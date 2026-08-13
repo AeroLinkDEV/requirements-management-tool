@@ -518,11 +518,28 @@ jobs:
           # No dependency install: `--with-deps` and `install-deps` install apt packages and do not apply on
           # Windows. The cache holds the browser binary, which is the whole of what is needed here.
           npx playwright install chromium
+      # The JSON reporter is here to be read by a person, not by the gate. Playwright shards by test count and
+      # does it well — 58/57/54/56 across four — but the shards took 360s, 328s, 233s and 662s, because what
+      # varies is duration per test, not tests per shard. Nothing in the run records which tests those are, so
+      # the only available fix has been "add another runner", and that is now capped: at 14 jobs a run, two
+      # concurrent pull requests already exceed the account's job limit and every agent queues.
+      #
+      # Durations are the input to packing the existing runners properly instead. `list` is kept so the console
+      # output stays readable.
       - name: Run browser journey shard
         working-directory: product/client
         env:
           AEROLINK_E2E_SKIP_BUILD: "true"
-        run: npx playwright test --shard=${{ matrix.shard }}/${{ strategy.job-total }}
+          PLAYWRIGHT_JSON_OUTPUT_NAME: journey-durations-${{ matrix.shard }}.json
+        run: npx playwright test --shard=${{ matrix.shard }}/${{ strategy.job-total }} --reporter=list,json
+      - name: Upload journey durations
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: journey-durations-${{ matrix.shard }}-${{ github.run_attempt }}
+          path: product/client/journey-durations-${{ matrix.shard }}.json
+          if-no-files-found: warn
+          retention-days: 7
       - name: Upload failure diagnostics
         if: failure()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
