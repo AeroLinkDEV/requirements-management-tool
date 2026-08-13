@@ -172,14 +172,14 @@ test('Clear returns the whole library', async ({ page }) => {
  * carried none of that — the same title on all three disciplines, no position in the results, and a caption
  * stacked over every control.
  */
-test('the Explorer names its discipline, as the requirements one does', async ({ page }) => {
+test('the Explorer names the software workspace and the selected level', async ({ page }) => {
   test.setTimeout(180_000)
   await page.setViewportSize({ width: 1600, height: 900 })
   await login(page)
   await openExplorer(page, 'software-verification/hlr')
 
-  // "Test Procedure Explorer" was the title of all three, so a link or a screenshot could not say which.
-  await expect(page.getByRole('heading', { name: 'HLR Test Procedure Explorer', level: 1 })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Software Test Procedure Explorer', level: 1 })).toBeVisible()
+  await expect(page.getByLabel('Level filter')).toHaveValue('HighLevel')
 })
 
 test('the result summary says how many answer and where in them you are', async ({ page }) => {

@@ -75,7 +75,6 @@ const IntegrationCommandCenter = lazyView(() => import("./IntegrationCommandCent
 const ReviewWorkflowCenter = lazyView(() => import("./ReviewWorkflowCenter"));
 const TestResultsWorkspace = lazyView(() => import("./TestResultsWorkspace"));
 const TestingCoverageWorkspace = lazyView(() => import("./TestingCoverageWorkspace"));
-const TestChangeRequestRegisterPage = lazyView(() => import("./TestChangeRequestRegisterPage"));
 const TestChangeRequestPage = lazyView(() => import("./TestChangeRequestPage"));
 const TestProcedureExplorer = lazyView(() => import("./TestProcedureExplorer"));
 const ArtifactRecordPage = lazyView(() => import("./ArtifactRecordPage"));
@@ -91,6 +90,7 @@ const viewCode: Partial<Record<View, { warm: () => void }>> = {
   verification: VerificationLanding,
   testResults: TestResultsWorkspace,
   testingCoverage: TestingCoverageWorkspace,
+  testChangeRequests: TestingCoverageWorkspace,
   procedureExplorer: TestProcedureExplorer,
   documents: DocumentCenter,
   managedDocuments: ManagedDocumentationCenter,
@@ -179,7 +179,9 @@ function AppNavigation({ user, workspaces, activeId, selectedProjectId, selected
   // `kind` carries the software level for the verification pages, which split into HLR and LLR. It is the
   // same field the change-request routes use for it, so no new axis had to be threaded through the shell.
   const item = (label:string,target:View,icon:string,area:Discipline="system",accessibleLabel=label,kind?:string,topLevel=false) => {
-    const activeItem = (view===target || (target==="history" && view==="scr") || (target==="release" && ["releaseImpact","releaseDecision","releaseOperations"].includes(view))) && discipline===area && (!kind || artifactKind===kind);
+    const groupedChangeView = target === "testChangeRequests"
+      && ["testChangeRequests", "testingCoverage", "testChangeRequest", "createTestChangeRequest"].includes(view);
+    const activeItem = (view===target || groupedChangeView || (target==="history" && view==="scr") || (target==="release" && ["releaseImpact","releaseDecision","releaseOperations"].includes(view))) && discipline===area && (!kind || artifactKind===kind);
     // Fetched on hover or keyboard focus, so the workspace's code is usually already here by the time the
     // click is. Both events, because a keyboard user never hovers anything.
     const warm = () => viewCode[target]?.warm();
@@ -217,9 +219,26 @@ function AppNavigation({ user, workspaces, activeId, selectedProjectId, selected
       <nav className="primaryNavigation" aria-label="Primary navigation">
         <div className="navHome">{item("Command Center","dashboard","⌂")}{item("My Work","mywork","◎")}</div>
         <details className="navGroup" open={engineeringView}><summary>REQUIREMENTS</summary><div className="navScopeSwitch" role="group" aria-label="Requirements scope"><button type="button" aria-pressed={engineeringScope==="system"} onClick={()=>onNavigate(view==="history"||view==="requirements"||view==="documents"?view:"history","system")}>System</button><button type="button" aria-pressed={engineeringScope==="software"} onClick={()=>onNavigate(view==="history"||view==="requirements"||view==="documents"?view:"history","software")}>Software</button></div>{item("Change Requests","history","◇",engineeringScope,engineeringScope==="software"?"Software Change Requests":"System Change Requests")}{item("Requirements Explorer","requirements","≡",engineeringScope,engineeringScope==="software"?"Software Requirements Explorer":"System Requirements Explorer")}{item("Generated Documents","documents","▤",engineeringScope,engineeringScope==="software"?"Generated Software Requirements Documents":"Generated System Requirements Documents")}{item("Digital Thread","lifecycle","↗","system","Digital Thread")}</details>
-        <details className="navGroup" open={view==="verification"||view==="testingCoverage"||view==="testChangeRequests"||view==="testChangeRequest"||view==="createTestChangeRequest"||view==="procedureExplorer"||view==="testResults"||(view==="documents"&&(discipline==="systemTest"||discipline==="softwareTest"))}><summary>VERIFICATION</summary><div className="navScopeSwitch" role="group" aria-label="Verification scope"><button type="button" aria-pressed={verificationScope==="systemTest"} onClick={()=>onNavigate("verification","systemTest")}>System</button><button type="button" aria-pressed={verificationScope==="softwareTest"} onClick={()=>onNavigate("verification","softwareTest")}>Software</button></div>{verificationScope==="softwareTest"
-          ? <>{item("HLR Change Requests","testChangeRequests","◫","softwareTest","Software HLR Test Change Requests","HighLevel")}{item("HLR Downstream Assessments","testingCoverage","⊞","softwareTest","Software HLR Downstream Assessments","HighLevel")}{item("HLR Test Procedure Explorer","procedureExplorer","≡","softwareTest","Software HLR Test Procedure Explorer","HighLevel")}{item("HLR Test Results","testResults","▦","softwareTest","Software HLR Test Results","HighLevel")}{item("LLR Change Requests","testChangeRequests","◫","softwareTest","Software LLR Test Change Requests","LowLevel")}{item("LLR Downstream Assessments","testingCoverage","⊞","softwareTest","Software LLR Downstream Assessments","LowLevel")}{item("LLR Test Procedure Explorer","procedureExplorer","≡","softwareTest","Software LLR Test Procedure Explorer","LowLevel")}{item("LLR Test Results","testResults","▦","softwareTest","Software LLR Test Results","LowLevel")}</>
-          : <>{item("Change Requests","testChangeRequests","◫","systemTest","System Test Change Requests")}{item("Downstream Assessments","testingCoverage","⊞","systemTest","System Downstream Assessments")}{item("Test Procedure Explorer","procedureExplorer","≡","systemTest","System Test Procedure Explorer")}{item("Test Results","testResults","▦","systemTest","System Test Results")}</>}{item("Generated Documents","documents","▤",verificationScope,verificationScope==="softwareTest"?"Generated Software Verification Documents":"Generated System Verification Documents")}</details>
+        <details className="navGroup" open={view==="verification"||view==="testingCoverage"||view==="testChangeRequests"||view==="testChangeRequest"||view==="createTestChangeRequest"||view==="procedureExplorer"||view==="testResults"||(view==="documents"&&(discipline==="systemTest"||discipline==="softwareTest"))}>
+          <summary>VERIFICATION</summary>
+          <div className="navScopeSwitch" role="group" aria-label="Verification scope">
+            <button type="button" aria-pressed={verificationScope==="systemTest"} onClick={()=>onNavigate("verification","systemTest")}>System</button>
+            <button type="button" aria-pressed={verificationScope==="softwareTest"} onClick={()=>onNavigate("verification","softwareTest")}>Software</button>
+          </div>
+          {verificationScope==="softwareTest"
+            ? <>
+                {item("Change Requests","testChangeRequests","◫","softwareTest","Software Test Change Requests")}
+                {item("Test Procedure Explorer","procedureExplorer","≡","softwareTest","Software Test Procedure Explorer")}
+                {item("HLR Test Results","testResults","▦","softwareTest","Software HLR Test Results","HighLevel")}
+                {item("LLR Test Results","testResults","▦","softwareTest","Software LLR Test Results","LowLevel")}
+              </>
+            : <>
+                {item("Change Requests","testChangeRequests","◫","systemTest","System Test Change Requests")}
+                {item("Test Procedure Explorer","procedureExplorer","≡","systemTest","System Test Procedure Explorer")}
+                {item("Test Results","testResults","▦","systemTest","System Test Results")}
+              </>}
+          {item("Generated Documents","documents","▤",verificationScope,verificationScope==="softwareTest"?"Generated Software Verification Documents":"Generated System Verification Documents")}
+        </details>
         <div className="navStandalone">{item("Code","code","{ }","software","Code traceability",undefined,true)}</div>
         <div className="navStandalone">{item("Documentation Center","managedDocuments","▤","system","Documentation Center",undefined,true)}</div>
         <div className="navStandalone">{item("Problem Reports","problemReports","!","system","Problem Reports",undefined,true)}</div>
@@ -657,6 +676,7 @@ function App() {
   if (view === "procedureExplorer" && project && release)
     return inShell(
       <TestProcedureExplorer
+        key={discipline === "softwareTest" ? selectedArtifactKind || "HighLevel" : "System"}
         api={API}
         projectId={project.project.id}
         releaseId={release.id}
@@ -666,16 +686,23 @@ function App() {
         buildName={`Build ${release.version}`}
         releaseVersion={release.version}
         released={release.isReleased}
+        onBack={() => navigate("dashboard")}
         onOpenRequirementRevision={openRequirementRevision}
+        onLevelChange={discipline === "softwareTest"
+          ? level => navigate("procedureExplorer", "softwareTest", undefined, level)
+          : undefined}
       />
     );
-  // The two paths a build.s verification work splits into.
-  if (view === "testingCoverage" && project && release)
+  // Downstream assessments and the register are one change-control workspace. Historical coverage URLs still
+  // open it, so links already in circulation do not lose their exact assessment context.
+  if ((view === "testingCoverage" || view === "testChangeRequests") && project && release)
     return inShell(
       <TestingCoverageWorkspace
+        key={discipline === "softwareTest" ? selectedArtifactKind || "HighLevel" : "System"}
         api={API}
         projectId={project.project.id}
         releaseId={release.id}
+        releases={project.releases}
         discipline={discipline === "softwareTest"
           ? (selectedArtifactKind === "LowLevel" ? "LowLevelSoftware" : "HighLevelSoftware")
           : "System"}
@@ -684,25 +711,13 @@ function App() {
         programId={active?.program.id ?? ""}
         user={user}
         initialReviewId={selectedArtifactId}
+        onBack={() => navigate("dashboard")}
         onOpenRequirementRevision={openRequirementRevision}
         onRaiseTestChangeRequest={() => navigate("createTestChangeRequest", discipline, undefined, selectedArtifactKind)}
-      />
-    );
-
-  // The register is a page, exactly as it is on the requirements side.
-  if (view === "testChangeRequests" && project && release)
-    return inShell(
-      <TestChangeRequestRegisterPage
-        api={API}
-        projectId={project.project.id}
-        releases={project.releases}
-        activeReleaseId={release.id}
-        discipline={discipline === "softwareTest"
-          ? (selectedArtifactKind === "LowLevel" ? "LowLevelSoftware" : "HighLevelSoftware")
-          : "System"}
-        onBack={() => navigate("dashboard")}
-        onOpen={id => navigate("testChangeRequest", discipline, id, selectedArtifactKind)}
-        onCreate={() => navigate("createTestChangeRequest", discipline, undefined, selectedArtifactKind)}
+        onOpenTestChangeRequest={id => navigate("testChangeRequest", discipline, id, selectedArtifactKind)}
+        onLevelChange={discipline === "softwareTest"
+          ? level => navigate("testChangeRequests", "softwareTest", undefined, level)
+          : undefined}
       />
     );
 
@@ -719,6 +734,8 @@ function App() {
           : "System"}
         currentUser={user.userName}
         onBack={() => navigate("testChangeRequests", discipline, undefined, selectedArtifactKind)}
+        onOpenRequirementRevision={openRequirementRevision}
+        onOpenTestChangeRequest={id => navigate("testChangeRequest", discipline, id, selectedArtifactKind)}
       />
     );
 
@@ -734,9 +751,9 @@ function App() {
         discipline={discipline === "softwareTest"
           ? (selectedArtifactKind === "LowLevel" ? "LowLevelSoftware" : "HighLevelSoftware")
           : "System"}
-        onCancel={() => navigate("testingCoverage", discipline, undefined, selectedArtifactKind)}
+        onCancel={() => navigate("testChangeRequests", discipline, undefined, selectedArtifactKind)}
         // Lands on the package it just raised, the way saving a change-request draft opens the draft.
-        onRaised={(id) => navigate("testingCoverage", discipline, id, selectedArtifactKind)}
+        onRaised={(id) => navigate("testChangeRequests", discipline, id, selectedArtifactKind)}
       />
     );
 

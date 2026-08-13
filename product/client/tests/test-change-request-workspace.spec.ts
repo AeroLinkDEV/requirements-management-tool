@@ -108,7 +108,7 @@ test('a test engineer proposes a new procedure inside the test change request th
   await login(page, 'test.engineer', { openProject: false })
   await selectProgram(page, programName)
   await openNavigationGroup(page, 'ASSURANCE')
-  await page.getByRole('link', { name: 'System Downstream Assessments' }).click()
+  await page.getByRole('link', { name: 'System Test Change Requests' }).click()
 
   const row = page.locator('.downstreamAssessment').filter({ hasText: sourceNumber }).first()
   await expect(row).toBeVisible({ timeout: 30_000 })
@@ -203,7 +203,7 @@ test('a procedure modification shows retained coverage and records an explicit r
   test.setTimeout(120_000)
   await login(page, 'test.engineer')
   await openNavigationGroup(page, 'ASSURANCE')
-  await page.getByRole('link', { name: 'System Downstream Assessments' }).click()
+  await page.getByRole('link', { name: 'System Test Change Requests' }).click()
   const packageRow = page.locator('.downstreamAssessment').filter({ hasText: /SYSTCR-/ }).first()
   await expect(packageRow).toBeVisible({ timeout: 30_000 })
 
@@ -304,7 +304,7 @@ test('a stale Modify target reloads controlled state and requires an explicit re
   test.setTimeout(120_000)
   await login(page, 'test.engineer')
   await openNavigationGroup(page, 'ASSURANCE')
-  await page.getByRole('link', { name: 'System Downstream Assessments' }).click()
+  await page.getByRole('link', { name: 'System Test Change Requests' }).click()
   const packageRow = page.locator('.downstreamAssessment').filter({ hasText: /SYSTCR-/ }).first()
   await expect(packageRow).toBeVisible({ timeout: 30_000 })
 
@@ -386,4 +386,3 @@ test('a stale Modify target reloads controlled state and requires an explicit re
   await expect(procedure.getByRole('option', { name: 'SYSTP-000901.01 - Carried recovery procedure · Approved' })).toHaveCount(1)
   expect(proposals).toBe(1)
 })
-

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { PersonName } from './People'
 import PersonPicker from './PersonPicker'
 import ProblemReportPicker, { type ProblemReportOption } from './ProblemReportPicker'
+import TestChangeRequestRegisterPage from './TestChangeRequestRegisterPage'
 import TestChangeRequestWorkspace from './TestChangeRequestWorkspace'
 import type { AuthUser } from './IdentityCenter'
 import { apiRequest, operationError, recordClientOperationFailure } from './apiClient'
@@ -9,7 +10,10 @@ import { pickerSummary } from './pickerText'
 import { isControlledTestChangeRequest, reviewsVisibleInCurrentRelease, successorReferenceFor, supersededHistoryFor } from './testChangeReviewPresentation'
 import type { TestDiscipline } from './TestResultsWorkspace'
 import './DownstreamAssessmentQueue.css'
+import './HistoryExplorer.css'
 import './TestingCoverageWorkspace.css'
+
+type SoftwareVerificationLevel = 'HighLevel' | 'LowLevel'
 
 type CoverageItem = {
   revisionId: string
@@ -159,19 +163,23 @@ function ExistingCoverage({ item, coverage }: { item: ImpactItem; coverage?: Cov
  * change request is approved, so nothing goes unnoticed; an engineer can also raise one deliberately when a
  * set of changes is best tested together.
  */
-export default function TestingCoverageWorkspace({ api, projectId, releaseId, discipline, buildName, readOnly, programId, user, initialReviewId, onOpenRequirementRevision, onRaiseTestChangeRequest }: {
+export default function TestingCoverageWorkspace({ api, projectId, releaseId, releases, discipline, buildName, readOnly, programId, user, initialReviewId, onBack, onOpenRequirementRevision, onRaiseTestChangeRequest, onOpenTestChangeRequest, onLevelChange }: {
   api: string
   projectId: string
   releaseId: string
+  releases: { id: string; version: string; isReleased: boolean }[]
   discipline: TestDiscipline
   buildName: string
   readOnly: boolean
   programId: string
   user: AuthUser
   initialReviewId?: string
+  onBack?: () => void
   onOpenRequirementRevision: (requirement: { id: string; revisionId: string; level: string }) => void
   /// Opens the authoring page. Raising a package is a page, exactly as raising a change request is.
   onRaiseTestChangeRequest: () => void
+  onOpenTestChangeRequest: (id: string) => void
+  onLevelChange?: (level: SoftwareVerificationLevel) => void
 }) {
   // Authority is per Program, and it is the server that enforces it. Reflecting it here is about not offering
   // somebody a control that will refuse them — an approval they cannot give is worse than no button at all.
@@ -577,22 +585,34 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, di
   // drove each of them is the Test Procedure Explorer, and a second reader here reachable only by a stale
   // link would be a second answer to "where do I read a procedure".
   return (
-    <main className="testingCoveragePage">
-      <header>
+    <main className="historyPage testingCoveragePage">
+      <header className="historyHeader">
         <div>
-          <p className="eyebrow">VERIFICATION / {disciplineLabel(discipline).toUpperCase()}</p>
-          {/* Named for what it answers now that the register is its own page. This page is where an approved
-              change is assessed for test impact; the packages that assessment raises are listed under Change
-              Requests, and calling both pages the same thing made one of them impossible to find. */}
-          <h1>Downstream Assessments</h1>
-          <p>Approved changes waiting for a {tcrAcronym(discipline)} conclusion, and what {buildName}'s procedures cover.</p>
+          {onBack && <button className="back" onClick={onBack}>← Command Center</button>}
+          <p className="eyebrow">{disciplineLabel(discipline).toUpperCase()} TEST CHANGE CONTROL / BUILD {buildName.replace(/^Build\s+/i, '')}</p>
+          <h1>{discipline === 'System' ? 'System Test Change Requests' : 'Software Test Change Requests'}</h1>
+          <p>Active and deferred {disciplineLabel(discipline)} test change requests owned by {buildName}.</p>
         </div>
         {canCreate && (
-          <button type="button" className="newTcrAction" onClick={onRaiseTestChangeRequest}>
+          <button type="button" className="recordBuild" onClick={onRaiseTestChangeRequest}>
             + New {tcrNewLabel(discipline)} Test Change Request
           </button>
         )}
       </header>
+      {discipline !== 'System' && onLevelChange && (
+        <nav className="softwareLevelTabs" role="tablist" aria-label="Software verification level">
+          <button type="button" role="tab" aria-selected={discipline === 'HighLevelSoftware'}
+            aria-current={discipline === 'HighLevelSoftware' ? 'page' : undefined}
+            onClick={() => onLevelChange('HighLevel')}>
+            <b>HLR</b><span>High-level test procedures</span>
+          </button>
+          <button type="button" role="tab" aria-selected={discipline === 'LowLevelSoftware'}
+            aria-current={discipline === 'LowLevelSoftware' ? 'page' : undefined}
+            onClick={() => onLevelChange('LowLevel')}>
+            <b>LLR</b><span>Low-level test procedures</span>
+          </button>
+        </nav>
+      )}
       {error && <div className="workspaceError" role="alert" aria-live="assertive">{error}</div>}
       {saved && <div className="workspaceSaved" role="status">{saved}</div>}
 
@@ -625,13 +645,16 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, di
 
       {/* The queue, before the inventory. Somebody arriving to do verification work needs to know what this
           build's changes have made their problem — a wall of green coverage says nothing about that. */}
-      <section className="coverageCard">
-        <div className="cardTitle">
+      <section className="downstreamQueue">
+        <header>
+          <div>
+            <p className="eyebrow">CONSUMING ENGINEERING</p>
           {/* Named for the question, not for the artefact one answer to it produces. Approved changes arrive
               here to be assessed; a test change request is what an assessment raises when it finds work. */}
-          <h2>Downstream test assessments</h2>
+          <h2>Downstream Assessments</h2>
           <p>Approved upstream changes waiting for an explicit {assessmentName(discipline)} conclusion.</p>
-        </div>
+          </div>
+        </header>
         {!visibleMine.length && (
           <div className="coverageEmpty">
             <b>No {disciplineLabel(discipline)} test assessments for this build</b>
@@ -683,10 +706,15 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, di
           for every requirement the change touched.
         </p>
       </section>
-      {/* The register itself is a page of its own now, at Verification → Change Requests, rendered by the
-          same component the requirements side uses. It lived here because there was nowhere else for it to
-          live; a build's packages are not a section of its coverage report. */}
-
+      <TestChangeRequestRegisterPage
+        api={api}
+        projectId={projectId}
+        releases={releases}
+        activeReleaseId={releaseId}
+        discipline={discipline}
+        onOpen={onOpenTestChangeRequest}
+        embedded
+      />
       {/* What Open assessment opens. Everything that used to sit on the row lives here, which is where the
           requirements queue has always put it. */}
       {opened && (() => {

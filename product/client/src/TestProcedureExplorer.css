@@ -1,21 +1,14 @@
 /* Layout only. Everything inside the inspector is RequirementsWorkspace.css, imported rather than restated,
    because browsing a controlled artifact is the same job whichever discipline owns it. */
-.procedureExplorer{display:flex;flex-direction:column;gap:12px}
-.procedureExplorerHead h1{margin:2px 0;font-size:26px;font-weight:700}
+.procedureExplorer{max-width:none}
 /* .eyebrow itself is App.css's — its size and colour were chosen to clear AA on this ground, and restating
    them here would silently fork that decision. Only the margin is local. */
-.procedureExplorerHead p{margin:0;color:var(--muted,#52647a);font-size:14px}
-.procedureExplorerHead .eyebrow{margin:0;text-transform:uppercase}
-
-.procedureFind{display:flex;flex-direction:column;gap:.35rem;max-width:420px;font-size:.8rem;font-weight:700}
-.procedureFind input{padding:.5rem .65rem;border:1px solid var(--line,#cbd7e6);border-radius:8px;font:inherit}
 
 /* The split is defined once, below, where the document rail is accounted for. The two-column version this
    file used to open with is dead: every rule it set is overridden there, and leaving both meant reading two
    contradictory definitions of the same layout to work out which one the page actually uses. */
 
-.procedureList{display:flex;flex-direction:column;border:1px solid var(--line,#d9e2ec);border-radius:10px;
-  background:var(--card,#fff);overflow:hidden}
+.procedureList{display:flex;flex-direction:column;border:0;border-radius:0;background:var(--card,#fff);overflow:auto}
 /* A procedure row is a table row now, not a three-column grid. The class name is kept because it is what a
    row has always been called — the journeys reach a procedure through it — but the flat-list layout it used
    to carry is gone, and `display:grid` on a <tr> would take the row out of the table it belongs to. */
@@ -63,10 +56,8 @@
 /* One row of controls, centred on each other, as the requirements filter bar is. `align-items: end` was
    there to hang stacked label-and-control pairs off a common baseline; without the captions there is nothing
    to hang, and centring is what makes a search box and two selects read as one bar. */
-.procedureFilters{display:flex;flex-wrap:wrap;gap:.75rem;align-items:center;margin:0 0 12px}
-.procedureFilters label{display:flex;flex-direction:column;gap:.35rem;font-size:.8rem;font-weight:700}
-.procedureFilters select{padding:.5rem .65rem;border:1px solid var(--line,#cbd7e6);border-radius:8px;font:inherit;
-  background:white;min-width:150px}
+.procedureFilters.reqCommand{margin:0}
+.coverageLevelFilter{justify-content:flex-end;margin-bottom:14px !important}
 .procedureFilters .procedureFind{margin:0}
 
 /* Trace & impact: one exact procedure revision, every exact requirement revision it verifies. */
@@ -99,14 +90,23 @@
    A fixed track reserves the space whether the inspector is in flow or over it.
 
    Gated on `.requirementInspector`, which is the class the inspector actually has. */
-.procedureExplorerSplit { display: grid; grid-template-columns: 232px minmax(0, 1fr) 340px; gap: 14px; align-items: start; }
-.procedureExplorerSplit:not(:has(.requirementInspector)) { grid-template-columns: 232px minmax(0, 1fr); }
+.procedureExplorerSplit { grid-template-columns: 230px minmax(520px, 1fr) minmax(330px, 370px); gap: 0; align-items: stretch; }
 
-.procedureDocumentRail { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-md); padding: 10px; }
-.procedureDocumentRail h2 {
-  font: var(--weight-bold) var(--text-xs)/1.4 var(--font-body); letter-spacing: .07em; text-transform: uppercase;
-  color: var(--ink-500); margin: 2px 4px 8px;
+.procedureInspectorEmpty {
+  min-height: 360px;
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: 8px;
+  padding: 32px;
+  text-align: center;
+  color: var(--ink-500);
 }
+.procedureInspectorEmpty > span { font-size: 28px; color: var(--teal-700); }
+.procedureInspectorEmpty b { color: var(--ink-900); font: var(--weight-bold) var(--text-md) var(--font-display); }
+.procedureInspectorEmpty p { max-width: 240px; margin: 0; font-size: var(--text-sm); line-height: 1.5; }
+
+.procedureDocumentRail { background: transparent; border: 0; border-radius: 0; padding: 0; }
 .railDocument { margin-top: 6px; }
 .railEntry, .railSection {
   display: block; width: 100%; text-align: left; background: none; border: none; cursor: pointer;
@@ -121,18 +121,6 @@
 .railEmpty { margin: 6px 4px; font-size: var(--text-xs); color: var(--ink-500); }
 
 .procedureFind { position: relative; }
-.procedureFind .resultCount {
-  position: absolute; right: 8px; bottom: 7px; background: var(--surface-subtle); border: 1px solid var(--line);
-  border-radius: var(--radius-pill); padding: 1px 9px; font: var(--weight-strong) var(--text-xs) var(--font-body);
-  color: var(--ink-500); font-variant-numeric: tabular-nums;
-}
-.procedureFilters .clear, .procedureFilters .pageSizeControl { align-self: flex-end; }
-.procedureFilters .clear {
-  min-height: 36px; padding: 8px 14px; border-radius: var(--radius-sm); border: 1px solid var(--line);
-  background: var(--surface); color: var(--teal-700); font: var(--weight-strong) var(--text-control) var(--font-body); cursor: pointer;
-}
-.procedureFilters .clear:disabled { opacity: .5; cursor: not-allowed; }
-.procedureFilters .pageSizeControl span { font-size: var(--text-xs); color: var(--ink-500); }
 
 /* `fixed` rather than the default `auto`. An auto table sizes to its content, so a long procedure title made
    the table — and every row in it — wider than the column it lives in. The list clips the overflow, so it
@@ -166,10 +154,9 @@
 /* Saved views sit below the documents in the same column, as their own panel rather than inside the
    documents landmark. The rows themselves are styled by the requirements workspace stylesheet this Explorer
    already imports, so only the panel and the form for creating one are new here. */
-.procedureRailColumn { display: grid; gap: 12px; align-items: start; }
+.procedureRailColumn { display: block; }
 .savedViewsPanel {
-  background: var(--surface); border: 1px solid var(--line);
-  border-radius: var(--radius-md); padding: 10px;
+  background: transparent; border: 0; border-radius: 0; padding: 0;
 }
 .saveViewOpen {
   width: 100%; margin-top: 6px; padding: 7px 9px; cursor: pointer; background: none;
@@ -194,5 +181,5 @@
 .saveViewActions button[type="submit"] { background: var(--teal-700); border-color: var(--teal-700); color: #fff; }
 
 @media (max-width: 1100px) {
-  .procedureExplorerSplit, .procedureExplorerSplit:not(:has(.procedureInspector)) { grid-template-columns: 1fr; }
+  .procedureExplorerSplit { grid-template-columns: 1fr; }
 }

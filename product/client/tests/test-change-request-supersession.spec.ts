@@ -111,7 +111,7 @@ test('a revised TCR keeps its predecessor in history and out of active work and 
   await login(page, 'test.engineer', { openProject: false })
   await selectProgram(page, programName)
   await openNavigationGroup(page, 'ASSURANCE')
-  await page.getByRole('link', { name: 'System Downstream Assessments' }).click()
+  await page.getByRole('link', { name: 'System Test Change Requests' }).click()
   await expect(page.getByRole('heading', { name: 'Downstream Assessments' })).toBeVisible({ timeout: 30_000 })
 
   const assessmentRow = page.locator('.downstreamAssessment').filter({ hasText: draft.displayNumber }).first()

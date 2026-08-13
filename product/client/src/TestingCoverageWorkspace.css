@@ -1,18 +1,6 @@
-/* Attention first, inventory second: the rows that need somebody are marked, the rest recede. */
-.testingCoveragePage { display: flex; flex-direction: column; gap: 18px; }
-.testingCoveragePage > header { display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem; }
-.newTcrAction {
-  flex: none;
-  min-height: 38px;
-  padding: 0 14px;
-  border: 0;
-  border-radius: 8px;
-  background: #0b6bcb;
-  color: #fff;
-  font: 700 13px/1 "DM Sans", sans-serif;
-  cursor: pointer;
-}
-.newTcrAction:hover { background: #095caf; }
+/* Attention first, inventory second: the rows that need somebody are marked, the rest recede. The page
+   shell, header, level tabs and register come from HistoryExplorer.css so Change Requests stays the same
+   page on the requirements and verification sides. */
 
 .coverageSummary { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; }
 .coverageSummary article {

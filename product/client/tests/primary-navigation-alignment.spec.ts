@@ -29,13 +29,13 @@ test('primary navigation separates generated data, managed documents, code and p
   expect(standaloneNames).toEqual(['Code traceability','Documentation Center','Problem Reports'])
 
   await expect(verification.getByRole('link',{name:'System Test Change Requests'})).toBeVisible()
-  // The register and the assessments queue are separate destinations; naming both stops one of them
-  // becoming unreachable when the other is repointed.
-  await expect(verification.getByRole('link',{name:'System Downstream Assessments'})).toBeVisible()
+  await expect(verification.getByRole('link',{name:'System Downstream Assessments'})).toHaveCount(0)
+  await expect(verification.getByRole('link',{name:'System Test Procedure Explorer'})).toBeVisible()
   await expect(verification.getByRole('link',{name:'System Test Results'})).toBeVisible()
   await expect(verification.getByRole('link',{name:'Generated System Verification Documents'})).toBeVisible()
   await verification.getByRole('group',{name:'Verification scope'}).getByRole('button',{name:'Software'}).click()
-  for(const name of['Software HLR Test Change Requests','Software HLR Downstream Assessments','Software HLR Test Results','Software LLR Test Change Requests','Software LLR Downstream Assessments','Software LLR Test Results','Generated Software Verification Documents'])await expect(verification.getByRole('link',{name})).toBeVisible()
+  for(const name of['Software Test Change Requests','Software Test Procedure Explorer','Software HLR Test Results','Software LLR Test Results','Generated Software Verification Documents'])await expect(verification.getByRole('link',{name})).toBeVisible()
+  await expect(verification.getByRole('link',{name:/Downstream Assessments/})).toHaveCount(0)
 
   await reports.click()
   await expect(page.getByRole('heading',{name:'Problem Reports'})).toBeVisible()
