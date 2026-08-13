@@ -134,11 +134,17 @@ public sealed class ManagedDocumentApiTests
         using (var heartbeatRequest = new HttpRequestMessage(HttpMethod.Post, $"/api/document-connector/{grantId}/heartbeat") { Content = JsonContent.Create(new { expectedVersion = version }) }) { heartbeatRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token); using var heartbeat = await client.SendAsync(heartbeatRequest); Assert.Equal(HttpStatusCode.OK, heartbeat.StatusCode); var heartbeatBody = await heartbeat.Content.ReadFromJsonAsync<JsonElement>(); Assert.Equal(version, heartbeatBody.GetProperty("version").GetInt64()); }
         using (var blankForm = new MultipartFormDataContent()) { blankForm.Add(new StringContent(" "), "comment"); blankForm.Add(new StringContent(version.ToString()), "expectedVersion"); var blankFile = new ByteArrayContent(word); blankFile.Headers.ContentType = new(ManagedDocumentFileService.DocxContentType); blankForm.Add(blankFile, "file", "SDP-000001.00.docx"); using var blankRequest = new HttpRequestMessage(HttpMethod.Post, $"/api/document-connector/{grantId}/check-in") { Content = blankForm }; blankRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token); using var blank = await client.SendAsync(blankRequest); Assert.Equal(HttpStatusCode.BadRequest, blank.StatusCode); }
         using (var oversizedForm = new MultipartFormDataContent()) { oversizedForm.Add(new StringContent(new string('x', 4001)), "comment"); oversizedForm.Add(new StringContent(version.ToString()), "expectedVersion"); var oversizedFile = new ByteArrayContent(word); oversizedFile.Headers.ContentType = new(ManagedDocumentFileService.DocxContentType); oversizedForm.Add(oversizedFile, "file", "SDP-000001.00.docx"); using var oversizedRequest = new HttpRequestMessage(HttpMethod.Post, $"/api/document-connector/{grantId}/check-in") { Content = oversizedForm }; oversizedRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token); using var oversized = await client.SendAsync(oversizedRequest); Assert.Equal(HttpStatusCode.BadRequest, oversized.StatusCode); }
+        using (var unsafeCheckIn = await SendCheckInAsync(client, grantId, token, version,
+            "Attempted direct API bypass with external package content.", AddExternalImageRelationship(word)))
+        {
+            Assert.Equal(HttpStatusCode.BadRequest, unsafeCheckIn.StatusCode);
+            Assert.Contains("external target is prohibited", await unsafeCheckIn.Content.ReadAsStringAsync(), StringComparison.OrdinalIgnoreCase);
+        }
         using var checkedIn = await SendCheckInAsync(client, grantId, token, version, "Added build and code-traceability responsibilities.", word); Assert.Equal(HttpStatusCode.OK, checkedIn.StatusCode); var checkedInJson = await checkedIn.Content.ReadAsStringAsync();
         using var retriedCheckIn = await SendCheckInAsync(client, grantId, token, version, "Added build and code-traceability responsibilities.", word); Assert.Equal(HttpStatusCode.OK, retriedCheckIn.StatusCode); Assert.Equal(checkedInJson, await retriedCheckIn.Content.ReadAsStringAsync());
         using var conflictingCheckIn = await SendCheckInAsync(client, grantId, token, version, "Different comment under the completed connector grant.", word); Assert.Equal(HttpStatusCode.Conflict, conflictingCheckIn.StatusCode);
 
-        using var detailResponse = await client.GetAsync($"/api/managed-documents/{documentId}"); Assert.True(detailResponse.IsSuccessStatusCode, await detailResponse.Content.ReadAsStringAsync()); var detail = await detailResponse.Content.ReadFromJsonAsync<JsonElement>(); var revision = detail.GetProperty("revisions")[0]; var attachments = revision.GetProperty("attachments").EnumerateArray().ToList(); Assert.Equal(2, attachments.Count); Assert.Contains(attachments, item => item.GetProperty("version").GetInt32() == 2 && item.GetProperty("state").GetString() == "Active");
+        using var detailResponse = await client.GetAsync($"/api/managed-documents/{documentId}"); Assert.True(detailResponse.IsSuccessStatusCode, await detailResponse.Content.ReadAsStringAsync()); var detail = await detailResponse.Content.ReadFromJsonAsync<JsonElement>(); var revision = detail.GetProperty("revisions")[0]; var attachments = revision.GetProperty("attachments").EnumerateArray().ToList(); Assert.Equal(2, attachments.Count); Assert.Contains(attachments, item => item.GetProperty("version").GetInt32() == 2 && item.GetProperty("state").GetString() == "Active"); Assert.All(attachments, item => { Assert.Equal("aerolink-ooxml-safe-v1", item.GetProperty("validationProfile").GetString()); Assert.Equal("accepted", item.GetProperty("validationResult").GetString()); });
         Assert.Equal("Initial controlled draft.", revision.GetProperty("formalChangeSummary").GetString());
         Assert.Equal("software.author", revision.GetProperty("responsibleOwnerId").GetString());
         var checkIns = revision.GetProperty("checkIns").EnumerateArray().ToList();
@@ -986,6 +992,27 @@ public sealed class ManagedDocumentApiTests
         db.AddRange(program, project, released, active, technical, quality, author, reviewer, new ProgramMembership(technical.Id, program.Id, ProgramRole.SoftwareEngineeringLead, "admin", now), new ProgramMembership(quality.Id, program.Id, ProgramRole.SoftwareQualityAnalyst, "admin", now), new ProgramMembership(author.Id, program.Id, ProgramRole.SoftwareEngineer, "admin", now), new ProgramMembership(author.Id, program.Id, ProgramRole.Reviewer, "admin", now), new ProgramMembership(reviewer.Id, program.Id, ProgramRole.Reviewer, "admin", now)); await db.SaveChangesAsync(); return (program.Id, project.Id, released.Id, active.Id);
     }
     private static Dictionary<string,string> Query(Uri uri) => uri.Query.TrimStart('?').Split('&').Select(part => part.Split('=', 2)).ToDictionary(pair => pair[0], pair => Uri.UnescapeDataString(pair[1]));
+
+    private static byte[] AddExternalImageRelationship(byte[] source)
+    {
+        using var output = new MemoryStream(); output.Write(source); output.Position = 0;
+        using (var archive = new System.IO.Compression.ZipArchive(output, System.IO.Compression.ZipArchiveMode.Update, true))
+        {
+            var entry = archive.GetEntry("word/_rels/document.xml.rels")!;
+            System.Xml.Linq.XDocument document;
+            using (var reader = new StreamReader(entry.Open())) document = System.Xml.Linq.XDocument.Parse(reader.ReadToEnd());
+            entry.Delete();
+            var ns = (System.Xml.Linq.XNamespace)"http://schemas.openxmlformats.org/package/2006/relationships";
+            document.Root!.Add(new System.Xml.Linq.XElement(ns + "Relationship",
+                new System.Xml.Linq.XAttribute("Id", "rIdUnsafeExternalImage"),
+                new System.Xml.Linq.XAttribute("Type", "http://schemas.openxmlformats.org/officeDocument/2006/relationships/image"),
+                new System.Xml.Linq.XAttribute("Target", "https://example.test/tracker.png"),
+                new System.Xml.Linq.XAttribute("TargetMode", "External")));
+            var replacement = archive.CreateEntry("word/_rels/document.xml.rels");
+            using var writer = new StreamWriter(replacement.Open()); writer.Write(document.ToString(System.Xml.Linq.SaveOptions.DisableFormatting));
+        }
+        return output.ToArray();
+    }
 }
 
 internal sealed class OneShotStorageFaultInjector(string operationType, string phase) : IManagedDocumentStorageFaultInjector

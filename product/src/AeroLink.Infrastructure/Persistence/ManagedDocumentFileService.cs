@@ -2,6 +2,7 @@ using System.IO.Compression;
 using System.Security.Cryptography;
 using System.Text;
 using System.Xml.Linq;
+using AeroLink.DocumentSecurity;
 using AeroLink.Domain.Common;
 using AeroLink.Domain.Requirements;
 
@@ -39,6 +40,7 @@ public sealed class ManagedDocumentFileService(EvidenceFileStore files)
     /// </summary>
     public static void ValidateDocx(byte[] bytes, bool requireDraftWatermark)
     {
+        ValidateSafeOoxml(bytes);
         try
         {
             using var stream = new MemoryStream(bytes, false);
@@ -459,11 +461,12 @@ public sealed class ManagedDocumentFileService(EvidenceFileStore files)
         Guid logicalId, int version, string label, string description, string fileName, string contentType,
         byte[] content, Guid? supersedesId, string actor, DateTimeOffset now, CancellationToken ct)
     {
+        var validation = ValidateSafeOoxmlIfDocx(contentType, content);
         await using var source = new MemoryStream(content, false);
         var stored = await files.StoreAsync(source, fileName, contentType, ct);
         return new ControlledAttachment(projectId, "ManagedDocument", documentId, revisionId, logicalId, version,
             label, description, stored.OriginalFileName, stored.ContentType, stored.Size, stored.Sha256,
-            stored.StorageKey, supersedesId, actor, now);
+            stored.StorageKey, supersedesId, actor, now, validation?.Profile, validation?.Result);
     }
 
     public async Task<(ControlledAttachment Attachment, StagedEvidence Staged)> StageAsync(Guid operationId, string slot,
@@ -471,21 +474,22 @@ public sealed class ManagedDocumentFileService(EvidenceFileStore files)
         string description, string fileName, string contentType, byte[] content, Guid? supersedesId,
         string actor, DateTimeOffset now, CancellationToken ct)
     {
+        var validation = ValidateSafeOoxmlIfDocx(contentType, content);
         await using var source = new MemoryStream(content, false);
         return await StageAsync(operationId, slot, projectId, documentId, revisionId, logicalId, version, label,
-            description, fileName, contentType, source, supersedesId, actor, now, ct);
+            description, fileName, contentType, source, supersedesId, actor, now, ct, validation);
     }
 
     /// <summary>Stages evidence from a stream so the evidence store can bound, hash and write it without an in-memory copy.</summary>
     public async Task<(ControlledAttachment Attachment, StagedEvidence Staged)> StageAsync(Guid operationId, string slot,
         Guid projectId, Guid documentId, Guid revisionId, Guid logicalId, int version, string label,
         string description, string fileName, string contentType, Stream source, Guid? supersedesId,
-        string actor, DateTimeOffset now, CancellationToken ct)
+        string actor, DateTimeOffset now, CancellationToken ct, OoxmlValidationResult? validation = null)
     {
         var staged = await files.StageAsync(source, operationId, slot, fileName, contentType, ct);
         var attachment = new ControlledAttachment(projectId, "ManagedDocument", documentId, revisionId, logicalId,
             version, label, description, staged.OriginalFileName, staged.ContentType, staged.Size, staged.Sha256,
-            staged.StorageKey, supersedesId, actor, now);
+            staged.StorageKey, supersedesId, actor, now, validation?.Profile, validation?.Result);
         return (attachment, staged);
     }
 
@@ -494,6 +498,17 @@ public sealed class ManagedDocumentFileService(EvidenceFileStore files)
 
     public static string Sha256(byte[] content) => Convert.ToHexString(SHA256.HashData(content)).ToLowerInvariant();
     public void Delete(string storageKey) => files.Delete(storageKey);
+
+    private static OoxmlValidationResult? ValidateSafeOoxmlIfDocx(string contentType, byte[] content) =>
+        string.Equals(contentType, DocxContentType, StringComparison.OrdinalIgnoreCase)
+            ? ValidateSafeOoxml(content)
+            : null;
+
+    private static OoxmlValidationResult ValidateSafeOoxml(byte[] content)
+    {
+        try { return AeroLinkOoxmlProfile.Validate(content); }
+        catch (OoxmlValidationException ex) { throw new DomainException(ex.Message); }
+    }
 
     private static bool IsUnsafeEntry(string name)
     {

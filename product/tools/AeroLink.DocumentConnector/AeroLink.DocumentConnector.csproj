@@ -8,4 +8,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <AssemblyName>AeroLink.DocumentConnector</AssemblyName>
   </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\AeroLink.DocumentSecurity\AeroLink.DocumentSecurity.csproj" />
+  </ItemGroup>
 </Project>

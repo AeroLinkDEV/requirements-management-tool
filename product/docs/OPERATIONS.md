@@ -34,6 +34,13 @@ the browser is allowed to open the AeroLink protocol. An abandoned checkout expi
 configuration manager or administrator may force-unlock it with a recorded reason. Connector working files are
 local conveniences, not authoritative storage; a completed check-in must appear in AeroLink's Versions tab.
 
+After an upgrade that changes the versioned safe OOXML profile, run the Documentation Center Project integrity
+scan before controlled use. Existing DOCX attachment rows deliberately retain null validation-profile evidence;
+the scan verifies their immutable bytes against the current profile without rewriting historical acceptance.
+Any profile failure opens a deduplicated critical integrity incident and blocks download. Recover only the exact
+recorded bytes from independent backup; if those exact bytes remain outside the current profile, retain them as
+historical evidence and create a separately authorized safe successor rather than modifying the old attachment.
+
 Liveness is available at `/health/live`. Deployment orchestrators should use `/health/ready`, which returns `503` until the database can be reached.
 
 ## Requirement proposal integrity reconciliation

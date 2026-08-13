@@ -1,4 +1,5 @@
 using AeroLink.Domain.Common;
+using AeroLink.DocumentSecurity;
 using AeroLink.Infrastructure.Persistence;
 
 namespace AeroLink.Infrastructure.Tests;
@@ -106,6 +107,43 @@ public sealed class ManagedDocumentFileTests
         {
             var service = new ManagedDocumentFileService(new EvidenceFileStore(root));
             await Assert.ThrowsAsync<DomainException>(() => service.ReadDocxAsync(new MemoryStream([1, 2, 3]), fileName, true, default));
+        }
+        finally { if (Directory.Exists(root)) Directory.Delete(root, true); }
+    }
+
+    [Fact]
+    public async Task Stored_word_attachment_records_the_exact_safe_profile_evidence()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"aerolink-doc-profile-{Guid.NewGuid():N}");
+        try
+        {
+            var service = new ManagedDocumentFileService(new EvidenceFileStore(root));
+            var bytes = ProfessionalPublicationRenderer.Render(Publication("Draft", "DRAFT"), "docx", "SDP-000001.01").Content;
+
+            var attachment = await service.StoreAsync(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), 1,
+                "Working Word document", "Controlled draft.", "SDP-000001.01.docx", ManagedDocumentFileService.DocxContentType,
+                bytes, null, "software.author", DateTimeOffset.UtcNow, default);
+
+            Assert.Equal(AeroLinkOoxmlProfile.Version, attachment.ValidationProfile);
+            Assert.Equal(AeroLinkOoxmlProfile.AcceptedResult, attachment.ValidationResult);
+        }
+        finally { if (Directory.Exists(root)) Directory.Delete(root, true); }
+    }
+
+    [Fact]
+    public async Task Unsafe_word_package_is_rejected_before_any_staged_bytes_are_written()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"aerolink-doc-profile-reject-{Guid.NewGuid():N}");
+        try
+        {
+            var service = new ManagedDocumentFileService(new EvidenceFileStore(root));
+
+            await Assert.ThrowsAsync<DomainException>(() => service.StageAsync(Guid.NewGuid(), "working-docx",
+                Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), 1, "Working Word document",
+                "Controlled draft.", "unsafe.docx", ManagedDocumentFileService.DocxContentType, [1, 2, 3, 4],
+                null, "software.author", DateTimeOffset.UtcNow, default));
+
+            Assert.Empty(Directory.Exists(root) ? Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories) : []);
         }
         finally { if (Directory.Exists(root)) Directory.Delete(root, true); }
     }

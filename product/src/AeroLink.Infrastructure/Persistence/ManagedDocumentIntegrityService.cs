@@ -1,3 +1,4 @@
+using AeroLink.DocumentSecurity;
 using AeroLink.Domain.Documents;
 using AeroLink.Domain.Identity;
 using AeroLink.Domain.Requirements;
@@ -31,6 +32,26 @@ public sealed class ManagedDocumentIntegrityService(AeroLinkDbContext db, Eviden
         try
         {
             var stream = await store.OpenVerifiedReadAsync(attachment.StorageKey, attachment.Size, attachment.Sha256, ct);
+            if (string.Equals(attachment.ContentType, ManagedDocumentFileService.DocxContentType, StringComparison.OrdinalIgnoreCase))
+            {
+                try
+                {
+                    AeroLinkOoxmlProfile.Validate(stream, ct);
+                    stream.Position = 0;
+                }
+                catch (OoxmlValidationException ex)
+                {
+                    await stream.DisposeAsync();
+                    if (!readOnlyRestoreValidation) await RecordFailureAsync(attachment, actor, ex.Code, ct);
+                    throw new ManagedDocumentIntegrityFailure(attachment.Id, ex.Code,
+                        "Controlled Word evidence failed its safe OOXML profile. No bytes were returned or used.", ex);
+                }
+                catch (OperationCanceledException)
+                {
+                    await stream.DisposeAsync();
+                    throw;
+                }
+            }
             if (!readOnlyRestoreValidation)
                 await db.ControlledAttachments.Where(x => x.Id == attachment.Id)
                     .ExecuteUpdateAsync(setters => setters.SetProperty(x => x.IntegrityVerifiedAt, DateTimeOffset.UtcNow), ct);
@@ -38,7 +59,7 @@ public sealed class ManagedDocumentIntegrityService(AeroLinkDbContext db, Eviden
         }
         catch (EvidenceIntegrityException ex)
         {
-            if (!readOnlyRestoreValidation) await RecordFailureAsync(attachment, actor, ex, ct);
+            if (!readOnlyRestoreValidation) await RecordFailureAsync(attachment, actor, ex.Code, ct);
             throw new ManagedDocumentIntegrityFailure(attachment.Id, ex.Code,
                 "Controlled document evidence failed integrity verification. No bytes were returned or used.", ex);
         }
@@ -58,7 +79,26 @@ public sealed class ManagedDocumentIntegrityService(AeroLinkDbContext db, Eviden
         {
             throw new ManagedDocumentIntegrityFailure(attachment.Id, ex.Code, ex.Message, ex);
         }
-        await using (var verified = await store.OpenVerifiedReadAsync(attachment.StorageKey, attachment.Size, attachment.Sha256, ct)) { }
+        await using (var verified = await store.OpenVerifiedReadAsync(attachment.StorageKey, attachment.Size, attachment.Sha256, ct))
+        {
+            if (string.Equals(attachment.ContentType, ManagedDocumentFileService.DocxContentType, StringComparison.OrdinalIgnoreCase))
+            {
+                try { AeroLinkOoxmlProfile.Validate(verified, ct); }
+                catch (OoxmlValidationException ex)
+                {
+                    var rejectedAt = DateTimeOffset.UtcNow;
+                    var rejectionDetail = $"Rejected exact-hash recovery for attachment {attachment.Id}: restored bytes fail {ex.Code} under {AeroLinkOoxmlProfile.Version}. The integrity incident remains open."
+                        + (restored.QuarantineKey is null ? "" : $" Prior bytes were quarantined as {restored.QuarantineKey}.");
+                    db.SecurityAuditEvents.Add(new SecurityAuditEvent("ManagedDocumentIntegrityRecoveryRejected", actor,
+                        attachment.Id.ToString(), "Blocked", rejectionDetail, "local-storage", rejectedAt));
+                    db.ManagedDocumentEvents.Add(new ManagedDocumentEvent(attachment.ArtifactId,
+                        "DocumentIntegrityRecoveryRejected", actor, rejectionDetail, rejectedAt));
+                    await db.SaveChangesAsync(ct);
+                    throw new ManagedDocumentIntegrityFailure(attachment.Id, ex.Code,
+                        "The exact restored Word evidence still fails the safe OOXML profile. The integrity incident remains open.", ex);
+                }
+            }
+        }
         var now = DateTimeOffset.UtcNow;
         var tracked = await db.ControlledAttachments.SingleAsync(x => x.Id == attachment.Id, ct);
         tracked.RecordIntegrityVerification(now);
@@ -91,7 +131,7 @@ public sealed class ManagedDocumentIntegrityService(AeroLinkDbContext db, Eviden
         return new(attachments.Count, attachments.Count - failed.Count, failed.Count, failed);
     }
 
-    private async Task RecordFailureAsync(ControlledAttachment attachment, string actor, EvidenceIntegrityException failure, CancellationToken ct)
+    private async Task RecordFailureAsync(ControlledAttachment attachment, string actor, string failureCode, CancellationToken ct)
     {
         var signal = Signal(attachment.Id);
         var alreadyOpen = await db.OperationalAlerts.AnyAsync(x => x.ProjectId == attachment.ProjectId
@@ -99,11 +139,11 @@ public sealed class ManagedDocumentIntegrityService(AeroLinkDbContext db, Eviden
         if (alreadyOpen) return;
 
         var now = DateTimeOffset.UtcNow;
-        var detail = $"Attachment {attachment.Id} ({attachment.OriginalFileName}) failed {failure.Code}; expected size {attachment.Size} and SHA-256 {attachment.Sha256}. Historical metadata was not changed.";
+        var detail = $"Attachment {attachment.Id} ({attachment.OriginalFileName}) failed {failureCode}; expected size {attachment.Size} and SHA-256 {attachment.Sha256}. Historical metadata was not changed.";
         db.OperationalAlerts.Add(new OperationalAlert(attachment.ProjectId, "Critical", signal, detail,
             "/docs/MANAGED_DOCUMENTATION_CENTER.md#controlled-file-integrity", actor, now));
         db.ManagedDocumentEvents.Add(new ManagedDocumentEvent(attachment.ArtifactId, "DocumentIntegrityBlocked", actor,
-            $"Blocked controlled use of attachment {attachment.Id} after {failure.Code}. Expected SHA-256 remains {attachment.Sha256}.", now));
+            $"Blocked controlled use of attachment {attachment.Id} after {failureCode}. Expected SHA-256 remains {attachment.Sha256}.", now));
         db.SecurityAuditEvents.Add(new SecurityAuditEvent("ManagedDocumentIntegrityFailure", actor,
             attachment.Id.ToString(), "Blocked", detail, "local-storage", now));
         await db.SaveChangesAsync(ct);

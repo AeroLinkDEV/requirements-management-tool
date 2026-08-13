@@ -11,14 +11,17 @@ public sealed class ControlledAttachment
     private ControlledAttachment() { }
     public ControlledAttachment(Guid projectId, string artifactType, Guid artifactId, Guid? revisionId, Guid logicalId, int version,
         string label, string description, string originalFileName, string contentType, long size, string sha256, string storageKey,
-        Guid? supersedesId, string actor, DateTimeOffset now)
+        Guid? supersedesId, string actor, DateTimeOffset now, string? validationProfile = null, string? validationResult = null)
     {
         if (size <= 0) throw new DomainException("An attachment cannot be empty.");
         if (version < 1) throw new DomainException("Attachment versions begin at one.");
+        if (string.IsNullOrWhiteSpace(validationProfile) != string.IsNullOrWhiteSpace(validationResult))
+            throw new DomainException("Attachment validation profile and result must be recorded together.");
         Id = Guid.NewGuid(); ProjectId = projectId; ArtifactType = Required(artifactType); ArtifactId = artifactId; RevisionId = revisionId;
         LogicalId = logicalId; Version = version; Label = Required(label); Description = description.Trim(); OriginalFileName = Required(originalFileName);
         ContentType = Required(contentType); Size = size; Sha256 = Required(sha256).ToLowerInvariant(); StorageKey = Required(storageKey);
         SupersedesId = supersedesId; State = ControlledAttachmentState.Active; UploadedBy = Required(actor); UploadedAt = now;
+        ValidationProfile = validationProfile?.Trim(); ValidationResult = validationResult?.Trim();
     }
     public Guid Id { get; private set; }
     public Guid ProjectId { get; private set; }
@@ -39,6 +42,8 @@ public sealed class ControlledAttachment
     public string UploadedBy { get; private set; } = "";
     public DateTimeOffset UploadedAt { get; private set; }
     public DateTimeOffset? IntegrityVerifiedAt { get; private set; }
+    public string? ValidationProfile { get; private set; }
+    public string? ValidationResult { get; private set; }
     public void Supersede() { if (State == ControlledAttachmentState.Active) State = ControlledAttachmentState.Superseded; }
     public void Withdraw() { if (State != ControlledAttachmentState.Withdrawn) State = ControlledAttachmentState.Withdrawn; }
     public void RecordIntegrityVerification(DateTimeOffset now) => IntegrityVerifiedAt = now;
