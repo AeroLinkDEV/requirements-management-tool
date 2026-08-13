@@ -186,6 +186,39 @@ not done.
 Every shard count in the workflow now derives from `strategy.job-total` rather than being written beside the
 matrix. A matrix saying four next to a divisor saying two would run half the tests and pass.
 
+### The ceiling on sharding, and why it is not "add another runner"
+
+Four browser shards and three API shards took the critical path from 16m37s to **13m57s** — less than the
+arithmetic promised, and the shortfall is entirely imbalance:
+
+| Browser shard | Journey time |
+|---|---|
+| 4/4 | **662s** |
+| 1/4 | 360s |
+| 2/4 | 328s |
+| 3/4 | 233s |
+
+Perfectly balanced, those four would be ~396s each and the gate would be ~9m30s. **The imbalance costs more
+than another runner would buy.**
+
+It is not caused by a dominant spec file. Playwright shards by test count and does it well — 58/57/54/56 of
+225 tests across 104 files, largest file 10 tests. What varies is **duration per test**. The computed API
+partition has the same shape for the same reason: balanced at 162/162/161 tests, and 499s/347s/274s of
+running.
+
+Two consequences:
+
+1. **Neither splitter can improve without duration data**, because neither has any. Test count is the only
+   input either of them takes.
+2. **More shards is capped, and the cap is not money.** At 14 jobs per run, two concurrent pull requests
+   already exceed the account's concurrent-job limit — and this repository routinely has several agents
+   working at once. Past that point extra shards make every agent's gate slower, which is the opposite of the
+   goal. The remaining gain has to come from packing the runners that already exist.
+
+The browser shards now emit a Playwright JSON report as an artifact. That is the input for duration-aware
+assignment; it is deliberately not wired into the gate, because a partition that silently drops tests looks
+exactly like a fast green run.
+
 ## Not implemented here, and why
 
 Tracked as a GitHub issue rather than done in this increment, because each is a real piece of work rather than
