@@ -620,8 +620,19 @@ public sealed class DocumentConnectorGrant
 {
     private DocumentConnectorGrant() { }
     public DocumentConnectorGrant(Guid projectId, Guid documentId, Guid revisionId, Guid editSessionId,
-        string userName, string mode, string launchTokenHash, DateTimeOffset now)
-    { Id = Guid.NewGuid(); ProjectId = projectId; DocumentId = documentId; RevisionId = revisionId; EditSessionId = editSessionId; UserName = userName.ToLowerInvariant(); Mode = mode is "edit" or "release" ? mode : throw new DomainException("The connector mode is invalid."); LaunchTokenHash = launchTokenHash.ToLowerInvariant(); CreatedAt = now; ExpiresAt = now.AddMinutes(5); }
+        string userName, string mode, string launchTokenHash, string deploymentId, string origin, string keyId,
+        Guid sourceAttachmentId, long sourceSize, string sourceSha256, string documentNumber, string revisionNumber,
+        DateTimeOffset now)
+    {
+        Id = Guid.NewGuid(); ProjectId = projectId; DocumentId = documentId; RevisionId = revisionId;
+        EditSessionId = editSessionId; UserName = userName.ToLowerInvariant();
+        Mode = mode is "edit" or "release" ? mode : throw new DomainException("The connector mode is invalid.");
+        LaunchTokenHash = Required(launchTokenHash, 64).ToLowerInvariant(); DeploymentId = Required(deploymentId, 100);
+        Origin = Required(origin, 500); KeyId = Required(keyId, 100); SourceAttachmentId = sourceAttachmentId;
+        SourceSize = sourceSize > 0 ? sourceSize : throw new DomainException("The connector source size is invalid.");
+        SourceSha256 = Required(sourceSha256, 64).ToLowerInvariant(); DocumentNumber = Required(documentNumber, 100);
+        RevisionNumber = Required(revisionNumber, 100); CreatedAt = now; ExpiresAt = now.AddMinutes(5);
+    }
     public Guid Id { get; private set; }
     public Guid ProjectId { get; private set; }
     public Guid DocumentId { get; private set; }
@@ -630,6 +641,14 @@ public sealed class DocumentConnectorGrant
     public string UserName { get; private set; } = "";
     public string Mode { get; private set; } = "edit";
     public string LaunchTokenHash { get; private set; } = "";
+    public string? DeploymentId { get; private set; }
+    public string? Origin { get; private set; }
+    public string? KeyId { get; private set; }
+    public Guid? SourceAttachmentId { get; private set; }
+    public long? SourceSize { get; private set; }
+    public string? SourceSha256 { get; private set; }
+    public string? DocumentNumber { get; private set; }
+    public string? RevisionNumber { get; private set; }
     public string? AccessTokenHash { get; private set; }
     public DateTimeOffset CreatedAt { get; private set; }
     public DateTimeOffset ExpiresAt { get; private set; }
@@ -640,4 +659,6 @@ public sealed class DocumentConnectorGrant
     public bool IsAccessValid(DateTimeOffset now) => RedeemedAt is not null && RevokedAt is null && ExpiresAt > now && !string.IsNullOrWhiteSpace(AccessTokenHash);
     public void Extend(DateTimeOffset now) { if (!IsAccessValid(now)) throw new DomainException("This connector session is no longer active."); ExpiresAt = now.AddHours(8); }
     public void Revoke(DateTimeOffset now) => RevokedAt = now;
+    private static string Required(string? value, int maximum) => string.IsNullOrWhiteSpace(value) || value.Trim().Length > maximum
+        ? throw new DomainException("A connector evidence value is invalid.") : value.Trim();
 }

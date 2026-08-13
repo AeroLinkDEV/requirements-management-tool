@@ -339,6 +339,7 @@ internal sealed class AeroLinkApiFactory(bool seedDemoAccounts = false, bool all
     }
 
     private readonly string _evidenceRoot = Path.Combine(Path.GetTempPath(), $"aerolink-api-evidence-{Guid.NewGuid():N}");
+    private readonly string _connectorKeyPath = Path.Combine(Path.GetTempPath(), $"aerolink-connector-key-{Guid.NewGuid():N}.pem");
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
@@ -349,6 +350,8 @@ internal sealed class AeroLinkApiFactory(bool seedDemoAccounts = false, bool all
             ["Database:Provider"] = "Sqlite",
             ["ConnectionStrings:AeroLink"] = $"Data Source={_databasePath}",
             ["Evidence:Root"] = _evidenceRoot,
+            ["Connector:DeploymentId"] = "aerolink-api-tests",
+            ["Connector:SigningKeyPath"] = _connectorKeyPath,
             ["DemoData:Enabled"] = "false",
             ["Identity:SeedDemoAccounts"] = seedDemoAccounts.ToString(),
             ["Identity:AllowDemoAccounts"] = allowDemoAccounts.ToString(),
@@ -395,6 +398,7 @@ internal sealed class AeroLinkApiFactory(bool seedDemoAccounts = false, bool all
         DeleteIfPresent(_databasePath + "-wal");
         try { if (Directory.Exists(_evidenceRoot)) Directory.Delete(_evidenceRoot, true); }
         catch (IOException) { } catch (UnauthorizedAccessException) { }
+        DeleteIfPresent(_connectorKeyPath);
     }
 
     // Retried briefly before being given up on, because the usual cause is a handle closing a moment late

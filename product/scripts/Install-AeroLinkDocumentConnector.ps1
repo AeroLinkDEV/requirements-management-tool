@@ -1,4 +1,7 @@
-param([string]$Configuration = "Release")
+param(
+    [string]$Configuration = "Release",
+    [string]$TrustManifest = ""
+)
 $ErrorActionPreference = "Stop"
 $repo = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
 $project = Join-Path $repo "product\tools\AeroLink.DocumentConnector\AeroLink.DocumentConnector.csproj"
@@ -9,4 +12,10 @@ if ($LASTEXITCODE -ne 0) { throw "The AeroLink desktop connector could not be bu
 $connector = Join-Path $destination "AeroLink.DocumentConnector.exe"
 & $connector --install
 if ($LASTEXITCODE -ne 0) { throw "The AeroLink desktop connector could not be registered." }
+if ($TrustManifest) {
+    $resolvedManifest = (Resolve-Path -LiteralPath $TrustManifest).Path
+    & $connector --enroll $resolvedManifest
+    if ($LASTEXITCODE -ne 0) { throw "The selected AeroLink deployment could not be enrolled." }
+}
 Write-Host "AeroLink desktop connector installed for this Windows account." -ForegroundColor Green
+if (-not $TrustManifest) { Write-Host "No deployment was enrolled. Download a trust manifest from Documentation Center, then run the connector with --enroll <manifest-path>." -ForegroundColor Yellow }

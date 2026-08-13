@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test'
+import { readFile } from 'node:fs/promises'
 import { apiBase, apiLogin, login, showcaseSeed } from './auth'
 
 test('controlled relationship links use canonical targets and exact browser routes', async ({ page, request }) => {
@@ -57,6 +58,17 @@ test('managed Word documents remain one Project-wide register across build navig
   await page.getByRole('link', { name: 'Documentation Center' }).click()
   await expect(page).toHaveURL(/\/programs\/[0-9a-f-]+\/projects\/[0-9a-f-]+\/documentation-center$/)
   await expect(page.getByRole('heading', { name: 'Documentation Center' })).toBeVisible()
+  const [trustDownload] = await Promise.all([
+    page.waitForEvent('download'),
+    page.getByRole('button', { name: 'Download connector trust' }).click(),
+  ])
+  expect(trustDownload.suggestedFilename()).toMatch(/^aerolink-.+-trust\.json$/)
+  const trustPath = await trustDownload.path()
+  expect(trustPath).toBeTruthy()
+  const trust = JSON.parse(await readFile(trustPath!, 'utf8'))
+  expect(trust.protocolVersion).toBe('aerolink-connector-launch-v1')
+  expect(trust.profileVersion).toBe('aerolink-ooxml-safe-v1')
+  expect(trust.publicKeyFingerprint).toMatch(/^[0-9a-f]{64}$/)
   await expect(page.getByText('7 matching records')).toBeVisible()
   await expect(page.locator('.mdMetrics').getByText('4', { exact: true })).toBeVisible()
 

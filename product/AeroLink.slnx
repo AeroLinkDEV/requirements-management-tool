@@ -1,6 +1,7 @@
 <Solution>
   <Folder Name="/src/">
     <Project Path="src/AeroLink.Api/AeroLink.Api.csproj" />
+    <Project Path="src/AeroLink.ConnectorProtocol/AeroLink.ConnectorProtocol.csproj" />
     <Project Path="src/AeroLink.DocumentSecurity/AeroLink.DocumentSecurity.csproj" />
     <Project Path="src/AeroLink.Domain/AeroLink.Domain.csproj" />
     <Project Path="src/AeroLink.Infrastructure/AeroLink.Infrastructure.csproj" />
