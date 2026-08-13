@@ -97,3 +97,15 @@ Measure before optimizing, and measure the *job*, not the suite. Both times some
 counts here, the reasoning was about the browser suite in isolation and the answer depended entirely on what
 `validate` was doing at the time. The numbers in this file will go stale the same way; re-read the run
 summaries before trusting them.
+
+### The browser job timeout was inside the noise
+
+`timeout-minutes` on `browser-pr` was 20. A shard is roughly four minutes of setup plus its half of the
+journeys, and that half has grown: 14m48s, 15m21s, 17m04s, 17m46s, and then a run that printed
+`105 passed (16.3m)` and was cancelled at 20m08s while uploading its artifacts. Every test in it had passed.
+
+A timeout that fires after a green suite is the worst signal available: it reports failure, names no test, and
+costs a full gate to re-run something that already worked. Raised to 30, which still stops a genuinely hung
+browser.
+
+This is the same growth that makes the shard-count reasoning above worth re-measuring rather than inheriting.
