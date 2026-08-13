@@ -145,7 +145,7 @@ public sealed class ManagedDocumentShowcaseSeeder(AeroLinkDbContext db, ManagedD
             "All software builds", revision.ResponsibleOwnerId, revision.UpdatedAt, fingerprint,
             [("Document steward", document.StewardId), ("Revision responsible owner", revision.ResponsibleOwnerId), ("Revision initiated by", revision.InitiatedBy), ("Applicability", "Project-wide; build links are contextual only"), ("Formal revision scope", revision.FormalChangeSummary), ("Storage authority", "AeroLink Documentation Center")],
             approvals, [(revision.Revision.ToString("D2"), status, revision.UpdatedAt.UtcDateTime.ToString("yyyy-MM-dd"), revision.ResponsibleOwnerId)],
-            Sections(document, revision)) { Watermark = watermark };
+            Sections(document, revision)) { Watermark = watermark, ControlledStatusControls = true };
     }
 
     private static IReadOnlyList<PublicationSection> Sections(ManagedDocument document, ManagedDocumentRevision revision) =>
