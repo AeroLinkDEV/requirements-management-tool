@@ -262,5 +262,6 @@ export function routePath(context: RouteContext, view: View, discipline: Discipl
 export function artifactPath(context: RouteContext, kind: string, id: string, discipline = "system") {
   if (kind === "change-request") return routePath(context, "scr", discipline === "software" ? "software" : "system", id);
   if (kind === "requirement") return routePath(context, "requirements", discipline === "software" ? "software" : "system", id);
+  if (kind === "managed-document") return `/programs/${context.programId}/projects/${context.projectId}/documentation-center/${encodeURIComponent(id)}`;
   return routePath(context, "artifact", "system", id, kind);
 }

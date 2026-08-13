@@ -4,6 +4,7 @@ using AeroLink.Domain.Identity;
 using AeroLink.Domain.Notifications;
 using AeroLink.Domain.Programs;
 using AeroLink.Domain.Releases;
+using AeroLink.Domain.Requirements;
 using AeroLink.Domain.Traceability;
 using AeroLink.Domain.Verification;
 using AeroLink.Infrastructure.Notifications;
@@ -374,7 +375,16 @@ public static class WorkspaceEndpoints
                                                 select new { id = document.Id, owner = revision.ResponsibleOwnerId, artifact = document.DocumentNumber + "." + (revision.Revision < 10 ? "0" : "") + revision.Revision, dueAt = revision.UpdatedAt }).ToListAsync(ct);
                 managedRecoveryWork = recoveryCandidates.Where(x => !eligibleUsers.Contains(x.owner)).Select(x => (object)new { x.id, type = "Project document owner recovery", x.artifact, title = "Reassign disabled or departed owner: " + x.owner, priority = "High", x.dueAt, ageDays = (int)(now - x.dueAt).TotalDays, route = "managedDocuments", discipline = "project" }).ToList();
             }
-            var tasks = activeScrSteps.Cast<object>().Concat(releaseSteps).Concat(authoredDrafts).Concat(assignedTestWork).Concat(managedOwnerWork).Concat(managedReviewWork).Concat(managedRecoveryWork).ToList();
+            // An exclusive connector checkout is recoverable in-work evidence for its holder, and it is
+            // Project-wide exactly like the document it edits: the task never depends on a selected build.
+            var managedCheckoutWork = (await (from session in db.ArtifactEditSessions.AsNoTracking()
+                                              join document in db.ManagedDocuments.AsNoTracking() on session.ArtifactId equals document.Id
+                                              join revision in db.ManagedDocumentRevisions.AsNoTracking() on session.RevisionId!.Value equals revision.Id
+                                              where session.ArtifactType == "ManagedDocument" && session.IsExclusive
+                                                  && session.State == EditSessionState.Active && session.UserName == actor.UserName
+                                                  && (projectId == null || document.ProjectId == projectId)
+                                              select new { id = document.Id, type = "Project document checkout", artifact = document.DocumentNumber + "." + (revision.Revision < 10 ? "0" : "") + revision.Revision, title = "Recover the active desktop checkout", priority = "Normal", dueAt = session.ExpiresAt, ageDays = (int)(now - session.OpenedAt).TotalDays, route = "managedDocuments", discipline = "project" }).ToListAsync(ct)).OrderBy(x => x.dueAt).ToList();
+            var tasks = activeScrSteps.Cast<object>().Concat(releaseSteps).Concat(authoredDrafts).Concat(assignedTestWork).Concat(managedOwnerWork).Concat(managedReviewWork).Concat(managedRecoveryWork).Concat(managedCheckoutWork).ToList();
             return Results.Ok(new { generatedAt = now, summary = new { total = tasks.Count, approvals = activeScrSteps.Count + releaseSteps.Count + managedReviewWork.Count, overdue = activeScrSteps.Count(x => x.dueAt < now) + releaseSteps.Count(x => x.dueAt < now) + authoredDrafts.Count(x => x.dueAt < now) + managedOwnerWork.Count(x => x.dueAt < now) + managedReviewWork.Count(x => x.dueAt < now) + managedRecoveryWork.Count, drafts = authoredDrafts.Count + managedOwnerWork.Count }, tasks });
         });
 
@@ -393,7 +403,7 @@ public static class WorkspaceEndpoints
             http.Items["AeroLink.User"] = user;
 
             var normalized = kind.Trim().ToLowerInvariant();
-            Guid? projectId = null, releaseId = null; var tail = "";
+            Guid? projectId = null, releaseId = null; var tail = ""; var projectWide = false;
             switch (normalized)
             {
                 case "scr" or "swcr" or "change-request":
@@ -450,12 +460,40 @@ public static class WorkspaceEndpoints
                     if (record is not null) { projectId = record.ProjectId; tail = "/problem-reports"; }
                     break;
                 }
+                case "managed-document":
+                {
+                    // A managed document is Project-wide: the resolver must never fall back to guessing a
+                    // software build. The identifier may be a document or a specific formal revision; both
+                    // resolve to the canonical Project-level Documentation Center record.
+                    var document = await db.ManagedDocuments.AsNoTracking().Where(x => x.Id == id)
+                        .Select(x => new { x.Id, x.ProjectId }).SingleOrDefaultAsync(ct);
+                    if (document is not null)
+                    {
+                        projectId = document.ProjectId;
+                        tail = $"/documentation-center/{document.Id}";
+                    }
+                    else
+                    {
+                        var revision = await (from item in db.ManagedDocumentRevisions.AsNoTracking()
+                                              join owner in db.ManagedDocuments.AsNoTracking() on item.DocumentId equals owner.Id
+                                              where item.Id == id
+                                              select new { owner.Id, owner.ProjectId }).SingleOrDefaultAsync(ct);
+                        if (revision is not null)
+                        {
+                            projectId = revision.ProjectId;
+                            tail = $"/documentation-center/{revision.Id}";
+                        }
+                    }
+                    if (projectId is not null) projectWide = true;
+                    break;
+                }
             }
 
             if (projectId is null) return Results.Redirect("/");
             if (!await http.HasProjectAccessAsync(db, projectId.Value, ct)) return Results.Redirect("/");
             var programId = await db.Projects.AsNoTracking().Where(x => x.Id == projectId).Select(x => (Guid?)x.ProgramId).SingleOrDefaultAsync(ct);
             if (programId is null) return Results.Redirect("/");
+            if (projectWide) return Results.Redirect($"/programs/{programId}/projects/{projectId}{tail}");
             // A record that does not carry a release of its own opens in the one being worked, which is where
             // the reader would have gone looking for it anyway.
             releaseId ??= await db.Releases.AsNoTracking().Where(x => x.ProjectId == projectId)
@@ -475,12 +513,31 @@ public static class WorkspaceEndpoints
             var procedureEffectivity=releaseId is null?null:await TestProcedureEffectivity.ForReleaseAsync(db,projectId,releaseId.Value,ct);
             items.AddRange(await db.SystemChangeRequests.AsNoTracking().Where(x=>x.ProjectId==projectId&&(releaseId==null||x.TargetReleaseId==releaseId)&&(x.BaseNumber.ToLower().Contains(identifierQ)||x.Title.ToLower().Contains(q)||x.Problem.ToLower().Contains(q))).Take(take).Select(x=>new SearchResultDto(x.Id,"change-request",x.BaseNumber+"."+(x.Revision<10?"0":"")+x.Revision,x.Title,x.State.ToString(),x.Type==ChangeRequestType.Software?"software":"system",x.UpdatedAt)).ToListAsync(ct));
             items.AddRange(await db.ProblemReports.AsNoTracking().Where(x=>x.ProjectId==projectId&&(releaseId==null||db.ProblemReportLinks.Any(link=>link.ProblemReportId==x.Id&&link.ArtifactType=="Release"&&link.ArtifactId==releaseId))&&(x.ReportNumber.ToLower().Contains(identifierQ)||x.Title.ToLower().Contains(q)||x.Problem.ToLower().Contains(q)||x.RootCause.ToLower().Contains(q))).Take(take).Select(x=>new SearchResultDto(x.Id,"problem-report",x.ReportNumber+"."+(x.Revision<10?"0":"")+x.Revision,x.Title,x.State.ToString(),"assurance",x.UpdatedAt)).ToListAsync(ct));
-            items.AddRange(await (from document in db.ManagedDocuments.AsNoTracking().Where(x=>x.ProjectId==projectId)
-                                  join revision in db.ManagedDocumentRevisions.AsNoTracking() on document.Id equals revision.DocumentId
-                                  where document.DocumentNumber.ToLower().Contains(identifierQ)
-                                      ||document.Title.ToLower().Contains(q)
-                                      ||revision.FormalChangeSummary.ToLower().Contains(q)
-                                  select new SearchResultDto(document.Id,"managed-document",document.DocumentNumber+"."+(revision.Revision<10?"0":"")+revision.Revision,document.Title+": "+revision.FormalChangeSummary,revision.State.ToString(),"project",revision.UpdatedAt)).Take(take).ToListAsync(ct));
+            var managedStateQuery = Enum.TryParse<ManagedDocumentState>(q, ignoreCase: true, out var parsedManagedState)
+                ? parsedManagedState : (ManagedDocumentState?)null;
+            var hasManagedStateFilter = managedStateQuery.HasValue;
+            var managedStateValue = managedStateQuery ?? default;
+            int? exactManagedRevision = null;
+            if (q.Length > 3 && q[^3] == '.' && char.IsDigit(q[^2]) && char.IsDigit(q[^1])
+                && int.TryParse(q[^2..], out var managedRevision))
+                exactManagedRevision = managedRevision;
+            var managedCandidates = await (from document in db.ManagedDocuments.AsNoTracking().Where(x=>x.ProjectId==projectId)
+                                           join revision in db.ManagedDocumentRevisions.AsNoTracking() on document.Id equals revision.DocumentId
+                                           where (document.DocumentNumber.ToLower().Contains(identifierQ)
+                                                      ||document.Title.ToLower().Contains(q)
+                                                      ||document.Acronym.ToLower().Contains(q)
+                                                      ||document.DocumentType.ToLower().Contains(q)
+                                                      ||document.StewardId.ToLower().Contains(q)
+                                                      ||revision.FormalChangeSummary.ToLower().Contains(q)
+                                                      ||revision.ResponsibleOwnerId.ToLower().Contains(q)
+                                                      ||(hasManagedStateFilter && revision.State == managedStateValue))
+                                               && (exactManagedRevision == null || revision.Revision == exactManagedRevision.Value)
+                                           select new SearchResultDto(document.Id,"managed-document",document.DocumentNumber+"."+(revision.Revision<10?"0":"")+revision.Revision,document.Title+": "+revision.FormalChangeSummary,revision.State.ToString(),"project",revision.UpdatedAt)).Take(take*2).ToListAsync(ct);
+            // One row per document: a number-only search surfaces the newest formal revision rather than
+            // one near-identical row per revision, while a number.revision search returns that exact revision.
+            items.AddRange(exactManagedRevision is null
+                ? managedCandidates.GroupBy(item => item.Id).Select(group => group.OrderByDescending(item => item.Identifier).First()).Take(take)
+                : managedCandidates.Take(take));
             var requirementRows=effectiveBaselineId is not null
                 ? await(from artifact in db.Requirements.AsNoTracking().Where(x=>x.ProjectId==projectId) join member in db.BaselineRequirements.AsNoTracking().Where(x=>x.BaselineId==effectiveBaselineId) on artifact.Id equals member.ArtifactId join revision in db.RequirementRevisions.AsNoTracking() on member.RevisionId equals revision.Id where artifact.BaseNumber.ToLower().Contains(identifierQ)||revision.Statement.ToLower().Contains(q)||revision.Rationale.ToLower().Contains(q) select new{artifact.Id,artifact.BaseNumber,artifact.Level,revision.Revision,revision.Statement,revision.State,revision.CreatedAt}).Take(take).ToListAsync(ct)
                 : await(from artifact in db.Requirements.AsNoTracking().Where(x=>x.ProjectId==projectId) join revision in db.RequirementRevisions.AsNoTracking() on artifact.Id equals revision.ArtifactId where revision.Revision==db.RequirementRevisions.Where(r=>r.ArtifactId==artifact.Id).Max(r=>r.Revision)&&(artifact.BaseNumber.ToLower().Contains(identifierQ)||revision.Statement.ToLower().Contains(q)||revision.Rationale.ToLower().Contains(q)) select new{artifact.Id,artifact.BaseNumber,artifact.Level,revision.Revision,revision.Statement,revision.State,revision.CreatedAt}).Take(take).ToListAsync(ct);
