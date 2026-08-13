@@ -11,6 +11,7 @@ using AeroLink.Domain.Requirements;
 using AeroLink.Domain.Verification;
 using AeroLink.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace AeroLink.Api.Tests;
@@ -1002,6 +1003,90 @@ public sealed class ManagedDocumentApiTests
         revision.RecordReleaseCandidate(releasedDocx.Id, releasedPdf.Id, ManagedDocumentFileService.Sha256(System.Text.Encoding.UTF8.GetBytes($"{releasedDocx.Sha256}:{releasedPdf.Sha256}:{revision.FormalSummaryHash}:{revision.FormalSummaryVersion}")), "quality.analyst", now); revision.Approve("quality.analyst", "Release.", now);
         var oldHead = await Microsoft.EntityFrameworkCore.EntityFrameworkQueryableExtensions.SingleAsync(db.ManagedDocumentRevisions.Where(x => x.DocumentId == documentId && x.Id != revisionId && x.State == ManagedDocumentState.Released)); oldHead.Supersede(now);
         db.AddRange(releasedDocx, releasedPdf); db.ManagedDocumentReviewSteps.AddRange(revision.ReviewSteps.Where(x => x.Cycle == cycle)); await db.SaveChangesAsync(); return (revision.Id, releasedDocx.Id, releasedDocx.Sha256);
+    }
+
+    [Fact]
+    public async Task Open_managed_document_resolver_lands_on_the_project_wide_record_without_guessing_a_build()
+    {
+        using var factory = new AeroLinkApiFactory(); using var client = factory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false }); await ProblemReportApiTests.BootstrapAndLoginAsync(client);
+        var scope = await SeedProjectAsync(factory);
+        using var created = await client.PostAsJsonAsync("/api/managed-documents", new { projectId = scope.ProjectId, acronym = "SVP", documentType = "Software Verification Plan", title = "Project verification plan", ownerId = "software.author", formalChangeSummary = "Control Project-wide verification planning.", operationKey = Guid.NewGuid().ToString("N") });
+        Assert.Equal(HttpStatusCode.Created, created.StatusCode);
+        var body = await created.Content.ReadFromJsonAsync<JsonElement>();
+        var documentId = body.GetProperty("id").GetGuid();
+        var revisionId = body.GetProperty("revisionId").GetGuid();
+        var canonical = $"/programs/{scope.ProgramId}/projects/{scope.ProjectId}/documentation-center/{documentId}";
+
+        using var byDocument = await client.GetAsync($"/open/managed-document/{documentId}");
+        Assert.Equal(HttpStatusCode.Redirect, byDocument.StatusCode);
+        Assert.Equal(canonical, byDocument.Headers.Location!.ToString());
+        Assert.DoesNotContain("/releases/", byDocument.Headers.Location!.ToString());
+
+        using var byRevision = await client.GetAsync($"/open/managed-document/{revisionId}");
+        Assert.Equal(HttpStatusCode.Redirect, byRevision.StatusCode);
+        Assert.Equal(canonical, byRevision.Headers.Location!.ToString());
+
+        using var anonymous = factory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
+        using var anonymousAttempt = await anonymous.GetAsync($"/open/managed-document/{documentId}");
+        Assert.Equal(HttpStatusCode.Redirect, anonymousAttempt.StatusCode);
+        Assert.Equal("/", anonymousAttempt.Headers.Location!.ToString());
+
+        using var foreignFactory = new AeroLinkApiFactory(); using var foreignClient = foreignFactory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false }); await ProblemReportApiTests.BootstrapAndLoginAsync(foreignClient);
+        using var foreignAttempt = await foreignClient.GetAsync($"/open/managed-document/{documentId}");
+        Assert.Equal(HttpStatusCode.Redirect, foreignAttempt.StatusCode);
+        Assert.Equal("/", foreignAttempt.Headers.Location!.ToString());
+    }
+
+    [Fact]
+    public async Task Search_finds_managed_documents_by_acronym_type_owner_and_state_and_denies_other_projects()
+    {
+        using var factory = new AeroLinkApiFactory(); using var client = factory.CreateClient(); await ProblemReportApiTests.BootstrapAndLoginAsync(client);
+        var scope = await SeedProjectAsync(factory);
+        using var created = await client.PostAsJsonAsync("/api/managed-documents", new { projectId = scope.ProjectId, acronym = "SVP", documentType = "Software Verification Plan", title = "Project verification plan", ownerId = "software.author", formalChangeSummary = "Control Project-wide verification planning.", operationKey = Guid.NewGuid().ToString("N") });
+        Assert.Equal(HttpStatusCode.Created, created.StatusCode);
+
+        foreach (var query in new[] { "SVP", "Software Verification Plan", "software.author", "draft", "SVP-000001.00" })
+        {
+            var results = await client.GetFromJsonAsync<JsonElement>($"/api/search?projectId={scope.ProjectId}&query={Uri.EscapeDataString(query)}");
+            Assert.Contains(results.GetProperty("items").EnumerateArray(), item => item.GetProperty("kind").GetString() == "managed-document" && item.GetProperty("identifier").GetString()!.StartsWith("SVP-000001."));
+        }
+        var exact = await client.GetFromJsonAsync<JsonElement>($"/api/search?projectId={scope.ProjectId}&query=SVP-000001.00");
+        var exactItems = exact.GetProperty("items").EnumerateArray().Where(item => item.GetProperty("kind").GetString() == "managed-document").ToList();
+        Assert.Single(exactItems);
+        Assert.Equal("SVP-000001.00", exactItems[0].GetProperty("identifier").GetString());
+
+        using var foreignFactory = new AeroLinkApiFactory();
+        _ = await SeedProjectAsync(foreignFactory);
+        using var foreignMember = foreignFactory.CreateClient();
+        using (var login = await foreignMember.PostAsJsonAsync("/api/auth/login", new { userName = "software.author", password = AeroLinkApiFactory.MemberPassword })) Assert.Equal(HttpStatusCode.OK, login.StatusCode);
+        using var denied = await foreignMember.GetAsync($"/api/search?projectId={scope.ProjectId}&query=SVP");
+        Assert.Equal(HttpStatusCode.Forbidden, denied.StatusCode);
+    }
+
+    [Fact]
+    public async Task My_work_surfaces_the_active_desktop_checkout_for_its_holder_only()
+    {
+        using var factory = new AeroLinkApiFactory(); using var administrator = factory.CreateClient(); await ProblemReportApiTests.BootstrapAndLoginAsync(administrator);
+        var scope = await SeedProjectAsync(factory);
+        using var created = await administrator.PostAsJsonAsync("/api/managed-documents", new { projectId = scope.ProjectId, acronym = "SVP", documentType = "Software Verification Plan", title = "Project verification plan", ownerId = "software.author", formalChangeSummary = "Control Project-wide verification planning.", operationKey = Guid.NewGuid().ToString("N") });
+        Assert.Equal(HttpStatusCode.Created, created.StatusCode);
+        var body = await created.Content.ReadFromJsonAsync<JsonElement>();
+        var documentId = body.GetProperty("id").GetGuid();
+        var revisionId = body.GetProperty("revisionId").GetGuid();
+
+        using var author = factory.CreateClient();
+        using (var login = await author.PostAsJsonAsync("/api/auth/login", new { userName = "software.author", password = AeroLinkApiFactory.MemberPassword })) Assert.Equal(HttpStatusCode.OK, login.StatusCode);
+        await SecurityBoundaryTests.AuthorizeMutationsAsync(author);
+        using var checkout = await author.PostAsync($"/api/managed-documents/revisions/{revisionId}/checkout", null);
+        Assert.Equal(HttpStatusCode.OK, checkout.StatusCode);
+
+        var authorWork = await author.GetFromJsonAsync<JsonElement>($"/api/my-work?projectId={scope.ProjectId}");
+        Assert.Contains(authorWork.GetProperty("tasks").EnumerateArray(), item => item.GetProperty("id").GetGuid() == documentId && item.GetProperty("type").GetString() == "Project document checkout" && item.GetProperty("route").GetString() == "managedDocuments");
+
+        using var lead = factory.CreateClient();
+        using (var login = await lead.PostAsJsonAsync("/api/auth/login", new { userName = "software.lead", password = AeroLinkApiFactory.MemberPassword })) Assert.Equal(HttpStatusCode.OK, login.StatusCode);
+        var leadWork = await lead.GetFromJsonAsync<JsonElement>($"/api/my-work?projectId={scope.ProjectId}");
+        Assert.DoesNotContain(leadWork.GetProperty("tasks").EnumerateArray(), item => item.GetProperty("type").GetString() == "Project document checkout" && item.GetProperty("id").GetGuid() == documentId);
     }
 
     private static async Task<(Guid ProgramId, Guid ProjectId, Guid ReleasedId, Guid ActiveReleaseId)> SeedProjectAsync(AeroLinkApiFactory factory)

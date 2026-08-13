@@ -18,6 +18,15 @@ public sealed class NotificationOutboxTests
 {
     private static readonly DateTimeOffset Now = DateTimeOffset.UtcNow;
 
+    [Fact]
+    public void Managed_document_notifications_link_to_the_project_wide_open_resolver()
+    {
+        var (links, _) = Support();
+        var id = "11111111-1111-1111-1111-111111111111";
+        Assert.Equal($"/open/managed-document/{id}", NotificationLinkBuilder.PathFor($"managed-document:{id}"));
+        Assert.Equal($"https://aerolink.example.test/open/managed-document/{id}", links.LinkFor($"managed-document:{id}"));
+    }
+
     private sealed class RecordingSender(bool configured = true) : IEmailSender
     {
         public List<EmailMessage> Sent { get; } = [];
