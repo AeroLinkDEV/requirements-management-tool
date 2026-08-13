@@ -5,6 +5,11 @@ Date: 2026-07-19
 > **Historical engineering decision record.** Measurements and job topology describe the July 2026
 > optimization increment. The repository workflows and required GitHub checks are the live authority; current
 > qualification evidence is summarized in [the current handoff](../../CURRENT_PRODUCT_HANDOFF_2026-08-10.md).
+>
+> **The timings below are stale.** The suite has grown roughly 5× since. Every job duration and every
+> conclusion that depends on one — the shard-count reasoning in particular — is superseded by
+> [BROWSER_AND_BACKEND_FEEDBACK_TIME.md](BROWSER_AND_BACKEND_FEEDBACK_TIME.md), which measures the current
+> critical path. The *decisions* recorded here still stand; the numbers that justified them do not.
 
 ## Purpose
 

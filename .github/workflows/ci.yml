@@ -244,6 +244,15 @@ jobs:
           echo "Classify the changed paths in the changes job, or mark the change as documentation-only."
           exit 1
 
+  # Still two shards. Adding more was considered and measured against, twice now: the browser shards run
+  # 11–16 minutes while `validate` runs 21–27, so the journeys are not on the critical path and a third or
+  # fourth runner would shorten a job nobody is waiting for while paying setup for it. What governs elapsed
+  # time is the backend test assembly — see BROWSER_AND_BACKEND_FEEDBACK_TIME.md.
+  #
+  # `fail-fast: false` is the change. The opposite cancelled the sibling shard the moment one failed, so a
+  # single flake cost a rerun purely to discover whether anything else had also failed. A cancelled shard
+  # reports nothing, which is the most expensive kind of nothing — it buys runner minutes with information
+  # and then spends twenty-five minutes buying the information back.
   browser-pr:
     name: Browser journeys (${{ matrix.shard }}/2)
     needs: changes
@@ -251,7 +260,7 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 20
     strategy:
-      fail-fast: true
+      fail-fast: false
       matrix:
         shard: [1, 2]
     steps:
