@@ -5,7 +5,7 @@ namespace AeroLink.Domain.Releases;
 public enum ReleaseCampaignState { Planning, Verification, InReview, Released }
 public enum ImpactKind { Requirement, Traceability, Verification, Document }
 public enum ImpactDispositionState { Pending, Addressed, NotApplicable }
-public enum ReleaseApprovalState { Pending, Active, Approved }
+public enum ReleaseApprovalState { Pending, Active, Approved, Cancelled }
 
 public sealed class ReleaseCampaign
 {
@@ -15,7 +15,7 @@ public sealed class ReleaseCampaign
     public ReleaseCampaign(Guid projectId, Guid releaseId, Guid baselineId, string name, string ownerId, DateTimeOffset now)
     {
         if (string.IsNullOrWhiteSpace(name) || string.IsNullOrWhiteSpace(ownerId)) throw new DomainException("Campaign name and owner are required.");
-        Id = Guid.NewGuid(); ProjectId = projectId; ReleaseId = releaseId; BaselineId = baselineId; Name = name.Trim(); OwnerId = ownerId.Trim(); State = ReleaseCampaignState.Planning; CreatedAt = now;
+        Id = Guid.NewGuid(); ProjectId = projectId; ReleaseId = releaseId; BaselineId = baselineId; Name = name.Trim(); OwnerId = ownerId.Trim(); State = ReleaseCampaignState.Planning; CreatedAt = now; UpdatedAt = now;
         Event("CampaignCreated", ownerId, $"Created release campaign {Name}.", now);
     }
     public Guid Id { get; private set; }
@@ -26,7 +26,9 @@ public sealed class ReleaseCampaign
     public string Name { get; private set; } = string.Empty;
     public string OwnerId { get; private set; } = string.Empty;
     public ReleaseCampaignState State { get; private set; }
+    public long Version { get; private set; } = 1;
     public DateTimeOffset CreatedAt { get; private set; }
+    public DateTimeOffset UpdatedAt { get; private set; }
     public DateTimeOffset? ReleasedAt { get; private set; }
     public string? ReleaseHash { get; private set; }
     public IReadOnlyCollection<ReleaseCampaignEvent> Events => _events.AsReadOnly();
@@ -34,21 +36,22 @@ public sealed class ReleaseCampaign
     public void StartVerification(string actorId, DateTimeOffset now)
     {
         if (State != ReleaseCampaignState.Planning) throw new DomainException("Only a planning campaign can start verification.");
-        State = ReleaseCampaignState.Verification; Event("VerificationStarted", actorId, "Started release verification campaign.", now);
+        State = ReleaseCampaignState.Verification; Event("VerificationStarted", actorId, "Started release verification campaign.", now); Touch(now);
     }
     public void SelectVerificationBuild(Guid softwareBuildId, string actorId, DateTimeOffset now)
-    { EnsurePackageMutable(); SoftwareBuildId = softwareBuildId; Event("VerificationBuildSelected", actorId, $"Selected software build {softwareBuildId} for release verification.", now); }
+    { EnsurePackageMutable(); SoftwareBuildId = softwareBuildId; Event("VerificationBuildSelected", actorId, $"Selected software build {softwareBuildId} for release verification.", now); Touch(now); }
     public void RecordExecutionProgress(string eventType, string detail, string actorId, DateTimeOffset now)
-    { EnsurePackageMutable(); if (string.IsNullOrWhiteSpace(eventType) || string.IsNullOrWhiteSpace(detail)) throw new DomainException("Release progress type and detail are required."); Event(eventType.Trim(), actorId, detail.Trim(), now); }
+    { EnsurePackageMutable(); if (string.IsNullOrWhiteSpace(eventType) || string.IsNullOrWhiteSpace(detail)) throw new DomainException("Release progress type and detail are required."); Event(eventType.Trim(), actorId, detail.Trim(), now); Touch(now); }
     public void BeginReleaseReview(string actorId, IReadOnlyList<(string Id, string Name)> approvers, string manifestHash, DateTimeOffset now)
     {
         if (State != ReleaseCampaignState.Verification) throw new DomainException("Release review can begin only after verification is complete.");
         if (approvers.Count == 0) throw new DomainException("At least one release approver is required.");
         if (string.IsNullOrWhiteSpace(manifestHash) || manifestHash.Length != 64) throw new DomainException("A valid release review manifest hash is required.");
-        if (_approvals.Count != 0) throw new DomainException("Release review has already been configured.");
-        for (var i = 0; i < approvers.Count; i++) _approvals.Add(new ReleaseApproval(Id, i, approvers[i].Id, approvers[i].Name, i == 0 ? ReleaseApprovalState.Active : ReleaseApprovalState.Pending));
+        if (_approvals.Any(x => x.State != ReleaseApprovalState.Cancelled)) throw new DomainException("Release review has already been configured.");
+        var cycle = _approvals.Select(x => x.Cycle).DefaultIfEmpty(0).Max() + 1;
+        for (var i = 0; i < approvers.Count; i++) _approvals.Add(new ReleaseApproval(Id, cycle, i, approvers[i].Id, approvers[i].Name, i == 0 ? ReleaseApprovalState.Active : ReleaseApprovalState.Pending));
         ReleaseHash = manifestHash; State = ReleaseCampaignState.InReview;
-        Event("ReleaseReviewStarted", actorId, $"Started ordered release review with {approvers.Count} approvers against manifest SHA-256 {manifestHash}.", now);
+        Event("ReleaseReviewStarted", actorId, $"Started ordered release review with {approvers.Count} approvers against manifest SHA-256 {manifestHash}.", now); Touch(now);
     }
     public bool Approve(string actorId, DateTimeOffset now)
     {
@@ -56,7 +59,17 @@ public sealed class ReleaseCampaign
         var active = _approvals.SingleOrDefault(x => x.State == ReleaseApprovalState.Active) ?? throw new DomainException("No release approval is active.");
         if (!string.Equals(active.ApproverId, actorId, StringComparison.OrdinalIgnoreCase)) throw new DomainException("Only the active release approver can approve.");
         active.Approve(now); var next = _approvals.Where(x => x.State == ReleaseApprovalState.Pending).OrderBy(x => x.Position).FirstOrDefault(); next?.Activate();
-        Event("ReleaseApprovalRecorded", actorId, $"Approved release review position {active.Position + 1}.", now); return next is null;
+        Event("ReleaseApprovalRecorded", actorId, $"Approved release review position {active.Position + 1}.", now); Touch(now); return next is null;
+    }
+    public void CancelReleaseReview(string actorId, string? reason, DateTimeOffset now)
+    {
+        if (string.IsNullOrWhiteSpace(actorId)) throw new DomainException("A review cancellation actor is required.");
+        if (State != ReleaseCampaignState.InReview) throw new DomainException("Only a campaign in release review can be cancelled.");
+        foreach (var approval in _approvals.Where(x => x.State != ReleaseApprovalState.Cancelled))
+            approval.Cancel();
+        ReleaseHash = null; State = ReleaseCampaignState.Verification;
+        Event("ReleaseReviewCancelled", actorId, string.IsNullOrWhiteSpace(reason) ? "Release review cancelled; the package must be re-frozen and re-reviewed." : reason.Trim(), now);
+        Touch(now);
     }
     public void Release(Guid softwareBuildId, string releaseHash, string actorId, DateTimeOffset now)
     {
@@ -65,8 +78,9 @@ public sealed class ReleaseCampaign
         if (!string.Equals(ReleaseHash, releaseHash, StringComparison.OrdinalIgnoreCase)) throw new DomainException("The release package changed after review began. Cancel and restart release review against the current manifest.");
         if (SoftwareBuildId != softwareBuildId) throw new DomainException("The reviewed verification build does not match the release build.");
         ReleasedAt = now; State = ReleaseCampaignState.Released;
-        Event("ReleaseCompleted", actorId, $"Released campaign with software build {softwareBuildId} and hash {releaseHash}.", now);
+        Event("ReleaseCompleted", actorId, $"Released campaign with software build {softwareBuildId} and hash {releaseHash}.", now); Touch(now);
     }
+    private void Touch(DateTimeOffset now) { Version++; UpdatedAt = now; }
     private void EnsureNotReleased() { if (State == ReleaseCampaignState.Released) throw new DomainException("A released campaign is immutable."); }
     private void EnsurePackageMutable()
     {
@@ -79,13 +93,14 @@ public sealed class ReleaseCampaign
 public sealed class ReleaseApproval
 {
     private ReleaseApproval() { }
-    internal ReleaseApproval(Guid campaignId, int position, string approverId, string approverName, ReleaseApprovalState state)
-    { Id = Guid.NewGuid(); CampaignId = campaignId; Position = position; ApproverId = approverId; ApproverName = approverName; State = state; }
-    public Guid Id { get; private set; } public Guid CampaignId { get; private set; } public int Position { get; private set; }
+    internal ReleaseApproval(Guid campaignId, int cycle, int position, string approverId, string approverName, ReleaseApprovalState state)
+    { Id = Guid.NewGuid(); CampaignId = campaignId; Cycle = cycle; Position = position; ApproverId = approverId; ApproverName = approverName; State = state; }
+    public Guid Id { get; private set; } public Guid CampaignId { get; private set; } public int Cycle { get; private set; } public int Position { get; private set; }
     public string ApproverId { get; private set; } = string.Empty; public string ApproverName { get; private set; } = string.Empty;
     public ReleaseApprovalState State { get; private set; } public DateTimeOffset? ApprovedAt { get; private set; }
     internal void Activate() => State = ReleaseApprovalState.Active;
     internal void Approve(DateTimeOffset now) { State = ReleaseApprovalState.Approved; ApprovedAt = now; }
+    internal void Cancel() => State = ReleaseApprovalState.Cancelled;
 }
 
 public sealed class ReleaseCampaignEvent

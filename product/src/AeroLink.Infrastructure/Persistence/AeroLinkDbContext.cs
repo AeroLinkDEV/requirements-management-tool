@@ -731,14 +731,14 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
         modelBuilder.Entity<ReleaseCampaign>(b =>
         {
             b.ToTable("release_campaigns"); b.HasKey(x => x.Id); b.Property(x => x.Name).HasMaxLength(300).IsRequired(); b.Property(x => x.OwnerId).HasMaxLength(100).IsRequired();
-            b.Property(x => x.State).HasConversion<string>().HasMaxLength(30); b.Property(x => x.ReleaseHash).HasMaxLength(64); b.HasIndex(x => new { x.ProjectId, x.ReleaseId }).IsUnique();
+            b.Property(x => x.State).HasConversion<string>().HasMaxLength(30); b.Property(x => x.ReleaseHash).HasMaxLength(64); b.Property(x => x.Version).IsConcurrencyToken(); b.HasIndex(x => new { x.ProjectId, x.ReleaseId }).IsUnique();
             b.HasOne<ProjectRecord>().WithMany().HasForeignKey(x => x.ProjectId).OnDelete(DeleteBehavior.Restrict); b.HasOne<SoftwareRelease>().WithMany().HasForeignKey(x => x.ReleaseId).OnDelete(DeleteBehavior.Restrict);
             b.HasOne<CandidateBaseline>().WithMany().HasForeignKey(x => x.BaselineId).OnDelete(DeleteBehavior.Restrict); b.HasOne<SoftwareBuild>().WithMany().HasForeignKey(x => x.SoftwareBuildId).OnDelete(DeleteBehavior.Restrict);
             b.HasMany(x => x.Approvals).WithOne().HasForeignKey(x => x.CampaignId).OnDelete(DeleteBehavior.Restrict); b.HasMany(x => x.Events).WithOne().HasForeignKey(x => x.CampaignId).OnDelete(DeleteBehavior.Restrict);
         });
         modelBuilder.Entity<ReleaseApproval>(b =>
         {
-            b.ToTable("release_approvals"); b.HasKey(x => x.Id); b.Property(x => x.ApproverId).HasMaxLength(100).IsRequired(); b.Property(x => x.ApproverName).HasMaxLength(200).IsRequired(); b.Property(x => x.State).HasConversion<string>().HasMaxLength(30); b.HasIndex(x => new { x.CampaignId, x.Position }).IsUnique();
+            b.ToTable("release_approvals"); b.HasKey(x => x.Id); b.Property(x => x.ApproverId).HasMaxLength(100).IsRequired(); b.Property(x => x.ApproverName).HasMaxLength(200).IsRequired(); b.Property(x => x.State).HasConversion<string>().HasMaxLength(30); b.Property(x => x.Cycle); b.HasIndex(x => new { x.CampaignId, x.Cycle, x.Position }).IsUnique();
         });
         modelBuilder.Entity<ReleaseCampaignEvent>(b =>
         {
