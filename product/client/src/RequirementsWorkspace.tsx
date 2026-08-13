@@ -6,6 +6,11 @@ import type { FormEvent } from "react";
 import { AutosaveState, DraftRestore } from "./DraftNotice";
 import { useFormDraft } from "./autosave";
 import DocumentActions from "./DocumentActions";
+import {
+  ControlledArtifactExplorerHeader,
+  ControlledArtifactExplorerLayout,
+  ControlledArtifactInspector,
+} from "./ControlledArtifactExplorer";
 import { targetsFor } from "./presentation";
 import "./RequirementsWorkspace.css";
 
@@ -668,17 +673,11 @@ export default function RequirementsWorkspace({
   };
   return (
     <main className="reqWorkspace">
-      <header className="reqHeader">
-        <div>
-          <button className="back" onClick={onBack}>
-            ← Command Center
-          </button>
-          <p className="eyebrow">
-            CONTROLLED REQUIREMENTS / READ-ONLY EXPLORER
-          </p>
-          <h1>{scope} Requirements Explorer</h1>
-        </div>
-      </header>
+      <ControlledArtifactExplorerHeader
+        back={{ label: "Command Center", onClick: onBack }}
+        eyebrow="CONTROLLED REQUIREMENTS / READ-ONLY EXPLORER"
+        title={`${scope} Requirements Explorer`}
+      />
       {error && <div className="workspaceError">{error}</div>}
       {/* The document these requirements belong to, offered where they are read. Which one you get follows the
           build: approved for a released one, a stamped draft for an in-work one. Level-aware, so the Software
@@ -898,7 +897,10 @@ export default function RequirementsWorkspace({
           </button>
         </section>
       )}
-      <div className={`reqLayout ${selected ? "inspecting" : ""}`}>
+      <ControlledArtifactExplorerLayout
+        inspecting={Boolean(selected) || deepLinkMissing}
+        resizableKey="requirements-explorer"
+      >
         <aside className="specRail">
           <div className="railTitle">
             <b>Specifications</b>
@@ -1181,52 +1183,25 @@ export default function RequirementsWorkspace({
             </div>
           </aside>
         ) : selected && (
-          <aside className="requirementInspector">
-            <div className="inspectorTop">
-              <div>
-                <span>{selected.level.toUpperCase()} REQUIREMENT</span>
-                <h2>{selected.displayNumber}</h2>
-                <p>Controlled current revision</p>
-              </div>
-              <button
-                className="inspectorClose"
-                aria-label="Close requirement inspector"
-                onClick={() => {
-                  autoSelected.current = true;
-                  onCloseRequirement();
-                  setSelected(undefined);
-                  setDetail(undefined);
-                }}
-              >
-                ×
-              </button>
-            </div>
-            <div className="inspectorTabs">
-              <button
-                className={inspectorTab === "details" ? "active" : ""}
-                onClick={() => setInspectorTab("details")}
-              >
-                Overview
-              </button>
-              <button
-                className={inspectorTab === "trace" ? "active" : ""}
-                onClick={() => setInspectorTab("trace")}
-              >
-                Trace &amp; impact
-              </button>
-              <button
-                className={inspectorTab === "history" ? "active" : ""}
-                onClick={() => setInspectorTab("history")}
-              >
-                History
-              </button>
-              <button
-                className={inspectorTab === "discussion" ? "active" : ""}
-                onClick={() => setInspectorTab("discussion")}
-              >
-                Discussion <span>{comments.length}</span>
-              </button>
-            </div>
+          <ControlledArtifactInspector
+            artifactType={`${selected.level.toUpperCase()} REQUIREMENT`}
+            displayNumber={selected.displayNumber}
+            closeLabel="Close requirement inspector"
+            onClose={() => {
+              autoSelected.current = true;
+              onCloseRequirement();
+              setSelected(undefined);
+              setDetail(undefined);
+            }}
+            tabs={[
+              { id: "details", label: "Overview" },
+              { id: "trace", label: <>Trace &amp; impact</> },
+              { id: "history", label: "History" },
+              { id: "discussion", label: <>Discussion <span>{comments.length}</span></> },
+            ]}
+            activeTab={inspectorTab}
+            onTab={(tab) => setInspectorTab(tab as typeof inspectorTab)}
+          >
             {inspectorTab === "details" && (
               <div className="inspectorBody">
                 {release?.isReleased
@@ -1377,9 +1352,9 @@ export default function RequirementsWorkspace({
                 ))}
               </div>
             )}
-          </aside>
+          </ControlledArtifactInspector>
         )}
-      </div>
+      </ControlledArtifactExplorerLayout>
       {showSave && (
         <div className="reqModal">
           <form onSubmit={saveView}>

@@ -788,7 +788,7 @@ public sealed class TestChangeRequestControlledEditingAdapter(AeroLinkDbContext 
             .SingleOrDefaultAsync(x => x.Id == artifactId, ct);
         return item is null
             ? null
-            : new(item.ProjectId, item.State.ToString(), item, item.Version, item.Revision.ToString(), item.Id);
+            : new(item.ProjectId, item.State.ToString(), item, item.Version, item.Revision.ToString(), null);
     }
 
     public string CanonicalSnapshot(ControlledEditingArtifact artifact, long? versionOverride = null) =>

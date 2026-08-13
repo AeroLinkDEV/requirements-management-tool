@@ -3,14 +3,16 @@ import { PersonName } from './People'
 import { apiRequest, operationError } from './apiClient'
 import { procedureTargetsFor, stateLabel } from './presentation'
 import DocumentActions from './DocumentActions'
-import { loadCoverage, type Coverage } from './verificationCoverage'
+import {
+  ControlledArtifactExplorerHeader,
+  ControlledArtifactExplorerLayout,
+  ControlledArtifactInspector,
+  ControlledArtifactInspectorEmpty,
+} from './ControlledArtifactExplorer'
 import type { TestDiscipline } from './TestResultsWorkspace'
 // The requirements explorer's stylesheet, imported rather than copied. Browsing a controlled artifact is the
 // same job whichever discipline owns it, so the inspector is literally the same one.
 import './RequirementsWorkspace.css'
-// Coverage moved here from the test change request page, and its card and row styling came with it rather
-// than being restyled to look almost the same.
-import './TestingCoverageWorkspace.css'
 import './TestProcedureExplorer.css'
 
 type Procedure = {
@@ -104,8 +106,6 @@ type Tab = 'details' | 'trace' | 'history' | 'discussion'
  * build covered, and what is not" is a report about requirements. Both are about procedures as they stand,
  * which is why they are on one page — but they are different questions and a reader is asking one of them.
  */
-type PageTab = 'procedures' | 'coverage'
-
 /**
  * The scope the procedure list is asked for, which is the discipline's own name.
  *
@@ -172,10 +172,6 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
   const [traceError, setTraceError] = useState(false)
   const [comments, setComments] = useState<Comment[]>([])
   const [error, setError] = useState('')
-  const [pageTab, setPageTab] = useState<PageTab>('procedures')
-  const [coverage, setCoverage] = useState<Coverage>()
-  const [coverageRead, setCoverageRead] = useState(false)
-  const [showAll, setShowAll] = useState(false)
 
   const scope = scopeOf(discipline)
   // A page at a time, at the requirements explorer's own default. A build holds hundreds of procedures, and
@@ -435,36 +431,6 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
     } catch (problem) { setError(operationError(problem, 'The comment could not be resolved.')) }
   }
 
-  // Switching discipline or build is a different page asking a different question, and this component stays
-  // mounted across that switch. Without this, moving from HLR to LLR kept the coverage already read — the LLR
-  // page would have shown HLR's numbers under an LLR heading, which is worse than showing nothing. The tab
-  // goes back to the procedures it is named for, too.
-  useEffect(() => {
-    setCoverage(undefined)
-    setCoverageRead(false)
-    setShowAll(false)
-    setPageTab('procedures')
-  }, [api, projectId, releaseId, discipline])
-
-  // Read when the coverage tab is first opened, not with the procedure list. Coverage is three requests and a
-  // whole-configuration computation, and a reader who came to find one procedure by number should not pay for
-  // a report they did not ask for. Read once and kept, because it does not change while the page is open.
-  useEffect(() => {
-    if (pageTab !== 'coverage' || coverageRead) return
-    let active = true
-    void (async () => {
-      const { coverage: next, failed } = await loadCoverage(api, projectId, releaseId, discipline)
-      if (!active) return
-      setCoverageRead(true)
-      if (next) setCoverage(next)
-      if (failed) setError('The requirement coverage for this build could not be read.')
-    })()
-    return () => { active = false }
-  }, [api, projectId, releaseId, discipline, pageTab, coverageRead])
-
-  const uncovered = coverage?.items.filter(x => x.disposition === 'Uncovered') ?? []
-  const suspect = coverage?.items.filter(x => x.disposition === 'Suspect') ?? []
-
   const open = (procedure: Procedure) => {
     setSelectedId(procedure.id); setTab('details'); setHistory(undefined); setTrace(undefined); setTraceError(false)
     const params = new URLSearchParams(location.search)
@@ -493,14 +459,12 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
   }
 
   // A workspace is its own <main>: the shell supplies the navigation and context bar, not the landmark.
-  return <main className="reqWorkspace procedureExplorer">
-    <header className="reqHeader">
-      <div>
-        {onBack && <button className="back" onClick={onBack}>← Command Center</button>}
-        <p className="eyebrow">CONTROLLED TEST PROCEDURES / READ-ONLY EXPLORER</p>
-        <h1>{discipline === 'System' ? 'System Test Procedure Explorer' : 'Software Test Procedure Explorer'}</h1>
-      </div>
-    </header>
+  return <main className="reqWorkspace">
+    <ControlledArtifactExplorerHeader
+      back={onBack ? { label: 'Command Center', onClick: onBack } : undefined}
+      eyebrow="CONTROLLED TEST PROCEDURES / READ-ONLY EXPLORER"
+      title={discipline === 'System' ? 'System Test Procedure Explorer' : 'Software Test Procedure Explorer'}
+    />
     {error && <div className="workspaceError" role="alert">{error}</div>}
 
     {/* The document these procedures are written into, offered where they are read — the same place, shape
@@ -514,103 +478,12 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
       heading={released ? `Approved documents for ${releaseVersion}` : `Draft documents for ${releaseVersion}`}
     />
 
-    <div className="explorerTabs" role="tablist" aria-label="Test procedure views">
-      <button type="button" role="tab" aria-selected={pageTab === 'procedures'}
-        className={pageTab === 'procedures' ? 'active' : ''}
-        onClick={() => setPageTab('procedures')}>Procedures</button>
-      <button type="button" role="tab" aria-selected={pageTab === 'coverage'}
-        className={pageTab === 'coverage' ? 'active' : ''}
-        onClick={() => setPageTab('coverage')}>Requirement coverage</button>
-    </div>
-
-    {pageTab === 'coverage' && (
-      <div className="explorerCoverage">
-        {discipline !== 'System' && onLevelChange && (
-          <section className="reqCommand procedureFilters coverageLevelFilter">
-            <select aria-label="Level filter"
-              value={discipline === 'LowLevelSoftware' ? 'LowLevel' : 'HighLevel'}
-              onChange={event => onLevelChange(event.target.value as 'HighLevel' | 'LowLevel')}>
-              <option value="HighLevel">Software HLR</option>
-              <option value="LowLevel">Software LLR</option>
-            </select>
-          </section>
-        )}
-        <section className="coverageSummary" aria-label="Coverage summary">
-          <article><b>{coverage?.total ?? 0}</b><span>Requirements</span></article>
-          <article><b>{coverage?.covered ?? 0}</b><span>With a procedure</span></article>
-          <article className={uncovered.length ? 'attention' : ''}><b>{uncovered.length}</b><span>With none</span></article>
-          <article className={suspect.length ? 'attention' : ''}><b>{suspect.length}</b><span>Suspect coverage</span></article>
-        </section>
-
-        {(uncovered.length > 0 || suspect.length > 0) && (
-          <section className="coverageCard">
-            <div className="cardTitle">
-              <h2>Requirements needing attention</h2>
-              <p>A requirement with no procedure cannot be verified, and coverage carried across a change nobody reconfirmed does not count.</p>
-            </div>
-            {uncovered.slice(0, 25).map(item => (
-              <article className="coverageRow attention" key={item.revisionId}>
-                <div><b>{item.displayNumber}</b><i>No procedure</i></div>
-                <p>{item.statement}</p>
-              </article>
-            ))}
-            {suspect.slice(0, 25).map(item => (
-              <article className="coverageRow attention" key={`suspect-${item.revisionId}`}>
-                <div><b>{item.displayNumber}</b><i>Suspect</i></div>
-                <p>{item.statement}</p>
-                <small>Covered by {item.coveredBy.map(x => x.displayNumber).join(', ')}, written against earlier wording.</small>
-              </article>
-            ))}
-          </section>
-        )}
-
-        <section className="coverageCard">
-          <div className="cardTitle">
-            <h2>Requirement coverage</h2>
-            <p>Every effective requirement in this build and the procedures that verify it.</p>
-          </div>
-          {/* Attention first, then everything. A reader arriving to do work needs the requirements that cannot
-              be verified as things stand; a reader answering "is this build covered" needs the whole set. The
-              second is much the longer list, so it is asked for rather than imposed. */}
-          <button type="button" className="quiet" onClick={() => setShowAll(current => !current)}>
-            {showAll ? 'Show only what needs attention' : `Show all ${coverage?.total ?? 0} requirements`}
-          </button>
-          {showAll && (
-            <div className="fullCoverage">
-              {(coverage?.items ?? []).map(item => (
-                <article className={`coverageRow ${item.covered ? '' : 'attention'}`} key={`all-${item.revisionId}`}>
-                  <div>
-                    <b>{item.displayNumber}</b>
-                    {/* Suspect is read before "no procedure". A requirement whose only procedure was written
-                        against an earlier revision is not covered — but saying nothing is testing it hides the
-                        procedure somebody has to reconfirm or replace, which is the actual work. */}
-                    <i>{item.verified ? 'Verified'
-                      : item.coveredBy.some(x => x.coverageState === 'Suspect') ? 'Suspect'
-                      : item.covered ? 'Covered'
-                      : 'No procedure'}</i>
-                  </div>
-                  <p>{item.statement}</p>
-                  {item.coveredBy.length > 0 && <small>{item.coveredBy.map(x => `${x.displayNumber} (${x.state})`).join(', ')}</small>}
-                </article>
-              ))}
-            </div>
-          )}
-        </section>
-
-        {coverageRead && !coverage && (
-          <p className="coverageNone">
-            This build has not materialized its requirements, so there is nothing to report coverage against yet.
-          </p>
-        )}
-      </div>
-    )}
-
-    {pageTab === 'procedures' && <>
+    <>
     {/* Browsing, not just searching. The software side of the demonstration Program carries 440 procedures,
         so a list that could only be searched meant knowing the number of the thing you were looking for
         before you could look for it. State and latest result are how somebody actually narrows this: "the
         drafts", "what failed last time". */}
-    <section className="reqCommand procedureFilters">
+    <section className="reqCommand">
       {/* Inline, unlabelled controls, as the requirements Explorer has: a filter bar reads as one row of
           things you can narrow by, and a caption stacked over every control turns it into a form. The names
           are carried by `aria-label`, so nothing is lost to a screen reader or to a test. */}
@@ -665,11 +538,11 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
       </label>
     </section>
 
-    <div className="reqLayout inspecting procedureExplorerSplit" data-resizable-layout="horizontal" data-resizable-key="test-procedure-explorer">
+    <ControlledArtifactExplorerLayout inspecting resizableKey="test-procedure-explorer">
       {/* The documents these procedures are written into, in the place and shape the requirements Explorer
           puts its specifications. Procedures had no container until they were given one; this is the rail
           that was impossible before. */}
-      <div className="specRail procedureRailColumn">
+      <div className="specRail">
       <nav className="procedureDocumentRail" aria-label="Test procedure documents">
         <div className="railTitle"><b>Documents</b><span>{documents.length}</span></div>
         <button type="button" className={!documentId && !sectionId ? 'railEntry selected' : 'railEntry'}
@@ -760,7 +633,7 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
       </section>
       </div>
 
-      <section className="reqResults procedureList" aria-label="Test procedures">
+      <section className="reqResults" aria-label="Test procedures">
         {/* What the requirements Explorer puts above its list, in the same markup and from the same
             stylesheet: how many records answer, where in them you are, and that the index is live and
             permission-aware. The count alone was in the search box; where you were in the results was
@@ -783,17 +656,15 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
             ? 'No procedure matches that. Clear the search or the filters to see the rest.'
             : `This build has no controlled ${disciplineLabel(discipline).toLowerCase()} procedures yet.`}</p>
           : (
-            <table className="procedureTable">
-              <thead>
-                <tr>
-                  <th scope="col">Identifier &amp; title</th>
-                  <th scope="col">Level</th>
-                  <th scope="col">Verifies</th>
-                  <th scope="col">Latest result</th>
-                  <th scope="col">State</th>
-                </tr>
-              </thead>
-              <tbody>
+            <div className="reqTable procedureList" role="table" aria-label="Controlled test procedures">
+              <div className="reqTableHead" role="row">
+                <span role="columnheader">Identifier &amp; title</span>
+                <span role="columnheader">Level</span>
+                <span role="columnheader">Verifies</span>
+                <span role="columnheader">Latest result</span>
+                <span role="columnheader">State</span>
+                <span role="columnheader">Discussion</span>
+              </div>
                 {procedures.map(procedure => (
                   // `procedureRow` is kept on the table row. It is the hook the procedure journeys have
                   // always selected a row by — bounded rendering, deep links and the trace all reach a
@@ -802,24 +673,21 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
                   // The whole row opens the procedure, as it did when the row was itself a button. Anywhere
                   // in a record's row is where people click; the identifier cell keeps its own button so the
                   // row is still reachable and operable from the keyboard.
-                  <tr key={procedure.id} data-procedure={procedure.displayNumber}
-                    onClick={() => open(procedure)}
-                    className={`procedureRow${procedure.id === selectedId ? ' selected' : ''}`}>
-                    <td>
-                      <button type="button" className="procedureOpen" aria-pressed={procedure.id === selectedId}
+                  <article key={procedure.id} role="row" data-procedure={procedure.displayNumber}
+                    className={procedure.id === selectedId ? 'procedureRow selected' : 'procedureRow'}>
+                      <button type="button" aria-pressed={procedure.id === selectedId}
                         onClick={() => open(procedure)}>
                         <b>{procedure.displayNumber}</b>
-                        <span>{procedure.title}</span>
+                        <p>{procedure.title}</p>
                       </button>
-                    </td>
-                    <td>{disciplineLabel(discipline)}</td>
-                    <td className="procedureCountCell">{procedure.requirementCount}</td>
-                    <td>{procedure.lastOutcome ?? 'Not run'}</td>
-                    <td><span className={`procedureState ${procedure.state.toLowerCase()}`}>{procedure.state}</span></td>
-                  </tr>
+                    <span>{disciplineLabel(discipline)}</span>
+                    <span>{procedure.requirementCount}</span>
+                    <span>{procedure.lastOutcome ?? 'Not run'}</span>
+                    <i className={procedure.state.toLowerCase()}>{stateLabel(procedure.state)}</i>
+                    <span>○ 0</span>
+                  </article>
                 ))}
-              </tbody>
-            </table>
+            </div>
           )}
         <div className="pager">
           <button disabled={(data?.page ?? 1) <= 1} onClick={() => setPage(x => x - 1)}>← Previous</button>
@@ -835,29 +703,26 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
         </div>
       </section>
 
-      <aside className="requirementInspector procedureInspector"
-        aria-label={selected ? `${selected.displayNumber} detail` : 'Procedure detail'}>
-        {selected ? <>
-          <div className="inspectorTop">
-            <div>
-              <b>{selected.displayNumber}</b>
-              <span>{selected.title}</span>
-            </div>
-            <button type="button" className="inspectorClose" onClick={close}
-              aria-label="Close procedure detail">×</button>
-          </div>
-          <div className="inspectorTabs">
-            <button className={tab === 'details' ? 'active' : ''} onClick={() => selectTab('details')}>Overview</button>
-            <button className={tab === 'trace' ? 'active' : ''} onClick={() => selectTab('trace')}>Trace &amp; impact</button>
-            <button className={tab === 'history' ? 'active' : ''} onClick={() => selectTab('history')}>History</button>
-            <button className={tab === 'discussion' ? 'active' : ''} onClick={() => selectTab('discussion')}>
-              Discussion <span>{comments.length}</span>
-            </button>
-          </div>
+      {selected ? <ControlledArtifactInspector
+        artifactType={`${disciplineLabel(discipline).toUpperCase()} TEST PROCEDURE`}
+        displayNumber={selected.displayNumber}
+        closeLabel="Close procedure inspector"
+        onClose={close}
+        tabs={[
+          { id: 'details', label: 'Overview' },
+          { id: 'trace', label: <>Trace &amp; impact</> },
+          { id: 'history', label: 'History' },
+          { id: 'discussion', label: <>Discussion <span>{comments.length}</span></> },
+        ]}
+        activeTab={tab}
+        onTab={next => selectTab(next as Tab)}
+      >
 
           {tab === 'details' && (
             <div className="inspectorBody">
               {selected.titleNote && <p className="inspectorNote warn">{selected.titleNote}</p>}
+              <h3>Procedure title</h3>
+              <div className="richRequirement">{selected.title}</div>
               <dl className="procedureCase">
                 <dt>Objective</dt><dd>{selected.objective || 'Not recorded'}</dd>
                 <dt>Preconditions</dt><dd>{selected.preconditions || 'None'}</dd>
@@ -985,13 +850,11 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
               ))}
             </div>
           )}
-        </> : <div className="procedureInspectorEmpty">
-          <span aria-hidden="true">≡</span>
-          <b>Select a procedure</b>
-          <p>Choose a controlled procedure to review its overview, trace, history, and discussion.</p>
-        </div>}
-      </aside>
-    </div>
-    </>}
+      </ControlledArtifactInspector> : <ControlledArtifactInspectorEmpty
+        title="Procedure"
+        description="Choose a controlled procedure to review its overview, trace, history, and discussion."
+      />}
+    </ControlledArtifactExplorerLayout>
+    </>
   </main>
 }
