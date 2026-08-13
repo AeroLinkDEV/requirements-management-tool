@@ -45,6 +45,7 @@ public sealed class NotificationLinkBuilder(IConfiguration configuration)
             "release" or "campaign" => "/release-readiness",
             "document" => $"/open/document/{id}",
             "problem-report" => $"/open/problem-report/{id}",
+            "managed-document" => $"/open/managed-document/{id}",
             _ => "/",
         };
     }
