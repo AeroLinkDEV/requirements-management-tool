@@ -38,6 +38,7 @@ record ActorRequest(long? ExpectedVersion);
 /// Optional target build for reinstatement. Absent means "back into the build that shelved it".
 record ReinstateChangeRequest(Guid? IntoReleaseId);
 record SignatureRequest(string Password, string Meaning, long? ExpectedVersion);
+record ReleaseSignatureRequest(string Password, string Meaning, string ExpectedManifestHash, string? Rationale);
 record RequestChangesRequest(long? ExpectedVersion, string Reason);
 record CreateBaselineRequest(string BaseNumber, int Revision, Guid ProjectId, Guid ReleaseId, Guid? PredecessorBaselineId, string Name);
 record CreateReleaseCampaignRequest(Guid ProjectId, Guid ReleaseId, Guid BaselineId, string Name);
@@ -52,6 +53,7 @@ record DispositionImpactRequest(ImpactDispositionState State, string Rationale);
 record BulkDispositionImpactRequest(Guid? ChangeRequestId, ImpactDispositionState State, string Rationale);
 record SelectBuildRequest(Guid SoftwareBuildId);
 record StartReleaseReviewRequest(List<ApproverRequest> Approvers);
+record CancelReleaseReviewRequest(string? Reason);
 record CreateTraceLinkRequest(Guid ProjectId, Guid SourceRevisionId, Guid TargetRevisionId, RequirementTraceType Type, string Rationale);
 record CreateUserRequest(string UserName, string DisplayName, string Email, string TemporaryPassword);
 record GrantRoleRequest(Guid ProgramId, ProgramRole Role);
