@@ -99,6 +99,7 @@ public sealed class ConnectorLaunchProtocolTests
         var root = Path.Combine(Path.GetTempPath(), $"aerolink-workspaces-{Guid.NewGuid():N}"); var now = DateTimeOffset.UtcNow;
         try
         {
+            var legacy = Path.Combine(root, "SDP-000001.00.docx"); Directory.CreateDirectory(root); File.WriteAllText(legacy, "legacy unsent work");
             var first = Envelope(now); var grant = Guid.NewGuid();
             var firstPath = ConnectorWorkspaceLayout.CreateNew(root, first, grant);
             var unsent = Path.Combine(firstPath, ConnectorWorkspaceLayout.SafeDocumentFileName(first.RevisionNumber)); File.WriteAllText(unsent, "unsent work");
@@ -107,7 +108,95 @@ public sealed class ConnectorLaunchProtocolTests
             var otherProject = first with { ProjectId = Guid.NewGuid() }; var otherDeployment = first with { DeploymentId = "deployment-b" };
             Assert.NotEqual(firstPath, ConnectorWorkspaceLayout.CreateNew(root, otherProject, Guid.NewGuid()));
             Assert.NotEqual(firstPath, ConnectorWorkspaceLayout.CreateNew(root, otherDeployment, Guid.NewGuid()));
+            Assert.Equal("legacy unsent work", File.ReadAllText(legacy));
         }
+        finally { if (Directory.Exists(root)) Directory.Delete(root, true); }
+    }
+
+    [Fact]
+    public void Protected_workspace_metadata_round_trips_without_tokens_and_rejects_tampering()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"aerolink-protected-workspaces-{Guid.NewGuid():N}");
+        try
+        {
+            var envelope = Envelope(DateTimeOffset.UtcNow); var workspaceId = Guid.NewGuid();
+            var path = ConnectorWorkspaceLayout.CreateNew(root, envelope, workspaceId);
+            byte[] Protect(byte[] value) => value.Select(item => (byte)(item ^ 0x5a)).ToArray();
+            var store = new ConnectorWorkspaceStore(root, Protect, Protect);
+            var metadata = new ConnectorWorkspaceMetadata(2, workspaceId, envelope.DeploymentId, envelope.Origin,
+                Guid.NewGuid(), envelope.ProjectId, envelope.DocumentId, envelope.DocumentNumber, envelope.RevisionId,
+                envelope.RevisionNumber, envelope.EditSessionId, Guid.NewGuid(), envelope.Mode, envelope.SourceAttachmentId,
+                envelope.SourceSha256, "SDP-000001.00.docx", ConnectorWorkspaceState.Connected, DateTimeOffset.UtcNow,
+                DateTimeOffset.UtcNow, LeaseExpiresAt: DateTimeOffset.UtcNow.AddMinutes(15));
+            store.Save(path, metadata);
+            Assert.Equal(metadata, store.Load(path)); Assert.Single(store.Scan());
+            var protectedBytes = File.ReadAllBytes(Path.Combine(path, ConnectorWorkspaceStore.MetadataFileName));
+            Assert.DoesNotContain("accessToken", System.Text.Encoding.UTF8.GetString(protectedBytes), StringComparison.OrdinalIgnoreCase);
+            protectedBytes[0] ^= 0xff; File.WriteAllBytes(Path.Combine(path, ConnectorWorkspaceStore.MetadataFileName), protectedBytes);
+            Assert.Equal("connector_workspace_invalid", Assert.Throws<ConnectorProtocolException>(() => store.Load(path)).Code);
+            Assert.Empty(store.Scan());
+        }
+        finally { if (Directory.Exists(root)) Directory.Delete(root, true); }
+    }
+
+    [Theory]
+    [InlineData(ConnectorWorkspaceState.Downloading)]
+    [InlineData(ConnectorWorkspaceState.Connected)]
+    [InlineData(ConnectorWorkspaceState.Retrying)]
+    [InlineData(ConnectorWorkspaceState.LeaseAtRisk)]
+    [InlineData(ConnectorWorkspaceState.Finalizing)]
+    [InlineData(ConnectorWorkspaceState.CleanupPending)]
+    [InlineData(ConnectorWorkspaceState.SourceConflict)]
+    [InlineData(ConnectorWorkspaceState.Expired)]
+    [InlineData(ConnectorWorkspaceState.ForceUnlocked)]
+    [InlineData(ConnectorWorkspaceState.Abandoned)]
+    public void Interrupted_workspace_states_survive_restart_without_a_reusable_credential(ConnectorWorkspaceState state)
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"aerolink-restart-{Guid.NewGuid():N}");
+        try
+        {
+            var envelope = Envelope(DateTimeOffset.UtcNow); var workspaceId = Guid.NewGuid();
+            var path = ConnectorWorkspaceLayout.CreateNew(root, envelope, workspaceId);
+            byte[] Protect(byte[] value) => value.Select(item => (byte)(item ^ 0x37)).ToArray();
+            var storeBeforeCrash = new ConnectorWorkspaceStore(root, Protect, Protect);
+            var metadata = new ConnectorWorkspaceMetadata(2, workspaceId, envelope.DeploymentId, envelope.Origin,
+                Guid.NewGuid(), envelope.ProjectId, envelope.DocumentId, envelope.DocumentNumber, envelope.RevisionId,
+                envelope.RevisionNumber, envelope.EditSessionId, Guid.NewGuid(), envelope.Mode, envelope.SourceAttachmentId,
+                envelope.SourceSha256, "SDP-000001.00.docx", state, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow,
+                LocalSha256: new string('b', 64), LeaseExpiresAt: DateTimeOffset.UtcNow.AddMinutes(15),
+                RetainUntil: ConnectorWorkspaceLifecycle.RetainUntil(state, DateTimeOffset.UtcNow));
+            storeBeforeCrash.Save(path, metadata);
+
+            var storeAfterRestart = new ConnectorWorkspaceStore(root, Protect, Protect);
+            Assert.Equal(metadata, Assert.Single(storeAfterRestart.Scan()).Metadata);
+            Assert.DoesNotContain("token", string.Join('|', typeof(ConnectorWorkspaceMetadata).GetProperties().Select(property => property.Name)), StringComparison.OrdinalIgnoreCase);
+        }
+        finally { if (Directory.Exists(root)) Directory.Delete(root, true); }
+    }
+
+    [Fact]
+    public void Heartbeat_retries_transient_failures_marks_lease_risk_and_maps_terminal_server_states()
+    {
+        var now = DateTimeOffset.UtcNow; var lease = now.AddMinutes(15);
+        var first = ConnectorHeartbeatPolicy.Failure(0, now, lease); Assert.Equal(ConnectorWorkspaceState.Retrying, first.State); Assert.Equal(TimeSpan.FromSeconds(10), first.NextDelay); Assert.False(first.Terminal);
+        var third = ConnectorHeartbeatPolicy.Failure(2, now, lease); Assert.Equal(ConnectorWorkspaceState.LeaseAtRisk, third.State); Assert.Equal(TimeSpan.FromMinutes(1), third.NextDelay);
+        Assert.Equal(ConnectorWorkspaceState.Expired, ConnectorHeartbeatPolicy.Failure(1, now, lease, "stale_connector_session").State);
+        var offlinePastLease = ConnectorHeartbeatPolicy.Failure(3, lease.AddSeconds(1), lease);
+        Assert.Equal(ConnectorWorkspaceState.Expired, offlinePastLease.State); Assert.True(offlinePastLease.Terminal);
+        Assert.Equal(ConnectorWorkspaceState.ForceUnlocked, ConnectorHeartbeatPolicy.Failure(1, now, lease, "connector_force_unlocked").State);
+        Assert.Equal(ConnectorWorkspaceState.SourceConflict, ConnectorHeartbeatPolicy.Failure(1, now, lease, "document_snapshot_conflict").State);
+        Assert.Equal(ConnectorWorkspaceState.Connected, ConnectorHeartbeatPolicy.Success().State);
+    }
+
+    [Fact]
+    public void Word_state_and_candidate_lifecycle_prevent_unsaved_cleanup_and_candidate_overwrite()
+    {
+        Assert.False(ConnectorWorkspaceLifecycle.CanUpload(ConnectorWordDocumentState.OpenUnsaved));
+        Assert.True(ConnectorWorkspaceLifecycle.CanUpload(ConnectorWordDocumentState.OpenSaved));
+        Assert.False(ConnectorWorkspaceLifecycle.CanCleanup(ConnectorWordDocumentState.OpenSaved));
+        Assert.True(ConnectorWorkspaceLifecycle.CanCleanup(ConnectorWordDocumentState.Closed));
+        var root = Path.Combine(Path.GetTempPath(), $"aerolink-candidates-{Guid.NewGuid():N}");
+        try { Assert.NotEqual(ConnectorWorkspaceLifecycle.CreateCandidateSet(root), ConnectorWorkspaceLifecycle.CreateCandidateSet(root)); }
         finally { if (Directory.Exists(root)) Directory.Delete(root, true); }
     }
 
@@ -140,7 +229,8 @@ public sealed class ConnectorLaunchProtocolTests
             exact with { DocumentId = Guid.NewGuid() }, exact with { DocumentNumber = "SDP-999999" },
             exact with { RevisionId = Guid.NewGuid() }, exact with { RevisionNumber = "SDP-000001.99" },
             exact with { SourceAttachmentId = Guid.NewGuid() }, exact with { SourceSize = exact.SourceSize + 1 },
-            exact with { SourceSha256 = new string('b', 64) }
+            exact with { SourceSha256 = new string('b', 64) }, exact with { EditSessionId = Guid.NewGuid() },
+            exact with { RecoveryWorkspaceId = Guid.NewGuid() }
         };
         Assert.All(changed, value => Assert.Equal("connector_redemption_mismatch",
             Assert.Throws<ConnectorProtocolException>(() => ConnectorLaunchProtocol.ValidateRedemption(envelope, value)).Code));
@@ -162,7 +252,7 @@ public sealed class ConnectorLaunchProtocolTests
     private static ConnectorLaunchEnvelope Envelope(DateTimeOffset now) => new(ConnectorLaunchProtocol.Version,
         ConnectorLaunchProtocol.ProfileVersion, "deployment-a", "https://a.example", "key-1", "nonce-123456789",
         now.AddMinutes(5), Guid.NewGuid(), Guid.NewGuid(), "SDP-000001", Guid.NewGuid(), "SDP-000001.00", "edit",
-        Guid.NewGuid(), 4096, new string('a', 64));
+        Guid.NewGuid(), 4096, new string('a', 64), Guid.NewGuid());
 
     private static IEnumerable<ConnectorLaunchEnvelope> Mutations(ConnectorLaunchEnvelope value)
     {
@@ -173,11 +263,13 @@ public sealed class ConnectorLaunchProtocolTests
         yield return value with { SourceSize = value.SourceSize + 1 }; yield return value with { SourceSha256 = new string('b', 64) };
         yield return value with { ExpiresAt = value.ExpiresAt.AddSeconds(1) }; yield return value with { Nonce = "nonce-other-123456" };
         yield return value with { DeploymentId = "deployment-b" }; yield return value with { KeyId = "key-2" };
+        yield return value with { EditSessionId = Guid.NewGuid() }; yield return value with { RecoveryWorkspaceId = Guid.NewGuid() };
     }
 
     private static ConnectorRedemptionIdentity Redemption(ConnectorLaunchEnvelope value) => new(value.Mode,
         value.DeploymentId, value.Origin, value.ProjectId, value.DocumentId, value.DocumentNumber, value.RevisionId,
-        value.RevisionNumber, value.SourceAttachmentId, value.SourceSize, value.SourceSha256);
+        value.RevisionNumber, value.SourceAttachmentId, value.SourceSize, value.SourceSha256, value.EditSessionId,
+        value.RecoveryWorkspaceId);
 
     private static ConnectorEnrollmentManifest Manifest(string deployment, string origin, ECDsa key, DateTimeOffset now)
     {

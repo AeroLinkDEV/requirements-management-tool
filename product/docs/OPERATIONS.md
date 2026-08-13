@@ -58,6 +58,20 @@ the browser is allowed to open the AeroLink protocol. An abandoned checkout expi
 configuration manager or administrator may force-unlock it with a recorded reason. Connector working files are
 local conveniences, not authoritative storage; a completed check-in must appear in AeroLink's Versions tab.
 
+If Word, Windows, or the network fails during editing, run the connector executable without arguments to open
+**Recover local document work**. Select the retained workspace and authenticate in AeroLink. Resume and discard
+are browser-authorized operations; the connector stores no reusable browser credential. Resume is allowed only
+when the original user (or an authorized administrator) still has Project/document authority and the exact base
+attachment remains current. Source conflicts, advanced revisions, authority loss, or another active checkout are
+preserved for export and never uploaded automatically.
+
+Do not delete `%LOCALAPPDATA%\AeroLink\DocumentConnector\working` during repair, upgrade, or uninstall. It can
+contain unresolved local work. A signed cleanup command removes a successfully committed workspace only after
+the connector independently matches AeroLink's accepted hashes and confirms Word is closed. Explicit discard
+also refuses to remove an open or unsaved Word document. Conflict retention is marked for at least 90 days;
+expired, abandoned, and force-unlocked work is marked for at least 30 days. These dates are operator review
+targets, not unattended deletion jobs. Export retained work before any approved manual cleanup.
+
 After an upgrade that changes the versioned safe OOXML profile, run the Documentation Center Project integrity
 scan before controlled use. Existing DOCX attachment rows deliberately retain null validation-profile evidence;
 the scan verifies their immutable bytes against the current profile without rewriting historical acceptance.

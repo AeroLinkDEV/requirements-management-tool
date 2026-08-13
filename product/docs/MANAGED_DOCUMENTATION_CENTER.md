@@ -44,8 +44,11 @@ server URL. It binds the enrolled deployment and exact origin, Project, stable d
 one-use nonce, source attachment/size/SHA-256, and required OOXML profile. The connector verifies this before
 any request, refuses redirects, and requires redemption to repeat the signed identity exactly. A connector
 without an explicit active enrollment cannot contact even an HTTPS or loopback server. New files use a unique
-deployment/Project/document/revision/grant workspace and never truncate an unresolved workspace; full recovery
-and retention behavior remains tracked by #496.
+deployment/Project/document/revision/session workspace and never truncate an unresolved workspace. Protected
+local metadata contains only controlled identity, source hashes, lease state, and local evidence hashes—never a
+browser credential or reusable connector token. A crash, offline interval, expired lease, or force unlock leaves
+that workspace discoverable from the connector recovery center. Resume and discard require a fresh authenticated
+browser action that returns a new signed, one-use command bound to the exact workspace and current source.
 5. The formal revision scope is defined once when the revision starts. While Draft or Returned, an authorized
    owner or project authority may correct it through the explicit audited action with an optimistic-concurrency
    version and reason. It cannot be changed while in review or after release.
@@ -123,6 +126,29 @@ requires an unambiguous macro-free Word root and content-type manifest; resolves
 relationship graph; and rejects missing targets, cycles, active or embedded content, external templates/images,
 unsafe external schemes, DTD/entity processing, and DDE/LINK/INCLUDE/DATABASE fields. Ordinary HTTPS/mailto
 hyperlinks remain supported. Validation streams ZIP/XML content instead of materializing expanded parts.
+
+## Local workspace recovery
+
+Each connector launch has a unique workspace. The connector writes authenticated, Windows-user-protected
+recovery metadata before source download and updates it atomically through download, editing, heartbeat,
+finalization, conflict, and cleanup. Starting another launch never reuses or truncates a retained directory.
+Heartbeats retry with bounded backoff; the workspace visibly becomes lease-at-risk before expiry, and finalization
+pauses renewal so heartbeat and check-in cannot race each other. The server uses a 15-minute renewable lease.
+
+Run the connector without an `aerolink://` argument to open its recovery center. Resume opens the canonical
+Project document in the browser, where the user must authenticate again. AeroLink then rechecks Project access,
+current revision responsibility or review authority, exact source attachment/hash, revision state, and current
+checkout ownership. A current checkout is rotated into a new short-lived connector grant; a completed operation
+returns signed cleanup evidence; abandoned work returns a signed discard command. A different current source,
+advanced revision, authority loss, or competing checkout fails closed. Conflict work remains exportable but is
+never uploaded automatically.
+
+The connector uploads only a closed or saved Word document. Unsaved or externally locked files remain in place.
+Draft check-in and release-candidate responses must repeat the exact accepted attachment IDs and hashes; cleanup
+occurs only after those values match the retained local files and Word is closed. Successful or explicitly
+discarded work is then removed. Source conflicts are marked for at least 90 days of operator retention, and
+expired, abandoned, or force-unlocked work for at least 30 days; retention markers do not silently delete user
+work. Legacy connector folders without authenticated recovery metadata are export-only.
 
 New managed-document DOCX attachment rows retain the exact validation profile and accepted result. Historical
 rows remain null rather than being retroactively claimed as validated, but every material read re-runs the

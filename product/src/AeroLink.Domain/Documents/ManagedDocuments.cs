@@ -622,7 +622,7 @@ public sealed class DocumentConnectorGrant
     public DocumentConnectorGrant(Guid projectId, Guid documentId, Guid revisionId, Guid editSessionId,
         string userName, string mode, string launchTokenHash, string deploymentId, string origin, string keyId,
         Guid sourceAttachmentId, long sourceSize, string sourceSha256, string documentNumber, string revisionNumber,
-        DateTimeOffset now)
+        DateTimeOffset now, Guid? recoveryWorkspaceId = null)
     {
         Id = Guid.NewGuid(); ProjectId = projectId; DocumentId = documentId; RevisionId = revisionId;
         EditSessionId = editSessionId; UserName = userName.ToLowerInvariant();
@@ -631,7 +631,7 @@ public sealed class DocumentConnectorGrant
         Origin = Required(origin, 500); KeyId = Required(keyId, 100); SourceAttachmentId = sourceAttachmentId;
         SourceSize = sourceSize > 0 ? sourceSize : throw new DomainException("The connector source size is invalid.");
         SourceSha256 = Required(sourceSha256, 64).ToLowerInvariant(); DocumentNumber = Required(documentNumber, 100);
-        RevisionNumber = Required(revisionNumber, 100); CreatedAt = now; ExpiresAt = now.AddMinutes(5);
+        RevisionNumber = Required(revisionNumber, 100); RecoveryWorkspaceId = recoveryWorkspaceId; CreatedAt = now; ExpiresAt = now.AddMinutes(5);
     }
     public Guid Id { get; private set; }
     public Guid ProjectId { get; private set; }
@@ -649,6 +649,7 @@ public sealed class DocumentConnectorGrant
     public string? SourceSha256 { get; private set; }
     public string? DocumentNumber { get; private set; }
     public string? RevisionNumber { get; private set; }
+    public Guid? RecoveryWorkspaceId { get; private set; }
     public string? AccessTokenHash { get; private set; }
     public DateTimeOffset CreatedAt { get; private set; }
     public DateTimeOffset ExpiresAt { get; private set; }
