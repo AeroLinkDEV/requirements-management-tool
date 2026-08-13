@@ -558,7 +558,7 @@ public sealed class TestChangeReviewTests
         var next = review.StartNextRevision("verification.engineer", Now.AddMinutes(5), targetReleaseIsReleased: false);
 
         Assert.Equal("SYSTCR-000042.01", next.DisplayNumber);
-        Assert.Equal(TestChangeReviewState.Open, next.State);
+        Assert.Equal(TestChangeReviewState.Draft, next.State);
         // Reopening approved procedure work to correct it is not a reason to ask again whether any was needed.
         Assert.Equal(TestChangeReviewOutcome.ChangeRequired, next.Outcome);
         // The work carries forward so it is corrected rather than retyped.
@@ -687,7 +687,7 @@ public sealed class TestChangeReviewTests
     {
         var review = Create(TestChangeReviewDiscipline.HighLevelSoftware);
 
-        Assert.Equal(TestChangeReviewState.Open, review.State);
+        Assert.Equal(TestChangeReviewState.Draft, review.State);
         Assert.Equal(TestChangeReviewDiscipline.HighLevelSoftware, review.Discipline);
         Assert.Equal("SRCR-00039.00", review.SourceChangeRequestNumber);
     }
@@ -713,7 +713,7 @@ public sealed class TestChangeReviewTests
             review.Submit("verification.engineer", "test.approver", true, Now.AddMinutes(1)));
 
         Assert.Contains("names no procedure decisions", error.Message);
-        Assert.Equal(TestChangeReviewState.Open, review.State);
+        Assert.Equal(TestChangeReviewState.Draft, review.State);
         Assert.Empty(review.ReviewCycles);
     }
 
@@ -754,7 +754,7 @@ public sealed class TestChangeReviewTests
 
         review.ReturnToWork("test.approver", "Clarify the modified procedure.", Now.AddMinutes(2));
 
-        Assert.Equal(TestChangeReviewState.Open, review.State);
+        Assert.Equal(TestChangeReviewState.Draft, review.State);
         Assert.Null(review.SubmittedBy);
         Assert.Null(review.SubmittedAt);
     }
@@ -770,5 +770,110 @@ public sealed class TestChangeReviewTests
         review.AssignControlledNumber("HLRTCR-999999", Now.AddMinutes(3));
 
         Assert.Equal("HLRTCR-000014.00", review.DisplayNumber);
+    }
+
+    /// <summary>
+    /// Deferral, which a package could not do before: work the programme had dropped either sat in review
+    /// holding a gate that would never clear, or was rejected — throwing away a review that raised no
+    /// engineering objection.
+    /// </summary>
+    [Fact]
+    public void A_deferred_package_remembers_how_far_it_had_got()
+    {
+        var review = Submittable();
+        review.Submit("verification.engineer", "approver", true, Now.AddMinutes(1));
+        Assert.Equal(TestChangeReviewState.InReview, review.State);
+
+        review.Defer("Dropped from this build.", Now.AddMinutes(2));
+
+        Assert.Equal(TestChangeReviewState.Deferred, review.State);
+        Assert.Equal(TestChangeReviewState.InReview, review.DeferredFromState);
+        Assert.Equal("Dropped from this build.", review.DeferralReason);
+    }
+
+    /// <summary>
+    /// A package deferred out of review comes back as a Draft. The approvers were asked about work that has
+    /// since been put away, so restoring the review would restore signatures against a snapshot nobody has
+    /// looked at since.
+    /// </summary>
+    [Fact]
+    public void Reinstating_from_review_returns_a_draft_to_be_submitted_again()
+    {
+        var review = Submittable();
+        review.Submit("verification.engineer", "approver", true, Now.AddMinutes(1));
+        review.Defer("Dropped from this build.", Now.AddMinutes(2));
+
+        review.Reinstate(Now.AddMinutes(3));
+
+        Assert.Equal(TestChangeReviewState.Draft, review.State);
+        Assert.Null(review.DeferredFromState);
+        Assert.Equal("", review.DeferralReason);
+    }
+
+    [Fact]
+    public void Reinstating_an_approved_package_puts_it_back_as_approved()
+    {
+        var review = Submittable();
+        review.Submit("verification.engineer", "approver", true, Now.AddMinutes(1));
+        review.Approve("approver", "Signed.", Now.AddMinutes(2));
+        review.Defer("Held for the next build.", Now.AddMinutes(3));
+
+        review.Reinstate(Now.AddMinutes(4));
+
+        // Approved work put away is still approved work. Coming back as a Draft would quietly discard a
+        // signature somebody actually gave.
+        Assert.Equal(TestChangeReviewState.Approved, review.State);
+    }
+
+    [Fact]
+    public void A_deferred_package_cannot_be_edited_or_deferred_twice()
+    {
+        var review = Create();
+        review.Defer("Not this build.", Now.AddMinutes(1));
+
+        Assert.Throws<DomainException>(() => review.Defer("Again.", Now.AddMinutes(2)));
+        Assert.Throws<DomainException>(() =>
+            review.WriteCase("verification.engineer", "T", "P", "A", "S", Now.AddMinutes(2)));
+    }
+
+    /// <summary>
+    /// Who raised it, which the register shows and which a package had no way to answer.
+    ///
+    /// Empty is the honest answer for the automatic ones: a package that exists because an assessment
+    /// concluded test work is required was raised by nobody, and naming whoever was assigned afterwards would
+    /// answer a different question.
+    /// </summary>
+    [Fact]
+    public void A_package_records_who_raised_it_and_leaves_it_empty_when_nobody_did()
+    {
+        var automatic = Raised();
+        Assert.Equal("", automatic.AuthorId);
+
+        var byHand = new TestChangeReview(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(),
+            TestChangeReviewDiscipline.System, "SRCR-00039.00", Now, authorId: "test.engineer");
+        Assert.Equal("test.engineer", byHand.AuthorId);
+    }
+
+    /// <summary>Revising is raising the next revision, so the engineer who revised it is its author.</summary>
+    [Fact]
+    public void A_revision_is_authored_by_whoever_revised_it()
+    {
+        var review = Submittable();
+        review.Submit("verification.engineer", "approver", true, Now.AddMinutes(1));
+        review.Approve("approver", "Signed.", Now.AddMinutes(2));
+
+        var next = review.StartNextRevision("second.engineer", Now.AddMinutes(3), targetReleaseIsReleased: false);
+
+        Assert.Equal("second.engineer", next.AuthorId);
+        Assert.Equal(review.Revision + 1, next.Revision);
+    }
+
+    [Fact]
+    public void Deferring_requires_a_reason_and_only_a_deferred_package_can_be_reinstated()
+    {
+        var review = Create();
+
+        Assert.Throws<DomainException>(() => review.Defer("   ", Now.AddMinutes(1)));
+        Assert.Throws<DomainException>(() => review.Reinstate(Now.AddMinutes(1)));
     }
 }

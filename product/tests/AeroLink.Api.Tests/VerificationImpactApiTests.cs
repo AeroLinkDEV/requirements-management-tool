@@ -86,7 +86,7 @@ public sealed class VerificationImpactApiTests
         Assert.NotEmpty(items.EnumerateArray());
         var review = items.EnumerateArray().First();
         Assert.Equal("System", review.GetProperty("discipline").GetString());
-        Assert.Equal("Open", review.GetProperty("state").GetString());
+        Assert.Equal("Draft", review.GetProperty("state").GetString());
     }
 
     /// <summary>

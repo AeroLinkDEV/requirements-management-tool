@@ -5,7 +5,18 @@ namespace AeroLink.Domain.Verification;
 
 /// <summary>The independently governed test-procedure discipline affected by an approved engineering change.</summary>
 public enum TestChangeReviewDiscipline { System, HighLevelSoftware, LowLevelSoftware }
-public enum TestChangeReviewState { Open, InReview, Approved, Superseded }
+/// <summary>
+/// Where a test change request has got to.
+///
+/// The same vocabulary as <see cref="AeroLink.Domain.ChangeControl.ChangeRequestState"/>, because a reader
+/// moving between the requirements and verification sides is asking the same question of the same kind of
+/// record. `Draft` was called `Open` and meant exactly what Draft means on the requirements side — the
+/// author is still writing it — so it is named that now; a data migration renamed the stored values.
+///
+/// `Superseded` has no requirements counterpart and stays: a test change request can be replaced by a
+/// successor package, which is not something a change request does.
+/// </summary>
+public enum TestChangeReviewState { Draft, InReview, Approved, Deferred, Superseded }
 
 /// <summary>
 /// What the test assessment of an approved change concluded.
@@ -33,8 +44,9 @@ public sealed class TestChangeReview
 
     public TestChangeReview(Guid projectId, Guid releaseId, Guid changeRequestId,
         TestChangeReviewDiscipline discipline, string sourceChangeRequestNumber, DateTimeOffset now,
-        string baseNumber = "", int revision = 0, int caseContractVersion = CurrentCaseContractVersion)
-        : this(projectId, releaseId, discipline, now, baseNumber, revision, caseContractVersion)
+        string baseNumber = "", int revision = 0, int caseContractVersion = CurrentCaseContractVersion,
+        string authorId = "")
+        : this(projectId, releaseId, discipline, now, baseNumber, revision, caseContractVersion, authorId)
     {
         if (changeRequestId == Guid.Empty) throw new DomainException("A test change review requires its originating change request.");
         ChangeRequestId = changeRequestId;
@@ -54,11 +66,12 @@ public sealed class TestChangeReview
     /// </summary>
     public static TestChangeReview FromProblemReport(Guid projectId, Guid releaseId, Guid problemReportId,
         TestChangeReviewDiscipline discipline, string sourceProblemReportNumber, DateTimeOffset now,
-        string baseNumber = "", int revision = 0, int caseContractVersion = CurrentCaseContractVersion)
+        string baseNumber = "", int revision = 0, int caseContractVersion = CurrentCaseContractVersion,
+        string authorId = "")
     {
         if (problemReportId == Guid.Empty)
             throw new DomainException("A test change review raised from a Problem Report requires that report.");
-        var review = new TestChangeReview(projectId, releaseId, discipline, now, baseNumber, revision, caseContractVersion)
+        var review = new TestChangeReview(projectId, releaseId, discipline, now, baseNumber, revision, caseContractVersion, authorId)
         {
             OriginatingProblemReportId = problemReportId,
         };
@@ -67,8 +80,9 @@ public sealed class TestChangeReview
     }
 
     private TestChangeReview(Guid projectId, Guid releaseId, TestChangeReviewDiscipline discipline,
-        DateTimeOffset now, string baseNumber, int revision, int caseContractVersion)
+        DateTimeOffset now, string baseNumber, int revision, int caseContractVersion, string authorId = "")
     {
+        AuthorId = (authorId ?? "").Trim();
         Revision = revision;
         if (caseContractVersion < 0 || caseContractVersion > CurrentCaseContractVersion)
             throw new DomainException("A test change request requires a supported engineering-case contract version.");
@@ -83,7 +97,7 @@ public sealed class TestChangeReview
         // upgrade assigns those rows a real number without changing their identity or evidence.
         BaseNumber = baseNumber.Trim();
         CaseContractVersion = caseContractVersion;
-        State = TestChangeReviewState.Open;
+        State = TestChangeReviewState.Draft;
         CreatedAt = now;
         UpdatedAt = now;
     }
@@ -133,6 +147,13 @@ public sealed class TestChangeReview
     public IReadOnlyCollection<ChangeControl.ReviewCycle> ReviewCycles => _reviewCycles.AsReadOnly();
     public TestChangeReviewState State { get; private set; }
     /// <summary>
+    /// How far it had got when it was deferred, so reinstating puts it back rather than guessing. Null unless
+    /// the package is on the shelf. See <see cref="Defer"/>.
+    /// </summary>
+    public TestChangeReviewState? DeferredFromState { get; private set; }
+    /// <summary>Why it was put away, kept on the record because this aggregate carries no audit trail of its own.</summary>
+    public string DeferralReason { get; private set; } = "";
+    /// <summary>
     /// The case this package argues, in the same three parts a change request argues its own.
     ///
     /// A test change request is a controlled proposal, and a proposal that lists procedure edits without saying
@@ -169,6 +190,15 @@ public sealed class TestChangeReview
     public string NoChangeRationale { get; private set; } = "";
     public string? DecidedBy { get; private set; }
     public DateTimeOffset? DecidedAt { get; private set; }
+    /// <summary>
+    /// Who raised this package, as the requirements register shows for a change request.
+    ///
+    /// Empty where no person raised it: most packages come into being because a downstream assessment
+    /// concluded that test work is required, and naming the engineer who happened to be assigned afterwards
+    /// would answer a different question from the one the register asks. A reader is told it was raised by
+    /// the assessment rather than shown a name nobody chose.
+    /// </summary>
+    public string AuthorId { get; private set; } = "";
     public string? AssignedEngineerId { get; private set; }
     public string? SubmittedBy { get; private set; }
     public string? SelectedApproverId { get; private set; }
@@ -601,7 +631,7 @@ public sealed class TestChangeReview
             throw new DomainException("Only a submitted test change review can be returned.");
         Required(actorId, "reviewer");
         Required(rationale, "return rationale");
-        State = TestChangeReviewState.Open;
+        State = TestChangeReviewState.Draft;
         SubmittedBy = null;
         SelectedApproverId = null;
         SubmittedAt = null;
@@ -630,7 +660,7 @@ public sealed class TestChangeReview
         SubmittedBy = null;
         SelectedApproverId = null;
         SubmittedAt = null;
-        State = TestChangeReviewState.Open;
+        State = TestChangeReviewState.Draft;
         Touch(now);
     }
 
@@ -678,7 +708,7 @@ public sealed class TestChangeReview
     /// to its own.
     ///
     /// The successor is a new record at the same number and the next revision, carrying the same procedure
-    /// changes so the engineer corrects them rather than retyping them. It starts Open and already concluded
+    /// changes so the engineer corrects them rather than retyping them. It starts as a Draft and already concluded
     /// that test work is required — reopening approved procedure work to revise it is not a reason to ask
     /// again whether any was needed.
     ///
@@ -695,11 +725,13 @@ public sealed class TestChangeReview
                 "This test change request is incorporated in a released build and cannot be revised. Raise a new one against the in-work build.");
         // The successor keeps whatever this package was raised from. A revision continues the same work
         // against the same origin; it does not acquire a different one.
+        // Revising is raising the next revision, so the engineer who revised it is its author — the same
+        // answer the requirements side gives for a change request revision.
         var next = ChangeRequestId is { } originating
             ? new TestChangeReview(ProjectId, ReleaseId, originating, Discipline,
-                SourceChangeRequestNumber, now, BaseNumber, Revision + 1)
+                SourceChangeRequestNumber, now, BaseNumber, Revision + 1, authorId: actorId)
             : FromProblemReport(ProjectId, ReleaseId, OriginatingProblemReportId!.Value, Discipline,
-                SourceProblemReportNumber, now, BaseNumber, Revision + 1);
+                SourceProblemReportNumber, now, BaseNumber, Revision + 1, authorId: actorId);
         next.RecordTestChangeRequired(actorId, now);
         // The case carries forward exactly as a change request's does, so the engineer corrects the rationale
         // rather than retyping it. Packages that predate case authoring carry no fabricated case.
@@ -751,10 +783,56 @@ public sealed class TestChangeReview
         Touch(now);
     }
 
+    /// <summary>
+    /// Puts the package away for another day, from wherever it currently is.
+    ///
+    /// The verification twin of <see cref="AeroLink.Domain.ChangeControl.SystemChangeRequest.Defer"/>, and
+    /// deferred for the same reason: a package the programme has decided to drop had nowhere to go, so it sat
+    /// in review holding a gate that would never clear.
+    ///
+    /// Where it got to is remembered separately from where it now sits. A package put away while approved is
+    /// still approved work; one put away as a Draft still needs writing. Storing only "Deferred" loses that,
+    /// and a shelf that cannot tell signed-off work from unwritten work is a shelf nobody can plan from.
+    /// </summary>
+    public void Defer(string reason, DateTimeOffset now)
+    {
+        if (State == TestChangeReviewState.Deferred) throw new DomainException("The test change request is already deferred.");
+        if (State == TestChangeReviewState.Superseded)
+            throw new DomainException("A superseded test change request cannot be deferred.");
+        DeferredFromState = State;
+        DeferralReason = Required(reason, "deferral reason");
+        State = TestChangeReviewState.Deferred;
+        Touch(now);
+    }
+
+    /// <summary>
+    /// Takes a deferred package off the shelf, back to where it was when it went on.
+    ///
+    /// A package deferred while In Review comes back as a Draft and is submitted again, because the approvers
+    /// were asked about work that has since been put away. Anything else would restore a review nobody has
+    /// looked at since.
+    /// </summary>
+    public void Reinstate(DateTimeOffset now)
+    {
+        if (State != TestChangeReviewState.Deferred)
+            throw new DomainException("Only a deferred test change request can be reinstated.");
+        State = DeferredFromState switch
+        {
+            TestChangeReviewState.InReview => TestChangeReviewState.Draft,
+            // Rows deferred before the origin was remembered come back as Drafts. That is the safe direction:
+            // an author can resubmit a Draft, where claiming approval nobody gave cannot be undone.
+            null => TestChangeReviewState.Draft,
+            var value => value.Value,
+        };
+        DeferredFromState = null;
+        DeferralReason = "";
+        Touch(now);
+    }
+
     private void EnsureOpen()
     {
-        if (State != TestChangeReviewState.Open)
-            throw new DomainException("An in-review or approved test change review cannot be edited.");
+        if (State != TestChangeReviewState.Draft)
+            throw new DomainException("An in-review, deferred or approved test change review cannot be edited.");
     }
 
     /// <summary>

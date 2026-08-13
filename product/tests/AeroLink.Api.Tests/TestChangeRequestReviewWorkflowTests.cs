@@ -498,13 +498,13 @@ public sealed class TestChangeRequestReviewWorkflowTests
             new { rationale = "The procedure steps need rework." });
         var returnBody = await returned.Content.ReadAsStringAsync();
         Assert.True(returned.StatusCode == HttpStatusCode.OK, $"{(int)returned.StatusCode}: {returnBody}");
-        Assert.Equal("Open", JsonSerializer.Deserialize<JsonElement>(returnBody).GetProperty("state").GetString());
+        Assert.Equal("Draft", JsonSerializer.Deserialize<JsonElement>(returnBody).GetProperty("state").GetString());
 
         using (var scope = factory.Services.CreateScope())
         {
             var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
             var review = await db.TestChangeReviews.SingleAsync(x => x.Id == fixture.ReviewId);
-            Assert.Equal(TestChangeReviewState.Open, review.State);
+            Assert.Equal(TestChangeReviewState.Draft, review.State);
             var cycle = await db.ReviewCycles.SingleAsync(x => x.Id == firstCycleId);
             Assert.Equal(ReviewCycleState.ChangesRequested, cycle.State);
             Assert.Equal("The procedure steps need rework.", cycle.ClosureReason);
@@ -1325,5 +1325,52 @@ public sealed class TestChangeRequestReviewWorkflowTests
         var asAdmin = await ReadItemAsync(client, fixture.ReleaseId, fixture.ReviewId);
         Assert.True(asAdmin.GetProperty("capabilities").GetProperty("canDecide").GetBoolean());
         Assert.True(asAdmin.GetProperty("capabilities").GetProperty("canSubmit").GetBoolean());
+    }
+
+    /// <summary>
+    /// A package under review that the programme drops can be put away and taken back off the shelf, the same
+    /// capability a change request has. Before this it could only be rejected — throwing away a review that
+    /// raised no engineering objection — or left in review holding a gate that would never clear.
+    /// </summary>
+    [Fact]
+    public async Task A_package_can_be_deferred_and_reinstated_through_the_api()
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var client = factory.CreateClient();
+        var fixture = await SeedAsync(factory);
+        await PreparePackageAsync(client, fixture);
+        using var submitted = await client.PostAsJsonAsync($"/api/test-change-reviews/{fixture.ReviewId}/submit",
+            new { approverId = "workflow.one" });
+        Assert.True(submitted.IsSuccessStatusCode, await submitted.Content.ReadAsStringAsync());
+
+        using var deferred = await client.PostAsJsonAsync($"/api/test-change-reviews/{fixture.ReviewId}/defer",
+            new { reason = "Dropped from this build." });
+        Assert.Equal(HttpStatusCode.OK, deferred.StatusCode);
+        Assert.Equal("Deferred", (await deferred.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("state").GetString());
+
+        using var reinstated = await client.PostAsJsonAsync($"/api/test-change-reviews/{fixture.ReviewId}/reinstate", new { });
+        Assert.Equal(HttpStatusCode.OK, reinstated.StatusCode);
+        // Out of review it comes back as a Draft: the approvers were asked about work that has since been
+        // put away, so the cycle is not restored.
+        Assert.Equal("Draft", (await reinstated.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("state").GetString());
+    }
+
+    [Fact]
+    public async Task Deferring_needs_a_reason_and_test_authority()
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var client = factory.CreateClient();
+        var fixture = await SeedAsync(factory);
+        await PreparePackageAsync(client, fixture);
+
+        using var noReason = await client.PostAsJsonAsync($"/api/test-change-reviews/{fixture.ReviewId}/defer",
+            new { reason = "   " });
+        Assert.Equal(HttpStatusCode.BadRequest, noReason.StatusCode);
+
+        // An approver without test authority may sign a package; putting one away is test engineering work.
+        await LoginAsync(client, "workflow.one");
+        using var refused = await client.PostAsJsonAsync($"/api/test-change-reviews/{fixture.ReviewId}/defer",
+            new { reason = "Not mine to shelve." });
+        Assert.Equal(HttpStatusCode.Forbidden, refused.StatusCode);
     }
 }

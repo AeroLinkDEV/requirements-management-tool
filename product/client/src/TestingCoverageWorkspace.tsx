@@ -6,6 +6,7 @@ import TestChangeRequestWorkspace from './TestChangeRequestWorkspace'
 import type { AuthUser } from './IdentityCenter'
 import { apiRequest, operationError, recordClientOperationFailure } from './apiClient'
 import { pickerSummary } from './pickerText'
+import { stateLabel } from './presentation'
 import { isControlledTestChangeRequest, reviewsVisibleInCurrentRelease, successorReferenceFor, supersededHistoryFor } from './testChangeReviewPresentation'
 import type { TestDiscipline } from './TestResultsWorkspace'
 import './DownstreamAssessmentQueue.css'
@@ -91,8 +92,9 @@ const assessmentName = (discipline: TestDiscipline) =>
 const tcrAcronym = (discipline: TestDiscipline) =>
   discipline === 'System' ? 'SYSTCR' : discipline === 'HighLevelSoftware' ? 'HLRTCR' : 'LLRTCR'
 /// The package's own state, read the way a person says it rather than the way the enum spells it.
-const registerStateLabel = (state: string) =>
-  state === 'InReview' ? 'In review' : state
+// The requirements side's own label helper, so a state cannot read one way on one side and another way on
+// the other. It already splits InReview into "In review"; the local copy of that rule is gone.
+const registerStateLabel = (state: string) => stateLabel(state)
 const missingCaseFields = (request: TestChangeRequest) => [
   ['Title', request.title], ['Problem', request.problem],
   ['Analysis', request.analysis], ['Solution', request.solution],
@@ -802,7 +804,7 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, di
                     <button type="button" className="quiet" disabled={busy} onClick={() => setDecliningTest(request)}>No {tcrAcronym(discipline)} required</button>
                   </>
                 )}
-                {canTest && request.state === 'Open' && (
+                {canTest && request.state === 'Draft' && (
                   <button type="button" className="quiet" disabled={busy} onClick={() => {
                     setProblemReportIds((request.problemReports ?? []).map(report => report.id))
                     setLinkingProblemReports(request)

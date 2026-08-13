@@ -220,7 +220,7 @@ test('a revised TCR keeps its predecessor in history and out of active work and 
   expect(predecessor?.supersededByTestChangeRequestId).toBeTruthy()
   expect(predecessor?.supersededReason).toContain('Superseded by controlled revision')
   const successor = refreshedReviews.items.find(item => item.id === predecessor!.supersededByTestChangeRequestId)
-  expect(successor?.state).toBe('Open')
+  expect(successor?.state).toBe('Draft')
   expect(successor?.displayNumber).toMatch(/\.01$/)
 
   await expect(packageWorkspace.getByRole('heading', {

@@ -53,6 +53,7 @@ public sealed record ProposeProcedureChangeRequest(TestProcedureChangeKind Kind,
     Guid[]? DrivingRequirementRevisionIds, long? ExpectedVersion = null,
     Guid[]? RemovedRequirementRevisionIds = null, string? CoverageChangeRationale = null);
 public sealed record ReturnTestChangeReviewRequest(string Rationale);
+public sealed record DeferTestChangeReviewRequest(string Reason);
 
 /// <summary>The one lifecycle contract shared by every route that offers or accepts a TCR source.</summary>
 internal static class TestChangeRequestSourceEligibility
@@ -184,6 +185,11 @@ public static class VerificationImpactEndpoints
                     review.ChangeRequestId,
                     discipline = review.Discipline.ToString(),
                     state = review.State.ToString(),
+                    // Deferral reads the way it does on the requirements register: the allocation column says
+                    // it is on the shelf, and the state column says how far it had got before it went there.
+                    deferredFromState = review.DeferredFromState?.ToString(),
+                    review.DeferralReason,
+                    review.AuthorId,
                     review.SourceChangeRequestNumber,
                     review.DisplayNumber,
                     review.Title,
@@ -252,12 +258,12 @@ public static class VerificationImpactEndpoints
                         // open to anybody with the authority and a held one stays with whoever answered first.
                         // Answering/claiming an unheld package is open to any test engineer; Test Leads can
                         // additionally assign it elsewhere through the assign endpoint.
-                        canAssign = canTest && review.State == TestChangeReviewState.Open && review.AssignedEngineerId == null,
-                        canDecide = canTest && review.State == TestChangeReviewState.Open
+                        canAssign = canTest && review.State == TestChangeReviewState.Draft && review.AssignedEngineerId == null,
+                        canDecide = canTest && review.State == TestChangeReviewState.Draft
                             && (review.AssignedEngineerId == null
                                 || string.Equals(review.AssignedEngineerId, actor, StringComparison.OrdinalIgnoreCase)
                                 || isLead),
-                        canSubmit = canTest && review.State == TestChangeReviewState.Open
+                        canSubmit = canTest && review.State == TestChangeReviewState.Draft
                             && (review.AssignedEngineerId == null
                                 || string.Equals(review.AssignedEngineerId, actor, StringComparison.OrdinalIgnoreCase)
                                 || isLead),
@@ -299,8 +305,8 @@ public static class VerificationImpactEndpoints
                     error = "This test change request changed after it was opened. Refresh before changing its Problem Report links.",
                     code = "stale_version"
                 });
-            if (review.State != TestChangeReviewState.Open)
-                return Results.Conflict(new { error = "Problem Report links can be changed only while the test change request is Open." });
+            if (review.State != TestChangeReviewState.Draft)
+                return Results.Conflict(new { error = "Problem Report links can be changed only while the test change request is a Draft." });
             var refusal = await RefuseUnlessAuthoredBy(review, http, db, identity, ct);
             if (refusal is not null) return refusal;
             var error = await problemReports.ValidateSelectionAsync(review.ProjectId, review.ReleaseId,
@@ -469,9 +475,9 @@ public static class VerificationImpactEndpoints
             {
                 capabilities = new
                 {
-                    canProposeProcedureChange = mayAuthor && review.State == TestChangeReviewState.Open
+                    canProposeProcedureChange = mayAuthor && review.State == TestChangeReviewState.Draft
                         && review.Outcome == TestChangeReviewOutcome.ChangeRequired,
-                    canWithdrawProcedureChange = mayAuthor && review.State == TestChangeReviewState.Open,
+                    canWithdrawProcedureChange = mayAuthor && review.State == TestChangeReviewState.Draft,
                     canRevise = mayAuthor && review.State == TestChangeReviewState.Approved,
                 },
                 drivingRequirementChoices = candidates,
@@ -949,8 +955,8 @@ public static class VerificationImpactEndpoints
                 return Results.Forbid();
             var review = await db.TestChangeReviews.SingleOrDefaultAsync(x => x.Id == item.TestChangeReviewId, ct);
             if (review is null) return Results.NotFound();
-            if (review.State != TestChangeReviewState.Open)
-                return Results.Conflict(new { error = "Verification decisions can be changed only while the test change request is Open." });
+            if (review.State != TestChangeReviewState.Draft)
+                return Results.Conflict(new { error = "Verification decisions can be changed only while the test change request is a Draft." });
             try
             {
                 var now = DateTimeOffset.UtcNow;
@@ -982,8 +988,8 @@ public static class VerificationImpactEndpoints
                 return Results.Forbid();
             var review = await db.TestChangeReviews.SingleOrDefaultAsync(x => x.Id == item.TestChangeReviewId, ct);
             if (review is null) return Results.NotFound();
-            if (review.State != TestChangeReviewState.Open)
-                return Results.Conflict(new { error = "Verification decisions can be changed only while the test change request is Open." });
+            if (review.State != TestChangeReviewState.Draft)
+                return Results.Conflict(new { error = "Verification decisions can be changed only while the test change request is a Draft." });
             var decisionRefusal = await RefuseUnlessAuthoredBy(review, http, db, identity, ct);
             if (decisionRefusal is not null) return decisionRefusal;
 
@@ -1136,7 +1142,7 @@ public static class VerificationImpactEndpoints
                 var origin = await db.TestChangeReviews.AsNoTracking()
                     .Where(x => x.ChangeRequestId == change.Id && x.Discipline == request.Discipline
                         && x.State != TestChangeReviewState.Superseded
-                        && (x.State != TestChangeReviewState.Open || x.Outcome != TestChangeReviewOutcome.Pending))
+                        && (x.State != TestChangeReviewState.Draft || x.Outcome != TestChangeReviewOutcome.Pending))
                     .Select(x => x.DisplayNumber).FirstOrDefaultAsync(ct);
                 var claimed = await db.TestChangeRequestClaims.AsNoTracking()
                     .Where(x => x.ChangeRequestId == change.Id)
@@ -1158,7 +1164,7 @@ public static class VerificationImpactEndpoints
             var pendingAutomatic = await db.TestChangeReviews
                 .Where(x => x.ChangeRequestId != null && request.ChangeRequestIds.Contains(x.ChangeRequestId.Value)
                     && x.Discipline == request.Discipline
-                    && x.State == TestChangeReviewState.Open && x.Outcome == TestChangeReviewOutcome.Pending)
+                    && x.State == TestChangeReviewState.Draft && x.Outcome == TestChangeReviewOutcome.Pending)
                 .ToListAsync(ct);
 
             try
@@ -1175,7 +1181,7 @@ public static class VerificationImpactEndpoints
                         .Where(x => x.Id == namedProblemReports[0])
                         .Select(x => new { x.Id, x.ReportNumber, x.Revision }).SingleAsync(ct);
                     review = TestChangeReview.FromProblemReport(release.ProjectId, releaseId, originatingReport.Id,
-                        request.Discipline, $"{originatingReport.ReportNumber}.{originatingReport.Revision:D2}", now);
+                        request.Discipline, $"{originatingReport.ReportNumber}.{originatingReport.Revision:D2}", now, authorId: actor);
                     db.TestChangeReviews.Add(review);
                 }
                 else
@@ -1193,7 +1199,7 @@ public static class VerificationImpactEndpoints
                     else
                     {
                         review = new TestChangeReview(release.ProjectId, releaseId, first.Id, request.Discipline,
-                            first.DisplayNumber, now);
+                            first.DisplayNumber, now, authorId: actor);
                         db.TestChangeReviews.Add(review);
                     }
                 }
@@ -1318,7 +1324,7 @@ public static class VerificationImpactEndpoints
                 .Where(x => x.ChangeRequestId != null && ids.Contains(x.ChangeRequestId.Value)
                     && x.Discipline == discipline
                     && x.State != TestChangeReviewState.Superseded
-                    && (x.State != TestChangeReviewState.Open || x.Outcome != TestChangeReviewOutcome.Pending))
+                    && (x.State != TestChangeReviewState.Draft || x.Outcome != TestChangeReviewOutcome.Pending))
                 .GroupBy(x => x.ChangeRequestId!.Value)
                 .ToDictionaryAsync(group => group.Key, group => group.First().DisplayNumber, ct);
             var claims = await db.TestChangeRequestClaims.AsNoTracking()
@@ -1390,7 +1396,7 @@ public static class VerificationImpactEndpoints
             var concluded = await db.TestChangeReviews.AsNoTracking()
                 .Where(x => x.ChangeRequestId == request.ChangeRequestId && x.Discipline == review.Discipline
                     && x.State != TestChangeReviewState.Superseded
-                    && (x.State != TestChangeReviewState.Open || x.Outcome != TestChangeReviewOutcome.Pending))
+                    && (x.State != TestChangeReviewState.Draft || x.Outcome != TestChangeReviewOutcome.Pending))
                 .Select(x => x.DisplayNumber).FirstOrDefaultAsync(ct);
             if (!string.IsNullOrEmpty(concluded))
                 return Results.Conflict(new { error = $"{change.DisplayNumber} already has a {review.Discipline} test assessment." });
@@ -1410,7 +1416,7 @@ public static class VerificationImpactEndpoints
                 // workspace can see and settle them.
                 var automatic = await db.TestChangeReviews
                     .Where(x => x.ChangeRequestId == request.ChangeRequestId && x.Discipline == review.Discipline
-                        && x.State == TestChangeReviewState.Open && x.Outcome == TestChangeReviewOutcome.Pending)
+                        && x.State == TestChangeReviewState.Draft && x.Outcome == TestChangeReviewOutcome.Pending)
                     .ToListAsync(ct);
                 foreach (var pending in automatic)
                     pending.Supersede(review.Id,
@@ -1468,7 +1474,7 @@ public static class VerificationImpactEndpoints
                     var stranded = await db.VerificationImpactItems
                         .Where(x => x.ChangeRequestId == changeRequestId && x.TestChangeReviewId == id)
                         .ToListAsync(ct);
-                    // A fresh current Open/Pending assessment is restored unconditionally — even when the
+                    // A fresh current Draft/Pending assessment is restored unconditionally — even when the
                     // source has no impact items — so the change is never left without an actionable
                     // assessment and can be selected or folded again. The superseded assessment remains history.
                     var nextRevision = await db.TestChangeReviews
@@ -1702,6 +1708,47 @@ public static class VerificationImpactEndpoints
             catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
         });
 
+        // Deferral, the same capability a change request has. A package the programme has decided to drop had
+        // nowhere to go: it sat in review holding a gate that would never clear.
+        app.MapPost("/api/test-change-reviews/{id:guid}/defer", async (Guid id, DeferTestChangeReviewRequest request,
+            HttpContext http, AeroLinkDbContext db, IdentityService identity, CancellationToken ct) =>
+        {
+            var review = await db.TestChangeReviews.Include(x => x.ReviewCycles).ThenInclude(x => x.Steps)
+                .SingleOrDefaultAsync(x => x.Id == id, ct);
+            if (review is null) return Results.NotFound();
+            if (await db.Releases.AnyAsync(x => x.Id == review.ReleaseId && x.IsReleased, ct))
+                return Results.Conflict(new { error = "Released software-build test change reviews are read-only." });
+            if (!await http.HasProjectRoleAsync(db, identity, review.ProjectId, ct,
+                    ProgramRole.TestEngineer, ProgramRole.TestLead))
+                return Results.Forbid();
+            try
+            {
+                review.Defer(request.Reason, DateTimeOffset.UtcNow);
+                await db.SaveChangesAsync(ct);
+                return Results.Ok(new { review.Id, state = review.State.ToString() });
+            }
+            catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
+        });
+
+        app.MapPost("/api/test-change-reviews/{id:guid}/reinstate", async (Guid id,
+            HttpContext http, AeroLinkDbContext db, IdentityService identity, CancellationToken ct) =>
+        {
+            var review = await db.TestChangeReviews.SingleOrDefaultAsync(x => x.Id == id, ct);
+            if (review is null) return Results.NotFound();
+            if (await db.Releases.AnyAsync(x => x.Id == review.ReleaseId && x.IsReleased, ct))
+                return Results.Conflict(new { error = "Released software-build test change reviews are read-only." });
+            if (!await http.HasProjectRoleAsync(db, identity, review.ProjectId, ct,
+                    ProgramRole.TestEngineer, ProgramRole.TestLead))
+                return Results.Forbid();
+            try
+            {
+                review.Reinstate(DateTimeOffset.UtcNow);
+                await db.SaveChangesAsync(ct);
+                return Results.Ok(new { review.Id, state = review.State.ToString() });
+            }
+            catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
+        });
+
         app.MapPost("/api/verification-impact/{id:guid}/reopen", async (Guid id, ReopenVerificationImpactRequest request,
             HttpContext http, AeroLinkDbContext db, IdentityService identity, VerificationImpactService service, CancellationToken ct) =>
         {
@@ -1714,8 +1761,8 @@ public static class VerificationImpactEndpoints
                 return Results.Forbid();
             var reopenReview = await db.TestChangeReviews.SingleOrDefaultAsync(x => x.Id == item.TestChangeReviewId, ct);
             if (reopenReview is null) return Results.NotFound();
-            if (reopenReview.State != TestChangeReviewState.Open)
-                return Results.Conflict(new { error = "Verification decisions can be changed only while the test change request is Open." });
+            if (reopenReview.State != TestChangeReviewState.Draft)
+                return Results.Conflict(new { error = "Verification decisions can be changed only while the test change request is a Draft." });
             var reopenRefusal = await RefuseUnlessAuthoredBy(reopenReview, http, db, identity, ct);
             if (reopenRefusal is not null) return reopenRefusal;
             try

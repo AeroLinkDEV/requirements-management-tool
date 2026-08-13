@@ -605,6 +605,13 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
             b.ToTable("test_change_reviews"); b.HasKey(x => x.Id);
             b.Property(x => x.Discipline).HasConversion<string>().HasMaxLength(40);
             b.Property(x => x.Outcome).HasConversion<string>().HasMaxLength(30);
+            // Deferral, the same shape the requirements side stores it in: where the work sits and how far it
+            // had got are two different facts, so the origin state is kept rather than inferred on the way back.
+            b.Property(x => x.DeferredFromState).HasConversion<string>().HasMaxLength(30);
+            b.Property(x => x.DeferralReason).HasMaxLength(2000).IsRequired();
+            // Empty where no person raised it — see TestChangeReview.AuthorId. Required as a column so the
+            // register never has to distinguish "nobody" from "not stored".
+            b.Property(x => x.AuthorId).HasMaxLength(100).IsRequired();
             // Owned the way a change request owns its requirement changes: a proposed procedure change has
             // no life outside the test change request proposing it.
             b.HasMany(x => x.ProcedureChanges).WithOne().HasForeignKey(x => x.TestChangeReviewId)

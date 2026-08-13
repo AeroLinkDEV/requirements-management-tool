@@ -285,8 +285,8 @@ export default function TestChangeRequestWorkspace({api,projectId,reviewId,canAu
       {item&&<>
         <section className="tcrCaseSection">
           <h3>Engineering case</h3>
-          {missingCaseFields(item).length>0&&item.state==='Open'&&<p className="drawerEmpty">Missing before review: {missingCaseFields(item).join(', ')}. This package cannot be sent for approval until the complete engineering case is recorded.</p>}
-          {missingCaseFields(item).length>0&&item.caseContractVersion===0&&item.state!=='Open'&&<p className="drawerEmpty">This historical package predates the complete engineering-case contract. Its recorded content is shown unchanged; no case text has been fabricated.</p>}
+          {missingCaseFields(item).length>0&&item.state==='Draft'&&<p className="drawerEmpty">Missing before review: {missingCaseFields(item).join(', ')}. This package cannot be sent for approval until the complete engineering case is recorded.</p>}
+          {missingCaseFields(item).length>0&&item.caseContractVersion===0&&item.state!=='Draft'&&<p className="drawerEmpty">This historical package predates the complete engineering-case contract. Its recorded content is shown unchanged; no case text has been fabricated.</p>}
           {item.title
             ? <dl className="sourceCase">
                 <div><dt>Title</dt><dd>{item.title}</dd></div>
