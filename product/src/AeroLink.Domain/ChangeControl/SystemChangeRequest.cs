@@ -189,12 +189,12 @@ public sealed class SystemChangeRequest
         return cycle;
     }
 
-    public void ApproveActiveStage(string actorId, DateTimeOffset now)
+    public void ApproveActiveStage(string actorId, DateTimeOffset now, string? rationale = null)
     {
         EnsureInReview();
         var cycle = ActiveReviewCycle!;
-        var fullyApproved = cycle.Approve(actorId, now);
-        Audit("ApprovalRecorded", actorId, $"Approved review cycle {cycle.Sequence} stage.", now);
+        var fullyApproved = cycle.Approve(actorId, rationale, now);
+        Audit("ApprovalRecorded", actorId, $"Approved review cycle {cycle.Sequence} stage." + (string.IsNullOrWhiteSpace(rationale) ? "" : $" Reason: {rationale.Trim()}"), now);
         if (fullyApproved)
         {
             State = ChangeRequestState.Approved;
@@ -210,7 +210,7 @@ public sealed class SystemChangeRequest
         var active = cycle.Steps.SingleOrDefault(x => x.State == ApprovalStepState.Active && string.Equals(x.ApproverId, actorId, StringComparison.OrdinalIgnoreCase));
         if (active is null)
             throw new DomainException("Only the active approver can request changes.");
-        cycle.RequestChanges(reason, now);
+        cycle.ReturnActiveStep(actorId, reason, now);
         State = ChangeRequestState.Draft;
         UpdatedAt = now;
         Audit("ChangesRequested", actorId, $"Returned {DisplayNumber} to Draft at the same revision: {reason}", now);

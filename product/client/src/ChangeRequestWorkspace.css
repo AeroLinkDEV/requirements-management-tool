@@ -423,6 +423,11 @@ html .reviseAction:disabled { cursor: not-allowed; opacity: .5; }
   color: #24745d;
 }
 
+.approvalStep.returned > span {
+  background: #fdeee4;
+  color: #a04a1f;
+}
+
 .approvalStep div {
   display: flex;
   flex-direction: column;
@@ -436,6 +441,12 @@ html .reviseAction:disabled { cursor: not-allowed; opacity: .5; }
 .approvalStep small {
   color: #7c8b9b;
   font-size: 12px;
+}
+
+.approvalStep small.stepRationale {
+  margin-top: 3px;
+  color: #4c5f72;
+  font-style: italic;
 }
 
 .reviewActions {

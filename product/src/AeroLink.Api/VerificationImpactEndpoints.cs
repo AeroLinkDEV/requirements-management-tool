@@ -246,6 +246,7 @@ public static class VerificationImpactEndpoints
                                 authority = step.Authority,
                                 approverId = step.ApproverId,
                                 approverName = step.ApproverName,
+                                rationale = step.Rationale,
                                 state = step.State.ToString(),
                                 step.DecidedAt
                             })
@@ -1677,7 +1678,7 @@ public static class VerificationImpactEndpoints
                 db.ElectronicSignatures.Add(new(actor.Id, actor.UserName, actor.DisplayName, programId,
                     "TestChangeRequest", review.Id, review.DisplayNumber, "Approve", request.Meaning.Trim(),
                     snapshotHash, http.Connection.RemoteIpAddress?.ToString() ?? "local", now,
-                    activeStep.Authority));
+                    activeStep.Authority, rationale: request.Rationale.Trim()));
                 await db.SaveChangesAsync(ct);
                 return Results.Ok(new
                 {

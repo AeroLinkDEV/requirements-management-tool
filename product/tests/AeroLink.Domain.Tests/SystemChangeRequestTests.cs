@@ -157,11 +157,37 @@ public sealed class SystemChangeRequestTests
 
         Assert.Equal(ChangeRequestState.Draft, scr.State);
         Assert.Equal(1, scr.Revision);
-        Assert.Equal(ReviewCycleState.ChangesRequested, scr.ReviewCycles.Single().State);
+        var returnedCycle = scr.ReviewCycles.Single();
+        Assert.Equal(ReviewCycleState.ChangesRequested, returnedCycle.State);
+        Assert.Equal("Clarify trigger behavior.", returnedCycle.ClosureReason);
+        // The step itself records which reviewer asked for what, so history reads "systems returned with
+        // this reason" rather than only "the cycle closed".
+        var returnedStep = returnedCycle.Steps.Single(x => x.ApproverId == "systems");
+        Assert.Equal(ApprovalStepState.Returned, returnedStep.State);
+        Assert.Equal("Clarify trigger behavior.", returnedStep.Rationale);
 
         var second = scr.SubmitForReview("author", Approvers(), Now.AddMinutes(10));
         Assert.Equal(2, second.Sequence);
         Assert.Equal(2, scr.ReviewCycles.Count);
+        Assert.Equal(ApprovalStepState.Returned, scr.ReviewCycles.OrderBy(x => x.Sequence).First().Steps.Single(x => x.ApproverId == "systems").State);
+        Assert.Equal(ApprovalStepState.Active, scr.ReviewCycles.OrderBy(x => x.Sequence).Last().Steps.First().State);
+    }
+
+    [Fact]
+    public void Approve_records_the_reviewers_own_rationale_on_the_step()
+    {
+        var scr = CreateDraftWithRequirement();
+        scr.SubmitForReview("author", Approvers(), Now);
+
+        scr.ApproveActiveStage("systems", Now.AddMinutes(1), "The trigger wording matches the approved HLR.");
+
+        var step = scr.ActiveReviewCycle!.Steps.Single(x => x.ApproverId == "systems");
+        Assert.Equal(ApprovalStepState.Approved, step.State);
+        Assert.Equal("The trigger wording matches the approved HLR.", step.Rationale);
+
+        // A legacy caller that does not supply a rationale leaves the step readable with an empty string.
+        scr.ApproveActiveStage("software", Now.AddMinutes(2));
+        Assert.Equal("", scr.ActiveReviewCycle!.Steps.Single(x => x.ApproverId == "software").Rationale);
     }
 
     [Fact]

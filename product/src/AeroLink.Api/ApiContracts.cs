@@ -37,7 +37,7 @@ record RestartReviewRequest(long? ExpectedVersion, string Reason, List<ApproverR
 record ActorRequest(long? ExpectedVersion);
 /// Optional target build for reinstatement. Absent means "back into the build that shelved it".
 record ReinstateChangeRequest(Guid? IntoReleaseId);
-record SignatureRequest(string Password, string Meaning, long? ExpectedVersion);
+record SignatureRequest(string Password, string Meaning, long? ExpectedVersion, string? Rationale = null);
 record ReleaseSignatureRequest(string Password, string Meaning, string ExpectedManifestHash, string? Rationale);
 record RequestChangesRequest(long? ExpectedVersion, string Reason);
 record CreateBaselineRequest(string BaseNumber, int Revision, Guid ProjectId, Guid ReleaseId, Guid? PredecessorBaselineId, string Name);

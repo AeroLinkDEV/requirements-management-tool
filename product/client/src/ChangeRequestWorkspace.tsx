@@ -91,6 +91,7 @@ type Step = {
   approverName: string;
   authority: string;
   stageName: string;
+  rationale?: string;
   state: string;
   decidedAt?: string;
 };
@@ -408,6 +409,7 @@ export default function ChangeRequestWorkspace({
   const [loadFailure, setLoadFailure] = useState("");
   const [busy, setBusy] = useState(false);
   const [reason, setReason] = useState("");
+  const [approvalRationale, setApprovalRationale] = useState("");
   const [signing, setSigning] = useState(false);
   const [lock, setLock] = useState<EditLock>();
   const [lockStatus, setLockStatus] = useState<LockStatus>();
@@ -1373,7 +1375,7 @@ export default function ChangeRequestWorkspace({
                 <div className="workspaceTitle"><div><h2>Review cycle {latest.sequence}</h2><p>{stateLabel(latest.state)}</p></div></div>
                 <div className="approvalPath">
                   {latest.steps.map((step) => (
-                    <div className={`approvalStep ${step.state.toLowerCase()}`} key={step.position}><span>{step.state === "Approved" ? "✓" : step.position + 1}</span><div><b><PersonName userName={step.approverId} displayName={step.approverName} /></b><small>{approverRole(step)} · {approvalStanding(latest, step)}</small></div></div>
+                    <div className={`approvalStep ${step.state.toLowerCase()}`} key={step.position}><span>{step.state === "Approved" ? "✓" : step.state === "Returned" ? "↩" : step.position + 1}</span><div><b><PersonName userName={step.approverId} displayName={step.approverName} /></b><small>{approverRole(step)} · {approvalStanding(latest, step)}</small>{step.rationale && <small className="stepRationale">{step.rationale}</small>}</div></div>
                   ))}
                 </div>
                 {latest.closureReason && <div className="closure"><b>Closure reason</b><p>{latest.closureReason}</p></div>}
@@ -1381,7 +1383,7 @@ export default function ChangeRequestWorkspace({
                   <div className="reviewActions">
                     <p><b><PersonName userName={active.approverId} displayName={active.approverName} /></b> is the active reviewer.</p>
                     {active.approverId === user.userName ? (
-                      <><button type="button" disabled={busy} onClick={() => setSigning(true)}>Review & electronically approve</button><textarea aria-label="Reason for requested changes" placeholder="Reason for requested changes" value={reason} onChange={(event) => setReason(event.target.value)} /><button type="button" className="danger" disabled={busy || !reason.trim()} onClick={() => void call("request-changes", { expectedVersion: scr.version, reason })}>Request changes</button></>
+                      <><button type="button" disabled={busy} onClick={() => setSigning(true)}>Review & electronically approve</button><textarea aria-label="Reason for approval" placeholder="Reason for approval (recorded on the review step)" value={approvalRationale} onChange={(event) => setApprovalRationale(event.target.value)} /><textarea aria-label="Reason for requested changes" placeholder="Reason for requested changes" value={reason} onChange={(event) => setReason(event.target.value)} /><button type="button" className="danger" disabled={busy || !reason.trim()} onClick={() => void call("request-changes", { expectedVersion: scr.version, reason })}>Request changes</button></>
                     ) : (
                       <div className="snapshotNote"><b>Waiting for assigned reviewer</b><p>Only the assigned identity can act on this stage.</p></div>
                     )}
@@ -1406,7 +1408,7 @@ export default function ChangeRequestWorkspace({
           meaning="I approve this exact change request revision and its proposed requirement changes as suitable for controlled progression."
           onCancel={() => setSigning(false)}
           onSign={async (password, meaning) => {
-            const ok = await call("approve", { password, meaning, expectedVersion: scr.version });
+            const ok = await call("approve", { password, meaning, rationale: approvalRationale.trim(), expectedVersion: scr.version });
             if (ok) setSigning(false);
           }}
         />
