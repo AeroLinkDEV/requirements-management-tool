@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using AeroLink.Domain.ChangeControl;
 using AeroLink.Domain.Identity;
 using AeroLink.Domain.Programs;
@@ -229,5 +230,26 @@ public sealed class TestChangeRequestRegisterApiTests
         Assert.Contains("\"artifactType\":\"TestChangeRequest\"", body);
         // The working copy carries the package as it stands, so the engineer edits what is there.
         Assert.Contains("procedureChanges", body);
+
+        var session = JsonDocument.Parse(body).RootElement;
+        var draft = JsonNode.Parse(session.GetProperty("draftJson").GetString()!)!.AsObject();
+        draft["title"] = "Checked-in verification package";
+        draft["problem"] = "The verification case needs a controlled correction.";
+        using var saved = await client.PutAsJsonAsync(
+            $"/api/controlled-editing/sessions/{session.GetProperty("id").GetGuid()}/autosave",
+            new { expectedVersion = session.GetProperty("version").GetInt64(), draftJson = draft.ToJsonString() });
+        var savedBody = await saved.Content.ReadAsStringAsync();
+        Assert.Equal(HttpStatusCode.OK, saved.StatusCode);
+        var savedVersion = JsonDocument.Parse(savedBody).RootElement.GetProperty("version").GetInt64();
+
+        using var checkedIn = await client.PostAsJsonAsync(
+            $"/api/controlled-editing/sessions/{session.GetProperty("id").GetGuid()}/check-in",
+            new { expectedVersion = savedVersion });
+        var checkedInBody = await checkedIn.Content.ReadAsStringAsync();
+        Assert.Equal(HttpStatusCode.OK, checkedIn.StatusCode);
+
+        using var verificationScope = factory.Services.CreateScope();
+        var verificationDb = verificationScope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+        Assert.Equal("Checked-in verification package", (await verificationDb.TestChangeReviews.FindAsync(id))!.Title);
     }
 }

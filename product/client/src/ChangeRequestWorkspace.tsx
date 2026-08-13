@@ -15,6 +15,14 @@ import ChangeRequestJiraLink from "./ChangeRequestJiraLink";
 import { PersonName } from "./People";
 import { personLabel } from "./PeopleRegistry";
 import ReviewCycleCard from "./ReviewCycleCard";
+import {
+  ControlledChangeAuthoringActions,
+  ControlledChangeAuthoringForm,
+  ControlledChangeCaseCard,
+  ControlledChangePage,
+  ControlledChangeReadLayout,
+  ControlledStatusCard,
+} from "./ControlledChangePage";
 import { RichCaseField, RichContentView } from "./RichContent";
 import { useDebouncedSave } from "./autosave";
 import { emptyRichContent, fromPlainText, toPlainText } from "./richContentModel";
@@ -991,43 +999,40 @@ export default function ChangeRequestWorkspace({
   };
 
   return (
-    <main className="scrPage">
-      <header className="scrHeader">
-        <div>
-          <button className="back" type="button" onClick={onBack}>← {scr.type === "Software" ? "Software" : "System"} Change Requests</button>
-          <p className="eyebrow">CHANGE CONTROL / {scr.displayNumber}</p>
-          <h1>{scr.title}</h1>
-          <p>Revision-controlled change case, requirement proposals, and review authority.</p>
-        </div>
-        <div className="headerState">
-          {/* Both facts in the header badge, in the order somebody reads them: where the work sits, then how far
-              it got. "Deferred · Approved" is a sentence; "Deferred" alone loses that it was signed off. */}
-          <span className={`stateBadge ${scr.state.toLowerCase()}`} data-state={scr.state}>{changeRequestAllocation(scrFacts)} · {changeRequestState(scrFacts)}</span>
-          <small>Record version {scr.version}</small>
-          {/* In the header, in flow. These download links used to be a `position: fixed` overlay pinned to
-              the viewport's top right, which is the same place this state badge and record version sit — so
-              on every change request the buttons covered them. Nothing about them needs to float. */}
-          <div className="scrPublicationTools">
-            <span>Professional controlled publication</span>
-            <a href={`${api}/api/change-requests/${scr.id}/download?format=docx`}>Download DOCX</a>
-            <a href={`${api}/api/change-requests/${scr.id}/download?format=pdf`}>Download PDF</a>
-          </div>
-        </div>
-      </header>
-
-      {error && <div className="workspaceError" role="alert">{error}</div>}
-      {saved && <div className="workspaceSaved" role="status">✓ {saved}</div>}
+    <ControlledChangePage
+      backLabel={`${scr.type === "Software" ? "Software" : "System"} Change Requests`}
+      onBack={onBack}
+      eyebrow={`CHANGE CONTROL / ${scr.displayNumber}`}
+      title={scr.title}
+      description="Revision-controlled change case, requirement proposals, and review authority."
+      allocation={changeRequestAllocation(scrFacts)}
+      state={changeRequestState(scrFacts)}
+      stateCode={scr.state}
+      version={scr.version}
+      docxHref={`${api}/api/change-requests/${scr.id}/download?format=docx`}
+      pdfHref={`${api}/api/change-requests/${scr.id}/download?format=pdf`}
+      error={error}
+      saved={saved}
+    >
 
       {mode === "edit" ? (
-        <form onSubmit={save} className="workspaceStack">
-          <nav className="workspaceStages" aria-label="Checked-out authoring progress">
-            <a href="#checked-change-case" className={caseComplete ? "complete" : "active"}>
-              <span>1</span><div><b>Change case</b><small>{caseComplete ? "Complete" : "Required"}</small></div>
-            </a>
-            <a href="#checked-requirements" className={proposalsComplete ? "complete" : caseComplete ? "active" : ""}>
-              <span>2</span><div><b>Requirement changes</b><small>{proposalsComplete ? "Complete" : "In progress"}</small></div>
-            </a>
-          </nav>
+        <ControlledChangeAuthoringForm
+          onSubmit={save}
+          stages={[
+            { href: "#checked-change-case", label: "Change case", status: caseComplete ? "Complete" : "Required", complete: caseComplete, active: !caseComplete },
+            { href: "#checked-requirements", label: "Requirement changes", status: proposalsComplete ? "Complete" : "In progress", complete: proposalsComplete, active: caseComplete && !proposalsComplete },
+          ]}
+          actions={<ControlledChangeAuthoringActions
+            summary={reviewReady ? "Ready for review after check-in" : "Draft can be checked in before review readiness"}
+            detail={hasUnsavedChanges ? "Working copy has unsaved changes" : `Working copy: ${autosaveStatus.toLowerCase()}`}
+            busy={busy}
+            saving={autosaveStatus === "Saving"}
+            canSave={autosaveStatus !== "Conflict" && hasUnsavedChanges}
+            canCheckIn={autosaveStatus !== "Conflict" && hasCheckoutChanges && draftCanCheckIn}
+            onDiscard={() => void discard()}
+            onSave={() => void saveWorkingCopy()}
+          />}
+        >
 
           <section className="workspaceCard authoringCard" id="checked-change-case">
             <div className="workspaceTitle">
@@ -1118,19 +1123,7 @@ export default function ChangeRequestWorkspace({
             )}
           </section>
 
-          <div className="workspaceActions stickyWorkspaceActions">
-            <div>
-              <b>{reviewReady ? "Ready for review after check-in" : "Draft can be checked in before review readiness"}</b>
-              <span>{hasUnsavedChanges ? "Working copy has unsaved changes" : `Working copy: ${autosaveStatus.toLowerCase()}`}</span>
-            </div>
-            <button type="button" className="outline" onClick={discard}>Discard checkout</button>
-            <button type="button" className="outline" onClick={() => void saveWorkingCopy()}
-              disabled={busy || autosaveStatus === "Saving" || autosaveStatus === "Conflict" || !hasUnsavedChanges}>Save</button>
-            <button disabled={busy || autosaveStatus === "Conflict" || !hasCheckoutChanges || !draftCanCheckIn}>
-              {busy ? "Checking in…" : "Save & check in"}
-            </button>
-          </div>
-        </form>
+        </ControlledChangeAuthoringForm>
       ) : mode === "approvers" ? (
         <section className="workspaceCard approverSetup">
           <div className="reviewSetupIntro">
@@ -1198,17 +1191,10 @@ export default function ChangeRequestWorkspace({
           </div>
         </section>
       ) : (
-        <div className="workspaceGrid">
+        <ControlledChangeReadLayout>
           <div className="workspaceStack">
-            <section className="workspaceCard">
-              <div className="workspaceTitle">
-                <div><h2>Change case</h2><p>Problem, analysis, and proposed solution</p></div>
-                {/* One position holds whatever you do to this change request, so it is always the same place
-                    on the page and its label says which of the two applies. A Draft is checked out and
-                    edited in place. An approved revision is immutable and cannot be — it is superseded, and
-                    the action that does that is Revise. It was previously buried in the rail below a
-                    definition list and labelled "Create SRCR-31.01 Draft", which describes the
-                    mechanism rather than the intent, and nobody found it. */}
+            <ControlledChangeCaseCard
+              actions={<>
                 {scr.state === "Draft" && isAuthor && (
                   <button className="outline" type="button" disabled={busy || Boolean(lockStatus?.locked && !lockStatus.mine)} onClick={beginEdit}>
                     {busy ? "Checking lock…" : lockStatus?.locked && !lockStatus.mine ? `Read only · ${personLabel(lockStatus.holder)}` : "Check out & edit"}
@@ -1220,9 +1206,6 @@ export default function ChangeRequestWorkspace({
                     {busy ? "Creating revision…" : "Revise"}
                   </button>
                 )}
-                {/* Alongside the other actions, so putting work down is as reachable as picking it up. Available
-                    from Draft, In Review and Approved alike: what gets shelved is the work, at whatever stage it
-                    reached, and the state it reached is remembered so reinstating puts it back there. */}
                 {deferrable && (
                   <button className="deferAction" type="button" disabled={busy} onClick={defer}
                     title="Puts this change request away for another day. Its state is remembered.">
@@ -1237,22 +1220,16 @@ export default function ChangeRequestWorkspace({
                     {busy ? "Reinstating…" : "Reinstate"}
                   </button>
                 )}
-              </div>
-              {lockStatus?.locked && !lockStatus.mine && (
-                <div className="readOnlyLock"><b>Read-only while checked out</b><span><PersonName userName={lockStatus.holder} /> · active {lockStatus.lastActivityAt && new Date(lockStatus.lastActivityAt).toLocaleString()} · expires {lockStatus.expiresAt && new Date(lockStatus.expiresAt).toLocaleTimeString()}</span></div>
-              )}
-              <div className="pasView">
-                {/* Rendered as the author wrote it, tables and figures included. An approver signing for a
-                    change must read what the change actually says, not a flattened copy of it. */}
-                {([["P", "Problem", scr.problemRich || fromPlainText(scr.problem)],
-                   ["A", "Analysis", scr.analysisRich || fromPlainText(scr.analysis)],
-                   ["S", "Solution", scr.solutionRich || fromPlainText(scr.solution)]] as const).map((item) => (
-                  <article key={item[0]}><span>{item[0]}</span><div><b>{item[1]}</b>
-                    <RichContentView api={api} value={item[2]} empty="Not yet provided" />
-                  </div></article>
-                ))}
-              </div>
-            </section>
+              </>}
+              note={lockStatus?.locked && !lockStatus.mine
+                ? <div className="readOnlyLock"><b>Read-only while checked out</b><span><PersonName userName={lockStatus.holder} /> · active {lockStatus.lastActivityAt && new Date(lockStatus.lastActivityAt).toLocaleString()} · expires {lockStatus.expiresAt && new Date(lockStatus.expiresAt).toLocaleTimeString()}</span></div>
+                : undefined}
+              fields={[
+                { key: "P", label: "Problem", value: <RichContentView api={api} value={scr.problemRich || fromPlainText(scr.problem)} empty="Not yet provided" /> },
+                { key: "A", label: "Analysis", value: <RichContentView api={api} value={scr.analysisRich || fromPlainText(scr.analysis)} empty="Not yet provided" /> },
+                { key: "S", label: "Solution", value: <RichContentView api={api} value={scr.solutionRich || fromPlainText(scr.solution)} empty="Not yet provided" /> },
+              ]}
+            />
 
             {drivingProblemReports.length > 0 && (
               <section className="workspaceCard">
@@ -1313,18 +1290,16 @@ export default function ChangeRequestWorkspace({
           </div>
 
           <aside className="reviewRail">
-            <section className="workspaceCard controlStatusCard">
-              <div className="workspaceTitle"><div><h2>Control status</h2><p>{scr.displayNumber}</p></div></div>
-              {/* Two rows, because they are two questions. Allocation says which build this is going into, or
-                  that it has been put away; State says how far it has got. One stored value used to answer both
-                  and served neither — a reader asking either got a word that half answered the other. */}
-              <dl>
-                <div><dt>Allocation</dt><dd data-allocation={scr.state === "Deferred" ? "Deferred" : "Build"}>{changeRequestAllocation(scrFacts)}</dd></div>
-                <div><dt>State</dt><dd data-state={scr.state}>{changeRequestState(scrFacts)}</dd></div>
-                <div><dt>Author</dt><dd><PersonName userName={scr.authorId} withRole /></dd></div>
-                <div><dt>Revision</dt><dd>{scr.revision}</dd></div>
-                <div><dt>Updated</dt><dd>{new Date(scr.updatedAt).toLocaleDateString()}</dd></div>
-              </dl>
+            <ControlledStatusCard
+              displayNumber={scr.displayNumber}
+              fields={[
+                { label: "Allocation", value: changeRequestAllocation(scrFacts), data: { name: "allocation", value: scr.state === "Deferred" ? "Deferred" : "Build" } },
+                { label: "State", value: changeRequestState(scrFacts), data: { name: "state", value: scr.state } },
+                { label: "Author", value: <PersonName userName={scr.authorId} withRole /> },
+                { label: "Revision", value: scr.revision },
+                { label: "Updated", value: new Date(scr.updatedAt).toLocaleDateString() },
+              ]}
+            >
               {scr.state === "Draft" && isAuthor && reviewReady && (
                 <><div className="railReadiness ready"><b>Ready for review</b><span>The change case and requirement proposals are complete.</span></div><button type="button" className="primaryFull" onClick={openReviewerSetup}>Configure & Submit Review</button></>
               )}
@@ -1346,7 +1321,7 @@ export default function ChangeRequestWorkspace({
                   revised. Raise a new change request against the in-work build instead.
                 </p>
               )}
-            </section>
+            </ControlledStatusCard>
 
             {latest && (
               <ReviewCycleCard cycle={latest}>
@@ -1370,7 +1345,7 @@ export default function ChangeRequestWorkspace({
               </ReviewCycleCard>
             )}
           </aside>
-        </div>
+        </ControlledChangeReadLayout>
       )}
 
       {signing && (
@@ -1384,6 +1359,6 @@ export default function ChangeRequestWorkspace({
           }}
         />
       )}
-    </main>
+    </ControlledChangePage>
   );
 }

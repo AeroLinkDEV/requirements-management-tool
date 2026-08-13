@@ -112,7 +112,7 @@ test('a procedure says who wrote it and what drove each revision', async ({ page
  * confirm coverage against a procedure from the wrong level. This moved here with the library: the change
  * request page used to make the same guarantee about a procedure list it no longer carries.
  */
-test('software HLR and LLR each have their own procedures and coverage', async ({ page }) => {
+test('software HLR and LLR each have their own procedures', async ({ page }) => {
   test.setTimeout(180_000)
   await login(page, 'admin', { openProject: false })
   await selectProgram(page, 'Flight Management System Live Program')
@@ -125,16 +125,13 @@ test('software HLR and LLR each have their own procedures and coverage', async (
   await expect(page.getByLabel('Level filter')).toHaveValue('HighLevel')
   await expect(page.locator('.pager')).toContainText('of 160', { timeout: 30_000 })
   await expect(page.locator('.procedureList')).not.toContainText('LLRTP-')
-  await page.getByRole('tab', { name: 'Requirement coverage' }).click()
-  await expect(page.locator('.coverageSummary article').first().locator('b')).toHaveText('400', { timeout: 30_000 })
 
   await page.getByLabel('Level filter').selectOption('LowLevel')
   await expect(page).toHaveURL(/software-verification\/llr\/procedures$/, { timeout: 30_000 })
   await expect(page.getByLabel('Level filter')).toHaveValue('LowLevel')
   await expect(page.locator('.pager')).toContainText('of 280', { timeout: 30_000 })
   await expect(page.locator('.procedureList')).not.toContainText('HLRTP-')
-  await page.getByRole('tab', { name: 'Requirement coverage' }).click()
-  await expect(page.locator('.coverageSummary article').first().locator('b')).toHaveText('700', { timeout: 30_000 })
+  await expect(page.getByRole('tablist', { name: 'Test procedure views' })).toHaveCount(0)
 })
 
 /**
@@ -192,28 +189,4 @@ test('released Build 1.5 procedures remain readable without create or edit actio
   // A released build is read-only, so its procedures cannot be discussed either.
   await inspector.getByRole('button', { name: /^Discussion/ }).click()
   await expect(inspector.locator('.discussionPane textarea')).toHaveCount(0)
-})
-
-/**
- * The whole inventory, on request.
- *
- * The tab opens on what is not covered, because that is the work. The full list is still needed to answer
- * "is this specific requirement tested?", so it is one toggle away rather than a separate page.
- */
-test('the full requirement coverage table is one toggle away', async ({ page }) => {
-  test.setTimeout(120_000)
-  await login(page, 'admin', { openProject: false })
-  await selectProgram(page, 'Flight Management System Live Program')
-  await openNavigationGroup(page, 'ASSURANCE')
-  await page.getByRole('link', { name: 'System Test Procedure Explorer' }).click()
-  await expect(page.getByRole('heading', { name: 'Test Procedure Explorer' })).toBeVisible({ timeout: 30_000 })
-  await page.getByRole('tab', { name: 'Requirement coverage' }).click()
-
-  const toggle = page.getByRole('button', { name: /Show all \d+ requirements/ })
-  await expect(toggle).toBeVisible({ timeout: 30_000 })
-  await expect.poll(async () => Number(/Show all (\d+)/.exec((await toggle.textContent()) ?? '')?.[1] ?? 0), { timeout: 30_000 }).toBeGreaterThan(0)
-  const listed = Number(/Show all (\d+)/.exec((await toggle.textContent()) ?? '')?.[1] ?? 0)
-  await toggle.click()
-  await expect(page.getByRole('button', { name: 'Show only what needs attention' })).toBeVisible()
-  await expect(page.locator('.fullCoverage .coverageRow')).toHaveCount(listed, { timeout: 30_000 })
 })

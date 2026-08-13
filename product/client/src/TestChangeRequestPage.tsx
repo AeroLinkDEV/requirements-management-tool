@@ -1,24 +1,26 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import ControlledAttachments from './ControlledAttachments'
+import ControlledProcedureEditor, {
+  type ProcedureChangeKind,
+  type ProcedureProposal,
+} from './ControlledProcedureEditor'
+import {
+  ControlledChangeAuthoringActions,
+  ControlledChangeAuthoringForm,
+  ControlledChangeCaseCard,
+  ControlledChangePage,
+  ControlledChangeReadLayout,
+  ControlledStatusCard,
+} from './ControlledChangePage'
 import { PersonName } from './People'
 import ReviewCycleCard, { type ReviewCycleSummary } from './ReviewCycleCard'
-import TestChangeRequestWorkspace from './TestChangeRequestWorkspace'
+import { RichCaseField, RichContentView } from './RichContent'
 import { apiRequest, operationError } from './apiClient'
-import { changeRequestAllocation, changeRequestState, stateLabel } from './presentation'
+import { useDebouncedSave } from './autosave'
+import { fromPlainText, toPlainText } from './richContentModel'
+import { changeRequestAllocation, changeRequestState } from './presentation'
 import type { TestDiscipline } from './TestResultsWorkspace'
 import './ChangeRequestWorkspace.css'
-
-/**
- * A test change request, on a page of its own.
- *
- * Clicking one used to open a drawer over the coverage workspace headed "System test engineering decision",
- * which is the assessment's view of it rather than the package's own. There was no way to read a package the
- * way a change request is read: its case, what it proposes, who signed it, what it was raised from, and the
- * controlled document an approver takes away.
- *
- * This is the change request page over a package. The sections, their order and their names are the same,
- * because a reader moving between them is doing the same job on a different artifact.
- */
 
 type Release = { id: string; version: string; isReleased: boolean }
 
@@ -28,13 +30,16 @@ type ProcedureChange = {
   baseNumber: string
   revision: number
   level: string
-  kind: string
+  kind: ProcedureChangeKind
   title: string
   objective: string
   preconditions: string
   steps: string
   expectedResult: string
   rationale: string
+  drivingRequirementRevisionIdsJson?: string
+  removedRequirementRevisionIdsJson?: string
+  coverageChangeRationale?: string
 }
 
 type Package = {
@@ -48,6 +53,9 @@ type Package = {
   problem: string
   analysis: string
   solution: string
+  problemRich?: string
+  analysisRich?: string
+  solutionRich?: string
   state: string
   deferredFromState?: string | null
   deferralReason?: string
@@ -56,6 +64,7 @@ type Package = {
   discipline: string
   sourceChangeRequestNumber: string
   version: number
+  updatedAt?: string
   capabilities?: {
     canProposeProcedureChange?: boolean
     canWithdrawProcedureChange?: boolean
@@ -68,15 +77,106 @@ type Package = {
   coveredChangeRequests: { id: string; number: string; title: string; originating: boolean }[]
 }
 
+type EditLock = {
+  id: string
+  version: number
+  userName: string
+  openedAt: string
+  lastActivityAt: string
+  expiresAt: string
+  draftJson: string
+  resumed: boolean
+}
+
+type LockStatus = {
+  editable: boolean
+  locked: boolean
+  holder?: string
+  mine?: boolean
+  lastActivityAt?: string
+  expiresAt?: string
+}
+
+type ProcedureDraft = ProcedureProposal & {
+  level: string
+  drivingRequirementRevisionIdsJson: string
+  removedRequirementRevisionIdsJson: string
+  coverageChangeRationale: string
+}
+
+type WorkingDraft = {
+  packageVersion: number
+  title: string
+  problem: string
+  analysis: string
+  solution: string
+  problemRich: string
+  analysisRich: string
+  solutionRich: string
+  procedureChanges: ProcedureDraft[]
+}
+
 const disciplineLabel = (discipline: TestDiscipline) =>
   discipline === 'System' ? 'System' : discipline === 'HighLevelSoftware' ? 'HLR' : 'LLR'
 
+const procedureLevel = (discipline: TestDiscipline) =>
+  discipline === 'System' ? 'System' : discipline === 'HighLevelSoftware' ? 'HighLevel' : 'LowLevel'
+
 const changeKindLabel = (kind: string) =>
-  kind === 'Introduce' ? 'New procedure' : kind === 'Retire' ? 'Retired' : 'Modified'
+  kind === 'Introduce' ? 'Introduction' : kind === 'Retire' ? 'Retirement' : 'Modification'
+
+const emptyProcedure = (discipline: TestDiscipline, kind: ProcedureChangeKind): ProcedureDraft => ({
+  key: `draft-${crypto.randomUUID()}`,
+  kind,
+  baseNumber: '',
+  revision: 0,
+  level: procedureLevel(discipline),
+  title: '',
+  objective: '',
+  preconditions: '',
+  steps: '',
+  expectedResult: '',
+  rationale: '',
+  drivingRequirementRevisionIdsJson: '[]',
+  removedRequirementRevisionIdsJson: '[]',
+  coverageChangeRationale: '',
+})
+
+const proposalCanCheckIn = (proposal: ProcedureDraft) => proposal.kind === 'Retire'
+  ? Boolean(proposal.baseNumber.trim() && proposal.rationale.trim())
+  : Boolean(
+      proposal.baseNumber.trim()
+      && proposal.title.trim()
+      && proposal.objective.trim()
+      && proposal.steps.trim()
+      && proposal.rationale.trim())
+
+const normalizeCheckedOutDraft = (value: string, item: Package): WorkingDraft => {
+  const parsed = JSON.parse(value) as Partial<WorkingDraft> & { procedureChanges?: Partial<ProcedureDraft>[] }
+  return {
+    packageVersion: parsed.packageVersion ?? item.version,
+    title: parsed.title ?? '',
+    problem: parsed.problem ?? '',
+    analysis: parsed.analysis ?? '',
+    solution: parsed.solution ?? '',
+    problemRich: parsed.problemRich || fromPlainText(parsed.problem ?? ''),
+    analysisRich: parsed.analysisRich || fromPlainText(parsed.analysis ?? ''),
+    solutionRich: parsed.solutionRich || fromPlainText(parsed.solution ?? ''),
+    procedureChanges: (parsed.procedureChanges ?? []).map((change, index) => ({
+      ...emptyProcedure(item.discipline as TestDiscipline, change.kind ?? 'Introduce'),
+      ...change,
+      key: change.key || `checkout-${change.baseNumber || index}-${change.revision ?? 0}`,
+      level: change.level || procedureLevel(item.discipline as TestDiscipline),
+      drivingRequirementRevisionIdsJson: change.drivingRequirementRevisionIdsJson ?? '[]',
+      removedRequirementRevisionIdsJson: change.removedRequirementRevisionIdsJson ?? '[]',
+      coverageChangeRationale: change.coverageChangeRationale ?? '',
+    })),
+  }
+}
 
 export default function TestChangeRequestPage({
   api, releaseId, releases, packageId, discipline, currentUser, onBack,
-  onOpenRequirementRevision, onOpenTestChangeRequest,
+  onOpenTestChangeRequest,
 }: {
   api: string
   releaseId: string
@@ -92,19 +192,23 @@ export default function TestChangeRequestPage({
   const [error, setError] = useState('')
   const [saved, setSaved] = useState('')
   const [busy, setBusy] = useState(false)
-  const [editing, setEditing] = useState(false)
+  const [mode, setMode] = useState<'view' | 'edit'>('view')
+  const [lock, setLock] = useState<EditLock>()
+  const [lockStatus, setLockStatus] = useState<LockStatus>()
+  const [autosaveStatus, setAutosaveStatus] = useState<'Saved' | 'Unsaved' | 'Saving' | 'Error' | 'Conflict'>('Saved')
+  const [draft, setDraft] = useState<WorkingDraft>()
+  const lockRef = useRef<EditLock | undefined>(undefined)
+  const draftRef = useRef('')
+  const lastSavedRef = useRef('')
+  const checkoutSnapshotRef = useRef('')
+  const savingRef = useRef(false)
 
   const load = useCallback(async () => {
     setError('')
     try {
-      // The package's own read carries its case and its procedure changes together. The register's list
-      // carries a count rather than the changes themselves — enough for a row, not for a page.
       const detail = await apiRequest<Package>(`${api}/api/test-change-reviews/${packageId}/procedure-changes`)
-      // What it was raised from, and where it sits, come from the register's read; the detail read does not
-      // carry them, and inventing either on a controlled record would be worse than asking twice.
       const list = await apiRequest<{ items: Package[] }>(`${api}/api/releases/${releaseId}/test-change-reviews`)
       const row = list.items.find(x => x.id === packageId)
-      if (!row && !detail) { setError('That test change request is not in this build.'); return }
       setItem({
         ...detail,
         ...(row ?? {}),
@@ -116,7 +220,146 @@ export default function TestChangeRequestPage({
     }
   }, [api, packageId, releaseId])
 
-  useEffect(() => { void load() }, [load])
+  const loadStatus = useCallback(async () => {
+    const response = await fetch(`${api}/api/controlled-editing/status?artifactType=TestChangeRequest&artifactId=${packageId}`)
+    if (response.ok) setLockStatus(await response.json())
+  }, [api, packageId])
+
+  useEffect(() => { void load(); void loadStatus() }, [load, loadStatus])
+
+  const serializedWorkingCopy = useMemo(() => draft ? JSON.stringify(draft) : '', [draft])
+  useEffect(() => { lockRef.current = lock }, [lock])
+  useEffect(() => {
+    draftRef.current = serializedWorkingCopy
+    if (mode === 'edit' && serializedWorkingCopy && serializedWorkingCopy !== lastSavedRef.current)
+      setAutosaveStatus(current => current === 'Saving' || current === 'Conflict' ? current : 'Unsaved')
+  }, [mode, serializedWorkingCopy])
+
+  const autosave = useCallback(async (): Promise<EditLock | undefined> => {
+    const current = lockRef.current
+    const currentDraft = draftRef.current
+    if (!current || savingRef.current || !currentDraft || currentDraft === lastSavedRef.current) return current
+    savingRef.current = true
+    setAutosaveStatus('Saving')
+    try {
+      const response = await fetch(`${api}/api/controlled-editing/sessions/${current.id}/autosave`, {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ expectedVersion: current.version, draftJson: currentDraft, leaseMinutes: 15 }),
+      })
+      if (!response.ok) {
+        setAutosaveStatus(response.status === 409 ? 'Conflict' : 'Error')
+        const body = await response.json() as { error?: string }
+        setError(body.error || 'Server autosave failed.')
+        return undefined
+      }
+      const value = await response.json() as { version: number; updatedAt: string; expiresAt: string }
+      const next = { ...current, version: value.version, lastActivityAt: value.updatedAt, expiresAt: value.expiresAt }
+      setLock(next); lockRef.current = next; lastSavedRef.current = currentDraft; setAutosaveStatus('Saved')
+      return next
+    } catch {
+      setAutosaveStatus('Error')
+      return undefined
+    } finally {
+      savingRef.current = false
+    }
+  }, [api])
+
+  useDebouncedSave(serializedWorkingCopy, async () => { await autosave() }, {
+    delaySeconds: 1,
+    maximumSeconds: 10,
+    enabled: mode === 'edit',
+  })
+
+  useEffect(() => {
+    if (mode !== 'edit' || !lockRef.current) return
+    const heartbeat = window.setInterval(async () => {
+      const current = lockRef.current
+      if (!current || savingRef.current) return
+      const response = await fetch(`${api}/api/controlled-editing/sessions/${current.id}/heartbeat`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ expectedVersion: current.version, leaseMinutes: 15 }),
+      })
+      if (!response.ok) { setAutosaveStatus('Conflict'); return }
+      const value = await response.json() as { version: number; updatedAt: string; expiresAt: string }
+      const next = { ...current, version: value.version, lastActivityAt: value.updatedAt, expiresAt: value.expiresAt }
+      setLock(next); lockRef.current = next
+    }, 60_000)
+    return () => window.clearInterval(heartbeat)
+  }, [api, mode])
+
+  const beginEdit = async () => {
+    if (!item) return
+    setBusy(true); setError(''); setSaved('')
+    try {
+      const response = await fetch(`${api}/api/controlled-editing/checkout`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ artifactType: 'TestChangeRequest', artifactId: item.id, leaseMinutes: 15 }),
+      })
+      if (!response.ok) {
+        const body = await response.json() as { error?: string }
+        setError(body.error || 'This Draft could not be checked out.')
+        await loadStatus()
+        return
+      }
+      const opened = await response.json() as EditLock
+      const recovered = normalizeCheckedOutDraft(opened.draftJson, item)
+      const serialized = JSON.stringify(recovered)
+      setLock(opened); lockRef.current = opened; setDraft(recovered)
+      draftRef.current = serialized; lastSavedRef.current = serialized; checkoutSnapshotRef.current = serialized
+      setAutosaveStatus('Saved'); setMode('edit'); await loadStatus()
+    } catch (reason) {
+      setError(operationError(reason, 'This Draft could not be checked out.'))
+    } finally { setBusy(false) }
+  }
+
+  const discard = async () => {
+    const current = lockRef.current
+    if (current) {
+      const response = await fetch(`${api}/api/controlled-editing/sessions/${current.id}/discard`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ expectedVersion: current.version, reason: 'Author discarded the checked-out working copy.' }),
+      })
+      if (!response.ok) {
+        const body = await response.json() as { error?: string }
+        setError(body.error || 'The checkout could not be discarded.')
+        return
+      }
+    }
+    setLock(undefined); lockRef.current = undefined; setDraft(undefined); checkoutSnapshotRef.current = ''
+    setMode('view'); await load(); await loadStatus()
+  }
+
+  const saveWorkingCopy = async () => {
+    setError(''); setSaved('')
+    if (await autosave()) setSaved('Working copy saved. Checkout remains active.')
+  }
+
+  const checkIn = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    if (!draft || !lockRef.current || !draft.title.trim() || !draft.procedureChanges.every(proposalCanCheckIn)) {
+      setError('Add a title and finish or remove each started procedure proposal before checking in this Draft.')
+      return
+    }
+    setBusy(true); setError(''); setSaved('')
+    try {
+      while (savingRef.current) await new Promise(resolve => window.setTimeout(resolve, 25))
+      const current = await autosave()
+      if (!current) { setError('The latest recovery snapshot could not be saved for check-in.'); return }
+      const response = await fetch(`${api}/api/controlled-editing/sessions/${current.id}/check-in`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ expectedVersion: current.version }),
+      })
+      if (!response.ok) {
+        const body = await response.json() as { error?: string }
+        setError(body.error || 'Draft could not be saved.')
+        return
+      }
+      setLock(undefined); lockRef.current = undefined; setDraft(undefined); checkoutSnapshotRef.current = ''
+      setMode('view'); await load(); await loadStatus(); setSaved('Draft checked in.')
+    } catch (reason) {
+      setError(operationError(reason, 'Draft could not be saved.'))
+    } finally { setBusy(false) }
+  }
 
   const act = async (work: () => Promise<void>, failure: string, success: string) => {
     setBusy(true); setError(''); setSaved('')
@@ -126,21 +369,17 @@ export default function TestChangeRequestPage({
   }
 
   const defer = () => {
-    const reason = prompt('Why is this package being put away?')
+    const reason = prompt(`Why is ${item?.displayNumber ?? 'this package'} being put away for another day?`)
     if (reason === null || !reason.trim()) return
-    void act(
-      () => apiRequest(`${api}/api/test-change-reviews/${packageId}/defer`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ reason: reason.trim() }),
-      }),
-      'The package could not be deferred.', 'Deferred.')
+    void act(() => apiRequest(`${api}/api/test-change-reviews/${packageId}/defer`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ reason: reason.trim() }),
+    }), 'The package could not be deferred.', 'Put away for another day.')
   }
 
   const reinstate = () => void act(
     () => apiRequest(`${api}/api/test-change-reviews/${packageId}/reinstate`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}',
-    }),
-    'The package could not be reinstated.', 'Back off the shelf.')
+    }), 'The package could not be reinstated.', 'Back off the shelf.')
 
   const revise = () => void (async () => {
     setBusy(true); setError(''); setSaved('')
@@ -149,167 +388,187 @@ export default function TestChangeRequestPage({
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}',
       })
       onOpenTestChangeRequest(next.id)
-    } catch (reason) {
-      setError(operationError(reason, 'The next test change request revision could not be started.'))
-    } finally { setBusy(false) }
+    } catch (reason) { setError(operationError(reason, 'The next test change request revision could not be started.')) }
+    finally { setBusy(false) }
   })()
 
-  if (!item) {
-    return <main className="scrWorkspace">
-      {error
-        ? <div className="workspaceError" role="alert">{error}</div>
-        : <p className="workspaceLoading">Loading the test change request…</p>}
-    </main>
-  }
+  if (!item) return <main className="scrPage">
+    {error ? <div className="workspaceError" role="alert">{error}</div> : <p className="workspaceLoading">Loading the test change request…</p>}
+  </main>
 
-  // The same two facts the requirements page shows, read through the same helpers so a deferred package reads
-  // identically on both sides: allocation says where it sits, state says how far it got.
   const facts = {
     state: item.state,
     deferredFromState: item.deferredFromState,
     targetRelease: releases.find(x => x.id === item.releaseId),
     superseded: item.state === 'Superseded',
   }
-  const isAuthor = !item.authorId || item.authorId.toLowerCase() === currentUser.toLowerCase()
-  const editable = item.state === 'Draft'
   const canAuthor = Boolean(item.capabilities?.canProposeProcedureChange
     || item.capabilities?.canWithdrawProcedureChange || item.capabilities?.canRevise)
+  const isAuthor = !item.authorId || item.authorId.toLowerCase() === currentUser.toLowerCase() || currentUser.toLowerCase() === 'admin'
+  const editable = item.state === 'Draft'
   const raisedFrom = item.coveredChangeRequests.find(x => x.originating)
+  const caseComplete = Boolean(draft?.title.trim() && toPlainText(draft.problemRich).trim()
+    && toPlainText(draft.analysisRich).trim() && toPlainText(draft.solutionRich).trim())
+  const proposalsComplete = Boolean(draft?.procedureChanges.every(proposalCanCheckIn))
+  const workingCopyChanged = Boolean(draft && serializedWorkingCopy !== checkoutSnapshotRef.current)
+  const hasUnsavedChanges = Boolean(draft && serializedWorkingCopy !== lastSavedRef.current)
 
-  return <main className="scrWorkspace">
-    <header className="scrHeader">
-      <div>
-        <button className="back" type="button" onClick={onBack}>← {disciplineLabel(discipline)} Test Change Requests</button>
-        <p className="eyebrow">TEST CHANGE CONTROL / {item.displayNumber}</p>
-        <h1>{item.title || 'Not written up yet'}</h1>
-        <p>Revision-controlled change case, procedure proposals, and review authority.</p>
-      </div>
-      <div className="headerState">
-        <span className={`stateBadge ${item.state.toLowerCase()}`} data-state={item.state}>
-          {changeRequestAllocation(facts)} · {changeRequestState(facts)}
-        </span>
-        <small>Record version {item.version}</small>
-        <div className="scrPublicationTools">
-          <span>Professional controlled publication</span>
-          <a href={`${api}/api/test-change-reviews/${item.id}/download?format=docx`}>Download DOCX</a>
-          <a href={`${api}/api/test-change-reviews/${item.id}/download?format=pdf`}>Download PDF</a>
+  const updateProcedure = (key: string, field: keyof ProcedureProposal, value: string | number) =>
+    setDraft(current => current ? {
+      ...current,
+      procedureChanges: current.procedureChanges.map(proposal => proposal.key === key
+        ? { ...proposal, [field]: value }
+        : proposal),
+    } : current)
+
+  const actions = <>
+    {editable && canAuthor && isAuthor && <button type="button" className="outline"
+      disabled={busy || Boolean(lockStatus?.locked && !lockStatus.mine)} onClick={beginEdit}>
+      {busy ? 'Checking lock…' : lockStatus?.locked && !lockStatus.mine
+        ? `Read only · ${lockStatus.holder ?? 'another engineer'}`
+        : 'Check out & edit'}
+    </button>}
+    {item.state === 'Approved' && item.capabilities?.canRevise && <button type="button" className="reviseAction" disabled={busy} onClick={revise}>
+      {busy ? 'Creating revision…' : 'Revise'}
+    </button>}
+    {editable && isAuthor && <button type="button" className="deferAction" disabled={busy} onClick={defer}>
+      {busy ? 'Deferring…' : 'Defer'}
+    </button>}
+    {item.state === 'Deferred' && isAuthor && <button type="button" className="reviseAction" disabled={busy} onClick={reinstate}>Reinstate</button>}
+  </>
+
+  return <ControlledChangePage
+    backLabel={`${disciplineLabel(discipline)} Test Change Requests`}
+    onBack={onBack}
+    eyebrow={`TEST CHANGE CONTROL / ${item.displayNumber}`}
+    title={item.title || 'Not written up yet'}
+    description="Revision-controlled change case, procedure proposals, and review authority."
+    allocation={changeRequestAllocation(facts)}
+    state={changeRequestState(facts)}
+    stateCode={item.state}
+    version={item.version}
+    docxHref={`${api}/api/test-change-reviews/${item.id}/download?format=docx`}
+    pdfHref={`${api}/api/test-change-reviews/${item.id}/download?format=pdf`}
+    error={error}
+    saved={saved}
+  >
+    {mode === 'edit' && draft ? <ControlledChangeAuthoringForm
+      onSubmit={checkIn}
+      stages={[
+        { href: '#checked-change-case', label: 'Change case', status: caseComplete ? 'Complete' : 'Required', complete: caseComplete, active: !caseComplete },
+        { href: '#checked-procedures', label: 'Procedure changes', status: proposalsComplete ? 'Complete' : 'In progress', complete: proposalsComplete, active: caseComplete && !proposalsComplete },
+      ]}
+      actions={<ControlledChangeAuthoringActions
+        summary={caseComplete && proposalsComplete ? 'Ready for review after check-in' : 'Draft can be checked in before review readiness'}
+        detail={hasUnsavedChanges ? 'Working copy has unsaved changes' : `Working copy: ${autosaveStatus.toLowerCase()}`}
+        busy={busy}
+        saving={autosaveStatus === 'Saving'}
+        canSave={autosaveStatus !== 'Conflict' && hasUnsavedChanges}
+        canCheckIn={autosaveStatus !== 'Conflict' && workingCopyChanged && Boolean(draft.title.trim()) && proposalsComplete}
+        onDiscard={() => void discard()}
+        onSave={() => void saveWorkingCopy()}
+      />}
+    >
+      <section className="workspaceCard authoringCard" id="checked-change-case">
+        <div className="workspaceTitle">
+          <div><span className="stageKicker">STAGE 1</span><h2>Change case</h2><p>Keep the decision context concise, complete, and attributable.</p></div>
+          <div className={`autosaveState ${autosaveStatus.toLowerCase()}`}><i />{autosaveStatus}{lock && <small>Lock expires {new Date(lock.expiresAt).toLocaleTimeString()}</small>}</div>
         </div>
-      </div>
-    </header>
+        <div className="checkoutBanner"><b>Checked out by <PersonName userName={currentUser} /></b><span>Opened {lock && new Date(lock.openedAt).toLocaleString()} · other users remain read-only</span></div>
+        <div className="editFields">
+          <label>Title<input value={draft.title} onChange={event => setDraft(current => current ? { ...current, title: event.target.value } : current)} required /></label>
+          <RichCaseField api={api} projectId={item.projectId} label="Problem" value={draft.problemRich}
+            placeholder="What need, defect, or risk exists?" required={false}
+            onChange={value => setDraft(current => current ? { ...current, problemRich: value, problem: toPlainText(value) } : current)} />
+          <RichCaseField api={api} projectId={item.projectId} label="Analysis" value={draft.analysisRich}
+            placeholder="What is affected and what alternatives were considered?" required={false}
+            onChange={value => setDraft(current => current ? { ...current, analysisRich: value, analysis: toPlainText(value) } : current)} />
+          <RichCaseField api={api} projectId={item.projectId} label="Solution" value={draft.solutionRich}
+            placeholder="What controlled outcome is proposed?" required={false}
+            onChange={value => setDraft(current => current ? { ...current, solutionRich: value, solution: toPlainText(value) } : current)} />
+        </div>
+      </section>
 
-    {error && <div className="workspaceError" role="alert">{error}</div>}
-    {saved && <div className="workspaceSaved" role="status">✓ {saved}</div>}
+      <section className="workspaceCard authoringCard" id="checked-procedures">
+        <div className="workspaceTitle">
+          <div><span className="stageKicker">STAGE 2</span><h2>Controlled procedure authoring</h2><p>One shared editor for procedure content and classification.</p></div>
+          <span className={proposalsComplete ? 'completionBadge complete' : 'completionBadge'}>
+            {proposalsComplete ? 'Complete' : `${draft.procedureChanges.length} proposal${draft.procedureChanges.length === 1 ? '' : 's'}`}
+          </span>
+        </div>
+        <div className="workspaceProposalActions">
+          <span>Add proposal</span>
+          <button type="button" onClick={() => setDraft(current => current ? { ...current, procedureChanges: [...current.procedureChanges, emptyProcedure(discipline, 'Introduce')] } : current)}>+ Introduce {disciplineLabel(discipline)} test procedure</button>
+          <button type="button" onClick={() => setDraft(current => current ? { ...current, procedureChanges: [...current.procedureChanges, emptyProcedure(discipline, 'Modify')] } : current)}>Modify existing</button>
+          <button type="button" onClick={() => setDraft(current => current ? { ...current, procedureChanges: [...current.procedureChanges, emptyProcedure(discipline, 'Retire')] } : current)}>Retire existing</button>
+        </div>
+        {draft.procedureChanges.map((proposal, index) => <ControlledProcedureEditor
+          key={proposal.key}
+          api={api}
+          projectId={item.projectId}
+          releaseId={item.releaseId}
+          scope={discipline}
+          levelLabel={disciplineLabel(discipline)}
+          item={proposal}
+          index={index}
+          onChange={(field, value) => updateProcedure(proposal.key, field, value)}
+          onRemove={() => setDraft(current => current ? { ...current, procedureChanges: current.procedureChanges.filter(value => value.key !== proposal.key) } : current)}
+        />)}
+        {!draft.procedureChanges.length && <div className="workspaceEmptyState"><b>No procedure proposals</b><p>Add the smallest controlled set needed to deliver this verification change.</p></div>}
+      </section>
+    </ControlledChangeAuthoringForm> : <ControlledChangeReadLayout>
+      <div className="workspaceStack">
+        <ControlledChangeCaseCard
+          actions={actions}
+          note={item.state === 'Deferred' && item.deferralReason ? <p className="snapshotNote">Put away because: {item.deferralReason}</p> : undefined}
+          fields={[
+            { key: 'P', label: 'Problem', value: <RichContentView api={api} value={item.problemRich || fromPlainText(item.problem)} empty="Not written up yet" /> },
+            { key: 'A', label: 'Analysis', value: <RichContentView api={api} value={item.analysisRich || fromPlainText(item.analysis)} empty="Not written up yet" /> },
+            { key: 'S', label: 'Solution', value: <RichContentView api={api} value={item.solutionRich || fromPlainText(item.solution)} empty="Not written up yet" /> },
+          ]}
+        />
 
-    <div className="scrLayout">
-      <div className="scrMain">
         <section className="workspaceCard">
-          <div className="workspaceTitle">
-            <div><h2>Change case</h2><p>Problem, analysis, and proposed solution</p></div>
-            <div className="workspaceActions">
-              {editable && canAuthor && (
-                <button type="button" className="primary" disabled={busy}
-                  onClick={() => setEditing(true)}>
-                  Check out &amp; edit
-                </button>
-              )}
-              {item.state === 'Approved' && item.capabilities?.canRevise && (
-                <button type="button" className="primary" disabled={busy} onClick={revise}>
-                  {busy ? 'Creating revision…' : 'Revise'}
-                </button>
-              )}
-              {editable && isAuthor && (
-                <button type="button" className="quiet" disabled={busy} onClick={defer}>
-                  {busy ? 'Deferring…' : 'Defer'}
-                </button>
-              )}
-              {item.state === 'Deferred' && isAuthor && (
-                <button type="button" className="quiet" disabled={busy} onClick={reinstate}>Reinstate</button>
-              )}
-            </div>
-          </div>
-          {item.state === 'Deferred' && item.deferralReason && (
-            <p className="snapshotNote">Put away because: {item.deferralReason}</p>
-          )}
-          <div className="caseRecord"><span>P</span><div><b>Problem</b><p>{item.problem || 'Not written up yet'}</p></div></div>
-          <div className="caseRecord"><span>A</span><div><b>Analysis</b><p>{item.analysis || 'Not written up yet'}</p></div></div>
-          <div className="caseRecord"><span>S</span><div><b>Solution</b><p>{item.solution || 'Not written up yet'}</p></div></div>
+          <div className="workspaceTitle"><div><h2>Raised from</h2><p>What concluded that this test work was required</p></div></div>
+          {raisedFrom ? <p className="sourceRecord"><b>{raisedFrom.number}</b> {raisedFrom.title}</p> : <p className="sourceRecord"><b>{item.sourceChangeRequestNumber || 'A Problem Report'}</b></p>}
         </section>
 
         <section className="workspaceCard">
-          <div className="workspaceTitle">
-            <div><h2>Raised from</h2><p>What concluded that this test work was required</p></div>
-          </div>
-          {raisedFrom
-            ? <p className="sourceRecord"><b>{raisedFrom.number}</b> {raisedFrom.title}</p>
-            : <p className="sourceRecord"><b>{item.sourceChangeRequestNumber || 'A Problem Report'}</b></p>}
+          <div className="workspaceTitle"><div><h2>Supporting files</h2><p>Evidence an approver needs alongside the change case</p></div></div>
+          <ControlledAttachments api={api} projectId={item.projectId} artifactType="TestChangeRequest" artifactId={item.id} canAttach={editable && canAuthor} />
         </section>
 
         <section className="workspaceCard">
-          <div className="workspaceTitle">
-            <div><h2>Supporting files</h2><p>Evidence an approver needs alongside the change case</p></div>
-          </div>
-          {/* The same component the change request uses, against this artifact type. Evidence belongs beside
-              the record it justifies. */}
-          <ControlledAttachments
-            api={api}
-            projectId={item.projectId}
-            artifactType="TestChangeRequest"
-            artifactId={item.id}
-            canAttach={editable && canAuthor}
-          />
+          <div className="workspaceTitle"><div><h2>Procedure impact</h2><p>{item.procedureChanges.length} proposed controlled change{item.procedureChanges.length === 1 ? '' : 's'}</p></div></div>
+          {!item.procedureChanges.length && <p className="workspaceEmpty">No procedure changes are proposed yet.</p>}
+          {item.procedureChanges.map(change => <article className="requirementView" key={change.id} data-procedure-change={change.displayNumber}>
+            <div><b>{change.displayNumber}</b><span>{changeKindLabel(change.kind)}</span></div>
+            <p>{change.objective || change.title}</p>
+            {change.rationale && <small>{change.rationale}</small>}
+          </article>)}
         </section>
 
         <section className="workspaceCard">
-          <div className="workspaceTitle">
-            <div>
-              <h2>Procedure impact</h2>
-              <p>{item.procedureChanges.length} proposed controlled change{item.procedureChanges.length === 1 ? '' : 's'}</p>
-            </div>
-          </div>
-          {!item.procedureChanges.length && (
-            <p className="workspaceEmpty">No procedure changes are proposed yet.</p>
-          )}
-          {item.procedureChanges.map(change => (
-            <article className="requirementView" key={change.id} data-procedure-change={change.displayNumber}>
-              <div><b>{change.displayNumber}</b><span>{changeKindLabel(change.kind)}</span></div>
-              <p>{change.objective || change.title}</p>
-              {change.rationale && <small>{change.rationale}</small>}
-            </article>
-          ))}
+          <div className="workspaceTitle"><div><h2>Audit history</h2></div></div>
+          <p className="workspaceEmpty">Controlled checkout, check-in, review, and approval evidence is retained with this record.</p>
         </section>
       </div>
 
-      <aside className="scrRail">
-        <section className="workspaceCard controlStatusCard">
-          <div className="workspaceTitle"><div><h2>Control status</h2><p>{item.displayNumber}</p></div></div>
-          <dl>
-            <div><dt>Allocation</dt><dd data-allocation={item.state === 'Deferred' ? 'Deferred' : 'Build'}>{changeRequestAllocation(facts)}</dd></div>
-            <div><dt>State</dt><dd data-state={item.state}>{changeRequestState(facts)}</dd></div>
-            <div><dt>Author</dt><dd>{item.authorId ? <PersonName userName={item.authorId} withRole /> : 'Raised by assessment'}</dd></div>
-            <div><dt>Discipline</dt><dd>{stateLabel(item.discipline)}</dd></div>
-            <div><dt>Revision</dt><dd>{item.revision}</dd></div>
-          </dl>
-          {editable && isAuthor && !item.procedureChanges.length && (
-            <div className="railReadiness">
-              <b>Draft needs authoring</b>
-              <span>Complete the procedure proposals.</span>
-            </div>
-          )}
-        </section>
+      <aside className="reviewRail">
+        <ControlledStatusCard
+          displayNumber={item.displayNumber}
+          fields={[
+            { label: 'Allocation', value: changeRequestAllocation(facts), data: { name: 'allocation', value: item.state === 'Deferred' ? 'Deferred' : 'Build' } },
+            { label: 'State', value: changeRequestState(facts), data: { name: 'state', value: item.state } },
+            { label: 'Author', value: item.authorId ? <PersonName userName={item.authorId} withRole /> : 'Raised by assessment' },
+            { label: 'Revision', value: item.revision },
+            { label: 'Updated', value: item.updatedAt ? new Date(item.updatedAt).toLocaleDateString() : '—' },
+          ]}
+        >
+          {editable && isAuthor && !item.procedureChanges.length && <div className="railReadiness"><b>Draft needs authoring</b><span>Complete the procedure proposals.</span><button type="button" disabled={busy} onClick={beginEdit}>Complete Draft readiness</button></div>}
+        </ControlledStatusCard>
         <ReviewCycleCard cycle={item.reviewCycle} />
       </aside>
-    </div>
-    {editing && (
-      <TestChangeRequestWorkspace
-        api={api}
-        projectId={item.projectId}
-        reviewId={item.id}
-        canAuthor={canAuthor}
-        onClose={() => setEditing(false)}
-        onChanged={() => { void load() }}
-        onOpenRequirementRevision={onOpenRequirementRevision}
-        onOpenTestChangeRequest={onOpenTestChangeRequest}
-      />
-    )}
-  </main>
+    </ControlledChangeReadLayout>}
+  </ControlledChangePage>
 }

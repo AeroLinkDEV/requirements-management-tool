@@ -49,7 +49,7 @@ test('the page carries the same sections the requirements change request page ca
   }
   // The change case is Problem-Analysis-Solution here as it is there, not a paragraph of prose.
   for (const part of ['Problem', 'Analysis', 'Solution']) {
-    await expect(page.locator('.caseRecord').filter({ hasText: part })).toBeVisible()
+    await expect(page.locator('.pasView article').filter({ hasText: part })).toBeVisible()
   }
   // Allocation and state are two separate answers, as on the requirements page.
   const control = page.locator('.controlStatusCard')
@@ -60,7 +60,7 @@ test('the page carries the same sections the requirements change request page ca
   await expect(page.getByRole('heading', { name: /Review cycle(?: \d+)?/, level: 2 })).toBeVisible()
 })
 
-test('check out and edit opens the existing package workspace instead of a new-package URL', async ({ page }) => {
+test('check out and edit uses the same full-page two-stage authoring flow as a requirement change', async ({ page }) => {
   test.setTimeout(180_000)
   await page.setViewportSize({ width: 1600, height: 900 })
   await login(page)
@@ -70,10 +70,36 @@ test('check out and edit opens the existing package workspace instead of a new-p
   const exactUrl = page.url()
 
   await page.getByRole('button', { name: 'Check out & edit' }).click()
-  const workspace = page.getByRole('dialog', { name: /procedure decisions/ })
-  await expect(workspace).toBeVisible()
-  await expect(workspace.getByRole('heading', { name: 'Engineering case' })).toBeVisible()
+  await expect(page.getByRole('dialog')).toHaveCount(0)
+  await expect(page.getByRole('navigation', { name: 'Checked-out authoring progress' })).toBeVisible()
+  await expect(page.getByRole('link', { name: /Change case/ })).toBeVisible()
+  await expect(page.getByRole('link', { name: /Procedure changes/ })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Discard checkout' })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Save', exact: true })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Save & check in' })).toBeVisible()
   await expect(page).toHaveURL(exactUrl)
+  await page.getByRole('button', { name: 'Discard checkout' }).click()
+  await expect(page.getByRole('button', { name: 'Check out & edit' })).toBeVisible()
+})
+
+test('the shared authoring page checks in and reopens the persisted test change case', async ({ page }) => {
+  test.setTimeout(180_000)
+  await page.setViewportSize({ width: 1600, height: 900 })
+  await login(page)
+  await openRegister(page)
+  await page.getByLabel('Lifecycle state filter').selectOption('Draft')
+  await page.locator('[data-register-row]').first().click()
+
+  const title = `Verification parity check-in ${Date.now()}`
+  await page.getByRole('button', { name: 'Check out & edit' }).click()
+  await page.getByLabel('Title').fill(title)
+  await expect(page.getByRole('button', { name: 'Save & check in' })).toBeEnabled({ timeout: 30_000 })
+  await page.getByRole('button', { name: 'Save & check in' }).click()
+
+  await expect(page.getByRole('heading', { name: title, level: 1 })).toBeVisible({ timeout: 30_000 })
+  await expect(page.getByRole('button', { name: 'Check out & edit' })).toBeVisible()
+  await page.reload({ waitUntil: 'load' })
+  await expect(page.getByRole('heading', { name: title, level: 1 })).toBeVisible({ timeout: 30_000 })
 })
 
 test('the controlled publication is offered from the package', async ({ page }) => {

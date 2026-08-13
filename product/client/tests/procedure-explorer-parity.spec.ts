@@ -38,6 +38,15 @@ test('the Explorer groups procedures by the document they are written into', asy
   await login(page)
   await openExplorer(page, 'software-verification/hlr')
 
+  await expect(page.locator('main.reqWorkspace')).toBeVisible()
+  await expect(page.locator('.reqCommand')).toBeVisible()
+  await expect(page.locator('.reqLayout')).toBeVisible()
+  await expect(page.locator('.specRail')).toBeVisible()
+  await expect(page.locator('.reqResults')).toBeVisible()
+  await expect(page.locator('.requirementInspector')).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Advanced' })).toBeVisible()
+  await expect(page.getByRole('tablist', { name: 'Test procedure views' })).toHaveCount(0)
+
   const rail = page.getByRole('navigation', { name: 'Test procedure documents' })
   await expect(rail).toBeVisible()
   // The HLR Explorer speaks for one level, so it shows that level's document and no other. The number runs
@@ -207,5 +216,5 @@ test('the filters read as one row rather than a stack of captioned fields', asyn
   await expect(page.getByLabel('Procedure state')).toBeVisible()
   await expect(page.getByLabel('Latest result')).toBeVisible()
   // The captions that made the bar a form are gone.
-  await expect(page.locator('.procedureFilters label span')).toHaveCount(1)
+  await expect(page.locator('.reqCommand label span')).toHaveCount(1)
 })
