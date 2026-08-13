@@ -30,8 +30,23 @@ export default defineConfig({
   testIgnore: 'production/**',
   globalSetup: './tests/global-setup.ts',
   outputDir,
+  // One worker, deliberately: every journey shares one API and one database, so two running at once can see
+  // each other's seeded state. Parallelism here needs per-test isolation first, which is tracked separately —
+  // CI gets its parallelism from sharding, where each shard is a separate process with its own API, database
+  // and ports.
   fullyParallel: false,
   workers: 1,
+  // One retry on CI, none locally.
+  //
+  // This suite produces roughly one load-induced flake per full run — a different test each time, each one
+  // passing in isolation. With no retries and fail-fast shards, a single flake cost a complete re-run: about
+  // twenty-five minutes to re-learn that nothing was wrong. A retry costs seconds and only when something has
+  // already failed.
+  //
+  // Playwright reports a test that passes on retry as `flaky`, not as passing, so this hides nothing: the
+  // count still appears in the run summary and the trace from the failed attempt is still uploaded. What it
+  // stops is a flake ending the whole run.
+  retries: process.env.CI ? 1 : 0,
   // Fifteen seconds, not Playwright's five.
   //
   // Almost every assertion here waits on a server round-trip — a signed determination, a released lock, a

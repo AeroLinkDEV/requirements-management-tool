@@ -98,6 +98,7 @@ demonstrations use the `FMSLIVE` dataset described in
 | [Massive enterprise update report](MASSIVE_ENTERPRISE_UPDATE_REPORT.md) | Historical acceptance report for its completed enterprise increment; current state is in Project State |
 | [Showcase and usability refresh](SHOWCASE_USABILITY_REFRESH_REPORT.md) | Readable design system, simplified shell, progressive disclosure, critical-surface redesign, and visual validation evidence |
 | [Operations and recovery](product/docs/OPERATIONS.md) | Startup, stop, diagnostics, backup verification, isolated restore, and production recovery |
+| [Feedback time](product/docs/BROWSER_AND_BACKEND_FEEDBACK_TIME.md) | **Read before changing CI.** Which job actually governs a pull request's wall clock, measured; why shard counts are not the lever; what is deferred and why |
 | [Quality attributes](QUALITY_ATTRIBUTES.md) | Security, integrity, operations, and production targets |
 | [Decisions and open questions](DECISIONS_AND_OPEN_QUESTIONS.md) | Accepted decisions, assumptions, and unresolved choices |
 | [Source material traceability](SOURCE_MATERIAL_TRACEABILITY.md) | Disposition of the original Word and Markdown inputs |

@@ -244,14 +244,31 @@ jobs:
           echo "Classify the changed paths in the changes job, or mark the change as documentation-only."
           exit 1
 
+  # Still two shards. Adding more was considered and measured against, twice now: the browser shards run
+  # 11–16 minutes while `validate` runs 21–27, so the journeys are not on the critical path and a third or
+  # fourth runner would shorten a job nobody is waiting for while paying setup for it. What governs elapsed
+  # time is the backend test assembly — see BROWSER_AND_BACKEND_FEEDBACK_TIME.md.
+  #
+  # `fail-fast: false` is the change. The opposite cancelled the sibling shard the moment one failed, so a
+  # single flake cost a rerun purely to discover whether anything else had also failed. A cancelled shard
+  # reports nothing, which is the most expensive kind of nothing — it buys runner minutes with information
+  # and then spends twenty-five minutes buying the information back.
   browser-pr:
     name: Browser journeys (${{ matrix.shard }}/2)
     needs: changes
     if: github.event_name == 'pull_request' && needs.changes.outputs.browser == 'true'
     runs-on: windows-latest
-    timeout-minutes: 20
+    # Thirty, because twenty is now inside the noise. A shard is roughly four minutes of setup — checkout,
+    # .NET, Node, NuGet restore, the Release API build, Chromium — plus its half of the journeys, and that
+    # half has grown steadily: 14m48s, 15m21s, 17m04s, 17m46s, and then a run that reported `105 passed
+    # (16.3m)` and was cancelled at 20m08s while uploading. Every test had passed.
+    #
+    # A timeout that fires after a green suite is the worst possible signal: it reports failure, names no
+    # test, and costs a full gate to re-run something that already worked. The ceiling exists to stop a hung
+    # browser running for an hour, and thirty still does that.
+    timeout-minutes: 30
     strategy:
-      fail-fast: true
+      fail-fast: false
       matrix:
         shard: [1, 2]
     steps:
