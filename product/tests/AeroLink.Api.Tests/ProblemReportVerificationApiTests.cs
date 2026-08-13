@@ -123,7 +123,6 @@ public sealed class ProblemReportVerificationApiTests
         await RejectAsync(client, fixture.ReportId, fixture.ReportVersion, fixture.WrongProcedureExecutionId, "pr_verification_wrong_procedure");
         await RejectAsync(client, fixture.ReportId, fixture.ReportVersion, fixture.NoRetestExecutionId, "pr_verification_not_successor");
         await RejectAsync(client, fixture.ReportId, fixture.ReportVersion, fixture.HistoricalExecutionId, "pr_verification_not_successor");
-        await RejectAsync(client, fixture.ReportId, fixture.ReportVersion, fixture.EqualCorrectionTimeExecutionId, "pr_verification_not_successor");
         await RejectAsync(client, fixture.ReportId, fixture.ReportVersion, fixture.WrongBuildExecutionId, "pr_verification_wrong_build");
         await RejectAsync(client, fixture.ReportId, fixture.ReportVersion, fixture.FailedExecutionId, "pr_verification_not_pass");
         await RejectAsync(client, fixture.ReportId, fixture.ReportVersion, fixture.BlockedExecutionId, "pr_verification_not_pass");
@@ -145,7 +144,10 @@ public sealed class ProblemReportVerificationApiTests
         Assert.Equal(fixture.TargetRevisionId, corrective.GetProperty("procedureRevisionId").GetGuid());
         Assert.Equal(fixture.OriginExecutionId, corrective.GetProperty("executionId").GetGuid());
 
-        using (var notLater = await client.PostAsJsonAsync("/api/test-executions", new
+        // A retest must not be reported strictly earlier than the execution it supersedes; an equal
+        // reported instant is a clock-resolution collision and is accepted, because the retest link is the
+        // structural succession proof.
+        using (var earlier = await client.PostAsJsonAsync("/api/test-executions", new
         {
             projectId = fixture.ProjectId,
             procedureRevisionId = fixture.TargetRevisionId,
@@ -153,14 +155,29 @@ public sealed class ProblemReportVerificationApiTests
             retestOfExecutionId = fixture.OriginExecutionId,
             outcome = "Pass",
             configuration = "Corrective rig",
-            determination = "A simultaneous result is not a successor.",
+            determination = "An earlier reported instant is not a successor.",
             evidenceReference = "controlled://pr-449/not-later",
+            executedAt = new DateTimeOffset(2026, 8, 10, 11, 59, 0, TimeSpan.Zero),
+        }))
+        {
+            Assert.Equal(HttpStatusCode.BadRequest, earlier.StatusCode);
+            Assert.Equal("retest_not_successor",
+                (await earlier.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("code").GetString());
+        }
+        using (var simultaneous = await client.PostAsJsonAsync("/api/test-executions", new
+        {
+            projectId = fixture.ProjectId,
+            procedureRevisionId = fixture.TargetRevisionId,
+            softwareBuildId = fixture.TargetBuildId,
+            retestOfExecutionId = fixture.OriginExecutionId,
+            outcome = "Pass",
+            configuration = "Corrective rig",
+            determination = "An equal reported instant is still a structural successor.",
+            evidenceReference = "controlled://pr-449/simultaneous",
             executedAt = new DateTimeOffset(2026, 8, 10, 12, 0, 0, TimeSpan.Zero),
         }))
         {
-            Assert.Equal(HttpStatusCode.BadRequest, notLater.StatusCode);
-            Assert.Equal("retest_not_successor",
-                (await notLater.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("code").GetString());
+            Assert.Equal(HttpStatusCode.Created, simultaneous.StatusCode);
         }
 
         // The target build carries revision 1 while the failure executed revision 0. Recording the retest
@@ -195,6 +212,77 @@ public sealed class ProblemReportVerificationApiTests
         var link = Assert.Single(links);
         Assert.Equal(executionId, link.ArtifactId);
         Assert.Equal("admin", link.AddedBy);
+    }
+
+    [Fact]
+    public async Task Equal_instant_closure_retest_is_accepted_and_reported_time_does_not_gate_recording()
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var client = factory.CreateClient();
+        await ProblemReportApiTests.BootstrapAndLoginAsync(client);
+        var fixture = await SeedAsync(factory);
+
+        // The corrective action and the retest share the same recording instant. The retest is otherwise an
+        // unquestionably valid structural successor, so equality must be accepted rather than refused.
+        using var equal = await client.PostAsJsonAsync($"/api/problem-reports/{fixture.ReportId}/verify", new
+        {
+            expectedVersion = fixture.ReportVersion,
+            testExecutionId = fixture.EqualCorrectionTimeExecutionId,
+        });
+        Assert.Equal(HttpStatusCode.OK, equal.StatusCode);
+        Assert.Equal("AwaitingSqaClosure",
+            (await equal.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("state").GetString());
+
+        // The gate compares server recording instants. A client-reported time earlier than the corrective
+        // action cannot refuse a retest the server recorded afterwards.
+        using var lateFactory = new AeroLinkApiFactory();
+        using var lateClient = lateFactory.CreateClient();
+        await ProblemReportApiTests.BootstrapAndLoginAsync(lateClient);
+        var lateFixture = await SeedAsync(lateFactory);
+        Guid lateRecordedId;
+        Guid targetReleaseId;
+        await using (var scope = lateFactory.Services.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            targetReleaseId = (await db.SoftwareBuilds.AsNoTracking()
+                .Where(item => item.Id == lateFixture.TargetBuildId)
+                .Select(item => item.ReleaseId).SingleAsync());
+            var start = new DateTimeOffset(2026, 8, 10, 12, 0, 0, TimeSpan.Zero);
+            var lateRecorded = new TestExecution(lateFixture.ProjectId, lateFixture.TargetRevisionId,
+                lateFixture.TargetBuildId, lateFixture.OriginExecutionId, TestOutcome.Pass, "tester", "Rig",
+                "Recorded by the server after the corrective action despite an earlier reported clock.",
+                "controlled://late-recorded", start.AddMinutes(3), start.AddMinutes(10), targetReleaseId);
+            db.TestExecutions.Add(lateRecorded);
+            await db.SaveChangesAsync();
+            lateRecordedId = lateRecorded.Id;
+        }
+        using var lateVerify = await lateClient.PostAsJsonAsync($"/api/problem-reports/{lateFixture.ReportId}/verify", new
+        {
+            expectedVersion = lateFixture.ReportVersion,
+            testExecutionId = lateRecordedId,
+        });
+        Assert.Equal(HttpStatusCode.OK, lateVerify.StatusCode);
+        Assert.Equal("AwaitingSqaClosure",
+            (await lateVerify.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("state").GetString());
+    }
+
+    [Fact]
+    public async Task A_retest_recorded_before_verification_ready_remains_refused_with_an_actionable_reason()
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var client = factory.CreateClient();
+        await ProblemReportApiTests.BootstrapAndLoginAsync(client);
+        var fixture = await SeedAsync(factory);
+        using var stale = await client.PostAsJsonAsync($"/api/problem-reports/{fixture.ReportId}/verify", new
+        {
+            expectedVersion = fixture.ReportVersion,
+            testExecutionId = fixture.HistoricalExecutionId,
+        });
+        Assert.Equal(HttpStatusCode.Conflict, stale.StatusCode);
+        var body = await stale.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal("pr_verification_not_successor", body.GetProperty("code").GetString());
+        Assert.Contains("recorded before", body.GetProperty("error").GetString());
+        Assert.DoesNotContain("2026", body.GetProperty("error").GetString());
     }
 
     [Fact]

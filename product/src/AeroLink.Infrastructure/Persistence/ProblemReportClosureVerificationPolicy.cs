@@ -38,15 +38,7 @@ public sealed class ProblemReportClosureVerificationPolicy(AeroLinkDbContext db)
     {
         DateTimeOffset? verificationReadyAt = report.State == ProblemReportState.Verifying
             ? report.UpdatedAt
-            : null;
-        if (verificationReadyAt is null)
-        {
-            var proposed = await db.ProblemReportRevisions.AsNoTracking()
-                .Where(item => item.ProblemReportId == report.Id && item.EventType == "ResolutionProposed")
-                .Select(item => item.OccurredAt).ToListAsync(ct);
-            verificationReadyAt = proposed.OrderByDescending(item => item).FirstOrDefault();
-            if (verificationReadyAt == default) verificationReadyAt = null;
-        }
+            : await LatestResolutionProposedAsync(report.Id, ct);
         var originatingLinks = (await db.ProblemReportLinks.AsNoTracking()
             .Where(link => link.ProblemReportId == report.Id
                 && link.ArtifactType == "TestExecution"
@@ -161,10 +153,16 @@ public sealed class ProblemReportClosureVerificationPolicy(AeroLinkDbContext db)
         if (string.IsNullOrWhiteSpace(execution.EvidenceReference))
             return ProblemReportVerificationDecision.Reject(scope, "pr_verification_missing_evidence",
                 "Closure verification requires an attributable evidence reference.");
-        if (scope.VerificationReadyAt is { } readyAt && execution.ExecutedAt <= readyAt
-            || scope.OriginExecutedAt is { } originAt && execution.ExecutedAt <= originAt)
+        // Causal contract. The retest lineage validated below is the structural proof that this execution
+        // succeeded the originating failure; no wall-clock comparison with the origin is needed. Succession
+        // against the corrective action is proved with server recording instants: RecordedAt is assigned by
+        // this server when the execution row is created, so it is never subject to client clock skew or
+        // second-precision truncation. Two sequential requests can complete inside one clock tick, and an
+        // equal instant is not evidence that the execution came first - only a strictly earlier recording
+        // instant is refused.
+        if (scope.VerificationReadyAt is { } readyAt && execution.RecordedAt < readyAt)
             return ProblemReportVerificationDecision.Reject(scope, "pr_verification_not_successor",
-                "Closure verification must be executed after the failure and after the corrective action entered verification.");
+                "The closure retest was recorded before the corrective action entered verification, or before the latest change to the verification scope. Record a new passing successor execution.");
         if (scope.OriginExecutionId is { } originId
             && !await RetestChainReachesAsync(execution, originId, scope.ProcedureId!.Value, ct))
             return ProblemReportVerificationDecision.Reject(scope, "pr_verification_not_successor",
@@ -193,6 +191,22 @@ public sealed class ProblemReportClosureVerificationPolicy(AeroLinkDbContext db)
             currentId = predecessor.Execution.RetestOfExecutionId;
         }
         return false;
+    }
+
+    /// <summary>
+    /// The structural "corrective action entered verification" event: the most recent ResolutionProposed
+    /// lifecycle revision. Selected by the monotonic revision number, never by wall-clock order, so two
+    /// same-instant events cannot swap. A legacy report without that event yields no bound; the remaining
+    /// project/build/procedure/outcome/evidence/lineage checks still gate adoption.
+    /// </summary>
+    private async Task<DateTimeOffset?> LatestResolutionProposedAsync(Guid reportId, CancellationToken ct)
+    {
+        var proposed = await db.ProblemReportRevisions.AsNoTracking()
+            .Where(item => item.ProblemReportId == reportId && item.EventType == "ResolutionProposed")
+            .OrderByDescending(item => item.Revision)
+            .Select(item => (DateTimeOffset?)item.OccurredAt)
+            .FirstOrDefaultAsync(ct);
+        return proposed;
     }
 
     private static ProblemReportVerificationScope Unknown(ProblemReport report, string error) =>
