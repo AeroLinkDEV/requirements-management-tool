@@ -518,20 +518,53 @@ jobs:
           # No dependency install: `--with-deps` and `install-deps` install apt packages and do not apply on
           # Windows. The cache holds the browser binary, which is the whole of what is needed here.
           npx playwright install chromium
-      # The JSON reporter is here to be read by a person, not by the gate. Playwright shards by test count and
-      # does it well — 58/57/54/56 across four — but the shards took 360s, 328s, 233s and 662s, because what
-      # varies is duration per test, not tests per shard. Nothing in the run records which tests those are, so
-      # the only available fix has been "add another runner", and that is now capped: at 14 jobs a run, two
-      # concurrent pull requests already exceed the account's job limit and every agent queues.
+      # Packed by recorded duration rather than by `--shard`. Playwright's own sharding balances test *count*
+      # and does it well — 58/57/54/56 across four — but those shards took 360s, 328s, 233s and 662s, because
+      # what varies is duration per test. One file, zzz-post-414-picker-integrity.spec.ts, is 220 of the
+      # suite's 1182 seconds by itself, and no count-based split can see that.
       #
-      # Durations are the input to packing the existing runners properly instead. `list` is kept so the console
-      # output stays readable.
+      # Adding runners was the only other lever and it is now capped by something other than money: at 14 jobs
+      # a run, two concurrent pull requests already exceed the account's job limit, and this repository
+      # routinely has several agents working at once. So the fix is to pack the runners that already exist.
+      #
+      # `journey-durations.json` is an optimisation, never a correctness input: an unknown or stale file is
+      # weighted at the median, and a missing file degenerates the whole thing to a count-based split. It is
+      # refreshed from the artifacts these jobs upload. The `json` reporter stays for that, and `list` stays so
+      # the console output remains readable.
       - name: Run browser journey shard
         working-directory: product/client
+        shell: bash
         env:
           AEROLINK_E2E_SKIP_BUILD: "true"
           PLAYWRIGHT_JSON_OUTPUT_NAME: journey-durations-${{ matrix.shard }}.json
-        run: npx playwright test --shard=${{ matrix.shard }}/${{ strategy.job-total }} --reporter=list,json
+        run: |
+          set -euo pipefail
+          npx playwright test --list > listed.txt
+          node scripts/plan-journey-shard.mjs listed.txt ${{ matrix.shard }} ${{ strategy.job-total }} > plan.txt
+
+          readarray -t planned < plan.txt
+          expected="${planned[0]}"
+          files=("${planned[@]:1}")
+
+          # A plan of nothing would run the entire suite on every shard: green, and four times the work it was
+          # meant to divide.
+          if [ "${#files[@]}" -eq 0 ] || [ "$expected" = "0" ]; then
+            echo "::error::Shard ${{ matrix.shard }} planned no spec files. Discovery or the packing is broken."
+            exit 1
+          fi
+          echo "Shard ${{ matrix.shard }} of ${{ strategy.job-total }}: $expected tests across ${#files[@]} spec files."
+
+          npx playwright test "${files[@]}" --reporter=list,json
+
+          # Playwright matches a positional argument as a path substring, so a spec whose name is contained in
+          # another would pull in a file this shard was not given, and a mistyped plan would quietly run fewer.
+          # Neither fails on its own. The report's own stats are compared against what the plan claimed.
+          actual="$(node -e "const s=require('./journey-durations-${{ matrix.shard }}.json').stats; console.log(s.expected + s.unexpected + s.flaky + s.skipped)")"
+          if [ "$actual" != "$expected" ]; then
+            echo "::error::Shard ${{ matrix.shard }} planned $expected tests but ran $actual. The file list does not match the plan."
+            exit 1
+          fi
+          echo "Shard ${{ matrix.shard }} ran exactly the $expected tests it planned."
       - name: Upload journey durations
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

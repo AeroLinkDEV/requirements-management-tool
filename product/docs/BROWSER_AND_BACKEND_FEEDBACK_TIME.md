@@ -215,9 +215,32 @@ Two consequences:
    working at once. Past that point extra shards make every agent's gate slower, which is the opposite of the
    goal. The remaining gain has to come from packing the runners that already exist.
 
-The browser shards now emit a Playwright JSON report as an artifact. That is the input for duration-aware
-assignment; it is deliberately not wired into the gate, because a partition that silently drops tests looks
-exactly like a fast green run.
+### Packing the journeys by duration
+
+The browser shards emit a Playwright JSON report, and the durations from it are checked in as
+`product/client/journey-durations.json`. `scripts/plan-journey-shard.mjs` packs the spec files heaviest-first
+into whichever shard is lightest, and each shard runs its own file list instead of `--shard`.
+
+What the recorded numbers show is why no count-based split could have worked:
+
+| Spec file | Duration |
+|---|---|
+| `zzz-post-414-picker-integrity.spec.ts` | **220s** — 19% of the suite alone |
+| `zzz-searchable-authoring-pickers.spec.ts` | 100s |
+| every other file | ≤ 39s |
+
+Packed by duration, four shards come out at **296s each** against a measured worst of 662s. The test counts
+become deliberately uneven — 46 / 55 / 50 / 74 — which is the point.
+
+The durations are an **optimisation, never a correctness input**. An unknown or stale entry is weighted at the
+median, and a missing file degenerates the whole thing to a count-based split; both were tested by deleting
+the file, and still cover all 225 tests across all 104 spec files. Discovery returning nothing fails the shard
+rather than running everything. Each shard then compares the report's own stats against what it planned,
+because Playwright matches a positional argument as a path substring and a spec name contained in another
+would otherwise quietly pull in a file that shard was never given.
+
+Refresh the file from the artifacts these jobs upload when the numbers drift. Nothing breaks if it is stale —
+it just packs less well.
 
 ## Not implemented here, and why
 
