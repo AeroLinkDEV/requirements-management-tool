@@ -3,6 +3,7 @@ using System;
 using AeroLink.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 
@@ -11,9 +12,11 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace AeroLink.Infrastructure.Persistence.Migrations
 {
     [DbContext(typeof(AeroLinkDbContext))]
-    partial class AeroLinkDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260813102037_AddControlledDocumentArtifacts")]
+    partial class AddControlledDocumentArtifacts
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -3255,9 +3258,6 @@ namespace AeroLink.Infrastructure.Persistence.Migrations
                     b.Property<Guid>("CampaignId")
                         .HasColumnType("uuid");
 
-                    b.Property<int>("Cycle")
-                        .HasColumnType("integer");
-
                     b.Property<int>("Position")
                         .HasColumnType("integer");
 
@@ -3268,7 +3268,7 @@ namespace AeroLink.Infrastructure.Persistence.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("CampaignId", "Cycle", "Position")
+                    b.HasIndex("CampaignId", "Position")
                         .IsUnique();
 
                     b.ToTable("release_approvals", (string)null);
@@ -3316,13 +3316,6 @@ namespace AeroLink.Infrastructure.Persistence.Migrations
                         .IsRequired()
                         .HasMaxLength(30)
                         .HasColumnType("character varying(30)");
-
-                    b.Property<DateTimeOffset>("UpdatedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<long>("Version")
-                        .IsConcurrencyToken()
-                        .HasColumnType("bigint");
 
                     b.HasKey("Id");
 

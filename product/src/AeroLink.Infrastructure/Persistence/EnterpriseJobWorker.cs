@@ -131,9 +131,29 @@ public sealed class EnterpriseJobWorker(IServiceScopeFactory scopes, ILogger<Ent
             {
                 var request=JsonSerializer.Deserialize<PublicationJobPayload>(job.RequestJson)??throw new InvalidOperationException("Publication request is invalid.");
                 var document=await db.ControlledDocuments.AsNoTracking().SingleOrDefaultAsync(x=>x.Id==request.DocumentId&&x.ProjectId==job.ProjectId,ct)??throw new InvalidOperationException("The controlled document no longer exists.");
-                var output=await scope.ServiceProvider.GetRequiredService<ControlledOutputGenerator>().GenerateAsync(request.DocumentId,request.Format,ct)??throw new InvalidOperationException("The controlled publication could not be rendered.");
-                job.Heartbeat(75,DateTimeOffset.UtcNow,Lease);await db.SaveChangesAsync(ct);await using var content=new MemoryStream(output.Content);var stored=await scope.ServiceProvider.GetRequiredService<EvidenceFileStore>().StoreAsync(content,output.FileName,output.ContentType,ct);
-                var publicationResult=new{document.Id,document.DocumentNumber,document.Revision,document.ContentHash,document.GeneratedAt,format=request.Format,templateId=request.TemplateId,previousDocumentId=request.PreviousDocumentId,renderer="AeroLink professional publication renderer",reproducible=true,stored.StorageKey,stored.OriginalFileName,stored.ContentType,stored.Size,stored.Sha256};
+                // A document created after artifact freezing is already exact bytes; the publication job ships
+                // those bytes rather than re-evaluating live state and risking a different rendition. A
+                // legacy record has no frozen artifact and is honestly reported as non-reproducible
+                // regeneration instead of claiming determinism it does not have.
+                var frozen=await db.ControlledDocumentArtifacts.AsNoTracking().SingleOrDefaultAsync(x=>x.DocumentId==request.DocumentId&&x.Format==request.Format,ct);
+                string storageKey, originalFileName, contentType;
+                long size;
+                string sha256;
+                bool reproducible;
+                string rendererBasis;
+                if(frozen is not null)
+                {
+                    storageKey=frozen.StorageKey;originalFileName=frozen.OriginalFileName;contentType=frozen.ContentType;size=frozen.Size;sha256=frozen.Sha256;
+                    reproducible=true;rendererBasis="frozen artifact";
+                }
+                else
+                {
+                    var output=await scope.ServiceProvider.GetRequiredService<ControlledOutputGenerator>().GenerateAsync(request.DocumentId,request.Format,ct)??throw new InvalidOperationException("The controlled publication could not be rendered.");
+                    job.Heartbeat(75,DateTimeOffset.UtcNow,Lease);await db.SaveChangesAsync(ct);await using var content=new MemoryStream(output.Content);var legacy=await scope.ServiceProvider.GetRequiredService<EvidenceFileStore>().StoreAsync(content,output.FileName,output.ContentType,ct);
+                    storageKey=legacy.StorageKey;originalFileName=legacy.OriginalFileName;contentType=legacy.ContentType;size=legacy.Size;sha256=legacy.Sha256;
+                    reproducible=false;rendererBasis="legacy regeneration; bytes are not frozen";
+                }
+                var publicationResult=new{document.Id,document.DocumentNumber,document.Revision,document.ContentHash,document.GeneratedAt,format=request.Format,templateId=request.TemplateId,previousDocumentId=request.PreviousDocumentId,renderer="AeroLink professional publication renderer",reproducible,basis=rendererBasis,StorageKey=storageKey,OriginalFileName=originalFileName,ContentType=contentType,Size=size,Sha256=sha256};
                 job.Complete(1,0,JsonSerializer.Serialize(publicationResult),DateTimeOffset.UtcNow);await db.SaveChangesAsync(ct);return;
             }
             if(job.JobType=="BackgroundVariantPublication")
