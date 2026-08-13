@@ -2,6 +2,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using AeroLink.Api;
+using AeroLink.ConnectorProtocol;
 using AeroLink.Domain.Common;
 using AeroLink.Domain.ChangeControl;
 using AeroLink.Domain.Documents;
@@ -19,6 +20,7 @@ public static class ManagedDocumentEndpoints
         group.MapGet("", ListAsync);
         group.MapGet("/dashboard", DashboardAsync);
         group.MapGet("/link-options", LinkOptionsAsync);
+        group.MapPost("/connector-enrollment", ConnectorEnrollmentAsync);
         group.MapPost("", CreateAsync);
         group.MapGet("/attachments/{attachmentId:guid}", DownloadAttachmentAsync);
         group.MapPost("/attachments/{attachmentId:guid}/restore", RestoreAttachmentAsync);
@@ -228,25 +230,25 @@ public static class ManagedDocumentEndpoints
         catch { if (operation is not null) await RollBackStorageAsync(db, storage, operation.Id, "The successor operation failed before atomic completion.", actor.UserName); throw; }
     }
 
-    private static async Task<IResult> CheckoutAsync(Guid revisionId, HttpContext http, AeroLinkDbContext db, IdentityService identity, ManagedDocumentIntegrityService integrity, CancellationToken ct)
+    private static async Task<IResult> CheckoutAsync(Guid revisionId, HttpContext http, AeroLinkDbContext db, IdentityService identity, ManagedDocumentIntegrityService integrity, ConnectorSigningService signing, CancellationToken ct)
     {
         var data = await RevisionDataAsync(db, revisionId, ct); if (data is null) return Results.NotFound();
         if (!await http.HasProjectRoleAsync(db, identity, data.Document.ProjectId, ct, ProgramRole.Engineer, ProgramRole.ConfigurationManager, ProgramRole.ProgramManager, ProgramRole.ProjectEngineeringLead)) return Results.Forbid();
         if (data.Revision.State is not (ManagedDocumentState.Draft or ManagedDocumentState.Returned)) return Results.Conflict(new { error = "Only a Draft or returned revision can be checked out." });
         var actor = http.UserAccount(); if (actor.UserName != data.Revision.ResponsibleOwnerId && !actor.IsAdministrator) return Results.Forbid();
-        return await CreateGrantAsync(data, "edit", actor.UserName, http, db, integrity, ct);
+        return await CreateGrantAsync(data, "edit", actor.UserName, http, db, integrity, signing, ct);
     }
 
-    private static async Task<IResult> PrepareReleaseAsync(Guid revisionId, HttpContext http, AeroLinkDbContext db, ManagedDocumentIntegrityService integrity, CancellationToken ct)
+    private static async Task<IResult> PrepareReleaseAsync(Guid revisionId, HttpContext http, AeroLinkDbContext db, ManagedDocumentIntegrityService integrity, ConnectorSigningService signing, CancellationToken ct)
     {
         var data = await RevisionDataAsync(db, revisionId, ct, true); if (data is null) return Results.NotFound(); if (!await http.HasProjectAccessAsync(db, data.Document.ProjectId, ct)) return Results.Forbid();
         var active = data.Revision.ReviewSteps.SingleOrDefault(x => x.Cycle == data.Revision.CurrentReviewCycle && x.State == ManagedDocumentReviewStepState.Active);
         var finalPosition = data.Revision.ReviewSteps.Where(x => x.Cycle == data.Revision.CurrentReviewCycle).Select(x => x.Position).DefaultIfEmpty(-1).Max(); var actor = http.UserAccount();
         if (data.Revision.State != ManagedDocumentState.InReview || active is null || active.Position != finalPosition || active.ApproverId != actor.UserName) return Results.Conflict(new { error = "Release preparation is available only to the active final approver after technical review." });
-        return await CreateGrantAsync(data, "release", actor.UserName, http, db, integrity, ct);
+        return await CreateGrantAsync(data, "release", actor.UserName, http, db, integrity, signing, ct);
     }
 
-    private static async Task<IResult> CreateGrantAsync(RevisionData data, string mode, string actor, HttpContext http, AeroLinkDbContext db, ManagedDocumentIntegrityService integrity, CancellationToken ct)
+    private static async Task<IResult> CreateGrantAsync(RevisionData data, string mode, string actor, HttpContext http, AeroLinkDbContext db, ManagedDocumentIntegrityService integrity, ConnectorSigningService signing, CancellationToken ct)
     {
         var now = DateTimeOffset.UtcNow; var sessions = await db.ArtifactEditSessions.Where(x => x.ArtifactType == "ManagedDocument" && x.ArtifactId == data.Document.Id && x.IsExclusive && x.State == EditSessionState.Active).ToListAsync(ct);
         foreach (var expired in sessions.Where(x => x.ExpiresAt <= now)) expired.Expire(now); var active = sessions.FirstOrDefault(x => x.State == EditSessionState.Active);
@@ -255,9 +257,17 @@ public static class ManagedDocumentEndpoints
         try { await integrity.VerifyAsync(attachment, actor, ct); }
         catch (ManagedDocumentIntegrityFailure ex) { return IntegrityFailure(ex); }
         var session = new ArtifactEditSession(data.Document.ProjectId, "ManagedDocument", data.Document.Id, data.Revision.Id, attachment.Sha256, "{}", actor, now, true, 120);
-        var launchToken = Token(); var grant = new DocumentConnectorGrant(data.Document.ProjectId, data.Document.Id, data.Revision.Id, session.Id, actor, mode, Hash(launchToken), now);
+        var origin = signing.ResolveOrigin(http);
+        var launchToken = Token(); var revisionNumber = $"{data.Document.DocumentNumber}.{data.Revision.Revision:D2}";
+        var grant = new DocumentConnectorGrant(data.Document.ProjectId, data.Document.Id, data.Revision.Id, session.Id, actor, mode,
+            Hash(launchToken), signing.DeploymentId, origin, signing.KeyId, attachment.Id, attachment.Size, attachment.Sha256,
+            data.Document.DocumentNumber, revisionNumber, now);
         db.ArtifactEditSessions.Add(session); db.DocumentConnectorGrants.Add(grant); db.ManagedDocumentEvents.Add(new(data.Document.Id, mode == "edit" ? "DocumentCheckedOut" : "ReleasePreparationOpened", actor, mode == "edit" ? $"Checked out {data.Document.DocumentNumber}.{data.Revision.Revision:D2} for exclusive editing." : $"Opened exact release-candidate preparation for {data.Document.DocumentNumber}.{data.Revision.Revision:D2}.", now)); await db.SaveChangesAsync(ct);
-        var server = $"{http.Request.Scheme}://{http.Request.Host}"; var launchUri = $"aerolink://document/{mode}?server={Uri.EscapeDataString(server)}&ticket={Uri.EscapeDataString(launchToken)}";
+        var envelope = new ConnectorLaunchEnvelope(ConnectorLaunchProtocol.Version, ConnectorLaunchProtocol.ProfileVersion,
+            signing.DeploymentId, origin, signing.KeyId, launchToken, grant.ExpiresAt, data.Document.ProjectId,
+            data.Document.Id, data.Document.DocumentNumber, data.Revision.Id, revisionNumber, mode, attachment.Id,
+            attachment.Size, attachment.Sha256);
+        var launchUri = $"aerolink://document/{mode}?envelope={Uri.EscapeDataString(signing.Sign(envelope))}";
         return Results.Ok(new { grantId = grant.Id, sessionId = session.Id, session.ExpiresAt, launchUri, mode, holder = actor });
     }
 
@@ -624,11 +634,49 @@ public static class ManagedDocumentEndpoints
         catch (InvalidOperationException ex) { return Results.Conflict(new { error = ex.Message, code = "document_recovery_conflict" }); }
     }
 
+    private static async Task<IResult> ConnectorEnrollmentAsync(Guid projectId, HttpContext http, AeroLinkDbContext db, ConnectorSigningService signing, CancellationToken ct)
+    {
+        if (!await http.HasProjectAccessAsync(db, projectId, ct)) return Results.Forbid();
+        var now = DateTimeOffset.UtcNow; var actor = http.UserAccount();
+        var origin = signing.ResolveOrigin(http);
+        var manifest = signing.Enrollment(origin, now);
+        db.SecurityAuditEvents.Add(new("ConnectorTrustManifestIssued", actor.UserName, signing.DeploymentId, "Success",
+            $"Issued connector trust manifest for {origin}, key {signing.KeyId}, and Project {projectId}.", http.Connection.RemoteIpAddress?.ToString() ?? "local", now));
+        await db.SaveChangesAsync(ct);
+        return Results.Json(manifest);
+    }
+
     private static async Task<IResult> RedeemAsync(string launchToken, AeroLinkDbContext db, CancellationToken ct)
-    { var now = DateTimeOffset.UtcNow; var grant = await db.DocumentConnectorGrants.SingleOrDefaultAsync(x => x.LaunchTokenHash == Hash(launchToken), ct); if (grant is null) return Results.Unauthorized(); try { var accessToken = Token(); grant.Redeem(Hash(accessToken), now); var session = await db.ArtifactEditSessions.SingleAsync(x => x.Id == grant.EditSessionId, ct); var document = await db.ManagedDocuments.AsNoTracking().SingleAsync(x => x.Id == grant.DocumentId, ct); var revision = await db.ManagedDocumentRevisions.AsNoTracking().SingleAsync(x => x.Id == grant.RevisionId, ct); var attachment = revision.CurrentWorkingAttachmentId is null ? null : await db.ControlledAttachments.AsNoTracking().SingleOrDefaultAsync(x => x.Id == revision.CurrentWorkingAttachmentId, ct); if (attachment is null) return Results.Conflict(new { error = "The connector source attachment is missing.", code = "document_integrity_blocked" }); await db.SaveChangesAsync(ct); return Results.Ok(new { grant.Id, accessToken, grant.Mode, documentNumber = $"{document.DocumentNumber}.{revision.Revision:D2}", document.Title, expiresAt = grant.ExpiresAt, sessionVersion = session.Version, sourceAttachmentId = attachment.Id, sourceSize = attachment.Size, sourceSha256 = attachment.Sha256 }); } catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); } }
+    {
+        var now = DateTimeOffset.UtcNow; var tokenHash = Hash(launchToken);
+        var grant = await db.DocumentConnectorGrants.SingleOrDefaultAsync(x => x.LaunchTokenHash == tokenHash, ct);
+        if (grant is null)
+        {
+            db.SecurityAuditEvents.Add(new("ConnectorLaunchRejected", "system.connector", tokenHash[..16], "Rejected",
+                "Rejected an unknown connector launch nonce.", "connector", now)); await db.SaveChangesAsync(ct);
+            return Results.Unauthorized();
+        }
+        try
+        {
+            var accessToken = Token(); grant.Redeem(Hash(accessToken), now);
+            var session = await db.ArtifactEditSessions.SingleAsync(x => x.Id == grant.EditSessionId, ct);
+            var document = await db.ManagedDocuments.AsNoTracking().SingleAsync(x => x.Id == grant.DocumentId, ct);
+            var attachment = await db.ControlledAttachments.AsNoTracking().SingleOrDefaultAsync(x => x.Id == grant.SourceAttachmentId
+                && x.ProjectId == grant.ProjectId && x.ArtifactId == grant.DocumentId && x.RevisionId == grant.RevisionId, ct);
+            if (attachment is null || attachment.Size != grant.SourceSize || !string.Equals(attachment.Sha256, grant.SourceSha256, StringComparison.OrdinalIgnoreCase))
+                return Results.Conflict(new { error = "The connector source attachment no longer matches the signed launch envelope.", code = "document_integrity_blocked" });
+            await db.SaveChangesAsync(ct);
+            return Results.Ok(new { grant.Id, accessToken, grant.Mode, grant.DeploymentId, grant.Origin, grant.ProjectId,
+                grant.DocumentId, grant.DocumentNumber, document.Title, grant.RevisionId, grant.RevisionNumber,
+                expiresAt = grant.ExpiresAt, sessionVersion = session.Version, grant.SourceAttachmentId,
+                grant.SourceSize, grant.SourceSha256 });
+        }
+        catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
+        catch (DbUpdateConcurrencyException) { return Results.Conflict(new { error = "This connector launch ticket was redeemed concurrently.", code = "connector_envelope_replayed" }); }
+    }
 
     private static async Task<IResult> ConnectorDownloadAsync(Guid grantId, HttpContext http, AeroLinkDbContext db, ManagedDocumentIntegrityService integrity, CancellationToken ct)
-    { var auth = await ConnectorAuthAsync(grantId, http, db, ct); if (auth.Error is not null) return auth.Error; var grant = auth.Grant!; var revision = await db.ManagedDocumentRevisions.AsNoTracking().SingleAsync(x => x.Id == grant.RevisionId, ct); if (revision.CurrentWorkingAttachmentId is null) return Results.Conflict(new { error = "The connector source attachment metadata is missing.", code = "document_integrity_blocked" }); var attachment = await db.ControlledAttachments.AsNoTracking().SingleAsync(x => x.Id == revision.CurrentWorkingAttachmentId, ct); try { return Results.File(await integrity.OpenVerifiedAsync(attachment, grant.UserName, ct), attachment.ContentType, attachment.OriginalFileName, enableRangeProcessing: true); } catch (ManagedDocumentIntegrityFailure ex) { return IntegrityFailure(ex); } }
+    { var auth = await ConnectorAuthAsync(grantId, http, db, ct); if (auth.Error is not null) return auth.Error; var grant = auth.Grant!; var attachment = await db.ControlledAttachments.AsNoTracking().SingleOrDefaultAsync(x => x.Id == grant.SourceAttachmentId && x.ProjectId == grant.ProjectId && x.ArtifactId == grant.DocumentId && x.RevisionId == grant.RevisionId, ct); if (attachment is null || attachment.Size != grant.SourceSize || !string.Equals(attachment.Sha256, grant.SourceSha256, StringComparison.OrdinalIgnoreCase)) return Results.Conflict(new { error = "The connector source attachment metadata does not match the signed launch.", code = "document_integrity_blocked" }); try { return Results.File(await integrity.OpenVerifiedAsync(attachment, grant.UserName, ct), attachment.ContentType, attachment.OriginalFileName, enableRangeProcessing: true); } catch (ManagedDocumentIntegrityFailure ex) { return IntegrityFailure(ex); } }
 
     private static async Task<IResult> ConnectorHeartbeatAsync(Guid grantId, ConnectorVersionRequest request, HttpContext http, AeroLinkDbContext db, CancellationToken ct)
     { var auth = await ConnectorAuthAsync(grantId, http, db, ct); if (auth.Error is not null) return auth.Error; try { var now = DateTimeOffset.UtcNow; auth.Session!.Heartbeat(request.ExpectedVersion, now, 120); auth.Grant!.Extend(now); await db.SaveChangesAsync(ct); return Results.Ok(new { auth.Session.Version, auth.Session.ExpiresAt }); } catch (DomainException ex) { return Results.Conflict(new { error = ex.Message, code = "stale_connector_session" }); } catch (DbUpdateConcurrencyException) { return Results.Conflict(new { error = "The connector session was finalized while its lease was being renewed.", code = "stale_connector_session" }); } }

@@ -38,6 +38,14 @@ Working-file versions are retained inside a formal revision and do not create ne
    Check-in never changes the formal revision scope or revision owner. Every accepted check-in retains its actor,
    time, base attachment/hash, resulting attachment/hash, superseded version, connector session when known, and
    operation identifier as immutable evidence.
+
+The browser handoff is a signed, five-minute `aerolink-connector-launch-v1` envelope rather than a caller-chosen
+server URL. It binds the enrolled deployment and exact origin, Project, stable document, formal revision, mode,
+one-use nonce, source attachment/size/SHA-256, and required OOXML profile. The connector verifies this before
+any request, refuses redirects, and requires redemption to repeat the signed identity exactly. A connector
+without an explicit active enrollment cannot contact even an HTTPS or loopback server. New files use a unique
+deployment/Project/document/revision/grant workspace and never truncate an unresolved workspace; full recovery
+and retention behavior remains tracked by #496.
 5. The formal revision scope is defined once when the revision starts. While Draft or Returned, an authorized
    owner or project authority may correct it through the explicit audited action with an optimistic-concurrency
    version and reason. It cannot be changed while in review or after release.

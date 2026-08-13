@@ -59,6 +59,7 @@ if (restoreValidationReadOnly)
 builder.Services.AddAuthentication(AeroLinkAuthorizationHandler.SchemeName)
     .AddScheme<AuthenticationSchemeOptions, AeroLinkAuthorizationHandler>(AeroLinkAuthorizationHandler.SchemeName, _ => { });
 builder.Services.AddSingleton<BrowserMutationProtector>();
+builder.Services.AddSingleton<ConnectorSigningService>();
 var loginRateLimit = Math.Max(1, builder.Configuration.GetValue<int?>("Identity:LoginRateLimitPerMinute") ?? 600);
 builder.Services.AddRateLimiter(options =>
 {

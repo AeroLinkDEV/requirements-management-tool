@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json;
+using AeroLink.ConnectorProtocol;
 using AeroLink.Domain.ChangeControl;
 using AeroLink.Domain.Documents;
 using AeroLink.Domain.Identity;
@@ -122,13 +123,31 @@ public sealed class ManagedDocumentApiTests
     {
         using var factory = new AeroLinkApiFactory(); using var client = factory.CreateClient(); await ProblemReportApiTests.BootstrapAndLoginAsync(client);
         var scope = await SeedProjectAsync(factory);
+        using var enrollmentResponse = await client.PostAsync($"/api/managed-documents/connector-enrollment?projectId={scope.ProjectId}", null);
+        Assert.Equal(HttpStatusCode.OK, enrollmentResponse.StatusCode);
+        var enrollment = await enrollmentResponse.Content.ReadFromJsonAsync<ConnectorEnrollmentManifest>();
+        Assert.NotNull(enrollment); Assert.Equal("aerolink-api-tests", enrollment.DeploymentId);
         using var created = await client.PostAsJsonAsync("/api/managed-documents", new { projectId = scope.ProjectId, acronym = "SDP", documentType = "Software Development Plan", title = "Navigation Software Development Plan", ownerId = "software.author", changeSummary = "Initial controlled draft.", operationKey = Guid.NewGuid().ToString("N") });
         Assert.True(created.StatusCode == HttpStatusCode.Created, await created.Content.ReadAsStringAsync()); var createdBody = await created.Content.ReadFromJsonAsync<JsonElement>(); var documentId = createdBody.GetProperty("id").GetGuid(); var revisionId = createdBody.GetProperty("revisionId").GetGuid();
 
         using var checkout = await client.PostAsync($"/api/managed-documents/revisions/{revisionId}/checkout", null); Assert.Equal(HttpStatusCode.OK, checkout.StatusCode); var checkoutBody = await checkout.Content.ReadFromJsonAsync<JsonElement>();
         using var secondCheckout = await client.PostAsync($"/api/managed-documents/revisions/{revisionId}/checkout", null); Assert.Equal(HttpStatusCode.Conflict, secondCheckout.StatusCode);
-        var ticket = Query(new Uri(checkoutBody.GetProperty("launchUri").GetString()!))["ticket"];
-        using var redeemed = await client.PostAsync($"/api/document-connector/redeem/{Uri.EscapeDataString(ticket)}", null); Assert.Equal(HttpStatusCode.OK, redeemed.StatusCode); var grant = await redeemed.Content.ReadFromJsonAsync<JsonElement>();
+        var launch = new Uri(checkoutBody.GetProperty("launchUri").GetString()!); var launchQuery = Query(launch); Assert.Single(launchQuery); Assert.True(launchQuery.ContainsKey("envelope"));
+        var signedEnvelope = ConnectorLaunchProtocol.Verify(launchQuery["envelope"], enrollment.PublicKey, DateTimeOffset.UtcNow);
+        Assert.Equal(scope.ProjectId, signedEnvelope.ProjectId); Assert.Equal(documentId, signedEnvelope.DocumentId); Assert.Equal(revisionId, signedEnvelope.RevisionId);
+        Assert.Equal("edit", signedEnvelope.Mode); Assert.Equal(enrollment.DeploymentId, signedEnvelope.DeploymentId); Assert.Equal(enrollment.Origin, signedEnvelope.Origin);
+        var ticket = signedEnvelope.Nonce;
+        var redemptionAttempts = await Task.WhenAll(
+            client.PostAsync($"/api/document-connector/redeem/{Uri.EscapeDataString(ticket)}", null),
+            client.PostAsync($"/api/document-connector/redeem/{Uri.EscapeDataString(ticket)}", null));
+        using var redeemed = redemptionAttempts.Single(response => response.StatusCode == HttpStatusCode.OK);
+        using var concurrentReplay = redemptionAttempts.Single(response => response.StatusCode != HttpStatusCode.OK);
+        Assert.True(concurrentReplay.StatusCode is HttpStatusCode.BadRequest or HttpStatusCode.Conflict);
+        var grant = await redeemed.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal(signedEnvelope.ProjectId, grant.GetProperty("projectId").GetGuid()); Assert.Equal(signedEnvelope.DocumentId, grant.GetProperty("documentId").GetGuid());
+        Assert.Equal(signedEnvelope.RevisionId, grant.GetProperty("revisionId").GetGuid()); Assert.Equal(signedEnvelope.SourceAttachmentId, grant.GetProperty("sourceAttachmentId").GetGuid());
+        Assert.Equal(signedEnvelope.SourceSize, grant.GetProperty("sourceSize").GetInt64()); Assert.Equal(signedEnvelope.SourceSha256, grant.GetProperty("sourceSha256").GetString());
+        using var replayedRedemption = await client.PostAsync($"/api/document-connector/redeem/{Uri.EscapeDataString(ticket)}", null); Assert.Equal(HttpStatusCode.BadRequest, replayedRedemption.StatusCode);
         var grantId = grant.GetProperty("id").GetGuid(); var token = grant.GetProperty("accessToken").GetString()!; var version = grant.GetProperty("sessionVersion").GetInt64();
         using var download = new HttpRequestMessage(HttpMethod.Get, $"/api/document-connector/{grantId}/download"); download.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token); using var downloaded = await client.SendAsync(download); Assert.Equal(HttpStatusCode.OK, downloaded.StatusCode); var word = await downloaded.Content.ReadAsByteArrayAsync(); ManagedDocumentFileService.ValidateDocx(word, true);
         using (var heartbeatRequest = new HttpRequestMessage(HttpMethod.Post, $"/api/document-connector/{grantId}/heartbeat") { Content = JsonContent.Create(new { expectedVersion = version }) }) { heartbeatRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token); using var heartbeat = await client.SendAsync(heartbeatRequest); Assert.Equal(HttpStatusCode.OK, heartbeat.StatusCode); var heartbeatBody = await heartbeat.Content.ReadFromJsonAsync<JsonElement>(); Assert.Equal(version, heartbeatBody.GetProperty("version").GetInt64()); }
@@ -179,7 +198,7 @@ public sealed class ManagedDocumentApiTests
         var detail = await owner.GetFromJsonAsync<JsonElement>($"/api/managed-documents/{documentId}"); var revision = detail.GetProperty("revisions")[0]; var attachmentId = revision.GetProperty("currentWorkingAttachmentId").GetGuid();
 
         using var checkout = await owner.PostAsync($"/api/managed-documents/revisions/{revisionId}/checkout", null); Assert.Equal(HttpStatusCode.OK, checkout.StatusCode);
-        var ticket = Query(new Uri((await checkout.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("launchUri").GetString()!))["ticket"];
+        var ticket = LaunchEnvelope(new Uri((await checkout.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("launchUri").GetString()!)).Nonce;
         using var redeemed = await owner.PostAsync($"/api/document-connector/redeem/{Uri.EscapeDataString(ticket)}", null); Assert.Equal(HttpStatusCode.OK, redeemed.StatusCode);
         var grant = await redeemed.Content.ReadFromJsonAsync<JsonElement>(); var grantId = grant.GetProperty("id").GetGuid(); var accessToken = grant.GetProperty("accessToken").GetString()!;
         Assert.Equal(attachmentId, grant.GetProperty("sourceAttachmentId").GetGuid());
@@ -228,7 +247,7 @@ public sealed class ManagedDocumentApiTests
             using var recovered = await quality.PostAsync($"/api/managed-documents/attachments/{attachmentId}/restore", recoveryForm); Assert.Equal(HttpStatusCode.OK, recovered.StatusCode);
         }
         using var recoveredCheckout = await owner.PostAsync($"/api/managed-documents/revisions/{revisionId}/checkout", null); Assert.Equal(HttpStatusCode.OK, recoveredCheckout.StatusCode);
-        var recoveredTicket = Query(new Uri((await recoveredCheckout.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("launchUri").GetString()!))["ticket"];
+        var recoveredTicket = LaunchEnvelope(new Uri((await recoveredCheckout.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("launchUri").GetString()!)).Nonce;
         using var recoveredRedemption = await owner.PostAsync($"/api/document-connector/redeem/{Uri.EscapeDataString(recoveredTicket)}", null); var recoveredGrant = await recoveredRedemption.Content.ReadFromJsonAsync<JsonElement>();
         var recoveredGrantId = recoveredGrant.GetProperty("id").GetGuid(); var recoveredToken = recoveredGrant.GetProperty("accessToken").GetString()!;
         using (var connectorRequest = new HttpRequestMessage(HttpMethod.Get, $"/api/document-connector/{recoveredGrantId}/download"))
@@ -430,7 +449,7 @@ public sealed class ManagedDocumentApiTests
         using var technicalEdit = await owner.PatchAsJsonAsync($"/api/managed-documents/revisions/{revisionId}/formal-summary", new { formalChangeSummary = "Forbidden after approval.", reason = "Must fail.", expectedVersion = technicalVersion }); Assert.Equal(HttpStatusCode.Conflict, technicalEdit.StatusCode);
 
         using var quality = factory.CreateClient(); using (var login = await quality.PostAsJsonAsync("/api/auth/login", new { userName = "quality.analyst", password = AeroLinkApiFactory.MemberPassword })) Assert.Equal(HttpStatusCode.OK, login.StatusCode); await SecurityBoundaryTests.AuthorizeMutationsAsync(quality);
-        using var preparation = await quality.PostAsync($"/api/managed-documents/revisions/{revisionId}/release-preparation", null); Assert.Equal(HttpStatusCode.OK, preparation.StatusCode); var preparationBody = await preparation.Content.ReadFromJsonAsync<JsonElement>(); var ticket = Query(new Uri(preparationBody.GetProperty("launchUri").GetString()!))["ticket"];
+        using var preparation = await quality.PostAsync($"/api/managed-documents/revisions/{revisionId}/release-preparation", null); Assert.Equal(HttpStatusCode.OK, preparation.StatusCode); var preparationBody = await preparation.Content.ReadFromJsonAsync<JsonElement>(); var ticket = LaunchEnvelope(new Uri(preparationBody.GetProperty("launchUri").GetString()!)).Nonce;
         using var redeemed = await quality.PostAsync($"/api/document-connector/redeem/{Uri.EscapeDataString(ticket)}", null); var grant = await redeemed.Content.ReadFromJsonAsync<JsonElement>(); var grantId = grant.GetProperty("id").GetGuid(); var token = grant.GetProperty("accessToken").GetString()!; var sessionVersion = grant.GetProperty("sessionVersion").GetInt64();
         byte[] workingBytes; string reviewedSha256;
         using (var serviceScope = factory.Services.CreateScope())
@@ -498,7 +517,7 @@ public sealed class ManagedDocumentApiTests
 
         using var quality = factory.CreateClient(); using (var login = await quality.PostAsJsonAsync("/api/auth/login", new { userName = "quality.analyst", password = AeroLinkApiFactory.MemberPassword })) Assert.Equal(HttpStatusCode.OK, login.StatusCode); await SecurityBoundaryTests.AuthorizeMutationsAsync(quality);
         using var preparation = await quality.PostAsync($"/api/managed-documents/revisions/{revisionId}/release-preparation", null); Assert.Equal(HttpStatusCode.OK, preparation.StatusCode); var preparationBody = await preparation.Content.ReadFromJsonAsync<JsonElement>();
-        var ticket = Query(new Uri(preparationBody.GetProperty("launchUri").GetString()!))["ticket"];
+        var ticket = LaunchEnvelope(new Uri(preparationBody.GetProperty("launchUri").GetString()!)).Nonce;
         using var redeemed = await quality.PostAsync($"/api/document-connector/redeem/{Uri.EscapeDataString(ticket)}", null); var grant = await redeemed.Content.ReadFromJsonAsync<JsonElement>();
         var grantId = grant.GetProperty("id").GetGuid(); var token = grant.GetProperty("accessToken").GetString()!; var sessionVersion = grant.GetProperty("sessionVersion").GetInt64();
 
@@ -594,7 +613,7 @@ public sealed class ManagedDocumentApiTests
         {
             using var preparation = await quality.PostAsync($"/api/managed-documents/revisions/{revisionId}/release-preparation", null); Assert.Equal(HttpStatusCode.OK, preparation.StatusCode);
             var body = await preparation.Content.ReadFromJsonAsync<JsonElement>();
-            var ticket = Query(new Uri(body.GetProperty("launchUri").GetString()!))["ticket"];
+            var ticket = LaunchEnvelope(new Uri(body.GetProperty("launchUri").GetString()!)).Nonce;
             using var redeemed = await quality.PostAsync($"/api/document-connector/redeem/{Uri.EscapeDataString(ticket)}", null);
             var grant = await redeemed.Content.ReadFromJsonAsync<JsonElement>();
             return (grant.GetProperty("id").GetGuid(), grant.GetProperty("accessToken").GetString()!, grant.GetProperty("sessionVersion").GetInt64());
@@ -992,6 +1011,12 @@ public sealed class ManagedDocumentApiTests
         db.AddRange(program, project, released, active, technical, quality, author, reviewer, new ProgramMembership(technical.Id, program.Id, ProgramRole.SoftwareEngineeringLead, "admin", now), new ProgramMembership(quality.Id, program.Id, ProgramRole.SoftwareQualityAnalyst, "admin", now), new ProgramMembership(author.Id, program.Id, ProgramRole.SoftwareEngineer, "admin", now), new ProgramMembership(author.Id, program.Id, ProgramRole.Reviewer, "admin", now), new ProgramMembership(reviewer.Id, program.Id, ProgramRole.Reviewer, "admin", now)); await db.SaveChangesAsync(); return (program.Id, project.Id, released.Id, active.Id);
     }
     private static Dictionary<string,string> Query(Uri uri) => uri.Query.TrimStart('?').Split('&').Select(part => part.Split('=', 2)).ToDictionary(pair => pair[0], pair => Uri.UnescapeDataString(pair[1]));
+    private static ConnectorLaunchEnvelope LaunchEnvelope(Uri uri)
+    {
+        var compact = Query(uri)["envelope"]; var encoded = compact.Split('.')[0].Replace('-', '+').Replace('_', '/');
+        encoded += (encoded.Length % 4) switch { 2 => "==", 3 => "=", 0 => "", _ => throw new InvalidOperationException("Invalid connector envelope encoding.") };
+        return JsonSerializer.Deserialize<ConnectorLaunchEnvelope>(Convert.FromBase64String(encoded), new JsonSerializerOptions(JsonSerializerDefaults.Web))!;
+    }
 
     private static byte[] AddExternalImageRelationship(byte[] source)
     {

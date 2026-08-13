@@ -29,6 +29,30 @@ publishes the small connector under `%LOCALAPPDATA%\AeroLink\DocumentConnector` 
 protocol in `HKCU`, so administrator rights are not required. Microsoft Word is required for editing and final
 PDF conversion. Re-run the installer after upgrading AeroLink to update the connector.
 
+Installation does not trust a server implicitly. In Documentation Center, select **Download connector trust**
+while authenticated to the intended Project. Verify the exact origin, stable deployment ID, and SHA-256
+public-key fingerprint through the organization's deployment channel, then enroll the downloaded file:
+
+```powershell
+product\.local\document-connector\AeroLink.DocumentConnector.exe --enroll C:\approved\aerolink-deployment-trust.json
+```
+
+Enrollment is per Windows user and is recorded in
+`%LOCALAPPDATA%\AeroLink\DocumentConnector\trust\trust-audit.log`. Enrolling a new key for the same deployment
+retires its prior active key. Revoke a compromised or retired key explicitly with
+`AeroLink.DocumentConnector.exe --revoke <deployment-id> <key-id>`. HTTP is refused except when the manifest
+explicitly identifies an exact loopback development origin. Production deployments must set a stable
+`Connector__DeploymentId`, set the externally reachable exact `Connector__PublicOrigin`, and protect the ECDSA
+P-256 private key named by `Connector__SigningKeyPath`; rotate
+the key by changing that protected file and enrolling the newly issued manifest before retiring the old key.
+
+Every custom-protocol launch contains only a five-minute signed envelope. The connector verifies the enrolled
+deployment/key and exact origin before network access, refuses redirects, and checks that redemption cannot
+change the Project, document, formal revision, mode, source attachment, size, or SHA-256. It streams to a new
+deployment/Project/document/revision/grant-specific workspace, verifies length, hash, and the shared safe OOXML
+profile, and applies the Windows intranet attachment zone before Word opens. Reusable browser credentials are
+never sent to or stored by the connector.
+
 If **Open in Word** does nothing, confirm the connector is installed for the signed-in Windows account and that
 the browser is allowed to open the AeroLink protocol. An abandoned checkout expires automatically; a
 configuration manager or administrator may force-unlock it with a recorded reason. Connector working files are
