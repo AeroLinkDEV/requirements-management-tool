@@ -73,14 +73,15 @@ test('parameterized theory rows are reported as ambiguous, never merged into one
     { type: 'factory', factoryId: 2, class: 'TheoryApiTests', method: 'A_theory_case', phase: 'host', constructionMs: 10, ms: 600 },
   ]
   const trxTests = [
-    { className: 'AeroLink.Api.Tests.TheoryApiTests', name: 'A_theory_case(x: "one")', durationMs: 800, outcome: 'Passed' },
-    { className: 'AeroLink.Api.Tests.TheoryApiTests', name: 'A_theory_case(x: "two")', durationMs: 900, outcome: 'Passed' },
+    { className: 'AeroLink.Api.Tests.TheoryApiTests', name: 'AeroLink.Api.Tests.TheoryApiTests.A_theory_case(x: "one")', durationMs: 800, outcome: 'Passed' },
+    { className: 'AeroLink.Api.Tests.TheoryApiTests', name: 'AeroLink.Api.Tests.TheoryApiTests.A_theory_case(x: "two")', durationMs: 900, outcome: 'Passed' },
   ]
   const report = aggregateApiTelemetry({ factoryRecords, trxTests })
   assert.equal(report.totals.trxTests, 2)
   assert.equal(report.totals.tests, 0)
   assert.equal(report.totals.ambiguousTheoryRows, 2)
   assert.equal(report.ambiguousTheoryRows.length, 1)
+  assert.equal(report.totals.unmatchedMethods, 0)
   assert.equal(report.ambiguousTheoryRows[0].trxRows, 2)
   assert.equal(report.ambiguousTheoryRows[0].factories, 2)
   assert.equal(report.multipleFactoryTests.length, 0)

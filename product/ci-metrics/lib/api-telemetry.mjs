@@ -121,6 +121,7 @@ export function aggregateApiTelemetry({ factoryRecords, trxTests = [] }) {
         test.name === factory.method ||
         test.name.endsWith(`.${factory.method}`) ||
         test.name.startsWith(`${factory.method}(`) ||
+        test.name.includes(`.${factory.method}(`) ||
         test.name.startsWith(`${factory.method}_`))
       entry.wallMs = matched?.durationMs ?? null
     }
@@ -134,6 +135,7 @@ export function aggregateApiTelemetry({ factoryRecords, trxTests = [] }) {
       test.name === entry.method ||
       test.name.endsWith(`.${entry.method}`) ||
       test.name.startsWith(`${entry.method}(`) ||
+      test.name.includes(`.${entry.method}(`) ||
       test.name.startsWith(`${entry.method}_`))
     if (rows.length === 0) {
       // Fixture/helper factories (e.g., ShowcaseApiFixture.CreateFactory) have no TRX row of their own.
