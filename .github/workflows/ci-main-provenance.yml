@@ -1,0 +1,53 @@
+name: CI main-push provenance (shadow)
+
+# #562 phase A: observes whether a main push's tree was already validated by a successful pull-request
+# gate. Shadow mode only: the post-merge product gate continues to run, and the output never skips
+# validation. Enforcement is phase B after real-merge observation.
+#
+# workflow_run runs default-branch code; manifests downloaded from run artifacts are validated as
+# untrusted data and their trees are compared against GitHub's own commit metadata.
+on:
+  workflow_run:
+    workflows:
+      - Product quality gate
+    types:
+      - completed
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  check:
+    name: Check main-push provenance
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out the default branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+      - name: Check provenance
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_API_URL: ${{ github.api_url }}
+          GITHUB_EVENT_PATH: ${{ github.event_path }}
+          PROVENANCE_OUTPUT_DIR: ${{ runner.temp }}/provenance
+        run: node product/ci-metrics/bin/check-main-provenance.mjs
+      - name: Publish provenance summary
+        if: always()
+        run: |
+          if [ -f "${{ runner.temp }}/provenance/main-provenance.md" ]; then
+            cat "${{ runner.temp }}/provenance/main-provenance.md" >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - name: Upload provenance artifact
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: main-provenance
+          path: ${{ runner.temp }}/provenance
+          if-no-files-found: ignore
+          retention-days: 30

@@ -134,6 +134,29 @@ only when sustained regressions exist; an empty result never opens or touches an
 
 Rolling output is never merge authority. The required check remains `Report what this run validated`.
 
+## Tested-tree provenance (562A shadow)
+
+`bin/write-validated-tree.mjs` runs in the metrics-report job and writes `validated-tree.json` from the
+merged run record: repository, workflow and revision, run id/attempt, PR/base/head identity, exact
+checked-out commit and tree, event, classifier outputs, per-job gate results, verified totals, and
+`canAuthorizePostMergeSkip` (true only when the gate and every selected product job passed with zero
+missing). The manifest is labelled `shadow` because same-workflow code is PR-controlled on pull_request
+runs, and it is uploaded only when the aggregate job succeeds (30-day retention).
+
+`.github/workflows/ci-main-provenance.yml` observes every completed quality-gate run. For main pushes it
+resolves the merged pull request (closed-PR search), finds that PR's successful gate runs, downloads and
+validates their manifests as untrusted data, and compares manifest trees against GitHub's own commit tree
+for the pushed commit. Every accepted manifest is **bound to trusted API metadata**: repository and
+workflow name/revision, candidate run id/attempt, merged PR number and head/base, the expected PR merge
+ref, and the GitHub-side tree of the manifest's checked-out commit. Eligibility is **derived from raw
+evidence** (gate passed, every selected job success, empty missing, coherent verified totals), and
+`canAuthorizePostMergeSkip` is treated only as a consistency assertion that must agree with that derived
+eligibility. `lib/provenance.mjs` decides `provenanced-match` only when a bound manifest has the exact tree
+and eligible raw evidence; any missing/malformed/mismatched/contradictory evidence yields
+`fallback-needed` with an explicit reason. **Shadow phase:** the post-merge product gate always runs,
+`canSkip` is always false, and the output records what phase B would skip. Enforcement requires real-merge
+observation and a separate review.
+
 ### Current baseline (phase A measurements)
 
 - Documented historical baseline (from #553-#559): 10m14s critical path; measurements and decisions are
@@ -224,18 +247,21 @@ independently selected producer, so push/schedule reports are complete).
 Run the full suite exactly as CI does:
 
 ```powershell
-node --test product/ci-metrics/tests/trx.test.mjs product/ci-metrics/tests/playwright.test.mjs product/ci-metrics/tests/fragment.test.mjs product/ci-metrics/tests/aggregate.test.mjs product/ci-metrics/tests/build-run-meta.test.mjs product/ci-metrics/tests/junit.test.mjs product/ci-metrics/tests/ci-workflow-contract.test.mjs product/ci-metrics/tests/zip.test.mjs product/ci-metrics/tests/rolling.test.mjs
+node --test product/ci-metrics/tests/trx.test.mjs product/ci-metrics/tests/playwright.test.mjs product/ci-metrics/tests/fragment.test.mjs product/ci-metrics/tests/aggregate.test.mjs product/ci-metrics/tests/build-run-meta.test.mjs product/ci-metrics/tests/junit.test.mjs product/ci-metrics/tests/ci-workflow-contract.test.mjs product/ci-metrics/tests/zip.test.mjs product/ci-metrics/tests/rolling.test.mjs product/ci-metrics/tests/provenance.test.mjs
 ```
 
-The suite (120 tests) covers schema-driven nested validation, real-format Playwright suite traversal,
+The suite (126 tests) covers schema-driven nested validation, real-format Playwright suite traversal,
 representative TRX success/failure fixtures, Node JUnit parsing, valid/missing/malformed/oversized
 fragments and artifacts, unknown schema versions, failed/cancelled/skipped jobs, missing test reports,
 count mismatches, retried Playwright tests, empty test sets, comparable-run grouping and rolling
 median/p95, queue/cancellation accounting, flake and cache trends, sustained-regression thresholds,
 matrix topology, exact event/classification topology, deliberate skips, provenance shadow/trusted
 semantics, attempt resolution (superseded + fallback ambiguity), v1-legacy acceptance, run-identity
-consistency and GitHub-tree cross-checking, credential guards, timing validation, bounded output,
-Markdown escaping, critical-path computation, the minimal ZIP reader, and the static workflow contract.
+consistency and GitHub-tree cross-checking, tested-tree manifest validation and provenance decisions
+(tree match, missing PR, tree mismatch, unauthorized manifest, malformed manifest, newest-manifest
+selection, contradictory raw gate evidence, identity binding for repository/workflow/run/attempt/PR/
+head/base/ref/checkout-tree), credential guards, timing validation, bounded output, Markdown escaping, critical-path
+computation, the minimal ZIP reader, and the static workflow contract.
 
 CI runs this suite in the `metrics-tooling` job from a clean checkout and reports its result in the
 authoritative gate summary; the job is deliberately not part of merge authority.
