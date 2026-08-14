@@ -1255,9 +1255,6 @@ jobs:
           echo "METRICS_FRAGMENT_PATH=${{ runner.temp }}/ci-metrics/fragment-gate.json" >> "$GITHUB_ENV"
           mkdir -p "${{ runner.temp }}/ci-metrics"
           printf '{"name":"job-start","at":%s}\n' "$(date +%s%3N)" >> "${{ runner.temp }}/ci-metrics/timing-gate.json"
-      - name: Mark setup complete
-        continue-on-error: true
-        run: node "${{ github.workspace }}/product/ci-metrics/bin/mark.mjs" setup-end
       - name: Summarise and enforce
         env:
           BACKEND_API: ${{ needs.backend-api.result }}
@@ -1348,6 +1345,9 @@ jobs:
       - name: Check out repository
         continue-on-error: true
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Mark setup complete
+        continue-on-error: true
+        run: node "${{ github.workspace }}/product/ci-metrics/bin/mark.mjs" setup-end
       - name: Mark test complete
         if: always()
         continue-on-error: true

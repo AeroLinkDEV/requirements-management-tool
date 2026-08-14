@@ -163,4 +163,7 @@ test('product enforcement in the gate has no telemetry prerequisite', () => {
   const checkoutBlock = blocks.find((block) => block.name === 'Check out repository')
   assert.ok(checkoutBlock, 'gate checkout step must exist')
   assert.match(checkoutBlock.lines.join('\n'), /continue-on-error:\s*true/, 'gate telemetry checkout must be isolated')
+
+  const setupIndex = gate.indexOf('Mark setup complete')
+  assert.ok(setupIndex > checkoutIndex, 'gate setup marker must run after the telemetry checkout so the script exists')
 })
