@@ -168,6 +168,12 @@ verification proves every planned spec ran exactly once with no overlap; a merge
 Dual mode is opt-in via the `ci-benchmark-dual` PR label (`AEROLINK_E2E_DUAL_PROCESS`); one-process mode
 remains the default until at least ten representative CI observations support activation.
 
+Pilot measurement (2026-08-14, run 31833743839): shards 1-2 passed dual mode with full coverage
+verification (46/46, 55/55, zero unexpected); shards 3-4 failed with load-induced contention timeouts
+(3 unexpected tests across two shards), and the worst lane wall time (~934s) exceeded the one-process
+browser-shard baseline (~600-680s). **Activation is not requested; the negative result is retained.** The
+opt-in harness remains available for future benchmarks after runner/topology changes.
+
 ### Current baseline (phase A measurements)
 
 - Documented historical baseline (from #553-#559): 10m14s critical path; measurements and decisions are
