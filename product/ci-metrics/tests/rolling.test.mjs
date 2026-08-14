@@ -154,11 +154,19 @@ test('v1-legacy records are accepted without fabricated source attempts', () => 
 test('malformed legacy jobs are rejected, not passed to aggregation', () => {
   const legacy = record()
   legacy.schemaVersion = 'aerolink-ci-run/v1'
-  legacy.jobs = [null, { group: 'x', instance: 42, timings: 'bad' }]
+  legacy.jobs = [
+    null,
+    { group: 'x', instance: 42, timings: 'bad' },
+    { group: 'x', instance: 'no-timings' },
+    { group: 'x', instance: 'non-numeric', timings: { jobStartMs: 'a', jobEndMs: 5 } },
+    { group: 'x', instance: 'reversed', timings: { jobStartMs: 10, jobEndMs: 5 } },
+  ]
   const errors = validateRunRecord(legacy)
   assert.ok(errors.some((error) => /not an object/.test(error)))
   assert.ok(errors.some((error) => /invalid instance/.test(error)))
   assert.ok(errors.some((error) => /no timings object/.test(error)))
+  assert.ok(errors.some((error) => /non-integer or negative timing endpoints/.test(error)))
+  assert.ok(errors.some((error) => /reversed timing endpoints/.test(error)))
   assert.equal(jobGroupDurations({ jobs: [null, { group: 'a', instance: 'a', timings: { jobStartMs: 0, jobEndMs: 1 } }] }).get('a')[0], 1)
 })
 
@@ -178,6 +186,14 @@ test('buildRollingReport produces bounded JSON and Markdown', () => {
   assert.ok(Buffer.byteLength(JSON.stringify(report), 'utf8') <= 512 * 1024)
 })
 
+test('the Markdown regression section retains the comparable category', () => {
+  const report = buildRollingReport({
+    records: [record()],
+    regressions: [{ metric: 'criticalPathMedian', category: 'mixed', current: 900_000, previous: 700_000, threshold: 805_000, runs: 8 }],
+  })
+  assert.match(report.markdown, /mixed: criticalPathMedian/)
+})
+
 test('trackerBody is single-issue and never fabricates regressions', () => {
   const clean = trackerBody({ generatedAt: '2026-08-14T00:00:00Z', regressions: [] })
   assert.match(clean, /No sustained regressions/)
@@ -189,20 +205,33 @@ test('trackerBody is single-issue and never fabricates regressions', () => {
   assert.match(hot, /current 900s vs previous 700s/)
 })
 
-test('fullGatesPerMerge counts the PR gate plus successful post-merge push gates', () => {
+test('fullGatesPerMerge attributes every quality-gate run and attempt to its merged PR', () => {
   const mergedPrs = [
-    { number: 571, merge_commit_sha: 'a'.repeat(40), merged_at: '2026-08-14T07:10:42Z' },
-    { number: 572, merge_commit_sha: '2e5acb25ff4bbaab811773cecbafabc00fd2c7af', merged_at: '2026-08-14T13:40:00Z' },
+    {
+      number: 572,
+      head: { ref: 'deepseek/567-ci-metrics-instrumentation' },
+      created_at: '2026-08-14T07:00:00Z',
+      merged_at: '2026-08-14T13:40:00Z',
+      merge_commit_sha: '2e5acb25ff4bbaab811773cecbafabc00fd2c7af',
+    },
   ]
   const runs = [
-    { head_sha: '2e5acb25ff4bbaab811773cecbafabc00fd2c7af', conclusion: 'success' },
-    { head_sha: '2e5acb25ff4bbaab811773cecbafabc00fd2c7af', conclusion: 'failure' },
-    { head_sha: '2e5acb25ff4bbaab811773cecbafabc00fd2c7af', conclusion: 'success' },
-    { head_sha: 'x'.repeat(40), conclusion: 'success' },
+    { event: 'pull_request', head_branch: 'deepseek/567-ci-metrics-instrumentation', created_at: '2026-08-14T07:22:35Z', run_attempt: 1 },
+    { event: 'pull_request', head_branch: 'deepseek/567-ci-metrics-instrumentation', created_at: '2026-08-14T07:36:51Z', run_attempt: 1 },
+    { event: 'pull_request', head_branch: 'deepseek/567-ci-metrics-instrumentation', created_at: '2026-08-14T07:52:08Z', run_attempt: 1 },
+    { event: 'pull_request', head_branch: 'deepseek/567-ci-metrics-instrumentation', created_at: '2026-08-14T09:38:14Z', run_attempt: 1 },
+    { event: 'pull_request', head_branch: 'deepseek/567-ci-metrics-instrumentation', created_at: '2026-08-14T10:04:19Z', run_attempt: 1 },
+    { event: 'pull_request', head_branch: 'deepseek/567-ci-metrics-instrumentation', created_at: '2026-08-14T11:40:09Z', run_attempt: 2 },
+    { event: 'pull_request', head_branch: 'deepseek/567-ci-metrics-instrumentation', created_at: '2026-08-14T12:44:27Z', run_attempt: 2 },
+    { event: 'pull_request', head_branch: 'other-branch', created_at: '2026-08-14T08:00:00Z', run_attempt: 1 },
+    { event: 'pull_request', head_branch: 'deepseek/567-ci-metrics-instrumentation', created_at: '2026-08-20T00:00:00Z', run_attempt: 1 },
+    { event: 'push', head_sha: '2e5acb25ff4bbaab811773cecbafabc00fd2c7af', created_at: '2026-08-14T13:43:34Z', run_attempt: 1 },
+    { event: 'push', head_sha: 'x'.repeat(40), created_at: '2026-08-14T13:50:00Z', run_attempt: 1 },
   ]
   const result = fullGatesPerMerge(mergedPrs, runs)
   const pr572 = result.find((entry) => entry.pr === 572)
-  assert.equal(pr572.gates, 3)
-  const pr571 = result.find((entry) => entry.pr === 571)
-  assert.equal(pr571.gates, 1)
+  assert.equal(pr572.prRuns, 7)
+  assert.equal(pr572.postMergeRuns, 1)
+  assert.equal(pr572.runs, 8)
+  assert.equal(pr572.attempts, 10)
 })

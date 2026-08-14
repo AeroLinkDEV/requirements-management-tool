@@ -129,19 +129,38 @@ export function cacheTrend(records) {
 }
 
 export function fullGatesPerMerge(mergedPrs, runs) {
-  const runCountByHead = new Map()
-  for (const run of Array.isArray(runs) ? runs : []) {
-    if (run.conclusion === 'success' && run.head_sha) {
-      runCountByHead.set(run.head_sha, (runCountByHead.get(run.head_sha) ?? 0) + 1)
-    }
-  }
   const result = []
   for (const pr of Array.isArray(mergedPrs) ? mergedPrs : []) {
     if (!pr.merged_at || typeof pr.merge_commit_sha !== 'string' || pr.merge_commit_sha.length !== 40) continue
-    // One full gate is the PR's own quality-gate run; each additional successful push run on the merge
-    // commit is another full gate purchased after the merge.
-    const postMerge = runCountByHead.get(pr.merge_commit_sha) ?? 0
-    result.push({ pr: pr.number, mergedAt: pr.merged_at, gates: 1 + postMerge })
+    if (!pr.head || typeof pr.head.ref !== 'string' || typeof pr.created_at !== 'string') continue
+    const created = Date.parse(pr.created_at)
+    const merged = Date.parse(pr.merged_at)
+    if (!Number.isFinite(created) || !Number.isFinite(merged)) continue
+    // Pre-merge gates are every pull_request quality-gate run on the PR's branch created between shortly
+    // before the PR and one day after the merge (reruns keep their original created_at, so they remain in
+    // the window). Post-merge gates are push runs on the exact merge commit.
+    const cutoff = merged + 24 * 60 * 60 * 1000
+    const prRuns = []
+    const postMergeRuns = []
+    for (const run of Array.isArray(runs) ? runs : []) {
+      if (typeof run.created_at !== 'string') continue
+      const at = Date.parse(run.created_at)
+      if (!Number.isFinite(at)) continue
+      if (run.event === 'pull_request' && run.head_branch === pr.head.ref && at >= created - 60 * 60 * 1000 && at <= cutoff) {
+        prRuns.push(run)
+      } else if (run.event === 'push' && run.head_sha === pr.merge_commit_sha) {
+        postMergeRuns.push(run)
+      }
+    }
+    const attemptCount = (runs) => runs.reduce((sum, run) => sum + (Number.isInteger(run.run_attempt) && run.run_attempt > 0 ? run.run_attempt : 1), 0)
+    result.push({
+      pr: pr.number,
+      mergedAt: pr.merged_at,
+      runs: prRuns.length + postMergeRuns.length,
+      attempts: attemptCount(prRuns) + attemptCount(postMergeRuns),
+      prRuns: prRuns.length,
+      postMergeRuns: postMergeRuns.length,
+    })
   }
   return result.sort((a, b) => String(b.mergedAt).localeCompare(String(a.mergedAt))).slice(0, MAX_RECORDS)
 }
@@ -238,8 +257,19 @@ export function validateRunRecord(record) {
         errors.push('A legacy job is not an object.')
         continue
       }
+      if (typeof job.group !== 'string' || job.group.length === 0 || job.group.length > 100) errors.push('A legacy job has an invalid group.')
       if (typeof job.instance !== 'string' || job.instance.length > 120) errors.push('A legacy job has an invalid instance.')
-      if (!job.timings || typeof job.timings !== 'object') errors.push(`Legacy job "${job.instance ?? '?'}" has no timings object.`)
+      if (!job.timings || typeof job.timings !== 'object') {
+        errors.push(`Legacy job "${job.instance ?? '?'}" has no timings object.`)
+        continue
+      }
+      const start = job.timings.jobStartMs
+      const end = job.timings.jobEndMs
+      if (!Number.isInteger(start) || start < 0 || !Number.isInteger(end) || end < 0) {
+        errors.push(`Legacy job "${job.instance ?? '?'}" has non-integer or negative timing endpoints.`)
+      } else if (end < start) {
+        errors.push(`Legacy job "${job.instance ?? '?'}" has reversed timing endpoints.`)
+      }
     }
   }
   const json = JSON.stringify(record)
@@ -310,7 +340,8 @@ export function buildRollingReport({ records, regressions = [], missing = [], fu
     lines.push('## Sustained regressions')
     lines.push('')
     for (const entry of regressions) {
-      lines.push(`- ${escapeMarkdown(entry.metric)}: current ${Math.round(entry.current / 1000)}s vs previous ${Math.round(entry.previous / 1000)}s (threshold ${Math.round(entry.threshold / 1000)}s, ${entry.runs} runs)`)
+      const label = entry.category ? `${entry.category}: ${entry.metric}` : entry.metric
+      lines.push(`- ${escapeMarkdown(label)}: current ${Math.round(entry.current / 1000)}s vs previous ${Math.round(entry.previous / 1000)}s (threshold ${Math.round(entry.threshold / 1000)}s, ${entry.runs} runs)`)
     }
     lines.push('')
   }
@@ -333,7 +364,7 @@ export function buildRollingReport({ records, regressions = [], missing = [], fu
     lines.push('## Full gates per merged PR')
     lines.push('')
     for (const entry of fullGates.slice(0, 20)) {
-      lines.push(`- PR #${escapeMarkdown(String(entry.pr))} (merged ${escapeMarkdown(String(entry.mergedAt).slice(0, 10))}): ${entry.gates} full gate run(s)`)
+      lines.push(`- PR #${escapeMarkdown(String(entry.pr))} (merged ${escapeMarkdown(String(entry.mergedAt).slice(0, 10))}): ${entry.runs} full gate run(s) / ${entry.attempts} attempt(s) (${entry.prRuns} pre-merge, ${entry.postMergeRuns} post-merge)`)
     }
     lines.push('')
   }
