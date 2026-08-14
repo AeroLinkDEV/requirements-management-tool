@@ -1,31 +1,44 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 import { parsePlaywrightJson, specDurations, PlaywrightParseError } from '../lib/playwright.mjs'
 
-const report = {
-  stats: { expected: 5, unexpected: 1, flaky: 1, skipped: 1 },
-  tests: [
-    { title: 'stable test', file: 'alpha.spec.ts', status: 'expected', retries: 0, duration: 1200, results: [{ status: 'passed' }] },
-    { title: 'flaky test', file: 'beta.spec.ts', status: 'expected', retries: 1, duration: 3000, results: [{ status: 'failed' }, { status: 'passed' }] },
-    { title: 'failed test', file: 'beta.spec.ts', status: 'unexpected', retries: 0, duration: 500, results: [{ status: 'failed' }] },
-    { title: 'skipped test', file: 'gamma.spec.ts', status: 'skipped', retries: 0, duration: 0, results: [{ status: 'skipped' }] },
-    { title: 'other test', file: 'gamma.spec.ts', status: 'expected', retries: 0, duration: 800, results: [{ status: 'passed' }] },
-  ],
-}
+test('the real Playwright suite hierarchy is parsed with exact totals, durations, and flaky titles', () => {
+  const fixture = JSON.parse(readFileSync(new URL('./fixtures/playwright-real.json', import.meta.url), 'utf8'))
+  const parsed = parsePlaywrightJson(fixture)
+  assert.deepEqual(parsed.totals, { expected: 3, unexpected: 0, flaky: 1, skipped: 1, executed: 5 })
+  assert.equal(parsed.tests.length, 4)
 
-test('parsePlaywrightJson reads totals, retries, and flaky titles', () => {
-  const parsed = parsePlaywrightJson(report)
-  assert.deepEqual(parsed.totals, { expected: 5, unexpected: 1, flaky: 1, skipped: 1, executed: 8 })
-  assert.equal(parsed.tests.length, 5)
-  assert.equal(parsed.tests[1].retries, 1)
-  assert.deepEqual(parsed.flakyTitles, ['flaky test'])
+  const flaky = parsed.tests.find((test) => test.title.includes('assessment deep link'))
+  assert.equal(flaky.status, 'passed')
+  assert.equal(flaky.retries, 1)
+  assert.equal(flaky.durationMs, 5700)
+  assert.equal(flaky.flaky, true)
+  assert.deepEqual(parsed.flakyTitles, ['an assessment deep link explains impact'])
+
+  const password = parsed.tests.find((test) => test.title === 'Password visibility test')
+  assert.equal(password.status, 'passed')
+  assert.equal(password.durationMs, 1100)
+  assert.equal(password.flaky, false)
+
+  const skipped = parsed.tests.find((test) => test.title.includes('token refresh'))
+  assert.equal(skipped.status, 'skipped')
+
+  const rows = specDurations(parsed.tests)
+  assert.deepEqual(rows.map((row) => row.name), [
+    'tests/downstream-assessments.spec.ts',
+    'tests/form-semantics.spec.ts',
+    'tests/other.spec.ts',
+    'tests/auth.spec.ts',
+  ])
+  assert.equal(rows[0].durationMs, 5700)
 })
 
-test('specDurations aggregates by file and orders heaviest first', () => {
-  const rows = specDurations(parsePlaywrightJson(report).tests)
-  assert.equal(rows[0].name, 'beta.spec.ts')
-  assert.equal(rows[0].durationMs, 3500)
-  assert.equal(rows[0].tests, 2)
+test('a stats-only report yields totals and reports missing detail rather than inventing rows', () => {
+  const parsed = parsePlaywrightJson({ stats: { expected: 10, unexpected: 1, flaky: 1, skipped: 2 }, errors: [] })
+  assert.deepEqual(parsed.totals, { expected: 10, unexpected: 1, flaky: 1, skipped: 2, executed: 14 })
+  assert.equal(parsed.tests.length, 0)
+  assert.match(parsed.detailMissing, /no suites hierarchy/)
 })
 
 test('parsePlaywrightJson rejects malformed, non-object, and oversized input', () => {
@@ -36,7 +49,30 @@ test('parsePlaywrightJson rejects malformed, non-object, and oversized input', (
 })
 
 test('an empty Playwright report is a valid empty set, not an error', () => {
-  const parsed = parsePlaywrightJson({ stats: { expected: 0, unexpected: 0, flaky: 0, skipped: 0 }, tests: [] })
+  const parsed = parsePlaywrightJson({ stats: { expected: 0, unexpected: 0, flaky: 0, skipped: 0 }, suites: [] })
   assert.equal(parsed.totals.executed, 0)
   assert.deepEqual(parsed.flakyTitles, [])
+  assert.equal(parsed.detailMissing, null)
+})
+
+test('timedOut and interrupted results count as failures for flaky classification', () => {
+  const report = {
+    stats: { expected: 1, unexpected: 0, flaky: 1, skipped: 0 },
+    suites: [{
+      title: 's',
+      specs: [{
+        title: 'spec',
+        file: 'x.spec.ts',
+        tests: [{
+          title: 'timed out then passed',
+          results: [{ status: 'timedOut', duration: 100 }, { status: 'passed', duration: 200 }],
+          retries: 1,
+        }],
+      }],
+      suites: [],
+    }],
+  }
+  const parsed = parsePlaywrightJson(report)
+  assert.equal(parsed.tests[0].flaky, true)
+  assert.equal(parsed.tests[0].retries, 1)
 })

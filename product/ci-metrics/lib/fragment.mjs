@@ -1,28 +1,27 @@
 // Builds and validates one bounded CI metrics fragment.
 //
 // The fragment is CI-only telemetry. It deliberately carries no environment values, command output, cookies,
-// headers, request bodies, or file contents; every field is a number, boolean, enum, or a bounded string
-// that passed the secret scan below.
+// headers, request bodies, or file contents. Validation is driven by the checked-in JSON Schema so the
+// contract cannot drift from the code that consumes it.
+
+import { validateAgainstSchema, schema } from './schema-validate.mjs'
 
 export const SCHEMA_VERSION = 'aerolink-ci-fragment/v1'
 export const MAX_FRAGMENT_BYTES = 256 * 1024
 
-const SECRET_PATTERNS = [
-  /password/i,
-  /passwd/i,
-  /secret/i,
-  /token/i,
-  /authorization/i,
-  /cookie/i,
-  /connectionstrings?/i,
-  /apikey/i,
-  /privatekey/i,
+// Bare keyword scanning would reject legitimate AeroLink test/class names ("Password visibility test",
+// "token refresh", "cookie consent"). These patterns only match credential-shaped values, which must never
+// appear in telemetry regardless of the field that carries them.
+const CREDENTIAL_VALUE_PATTERNS = [
+  /\b(password|passwd|pwd|secret|api[_-]?key|authorization|connectionstring)\s*[:=]\s*\S+/i,
+  /\bbearer\s+[A-Za-z0-9._~+/=-]{12,}/i,
   /begin (rsa |ec |openssh )?private key/i,
+  /(host|server)\s*=\s*\S+.*(user\s*id|username|password)\s*=/i,
 ]
 
-export function looksLikeSecret(value) {
+export function looksLikeCredential(value) {
   if (typeof value !== 'string') return false
-  return SECRET_PATTERNS.some((pattern) => pattern.test(value))
+  return CREDENTIAL_VALUE_PATTERNS.some((pattern) => pattern.test(value))
 }
 
 export function boundedString(value, maxLength, fallback = '') {
@@ -72,7 +71,8 @@ export function buildFragment({ run, job, timings, counts, slowest = [], flakyTe
       repository: boundedString(run.repository, 200),
     },
     job: {
-      id: boundedString(job.id, 100),
+      group: boundedString(job.group || job.id, 100),
+      instance: boundedString(job.instance || job.group || job.id, 120),
       name: boundedString(job.name, 200),
       matrix: job.matrix ?? null,
       needs: Array.isArray(job.needs) ? job.needs.slice(0, 12).map((n) => boundedString(n, 100)) : [],
@@ -129,20 +129,18 @@ function sanitiseMissing(missing) {
 }
 
 function sanitiseFragment(fragment) {
-  const json = JSON.stringify(fragment)
+  let json = JSON.stringify(fragment)
   if (Buffer.byteLength(json, 'utf8') > MAX_FRAGMENT_BYTES) {
-    // Bounded output is part of the contract. Drop the optional detail lists first; if still too large,
-    // fail loudly so a schema/field change cannot silently ship unbounded telemetry.
     fragment.slowest = []
     fragment.flakyTests = []
-    const retry = JSON.stringify(fragment)
-    if (Buffer.byteLength(retry, 'utf8') > MAX_FRAGMENT_BYTES) {
+    json = JSON.stringify(fragment)
+    if (Buffer.byteLength(json, 'utf8') > MAX_FRAGMENT_BYTES) {
       throw new Error('Metrics fragment exceeds the bounded size even without optional detail lists.')
     }
   }
   for (const [key, value] of Object.entries(flatten(fragment))) {
-    if (looksLikeSecret(value)) {
-      throw new Error(`Metrics fragment field "${key}" matches a secret pattern; refusing to publish it.`)
+    if (looksLikeCredential(value)) {
+      throw new Error(`Metrics fragment field "${key}" matches a credential-value pattern; refusing to publish it.`)
     }
   }
   return fragment
@@ -157,17 +155,10 @@ function flatten(value, prefix = '', out = {}) {
   return out
 }
 
-const REQUIRED_TOP_LEVEL = ['schemaVersion', 'run', 'job', 'timings', 'counts', 'cache', 'classification', 'missing']
-
 export function validationErrors(fragment) {
   const errors = []
   if (fragment === null || typeof fragment !== 'object' || Array.isArray(fragment)) return ['Fragment is not an object.']
-  for (const key of REQUIRED_TOP_LEVEL) if (!(key in fragment)) errors.push(`Missing top-level field "${key}".`)
-  if (fragment.schemaVersion !== SCHEMA_VERSION) errors.push(`Unknown schema version "${fragment.schemaVersion}".`)
-  if (!Number.isInteger(fragment.run?.id) || fragment.run.id < 1) errors.push('run.id must be a positive integer.')
-  if (!/^[0-9a-f]{40}$/.test(fragment.run?.sha ?? '')) errors.push('run.sha must be a 40-character hex SHA.')
-  if (!/^[0-9a-f]{40}$/.test(fragment.run?.tree ?? '')) errors.push('run.tree must be a 40-character hex SHA.')
-  if (!['success', 'failure', 'cancelled', 'skipped', 'unavailable'].includes(fragment.job?.result)) errors.push('job.result is not a known outcome.')
+  errors.push(...validateAgainstSchema(fragment, schema))
   if (Buffer.byteLength(JSON.stringify(fragment), 'utf8') > MAX_FRAGMENT_BYTES) errors.push('Fragment exceeds the bounded size.')
   return errors
 }

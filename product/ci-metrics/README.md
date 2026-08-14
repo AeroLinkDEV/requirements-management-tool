@@ -14,7 +14,8 @@ Each fragment (`aerolink-ci-fragment/v1`, schema in
 
 - run identity: run id/attempt, event, repository, workflow and workflow revision, commit and **exact Git
   tree** SHA, PR number and base/head SHAs when the event provides them;
-- job identity: job id/name, matrix coordinates, dependency list, and result (`success`, `failure`,
+- job identity: stable job **group** (`backend-api`, `browser-pr`), unique job **instance**
+  (`backend-api-1`, `browser-pr-4`), matrix coordinates, dependency list, and result (`success`, `failure`,
   `cancelled`, `skipped`, or `unavailable`);
 - timings: job start, setup end, test end, and job end in milliseconds, plus the derived setup/test/
   upload-and-cleanup durations;
@@ -40,20 +41,28 @@ turn a correct product gate red.
 
 ## Aggregation
 
-`bin/aggregate.mjs <fragments-dir> <output-dir> [run-meta.json]` validates every fragment, computes the
-longest-path critical path over each job's declared dependencies, and writes:
+`bin/aggregate.mjs <fragments-dir> <output-dir> [run-meta.json]` validates every fragment, checks that every
+fragment belongs to the same run identity, resolves group-level dependencies to every matrix instance,
+computes the longest-path critical path, and writes:
 
 - `run-metrics.json` (`aerolink-ci-run/v1`) — the merged, bounded record;
 - `run-metrics.md` — a concise human-readable summary naming the critical path and separating setup/build/
   test/upload time.
 
-The optional `run-meta.json` may carry `{"queueDelayMs": <integer|null>}` from a trusted default-branch
-source; Phase B (rolling collection) is where GitHub API queue and cancellation accounting lands.
+The optional `run-meta.json` may carry `{"queueDelayMs": <integer|null>, "expectedJobs": [...],
+"expectedRun": {...}}` from a trusted default-branch source. `expectedJobs` names every job group/instance
+that should have produced a fragment, so an absent fragment is reported as missing instead of invisible; a
+job whose duration is unknown, absent, or whose dependency group does not resolve makes the critical path
+**unavailable with a reason** rather than numerically smaller. Phase B (rolling collection) is where GitHub
+API queue and cancellation accounting lands.
 
 ## Security and trust
 
 - Fragments contain no environment values, cookies, headers, passwords, connection strings, request/response
-  bodies, or file contents. The builder refuses any field that matches a secret pattern.
+  bodies, or file contents. The builder refuses any field that matches a credential-*value* pattern
+  (`Password=...`, `Bearer <long token>`, private-key blocks, connection-string assignments); legitimate
+  test/class names that merely contain security vocabulary ("Password visibility test", "token refresh")
+  are retained.
 - Fragment and report sizes are bounded; oversized or malformed fragments are reported as missing with a
   reason.
 - The aggregator treats fragment values as data, never as commands, paths, expressions, or scripts.
@@ -70,6 +79,9 @@ source; Phase B (rolling collection) is where GitHub API queue and cancellation 
 | Unknown schema version | rejected; listed in `missing` |
 | No TRX/Playwright report | `counts.source = null` + `counts.missing` reason |
 | No timing markers | `timings.* = null` + `timings.missing` reasons |
+| Expected job instance uploaded no fragment | listed in `missing` with reason (requires `expectedJobs`) |
+| Any job duration unknown or absent | critical path `job = null` + explicit `unavailableReason` |
+| Fragments disagree on run identity | critical path unavailable with reason; mismatched fragment rejected |
 | No fragments at all | critical path `job = null`, `durationMs = null` |
 
 ## Performance budget
@@ -84,7 +96,13 @@ second), and the aggregation job runs only after the required gate. The measured
 node --test product/ci-metrics/tests/trx.test.mjs product/ci-metrics/tests/playwright.test.mjs product/ci-metrics/tests/fragment.test.mjs product/ci-metrics/tests/aggregate.test.mjs
 ```
 
-The suite covers valid/missing/malformed/oversized fragments, unknown schema versions, failed/cancelled/
-skipped jobs, missing test reports, count mismatches, retried Playwright tests, empty test sets, comparable
-run grouping, secret leakage refusal, bounded output, and critical-path computation (including a cycle
-guard).
+The suite (41 tests) covers schema-driven nested validation, real-format Playwright suite traversal,
+representative TRX success/failure fixtures, valid/missing/malformed/oversized fragments, unknown schema
+versions, failed/cancelled/skipped jobs, missing test reports, count mismatches, retried Playwright tests,
+empty test sets, comparable-run grouping, matrix topology with distinct instances, run-identity
+consistency, credential-value refusal with legitimate security-vocabulary retention, bounded output,
+Markdown escaping, and critical-path computation (including cycles, absent lanes, unknown durations, and
+missing dependency groups).
+
+CI runs this suite in the `metrics-tooling` job from a clean checkout and reports its result in the
+authoritative gate summary; the job is deliberately not part of merge authority.

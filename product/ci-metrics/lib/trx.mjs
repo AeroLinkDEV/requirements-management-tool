@@ -59,10 +59,10 @@ export function parseTrx(xml) {
   }
 
   const tests = []
-  const resultRe = /<UnitTestResult\b([^>]*)\/>/g
+  const resultRe = /<UnitTestResult\b([^>]*)\/>|<UnitTestResult\b([^>]*)>[\s\S]*?<\/UnitTestResult>/g
   let resultMatch
   while ((resultMatch = resultRe.exec(xml)) !== null) {
-    const result = attributes(resultMatch[1])
+    const result = attributes(resultMatch[1] ?? resultMatch[2])
     tests.push({
       className: classByTestId.get(result.testId ?? '') ?? '',
       name: result.testName ?? '',

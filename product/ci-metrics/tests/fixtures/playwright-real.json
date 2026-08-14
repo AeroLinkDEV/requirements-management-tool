@@ -1,0 +1,115 @@
+{
+  "config": {
+    "configFile": "playwright.config.ts",
+    "rootDir": "C:\\repo\\product\\client",
+    "forbidOnly": false,
+    "fullyParallel": false,
+    "globalSetup": "tests/global-setup.ts",
+    "globalTeardown": null,
+    "grep": {},
+    "grepInvert": null,
+    "maxFailures": 0,
+    "metadata": { "actualWorkers": 1 },
+    "outputDir": "test-results",
+    "preserveOutput": "always",
+    "projects": [{ "outputDir": "test-results", "repeatEach": 1, "retries": 1, "name": "chromium" }],
+    "reporter": [],
+    "reportSlowTests": { "max": 0, "threshold": 15000 },
+    "testDir": "tests",
+    "testIgnore": [],
+    "testMatch": [],
+    "updateSnapshots": "missing",
+    "use": { "baseURL": "http://127.0.0.1:5174", "screenshot": "only-on-failure", "trace": "retain-on-failure" },
+    "workers": 1
+  },
+  "suites": [
+    {
+      "title": "",
+      "file": "",
+      "line": 0,
+      "column": 0,
+      "specs": [],
+      "suites": [
+        {
+          "title": "downstream-assessments",
+          "file": "tests/downstream-assessments.spec.ts",
+          "line": 4,
+          "column": 0,
+          "specs": [
+            {
+              "title": "an assessment deep link explains impact",
+              "file": "tests/downstream-assessments.spec.ts",
+              "line": 90,
+              "column": 0,
+              "tests": [
+                {
+                  "title": "an assessment deep link explains impact",
+                  "projectName": "chromium",
+                  "results": [
+                    { "status": "failed", "duration": 2500, "retry": 0 },
+                    { "status": "passed", "duration": 3200, "retry": 1 }
+                  ],
+                  "retries": 1
+                }
+              ]
+            },
+            {
+              "title": "Password visibility test",
+              "file": "tests/form-semantics.spec.ts",
+              "line": 12,
+              "column": 0,
+              "tests": [
+                {
+                  "title": "Password visibility test",
+                  "projectName": "chromium",
+                  "results": [{ "status": "passed", "duration": 1100, "retry": 0 }],
+                  "retries": 0
+                }
+              ]
+            },
+            {
+              "title": "token refresh keeps the session",
+              "file": "tests/auth.spec.ts",
+              "line": 21,
+              "column": 0,
+              "tests": [
+                {
+                  "title": "token refresh keeps the session",
+                  "projectName": "chromium",
+                  "results": [{ "status": "skipped", "duration": 0, "retry": 0 }],
+                  "retries": 0
+                }
+              ]
+            }
+          ],
+          "suites": []
+        },
+        {
+          "title": "another-file",
+          "file": "tests/other.spec.ts",
+          "line": 1,
+          "column": 0,
+          "specs": [
+            {
+              "title": "plain passing test",
+              "file": "tests/other.spec.ts",
+              "line": 5,
+              "column": 0,
+              "tests": [
+                {
+                  "title": "plain passing test",
+                  "projectName": "chromium",
+                  "results": [{ "status": "passed", "duration": 700, "retry": 0 }],
+                  "retries": 0
+                }
+              ]
+            }
+          ],
+          "suites": []
+        }
+      ]
+    }
+  ],
+  "errors": [],
+  "stats": { "expected": 3, "unexpected": 0, "flaky": 1, "skipped": 1 }
+}

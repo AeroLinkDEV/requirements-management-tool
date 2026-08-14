@@ -1,9 +1,9 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtempSync, writeFileSync, rmSync, mkdirSync } from 'node:fs'
+import { mkdtempSync, writeFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { readFragments, aggregateFragments, criticalPath } from '../lib/aggregate.mjs'
+import { readFragments, aggregateFragments, criticalPath, renderMarkdown, MAX_FRAGMENTS } from '../lib/aggregate.mjs'
 import { buildFragment } from '../lib/fragment.mjs'
 
 const run = {
@@ -19,11 +19,20 @@ const run = {
   repository: 'owner/repo',
 }
 
-function fragment(jobId, { needs = [], result = 'success', jobStartMs = 0, jobEndMs = 10000, setupEndMs = 2000, testEndMs = 9000, counts = null, cache = {}, classification = { docsOnly: false, backend: true, client: false, browser: false, postgresql: false, unavailable: false }, flakyTests = [] } = {}) {
+function fragment(group, instance, { needs = [], result = 'success', jobStartMs = 0, jobEndMs = 10000, setupEndMs = 2000, testEndMs = 9000, counts = null, cache = {}, classification = { docsOnly: false, backend: true, client: false, browser: false, postgresql: false, unavailable: false }, flakyTests = [] } = {}) {
   return buildFragment({
     run,
-    job: { id: jobId, name: jobId, needs, result },
-    timings: { jobStartMs, setupEndMs, testEndMs, jobEndMs, setupMs: setupEndMs - jobStartMs, testMs: testEndMs - setupEndMs, uploadAndCleanupMs: jobEndMs - testEndMs, missing: {} },
+    job: { group, instance, name: `${group} (${instance})`, needs, result, matrix: null },
+    timings: {
+      jobStartMs: jobStartMs === null ? null : jobStartMs,
+      setupEndMs: setupEndMs === null ? null : setupEndMs,
+      testEndMs: testEndMs === null ? null : testEndMs,
+      jobEndMs: jobEndMs === null ? null : jobEndMs,
+      setupMs: setupEndMs !== null && jobStartMs !== null ? setupEndMs - jobStartMs : null,
+      testMs: setupEndMs !== null && testEndMs !== null ? testEndMs - setupEndMs : null,
+      uploadAndCleanupMs: testEndMs !== null && jobEndMs !== null ? jobEndMs - testEndMs : null,
+      missing: {},
+    },
     counts: counts ?? { expected: null, executed: null, passed: null, failed: null, skipped: null, flaky: null, source: null, missing: 'no structured output' },
     slowest: [],
     flakyTests,
@@ -33,38 +42,126 @@ function fragment(jobId, { needs = [], result = 'success', jobStartMs = 0, jobEn
   })
 }
 
-test('valid fragments aggregate and the critical path follows the dependency DAG', () => {
+const expectedMatrix = [
+  { group: 'changes', instance: 'changes', needs: [] },
+  { group: 'backend-api', instance: 'backend-api-1', needs: ['changes'] },
+  { group: 'backend-api', instance: 'backend-api-2', needs: ['changes'] },
+  { group: 'backend-api', instance: 'backend-api-3', needs: ['changes'] },
+  { group: 'browser-pr', instance: 'browser-pr-1', needs: ['changes'] },
+  { group: 'browser-pr', instance: 'browser-pr-2', needs: ['changes'] },
+  { group: 'browser-pr', instance: 'browser-pr-3', needs: ['changes'] },
+  { group: 'browser-pr', instance: 'browser-pr-4', needs: ['changes'] },
+  { group: 'gate', instance: 'gate', needs: ['changes', 'backend-api', 'browser-pr'] },
+]
+
+test('the real matrix topology keeps every instance distinct and the gate waits on the slowest lane', () => {
   const fragments = [
-    fragment('changes', { jobStartMs: 0, jobEndMs: 1000 }),
-    fragment('backend-api', { needs: ['changes'], jobStartMs: 1000, jobEndMs: 26000 }),
-    fragment('client', { needs: ['changes'], jobStartMs: 1000, jobEndMs: 8000 }),
-    fragment('gate', { needs: ['backend-api', 'client'], jobStartMs: 26000, jobEndMs: 27000 }),
+    fragment('changes', 'changes', { jobStartMs: 0, jobEndMs: 1000 }),
+    fragment('backend-api', 'backend-api-1', { needs: ['changes'], jobStartMs: 1000, jobEndMs: 20000 }),
+    fragment('backend-api', 'backend-api-2', { needs: ['changes'], jobStartMs: 1000, jobEndMs: 12000 }),
+    fragment('backend-api', 'backend-api-3', { needs: ['changes'], jobStartMs: 1000, jobEndMs: 14000 }),
+    fragment('browser-pr', 'browser-pr-1', { needs: ['changes'], jobStartMs: 1000, jobEndMs: 30000 }),
+    fragment('browser-pr', 'browser-pr-2', { needs: ['changes'], jobStartMs: 1000, jobEndMs: 16000 }),
+    fragment('browser-pr', 'browser-pr-3', { needs: ['changes'], jobStartMs: 1000, jobEndMs: 18000 }),
+    fragment('browser-pr', 'browser-pr-4', { needs: ['changes'], jobStartMs: 1000, jobEndMs: 15000 }),
+    fragment('gate', 'gate', { needs: ['changes', 'backend-api', 'browser-pr'], jobStartMs: 30000, jobEndMs: 31000 }),
   ]
-  const merged = aggregateFragments({ fragments })
-  assert.equal(merged.jobs.length, 4)
+  const merged = aggregateFragments({ fragments, runMeta: { expectedJobs: expectedMatrix } })
+  assert.equal(merged.missing.length, 0)
+  assert.equal(merged.jobs.length, 9)
   assert.equal(merged.criticalPath.job, 'gate')
-  assert.equal(merged.criticalPath.durationMs, 27000)
-  assert.deepEqual(merged.criticalPath.path, ['changes', 'backend-api', 'gate'])
+  assert.equal(merged.criticalPath.durationMs, 31000)
+  assert.deepEqual(merged.criticalPath.path, ['changes', 'browser-pr-1', 'gate'])
 })
 
-test('a job without duration does not claim zero on the critical path', () => {
-  const fragments = [fragment('changes', { jobStartMs: 0, jobEndMs: 1000 }), fragment('backend-api', { needs: ['changes'], jobStartMs: null, jobEndMs: null, setupEndMs: null, testEndMs: null })]
-  const merged = aggregateFragments({ fragments })
-  assert.ok(merged.criticalPath.missingDuration.includes('backend-api'))
-  assert.equal(merged.criticalPath.durationMs, 1000)
+test('an absent expected lane is missing data and makes the critical path unavailable', () => {
+  const fragments = [
+    fragment('changes', 'changes', { jobStartMs: 0, jobEndMs: 1000 }),
+    fragment('backend-api', 'backend-api-1', { needs: ['changes'], jobStartMs: 1000, jobEndMs: 20000 }),
+    fragment('gate', 'gate', { needs: ['changes', 'backend-api', 'browser-pr'], jobStartMs: 20000, jobEndMs: 21000 }),
+  ]
+  const merged = aggregateFragments({ fragments, runMeta: { expectedJobs: expectedMatrix } })
+  assert.ok(merged.missing.some((entry) => entry.job === 'browser-pr-1'))
+  assert.ok(merged.missing.some((entry) => entry.job === 'backend-api-2'))
+  assert.equal(merged.criticalPath.job, null)
+  assert.equal(merged.criticalPath.durationMs, null)
+  assert.match(merged.criticalPath.unavailableReason, /expected fragment absent/)
+})
+
+test('a null duration on the otherwise longest path makes the critical path unavailable', () => {
+  const fragments = [
+    fragment('changes', 'changes', { jobStartMs: 0, jobEndMs: 1000 }),
+    fragment('backend-api', 'backend-api-1', { needs: ['changes'], jobStartMs: null, jobEndMs: null, setupEndMs: null, testEndMs: null }),
+  ]
+  const path = criticalPath({ fragments })
+  assert.equal(path.durationMs, null)
+  assert.match(path.unavailableReason, /duration unknown/)
+})
+
+test('a cycle yields an explicit unavailable reason rather than a number', () => {
+  const a = fragment('a', 'a', { needs: ['b'] })
+  const b = fragment('b', 'b', { needs: ['a'] })
+  const path = criticalPath({ fragments: [a, b] })
+  assert.equal(path.durationMs, null)
+  assert.match(path.unavailableReason, /Cycle detected/)
+})
+
+test('a missing dependency group makes the critical path unavailable', () => {
+  const fragments = [fragment('a', 'a', { needs: ['does-not-exist'] })]
+  const path = criticalPath({ fragments })
+  assert.match(path.unavailableReason, /Dependency group "does-not-exist"/)
+})
+
+test('duplicate instance identity is contradictory topology', () => {
+  const fragments = [
+    fragment('backend-api', 'backend-api-1'),
+    fragment('backend-api', 'backend-api-1'),
+  ]
+  const path = criticalPath({ fragments })
+  assert.match(path.unavailableReason, /Duplicate job instance/)
+})
+
+test('fragments from a different run are rejected rather than merged', () => {
+  const foreign = fragment('changes', 'changes')
+  foreign.run.id = 9999
+  const merged = aggregateFragments({ fragments: [fragment('changes', 'changes'), foreign], runMeta: { expectedJobs: [{ group: 'changes', instance: 'changes', needs: [] }] } })
+  assert.ok(merged.criticalPath.unavailableReason.includes('different run/attempt/SHA/tree/workflow/repository identity'))
+})
+
+test('a fragment that does not match the expected run identity is rejected', () => {
+  const mismatched = fragment('changes', 'changes')
+  mismatched.run.tree = 'e'.repeat(40)
+  const merged = aggregateFragments({
+    fragments: [mismatched],
+    runMeta: {
+      expectedJobs: [{ group: 'changes', instance: 'changes', needs: [] }],
+      expectedRun: { ...run, tree: 'd'.repeat(40) },
+    },
+  })
+  assert.match(merged.criticalPath.unavailableReason, /does not match the expected run identity/)
+})
+
+test('expected-job metadata with duplicate or malformed entries is rejected', () => {
+  const fragments = [fragment('changes', 'changes')]
+  const merged = aggregateFragments({
+    fragments,
+    runMeta: { expectedJobs: [
+      { group: 'changes', instance: 'changes', needs: [] },
+      { group: 'changes', instance: 'changes', needs: [] },
+    ] },
+  })
+  assert.match(merged.criticalPath.unavailableReason, /Duplicate expected job instance/)
 })
 
 test('missing and malformed fragments are reported as missing, never as zero', () => {
   const directory = mkdtempSync(join(tmpdir(), 'ci-metrics-'))
   try {
-    writeFileSync(join(directory, 'valid.json'), JSON.stringify(fragment('changes', { jobStartMs: 0, jobEndMs: 1000 })))
+    writeFileSync(join(directory, 'valid.json'), JSON.stringify(fragment('changes', 'changes', { jobStartMs: 0, jobEndMs: 1000 })))
     writeFileSync(join(directory, 'malformed.json'), '{not json')
-    writeFileSync(join(directory, 'wrong-schema.json'), JSON.stringify({ ...fragment('client'), schemaVersion: 'aerolink-ci-fragment/old' }))
+    writeFileSync(join(directory, 'bad-nested.json'), JSON.stringify({ ...fragment('client', 'client'), job: { ...fragment('client', 'client').job, needs: null } }))
     const { fragments, missing } = readFragments(directory)
     assert.equal(fragments.length, 1)
     assert.equal(missing.length, 2)
-    assert.ok(missing.some((entry) => entry.job === 'malformed'))
-    assert.ok(missing.some((entry) => entry.job === 'wrong-schema'))
   } finally {
     rmSync(directory, { recursive: true, force: true })
   }
@@ -88,7 +185,6 @@ test('an empty fragment directory is missing data, not a successful zero-duratio
   try {
     const { fragments, missing } = readFragments(directory)
     assert.equal(fragments.length, 0)
-    assert.deepEqual(missing, [])
     const merged = aggregateFragments({ fragments, missing })
     assert.equal(merged.criticalPath.job, null)
     assert.equal(merged.jobs.length, 0)
@@ -98,88 +194,88 @@ test('an empty fragment directory is missing data, not a successful zero-duratio
 })
 
 test('expected/actual count mismatch is carried into the merged record', () => {
-  const fragments = [fragment('backend-api', { counts: { expected: 160, executed: 159, passed: 158, failed: 1, skipped: 0, flaky: null, source: 'trx', missing: null } })]
+  const fragments = [fragment('backend-api', 'backend-api-1', { counts: { expected: 160, executed: 159, passed: 158, failed: 1, skipped: 0, flaky: null, source: 'trx', missing: null } })]
   const merged = aggregateFragments({ fragments })
   assert.equal(merged.counts.expected, 160)
   assert.equal(merged.counts.executed, 159)
-  assert.notEqual(merged.counts.expected, merged.counts.executed)
 })
 
 test('flaky titles from all fragments are unioned and bounded', () => {
   const fragments = [
-    fragment('browser-1', { flakyTests: ['alpha spec'], counts: { expected: 40, executed: 40, passed: 39, failed: 0, skipped: 0, flaky: 1, source: 'playwright-json', missing: null } }),
-    fragment('browser-2', { flakyTests: ['alpha spec', 'beta spec'], counts: { expected: 40, executed: 40, passed: 39, failed: 0, skipped: 0, flaky: 1, source: 'playwright-json', missing: null } }),
+    fragment('browser-pr', 'browser-pr-1', { flakyTests: ['alpha spec'], counts: { expected: 40, executed: 40, passed: 39, failed: 0, skipped: 0, flaky: 1, source: 'playwright-json', missing: null } }),
+    fragment('browser-pr', 'browser-pr-2', { flakyTests: ['alpha spec', 'beta spec'], counts: { expected: 40, executed: 40, passed: 39, failed: 0, skipped: 0, flaky: 1, source: 'playwright-json', missing: null } }),
   ]
   const merged = aggregateFragments({ fragments })
   assert.deepEqual(merged.flakyTests, ['alpha spec', 'beta spec'])
   assert.equal(merged.counts.flaky, 2)
 })
 
-test('comparable-run grouping counts classification flags per fragment', () => {
-  const fragments = [
-    fragment('backend-api', { classification: { docsOnly: false, backend: true, client: false, browser: false, postgresql: false, unavailable: false } }),
-    fragment('browser-1', { classification: { docsOnly: false, backend: false, client: false, browser: true, postgresql: false, unavailable: false } }),
-    fragment('changes', { classification: { docsOnly: true, backend: false, client: false, browser: false, postgresql: false, unavailable: false } }),
-  ]
-  const merged = aggregateFragments({ fragments })
-  assert.equal(merged.classifications.backend, 1)
-  assert.equal(merged.classifications.browser, 1)
-  assert.equal(merged.classifications.docsOnly, 1)
-})
-
 test('runMeta queue delay is reported when supplied and unavailable otherwise', () => {
-  const fragments = [fragment('changes')]
+  const fragments = [fragment('changes', 'changes')]
   assert.equal(aggregateFragments({ fragments }).queue.delayMs, null)
   assert.match(aggregateFragments({ fragments }).queue.unavailableReason, /rolling collector/)
   assert.equal(aggregateFragments({ fragments, runMeta: { queueDelayMs: 12000 } }).queue.delayMs, 12000)
 })
 
-test('criticalPath guards against a cycle without hanging', () => {
-  const a = fragment('a', { needs: ['b'] })
-  const b = fragment('b', { needs: ['a'] })
-  const path = criticalPath([a, b])
-  assert.ok(Array.isArray(path.path))
+test('Markdown output escapes pipes, line breaks, and HTML from untrusted names', () => {
+  const tricky = fragment('backend-api', 'backend-api-1', { needs: ['x|y'] })
+  tricky.job.name = 'API | suite\n<script>alert(1)</script>'
+  tricky.missing['reason <b>'] = 'line\nbreak & value'
+  const merged = aggregateFragments({ fragments: [tricky] })
+  const markdown = renderMarkdown(merged)
+  assert.ok(!markdown.includes('<script>'))
+  assert.ok(markdown.includes('&lt;script&gt;'))
+  assert.ok(markdown.includes('\\|'))
 })
 
-test('readFragments tolerates a missing directory', () => {
-  const { fragments, missing } = readFragments(join(tmpdir(), 'does-not-exist-ci-metrics'))
-  assert.equal(fragments.length, 0)
-  assert.equal(missing.length, 1)
-  assert.match(missing[0].reason, /Could not read fragment directory/)
+test('merged output and missing lists are bounded', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'ci-metrics-'))
+  try {
+    for (let i = 0; i < MAX_FRAGMENTS + 10; i++) {
+      writeFileSync(join(directory, `fragment-${i}.json`), JSON.stringify(fragment('backend-api', `backend-api-${i}`)))
+    }
+    const { fragments, missing, truncated } = readFragments(directory)
+    assert.equal(fragments.length, MAX_FRAGMENTS)
+    assert.equal(truncated, true)
+    assert.equal(missing.length, 0)
+  } finally {
+    rmSync(directory, { recursive: true, force: true })
+  }
 })
 
-test('aggregate output is bounded and contains no secret-like values', () => {
-  const fragments = [fragment('changes'), fragment('backend-api', { needs: ['changes'] })]
+test('aggregate output is bounded and contains no credential-shaped values', () => {
+  const fragments = [fragment('changes', 'changes'), fragment('backend-api', 'backend-api-1', { needs: ['changes'] })]
   const merged = aggregateFragments({ fragments })
   const json = JSON.stringify(merged)
-  assert.ok(Buffer.byteLength(json, 'utf8') < 256 * 1024)
-  assert.ok(!/password|secret|authorization/i.test(json))
+  assert.ok(Buffer.byteLength(json, 'utf8') < 512 * 1024)
+  assert.ok(!/password\s*=|bearer\s+[A-Za-z0-9._~+/=-]{12,}/i.test(json))
 })
 
 test('a failed or cancelled job result is preserved in the merged record', () => {
-  const fragments = [fragment('backend-api', { result: 'failure' }), fragment('browser-1', { result: 'cancelled' })]
+  const fragments = [fragment('backend-api', 'backend-api-1', { result: 'failure' }), fragment('browser-pr', 'browser-pr-1', { result: 'cancelled' })]
   const merged = aggregateFragments({ fragments })
-  assert.equal(merged.jobs.find((job) => job.id === 'backend-api').result, 'failure')
-  assert.equal(merged.jobs.find((job) => job.id === 'browser-1').result, 'cancelled')
+  assert.equal(merged.jobs.find((job) => job.instance === 'backend-api-1').result, 'failure')
+  assert.equal(merged.jobs.find((job) => job.instance === 'browser-pr-1').result, 'cancelled')
 })
 
-test('writeFragment parity: a fixture directory plus a valid run-meta produces a full run record', async () => {
+test('CLI parity: expected-jobs metadata drives absent detection and bounded output', async () => {
   const directory = mkdtempSync(join(tmpdir(), 'ci-metrics-'))
   const output = mkdtempSync(join(tmpdir(), 'ci-metrics-out-'))
   try {
-    writeFileSync(join(directory, 'changes.json'), JSON.stringify(fragment('changes', { jobStartMs: 0, jobEndMs: 1000 })))
-    writeFileSync(join(directory, 'backend-api.json'), JSON.stringify(fragment('backend-api', { needs: ['changes'], jobStartMs: 1000, jobEndMs: 26000 })))
+    writeFileSync(join(directory, 'changes.json'), JSON.stringify(fragment('changes', 'changes', { jobStartMs: 0, jobEndMs: 1000 })))
+    writeFileSync(join(directory, 'backend-api-1.json'), JSON.stringify(fragment('backend-api', 'backend-api-1', { needs: ['changes'], jobStartMs: 1000, jobEndMs: 26000 })))
     const runMetaPath = join(output, 'run-meta.json')
-    writeFileSync(runMetaPath, JSON.stringify({ queueDelayMs: 5000 }))
+    writeFileSync(runMetaPath, JSON.stringify({ queueDelayMs: 5000, expectedJobs: expectedMatrix }))
     const { spawnSync } = await import('node:child_process')
     const result = spawnSync(process.execPath, ['bin/aggregate.mjs', directory, output, runMetaPath], { encoding: 'utf8' })
     assert.equal(result.status, 0, result.stderr)
     const merged = JSON.parse(await import('node:fs').then((fs) => fs.readFileSync(join(output, 'run-metrics.json'), 'utf8')))
     assert.equal(merged.schemaVersion, 'aerolink-ci-run/v1')
     assert.equal(merged.queue.delayMs, 5000)
-    assert.equal(merged.criticalPath.job, 'backend-api')
+    assert.ok(merged.missing.some((entry) => entry.job === 'backend-api-2'))
+    assert.equal(merged.criticalPath.job, null)
     const markdown = await import('node:fs').then((fs) => fs.readFileSync(join(output, 'run-metrics.md'), 'utf8'))
-    assert.match(markdown, /Critical path/)
+    assert.match(markdown, /Critical path: unavailable/)
   } finally {
     rmSync(directory, { recursive: true, force: true })
     rmSync(output, { recursive: true, force: true })

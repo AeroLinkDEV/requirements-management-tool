@@ -27,9 +27,11 @@
     },
     "job": {
       "type": "object",
-      "required": ["id", "name", "needs", "result"],
+      "required": ["group", "instance", "name", "needs", "result"],
+      "additionalProperties": false,
       "properties": {
-        "id": { "type": "string", "maxLength": 100 },
+        "group": { "type": "string", "maxLength": 100 },
+        "instance": { "type": "string", "maxLength": 120 },
         "name": { "type": "string", "maxLength": 200 },
         "matrix": { "type": ["object", "null"] },
         "needs": { "type": "array", "items": { "type": "string", "maxLength": 100 }, "maxItems": 12 },
@@ -39,23 +41,25 @@
     "timings": {
       "type": "object",
       "required": ["jobStartMs", "setupEndMs", "testEndMs", "jobEndMs", "setupMs", "testMs", "uploadAndCleanupMs", "missing"],
+      "additionalProperties": false,
       "properties": {
         "jobStartMs": { "type": ["integer", "null"], "minimum": 0 },
         "setupEndMs": { "type": ["integer", "null"], "minimum": 0 },
         "testEndMs": { "type": ["integer", "null"], "minimum": 0 },
         "jobEndMs": { "type": ["integer", "null"], "minimum": 0 },
-        "setupMs": { "type": ["integer", "null"], "minimum": 0 },
-        "testMs": { "type": ["integer", "null"], "minimum": 0 },
-        "uploadAndCleanupMs": { "type": ["integer", "null"], "minimum": 0 },
         "missing": {
           "type": "object",
           "additionalProperties": { "type": "string", "maxLength": 300 }
-        }
+        },
+        "setupMs": { "type": ["integer", "null"], "minimum": 0 },
+        "testMs": { "type": ["integer", "null"], "minimum": 0 },
+        "uploadAndCleanupMs": { "type": ["integer", "null"], "minimum": 0 }
       }
     },
     "counts": {
       "type": "object",
       "required": ["expected", "executed", "passed", "failed", "skipped", "flaky", "source", "missing"],
+      "additionalProperties": false,
       "properties": {
         "expected": { "type": ["integer", "null"], "minimum": 0 },
         "executed": { "type": ["integer", "null"], "minimum": 0 },
@@ -73,6 +77,7 @@
       "items": {
         "type": "object",
         "required": ["name", "durationMs", "kind"],
+        "additionalProperties": false,
         "properties": {
           "name": { "type": "string", "maxLength": 300 },
           "durationMs": { "type": "integer", "minimum": 0 },
@@ -88,16 +93,21 @@
     "cache": {
       "type": "object",
       "required": ["nuget", "npm", "chromium", "missing"],
+      "additionalProperties": false,
       "properties": {
         "nuget": { "type": ["string", "null"], "enum": ["hit", "miss", null] },
         "npm": { "type": ["string", "null"], "enum": ["hit", "miss", null] },
         "chromium": { "type": ["string", "null"], "enum": ["hit", "miss", null] },
-        "missing": { "type": "object", "additionalProperties": { "type": "string", "maxLength": 300 } }
+        "missing": {
+          "type": "object",
+          "additionalProperties": { "type": "string", "maxLength": 300 }
+        }
       }
     },
     "classification": {
       "type": "object",
       "required": ["docsOnly", "backend", "client", "browser", "postgresql", "unavailable"],
+      "additionalProperties": false,
       "properties": {
         "docsOnly": { "type": ["boolean", "null"] },
         "backend": { "type": ["boolean", "null"] },

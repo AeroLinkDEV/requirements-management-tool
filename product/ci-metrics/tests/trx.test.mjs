@@ -1,5 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
 import { parseTrx, parseDuration, classDurations, TrxParseError } from '../lib/trx.mjs'
 
 const sample = `<?xml version="1.0" encoding="utf-8"?>
@@ -58,4 +60,18 @@ test('parseTrx rejects a file without counters', () => {
 test('parseTrx rejects non-text and oversized input', () => {
   assert.throws(() => parseTrx(42), TrxParseError)
   assert.throws(() => parseTrx('x'.repeat(51 * 1024 * 1024)), TrxParseError)
+})
+
+test('a representative failed TRX fixture yields exact totals and per-test outcomes', () => {
+  const fixture = readFileSync(new URL('./fixtures/trx-failure.trx', import.meta.url), 'utf8')
+  const parsed = parseTrx(fixture)
+  assert.deepEqual(parsed.totals, { total: 4, executed: 4, passed: 2, failed: 2, skipped: 0 })
+  assert.equal(parsed.tests.length, 4)
+  const byName = new Map(parsed.tests.map((entry) => [entry.name, entry]))
+  assert.equal(byName.get('BetaTests.Failing_one').outcome, 'Failed')
+  assert.equal(byName.get('BetaTests.Failing_one').durationMs, 1100)
+  assert.equal(byName.get('AlphaTests.Passing_one').outcome, 'Passed')
+  const rows = classDurations(parsed.tests)
+  assert.deepEqual(rows.map((row) => row.name), ['AeroLink.Api.Tests.BetaTests', 'AeroLink.Api.Tests.AlphaTests'])
+  assert.equal(rows[0].durationMs, 2000)
 })

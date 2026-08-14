@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="utf-8"?>
+<TestRun id="8e8b25e4-2a9c-4c56-8f6f-1d5c3f5a9b21" name="AeroLink.Api.Tests 2026-08-13T12:00:00" runUser="runner" xmlns="http://microsoft.com/schemas/VisualStudio/TeamTest/2010">
+  <TestSettings name="default" id="00000000-0000-0000-0000-000000000000">
+    <Description>CI test run</Description>
+  </TestSettings>
+  <Times creation="2026-08-13T12:00:00.0000000+00:00" queuing="2026-08-13T12:00:00.1000000+00:00" start="2026-08-13T12:00:01.0000000+00:00" finish="2026-08-13T12:00:31.5000000+00:00" />
+  <ResultSummary outcome="Failed">
+    <Counters total="4" executed="4" passed="2" failed="2" error="0" timeout="0" aborted="0" inconclusive="0" passedButRunAborted="0" notRunnable="0" notExecuted="0" disconnected="0" warning="0" completed="0" inProgress="0" pending="0" />
+    <Output>
+      <StdOut>Shard 1 of 3: 4 tests across 2 discovered classes.</StdOut>
+    </Output>
+  </ResultSummary>
+  <TestDefinitions>
+    <UnitTest id="7d1a0c2a-9d86-46f5-9a3e-8d1e1e7b0f01" name="AlphaTests.Passing_one" storage="aerolink.api.tests.dll">
+      <Execution id="00000000-0000-0000-0000-000000000001" />
+      <TestMethod codeBase="aerolink.api.tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/net" className="AeroLink.Api.Tests.AlphaTests" name="Passing_one" />
+    </UnitTest>
+    <UnitTest id="7d1a0c2a-9d86-46f5-9a3e-8d1e1e7b0f02" name="AlphaTests.Passing_two" storage="aerolink.api.tests.dll">
+      <Execution id="00000000-0000-0000-0000-000000000002" />
+      <TestMethod codeBase="aerolink.api.tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/net" className="AeroLink.Api.Tests.AlphaTests" name="Passing_two" />
+    </UnitTest>
+    <UnitTest id="7d1a0c2a-9d86-46f5-9a3e-8d1e1e7b0f03" name="BetaTests.Failing_one" storage="aerolink.api.tests.dll">
+      <Execution id="00000000-0000-0000-0000-000000000003" />
+      <TestMethod codeBase="aerolink.api.tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/net" className="AeroLink.Api.Tests.BetaTests" name="Failing_one" />
+    </UnitTest>
+    <UnitTest id="7d1a0c2a-9d86-46f5-9a3e-8d1e1e7b0f04" name="BetaTests.Failing_two" storage="aerolink.api.tests.dll">
+      <Execution id="00000000-0000-0000-0000-000000000004" />
+      <TestMethod codeBase="aerolink.api.tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/net" className="AeroLink.Api.Tests.BetaTests" name="Failing_two" />
+    </UnitTest>
+  </TestDefinitions>
+  <Results>
+    <UnitTestResult executionId="00000000-0000-0000-0000-000000000001" testId="7d1a0c2a-9d86-46f5-9a3e-8d1e1e7b0f01" testName="AlphaTests.Passing_one" computerName="WIN-RUNNER" duration="00:00:00.4500000" startTime="2026-08-13T12:00:02.0000000+00:00" endTime="2026-08-13T12:00:02.4500000+00:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57de7f980db9" relativeResultsDirectory="7d1a0c2a-9d86-46f5-9a3e-8d1e1e7b0f01">
+      <Output><StdOut>ok</StdOut></Output>
+    </UnitTestResult>
+    <UnitTestResult executionId="00000000-0000-0000-0000-000000000002" testId="7d1a0c2a-9d86-46f5-9a3e-8d1e1e7b0f02" testName="AlphaTests.Passing_two" computerName="WIN-RUNNER" duration="00:00:00.3800000" startTime="2026-08-13T12:00:02.5000000+00:00" endTime="2026-08-13T12:00:02.8800000+00:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57de7f980db9" relativeResultsDirectory="7d1a0c2a-9d86-46f5-9a3e-8d1e1e7b0f02">
+      <Output><StdOut>ok</StdOut></Output>
+    </UnitTestResult>
+    <UnitTestResult executionId="00000000-0000-0000-0000-000000000003" testId="7d1a0c2a-9d86-46f5-9a3e-8d1e1e7b0f03" testName="BetaTests.Failing_one" computerName="WIN-RUNNER" duration="00:00:01.1000000" startTime="2026-08-13T12:00:03.0000000+00:00" endTime="2026-08-13T12:00:04.1000000+00:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Failed" testListId="8c84fa94-04c1-424b-9868-57de7f980db9" relativeResultsDirectory="7d1a0c2a-9d86-46f5-9a3e-8d1e1e7b0f03">
+      <Output><ErrorInfo><Message>Assert.Equal() Failure</Message><StackTrace>at AeroLink.Api.Tests.BetaTests.Failing_one() in BetaTests.cs:line 42</StackTrace></ErrorInfo></Output>
+    </UnitTestResult>
+    <UnitTestResult executionId="00000000-0000-0000-0000-000000000004" testId="7d1a0c2a-9d86-46f5-9a3e-8d1e1e7b0f04" testName="BetaTests.Failing_two" computerName="WIN-RUNNER" duration="00:00:00.9000000" startTime="2026-08-13T12:00:04.2000000+00:00" endTime="2026-08-13T12:00:05.1000000+00:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Failed" testListId="8c84fa94-04c1-424b-9868-57de7f980db9" relativeResultsDirectory="7d1a0c2a-9d86-46f5-9a3e-8d1e1e7b0f04">
+      <Output><ErrorInfo><Message>Timeout</Message><StackTrace>at AeroLink.Api.Tests.BetaTests.Failing_two() in BetaTests.cs:line 77</StackTrace></ErrorInfo></Output>
+    </UnitTestResult>
+  </Results>
+</TestRun>
