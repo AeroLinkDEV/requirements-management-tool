@@ -910,6 +910,19 @@ html .reviseAction:disabled { cursor: not-allowed; opacity: .5; }
   backdrop-filter: blur(15px);
 }
 
+/* Sits between the summary and the controls, so the reason a control is unavailable is read on the way to
+   it rather than discovered by clicking. Deliberately not an error colour: nothing has gone wrong, there is
+   simply something left to do. */
+.checkInBlockedReason {
+  flex: 1 1 260px;
+  min-width: 0;
+  margin: 0;
+  color: #4a5b68;
+  font-size: 0.86rem;
+  line-height: 1.35;
+  text-align: right;
+}
+
 .approverSetup {
   max-width: 920px;
   margin: 0 auto;

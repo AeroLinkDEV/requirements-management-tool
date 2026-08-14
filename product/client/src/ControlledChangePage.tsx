@@ -131,6 +131,7 @@ export function ControlledChangeAuthoringActions({
   saving = false,
   canSave,
   canCheckIn,
+  checkInBlockedReason,
   onDiscard,
   onSave,
   checkInLabel = 'Save & check in',
@@ -141,12 +142,21 @@ export function ControlledChangeAuthoringActions({
   saving?: boolean
   canSave: boolean
   canCheckIn: boolean
+  /**
+   * Why check-in is unavailable, in words, whenever it is. A greyed control that says nothing leaves the
+   * reader to guess between "the page is busy", "I lack authority" and "something I typed is wrong" — and
+   * they are three different actions. Required in practice rather than by the type, because the only correct
+   * value when `canCheckIn` is false is a sentence.
+   */
+  checkInBlockedReason?: string
   onDiscard: () => void
   onSave: () => void
   checkInLabel?: string
 }) {
   return <div className="workspaceActions stickyWorkspaceActions">
     <div><b>{summary}</b><span>{detail}</span></div>
+    {!canCheckIn && checkInBlockedReason && !busy && !saving
+      && <p className="checkInBlockedReason" role="status">{checkInBlockedReason}</p>}
     <button type="button" className="outline" onClick={onDiscard} disabled={busy}>Discard checkout</button>
     <button type="button" className="outline" onClick={onSave} disabled={busy || saving || !canSave}>Save</button>
     <button type="submit" disabled={busy || saving || !canCheckIn}>{busy ? 'Checking in…' : checkInLabel}</button>
