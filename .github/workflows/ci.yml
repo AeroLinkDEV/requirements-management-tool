@@ -827,7 +827,7 @@ jobs:
   gate:
     name: Report what this run validated
     if: always()
-    needs: [changes, backend-api, backend-core, client, script-contracts, browser-pr, browser-production, postgresql-smoke]
+    needs: [changes, backend-api, backend-core, client, script-contracts, browser-pr, browser-production, postgresql-smoke, metrics-tooling]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -840,6 +840,7 @@ jobs:
           BROWSER: ${{ needs.browser-pr.result }}
           PRODUCTION: ${{ needs.browser-production.result }}
           POSTGRESQL: ${{ needs.postgresql-smoke.result }}
+          METRICS_TOOLING: ${{ needs.metrics-tooling.result }}
           DOCS_ONLY: ${{ needs.changes.outputs.docs_only }}
           EVENT_NAME: ${{ github.event_name }}
         run: |
@@ -862,6 +863,7 @@ jobs:
             describe "Browser journeys" "$BROWSER"
             describe "Browser journeys on the production build" "$PRODUCTION"
             describe "PostgreSQL migrations and secure bootstrap" "$POSTGRESQL"
+            describe "CI metrics tooling tests" "$METRICS_TOOLING"
             echo
             if [ "$DOCS_ONLY" = "true" ]; then
               echo "Classified as a documentation-only change, so no product gate ran. This tick is not evidence about the product."
@@ -914,3 +916,16 @@ jobs:
               exit 1
             fi
           fi
+
+  # The metrics tooling is CI-only and never merge authority: its job is deliberately NOT part of the
+  # failure list above, so a metrics bug cannot turn a correct product gate red. It is still visible in the
+  # authoritative summary, which is the point: the tooling that will observe CI must itself be observed.
+  metrics-tooling:
+    name: CI metrics tooling tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Run metrics tooling tests from a clean checkout
+        run: node --test product/ci-metrics/tests/trx.test.mjs product/ci-metrics/tests/playwright.test.mjs product/ci-metrics/tests/fragment.test.mjs product/ci-metrics/tests/aggregate.test.mjs
