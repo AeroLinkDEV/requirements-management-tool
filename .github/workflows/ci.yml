@@ -1415,7 +1415,7 @@ jobs:
         continue-on-error: true
         run: node "${{ github.workspace }}/product/ci-metrics/bin/mark.mjs" setup-end
       - name: Run metrics tooling tests from a clean checkout
-        run: node --test --test-reporter=spec --test-reporter=junit --test-reporter-destination=stdout --test-reporter-destination=metrics-tooling.xml product/ci-metrics/tests/trx.test.mjs product/ci-metrics/tests/playwright.test.mjs product/ci-metrics/tests/fragment.test.mjs product/ci-metrics/tests/aggregate.test.mjs product/ci-metrics/tests/build-run-meta.test.mjs product/ci-metrics/tests/junit.test.mjs product/ci-metrics/tests/ci-workflow-contract.test.mjs product/ci-metrics/tests/zip.test.mjs product/ci-metrics/tests/rolling.test.mjs
+        run: node --test --test-reporter=spec --test-reporter=junit --test-reporter-destination=stdout --test-reporter-destination=metrics-tooling.xml product/ci-metrics/tests/trx.test.mjs product/ci-metrics/tests/playwright.test.mjs product/ci-metrics/tests/fragment.test.mjs product/ci-metrics/tests/aggregate.test.mjs product/ci-metrics/tests/build-run-meta.test.mjs product/ci-metrics/tests/junit.test.mjs product/ci-metrics/tests/ci-workflow-contract.test.mjs product/ci-metrics/tests/zip.test.mjs product/ci-metrics/tests/rolling.test.mjs product/ci-metrics/tests/provenance.test.mjs
       - name: Mark test complete
         if: always()
         continue-on-error: true
@@ -1496,6 +1496,22 @@ jobs:
             "${{ runner.temp }}/metrics/out" \
             "${{ runner.temp }}/metrics/run-meta.json"
           cat "${{ runner.temp }}/metrics/out/run-metrics.md" >> "$GITHUB_STEP_SUMMARY"
+      - name: Write validated-tree manifest
+        if: always()
+        continue-on-error: true
+        env:
+          VALIDATED_RUN_METRICS_PATH: ${{ runner.temp }}/metrics/out/run-metrics.json
+          VALIDATED_TREE_OUTPUT_PATH: ${{ runner.temp }}/metrics/out/validated-tree.json
+        run: node "${{ github.workspace }}/product/ci-metrics/bin/write-validated-tree.mjs"
+      - name: Upload validated-tree manifest
+        if: success()
+        continue-on-error: true
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: validated-tree-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/metrics/out/validated-tree.json
+          if-no-files-found: ignore
+          retention-days: 30
       - name: Upload merged metrics
         if: always()
         continue-on-error: true

@@ -76,6 +76,8 @@ const METRICS_ONLY_STEPS = [
   'Aggregate and publish summary',
   'Upload merged metrics',
   'Compute metrics gate dependencies',
+  'Write validated-tree manifest',
+  'Upload validated-tree manifest',
 ]
 
 test('every metrics-only step is failure-isolated with continue-on-error', () => {
@@ -116,6 +118,8 @@ test('fragment artifacts are attempt-scoped and the report pattern excludes merg
   assert.doesNotMatch(report, /merge-multiple:\s*true/, 'each attempt artifact must land in its own subdirectory')
   assert.match(report, /if-no-files-found:\s*ignore/)
   assert.match(report, /name:\s*ci-metrics-run-\$\{\{\s*github\.run_id\s*\}\}-\$\{\{\s*github\.run_attempt\s*\}\}/)
+  assert.match(report, /name:\s*validated-tree-\$\{\{\s*github\.run_id\s*\}\}-\$\{\{\s*github\.run_attempt\s*\}\}/)
+  assert.match(report, /if:\s*success\(\)\s*\n\s*continue-on-error:\s*true\s*\n\s*uses: actions\/upload-artifact/, 'validated-tree manifest upload must be success-gated and isolated')
 })
 
 test('metrics-report waits for every independently selected producer', () => {
