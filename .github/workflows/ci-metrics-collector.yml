@@ -1,0 +1,68 @@
+name: CI metrics rolling collector
+
+# Phase B: a trusted default-branch collector that turns per-run metrics fragments into like-for-like
+# rolling medians/p95, queue/cancellation accounting, flake and cache trends, and sustained-regression
+# candidates. It is a separate non-authoritative workflow: the required check remains
+# `Report what this run validated`, and this collector can never influence merge authority.
+#
+# workflow_run fires for completed quality-gate runs (including PR runs). This workflow file and the
+# collector code it executes always come from the default branch, never from PR-controlled content;
+# downloaded run records are validated as untrusted data and their identity is cross-checked against the
+# GitHub API.
+on:
+  workflow_run:
+    workflows:
+      - Product quality gate
+    types:
+      - completed
+  schedule:
+    - cron: '17 * * * *'
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: read
+  issues: write
+
+jobs:
+  collect:
+    name: Collect rolling CI metrics
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out the default branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+      - name: Collect and aggregate rolling metrics
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_API_URL: ${{ github.api_url }}
+          ROLLING_OUTPUT_DIR: ${{ runner.temp }}/rolling
+          ROLLING_RUN_WINDOW: '50'
+        run: node product/ci-metrics/bin/rolling-collect.mjs
+      - name: Publish rolling summary
+        if: always()
+        run: |
+          if [ -f "${{ runner.temp }}/rolling/rolling-metrics.md" ]; then
+            cat "${{ runner.temp }}/rolling/rolling-metrics.md" >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - name: Update the durable regression tracker
+        if: always()
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_API_URL: ${{ github.api_url }}
+          ROLLING_REPORT_PATH: ${{ runner.temp }}/rolling/rolling-metrics.json
+        run: node product/ci-metrics/bin/update-regression-tracker.mjs
+      - name: Upload rolling metrics artifact
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ci-rolling-metrics
+          path: ${{ runner.temp }}/rolling
+          if-no-files-found: ignore
+          retention-days: 30

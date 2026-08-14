@@ -105,6 +105,45 @@ the same-workflow checkout is PR-controlled, so the metadata is labelled `shadow
 never claim trusted identity; trusted validation is phase B. Only default-branch push/schedule/dispatch
 runs label the record trusted. A PR modification cannot promote its own record to trusted.
 
+## Rolling collection (phase B)
+
+`.github/workflows/ci-metrics-collector.yml` is a separate, non-authoritative workflow triggered by
+completed quality-gate runs (`workflow_run`), an hourly schedule, and manual dispatch. It always executes
+default-branch code and never executes PR content.
+
+`bin/rolling-collect.mjs`:
+
+- lists recent completed runs of `ci.yml` via the GitHub API;
+- downloads each run's latest `ci-metrics-run-<id>-<attempt>` artifact (minimal ZIP reader in
+  `lib/zip.mjs`, bounded and tested);
+- validates the run record as untrusted data (`validateRunRecord`), accepts `v1-legacy` records with an
+  explicit provenance note, and rejects intermediate/current-format violations with reasons;
+- cross-checks identity: run id, event, repository, PR head and merge ref for v2 PR records, the API
+  head SHA for non-PR records, and the GitHub-side commit tree for the tested commit (so a record cannot
+  self-attest its tree);
+- enriches each record with Actions queue delay and cancellation consumption (`queueAndCancellation`);
+- groups like-for-like runs (docs-only, backend-only, client-only, browser-only, postgresql-only, mixed,
+  push-main, scheduled, manual) and computes median/p95 for the critical path and each job group, plus
+  count, flake-title, and cache trends;
+- detects sustained regressions only with enough comparable evidence (window and minimum-run guards;
+  noise never fires);
+- publishes `rolling-metrics.json` + `rolling-metrics.md` as a 30-day artifact.
+
+`bin/update-regression-tracker.mjs` updates a single durable issue (`CI rolling regression tracker`)
+only when sustained regressions exist; an empty result never opens or touches an issue.
+
+Rolling output is never merge authority. The required check remains `Report what this run validated`.
+
+### Current baseline (phase A measurements)
+
+- Documented historical baseline (from #553-#559): 10m14s critical path; measurements and decisions are
+  recorded in `product/docs/BROWSER_AND_BACKEND_FEEDBACK_TIME.md`.
+- Current phase-A per-run measurements (dogfood runs, July/August 2026): full PR critical path gate
+  672-723s (browser shard 1 + gate), API suite 486 tests across 3 shards, domain+infrastructure 758 tests,
+  production journeys 10 tests, metrics tooling 103 tests; caches NuGet 9 hit / Chromium 5 hit per full
+  run. These values are re-measured automatically by the rolling collector; the checked-in journey
+  durations continue to be refreshed from `journey-durations-*` artifacts.
+
 ## Security and trust
 
 - Fragments contain no environment values, cookies, headers, passwords, connection strings, request/response
@@ -153,6 +192,8 @@ runs label the record trusted. A PR modification cannot promote its own record t
 | Conflicting identities without `expectedRun` | aggregate unavailable; no identity chosen by artifact order |
 | Duplicate job instance identity | no derived jobs/counts/cache/flaky/classifications published; recorded in `missing` |
 | Same instance from an earlier attempt (partial rerun) | latest attempt wins; earlier fragment listed in `superseded` with reason |
+| v1-legacy run record in the rolling window | accepted with `format=v1-legacy` + explicit identity note (no fabricated PR/base/head fields) |
+| Run record identity cannot be bound to GitHub metadata | excluded from the rolling report with reason |
 | Deliberately skipped job (event/classification) | listed in `skipped` with reason; never treated as missing |
 | Selected test family without structured counts | listed in `countsModel.missingFamilies`; totals remain a labelled sourced subtotal |
 | Reversed/inconsistent timing markers | rejected on read; the writer emits null durations + missing reasons |
@@ -183,24 +224,18 @@ independently selected producer, so push/schedule reports are complete).
 Run the full suite exactly as CI does:
 
 ```powershell
-node --test product/ci-metrics/tests/trx.test.mjs product/ci-metrics/tests/playwright.test.mjs product/ci-metrics/tests/fragment.test.mjs product/ci-metrics/tests/aggregate.test.mjs product/ci-metrics/tests/build-run-meta.test.mjs product/ci-metrics/tests/junit.test.mjs product/ci-metrics/tests/ci-workflow-contract.test.mjs
+node --test product/ci-metrics/tests/trx.test.mjs product/ci-metrics/tests/playwright.test.mjs product/ci-metrics/tests/fragment.test.mjs product/ci-metrics/tests/aggregate.test.mjs product/ci-metrics/tests/build-run-meta.test.mjs product/ci-metrics/tests/junit.test.mjs product/ci-metrics/tests/ci-workflow-contract.test.mjs product/ci-metrics/tests/zip.test.mjs product/ci-metrics/tests/rolling.test.mjs
 ```
 
-The suite (99 tests) covers schema-driven nested validation, real-format Playwright suite traversal,
+The suite (120 tests) covers schema-driven nested validation, real-format Playwright suite traversal,
 representative TRX success/failure fixtures, Node JUnit parsing, valid/missing/malformed/oversized
-fragments, unknown schema versions, failed/cancelled/skipped jobs, missing test reports, count mismatches,
-retried Playwright tests, empty test sets, comparable-run grouping, matrix topology with distinct
-instances, exact event/classification topology (docs-only, backend-only, client-only, full PR,
-merge-group, push, schedule, dispatch), deliberate skips, provenance shadow/trusted semantics,
-run-identity consistency with exclusion from derived aggregates and order-invariant conflict handling,
-expected-jobs topology with disagreement reporting, matrix property/key/value bounds, read-time timing
-validation, duplicate-instance aggregate exclusion, closed run schemas with read-time credential guards,
-inconsistent structured counters, planned/executed/passed semantics, explicit flaky-title
-unavailable/truncation handling with structural read-time rules and run-level propagation, null-duration
-propagation, credential-value refusal with legitimate security-vocabulary retention, bounded output,
-Markdown escaping, critical-path computation (including cycles, absent lanes, unknown durations, and
-missing dependency groups), and the static workflow contract (failure isolation, attempt-scoped
-artifacts, report ordering, structured-count wiring, derived gate needs).
+fragments and artifacts, unknown schema versions, failed/cancelled/skipped jobs, missing test reports,
+count mismatches, retried Playwright tests, empty test sets, comparable-run grouping and rolling
+median/p95, queue/cancellation accounting, flake and cache trends, sustained-regression thresholds,
+matrix topology, exact event/classification topology, deliberate skips, provenance shadow/trusted
+semantics, attempt resolution (superseded + fallback ambiguity), v1-legacy acceptance, run-identity
+consistency and GitHub-tree cross-checking, credential guards, timing validation, bounded output,
+Markdown escaping, critical-path computation, the minimal ZIP reader, and the static workflow contract.
 
 CI runs this suite in the `metrics-tooling` job from a clean checkout and reports its result in the
 authoritative gate summary; the job is deliberately not part of merge authority.
