@@ -65,19 +65,18 @@ export function deriveEligibility(manifest) {
 }
 
 export function bindManifest(manifest, {
-  repository, workflow, runId, runAttempt, prNumber, expectedHeadSha, expectedBaseSha = null,
+  repository, workflow, runId, runAttempt, artifactAttempt, prNumber, expectedHeadSha, expectedBaseSha = null,
   expectedMergeRef, checkoutCommitTree = null,
 }) {
   const fail = (reason) => ({ ok: false, reason })
   if (manifest.repository !== repository) return fail(`Manifest repository ${manifest.repository} does not match ${repository}.`)
   if (manifest.workflow !== workflow) return fail(`Manifest workflow ${manifest.workflow} does not match ${workflow}.`)
-  if (typeof manifest.workflowRef !== 'string' || !manifest.workflowRef.startsWith(`${repository}/.github/workflows/ci.yml@`)) {
-    return fail('Manifest workflowRef does not identify the quality-gate workflow.')
-  }
-  if (!manifest.workflowRef.includes(`@refs/pull/${prNumber}/merge`)) {
-    return fail(`Manifest workflowRef does not match the expected PR merge ref for PR #${prNumber}.`)
+  const expectedWorkflowRef = `${repository}/.github/workflows/ci.yml@${expectedMergeRef}`
+  if (manifest.workflowRef !== expectedWorkflowRef) {
+    return fail(`Manifest workflowRef ${manifest.workflowRef} does not exactly match ${expectedWorkflowRef}.`)
   }
   if (manifest.run?.id !== runId) return fail(`Manifest run id ${manifest.run?.id} does not match the candidate run ${runId}.`)
+  if (artifactAttempt !== runAttempt) return fail(`Artifact attempt ${artifactAttempt} does not match the authoritative candidate run attempt ${runAttempt}.`)
   if (manifest.run?.attempt !== runAttempt) return fail(`Manifest run attempt ${manifest.run?.attempt} does not match the artifact attempt ${runAttempt}.`)
   if (manifest.pullRequest?.number !== prNumber) return fail(`Manifest PR ${manifest.pullRequest?.number} does not match ${prNumber}.`)
   if (manifest.pullRequest?.headSha !== expectedHeadSha) return fail('Manifest PR head SHA does not match the candidate run head.')

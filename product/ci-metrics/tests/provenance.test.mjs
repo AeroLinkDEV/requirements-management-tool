@@ -91,6 +91,7 @@ test('bindManifest rejects any identity mismatch against trusted API metadata', 
     workflow: 'Product quality gate',
     runId: 100,
     runAttempt: 1,
+    artifactAttempt: 1,
     prNumber: 1,
     expectedHeadSha: 'b'.repeat(40),
     expectedBaseSha: 'a'.repeat(40),
@@ -101,6 +102,8 @@ test('bindManifest rejects any identity mismatch against trusted API metadata', 
   assert.equal(bindManifest({ ...m, repository: 'other/repo' }, context).ok, false)
   assert.equal(bindManifest({ ...m, workflow: 'Other workflow' }, context).ok, false)
   assert.equal(bindManifest({ ...m, workflowRef: 'owner/repo/.github/workflows/other.yml@refs/pull/1/merge' }, context).ok, false)
+  assert.equal(bindManifest({ ...m, workflowRef: 'owner/repo/.github/workflows/ci.yml@refs/pull/1/merge-untrusted-suffix' }, context).ok, false)
+  assert.equal(bindManifest(m, { ...context, artifactAttempt: 77 }).ok, false)
   assert.equal(bindManifest({ ...m, run: { ...m.run, id: 999 } }, context).ok, false)
   assert.equal(bindManifest({ ...m, run: { ...m.run, attempt: 77 } }, context).ok, false)
   assert.equal(bindManifest({ ...m, pullRequest: { ...m.pullRequest, number: 999 } }, context).ok, false)
