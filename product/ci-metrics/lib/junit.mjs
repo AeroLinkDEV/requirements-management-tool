@@ -95,3 +95,11 @@ export function fileDurations(tests) {
   }
   return [...byFile.values()].sort((a, b) => (b.durationMs ?? -1) - (a.durationMs ?? -1) || a.name.localeCompare(b.name))
 }
+
+// Report paths are never published verbatim: a Windows profile or CI workspace path would leak absolute
+// user/workspace layout into the metrics artifact. Only the final path segment (bounded) is kept.
+export function sanitizeFilePath(value) {
+  if (typeof value !== 'string') return ''
+  const segments = value.split(/[\\/]/).filter(Boolean)
+  return (segments.at(-1) ?? '').slice(0, 300)
+}

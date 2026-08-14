@@ -365,7 +365,7 @@ export function aggregateFragments({ fragments, missing = [], runMeta = null }) 
   // structured counts is listed, and the totals are never presented as the full run total.
   const TEST_FAMILY_GROUPS = new Set([
     'backend-api', 'backend-core', 'browser-pr', 'browser-production', 'browser-full',
-    'metrics-tooling', 'script-contracts',
+    'metrics-tooling', 'script-contracts', 'postgresql-smoke',
   ])
   const missingFamilies = []
   if (expectedJobs) {
@@ -374,16 +374,22 @@ export function aggregateFragments({ fragments, missing = [], runMeta = null }) 
       if (!TEST_FAMILY_GROUPS.has(job.group)) continue
       const fragment = present.get(job.instance)
       if (!fragment) {
-        missingFamilies.push({ instance: job.instance, reason: 'Expected test family uploaded no fragment.' })
+        missingFamilies.push({ group: job.group, instance: job.instance, reason: 'Expected test family uploaded no fragment.' })
       } else if (!fragment.counts.source) {
         missingFamilies.push({
+          group: job.group,
           instance: job.instance,
           reason: fragment.counts.missing ?? 'This family has no structured test output.',
         })
       }
     }
   }
-  missingFamilies.sort((a, b) => a.instance.localeCompare(b.instance))
+  missingFamilies.sort((a, b) => a.group.localeCompare(b.group) || a.instance.localeCompare(b.instance))
+
+  const sourcedFamilyGroups = new Set()
+  for (const fragment of consistent) {
+    if (fragment.counts.source) sourcedFamilyGroups.add(fragment.job.group)
+  }
 
   const queueDelayMs = runMeta?.queueDelayMs ?? null
   const run = expectedRun ?? consistent[0]?.run ?? null
@@ -411,6 +417,7 @@ export function aggregateFragments({ fragments, missing = [], runMeta = null }) 
       result: fragment.job.result,
       timings: fragment.timings,
       counts: fragment.counts,
+      slowest: Array.isArray(fragment.slowest) ? fragment.slowest.slice(0, 50) : [],
       cache: fragment.cache,
       classification: fragment.classification,
       flakyTitlesUnavailable: fragment.flakyTitlesUnavailable === true,
@@ -438,7 +445,8 @@ export function aggregateFragments({ fragments, missing = [], runMeta = null }) 
     },
     counts: countSummary,
     countsModel: {
-      sourcedFamilies: countSummary.sourcedJobs,
+      sourcedFamilies: sourcedFamilyGroups.size,
+      sourcedJobInstances: countSummary.sourcedJobs,
       missingFamilies,
       totalIsPartial: missingFamilies.length > 0,
       label: 'sourced families with structured output only',

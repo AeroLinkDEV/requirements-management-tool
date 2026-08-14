@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { parseJunitXml, fileDurations, JunitParseError } from '../lib/junit.mjs'
+import { parseJunitXml, fileDurations, sanitizeFilePath, JunitParseError } from '../lib/junit.mjs'
 
 test('parseJunitXml reads totals, outcomes, and per-file durations from a Node 24 fixture', () => {
   const xml = `<?xml version="1.0" encoding="utf-8"?>
@@ -56,4 +56,25 @@ test('missing durations make the file duration unknown, never zero', () => {
 </testsuites>`
   const parsed = parseJunitXml(xml)
   assert.equal(fileDurations(parsed.tests)[0].durationMs, null)
+})
+
+test('report file paths are sanitized to bounded basenames before fragment construction', () => {
+  assert.equal(sanitizeFilePath('/home/runner/work/repo/repo/product/ci-metrics/tests/trx.test.mjs'), 'trx.test.mjs')
+  assert.equal(sanitizeFilePath('C:\\Users\\sean\\work\\repo\\product\\ci-metrics\\tests\\junit.test.mjs'), 'junit.test.mjs')
+  assert.equal(sanitizeFilePath('product/ci-metrics/tests/fragment.test.mjs'), 'fragment.test.mjs')
+  assert.equal(sanitizeFilePath('a/b/' + 'x'.repeat(500) + '.mjs'), 'x'.repeat(300))
+  assert.equal(sanitizeFilePath(42), '')
+  assert.equal(sanitizeFilePath(''), '')
+})
+
+test('fileDurations entries feed sanitizeFilePath so no absolute path reaches the fragment', () => {
+  const xml = `<?xml version="1.0" encoding="utf-8"?>
+<testsuites>
+  <testcase name="a" time="0.5" classname="test" file="C:/Users/smccarth/AppData/Local/Temp/probe/a.test.mjs"/>
+</testsuites>`
+  const parsed = parseJunitXml(xml)
+  const entries = fileDurations(parsed.tests)
+  assert.equal(entries[0].name, 'C:/Users/smccarth/AppData/Local/Temp/probe/a.test.mjs')
+  assert.equal(sanitizeFilePath(entries[0].name), 'a.test.mjs')
+  assert.ok(!sanitizeFilePath(entries[0].name).includes('smccarth'))
 })

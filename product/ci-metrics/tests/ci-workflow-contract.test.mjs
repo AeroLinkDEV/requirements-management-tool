@@ -145,3 +145,22 @@ test('the gate derives its metrics dependency list from event and classifier pre
   assert.match(gate, /METRICS_NEEDS=\$needs/)
   assert.ok(gate.indexOf('Compute metrics gate dependencies') < gate.indexOf('Write metrics fragment'))
 })
+
+test('product enforcement in the gate has no telemetry prerequisite', () => {
+  const gate = jobBodies(workflowLines())['gate'].join('\n')
+  const enforceIndex = gate.indexOf('Summarise and enforce')
+  const checkoutIndex = gate.indexOf('Check out repository')
+  assert.ok(enforceIndex >= 0, 'gate must contain Summarise and enforce')
+  assert.ok(checkoutIndex > enforceIndex, 'gate checkout must run after product enforcement')
+
+  const blocks = stepBlocks(jobBodies(workflowLines())['gate'])
+  const enforceBlock = blocks.find((block) => block.name === 'Summarise and enforce')
+  assert.ok(enforceBlock, 'gate Summarise and enforce step must exist')
+  const enforceText = enforceBlock.lines.join('\n')
+  assert.doesNotMatch(enforceText, /METRICS_(TIMING|FRAGMENT|JOB|COUNTS|NEEDS)/, 'enforcement must not depend on metrics script state')
+  assert.doesNotMatch(enforceText, /mark\.mjs|write-fragment|upload-artifact|Check out repository/, 'enforcement must run before any telemetry step')
+
+  const checkoutBlock = blocks.find((block) => block.name === 'Check out repository')
+  assert.ok(checkoutBlock, 'gate checkout step must exist')
+  assert.match(checkoutBlock.lines.join('\n'), /continue-on-error:\s*true/, 'gate telemetry checkout must be isolated')
+})

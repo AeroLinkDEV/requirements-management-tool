@@ -41,7 +41,9 @@ artifacts) with:
   titles, a bounded reason, and unavailable=false; zero flakes requires both flags false and no titles.
   Non-Playwright fragments must not carry flaky titles, title-state flags, or a flaky count. Free text is
   never trusted as evidence;
-- slowest classes or specs (bounded to 50) and flaky test titles (bounded to 20);
+- slowest classes or specs (bounded to 50; JUnit report paths are reduced to bounded basenames before
+  fragment construction, so absolute workspace/profile paths never reach an artifact) and flaky test titles
+  (bounded to 20);
 - cache hit/miss for NuGet, npm, and Chromium where a job has those steps;
 - the path classifier outputs when the job can see them.
 
@@ -72,7 +74,8 @@ models each test family separately from the sourced totals, and writes:
 
 - `run-metrics.json` (`aerolink-ci-run/v2`) — the merged, bounded record;
 - `run-metrics.md` — a concise human-readable summary naming the critical path and separating setup/build/
-  test/post-test time, plus deliberate skips and families without structured counts.
+  test/post-test time, plus deliberate skips and families without structured counts. `merged.jobs[].slowest`
+  carries the bounded class/spec duration detail so one merged record can drive rebalancing.
 
 The optional `run-meta.json` may carry `{"queueDelayMs": <integer|null>, "expectedJobs": [...],
 "expectedRun": {...}, "skippedJobs": [...], "provenance": {"mode": "...", "reason": "..."}}` from the
@@ -117,8 +120,15 @@ runs label the record trusted. A PR modification cannot promote its own record t
   `tests/ci-workflow-contract.test.mjs`).
 - Fragment artifacts are attempt-scoped and the report downloads only
   `ci-metrics-fragment-*-<attempt>`, never prior-attempt fragments or a previous merged report.
-- The run-level totals are explicitly a **sourced-families subtotal**: `countsModel.missingFamilies` lists
-  every selected test family without structured counts, and `totalIsPartial` is true whenever one exists.
+- The run-level totals are explicitly a **sourced-families subtotal**: `countsModel.sourcedFamilies`
+  counts distinct families with structured counts, `sourcedJobInstances` counts the job instances behind
+  them, `missingFamilies` lists every selected test family (group + instance) without structured counts,
+  and `totalIsPartial` is true whenever one exists. The taxonomy includes backend-api, backend-core,
+  browser-pr, browser-production, browser-full, metrics-tooling, script-contracts, and postgresql-smoke;
+  script-contracts and postgresql-smoke have no structured test runner and are listed as missing rather
+  than silently excluded.
+- JUnit `file` attributes are never published: `sanitizeFilePath` reduces them to bounded basenames before
+  fragment construction (POSIX and Windows absolute paths covered by tests).
 
 ## Missing-data contract
 
@@ -143,11 +153,22 @@ runs label the record trusted. A PR modification cannot promote its own record t
 
 ## Performance budget
 
+Overhead is measured from Actions job/step timestamps, not from the fragment writer's own clock, and
+critical-path overhead is reported separately from post-gate report time. On run 31790715303:
+
+- The required gate performs product enforcement before any telemetry prerequisite; its metrics-only
+  checkout plus marker/upload steps added roughly 4s to the gate (Actions step timestamps), within the
+  30s budget.
+- The non-authoritative `metrics-report` job ran after the gate and took about 10s of Actions wall time; it
+  is not a required check and never extends the merge gate.
+- Actions-reported step wall time for individual marker steps varied between jobs (up to 13s for
+  `changes` and 8s for `script-contracts` on that run); every such step is isolated with
+  `continue-on-error: true`, so a slow or failing telemetry step cannot change a product result. Phase B
+  records exact queue/completion timing from Actions metadata in the merged artifact.
+
 The per-job instrumentation adds two small Node invocations plus one artifact upload per job, all isolated
 with `continue-on-error: true`, and the aggregation job runs only after the required gate (and after every
-independently selected producer, so push/schedule reports are complete). The per-run overhead is measured
-in the merged `run-metrics` artifact itself: the `metrics-report` job duration comes from Actions metadata
-in phase B; the phase-A marker steps add well under a second per job and never extend the required gate.
+independently selected producer, so push/schedule reports are complete).
 
 ## Tests
 

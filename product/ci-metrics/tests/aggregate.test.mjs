@@ -1002,22 +1002,65 @@ test('missing test families are modelled separately from the sourced totals', ()
   const fragments = [
     fragment('backend-api', 'backend-api-1', { needs: ['changes'], counts: { expected: 100, executed: 100, passed: 100, failed: 0, skipped: 0, flaky: null, source: 'trx', missing: null } }),
     fragment('script-contracts', 'script-contracts', { needs: ['changes'], counts: { expected: null, executed: null, passed: null, failed: null, skipped: null, flaky: null, source: null, missing: 'This family has no structured test output.' } }),
+    fragment('postgresql-smoke', 'postgresql-smoke', { needs: ['changes'], counts: { expected: null, executed: null, passed: null, failed: null, skipped: null, flaky: null, source: null, missing: 'This job validates through API/psql checks with no structured test runner.' } }),
   ]
   const runMeta = {
     expectedJobs: [
       { group: 'backend-api', instance: 'backend-api-1', needs: ['changes'] },
       { group: 'script-contracts', instance: 'script-contracts', needs: ['changes'] },
+      { group: 'postgresql-smoke', instance: 'postgresql-smoke', needs: ['changes'] },
     ],
     provenance: { mode: 'trusted', reason: 'test default-branch context' },
   }
   const merged = aggregateFragments({ fragments, runMeta })
   assert.equal(merged.counts.expected, 100)
   assert.equal(merged.countsModel.totalIsPartial, true)
-  assert.deepEqual(merged.countsModel.missingFamilies, [{ instance: 'script-contracts', reason: 'This family has no structured test output.' }])
+  assert.deepEqual(merged.countsModel.missingFamilies, [
+    { group: 'postgresql-smoke', instance: 'postgresql-smoke', reason: 'This job validates through API/psql checks with no structured test runner.' },
+    { group: 'script-contracts', instance: 'script-contracts', reason: 'This family has no structured test output.' },
+  ])
+  assert.equal(merged.countsModel.sourcedFamilies, 1)
+  assert.equal(merged.countsModel.sourcedJobInstances, 1)
   const markdown = renderMarkdown(merged)
   assert.match(markdown, /sourced families with structured output only/)
   assert.match(markdown, /Families without structured counts/)
   assert.match(markdown, /script-contracts/)
+  assert.match(markdown, /postgresql-smoke/)
+})
+
+test('a matrix family is missing when any selected instance lacks structured counts', () => {
+  const fragments = [
+    fragment('browser-pr', 'browser-pr-1', { needs: ['changes'], counts: { expected: 40, executed: 40, passed: 40, failed: 0, skipped: 0, flaky: 0, source: 'playwright-json', missing: null } }),
+    fragment('browser-pr', 'browser-pr-2', { needs: ['changes'], counts: { expected: null, executed: null, passed: null, failed: null, skipped: null, flaky: null, source: null, missing: 'Report file missing.' } }),
+  ]
+  const merged = aggregateFragments({
+    fragments,
+    runMeta: {
+      expectedJobs: [
+        { group: 'browser-pr', instance: 'browser-pr-1', needs: ['changes'] },
+        { group: 'browser-pr', instance: 'browser-pr-2', needs: ['changes'] },
+      ],
+      provenance: { mode: 'trusted', reason: 'test default-branch context' },
+    },
+  })
+  assert.deepEqual(merged.countsModel.missingFamilies, [
+    { group: 'browser-pr', instance: 'browser-pr-2', reason: 'Report file missing.' },
+  ])
+  assert.equal(merged.countsModel.sourcedFamilies, 1)
+  assert.equal(merged.countsModel.totalIsPartial, true)
+})
+
+test('the merged record carries bounded slowest class/spec duration detail', () => {
+  const withSlowest = fragment('backend-api', 'backend-api-1', { needs: ['changes'], counts: { expected: 100, executed: 100, passed: 100, failed: 0, skipped: 0, flaky: null, source: 'trx', missing: null } })
+  withSlowest.slowest = [
+    { name: 'AeroLink.Api.Tests.SlowApiTests', durationMs: 50000, kind: 'class' },
+    { name: 'AeroLink.Api.Tests.FastApiTests', durationMs: 100, kind: 'class' },
+  ]
+  const merged = aggregateFragments({ fragments: [withSlowest] })
+  assert.deepEqual(merged.jobs[0].slowest, [
+    { name: 'AeroLink.Api.Tests.SlowApiTests', durationMs: 50000, kind: 'class' },
+    { name: 'AeroLink.Api.Tests.FastApiTests', durationMs: 100, kind: 'class' },
+  ])
 })
 
 test('postTestMs is the interval between test-end and writer, never called upload/cleanup', () => {

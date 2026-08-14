@@ -7,7 +7,7 @@ import { execFileSync } from 'node:child_process'
 import { buildFragment, validateFragment } from '../lib/fragment.mjs'
 import { parseTrx, classDurations } from '../lib/trx.mjs'
 import { parsePlaywrightJson, specDurations } from '../lib/playwright.mjs'
-import { parseJunitXml, fileDurations } from '../lib/junit.mjs'
+import { parseJunitXml, fileDurations, sanitizeFilePath } from '../lib/junit.mjs'
 
 function env(name) {
   return process.env[name] ?? ''
@@ -143,7 +143,7 @@ function parseCounts() {
           source: 'node-junit',
           missing: null,
         },
-        slowest: fileDurations(parsed.tests).slice(0, 50).map((entry) => ({ name: entry.name, durationMs: entry.durationMs, kind: 'spec' })),
+        slowest: fileDurations(parsed.tests).slice(0, 50).map((entry) => ({ name: sanitizeFilePath(entry.name), durationMs: entry.durationMs, kind: 'spec' })),
         flakyTests: [],
       }
     } catch (error) {

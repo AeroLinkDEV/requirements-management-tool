@@ -1255,8 +1255,6 @@ jobs:
           echo "METRICS_FRAGMENT_PATH=${{ runner.temp }}/ci-metrics/fragment-gate.json" >> "$GITHUB_ENV"
           mkdir -p "${{ runner.temp }}/ci-metrics"
           printf '{"name":"job-start","at":%s}\n' "$(date +%s%3N)" >> "${{ runner.temp }}/ci-metrics/timing-gate.json"
-      - name: Check out repository
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Mark setup complete
         continue-on-error: true
         run: node "${{ github.workspace }}/product/ci-metrics/bin/mark.mjs" setup-end
@@ -1345,6 +1343,11 @@ jobs:
               exit 1
             fi
           fi
+      # Product enforcement is complete before any telemetry prerequisite. This checkout exists only so the
+      # later metric scripts can run; it is isolated and cannot affect the authoritative enforcement result.
+      - name: Check out repository
+        continue-on-error: true
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Mark test complete
         if: always()
         continue-on-error: true
