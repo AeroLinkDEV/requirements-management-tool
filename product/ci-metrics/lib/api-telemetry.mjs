@@ -204,7 +204,7 @@ export function renderApiTelemetryMarkdown(report) {
     lines.push('## Tests creating multiple factories')
     lines.push('')
     for (const entry of report.multipleFactoryTests) {
-      lines.push(`- ${escapeMarkdown(entry.className)}.${escapeMarkdown(entry.method)}: ${entry.factories} factories`)
+      lines.push(`- ${escapeMarkdown(entry.className)}.${escapeMarkdown(entry.method)}: ${entry.factoryCount} factories`)
     }
     lines.push('')
   }
