@@ -18,7 +18,8 @@ function walkSuites(suites, out) {
       const file = String(spec.file ?? '').slice(0, 300)
       for (const test of Array.isArray(spec.tests) ? spec.tests : []) {
         const results = Array.isArray(test.results) ? test.results : []
-        const durationMs = results.reduce((sum, result) => sum + (Number.isFinite(result.duration) ? result.duration : 0), 0)
+        const durations = results.map((result) => result.duration)
+        const durationMs = durations.every(Number.isFinite) ? Math.round(durations.reduce((sum, value) => sum + value, 0)) : null
         const finalStatus = results.at(-1)?.status ?? 'unknown'
         const failedCount = results.filter((result) => isFailure(result.status)).length
         const passedCount = results.filter((result) => result.status === 'passed').length
@@ -28,7 +29,7 @@ function walkSuites(suites, out) {
           file,
           status: String(finalStatus),
           retries,
-          durationMs: Math.round(durationMs),
+          durationMs,
           flaky: passedCount > 0 && failedCount > 0,
         })
       }
@@ -53,13 +54,23 @@ export function parsePlaywrightJson(input) {
   const unexpected = Number(stats.unexpected ?? NaN)
   const flaky = Number(stats.flaky ?? NaN)
   const skipped = Number(stats.skipped ?? NaN)
-  if (![expected, unexpected, flaky, skipped].every(Number.isInteger)) {
-    throw new PlaywrightParseError('Playwright stats are not all non-negative integers.')
+  if (![expected, unexpected, flaky, skipped].every((value) => Number.isInteger(value) && value >= 0)) {
+    throw new PlaywrightParseError('Playwright stats must all be non-negative integers.')
   }
 
   const collected = { tests: [] }
   walkSuites(input.suites, collected)
   const tests = collected.tests
+
+  if (input.suites !== undefined) {
+    const passedRows = tests.filter((test) => test.status === 'passed').length
+    const failedRows = tests.filter((test) => test.status === 'failed' || test.status === 'timedOut' || test.status === 'interrupted').length
+    const skippedRows = tests.filter((test) => test.status === 'skipped').length
+    if (passedRows !== expected + flaky || failedRows !== unexpected || skippedRows !== skipped) {
+      throw new PlaywrightParseError(
+        `Playwright stats are inconsistent with the test rows: stats expected=${expected} flaky=${flaky} unexpected=${unexpected} skipped=${skipped}, rows passed=${passedRows} failed=${failedRows} skipped=${skippedRows}.`)
+    }
+  }
   const flakyTitles = tests.filter((test) => test.flaky).slice(0, 20).map((test) => test.title)
 
   return {
@@ -75,9 +86,10 @@ export function specDurations(tests) {
   for (const test of tests) {
     if (!test.file) continue
     const entry = byFile.get(test.file) ?? { name: test.file, durationMs: 0, tests: 0 }
-    entry.durationMs += test.durationMs ?? 0
+    if (test.durationMs === null) entry.durationMs = null
+    else if (entry.durationMs !== null) entry.durationMs += test.durationMs
     entry.tests += 1
     byFile.set(test.file, entry)
   }
-  return [...byFile.values()].sort((a, b) => b.durationMs - a.durationMs || a.name.localeCompare(b.name))
+  return [...byFile.values()].sort((a, b) => (b.durationMs ?? -1) - (a.durationMs ?? -1) || a.name.localeCompare(b.name))
 }

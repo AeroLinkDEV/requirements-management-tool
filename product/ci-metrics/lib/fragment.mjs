@@ -46,7 +46,7 @@ function trimList(items, max) {
   if (!Array.isArray(items)) return []
   return items.slice(0, max).map((item) => ({
     name: boundedString(item.name, 300),
-    durationMs: optionalInt(item.durationMs) ?? 0,
+    durationMs: optionalInt(item.durationMs),
     kind: item.kind === 'spec' ? 'spec' : 'class',
   }))
 }
@@ -159,6 +159,11 @@ export function validationErrors(fragment) {
   const errors = []
   if (fragment === null || typeof fragment !== 'object' || Array.isArray(fragment)) return ['Fragment is not an object.']
   errors.push(...validateAgainstSchema(fragment, schema))
+  // The builder refuses credential-shaped values, but fragments are read back from untrusted artifacts.
+  // Re-apply the same guard when validating anything that came from disk.
+  for (const [key, value] of Object.entries(flatten(fragment))) {
+    if (looksLikeCredential(value)) errors.push(`Field "${key}" matches a credential-value pattern; refusing to publish it.`)
+  }
   if (Buffer.byteLength(JSON.stringify(fragment), 'utf8') > MAX_FRAGMENT_BYTES) errors.push('Fragment exceeds the bounded size.')
   return errors
 }

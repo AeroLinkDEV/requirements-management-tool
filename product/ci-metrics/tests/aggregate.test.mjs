@@ -125,14 +125,23 @@ test('duplicate instance identity is contradictory topology', () => {
   assert.match(path.unavailableReason, /Duplicate job instance/)
 })
 
-test('fragments from a different run are rejected rather than merged', () => {
-  const foreign = fragment('changes', 'changes')
+test('run-inconsistent fragments are excluded from every derived aggregate, not merely flagged', () => {
+  const valid = fragment('changes', 'changes', { counts: { expected: 100, executed: 100, passed: 100, failed: 0, skipped: 0, flaky: null, source: 'trx', missing: null } })
+  const foreign = fragment('backend-api', 'backend-api-1', { counts: { expected: 900, executed: 900, passed: 900, failed: 0, skipped: 0, flaky: null, source: 'trx', missing: null } })
   foreign.run.id = 9999
-  const merged = aggregateFragments({ fragments: [fragment('changes', 'changes'), foreign], runMeta: { expectedJobs: [{ group: 'changes', instance: 'changes', needs: [] }] } })
-  assert.ok(merged.criticalPath.unavailableReason.includes('different run/attempt/SHA/tree/workflow/repository identity'))
+  foreign.cache.nuget = 'hit'
+  foreign.flakyTests = ['foreign flaky']
+  const merged = aggregateFragments({ fragments: [valid, foreign] })
+  assert.equal(merged.jobs.length, 1)
+  assert.equal(merged.jobs[0].instance, 'changes')
+  assert.equal(merged.counts.expected, 100)
+  assert.equal(merged.counts.executed, 100)
+  assert.equal(merged.cache.nuget.hit, 0)
+  assert.deepEqual(merged.flakyTests, [])
+  assert.ok(merged.missing.some((entry) => entry.job === 'backend-api-1' && /Run identity does not match/.test(entry.reason)))
 })
 
-test('a fragment that does not match the expected run identity is rejected', () => {
+test('a fragment that does not match the expected run identity is excluded from jobs and counts', () => {
   const mismatched = fragment('changes', 'changes')
   mismatched.run.tree = 'e'.repeat(40)
   const merged = aggregateFragments({
@@ -142,7 +151,38 @@ test('a fragment that does not match the expected run identity is rejected', () 
       expectedRun: { ...run, tree: 'd'.repeat(40) },
     },
   })
-  assert.match(merged.criticalPath.unavailableReason, /does not match the expected run identity/)
+  assert.equal(merged.jobs.length, 0)
+  assert.ok(merged.missing.some((entry) => /Run identity does not match/.test(entry.reason)))
+  assert.equal(merged.criticalPath.job, null)
+})
+
+test('credential-shaped content inside a serialized fragment is rejected at read time, not republished', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'ci-metrics-'))
+  try {
+    const crafted = fragment('changes', 'changes')
+    crafted.job.matrix = { injected: 'Authorization: Bearer abcdefghijklmnop' }
+    writeFileSync(join(directory, 'crafted.json'), JSON.stringify(crafted))
+    const { fragments, missing } = readFragments(directory)
+    assert.equal(fragments.length, 0)
+    assert.equal(missing.length, 1)
+    assert.match(missing[0].reason, /credential-value pattern/)
+  } finally {
+    rmSync(directory, { recursive: true, force: true })
+  }
+})
+
+test('unknown run properties are rejected by the closed run schema at read time', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'ci-metrics-'))
+  try {
+    const crafted = fragment('changes', 'changes')
+    crafted.run.unexpected = 'accepted'
+    writeFileSync(join(directory, 'crafted.json'), JSON.stringify(crafted))
+    const { fragments, missing } = readFragments(directory)
+    assert.equal(fragments.length, 0)
+    assert.match(missing[0].reason, /unexpected property "unexpected"/)
+  } finally {
+    rmSync(directory, { recursive: true, force: true })
+  }
 })
 
 test('expected-job metadata with duplicate or malformed entries is rejected', () => {
@@ -332,6 +372,51 @@ test('CLI integration: mark.mjs and write-fragment.mjs produce a valid fragment 
     assert.equal(fragment.counts.expected, 4)
     assert.equal(fragment.counts.executed, 4)
     assert.equal(fragment.timings.testMs > 0, true)
+  } finally {
+    rmSync(directory, { recursive: true, force: true })
+  }
+})
+
+test('CLI integration: a malformed structured report becomes an explicit counts.missing reason, not a crash', async () => {
+  const directory = mkdtempSync(join(tmpdir(), 'ci-metrics-cli-'))
+  try {
+    const { spawnSync } = await import('node:child_process')
+    const malformedTrx = join(directory, 'bad.trx')
+    writeFileSync(malformedTrx, '<TestRun><ResultSummary><Counters total="-1" /></ResultSummary></TestRun>')
+    const env = {
+      ...process.env,
+      METRICS_TIMING_FILE: join(directory, 'timing.json'),
+      METRICS_FRAGMENT_PATH: join(directory, 'fragment.json'),
+      METRICS_JOB_ID: 'backend-api',
+      METRICS_JOB_NAME: 'API test suite (1/3)',
+      METRICS_JOB_GROUP: 'backend-api',
+      METRICS_JOB_INSTANCE: 'backend-api-1',
+      METRICS_NEEDS: 'changes',
+      METRICS_JOB_RESULT: 'success',
+      METRICS_COUNTS_SOURCE: 'trx',
+      METRICS_TRX_PATH: malformedTrx,
+      GITHUB_RUN_ID: '782',
+      GITHUB_RUN_ATTEMPT: '1',
+      GITHUB_EVENT_NAME: 'pull_request',
+      GITHUB_SHA: 'a'.repeat(40),
+      GITHUB_REF: 'refs/pull/10/merge',
+      GITHUB_WORKFLOW: 'Product quality gate',
+      GITHUB_WORKFLOW_REF: 'repo/.github/workflows/ci.yml@refs/heads/main',
+      GITHUB_REPOSITORY: 'owner/repo',
+      GITHUB_JOB: 'backend-api',
+      GITHUB_WORKSPACE: repoRoot,
+    }
+    for (const name of ['job-start', 'setup-end', 'test-end']) {
+      const marked = spawnSync(process.execPath, [join(binDir, 'mark.mjs'), name], { encoding: 'utf8', cwd: directory, env })
+      assert.equal(marked.status, 0, marked.stderr)
+    }
+    const written = spawnSync(process.execPath, [join(binDir, 'write-fragment.mjs')], { encoding: 'utf8', cwd: directory, env })
+    assert.equal(written.status, 0, written.stderr)
+    const fragment = JSON.parse(await import('node:fs').then((fs) => fs.readFileSync(join(directory, 'fragment.json'), 'utf8')))
+    validateFragment(fragment)
+    assert.equal(fragment.counts.source, null)
+    assert.equal(fragment.counts.executed, null)
+    assert.match(fragment.counts.missing, /TRX parse failed/)
   } finally {
     rmSync(directory, { recursive: true, force: true })
   }

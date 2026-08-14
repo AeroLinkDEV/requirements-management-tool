@@ -44,7 +44,11 @@ export function parseTrx(xml) {
     failed: Number(counters.failed ?? NaN),
     skipped: Number(counters.notExecuted ?? NaN),
   }
-  if (!Number.isInteger(totals.total) || totals.total < 0) throw new TrxParseError('TRX <Counters total> is not a non-negative integer.')
+  for (const [name, value] of Object.entries(totals)) {
+    if (!Number.isInteger(value) || value < 0) throw new TrxParseError(`TRX <Counters ${name}> is missing or not a non-negative integer.`)
+  }
+  if (totals.executed > totals.total) throw new TrxParseError('TRX <Counters executed> exceeds total.')
+  if (totals.passed + totals.failed > totals.executed) throw new TrxParseError('TRX <Counters passed+failed> exceeds executed.')
 
   const classByTestId = new Map()
   const unitTestRe = /<UnitTest\b([^>]*)>([\s\S]*?)<\/UnitTest>/g
@@ -79,9 +83,10 @@ export function classDurations(tests) {
   for (const test of tests) {
     if (!test.className) continue
     const entry = byClass.get(test.className) ?? { name: test.className, durationMs: 0, tests: 0 }
-    entry.durationMs += test.durationMs ?? 0
+    if (test.durationMs === null) entry.durationMs = null
+    else if (entry.durationMs !== null) entry.durationMs += test.durationMs
     entry.tests += 1
     byClass.set(test.className, entry)
   }
-  return [...byClass.values()].sort((a, b) => b.durationMs - a.durationMs || a.name.localeCompare(b.name))
+  return [...byClass.values()].sort((a, b) => (b.durationMs ?? -1) - (a.durationMs ?? -1) || a.name.localeCompare(b.name))
 }

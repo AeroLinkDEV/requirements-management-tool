@@ -20,7 +20,8 @@ Each fragment (`aerolink-ci-fragment/v1`, schema in
 - timings: job start, setup end, test end, and job end in milliseconds, plus the derived setup/test/
   upload-and-cleanup durations;
 - counts: expected/executed/passed/failed/skipped/flaky totals read from TRX or the Playwright JSON report,
-  never from console text;
+  never from console text. All counters must be non-negative and internally consistent; a missing per-test
+  duration makes the class/spec duration unknown rather than zero;
 - slowest classes or specs (bounded to 50) and flaky test titles (bounded to 20);
 - cache hit/miss for NuGet, npm, and Chromium where a job has those steps;
 - the path classifier outputs when the job can see them.
@@ -62,7 +63,9 @@ API queue and cancellation accounting lands.
   bodies, or file contents. The builder refuses any field that matches a credential-*value* pattern
   (`Password=...`, `Bearer <long token>`, private-key blocks, connection-string assignments); legitimate
   test/class names that merely contain security vocabulary ("Password visibility test", "token refresh")
-  are retained.
+  are retained. The same credential guard is re-applied when fragments are read back from disk, the `run`
+  object is a closed schema, and `job.matrix` is a bounded scalar-coordinate shape, so a crafted artifact
+  cannot smuggle arbitrary content into the merged report.
 - Fragment and report sizes are bounded; oversized or malformed fragments are reported as missing with a
   reason.
 - The aggregator treats fragment values as data, never as commands, paths, expressions, or scripts.
@@ -81,7 +84,7 @@ API queue and cancellation accounting lands.
 | No timing markers | `timings.* = null` + `timings.missing` reasons |
 | Expected job instance uploaded no fragment | listed in `missing` with reason (requires `expectedJobs`) |
 | Any job duration unknown or absent | critical path `job = null` + explicit `unavailableReason` |
-| Fragments disagree on run identity | critical path unavailable with reason; mismatched fragment rejected |
+| Fragments disagree on run identity | excluded from jobs/counts/cache/flaky/classifications; recorded in `missing` with reason |
 | No fragments at all | critical path `job = null`, `durationMs = null` |
 
 ## Performance budget
@@ -96,13 +99,14 @@ second), and the aggregation job runs only after the required gate. The measured
 node --test product/ci-metrics/tests/trx.test.mjs product/ci-metrics/tests/playwright.test.mjs product/ci-metrics/tests/fragment.test.mjs product/ci-metrics/tests/aggregate.test.mjs
 ```
 
-The suite (41 tests) covers schema-driven nested validation, real-format Playwright suite traversal,
+The suite (49 tests) covers schema-driven nested validation, real-format Playwright suite traversal,
 representative TRX success/failure fixtures, valid/missing/malformed/oversized fragments, unknown schema
 versions, failed/cancelled/skipped jobs, missing test reports, count mismatches, retried Playwright tests,
 empty test sets, comparable-run grouping, matrix topology with distinct instances, run-identity
-consistency, credential-value refusal with legitimate security-vocabulary retention, bounded output,
-Markdown escaping, and critical-path computation (including cycles, absent lanes, unknown durations, and
-missing dependency groups).
+consistency with exclusion from derived aggregates, closed run/matrix schemas with read-time credential
+guards, inconsistent structured counters, null-duration propagation, credential-value refusal with
+legitimate security-vocabulary retention, bounded output, Markdown escaping, and critical-path computation
+(including cycles, absent lanes, unknown durations, and missing dependency groups).
 
 CI runs this suite in the `metrics-tooling` job from a clean checkout and reports its result in the
 authoritative gate summary; the job is deliberately not part of merge authority.

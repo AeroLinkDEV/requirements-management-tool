@@ -237,27 +237,49 @@ function boundedMissing(missing) {
 export function aggregateFragments({ fragments, missing = [], runMeta = null }) {
   const expectedJobs = Array.isArray(runMeta?.expectedJobs) ? runMeta.expectedJobs : null
   const expectedJobsErrors = expectedJobs === null ? [] : validateExpectedJobs(expectedJobs)
-  const runErrors = consistencyErrors(fragments, runMeta?.expectedRun ?? null)
+  const topologyErrors = [...expectedJobsErrors]
 
-  const topologyErrors = [...expectedJobsErrors, ...runErrors]
+  // Run identity is trusted input. Fragments that disagree with the trusted run metadata or with their
+  // siblings are excluded from every derived aggregate, not merely flagged, and each exclusion is recorded.
+  const referenceRun = runMeta?.expectedRun ?? fragments[0]?.run ?? null
+  const consistent = []
+  const excluded = []
+  for (const fragment of fragments) {
+    let reason = null
+    if (referenceRun) {
+      const run = fragment.run
+      const mismatch = run.id !== referenceRun.id || run.attempt !== referenceRun.attempt ||
+        run.sha !== referenceRun.sha || run.tree !== referenceRun.tree ||
+        run.workflowRef !== referenceRun.workflowRef || run.repository !== referenceRun.repository
+      if (mismatch) reason = 'Run identity does not match the trusted run metadata; excluded from the merged record.'
+    }
+    if (reason === null && expectedJobs !== null && !expectedJobs.some((job) => job.instance === fragment.job.instance)) {
+      reason = 'Job instance is not part of the expected topology; excluded from the merged record.'
+    }
+    if (reason === null) consistent.push(fragment)
+    else excluded.push({ job: fragment.job.instance, reason })
+  }
+  const runErrors = consistencyErrors(consistent, runMeta?.expectedRun ?? null)
+  const effectiveTopologyErrors = [...topologyErrors, ...runErrors]
+
   const expectedAbsent = []
   if (expectedJobs) {
-    const present = new Set(fragments.map((fragment) => fragment.job.instance))
+    const present = new Set(consistent.map((fragment) => fragment.job.instance))
     for (const job of expectedJobs) if (!present.has(job.instance)) expectedAbsent.push(job.instance)
   }
   const absentMissing = expectedAbsent.map((instance) => ({ job: instance, reason: 'Expected job instance uploaded no fragment (cancelled before cleanup or never ran).' }))
 
-  const allMissing = [...missing, ...absentMissing].map((entry) => ({ job: String(entry.job).slice(0, 120), reason: String(entry.reason).slice(0, 300) }))
+  const allMissing = [...missing, ...absentMissing, ...excluded].map((entry) => ({ job: String(entry.job).slice(0, 120), reason: String(entry.reason).slice(0, 300) }))
   const missingModel = boundedMissing(allMissing)
 
-  const path = topologyErrors.length > 0
-    ? { job: null, durationMs: null, path: [], unavailableReason: topologyErrors.join('; ') }
-    : criticalPath({ fragments, expectedJobs })
+  const path = effectiveTopologyErrors.length > 0
+    ? { job: null, durationMs: null, path: [], unavailableReason: effectiveTopologyErrors.join('; ') }
+    : criticalPath({ fragments: consistent, expectedJobs })
 
   const cache = { nuget: { hit: 0, miss: 0 }, npm: { hit: 0, miss: 0 }, chromium: { hit: 0, miss: 0 } }
   const flakyTests = []
   const countSummary = { expected: null, executed: null, passed: null, failed: null, skipped: null, flaky: null, sourcedJobs: 0 }
-  for (const fragment of fragments) {
+  for (const fragment of consistent) {
     for (const kind of ['nuget', 'npm', 'chromium']) {
       if (fragment.cache[kind] === 'hit') cache[kind].hit += 1
       if (fragment.cache[kind] === 'miss') cache[kind].miss += 1
@@ -272,7 +294,7 @@ export function aggregateFragments({ fragments, missing = [], runMeta = null }) 
   }
 
   const queueDelayMs = runMeta?.queueDelayMs ?? null
-  const run = runMeta?.expectedRun ?? fragments[0]?.run ?? null
+  const run = runMeta?.expectedRun ?? consistent[0]?.run ?? null
   const merged = {
     schemaVersion: RUN_SCHEMA_VERSION,
     run: run
@@ -288,7 +310,7 @@ export function aggregateFragments({ fragments, missing = [], runMeta = null }) 
           repository: run.repository,
         }
       : null,
-    jobs: fragments.slice(0, MAX_FRAGMENTS).map((fragment) => ({
+    jobs: consistent.slice(0, MAX_FRAGMENTS).map((fragment) => ({
       group: fragment.job.group,
       instance: fragment.job.instance,
       name: fragment.job.name,
@@ -314,12 +336,12 @@ export function aggregateFragments({ fragments, missing = [], runMeta = null }) 
     missingTruncated: missingModel.truncated,
     missingTotal: missingModel.total,
     classifications: {
-      docsOnly: fragments.filter((f) => f.classification?.docsOnly === true).length,
-      backend: fragments.filter((f) => f.classification?.backend === true).length,
-      client: fragments.filter((f) => f.classification?.client === true).length,
-      browser: fragments.filter((f) => f.classification?.browser === true).length,
-      postgresql: fragments.filter((f) => f.classification?.postgresql === true).length,
-      unavailable: fragments.filter((f) => f.classification?.unavailable === true).length,
+      docsOnly: consistent.filter((f) => f.classification?.docsOnly === true).length,
+      backend: consistent.filter((f) => f.classification?.backend === true).length,
+      client: consistent.filter((f) => f.classification?.client === true).length,
+      browser: consistent.filter((f) => f.classification?.browser === true).length,
+      postgresql: consistent.filter((f) => f.classification?.postgresql === true).length,
+      unavailable: consistent.filter((f) => f.classification?.unavailable === true).length,
     },
     bounds: {
       maxFragments: MAX_FRAGMENTS,

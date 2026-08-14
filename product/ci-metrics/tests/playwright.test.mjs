@@ -6,7 +6,7 @@ import { parsePlaywrightJson, specDurations, PlaywrightParseError } from '../lib
 test('the real Playwright suite hierarchy is parsed with exact totals, durations, and flaky titles', () => {
   const fixture = JSON.parse(readFileSync(new URL('./fixtures/playwright-real.json', import.meta.url), 'utf8'))
   const parsed = parsePlaywrightJson(fixture)
-  assert.deepEqual(parsed.totals, { expected: 3, unexpected: 0, flaky: 1, skipped: 1, executed: 5 })
+  assert.deepEqual(parsed.totals, { expected: 2, unexpected: 0, flaky: 1, skipped: 1, executed: 4 })
   assert.equal(parsed.tests.length, 4)
 
   const flaky = parsed.tests.find((test) => test.title.includes('assessment deep link'))
@@ -46,6 +46,7 @@ test('parsePlaywrightJson rejects malformed, non-object, and oversized input', (
   assert.throws(() => parsePlaywrightJson(7), PlaywrightParseError)
   assert.throws(() => parsePlaywrightJson('x'.repeat(51 * 1024 * 1024)), PlaywrightParseError)
   assert.throws(() => parsePlaywrightJson({ stats: { expected: 'bad' } }), PlaywrightParseError)
+  assert.throws(() => parsePlaywrightJson({ stats: { expected: -1, unexpected: 0, flaky: 0, skipped: 0 } }), /non-negative/)
 })
 
 test('an empty Playwright report is a valid empty set, not an error', () => {
@@ -57,7 +58,7 @@ test('an empty Playwright report is a valid empty set, not an error', () => {
 
 test('timedOut and interrupted results count as failures for flaky classification', () => {
   const report = {
-    stats: { expected: 1, unexpected: 0, flaky: 1, skipped: 0 },
+    stats: { expected: 0, unexpected: 0, flaky: 1, skipped: 0 },
     suites: [{
       title: 's',
       specs: [{
@@ -75,4 +76,28 @@ test('timedOut and interrupted results count as failures for flaky classificatio
   const parsed = parsePlaywrightJson(report)
   assert.equal(parsed.tests[0].flaky, true)
   assert.equal(parsed.tests[0].retries, 1)
+})
+
+test('stats that contradict the test rows are rejected', () => {
+  const report = {
+    stats: { expected: 2, unexpected: 0, flaky: 0, skipped: 0 },
+    suites: [{ title: 's', specs: [{ title: 'spec', file: 'x.spec.ts', tests: [{ title: 'one', results: [{ status: 'passed', duration: 100 }], retries: 0 }] }], suites: [] }],
+  }
+  assert.throws(() => parsePlaywrightJson(report), /inconsistent with the test rows/)
+})
+
+test('missing per-result durations make the test and its spec duration unknown, never zero', () => {
+  const report = {
+    stats: { expected: 2, unexpected: 0, flaky: 0, skipped: 0 },
+    suites: [{ title: 's', specs: [
+      { title: 'with duration', file: 'a.spec.ts', tests: [{ title: 'with duration', results: [{ status: 'passed', duration: 500 }], retries: 0 }] },
+      { title: 'without duration', file: 'b.spec.ts', tests: [{ title: 'without duration', results: [{ status: 'passed' }], retries: 0 }] },
+    ], suites: [] }],
+  }
+  const parsed = parsePlaywrightJson(report)
+  assert.equal(parsed.tests[0].durationMs, 500)
+  assert.equal(parsed.tests[1].durationMs, null)
+  const rows = specDurations(parsed.tests)
+  assert.equal(rows.find((row) => row.name === 'a.spec.ts').durationMs, 500)
+  assert.equal(rows.find((row) => row.name === 'b.spec.ts').durationMs, null)
 })

@@ -111,5 +111,5 @@
     }
   ],
   "errors": [],
-  "stats": { "expected": 3, "unexpected": 0, "flaky": 1, "skipped": 1 }
+  "stats": { "expected": 2, "unexpected": 0, "flaky": 1, "skipped": 1 }
 }

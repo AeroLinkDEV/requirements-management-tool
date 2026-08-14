@@ -75,3 +75,33 @@ test('a representative failed TRX fixture yields exact totals and per-test outco
   assert.deepEqual(rows.map((row) => row.name), ['AeroLink.Api.Tests.BetaTests', 'AeroLink.Api.Tests.AlphaTests'])
   assert.equal(rows[0].durationMs, 2000)
 })
+
+test('missing or impossible TRX counters are rejected', () => {
+  const withoutCounters = '<TestRun><Results /></TestRun>'
+  assert.throws(() => parseTrx(withoutCounters), TrxParseError)
+  const negative = `<TestRun><ResultSummary><Counters total="-1" executed="0" passed="0" failed="0" notExecuted="0" /></ResultSummary></TestRun>`
+  assert.throws(() => parseTrx(negative), /non-negative/)
+  const executedExceedsTotal = `<TestRun><ResultSummary><Counters total="2" executed="3" passed="3" failed="0" notExecuted="0" /></ResultSummary></TestRun>`
+  assert.throws(() => parseTrx(executedExceedsTotal), /exceeds total/)
+  const outcomesExceedExecuted = `<TestRun><ResultSummary><Counters total="2" executed="2" passed="1" failed="2" notExecuted="0" /></ResultSummary></TestRun>`
+  assert.throws(() => parseTrx(outcomesExceedExecuted), /exceeds executed/)
+})
+
+test('missing per-test durations make the class duration unknown, never zero', () => {
+  const xml = `<TestRun>
+    <Results>
+      <UnitTestResult testId="a" testName="A" outcome="Passed" duration="00:00:01.0000000" />
+      <UnitTestResult testId="b" testName="B" outcome="Passed" />
+    </Results>
+    <TestDefinitions>
+      <UnitTest id="a" name="A"><TestMethod className="X" name="A" /></UnitTest>
+      <UnitTest id="b" name="B"><TestMethod className="X" name="B" /></UnitTest>
+    </TestDefinitions>
+    <ResultSummary><Counters total="2" executed="2" passed="2" failed="0" notExecuted="0" /></ResultSummary>
+  </TestRun>`
+  const parsed = parseTrx(xml)
+  assert.equal(parsed.tests[0].durationMs, 1000)
+  assert.equal(parsed.tests[1].durationMs, null)
+  const rows = classDurations(parsed.tests)
+  assert.equal(rows[0].durationMs, null)
+})
