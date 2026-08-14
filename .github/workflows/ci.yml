@@ -839,6 +839,7 @@ jobs:
         shell: bash
         env:
           GITHUB_RUN_ID: ${{ github.run_id }}
+          DUAL_LANE_TIMEOUT_MS: '1700000'
         run: node scripts/run-dual-lanes.mjs lane-plan-${{ matrix.shard }}.json
       - name: Mark test complete
         if: always()
