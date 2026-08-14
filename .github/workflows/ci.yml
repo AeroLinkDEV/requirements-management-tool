@@ -403,12 +403,15 @@ jobs:
           AEROLINK_API_TRX_PATH: ${{ github.workspace }}/TestResults/shard.trx
           AEROLINK_API_TELEMETRY_OUT: ${{ runner.temp }}/api-telemetry/out
         run: |
-          if [ -f "$AEROLINK_API_TELEMETRY_JSONL" ]; then
+          jsonl="${AEROLINK_API_TELEMETRY_JSONL//\\//}"
+          trx="${AEROLINK_API_TRX_PATH//\\//}"
+          out="${AEROLINK_API_TELEMETRY_OUT//\\//}"
+          if [ -f "$jsonl" ] && [ -f "$trx" ]; then
             node "${{ github.workspace }}/product/ci-metrics/bin/aggregate-api-telemetry.mjs" \
-              "$AEROLINK_API_TELEMETRY_JSONL" "$AEROLINK_API_TRX_PATH" "$AEROLINK_API_TELEMETRY_OUT"
-            cat "$AEROLINK_API_TELEMETRY_OUT/api-telemetry.md" >> "$GITHUB_STEP_SUMMARY"
+              "$jsonl" "$trx" "$out"
+            cat "$out/api-telemetry.md" >> "$GITHUB_STEP_SUMMARY"
           else
-            echo "No API telemetry file; the factory was not exercised on this shard."
+            echo "API telemetry or TRX file missing (jsonl=$([ -f "$jsonl" ] && echo yes || echo no), trx=$([ -f "$trx" ] && echo yes || echo no))."
           fi
       - name: Upload API startup telemetry
         if: always()
