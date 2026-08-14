@@ -36,7 +36,7 @@ function fragment(group, instance, { needs = [], result = 'success', jobStartMs 
       jobEndMs: jobEndMs === null ? null : jobEndMs,
       setupMs: setupEndMs !== null && jobStartMs !== null ? setupEndMs - jobStartMs : null,
       testMs: setupEndMs !== null && testEndMs !== null ? testEndMs - setupEndMs : null,
-      uploadAndCleanupMs: testEndMs !== null && jobEndMs !== null ? jobEndMs - testEndMs : null,
+      postTestMs: testEndMs !== null && jobEndMs !== null ? jobEndMs - testEndMs : null,
       missing: {},
     },
     counts: counts ?? { expected: null, executed: null, passed: null, failed: null, skipped: null, flaky: null, source: null, missing: 'no structured output' },
@@ -72,7 +72,7 @@ test('the real matrix topology keeps every instance distinct and the gate waits 
     fragment('browser-pr', 'browser-pr-4', { needs: ['changes'], jobStartMs: 1000, jobEndMs: 15000 }),
     fragment('gate', 'gate', { needs: ['changes', 'backend-api', 'browser-pr'], jobStartMs: 30000, jobEndMs: 31000 }),
   ]
-  const merged = aggregateFragments({ fragments, runMeta: { expectedJobs: expectedMatrix } })
+  const merged = aggregateFragments({ fragments, runMeta: { expectedJobs: expectedMatrix, provenance: { mode: 'trusted', reason: 'test default-branch context' } } })
   assert.equal(merged.missing.length, 0)
   assert.equal(merged.jobs.length, 9)
   assert.equal(merged.criticalPath.job, 'gate')
@@ -164,7 +164,7 @@ test('with trusted expectedRun, run-inconsistent fragments are excluded from eve
   const runMeta = { expectedJobs: [
     { group: 'changes', instance: 'changes', needs: [] },
     { group: 'backend-api', instance: 'backend-api-1', needs: ['changes'] },
-  ], expectedRun: run }
+  ], expectedRun: run, provenance: { mode: 'trusted', reason: 'test default-branch context' } }
   for (const fragments of [[valid, foreign], [foreign, valid]]) {
     const merged = aggregateFragments({ fragments, runMeta })
     assert.equal(merged.jobs.length, 1)
@@ -226,7 +226,7 @@ test('trusted expected-jobs topology wins even when a fragment omits or invents 
     fragment('a', 'a', { jobStartMs: 0, jobEndMs: 1000 }),
     fragment('b', 'b', { needs: [], jobStartMs: 1000, jobEndMs: 12000 }),
   ]
-  const merged = aggregateFragments({ fragments: omitted, runMeta: { expectedJobs: trusted } })
+  const merged = aggregateFragments({ fragments: omitted, runMeta: { expectedJobs: trusted, provenance: { mode: 'trusted', reason: 'test default-branch context' } } })
   assert.equal(merged.criticalPath.job, 'b')
   assert.equal(merged.criticalPath.durationMs, 12000)
   assert.deepEqual(merged.criticalPath.path, ['a', 'b'])
@@ -237,7 +237,7 @@ test('trusted expected-jobs topology wins even when a fragment omits or invents 
     fragment('a', 'a', { jobStartMs: 0, jobEndMs: 1000 }),
     fragment('b', 'b', { needs: ['does-not-exist'], jobStartMs: 1000, jobEndMs: 12000 }),
   ]
-  const conflicted = aggregateFragments({ fragments: invented, runMeta: { expectedJobs: trusted } })
+  const conflicted = aggregateFragments({ fragments: invented, runMeta: { expectedJobs: trusted, provenance: { mode: 'trusted', reason: 'test default-branch context' } } })
   assert.equal(conflicted.criticalPath.job, 'b')
   assert.deepEqual(conflicted.criticalPath.path, ['a', 'b'])
   assert.deepEqual(conflicted.criticalPath.topologyDisagreements, ['b'])
@@ -427,14 +427,14 @@ test('CLI parity: expected-jobs metadata drives absent detection and bounded out
     writeFileSync(join(directory, 'changes.json'), JSON.stringify(fragment('changes', 'changes', { jobStartMs: 0, jobEndMs: 1000 })))
     writeFileSync(join(directory, 'backend-api-1.json'), JSON.stringify(fragment('backend-api', 'backend-api-1', { needs: ['changes'], jobStartMs: 1000, jobEndMs: 26000 })))
     const runMetaPath = join(output, 'run-meta.json')
-    writeFileSync(runMetaPath, JSON.stringify({ queueDelayMs: 5000, expectedJobs: expectedMatrix }))
+    writeFileSync(runMetaPath, JSON.stringify({ queueDelayMs: 5000, expectedJobs: expectedMatrix, provenance: { mode: 'trusted', reason: 'test default-branch context' } }))
     const { spawnSync } = await import('node:child_process')
     // The entry points must work from any working directory (CI runs the suite from the repository root),
     // so resolve the bin path from the module and execute with a neutral cwd.
     const result = spawnSync(process.execPath, [join(binDir, 'aggregate.mjs'), directory, output, runMetaPath], { encoding: 'utf8', cwd: output })
     assert.equal(result.status, 0, result.stderr)
     const merged = JSON.parse(await import('node:fs').then((fs) => fs.readFileSync(join(output, 'run-metrics.json'), 'utf8')))
-    assert.equal(merged.schemaVersion, 'aerolink-ci-run/v1')
+    assert.equal(merged.schemaVersion, 'aerolink-ci-run/v2')
     assert.equal(merged.queue.delayMs, 5000)
     assert.ok(merged.missing.some((entry) => entry.job === 'backend-api-2'))
     assert.equal(merged.criticalPath.job, null)
@@ -945,4 +945,63 @@ test('more than twenty flaky titles are truncated explicitly, not silently', asy
   } finally {
     rmSync(directory, { recursive: true, force: true })
   }
+})
+
+test('PR-controlled expectedJobs are used for the graph but labelled shadow until trusted validation', () => {
+  const fragments = [
+    fragment('changes', 'changes', { jobStartMs: 0, jobEndMs: 1000 }),
+    fragment('backend-api', 'backend-api-1', { needs: ['changes'], jobStartMs: 1000, jobEndMs: 20000 }),
+    fragment('gate', 'gate', { needs: ['changes', 'backend-api'], jobStartMs: 20000, jobEndMs: 21000 }),
+  ]
+  const runMeta = {
+    expectedJobs: [
+      { group: 'changes', instance: 'changes', needs: [] },
+      { group: 'backend-api', instance: 'backend-api-1', needs: ['changes'] },
+      { group: 'gate', instance: 'gate', needs: ['changes', 'backend-api'] },
+    ],
+    expectedRun: run,
+    provenance: { mode: 'shadow', reason: 'Same-workflow checkout is PR-controlled.' },
+    skippedJobs: [{ group: 'browser-pr', instance: 'browser-pr-1', reason: 'browser classification is false' }],
+  }
+  const merged = aggregateFragments({ fragments, runMeta })
+  assert.equal(merged.runIdentityTrusted, false)
+  assert.equal(merged.provenance.mode, 'shadow')
+  assert.equal(merged.criticalPath.trustedTopology, false)
+  assert.equal(merged.criticalPath.job, 'gate')
+  assert.deepEqual(merged.skipped, [{ group: 'browser-pr', instance: 'browser-pr-1', reason: 'browser classification is false' }])
+  const markdown = renderMarkdown(merged)
+  assert.match(markdown, /Deliberately skipped jobs: 1/)
+  assert.match(markdown, /browser-pr-1: browser classification is false/)
+  assert.match(markdown, /shadow/)
+})
+
+test('missing test families are modelled separately from the sourced totals', () => {
+  const fragments = [
+    fragment('backend-api', 'backend-api-1', { needs: ['changes'], counts: { expected: 100, executed: 100, passed: 100, failed: 0, skipped: 0, flaky: null, source: 'trx', missing: null } }),
+    fragment('script-contracts', 'script-contracts', { needs: ['changes'], counts: { expected: null, executed: null, passed: null, failed: null, skipped: null, flaky: null, source: null, missing: 'This family has no structured test output.' } }),
+  ]
+  const runMeta = {
+    expectedJobs: [
+      { group: 'backend-api', instance: 'backend-api-1', needs: ['changes'] },
+      { group: 'script-contracts', instance: 'script-contracts', needs: ['changes'] },
+    ],
+    provenance: { mode: 'trusted', reason: 'test default-branch context' },
+  }
+  const merged = aggregateFragments({ fragments, runMeta })
+  assert.equal(merged.counts.expected, 100)
+  assert.equal(merged.countsModel.totalIsPartial, true)
+  assert.deepEqual(merged.countsModel.missingFamilies, [{ instance: 'script-contracts', reason: 'This family has no structured test output.' }])
+  const markdown = renderMarkdown(merged)
+  assert.match(markdown, /sourced families with structured output only/)
+  assert.match(markdown, /Families without structured counts/)
+  assert.match(markdown, /script-contracts/)
+})
+
+test('postTestMs is the interval between test-end and writer, never called upload/cleanup', () => {
+  const merged = aggregateFragments({ fragments: [fragment('changes', 'changes', { jobStartMs: 0, setupEndMs: 2000, testEndMs: 9000, jobEndMs: 10000 })] })
+  assert.equal(merged.jobs[0].timings.postTestMs, 1000)
+  assert.equal('uploadAndCleanupMs' in merged.jobs[0].timings, false)
+  const markdown = renderMarkdown(merged)
+  assert.match(markdown, /\| After test \|/)
+  assert.doesNotMatch(markdown, /Upload\/cleanup/)
 })

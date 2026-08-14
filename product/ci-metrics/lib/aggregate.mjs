@@ -10,7 +10,7 @@ import { readFileSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { validationErrors, MAX_FRAGMENT_BYTES } from './fragment.mjs'
 
-export const RUN_SCHEMA_VERSION = 'aerolink-ci-run/v1'
+export const RUN_SCHEMA_VERSION = 'aerolink-ci-run/v2'
 export const MAX_FRAGMENTS = 200
 export const MAX_TOTAL_INPUT_BYTES = 20 * 1024 * 1024
 export const MAX_MERGED_BYTES = 512 * 1024
@@ -102,13 +102,15 @@ function sameNeeds(left, right) {
   return a.length === b.length && a.every((value, index) => value === b[index])
 }
 
-export function criticalPath({ fragments, expectedJobs = null }) {
+export function criticalPath({ fragments, expectedJobs = null, trustedTopology = expectedJobs !== null }) {
   const byInstance = new Map(fragments.map((fragment) => [fragment.job.instance, fragment]))
   const instances = expectedJobs ? expectedJobs.map((job) => job.instance) : [...byInstance.keys()]
   const instanceSet = new Set(instances)
 
-  // Duplicate instances are contradictory topology.
-  const trusted = expectedJobs !== null
+  // Duplicate instances are contradictory topology. `trusted` records whether the expected topology came
+  // from trusted code: PR-controlled same-workflow metadata is still used for missing detection and the
+  // dependency graph, but it is labelled shadow until a trusted post-run collector validates it.
+  const trusted = trustedTopology
   const unavailable = (unavailableReason) => ({ job: null, durationMs: null, path: [], unavailableReason, trustedTopology: trusted })
 
   if (byInstance.size !== fragments.length) return unavailable('Duplicate job instance identity in the fragment set.')
@@ -248,6 +250,13 @@ export function aggregateFragments({ fragments, missing = [], runMeta = null }) 
   const expectedJobs = Array.isArray(runMeta?.expectedJobs) ? runMeta.expectedJobs : null
   const expectedJobsErrors = expectedJobs === null ? [] : validateExpectedJobs(expectedJobs)
   const topologyErrors = [...expectedJobsErrors]
+  const provenanceMode = runMeta?.provenance?.mode === 'trusted' ? 'trusted' : 'shadow'
+  const provenanceReason = runMeta?.provenance?.reason
+    ? String(runMeta.provenance.reason).slice(0, 300)
+    : runMeta === null
+      ? 'No run metadata was provided.'
+      : 'Run metadata did not declare provenance.'
+  const topologyTrusted = expectedJobs !== null && provenanceMode === 'trusted'
 
   // Run identity is trusted input. With trusted expectedRun metadata, fragments that disagree are excluded
   // from every derived aggregate and each exclusion is recorded. Without it, fragment order must never
@@ -318,12 +327,12 @@ export function aggregateFragments({ fragments, missing = [], runMeta = null }) 
   const missingModel = boundedMissing(allMissing)
 
   const path = conflictUnavailable !== null
-    ? { job: null, durationMs: null, path: [], unavailableReason: conflictUnavailable, trustedTopology: expectedJobs !== null }
+    ? { job: null, durationMs: null, path: [], unavailableReason: conflictUnavailable, trustedTopology: topologyTrusted }
     : duplicateUnavailable !== null
-      ? { job: null, durationMs: null, path: [], unavailableReason: duplicateUnavailable, trustedTopology: expectedJobs !== null }
+      ? { job: null, durationMs: null, path: [], unavailableReason: duplicateUnavailable, trustedTopology: topologyTrusted }
     : effectiveTopologyErrors.length > 0
-      ? { job: null, durationMs: null, path: [], unavailableReason: effectiveTopologyErrors.join('; '), trustedTopology: expectedJobs !== null }
-      : criticalPath({ fragments: consistent, expectedJobs })
+      ? { job: null, durationMs: null, path: [], unavailableReason: effectiveTopologyErrors.join('; '), trustedTopology: topologyTrusted }
+      : criticalPath({ fragments: consistent, expectedJobs, trustedTopology: topologyTrusted })
 
   const cache = { nuget: { hit: 0, miss: 0 }, npm: { hit: 0, miss: 0 }, chromium: { hit: 0, miss: 0 } }
   const flakyTests = []
@@ -349,6 +358,30 @@ export function aggregateFragments({ fragments, missing = [], runMeta = null }) 
   }
   const unionTruncated = flakyTests.length > 20
   const finalFlakyTests = flakyTests.slice(0, 20)
+
+  // Test families are modelled separately from the sourced subtotal: a selected test-bearing job without
+  // structured counts is listed, and the totals are never presented as the full run total.
+  const TEST_FAMILY_GROUPS = new Set([
+    'backend-api', 'backend-core', 'browser-pr', 'browser-production', 'browser-full',
+    'metrics-tooling', 'script-contracts',
+  ])
+  const missingFamilies = []
+  if (expectedJobs) {
+    const present = new Map(consistent.map((fragment) => [fragment.job.instance, fragment]))
+    for (const job of expectedJobs) {
+      if (!TEST_FAMILY_GROUPS.has(job.group)) continue
+      const fragment = present.get(job.instance)
+      if (!fragment) {
+        missingFamilies.push({ instance: job.instance, reason: 'Expected test family uploaded no fragment.' })
+      } else if (!fragment.counts.source) {
+        missingFamilies.push({
+          instance: job.instance,
+          reason: fragment.counts.missing ?? 'This family has no structured test output.',
+        })
+      }
+    }
+  }
+  missingFamilies.sort((a, b) => a.instance.localeCompare(b.instance))
 
   const queueDelayMs = runMeta?.queueDelayMs ?? null
   const run = expectedRun ?? consistent[0]?.run ?? null
@@ -383,7 +416,18 @@ export function aggregateFragments({ fragments, missing = [], runMeta = null }) 
       flakyTitleMissingReason: fragment.counts.missing ? String(fragment.counts.missing).slice(0, 300) : null,
     })),
     criticalPath: path,
-    runIdentityTrusted: expectedRun !== null,
+    runIdentityTrusted: expectedRun !== null && provenanceMode === 'trusted',
+    provenance: {
+      mode: provenanceMode,
+      reason: provenanceReason,
+    },
+    skipped: Array.isArray(runMeta?.skippedJobs)
+      ? runMeta.skippedJobs.slice(0, MAX_FRAGMENTS).map((job) => ({
+          group: String(job.group ?? '').slice(0, 100),
+          instance: String(job.instance ?? '').slice(0, 120),
+          reason: String(job.reason ?? '').slice(0, 300),
+        }))
+      : [],
     queue: {
       delayMs: queueDelayMs,
       unavailableReason: queueDelayMs === null && runMeta === null
@@ -391,6 +435,12 @@ export function aggregateFragments({ fragments, missing = [], runMeta = null }) 
         : queueDelayMs === null ? 'runMeta did not include queueDelayMs.' : null,
     },
     counts: countSummary,
+    countsModel: {
+      sourcedFamilies: countSummary.sourcedJobs,
+      missingFamilies,
+      totalIsPartial: missingFamilies.length > 0,
+      label: 'sourced families with structured output only',
+    },
     cache,
     flakyTests: finalFlakyTests,
     flakyTitlesTruncated: unionTruncated || flakyTitleEvidence.truncated.length > 0,
@@ -428,8 +478,16 @@ export function renderMarkdown(merged) {
   push(`- Run: ${merged.run ? `#${escapeMarkdown(merged.run.id)} (attempt ${escapeMarkdown(merged.run.attempt)}, ${escapeMarkdown(merged.run.event)})` : 'unavailable'}`)
   push(`- Repository: ${merged.run?.repository ? escapeMarkdown(merged.run.repository) : 'unavailable'}`)
   push(`- Tested tree: ${merged.run?.tree ? `\`${escapeMarkdown(merged.run.tree)}\`` : 'unavailable'}`)
-  push(`- Run identity: ${merged.runIdentityTrusted ? 'trusted (expectedRun metadata)' : 'untrusted (no expectedRun metadata; fragment-consistent only)'}`)
+  push(`- Run identity: ${merged.runIdentityTrusted ? 'trusted (default-branch provenance)' : 'shadow (not yet validated by a trusted post-run collector)'}`)
+  push(`- Provenance: ${escapeMarkdown(merged.provenance?.reason ?? 'not declared')}`)
   push(`- Fragments: ${merged.jobs.length} valid, ${merged.missingTotal} missing/unreadable${merged.missingTruncated ? ' (list truncated)' : ''}`)
+  if (merged.skipped.length > 0) {
+    push(`- Deliberately skipped jobs: ${merged.skipped.length}`)
+  }
+  push(`- Sourced test totals (${escapeMarkdown(merged.countsModel?.label ?? 'sourced families only')}): expected ${merged.counts.expected ?? 'unavailable'}, executed ${merged.counts.executed ?? 'unavailable'}, passed ${merged.counts.passed ?? 'unavailable'}, failed ${merged.counts.failed ?? 'unavailable'}, skipped ${merged.counts.skipped ?? 'unavailable'}, flaky ${merged.counts.flaky ?? 'unavailable'}`)
+  if (merged.countsModel?.missingFamilies.length > 0) {
+    push(`- Families without structured counts (${merged.countsModel.missingFamilies.length}): ${merged.countsModel.missingFamilies.map((entry) => `${escapeMarkdown(entry.instance)} (${escapeMarkdown(entry.reason)})`).join('; ')}`)
+  }
   const critical = merged.criticalPath
   if (critical.trustedTopology === false) push('- Topology: fragment-controlled (trusted expectedJobs metadata was not provided)')
   if (critical.topologyDisagreements?.length > 0) {
@@ -443,15 +501,23 @@ export function renderMarkdown(merged) {
   push('')
   push('## Jobs')
   push('')
-  push('| Job | Result | Total | Setup | Test | Upload/cleanup | Counts |')
+  push('| Job | Result | Total | Setup | Test | After test | Counts |')
   push('|---|---|---|---|---|---|---|')
   for (const job of merged.jobs) {
     const seconds = (ms) => (ms === null ? '—' : `${(ms / 1000).toFixed(1)}s`)
     const counts = job.counts.source ? `${job.counts.executed ?? '?'}/${job.counts.expected ?? '?'}` : '—'
     const total = job.timings.jobStartMs !== null && job.timings.jobEndMs !== null ? job.timings.jobEndMs - job.timings.jobStartMs : null
-    push(`| ${escapeMarkdown(job.name)} | ${escapeMarkdown(job.result)} | ${seconds(total)} | ${seconds(job.timings.setupMs)} | ${seconds(job.timings.testMs)} | ${seconds(job.timings.uploadAndCleanupMs)} | ${counts} |`)
+    push(`| ${escapeMarkdown(job.name)} | ${escapeMarkdown(job.result)} | ${seconds(total)} | ${seconds(job.timings.setupMs)} | ${seconds(job.timings.testMs)} | ${seconds(job.timings.postTestMs)} | ${counts} |`)
   }
   push('')
+  if (merged.skipped.length > 0) {
+    push('## Deliberately skipped')
+    push('')
+    for (const job of merged.skipped) {
+      push(`- ${escapeMarkdown(job.instance)}: ${escapeMarkdown(job.reason)}`)
+    }
+    push('')
+  }
   if (merged.missing.length > 0) {
     push('## Missing data')
     push('')

@@ -7,6 +7,7 @@ import { execFileSync } from 'node:child_process'
 import { buildFragment, validateFragment } from '../lib/fragment.mjs'
 import { parseTrx, classDurations } from '../lib/trx.mjs'
 import { parsePlaywrightJson, specDurations } from '../lib/playwright.mjs'
+import { parseJunitXml, fileDurations } from '../lib/junit.mjs'
 
 function env(name) {
   return process.env[name] ?? ''
@@ -56,10 +57,20 @@ function readEventContext() {
 function parseCounts() {
   const source = env('METRICS_COUNTS_SOURCE')
   if (source === 'trx') {
-    const path = env('METRICS_TRX_PATH')
-    if (!path || !existsSync(path)) return { counts: null, reason: 'METRICS_TRX_PATH was set but the TRX file is missing.' }
+    const paths = env('METRICS_TRX_PATH').split(',').map((path) => path.trim()).filter(Boolean)
+    if (paths.length === 0) return { counts: null, reason: 'METRICS_TRX_PATH was set but no TRX file paths were supplied.' }
+    const missing = paths.filter((path) => !existsSync(path))
+    if (missing.length > 0) return { counts: null, reason: `METRICS_TRX_PATH was set but the TRX file is missing: ${missing.join(', ')}` }
     try {
-      const { totals, tests } = parseTrx(readFileSync(path, 'utf8'))
+      const parsed = paths.map((path) => parseTrx(readFileSync(path, 'utf8')))
+      const totals = parsed.reduce((sum, entry) => ({
+        total: sum.total + entry.totals.total,
+        executed: sum.executed + entry.totals.executed,
+        passed: sum.passed + entry.totals.passed,
+        failed: sum.failed + entry.totals.failed,
+        skipped: sum.skipped + entry.totals.skipped,
+      }), { total: 0, executed: 0, passed: 0, failed: 0, skipped: 0 })
+      const tests = parsed.flatMap((entry) => entry.tests)
       return {
         counts: {
           expected: totals.total,
@@ -71,7 +82,7 @@ function parseCounts() {
           source: 'trx',
           missing: null,
         },
-        slowest: classDurations(tests),
+        slowest: classDurations(tests).slice(0, 50),
         flakyTests: [],
       }
     } catch (error) {
@@ -116,6 +127,29 @@ function parseCounts() {
       return { counts: null, reason: `Playwright JSON parse failed: ${error.message}` }
     }
   }
+  if (source === 'node-junit') {
+    const path = env('METRICS_JUNIT_PATH')
+    if (!path || !existsSync(path)) return { counts: null, reason: 'METRICS_JUNIT_PATH was set but the JUnit file is missing.' }
+    try {
+      const parsed = parseJunitXml(readFileSync(path, 'utf8'))
+      return {
+        counts: {
+          expected: parsed.totals.total,
+          executed: parsed.totals.executed,
+          passed: parsed.totals.passed,
+          failed: parsed.totals.failed,
+          skipped: parsed.totals.skipped,
+          flaky: null,
+          source: 'node-junit',
+          missing: null,
+        },
+        slowest: fileDurations(parsed.tests).slice(0, 50).map((entry) => ({ name: entry.name, durationMs: entry.durationMs, kind: 'spec' })),
+        flakyTests: [],
+      }
+    } catch (error) {
+      return { counts: null, reason: `JUnit parse failed: ${error.message}` }
+    }
+  }
   return { counts: null, reason: source ? `Unknown METRICS_COUNTS_SOURCE "${source}".` : 'This job has no structured test output.' }
 }
 
@@ -135,7 +169,7 @@ function main() {
 
   let setupMs = null
   let testMs = null
-  let uploadAndCleanupMs = null
+  let postTestMs = null
   if (setupEndMs !== null && jobStartMs !== null && setupEndMs < jobStartMs) {
     timingMissing.setupEndMs = 'setup-end marker precedes job-start; duration treated as unavailable.'
     setupEndMs = null
@@ -152,7 +186,7 @@ function main() {
     timingMissing.jobEndMs = 'job-end marker precedes test-end; duration treated as unavailable.'
     jobEndMs = null
   } else if (jobEndMs !== null && testEndMs !== null) {
-    uploadAndCleanupMs = jobEndMs - testEndMs
+    postTestMs = jobEndMs - testEndMs
   }
 
   const parsed = parseCounts()
@@ -234,7 +268,7 @@ function main() {
       jobEndMs,
       setupMs,
       testMs,
-      uploadAndCleanupMs,
+      postTestMs,
       missing: timingMissing,
     },
     counts,

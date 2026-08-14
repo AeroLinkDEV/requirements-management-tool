@@ -6,7 +6,7 @@
 
 import { validateAgainstSchema, schema } from './schema-validate.mjs'
 
-export const SCHEMA_VERSION = 'aerolink-ci-fragment/v1'
+export const SCHEMA_VERSION = 'aerolink-ci-fragment/v2'
 export const MAX_FRAGMENT_BYTES = 256 * 1024
 
 // Bare keyword scanning would reject legitimate AeroLink test/class names ("Password visibility test",
@@ -85,7 +85,10 @@ export function buildFragment({ run, job, timings, counts, slowest = [], flakyTe
       jobEndMs: optionalInt(timings.jobEndMs),
       setupMs: optionalInt(timings.setupMs),
       testMs: optionalInt(timings.testMs),
-      uploadAndCleanupMs: optionalInt(timings.uploadAndCleanupMs),
+      // The interval between the test-end marker and the moment the fragment writer runs. It is not a
+      // full "upload and cleanup" measurement: the later artifact upload and runner cleanup are not
+      // observable from inside the job. Real completion timing comes from Actions metadata (phase B).
+      postTestMs: optionalInt(timings.postTestMs),
       missing: sanitiseMissing(timings.missing),
     },
     counts: {
@@ -180,7 +183,7 @@ export function validationErrors(fragment) {
   const derived = [
     [timings.setupMs, timings.setupEndMs, timings.jobStartMs],
     [timings.testMs, timings.testEndMs, timings.setupEndMs],
-    [timings.uploadAndCleanupMs, timings.jobEndMs, timings.testEndMs],
+    [timings.postTestMs, timings.jobEndMs, timings.testEndMs],
   ]
   for (const [value, later, earlier] of derived) {
     if (value !== null && (later === null || earlier === null || value !== later - earlier)) {
@@ -230,6 +233,15 @@ export function validationErrors(fragment) {
     } else {
       if (counts.executed + counts.skipped > counts.expected) errors.push('counts: executed + skipped cannot exceed expected for TRX.')
       if (counts.passed + counts.failed > counts.executed) errors.push('counts: passed + failed cannot exceed executed for TRX.')
+    }
+  }
+  if (counts.source === 'node-junit') {
+    const required = [counts.expected, counts.executed, counts.passed, counts.failed, counts.skipped]
+    if (required.some((value) => value === null)) {
+      errors.push('counts: node-junit requires expected/executed/passed/failed/skipped.')
+    } else {
+      if (counts.expected !== counts.executed + counts.skipped) errors.push('counts: expected must equal executed + skipped for node-junit.')
+      if (counts.executed !== counts.passed + counts.failed) errors.push('counts: executed must equal passed + failed for node-junit.')
     }
   }
   if (Buffer.byteLength(JSON.stringify(fragment), 'utf8') > MAX_FRAGMENT_BYTES) errors.push('Fragment exceeds the bounded size.')

@@ -16,7 +16,7 @@ const base = {
     repository: 'seanmccarthyns/requirements-management-tool',
   },
   job: { group: 'backend-api', instance: 'backend-api-1', name: 'API test suite (1/3)', needs: ['changes'], result: 'success', matrix: { shard: 1 } },
-  timings: { jobStartMs: 1000, setupEndMs: 5000, testEndMs: 30000, jobEndMs: 31000, setupMs: 4000, testMs: 25000, uploadAndCleanupMs: 1000, missing: {} },
+  timings: { jobStartMs: 1000, setupEndMs: 5000, testEndMs: 30000, jobEndMs: 31000, setupMs: 4000, testMs: 25000, postTestMs: 1000, missing: {} },
   counts: { expected: 160, executed: 159, passed: 158, failed: 1, skipped: 1, flaky: null, source: 'trx', missing: null },
   cache: { nuget: 'hit', npm: null, chromium: null, missing: { npm: 'no npm cache in this job' } },
   classification: { docsOnly: false, backend: true, client: false, browser: false, postgresql: false, unavailable: false },
@@ -26,7 +26,7 @@ const base = {
 test('buildFragment produces a valid bounded fragment with group and instance identity', () => {
   const fragment = buildFragment(base)
   validateFragment(fragment)
-  assert.equal(fragment.schemaVersion, 'aerolink-ci-fragment/v1')
+  assert.equal(fragment.schemaVersion, 'aerolink-ci-fragment/v2')
   assert.equal(fragment.job.group, 'backend-api')
   assert.equal(fragment.job.instance, 'backend-api-1')
   assert.deepEqual(fragment.job.matrix, { shard: 1 })
@@ -41,6 +41,27 @@ test('an unknown schema version is rejected by the schema-driven validator', () 
   const fragment = buildFragment(base)
   fragment.schemaVersion = 'aerolink-ci-fragment/older'
   assert.ok(validationErrors(fragment).some((e) => e.includes('constant')))
+})
+
+test('the v2 timing field names the post-test interval, not the untracked upload/cleanup', () => {
+  const fragment = buildFragment(base)
+  assert.equal(fragment.timings.postTestMs, 1000)
+  assert.equal('uploadAndCleanupMs' in fragment.timings, false)
+  const stale = buildFragment(base)
+  stale.timings.uploadAndCleanupMs = 1000
+  assert.ok(validationErrors(stale).some((e) => e.includes('timings')))
+})
+
+test('node-junit counts must be internally consistent', () => {
+  const junitBase = { ...base, counts: { expected: 10, executed: 9, passed: 9, failed: 0, skipped: 1, flaky: null, source: 'node-junit', missing: null } }
+  const valid = buildFragment(junitBase)
+  assert.equal(validationErrors(valid).length, 0)
+
+  const bad = buildFragment({ ...junitBase, counts: { ...junitBase.counts, expected: 11, executed: 9, passed: 9, failed: 0, skipped: 1, flaky: null, source: 'node-junit', missing: null } })
+  assert.ok(validationErrors(bad).some((e) => e.includes('expected must equal executed + skipped')))
+
+  const flaky = buildFragment({ ...junitBase, counts: { ...junitBase.counts, flaky: 2, source: 'node-junit' } })
+  assert.ok(validationErrors(flaky).some((e) => e.includes('flaky count is only valid for playwright-json')))
 })
 
 test('malformed nested fields are rejected, not passed to aggregation', () => {
