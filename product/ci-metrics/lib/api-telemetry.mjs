@@ -45,7 +45,7 @@ export function parseTelemetryLines(text) {
       malformed.push('method is invalid.')
       continue
     }
-    if (parsed.phase !== 'host' && parsed.phase !== 'dispose') {
+    if (!['host', 'dispose', 'dbOpen'].includes(parsed.phase)) {
       malformed.push(`phase "${parsed.phase}" is invalid.`)
       continue
     }
@@ -76,15 +76,17 @@ export function aggregateApiTelemetry({ factoryRecords, trxTests = [] }) {
   // Per factory, startup is construction latency at host start plus host build plus disposal. The
   // construction latency appears in both records; the maximum is the latest observation.
   // Construction latency is the time from factory construction to host build start (the host record).
-  // The dispose record's constructionMs includes the host build, so it must not be added again.
+  // The dispose record's constructionMs includes the host build, so it must not be added again. dbOpen is
+  // a sub-phase of the host build and is reported separately, never added to the startup total.
   const byFactory = new Map()
   for (const record of factoryRecords) {
-    const entry = byFactory.get(record.factoryId) ?? { class: record.class, method: record.method, constructionMs: null, hostMs: null, disposeMs: null }
+    const entry = byFactory.get(record.factoryId) ?? { class: record.class, method: record.method, constructionMs: null, hostMs: null, disposeMs: null, dbOpenMs: null }
     if (record.phase === 'host') {
       entry.constructionMs = record.constructionMs
       entry.hostMs = record.ms
     }
     if (record.phase === 'dispose') entry.disposeMs = record.ms
+    if (record.phase === 'dbOpen') entry.dbOpenMs = (entry.dbOpenMs ?? 0) + record.ms
     byFactory.set(record.factoryId, entry)
   }
   const factories = [...byFactory.values()]
@@ -98,29 +100,70 @@ export function aggregateApiTelemetry({ factoryRecords, trxTests = [] }) {
   }
 
   const byTest = new Map()
+  const ambiguousTheories = []
+  const unmatchedMethods = []
   for (const factory of factories) {
     const key = `${factory.class}.${factory.method}`
-    const entry = byTest.get(key) ?? { className: factory.class, method: factory.method, factoryCount: 0, startupMs: 0, wallMs: null }
+    const entry = byTest.get(key) ?? {
+      className: factory.class,
+      method: factory.method,
+      factoryCount: 0,
+      startupMs: 0,
+      dbOpenMs: 0,
+      wallMs: null,
+    }
     entry.factoryCount += 1
     entry.startupMs += (factory.constructionMs ?? 0) + (factory.hostMs ?? 0) + (factory.disposeMs ?? 0)
+    entry.dbOpenMs += factory.dbOpenMs ?? 0
     if (entry.wallMs === null) {
       const trxList = trxByClass.get(factory.class) ?? []
       const matched = trxList.find((test) =>
         test.name === factory.method ||
         test.name.endsWith(`.${factory.method}`) ||
+        test.name.startsWith(`${factory.method}(`) ||
         test.name.startsWith(`${factory.method}_`))
       entry.wallMs = matched?.durationMs ?? null
     }
     byTest.set(key, entry)
   }
-  const perTest = [...byTest.values()].map((entry) => ({
-    className: entry.className,
-    method: entry.method,
-    factoryCount: entry.factoryCount,
-    startupMs: Math.round(entry.startupMs),
-    wallMs: entry.wallMs === null ? null : Math.round(entry.wallMs),
-    bodyMs: entry.wallMs === null ? null : Math.max(0, Math.round(entry.wallMs - entry.startupMs)),
-  }))
+
+  const perTest = []
+  for (const entry of byTest.values()) {
+    const trxList = trxByClass.get(entry.className) ?? []
+    const rows = trxList.filter((test) =>
+      test.name === entry.method ||
+      test.name.endsWith(`.${entry.method}`) ||
+      test.name.startsWith(`${entry.method}(`) ||
+      test.name.startsWith(`${entry.method}_`))
+    if (rows.length === 0) {
+      // Fixture/helper factories (e.g., ShowcaseApiFixture.CreateFactory) have no TRX row of their own.
+      unmatchedMethods.push({ className: entry.className, method: entry.method, factories: entry.factoryCount })
+      continue
+    }
+    if (rows.length > 1) {
+      // Parameterized theory rows cannot be mapped to individual factories from call-site attribution
+      // alone. They are reported as ambiguous rather than merged into a fabricated multi-factory test.
+      ambiguousTheories.push({
+        className: entry.className,
+        method: entry.method,
+        trxRows: rows.length,
+        factories: entry.factoryCount,
+        startupMs: Math.round(entry.startupMs),
+        dbOpenMs: Math.round(entry.dbOpenMs),
+      })
+      continue
+    }
+    const wallMs = rows[0].durationMs
+    perTest.push({
+      className: entry.className,
+      method: entry.method,
+      factoryCount: entry.factoryCount,
+      startupMs: Math.round(entry.startupMs),
+      dbOpenMs: Math.round(entry.dbOpenMs),
+      wallMs: wallMs === null ? null : Math.round(wallMs),
+      bodyMs: wallMs === null ? null : Math.max(0, Math.round(wallMs - entry.startupMs)),
+    })
+  }
 
   const classes = new Map()
   for (const entry of perTest) {
@@ -128,20 +171,40 @@ export function aggregateApiTelemetry({ factoryRecords, trxTests = [] }) {
       className: entry.className,
       tests: 0,
       factories: 0,
+      dbOpenMs: 0,
+      theoryRows: 0,
       wallMs: [],
       startupMs: [],
     }
     classEntry.tests += 1
     classEntry.factories += entry.factoryCount
+    classEntry.dbOpenMs += entry.dbOpenMs
     classEntry.startupMs.push(entry.startupMs)
     if (entry.wallMs !== null) classEntry.wallMs.push(entry.wallMs)
     classes.set(entry.className, classEntry)
+  }
+  for (const theory of ambiguousTheories) {
+    const classEntry = classes.get(theory.className) ?? {
+      className: theory.className,
+      tests: 0,
+      factories: 0,
+      dbOpenMs: 0,
+      theoryRows: 0,
+      wallMs: [],
+      startupMs: [],
+    }
+    classEntry.theoryRows += theory.trxRows
+    classEntry.factories += theory.factories
+    classEntry.dbOpenMs += theory.dbOpenMs
+    classes.set(theory.className, classEntry)
   }
 
   const classSummary = [...classes.values()].map((entry) => ({
     className: entry.className,
     tests: entry.tests,
     factories: entry.factories,
+    theoryRows: entry.theoryRows,
+    dbOpenMs: Math.round(entry.dbOpenMs),
     wall: quantiles(entry.wallMs),
     startup: quantiles(entry.startupMs),
     summedStartupMs: Math.round(entry.startupMs.reduce((sum, value) => sum + value, 0)),
@@ -158,11 +221,15 @@ export function aggregateApiTelemetry({ factoryRecords, trxTests = [] }) {
   return {
     schemaVersion: API_TELEMETRY_SCHEMA_VERSION,
     totals: {
+      trxTests: trxTests.length,
       tests: perTest.length,
+      ambiguousTheoryRows: ambiguousTheories.reduce((sum, entry) => sum + entry.trxRows, 0),
+      unmatchedMethods: unmatchedMethods.length,
       factories: factories.length,
       classes: classes.size,
       summedWallMs: Math.round(allWall.reduce((sum, value) => sum + value, 0)),
       summedStartupMs: Math.round(allStartup.reduce((sum, value) => sum + value, 0)),
+      summedDbOpenMs: Math.round(perTest.reduce((sum, entry) => sum + entry.dbOpenMs, 0)),
       wall: quantiles(allWall),
       startup: quantiles(allStartup),
       startupFraction: allWall.length > 0 ? Math.round((allStartup.reduce((sum, value) => sum + value, 0) / Math.max(1, allWall.reduce((sum, value) => sum + value, 0))) * 100) / 100 : null,
@@ -170,6 +237,8 @@ export function aggregateApiTelemetry({ factoryRecords, trxTests = [] }) {
     classes: classSummary.slice(0, MAX_CLASSES),
     slowestStartupTests: [...perTest].sort((a, b) => b.startupMs - a.startupMs).slice(0, 50),
     multipleFactoryTests: multiFactoryTests,
+    ambiguousTheoryRows: ambiguousTheories,
+    unmatchedMethods: unmatchedMethods.slice(0, 50),
   }
 }
 
@@ -187,19 +256,40 @@ export function renderApiTelemetryMarkdown(report) {
   const lines = []
   lines.push('# API startup-floor telemetry')
   lines.push('')
-  lines.push(`- Tests attributed: ${report.totals.tests}; factories: ${report.totals.factories}; classes: ${report.totals.classes}`)
+  lines.push(`- TRX tests: ${report.totals.trxTests}; attributed (non-ambiguous) tests: ${report.totals.tests}; ambiguous theory rows: ${report.totals.ambiguousTheoryRows}; unmatched factory methods: ${report.totals.unmatchedMethods}`)
+  lines.push(`- Factories: ${report.totals.factories}; classes: ${report.totals.classes}`)
   lines.push(`- Summed wall: ${seconds(report.totals.summedWallMs)}; summed startup: ${seconds(report.totals.summedStartupMs)} (${Math.round((report.totals.startupFraction ?? 0) * 100)}% of wall)`)
+  lines.push(`- Database open (informational sub-phase of host build): ${seconds(report.totals.summedDbOpenMs)}`)
   lines.push(`- Wall p10/median/p75/p95: ${seconds(report.totals.wall.p10)} / ${seconds(report.totals.wall.median)} / ${seconds(report.totals.wall.p75)} / ${seconds(report.totals.wall.p95)}`)
   lines.push(`- Startup p10/median/p75/p95: ${seconds(report.totals.startup.p10)} / ${seconds(report.totals.startup.median)} / ${seconds(report.totals.startup.p75)} / ${seconds(report.totals.startup.p95)}`)
   lines.push('')
   lines.push('## Classes by summed startup')
   lines.push('')
-  lines.push('| Class | Tests | Factories | Startup p50 | Wall p50 | Startup sum | Wall sum | Startup fraction |')
-  lines.push('|---|---|---:|---:|---:|---:|---:|---:|')
+  lines.push('| Class | Tests | Theory rows | Factories | Startup p50 | Wall p50 | Startup sum | Wall sum | Startup fraction |')
+  lines.push('|---|---|---:|---:|---:|---:|---:|---:|---:|')
   for (const entry of report.classes) {
-    lines.push(`| ${escapeMarkdown(entry.className)} | ${entry.tests} | ${entry.factories} | ${seconds(entry.startup.median)} | ${seconds(entry.wall.median)} | ${seconds(entry.summedStartupMs)} | ${seconds(entry.summedWallMs)} | ${entry.startupFraction === null ? '—' : `${Math.round(entry.startupFraction * 100)}%`} |`)
+    lines.push(`| ${escapeMarkdown(entry.className)} | ${entry.tests} | ${entry.theoryRows} | ${entry.factories} | ${seconds(entry.startup.median)} | ${seconds(entry.wall.median)} | ${seconds(entry.summedStartupMs)} | ${seconds(entry.summedWallMs)} | ${entry.startupFraction === null ? '—' : `${Math.round(entry.startupFraction * 100)}%`} |`)
   }
   lines.push('')
+  if (report.ambiguousTheoryRows.length > 0) {
+    lines.push('## Ambiguous parameterized theory rows')
+    lines.push('')
+    lines.push('Per-invocation identity is not available from call-site attribution alone; these rows are')
+    lines.push('reported separately and never merged into a fabricated multi-factory test.')
+    lines.push('')
+    for (const entry of report.ambiguousTheoryRows.slice(0, 30)) {
+      lines.push(`- ${escapeMarkdown(entry.className)}.${escapeMarkdown(entry.method)}: ${entry.trxRows} TRX rows, ${entry.factories} factories, startup ${seconds(entry.startupMs)} (wall unavailable)`)
+    }
+    lines.push('')
+  }
+  if (report.unmatchedMethods.length > 0) {
+    lines.push('## Unmatched factory methods (fixture/helpers)')
+    lines.push('')
+    for (const entry of report.unmatchedMethods.slice(0, 20)) {
+      lines.push(`- ${escapeMarkdown(entry.className)}.${escapeMarkdown(entry.method)}: ${entry.factories} factories, no TRX row`)
+    }
+    lines.push('')
+  }
   if (report.multipleFactoryTests.length > 0) {
     lines.push('## Tests creating multiple factories')
     lines.push('')

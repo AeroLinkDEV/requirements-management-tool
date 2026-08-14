@@ -40,8 +40,11 @@ test('aggregateApiTelemetry computes startup floor and per-class summaries', () 
     { className: 'AeroLink.Api.Tests.ExampleApiTests', name: 'A_test_deletes_a_project', durationMs: 4000, outcome: 'Passed' },
   ]
   const report = aggregateApiTelemetry({ factoryRecords, trxTests })
+  assert.equal(report.totals.trxTests, 2)
   assert.equal(report.totals.tests, 2)
   assert.equal(report.totals.factories, 2)
+  assert.equal(report.totals.ambiguousTheoryRows, 0)
+  assert.equal(report.totals.unmatchedMethods, 0)
   assert.equal(report.totals.summedWallMs, 9000)
   assert.equal(report.totals.summedStartupMs, 4490)
   assert.equal(report.classes[0].className, 'ExampleApiTests')
@@ -55,10 +58,61 @@ test('aggregateApiTelemetry detects multiple-factory tests', () => {
     { type: 'factory', factoryId: 1, class: 'ExampleApiTests', method: 'A_test_uses_two_factories', phase: 'host', constructionMs: 10, ms: 500 },
     { type: 'factory', factoryId: 2, class: 'ExampleApiTests', method: 'A_test_uses_two_factories', phase: 'host', constructionMs: 10, ms: 600 },
   ]
-  const report = aggregateApiTelemetry({ factoryRecords })
+  const report = aggregateApiTelemetry({
+    factoryRecords,
+    trxTests: [{ className: 'AeroLink.Api.Tests.ExampleApiTests', name: 'A_test_uses_two_factories', durationMs: 2000, outcome: 'Passed' }],
+  })
   assert.equal(report.totals.tests, 1)
   assert.equal(report.multipleFactoryTests.length, 1)
   assert.equal(report.multipleFactoryTests[0].factoryCount, 2)
+})
+
+test('parameterized theory rows are reported as ambiguous, never merged into one test', () => {
+  const factoryRecords = [
+    { type: 'factory', factoryId: 1, class: 'TheoryApiTests', method: 'A_theory_case', phase: 'host', constructionMs: 10, ms: 500 },
+    { type: 'factory', factoryId: 2, class: 'TheoryApiTests', method: 'A_theory_case', phase: 'host', constructionMs: 10, ms: 600 },
+  ]
+  const trxTests = [
+    { className: 'AeroLink.Api.Tests.TheoryApiTests', name: 'A_theory_case(x: "one")', durationMs: 800, outcome: 'Passed' },
+    { className: 'AeroLink.Api.Tests.TheoryApiTests', name: 'A_theory_case(x: "two")', durationMs: 900, outcome: 'Passed' },
+  ]
+  const report = aggregateApiTelemetry({ factoryRecords, trxTests })
+  assert.equal(report.totals.trxTests, 2)
+  assert.equal(report.totals.tests, 0)
+  assert.equal(report.totals.ambiguousTheoryRows, 2)
+  assert.equal(report.ambiguousTheoryRows.length, 1)
+  assert.equal(report.ambiguousTheoryRows[0].trxRows, 2)
+  assert.equal(report.ambiguousTheoryRows[0].factories, 2)
+  assert.equal(report.multipleFactoryTests.length, 0)
+  assert.equal(report.classes[0].theoryRows, 2)
+})
+
+test('database-open sub-phase is aggregated separately and never added to startup', () => {
+  const factoryRecords = [
+    { type: 'factory', factoryId: 1, class: 'ExampleApiTests', method: 'A_test_creates_a_project', phase: 'host', constructionMs: 100, ms: 2000 },
+    { type: 'factory', factoryId: 1, class: 'ExampleApiTests', method: 'A_test_creates_a_project', phase: 'dbOpen', constructionMs: 0, ms: 350 },
+    { type: 'factory', factoryId: 1, class: 'ExampleApiTests', method: 'A_test_creates_a_project', phase: 'dispose', constructionMs: 100, ms: 300 },
+  ]
+  const trxTests = [{ className: 'AeroLink.Api.Tests.ExampleApiTests', name: 'A_test_creates_a_project', durationMs: 5000, outcome: 'Passed' }]
+  const report = aggregateApiTelemetry({ factoryRecords, trxTests })
+  assert.equal(report.totals.summedStartupMs, 2400)
+  assert.equal(report.totals.summedDbOpenMs, 350)
+  assert.equal(report.slowestStartupTests[0].dbOpenMs, 350)
+})
+
+test('fixture and helper factories with no TRX row are reported as unmatched, not attributed', () => {
+  const factoryRecords = [
+    { type: 'factory', factoryId: 1, class: 'ShowcaseApiFixture', method: 'CreateFactory', phase: 'host', constructionMs: 10, ms: 500 },
+    { type: 'factory', factoryId: 2, class: 'ExampleApiTests', method: 'A_test_creates_a_project', phase: 'host', constructionMs: 10, ms: 600 },
+  ]
+  const trxTests = [{ className: 'AeroLink.Api.Tests.ExampleApiTests', name: 'A_test_creates_a_project', durationMs: 2000, outcome: 'Passed' }]
+  const report = aggregateApiTelemetry({ factoryRecords, trxTests })
+  assert.equal(report.totals.trxTests, 1)
+  assert.equal(report.totals.tests, 1)
+  assert.equal(report.totals.unmatchedMethods, 1)
+  assert.equal(report.unmatchedMethods[0].className, 'ShowcaseApiFixture')
+  assert.equal(report.unmatchedMethods[0].method, 'CreateFactory')
+  assert.equal(report.unmatchedMethods[0].factories, 1)
 })
 
 test('credential-shaped telemetry is rejected and the markdown is bounded', () => {
@@ -70,5 +124,6 @@ test('credential-shaped telemetry is rejected and the markdown is bounded', () =
   ] })
   const markdown = renderApiTelemetryMarkdown(report)
   assert.match(markdown, /API startup-floor telemetry/)
+  assert.match(markdown, /TRX tests: 0/)
   assert.ok(Buffer.byteLength(markdown, 'utf8') < 128 * 1024)
 })

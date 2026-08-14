@@ -393,7 +393,8 @@ internal sealed class AeroLinkApiFactory(bool seedDemoAccounts = false, bool all
             services.RemoveAll<IDbContextOptionsConfiguration<AeroLinkDbContext>>();
             services.AddDbContext<AeroLinkDbContext>(options =>
             {
-                options.UseSqlite(ConnectionString).AddInterceptors(new SaveRaceInterceptor());
+                options.UseSqlite(ConnectionString)
+                    .AddInterceptors(new SaveRaceInterceptor(), new TimingConnectionInterceptor(_factoryId, _callerFile, _callerMember));
                 if (commandInterceptor is not null) options.AddInterceptors(commandInterceptor);
             });
             if (storageFaultInjector is not null)

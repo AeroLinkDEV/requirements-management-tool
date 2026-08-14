@@ -319,26 +319,56 @@ This is the same growth that makes the shard-count reasoning above worth re-meas
 
 ## API startup floor, measured (563A, 2026-08-14)
 
-Per-shard telemetry from run 31843343040 (PR #581 head c002890) splits each hosted API test's wall time
-into factory startup (host build + disposal, attributed from the construction call site) and test body
-(wall minus startup). Structured per-shard artifacts: `api-telemetry-<shard>-<attempt>`.
+Per-shard telemetry splits each hosted API test's wall time into factory startup (host build + disposal,
+attributed from the construction call site) and test body (wall minus startup). Structured per-shard
+artifacts: `api-telemetry-<shard>-<attempt>`.
+
+### Exact-head baseline: run 31844562806, PR #581 head `e0d4770`
+
+This is the authoritative baseline for the exact SHA reviewed in round 1. Each shard's TRX reports
+**162 tests** (486 across the three shards); the telemetry artifacts attribute **419** of them because
+parameterized theory invocations share one call-site method name and are not yet split per invocation at
+this head. The round-1 fix adds separate `ambiguousTheoryRows` and `unmatchedMethods` accounting; the
+round-2 run re-measures the same floor with that split visible.
 
 | Shard | Tests | Factories | Summed wall | Summed startup | Startup % | Wall p10/median/p75/p95 | Startup p10/median/p75/p95 |
 |---|---:|---:|---:|---:|---:|---:|---:|
-| 1 | 133 | 159 | 778.4s | 229.9s | 30% | 3.7 / 5.6 / 7.7 / 11.5s | 0.7 / 1.0 / 1.5 / 8.7s |
-| 2 | 152 | 163 | 970.9s | 350.8s | 36% | 4.0 / 5.9 / 7.5 / 13.5s | 1.0 / 1.5 / 1.9 / 10.0s |
-| 3 | 134 | 148 | 833.8s | 194.0s | 23% | 3.4 / 6.6 / 7.7 / 11.1s | 0.7 / 1.0 / 1.2 / 3.9s |
-| Total | 419 | 470 | 2583.1s | 774.7s | 30% | — | — |
+| 1 | 133 | 159 | 821.0s | 360.4s | 44% | 4.1 / 5.7 / 7.3 / 13.0s | 0.8 / 1.2 / 1.8 / 10.3s |
+| 2 | 152 | 163 | 838.5s | 224.7s | 27% | 3.8 / 5.5 / 7.0 / 9.8s | 0.8 / 1.1 / 1.5 / 2.4s |
+| 3 | 134 | 148 | 774.4s | 297.8s | 38% | 3.6 / 5.3 / 6.2 / 12.8s | 1.0 / 1.4 / 1.8 / 9.8s |
+| Total | 419 | 470 | 2433.9s | 882.9s | 36% | — | — |
+
+TRX totals are the authoritative test count: **162 tests per shard, 486 total**. The 67-test gap per run
+(486 TRX − 419 attributed) is the parameterized-theory and fixture/helper attribution gap measured above,
+not a suite reduction.
+
+### Earlier baseline for comparison: run 31843343040, PR #581 head `c002890`
+
+This is the pre-rebase measurement, retained only as a comparison point. It uses the same aggregator and
+the same attribution gap; it is **not** the exact-head baseline.
+
+| Shard | Tests | Factories | Summed wall | Summed startup | Startup % |
+|---|---:|---:|---:|---:|---:|
+| 1 | 133 | 159 | 778.4s | 229.9s | 30% |
+| 2 | 152 | 163 | 970.9s | 350.8s | 36% |
+| 3 | 134 | 148 | 833.8s | 194.0s | 23% |
+| Total | 419 | 470 | 2583.1s | 774.7s | 30% |
 
 Notes:
 
-- The measured floor (~30% of summed wall) is lower than the historical ~39% because it counts only host
-  build and disposal; factory construction, database open, and first-client latency are inside the host
-  build, and the TRX wall is the whole test method. Startup percentages above 100% for classes whose
-  factories are created in collection/class fixtures (e.g., `ShowcaseApiFixture`, `CancelReviewAuthorityTests`)
-  are expected: fixture startup occurs outside any single test's TRX wall.
-- 470 factories were created for 419 attributed tests; multiple-factory tests are listed explicitly.
+- The measured floor (27–44% of summed wall by shard) counts only host build and disposal; factory
+  construction, database open, and first-client latency are inside the host build, and the TRX wall is the
+  whole test method. A `dbOpen` sub-phase (SQLite connection open inside the host build) is now recorded
+  separately and is never added to the startup total, because the host build already contains it.
+- Startup percentages above 100% for classes whose factories are created in collection/class fixtures
+  (e.g., `ShowcaseApiFixture`, `CancelReviewAuthorityTests`) are expected: fixture startup occurs outside
+  any single test's TRX wall.
+- 470 factories were created for 419 attributed tests at the exact-head baseline; multiple-factory tests
+  are listed explicitly in the artifact, and parameterized-theory rows are reported separately (not merged
+  into a fabricated multi-factory test) from the round-2 head onward.
 - The schema-template copy experiment remains the recorded negative result: median rose 13.4s to 19.4s,
   p75 20.4s to 26.9s, summed CPU +22%; do not repeat a per-test database-copy strategy.
 - Phase 2 (fresh-host/reusable-host/non-hosted inventory) and phase 3 (host-reuse pilot with >=10
   full-concurrency runs) are the next increments; this phase changes no isolation architecture.
+- This foundation does not yet break host build down into database/schema, bootstrap, evidence-root, and
+  first-client components; that attribution is a phase-2 requirement before a host-reuse design is chosen.

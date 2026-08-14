@@ -16,18 +16,49 @@ internal static class ApiTestTelemetry
     private static readonly object Gate = new();
     private static string? _jsonlPath;
     private static bool _configured;
+    private static string? _unavailableReason;
     private static long _written;
     private const long MaxLines = 50_000;
+
+    public static string? UnavailableReason
+    {
+        get
+        {
+            lock (Gate)
+            {
+                return _unavailableReason;
+            }
+        }
+    }
+
+    internal static void ResetForTest()
+    {
+        lock (Gate)
+        {
+            _configured = false;
+            _jsonlPath = null;
+            _unavailableReason = null;
+            _written = 0;
+        }
+    }
 
     public static void ConfigureJsonlPath(string? path)
     {
         lock (Gate)
         {
-            _jsonlPath = string.IsNullOrWhiteSpace(path) ? null : path;
-            if (_jsonlPath is not null)
+            try
             {
-                var directory = Path.GetDirectoryName(_jsonlPath);
-                if (!string.IsNullOrEmpty(directory)) Directory.CreateDirectory(directory);
+                _jsonlPath = string.IsNullOrWhiteSpace(path) ? null : path;
+                if (_jsonlPath is not null)
+                {
+                    var directory = Path.GetDirectoryName(_jsonlPath);
+                    if (!string.IsNullOrEmpty(directory)) Directory.CreateDirectory(directory);
+                }
+            }
+            catch (Exception problem) when (problem is IOException or UnauthorizedAccessException or NotSupportedException or ArgumentException)
+            {
+                _jsonlPath = null;
+                _unavailableReason = problem.Message;
             }
         }
     }
@@ -57,7 +88,17 @@ internal static class ApiTestTelemetry
             }
             if (_jsonlPath is null || _written >= MaxLines) return;
             _written += 1;
-            File.AppendAllText(_jsonlPath, JsonSerializer.Serialize(record) + Environment.NewLine);
+            try
+            {
+                File.AppendAllText(_jsonlPath, JsonSerializer.Serialize(record) + Environment.NewLine);
+            }
+            catch (Exception problem) when (problem is IOException or UnauthorizedAccessException or NotSupportedException)
+            {
+                // Telemetry is best-effort by design: a locked or unwritable path must never change the
+                // product-test result. Disable further writes and record the reason.
+                _jsonlPath = null;
+                _unavailableReason = problem.Message;
+            }
         }
     }
 
