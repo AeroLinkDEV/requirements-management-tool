@@ -75,8 +75,22 @@ test('check out and edit uses the same full-page two-stage authoring flow as a r
   await expect(page.getByRole('link', { name: /Change case/ })).toBeVisible()
   await expect(page.getByRole('link', { name: /Procedure changes/ })).toBeVisible()
   await expect(page.getByRole('button', { name: 'Discard checkout' })).toBeVisible()
-  await expect(page.getByRole('button', { name: 'Save', exact: true })).toBeVisible()
-  await expect(page.getByRole('button', { name: 'Save & check in' })).toBeVisible()
+  // Visible was never the question. Nothing has been edited since checkout, and in that state Save greyed
+  // because there were no unsaved changes and check-in greyed because the working copy matched the snapshot —
+  // so the only way out of an accidental checkout was Discard, which throws work away rather than handing the
+  // lock back. Save is now available whenever a working copy is held.
+  const save = page.getByRole('button', { name: 'Save', exact: true })
+  await expect(save).toBeEnabled({ timeout: 30_000 })
+  await save.click()
+  // Still available after an explicit save, which is the moment it used to disappear.
+  await expect(save).toBeEnabled({ timeout: 30_000 })
+
+  // And a check-in that genuinely cannot proceed says why. The implication is the assertion: whenever the
+  // control is unavailable a reason is on screen, which is false on the behaviour this replaces because
+  // nothing was ever rendered beside a greyed button.
+  const checkIn = page.getByRole('button', { name: 'Save & check in' })
+  await expect(checkIn).toBeVisible()
+  if (!(await checkIn.isEnabled())) await expect(page.locator('.checkInBlockedReason')).toBeVisible()
   await expect(page).toHaveURL(exactUrl)
   await page.getByRole('button', { name: 'Discard checkout' }).click()
   await expect(page.getByRole('button', { name: 'Check out & edit' })).toBeVisible()

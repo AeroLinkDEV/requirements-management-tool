@@ -61,7 +61,13 @@ type Requirement = {
   rationale: string;
   verificationMethod: string;
   state: string;
-  sourceScrId: string;
+  // The server's name, not a convenient shorthand for it. This was declared as `sourceScrId` and the server
+  // has always sent `sourceChangeRequestId`, so every read produced undefined and every link built a route
+  // ending in the literal string "undefined". A hand-written interface asserts what the payload contains; it
+  // does not check, so the mismatch type-checked cleanly for as long as it existed.
+  sourceChangeRequestId: string;
+  /** The build that owns the change request, which for a historical revision is an earlier one. */
+  sourceChangeRequestReleaseId: string | null;
   sourceScr: string;
   createdAt: string;
   richText: string;
@@ -91,7 +97,13 @@ type History = {
   rationale: string;
   verificationMethod: string;
   state: string;
-  sourceScrId: string;
+  // The server's name, not a convenient shorthand for it. This was declared as `sourceScrId` and the server
+  // has always sent `sourceChangeRequestId`, so every read produced undefined and every link built a route
+  // ending in the literal string "undefined". A hand-written interface asserts what the payload contains; it
+  // does not check, so the mismatch type-checked cleanly for as long as it existed.
+  sourceChangeRequestId: string;
+  /** The build that owns the change request, which for a historical revision is an earlier one. */
+  sourceChangeRequestReleaseId: string | null;
   sourceScr: string;
   createdAt: string;
   originBuild: string;
@@ -167,7 +179,8 @@ type Props = {
   /** The exact requirement revision a procedure trace deep link opens, when one is named. */
   initialRevisionId?: string;
   onBack: () => void;
-  onOpenScr: (id: string) => void;
+  /** The owning build travels with the identifier so a change request opens in its own context. */
+  onOpenScr: (id: string, owningReleaseId?: string | null) => void;
   onProposeChange: (requirementId: string, level?: Requirement["level"]) => void;
   onOpenRequirement: (id: string) => void;
   onCloseRequirement: () => void;
@@ -413,7 +426,8 @@ export default function RequirementsWorkspace({
         rationale: latest.rationale,
         verificationMethod: latest.verificationMethod,
         state: latest.state,
-        sourceScrId: latest.sourceScrId,
+        sourceChangeRequestId: latest.sourceChangeRequestId,
+        sourceChangeRequestReleaseId: latest.sourceChangeRequestReleaseId,
         sourceScr: latest.sourceScr,
         createdAt: latest.createdAt,
         richText: latest.statement,
@@ -1224,7 +1238,7 @@ export default function RequirementsWorkspace({
                       {/* Named after the record it opens, not after the page it is on. The controlled
                           identifier already says which kind of change request it is — SRCR, HLRCR or
                           LLRCR — so the label reads it off rather than guessing from the workspace. */}
-                      <button onClick={() => onOpenScr(selected.sourceScrId)}>
+                      <button onClick={() => onOpenScr(selected.sourceChangeRequestId, selected.sourceChangeRequestReleaseId)}>
                         Open {artifactAcronym(selected.sourceScr, "changeRequest")} →
                       </button>
                     </dd>
@@ -1302,7 +1316,12 @@ export default function RequirementsWorkspace({
                     </div>
                     <p>{x.statement}</p>
                     <small>
-                      {x.isHistorical ? `Historical version — Build ${x.originBuild}` : `Build ${x.originBuild}`} · <button type="button" className="inlineArtifactLink" onClick={() => onOpenScr(x.sourceScrId)}>{x.sourceScr}</button> ·{" "}
+                      {x.isHistorical ? `Historical version — Build ${x.originBuild}` : `Build ${x.originBuild}`} ·{" "}
+                      {/* A control only where there is somewhere to go. A revision with no recorded source
+                          change request reads as text rather than as a link that does nothing. */}
+                      {x.sourceChangeRequestId
+                        ? <button type="button" className="inlineArtifactLink" onClick={() => onOpenScr(x.sourceChangeRequestId, x.sourceChangeRequestReleaseId)}>{x.sourceScr}</button>
+                        : <span>{x.sourceScr}</span>} ·{" "}
                       {new Date(x.createdAt).toLocaleDateString()}
                     </small>
                   </article>

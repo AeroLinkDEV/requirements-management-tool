@@ -877,8 +877,11 @@ export default function ChangeRequestWorkspace({
   const save = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (!scr || !lockRef.current) return;
+    // Matches the button beside it, and says which of the two is missing rather than naming both every time.
     if (!draft.title.trim() || !requirements.every(proposalCanCheckIn)) {
-      setError("Add a title and finish or remove each started requirement proposal before checking in this Draft.");
+      setError(!draft.title.trim()
+        ? "Give the change request a title before checking it in."
+        : "Finish or remove each started requirement proposal before checking in this Draft.");
       return;
     }
     await withBusy(async () => {
@@ -968,9 +971,6 @@ export default function ChangeRequestWorkspace({
   const proposalsComplete = requirements.length > 0 && requirements.every(proposalComplete);
   const reviewReady = caseComplete && proposalsComplete && requirements.length > 0;
   const hasUnsavedChanges = mode === "edit" && serializedWorkingCopy !== lastSavedRef.current;
-  const hasCheckoutChanges = mode === "edit" && (
-    resumedWorkingCopyRef.current || serializedWorkingCopy !== checkoutSnapshotRef.current
-  );
   const draftCanCheckIn = Boolean(draft.title.trim()) && requirements.every(proposalCanCheckIn);
   const uniqueApprovers = new Set(approvers.map((item) => item.userId).filter(Boolean));
   const selectedApproverCount = uniqueApprovers.size;
@@ -1027,8 +1027,17 @@ export default function ChangeRequestWorkspace({
             detail={hasUnsavedChanges ? "Working copy has unsaved changes" : `Working copy: ${autosaveStatus.toLowerCase()}`}
             busy={busy}
             saving={autosaveStatus === "Saving"}
-            canSave={autosaveStatus !== "Conflict" && hasUnsavedChanges}
-            canCheckIn={autosaveStatus !== "Conflict" && hasCheckoutChanges && draftCanCheckIn}
+            // The same rule as the test change request page. Save stays available while checked out, and
+            // `hasCheckoutChanges` is gone so an untouched checkout can be handed back rather than only
+            // discarded. The proposal minimum stays, because check-in applies the draft to the aggregate and
+            // a half-created proposal is rejected there as a 400 — but it now says so instead of greying in
+            // silence.
+            canSave={autosaveStatus !== "Conflict"}
+            canCheckIn={autosaveStatus !== "Conflict" && draftCanCheckIn}
+            checkInBlockedReason={
+              autosaveStatus === "Conflict" ? "Another edit reached this change request first. Reload to see it before checking in."
+              : !draft.title.trim() ? "Give the change request a title before checking it in."
+              : "Finish or remove each started requirement proposal — a proposal needs its identifier and statement, and a derived one needs its rationale, before it can be checked in."}
             onDiscard={() => void discard()}
             onSave={() => void saveWorkingCopy()}
           />}

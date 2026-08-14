@@ -455,7 +455,36 @@ function App() {
       </div>
     );
   const context:RouteContext|undefined=active&&project&&release?{programId:active.program.id,projectId:project.project.id,releaseId:release.id}:undefined;
-  const navigate=(target:View,area:Discipline=discipline,artifactId?:string,artifactKind?:string,replace=false,stateIntent?:HistoryStateIntent,typeIntent?:HistoryTypeIntent)=>{const nextStateIntent=target==="history"?stateIntent:undefined,nextTypeIntent=target==="history"?(typeIntent??(area==="software"?"Software":"System")):undefined;setView(target);setDiscipline(area);setHistoryStateIntent(nextStateIntent);setHistoryTypeIntent(nextTypeIntent);setSelectedArtifactId(artifactId??"");setSelectedArtifactKind(artifactKind??"");setRequirementRevisionId("");setSelectedScrId(target==="scr"?artifactId??"":["scr"].includes(target)?selectedScrId:"");const navigationContext=context??(target==="managedDocuments"&&active&&project?{programId:active.program.id,projectId:project.project.id,releaseId:""}:undefined);if(navigationContext){const path=routePath(navigationContext,target,area,artifactId,artifactKind,nextStateIntent,nextTypeIntent);history[replace?"replaceState":"pushState"]({},"",path)}};
+  // These two render nothing without an artifact to render, so a navigation that omits one used to change the
+  // address bar and then fall through to whichever view matched next — Command Center. The reader saw a
+  // populated dashboard, the URL still claimed to be on the artifact, and nothing was reported. A link built
+  // from a missing identifier was therefore indistinguishable from a working one, which is how
+  // `/systems/change-requests/undefined` survived: it looked like a misclick.
+  const viewsRequiringArtifact:View[]=["scr","testChangeRequest"];
+  const navigate=(target:View,area:Discipline=discipline,artifactId?:string,artifactKind?:string,replace=false,stateIntent?:HistoryStateIntent,typeIntent?:HistoryTypeIntent)=>{
+    if(viewsRequiringArtifact.includes(target)&&!artifactId){
+      // Refused rather than half-performed. Reporting it and staying put is honest; pushing a route that
+      // cannot resolve is not.
+      console.error(`Refusing to open ${target} without an artifact identifier. The caller passed ${artifactId===undefined?"undefined":JSON.stringify(artifactId)}.`);
+      setToast("That link is missing its destination, so nothing was opened. This is a defect — please report it.");
+      return;
+    }
+    const nextStateIntent=target==="history"?stateIntent:undefined,nextTypeIntent=target==="history"?(typeIntent??(area==="software"?"Software":"System")):undefined;setView(target);setDiscipline(area);setHistoryStateIntent(nextStateIntent);setHistoryTypeIntent(nextTypeIntent);setSelectedArtifactId(artifactId??"");setSelectedArtifactKind(artifactKind??"");setRequirementRevisionId("");setSelectedScrId(target==="scr"?artifactId??"":["scr"].includes(target)?selectedScrId:"");const navigationContext=context??(target==="managedDocuments"&&active&&project?{programId:active.program.id,projectId:project.project.id,releaseId:""}:undefined);if(navigationContext){const path=routePath(navigationContext,target,area,artifactId,artifactKind,nextStateIntent,nextTypeIntent);history[replace?"replaceState":"pushState"]({},"",path)}};
+  // Opens a change request in the build that owns it rather than the one that happens to be selected. A
+  // historical revision's source change request belongs to an earlier build by definition, so routing it into
+  // the in-work build would present a released, frozen record inside a context that says it can be edited.
+  // Everything the reader uses to judge that — the breadcrumb, the active-build chip, the read-only banner —
+  // is derived from the release in the route.
+  const openChangeRequest=(id?:string,owningReleaseId?:string|null)=>{
+    if(!id){navigate("scr",discipline,undefined);return}
+    const owned=owningReleaseId&&owningReleaseId!==selectedReleaseId
+      ? project?.releases.find(x=>x.id===owningReleaseId)
+      : undefined;
+    if(!owned){navigate("scr",discipline,id);return}
+    setSelectedReleaseId(owned.id);
+    setView("scr");setDiscipline(discipline);setSelectedScrId(id);setSelectedArtifactId(id);setSelectedArtifactKind("");setRequirementRevisionId("");
+    if(context)history.pushState({},"",routePath({...context,releaseId:owned.id},"scr",discipline,id));
+  };
   const linkPendingAssessment=async(changeRequestId:string)=>{
     if(!pendingAssessmentLink)return true
     try{await apiRequest(`${API}/api/downstream-assessments/${pendingAssessmentLink.assessmentId}/change-requests`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({changeRequestId})});setPendingAssessmentLink(undefined);return true}
@@ -664,7 +693,7 @@ function App() {
         initialArtifactId={view === "requirements" ? selectedArtifactId || undefined : undefined}
         initialRevisionId={view === "requirements" ? requirementRevisionId || undefined : undefined}
         onBack={() => navigate("dashboard")}
-        onOpenScr={(id) => navigate("scr",discipline,id)}
+        onOpenScr={openChangeRequest}
         onProposeChange={(id, level) => navigate(discipline === "software" ? "createSoftwareChange" : "createSystemScr", discipline, id, level)}
         onOpenRequirement={(id) => navigate("requirements",discipline,id)}
         onCloseRequirement={() => navigate("requirements", discipline, undefined, undefined, true)}
