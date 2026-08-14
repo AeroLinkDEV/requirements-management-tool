@@ -17,7 +17,7 @@ const base = {
   },
   job: { group: 'backend-api', instance: 'backend-api-1', name: 'API test suite (1/3)', needs: ['changes'], result: 'success', matrix: { shard: 1 } },
   timings: { jobStartMs: 1000, setupEndMs: 5000, testEndMs: 30000, jobEndMs: 31000, setupMs: 4000, testMs: 25000, uploadAndCleanupMs: 1000, missing: {} },
-  counts: { expected: 160, executed: 160, passed: 158, failed: 1, skipped: 1, flaky: null, source: 'trx', missing: null },
+  counts: { expected: 160, executed: 159, passed: 158, failed: 1, skipped: 1, flaky: null, source: 'trx', missing: null },
   cache: { nuget: 'hit', npm: null, chromium: null, missing: { npm: 'no npm cache in this job' } },
   classification: { docsOnly: false, backend: true, client: false, browser: false, postgresql: false, unavailable: false },
   missing: {},

@@ -83,11 +83,13 @@ function parseCounts() {
     if (!path || !existsSync(path)) return { counts: null, reason: 'METRICS_PLAYWRIGHT_JSON_PATH was set but the report file is missing.' }
     try {
       const parsed = parsePlaywrightJson(readFileSync(path, 'utf8'))
+      // Planned/executed/passed semantics: a skipped test is planned but never executed; a retry-pass is a
+      // final pass and is counted in flaky as well as in the final-pass total.
       return {
         counts: {
-          expected: parsed.totals.expected,
+          expected: parsed.totals.planned,
           executed: parsed.totals.executed,
-          passed: parsed.totals.expected,
+          passed: parsed.totals.passed,
           failed: parsed.totals.unexpected,
           skipped: parsed.totals.skipped,
           flaky: parsed.totals.flaky,

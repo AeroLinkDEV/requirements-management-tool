@@ -255,7 +255,7 @@ export function aggregateFragments({ fragments, missing = [], runMeta = null }) 
   // side as authoritative totals. A fully consistent set is still aggregated but labelled untrusted.
   const expectedRun = runMeta?.expectedRun ?? null
   let referenceRun = expectedRun
-  const consistent = []
+  let consistent = []
   const excluded = []
   let runIdentityConflict = false
   if (expectedRun) {
@@ -295,6 +295,18 @@ export function aggregateFragments({ fragments, missing = [], runMeta = null }) 
     ? 'No trusted expectedRun metadata and fragment identities conflict; aggregate and critical path are unavailable.'
     : null
 
+  let duplicateUnavailable = null
+  const instanceCounts = new Map()
+  for (const fragment of consistent) instanceCounts.set(fragment.job.instance, (instanceCounts.get(fragment.job.instance) ?? 0) + 1)
+  const duplicated = [...instanceCounts.entries()].filter(([, count]) => count > 1)
+  if (duplicated.length > 0) {
+    for (const [instance, count] of duplicated) {
+      excluded.push({ job: instance, reason: `Duplicate job instance identity (${count} fragments); derived aggregates are not published.` })
+    }
+    consistent = []
+    duplicateUnavailable = 'Duplicate job instance identity in the fragment set; derived aggregates and critical path are unavailable.'
+  }
+
   const expectedAbsent = []
   if (expectedJobs) {
     const present = new Set(consistent.map((fragment) => fragment.job.instance))
@@ -307,6 +319,8 @@ export function aggregateFragments({ fragments, missing = [], runMeta = null }) 
 
   const path = conflictUnavailable !== null
     ? { job: null, durationMs: null, path: [], unavailableReason: conflictUnavailable, trustedTopology: expectedJobs !== null }
+    : duplicateUnavailable !== null
+      ? { job: null, durationMs: null, path: [], unavailableReason: duplicateUnavailable, trustedTopology: expectedJobs !== null }
     : effectiveTopologyErrors.length > 0
       ? { job: null, durationMs: null, path: [], unavailableReason: effectiveTopologyErrors.join('; '), trustedTopology: expectedJobs !== null }
       : criticalPath({ fragments: consistent, expectedJobs })

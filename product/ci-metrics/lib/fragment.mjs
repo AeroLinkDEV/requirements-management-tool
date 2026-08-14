@@ -184,6 +184,26 @@ export function validationErrors(fragment) {
       errors.push('timings: a derived duration does not match its raw markers.')
     }
   }
+  const counts = fragment.counts ?? {}
+  if (counts.source === 'playwright-json') {
+    const required = [counts.expected, counts.executed, counts.passed, counts.failed, counts.skipped, counts.flaky]
+    if (required.some((value) => value === null)) {
+      errors.push('counts: playwright-json requires expected/executed/passed/failed/skipped/flaky.')
+    } else {
+      if (counts.expected !== counts.executed + counts.skipped) errors.push('counts: expected must equal executed + skipped for playwright-json.')
+      if (counts.executed !== counts.passed + counts.failed) errors.push('counts: executed must equal passed + failed for playwright-json.')
+      if (counts.flaky > counts.passed) errors.push('counts: flaky cannot exceed passed for playwright-json.')
+    }
+  }
+  if (counts.source === 'trx') {
+    const required = [counts.expected, counts.executed, counts.passed, counts.failed, counts.skipped]
+    if (required.some((value) => value === null)) {
+      errors.push('counts: TRX requires expected/executed/passed/failed/skipped.')
+    } else {
+      if (counts.executed + counts.skipped > counts.expected) errors.push('counts: executed + skipped cannot exceed expected for TRX.')
+      if (counts.passed + counts.failed > counts.executed) errors.push('counts: passed + failed cannot exceed executed for TRX.')
+    }
+  }
   if (Buffer.byteLength(JSON.stringify(fragment), 'utf8') > MAX_FRAGMENT_BYTES) errors.push('Fragment exceeds the bounded size.')
   return errors
 }

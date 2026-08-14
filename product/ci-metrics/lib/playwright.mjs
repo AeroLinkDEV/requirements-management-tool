@@ -66,15 +66,25 @@ export function parsePlaywrightJson(input) {
     const passedRows = tests.filter((test) => test.status === 'passed').length
     const failedRows = tests.filter((test) => test.status === 'failed' || test.status === 'timedOut' || test.status === 'interrupted').length
     const skippedRows = tests.filter((test) => test.status === 'skipped').length
-    if (passedRows !== expected + flaky || failedRows !== unexpected || skippedRows !== skipped) {
+    const flakyRows = tests.filter((test) => test.flaky).length
+    if (passedRows !== expected + flaky || failedRows !== unexpected || skippedRows !== skipped || flakyRows !== flaky) {
       throw new PlaywrightParseError(
-        `Playwright stats are inconsistent with the test rows: stats expected=${expected} flaky=${flaky} unexpected=${unexpected} skipped=${skipped}, rows passed=${passedRows} failed=${failedRows} skipped=${skippedRows}.`)
+        `Playwright stats are inconsistent with the test rows: stats expected=${expected} flaky=${flaky} unexpected=${unexpected} skipped=${skipped}, rows passed=${passedRows} failed=${failedRows} skipped=${skippedRows} flakyRows=${flakyRows}.`)
     }
   }
   const flakyTitles = tests.filter((test) => test.flaky).slice(0, 20).map((test) => test.title)
+  const planned = expected + unexpected + flaky + skipped
 
   return {
-    totals: { expected, unexpected, flaky, skipped, executed: expected + unexpected + flaky + skipped },
+    totals: {
+      expected,
+      unexpected,
+      flaky,
+      skipped,
+      planned,
+      executed: planned - skipped,
+      passed: expected + flaky,
+    },
     tests,
     flakyTitles,
     detailMissing: input.suites === undefined ? 'Report has no suites hierarchy; per-test detail is unavailable.' : null,

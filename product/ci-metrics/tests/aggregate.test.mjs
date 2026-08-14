@@ -129,6 +129,32 @@ test('duplicate instance identity is contradictory topology', () => {
   assert.match(path.unavailableReason, /Duplicate job instance/)
 })
 
+test('duplicate instances contaminate no derived aggregate, not merely the critical path', () => {
+  const one = fragment('backend-api', 'backend-api-1', { counts: { expected: 100, executed: 100, passed: 100, failed: 0, skipped: 0, flaky: null, source: 'trx', missing: null } })
+  const two = fragment('backend-api', 'backend-api-1', { counts: { expected: 100, executed: 100, passed: 100, failed: 0, skipped: 0, flaky: null, source: 'trx', missing: null } })
+  two.cache.nuget = 'hit'
+  const merged = aggregateFragments({ fragments: [one, two], runMeta: { expectedJobs: [{ group: 'backend-api', instance: 'backend-api-1', needs: [] }] } })
+  assert.equal(merged.jobs.length, 0)
+  assert.equal(merged.counts.expected, null)
+  assert.equal(merged.cache.nuget.hit, 0)
+  assert.equal(merged.criticalPath.job, null)
+  assert.match(merged.criticalPath.unavailableReason, /Duplicate job instance identity/)
+  assert.ok(merged.missing.some((entry) => /Duplicate job instance identity/.test(entry.reason)))
+})
+
+test('contradictory counters in a serialized fragment are rejected at read time', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'ci-metrics-'))
+  try {
+    const crafted = fragment('browser-pr', 'browser-pr-1', { counts: { expected: 100, executed: 1, passed: 99, failed: 0, skipped: 0, flaky: 50, source: 'playwright-json', missing: null } })
+    writeFileSync(join(directory, 'crafted.json'), JSON.stringify(crafted))
+    const { fragments, missing } = readFragments(directory)
+    assert.equal(fragments.length, 0)
+    assert.ok(missing.some((entry) => entry.job === 'crafted' && /expected must equal executed \+ skipped/.test(entry.reason)))
+  } finally {
+    rmSync(directory, { recursive: true, force: true })
+  }
+})
+
 test('with trusted expectedRun, run-inconsistent fragments are excluded from every derived aggregate regardless of input order', () => {
   const valid = fragment('changes', 'changes', { counts: { expected: 100, executed: 100, passed: 100, failed: 0, skipped: 0, flaky: null, source: 'trx', missing: null } })
   const foreign = fragment('backend-api', 'backend-api-1', { counts: { expected: 900, executed: 900, passed: 900, failed: 0, skipped: 0, flaky: null, source: 'trx', missing: null } })
@@ -338,8 +364,8 @@ test('expected/actual count mismatch is carried into the merged record', () => {
 
 test('flaky titles from all fragments are unioned and bounded', () => {
   const fragments = [
-    fragment('browser-pr', 'browser-pr-1', { flakyTests: ['alpha spec'], counts: { expected: 40, executed: 40, passed: 39, failed: 0, skipped: 0, flaky: 1, source: 'playwright-json', missing: null } }),
-    fragment('browser-pr', 'browser-pr-2', { flakyTests: ['alpha spec', 'beta spec'], counts: { expected: 40, executed: 40, passed: 39, failed: 0, skipped: 0, flaky: 1, source: 'playwright-json', missing: null } }),
+    fragment('browser-pr', 'browser-pr-1', { flakyTests: ['alpha spec'], counts: { expected: 40, executed: 40, passed: 40, failed: 0, skipped: 0, flaky: 1, source: 'playwright-json', missing: null } }),
+    fragment('browser-pr', 'browser-pr-2', { flakyTests: ['alpha spec', 'beta spec'], counts: { expected: 40, executed: 40, passed: 40, failed: 0, skipped: 0, flaky: 1, source: 'playwright-json', missing: null } }),
   ]
   const merged = aggregateFragments({ fragments })
   assert.deepEqual(merged.flakyTests, ['alpha spec', 'beta spec'])
@@ -550,6 +576,60 @@ test('CLI integration: reversed timing markers become null durations with missin
     assert.equal(fragment.timings.setupMs, null)
     assert.equal(fragment.timings.setupEndMs, null)
     assert.match(fragment.timings.missing.setupEndMs, /precedes/)
+  } finally {
+    rmSync(directory, { recursive: true, force: true })
+  }
+})
+
+test('CLI integration: playwright-json counts follow planned/executed/passed semantics for a clean+flaky+skipped mixture', async () => {
+  const directory = mkdtempSync(join(tmpdir(), 'ci-metrics-cli-'))
+  try {
+    const { spawnSync } = await import('node:child_process')
+    const tests = []
+    for (let i = 0; i < 44; i++) tests.push({ title: `clean-${i}`, projectName: 'chromium', results: [{ status: 'passed', duration: 100 }], retries: 0 })
+    tests.push({ title: 'flaky picker', projectName: 'chromium', results: [{ status: 'failed', duration: 100 }, { status: 'passed', duration: 200 }], retries: 1 })
+    tests.push({ title: 'skipped capture', projectName: 'chromium', results: [{ status: 'skipped', duration: 0 }], retries: 0 })
+    const report = {
+      stats: { expected: 44, unexpected: 0, flaky: 1, skipped: 1 },
+      suites: [{ title: 's', specs: [{ title: 'x', file: 'x.spec.ts', tests }], suites: [] }],
+    }
+    const reportPath = join(directory, 'report.json')
+    writeFileSync(reportPath, JSON.stringify(report))
+    const env = {
+      ...process.env,
+      METRICS_TIMING_FILE: join(directory, 'timing.json'),
+      METRICS_FRAGMENT_PATH: join(directory, 'fragment.json'),
+      METRICS_JOB_ID: 'browser-pr',
+      METRICS_JOB_NAME: 'Browser journeys (1/4)',
+      METRICS_JOB_GROUP: 'browser-pr',
+      METRICS_JOB_INSTANCE: 'browser-pr-1',
+      METRICS_NEEDS: 'changes',
+      METRICS_JOB_RESULT: 'success',
+      METRICS_COUNTS_SOURCE: 'playwright-json',
+      METRICS_PLAYWRIGHT_JSON_PATH: reportPath,
+      GITHUB_RUN_ID: '784',
+      GITHUB_RUN_ATTEMPT: '1',
+      GITHUB_EVENT_NAME: 'pull_request',
+      GITHUB_SHA: 'a'.repeat(40),
+      GITHUB_REF: 'refs/pull/12/merge',
+      GITHUB_WORKFLOW: 'Product quality gate',
+      GITHUB_WORKFLOW_REF: 'repo/.github/workflows/ci.yml@refs/heads/main',
+      GITHUB_REPOSITORY: 'owner/repo',
+      GITHUB_JOB: 'browser-pr',
+      GITHUB_WORKSPACE: repoRoot,
+    }
+    for (const name of ['job-start', 'setup-end', 'test-end']) {
+      const marked = spawnSync(process.execPath, [join(binDir, 'mark.mjs'), name], { encoding: 'utf8', cwd: directory, env })
+      assert.equal(marked.status, 0, marked.stderr)
+    }
+    const written = spawnSync(process.execPath, [join(binDir, 'write-fragment.mjs')], { encoding: 'utf8', cwd: directory, env })
+    assert.equal(written.status, 0, written.stderr)
+    const fragment = JSON.parse(await import('node:fs').then((fs) => fs.readFileSync(join(directory, 'fragment.json'), 'utf8')))
+    validateFragment(fragment)
+    assert.deepEqual(
+      { expected: fragment.counts.expected, executed: fragment.counts.executed, passed: fragment.counts.passed, failed: fragment.counts.failed, skipped: fragment.counts.skipped, flaky: fragment.counts.flaky },
+      { expected: 46, executed: 45, passed: 45, failed: 0, skipped: 1, flaky: 1 })
+    assert.deepEqual(fragment.flakyTests, ['flaky picker'])
   } finally {
     rmSync(directory, { recursive: true, force: true })
   }
