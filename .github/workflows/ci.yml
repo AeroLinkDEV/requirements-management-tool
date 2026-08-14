@@ -1440,10 +1440,12 @@ jobs:
           retention-days: 30
 
   # Non-authoritative: runs after the required gate and after every independently selected producer,
-  # aggregates the current-attempt fragments against the expected topology, and publishes bounded JSON +
-  # Markdown artifacts. A metrics failure cannot fail the product gate because this job is not in the
-  # gate's needs or failure list. On pull_request/merge_group runs the output is explicitly labelled
-  # shadow because the same-workflow checkout is PR-controlled; trusted validation is phase B.
+  # aggregates the current run's fragment artifacts (all attempts; latest fragment per instance wins,
+  # earlier attempts are superseded, and earlier-attempt-only evidence is flagged as fallback) against the
+  # expected topology, and publishes bounded JSON + Markdown artifacts. A metrics failure cannot fail the
+  # product gate because this job is not in the gate's needs or failure list. On pull_request/merge_group
+  # runs the output is explicitly labelled shadow because the same-workflow checkout is PR-controlled;
+  # trusted validation is phase B.
   metrics-report:
     name: Aggregate CI metrics
     if: always()

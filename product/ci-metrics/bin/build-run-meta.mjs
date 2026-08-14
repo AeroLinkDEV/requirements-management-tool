@@ -11,11 +11,26 @@
 // identity until a trusted post-run collector (phase B) validates it. On default-branch push/schedule/
 // workflow_dispatch runs the checkout is the trusted workflow itself.
 
-import { writeFileSync, mkdirSync } from 'node:fs'
+import { writeFileSync, mkdirSync, readFileSync, existsSync } from 'node:fs'
 import { dirname } from 'node:path'
 
 const value = (name) => process.env[name] ?? null
 const enabled = (name) => process.env[name] === 'true'
+
+function readEventContext() {
+  const eventPath = value('GITHUB_EVENT_PATH')
+  if (!eventPath || !existsSync(eventPath)) return { pr: null, baseSha: null, headSha: null }
+  try {
+    const event = JSON.parse(readFileSync(eventPath, 'utf8'))
+    return {
+      pr: event.pull_request?.number ?? null,
+      baseSha: event.pull_request?.base?.sha ?? null,
+      headSha: event.pull_request?.head?.sha ?? null,
+    }
+  } catch {
+    return { pr: null, baseSha: null, headSha: null }
+  }
+}
 
 function requireClassification(names) {
   for (const name of names) {
@@ -34,6 +49,7 @@ if (!tree || !/^[0-9a-f]{40}$/.test(tree)) {
 
 const event = value('GITHUB_EVENT_NAME') ?? ''
 const ref = value('GITHUB_REF') ?? ''
+const eventContext = readEventContext()
 const docsOnly = enabled('CLASS_DOCS_ONLY')
 const backend = enabled('CLASS_BACKEND')
 const client = enabled('CLASS_CLIENT')
@@ -155,6 +171,11 @@ const meta = {
     event,
     sha: value('GITHUB_SHA'),
     tree,
+    ref,
+    pr: eventContext.pr,
+    baseSha: eventContext.baseSha,
+    headSha: eventContext.headSha,
+    workflow: value('GITHUB_WORKFLOW'),
     workflowRef: value('GITHUB_WORKFLOW_REF'),
     repository: value('GITHUB_REPOSITORY'),
   },

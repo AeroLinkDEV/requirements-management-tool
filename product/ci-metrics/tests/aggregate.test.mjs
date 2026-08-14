@@ -1021,10 +1021,95 @@ test('a partial rerun keeps non-rerun attempt-1 fragments and replaces rerun ins
     const api = merged.jobs.find((job) => job.instance === 'backend-api-1')
     assert.equal(api.counts.passed, 100)
     assert.equal(api.counts.failed, 0)
+    assert.equal(api.sourceAttempt, 2)
+    assert.equal(merged.jobs.find((job) => job.instance === 'changes').sourceAttempt, 1)
     assert.deepEqual(merged.superseded, [{ instance: 'backend-api-1', attempt: 1, reason: 'Superseded by the attempt 2 fragment for the same instance.' }])
+    assert.equal(merged.attemptModel.currentAttempt, 2)
+    assert.equal(merged.attemptModel.ambiguous, true)
+    assert.deepEqual(merged.attemptModel.earlierAttemptFallbacks.map((entry) => entry.instance), ['changes'])
     const markdown = renderMarkdown(merged)
     assert.match(markdown, /Superseded earlier-attempt fragments: 1/)
+    assert.match(markdown, /Earlier-attempt fallback evidence/)
   }
+})
+
+test('an absent newest-attempt fragment is flagged as ambiguous fallback, never unqualified current evidence', () => {
+  const run2 = { ...run, attempt: 2 }
+  const oldApi = fragment('backend-api', 'backend-api-1', { needs: ['changes'], jobStartMs: 1000, jobEndMs: 9000, counts: { expected: 100, executed: 99, passed: 98, failed: 1, skipped: 1, flaky: null, source: 'trx', missing: null } })
+  const merged = aggregateFragments({
+    fragments: [oldApi],
+    runMeta: {
+      expectedRun: run2,
+      expectedJobs: [{ group: 'backend-api', instance: 'backend-api-1', needs: ['changes'] }],
+      provenance: { mode: 'trusted', reason: 'test default-branch context' },
+    },
+  })
+  assert.equal(merged.jobs.length, 1)
+  assert.equal(merged.jobs[0].sourceAttempt, 1)
+  assert.equal(merged.superseded.length, 0)
+  assert.equal(merged.missingTotal, 0)
+  assert.equal(merged.attemptModel.ambiguous, true)
+  assert.deepEqual(merged.attemptModel.earlierAttemptFallbacks.map((entry) => entry.instance), ['backend-api-1'])
+  const markdown = renderMarkdown(merged)
+  assert.match(markdown, /Attempt ambiguity: 1/)
+  assert.match(markdown, /may not have rerun or its telemetry may have failed/)
+})
+
+test('a malformed newest-attempt artifact is missing data and the older fragment stays flagged fallback', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'ci-metrics-'))
+  try {
+    const run2 = { ...run, attempt: 2 }
+    const oldApi = fragment('backend-api', 'backend-api-1', { needs: ['changes'], jobStartMs: 1000, jobEndMs: 9000 })
+    writeFileSync(join(directory, 'attempt-1.json'), JSON.stringify(oldApi))
+    writeFileSync(join(directory, 'attempt-2.json'), '{not json')
+    const { fragments, missing } = readFragments(directory)
+    assert.equal(fragments.length, 1)
+    assert.ok(missing.some((entry) => entry.job === 'attempt-2'))
+    const merged = aggregateFragments({
+      fragments,
+      missing,
+      runMeta: {
+        expectedRun: run2,
+        expectedJobs: [{ group: 'backend-api', instance: 'backend-api-1', needs: ['changes'] }],
+        provenance: { mode: 'trusted', reason: 'test default-branch context' },
+      },
+    })
+    assert.equal(merged.jobs[0].sourceAttempt, 1)
+    assert.equal(merged.attemptModel.ambiguous, true)
+    assert.ok(merged.missing.some((entry) => /attempt-2/.test(entry.job)))
+  } finally {
+    rmSync(directory, { recursive: true, force: true })
+  }
+})
+
+test('the merged record preserves PR/base/head/ref/workflow identity and per-job source attempts', () => {
+  const fullRun = {
+    ...run,
+    ref: 'refs/pull/572/merge',
+    pr: 572,
+    baseSha: 'b'.repeat(40),
+    headSha: 'c'.repeat(40),
+    workflow: 'Product quality gate',
+  }
+  const fragments = [fragment('changes', 'changes', { jobStartMs: 0, jobEndMs: 1000 })]
+  const merged = aggregateFragments({
+    fragments,
+    runMeta: {
+      expectedRun: fullRun,
+      expectedJobs: [{ group: 'changes', instance: 'changes', needs: [] }],
+      provenance: { mode: 'shadow', reason: 'PR-controlled checkout' },
+    },
+  })
+  assert.equal(merged.run.pr, 572)
+  assert.equal(merged.run.baseSha, 'b'.repeat(40))
+  assert.equal(merged.run.headSha, 'c'.repeat(40))
+  assert.equal(merged.run.ref, 'refs/pull/572/merge')
+  assert.equal(merged.run.workflow, 'Product quality gate')
+  assert.equal(merged.run.workflowRef, 'x/.github/workflows/ci.yml@main')
+  assert.equal(merged.jobs[0].sourceAttempt, 1)
+  const serialized = JSON.stringify(merged)
+  assert.ok(serialized.includes('refs/pull/572/merge'))
+  assert.ok(serialized.includes('c'.repeat(40)))
 })
 
 test('same-attempt duplicate fragments remain a contradiction, never a silent pick', () => {

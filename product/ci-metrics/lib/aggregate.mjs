@@ -330,6 +330,7 @@ export function aggregateFragments({ fragments, missing = [], runMeta = null }) 
 
   let duplicateUnavailable = null
   const superseded = []
+  const earlierAttemptFallbacks = []
   if (expectedRun) {
     const byInstance = new Map()
     for (const fragment of consistent) {
@@ -355,6 +356,16 @@ export function aggregateFragments({ fragments, missing = [], runMeta = null }) 
       }
     }
     consistent = resolved
+    for (const fragment of consistent) {
+      if (fragment.run.attempt < expectedRun.attempt) {
+        earlierAttemptFallbacks.push({
+          instance: fragment.job.instance,
+          sourceAttempt: fragment.run.attempt,
+          reason: `No fragment from the current attempt (${expectedRun.attempt}) was available; the job may not have rerun or its telemetry may have failed. Phase B adds exact per-attempt Actions metadata.`,
+        })
+      }
+    }
+    earlierAttemptFallbacks.sort((a, b) => a.instance.localeCompare(b.instance))
   }
   const instanceCounts = new Map()
   for (const fragment of consistent) instanceCounts.set(fragment.job.instance, (instanceCounts.get(fragment.job.instance) ?? 0) + 1)
@@ -453,7 +464,10 @@ export function aggregateFragments({ fragments, missing = [], runMeta = null }) 
           tree: run.tree,
           ref: run.ref,
           pr: run.pr,
+          baseSha: run.baseSha,
+          headSha: run.headSha,
           workflow: run.workflow,
+          workflowRef: run.workflowRef,
           repository: run.repository,
         }
       : null,
@@ -466,6 +480,7 @@ export function aggregateFragments({ fragments, missing = [], runMeta = null }) 
       result: fragment.job.result,
       timings: fragment.timings,
       counts: fragment.counts,
+      sourceAttempt: fragment.run.attempt,
       slowest: Array.isArray(fragment.slowest) ? fragment.slowest.slice(0, 50) : [],
       cache: fragment.cache,
       classification: fragment.classification,
@@ -484,6 +499,16 @@ export function aggregateFragments({ fragments, missing = [], runMeta = null }) 
       attempt: entry.attempt,
       reason: String(entry.reason).slice(0, 300),
     })),
+    attemptModel: {
+      currentAttempt: expectedRun?.attempt ?? null,
+      sourcedAtCurrentAttempt: expectedRun ? consistent.filter((fragment) => fragment.run.attempt === expectedRun.attempt).length : null,
+      earlierAttemptFallbacks: earlierAttemptFallbacks.slice(0, MAX_FRAGMENTS).map((entry) => ({
+        instance: String(entry.instance).slice(0, 120),
+        sourceAttempt: entry.sourceAttempt,
+        reason: String(entry.reason).slice(0, 300),
+      })),
+      ambiguous: earlierAttemptFallbacks.length > 0,
+    },
     skipped: Array.isArray(runMeta?.skippedJobs)
       ? runMeta.skippedJobs.slice(0, MAX_FRAGMENTS).map((job) => ({
           group: String(job.group ?? '').slice(0, 100),
@@ -551,6 +576,9 @@ export function renderMarkdown(merged) {
   if (merged.superseded.length > 0) {
     push(`- Superseded earlier-attempt fragments: ${merged.superseded.length}`)
   }
+  if (merged.attemptModel?.ambiguous) {
+    push(`- Attempt ambiguity: ${merged.attemptModel.earlierAttemptFallbacks.length} job(s) use earlier-attempt evidence (source attempt below run attempt ${merged.attemptModel.currentAttempt})`)
+  }
   push(`- Sourced test totals (${escapeMarkdown(merged.countsModel?.label ?? 'sourced families only')}): expected ${merged.counts.expected ?? 'unavailable'}, executed ${merged.counts.executed ?? 'unavailable'}, passed ${merged.counts.passed ?? 'unavailable'}, failed ${merged.counts.failed ?? 'unavailable'}, skipped ${merged.counts.skipped ?? 'unavailable'}, flaky ${merged.counts.flaky ?? 'unavailable'}`)
   if (merged.countsModel?.missingFamilies.length > 0) {
     push(`- Families without structured counts (${merged.countsModel.missingFamilies.length}): ${merged.countsModel.missingFamilies.map((entry) => `${escapeMarkdown(entry.instance)} (${escapeMarkdown(entry.reason)})`).join('; ')}`)
@@ -594,6 +622,14 @@ export function renderMarkdown(merged) {
     push('')
     for (const entry of merged.superseded) {
       push(`- ${escapeMarkdown(entry.instance)} (attempt ${entry.attempt}): ${escapeMarkdown(entry.reason)}`)
+    }
+    push('')
+  }
+  if (merged.attemptModel?.ambiguous) {
+    push('## Earlier-attempt fallback evidence')
+    push('')
+    for (const entry of merged.attemptModel.earlierAttemptFallbacks) {
+      push(`- ${escapeMarkdown(entry.instance)} (source attempt ${entry.sourceAttempt}, run attempt ${merged.attemptModel.currentAttempt}): ${escapeMarkdown(entry.reason)}`)
     }
     push('')
   }

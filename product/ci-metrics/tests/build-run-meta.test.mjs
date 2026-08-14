@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { mkdtempSync, readFileSync, writeFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -217,5 +217,38 @@ test('run metadata refuses to guess topology when any classifier output is missi
     assert.match(result.stderr, /expected topology cannot be derived/)
   } finally {
     rmSync(directory, { recursive: true, force: true })
+  }
+})
+
+test('expectedRun carries PR, base/head SHA, ref, and workflow identity from the event file', () => {
+  const eventDirectory = mkdtempSync(join(tmpdir(), 'ci-run-meta-event-'))
+  try {
+    const eventPath = join(eventDirectory, 'event.json')
+    writeFileSync(eventPath, JSON.stringify({
+      pull_request: {
+        number: 572,
+        base: { sha: 'b'.repeat(40) },
+        head: { sha: 'c'.repeat(40) },
+      },
+    }))
+    const { directory, result, meta } = build({
+      ...ALL_TRUE,
+      GITHUB_EVENT_PATH: eventPath,
+      GITHUB_REF: 'refs/pull/572/merge',
+      GITHUB_WORKFLOW: 'Product quality gate',
+    })
+    try {
+      assert.equal(result.status, 0, result.stderr)
+      assert.equal(meta.expectedRun.pr, 572)
+      assert.equal(meta.expectedRun.baseSha, 'b'.repeat(40))
+      assert.equal(meta.expectedRun.headSha, 'c'.repeat(40))
+      assert.equal(meta.expectedRun.ref, 'refs/pull/572/merge')
+      assert.equal(meta.expectedRun.workflow, 'Product quality gate')
+      assert.equal(meta.expectedRun.workflowRef, 'repo/.github/workflows/ci.yml@refs/pull/1/merge')
+    } finally {
+      rmSync(directory, { recursive: true, force: true })
+    }
+  } finally {
+    rmSync(eventDirectory, { recursive: true, force: true })
   }
 })

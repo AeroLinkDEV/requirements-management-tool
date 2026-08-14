@@ -9,8 +9,10 @@ Every quality-gate job in `.github/workflows/ci.yml` emits a fragment (timing ma
 counts, cache hits, classifier outputs) that is uploaded with `if: always()` and
 `continue-on-error: true`. The non-authoritative `metrics-report` job builds run metadata with
 `bin/build-run-meta.mjs` (exact tree SHA, expected job topology derived from the event and classifier
-outputs, deliberate skips, provenance), downloads only the current-attempt fragments, aggregates them, and
-publishes bounded JSON + Markdown artifacts after the required gate.
+outputs, deliberate skips, provenance), downloads the current run's fragment artifacts (all attempts),
+aggregates them, and publishes bounded JSON + Markdown artifacts after the required gate. The latest
+fragment per instance wins; earlier attempts are recorded as `superseded`, and an instance whose newest
+evidence is from an earlier attempt is flagged as an ambiguous fallback rather than presented as current.
 
 Each fragment (`aerolink-ci-fragment/v2`, schema in
 [`schema/v2-fragment.json`](schema/v2-fragment.json); the v1 file remains on disk only for validating older
@@ -184,7 +186,7 @@ Run the full suite exactly as CI does:
 node --test product/ci-metrics/tests/trx.test.mjs product/ci-metrics/tests/playwright.test.mjs product/ci-metrics/tests/fragment.test.mjs product/ci-metrics/tests/aggregate.test.mjs product/ci-metrics/tests/build-run-meta.test.mjs product/ci-metrics/tests/junit.test.mjs product/ci-metrics/tests/ci-workflow-contract.test.mjs
 ```
 
-The suite (90 tests) covers schema-driven nested validation, real-format Playwright suite traversal,
+The suite (99 tests) covers schema-driven nested validation, real-format Playwright suite traversal,
 representative TRX success/failure fixtures, Node JUnit parsing, valid/missing/malformed/oversized
 fragments, unknown schema versions, failed/cancelled/skipped jobs, missing test reports, count mismatches,
 retried Playwright tests, empty test sets, comparable-run grouping, matrix topology with distinct

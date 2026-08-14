@@ -3,8 +3,10 @@
 // These guard the properties the round-1 review found missing:
 // 1. Every metrics-only step is failure-isolated (continue-on-error), so telemetry can never fail a
 //    product job or the required gate.
-// 2. Fragment artifacts are attempt-scoped and the report downloads only current-attempt fragments,
-//    never prior-attempt fragments or a previous merged report.
+// 2. Fragment artifacts are attempt-scoped; the report downloads the current run's fragment artifacts
+//    from all attempts into per-artifact subdirectories, and the aggregator selects the latest per
+//    instance (superseded and fallback semantics are unit-tested). Previous runs' merged reports are
+//    excluded by the prefix.
 // 3. The metrics-report waits for every independently selected producer.
 // 4. Every applicable test-bearing job is wired to structured counts (TRX, Playwright JSON, JUnit).
 // 5. The gate's metrics dependency list is derived from the same event/classification predicates as the
