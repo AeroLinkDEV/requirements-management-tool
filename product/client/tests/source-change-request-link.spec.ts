@@ -66,6 +66,11 @@ test('the source change request named on a requirement revision opens that chang
   expect(revision.sourceChangeRequestId, 'the revision projection must name the source change request').toBe(draft.id)
   expect(revision.sourceChangeRequestReleaseId, 'the revision projection must name the build that owns it').toBe(workspace.release.id)
 
+  // The inspector's history sits below a sticky command bar, and at Playwright's default 1280×720 the link
+  // scrolls under it — the run failed with the Advanced button intercepting the click on a locator that had
+  // already resolved to the right element. The sibling specs on this surface all size the window; this is a
+  // realistic one rather than a workaround, and forcing the click would have hidden a real overlap.
+  await page.setViewportSize({ width: 1600, height: 1000 })
   await login(page, 'admin', { openProject: false })
   await selectProgram(page, programName)
   await openNavigationGroup(page, 'SYSTEMS ENGINEERING')
