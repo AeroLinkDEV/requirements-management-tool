@@ -728,7 +728,7 @@ test('flaky-title evidence is structural: partial, bogus-reason, and inconsisten
           f.flakyTests = []
           f.flakyTitlesTruncated = true
         },
-        pattern: /truncation requires at least one retained title/,
+        pattern: /requires flaky > 20/,
       },
       {
         name: 'unavailable-with-titles',
@@ -737,7 +737,61 @@ test('flaky-title evidence is structural: partial, bogus-reason, and inconsisten
           f.flakyTests = ['a title']
           f.flakyTitlesUnavailable = true
         },
-        pattern: /unavailable flaky titles must not also carry titles/,
+        pattern: /unavailable flaky titles must have zero retained titles/,
+      },
+      {
+        name: 'unavailable-without-reason',
+        mutate: (f) => {
+          f.counts = { expected: 1, executed: 1, passed: 1, failed: 0, skipped: 0, flaky: 1, source: 'playwright-json', missing: null }
+          f.flakyTests = []
+          f.flakyTitlesUnavailable = true
+        },
+        pattern: /require a bounded reason/,
+      },
+      {
+        name: 'truncated-without-reason',
+        mutate: (f) => {
+          f.counts = { expected: 25, executed: 25, passed: 25, failed: 0, skipped: 0, flaky: 25, source: 'playwright-json', missing: null }
+          f.flakyTests = Array.from({ length: 20 }, (_, i) => `t-${i}`)
+          f.flakyTitlesTruncated = true
+        },
+        pattern: /require a bounded reason/,
+      },
+      {
+        name: 'truncated-at-20',
+        mutate: (f) => {
+          f.counts = { expected: 20, executed: 20, passed: 20, failed: 0, skipped: 0, flaky: 20, source: 'playwright-json', missing: 'truncated' }
+          f.flakyTests = Array.from({ length: 20 }, (_, i) => `t-${i}`)
+          f.flakyTitlesTruncated = true
+        },
+        pattern: /requires flaky > 20/,
+      },
+      {
+        name: 'truncated-19-titles',
+        mutate: (f) => {
+          f.counts = { expected: 25, executed: 25, passed: 25, failed: 0, skipped: 0, flaky: 25, source: 'playwright-json', missing: 'truncated' }
+          f.flakyTests = Array.from({ length: 19 }, (_, i) => `t-${i}`)
+          f.flakyTitlesTruncated = true
+        },
+        pattern: /must retain exactly 20/,
+      },
+      {
+        name: 'zero-flaky-unavailable',
+        mutate: (f) => {
+          f.counts = { expected: 1, executed: 1, passed: 1, failed: 0, skipped: 0, flaky: 0, source: 'playwright-json', missing: 'unavailable' }
+          f.flakyTests = []
+          f.flakyTitlesUnavailable = true
+        },
+        pattern: /requires flaky > 0/,
+      },
+      {
+        name: 'zero-flaky-truncated',
+        mutate: (f) => {
+          f.counts = { expected: 1, executed: 1, passed: 1, failed: 0, skipped: 0, flaky: 0, source: 'playwright-json', missing: 'truncated' }
+          f.flakyTests = []
+          f.flakyTitlesTruncated = true
+        },
+        pattern: /requires flaky > 20/,
       },
     ]
     for (const entry of cases) {
@@ -755,6 +809,31 @@ test('flaky-title evidence is structural: partial, bogus-reason, and inconsisten
     for (const entry of cases) {
       assert.ok(missing.some((item) => item.job === entry.name && entry.pattern.test(item.reason)), `${entry.name} should be rejected`)
     }
+  } finally {
+    rmSync(directory, { recursive: true, force: true })
+  }
+})
+
+test('non-Playwright fragments cannot carry flaky titles or title-state flags', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'ci-metrics-'))
+  try {
+    const forged = fragment('backend-api', 'backend-api-1', { counts: { expected: 1, executed: 1, passed: 1, failed: 0, skipped: 0, flaky: null, source: 'trx', missing: null } })
+    forged.flakyTests = ['forged flaky title']
+    writeFileSync(join(directory, 'forged.json'), JSON.stringify(forged))
+
+    const flagged = fragment('changes', 'changes')
+    flagged.flakyTitlesUnavailable = true
+    writeFileSync(join(directory, 'flagged.json'), JSON.stringify(flagged))
+
+    const withFlakyCount = fragment('backend-api', 'backend-api-1', { counts: { expected: 1, executed: 1, passed: 1, failed: 0, skipped: 0, flaky: 3, source: 'trx', missing: null } })
+    writeFileSync(join(directory, 'with-flaky-count.json'), JSON.stringify(withFlakyCount))
+
+    const { fragments, missing } = readFragments(directory)
+    assert.equal(fragments.length, 0)
+    assert.equal(missing.length, 3)
+    assert.ok(missing.some((entry) => entry.job === 'forged' && /flaky titles are only valid for playwright-json/.test(entry.reason)))
+    assert.ok(missing.some((entry) => entry.job === 'flagged' && /flakyTitlesUnavailable is only valid for playwright-json/.test(entry.reason)))
+    assert.ok(missing.some((entry) => entry.job === 'with-flaky-count' && /flaky count is only valid for playwright-json/.test(entry.reason)))
   } finally {
     rmSync(directory, { recursive: true, force: true })
   }

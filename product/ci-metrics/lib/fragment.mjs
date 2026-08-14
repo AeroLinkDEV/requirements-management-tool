@@ -188,6 +188,15 @@ export function validationErrors(fragment) {
     }
   }
   const counts = fragment.counts ?? {}
+  const flakyTitles = Array.isArray(fragment.flakyTests) ? fragment.flakyTests : []
+  const titlesUnavailable = fragment.flakyTitlesUnavailable === true
+  const titlesTruncated = fragment.flakyTitlesTruncated === true
+  if (counts.source !== 'playwright-json') {
+    if (flakyTitles.length > 0) errors.push('counts: flaky titles are only valid for playwright-json fragments.')
+    if (titlesUnavailable) errors.push('counts: flakyTitlesUnavailable is only valid for playwright-json fragments.')
+    if (titlesTruncated) errors.push('counts: flakyTitlesTruncated is only valid for playwright-json fragments.')
+    if (counts.flaky !== null) errors.push('counts: flaky count is only valid for playwright-json fragments.')
+  }
   if (counts.source === 'playwright-json') {
     const required = [counts.expected, counts.executed, counts.passed, counts.failed, counts.skipped, counts.flaky]
     if (required.some((value) => value === null)) {
@@ -196,16 +205,22 @@ export function validationErrors(fragment) {
       if (counts.expected !== counts.executed + counts.skipped) errors.push('counts: expected must equal executed + skipped for playwright-json.')
       if (counts.executed !== counts.passed + counts.failed) errors.push('counts: executed must equal passed + failed for playwright-json.')
       if (counts.flaky > counts.passed) errors.push('counts: flaky cannot exceed passed for playwright-json.')
-      const titles = Array.isArray(fragment.flakyTests) ? fragment.flakyTests : []
-      const unavailable = fragment.flakyTitlesUnavailable === true
-      const truncated = fragment.flakyTitlesTruncated === true
-      if (counts.flaky === 0 && titles.length > 0) errors.push('counts: flaky titles present with a zero flaky count.')
-      if (counts.flaky > 0 && !unavailable && !truncated && titles.length !== counts.flaky) {
-        errors.push(`counts: flaky title count (${titles.length}) does not match the flaky count (${counts.flaky}).`)
+      const reason = counts.missing ?? ''
+      if (counts.flaky === 0) {
+        if (flakyTitles.length > 0) errors.push('counts: flaky titles present with a zero flaky count.')
+        if (titlesUnavailable) errors.push('counts: flakyTitlesUnavailable requires flaky > 0.')
+        if (titlesTruncated) errors.push('counts: flakyTitlesTruncated requires flaky > 20.')
+      } else if (titlesUnavailable) {
+        if (titlesTruncated) errors.push('counts: flaky-title unavailable and truncated are mutually exclusive.')
+        if (flakyTitles.length !== 0) errors.push('counts: unavailable flaky titles must have zero retained titles.')
+        if (reason.length === 0) errors.push('counts: unavailable flaky titles require a bounded reason in counts.missing.')
+      } else if (titlesTruncated) {
+        if (counts.flaky <= 20) errors.push('counts: flaky-title truncation requires flaky > 20.')
+        if (flakyTitles.length !== 20) errors.push(`counts: truncated flaky titles must retain exactly 20 (found ${flakyTitles.length}).`)
+        if (reason.length === 0) errors.push('counts: truncated flaky titles require a bounded reason in counts.missing.')
+      } else if (flakyTitles.length !== counts.flaky) {
+        errors.push(`counts: flaky title count (${flakyTitles.length}) does not match the flaky count (${counts.flaky}).`)
       }
-      if (truncated && titles.length === 0) errors.push('counts: flaky-title truncation requires at least one retained title.')
-      if (truncated && unavailable) errors.push('counts: flaky-title unavailable and truncated are mutually exclusive.')
-      if (unavailable && titles.length > 0) errors.push('counts: unavailable flaky titles must not also carry titles.')
     }
   }
   if (counts.source === 'trx') {

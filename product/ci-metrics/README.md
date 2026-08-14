@@ -29,9 +29,11 @@ Each fragment (`aerolink-ci-fragment/v1`, schema in
   rather than zero. A Playwright flaky count without title evidence is never silent: the writer records an
   explicit `counts.missing` reason when the report has no suites hierarchy or no titles could be derived,
   and the structured flags `flakyTitlesUnavailable` / `flakyTitlesTruncated` carry the state. Read-time
-  validation is structural: when detail is available and not truncated, title cardinality must equal
-  `counts.flaky`; truncation requires at least one retained title; unavailable and truncated are mutually
-  exclusive; and unavailable cannot coexist with titles. Free text is never trusted as evidence;
+  validation is a strict structural state machine: available detail requires exactly `flaky` titles;
+  unavailable requires `flaky > 0`, zero titles, and a bounded reason; truncated requires `flaky > 20`,
+  exactly 20 retained titles, a bounded reason, and unavailable=false; zero flakes requires both flags
+  false and no titles. Non-Playwright fragments must not carry flaky titles, title-state flags, or a flaky
+  count. Free text is never trusted as evidence;
 - slowest classes or specs (bounded to 50) and flaky test titles (bounded to 20);
 - cache hit/miss for NuGet, npm, and Chromium where a job has those steps;
 - the path classifier outputs when the job can see them.
