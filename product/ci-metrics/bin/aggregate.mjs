@@ -1,8 +1,9 @@
 // Aggregates one run's fragments into run-metrics.json and run-metrics.md.
 //
 // Usage: node bin/aggregate.mjs <fragments-directory> <output-directory> [run-meta.json]
-// The optional run-meta.json may contain {"queueDelayMs": <number|null>} from a trusted default-branch
-// source; values are only numbers, never commands or paths.
+// The optional run-meta.json may contain {"queueDelayMs": <number|null>, "expectedJobs": [...],
+// "skippedJobs": [...], "provenance": {"mode": "...", "reason": "..."}} from the workflow; values are only
+// data, never commands or paths.
 
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'

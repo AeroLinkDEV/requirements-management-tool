@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtempSync, writeFileSync, rmSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, writeFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -36,7 +36,7 @@ function fragment(group, instance, { needs = [], result = 'success', jobStartMs 
       jobEndMs: jobEndMs === null ? null : jobEndMs,
       setupMs: setupEndMs !== null && jobStartMs !== null ? setupEndMs - jobStartMs : null,
       testMs: setupEndMs !== null && testEndMs !== null ? testEndMs - setupEndMs : null,
-      uploadAndCleanupMs: testEndMs !== null && jobEndMs !== null ? jobEndMs - testEndMs : null,
+      postTestMs: testEndMs !== null && jobEndMs !== null ? jobEndMs - testEndMs : null,
       missing: {},
     },
     counts: counts ?? { expected: null, executed: null, passed: null, failed: null, skipped: null, flaky: null, source: null, missing: 'no structured output' },
@@ -72,7 +72,7 @@ test('the real matrix topology keeps every instance distinct and the gate waits 
     fragment('browser-pr', 'browser-pr-4', { needs: ['changes'], jobStartMs: 1000, jobEndMs: 15000 }),
     fragment('gate', 'gate', { needs: ['changes', 'backend-api', 'browser-pr'], jobStartMs: 30000, jobEndMs: 31000 }),
   ]
-  const merged = aggregateFragments({ fragments, runMeta: { expectedJobs: expectedMatrix } })
+  const merged = aggregateFragments({ fragments, runMeta: { expectedJobs: expectedMatrix, provenance: { mode: 'trusted', reason: 'test default-branch context' } } })
   assert.equal(merged.missing.length, 0)
   assert.equal(merged.jobs.length, 9)
   assert.equal(merged.criticalPath.job, 'gate')
@@ -164,7 +164,7 @@ test('with trusted expectedRun, run-inconsistent fragments are excluded from eve
   const runMeta = { expectedJobs: [
     { group: 'changes', instance: 'changes', needs: [] },
     { group: 'backend-api', instance: 'backend-api-1', needs: ['changes'] },
-  ], expectedRun: run }
+  ], expectedRun: run, provenance: { mode: 'trusted', reason: 'test default-branch context' } }
   for (const fragments of [[valid, foreign], [foreign, valid]]) {
     const merged = aggregateFragments({ fragments, runMeta })
     assert.equal(merged.jobs.length, 1)
@@ -226,7 +226,7 @@ test('trusted expected-jobs topology wins even when a fragment omits or invents 
     fragment('a', 'a', { jobStartMs: 0, jobEndMs: 1000 }),
     fragment('b', 'b', { needs: [], jobStartMs: 1000, jobEndMs: 12000 }),
   ]
-  const merged = aggregateFragments({ fragments: omitted, runMeta: { expectedJobs: trusted } })
+  const merged = aggregateFragments({ fragments: omitted, runMeta: { expectedJobs: trusted, provenance: { mode: 'trusted', reason: 'test default-branch context' } } })
   assert.equal(merged.criticalPath.job, 'b')
   assert.equal(merged.criticalPath.durationMs, 12000)
   assert.deepEqual(merged.criticalPath.path, ['a', 'b'])
@@ -237,7 +237,7 @@ test('trusted expected-jobs topology wins even when a fragment omits or invents 
     fragment('a', 'a', { jobStartMs: 0, jobEndMs: 1000 }),
     fragment('b', 'b', { needs: ['does-not-exist'], jobStartMs: 1000, jobEndMs: 12000 }),
   ]
-  const conflicted = aggregateFragments({ fragments: invented, runMeta: { expectedJobs: trusted } })
+  const conflicted = aggregateFragments({ fragments: invented, runMeta: { expectedJobs: trusted, provenance: { mode: 'trusted', reason: 'test default-branch context' } } })
   assert.equal(conflicted.criticalPath.job, 'b')
   assert.deepEqual(conflicted.criticalPath.path, ['a', 'b'])
   assert.deepEqual(conflicted.criticalPath.topologyDisagreements, ['b'])
@@ -427,14 +427,14 @@ test('CLI parity: expected-jobs metadata drives absent detection and bounded out
     writeFileSync(join(directory, 'changes.json'), JSON.stringify(fragment('changes', 'changes', { jobStartMs: 0, jobEndMs: 1000 })))
     writeFileSync(join(directory, 'backend-api-1.json'), JSON.stringify(fragment('backend-api', 'backend-api-1', { needs: ['changes'], jobStartMs: 1000, jobEndMs: 26000 })))
     const runMetaPath = join(output, 'run-meta.json')
-    writeFileSync(runMetaPath, JSON.stringify({ queueDelayMs: 5000, expectedJobs: expectedMatrix }))
+    writeFileSync(runMetaPath, JSON.stringify({ queueDelayMs: 5000, expectedJobs: expectedMatrix, provenance: { mode: 'trusted', reason: 'test default-branch context' } }))
     const { spawnSync } = await import('node:child_process')
     // The entry points must work from any working directory (CI runs the suite from the repository root),
     // so resolve the bin path from the module and execute with a neutral cwd.
     const result = spawnSync(process.execPath, [join(binDir, 'aggregate.mjs'), directory, output, runMetaPath], { encoding: 'utf8', cwd: output })
     assert.equal(result.status, 0, result.stderr)
     const merged = JSON.parse(await import('node:fs').then((fs) => fs.readFileSync(join(output, 'run-metrics.json'), 'utf8')))
-    assert.equal(merged.schemaVersion, 'aerolink-ci-run/v1')
+    assert.equal(merged.schemaVersion, 'aerolink-ci-run/v2')
     assert.equal(merged.queue.delayMs, 5000)
     assert.ok(merged.missing.some((entry) => entry.job === 'backend-api-2'))
     assert.equal(merged.criticalPath.job, null)
@@ -513,6 +513,7 @@ test('CLI integration: a malformed structured report becomes an explicit counts.
       METRICS_JOB_RESULT: 'success',
       METRICS_COUNTS_SOURCE: 'trx',
       METRICS_TRX_PATH: malformedTrx,
+      METRICS_CACHE_NUGET: 'true',
       GITHUB_RUN_ID: '782',
       GITHUB_RUN_ATTEMPT: '1',
       GITHUB_EVENT_NAME: 'pull_request',
@@ -535,6 +536,7 @@ test('CLI integration: a malformed structured report becomes an explicit counts.
     assert.equal(fragment.counts.source, null)
     assert.equal(fragment.counts.executed, null)
     assert.match(fragment.counts.missing, /TRX parse failed/)
+    assert.equal(fragment.cache.nuget, 'hit')
   } finally {
     rmSync(directory, { recursive: true, force: true })
   }
@@ -943,4 +945,277 @@ test('more than twenty flaky titles are truncated explicitly, not silently', asy
   } finally {
     rmSync(directory, { recursive: true, force: true })
   }
+})
+
+test('PR-controlled expectedJobs are used for the graph but labelled shadow until trusted validation', () => {
+  const fragments = [
+    fragment('changes', 'changes', { jobStartMs: 0, jobEndMs: 1000 }),
+    fragment('backend-api', 'backend-api-1', { needs: ['changes'], jobStartMs: 1000, jobEndMs: 20000 }),
+    fragment('gate', 'gate', { needs: ['changes', 'backend-api'], jobStartMs: 20000, jobEndMs: 21000 }),
+  ]
+  const runMeta = {
+    expectedJobs: [
+      { group: 'changes', instance: 'changes', needs: [] },
+      { group: 'backend-api', instance: 'backend-api-1', needs: ['changes'] },
+      { group: 'gate', instance: 'gate', needs: ['changes', 'backend-api'] },
+    ],
+    expectedRun: run,
+    provenance: { mode: 'shadow', reason: 'Same-workflow checkout is PR-controlled.' },
+    skippedJobs: [{ group: 'browser-pr', instance: 'browser-pr-1', reason: 'browser classification is false' }],
+  }
+  const merged = aggregateFragments({ fragments, runMeta })
+  assert.equal(merged.runIdentityTrusted, false)
+  assert.equal(merged.provenance.mode, 'shadow')
+  assert.equal(merged.criticalPath.trustedTopology, false)
+  assert.equal(merged.criticalPath.expectedTopology, true)
+  assert.equal(merged.criticalPath.job, 'gate')
+  assert.deepEqual(merged.skipped, [{ group: 'browser-pr', instance: 'browser-pr-1', reason: 'browser classification is false' }])
+  const markdown = renderMarkdown(merged)
+  assert.match(markdown, /Deliberately skipped jobs: 1/)
+  assert.match(markdown, /browser-pr-1: browser classification is false/)
+  assert.match(markdown, /shadow/)
+})
+
+test('shadow expected-job metadata still wins over fragment claims and records disagreements', () => {
+  const fragments = [
+    fragment('a', 'a', { jobStartMs: 0, jobEndMs: 1000 }),
+    fragment('b', 'b', { needs: ['does-not-exist'], jobStartMs: 1000, jobEndMs: 12000 }),
+  ]
+  const merged = aggregateFragments({
+    fragments,
+    runMeta: {
+      expectedJobs: [
+        { group: 'a', instance: 'a', needs: [] },
+        { group: 'b', instance: 'b', needs: ['a'] },
+      ],
+      provenance: { mode: 'shadow', reason: 'PR-controlled checkout' },
+    },
+  })
+  assert.equal(merged.criticalPath.job, 'b')
+  assert.deepEqual(merged.criticalPath.path, ['a', 'b'])
+  assert.deepEqual(merged.criticalPath.topologyDisagreements, ['b'])
+  assert.equal(merged.criticalPath.trustedTopology, false)
+  assert.equal(merged.criticalPath.expectedTopology, true)
+})
+
+test('a partial rerun keeps non-rerun attempt-1 fragments and replaces rerun instances with attempt 2', () => {
+  const run2 = { ...run, attempt: 2 }
+  const nonRerun = fragment('changes', 'changes', { jobStartMs: 0, jobEndMs: 1000 })
+  const oldApi = fragment('backend-api', 'backend-api-1', { needs: ['changes'], jobStartMs: 1000, jobEndMs: 9000, counts: { expected: 100, executed: 99, passed: 98, failed: 1, skipped: 1, flaky: null, source: 'trx', missing: null } })
+  const newApi = fragment('backend-api', 'backend-api-1', { needs: ['changes'], jobStartMs: 1000, jobEndMs: 8000, counts: { expected: 100, executed: 100, passed: 100, failed: 0, skipped: 0, flaky: null, source: 'trx', missing: null } })
+  newApi.run = run2
+  const runMeta = {
+    expectedRun: run2,
+    expectedJobs: [
+      { group: 'changes', instance: 'changes', needs: [] },
+      { group: 'backend-api', instance: 'backend-api-1', needs: ['changes'] },
+    ],
+    provenance: { mode: 'trusted', reason: 'test default-branch context' },
+  }
+  for (const fragments of [
+    [nonRerun, oldApi, newApi],
+    [newApi, oldApi, nonRerun],
+  ]) {
+    const merged = aggregateFragments({ fragments, runMeta })
+    assert.equal(merged.jobs.length, 2)
+    const api = merged.jobs.find((job) => job.instance === 'backend-api-1')
+    assert.equal(api.counts.passed, 100)
+    assert.equal(api.counts.failed, 0)
+    assert.equal(api.sourceAttempt, 2)
+    assert.equal(merged.jobs.find((job) => job.instance === 'changes').sourceAttempt, 1)
+    assert.deepEqual(merged.superseded, [{ instance: 'backend-api-1', attempt: 1, reason: 'Superseded by the attempt 2 fragment for the same instance.' }])
+    assert.equal(merged.attemptModel.currentAttempt, 2)
+    assert.equal(merged.attemptModel.ambiguous, true)
+    assert.deepEqual(merged.attemptModel.earlierAttemptFallbacks.map((entry) => entry.instance), ['changes'])
+    const markdown = renderMarkdown(merged)
+    assert.match(markdown, /Superseded earlier-attempt fragments: 1/)
+    assert.match(markdown, /Earlier-attempt fallback evidence/)
+  }
+})
+
+test('an absent newest-attempt fragment is flagged as ambiguous fallback, never unqualified current evidence', () => {
+  const run2 = { ...run, attempt: 2 }
+  const oldApi = fragment('backend-api', 'backend-api-1', { needs: ['changes'], jobStartMs: 1000, jobEndMs: 9000, counts: { expected: 100, executed: 99, passed: 98, failed: 1, skipped: 1, flaky: null, source: 'trx', missing: null } })
+  const merged = aggregateFragments({
+    fragments: [oldApi],
+    runMeta: {
+      expectedRun: run2,
+      expectedJobs: [{ group: 'backend-api', instance: 'backend-api-1', needs: ['changes'] }],
+      provenance: { mode: 'trusted', reason: 'test default-branch context' },
+    },
+  })
+  assert.equal(merged.jobs.length, 1)
+  assert.equal(merged.jobs[0].sourceAttempt, 1)
+  assert.equal(merged.superseded.length, 0)
+  assert.equal(merged.missingTotal, 0)
+  assert.equal(merged.attemptModel.ambiguous, true)
+  assert.deepEqual(merged.attemptModel.earlierAttemptFallbacks.map((entry) => entry.instance), ['backend-api-1'])
+  const markdown = renderMarkdown(merged)
+  assert.match(markdown, /Attempt ambiguity: 1/)
+  assert.match(markdown, /may not have rerun or its telemetry may have failed/)
+})
+
+test('a malformed newest-attempt artifact is missing data and the older fragment stays flagged fallback', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'ci-metrics-'))
+  try {
+    const run2 = { ...run, attempt: 2 }
+    const oldApi = fragment('backend-api', 'backend-api-1', { needs: ['changes'], jobStartMs: 1000, jobEndMs: 9000 })
+    writeFileSync(join(directory, 'attempt-1.json'), JSON.stringify(oldApi))
+    writeFileSync(join(directory, 'attempt-2.json'), '{not json')
+    const { fragments, missing } = readFragments(directory)
+    assert.equal(fragments.length, 1)
+    assert.ok(missing.some((entry) => entry.job === 'attempt-2'))
+    const merged = aggregateFragments({
+      fragments,
+      missing,
+      runMeta: {
+        expectedRun: run2,
+        expectedJobs: [{ group: 'backend-api', instance: 'backend-api-1', needs: ['changes'] }],
+        provenance: { mode: 'trusted', reason: 'test default-branch context' },
+      },
+    })
+    assert.equal(merged.jobs[0].sourceAttempt, 1)
+    assert.equal(merged.attemptModel.ambiguous, true)
+    assert.ok(merged.missing.some((entry) => /attempt-2/.test(entry.job)))
+  } finally {
+    rmSync(directory, { recursive: true, force: true })
+  }
+})
+
+test('the merged record preserves PR/base/head/ref/workflow identity and per-job source attempts', () => {
+  const fullRun = {
+    ...run,
+    ref: 'refs/pull/572/merge',
+    pr: 572,
+    baseSha: 'b'.repeat(40),
+    headSha: 'c'.repeat(40),
+    workflow: 'Product quality gate',
+  }
+  const fragments = [fragment('changes', 'changes', { jobStartMs: 0, jobEndMs: 1000 })]
+  const merged = aggregateFragments({
+    fragments,
+    runMeta: {
+      expectedRun: fullRun,
+      expectedJobs: [{ group: 'changes', instance: 'changes', needs: [] }],
+      provenance: { mode: 'shadow', reason: 'PR-controlled checkout' },
+    },
+  })
+  assert.equal(merged.run.pr, 572)
+  assert.equal(merged.run.baseSha, 'b'.repeat(40))
+  assert.equal(merged.run.headSha, 'c'.repeat(40))
+  assert.equal(merged.run.ref, 'refs/pull/572/merge')
+  assert.equal(merged.run.workflow, 'Product quality gate')
+  assert.equal(merged.run.workflowRef, 'x/.github/workflows/ci.yml@main')
+  assert.equal(merged.jobs[0].sourceAttempt, 1)
+  const serialized = JSON.stringify(merged)
+  assert.ok(serialized.includes('refs/pull/572/merge'))
+  assert.ok(serialized.includes('c'.repeat(40)))
+})
+
+test('same-attempt duplicate fragments remain a contradiction, never a silent pick', () => {
+  const run2 = { ...run, attempt: 2 }
+  const first = fragment('backend-api', 'backend-api-1', { needs: ['changes'], jobStartMs: 1000, jobEndMs: 9000 })
+  const second = fragment('backend-api', 'backend-api-1', { needs: ['changes'], jobStartMs: 1000, jobEndMs: 8000 })
+  first.run = run2
+  second.run = run2
+  const merged = aggregateFragments({
+    fragments: [first, second],
+    runMeta: {
+      expectedRun: run2,
+      expectedJobs: [{ group: 'backend-api', instance: 'backend-api-1', needs: ['changes'] }],
+      provenance: { mode: 'trusted', reason: 'test default-branch context' },
+    },
+  })
+  assert.equal(merged.jobs.length, 0)
+  assert.equal(merged.superseded.length, 0)
+  assert.match(merged.criticalPath.unavailableReason, /Duplicate job instance identity/)
+})
+
+test('readFragments finds fragments inside per-artifact subdirectories', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'ci-metrics-'))
+  try {
+    const subdir = join(directory, 'ci-metrics-fragment-backend-api-1-2')
+    mkdirSync(subdir, { recursive: true })
+    writeFileSync(join(subdir, 'fragment-backend-api-1.json'), JSON.stringify(fragment('backend-api', 'backend-api-1')))
+    const { fragments, missing } = readFragments(directory)
+    assert.equal(fragments.length, 1)
+    assert.equal(fragments[0].job.instance, 'backend-api-1')
+    assert.equal(missing.length, 0)
+  } finally {
+    rmSync(directory, { recursive: true, force: true })
+  }
+})
+
+test('missing test families are modelled separately from the sourced totals', () => {
+  const fragments = [
+    fragment('backend-api', 'backend-api-1', { needs: ['changes'], counts: { expected: 100, executed: 100, passed: 100, failed: 0, skipped: 0, flaky: null, source: 'trx', missing: null } }),
+    fragment('script-contracts', 'script-contracts', { needs: ['changes'], counts: { expected: null, executed: null, passed: null, failed: null, skipped: null, flaky: null, source: null, missing: 'This family has no structured test output.' } }),
+    fragment('postgresql-smoke', 'postgresql-smoke', { needs: ['changes'], counts: { expected: null, executed: null, passed: null, failed: null, skipped: null, flaky: null, source: null, missing: 'This job validates through API/psql checks with no structured test runner.' } }),
+  ]
+  const runMeta = {
+    expectedJobs: [
+      { group: 'backend-api', instance: 'backend-api-1', needs: ['changes'] },
+      { group: 'script-contracts', instance: 'script-contracts', needs: ['changes'] },
+      { group: 'postgresql-smoke', instance: 'postgresql-smoke', needs: ['changes'] },
+    ],
+    provenance: { mode: 'trusted', reason: 'test default-branch context' },
+  }
+  const merged = aggregateFragments({ fragments, runMeta })
+  assert.equal(merged.counts.expected, 100)
+  assert.equal(merged.countsModel.totalIsPartial, true)
+  assert.deepEqual(merged.countsModel.missingFamilies, [
+    { group: 'postgresql-smoke', instance: 'postgresql-smoke', reason: 'This job validates through API/psql checks with no structured test runner.' },
+    { group: 'script-contracts', instance: 'script-contracts', reason: 'This family has no structured test output.' },
+  ])
+  assert.equal(merged.countsModel.sourcedFamilies, 1)
+  assert.equal(merged.countsModel.sourcedJobInstances, 1)
+  const markdown = renderMarkdown(merged)
+  assert.match(markdown, /sourced families with structured output only/)
+  assert.match(markdown, /Families without structured counts/)
+  assert.match(markdown, /script-contracts/)
+  assert.match(markdown, /postgresql-smoke/)
+})
+
+test('a matrix family is missing when any selected instance lacks structured counts', () => {
+  const fragments = [
+    fragment('browser-pr', 'browser-pr-1', { needs: ['changes'], counts: { expected: 40, executed: 40, passed: 40, failed: 0, skipped: 0, flaky: 0, source: 'playwright-json', missing: null } }),
+    fragment('browser-pr', 'browser-pr-2', { needs: ['changes'], counts: { expected: null, executed: null, passed: null, failed: null, skipped: null, flaky: null, source: null, missing: 'Report file missing.' } }),
+  ]
+  const merged = aggregateFragments({
+    fragments,
+    runMeta: {
+      expectedJobs: [
+        { group: 'browser-pr', instance: 'browser-pr-1', needs: ['changes'] },
+        { group: 'browser-pr', instance: 'browser-pr-2', needs: ['changes'] },
+      ],
+      provenance: { mode: 'trusted', reason: 'test default-branch context' },
+    },
+  })
+  assert.deepEqual(merged.countsModel.missingFamilies, [
+    { group: 'browser-pr', instance: 'browser-pr-2', reason: 'Report file missing.' },
+  ])
+  assert.equal(merged.countsModel.sourcedFamilies, 1)
+  assert.equal(merged.countsModel.totalIsPartial, true)
+})
+
+test('the merged record carries bounded slowest class/spec duration detail', () => {
+  const withSlowest = fragment('backend-api', 'backend-api-1', { needs: ['changes'], counts: { expected: 100, executed: 100, passed: 100, failed: 0, skipped: 0, flaky: null, source: 'trx', missing: null } })
+  withSlowest.slowest = [
+    { name: 'AeroLink.Api.Tests.SlowApiTests', durationMs: 50000, kind: 'class' },
+    { name: 'AeroLink.Api.Tests.FastApiTests', durationMs: 100, kind: 'class' },
+  ]
+  const merged = aggregateFragments({ fragments: [withSlowest] })
+  assert.deepEqual(merged.jobs[0].slowest, [
+    { name: 'AeroLink.Api.Tests.SlowApiTests', durationMs: 50000, kind: 'class' },
+    { name: 'AeroLink.Api.Tests.FastApiTests', durationMs: 100, kind: 'class' },
+  ])
+})
+
+test('postTestMs is the interval between test-end and writer, never called upload/cleanup', () => {
+  const merged = aggregateFragments({ fragments: [fragment('changes', 'changes', { jobStartMs: 0, setupEndMs: 2000, testEndMs: 9000, jobEndMs: 10000 })] })
+  assert.equal(merged.jobs[0].timings.postTestMs, 1000)
+  assert.equal('uploadAndCleanupMs' in merged.jobs[0].timings, false)
+  const markdown = renderMarkdown(merged)
+  assert.match(markdown, /\| After test \|/)
+  assert.doesNotMatch(markdown, /Upload\/cleanup/)
 })

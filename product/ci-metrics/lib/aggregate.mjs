@@ -10,7 +10,7 @@ import { readFileSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { validationErrors, MAX_FRAGMENT_BYTES } from './fragment.mjs'
 
-export const RUN_SCHEMA_VERSION = 'aerolink-ci-run/v1'
+export const RUN_SCHEMA_VERSION = 'aerolink-ci-run/v2'
 export const MAX_FRAGMENTS = 200
 export const MAX_TOTAL_INPUT_BYTES = 20 * 1024 * 1024
 export const MAX_MERGED_BYTES = 512 * 1024
@@ -19,20 +19,39 @@ export const MAX_MARKDOWN_BYTES = 128 * 1024
 
 export function readFragments(directory) {
   const entries = []
-  let files = []
+  let names = []
   try {
-    files = readdirSync(directory)
+    names = readdirSync(directory)
   } catch (error) {
     return { fragments: [], missing: [{ job: 'fragments-directory', reason: `Could not read fragment directory: ${error.message}` }], truncated: false }
   }
+  // The report downloads one artifact per job into its own subdirectory (artifact names are
+  // attempt-scoped, so a partial rerun leaves both attempts on disk). Walk one level so every
+  // current-run fragment is found regardless of whether download-artifact created a subdirectory.
+  const files = []
+  for (const name of names.sort()) {
+    const path = join(directory, name)
+    let childNames = null
+    try {
+      childNames = readdirSync(path)
+    } catch {
+      // Not a directory; the root-level file is handled below.
+    }
+    if (childNames !== null) {
+      for (const child of childNames.sort()) {
+        if (child.endsWith('.json')) files.push(join(path, child))
+      }
+    } else if (name.endsWith('.json')) {
+      files.push(path)
+    }
+  }
   let totalBytes = 0
   let truncated = false
-  for (const file of files.filter((name) => name.endsWith('.json')).sort()) {
+  for (const path of files) {
     if (entries.length >= MAX_FRAGMENTS) {
       truncated = true
       break
     }
-    const path = join(directory, file)
     let parsed
     try {
       const content = readFileSync(path, 'utf8')
@@ -42,19 +61,19 @@ export function readFragments(directory) {
       if (totalBytes > MAX_TOTAL_INPUT_BYTES) throw new Error('Total fragment input exceeds the bounded size.')
       parsed = JSON.parse(content)
     } catch (error) {
-      entries.push({ file, error: error.message, fragment: null })
+      entries.push({ file: path, error: error.message, fragment: null })
       continue
     }
     const errors = validationErrors(parsed)
     if (errors.length > 0) {
-      entries.push({ file, error: errors.join('; '), fragment: null })
+      entries.push({ file: path, error: errors.join('; '), fragment: null })
       continue
     }
-    entries.push({ file, error: null, fragment: parsed })
+    entries.push({ file: path, error: null, fragment: parsed })
   }
   const fragments = entries.filter((entry) => entry.fragment !== null).map((entry) => entry.fragment)
   const missing = entries.filter((entry) => entry.fragment === null).map((entry) => ({
-    job: entry.file.replace(/\.json$/, ''),
+    job: entry.file.split(/[\\/]/).at(-1)?.replace(/\.json$/, '') ?? entry.file,
     reason: entry.error,
   }))
   return { fragments, missing, truncated }
@@ -92,7 +111,10 @@ function runIdentity(fragment) {
 
 function matchesExpectedRun(fragment, expectedRun) {
   const run = fragment.run
-  return run.id === expectedRun.id && run.attempt === expectedRun.attempt && run.sha === expectedRun.sha &&
+  // A partial rerun is a continuation of the same run: jobs that were not rerun keep their earlier-attempt
+  // fragment. Run identity is therefore (id, sha, tree, workflow revision, repository) without attempt;
+  // the latest fragment per instance is selected below and earlier attempts are recorded as superseded.
+  return run.id === expectedRun.id && run.sha === expectedRun.sha &&
     run.tree === expectedRun.tree && run.workflowRef === expectedRun.workflowRef && run.repository === expectedRun.repository
 }
 
@@ -102,14 +124,18 @@ function sameNeeds(left, right) {
   return a.length === b.length && a.every((value, index) => value === b[index])
 }
 
-export function criticalPath({ fragments, expectedJobs = null }) {
+export function criticalPath({ fragments, expectedJobs = null, expectedTopology = expectedJobs !== null, trustedTopology = expectedJobs !== null }) {
   const byInstance = new Map(fragments.map((fragment) => [fragment.job.instance, fragment]))
   const instances = expectedJobs ? expectedJobs.map((job) => job.instance) : [...byInstance.keys()]
   const instanceSet = new Set(instances)
 
-  // Duplicate instances are contradictory topology.
-  const trusted = expectedJobs !== null
-  const unavailable = (unavailableReason) => ({ job: null, durationMs: null, path: [], unavailableReason, trustedTopology: trusted })
+  // Duplicate instances are contradictory topology. `usesExpected` decides the graph source: expected-job
+  // metadata drives the graph and missing detection whenever it is provided, even on PR runs where the
+  // same-workflow metadata is shadow. `trusted` is only the label: PR-controlled metadata can never claim
+  // trusted provenance until a trusted post-run collector validates it (phase B).
+  const usesExpected = expectedJobs !== null && expectedTopology
+  const trusted = usesExpected && trustedTopology
+  const unavailable = (unavailableReason) => ({ job: null, durationMs: null, path: [], unavailableReason, trustedTopology: trusted, expectedTopology: usesExpected })
 
   if (byInstance.size !== fragments.length) return unavailable('Duplicate job instance identity in the fragment set.')
 
@@ -152,7 +178,7 @@ export function criticalPath({ fragments, expectedJobs = null }) {
   // untrusted rather than presented as authoritative.
   const edges = new Map()
   const topologyDisagreements = []
-  if (trusted) {
+  if (usesExpected) {
     for (const fragment of fragments) {
       const trustedJob = expectedJobs.find((job) => job.instance === fragment.job.instance)
       if (trustedJob && !sameNeeds(fragment.job.needs, trustedJob.needs)) {
@@ -227,7 +253,7 @@ export function criticalPath({ fragments, expectedJobs = null }) {
     path.unshift(cursor)
     cursor = parent.get(cursor)
   }
-  return { job: critical?.id ?? null, durationMs: critical?.durationMs ?? null, path, unavailableReason: null, trustedTopology: trusted, topologyDisagreements }
+  return { job: critical?.id ?? null, durationMs: critical?.durationMs ?? null, path, unavailableReason: null, trustedTopology: trusted, expectedTopology: usesExpected, topologyDisagreements }
 }
 
 function escapeMarkdown(value) {
@@ -248,6 +274,13 @@ export function aggregateFragments({ fragments, missing = [], runMeta = null }) 
   const expectedJobs = Array.isArray(runMeta?.expectedJobs) ? runMeta.expectedJobs : null
   const expectedJobsErrors = expectedJobs === null ? [] : validateExpectedJobs(expectedJobs)
   const topologyErrors = [...expectedJobsErrors]
+  const provenanceMode = runMeta?.provenance?.mode === 'trusted' ? 'trusted' : 'shadow'
+  const provenanceReason = runMeta?.provenance?.reason
+    ? String(runMeta.provenance.reason).slice(0, 300)
+    : runMeta === null
+      ? 'No run metadata was provided.'
+      : 'Run metadata did not declare provenance.'
+  const topologyTrusted = expectedJobs !== null && provenanceMode === 'trusted'
 
   // Run identity is trusted input. With trusted expectedRun metadata, fragments that disagree are excluded
   // from every derived aggregate and each exclusion is recorded. Without it, fragment order must never
@@ -296,6 +329,44 @@ export function aggregateFragments({ fragments, missing = [], runMeta = null }) 
     : null
 
   let duplicateUnavailable = null
+  const superseded = []
+  const earlierAttemptFallbacks = []
+  if (expectedRun) {
+    const byInstance = new Map()
+    for (const fragment of consistent) {
+      const list = byInstance.get(fragment.job.instance) ?? []
+      list.push(fragment)
+      byInstance.set(fragment.job.instance, list)
+    }
+    const resolved = []
+    for (const [instance, list] of byInstance) {
+      list.sort((a, b) => a.run.attempt - b.run.attempt)
+      const maxAttempt = list.at(-1).run.attempt
+      const latest = list.filter((fragment) => fragment.run.attempt === maxAttempt)
+      if (latest.length === 1) {
+        resolved.push(latest[0])
+        for (const older of list) {
+          if (older !== latest[0]) {
+            superseded.push({ instance, attempt: older.run.attempt, reason: `Superseded by the attempt ${maxAttempt} fragment for the same instance.` })
+          }
+        }
+      } else {
+        // Same-attempt duplicates are contradictory; the existing duplicate logic below handles them.
+        resolved.push(...latest)
+      }
+    }
+    consistent = resolved
+    for (const fragment of consistent) {
+      if (fragment.run.attempt < expectedRun.attempt) {
+        earlierAttemptFallbacks.push({
+          instance: fragment.job.instance,
+          sourceAttempt: fragment.run.attempt,
+          reason: `No fragment from the current attempt (${expectedRun.attempt}) was available; the job may not have rerun or its telemetry may have failed. Phase B adds exact per-attempt Actions metadata.`,
+        })
+      }
+    }
+    earlierAttemptFallbacks.sort((a, b) => a.instance.localeCompare(b.instance))
+  }
   const instanceCounts = new Map()
   for (const fragment of consistent) instanceCounts.set(fragment.job.instance, (instanceCounts.get(fragment.job.instance) ?? 0) + 1)
   const duplicated = [...instanceCounts.entries()].filter(([, count]) => count > 1)
@@ -318,12 +389,12 @@ export function aggregateFragments({ fragments, missing = [], runMeta = null }) 
   const missingModel = boundedMissing(allMissing)
 
   const path = conflictUnavailable !== null
-    ? { job: null, durationMs: null, path: [], unavailableReason: conflictUnavailable, trustedTopology: expectedJobs !== null }
+    ? { job: null, durationMs: null, path: [], unavailableReason: conflictUnavailable, trustedTopology: topologyTrusted }
     : duplicateUnavailable !== null
-      ? { job: null, durationMs: null, path: [], unavailableReason: duplicateUnavailable, trustedTopology: expectedJobs !== null }
+      ? { job: null, durationMs: null, path: [], unavailableReason: duplicateUnavailable, trustedTopology: topologyTrusted }
     : effectiveTopologyErrors.length > 0
-      ? { job: null, durationMs: null, path: [], unavailableReason: effectiveTopologyErrors.join('; '), trustedTopology: expectedJobs !== null }
-      : criticalPath({ fragments: consistent, expectedJobs })
+      ? { job: null, durationMs: null, path: [], unavailableReason: effectiveTopologyErrors.join('; '), trustedTopology: topologyTrusted }
+      : criticalPath({ fragments: consistent, expectedJobs, expectedTopology: expectedJobs !== null, trustedTopology: topologyTrusted })
 
   const cache = { nuget: { hit: 0, miss: 0 }, npm: { hit: 0, miss: 0 }, chromium: { hit: 0, miss: 0 } }
   const flakyTests = []
@@ -350,6 +421,36 @@ export function aggregateFragments({ fragments, missing = [], runMeta = null }) 
   const unionTruncated = flakyTests.length > 20
   const finalFlakyTests = flakyTests.slice(0, 20)
 
+  // Test families are modelled separately from the sourced subtotal: a selected test-bearing job without
+  // structured counts is listed, and the totals are never presented as the full run total.
+  const TEST_FAMILY_GROUPS = new Set([
+    'backend-api', 'backend-core', 'browser-pr', 'browser-production', 'browser-full',
+    'metrics-tooling', 'script-contracts', 'postgresql-smoke',
+  ])
+  const missingFamilies = []
+  if (expectedJobs) {
+    const present = new Map(consistent.map((fragment) => [fragment.job.instance, fragment]))
+    for (const job of expectedJobs) {
+      if (!TEST_FAMILY_GROUPS.has(job.group)) continue
+      const fragment = present.get(job.instance)
+      if (!fragment) {
+        missingFamilies.push({ group: job.group, instance: job.instance, reason: 'Expected test family uploaded no fragment.' })
+      } else if (!fragment.counts.source) {
+        missingFamilies.push({
+          group: job.group,
+          instance: job.instance,
+          reason: fragment.counts.missing ?? 'This family has no structured test output.',
+        })
+      }
+    }
+  }
+  missingFamilies.sort((a, b) => a.group.localeCompare(b.group) || a.instance.localeCompare(b.instance))
+
+  const sourcedFamilyGroups = new Set()
+  for (const fragment of consistent) {
+    if (fragment.counts.source) sourcedFamilyGroups.add(fragment.job.group)
+  }
+
   const queueDelayMs = runMeta?.queueDelayMs ?? null
   const run = expectedRun ?? consistent[0]?.run ?? null
   const merged = {
@@ -363,7 +464,10 @@ export function aggregateFragments({ fragments, missing = [], runMeta = null }) 
           tree: run.tree,
           ref: run.ref,
           pr: run.pr,
+          baseSha: run.baseSha,
+          headSha: run.headSha,
           workflow: run.workflow,
+          workflowRef: run.workflowRef,
           repository: run.repository,
         }
       : null,
@@ -376,6 +480,8 @@ export function aggregateFragments({ fragments, missing = [], runMeta = null }) 
       result: fragment.job.result,
       timings: fragment.timings,
       counts: fragment.counts,
+      sourceAttempt: fragment.run.attempt,
+      slowest: Array.isArray(fragment.slowest) ? fragment.slowest.slice(0, 50) : [],
       cache: fragment.cache,
       classification: fragment.classification,
       flakyTitlesUnavailable: fragment.flakyTitlesUnavailable === true,
@@ -383,7 +489,33 @@ export function aggregateFragments({ fragments, missing = [], runMeta = null }) 
       flakyTitleMissingReason: fragment.counts.missing ? String(fragment.counts.missing).slice(0, 300) : null,
     })),
     criticalPath: path,
-    runIdentityTrusted: expectedRun !== null,
+    runIdentityTrusted: expectedRun !== null && provenanceMode === 'trusted',
+    provenance: {
+      mode: provenanceMode,
+      reason: provenanceReason,
+    },
+    superseded: superseded.slice(0, MAX_FRAGMENTS).map((entry) => ({
+      instance: String(entry.instance).slice(0, 120),
+      attempt: entry.attempt,
+      reason: String(entry.reason).slice(0, 300),
+    })),
+    attemptModel: {
+      currentAttempt: expectedRun?.attempt ?? null,
+      sourcedAtCurrentAttempt: expectedRun ? consistent.filter((fragment) => fragment.run.attempt === expectedRun.attempt).length : null,
+      earlierAttemptFallbacks: earlierAttemptFallbacks.slice(0, MAX_FRAGMENTS).map((entry) => ({
+        instance: String(entry.instance).slice(0, 120),
+        sourceAttempt: entry.sourceAttempt,
+        reason: String(entry.reason).slice(0, 300),
+      })),
+      ambiguous: earlierAttemptFallbacks.length > 0,
+    },
+    skipped: Array.isArray(runMeta?.skippedJobs)
+      ? runMeta.skippedJobs.slice(0, MAX_FRAGMENTS).map((job) => ({
+          group: String(job.group ?? '').slice(0, 100),
+          instance: String(job.instance ?? '').slice(0, 120),
+          reason: String(job.reason ?? '').slice(0, 300),
+        }))
+      : [],
     queue: {
       delayMs: queueDelayMs,
       unavailableReason: queueDelayMs === null && runMeta === null
@@ -391,6 +523,13 @@ export function aggregateFragments({ fragments, missing = [], runMeta = null }) 
         : queueDelayMs === null ? 'runMeta did not include queueDelayMs.' : null,
     },
     counts: countSummary,
+    countsModel: {
+      sourcedFamilies: sourcedFamilyGroups.size,
+      sourcedJobInstances: countSummary.sourcedJobs,
+      missingFamilies,
+      totalIsPartial: missingFamilies.length > 0,
+      label: 'sourced families with structured output only',
+    },
     cache,
     flakyTests: finalFlakyTests,
     flakyTitlesTruncated: unionTruncated || flakyTitleEvidence.truncated.length > 0,
@@ -428,10 +567,28 @@ export function renderMarkdown(merged) {
   push(`- Run: ${merged.run ? `#${escapeMarkdown(merged.run.id)} (attempt ${escapeMarkdown(merged.run.attempt)}, ${escapeMarkdown(merged.run.event)})` : 'unavailable'}`)
   push(`- Repository: ${merged.run?.repository ? escapeMarkdown(merged.run.repository) : 'unavailable'}`)
   push(`- Tested tree: ${merged.run?.tree ? `\`${escapeMarkdown(merged.run.tree)}\`` : 'unavailable'}`)
-  push(`- Run identity: ${merged.runIdentityTrusted ? 'trusted (expectedRun metadata)' : 'untrusted (no expectedRun metadata; fragment-consistent only)'}`)
+  push(`- Run identity: ${merged.runIdentityTrusted ? 'trusted (default-branch provenance)' : 'shadow (not yet validated by a trusted post-run collector)'}`)
+  push(`- Provenance: ${escapeMarkdown(merged.provenance?.reason ?? 'not declared')}`)
   push(`- Fragments: ${merged.jobs.length} valid, ${merged.missingTotal} missing/unreadable${merged.missingTruncated ? ' (list truncated)' : ''}`)
+  if (merged.skipped.length > 0) {
+    push(`- Deliberately skipped jobs: ${merged.skipped.length}`)
+  }
+  if (merged.superseded.length > 0) {
+    push(`- Superseded earlier-attempt fragments: ${merged.superseded.length}`)
+  }
+  if (merged.attemptModel?.ambiguous) {
+    push(`- Attempt ambiguity: ${merged.attemptModel.earlierAttemptFallbacks.length} job(s) use earlier-attempt evidence (source attempt below run attempt ${merged.attemptModel.currentAttempt})`)
+  }
+  push(`- Sourced test totals (${escapeMarkdown(merged.countsModel?.label ?? 'sourced families only')}): expected ${merged.counts.expected ?? 'unavailable'}, executed ${merged.counts.executed ?? 'unavailable'}, passed ${merged.counts.passed ?? 'unavailable'}, failed ${merged.counts.failed ?? 'unavailable'}, skipped ${merged.counts.skipped ?? 'unavailable'}, flaky ${merged.counts.flaky ?? 'unavailable'}`)
+  if (merged.countsModel?.missingFamilies.length > 0) {
+    push(`- Families without structured counts (${merged.countsModel.missingFamilies.length}): ${merged.countsModel.missingFamilies.map((entry) => `${escapeMarkdown(entry.instance)} (${escapeMarkdown(entry.reason)})`).join('; ')}`)
+  }
   const critical = merged.criticalPath
-  if (critical.trustedTopology === false) push('- Topology: fragment-controlled (trusted expectedJobs metadata was not provided)')
+  if (critical.trustedTopology === false) {
+    push(critical.expectedTopology === true
+      ? '- Topology: same-workflow (shadow) expected-job metadata; trusted validation pending phase B'
+      : '- Topology: fragment-controlled (trusted expectedJobs metadata was not provided)')
+  }
   if (critical.topologyDisagreements?.length > 0) {
     push(`- Topology disagreements (trusted graph won): ${critical.topologyDisagreements.map(escapeMarkdown).join(', ')}`)
   }
@@ -443,15 +600,39 @@ export function renderMarkdown(merged) {
   push('')
   push('## Jobs')
   push('')
-  push('| Job | Result | Total | Setup | Test | Upload/cleanup | Counts |')
+  push('| Job | Result | Total | Setup | Test | After test | Counts |')
   push('|---|---|---|---|---|---|---|')
   for (const job of merged.jobs) {
     const seconds = (ms) => (ms === null ? '—' : `${(ms / 1000).toFixed(1)}s`)
     const counts = job.counts.source ? `${job.counts.executed ?? '?'}/${job.counts.expected ?? '?'}` : '—'
     const total = job.timings.jobStartMs !== null && job.timings.jobEndMs !== null ? job.timings.jobEndMs - job.timings.jobStartMs : null
-    push(`| ${escapeMarkdown(job.name)} | ${escapeMarkdown(job.result)} | ${seconds(total)} | ${seconds(job.timings.setupMs)} | ${seconds(job.timings.testMs)} | ${seconds(job.timings.uploadAndCleanupMs)} | ${counts} |`)
+    push(`| ${escapeMarkdown(job.name)} | ${escapeMarkdown(job.result)} | ${seconds(total)} | ${seconds(job.timings.setupMs)} | ${seconds(job.timings.testMs)} | ${seconds(job.timings.postTestMs)} | ${counts} |`)
   }
   push('')
+  if (merged.skipped.length > 0) {
+    push('## Deliberately skipped')
+    push('')
+    for (const job of merged.skipped) {
+      push(`- ${escapeMarkdown(job.instance)}: ${escapeMarkdown(job.reason)}`)
+    }
+    push('')
+  }
+  if (merged.superseded.length > 0) {
+    push('## Superseded earlier-attempt fragments')
+    push('')
+    for (const entry of merged.superseded) {
+      push(`- ${escapeMarkdown(entry.instance)} (attempt ${entry.attempt}): ${escapeMarkdown(entry.reason)}`)
+    }
+    push('')
+  }
+  if (merged.attemptModel?.ambiguous) {
+    push('## Earlier-attempt fallback evidence')
+    push('')
+    for (const entry of merged.attemptModel.earlierAttemptFallbacks) {
+      push(`- ${escapeMarkdown(entry.instance)} (source attempt ${entry.sourceAttempt}, run attempt ${merged.attemptModel.currentAttempt}): ${escapeMarkdown(entry.reason)}`)
+    }
+    push('')
+  }
   if (merged.missing.length > 0) {
     push('## Missing data')
     push('')
