@@ -102,16 +102,18 @@ function sameNeeds(left, right) {
   return a.length === b.length && a.every((value, index) => value === b[index])
 }
 
-export function criticalPath({ fragments, expectedJobs = null, trustedTopology = expectedJobs !== null }) {
+export function criticalPath({ fragments, expectedJobs = null, expectedTopology = expectedJobs !== null, trustedTopology = expectedJobs !== null }) {
   const byInstance = new Map(fragments.map((fragment) => [fragment.job.instance, fragment]))
   const instances = expectedJobs ? expectedJobs.map((job) => job.instance) : [...byInstance.keys()]
   const instanceSet = new Set(instances)
 
-  // Duplicate instances are contradictory topology. `trusted` records whether the expected topology came
-  // from trusted code: PR-controlled same-workflow metadata is still used for missing detection and the
-  // dependency graph, but it is labelled shadow until a trusted post-run collector validates it.
-  const trusted = trustedTopology
-  const unavailable = (unavailableReason) => ({ job: null, durationMs: null, path: [], unavailableReason, trustedTopology: trusted })
+  // Duplicate instances are contradictory topology. `usesExpected` decides the graph source: expected-job
+  // metadata drives the graph and missing detection whenever it is provided, even on PR runs where the
+  // same-workflow metadata is shadow. `trusted` is only the label: PR-controlled metadata can never claim
+  // trusted provenance until a trusted post-run collector validates it (phase B).
+  const usesExpected = expectedJobs !== null && expectedTopology
+  const trusted = usesExpected && trustedTopology
+  const unavailable = (unavailableReason) => ({ job: null, durationMs: null, path: [], unavailableReason, trustedTopology: trusted, expectedTopology: usesExpected })
 
   if (byInstance.size !== fragments.length) return unavailable('Duplicate job instance identity in the fragment set.')
 
@@ -154,7 +156,7 @@ export function criticalPath({ fragments, expectedJobs = null, trustedTopology =
   // untrusted rather than presented as authoritative.
   const edges = new Map()
   const topologyDisagreements = []
-  if (trusted) {
+  if (usesExpected) {
     for (const fragment of fragments) {
       const trustedJob = expectedJobs.find((job) => job.instance === fragment.job.instance)
       if (trustedJob && !sameNeeds(fragment.job.needs, trustedJob.needs)) {
@@ -229,7 +231,7 @@ export function criticalPath({ fragments, expectedJobs = null, trustedTopology =
     path.unshift(cursor)
     cursor = parent.get(cursor)
   }
-  return { job: critical?.id ?? null, durationMs: critical?.durationMs ?? null, path, unavailableReason: null, trustedTopology: trusted, topologyDisagreements }
+  return { job: critical?.id ?? null, durationMs: critical?.durationMs ?? null, path, unavailableReason: null, trustedTopology: trusted, expectedTopology: usesExpected, topologyDisagreements }
 }
 
 function escapeMarkdown(value) {
@@ -332,7 +334,7 @@ export function aggregateFragments({ fragments, missing = [], runMeta = null }) 
       ? { job: null, durationMs: null, path: [], unavailableReason: duplicateUnavailable, trustedTopology: topologyTrusted }
     : effectiveTopologyErrors.length > 0
       ? { job: null, durationMs: null, path: [], unavailableReason: effectiveTopologyErrors.join('; '), trustedTopology: topologyTrusted }
-      : criticalPath({ fragments: consistent, expectedJobs, trustedTopology: topologyTrusted })
+      : criticalPath({ fragments: consistent, expectedJobs, expectedTopology: expectedJobs !== null, trustedTopology: topologyTrusted })
 
   const cache = { nuget: { hit: 0, miss: 0 }, npm: { hit: 0, miss: 0 }, chromium: { hit: 0, miss: 0 } }
   const flakyTests = []
@@ -489,7 +491,11 @@ export function renderMarkdown(merged) {
     push(`- Families without structured counts (${merged.countsModel.missingFamilies.length}): ${merged.countsModel.missingFamilies.map((entry) => `${escapeMarkdown(entry.instance)} (${escapeMarkdown(entry.reason)})`).join('; ')}`)
   }
   const critical = merged.criticalPath
-  if (critical.trustedTopology === false) push('- Topology: fragment-controlled (trusted expectedJobs metadata was not provided)')
+  if (critical.trustedTopology === false) {
+    push(critical.expectedTopology === true
+      ? '- Topology: same-workflow (shadow) expected-job metadata; trusted validation pending phase B'
+      : '- Topology: fragment-controlled (trusted expectedJobs metadata was not provided)')
+  }
   if (critical.topologyDisagreements?.length > 0) {
     push(`- Topology disagreements (trusted graph won): ${critical.topologyDisagreements.map(escapeMarkdown).join(', ')}`)
   }

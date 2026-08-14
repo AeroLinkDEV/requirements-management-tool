@@ -967,12 +967,35 @@ test('PR-controlled expectedJobs are used for the graph but labelled shadow unti
   assert.equal(merged.runIdentityTrusted, false)
   assert.equal(merged.provenance.mode, 'shadow')
   assert.equal(merged.criticalPath.trustedTopology, false)
+  assert.equal(merged.criticalPath.expectedTopology, true)
   assert.equal(merged.criticalPath.job, 'gate')
   assert.deepEqual(merged.skipped, [{ group: 'browser-pr', instance: 'browser-pr-1', reason: 'browser classification is false' }])
   const markdown = renderMarkdown(merged)
   assert.match(markdown, /Deliberately skipped jobs: 1/)
   assert.match(markdown, /browser-pr-1: browser classification is false/)
   assert.match(markdown, /shadow/)
+})
+
+test('shadow expected-job metadata still wins over fragment claims and records disagreements', () => {
+  const fragments = [
+    fragment('a', 'a', { jobStartMs: 0, jobEndMs: 1000 }),
+    fragment('b', 'b', { needs: ['does-not-exist'], jobStartMs: 1000, jobEndMs: 12000 }),
+  ]
+  const merged = aggregateFragments({
+    fragments,
+    runMeta: {
+      expectedJobs: [
+        { group: 'a', instance: 'a', needs: [] },
+        { group: 'b', instance: 'b', needs: ['a'] },
+      ],
+      provenance: { mode: 'shadow', reason: 'PR-controlled checkout' },
+    },
+  })
+  assert.equal(merged.criticalPath.job, 'b')
+  assert.deepEqual(merged.criticalPath.path, ['a', 'b'])
+  assert.deepEqual(merged.criticalPath.topologyDisagreements, ['b'])
+  assert.equal(merged.criticalPath.trustedTopology, false)
+  assert.equal(merged.criticalPath.expectedTopology, true)
 })
 
 test('missing test families are modelled separately from the sourced totals', () => {
