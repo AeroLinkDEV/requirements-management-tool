@@ -38,13 +38,16 @@ test('aggregateApiTelemetry computes startup floor and per-class summaries', () 
   const trxTests = [
     { className: 'AeroLink.Api.Tests.ExampleApiTests', name: 'A_test_creates_a_project', durationMs: 5000, outcome: 'Passed' },
     { className: 'AeroLink.Api.Tests.ExampleApiTests', name: 'A_test_deletes_a_project', durationMs: 4000, outcome: 'Passed' },
+    { className: 'AeroLink.Api.Tests.PureUnitApiTests', name: 'AeroLink.Api.Tests.PureUnitApiTests.A_rule_test_without_a_factory', durationMs: 12, outcome: 'Passed' },
   ]
   const report = aggregateApiTelemetry({ factoryRecords, trxTests })
-  assert.equal(report.totals.trxTests, 2)
+  assert.equal(report.totals.trxTests, 3)
   assert.equal(report.totals.tests, 2)
   assert.equal(report.totals.factories, 2)
   assert.equal(report.totals.ambiguousTheoryRows, 0)
   assert.equal(report.totals.unmatchedMethods, 0)
+  assert.equal(report.totals.nonHostedTrxTests, 1)
+  assert.equal(report.nonHostedTests[0].method, 'AeroLink.Api.Tests.PureUnitApiTests.A_rule_test_without_a_factory')
   assert.equal(report.totals.summedWallMs, 9000)
   assert.equal(report.totals.summedStartupMs, 4490)
   assert.equal(report.classes[0].className, 'ExampleApiTests')

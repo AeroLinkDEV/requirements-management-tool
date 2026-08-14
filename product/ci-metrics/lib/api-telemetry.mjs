@@ -128,6 +128,12 @@ export function aggregateApiTelemetry({ factoryRecords, trxTests = [] }) {
     byTest.set(key, entry)
   }
 
+  const methodBaseOf = (name) => {
+    const afterDot = name.includes('.') ? name.slice(name.lastIndexOf('.') + 1) : name
+    const open = afterDot.indexOf('(')
+    return (open === -1 ? afterDot : afterDot.slice(0, open)).trim()
+  }
+
   const perTest = []
   for (const entry of byTest.values()) {
     const trxList = trxByClass.get(entry.className) ?? []
@@ -220,6 +226,18 @@ export function aggregateApiTelemetry({ factoryRecords, trxTests = [] }) {
 
   const allWall = perTest.map((entry) => entry.wallMs).filter((value) => value !== null)
   const allStartup = perTest.map((entry) => entry.startupMs)
+  const nonHostedTests = []
+  for (const test of trxTests) {
+    const shortClass = test.className?.split('.').at(-1) ?? 'unknown'
+    const base = methodBaseOf(test.name)
+    if (!byTest.has(`${shortClass}.${base}`)) {
+      nonHostedTests.push({
+        className: test.className,
+        method: test.name,
+        durationMs: test.durationMs,
+      })
+    }
+  }
   return {
     schemaVersion: API_TELEMETRY_SCHEMA_VERSION,
     totals: {
@@ -227,6 +245,7 @@ export function aggregateApiTelemetry({ factoryRecords, trxTests = [] }) {
       tests: perTest.length,
       ambiguousTheoryRows: ambiguousTheories.reduce((sum, entry) => sum + entry.trxRows, 0),
       unmatchedMethods: unmatchedMethods.length,
+      nonHostedTrxTests: nonHostedTests.length,
       factories: factories.length,
       classes: classes.size,
       summedWallMs: Math.round(allWall.reduce((sum, value) => sum + value, 0)),
@@ -241,6 +260,7 @@ export function aggregateApiTelemetry({ factoryRecords, trxTests = [] }) {
     multipleFactoryTests: multiFactoryTests,
     ambiguousTheoryRows: ambiguousTheories,
     unmatchedMethods: unmatchedMethods.slice(0, 50),
+    nonHostedTests: nonHostedTests.sort((a, b) => (b.durationMs ?? 0) - (a.durationMs ?? 0)).slice(0, 50),
   }
 }
 
@@ -258,7 +278,7 @@ export function renderApiTelemetryMarkdown(report) {
   const lines = []
   lines.push('# API startup-floor telemetry')
   lines.push('')
-  lines.push(`- TRX tests: ${report.totals.trxTests}; attributed (non-ambiguous) tests: ${report.totals.tests}; ambiguous theory rows: ${report.totals.ambiguousTheoryRows}; unmatched factory methods: ${report.totals.unmatchedMethods}`)
+  lines.push(`- TRX tests: ${report.totals.trxTests}; attributed (non-ambiguous) tests: ${report.totals.tests}; ambiguous theory rows: ${report.totals.ambiguousTheoryRows}; unmatched factory methods: ${report.totals.unmatchedMethods}; non-hosted TRX tests (no factory record): ${report.totals.nonHostedTrxTests}`)
   lines.push(`- Factories: ${report.totals.factories}; classes: ${report.totals.classes}`)
   lines.push(`- Summed wall: ${seconds(report.totals.summedWallMs)}; summed startup: ${seconds(report.totals.summedStartupMs)} (${Math.round((report.totals.startupFraction ?? 0) * 100)}% of wall)`)
   lines.push(`- Database open (informational sub-phase of host build): ${seconds(report.totals.summedDbOpenMs)}`)
@@ -289,6 +309,14 @@ export function renderApiTelemetryMarkdown(report) {
     lines.push('')
     for (const entry of report.unmatchedMethods.slice(0, 20)) {
       lines.push(`- ${escapeMarkdown(entry.className)}.${escapeMarkdown(entry.method)}: ${entry.factories} factories, no TRX row`)
+    }
+    lines.push('')
+  }
+  if (report.nonHostedTests.length > 0) {
+    lines.push('## Non-hosted TRX tests (no factory record)')
+    lines.push('')
+    for (const entry of report.nonHostedTests.slice(0, 20)) {
+      lines.push(`- ${escapeMarkdown(entry.className)}.${escapeMarkdown(entry.method)}: ${seconds(entry.durationMs)}`)
     }
     lines.push('')
   }
