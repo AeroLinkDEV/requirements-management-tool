@@ -146,11 +146,16 @@ runs, and it is uploaded only when the aggregate job succeeds (30-day retention)
 `.github/workflows/ci-main-provenance.yml` observes every completed quality-gate run. For main pushes it
 resolves the merged pull request (closed-PR search), finds that PR's successful gate runs, downloads and
 validates their manifests as untrusted data, and compares manifest trees against GitHub's own commit tree
-for the pushed commit. `lib/provenance.mjs` decides `provenanced-match` only when a manifest has the exact
-tree and authorizes the skip; any missing/malformed/mismatched evidence yields `fallback-needed` with an
-explicit reason. **Shadow phase:** the post-merge product gate always runs, `canSkip` is always false, and
-the output records what phase B would skip. Enforcement requires real-merge observation and a separate
-review.
+for the pushed commit. Every accepted manifest is **bound to trusted API metadata**: repository and
+workflow name/revision, candidate run id/attempt, merged PR number and head/base, the expected PR merge
+ref, and the GitHub-side tree of the manifest's checked-out commit. Eligibility is **derived from raw
+evidence** (gate passed, every selected job success, empty missing, coherent verified totals), and
+`canAuthorizePostMergeSkip` is treated only as a consistency assertion that must agree with that derived
+eligibility. `lib/provenance.mjs` decides `provenanced-match` only when a bound manifest has the exact tree
+and eligible raw evidence; any missing/malformed/mismatched/contradictory evidence yields
+`fallback-needed` with an explicit reason. **Shadow phase:** the post-merge product gate always runs,
+`canSkip` is always false, and the output records what phase B would skip. Enforcement requires real-merge
+observation and a separate review.
 
 ### Current baseline (phase A measurements)
 
@@ -245,7 +250,7 @@ Run the full suite exactly as CI does:
 node --test product/ci-metrics/tests/trx.test.mjs product/ci-metrics/tests/playwright.test.mjs product/ci-metrics/tests/fragment.test.mjs product/ci-metrics/tests/aggregate.test.mjs product/ci-metrics/tests/build-run-meta.test.mjs product/ci-metrics/tests/junit.test.mjs product/ci-metrics/tests/ci-workflow-contract.test.mjs product/ci-metrics/tests/zip.test.mjs product/ci-metrics/tests/rolling.test.mjs product/ci-metrics/tests/provenance.test.mjs
 ```
 
-The suite (124 tests) covers schema-driven nested validation, real-format Playwright suite traversal,
+The suite (126 tests) covers schema-driven nested validation, real-format Playwright suite traversal,
 representative TRX success/failure fixtures, Node JUnit parsing, valid/missing/malformed/oversized
 fragments and artifacts, unknown schema versions, failed/cancelled/skipped jobs, missing test reports,
 count mismatches, retried Playwright tests, empty test sets, comparable-run grouping and rolling
@@ -254,7 +259,8 @@ matrix topology, exact event/classification topology, deliberate skips, provenan
 semantics, attempt resolution (superseded + fallback ambiguity), v1-legacy acceptance, run-identity
 consistency and GitHub-tree cross-checking, tested-tree manifest validation and provenance decisions
 (tree match, missing PR, tree mismatch, unauthorized manifest, malformed manifest, newest-manifest
-selection), credential guards, timing validation, bounded output, Markdown escaping, critical-path
+selection, contradictory raw gate evidence, identity binding for repository/workflow/run/attempt/PR/
+head/base/ref/checkout-tree), credential guards, timing validation, bounded output, Markdown escaping, critical-path
 computation, the minimal ZIP reader, and the static workflow contract.
 
 CI runs this suite in the `metrics-tooling` job from a clean checkout and reports its result in the

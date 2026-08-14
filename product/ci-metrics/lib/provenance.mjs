@@ -35,6 +35,62 @@ export function validateManifest(manifest) {
   return errors
 }
 
+export function deriveEligibility(manifest) {
+  const reasons = []
+  const gates = manifest?.gates
+  if (!gates || typeof gates !== 'object') {
+    reasons.push('Manifest has no gates evidence.')
+  } else {
+    if (gates.gatePassed !== true) reasons.push('The required gate did not pass.')
+    if (gates.allSelectedPassed !== true) reasons.push('Not every selected gate passed.')
+    if (!Array.isArray(gates.selected) || gates.selected.length === 0) reasons.push('No selected gates were recorded.')
+    if (Array.isArray(gates.selected) && gates.selected.some((job) => !job || job.result !== 'success')) {
+      reasons.push('A selected gate did not succeed.')
+    }
+    if (Array.isArray(gates.missing) && gates.missing.length > 0) reasons.push('Missing gate evidence is present.')
+  }
+  const totals = manifest?.verifiedTotals ?? {}
+  for (const key of ['expected', 'executed', 'passed', 'failed', 'skipped']) {
+    if (!Number.isInteger(totals[key]) || totals[key] < 0) reasons.push(`verifiedTotals.${key} is not a non-negative integer.`)
+  }
+  if (Number.isInteger(totals.expected) && Number.isInteger(totals.executed) && Number.isInteger(totals.skipped) &&
+    totals.expected !== totals.executed + totals.skipped) {
+    reasons.push('verifiedTotals are incoherent: expected must equal executed + skipped.')
+  }
+  if (Number.isInteger(totals.executed) && Number.isInteger(totals.passed) && Number.isInteger(totals.failed) &&
+    totals.executed !== totals.passed + totals.failed) {
+    reasons.push('verifiedTotals are incoherent: executed must equal passed + failed.')
+  }
+  return { eligible: reasons.length === 0, reasons }
+}
+
+export function bindManifest(manifest, {
+  repository, workflow, runId, runAttempt, prNumber, expectedHeadSha, expectedBaseSha = null,
+  expectedMergeRef, checkoutCommitTree = null,
+}) {
+  const fail = (reason) => ({ ok: false, reason })
+  if (manifest.repository !== repository) return fail(`Manifest repository ${manifest.repository} does not match ${repository}.`)
+  if (manifest.workflow !== workflow) return fail(`Manifest workflow ${manifest.workflow} does not match ${workflow}.`)
+  if (typeof manifest.workflowRef !== 'string' || !manifest.workflowRef.startsWith(`${repository}/.github/workflows/ci.yml@`)) {
+    return fail('Manifest workflowRef does not identify the quality-gate workflow.')
+  }
+  if (!manifest.workflowRef.includes(`@refs/pull/${prNumber}/merge`)) {
+    return fail(`Manifest workflowRef does not match the expected PR merge ref for PR #${prNumber}.`)
+  }
+  if (manifest.run?.id !== runId) return fail(`Manifest run id ${manifest.run?.id} does not match the candidate run ${runId}.`)
+  if (manifest.run?.attempt !== runAttempt) return fail(`Manifest run attempt ${manifest.run?.attempt} does not match the artifact attempt ${runAttempt}.`)
+  if (manifest.pullRequest?.number !== prNumber) return fail(`Manifest PR ${manifest.pullRequest?.number} does not match ${prNumber}.`)
+  if (manifest.pullRequest?.headSha !== expectedHeadSha) return fail('Manifest PR head SHA does not match the candidate run head.')
+  if (expectedBaseSha !== null && manifest.pullRequest?.baseSha !== expectedBaseSha) {
+    return fail('Manifest PR base SHA does not match the merged PR base.')
+  }
+  if (manifest.checkedOut?.ref !== expectedMergeRef) return fail('Manifest checkout ref does not match the expected PR merge ref.')
+  if (checkoutCommitTree !== null && checkoutCommitTree !== manifest.checkedOut?.treeSha) {
+    return fail('The manifest checkout commit GitHub-side tree does not match the manifest tree.')
+  }
+  return { ok: true }
+}
+
 export function decideProvenance({ pushTreeSha, mergedPr = null, manifests = [] }) {
   if (typeof pushTreeSha !== 'string' || !/^[0-9a-f]{40}$/.test(pushTreeSha)) {
     return { outcome: 'fallback-needed', canSkip: false, reason: 'The pushed main tree SHA is missing or malformed.' }
@@ -56,6 +112,11 @@ export function decideProvenance({ pushTreeSha, mergedPr = null, manifests = [] 
     }
     if (manifest.canAuthorizePostMergeSkip !== true) {
       rejected.push({ run: manifest.run.id, reason: 'Manifest does not authorize a post-merge skip (gate or totals incomplete).' })
+      continue
+    }
+    const eligibility = deriveEligibility(manifest)
+    if (!eligibility.eligible) {
+      rejected.push({ run: manifest.run.id, reason: `Raw gate/count evidence is not eligible: ${eligibility.reasons.join('; ')}` })
       continue
     }
     valid.push(manifest)

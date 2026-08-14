@@ -8,7 +8,7 @@
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { readSingleJsonFromZip } from '../lib/zip.mjs'
-import { decideProvenance, validateManifest } from '../lib/provenance.mjs'
+import { decideProvenance, validateManifest, bindManifest } from '../lib/provenance.mjs'
 
 const env = (name) => process.env[name] ?? ''
 
@@ -64,7 +64,7 @@ async function latestManifestForRun(runId, { token, apiUrl, repository }) {
   if (!response.ok) return null
   const zip = Buffer.from(await response.arrayBuffer())
   try {
-    return readSingleJsonFromZip(zip)
+    return { manifest: readSingleJsonFromZip(zip), attempt: best.attempt }
   } catch {
     return null
   }
@@ -123,14 +123,31 @@ async function main() {
         })
         .sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)))
       for (const candidate of candidates.slice(0, 10)) {
-        const manifest = await latestManifestForRun(candidate.id, { token, apiUrl, repository })
-        if (!manifest) {
+        const downloaded = await latestManifestForRun(candidate.id, { token, apiUrl, repository })
+        if (!downloaded) {
           manifestErrors.push({ runId: candidate.id, reason: 'No validated-tree manifest artifact found.' })
           continue
         }
+        const manifest = downloaded.manifest
         const errors = validateManifest(manifest)
         if (errors.length > 0) {
           manifestErrors.push({ runId: candidate.id, reason: `Manifest failed validation: ${errors.join('; ')}` })
+          continue
+        }
+        const checkoutTree = await fetchTree(manifest.checkedOut.commitSha, { token, apiUrl, repository })
+        const bound = bindManifest(manifest, {
+          repository,
+          workflow: 'Product quality gate',
+          runId: candidate.id,
+          runAttempt: downloaded.attempt,
+          prNumber: mergedPr.number,
+          expectedHeadSha: candidate.head_sha,
+          expectedBaseSha: mergedPr.base?.sha ?? null,
+          expectedMergeRef: `refs/pull/${mergedPr.number}/merge`,
+          checkoutCommitTree: checkoutTree,
+        })
+        if (!bound.ok) {
+          manifestErrors.push({ runId: candidate.id, reason: bound.reason })
           continue
         }
         manifests.push(manifest)
