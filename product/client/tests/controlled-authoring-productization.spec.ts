@@ -118,15 +118,21 @@ test('an incomplete Draft can be saved and checked in while review remains gated
   await page.getByRole('button',{name:'Check out & edit'}).click()
   const save=page.getByRole('button',{name:'Save',exact:true})
   const checkIn=page.getByRole('button',{name:'Save & check in'})
-  await expect(save).toBeDisabled()
-  await expect(checkIn).toBeDisabled()
+  // These three assertions used to read "disabled" here and after the save below, and that is the behaviour
+  // being deliberately replaced rather than a broken expectation. A checkout that has changed nothing could
+  // only be discarded, so "I opened this by mistake" and "throw my work away" were the same button; and Save
+  // vanished the instant the working copy was written, which left no way to tell a saved copy from a stuck
+  // one. Nothing is being protected by either: saving an already-saved copy is a no-op, and checking in an
+  // unchanged draft is exactly how a lock should be handed back.
+  await expect(save).toBeEnabled()
+  await expect(checkIn).toBeEnabled()
 
   await page.getByLabel('Title').fill('Draft navigation behavior updated')
   await expect(save).toBeEnabled()
   await expect(checkIn).toBeEnabled()
   await save.click()
   await expect(page.getByText('Working copy saved. Checkout remains active.')).toBeVisible()
-  await expect(save).toBeDisabled()
+  await expect(save).toBeEnabled()
   await expect(checkIn).toBeEnabled()
   await checkIn.click()
 
