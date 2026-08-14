@@ -13,6 +13,8 @@ rendered/
 
 # Product build and local runtime output
 **/bin/
+!product/ci-metrics/bin/
+!product/ci-metrics/bin/**
 **/obj/
 **/node_modules/
 **/dist/
