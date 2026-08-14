@@ -2,9 +2,13 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { mkdtempSync, writeFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { readFragments, aggregateFragments, criticalPath, renderMarkdown, MAX_FRAGMENTS } from '../lib/aggregate.mjs'
-import { buildFragment } from '../lib/fragment.mjs'
+import { buildFragment, validateFragment } from '../lib/fragment.mjs'
+
+const binDir = fileURLToPath(new URL('../bin/', import.meta.url))
+const repoRoot = fileURLToPath(new URL('../../../', import.meta.url))
 
 const run = {
   id: 99,
@@ -267,7 +271,9 @@ test('CLI parity: expected-jobs metadata drives absent detection and bounded out
     const runMetaPath = join(output, 'run-meta.json')
     writeFileSync(runMetaPath, JSON.stringify({ queueDelayMs: 5000, expectedJobs: expectedMatrix }))
     const { spawnSync } = await import('node:child_process')
-    const result = spawnSync(process.execPath, ['bin/aggregate.mjs', directory, output, runMetaPath], { encoding: 'utf8' })
+    // The entry points must work from any working directory (CI runs the suite from the repository root),
+    // so resolve the bin path from the module and execute with a neutral cwd.
+    const result = spawnSync(process.execPath, [join(binDir, 'aggregate.mjs'), directory, output, runMetaPath], { encoding: 'utf8', cwd: output })
     assert.equal(result.status, 0, result.stderr)
     const merged = JSON.parse(await import('node:fs').then((fs) => fs.readFileSync(join(output, 'run-metrics.json'), 'utf8')))
     assert.equal(merged.schemaVersion, 'aerolink-ci-run/v1')
@@ -279,5 +285,54 @@ test('CLI parity: expected-jobs metadata drives absent detection and bounded out
   } finally {
     rmSync(directory, { recursive: true, force: true })
     rmSync(output, { recursive: true, force: true })
+  }
+})
+
+test('CLI integration: mark.mjs and write-fragment.mjs produce a valid fragment from a clean working directory', async () => {
+  const directory = mkdtempSync(join(tmpdir(), 'ci-metrics-cli-'))
+  try {
+    const { spawnSync } = await import('node:child_process')
+    const env = {
+      ...process.env,
+      METRICS_TIMING_FILE: join(directory, 'timing.json'),
+      METRICS_FRAGMENT_PATH: join(directory, 'fragment.json'),
+      METRICS_JOB_ID: 'backend-api',
+      METRICS_JOB_NAME: 'API test suite (1/3)',
+      METRICS_JOB_GROUP: 'backend-api',
+      METRICS_JOB_INSTANCE: 'backend-api-1',
+      METRICS_NEEDS: 'changes',
+      METRICS_JOB_RESULT: 'success',
+      METRICS_MATRIX: '{"shard":1}',
+      METRICS_COUNTS_SOURCE: 'trx',
+      METRICS_TRX_PATH: fileURLToPath(new URL('./fixtures/trx-failure.trx', import.meta.url)),
+      METRICS_CLASS_DOCS_ONLY: 'false',
+      METRICS_CLASS_BACKEND: 'true',
+      METRICS_CACHE_NUGET: 'hit',
+      GITHUB_RUN_ID: '781',
+      GITHUB_RUN_ATTEMPT: '1',
+      GITHUB_EVENT_NAME: 'pull_request',
+      GITHUB_SHA: 'a'.repeat(40),
+      GITHUB_REF: 'refs/pull/9/merge',
+      GITHUB_WORKFLOW: 'Product quality gate',
+      GITHUB_WORKFLOW_REF: 'repo/.github/workflows/ci.yml@refs/heads/main',
+      GITHUB_REPOSITORY: 'owner/repo',
+      GITHUB_JOB: 'backend-api',
+      GITHUB_WORKSPACE: repoRoot,
+    }
+    for (const name of ['job-start', 'setup-end', 'test-end']) {
+      const marked = spawnSync(process.execPath, [join(binDir, 'mark.mjs'), name], { encoding: 'utf8', cwd: directory, env })
+      assert.equal(marked.status, 0, marked.stderr)
+    }
+    const written = spawnSync(process.execPath, [join(binDir, 'write-fragment.mjs')], { encoding: 'utf8', cwd: directory, env })
+    assert.equal(written.status, 0, written.stderr)
+    const fragment = JSON.parse(await import('node:fs').then((fs) => fs.readFileSync(join(directory, 'fragment.json'), 'utf8')))
+    validateFragment(fragment)
+    assert.equal(fragment.job.group, 'backend-api')
+    assert.equal(fragment.job.instance, 'backend-api-1')
+    assert.equal(fragment.counts.expected, 4)
+    assert.equal(fragment.counts.executed, 4)
+    assert.equal(fragment.timings.testMs > 0, true)
+  } finally {
+    rmSync(directory, { recursive: true, force: true })
   }
 })
