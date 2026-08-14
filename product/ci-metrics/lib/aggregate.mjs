@@ -19,20 +19,39 @@ export const MAX_MARKDOWN_BYTES = 128 * 1024
 
 export function readFragments(directory) {
   const entries = []
-  let files = []
+  let names = []
   try {
-    files = readdirSync(directory)
+    names = readdirSync(directory)
   } catch (error) {
     return { fragments: [], missing: [{ job: 'fragments-directory', reason: `Could not read fragment directory: ${error.message}` }], truncated: false }
   }
+  // The report downloads one artifact per job into its own subdirectory (artifact names are
+  // attempt-scoped, so a partial rerun leaves both attempts on disk). Walk one level so every
+  // current-run fragment is found regardless of whether download-artifact created a subdirectory.
+  const files = []
+  for (const name of names.sort()) {
+    const path = join(directory, name)
+    let childNames = null
+    try {
+      childNames = readdirSync(path)
+    } catch {
+      // Not a directory; the root-level file is handled below.
+    }
+    if (childNames !== null) {
+      for (const child of childNames.sort()) {
+        if (child.endsWith('.json')) files.push(join(path, child))
+      }
+    } else if (name.endsWith('.json')) {
+      files.push(path)
+    }
+  }
   let totalBytes = 0
   let truncated = false
-  for (const file of files.filter((name) => name.endsWith('.json')).sort()) {
+  for (const path of files) {
     if (entries.length >= MAX_FRAGMENTS) {
       truncated = true
       break
     }
-    const path = join(directory, file)
     let parsed
     try {
       const content = readFileSync(path, 'utf8')
@@ -42,19 +61,19 @@ export function readFragments(directory) {
       if (totalBytes > MAX_TOTAL_INPUT_BYTES) throw new Error('Total fragment input exceeds the bounded size.')
       parsed = JSON.parse(content)
     } catch (error) {
-      entries.push({ file, error: error.message, fragment: null })
+      entries.push({ file: path, error: error.message, fragment: null })
       continue
     }
     const errors = validationErrors(parsed)
     if (errors.length > 0) {
-      entries.push({ file, error: errors.join('; '), fragment: null })
+      entries.push({ file: path, error: errors.join('; '), fragment: null })
       continue
     }
-    entries.push({ file, error: null, fragment: parsed })
+    entries.push({ file: path, error: null, fragment: parsed })
   }
   const fragments = entries.filter((entry) => entry.fragment !== null).map((entry) => entry.fragment)
   const missing = entries.filter((entry) => entry.fragment === null).map((entry) => ({
-    job: entry.file.replace(/\.json$/, ''),
+    job: entry.file.split(/[\\/]/).at(-1)?.replace(/\.json$/, '') ?? entry.file,
     reason: entry.error,
   }))
   return { fragments, missing, truncated }
@@ -92,7 +111,10 @@ function runIdentity(fragment) {
 
 function matchesExpectedRun(fragment, expectedRun) {
   const run = fragment.run
-  return run.id === expectedRun.id && run.attempt === expectedRun.attempt && run.sha === expectedRun.sha &&
+  // A partial rerun is a continuation of the same run: jobs that were not rerun keep their earlier-attempt
+  // fragment. Run identity is therefore (id, sha, tree, workflow revision, repository) without attempt;
+  // the latest fragment per instance is selected below and earlier attempts are recorded as superseded.
+  return run.id === expectedRun.id && run.sha === expectedRun.sha &&
     run.tree === expectedRun.tree && run.workflowRef === expectedRun.workflowRef && run.repository === expectedRun.repository
 }
 
@@ -307,6 +329,33 @@ export function aggregateFragments({ fragments, missing = [], runMeta = null }) 
     : null
 
   let duplicateUnavailable = null
+  const superseded = []
+  if (expectedRun) {
+    const byInstance = new Map()
+    for (const fragment of consistent) {
+      const list = byInstance.get(fragment.job.instance) ?? []
+      list.push(fragment)
+      byInstance.set(fragment.job.instance, list)
+    }
+    const resolved = []
+    for (const [instance, list] of byInstance) {
+      list.sort((a, b) => a.run.attempt - b.run.attempt)
+      const maxAttempt = list.at(-1).run.attempt
+      const latest = list.filter((fragment) => fragment.run.attempt === maxAttempt)
+      if (latest.length === 1) {
+        resolved.push(latest[0])
+        for (const older of list) {
+          if (older !== latest[0]) {
+            superseded.push({ instance, attempt: older.run.attempt, reason: `Superseded by the attempt ${maxAttempt} fragment for the same instance.` })
+          }
+        }
+      } else {
+        // Same-attempt duplicates are contradictory; the existing duplicate logic below handles them.
+        resolved.push(...latest)
+      }
+    }
+    consistent = resolved
+  }
   const instanceCounts = new Map()
   for (const fragment of consistent) instanceCounts.set(fragment.job.instance, (instanceCounts.get(fragment.job.instance) ?? 0) + 1)
   const duplicated = [...instanceCounts.entries()].filter(([, count]) => count > 1)
@@ -430,6 +479,11 @@ export function aggregateFragments({ fragments, missing = [], runMeta = null }) 
       mode: provenanceMode,
       reason: provenanceReason,
     },
+    superseded: superseded.slice(0, MAX_FRAGMENTS).map((entry) => ({
+      instance: String(entry.instance).slice(0, 120),
+      attempt: entry.attempt,
+      reason: String(entry.reason).slice(0, 300),
+    })),
     skipped: Array.isArray(runMeta?.skippedJobs)
       ? runMeta.skippedJobs.slice(0, MAX_FRAGMENTS).map((job) => ({
           group: String(job.group ?? '').slice(0, 100),
@@ -494,6 +548,9 @@ export function renderMarkdown(merged) {
   if (merged.skipped.length > 0) {
     push(`- Deliberately skipped jobs: ${merged.skipped.length}`)
   }
+  if (merged.superseded.length > 0) {
+    push(`- Superseded earlier-attempt fragments: ${merged.superseded.length}`)
+  }
   push(`- Sourced test totals (${escapeMarkdown(merged.countsModel?.label ?? 'sourced families only')}): expected ${merged.counts.expected ?? 'unavailable'}, executed ${merged.counts.executed ?? 'unavailable'}, passed ${merged.counts.passed ?? 'unavailable'}, failed ${merged.counts.failed ?? 'unavailable'}, skipped ${merged.counts.skipped ?? 'unavailable'}, flaky ${merged.counts.flaky ?? 'unavailable'}`)
   if (merged.countsModel?.missingFamilies.length > 0) {
     push(`- Families without structured counts (${merged.countsModel.missingFamilies.length}): ${merged.countsModel.missingFamilies.map((entry) => `${escapeMarkdown(entry.instance)} (${escapeMarkdown(entry.reason)})`).join('; ')}`)
@@ -529,6 +586,14 @@ export function renderMarkdown(merged) {
     push('')
     for (const job of merged.skipped) {
       push(`- ${escapeMarkdown(job.instance)}: ${escapeMarkdown(job.reason)}`)
+    }
+    push('')
+  }
+  if (merged.superseded.length > 0) {
+    push('## Superseded earlier-attempt fragments')
+    push('')
+    for (const entry of merged.superseded) {
+      push(`- ${escapeMarkdown(entry.instance)} (attempt ${entry.attempt}): ${escapeMarkdown(entry.reason)}`)
     }
     push('')
   }

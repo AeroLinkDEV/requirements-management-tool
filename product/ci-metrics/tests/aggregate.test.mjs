@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtempSync, writeFileSync, rmSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, writeFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -996,6 +996,69 @@ test('shadow expected-job metadata still wins over fragment claims and records d
   assert.deepEqual(merged.criticalPath.topologyDisagreements, ['b'])
   assert.equal(merged.criticalPath.trustedTopology, false)
   assert.equal(merged.criticalPath.expectedTopology, true)
+})
+
+test('a partial rerun keeps non-rerun attempt-1 fragments and replaces rerun instances with attempt 2', () => {
+  const run2 = { ...run, attempt: 2 }
+  const nonRerun = fragment('changes', 'changes', { jobStartMs: 0, jobEndMs: 1000 })
+  const oldApi = fragment('backend-api', 'backend-api-1', { needs: ['changes'], jobStartMs: 1000, jobEndMs: 9000, counts: { expected: 100, executed: 99, passed: 98, failed: 1, skipped: 1, flaky: null, source: 'trx', missing: null } })
+  const newApi = fragment('backend-api', 'backend-api-1', { needs: ['changes'], jobStartMs: 1000, jobEndMs: 8000, counts: { expected: 100, executed: 100, passed: 100, failed: 0, skipped: 0, flaky: null, source: 'trx', missing: null } })
+  newApi.run = run2
+  const runMeta = {
+    expectedRun: run2,
+    expectedJobs: [
+      { group: 'changes', instance: 'changes', needs: [] },
+      { group: 'backend-api', instance: 'backend-api-1', needs: ['changes'] },
+    ],
+    provenance: { mode: 'trusted', reason: 'test default-branch context' },
+  }
+  for (const fragments of [
+    [nonRerun, oldApi, newApi],
+    [newApi, oldApi, nonRerun],
+  ]) {
+    const merged = aggregateFragments({ fragments, runMeta })
+    assert.equal(merged.jobs.length, 2)
+    const api = merged.jobs.find((job) => job.instance === 'backend-api-1')
+    assert.equal(api.counts.passed, 100)
+    assert.equal(api.counts.failed, 0)
+    assert.deepEqual(merged.superseded, [{ instance: 'backend-api-1', attempt: 1, reason: 'Superseded by the attempt 2 fragment for the same instance.' }])
+    const markdown = renderMarkdown(merged)
+    assert.match(markdown, /Superseded earlier-attempt fragments: 1/)
+  }
+})
+
+test('same-attempt duplicate fragments remain a contradiction, never a silent pick', () => {
+  const run2 = { ...run, attempt: 2 }
+  const first = fragment('backend-api', 'backend-api-1', { needs: ['changes'], jobStartMs: 1000, jobEndMs: 9000 })
+  const second = fragment('backend-api', 'backend-api-1', { needs: ['changes'], jobStartMs: 1000, jobEndMs: 8000 })
+  first.run = run2
+  second.run = run2
+  const merged = aggregateFragments({
+    fragments: [first, second],
+    runMeta: {
+      expectedRun: run2,
+      expectedJobs: [{ group: 'backend-api', instance: 'backend-api-1', needs: ['changes'] }],
+      provenance: { mode: 'trusted', reason: 'test default-branch context' },
+    },
+  })
+  assert.equal(merged.jobs.length, 0)
+  assert.equal(merged.superseded.length, 0)
+  assert.match(merged.criticalPath.unavailableReason, /Duplicate job instance identity/)
+})
+
+test('readFragments finds fragments inside per-artifact subdirectories', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'ci-metrics-'))
+  try {
+    const subdir = join(directory, 'ci-metrics-fragment-backend-api-1-2')
+    mkdirSync(subdir, { recursive: true })
+    writeFileSync(join(subdir, 'fragment-backend-api-1.json'), JSON.stringify(fragment('backend-api', 'backend-api-1')))
+    const { fragments, missing } = readFragments(directory)
+    assert.equal(fragments.length, 1)
+    assert.equal(fragments[0].job.instance, 'backend-api-1')
+    assert.equal(missing.length, 0)
+  } finally {
+    rmSync(directory, { recursive: true, force: true })
+  }
 })
 
 test('missing test families are modelled separately from the sourced totals', () => {

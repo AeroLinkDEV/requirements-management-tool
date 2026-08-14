@@ -110,7 +110,8 @@ test('fragment artifacts are attempt-scoped and the report pattern excludes merg
   assert.ok(uploads.length >= 12, `expected a fragment upload per fragment-producing job, found ${uploads.length}`)
 
   const report = jobBodies(workflowLines())['metrics-report'].join('\n')
-  assert.match(report, /pattern:\s*ci-metrics-fragment-\*-\$\{\{\s*github\.run_attempt\s*\}\}/)
+  assert.match(report, /pattern:\s*ci-metrics-fragment-\*/)
+  assert.doesNotMatch(report, /merge-multiple:\s*true/, 'each attempt artifact must land in its own subdirectory')
   assert.match(report, /if-no-files-found:\s*ignore/)
   assert.match(report, /name:\s*ci-metrics-run-\$\{\{\s*github\.run_id\s*\}\}-\$\{\{\s*github\.run_attempt\s*\}\}/)
 })

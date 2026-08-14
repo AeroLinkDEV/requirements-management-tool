@@ -1478,9 +1478,12 @@ jobs:
         continue-on-error: true
         uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
         with:
-          pattern: ci-metrics-fragment-*-${{ github.run_attempt }}
+          # All attempts of this run: a partial rerun leaves non-rerun jobs on their earlier attempt, and
+          # the aggregator selects the latest fragment per instance (earlier ones are recorded as
+          # superseded). Artifact names are attempt-scoped so each downloads into its own subdirectory,
+          # and ci-metrics-run-* merged reports are excluded by this prefix.
+          pattern: ci-metrics-fragment-*
           path: ${{ runner.temp }}/fragments
-          merge-multiple: true
           if-no-files-found: ignore
       - name: Aggregate and publish summary
         if: always()

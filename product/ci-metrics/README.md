@@ -83,13 +83,17 @@ workflow. `expectedJobs` names every job group/instance that should have produce
 the dependency topology: when present, the dependency graph comes exclusively from that metadata (a
 fragment whose `needs` disagree is reported as a topology disagreement and the expected graph wins).
 `skippedJobs` lists deliberately skipped jobs with reasons so an absent fragment is never confused with a
-job that never existed. `expectedRun` is required for an **authoritative** merged record: fragments that
-disagree with it are excluded from every derived aggregate and recorded in `missing`. Without `expectedRun`,
-conflicting fragment identities never resolve by artifact order — the aggregate and critical path are
-unavailable — and a fully consistent set is aggregated but explicitly labelled untrusted. A job whose
-duration is unknown, absent, or whose dependency group does not resolve makes the critical path
-**unavailable with a reason** rather than numerically smaller. Phase B (rolling collection) is where
-GitHub API queue and cancellation accounting lands.
+job that never existed. `expectedRun` is required for an **authoritative** merged record: run identity is
+(id, sha, tree, workflow revision, repository) **without attempt** — a partial rerun is a continuation of
+the same run, and jobs that were not rerun keep their earlier-attempt fragment. The aggregator selects the
+latest fragment per instance, records earlier attempts in `superseded`, and excludes fragments that
+disagree with the expected run identity from every derived aggregate (`missing`). Same-attempt duplicates
+remain a contradiction and make the derived aggregates unavailable. Without `expectedRun`, conflicting
+fragment identities never resolve by artifact order — the aggregate and critical path are unavailable —
+and a fully consistent set is aggregated but explicitly labelled untrusted. A job whose duration is
+unknown, absent, or whose dependency group does not resolve makes the critical path **unavailable with a
+reason** rather than numerically smaller. Phase B (rolling collection) is where GitHub API queue and
+cancellation accounting lands.
 
 `bin/build-run-meta.mjs` emits `expectedRun` (exact commit and tree SHA), `expectedJobs`, and `skippedJobs`
 from the workflow's own event and classifier predicates (mirrored in `tests/build-run-meta.test.mjs` for
@@ -118,8 +122,9 @@ runs label the record trusted. A PR modification cannot promote its own record t
 - Every metrics-only step in product jobs and the gate runs with `continue-on-error: true`; injected marker,
   writer, or upload failures cannot change an otherwise successful product job/gate result (enforced by
   `tests/ci-workflow-contract.test.mjs`).
-- Fragment artifacts are attempt-scoped and the report downloads only
-  `ci-metrics-fragment-*-<attempt>`, never prior-attempt fragments or a previous merged report.
+- Fragment artifacts are attempt-scoped and the report downloads `ci-metrics-fragment-*` for the current
+  run into per-artifact subdirectories (never a previous run's `ci-metrics-run-*` merged report);
+  per-instance the latest attempt wins and earlier attempts are recorded as `superseded`.
 - The run-level totals are explicitly a **sourced-families subtotal**: `countsModel.sourcedFamilies`
   counts distinct families with structured counts, `sourcedJobInstances` counts the job instances behind
   them, `missingFamilies` lists every selected test family (group + instance) without structured counts,
@@ -145,6 +150,7 @@ runs label the record trusted. A PR modification cannot promote its own record t
 | Fragments disagree on run identity | excluded from jobs/counts/cache/flaky/classifications; recorded in `missing` with reason |
 | Conflicting identities without `expectedRun` | aggregate unavailable; no identity chosen by artifact order |
 | Duplicate job instance identity | no derived jobs/counts/cache/flaky/classifications published; recorded in `missing` |
+| Same instance from an earlier attempt (partial rerun) | latest attempt wins; earlier fragment listed in `superseded` with reason |
 | Deliberately skipped job (event/classification) | listed in `skipped` with reason; never treated as missing |
 | Selected test family without structured counts | listed in `countsModel.missingFamilies`; totals remain a labelled sourced subtotal |
 | Reversed/inconsistent timing markers | rejected on read; the writer emits null durations + missing reasons |
