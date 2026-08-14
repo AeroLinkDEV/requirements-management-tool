@@ -38,6 +38,11 @@ jobs:
   changes:
     name: Classify changed product areas
     runs-on: windows-latest
+    env:
+      METRICS_TIMING_FILE: ${{ runner.temp }}/ci-metrics/timing-changes.json
+      METRICS_FRAGMENT_PATH: ${{ runner.temp }}/ci-metrics/fragment-changes.json
+      METRICS_JOB_ID: changes
+      METRICS_JOB_NAME: Classify changed product areas
     outputs:
       docs_only: ${{ steps.classify.outputs.docs_only }}
       backend: ${{ steps.classify.outputs.backend }}
@@ -45,10 +50,17 @@ jobs:
       browser: ${{ steps.classify.outputs.browser }}
       postgresql: ${{ steps.classify.outputs.postgresql }}
     steps:
+      - name: Capture job start
+        shell: bash
+        run: |
+          mkdir -p "$(dirname "$METRICS_TIMING_FILE")"
+          printf '{"name":"job-start","at":%s}\n' "$(date +%s%3N)" >> "$METRICS_TIMING_FILE"
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+      - name: Mark setup complete
+        run: node "${{ github.workspace }}/product/ci-metrics/bin/mark.mjs" setup-end
       - name: Classify paths
         id: classify
         shell: bash
@@ -119,6 +131,28 @@ jobs:
           echo "client=$client" >> "$GITHUB_OUTPUT"
           echo "browser=$browser" >> "$GITHUB_OUTPUT"
           echo "postgresql=$postgresql" >> "$GITHUB_OUTPUT"
+      - name: Mark test complete
+        if: always()
+        run: node "${{ github.workspace }}/product/ci-metrics/bin/mark.mjs" test-end
+      - name: Write metrics fragment
+        if: always()
+        env:
+          METRICS_JOB_RESULT: ${{ job.status }}
+          METRICS_NEEDS: ""
+          METRICS_CLASS_DOCS_ONLY: ${{ steps.classify.outputs.docs_only }}
+          METRICS_CLASS_BACKEND: ${{ steps.classify.outputs.backend }}
+          METRICS_CLASS_CLIENT: ${{ steps.classify.outputs.client }}
+          METRICS_CLASS_BROWSER: ${{ steps.classify.outputs.browser }}
+          METRICS_CLASS_POSTGRESQL: ${{ steps.classify.outputs.postgresql }}
+        run: node "${{ github.workspace }}/product/ci-metrics/bin/write-fragment.mjs"
+      - name: Upload metrics fragment
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ci-metrics-changes-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/ci-metrics/fragment-changes.json
+          if-no-files-found: ignore
+          retention-days: 30
 
   # Warms the Chromium cache on main, and exists only because of how GitHub scopes caches.
   #
@@ -134,7 +168,17 @@ jobs:
     if: github.event_name == 'push'
     runs-on: windows-latest
     timeout-minutes: 10
+    env:
+      METRICS_TIMING_FILE: ${{ runner.temp }}/ci-metrics/timing-warm-chromium-cache.json
+      METRICS_FRAGMENT_PATH: ${{ runner.temp }}/ci-metrics/fragment-warm-chromium-cache.json
+      METRICS_JOB_ID: warm-chromium-cache
+      METRICS_JOB_NAME: Warm the Chromium cache
     steps:
+      - name: Capture job start
+        shell: bash
+        run: |
+          mkdir -p "$(dirname "$METRICS_TIMING_FILE")"
+          printf '{"name":"job-start","at":%s}\n' "$(date +%s%3N)" >> "$METRICS_TIMING_FILE"
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Cache Chromium
@@ -158,6 +202,27 @@ jobs:
         run: |
           npm ci
           npx playwright install chromium
+      - name: Mark setup complete
+        if: always()
+        run: node "${{ github.workspace }}/product/ci-metrics/bin/mark.mjs" setup-end
+      - name: Mark test complete
+        if: always()
+        run: node "${{ github.workspace }}/product/ci-metrics/bin/mark.mjs" test-end
+      - name: Write metrics fragment
+        if: always()
+        env:
+          METRICS_JOB_RESULT: ${{ job.status }}
+          METRICS_NEEDS: ""
+          METRICS_CACHE_CHROMIUM: ${{ steps.chromium.outputs.cache-hit }}
+        run: node "${{ github.workspace }}/product/ci-metrics/bin/write-fragment.mjs"
+      - name: Upload metrics fragment
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ci-metrics-warm-chromium-cache-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/ci-metrics/fragment-warm-chromium-cache.json
+          if-no-files-found: ignore
+          retention-days: 30
 
   # Every gate in this workflow runs on Windows, because Windows is the only platform this product is installed,
   # run, demonstrated and debugged on. A Linux gate proves something about a configuration nobody ships, and it
@@ -195,6 +260,12 @@ jobs:
     if: needs.changes.outputs.docs_only != 'true' && needs.changes.outputs.backend == 'true'
     runs-on: windows-latest
     timeout-minutes: 30
+    env:
+      METRICS_TIMING_FILE: ${{ runner.temp }}/ci-metrics/timing-backend-api-${{ matrix.shard }}.json
+      METRICS_FRAGMENT_PATH: ${{ runner.temp }}/ci-metrics/fragment-backend-api-${{ matrix.shard }}.json
+      METRICS_JOB_ID: backend-api
+      METRICS_JOB_NAME: API test suite (${{ matrix.shard }}/${{ strategy.job-total }})
+      METRICS_MATRIX: ${{ toJson(matrix) }}
     strategy:
       # Independently, for the same reason as the browser shards: a cancelled sibling reports nothing, and
       # buying that nothing costs a full gate to re-run.
@@ -206,6 +277,11 @@ jobs:
         # divisor says two would silently run a third of the tests and pass.
         shard: [1, 2, 3]
     steps:
+      - name: Capture job start
+        shell: bash
+        run: |
+          mkdir -p "$(dirname "$METRICS_TIMING_FILE")"
+          printf '{"name":"job-start","at":%s}\n' "$(date +%s%3N)" >> "$METRICS_TIMING_FILE"
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Install .NET 10
@@ -213,6 +289,7 @@ jobs:
         with:
           dotnet-version: 10.0.x
       - name: Cache NuGet packages
+        id: nuget
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.nuget/packages
@@ -222,6 +299,8 @@ jobs:
         run: |
           dotnet restore product/AeroLink.slnx
           dotnet build product/AeroLink.slnx --configuration Release --no-restore
+      - name: Mark setup complete
+        run: node "${{ github.workspace }}/product/ci-metrics/bin/mark.mjs" setup-end
       # xunit has no sharding of its own, so the split is computed rather than configured. Both shards run the
       # identical deterministic partition over the same discovered class list, so their union is every class
       # and their intersection is empty *by construction* — there is no list to maintain and no way for a new
@@ -298,6 +377,31 @@ jobs:
             exit 1
           fi
           echo "Shard ${{ matrix.shard }} ran exactly the $expected tests it selected."
+      - name: Mark test complete
+        if: always()
+        run: node "${{ github.workspace }}/product/ci-metrics/bin/mark.mjs" test-end
+      - name: Write metrics fragment
+        if: always()
+        env:
+          METRICS_JOB_RESULT: ${{ job.status }}
+          METRICS_NEEDS: changes
+          METRICS_COUNTS_SOURCE: trx
+          METRICS_TRX_PATH: ${{ github.workspace }}/TestResults/shard.trx
+          METRICS_CLASS_DOCS_ONLY: ${{ needs.changes.outputs.docs_only }}
+          METRICS_CLASS_BACKEND: ${{ needs.changes.outputs.backend }}
+          METRICS_CLASS_CLIENT: ${{ needs.changes.outputs.client }}
+          METRICS_CLASS_BROWSER: ${{ needs.changes.outputs.browser }}
+          METRICS_CLASS_POSTGRESQL: ${{ needs.changes.outputs.postgresql }}
+          METRICS_CACHE_NUGET: ${{ steps.nuget.outputs.cache-hit }}
+        run: node "${{ github.workspace }}/product/ci-metrics/bin/write-fragment.mjs"
+      - name: Upload metrics fragment
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ci-metrics-backend-api-${{ matrix.shard }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/ci-metrics/fragment-backend-api-${{ matrix.shard }}.json
+          if-no-files-found: ignore
+          retention-days: 30
 
   backend-core:
     name: Domain and infrastructure test suites
@@ -305,7 +409,17 @@ jobs:
     if: needs.changes.outputs.docs_only != 'true' && needs.changes.outputs.backend == 'true'
     runs-on: windows-latest
     timeout-minutes: 20
+    env:
+      METRICS_TIMING_FILE: ${{ runner.temp }}/ci-metrics/timing-backend-core.json
+      METRICS_FRAGMENT_PATH: ${{ runner.temp }}/ci-metrics/fragment-backend-core.json
+      METRICS_JOB_ID: backend-core
+      METRICS_JOB_NAME: Domain and infrastructure test suites
     steps:
+      - name: Capture job start
+        shell: bash
+        run: |
+          mkdir -p "$(dirname "$METRICS_TIMING_FILE")"
+          printf '{"name":"job-start","at":%s}\n' "$(date +%s%3N)" >> "$METRICS_TIMING_FILE"
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Install .NET 10
@@ -313,6 +427,7 @@ jobs:
         with:
           dotnet-version: 10.0.x
       - name: Cache NuGet packages
+        id: nuget
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.nuget/packages
@@ -322,6 +437,8 @@ jobs:
         run: |
           dotnet restore product/AeroLink.slnx
           dotnet build product/AeroLink.slnx --configuration Release --no-restore
+      - name: Mark setup complete
+        run: node "${{ github.workspace }}/product/ci-metrics/bin/mark.mjs" setup-end
       # Naming the assemblies individually is what makes them splittable, and it introduces the one failure
       # mode the old `dotnet test <solution>` could not have: a new test project that no job runs. It would
       # still build, so nothing would fail — the suite would simply be invisible, which is the most expensive
@@ -349,6 +466,29 @@ jobs:
         run: |
           dotnet test product/tests/AeroLink.Domain.Tests/AeroLink.Domain.Tests.csproj --configuration Release --no-build --logger "console;verbosity=normal"
           dotnet test product/tests/AeroLink.Infrastructure.Tests/AeroLink.Infrastructure.Tests.csproj --configuration Release --no-build --logger "console;verbosity=normal"
+      - name: Mark test complete
+        if: always()
+        run: node "${{ github.workspace }}/product/ci-metrics/bin/mark.mjs" test-end
+      - name: Write metrics fragment
+        if: always()
+        env:
+          METRICS_JOB_RESULT: ${{ job.status }}
+          METRICS_NEEDS: changes
+          METRICS_CLASS_DOCS_ONLY: ${{ needs.changes.outputs.docs_only }}
+          METRICS_CLASS_BACKEND: ${{ needs.changes.outputs.backend }}
+          METRICS_CLASS_CLIENT: ${{ needs.changes.outputs.client }}
+          METRICS_CLASS_BROWSER: ${{ needs.changes.outputs.browser }}
+          METRICS_CLASS_POSTGRESQL: ${{ needs.changes.outputs.postgresql }}
+          METRICS_CACHE_NUGET: ${{ steps.nuget.outputs.cache-hit }}
+        run: node "${{ github.workspace }}/product/ci-metrics/bin/write-fragment.mjs"
+      - name: Upload metrics fragment
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ci-metrics-backend-core-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/ci-metrics/fragment-backend-core.json
+          if-no-files-found: ignore
+          retention-days: 30
 
   client:
     name: Client lint, type-check, and build
@@ -356,7 +496,17 @@ jobs:
     if: needs.changes.outputs.docs_only != 'true' && needs.changes.outputs.client == 'true'
     runs-on: windows-latest
     timeout-minutes: 20
+    env:
+      METRICS_TIMING_FILE: ${{ runner.temp }}/ci-metrics/timing-client.json
+      METRICS_FRAGMENT_PATH: ${{ runner.temp }}/ci-metrics/fragment-client.json
+      METRICS_JOB_ID: client
+      METRICS_JOB_NAME: Client lint, type-check, and build
     steps:
+      - name: Capture job start
+        shell: bash
+        run: |
+          mkdir -p "$(dirname "$METRICS_TIMING_FILE")"
+          printf '{"name":"job-start","at":%s}\n' "$(date +%s%3N)" >> "$METRICS_TIMING_FILE"
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Install Node.js
@@ -365,6 +515,8 @@ jobs:
           node-version: 24
           cache: npm
           cache-dependency-path: product/client/package-lock.json
+      - name: Mark setup complete
+        run: node "${{ github.workspace }}/product/ci-metrics/bin/mark.mjs" setup-end
       - name: Lint, type-check, and build client
         working-directory: product/client
         run: |
@@ -372,6 +524,28 @@ jobs:
           npm run lint
           npm run typecheck
           npm run build
+      - name: Mark test complete
+        if: always()
+        run: node "${{ github.workspace }}/product/ci-metrics/bin/mark.mjs" test-end
+      - name: Write metrics fragment
+        if: always()
+        env:
+          METRICS_JOB_RESULT: ${{ job.status }}
+          METRICS_NEEDS: changes
+          METRICS_CLASS_DOCS_ONLY: ${{ needs.changes.outputs.docs_only }}
+          METRICS_CLASS_BACKEND: ${{ needs.changes.outputs.backend }}
+          METRICS_CLASS_CLIENT: ${{ needs.changes.outputs.client }}
+          METRICS_CLASS_BROWSER: ${{ needs.changes.outputs.browser }}
+          METRICS_CLASS_POSTGRESQL: ${{ needs.changes.outputs.postgresql }}
+        run: node "${{ github.workspace }}/product/ci-metrics/bin/write-fragment.mjs"
+      - name: Upload metrics fragment
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ci-metrics-client-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/ci-metrics/fragment-client.json
+          if-no-files-found: ignore
+          retention-days: 30
 
   # The operator scripts are PowerShell and reference no compiled output, so this job needs neither .NET nor
   # Node — a checkout is the whole environment. It stayed on the critical path for years only because it
@@ -387,9 +561,21 @@ jobs:
     if: needs.changes.outputs.docs_only != 'true'
     runs-on: windows-latest
     timeout-minutes: 15
+    env:
+      METRICS_TIMING_FILE: ${{ runner.temp }}/ci-metrics/timing-script-contracts.json
+      METRICS_FRAGMENT_PATH: ${{ runner.temp }}/ci-metrics/fragment-script-contracts.json
+      METRICS_JOB_ID: script-contracts
+      METRICS_JOB_NAME: Operator and recovery script contracts
     steps:
+      - name: Capture job start
+        shell: bash
+        run: |
+          mkdir -p "$(dirname "$METRICS_TIMING_FILE")"
+          printf '{"name":"job-start","at":%s}\n' "$(date +%s%3N)" >> "$METRICS_TIMING_FILE"
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Mark setup complete
+        run: node "${{ github.workspace }}/product/ci-metrics/bin/mark.mjs" setup-end
 
       - name: Validate the non-mutating backup schedule contract
         shell: powershell
@@ -437,6 +623,28 @@ jobs:
           $ErrorActionPreference = 'Stop'
           & ./product/scripts/AeroLinkRemoteDemoRecovery.Tests.ps1
           if ($LASTEXITCODE -ne 0) { throw 'Remote-demo recovery regression failed.' }
+      - name: Mark test complete
+        if: always()
+        run: node "${{ github.workspace }}/product/ci-metrics/bin/mark.mjs" test-end
+      - name: Write metrics fragment
+        if: always()
+        env:
+          METRICS_JOB_RESULT: ${{ job.status }}
+          METRICS_NEEDS: changes
+          METRICS_CLASS_DOCS_ONLY: ${{ needs.changes.outputs.docs_only }}
+          METRICS_CLASS_BACKEND: ${{ needs.changes.outputs.backend }}
+          METRICS_CLASS_CLIENT: ${{ needs.changes.outputs.client }}
+          METRICS_CLASS_BROWSER: ${{ needs.changes.outputs.browser }}
+          METRICS_CLASS_POSTGRESQL: ${{ needs.changes.outputs.postgresql }}
+        run: node "${{ github.workspace }}/product/ci-metrics/bin/write-fragment.mjs"
+      - name: Upload metrics fragment
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ci-metrics-script-contracts-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/ci-metrics/fragment-script-contracts.json
+          if-no-files-found: ignore
+          retention-days: 30
 
   # Four shards now, and the reasoning that held them at two is what changed rather than anyone's opinion.
   # Twice the answer was "the journeys are not the critical path, so splitting them shortens a job nobody is
@@ -477,7 +685,18 @@ jobs:
       fail-fast: false
       matrix:
         shard: [1, 2, 3, 4]
+    env:
+      METRICS_TIMING_FILE: ${{ runner.temp }}/ci-metrics/timing-browser-pr-${{ matrix.shard }}.json
+      METRICS_FRAGMENT_PATH: ${{ runner.temp }}/ci-metrics/fragment-browser-pr-${{ matrix.shard }}.json
+      METRICS_JOB_ID: browser-pr
+      METRICS_JOB_NAME: Browser journeys (${{ matrix.shard }}/${{ strategy.job-total }})
+      METRICS_MATRIX: ${{ toJson(matrix) }}
     steps:
+      - name: Capture job start
+        shell: bash
+        run: |
+          mkdir -p "$(dirname "$METRICS_TIMING_FILE")"
+          printf '{"name":"job-start","at":%s}\n' "$(date +%s%3N)" >> "$METRICS_TIMING_FILE"
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Install .NET 10
@@ -491,6 +710,7 @@ jobs:
           cache: npm
           cache-dependency-path: product/client/package-lock.json
       - name: Cache NuGet packages
+        id: nuget
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.nuget/packages
@@ -518,6 +738,8 @@ jobs:
           # No dependency install: `--with-deps` and `install-deps` install apt packages and do not apply on
           # Windows. The cache holds the browser binary, which is the whole of what is needed here.
           npx playwright install chromium
+      - name: Mark setup complete
+        run: node "${{ github.workspace }}/product/ci-metrics/bin/mark.mjs" setup-end
       # Packed by recorded duration rather than by `--shard`. Playwright's own sharding balances test *count*
       # and does it well — 58/57/54/56 across four — but those shards took 360s, 328s, 233s and 662s, because
       # what varies is duration per test. One file, zzz-post-414-picker-integrity.spec.ts, is 220 of the
@@ -565,6 +787,9 @@ jobs:
             exit 1
           fi
           echo "Shard ${{ matrix.shard }} ran exactly the $expected tests it planned."
+      - name: Mark test complete
+        if: always()
+        run: node "${{ github.workspace }}/product/ci-metrics/bin/mark.mjs" test-end
       - name: Upload journey durations
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -583,6 +808,29 @@ jobs:
             product/client/test-results
           if-no-files-found: ignore
           retention-days: 7
+      - name: Write metrics fragment
+        if: always()
+        env:
+          METRICS_JOB_RESULT: ${{ job.status }}
+          METRICS_NEEDS: changes
+          METRICS_COUNTS_SOURCE: playwright-json
+          METRICS_PLAYWRIGHT_JSON_PATH: ${{ github.workspace }}/product/client/journey-durations-${{ matrix.shard }}.json
+          METRICS_CLASS_DOCS_ONLY: ${{ needs.changes.outputs.docs_only }}
+          METRICS_CLASS_BACKEND: ${{ needs.changes.outputs.backend }}
+          METRICS_CLASS_CLIENT: ${{ needs.changes.outputs.client }}
+          METRICS_CLASS_BROWSER: ${{ needs.changes.outputs.browser }}
+          METRICS_CLASS_POSTGRESQL: ${{ needs.changes.outputs.postgresql }}
+          METRICS_CACHE_NUGET: ${{ steps.nuget.outputs.cache-hit }}
+          METRICS_CACHE_CHROMIUM: ${{ steps.chromium.outputs.cache-hit }}
+        run: node "${{ github.workspace }}/product/ci-metrics/bin/write-fragment.mjs"
+      - name: Upload metrics fragment
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ci-metrics-browser-pr-${{ matrix.shard }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/ci-metrics/fragment-browser-pr-${{ matrix.shard }}.json
+          if-no-files-found: ignore
+          retention-days: 30
 
   # The journeys against the artifact a demonstration or a deployment actually serves: the built client, hosted
   # by the API on one origin. Every other gate serves the client with `vite dev`, which meant the production
@@ -599,7 +847,17 @@ jobs:
     if: github.event_name != 'push' && needs.changes.outputs.browser == 'true'
     runs-on: windows-latest
     timeout-minutes: 20
+    env:
+      METRICS_TIMING_FILE: ${{ runner.temp }}/ci-metrics/timing-browser-production.json
+      METRICS_FRAGMENT_PATH: ${{ runner.temp }}/ci-metrics/fragment-browser-production.json
+      METRICS_JOB_ID: browser-production
+      METRICS_JOB_NAME: Browser journeys on the production build
     steps:
+      - name: Capture job start
+        shell: bash
+        run: |
+          mkdir -p "$(dirname "$METRICS_TIMING_FILE")"
+          printf '{"name":"job-start","at":%s}\n' "$(date +%s%3N)" >> "$METRICS_TIMING_FILE"
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Install .NET 10
@@ -613,6 +871,7 @@ jobs:
           cache: npm
           cache-dependency-path: product/client/package-lock.json
       - name: Cache NuGet packages
+        id: nuget
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.nuget/packages
@@ -636,11 +895,16 @@ jobs:
           # `--with-deps` installs apt packages and does not apply on Windows; the cached browser binary is all
           # that is needed.
           npx playwright install chromium
+      - name: Mark setup complete
+        run: node "${{ github.workspace }}/product/ci-metrics/bin/mark.mjs" setup-end
       - name: Build the client and run the production journeys
         working-directory: product/client
         env:
           AEROLINK_E2E_SKIP_BUILD: "true"
         run: npm run test:production
+      - name: Mark test complete
+        if: always()
+        run: node "${{ github.workspace }}/product/ci-metrics/bin/mark.mjs" test-end
       - name: Upload failure diagnostics
         if: failure()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -651,6 +915,27 @@ jobs:
             product/client/test-results-production
           if-no-files-found: ignore
           retention-days: 7
+      - name: Write metrics fragment
+        if: always()
+        env:
+          METRICS_JOB_RESULT: ${{ job.status }}
+          METRICS_NEEDS: changes
+          METRICS_CLASS_DOCS_ONLY: ${{ needs.changes.outputs.docs_only }}
+          METRICS_CLASS_BACKEND: ${{ needs.changes.outputs.backend }}
+          METRICS_CLASS_CLIENT: ${{ needs.changes.outputs.client }}
+          METRICS_CLASS_BROWSER: ${{ needs.changes.outputs.browser }}
+          METRICS_CLASS_POSTGRESQL: ${{ needs.changes.outputs.postgresql }}
+          METRICS_CACHE_NUGET: ${{ steps.nuget.outputs.cache-hit }}
+          METRICS_CACHE_CHROMIUM: ${{ steps.chromium.outputs.cache-hit }}
+        run: node "${{ github.workspace }}/product/ci-metrics/bin/write-fragment.mjs"
+      - name: Upload metrics fragment
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ci-metrics-browser-production-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/ci-metrics/fragment-browser-production.json
+          if-no-files-found: ignore
+          retention-days: 30
 
   browser-full:
     name: Full browser journeys (${{ matrix.shard }}/${{ strategy.job-total }})
@@ -665,7 +950,18 @@ jobs:
       fail-fast: false
       matrix:
         shard: [1, 2, 3]
+    env:
+      METRICS_TIMING_FILE: ${{ runner.temp }}/ci-metrics/timing-browser-full-${{ matrix.shard }}.json
+      METRICS_FRAGMENT_PATH: ${{ runner.temp }}/ci-metrics/fragment-browser-full-${{ matrix.shard }}.json
+      METRICS_JOB_ID: browser-full
+      METRICS_JOB_NAME: Full browser journeys (${{ matrix.shard }}/${{ strategy.job-total }})
+      METRICS_MATRIX: ${{ toJson(matrix) }}
     steps:
+      - name: Capture job start
+        shell: bash
+        run: |
+          mkdir -p "$(dirname "$METRICS_TIMING_FILE")"
+          printf '{"name":"job-start","at":%s}\n' "$(date +%s%3N)" >> "$METRICS_TIMING_FILE"
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Install .NET 10
@@ -695,11 +991,16 @@ jobs:
           # `--with-deps` installs apt packages and does not apply on Windows; the cached browser binary is all
           # that is needed.
           npx playwright install chromium
+      - name: Mark setup complete
+        run: node "${{ github.workspace }}/product/ci-metrics/bin/mark.mjs" setup-end
       - name: Run full browser shard
         working-directory: product/client
         env:
           AEROLINK_E2E_SKIP_BUILD: "true"
         run: npx playwright test --shard=${{ matrix.shard }}/${{ strategy.job-total }}
+      - name: Mark test complete
+        if: always()
+        run: node "${{ github.workspace }}/product/ci-metrics/bin/mark.mjs" test-end
       - name: Upload diagnostics and timings
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -707,12 +1008,37 @@ jobs:
           name: playwright-full-${{ matrix.shard }}-${{ github.run_attempt }}
           path: |
             product/client/playwright-report
+      - name: Write metrics fragment
+        if: always()
+        env:
+          METRICS_JOB_RESULT: ${{ job.status }}
+          METRICS_NEEDS: changes
+          METRICS_CLASS_DOCS_ONLY: ${{ needs.changes.outputs.docs_only }}
+          METRICS_CLASS_BACKEND: ${{ needs.changes.outputs.backend }}
+          METRICS_CLASS_CLIENT: ${{ needs.changes.outputs.client }}
+          METRICS_CLASS_BROWSER: ${{ needs.changes.outputs.browser }}
+          METRICS_CLASS_POSTGRESQL: ${{ needs.changes.outputs.postgresql }}
+          METRICS_CACHE_CHROMIUM: ${{ steps.chromium.outputs.cache-hit }}
+        run: node "${{ github.workspace }}/product/ci-metrics/bin/write-fragment.mjs"
+      - name: Upload metrics fragment
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ci-metrics-browser-full-${{ matrix.shard }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/ci-metrics/fragment-browser-full-${{ matrix.shard }}.json
+          if-no-files-found: ignore
+          retention-days: 30
   postgresql-smoke:
     name: PostgreSQL migrations and secure bootstrap
     needs: changes
     if: needs.changes.outputs.postgresql == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    env:
+      METRICS_TIMING_FILE: ${{ runner.temp }}/ci-metrics/timing-postgresql-smoke.json
+      METRICS_FRAGMENT_PATH: ${{ runner.temp }}/ci-metrics/fragment-postgresql-smoke.json
+      METRICS_JOB_ID: postgresql-smoke
+      METRICS_JOB_NAME: PostgreSQL migrations and secure bootstrap
     services:
       postgres:
         image: postgres:17
@@ -728,6 +1054,11 @@ jobs:
           --health-timeout 5s
           --health-retries 12
     steps:
+      - name: Capture job start
+        shell: bash
+        run: |
+          mkdir -p "$(dirname "$METRICS_TIMING_FILE")"
+          printf '{"name":"job-start","at":%s}\n' "$(date +%s%3N)" >> "$METRICS_TIMING_FILE"
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Install .NET 10
@@ -738,6 +1069,8 @@ jobs:
         run: |
           dotnet restore product/AeroLink.slnx
           dotnet build product/AeroLink.slnx --configuration Release --no-restore
+      - name: Mark setup complete
+        run: node "${{ github.workspace }}/product/ci-metrics/bin/mark.mjs" setup-end
       - name: Apply migrations and prove first-install and identity administration paths
         env:
           ASPNETCORE_ENVIRONMENT: Production
@@ -806,6 +1139,9 @@ jobs:
           psql -h 127.0.0.1 -U aerolink -d aerolink_ci -qtAc \
             "select count(*) from security_audit_events where \"EventType\" like 'External%' and \"Outcome\" = 'Success';" \
             | { read -r count; test "$count" -ge 3 || { echo "expected identity audit evidence, found $count"; exit 1; }; }
+      - name: Mark test complete
+        if: always()
+        run: node "${{ github.workspace }}/product/ci-metrics/bin/mark.mjs" test-end
       - name: Upload PostgreSQL startup diagnostics
         if: failure()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -814,6 +1150,25 @@ jobs:
           path: postgres-api.log
           if-no-files-found: ignore
           retention-days: 7
+      - name: Write metrics fragment
+        if: always()
+        env:
+          METRICS_JOB_RESULT: ${{ job.status }}
+          METRICS_NEEDS: changes
+          METRICS_CLASS_DOCS_ONLY: ${{ needs.changes.outputs.docs_only }}
+          METRICS_CLASS_BACKEND: ${{ needs.changes.outputs.backend }}
+          METRICS_CLASS_CLIENT: ${{ needs.changes.outputs.client }}
+          METRICS_CLASS_BROWSER: ${{ needs.changes.outputs.browser }}
+          METRICS_CLASS_POSTGRESQL: ${{ needs.changes.outputs.postgresql }}
+        run: node "${{ github.workspace }}/product/ci-metrics/bin/write-fragment.mjs"
+      - name: Upload metrics fragment
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ci-metrics-postgresql-smoke-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/ci-metrics/fragment-postgresql-smoke.json
+          if-no-files-found: ignore
+          retention-days: 30
   # What a green tick on this run actually means.
   #
   # Every job above is conditional, and a skipped job is not a failed one — so a run whose journeys never ran
@@ -830,7 +1185,21 @@ jobs:
     needs: [changes, backend-api, backend-core, client, script-contracts, browser-pr, browser-production, postgresql-smoke, metrics-tooling]
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    env:
+      METRICS_TIMING_FILE: ${{ runner.temp }}/ci-metrics/timing-gate.json
+      METRICS_FRAGMENT_PATH: ${{ runner.temp }}/ci-metrics/fragment-gate.json
+      METRICS_JOB_ID: gate
+      METRICS_JOB_NAME: Report what this run validated
     steps:
+      - name: Capture job start
+        shell: bash
+        run: |
+          mkdir -p "$(dirname "$METRICS_TIMING_FILE")"
+          printf '{"name":"job-start","at":%s}\n' "$(date +%s%3N)" >> "$METRICS_TIMING_FILE"
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Mark setup complete
+        run: node "${{ github.workspace }}/product/ci-metrics/bin/mark.mjs" setup-end
       - name: Summarise and enforce
         env:
           BACKEND_API: ${{ needs.backend-api.result }}
@@ -916,6 +1285,28 @@ jobs:
               exit 1
             fi
           fi
+      - name: Mark test complete
+        if: always()
+        run: node "${{ github.workspace }}/product/ci-metrics/bin/mark.mjs" test-end
+      - name: Write metrics fragment
+        if: always()
+        env:
+          METRICS_JOB_RESULT: ${{ job.status }}
+          METRICS_NEEDS: changes,backend-api,backend-core,client,script-contracts,browser-pr,browser-production,postgresql-smoke,metrics-tooling
+          METRICS_CLASS_DOCS_ONLY: ${{ needs.changes.outputs.docs_only }}
+          METRICS_CLASS_BACKEND: ${{ needs.changes.outputs.backend }}
+          METRICS_CLASS_CLIENT: ${{ needs.changes.outputs.client }}
+          METRICS_CLASS_BROWSER: ${{ needs.changes.outputs.browser }}
+          METRICS_CLASS_POSTGRESQL: ${{ needs.changes.outputs.postgresql }}
+        run: node "${{ github.workspace }}/product/ci-metrics/bin/write-fragment.mjs"
+      - name: Upload metrics fragment
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ci-metrics-gate-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/ci-metrics/fragment-gate.json
+          if-no-files-found: ignore
+          retention-days: 30
 
   # The metrics tooling is CI-only and never merge authority: its job is deliberately NOT part of the
   # failure list above, so a metrics bug cannot turn a correct product gate red. It is still visible in the
@@ -928,4 +1319,57 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Run metrics tooling tests from a clean checkout
-        run: node --test product/ci-metrics/tests/trx.test.mjs product/ci-metrics/tests/playwright.test.mjs product/ci-metrics/tests/fragment.test.mjs product/ci-metrics/tests/aggregate.test.mjs
+        run: node --test product/ci-metrics/tests/trx.test.mjs product/ci-metrics/tests/playwright.test.mjs product/ci-metrics/tests/fragment.test.mjs product/ci-metrics/tests/aggregate.test.mjs product/ci-metrics/tests/build-run-meta.test.mjs
+
+  # Non-authoritative: runs after the required gate, aggregates every uploaded fragment against the trusted
+  # expected topology, and publishes bounded JSON + Markdown artifacts. A metrics failure cannot fail the
+  # product gate because this job is not in the gate's needs or failure list.
+  metrics-report:
+    name: Aggregate CI metrics
+    if: always()
+    needs: [gate, changes]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Build trusted run metadata
+        shell: bash
+        env:
+          GITHUB_RUN_ID: ${{ github.run_id }}
+          GITHUB_RUN_ATTEMPT: ${{ github.run_attempt }}
+          GITHUB_EVENT_NAME: ${{ github.event_name }}
+          GITHUB_SHA: ${{ github.sha }}
+          GITHUB_WORKFLOW_REF: ${{ github.workflow_ref }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          CLASS_DOCS_ONLY: ${{ needs.changes.outputs.docs_only }}
+          CLASS_BACKEND: ${{ needs.changes.outputs.backend }}
+          CLASS_CLIENT: ${{ needs.changes.outputs.client }}
+          CLASS_BROWSER: ${{ needs.changes.outputs.browser }}
+          CLASS_POSTGRESQL: ${{ needs.changes.outputs.postgresql }}
+          METRICS_RUN_META_PATH: ${{ runner.temp }}/metrics/run-meta.json
+        run: |
+          tree="$(git rev-parse HEAD^{tree})"
+          METRICS_TREE_SHA="$tree" node "${{ github.workspace }}/product/ci-metrics/bin/build-run-meta.mjs"
+      - name: Download fragments
+        if: always()
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          path: ${{ runner.temp }}/fragments
+          merge-multiple: true
+      - name: Aggregate and publish summary
+        if: always()
+        run: |
+          node "${{ github.workspace }}/product/ci-metrics/bin/aggregate.mjs" \
+            "${{ runner.temp }}/fragments" \
+            "${{ runner.temp }}/metrics/out" \
+            "${{ runner.temp }}/metrics/run-meta.json"
+          cat "${{ runner.temp }}/metrics/out/run-metrics.md" >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload merged metrics
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ci-metrics-run-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/metrics/out
+          if-no-files-found: ignore
+          retention-days: 30

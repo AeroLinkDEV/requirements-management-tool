@@ -5,9 +5,11 @@ everything here runs inside GitHub Actions or local test tooling.
 
 ## What one fragment contains
 
-This increment provides the tooling and tests; the workflow instrumentation that makes every quality-gate
-job emit fragments is the second part of the same phase and lands as a separate, independently reviewable
-PR after this foundation is merged.
+Every quality-gate job in `.github/workflows/ci.yml` emits a fragment (timing markers, TRX/Playwright
+counts, cache hits, classifier outputs) that is uploaded with `if: always()`. The non-authoritative
+`metrics-report` job builds trusted run metadata with `bin/build-run-meta.mjs` (exact tree SHA, expected
+job topology from the classifier outputs), downloads the fragments, aggregates them, and publishes bounded
+JSON + Markdown artifacts after the required gate.
 
 Each fragment (`aerolink-ci-fragment/v1`, schema in
 [`schema/v1-fragment.json`](schema/v1-fragment.json)) with:
@@ -74,6 +76,11 @@ labelled untrusted. A job whose duration is unknown, absent, or whose dependency
 makes the critical path **unavailable with a reason** rather than numerically smaller. Phase B (rolling
 collection) is where GitHub API queue and cancellation accounting lands.
 
+`bin/build-run-meta.mjs` is the trusted default-branch source of the expected topology: it emits
+`expectedRun` (exact commit and tree SHA) and `expectedJobs` (groups, unique matrix instances, and
+dependency groups) from the workflow's own classifier outputs and event type. Fragments are untrusted data;
+they never define the topology.
+
 ## Security and trust
 
 - Fragments contain no environment values, cookies, headers, passwords, connection strings, request/response
@@ -119,10 +126,10 @@ second), and the aggregation job runs only after the required gate. The measured
 ## Tests
 
 ```powershell
-node --test product/ci-metrics/tests/trx.test.mjs product/ci-metrics/tests/playwright.test.mjs product/ci-metrics/tests/fragment.test.mjs product/ci-metrics/tests/aggregate.test.mjs
+node --test product/ci-metrics/tests/trx.test.mjs product/ci-metrics/tests/playwright.test.mjs product/ci-metrics/tests/fragment.test.mjs product/ci-metrics/tests/aggregate.test.mjs product/ci-metrics/tests/build-run-meta.test.mjs
 ```
 
-The suite (64 tests) covers schema-driven nested validation, real-format Playwright suite traversal,
+The suite (68 tests) covers schema-driven nested validation, real-format Playwright suite traversal,
 representative TRX success/failure fixtures, valid/missing/malformed/oversized fragments, unknown schema
 versions, failed/cancelled/skipped jobs, missing test reports, count mismatches, retried Playwright tests,
 empty test sets, comparable-run grouping, matrix topology with distinct instances, run-identity
