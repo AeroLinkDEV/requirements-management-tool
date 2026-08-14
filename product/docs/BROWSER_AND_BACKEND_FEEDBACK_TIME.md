@@ -316,3 +316,29 @@ costs a full gate to re-run something that already worked. Raised to 30, which s
 browser.
 
 This is the same growth that makes the shard-count reasoning above worth re-measuring rather than inheriting.
+
+## API startup floor, measured (563A, 2026-08-14)
+
+Per-shard telemetry from run 31843343040 (PR #581 head c002890) splits each hosted API test's wall time
+into factory startup (host build + disposal, attributed from the construction call site) and test body
+(wall minus startup). Structured per-shard artifacts: `api-telemetry-<shard>-<attempt>`.
+
+| Shard | Tests | Factories | Summed wall | Summed startup | Startup % | Wall p10/median/p75/p95 | Startup p10/median/p75/p95 |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| 1 | 133 | 159 | 778.4s | 229.9s | 30% | 3.7 / 5.6 / 7.7 / 11.5s | 0.7 / 1.0 / 1.5 / 8.7s |
+| 2 | 152 | 163 | 970.9s | 350.8s | 36% | 4.0 / 5.9 / 7.5 / 13.5s | 1.0 / 1.5 / 1.9 / 10.0s |
+| 3 | 134 | 148 | 833.8s | 194.0s | 23% | 3.4 / 6.6 / 7.7 / 11.1s | 0.7 / 1.0 / 1.2 / 3.9s |
+| Total | 419 | 470 | 2583.1s | 774.7s | 30% | — | — |
+
+Notes:
+
+- The measured floor (~30% of summed wall) is lower than the historical ~39% because it counts only host
+  build and disposal; factory construction, database open, and first-client latency are inside the host
+  build, and the TRX wall is the whole test method. Startup percentages above 100% for classes whose
+  factories are created in collection/class fixtures (e.g., `ShowcaseApiFixture`, `CancelReviewAuthorityTests`)
+  are expected: fixture startup occurs outside any single test's TRX wall.
+- 470 factories were created for 419 attributed tests; multiple-factory tests are listed explicitly.
+- The schema-template copy experiment remains the recorded negative result: median rose 13.4s to 19.4s,
+  p75 20.4s to 26.9s, summed CPU +22%; do not repeat a per-test database-copy strategy.
+- Phase 2 (fresh-host/reusable-host/non-hosted inventory) and phase 3 (host-reuse pilot with >=10
+  full-concurrency runs) are the next increments; this phase changes no isolation architecture.
