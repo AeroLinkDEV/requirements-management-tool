@@ -59,8 +59,9 @@ export function runDurationMs(record) {
 export function jobGroupDurations(record) {
   const byGroup = new Map()
   for (const job of Array.isArray(record.jobs) ? record.jobs : []) {
-    const start = job.timings?.jobStartMs
-    const end = job.timings?.jobEndMs
+    if (!job || typeof job !== 'object' || !job.timings || typeof job.timings !== 'object') continue
+    const start = job.timings.jobStartMs
+    const end = job.timings.jobEndMs
     if (start === null || end === null || end < start) continue
     const list = byGroup.get(job.group) ?? []
     list.push(end - start)
@@ -197,13 +198,14 @@ export function detectRegressions(records, { window = 10, minRuns = 3, ratio = 1
   const recentMedian = median(recent.map(runDurationMs))
   const previousMedian = median(previous.map(runDurationMs))
   const recentP95 = percentile(recent.map(runDurationMs), 95)
-  if (recentMedian === null || previousMedian === null || recentP95 === null) return []
+  const previousP95 = percentile(previous.map(runDurationMs), 95)
+  if (recentMedian === null || previousMedian === null || recentP95 === null || previousP95 === null) return []
   const regressions = []
   if (recentMedian > previousMedian * ratio && recentMedian - previousMedian >= minDeltaMs) {
     regressions.push({ metric: 'criticalPathMedian', current: recentMedian, previous: previousMedian, threshold: previousMedian * ratio, runs: recent.length })
   }
-  if (recentP95 > recentMedian * ratio && recentP95 - recentMedian >= minDeltaMs) {
-    regressions.push({ metric: 'criticalPathP95Spread', current: recentP95, previous: recentMedian, threshold: recentMedian * ratio, runs: recent.length })
+  if (recentP95 > previousP95 * ratio && recentP95 - previousP95 >= minDeltaMs) {
+    regressions.push({ metric: 'criticalPathP95', current: recentP95, previous: previousP95, threshold: previousP95 * ratio, runs: recent.length })
   }
   return regressions.slice(0, MAX_REGRESSIONS)
 }
@@ -229,6 +231,15 @@ export function validateRunRecord(record) {
     for (const job of Array.isArray(record.jobs) ? record.jobs : []) {
       if (typeof job?.instance !== 'string' || job.instance.length > 120) errors.push('A job has an invalid instance.')
       if (!Number.isInteger(job?.sourceAttempt) || job.sourceAttempt < 1) errors.push('A job has an invalid sourceAttempt.')
+    }
+  } else {
+    for (const job of Array.isArray(record.jobs) ? record.jobs : []) {
+      if (!job || typeof job !== 'object') {
+        errors.push('A legacy job is not an object.')
+        continue
+      }
+      if (typeof job.instance !== 'string' || job.instance.length > 120) errors.push('A legacy job has an invalid instance.')
+      if (!job.timings || typeof job.timings !== 'object') errors.push(`Legacy job "${job.instance ?? '?'}" has no timings object.`)
     }
   }
   const json = JSON.stringify(record)
@@ -267,6 +278,11 @@ export function buildRollingReport({ records, regressions = [], missing = [], fu
   const stats = rollingStats(records)
   const flakes = flakeTrend(records)
   const cache = cacheTrend(records)
+  const queueDelays = records.map((record) => record.apiTiming?.queueDelayMs).filter((value) => Number.isFinite(value))
+  const cancelledConsumedTotal = records.reduce((sum, record) => sum + (record.apiTiming?.cancelledConsumedMs ?? 0), 0)
+  const cancelledJobsTotal = records.reduce((sum, record) => sum + (record.apiTiming?.cancelledJobs ?? 0), 0)
+  const cancelledRuns = records.filter((record) => record.conclusion === 'cancelled').length
+  const runConsumedTotal = records.reduce((sum, record) => sum + (record.apiTiming?.runConsumedMs ?? 0), 0)
   const lines = []
   lines.push('# CI rolling metrics')
   lines.push('')
@@ -274,6 +290,9 @@ export function buildRollingReport({ records, regressions = [], missing = [], fu
   lines.push(`- Runs included: ${records.length}`)
   lines.push(`- Runs missing/unreadable: ${missing.length}`)
   lines.push(`- Flaky runs: ${flakes.totalFlakyRuns}`)
+  lines.push(`- Queue delay median: ${median(queueDelays) === null ? 'unavailable' : `${Math.round(median(queueDelays) / 1000)}s`} (${queueDelays.length} measured)`)
+  lines.push(`- Cancelled: ${cancelledRuns} run(s), ${cancelledJobsTotal} job(s), ${Math.round(cancelledConsumedTotal / 1000)}s consumed`)
+  lines.push(`- Run wall time consumed (window): ${Math.round(runConsumedTotal / 1000)}s`)
   if (fullGates.length > 0) {
     const total = fullGates.reduce((sum, entry) => sum + entry.gates, 0)
     lines.push(`- Full gates per merged PR (window): ${total} gates across ${fullGates.length} merges`)
@@ -324,6 +343,12 @@ export function buildRollingReport({ records, regressions = [], missing = [], fu
   lines.push(`- npm: ${cache.npm.hit} hit / ${cache.npm.miss} miss`)
   lines.push(`- Chromium: ${cache.chromium.hit} hit / ${cache.chromium.miss} miss`)
   lines.push('')
+  lines.push('## Queue and cancellation')
+  lines.push('')
+  lines.push(`- Queue delay median: ${median(queueDelays) === null ? 'unavailable' : `${Math.round(median(queueDelays) / 1000)}s`} across ${queueDelays.length} measured run(s)`)
+  lines.push(`- Cancelled runs: ${cancelledRuns}; cancelled jobs: ${cancelledJobsTotal}; cancelled consumed: ${Math.round(cancelledConsumedTotal / 1000)}s`)
+  lines.push(`- Run wall time consumed: ${Math.round(runConsumedTotal / 1000)}s`)
+  lines.push('')
   const markdown = lines.join('\n')
   if (Buffer.byteLength(markdown, 'utf8') > MAX_REPORT_BYTES) throw new Error('Rolling Markdown exceeds the bounded size.')
   return {
@@ -339,11 +364,20 @@ export function buildRollingReport({ records, regressions = [], missing = [], fu
       category: classifyRun(record),
       criticalPathMs: runDurationMs(record),
       conclusion: record.conclusion ?? null,
+      apiTiming: record.apiTiming ?? null,
     })),
     stats,
     regressions: regressions.slice(0, MAX_REGRESSIONS),
     missing: missing.slice(0, 50),
     fullGatesPerMerge: fullGates.slice(0, MAX_RECORDS),
+    queueAndCancellation: {
+      queueDelayMedianMs: median(queueDelays),
+      queueDelaySamples: queueDelays.length,
+      cancelledRuns,
+      cancelledJobs: cancelledJobsTotal,
+      cancelledConsumedMs: cancelledConsumedTotal,
+      runConsumedMs: runConsumedTotal,
+    },
     flakeTrend: flakes,
     cache,
     markdown,
@@ -367,7 +401,8 @@ export function trackerBody(report) {
     lines.push(`Detected ${regressions.length} sustained regression(s):`)
     lines.push('')
     for (const entry of regressions) {
-      lines.push(`- ${escapeMarkdown(entry.metric)}: current ${Math.round(entry.current / 1000)}s vs previous ${Math.round(entry.previous / 1000)}s (threshold ${Math.round(entry.threshold / 1000)}s, ${entry.runs} runs)`)
+      const label = entry.category ? `${entry.category}: ${entry.metric}` : entry.metric
+      lines.push(`- ${escapeMarkdown(label)}: current ${Math.round(entry.current / 1000)}s vs previous ${Math.round(entry.previous / 1000)}s (threshold ${Math.round(entry.threshold / 1000)}s, ${entry.runs} runs)`)
     }
     lines.push('')
     lines.push(`Last updated: ${report?.generatedAt ?? 'unknown'}`)

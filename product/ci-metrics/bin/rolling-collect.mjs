@@ -108,7 +108,7 @@ async function main() {
   }
 
   const workflowRuns = await listAll(`/repos/${repository}/actions/workflows/ci.yml/runs`, { token, apiUrl })
-  const mergedPrs = await listAll(`/repos/${repository}/pulls`, { token, apiUrl })
+  const mergedPrs = await listAll(`/repos/${repository}/pulls?state=closed&sort=updated&direction=desc`, { token, apiUrl })
   const completed = workflowRuns
     .filter((run) => run.status === 'completed')
     .sort((a, b) => String(a.created_at).localeCompare(String(b.created_at)))
@@ -144,7 +144,7 @@ async function main() {
       missing.push({ runId: apiRun.id, reason: 'Run record identity does not match GitHub run metadata.' })
       continue
     }
-    const jobs = await listAll(`/repos/${repository}/actions/runs/${apiRun.id}/jobs`, { token, apiUrl })
+    const jobs = await listAll(`/repos/${repository}/actions/runs/${apiRun.id}/jobs?filter=all`, { token, apiUrl })
     const timing = queueAndCancellation(apiRun, jobs)
     const format = recordFormat(parsed)
     records.push({
@@ -165,12 +165,16 @@ async function main() {
     byCategory.set(category, list)
   }
   const regressions = []
-  for (const list of byCategory.values()) {
-    regressions.push(...detectRegressions(list, { window: 8, minRuns: 3, ratio: 1.15, minDeltaMs: 60_000 }))
+  for (const [category, list] of byCategory) {
+    regressions.push(...detectRegressions(list, { window: 8, minRuns: 3, ratio: 1.15, minDeltaMs: 60_000 }).map((entry) => ({ ...entry, category })))
   }
 
   const fullGates = fullGatesPerMerge(
-    mergedPrs.filter((pr) => pr.merged_at !== null),
+    mergedPrs.filter((pr) => {
+      if (!pr.merged_at) return false
+      const mergedAt = Date.parse(pr.merged_at)
+      return Number.isFinite(mergedAt) && Date.now() - mergedAt <= 30 * 24 * 60 * 60 * 1000
+    }),
     workflowRuns,
   )
   const report = buildRollingReport({ records, regressions, missing, fullGates })

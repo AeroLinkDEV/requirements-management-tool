@@ -124,6 +124,9 @@ test('detectRegressions requires sustained evidence and never fires on noise', (
   const regressions = detectRegressions([...fast, ...slow], { window: 6, minRuns: 3, ratio: 1.15, minDeltaMs: 10_000 })
   assert.ok(regressions.some((entry) => entry.metric === 'criticalPathMedian'))
   assert.deepEqual(detectRegressions([...fast, ...fast], { window: 6, minRuns: 3, ratio: 1.15, minDeltaMs: 10_000 }), [])
+  const outlier = record({ criticalPath: { job: 'gate', durationMs: 240_000, unavailableReason: null }, run: { ...record().run, id: 999 } })
+  const p95regressions = detectRegressions([...fast, ...fast, outlier], { window: 6, minRuns: 3, ratio: 1.15, minDeltaMs: 60_000 })
+  assert.ok(p95regressions.some((entry) => entry.metric === 'criticalPathP95' && entry.previous === 30_000))
 })
 
 test('validateRunRecord rejects untrusted or credential-shaped records', () => {
@@ -148,11 +151,30 @@ test('v1-legacy records are accepted without fabricated source attempts', () => 
   assert.equal(recordFormat({}), 'unknown')
 })
 
+test('malformed legacy jobs are rejected, not passed to aggregation', () => {
+  const legacy = record()
+  legacy.schemaVersion = 'aerolink-ci-run/v1'
+  legacy.jobs = [null, { group: 'x', instance: 42, timings: 'bad' }]
+  const errors = validateRunRecord(legacy)
+  assert.ok(errors.some((error) => /not an object/.test(error)))
+  assert.ok(errors.some((error) => /invalid instance/.test(error)))
+  assert.ok(errors.some((error) => /no timings object/.test(error)))
+  assert.equal(jobGroupDurations({ jobs: [null, { group: 'a', instance: 'a', timings: { jobStartMs: 0, jobEndMs: 1 } }] }).get('a')[0], 1)
+})
+
 test('buildRollingReport produces bounded JSON and Markdown', () => {
-  const report = buildRollingReport({ records: [record(), record({ run: { ...record().run, id: 2 }, flakyTests: ['alpha'] })], regressions: [] })
+  const withTiming = record()
+  withTiming.apiTiming = { queueDelayMs: 5000, cancelledConsumedMs: 120_000, cancelledJobs: 2, runConsumedMs: 900_000, conclusion: 'success' }
+  const report = buildRollingReport({ records: [withTiming, record({ run: { ...record().run, id: 2 }, flakyTests: ['alpha'] })], regressions: [] })
   assert.equal(report.schemaVersion, 'aerolink-ci-rolling/v1')
   assert.equal(report.records.length, 2)
+  assert.equal(report.records[0].apiTiming.queueDelayMs, 5000)
+  assert.equal(report.queueAndCancellation.queueDelayMedianMs, 5000)
+  assert.equal(report.queueAndCancellation.cancelledJobs, 2)
+  assert.equal(report.queueAndCancellation.cancelledConsumedMs, 120_000)
   assert.match(report.markdown, /Comparable groups/)
+  assert.match(report.markdown, /Queue and cancellation/)
+  assert.match(report.markdown, /Queue delay median: 5s/)
   assert.ok(Buffer.byteLength(JSON.stringify(report), 'utf8') <= 512 * 1024)
 })
 
