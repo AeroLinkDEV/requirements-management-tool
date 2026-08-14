@@ -60,6 +60,7 @@ const meta = {
   expectedRun: {
     id: Number(value('GITHUB_RUN_ID')),
     attempt: Number(value('GITHUB_RUN_ATTEMPT') ?? 1),
+    event: value('GITHUB_EVENT_NAME'),
     sha: value('GITHUB_SHA'),
     tree,
     workflowRef: value('GITHUB_WORKFLOW_REF'),

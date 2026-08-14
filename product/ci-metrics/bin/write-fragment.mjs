@@ -176,10 +176,15 @@ function main() {
   }
 
   const cacheMissing = {}
+  const cacheValue = (raw) => {
+    if (raw === 'true') return 'hit'
+    if (raw === 'false') return 'miss'
+    return raw === 'hit' || raw === 'miss' ? raw : null
+  }
   const cache = {
-    nuget: optional('METRICS_CACHE_NUGET'),
-    npm: optional('METRICS_CACHE_NPM'),
-    chromium: optional('METRICS_CACHE_CHROMIUM'),
+    nuget: cacheValue(optional('METRICS_CACHE_NUGET')),
+    npm: cacheValue(optional('METRICS_CACHE_NPM')),
+    chromium: cacheValue(optional('METRICS_CACHE_CHROMIUM')),
     missing: cacheMissing,
   }
   if (cache.nuget === null) cacheMissing.nuget = 'Cache step output not wired for this job.'

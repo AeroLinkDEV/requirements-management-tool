@@ -40,6 +40,7 @@ test('full backend+browser+postgres pull-request topology is produced with uniqu
     assert.equal(result.status, 0, result.stderr)
     const meta = JSON.parse(readFileSync(join(directory, 'run-meta.json'), 'utf8'))
     assert.equal(meta.expectedRun.tree, 'b'.repeat(40))
+    assert.equal(meta.expectedRun.event, 'pull_request')
     const instances = meta.expectedJobs.map((job) => job.instance)
     for (const expected of ['changes', 'backend-api-1', 'backend-api-2', 'backend-api-3', 'backend-core', 'client',
       'browser-pr-1', 'browser-pr-2', 'browser-pr-3', 'browser-pr-4', 'browser-production',

@@ -513,6 +513,7 @@ test('CLI integration: a malformed structured report becomes an explicit counts.
       METRICS_JOB_RESULT: 'success',
       METRICS_COUNTS_SOURCE: 'trx',
       METRICS_TRX_PATH: malformedTrx,
+      METRICS_CACHE_NUGET: 'true',
       GITHUB_RUN_ID: '782',
       GITHUB_RUN_ATTEMPT: '1',
       GITHUB_EVENT_NAME: 'pull_request',
@@ -535,6 +536,7 @@ test('CLI integration: a malformed structured report becomes an explicit counts.
     assert.equal(fragment.counts.source, null)
     assert.equal(fragment.counts.executed, null)
     assert.match(fragment.counts.missing, /TRX parse failed/)
+    assert.equal(fragment.cache.nuget, 'hit')
   } finally {
     rmSync(directory, { recursive: true, force: true })
   }

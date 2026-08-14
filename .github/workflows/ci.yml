@@ -1315,11 +1315,40 @@ jobs:
     name: CI metrics tooling tests
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    env:
+      METRICS_TIMING_FILE: ${{ github.workspace }}/.ci-metrics/timing-metrics-tooling.json
+      METRICS_FRAGMENT_PATH: ${{ github.workspace }}/.ci-metrics/fragment-metrics-tooling.json
+      METRICS_JOB_ID: metrics-tooling
+      METRICS_JOB_NAME: CI metrics tooling tests
     steps:
+      - name: Capture job start
+        shell: bash
+        run: |
+          mkdir -p "$(dirname "$METRICS_TIMING_FILE")"
+          printf '{"name":"job-start","at":%s}\n' "$(date +%s%3N)" >> "$METRICS_TIMING_FILE"
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Mark setup complete
+        run: node "${{ github.workspace }}/product/ci-metrics/bin/mark.mjs" setup-end
       - name: Run metrics tooling tests from a clean checkout
         run: node --test product/ci-metrics/tests/trx.test.mjs product/ci-metrics/tests/playwright.test.mjs product/ci-metrics/tests/fragment.test.mjs product/ci-metrics/tests/aggregate.test.mjs product/ci-metrics/tests/build-run-meta.test.mjs
+      - name: Mark test complete
+        if: always()
+        run: node "${{ github.workspace }}/product/ci-metrics/bin/mark.mjs" test-end
+      - name: Write metrics fragment
+        if: always()
+        env:
+          METRICS_JOB_RESULT: ${{ job.status }}
+          METRICS_NEEDS: ""
+        run: node "${{ github.workspace }}/product/ci-metrics/bin/write-fragment.mjs"
+      - name: Upload metrics fragment
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ci-metrics-metrics-tooling-${{ github.run_attempt }}
+          path: ${{ github.workspace }}/.ci-metrics/fragment-metrics-tooling.json
+          if-no-files-found: ignore
+          retention-days: 30
 
   # Non-authoritative: runs after the required gate, aggregates every uploaded fragment against the trusted
   # expected topology, and publishes bounded JSON + Markdown artifacts. A metrics failure cannot fail the
