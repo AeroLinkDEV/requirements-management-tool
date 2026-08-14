@@ -157,6 +157,14 @@ and eligible raw evidence; any missing/malformed/mismatched/contradictory eviden
 `canSkip` is always false, and the output records what phase B would skip. Enforcement requires real-merge
 observation and a separate review.
 
+## API startup-floor telemetry (563A)
+
+`AeroLinkApiFactory` emits one bounded JSON line per host build and disposal, attributed to the test class
+and method from the construction call site (`AEROLINK_API_TELEMETRY_JSONL`; no-op when unset).
+`bin/aggregate-api-telemetry.mjs` combines those lines with the shard TRX to publish per-test/class
+startup versus test-body breakdowns (p10/median/p75/p95, factory counts, multiple-factory tests) as
+`api-telemetry.json`/`.md` artifacts per API shard. No isolation architecture is changed in this phase.
+
 ### Current baseline (phase A measurements)
 
 - Documented historical baseline (from #553-#559): 10m14s critical path; measurements and decisions are
@@ -250,7 +258,7 @@ Run the full suite exactly as CI does:
 node --test product/ci-metrics/tests/trx.test.mjs product/ci-metrics/tests/playwright.test.mjs product/ci-metrics/tests/fragment.test.mjs product/ci-metrics/tests/aggregate.test.mjs product/ci-metrics/tests/build-run-meta.test.mjs product/ci-metrics/tests/junit.test.mjs product/ci-metrics/tests/ci-workflow-contract.test.mjs product/ci-metrics/tests/zip.test.mjs product/ci-metrics/tests/rolling.test.mjs product/ci-metrics/tests/provenance.test.mjs
 ```
 
-The suite (126 tests) covers schema-driven nested validation, real-format Playwright suite traversal,
+The suite (130 tests) covers schema-driven nested validation, real-format Playwright suite traversal,
 representative TRX success/failure fixtures, Node JUnit parsing, valid/missing/malformed/oversized
 fragments and artifacts, unknown schema versions, failed/cancelled/skipped jobs, missing test reports,
 count mismatches, retried Playwright tests, empty test sets, comparable-run grouping and rolling

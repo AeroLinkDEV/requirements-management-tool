@@ -1,5 +1,7 @@
 using System.Net;
 using System.Net.Http.Json;
+using System.Diagnostics;
+using System.Runtime.CompilerServices;
 using System.Text.Json;
 using AeroLink.Domain.Baselines;
 using AeroLink.Domain.Identity;
@@ -15,6 +17,7 @@ using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Hosting;
 
 namespace AeroLink.Api.Tests;
 
@@ -315,7 +318,9 @@ public sealed class SecurityBoundaryTests
 internal sealed class AeroLinkApiFactory(bool seedDemoAccounts = false, bool allowDemoAccounts = false,
     string? showcaseTemplate = null, string? staticFilesRoot = null,
     DbCommandInterceptor? commandInterceptor = null,
-    IManagedDocumentStorageFaultInjector? storageFaultInjector = null) : WebApplicationFactory<Program>
+    IManagedDocumentStorageFaultInjector? storageFaultInjector = null,
+    [CallerFilePath] string? callerFile = null,
+    [CallerMemberName] string? callerMember = null) : WebApplicationFactory<Program>
 {
     public const string BootstrapSecret = "test-bootstrap-secret-0123456789-abcdef";
     public const string AdministratorPassword = "Bootstrap-Admin!2026";
@@ -340,6 +345,24 @@ internal sealed class AeroLinkApiFactory(bool seedDemoAccounts = false, bool all
 
     private readonly string _evidenceRoot = Path.Combine(Path.GetTempPath(), $"aerolink-api-evidence-{Guid.NewGuid():N}");
     private readonly string _connectorKeyPath = Path.Combine(Path.GetTempPath(), $"aerolink-connector-key-{Guid.NewGuid():N}.pem");
+    private static long _nextFactoryId;
+    private readonly long _factoryId = Interlocked.Increment(ref _nextFactoryId);
+    private readonly string _callerFile = callerFile ?? "unknown";
+    private readonly string _callerMember = callerMember ?? "unknown";
+    private readonly Stopwatch _construction = Stopwatch.StartNew();
+
+    protected override IHost CreateHost(IHostBuilder builder)
+    {
+        var stopwatch = Stopwatch.StartNew();
+        try
+        {
+            return base.CreateHost(builder);
+        }
+        finally
+        {
+            ApiTestTelemetry.RecordFactoryPhase("host", _construction.Elapsed.TotalMilliseconds, stopwatch.Elapsed.TotalMilliseconds, _callerFile, _callerMember, _factoryId);
+        }
+    }
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
@@ -391,6 +414,7 @@ internal sealed class AeroLinkApiFactory(bool seedDemoAccounts = false, bool all
     /// </summary>
     protected override void Dispose(bool disposing)
     {
+        var stopwatch = Stopwatch.StartNew();
         base.Dispose(disposing);
         SqliteConnection.ClearAllPools();
         DeleteIfPresent(_databasePath);
@@ -399,6 +423,7 @@ internal sealed class AeroLinkApiFactory(bool seedDemoAccounts = false, bool all
         try { if (Directory.Exists(_evidenceRoot)) Directory.Delete(_evidenceRoot, true); }
         catch (IOException) { } catch (UnauthorizedAccessException) { }
         DeleteIfPresent(_connectorKeyPath);
+        ApiTestTelemetry.RecordFactoryPhase("dispose", _construction.Elapsed.TotalMilliseconds, stopwatch.Elapsed.TotalMilliseconds, _callerFile, _callerMember, _factoryId);
     }
 
     // Retried briefly before being given up on, because the usual cause is a handle closing a moment late
