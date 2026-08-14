@@ -336,8 +336,11 @@ export default function TestChangeRequestPage({
 
   const checkIn = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
+    // Matches the button beside it, and says which of the two is missing rather than naming both every time.
     if (!draft || !lockRef.current || !draft.title.trim() || !draft.procedureChanges.every(proposalCanCheckIn)) {
-      setError('Add a title and finish or remove each started procedure proposal before checking in this Draft.')
+      setError(!draft?.title.trim()
+        ? 'Give the Draft a title before checking it in.'
+        : 'Finish or remove each started procedure proposal before checking in this Draft.')
       return
     }
     setBusy(true); setError(''); setSaved('')
@@ -410,7 +413,6 @@ export default function TestChangeRequestPage({
   const caseComplete = Boolean(draft?.title.trim() && toPlainText(draft.problemRich).trim()
     && toPlainText(draft.analysisRich).trim() && toPlainText(draft.solutionRich).trim())
   const proposalsComplete = Boolean(draft?.procedureChanges.every(proposalCanCheckIn))
-  const workingCopyChanged = Boolean(draft && serializedWorkingCopy !== checkoutSnapshotRef.current)
   const hasUnsavedChanges = Boolean(draft && serializedWorkingCopy !== lastSavedRef.current)
 
   const updateProcedure = (key: string, field: keyof ProcedureProposal, value: string | number) =>
@@ -463,8 +465,23 @@ export default function TestChangeRequestPage({
         detail={hasUnsavedChanges ? 'Working copy has unsaved changes' : `Working copy: ${autosaveStatus.toLowerCase()}`}
         busy={busy}
         saving={autosaveStatus === 'Saving'}
-        canSave={autosaveStatus !== 'Conflict' && hasUnsavedChanges}
-        canCheckIn={autosaveStatus !== 'Conflict' && workingCopyChanged && Boolean(draft.title.trim()) && proposalsComplete}
+        // Save stays available while a working copy is checked out. Saving one that autosave has already
+        // written is a no-op, so there was never an invariant behind greying it — only a convention, and the
+        // reader asked for the reassurance of an explicit save.
+        canSave={autosaveStatus !== 'Conflict'}
+        // `workingCopyChanged` is gone: a checkout that changed nothing could previously only be discarded,
+        // never handed back, which made "I opened this by mistake" indistinguishable from "throw my work
+        // away". An unchanged draft checks in cleanly.
+        //
+        // The proposal minimum stays. Check-in is not a client-side commit: the engine calls
+        // `ApplyDraftAsync` against the aggregate and returns `aggregate_validation_failed` as a 400 for a
+        // half-created proposal. Removing this gate would produce a button that clicks and fails, which is
+        // worse than one that is unavailable. What was actually wrong is that it never said so.
+        canCheckIn={autosaveStatus !== 'Conflict' && Boolean(draft.title.trim()) && proposalsComplete}
+        checkInBlockedReason={
+          autosaveStatus === 'Conflict' ? 'Another edit reached this Draft first. Reload to see it before checking in.'
+          : !draft.title.trim() ? 'Give the Draft a title before checking it in.'
+          : 'Finish or remove each started procedure proposal — a proposal needs its identifier, title, objective and steps before it can be checked in.'}
         onDiscard={() => void discard()}
         onSave={() => void saveWorkingCopy()}
       />}
