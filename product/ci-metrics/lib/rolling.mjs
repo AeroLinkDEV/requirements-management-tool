@@ -127,6 +127,24 @@ export function cacheTrend(records) {
   return totals
 }
 
+export function fullGatesPerMerge(mergedPrs, runs) {
+  const runCountByHead = new Map()
+  for (const run of Array.isArray(runs) ? runs : []) {
+    if (run.conclusion === 'success' && run.head_sha) {
+      runCountByHead.set(run.head_sha, (runCountByHead.get(run.head_sha) ?? 0) + 1)
+    }
+  }
+  const result = []
+  for (const pr of Array.isArray(mergedPrs) ? mergedPrs : []) {
+    if (!pr.merged_at || typeof pr.merge_commit_sha !== 'string' || pr.merge_commit_sha.length !== 40) continue
+    // One full gate is the PR's own quality-gate run; each additional successful push run on the merge
+    // commit is another full gate purchased after the merge.
+    const postMerge = runCountByHead.get(pr.merge_commit_sha) ?? 0
+    result.push({ pr: pr.number, mergedAt: pr.merged_at, gates: 1 + postMerge })
+  }
+  return result.sort((a, b) => String(b.mergedAt).localeCompare(String(a.mergedAt))).slice(0, MAX_RECORDS)
+}
+
 export function rollingStats(records) {
   const groups = new Map()
   for (const record of records) {
@@ -245,7 +263,7 @@ function escapeMarkdown(value) {
     .replace(/\r?\n/g, ' ')
 }
 
-export function buildRollingReport({ records, regressions = [], missing = [], generatedAt = new Date().toISOString() }) {
+export function buildRollingReport({ records, regressions = [], missing = [], fullGates = [], generatedAt = new Date().toISOString() }) {
   const stats = rollingStats(records)
   const flakes = flakeTrend(records)
   const cache = cacheTrend(records)
@@ -256,6 +274,10 @@ export function buildRollingReport({ records, regressions = [], missing = [], ge
   lines.push(`- Runs included: ${records.length}`)
   lines.push(`- Runs missing/unreadable: ${missing.length}`)
   lines.push(`- Flaky runs: ${flakes.totalFlakyRuns}`)
+  if (fullGates.length > 0) {
+    const total = fullGates.reduce((sum, entry) => sum + entry.gates, 0)
+    lines.push(`- Full gates per merged PR (window): ${total} gates across ${fullGates.length} merges`)
+  }
   lines.push('')
   lines.push('## Comparable groups')
   lines.push('')
@@ -288,6 +310,14 @@ export function buildRollingReport({ records, regressions = [], missing = [], ge
     if (missing.length > 20) lines.push(`- ...and ${missing.length - 20} more.`)
     lines.push('')
   }
+  if (fullGates.length > 0) {
+    lines.push('## Full gates per merged PR')
+    lines.push('')
+    for (const entry of fullGates.slice(0, 20)) {
+      lines.push(`- PR #${escapeMarkdown(String(entry.pr))} (merged ${escapeMarkdown(String(entry.mergedAt).slice(0, 10))}): ${entry.gates} full gate run(s)`)
+    }
+    lines.push('')
+  }
   lines.push('## Cache totals')
   lines.push('')
   lines.push(`- NuGet: ${cache.nuget.hit} hit / ${cache.nuget.miss} miss`)
@@ -313,6 +343,7 @@ export function buildRollingReport({ records, regressions = [], missing = [], ge
     stats,
     regressions: regressions.slice(0, MAX_REGRESSIONS),
     missing: missing.slice(0, 50),
+    fullGatesPerMerge: fullGates.slice(0, MAX_RECORDS),
     flakeTrend: flakes,
     cache,
     markdown,

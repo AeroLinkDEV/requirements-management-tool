@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import {
   median, percentile, classifyRun, runDurationMs, jobGroupDurations, queueAndCancellation,
   flakeTrend, cacheTrend, rollingStats, detectRegressions, validateRunRecord, recordFormat, buildRollingReport, trackerBody,
+  fullGatesPerMerge,
 } from '../lib/rolling.mjs'
 
 function record(overrides = {}) {
@@ -164,4 +165,22 @@ test('trackerBody is single-issue and never fabricates regressions', () => {
   })
   assert.match(hot, /criticalPathMedian/)
   assert.match(hot, /current 900s vs previous 700s/)
+})
+
+test('fullGatesPerMerge counts the PR gate plus successful post-merge push gates', () => {
+  const mergedPrs = [
+    { number: 571, merge_commit_sha: 'a'.repeat(40), merged_at: '2026-08-14T07:10:42Z' },
+    { number: 572, merge_commit_sha: '2e5acb25ff4bbaab811773cecbafabc00fd2c7af', merged_at: '2026-08-14T13:40:00Z' },
+  ]
+  const runs = [
+    { head_sha: '2e5acb25ff4bbaab811773cecbafabc00fd2c7af', conclusion: 'success' },
+    { head_sha: '2e5acb25ff4bbaab811773cecbafabc00fd2c7af', conclusion: 'failure' },
+    { head_sha: '2e5acb25ff4bbaab811773cecbafabc00fd2c7af', conclusion: 'success' },
+    { head_sha: 'x'.repeat(40), conclusion: 'success' },
+  ]
+  const result = fullGatesPerMerge(mergedPrs, runs)
+  const pr572 = result.find((entry) => entry.pr === 572)
+  assert.equal(pr572.gates, 3)
+  const pr571 = result.find((entry) => entry.pr === 571)
+  assert.equal(pr571.gates, 1)
 })

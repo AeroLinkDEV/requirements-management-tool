@@ -134,6 +134,16 @@ only when sustained regressions exist; an empty result never opens or touches an
 
 Rolling output is never merge authority. The required check remains `Report what this run validated`.
 
+### Current baseline (phase A measurements)
+
+- Documented historical baseline (from #553-#559): 10m14s critical path; measurements and decisions are
+  recorded in `product/docs/BROWSER_AND_BACKEND_FEEDBACK_TIME.md`.
+- Current phase-A per-run measurements (dogfood runs, July/August 2026): full PR critical path gate
+  672-723s (browser shard 1 + gate), API suite 486 tests across 3 shards, domain+infrastructure 758 tests,
+  production journeys 10 tests, metrics tooling 103 tests; caches NuGet 9 hit / Chromium 5 hit per full
+  run. These values are re-measured automatically by the rolling collector; the checked-in journey
+  durations continue to be refreshed from `journey-durations-*` artifacts.
+
 ## Security and trust
 
 - Fragments contain no environment values, cookies, headers, passwords, connection strings, request/response

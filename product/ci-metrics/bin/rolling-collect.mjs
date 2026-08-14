@@ -11,7 +11,7 @@ import { join } from 'node:path'
 import { readSingleJsonFromZip, ZipParseError } from '../lib/zip.mjs'
 import {
   validateRunRecord, queueAndCancellation, rollingStats, flakeTrend, cacheTrend,
-  detectRegressions, classifyRun, buildRollingReport, recordFormat, MAX_RECORDS,
+  detectRegressions, classifyRun, buildRollingReport, recordFormat, fullGatesPerMerge, MAX_RECORDS,
 } from '../lib/rolling.mjs'
 
 const env = (name) => process.env[name] ?? ''
@@ -108,6 +108,7 @@ async function main() {
   }
 
   const workflowRuns = await listAll(`/repos/${repository}/actions/workflows/ci.yml/runs`, { token, apiUrl })
+  const mergedPrs = await listAll(`/repos/${repository}/pulls`, { token, apiUrl })
   const completed = workflowRuns
     .filter((run) => run.status === 'completed')
     .sort((a, b) => String(a.created_at).localeCompare(String(b.created_at)))
@@ -168,7 +169,11 @@ async function main() {
     regressions.push(...detectRegressions(list, { window: 8, minRuns: 3, ratio: 1.15, minDeltaMs: 60_000 }))
   }
 
-  const report = buildRollingReport({ records, regressions, missing })
+  const fullGates = fullGatesPerMerge(
+    mergedPrs.filter((pr) => pr.merged_at !== null),
+    workflowRuns,
+  )
+  const report = buildRollingReport({ records, regressions, missing, fullGates })
   mkdirSync(outputDir, { recursive: true })
   writeFileSync(join(outputDir, 'rolling-metrics.json'), `${JSON.stringify(report, null, 2)}\n`, 'utf8')
   writeFileSync(join(outputDir, 'rolling-metrics.md'), `${report.markdown}\n`, 'utf8')
