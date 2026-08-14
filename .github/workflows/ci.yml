@@ -39,8 +39,8 @@ jobs:
     name: Classify changed product areas
     runs-on: windows-latest
     env:
-      METRICS_TIMING_FILE: ${{ runner.temp }}/ci-metrics/timing-changes.json
-      METRICS_FRAGMENT_PATH: ${{ runner.temp }}/ci-metrics/fragment-changes.json
+      METRICS_TIMING_FILE: ${{ github.workspace }}/.ci-metrics/timing-changes.json
+      METRICS_FRAGMENT_PATH: ${{ github.workspace }}/.ci-metrics/fragment-changes.json
       METRICS_JOB_ID: changes
       METRICS_JOB_NAME: Classify changed product areas
     outputs:
@@ -150,7 +150,7 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: ci-metrics-changes-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/ci-metrics/fragment-changes.json
+          path: ${{ github.workspace }}/.ci-metrics/fragment-changes.json
           if-no-files-found: ignore
           retention-days: 30
 
@@ -169,8 +169,8 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 10
     env:
-      METRICS_TIMING_FILE: ${{ runner.temp }}/ci-metrics/timing-warm-chromium-cache.json
-      METRICS_FRAGMENT_PATH: ${{ runner.temp }}/ci-metrics/fragment-warm-chromium-cache.json
+      METRICS_TIMING_FILE: ${{ github.workspace }}/.ci-metrics/timing-warm-chromium-cache.json
+      METRICS_FRAGMENT_PATH: ${{ github.workspace }}/.ci-metrics/fragment-warm-chromium-cache.json
       METRICS_JOB_ID: warm-chromium-cache
       METRICS_JOB_NAME: Warm the Chromium cache
     steps:
@@ -220,7 +220,7 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: ci-metrics-warm-chromium-cache-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/ci-metrics/fragment-warm-chromium-cache.json
+          path: ${{ github.workspace }}/.ci-metrics/fragment-warm-chromium-cache.json
           if-no-files-found: ignore
           retention-days: 30
 
@@ -261,8 +261,8 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 30
     env:
-      METRICS_TIMING_FILE: ${{ runner.temp }}/ci-metrics/timing-backend-api-${{ matrix.shard }}.json
-      METRICS_FRAGMENT_PATH: ${{ runner.temp }}/ci-metrics/fragment-backend-api-${{ matrix.shard }}.json
+      METRICS_TIMING_FILE: ${{ github.workspace }}/.ci-metrics/timing-backend-api-${{ matrix.shard }}.json
+      METRICS_FRAGMENT_PATH: ${{ github.workspace }}/.ci-metrics/fragment-backend-api-${{ matrix.shard }}.json
       METRICS_JOB_ID: backend-api
       METRICS_JOB_NAME: API test suite (${{ matrix.shard }}/${{ strategy.job-total }})
       METRICS_MATRIX: ${{ toJson(matrix) }}
@@ -399,7 +399,7 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: ci-metrics-backend-api-${{ matrix.shard }}-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/ci-metrics/fragment-backend-api-${{ matrix.shard }}.json
+          path: ${{ github.workspace }}/.ci-metrics/fragment-backend-api-${{ matrix.shard }}.json
           if-no-files-found: ignore
           retention-days: 30
 
@@ -410,8 +410,8 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 20
     env:
-      METRICS_TIMING_FILE: ${{ runner.temp }}/ci-metrics/timing-backend-core.json
-      METRICS_FRAGMENT_PATH: ${{ runner.temp }}/ci-metrics/fragment-backend-core.json
+      METRICS_TIMING_FILE: ${{ github.workspace }}/.ci-metrics/timing-backend-core.json
+      METRICS_FRAGMENT_PATH: ${{ github.workspace }}/.ci-metrics/fragment-backend-core.json
       METRICS_JOB_ID: backend-core
       METRICS_JOB_NAME: Domain and infrastructure test suites
     steps:
@@ -486,7 +486,7 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: ci-metrics-backend-core-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/ci-metrics/fragment-backend-core.json
+          path: ${{ github.workspace }}/.ci-metrics/fragment-backend-core.json
           if-no-files-found: ignore
           retention-days: 30
 
@@ -497,8 +497,8 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 20
     env:
-      METRICS_TIMING_FILE: ${{ runner.temp }}/ci-metrics/timing-client.json
-      METRICS_FRAGMENT_PATH: ${{ runner.temp }}/ci-metrics/fragment-client.json
+      METRICS_TIMING_FILE: ${{ github.workspace }}/.ci-metrics/timing-client.json
+      METRICS_FRAGMENT_PATH: ${{ github.workspace }}/.ci-metrics/fragment-client.json
       METRICS_JOB_ID: client
       METRICS_JOB_NAME: Client lint, type-check, and build
     steps:
@@ -543,7 +543,7 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: ci-metrics-client-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/ci-metrics/fragment-client.json
+          path: ${{ github.workspace }}/.ci-metrics/fragment-client.json
           if-no-files-found: ignore
           retention-days: 30
 
@@ -562,8 +562,8 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 15
     env:
-      METRICS_TIMING_FILE: ${{ runner.temp }}/ci-metrics/timing-script-contracts.json
-      METRICS_FRAGMENT_PATH: ${{ runner.temp }}/ci-metrics/fragment-script-contracts.json
+      METRICS_TIMING_FILE: ${{ github.workspace }}/.ci-metrics/timing-script-contracts.json
+      METRICS_FRAGMENT_PATH: ${{ github.workspace }}/.ci-metrics/fragment-script-contracts.json
       METRICS_JOB_ID: script-contracts
       METRICS_JOB_NAME: Operator and recovery script contracts
     steps:
@@ -642,7 +642,7 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: ci-metrics-script-contracts-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/ci-metrics/fragment-script-contracts.json
+          path: ${{ github.workspace }}/.ci-metrics/fragment-script-contracts.json
           if-no-files-found: ignore
           retention-days: 30
 
@@ -686,8 +686,8 @@ jobs:
       matrix:
         shard: [1, 2, 3, 4]
     env:
-      METRICS_TIMING_FILE: ${{ runner.temp }}/ci-metrics/timing-browser-pr-${{ matrix.shard }}.json
-      METRICS_FRAGMENT_PATH: ${{ runner.temp }}/ci-metrics/fragment-browser-pr-${{ matrix.shard }}.json
+      METRICS_TIMING_FILE: ${{ github.workspace }}/.ci-metrics/timing-browser-pr-${{ matrix.shard }}.json
+      METRICS_FRAGMENT_PATH: ${{ github.workspace }}/.ci-metrics/fragment-browser-pr-${{ matrix.shard }}.json
       METRICS_JOB_ID: browser-pr
       METRICS_JOB_NAME: Browser journeys (${{ matrix.shard }}/${{ strategy.job-total }})
       METRICS_MATRIX: ${{ toJson(matrix) }}
@@ -828,7 +828,7 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: ci-metrics-browser-pr-${{ matrix.shard }}-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/ci-metrics/fragment-browser-pr-${{ matrix.shard }}.json
+          path: ${{ github.workspace }}/.ci-metrics/fragment-browser-pr-${{ matrix.shard }}.json
           if-no-files-found: ignore
           retention-days: 30
 
@@ -848,8 +848,8 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 20
     env:
-      METRICS_TIMING_FILE: ${{ runner.temp }}/ci-metrics/timing-browser-production.json
-      METRICS_FRAGMENT_PATH: ${{ runner.temp }}/ci-metrics/fragment-browser-production.json
+      METRICS_TIMING_FILE: ${{ github.workspace }}/.ci-metrics/timing-browser-production.json
+      METRICS_FRAGMENT_PATH: ${{ github.workspace }}/.ci-metrics/fragment-browser-production.json
       METRICS_JOB_ID: browser-production
       METRICS_JOB_NAME: Browser journeys on the production build
     steps:
@@ -933,7 +933,7 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: ci-metrics-browser-production-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/ci-metrics/fragment-browser-production.json
+          path: ${{ github.workspace }}/.ci-metrics/fragment-browser-production.json
           if-no-files-found: ignore
           retention-days: 30
 
@@ -951,8 +951,8 @@ jobs:
       matrix:
         shard: [1, 2, 3]
     env:
-      METRICS_TIMING_FILE: ${{ runner.temp }}/ci-metrics/timing-browser-full-${{ matrix.shard }}.json
-      METRICS_FRAGMENT_PATH: ${{ runner.temp }}/ci-metrics/fragment-browser-full-${{ matrix.shard }}.json
+      METRICS_TIMING_FILE: ${{ github.workspace }}/.ci-metrics/timing-browser-full-${{ matrix.shard }}.json
+      METRICS_FRAGMENT_PATH: ${{ github.workspace }}/.ci-metrics/fragment-browser-full-${{ matrix.shard }}.json
       METRICS_JOB_ID: browser-full
       METRICS_JOB_NAME: Full browser journeys (${{ matrix.shard }}/${{ strategy.job-total }})
       METRICS_MATRIX: ${{ toJson(matrix) }}
@@ -1025,7 +1025,7 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: ci-metrics-browser-full-${{ matrix.shard }}-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/ci-metrics/fragment-browser-full-${{ matrix.shard }}.json
+          path: ${{ github.workspace }}/.ci-metrics/fragment-browser-full-${{ matrix.shard }}.json
           if-no-files-found: ignore
           retention-days: 30
   postgresql-smoke:
@@ -1035,8 +1035,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
-      METRICS_TIMING_FILE: ${{ runner.temp }}/ci-metrics/timing-postgresql-smoke.json
-      METRICS_FRAGMENT_PATH: ${{ runner.temp }}/ci-metrics/fragment-postgresql-smoke.json
+      METRICS_TIMING_FILE: ${{ github.workspace }}/.ci-metrics/timing-postgresql-smoke.json
+      METRICS_FRAGMENT_PATH: ${{ github.workspace }}/.ci-metrics/fragment-postgresql-smoke.json
       METRICS_JOB_ID: postgresql-smoke
       METRICS_JOB_NAME: PostgreSQL migrations and secure bootstrap
     services:
@@ -1166,7 +1166,7 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: ci-metrics-postgresql-smoke-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/ci-metrics/fragment-postgresql-smoke.json
+          path: ${{ github.workspace }}/.ci-metrics/fragment-postgresql-smoke.json
           if-no-files-found: ignore
           retention-days: 30
   # What a green tick on this run actually means.
@@ -1186,8 +1186,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     env:
-      METRICS_TIMING_FILE: ${{ runner.temp }}/ci-metrics/timing-gate.json
-      METRICS_FRAGMENT_PATH: ${{ runner.temp }}/ci-metrics/fragment-gate.json
+      METRICS_TIMING_FILE: ${{ github.workspace }}/.ci-metrics/timing-gate.json
+      METRICS_FRAGMENT_PATH: ${{ github.workspace }}/.ci-metrics/fragment-gate.json
       METRICS_JOB_ID: gate
       METRICS_JOB_NAME: Report what this run validated
     steps:
@@ -1304,7 +1304,7 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: ci-metrics-gate-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/ci-metrics/fragment-gate.json
+          path: ${{ github.workspace }}/.ci-metrics/fragment-gate.json
           if-no-files-found: ignore
           retention-days: 30
 
