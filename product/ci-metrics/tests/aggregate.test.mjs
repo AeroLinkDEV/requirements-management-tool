@@ -634,3 +634,119 @@ test('CLI integration: playwright-json counts follow planned/executed/passed sem
     rmSync(directory, { recursive: true, force: true })
   }
 })
+
+test('CLI integration: a stats-only flaky report makes missing title/spec detail explicit, not silent', async () => {
+  const directory = mkdtempSync(join(tmpdir(), 'ci-metrics-cli-'))
+  try {
+    const { spawnSync } = await import('node:child_process')
+    const reportPath = join(directory, 'report.json')
+    writeFileSync(reportPath, JSON.stringify({ stats: { expected: 0, unexpected: 0, flaky: 1, skipped: 0 }, errors: [] }))
+    const env = {
+      ...process.env,
+      METRICS_TIMING_FILE: join(directory, 'timing.json'),
+      METRICS_FRAGMENT_PATH: join(directory, 'fragment.json'),
+      METRICS_JOB_ID: 'browser-pr',
+      METRICS_JOB_NAME: 'Browser journeys (1/4)',
+      METRICS_JOB_GROUP: 'browser-pr',
+      METRICS_JOB_INSTANCE: 'browser-pr-1',
+      METRICS_NEEDS: 'changes',
+      METRICS_JOB_RESULT: 'success',
+      METRICS_COUNTS_SOURCE: 'playwright-json',
+      METRICS_PLAYWRIGHT_JSON_PATH: reportPath,
+      GITHUB_RUN_ID: '785',
+      GITHUB_RUN_ATTEMPT: '1',
+      GITHUB_EVENT_NAME: 'pull_request',
+      GITHUB_SHA: 'a'.repeat(40),
+      GITHUB_REF: 'refs/pull/13/merge',
+      GITHUB_WORKFLOW: 'Product quality gate',
+      GITHUB_WORKFLOW_REF: 'repo/.github/workflows/ci.yml@refs/heads/main',
+      GITHUB_REPOSITORY: 'owner/repo',
+      GITHUB_JOB: 'browser-pr',
+      GITHUB_WORKSPACE: repoRoot,
+    }
+    for (const name of ['job-start', 'setup-end', 'test-end']) {
+      const marked = spawnSync(process.execPath, [join(binDir, 'mark.mjs'), name], { encoding: 'utf8', cwd: directory, env })
+      assert.equal(marked.status, 0, marked.stderr)
+    }
+    const written = spawnSync(process.execPath, [join(binDir, 'write-fragment.mjs')], { encoding: 'utf8', cwd: directory, env })
+    assert.equal(written.status, 0, written.stderr)
+    const fragment = JSON.parse(await import('node:fs').then((fs) => fs.readFileSync(join(directory, 'fragment.json'), 'utf8')))
+    validateFragment(fragment)
+    assert.equal(fragment.counts.flaky, 1)
+    assert.deepEqual(fragment.flakyTests, [])
+    assert.match(fragment.counts.missing, /suites hierarchy|flaky titles/i)
+  } finally {
+    rmSync(directory, { recursive: true, force: true })
+  }
+})
+
+test('a serialized flaky=1 fragment with no title evidence and no reason is rejected at read time', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'ci-metrics-'))
+  try {
+    const crafted = fragment('browser-pr', 'browser-pr-1', { counts: { expected: 1, executed: 1, passed: 1, failed: 0, skipped: 0, flaky: 1, source: 'playwright-json', missing: null } })
+    writeFileSync(join(directory, 'crafted.json'), JSON.stringify(crafted))
+    const { fragments, missing } = readFragments(directory)
+    assert.equal(fragments.length, 0)
+    assert.ok(missing.some((entry) => entry.job === 'crafted' && /flaky title evidence/.test(entry.reason)))
+
+    // With an explicit unavailable reason the fragment is accepted as honest degraded data.
+    const honest = fragment('browser-pr', 'browser-pr-1', { counts: { expected: 1, executed: 1, passed: 1, failed: 0, skipped: 0, flaky: 1, source: 'playwright-json', missing: 'Report has no suites hierarchy; flaky titles unavailable.' } })
+    writeFileSync(join(directory, 'honest.json'), JSON.stringify(honest))
+    const honestResult = readFragments(directory)
+    assert.equal(honestResult.fragments.length, 1)
+  } finally {
+    rmSync(directory, { recursive: true, force: true })
+  }
+})
+
+test('more than twenty flaky titles are truncated explicitly, not silently', async () => {
+  const directory = mkdtempSync(join(tmpdir(), 'ci-metrics-cli-'))
+  try {
+    const { spawnSync } = await import('node:child_process')
+    const tests = Array.from({ length: 25 }, (_, i) => ({
+      title: `flaky-${i}`,
+      projectName: 'chromium',
+      results: [{ status: 'failed', duration: 100 }, { status: 'passed', duration: 200 }],
+      retries: 1,
+    }))
+    const report = { stats: { expected: 0, unexpected: 0, flaky: 25, skipped: 0 }, suites: [{ title: 's', specs: [{ title: 'x', file: 'x.spec.ts', tests }], suites: [] }] }
+    const reportPath = join(directory, 'report.json')
+    writeFileSync(reportPath, JSON.stringify(report))
+    const env = {
+      ...process.env,
+      METRICS_TIMING_FILE: join(directory, 'timing.json'),
+      METRICS_FRAGMENT_PATH: join(directory, 'fragment.json'),
+      METRICS_JOB_ID: 'browser-pr',
+      METRICS_JOB_NAME: 'Browser journeys (1/4)',
+      METRICS_JOB_GROUP: 'browser-pr',
+      METRICS_JOB_INSTANCE: 'browser-pr-1',
+      METRICS_NEEDS: 'changes',
+      METRICS_JOB_RESULT: 'success',
+      METRICS_COUNTS_SOURCE: 'playwright-json',
+      METRICS_PLAYWRIGHT_JSON_PATH: reportPath,
+      GITHUB_RUN_ID: '786',
+      GITHUB_RUN_ATTEMPT: '1',
+      GITHUB_EVENT_NAME: 'pull_request',
+      GITHUB_SHA: 'a'.repeat(40),
+      GITHUB_REF: 'refs/pull/14/merge',
+      GITHUB_WORKFLOW: 'Product quality gate',
+      GITHUB_WORKFLOW_REF: 'repo/.github/workflows/ci.yml@refs/heads/main',
+      GITHUB_REPOSITORY: 'owner/repo',
+      GITHUB_JOB: 'browser-pr',
+      GITHUB_WORKSPACE: repoRoot,
+    }
+    for (const name of ['job-start', 'setup-end', 'test-end']) {
+      const marked = spawnSync(process.execPath, [join(binDir, 'mark.mjs'), name], { encoding: 'utf8', cwd: directory, env })
+      assert.equal(marked.status, 0, marked.stderr)
+    }
+    const written = spawnSync(process.execPath, [join(binDir, 'write-fragment.mjs')], { encoding: 'utf8', cwd: directory, env })
+    assert.equal(written.status, 0, written.stderr)
+    const fragment = JSON.parse(await import('node:fs').then((fs) => fs.readFileSync(join(directory, 'fragment.json'), 'utf8')))
+    validateFragment(fragment)
+    assert.equal(fragment.flakyTests.length, 20)
+    assert.equal(fragment.flakyTitlesTruncated, true)
+    assert.match(fragment.counts.missing, /truncated to 20 of 25/)
+  } finally {
+    rmSync(directory, { recursive: true, force: true })
+  }
+})

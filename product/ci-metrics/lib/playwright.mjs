@@ -72,7 +72,8 @@ export function parsePlaywrightJson(input) {
         `Playwright stats are inconsistent with the test rows: stats expected=${expected} flaky=${flaky} unexpected=${unexpected} skipped=${skipped}, rows passed=${passedRows} failed=${failedRows} skipped=${skippedRows} flakyRows=${flakyRows}.`)
     }
   }
-  const flakyTitles = tests.filter((test) => test.flaky).slice(0, 20).map((test) => test.title)
+  const flakyTitlesAll = tests.filter((test) => test.flaky).map((test) => test.title)
+  const flakyTitles = flakyTitlesAll.slice(0, 20)
   const planned = expected + unexpected + flaky + skipped
 
   return {
@@ -87,6 +88,7 @@ export function parsePlaywrightJson(input) {
     },
     tests,
     flakyTitles,
+    flakyTitlesTotal: flakyTitlesAll.length,
     detailMissing: input.suites === undefined ? 'Report has no suites hierarchy; per-test detail is unavailable.' : null,
   }
 }
