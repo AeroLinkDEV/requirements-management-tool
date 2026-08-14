@@ -194,6 +194,19 @@ test('the Markdown regression section retains the comparable category', () => {
   assert.match(report.markdown, /mixed: criticalPathMedian/)
 })
 
+test('the full-gate headline sums the current run/attempt fields and never emits NaN', () => {
+  const report = buildRollingReport({
+    records: [record()],
+    fullGates: [
+      { pr: 572, mergedAt: '2026-08-14T13:43:31Z', runs: 10, attempts: 13, prRuns: 9, postMergeRuns: 1 },
+      { pr: 571, mergedAt: '2026-08-14T07:10:42Z', runs: 10, attempts: 10, prRuns: 9, postMergeRuns: 1 },
+    ],
+  })
+  assert.doesNotMatch(report.markdown, /NaN/)
+  assert.match(report.markdown, /Full gates per merged PR \(window\): 20 full gate runs \/ 23 attempts across 2 merges/)
+  assert.match(report.markdown, /PR #572 \(merged 2026-08-14\): 10 full gate run\(s\) \/ 13 attempt\(s\) \(9 pre-merge, 1 post-merge\)/)
+})
+
 test('trackerBody is single-issue and never fabricates regressions', () => {
   const clean = trackerBody({ generatedAt: '2026-08-14T00:00:00Z', regressions: [] })
   assert.match(clean, /No sustained regressions/)

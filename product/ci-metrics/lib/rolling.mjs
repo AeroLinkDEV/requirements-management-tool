@@ -324,8 +324,9 @@ export function buildRollingReport({ records, regressions = [], missing = [], fu
   lines.push(`- Cancelled: ${cancelledRuns} run(s), ${cancelledJobsTotal} job(s), ${Math.round(cancelledConsumedTotal / 1000)}s consumed`)
   lines.push(`- Run wall time consumed (window): ${Math.round(runConsumedTotal / 1000)}s`)
   if (fullGates.length > 0) {
-    const total = fullGates.reduce((sum, entry) => sum + entry.gates, 0)
-    lines.push(`- Full gates per merged PR (window): ${total} gates across ${fullGates.length} merges`)
+    const totalRuns = fullGates.reduce((sum, entry) => sum + (Number.isInteger(entry.runs) ? entry.runs : 0), 0)
+    const totalAttempts = fullGates.reduce((sum, entry) => sum + (Number.isInteger(entry.attempts) ? entry.attempts : 0), 0)
+    lines.push(`- Full gates per merged PR (window): ${totalRuns} full gate runs / ${totalAttempts} attempts across ${fullGates.length} merges`)
   }
   lines.push('')
   lines.push('## Comparable groups')
