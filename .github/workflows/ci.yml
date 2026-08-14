@@ -721,6 +721,9 @@ jobs:
       METRICS_JOB_ID: browser-pr
       METRICS_JOB_NAME: Browser journeys (${{ matrix.shard }}/${{ strategy.job-total }})
       METRICS_MATRIX: ${{ toJson(matrix) }}
+      # #564 dual-lane pilot: two isolated Playwright processes per runner behind an explicit label flag.
+      # One-process mode remains the default; dual mode is opt-in for benchmarking.
+      AEROLINK_E2E_DUAL_PROCESS: ${{ contains(github.event.pull_request.labels.*.name, 'ci-benchmark-dual') }}
     steps:
       - name: Capture job start
         continue-on-error: true
@@ -788,6 +791,7 @@ jobs:
       # refreshed from the artifacts these jobs upload. The `json` reporter stays for that, and `list` stays so
       # the console output remains readable.
       - name: Run browser journey shard
+        if: env.AEROLINK_E2E_DUAL_PROCESS != 'true'
         working-directory: product/client
         shell: bash
         env:
@@ -821,6 +825,21 @@ jobs:
             exit 1
           fi
           echo "Shard ${{ matrix.shard }} ran exactly the $expected tests it planned."
+      - name: Plan dual lanes
+        if: env.AEROLINK_E2E_DUAL_PROCESS == 'true'
+        working-directory: product/client
+        shell: bash
+        run: |
+          set -euo pipefail
+          npx playwright test --list > listed.txt
+          node scripts/plan-journey-lanes.mjs listed.txt ${{ matrix.shard }} ${{ strategy.job-total }} lane-plan-${{ matrix.shard }}.json
+      - name: Run dual browser lanes
+        if: env.AEROLINK_E2E_DUAL_PROCESS == 'true'
+        working-directory: product/client
+        shell: bash
+        env:
+          GITHUB_RUN_ID: ${{ github.run_id }}
+        run: node scripts/run-dual-lanes.mjs lane-plan-${{ matrix.shard }}.json
       - name: Mark test complete
         if: always()
         continue-on-error: true
@@ -832,6 +851,21 @@ jobs:
           name: journey-durations-${{ matrix.shard }}-${{ github.run_attempt }}
           path: product/client/journey-durations-${{ matrix.shard }}.json
           if-no-files-found: warn
+          retention-days: 7
+      - name: Upload dual lane diagnostics
+        if: env.AEROLINK_E2E_DUAL_PROCESS == 'true' && always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: dual-lanes-${{ matrix.shard }}-${{ github.run_attempt }}
+          path: |
+            product/client/durations-lane-a.json
+            product/client/durations-lane-b.json
+            product/client/dual-lanes-summary.json
+            product/client/playwright-report-lane-a
+            product/client/playwright-report-lane-b
+            product/client/test-results-lane-a
+            product/client/test-results-lane-b
+          if-no-files-found: ignore
           retention-days: 7
       - name: Upload failure diagnostics
         if: failure()
@@ -1415,7 +1449,7 @@ jobs:
         continue-on-error: true
         run: node "${{ github.workspace }}/product/ci-metrics/bin/mark.mjs" setup-end
       - name: Run metrics tooling tests from a clean checkout
-        run: node --test --test-reporter=spec --test-reporter=junit --test-reporter-destination=stdout --test-reporter-destination=metrics-tooling.xml product/ci-metrics/tests/trx.test.mjs product/ci-metrics/tests/playwright.test.mjs product/ci-metrics/tests/fragment.test.mjs product/ci-metrics/tests/aggregate.test.mjs product/ci-metrics/tests/build-run-meta.test.mjs product/ci-metrics/tests/junit.test.mjs product/ci-metrics/tests/ci-workflow-contract.test.mjs product/ci-metrics/tests/zip.test.mjs product/ci-metrics/tests/rolling.test.mjs product/ci-metrics/tests/provenance.test.mjs
+        run: node --test --test-reporter=spec --test-reporter=junit --test-reporter-destination=stdout --test-reporter-destination=metrics-tooling.xml product/ci-metrics/tests/trx.test.mjs product/ci-metrics/tests/playwright.test.mjs product/ci-metrics/tests/fragment.test.mjs product/ci-metrics/tests/aggregate.test.mjs product/ci-metrics/tests/build-run-meta.test.mjs product/ci-metrics/tests/junit.test.mjs product/ci-metrics/tests/ci-workflow-contract.test.mjs product/ci-metrics/tests/zip.test.mjs product/ci-metrics/tests/rolling.test.mjs product/ci-metrics/tests/provenance.test.mjs product/client/scripts/lane-plan.test.mjs
       - name: Mark test complete
         if: always()
         continue-on-error: true

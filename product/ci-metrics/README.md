@@ -157,6 +157,17 @@ and eligible raw evidence; any missing/malformed/mismatched/contradictory eviden
 `canSkip` is always false, and the output records what phase B would skip. Enforcement requires real-merge
 observation and a separate review.
 
+## Dual-lane browser pilot (564)
+
+`product/client/scripts/plan-journey-lanes.mjs` splits each GitHub browser shard into two
+duration-balanced local lanes (heaviest-first, median fallback, deterministic plan id), and
+`product/client/scripts/run-dual-lanes.mjs` runs both lanes as isolated Playwright processes with unique
+run IDs, API/client ports, SQLite databases, output/report directories, and JSON reports. Coverage
+verification proves every planned spec ran exactly once with no overlap; a merged
+`journey-durations-<shard>.json` keeps the existing metrics and duration-refresh consumers working.
+Dual mode is opt-in via the `ci-benchmark-dual` PR label (`AEROLINK_E2E_DUAL_PROCESS`); one-process mode
+remains the default until at least ten representative CI observations support activation.
+
 ### Current baseline (phase A measurements)
 
 - Documented historical baseline (from #553-#559): 10m14s critical path; measurements and decisions are
@@ -247,10 +258,10 @@ independently selected producer, so push/schedule reports are complete).
 Run the full suite exactly as CI does:
 
 ```powershell
-node --test product/ci-metrics/tests/trx.test.mjs product/ci-metrics/tests/playwright.test.mjs product/ci-metrics/tests/fragment.test.mjs product/ci-metrics/tests/aggregate.test.mjs product/ci-metrics/tests/build-run-meta.test.mjs product/ci-metrics/tests/junit.test.mjs product/ci-metrics/tests/ci-workflow-contract.test.mjs product/ci-metrics/tests/zip.test.mjs product/ci-metrics/tests/rolling.test.mjs product/ci-metrics/tests/provenance.test.mjs
+node --test product/ci-metrics/tests/trx.test.mjs product/ci-metrics/tests/playwright.test.mjs product/ci-metrics/tests/fragment.test.mjs product/ci-metrics/tests/aggregate.test.mjs product/ci-metrics/tests/build-run-meta.test.mjs product/ci-metrics/tests/junit.test.mjs product/ci-metrics/tests/ci-workflow-contract.test.mjs product/ci-metrics/tests/zip.test.mjs product/ci-metrics/tests/rolling.test.mjs product/ci-metrics/tests/provenance.test.mjs product/client/scripts/lane-plan.test.mjs
 ```
 
-The suite (126 tests) covers schema-driven nested validation, real-format Playwright suite traversal,
+The suite (132 tests) covers schema-driven nested validation, real-format Playwright suite traversal,
 representative TRX success/failure fixtures, Node JUnit parsing, valid/missing/malformed/oversized
 fragments and artifacts, unknown schema versions, failed/cancelled/skipped jobs, missing test reports,
 count mismatches, retried Playwright tests, empty test sets, comparable-run grouping and rolling
