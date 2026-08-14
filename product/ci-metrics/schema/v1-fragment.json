@@ -100,6 +100,7 @@
       "items": { "type": "string", "maxLength": 400 }
     },
     "flakyTitlesTruncated": { "type": "boolean" },
+    "flakyTitlesUnavailable": { "type": "boolean" },
     "cache": {
       "type": "object",
       "required": ["nuget", "npm", "chromium", "missing"],

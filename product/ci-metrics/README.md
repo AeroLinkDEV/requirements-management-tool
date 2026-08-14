@@ -28,9 +28,10 @@ Each fragment (`aerolink-ci-fragment/v1`, schema in
   `passed + failed <= executed` for TRX); a missing per-test duration makes the class/spec duration unknown
   rather than zero. A Playwright flaky count without title evidence is never silent: the writer records an
   explicit `counts.missing` reason when the report has no suites hierarchy or no titles could be derived,
-  the 20-title bound is surfaced as `flakyTitlesTruncated` with a truncation reason, and read-time
-  validation rejects a `flaky > 0` fragment that has neither titles nor an explicit unavailable/truncated
-  reason;
+  and the structured flags `flakyTitlesUnavailable` / `flakyTitlesTruncated` carry the state. Read-time
+  validation is structural: when detail is available and not truncated, title cardinality must equal
+  `counts.flaky`; truncation requires at least one retained title; unavailable and truncated are mutually
+  exclusive; and unavailable cannot coexist with titles. Free text is never trusted as evidence;
 - slowest classes or specs (bounded to 50) and flaky test titles (bounded to 20);
 - cache hit/miss for NuGet, npm, and Chromium where a job has those steps;
 - the path classifier outputs when the job can see them.
@@ -104,6 +105,7 @@ collection) is where GitHub API queue and cancellation accounting lands.
 | Conflicting identities without `expectedRun` | aggregate unavailable; no identity chosen by artifact order |
 | Duplicate job instance identity | no derived jobs/counts/cache/flaky/classifications published; recorded in `missing` |
 | Reversed/inconsistent timing markers | rejected on read; the writer emits null durations + missing reasons |
+| Flaky titles unavailable or truncated | carried into the merged record (`flakyTitleEvidence`) and Markdown summary per job |
 | No fragments at all | critical path `job = null`, `durationMs = null` |
 
 ## Performance budget
@@ -118,7 +120,7 @@ second), and the aggregation job runs only after the required gate. The measured
 node --test product/ci-metrics/tests/trx.test.mjs product/ci-metrics/tests/playwright.test.mjs product/ci-metrics/tests/fragment.test.mjs product/ci-metrics/tests/aggregate.test.mjs
 ```
 
-The suite (62 tests) covers schema-driven nested validation, real-format Playwright suite traversal,
+The suite (64 tests) covers schema-driven nested validation, real-format Playwright suite traversal,
 representative TRX success/failure fixtures, valid/missing/malformed/oversized fragments, unknown schema
 versions, failed/cancelled/skipped jobs, missing test reports, count mismatches, retried Playwright tests,
 empty test sets, comparable-run grouping, matrix topology with distinct instances, run-identity
@@ -126,9 +128,10 @@ consistency with exclusion from derived aggregates and order-invariant conflict 
 expected-jobs topology with disagreement reporting, matrix property/key/value bounds, read-time timing
 validation, duplicate-instance aggregate exclusion, closed run schemas with read-time credential guards,
 inconsistent structured counters, planned/executed/passed semantics, explicit flaky-title
-unavailable/truncation handling, null-duration propagation, credential-value refusal with legitimate
-security-vocabulary retention, bounded output, Markdown escaping, and critical-path computation (including
-cycles, absent lanes, unknown durations, and missing dependency groups).
+unavailable/truncation handling with structural read-time rules and run-level propagation, null-duration
+propagation, credential-value refusal with legitimate security-vocabulary retention, bounded output,
+Markdown escaping, and critical-path computation (including cycles, absent lanes, unknown durations, and
+missing dependency groups).
 
 CI runs this suite in the `metrics-tooling` job from a clean checkout and reports its result in the
 authoritative gate summary; the job is deliberately not part of merge authority.

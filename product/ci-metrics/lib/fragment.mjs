@@ -51,7 +51,7 @@ function trimList(items, max) {
   }))
 }
 
-export function buildFragment({ run, job, timings, counts, slowest = [], flakyTests = [], flakyTitlesTruncated = false, cache, classification, missing = {}, result }) {
+export function buildFragment({ run, job, timings, counts, slowest = [], flakyTests = [], flakyTitlesTruncated = false, flakyTitlesUnavailable = false, cache, classification, missing = {}, result }) {
   const knownResults = ['success', 'failure', 'cancelled', 'skipped']
   const jobResult = knownResults.includes(result) ? result : knownResults.includes(job?.result) ? job.result : 'unavailable'
   const fragment = {
@@ -101,6 +101,7 @@ export function buildFragment({ run, job, timings, counts, slowest = [], flakyTe
     slowest: trimList(slowest, 50),
     flakyTests: (Array.isArray(flakyTests) ? flakyTests : []).slice(0, 20).map((t) => boundedString(t, 400)),
     flakyTitlesTruncated: flakyTitlesTruncated === true,
+    flakyTitlesUnavailable: flakyTitlesUnavailable === true,
     cache: {
       nuget: cache.nuget ?? null,
       npm: cache.npm ?? null,
@@ -195,11 +196,16 @@ export function validationErrors(fragment) {
       if (counts.expected !== counts.executed + counts.skipped) errors.push('counts: expected must equal executed + skipped for playwright-json.')
       if (counts.executed !== counts.passed + counts.failed) errors.push('counts: executed must equal passed + failed for playwright-json.')
       if (counts.flaky > counts.passed) errors.push('counts: flaky cannot exceed passed for playwright-json.')
-      const hasTitles = Array.isArray(fragment.flakyTests) && fragment.flakyTests.length > 0
-      const reason = counts.missing ?? ''
-      if (counts.flaky > 0 && !hasTitles && !/(title|flaky|detail|spec)/i.test(reason)) {
-        errors.push('counts: a Playwright flaky count requires flaky title evidence or an explicit unavailable/truncated reason.')
+      const titles = Array.isArray(fragment.flakyTests) ? fragment.flakyTests : []
+      const unavailable = fragment.flakyTitlesUnavailable === true
+      const truncated = fragment.flakyTitlesTruncated === true
+      if (counts.flaky === 0 && titles.length > 0) errors.push('counts: flaky titles present with a zero flaky count.')
+      if (counts.flaky > 0 && !unavailable && !truncated && titles.length !== counts.flaky) {
+        errors.push(`counts: flaky title count (${titles.length}) does not match the flaky count (${counts.flaky}).`)
       }
+      if (truncated && titles.length === 0) errors.push('counts: flaky-title truncation requires at least one retained title.')
+      if (truncated && unavailable) errors.push('counts: flaky-title unavailable and truncated are mutually exclusive.')
+      if (unavailable && titles.length > 0) errors.push('counts: unavailable flaky titles must not also carry titles.')
     }
   }
   if (counts.source === 'trx') {

@@ -86,10 +86,13 @@ function parseCounts() {
       // Planned/executed/passed semantics: a skipped test is planned but never executed; a retry-pass is a
       // final pass and is counted in flaky as well as in the final-pass total.
       let missingReason = null
+      let titlesUnavailable = false
       if (parsed.detailMissing) {
         missingReason = parsed.detailMissing
+        titlesUnavailable = parsed.totals.flaky > 0
       } else if (parsed.totals.flaky > 0 && parsed.flakyTitles.length === 0) {
         missingReason = 'Flaky count present but no flaky titles could be derived from the report rows.'
+        titlesUnavailable = true
       } else if (parsed.flakyTitlesTotal > 20) {
         missingReason = `Flaky titles truncated to 20 of ${parsed.flakyTitlesTotal}.`
       }
@@ -107,6 +110,7 @@ function parseCounts() {
         slowest: specDurations(parsed.tests),
         flakyTests: parsed.flakyTitles,
         flakyTitlesTruncated: parsed.flakyTitlesTotal > 20,
+        flakyTitlesUnavailable: titlesUnavailable,
       }
     } catch (error) {
       return { counts: null, reason: `Playwright JSON parse failed: ${error.message}` }
@@ -232,6 +236,7 @@ function main() {
     slowest: parsed.slowest ?? [],
     flakyTests: parsed.flakyTests ?? [],
     flakyTitlesTruncated: parsed.flakyTitlesTruncated ?? false,
+    flakyTitlesUnavailable: parsed.flakyTitlesUnavailable ?? false,
     cache,
     classification,
     missing: runMissing,

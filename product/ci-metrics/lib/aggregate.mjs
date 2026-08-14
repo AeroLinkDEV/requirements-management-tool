@@ -327,6 +327,7 @@ export function aggregateFragments({ fragments, missing = [], runMeta = null }) 
 
   const cache = { nuget: { hit: 0, miss: 0 }, npm: { hit: 0, miss: 0 }, chromium: { hit: 0, miss: 0 } }
   const flakyTests = []
+  const flakyTitleEvidence = { unavailable: [], truncated: [], reasons: {} }
   const countSummary = { expected: null, executed: null, passed: null, failed: null, skipped: null, flaky: null, sourcedJobs: 0 }
   for (const fragment of consistent) {
     for (const kind of ['nuget', 'npm', 'chromium']) {
@@ -334,6 +335,11 @@ export function aggregateFragments({ fragments, missing = [], runMeta = null }) 
       if (fragment.cache[kind] === 'miss') cache[kind].miss += 1
     }
     for (const title of fragment.flakyTests ?? []) if (!flakyTests.includes(title)) flakyTests.push(title)
+    if (fragment.flakyTitlesUnavailable === true) flakyTitleEvidence.unavailable.push(fragment.job.instance)
+    if (fragment.flakyTitlesTruncated === true) flakyTitleEvidence.truncated.push(fragment.job.instance)
+    if ((fragment.flakyTitlesUnavailable === true || fragment.flakyTitlesTruncated === true) && fragment.counts.missing) {
+      flakyTitleEvidence.reasons[fragment.job.instance] = String(fragment.counts.missing).slice(0, 300)
+    }
     if (fragment.counts.source) {
       countSummary.sourcedJobs += 1
       for (const key of ['expected', 'executed', 'passed', 'failed', 'skipped', 'flaky']) {
@@ -341,6 +347,8 @@ export function aggregateFragments({ fragments, missing = [], runMeta = null }) 
       }
     }
   }
+  const unionTruncated = flakyTests.length > 20
+  const finalFlakyTests = flakyTests.slice(0, 20)
 
   const queueDelayMs = runMeta?.queueDelayMs ?? null
   const run = expectedRun ?? consistent[0]?.run ?? null
@@ -370,6 +378,9 @@ export function aggregateFragments({ fragments, missing = [], runMeta = null }) 
       counts: fragment.counts,
       cache: fragment.cache,
       classification: fragment.classification,
+      flakyTitlesUnavailable: fragment.flakyTitlesUnavailable === true,
+      flakyTitlesTruncated: fragment.flakyTitlesTruncated === true,
+      flakyTitleMissingReason: fragment.counts.missing ? String(fragment.counts.missing).slice(0, 300) : null,
     })),
     criticalPath: path,
     runIdentityTrusted: expectedRun !== null,
@@ -381,7 +392,9 @@ export function aggregateFragments({ fragments, missing = [], runMeta = null }) 
     },
     counts: countSummary,
     cache,
-    flakyTests: flakyTests.slice(0, 20),
+    flakyTests: finalFlakyTests,
+    flakyTitlesTruncated: unionTruncated || flakyTitleEvidence.truncated.length > 0,
+    flakyTitleEvidence,
     missing: missingModel.entries,
     missingTruncated: missingModel.truncated,
     missingTotal: missingModel.total,
@@ -451,6 +464,18 @@ export function renderMarkdown(merged) {
     push('## Flaky / retried browser tests')
     push('')
     for (const title of merged.flakyTests) push(`- ${escapeMarkdown(title)}`)
+    if (merged.flakyTitlesTruncated) push(`- (titles truncated at 20)`)
+    push('')
+  }
+  if (merged.flakyTitleEvidence && (merged.flakyTitleEvidence.unavailable.length > 0 || merged.flakyTitleEvidence.truncated.length > 0)) {
+    push('## Flaky title evidence')
+    push('')
+    for (const instance of merged.flakyTitleEvidence.unavailable) {
+      push(`- ${escapeMarkdown(instance)}: exact flaky titles unavailable — ${escapeMarkdown(merged.flakyTitleEvidence.reasons[instance] ?? 'no reason recorded')}`)
+    }
+    for (const instance of merged.flakyTitleEvidence.truncated) {
+      push(`- ${escapeMarkdown(instance)}: flaky titles truncated — ${escapeMarkdown(merged.flakyTitleEvidence.reasons[instance] ?? 'no reason recorded')}`)
+    }
     push('')
   }
   if (merged.cache.nuget.hit + merged.cache.nuget.miss + merged.cache.npm.hit + merged.cache.npm.miss + merged.cache.chromium.hit + merged.cache.chromium.miss > 0) {

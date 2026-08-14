@@ -674,6 +674,7 @@ test('CLI integration: a stats-only flaky report makes missing title/spec detail
     validateFragment(fragment)
     assert.equal(fragment.counts.flaky, 1)
     assert.deepEqual(fragment.flakyTests, [])
+    assert.equal(fragment.flakyTitlesUnavailable, true)
     assert.match(fragment.counts.missing, /suites hierarchy|flaky titles/i)
   } finally {
     rmSync(directory, { recursive: true, force: true })
@@ -687,15 +688,129 @@ test('a serialized flaky=1 fragment with no title evidence and no reason is reje
     writeFileSync(join(directory, 'crafted.json'), JSON.stringify(crafted))
     const { fragments, missing } = readFragments(directory)
     assert.equal(fragments.length, 0)
-    assert.ok(missing.some((entry) => entry.job === 'crafted' && /flaky title evidence/.test(entry.reason)))
+    assert.ok(missing.some((entry) => entry.job === 'crafted' && /flaky title count \(0\) does not match the flaky count \(1\)/.test(entry.reason)))
 
     // With an explicit unavailable reason the fragment is accepted as honest degraded data.
     const honest = fragment('browser-pr', 'browser-pr-1', { counts: { expected: 1, executed: 1, passed: 1, failed: 0, skipped: 0, flaky: 1, source: 'playwright-json', missing: 'Report has no suites hierarchy; flaky titles unavailable.' } })
+    honest.flakyTitlesUnavailable = true
     writeFileSync(join(directory, 'honest.json'), JSON.stringify(honest))
     const honestResult = readFragments(directory)
     assert.equal(honestResult.fragments.length, 1)
   } finally {
     rmSync(directory, { recursive: true, force: true })
+  }
+})
+
+test('flaky-title evidence is structural: partial, bogus-reason, and inconsistent-flag fragments are rejected', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'ci-metrics-'))
+  try {
+    const cases = [
+      {
+        name: 'partial',
+        mutate: (f) => {
+          f.counts = { expected: 2, executed: 2, passed: 2, failed: 0, skipped: 0, flaky: 2, source: 'playwright-json', missing: null }
+          f.flakyTests = ['only one']
+        },
+        pattern: /flaky title count \(1\) does not match the flaky count \(2\)/,
+      },
+      {
+        name: 'bogus-reason',
+        mutate: (f) => {
+          f.counts = { expected: 1, executed: 1, passed: 1, failed: 0, skipped: 0, flaky: 1, source: 'playwright-json', missing: 'Flaky title is present.' }
+          f.flakyTests = []
+        },
+        pattern: /flaky title count \(0\) does not match the flaky count \(1\)/,
+      },
+      {
+        name: 'inconsistent-truncation',
+        mutate: (f) => {
+          f.counts = { expected: 1, executed: 1, passed: 1, failed: 0, skipped: 0, flaky: 1, source: 'playwright-json', missing: null }
+          f.flakyTests = []
+          f.flakyTitlesTruncated = true
+        },
+        pattern: /truncation requires at least one retained title/,
+      },
+      {
+        name: 'unavailable-with-titles',
+        mutate: (f) => {
+          f.counts = { expected: 1, executed: 1, passed: 1, failed: 0, skipped: 0, flaky: 1, source: 'playwright-json', missing: 'unavailable' }
+          f.flakyTests = ['a title']
+          f.flakyTitlesUnavailable = true
+        },
+        pattern: /unavailable flaky titles must not also carry titles/,
+      },
+    ]
+    for (const entry of cases) {
+      const crafted = fragment('browser-pr', 'browser-pr-1')
+      entry.mutate(crafted)
+      writeFileSync(join(directory, `${entry.name}.json`), JSON.stringify(crafted))
+    }
+    const complete = fragment('browser-pr', 'browser-pr-1', { counts: { expected: 2, executed: 2, passed: 2, failed: 0, skipped: 0, flaky: 2, source: 'playwright-json', missing: null } })
+    complete.flakyTests = ['alpha', 'beta']
+    writeFileSync(join(directory, 'complete.json'), JSON.stringify(complete))
+
+    const { fragments, missing } = readFragments(directory)
+    assert.equal(fragments.length, 1)
+    assert.equal(fragments[0].flakyTests.length, 2)
+    for (const entry of cases) {
+      assert.ok(missing.some((item) => item.job === entry.name && entry.pattern.test(item.reason)), `${entry.name} should be rejected`)
+    }
+  } finally {
+    rmSync(directory, { recursive: true, force: true })
+  }
+})
+
+test('aggregation and Markdown expose per-job unavailable/truncated flaky-title evidence', async () => {
+  const directory = mkdtempSync(join(tmpdir(), 'ci-metrics-cli-'))
+  const output = mkdtempSync(join(tmpdir(), 'ci-metrics-out-'))
+  try {
+    const { spawnSync } = await import('node:child_process')
+    const reportPath = join(directory, 'report.json')
+    writeFileSync(reportPath, JSON.stringify({ stats: { expected: 0, unexpected: 0, flaky: 2, skipped: 0 }, errors: [] }))
+    const env = {
+      ...process.env,
+      METRICS_TIMING_FILE: join(directory, 'timing.json'),
+      METRICS_FRAGMENT_PATH: join(directory, 'fragment.json'),
+      METRICS_JOB_ID: 'browser-pr',
+      METRICS_JOB_NAME: 'Browser journeys (1/4)',
+      METRICS_JOB_GROUP: 'browser-pr',
+      METRICS_JOB_INSTANCE: 'browser-pr-1',
+      METRICS_NEEDS: 'changes',
+      METRICS_JOB_RESULT: 'success',
+      METRICS_COUNTS_SOURCE: 'playwright-json',
+      METRICS_PLAYWRIGHT_JSON_PATH: reportPath,
+      GITHUB_RUN_ID: '787',
+      GITHUB_RUN_ATTEMPT: '1',
+      GITHUB_EVENT_NAME: 'pull_request',
+      GITHUB_SHA: 'a'.repeat(40),
+      GITHUB_REF: 'refs/pull/15/merge',
+      GITHUB_WORKFLOW: 'Product quality gate',
+      GITHUB_WORKFLOW_REF: 'repo/.github/workflows/ci.yml@refs/heads/main',
+      GITHUB_REPOSITORY: 'owner/repo',
+      GITHUB_JOB: 'browser-pr',
+      GITHUB_WORKSPACE: repoRoot,
+    }
+    for (const name of ['job-start', 'setup-end', 'test-end']) {
+      const marked = spawnSync(process.execPath, [join(binDir, 'mark.mjs'), name], { encoding: 'utf8', cwd: directory, env })
+      assert.equal(marked.status, 0, marked.stderr)
+    }
+    const written = spawnSync(process.execPath, [join(binDir, 'write-fragment.mjs')], { encoding: 'utf8', cwd: directory, env })
+    assert.equal(written.status, 0, written.stderr)
+
+    const meta = join(output, 'run-meta.json')
+    writeFileSync(meta, JSON.stringify({ expectedJobs: [{ group: 'browser-pr', instance: 'browser-pr-1', needs: [] }] }))
+    const aggregated = spawnSync(process.execPath, [join(binDir, 'aggregate.mjs'), directory, output, meta], { encoding: 'utf8', cwd: output })
+    assert.equal(aggregated.status, 0, aggregated.stderr)
+    const merged = JSON.parse(await import('node:fs').then((fs) => fs.readFileSync(join(output, 'run-metrics.json'), 'utf8')))
+    assert.deepEqual(merged.flakyTitleEvidence.unavailable, ['browser-pr-1'])
+    assert.equal(merged.jobs[0].flakyTitlesUnavailable, true)
+    assert.equal(merged.jobs[0].flakyTitlesTruncated, false)
+    assert.match(merged.jobs[0].flakyTitleMissingReason, /suites hierarchy/)
+    const markdown = await import('node:fs').then((fs) => fs.readFileSync(join(output, 'run-metrics.md'), 'utf8'))
+    assert.match(markdown, /exact flaky titles unavailable/)
+  } finally {
+    rmSync(directory, { recursive: true, force: true })
+    rmSync(output, { recursive: true, force: true })
   }
 })
 
