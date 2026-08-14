@@ -52,10 +52,15 @@ computes the longest-path critical path, and writes:
 
 The optional `run-meta.json` may carry `{"queueDelayMs": <integer|null>, "expectedJobs": [...],
 "expectedRun": {...}}` from a trusted default-branch source. `expectedJobs` names every job group/instance
-that should have produced a fragment, so an absent fragment is reported as missing instead of invisible; a
-job whose duration is unknown, absent, or whose dependency group does not resolve makes the critical path
-**unavailable with a reason** rather than numerically smaller. Phase B (rolling collection) is where GitHub
-API queue and cancellation accounting lands.
+that should have produced a fragment and supplies the **trusted dependency topology**: when present, the
+dependency graph comes exclusively from that metadata (a fragment whose `needs` disagree is reported as a
+topology disagreement and the trusted graph wins). `expectedRun` is required for an **authoritative**
+merged record: fragments that disagree with it are excluded from every derived aggregate and recorded in
+`missing`. Without `expectedRun`, conflicting fragment identities never resolve by artifact order — the
+aggregate and critical path are unavailable — and a fully consistent set is aggregated but explicitly
+labelled untrusted. A job whose duration is unknown, absent, or whose dependency group does not resolve
+makes the critical path **unavailable with a reason** rather than numerically smaller. Phase B (rolling
+collection) is where GitHub API queue and cancellation accounting lands.
 
 ## Security and trust
 
@@ -64,8 +69,10 @@ API queue and cancellation accounting lands.
   (`Password=...`, `Bearer <long token>`, private-key blocks, connection-string assignments); legitimate
   test/class names that merely contain security vocabulary ("Password visibility test", "token refresh")
   are retained. The same credential guard is re-applied when fragments are read back from disk, the `run`
-  object is a closed schema, and `job.matrix` is a bounded scalar-coordinate shape, so a crafted artifact
-  cannot smuggle arbitrary content into the merged report.
+  object is a closed schema, and `job.matrix` is a bounded scalar-coordinate shape (max 8 properties, key
+  and value lengths bounded, scalar types only), so a crafted artifact cannot smuggle arbitrary content into
+  the merged report. Timing relationships are validated on read: reversed markers or derived values that do
+  not match their raw markers are rejected rather than published as zero.
 - Fragment and report sizes are bounded; oversized or malformed fragments are reported as missing with a
   reason.
 - The aggregator treats fragment values as data, never as commands, paths, expressions, or scripts.
@@ -85,6 +92,8 @@ API queue and cancellation accounting lands.
 | Expected job instance uploaded no fragment | listed in `missing` with reason (requires `expectedJobs`) |
 | Any job duration unknown or absent | critical path `job = null` + explicit `unavailableReason` |
 | Fragments disagree on run identity | excluded from jobs/counts/cache/flaky/classifications; recorded in `missing` with reason |
+| Conflicting identities without `expectedRun` | aggregate unavailable; no identity chosen by artifact order |
+| Reversed/inconsistent timing markers | rejected on read; the writer emits null durations + missing reasons |
 | No fragments at all | critical path `job = null`, `durationMs = null` |
 
 ## Performance budget
@@ -99,14 +108,16 @@ second), and the aggregation job runs only after the required gate. The measured
 node --test product/ci-metrics/tests/trx.test.mjs product/ci-metrics/tests/playwright.test.mjs product/ci-metrics/tests/fragment.test.mjs product/ci-metrics/tests/aggregate.test.mjs
 ```
 
-The suite (49 tests) covers schema-driven nested validation, real-format Playwright suite traversal,
+The suite (55 tests) covers schema-driven nested validation, real-format Playwright suite traversal,
 representative TRX success/failure fixtures, valid/missing/malformed/oversized fragments, unknown schema
 versions, failed/cancelled/skipped jobs, missing test reports, count mismatches, retried Playwright tests,
 empty test sets, comparable-run grouping, matrix topology with distinct instances, run-identity
-consistency with exclusion from derived aggregates, closed run/matrix schemas with read-time credential
-guards, inconsistent structured counters, null-duration propagation, credential-value refusal with
-legitimate security-vocabulary retention, bounded output, Markdown escaping, and critical-path computation
-(including cycles, absent lanes, unknown durations, and missing dependency groups).
+consistency with exclusion from derived aggregates and order-invariant conflict handling, trusted
+expected-jobs topology with disagreement reporting, matrix property/key/value bounds, read-time timing
+validation, closed run schemas with read-time credential guards, inconsistent structured counters,
+null-duration propagation, credential-value refusal with legitimate security-vocabulary retention, bounded
+output, Markdown escaping, and critical-path computation (including cycles, absent lanes, unknown
+durations, and missing dependency groups).
 
 CI runs this suite in the `metrics-tooling` job from a clean checkout and reports its result in the
 authoritative gate summary; the job is deliberately not part of merge authority.

@@ -113,3 +113,17 @@ test('failed, cancelled, and skipped results are preserved as distinct outcomes'
     assert.equal(fragment.job.result, result)
   }
 })
+
+test('reversed or inconsistent timing markers are rejected at read time, never published as zero', () => {
+  const reversed = buildFragment(base)
+  reversed.timings.jobStartMs = 1000
+  reversed.timings.setupEndMs = 500
+  assert.ok(validationErrors(reversed).some((e) => e.includes('setupEndMs precedes jobStartMs')))
+
+  const derivedMismatch = buildFragment(base)
+  derivedMismatch.timings.setupMs = 999
+  assert.ok(validationErrors(derivedMismatch).some((e) => e.includes('derived duration does not match')))
+
+  const consistent = buildFragment(base)
+  assert.equal(validationErrors(consistent).length, 0)
+})

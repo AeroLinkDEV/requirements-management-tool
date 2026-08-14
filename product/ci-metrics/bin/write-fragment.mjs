@@ -4,7 +4,7 @@
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs'
 import { dirname } from 'node:path'
 import { execFileSync } from 'node:child_process'
-import { buildFragment } from '../lib/fragment.mjs'
+import { buildFragment, validateFragment } from '../lib/fragment.mjs'
 import { parseTrx, classDurations } from '../lib/trx.mjs'
 import { parsePlaywrightJson, specDurations } from '../lib/playwright.mjs'
 
@@ -108,15 +108,37 @@ function main() {
   const timings = readTimings()
   const markers = new Map(timings.markers.map((marker) => [marker.name, marker.at]))
   const jobStartMs = markers.get('job-start') ?? null
-  const setupEndMs = markers.get('setup-end') ?? null
-  const testEndMs = markers.get('test-end') ?? null
-  const jobEndMs = Date.now()
+  let setupEndMs = markers.get('setup-end') ?? null
+  let testEndMs = markers.get('test-end') ?? null
+  let jobEndMs = Date.now()
 
   const timingMissing = {}
   if (timings.reason) timingMissing.markers = timings.reason
   if (jobStartMs === null) timingMissing.jobStartMs = 'job-start marker missing; timings unavailable.'
   if (setupEndMs === null) timingMissing.setupEndMs = 'setup-end marker missing; setup/build duration unavailable.'
   if (testEndMs === null) timingMissing.testEndMs = 'test-end marker missing; test duration unavailable.'
+
+  let setupMs = null
+  let testMs = null
+  let uploadAndCleanupMs = null
+  if (setupEndMs !== null && jobStartMs !== null && setupEndMs < jobStartMs) {
+    timingMissing.setupEndMs = 'setup-end marker precedes job-start; duration treated as unavailable.'
+    setupEndMs = null
+  } else if (setupEndMs !== null && jobStartMs !== null) {
+    setupMs = setupEndMs - jobStartMs
+  }
+  if (testEndMs !== null && setupEndMs !== null && testEndMs < setupEndMs) {
+    timingMissing.testEndMs = 'test-end marker precedes setup-end; duration treated as unavailable.'
+    testEndMs = null
+  } else if (testEndMs !== null && setupEndMs !== null) {
+    testMs = testEndMs - setupEndMs
+  }
+  if (jobEndMs !== null && testEndMs !== null && jobEndMs < testEndMs) {
+    timingMissing.jobEndMs = 'job-end marker precedes test-end; duration treated as unavailable.'
+    jobEndMs = null
+  } else if (jobEndMs !== null && testEndMs !== null) {
+    uploadAndCleanupMs = jobEndMs - testEndMs
+  }
 
   const parsed = parseCounts()
   const counts = parsed.counts ?? { expected: null, executed: null, passed: null, failed: null, skipped: null, flaky: null, source: null, missing: null }
@@ -190,9 +212,9 @@ function main() {
       setupEndMs,
       testEndMs,
       jobEndMs,
-      setupMs: jobStartMs !== null && setupEndMs !== null ? Math.max(0, setupEndMs - jobStartMs) : null,
-      testMs: setupEndMs !== null && testEndMs !== null ? Math.max(0, testEndMs - setupEndMs) : null,
-      uploadAndCleanupMs: testEndMs !== null ? Math.max(0, jobEndMs - testEndMs) : null,
+      setupMs,
+      testMs,
+      uploadAndCleanupMs,
       missing: timingMissing,
     },
     counts,
@@ -202,6 +224,13 @@ function main() {
     classification,
     missing: runMissing,
   })
+
+  try {
+    validateFragment(fragment)
+  } catch (error) {
+    console.error(`[ci-metrics] Fragment failed validation and was not published: ${error.message}`)
+    process.exit(0)
+  }
 
   const outputPath = env('METRICS_FRAGMENT_PATH')
   if (!outputPath) {

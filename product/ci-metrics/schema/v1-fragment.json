@@ -39,7 +39,8 @@
           "maxProperties": 8,
           "additionalProperties": {
             "type": ["string", "number", "boolean", "null"],
-            "maxLength": 100
+            "maxLength": 100,
+            "maxKeyLength": 100
           }
         },
         "needs": { "type": "array", "items": { "type": "string", "maxLength": 100 }, "maxItems": 12 },

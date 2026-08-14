@@ -52,6 +52,9 @@ export function validateAgainstSchema(value, node = schema, path = '$') {
     }
   }
   if (value !== null && typeof value === 'object' && !Array.isArray(value)) {
+    if (node.maxProperties !== undefined && Object.keys(value).length > node.maxProperties) {
+      errors.push(`${path}: exceeds maxProperties ${node.maxProperties}.`)
+    }
     if (node.required !== undefined) {
       for (const key of node.required) {
         if (!(key in value)) errors.push(`${path}: missing required property "${key}".`)
@@ -69,6 +72,9 @@ export function validateAgainstSchema(value, node = schema, path = '$') {
         if (node.additionalProperties === false) {
           errors.push(`${path}: unexpected property "${key}".`)
         } else if (typeof node.additionalProperties === 'object') {
+          if (node.additionalProperties.maxKeyLength !== undefined && key.length > node.additionalProperties.maxKeyLength) {
+            errors.push(`${path}: property key exceeds maxKeyLength ${node.additionalProperties.maxKeyLength}.`)
+          }
           errors.push(...validateAgainstSchema(value[key], node.additionalProperties, `${path}.${key}`))
         }
       }

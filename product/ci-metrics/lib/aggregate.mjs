@@ -90,33 +90,16 @@ function runIdentity(fragment) {
   return `${run.id}:${run.attempt}:${run.sha}:${run.tree}:${run.workflowRef}:${run.repository}`
 }
 
-function consistencyErrors(fragments, expectedRun) {
-  if (fragments.length === 0) return []
-  const first = runIdentity(fragments[0])
-  const mismatched = fragments.filter((fragment) => runIdentity(fragment) !== first)
-  const errors = []
-  if (mismatched.length > 0) {
-    errors.push(`${mismatched.length} fragment(s) have a different run/attempt/SHA/tree/workflow/repository identity than their siblings.`)
-  }
-  if (expectedRun) {
-    const expected = {
-      id: expectedRun.id,
-      attempt: expectedRun.attempt,
-      sha: expectedRun.sha,
-      tree: expectedRun.tree,
-      workflowRef: expectedRun.workflowRef,
-      repository: expectedRun.repository,
-    }
-    for (const fragment of fragments) {
-      const run = fragment.run
-      if (run.id !== expected.id || run.attempt !== expected.attempt || run.sha !== expected.sha ||
-          run.tree !== expected.tree || run.workflowRef !== expected.workflowRef || run.repository !== expected.repository) {
-        errors.push(`Fragment "${fragment.job.instance}" does not match the expected run identity.`)
-        break
-      }
-    }
-  }
-  return errors
+function matchesExpectedRun(fragment, expectedRun) {
+  const run = fragment.run
+  return run.id === expectedRun.id && run.attempt === expectedRun.attempt && run.sha === expectedRun.sha &&
+    run.tree === expectedRun.tree && run.workflowRef === expectedRun.workflowRef && run.repository === expectedRun.repository
+}
+
+function sameNeeds(left, right) {
+  const a = [...left].sort()
+  const b = [...right].sort()
+  return a.length === b.length && a.every((value, index) => value === b[index])
 }
 
 export function criticalPath({ fragments, expectedJobs = null }) {
@@ -125,7 +108,10 @@ export function criticalPath({ fragments, expectedJobs = null }) {
   const instanceSet = new Set(instances)
 
   // Duplicate instances are contradictory topology.
-  if (byInstance.size !== fragments.length) return { job: null, durationMs: null, path: [], unavailableReason: 'Duplicate job instance identity in the fragment set.' }
+  const trusted = expectedJobs !== null
+  const unavailable = (unavailableReason) => ({ job: null, durationMs: null, path: [], unavailableReason, trustedTopology: trusted })
+
+  if (byInstance.size !== fragments.length) return unavailable('Duplicate job instance identity in the fragment set.')
 
   // A group-level need must resolve to at least one expected/present instance.
   const groupToInstances = new Map()
@@ -157,21 +143,45 @@ export function criticalPath({ fragments, expectedJobs = null }) {
     const reasons = []
     if (unknown.length > 0) reasons.push(`duration unknown for: ${unknown.join(', ')}`)
     if (absent.length > 0) reasons.push(`expected fragment absent for: ${absent.join(', ')}`)
-    return { job: null, durationMs: null, path: [], unavailableReason: reasons.join('; ') }
+    return unavailable(reasons.join('; '))
   }
 
-  // Build the DAG over instances. A fragment's needs are group-level names; expand each to every instance.
+  // Build the DAG over instances. With trusted expected-jobs metadata, the dependency graph comes
+  // exclusively from that metadata; a fragment whose needs disagree with the trusted topology is a
+  // contradiction, not a correction. Without it, the fragment-controlled graph is used and labelled as
+  // untrusted rather than presented as authoritative.
   const edges = new Map()
-  for (const fragment of fragments) {
-    const dependents = edges.get(fragment.job.instance) ?? []
-    for (const need of fragment.job.needs) {
-      const targets = groupToInstances.get(need)
-      if (!targets || targets.length === 0) {
-        return { job: null, durationMs: null, path: [], unavailableReason: `Dependency group "${need}" of "${fragment.job.instance}" has no known instances.` }
+  const topologyDisagreements = []
+  if (trusted) {
+    for (const fragment of fragments) {
+      const trustedJob = expectedJobs.find((job) => job.instance === fragment.job.instance)
+      if (trustedJob && !sameNeeds(fragment.job.needs, trustedJob.needs)) {
+        topologyDisagreements.push(fragment.job.instance)
       }
-      for (const target of targets) dependents.push(target)
     }
-    edges.set(fragment.job.instance, dependents)
+    for (const job of expectedJobs) {
+      const dependents = []
+      for (const need of job.needs) {
+        const targets = groupToInstances.get(need)
+        if (!targets || targets.length === 0) {
+          return unavailable(`Dependency group "${need}" of "${job.instance}" has no known instances.`)
+        }
+        for (const target of targets) dependents.push(target)
+      }
+      edges.set(job.instance, dependents)
+    }
+  } else {
+    for (const fragment of fragments) {
+      const dependents = edges.get(fragment.job.instance) ?? []
+      for (const need of fragment.job.needs) {
+        const targets = groupToInstances.get(need)
+        if (!targets || targets.length === 0) {
+          return unavailable(`Dependency group "${need}" of "${fragment.job.instance}" has no known instances.`)
+        }
+        for (const target of targets) dependents.push(target)
+      }
+      edges.set(fragment.job.instance, dependents)
+    }
   }
 
   const best = new Map()
@@ -200,7 +210,7 @@ export function criticalPath({ fragments, expectedJobs = null }) {
   try {
     for (const instance of instances) visit(instance)
   } catch (error) {
-    return { job: null, durationMs: null, path: [], unavailableReason: error.message }
+    return unavailable(error.message)
   }
 
   let critical = null
@@ -217,7 +227,7 @@ export function criticalPath({ fragments, expectedJobs = null }) {
     path.unshift(cursor)
     cursor = parent.get(cursor)
   }
-  return { job: critical?.id ?? null, durationMs: critical?.durationMs ?? null, path, unavailableReason: null }
+  return { job: critical?.id ?? null, durationMs: critical?.durationMs ?? null, path, unavailableReason: null, trustedTopology: trusted, topologyDisagreements }
 }
 
 function escapeMarkdown(value) {
@@ -239,28 +249,51 @@ export function aggregateFragments({ fragments, missing = [], runMeta = null }) 
   const expectedJobsErrors = expectedJobs === null ? [] : validateExpectedJobs(expectedJobs)
   const topologyErrors = [...expectedJobsErrors]
 
-  // Run identity is trusted input. Fragments that disagree with the trusted run metadata or with their
-  // siblings are excluded from every derived aggregate, not merely flagged, and each exclusion is recorded.
-  const referenceRun = runMeta?.expectedRun ?? fragments[0]?.run ?? null
+  // Run identity is trusted input. With trusted expectedRun metadata, fragments that disagree are excluded
+  // from every derived aggregate and each exclusion is recorded. Without it, fragment order must never
+  // choose the winner: conflicting identities make the aggregate unavailable rather than publishing one
+  // side as authoritative totals. A fully consistent set is still aggregated but labelled untrusted.
+  const expectedRun = runMeta?.expectedRun ?? null
+  let referenceRun = expectedRun
   const consistent = []
   const excluded = []
-  for (const fragment of fragments) {
-    let reason = null
-    if (referenceRun) {
-      const run = fragment.run
-      const mismatch = run.id !== referenceRun.id || run.attempt !== referenceRun.attempt ||
-        run.sha !== referenceRun.sha || run.tree !== referenceRun.tree ||
-        run.workflowRef !== referenceRun.workflowRef || run.repository !== referenceRun.repository
-      if (mismatch) reason = 'Run identity does not match the trusted run metadata; excluded from the merged record.'
+  let runIdentityConflict = false
+  if (expectedRun) {
+    for (const fragment of fragments) {
+      if (!matchesExpectedRun(fragment, expectedRun)) {
+        excluded.push({ job: fragment.job.instance, reason: 'Run identity does not match the trusted run metadata; excluded from the merged record.' })
+      } else if (expectedJobs !== null && !expectedJobs.some((job) => job.instance === fragment.job.instance)) {
+        excluded.push({ job: fragment.job.instance, reason: 'Job instance is not part of the expected topology; excluded from the merged record.' })
+      } else {
+        consistent.push(fragment)
+      }
     }
-    if (reason === null && expectedJobs !== null && !expectedJobs.some((job) => job.instance === fragment.job.instance)) {
-      reason = 'Job instance is not part of the expected topology; excluded from the merged record.'
+  } else if (fragments.length > 0) {
+    const first = fragments[0].run
+    runIdentityConflict = fragments.some((fragment) => runIdentity(fragment) !== runIdentity(fragments[0]))
+    if (runIdentityConflict) {
+      const reported = new Set()
+      for (const fragment of fragments) {
+        const identity = runIdentity(fragment)
+        if (reported.has(identity)) continue
+        reported.add(identity)
+        excluded.push({ job: fragment.job.instance, reason: 'No trusted expectedRun metadata and fragment identities conflict; no identity was selected as authoritative.' })
+      }
+    } else {
+      referenceRun = first
+      for (const fragment of fragments) {
+        if (expectedJobs !== null && !expectedJobs.some((job) => job.instance === fragment.job.instance)) {
+          excluded.push({ job: fragment.job.instance, reason: 'Job instance is not part of the expected topology; excluded from the merged record.' })
+        } else {
+          consistent.push(fragment)
+        }
+      }
     }
-    if (reason === null) consistent.push(fragment)
-    else excluded.push({ job: fragment.job.instance, reason })
   }
-  const runErrors = consistencyErrors(consistent, runMeta?.expectedRun ?? null)
-  const effectiveTopologyErrors = [...topologyErrors, ...runErrors]
+  const effectiveTopologyErrors = [...topologyErrors]
+  const conflictUnavailable = runIdentityConflict
+    ? 'No trusted expectedRun metadata and fragment identities conflict; aggregate and critical path are unavailable.'
+    : null
 
   const expectedAbsent = []
   if (expectedJobs) {
@@ -272,9 +305,11 @@ export function aggregateFragments({ fragments, missing = [], runMeta = null }) 
   const allMissing = [...missing, ...absentMissing, ...excluded].map((entry) => ({ job: String(entry.job).slice(0, 120), reason: String(entry.reason).slice(0, 300) }))
   const missingModel = boundedMissing(allMissing)
 
-  const path = effectiveTopologyErrors.length > 0
-    ? { job: null, durationMs: null, path: [], unavailableReason: effectiveTopologyErrors.join('; ') }
-    : criticalPath({ fragments: consistent, expectedJobs })
+  const path = conflictUnavailable !== null
+    ? { job: null, durationMs: null, path: [], unavailableReason: conflictUnavailable, trustedTopology: expectedJobs !== null }
+    : effectiveTopologyErrors.length > 0
+      ? { job: null, durationMs: null, path: [], unavailableReason: effectiveTopologyErrors.join('; '), trustedTopology: expectedJobs !== null }
+      : criticalPath({ fragments: consistent, expectedJobs })
 
   const cache = { nuget: { hit: 0, miss: 0 }, npm: { hit: 0, miss: 0 }, chromium: { hit: 0, miss: 0 } }
   const flakyTests = []
@@ -294,7 +329,7 @@ export function aggregateFragments({ fragments, missing = [], runMeta = null }) 
   }
 
   const queueDelayMs = runMeta?.queueDelayMs ?? null
-  const run = runMeta?.expectedRun ?? consistent[0]?.run ?? null
+  const run = expectedRun ?? consistent[0]?.run ?? null
   const merged = {
     schemaVersion: RUN_SCHEMA_VERSION,
     run: run
@@ -323,6 +358,7 @@ export function aggregateFragments({ fragments, missing = [], runMeta = null }) 
       classification: fragment.classification,
     })),
     criticalPath: path,
+    runIdentityTrusted: expectedRun !== null,
     queue: {
       delayMs: queueDelayMs,
       unavailableReason: queueDelayMs === null && runMeta === null
@@ -365,8 +401,13 @@ export function renderMarkdown(merged) {
   push(`- Run: ${merged.run ? `#${escapeMarkdown(merged.run.id)} (attempt ${escapeMarkdown(merged.run.attempt)}, ${escapeMarkdown(merged.run.event)})` : 'unavailable'}`)
   push(`- Repository: ${merged.run?.repository ? escapeMarkdown(merged.run.repository) : 'unavailable'}`)
   push(`- Tested tree: ${merged.run?.tree ? `\`${escapeMarkdown(merged.run.tree)}\`` : 'unavailable'}`)
+  push(`- Run identity: ${merged.runIdentityTrusted ? 'trusted (expectedRun metadata)' : 'untrusted (no expectedRun metadata; fragment-consistent only)'}`)
   push(`- Fragments: ${merged.jobs.length} valid, ${merged.missingTotal} missing/unreadable${merged.missingTruncated ? ' (list truncated)' : ''}`)
   const critical = merged.criticalPath
+  if (critical.trustedTopology === false) push('- Topology: fragment-controlled (trusted expectedJobs metadata was not provided)')
+  if (critical.topologyDisagreements?.length > 0) {
+    push(`- Topology disagreements (trusted graph won): ${critical.topologyDisagreements.map(escapeMarkdown).join(', ')}`)
+  }
   if (critical.unavailableReason) {
     push(`- Critical path: unavailable — ${escapeMarkdown(critical.unavailableReason)}`)
   } else {

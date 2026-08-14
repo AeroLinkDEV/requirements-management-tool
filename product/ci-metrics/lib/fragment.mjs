@@ -164,6 +164,26 @@ export function validationErrors(fragment) {
   for (const [key, value] of Object.entries(flatten(fragment))) {
     if (looksLikeCredential(value)) errors.push(`Field "${key}" matches a credential-value pattern; refusing to publish it.`)
   }
+  const timings = fragment.timings ?? {}
+  if (timings.jobStartMs !== null && timings.setupEndMs !== null && timings.setupEndMs < timings.jobStartMs) {
+    errors.push('timings: setupEndMs precedes jobStartMs.')
+  }
+  if (timings.setupEndMs !== null && timings.testEndMs !== null && timings.testEndMs < timings.setupEndMs) {
+    errors.push('timings: testEndMs precedes setupEndMs.')
+  }
+  if (timings.testEndMs !== null && timings.jobEndMs !== null && timings.jobEndMs < timings.testEndMs) {
+    errors.push('timings: jobEndMs precedes testEndMs.')
+  }
+  const derived = [
+    [timings.setupMs, timings.setupEndMs, timings.jobStartMs],
+    [timings.testMs, timings.testEndMs, timings.setupEndMs],
+    [timings.uploadAndCleanupMs, timings.jobEndMs, timings.testEndMs],
+  ]
+  for (const [value, later, earlier] of derived) {
+    if (value !== null && (later === null || earlier === null || value !== later - earlier)) {
+      errors.push('timings: a derived duration does not match its raw markers.')
+    }
+  }
   if (Buffer.byteLength(JSON.stringify(fragment), 'utf8') > MAX_FRAGMENT_BYTES) errors.push('Fragment exceeds the bounded size.')
   return errors
 }
