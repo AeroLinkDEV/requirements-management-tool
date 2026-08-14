@@ -129,9 +129,12 @@ export function aggregateApiTelemetry({ factoryRecords, trxTests = [] }) {
   }
 
   const methodBaseOf = (name) => {
-    const afterDot = name.includes('.') ? name.slice(name.lastIndexOf('.') + 1) : name
-    const open = afterDot.indexOf('(')
-    return (open === -1 ? afterDot : afterDot.slice(0, open)).trim()
+    // The method name ends at the first '('; arguments may contain dots and parentheses, so the last
+    // dot in the full TRX name cannot be trusted. Take the head first, then the segment after its last dot.
+    const open = name.indexOf('(')
+    const head = (open === -1 ? name : name.slice(0, open)).trim()
+    const dot = head.lastIndexOf('.')
+    return dot === -1 ? head : head.slice(dot + 1)
   }
 
   const perTest = []
