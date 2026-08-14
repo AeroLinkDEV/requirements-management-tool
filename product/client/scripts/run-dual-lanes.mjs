@@ -33,7 +33,9 @@ function runLane(lane) {
     const child = spawn('npx.cmd', ['playwright', 'test', ...lane.files, '--reporter=list,json'], {
       cwd: process.cwd(),
       env,
-      shell: false,
+      // On Windows, .cmd launchers require shell resolution; shell:true keeps the argument list intact and
+      // lets Node quote paths safely.
+      shell: true,
       stdio: ['ignore', 'pipe', 'pipe'],
       windowsHide: true,
     })

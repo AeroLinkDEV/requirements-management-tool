@@ -38,4 +38,4 @@ const plan = {
   planId: createHash('sha256').update([...lanes.flatMap((lane) => lane.files)].sort().join('\n')).digest('hex').slice(0, 16),
 }
 writeFileSync(outputPath, `${JSON.stringify(plan, null, 2)}\n`, 'utf8')
-console.log(`[lanes] Shard ${shard}/${shardTotal}: ${expected} tests across lanes ${lanes.map((lane) => `${lane.name}=${lane.expected}`).join(', ')} (plan ${plan.planId}).`)
+console.log(`[lanes] Shard ${shard}/${shardTotal}: ${expected} tests across lanes ${lanes.map((lane) => `${lane.name}=${lane.expected} tests/~${Math.round(lane.estimatedMs / 1000)}s`).join(', ')} (plan ${plan.planId}).`)
