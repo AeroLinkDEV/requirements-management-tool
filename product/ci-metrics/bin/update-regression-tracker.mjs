@@ -6,7 +6,7 @@
 // current evidence. Requires `issues: write`.
 
 import { readFileSync } from 'node:fs'
-import { trackerBody, decideTrackerAction } from '../lib/rolling.mjs'
+import { trackerBody, decideTrackerAction, writeWouldRegressTracker } from '../lib/rolling.mjs'
 
 const env = (name) => process.env[name] ?? ''
 const TRACKER_TITLE = 'CI rolling regression tracker'
@@ -37,13 +37,28 @@ async function main() {
   // which is what made a cleared regression unreportable: the code never learned a tracker was there.
   const search = await api(`/search/issues?q=repo:${repository}+in:title+"${encodeURIComponent(TRACKER_TITLE)}"+type:issue+state:open`)
   const existing = search?.items?.[0] ?? null
-  const decision = decideTrackerAction({ regressions: report.regressions, trackerExists: existing !== null })
+  const decision = decideTrackerAction({
+    regressions: report.regressions,
+    trackerExists: existing !== null,
+    determinate: report.determinacy?.determinate === true,
+  })
   if (decision.action === 'none') {
     console.log(`[ci-metrics] ${decision.reason}`)
     return
   }
   const body = trackerBody(report)
   if (decision.action === 'update') {
+    // The collector runs on every completed quality gate and hourly, so two executions can overlap.
+    // Before this change a clean execution never wrote at all, so a stale snapshot could not clobber a
+    // newer finding; now that it can write, it must not. The tracker body carries the generating run's
+    // timestamp, and an older report refuses to overwrite a newer one. The workflow is also serialised
+    // by a concurrency group — this is the second line of defence, because concurrency groups do not
+    // order what they let through, they only stop it running at the same moment.
+    const stale = writeWouldRegressTracker(existing.body, report.generatedAt)
+    if (stale !== null) {
+      console.log(`[ci-metrics] ${stale} Leaving the tracker as it is.`)
+      return
+    }
     await api(`/repos/${repository}/issues/${existing.number}`, { body: { body } }, 'PATCH')
     console.log(`[ci-metrics] Updated regression tracker issue #${existing.number}. ${decision.reason}`)
   } else {

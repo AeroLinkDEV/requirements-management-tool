@@ -219,6 +219,33 @@ function windowMedian(records, count) {
   return median(records.slice(-count).map(runDurationMs))
 }
 
+/**
+ * Whether a comparison was possible at all, independent of what it found.
+ *
+ * `detectRegressions` returns an empty array for two very different reasons: nothing regressed, or
+ * there was not enough comparable data to say. Both look identical to a caller, which is safe while
+ * the only consequence is "do not raise an alarm" and unsafe the moment a caller treats empty as
+ * evidence of recovery. This reports the difference using the same guards, so the two cannot drift.
+ */
+export function regressionDeterminacy(records, { window = 10, minRuns = 3 } = {}) {
+  const undetermined = (reason) => ({ determinate: false, reason })
+  if (!Array.isArray(records)) return undetermined('No records were supplied.')
+  if (records.length < minRuns * 2) return undetermined(`Only ${records.length} comparable runs; ${minRuns * 2} are needed to compare two windows.`)
+  const recent = records.slice(-window)
+  const previous = records.slice(-window * 2, -window)
+  if (recent.length < minRuns || previous.length < minRuns) {
+    return undetermined(`Windows are too small to compare (recent ${recent.length}, previous ${previous.length}, minimum ${minRuns}).`)
+  }
+  const durations = [
+    median(recent.map(runDurationMs)), median(previous.map(runDurationMs)),
+    percentile(recent.map(runDurationMs), 95), percentile(previous.map(runDurationMs), 95),
+  ]
+  if (durations.some((value) => value === null)) {
+    return undetermined('Critical-path durations were unavailable for at least one window, so no comparison was made.')
+  }
+  return { determinate: true, reason: null }
+}
+
 export function detectRegressions(records, { window = 10, minRuns = 3, ratio = 1.15, minDeltaMs = 60_000 } = {}) {
   if (records.length < minRuns * 2) return []
   const recent = records.slice(-window)
@@ -314,7 +341,7 @@ function escapeMarkdown(value) {
     .replace(/\r?\n/g, ' ')
 }
 
-export function buildRollingReport({ records, regressions = [], missing = [], fullGates = [], fullGateScope = null, generatedAt = new Date().toISOString() }) {
+export function buildRollingReport({ records, regressions = [], missing = [], fullGates = [], fullGateScope = null, determinacy = null, generatedAt = new Date().toISOString() }) {
   const stats = rollingStats(records)
   const flakes = flakeTrend(records)
   const cache = cacheTrend(records)
@@ -418,6 +445,10 @@ export function buildRollingReport({ records, regressions = [], missing = [], fu
   return {
     schemaVersion: ROLLING_SCHEMA_VERSION,
     generatedAt,
+    // Whether any category had enough comparable data for the regression check to mean anything.
+    // Published so a consumer can tell "nothing regressed" from "nothing could be compared" without
+    // re-deriving the collector's thresholds — the two are the same empty array otherwise.
+    determinacy: determinacy ?? { determinate: false, reason: 'The collector did not report whether a comparison was possible.' },
     records: records.slice(-MAX_RECORDS).map((record) => ({
       id: record.run?.id ?? null,
       attempt: record.run?.attempt ?? null,
@@ -456,7 +487,7 @@ export function buildRollingReport({ records, regressions = [], missing = [], fu
  * regression that had already cleared. Not opening an issue on noise and not correcting a claim the
  * tool itself published are different things, and only the first is worth protecting.
  */
-export function decideTrackerAction({ regressions = [], trackerExists = false } = {}) {
+export function decideTrackerAction({ regressions = [], trackerExists = false, determinate = false } = {}) {
   const detected = Array.isArray(regressions) ? regressions.length : 0
   if (detected > 0) {
     return trackerExists
@@ -464,11 +495,38 @@ export function decideTrackerAction({ regressions = [], trackerExists = false } 
       : { action: 'create', reason: `${detected} sustained regression(s) detected and no tracker exists.` }
   }
   if (trackerExists) {
-    return { action: 'update', reason: 'No sustained regressions; recording that the tracker is clear rather than leaving a stale claim.' }
+    // An empty result is only evidence of recovery when a comparison actually happened. Missing
+    // artifacts, a thin window, or a shift in the category mix all produce the same empty array, and
+    // clearing on those would replace a real finding with a claim nothing supports — trading a stale
+    // truth for a fresh falsehood, which is the worse of the two.
+    return determinate
+      ? { action: 'update', reason: 'No sustained regressions over a sufficient window; recording that the tracker is clear rather than leaving a stale claim.' }
+      : { action: 'none', reason: 'No regressions found, but the window was insufficient to compare; leaving the existing tracker rather than clearing it on ignorance.' }
   }
-  // The only case that should touch nothing. Creating an issue to announce that there is nothing to
+  // The only other case that touches nothing. Creating an issue to announce that there is nothing to
   // announce is exactly the issue spam the tracker was built to avoid.
   return { action: 'none', reason: 'No sustained regressions and no tracker to correct.' }
+}
+
+/**
+ * Whether writing a report generated at `generatedAt` over `existingBody` would move the tracker
+ * backwards in time. Returns an explanation when the write should be skipped, or null when it is safe.
+ *
+ * Reads the timestamp the tracker body already carries rather than any external state, so two
+ * collector executions racing on the same issue converge on the newer one regardless of which
+ * finishes last.
+ */
+export function writeWouldRegressTracker(existingBody, generatedAt) {
+  const incoming = Date.parse(generatedAt)
+  if (!Number.isFinite(incoming)) return 'The incoming report has no usable generation timestamp.'
+  const stamped = /^Last (?:updated|checked): (.+)$/m.exec(String(existingBody ?? ''))
+  if (!stamped) return null // An unstamped body predates this guard; the newer content is an improvement.
+  const current = Date.parse(stamped[1].trim())
+  if (!Number.isFinite(current)) return null
+  if (incoming < current) {
+    return `This report was generated at ${generatedAt}, older than the tracker's current ${stamped[1].trim()}.`
+  }
+  return null
 }
 
 export function trackerBody(report) {
