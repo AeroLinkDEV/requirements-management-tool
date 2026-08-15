@@ -70,69 +70,7 @@ jobs:
           EVENT_NAME: ${{ github.event_name }}
           BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
           HEAD_SHA: ${{ github.sha }}
-        run: |
-          set -euo pipefail
-          # `merge_group` belongs with these and not with the diff below. A merge-group event carries no base
-          # to diff against — both `pull_request.base.sha` and `event.before` are null — so the classifier
-          # would run `git diff` with an empty base. It is also the last gate before the commit is on main,
-          # which is the moment to classify broadly rather than narrowly.
-          if [[ "$EVENT_NAME" == "schedule" || "$EVENT_NAME" == "workflow_dispatch" || "$EVENT_NAME" == "push" || "$EVENT_NAME" == "merge_group" ]]; then
-            echo "docs_only=false" >> "$GITHUB_OUTPUT"
-            echo "backend=true" >> "$GITHUB_OUTPUT"
-            echo "client=true" >> "$GITHUB_OUTPUT"
-            echo "browser=true" >> "$GITHUB_OUTPUT"
-            echo "postgresql=true" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-
-          # Three dots, not two. A two-dot diff compares the two trees directly, so once `main` moves ahead of
-          # the branch, every file changed on `main` appears in this list as though the pull request had
-          # touched it. Three dots diffs from the merge base, which is the pull request's own change and
-          # nothing else.
-          #
-          # This is not cosmetic: it silently changed which gates ran. On 2026-08-13 a pull request that
-          # modified only this workflow classified as backend on its first run and, after an unrelated merge to
-          # `main` dragged client files into the two-dot diff, classified as client-only on its second — so the
-          # backend suites skipped and the gate went green having never run the tests the change was about.
-          files="$(git diff --name-only "$BASE_SHA...$HEAD_SHA")"
-          echo "$files"
-          product_files="$(printf '%s\n' "$files" | grep -Ev '(^|/)(docs?|design|showcase)/|\.md$' || true)"
-          backend=false
-          client=false
-          browser=false
-          postgresql=false
-          docs_only=true
-          [[ -n "$product_files" ]] && docs_only=false
-          # This workflow selects and shards the suites, so a change to it can alter any gate — including by
-          # not running one. It already keyed `browser` and `postgresql`; leaving it out of `backend` and
-          # `client` meant a change to how the backend tests run did not run the backend tests, and was only
-          # caught because an unrelated merge exposed it.
-          printf '%s\n' "$files" | grep -Eq '^product/(src|tests)/|^product/.*\.(cs|csproj|slnx|props|targets)$|^\.github/workflows/ci\.yml$' && backend=true || true
-          printf '%s\n' "$files" | grep -Eq '^product/client/|^\.github/workflows/ci\.yml$' && client=true || true
-          printf '%s\n' "$files" | grep -Eq '^product/(client|src/AeroLink.Api|src/AeroLink.Domain|src/AeroLink.Infrastructure)/|^\.github/workflows/ci\.yml$' && browser=true || true
-          # Keyed on persistence as well as the migration/identity keywords. A change to an EF query needs
-          # the real provider even when no schema moves: translation is not portable, and the SQLite path
-          # every other gate runs on will happily accept an expression Npgsql cannot produce. The previous
-          # pattern also pointed at AeroLink.Infrastructure/Migrations/, which does not exist — migrations
-          # live under Persistence/Migrations/ — so that alternative had never matched a file.
-          printf '%s\n' "$files" | grep -Eqi '^product/(src/AeroLink.Api|src/AeroLink.Infrastructure|tests)/.*(migration|database|identity|auth|bootstrap|postgres|persistence)|^product/src/AeroLink.Infrastructure/Persistence/Migrations/|^\.github/workflows/ci\.yml$' && postgresql=true || true
-          # A change that is neither documentation nor recognised product code used to select nothing: the gate
-          # ran, every step skipped on its condition, and the job reported success having executed no test at
-          # all. A launcher script, a root configuration file or a new top-level directory all landed there.
-          #
-          # Anything unclassified now runs the full backend and client validation rather than nothing. Being
-          # slower on a file nobody anticipated is the right trade against a green tick that means nothing, and
-          # the guard in the validate job below makes the same rule machine-checkable rather than a convention.
-          if [[ "$docs_only" == "false" && "$backend" == "false" && "$client" == "false" ]]; then
-            echo "Unclassified product change; running full validation rather than reporting a skipped pass."
-            backend=true
-            client=true
-          fi
-          echo "docs_only=$docs_only" >> "$GITHUB_OUTPUT"
-          echo "backend=$backend" >> "$GITHUB_OUTPUT"
-          echo "client=$client" >> "$GITHUB_OUTPUT"
-          echo "browser=$browser" >> "$GITHUB_OUTPUT"
-          echo "postgresql=$postgresql" >> "$GITHUB_OUTPUT"
+        run: node "${{ github.workspace }}/product/test-planner/bin/classify-ci.mjs"
       - name: Mark test complete
         if: always()
         continue-on-error: true
@@ -501,6 +439,11 @@ jobs:
           node-version: 24
       - name: Refuse a mutating route with no hosted boundary coverage
         run: node --test product/test-contracts/tests/routes.test.mjs
+      # Here for the same reason as the route contract above, and more urgently: this suite guards the
+      # classifier that decides which gates run at all. Two silent-green failures came from that code, and
+      # a guard on it that cannot fail the gate would be worth nothing.
+      - name: Verify the changed-area classifier and its workflow contract
+        run: node --test product/test-planner/tests/classify.test.mjs
       - name: Refuse a test project that no job runs
         shell: bash
         run: |
