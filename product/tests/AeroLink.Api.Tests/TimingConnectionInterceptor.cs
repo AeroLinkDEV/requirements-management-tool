@@ -1,8 +1,8 @@
-// Times SQLite connection opens inside the API test factory as a database-open sub-phase (#563).
+// Times SQLite connection opens inside the API test factory (#563).
 //
-// The host build already includes database open/schema initialization, so this sub-phase is informational
-// and is never added again to the startup total by the aggregator (hostMs covers it). Telemetry I/O is
-// best-effort: failures disable telemetry, never the test.
+// This covers every connection open over the factory lifetime, not only opens during host startup, so it
+// is informational and is never added to the startup total by the aggregator (hostMs already contains the
+// startup connection opens). Telemetry I/O is best-effort: failures disable telemetry, never the test.
 
 using System.Diagnostics;
 using System.Data.Common;
@@ -11,7 +11,7 @@ using Microsoft.EntityFrameworkCore.Diagnostics;
 
 namespace AeroLink.Api.Tests;
 
-internal sealed class TimingConnectionInterceptor(long factoryId, string callerFile, string callerMember) : DbConnectionInterceptor
+internal sealed class TimingConnectionInterceptor(long factoryId, string callerFile, string callerMember, Action<object>? telemetryObserver) : DbConnectionInterceptor
 {
     private readonly ConcurrentDictionary<DbConnection, Stopwatch> _opens = new();
 
@@ -49,6 +49,6 @@ internal sealed class TimingConnectionInterceptor(long factoryId, string callerF
     {
         if (!_opens.TryRemove(connection, out var open)) return;
         open.Stop();
-        ApiTestTelemetry.RecordFactoryPhase("dbOpen", 0, open.Elapsed.TotalMilliseconds, callerFile, callerMember, factoryId);
+        ApiTestTelemetry.RecordFactoryPhase("connectionOpen", 0, open.Elapsed.TotalMilliseconds, callerFile, callerMember, factoryId, telemetryObserver);
     }
 }

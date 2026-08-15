@@ -8,7 +8,7 @@
 import { median, percentile } from './rolling.mjs'
 import { looksLikeCredential } from './fragment.mjs'
 
-export const API_TELEMETRY_SCHEMA_VERSION = 'aerolink-api-telemetry/v1'
+export const API_TELEMETRY_SCHEMA_VERSION = 'aerolink-api-telemetry/v2'
 export const MAX_RECORDS = 60_000
 export const MAX_CLASSES = 300
 
@@ -45,8 +45,16 @@ export function parseTelemetryLines(text) {
       malformed.push('method is invalid.')
       continue
     }
-    if (!['host', 'dispose', 'dbOpen'].includes(parsed.phase)) {
+    if (!['host', 'dispose', 'connectionOpen', 'dbOpen'].includes(parsed.phase)) {
       malformed.push(`phase "${parsed.phase}" is invalid.`)
+      continue
+    }
+    if (parsed.phase === 'dbOpen' && parsed.schemaVersion !== undefined && parsed.schemaVersion !== 'aerolink-api-telemetry/v1') {
+      malformed.push('legacy dbOpen phase requires schema aerolink-api-telemetry/v1.')
+      continue
+    }
+    if (parsed.schemaVersion !== undefined && !['aerolink-api-telemetry/v1', 'aerolink-api-telemetry/v2'].includes(parsed.schemaVersion)) {
+      malformed.push(`schemaVersion "${parsed.schemaVersion}" is invalid.`)
       continue
     }
     let invalidTiming = false
@@ -73,20 +81,20 @@ function quantiles(values) {
 }
 
 export function aggregateApiTelemetry({ factoryRecords, trxTests = [] }) {
-  // Per factory, startup is construction latency at host start plus host build plus disposal. The
-  // construction latency appears in both records; the maximum is the latest observation.
-  // Construction latency is the time from factory construction to host build start (the host record).
-  // The dispose record's constructionMs includes the host build, so it must not be added again. dbOpen is
-  // a sub-phase of the host build and is reported separately, never added to the startup total.
+  // Per factory, startup is the sum of three non-overlapping intervals: construction latency (factory
+  // construction to host-build start, captured BEFORE base.CreateHost), the host build itself, and
+  // disposal. The dispose record repeats constructionMs for provenance only and it must not be added
+  // again. connectionOpen is informational (every SQLite connection open over the factory lifetime, not
+  // only host startup) and is reported separately, never added to the startup total.
   const byFactory = new Map()
   for (const record of factoryRecords) {
-    const entry = byFactory.get(record.factoryId) ?? { class: record.class, method: record.method, constructionMs: null, hostMs: null, disposeMs: null, dbOpenMs: null }
+    const entry = byFactory.get(record.factoryId) ?? { class: record.class, method: record.method, constructionMs: null, hostMs: null, disposeMs: null, connectionOpenMs: null }
     if (record.phase === 'host') {
       entry.constructionMs = record.constructionMs
       entry.hostMs = record.ms
     }
     if (record.phase === 'dispose') entry.disposeMs = record.ms
-    if (record.phase === 'dbOpen') entry.dbOpenMs = (entry.dbOpenMs ?? 0) + record.ms
+    if (record.phase === 'connectionOpen' || record.phase === 'dbOpen') entry.connectionOpenMs = (entry.connectionOpenMs ?? 0) + record.ms
     byFactory.set(record.factoryId, entry)
   }
   const factories = [...byFactory.values()]
@@ -109,12 +117,12 @@ export function aggregateApiTelemetry({ factoryRecords, trxTests = [] }) {
       method: factory.method,
       factoryCount: 0,
       startupMs: 0,
-      dbOpenMs: 0,
+      connectionOpenMs: 0,
       wallMs: null,
     }
     entry.factoryCount += 1
     entry.startupMs += (factory.constructionMs ?? 0) + (factory.hostMs ?? 0) + (factory.disposeMs ?? 0)
-    entry.dbOpenMs += factory.dbOpenMs ?? 0
+    entry.connectionOpenMs += factory.connectionOpenMs ?? 0
     if (entry.wallMs === null) {
       const trxList = trxByClass.get(factory.class) ?? []
       const matched = trxList.find((test) =>
@@ -160,7 +168,7 @@ export function aggregateApiTelemetry({ factoryRecords, trxTests = [] }) {
         trxRows: rows.length,
         factories: entry.factoryCount,
         startupMs: Math.round(entry.startupMs),
-        dbOpenMs: Math.round(entry.dbOpenMs),
+        connectionOpenMs: Math.round(entry.connectionOpenMs),
       })
       continue
     }
@@ -170,7 +178,7 @@ export function aggregateApiTelemetry({ factoryRecords, trxTests = [] }) {
       method: entry.method,
       factoryCount: entry.factoryCount,
       startupMs: Math.round(entry.startupMs),
-      dbOpenMs: Math.round(entry.dbOpenMs),
+      connectionOpenMs: Math.round(entry.connectionOpenMs),
       wallMs: wallMs === null ? null : Math.round(wallMs),
       bodyMs: wallMs === null ? null : Math.max(0, Math.round(wallMs - entry.startupMs)),
     })
@@ -182,14 +190,14 @@ export function aggregateApiTelemetry({ factoryRecords, trxTests = [] }) {
       className: entry.className,
       tests: 0,
       factories: 0,
-      dbOpenMs: 0,
+      connectionOpenMs: 0,
       theoryRows: 0,
       wallMs: [],
       startupMs: [],
     }
     classEntry.tests += 1
     classEntry.factories += entry.factoryCount
-    classEntry.dbOpenMs += entry.dbOpenMs
+    classEntry.connectionOpenMs += entry.connectionOpenMs
     classEntry.startupMs.push(entry.startupMs)
     if (entry.wallMs !== null) classEntry.wallMs.push(entry.wallMs)
     classes.set(entry.className, classEntry)
@@ -199,14 +207,14 @@ export function aggregateApiTelemetry({ factoryRecords, trxTests = [] }) {
       className: theory.className,
       tests: 0,
       factories: 0,
-      dbOpenMs: 0,
+      connectionOpenMs: 0,
       theoryRows: 0,
       wallMs: [],
       startupMs: [],
     }
     classEntry.theoryRows += theory.trxRows
     classEntry.factories += theory.factories
-    classEntry.dbOpenMs += theory.dbOpenMs
+    classEntry.connectionOpenMs += theory.connectionOpenMs
     classes.set(theory.className, classEntry)
   }
 
@@ -215,7 +223,7 @@ export function aggregateApiTelemetry({ factoryRecords, trxTests = [] }) {
     tests: entry.tests,
     factories: entry.factories,
     theoryRows: entry.theoryRows,
-    dbOpenMs: Math.round(entry.dbOpenMs),
+    connectionOpenMs: Math.round(entry.connectionOpenMs),
     wall: quantiles(entry.wallMs),
     startup: quantiles(entry.startupMs),
     summedStartupMs: Math.round(entry.startupMs.reduce((sum, value) => sum + value, 0)),
@@ -253,7 +261,7 @@ export function aggregateApiTelemetry({ factoryRecords, trxTests = [] }) {
       classes: classes.size,
       summedWallMs: Math.round(allWall.reduce((sum, value) => sum + value, 0)),
       summedStartupMs: Math.round(allStartup.reduce((sum, value) => sum + value, 0)),
-      summedDbOpenMs: Math.round(perTest.reduce((sum, entry) => sum + entry.dbOpenMs, 0)),
+      summedConnectionOpenMs: Math.round(perTest.reduce((sum, entry) => sum + entry.connectionOpenMs, 0)),
       wall: quantiles(allWall),
       startup: quantiles(allStartup),
       startupFraction: allWall.length > 0 ? Math.round((allStartup.reduce((sum, value) => sum + value, 0) / Math.max(1, allWall.reduce((sum, value) => sum + value, 0))) * 100) / 100 : null,
@@ -284,7 +292,7 @@ export function renderApiTelemetryMarkdown(report) {
   lines.push(`- TRX tests: ${report.totals.trxTests}; attributed (non-ambiguous) tests: ${report.totals.tests}; ambiguous theory rows: ${report.totals.ambiguousTheoryRows}; unmatched factory methods: ${report.totals.unmatchedMethods}; TRX tests without factory telemetry: ${report.totals.trxWithoutFactoryTelemetry}`)
   lines.push(`- Factories: ${report.totals.factories}; classes: ${report.totals.classes}`)
   lines.push(`- Summed wall: ${seconds(report.totals.summedWallMs)}; summed startup: ${seconds(report.totals.summedStartupMs)} (${Math.round((report.totals.startupFraction ?? 0) * 100)}% of wall)`)
-  lines.push(`- Database open (informational sub-phase of host build): ${seconds(report.totals.summedDbOpenMs)}`)
+  lines.push(`- Connection open (informational; all connection opens over the factory lifetime, never added to startup): ${seconds(report.totals.summedConnectionOpenMs)}`)
   lines.push(`- Wall p10/median/p75/p95: ${seconds(report.totals.wall.p10)} / ${seconds(report.totals.wall.median)} / ${seconds(report.totals.wall.p75)} / ${seconds(report.totals.wall.p95)}`)
   lines.push(`- Startup p10/median/p75/p95: ${seconds(report.totals.startup.p10)} / ${seconds(report.totals.startup.median)} / ${seconds(report.totals.startup.p75)} / ${seconds(report.totals.startup.p95)}`)
   lines.push('')

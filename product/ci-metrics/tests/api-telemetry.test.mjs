@@ -91,17 +91,42 @@ test('parameterized theory rows are reported as ambiguous, never merged into one
   assert.equal(report.classes[0].theoryRows, 2)
 })
 
-test('database-open sub-phase is aggregated separately and never added to startup', () => {
+test('connection-open sub-phase is aggregated separately and never added to startup', () => {
   const factoryRecords = [
-    { type: 'factory', factoryId: 1, class: 'ExampleApiTests', method: 'A_test_creates_a_project', phase: 'host', constructionMs: 100, ms: 2000 },
-    { type: 'factory', factoryId: 1, class: 'ExampleApiTests', method: 'A_test_creates_a_project', phase: 'dbOpen', constructionMs: 0, ms: 350 },
-    { type: 'factory', factoryId: 1, class: 'ExampleApiTests', method: 'A_test_creates_a_project', phase: 'dispose', constructionMs: 100, ms: 300 },
+    { type: 'factory', factoryId: 1, class: 'ExampleApiTests', method: 'A_test_creates_a_project', phase: 'host', constructionMs: 100, ms: 2000, schemaVersion: 'aerolink-api-telemetry/v2' },
+    { type: 'factory', factoryId: 1, class: 'ExampleApiTests', method: 'A_test_creates_a_project', phase: 'connectionOpen', constructionMs: 0, ms: 350, schemaVersion: 'aerolink-api-telemetry/v2' },
+    { type: 'factory', factoryId: 1, class: 'ExampleApiTests', method: 'A_test_creates_a_project', phase: 'dispose', constructionMs: 100, ms: 300, schemaVersion: 'aerolink-api-telemetry/v2' },
   ]
   const trxTests = [{ className: 'AeroLink.Api.Tests.ExampleApiTests', name: 'A_test_creates_a_project', durationMs: 5000, outcome: 'Passed' }]
   const report = aggregateApiTelemetry({ factoryRecords, trxTests })
   assert.equal(report.totals.summedStartupMs, 2400)
-  assert.equal(report.totals.summedDbOpenMs, 350)
-  assert.equal(report.slowestStartupTests[0].dbOpenMs, 350)
+  assert.equal(report.totals.summedConnectionOpenMs, 350)
+  assert.equal(report.slowestStartupTests[0].connectionOpenMs, 350)
+})
+
+test('construction, host, and disposal intervals are added exactly once each', () => {
+  // Regression for the round-2 finding: constructionMs is captured BEFORE the host build, so the
+  // aggregator must not re-add the dispose record's repeated constructionMs, and a constructionMs that
+  // (incorrectly) already contains hostMs must not be double counted.
+  const factoryRecords = [
+    { type: 'factory', factoryId: 1, class: 'ExampleApiTests', method: 'A_test_creates_a_project', phase: 'host', constructionMs: 100, ms: 2000, schemaVersion: 'aerolink-api-telemetry/v2' },
+    // The dispose record repeats the pre-host construction latency for provenance; it must not be added
+    // again. A huge value here would reveal any code that summed constructionMs from dispose.
+    { type: 'factory', factoryId: 1, class: 'ExampleApiTests', method: 'A_test_creates_a_project', phase: 'dispose', constructionMs: 999999, ms: 300, schemaVersion: 'aerolink-api-telemetry/v2' },
+  ]
+  const trxTests = [{ className: 'AeroLink.Api.Tests.ExampleApiTests', name: 'A_test_creates_a_project', durationMs: 5000, outcome: 'Passed' }]
+  const report = aggregateApiTelemetry({ factoryRecords, trxTests })
+  assert.equal(report.totals.summedStartupMs, 2400)
+  assert.equal(report.slowestStartupTests[0].startupMs, 2400)
+  assert.equal(report.slowestStartupTests[0].bodyMs, 2600)
+})
+
+test('unknown schema versions are rejected and the report is versioned v2', () => {
+  const parsed = parseTelemetryLines(line({ class: 'ExampleApiTests', schemaVersion: 'aerolink-api-telemetry/v99' }))
+  assert.equal(parsed.records.length, 0)
+  assert.ok(parsed.malformed.some((entry) => entry.includes('schemaVersion')))
+  const report = aggregateApiTelemetry({ factoryRecords: [], trxTests: [] })
+  assert.equal(report.schemaVersion, 'aerolink-api-telemetry/v2')
 })
 
 test('fixture and helper factories with no TRX row are reported as unmatched, not attributed', () => {

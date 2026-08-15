@@ -319,6 +319,7 @@ internal sealed class AeroLinkApiFactory(bool seedDemoAccounts = false, bool all
     string? showcaseTemplate = null, string? staticFilesRoot = null,
     DbCommandInterceptor? commandInterceptor = null,
     IManagedDocumentStorageFaultInjector? storageFaultInjector = null,
+    Action<object>? telemetryObserver = null,
     [CallerFilePath] string? callerFile = null,
     [CallerMemberName] string? callerMember = null) : WebApplicationFactory<Program>
 {
@@ -350,9 +351,17 @@ internal sealed class AeroLinkApiFactory(bool seedDemoAccounts = false, bool all
     private readonly string _callerFile = callerFile ?? "unknown";
     private readonly string _callerMember = callerMember ?? "unknown";
     private readonly Stopwatch _construction = Stopwatch.StartNew();
+    private double _constructionBeforeHostMs;
+    private readonly Action<object>? _telemetryObserver = telemetryObserver;
+
+    internal long TelemetryFactoryId => _factoryId;
 
     protected override IHost CreateHost(IHostBuilder builder)
     {
+        // Capture construction latency BEFORE base.CreateHost starts: constructionMs and hostMs are
+        // non-overlapping intervals. Reading _construction.Elapsed in the finally would include the host
+        // build and double-count it in the aggregator (constructionMs + hostMs + disposeMs).
+        _constructionBeforeHostMs = _construction.Elapsed.TotalMilliseconds;
         var stopwatch = Stopwatch.StartNew();
         try
         {
@@ -360,7 +369,7 @@ internal sealed class AeroLinkApiFactory(bool seedDemoAccounts = false, bool all
         }
         finally
         {
-            ApiTestTelemetry.RecordFactoryPhase("host", _construction.Elapsed.TotalMilliseconds, stopwatch.Elapsed.TotalMilliseconds, _callerFile, _callerMember, _factoryId);
+            ApiTestTelemetry.RecordFactoryPhase("host", _constructionBeforeHostMs, stopwatch.Elapsed.TotalMilliseconds, _callerFile, _callerMember, _factoryId, _telemetryObserver);
         }
     }
 
@@ -394,7 +403,7 @@ internal sealed class AeroLinkApiFactory(bool seedDemoAccounts = false, bool all
             services.AddDbContext<AeroLinkDbContext>(options =>
             {
                 options.UseSqlite(ConnectionString)
-                    .AddInterceptors(new SaveRaceInterceptor(), new TimingConnectionInterceptor(_factoryId, _callerFile, _callerMember));
+                    .AddInterceptors(new SaveRaceInterceptor(), new TimingConnectionInterceptor(_factoryId, _callerFile, _callerMember, _telemetryObserver));
                 if (commandInterceptor is not null) options.AddInterceptors(commandInterceptor);
             });
             if (storageFaultInjector is not null)
@@ -424,7 +433,7 @@ internal sealed class AeroLinkApiFactory(bool seedDemoAccounts = false, bool all
         try { if (Directory.Exists(_evidenceRoot)) Directory.Delete(_evidenceRoot, true); }
         catch (IOException) { } catch (UnauthorizedAccessException) { }
         DeleteIfPresent(_connectorKeyPath);
-        ApiTestTelemetry.RecordFactoryPhase("dispose", _construction.Elapsed.TotalMilliseconds, stopwatch.Elapsed.TotalMilliseconds, _callerFile, _callerMember, _factoryId);
+        ApiTestTelemetry.RecordFactoryPhase("dispose", _constructionBeforeHostMs, stopwatch.Elapsed.TotalMilliseconds, _callerFile, _callerMember, _factoryId, _telemetryObserver);
     }
 
     // Retried briefly before being given up on, because the usual cause is a handle closing a moment late

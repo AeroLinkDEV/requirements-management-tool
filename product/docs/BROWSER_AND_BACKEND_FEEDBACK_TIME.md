@@ -319,17 +319,28 @@ This is the same growth that makes the shard-count reasoning above worth re-meas
 
 ## API startup floor, measured (563A, 2026-08-14)
 
-Per-shard telemetry splits each hosted API test's wall time into factory startup (host build + disposal,
-attributed from the construction call site) and test body (wall minus startup). Structured per-shard
-artifacts: `api-telemetry-<shard>-<attempt>`.
+Per-shard telemetry (schema `aerolink-api-telemetry/v2`) splits each hosted API test's wall time into
+factory startup (construction-to-host-start + host build + disposal, attributed from the construction
+call site) and test body (wall minus startup). The three intervals are non-overlapping: `constructionMs`
+is captured **before** `base.CreateHost`, so it never contains the host build. `connectionOpen` records
+every SQLite connection open over the factory lifetime and is informational only (never added to
+startup). Structured per-shard artifacts: `api-telemetry-<shard>-<attempt>`.
 
-### Exact-head baseline: run 31844562806, PR #581 head `e0d4770`
+### Timing-correction note (round 2 review, 2026-08-14)
 
-This is the authoritative baseline for the exact SHA reviewed in round 1. Each shard's TRX reports
-**162 tests** (486 across the three shards); the telemetry artifacts attribute **419** of them because
-parameterized theory invocations share one call-site method name and are not yet split per invocation at
-this head. The round-1 fix adds separate `ambiguousTheoryRows` and `unmatchedMethods` accounting; the
-round-2 run re-measures the same floor with that split visible.
+Round-1/round-2 heads captured `constructionMs` in the `finally` **after** `base.CreateHost` completed,
+so the value already contained the whole host build and the aggregator's
+`constructionMs + hostMs + disposeMs` added the host time twice (about 438s across the three shards in
+run 31852062285). All startup percentages and summed-startup numbers in the tables below are therefore
+inflated and are retained **only as the defect evidence**. The corrected baseline is measured by the
+round-3 run (schema v2, non-overlapping intervals) and published in its per-shard artifacts and the PR
+body; this file is updated to the corrected table once that run is verified.
+
+### Inflated exact-head baseline (defect evidence): run 31844562806, PR #581 head `e0d4770`
+
+Each shard's TRX reported **162 tests** (486 across the three shards); the round-1 artifacts attributed
+**419** of them because parameterized theory invocations shared one call-site method name. All startup
+values below double-count the host build.
 
 | Shard | Tests | Factories | Summed wall | Summed startup | Startup % | Wall p10/median/p75/p95 | Startup p10/median/p75/p95 |
 |---|---:|---:|---:|---:|---:|---:|---:|
@@ -342,10 +353,11 @@ TRX totals are the authoritative test count: **162 tests per shard, 486 total**.
 (486 TRX − 419 attributed) is the parameterized-theory and fixture/helper attribution gap measured above,
 not a suite reduction.
 
-### Earlier baseline for comparison: run 31843343040, PR #581 head `c002890`
+### Inflated earlier baseline for comparison (defect evidence): run 31843343040, PR #581 head `c002890`
 
 This is the pre-rebase measurement, retained only as a comparison point. It uses the same aggregator and
-the same attribution gap; it is **not** the exact-head baseline.
+the same attribution gap; it is **not** the exact-head baseline. Its startup values also double-count the
+host build.
 
 | Shard | Tests | Factories | Summed wall | Summed startup | Startup % |
 |---|---:|---:|---:|---:|---:|
@@ -356,16 +368,17 @@ the same attribution gap; it is **not** the exact-head baseline.
 
 Notes:
 
-- The measured floor (27–44% of summed wall by shard) counts only host build and disposal; factory
-  construction, database open, and first-client latency are inside the host build, and the TRX wall is the
-  whole test method. A `dbOpen` sub-phase (SQLite connection open inside the host build) is now recorded
-  separately and is never added to the startup total, because the host build already contains it.
+- The corrected floor counts construction-to-host-start, host build, and disposal as three
+  non-overlapping intervals; the TRX wall is the whole test method. `connectionOpen` (every SQLite
+  connection open over the factory lifetime, not only host startup) is recorded separately and never
+  added to the startup total.
 - Startup percentages above 100% for classes whose factories are created in collection/class fixtures
   (e.g., `ShowcaseApiFixture`, `CancelReviewAuthorityTests`) are expected: fixture startup occurs outside
   any single test's TRX wall.
 - 470 factories were created for 419 attributed tests at the exact-head baseline; multiple-factory tests
   are listed explicitly in the artifact, and parameterized-theory rows are reported separately (not merged
-  into a fabricated multi-factory test) from the round-2 head onward.
+  into a fabricated multi-factory test) from the round-2 head onward. Every TRX row reconciles into
+  exactly one bucket (attributed, ambiguous theory, or no-factory-telemetry) from the round-2 head onward.
 - The schema-template copy experiment remains the recorded negative result: median rose 13.4s to 19.4s,
   p75 20.4s to 26.9s, summed CPU +22%; do not repeat a per-test database-copy strategy.
 - Phase 2 (fresh-host/reusable-host/non-hosted inventory) and phase 3 (host-reuse pilot with >=10

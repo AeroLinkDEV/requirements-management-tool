@@ -159,11 +159,19 @@ observation and a separate review.
 
 ## API startup-floor telemetry (563A)
 
-`AeroLinkApiFactory` emits one bounded JSON line per host build and disposal, attributed to the test class
-and method from the construction call site (`AEROLINK_API_TELEMETRY_JSONL`; no-op when unset).
-`bin/aggregate-api-telemetry.mjs` combines those lines with the shard TRX to publish per-test/class
-startup versus test-body breakdowns (p10/median/p75/p95, factory counts, multiple-factory tests) as
-`api-telemetry.json`/`.md` artifacts per API shard. No isolation architecture is changed in this phase.
+`AeroLinkApiFactory` emits one bounded JSON line per measured phase (schema
+`aerolink-api-telemetry/v2`), attributed to the test class and method from the construction call site
+(`AEROLINK_API_TELEMETRY_JSONL`; no-op when unset). Phases are non-overlapping: `constructionMs` is
+captured **before** `base.CreateHost`, `host` is the host build, `dispose` is disposal, and
+`connectionOpen` is every SQLite connection open over the factory lifetime (informational; never added to
+the startup total). `bin/aggregate-api-telemetry.mjs` combines those lines with the shard TRX to publish
+per-test/class startup versus test-body breakdowns (p10/median/p75/p95, factory counts, multiple-factory
+tests, ambiguous parameterized-theory rows, unmatched fixture/helper factories, and TRX rows without
+factory telemetry) as `api-telemetry.json`/`.md` artifacts per API shard. Every TRX row reconciles into
+exactly one bucket. Telemetry setup/write I/O failures are contained (they disable further writes and
+never change the authoritative test result), and tests can inject a per-factory write failure without
+mutating the process-global path state used by the running suite. No isolation architecture is changed in
+this phase.
 
 ### Current baseline (phase A measurements)
 
@@ -255,10 +263,10 @@ independently selected producer, so push/schedule reports are complete).
 Run the full suite exactly as CI does:
 
 ```powershell
-node --test product/ci-metrics/tests/trx.test.mjs product/ci-metrics/tests/playwright.test.mjs product/ci-metrics/tests/fragment.test.mjs product/ci-metrics/tests/aggregate.test.mjs product/ci-metrics/tests/build-run-meta.test.mjs product/ci-metrics/tests/junit.test.mjs product/ci-metrics/tests/ci-workflow-contract.test.mjs product/ci-metrics/tests/zip.test.mjs product/ci-metrics/tests/rolling.test.mjs product/ci-metrics/tests/provenance.test.mjs
+node --test product/ci-metrics/tests/trx.test.mjs product/ci-metrics/tests/playwright.test.mjs product/ci-metrics/tests/fragment.test.mjs product/ci-metrics/tests/aggregate.test.mjs product/ci-metrics/tests/build-run-meta.test.mjs product/ci-metrics/tests/junit.test.mjs product/ci-metrics/tests/ci-workflow-contract.test.mjs product/ci-metrics/tests/zip.test.mjs product/ci-metrics/tests/rolling.test.mjs product/ci-metrics/tests/provenance.test.mjs product/ci-metrics/tests/api-telemetry.test.mjs
 ```
 
-The suite (130 tests) covers schema-driven nested validation, real-format Playwright suite traversal,
+The suite (135 tests) covers schema-driven nested validation, real-format Playwright suite traversal,
 representative TRX success/failure fixtures, Node JUnit parsing, valid/missing/malformed/oversized
 fragments and artifacts, unknown schema versions, failed/cancelled/skipped jobs, missing test reports,
 count mismatches, retried Playwright tests, empty test sets, comparable-run grouping and rolling
@@ -270,6 +278,10 @@ consistency and GitHub-tree cross-checking, tested-tree manifest validation and 
 selection, contradictory raw gate evidence, identity binding for repository/workflow/run/attempt/PR/
 head/base/ref/checkout-tree), credential guards, timing validation, bounded output, Markdown escaping, critical-path
 computation, the minimal ZIP reader, and the static workflow contract.
+
+The API-telemetry subset (9 tests) additionally covers non-overlapping construction/host/disposal math,
+parameterized-theory ambiguity, unmatched fixture/helper factories, connection-open separation, schema
+version validation, TRX reconciliation, credential rejection, and bounded Markdown output.
 
 CI runs this suite in the `metrics-tooling` job from a clean checkout and reports its result in the
 authoritative gate summary; the job is deliberately not part of merge authority.
