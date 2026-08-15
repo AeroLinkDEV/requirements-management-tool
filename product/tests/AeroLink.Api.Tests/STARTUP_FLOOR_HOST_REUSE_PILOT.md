@@ -1,6 +1,6 @@
 # #563 phase 2 ? bounded API host-reuse pilot and class inventory
 
-Date: 2026-08-15. Branch: `deepseek/563-api-host-reuse-pilot`. Review round: 2.
+Date: 2026-08-15. Branch: `deepseek/563-api-host-reuse-tranche-2`. Review round: 1.
 
 ## Pilot design
 
@@ -13,42 +13,59 @@ Converted classes must satisfy, and were checked for:
 - every assertion is scoped by project/program identity or by the test's own seeded IDs ? no empty-table, first-install-bootstrap, or whole-database-count assumptions;
 - authentication isolation is proven per test: a fresh client is a fresh session, and an unaffiliated user is refused.
 
-## Pilot tranche 1 (this PR)
+## Tranche 1 (merged as #584, `ec75f91`)
+
+| Class | Shared tests | Fresh-host exceptions |
+|---|---:|---:|
+| ChangeRequestReviewRationaleApiTests | 3 | 0 |
+| CoverageStateFilterApiTests | 6 | 0 |
+| TestProcedureDocumentApiTests | 4 | 1 (first-install bootstrap) |
+| ApprovalConfigurationApiTests | 6 | 0 |
+| ProjectPersonnelApiTests | 13 | 0 |
+| SharedHostIsolationTests | 3 (isolation facts) | 0 |
+| **Tranche 1 totals** | **32 shared + 3 isolation** | **1** |
+
+## Tranche 2a (this PR)
 
 | Class | Shared tests | Fresh-host exceptions | Basis |
 |---|---:|---:|---|
-| ChangeRequestReviewRationaleApiTests | 3 | 0 | Review cycle + rationale/signature persistence; project-scoped assertions |
-| CoverageStateFilterApiTests | 6 | 0 | Coverage filters scoped by projectId; program-boundary test retained |
-| TestProcedureDocumentApiTests | 4 | 1 | `A_project_created_through_the_api_has_its_documents_immediately` requires first-install bootstrap (user-less DB); the class has five facts total |
-| ApprovalConfigurationApiTests | 6 | 0 | Workflow configuration scoped by project; holder/backup names now unique per test |
-| ProjectPersonnelApiTests | 13 | 0 | Roster routes project-scoped; `EndedBy` assertion uses the per-test manager name |
-| SharedHostIsolationTests | 3 | 0 | Isolation proof: unique-data counts, cross-test fixture-instance identity, program-boundary refusal, two-client session isolation |
-| **Converted total** | **32 shared + 3 isolation** | **1** | 33 converted tests + 3 isolation facts |
+| DownstreamAssessmentReopenApiTests | 5 | 0 | Withdraw/reopen capability and authority, project-scoped; decidedBy/actor assertions use per-test names |
+| LiveTestRegressionApiTests | 3 | 0 | Released-build effectivity and audit projection, seeded IDs and project scoping |
+| ProcedureBrowsingApiTests | 6 | 0 | Paging/filter/sort/search all project-scoped; outsider refusal retained |
+| TestProcedureRevisionHistoryApiTests | 2 | 0 | History/trace/coverage/search scoped by projectId and seeded IDs |
+| **Tranche 2a totals** | **16** | **0** | 16 per-test factories -> 4 class fixtures (**-12**) |
 
-### Factory math (corrected round 2)
+## Cumulative pilot scope
 
-- The five converted classes contain **33 tests** (3+6+4+6+13); before this PR they created **33 per-test factories**.
-- After conversion they create **5 class fixtures + 1 fresh factory** (the bootstrap exception) = **6 factories**: a **-27** reduction.
-- `SharedHostIsolationTests` adds **1 class fixture** (3 tests, 1 factory).
-- Suite delta: 471 factories (489 tests, 563A baseline run 31858889257) to 445 factories (491 tests, run 31861317606) = **-26**, consistent with -27 + 1.
-- The 563A telemetry reports class fixtures under `SharedApiHost` (method `class fixture`) as unmatched methods; their construction/host/disposal time is now included in the whole-run `summedFactoryStartupMs` total (attributed + class fixtures/helpers + ambiguous theory rows, every factory exactly once) so the before/after comparison is not structurally biased.
+- Classes: 9 (5 tranche 1 + 4 tranche 2a), meeting the 8?12-class pilot target.
+
+- Factories: tranche 1 -27 + isolation +1; tranche 2a -12; cumulative suite factory count drops from 471 (489 tests) to 433 (508 tests) on the tranche-2a head.
+
+## Fresh-host required additions
+
+- `ChangeRequestRenameApiTests` uses `ProblemReportApiTests.BootstrapAndLoginAsync` (first-install bootstrap requires a user-less DB), so it cannot share a host with tests that seed users; it remains fresh-host required.
 
 ## Exhaustive class inventory (all *.cs files in AeroLink.Api.Tests)
 
-### pilot (7)
+### pilot (11)
 
 - ApprovalConfigurationApiTests.cs
 - ChangeRequestReviewRationaleApiTests.cs
 - CoverageStateFilterApiTests.cs
+- DownstreamAssessmentReopenApiTests.cs
+- LiveTestRegressionApiTests.cs
+- ProcedureBrowsingApiTests.cs
 - ProjectPersonnelApiTests.cs
 - SharedApiHost.cs
 - SharedHostIsolationTests.cs
 - TestProcedureDocumentApiTests.cs
+- TestProcedureRevisionHistoryApiTests.cs
 
-### fresh-host required (6)
+### fresh-host required (7)
 
 - ApiTestTelemetryTests.cs
 - BaselineImportApiTests.cs
+- ChangeRequestRenameApiTests.cs
 - ManagedDocumentApiTests.cs
 - ProblemReportPagingApiTests.cs
 - ProductionRoutingTests.cs
@@ -61,7 +78,7 @@ Converted classes must satisfy, and were checked for:
 - DraftDocumentApiTests.cs
 - ProcedureDiscussionApiTests.cs
 
-### reuse candidate (not converted) (63)
+### reuse candidate (not converted) (58)
 
 - AdministratorChangeRequestApiTests.cs
 - AuthoredSectionTests.cs
@@ -70,7 +87,6 @@ Converted classes must satisfy, and were checked for:
 - BuildTestSetApiTests.cs
 - CancelReviewAuthorityTests.cs
 - ChangeAuthoringInvariantApiTests.cs
-- ChangeRequestRenameApiTests.cs
 - ClosedReleaseAuthoringTests.cs
 - ControlledEditingCheckInApiTests.cs
 - ControlledEditingProcedureAuthorityTests.cs
@@ -79,14 +95,12 @@ Converted classes must satisfy, and were checked for:
 - CorrectiveActionRoutingApiTests.cs
 - DeferralAndRevisionListingTests.cs
 - DeferredCarryForwardApiTests.cs
-- DownstreamAssessmentReopenApiTests.cs
 - ExternalIdentityAdminApiTests.cs
 - GovernanceEvidenceApiTests.cs
 - HistoricalPublicationFreezeApiTests.cs
 - IdentifierAllocationTests.cs
 - IntegrityCheckpointApiTests.cs
 - LegacyProcedureManifestBootstrapApiTests.cs
-- LiveTestRegressionApiTests.cs
 - ManagedDocumentRecoveryApiTests.cs
 - ManualTestChangeRequestApiTests.cs
 - OpenDigitalThreadTests.cs
@@ -100,7 +114,6 @@ Converted classes must satisfy, and were checked for:
 - ProblemReportVerificationApiTests.cs
 - ProblemReportWaiverApiTests.cs
 - ProcedureBaselineApiTests.cs
-- ProcedureBrowsingApiTests.cs
 - ProcedureManifestEffectivityApiTests.cs
 - ProcedureSavedViewApiTests.cs
 - ProcedureTraceApiTests.cs
@@ -123,7 +136,6 @@ Converted classes must satisfy, and were checked for:
 - TestChangeRequestScopeApiTests.cs
 - TestExecutionEffectivityApiTests.cs
 - TestProcedureAuthoringApiTests.cs
-- TestProcedureRevisionHistoryApiTests.cs
 - VerificationImpactApiTests.cs
 - VerificationProgramIsolationApiTests.cs
 
@@ -141,7 +153,7 @@ Converted classes must satisfy, and were checked for:
 
 ## Measurement model
 
-- Factory/host/database starts: 563A telemetry (`factories` per class and whole-run totals, schema v2). After this PR, each converted class reports one `SharedApiHost` factory instead of one per test, and the whole-run startup total includes unmatched fixture startup explicitly.
+- Factory/host/database starts: 563A telemetry (`factories` per class and whole-run `summedFactoryStartupMs`, schema v2). After this PR, each converted class reports one `SharedApiHost` factory instead of one per test, and the whole-run total includes every factory exactly once (attributed + fixtures/helpers + ambiguous theories).
 - Wall clock: the API shards' summed wall and startup come from the same telemetry; a before/after comparison is made on exact-head CI runs. Single runs are variance-dominated; the broad-rollout decision requires at least ten repeated full-concurrency observations, order randomization, summed CPU/disk-I/O, and the >=15% API critical-path threshold.
 
 ## Persistent data

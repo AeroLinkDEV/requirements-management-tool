@@ -14,8 +14,19 @@ using Microsoft.Extensions.DependencyInjection;
 
 namespace AeroLink.Api.Tests;
 
-public sealed class LiveTestRegressionApiTests
+/// <summary>
+/// #563 phase-2 pilot (tranche 2): this class shares one API host/database through <see cref="SharedApiHost"/>;
+/// each test seeds uniquely tagged users and a uniquely coded Program.
+/// </summary>
+public sealed class LiveTestRegressionApiTests : IClassFixture<SharedApiHost>
 {
+    private readonly SharedApiHost _host;
+
+    public LiveTestRegressionApiTests(SharedApiHost host)
+    {
+        _host = host;
+    }
+
     private static async Task LoginAsync(HttpClient client, string user)
     {
         using var response = await client.PostAsJsonAsync("/api/auth/login",
@@ -29,13 +40,14 @@ public sealed class LiveTestRegressionApiTests
     [Fact]
     public async Task Released_build_uses_its_effective_procedure_revision_and_exact_history_link()
     {
-        using var factory = new AeroLinkApiFactory();
+        var tag = Guid.NewGuid().ToString("N")[..8];
+        var memberName = $"scope.reader.{tag}";
         Guid projectId, releaseId, baselineId, procedureId, releasedRevisionId, laterRevisionId;
-        using (var scope = factory.Services.CreateScope())
+        using (var scope = _host.Factory.Services.CreateScope())
         {
             var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
             var now = DateTimeOffset.UtcNow;
-            var program = new ProgramRecord("Revision Scope", "RVS");
+            var program = new ProgramRecord($"Revision Scope {tag}", $"RVS{tag}");
             var project = new ProjectRecord(program.Id, "FMS", "Revision Scope FMS");
             var release = new SoftwareRelease(project.Id, "1.5", true);
             var scr = new SystemChangeRequest("SRCR-90001", 0, project.Id, release.Id, "Released source",
@@ -51,7 +63,7 @@ public sealed class LiveTestRegressionApiTests
                 "Released steps", "Released expected result", TestProcedureState.Approved, "tester", now);
             var laterRevision = new TestProcedureRevision(procedure.Id, 1, "Later objective", "Later setup",
                 "Later steps", "Later expected result", TestProcedureState.Draft, "tester", now.AddDays(1));
-            var member = Account("scope.reader", now);
+            var member = Account(memberName, now);
             db.AddRange(program, project, release, scr, baseline, requirement, requirementRevision, procedure,
                 releasedRevision, laterRevision, member,
                 new ProgramMembership(member.Id, program.Id, ProgramRole.Engineer, "setup", now),
@@ -64,8 +76,8 @@ public sealed class LiveTestRegressionApiTests
             releasedRevisionId = releasedRevision.Id; laterRevisionId = laterRevision.Id;
         }
 
-        using var client = factory.CreateClient();
-        await LoginAsync(client, "scope.reader");
+        using var client = _host.CreateClient();
+        await LoginAsync(client, memberName);
         var page = await client.GetFromJsonAsync<JsonElement>(
             $"/api/test-procedures?projectId={projectId}&releaseId={releaseId}&scope=System&page=1&pageSize=25");
         var row = page.GetProperty("items")[0];
@@ -95,21 +107,23 @@ public sealed class LiveTestRegressionApiTests
     [Fact]
     public async Task Downstream_queue_projects_claim_capability_for_the_current_user()
     {
-        using var factory = new AeroLinkApiFactory();
+        var tag = Guid.NewGuid().ToString("N")[..8];
+        var reviewerName = $"reviewer.only.{tag}";
+        var engineerName = $"software.engineer.{tag}";
         Guid projectId, releaseId, assessmentId;
-        using (var scope = factory.Services.CreateScope())
+        using (var scope = _host.Factory.Services.CreateScope())
         {
             var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
             var now = DateTimeOffset.UtcNow;
-            var program = new ProgramRecord("Assessment Authority", "ASA");
+            var program = new ProgramRecord($"Assessment Authority {tag}", $"ASA{tag}");
             var project = new ProjectRecord(program.Id, "FMS", "Assessment FMS");
             var release = new SoftwareRelease(project.Id, "1.6", false);
             var source = new SystemChangeRequest("SRCR-90002", 0, project.Id, release.Id, "Upstream change",
                 "Problem", "Analysis", "Solution", "author", now);
             var assessment = new DownstreamChangeAssessment(project.Id, release.Id, source.Id,
                 source.DisplayNumber, RequirementLevel.HighLevel, now);
-            var reviewer = Account("reviewer.only", now);
-            var engineer = Account("software.engineer", now);
+            var reviewer = Account(reviewerName, now);
+            var engineer = Account(engineerName, now);
             db.AddRange(program, project, release, source, assessment, reviewer, engineer,
                 new ProgramMembership(reviewer.Id, program.Id, ProgramRole.Approver, "setup", now),
                 new ProgramMembership(engineer.Id, program.Id, ProgramRole.Engineer, "setup", now));
@@ -117,23 +131,23 @@ public sealed class LiveTestRegressionApiTests
             projectId = project.Id; releaseId = release.Id; assessmentId = assessment.Id;
         }
 
-        using (var reviewer = factory.CreateClient())
+        using (var reviewer = _host.CreateClient())
         {
-            await LoginAsync(reviewer, "reviewer.only");
+            await LoginAsync(reviewer, reviewerName);
             var rows = await reviewer.GetFromJsonAsync<JsonElement>(
                 $"/api/downstream-assessments?projectId={projectId}&releaseId={releaseId}");
             Assert.False(rows[0].GetProperty("capabilities").GetProperty("canAssign").GetBoolean());
         }
-        using (var engineer = factory.CreateClient())
+        using (var engineer = _host.CreateClient())
         {
-            await LoginAsync(engineer, "software.engineer");
+            await LoginAsync(engineer, engineerName);
             var rows = await engineer.GetFromJsonAsync<JsonElement>(
                 $"/api/downstream-assessments?projectId={projectId}&releaseId={releaseId}");
             Assert.True(rows[0].GetProperty("capabilities").GetProperty("canAssign").GetBoolean());
             Assert.Equal("Problem", rows[0].GetProperty("sourceProblem").GetString());
             await SecurityBoundaryTests.AuthorizeMutationsAsync(engineer);
             Assert.Equal(HttpStatusCode.OK, (await engineer.PostAsJsonAsync(
-                $"/api/downstream-assessments/{assessmentId}/assign", new { engineerId = "software.engineer" })).StatusCode);
+                $"/api/downstream-assessments/{assessmentId}/assign", new { engineerId = engineerName })).StatusCode);
             Assert.Equal(HttpStatusCode.OK, (await engineer.PostAsync(
                 $"/api/downstream-assessments/{assessmentId}/change-required", null)).StatusCode);
             rows = await engineer.GetFromJsonAsync<JsonElement>(
@@ -141,15 +155,15 @@ public sealed class LiveTestRegressionApiTests
             Assert.Equal("ChangeRequired", rows[0].GetProperty("outcome").GetString());
             Assert.False(rows[0].GetProperty("capabilities").GetProperty("canSubmit").GetBoolean());
         }
-        using (var scope = factory.Services.CreateScope())
+        using (var scope = _host.Factory.Services.CreateScope())
         {
             var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
             await db.Releases.Where(x => x.Id == releaseId)
                 .ExecuteUpdateAsync(update => update.SetProperty(x => x.IsReleased, true));
         }
-        using (var historicalReader = factory.CreateClient())
+        using (var historicalReader = _host.CreateClient())
         {
-            await LoginAsync(historicalReader, "software.engineer");
+            await LoginAsync(historicalReader, engineerName);
             var rows = await historicalReader.GetFromJsonAsync<JsonElement>(
                 $"/api/downstream-assessments?projectId={projectId}&releaseId={releaseId}");
             Assert.False(rows[0].GetProperty("capabilities").GetProperty("canEdit").GetBoolean());
@@ -163,28 +177,29 @@ public sealed class LiveTestRegressionApiTests
     [Fact]
     public async Task Change_request_audit_projection_normalizes_legacy_requirement_padding()
     {
-        using var factory = new AeroLinkApiFactory();
+        var tag = Guid.NewGuid().ToString("N")[..8];
+        var readerName = $"audit.reader.{tag}";
         Guid changeRequestId;
-        using (var scope = factory.Services.CreateScope())
+        using (var scope = _host.Factory.Services.CreateScope())
         {
             var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
             var now = DateTimeOffset.UtcNow;
-            var program = new ProgramRecord("Audit Format", "AUF");
+            var program = new ProgramRecord($"Audit Format {tag}", $"AUF{tag}");
             var project = new ProjectRecord(program.Id, "FMS", "Audit FMS");
             var release = new SoftwareRelease(project.Id, "1.6", false);
             var scr = new SystemChangeRequest("SRCR-90003", 0, project.Id, release.Id, "Audit formatting",
-                "Problem", "Analysis", "Solution", "audit.reader", now);
-            scr.AddRequirementChange("audit.reader", "SYSR-00000001", 0, RequirementLevel.System,
+                "Problem", "Analysis", "Solution", readerName, now);
+            scr.AddRequirementChange(readerName, "SYSR-00000001", 0, RequirementLevel.System,
                 RequirementChangeKind.Introduce, "Statement", "Rationale", "Test", now);
-            var member = Account("audit.reader", now);
+            var member = Account(readerName, now);
             db.AddRange(program, project, release, scr, member,
                 new ProgramMembership(member.Id, program.Id, ProgramRole.Engineer, "setup", now));
             await db.SaveChangesAsync();
             changeRequestId = scr.Id;
         }
 
-        using var client = factory.CreateClient();
-        await LoginAsync(client, "audit.reader");
+        using var client = _host.CreateClient();
+        await LoginAsync(client, readerName);
         var detail = await client.GetFromJsonAsync<JsonElement>($"/api/change-requests/{changeRequestId}");
         var added = detail.GetProperty("audit").EnumerateArray()
             .Single(x => x.GetProperty("eventType").GetString() == "RequirementChangeAdded");

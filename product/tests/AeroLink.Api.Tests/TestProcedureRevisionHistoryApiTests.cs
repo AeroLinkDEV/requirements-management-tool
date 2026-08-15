@@ -12,21 +12,27 @@ using Microsoft.Extensions.DependencyInjection;
 
 namespace AeroLink.Api.Tests;
 
-public sealed class TestProcedureRevisionHistoryApiTests
+public sealed class TestProcedureRevisionHistoryApiTests : IClassFixture<SharedApiHost>
 {
+    private readonly SharedApiHost _host;
+
+    public TestProcedureRevisionHistoryApiTests(SharedApiHost host)
+    {
+        _host = host;
+    }
+
     private sealed record Fixture(Guid ProjectId, Guid Release15Id, Guid Release16Id,
         Guid Baseline15Id, Guid Baseline16Id,
         Guid ProcedureId, Guid Revision00Id, Guid Revision01Id, Guid Revision02Id,
         Guid RetirementExecutionId, Guid Review16Id,
-        string Tcr00, string Tcr01, string Cr00, string Cr01, string FoldedCr01);
+        string Tcr00, string Tcr01, string Cr00, string Cr01, string FoldedCr01, string EngineerName);
 
     [Fact]
     public async Task List_history_and_trace_keep_exact_titles_and_the_same_package_provenance_across_builds()
     {
-        using var factory = new AeroLinkApiFactory();
-        using var client = factory.CreateClient();
-        var fixture = await SeedAsync(factory);
-        await LoginAsync(client, "history.engineer");
+        using var client = _host.CreateClient();
+        var fixture = await SeedAsync(_host.Factory);
+        await LoginAsync(client, fixture.EngineerName);
 
         using var oldListResponse = await client.GetAsync(
             $"/api/test-procedures?projectId={fixture.ProjectId}&releaseId={fixture.Release15Id}" +
@@ -207,15 +213,16 @@ Assert.Equal(fixture.Revision01Id,
     [Fact]
     public async Task Manual_package_without_impacts_and_legacy_revision_report_only_the_provenance_recorded()
     {
-        using var factory = new AeroLinkApiFactory();
-        using var client = factory.CreateClient();
+        using var client = _host.CreateClient();
+        var tag = Guid.NewGuid().ToString("N")[..8];
+        var engineerName = $"history.engineer.{tag}";
         Guid manualProcedureId, manualRevisionId, legacyProcedureId, legacyRevisionId;
         string packageNumber, primaryNumber, foldedNumber;
-        using (var scope = factory.Services.CreateScope())
+        using (var scope = _host.Factory.Services.CreateScope())
         {
             var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
             var now = new DateTimeOffset(2026, 8, 10, 12, 0, 0, TimeSpan.Zero);
-            var program = new ProgramRecord("Manual procedure provenance", "MPP");
+            var program = new ProgramRecord($"Manual procedure provenance {tag}", $"MPP{tag}");
             var project = new ProjectRecord(program.Id, "Manual project", "Manual product");
             var release = new SoftwareRelease(project.Id, "2.0", false);
             var primary = ApprovedChange("SRCR-42410", project.Id, release.Id,
@@ -235,7 +242,7 @@ Assert.Equal(fixture.Revision01Id,
                 "legacy.author", now, TestProcedureLevel.System);
             var legacyRevision = Revision(legacyProcedure.Id, 0, null, null,
                 "Legacy objective", now.AddMinutes(5));
-            var engineer = new UserAccount("history.engineer", "History Engineer", "history@example.test",
+            var engineer = new UserAccount(engineerName, "History Engineer", "history@example.test",
                 IdentityService.HashPassword(AeroLinkApiFactory.MemberPassword), now);
             db.AddRange(program, project, release, primary, folded, review, manualProcedure, manualRevision,
                 legacyProcedure, legacyRevision, engineer,
@@ -249,7 +256,7 @@ Assert.Equal(fixture.Revision01Id,
             primaryNumber = primary.DisplayNumber;
             foldedNumber = folded.DisplayNumber;
         }
-        await LoginAsync(client, "history.engineer");
+        await LoginAsync(client, engineerName);
 
         var manualHistory = await JsonAsync(client,
             $"/api/test-procedures/{manualProcedureId}/history?revisionId={manualRevisionId}");
@@ -291,7 +298,11 @@ Assert.Equal(fixture.Revision01Id,
         using var scope = factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
         var now = new DateTimeOffset(2026, 8, 10, 10, 0, 0, TimeSpan.Zero);
-        var program = new ProgramRecord("Procedure revision history", "PRH");
+        // Unique per test: user accounts and Program codes are globally unique-constrained, so a shared
+        // host/database requires per-test identities. Requirement/procedure/CR numbers are project-scoped.
+        var tag = Guid.NewGuid().ToString("N")[..8];
+        var engineerName = $"history.engineer.{tag}";
+        var program = new ProgramRecord($"Procedure revision history {tag}", $"PRH{tag}");
         var project = new ProjectRecord(program.Id, "History project", "History product");
         var release15 = new SoftwareRelease(project.Id, "1.5", true);
         var release16 = new SoftwareRelease(project.Id, "1.6", false, release15.Id);
@@ -363,7 +374,7 @@ Assert.Equal(fixture.Revision01Id,
         var coverage15 = new TestRequirementCoverage(revision00.Id, requirement15Revision.Id);
         var coverage16 = new TestRequirementCoverage(revision01.Id, requirement16Revision.Id);
         var foldedCoverage16 = new TestRequirementCoverage(revision01.Id, foldedRequirement16Revision.Id);
-        var engineer = new UserAccount("history.engineer", "History Engineer", "history@example.test",
+        var engineer = new UserAccount(engineerName, "History Engineer", "history@example.test",
             IdentityService.HashPassword(AeroLinkApiFactory.MemberPassword), now);
         db.AddRange(program, project, release15, release16, scr15, scr16, foldedScr16, baseline15, baseline16,
             requirement15, requirement16, foldedRequirement16, requirement15Revision, requirement16Revision,
@@ -377,7 +388,7 @@ Assert.Equal(fixture.Revision01Id,
             procedure.Id, revision00.Id, revision01.Id, revision02.Id,
             retirementExecution.Id, tcr16.Id,
             tcr15.DisplayNumber, tcr16.DisplayNumber, scr15.DisplayNumber, scr16.DisplayNumber,
-            foldedScr16.DisplayNumber);
+            foldedScr16.DisplayNumber, engineerName);
     }
 
     private static SystemChangeRequest ApprovedChange(string number, Guid projectId, Guid releaseId,

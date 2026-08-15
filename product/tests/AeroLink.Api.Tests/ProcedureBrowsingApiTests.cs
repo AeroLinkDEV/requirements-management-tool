@@ -18,16 +18,25 @@ namespace AeroLink.Api.Tests;
 /// These drive the endpoint rather than the projection, because a bounded page that is bounded only in the
 /// browser is not paging.
 /// </summary>
-public sealed class ProcedureBrowsingApiTests
+public sealed class ProcedureBrowsingApiTests : IClassFixture<SharedApiHost>
 {
-    private const string Member = "procedure.browser";
+    private readonly SharedApiHost _host;
 
-    private static async Task<Guid> SeedAsync(AeroLinkApiFactory factory, int count = 40)
+    public ProcedureBrowsingApiTests(SharedApiHost host)
+    {
+        _host = host;
+    }
+
+    private static async Task<(Guid ProjectId, string MemberName)> SeedAsync(AeroLinkApiFactory factory, int count = 40)
     {
         using var scope = factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
         var now = DateTimeOffset.UtcNow;
-        var program = new ProgramRecord("Browsing Program", "BRW");
+        // Unique per test: user accounts and Program codes are globally unique-constrained, so a shared
+        // host/database requires per-test identities.
+        var tag = Guid.NewGuid().ToString("N")[..8];
+        var member = $"procedure.browser.{tag}";
+        var program = new ProgramRecord($"Browsing Program {tag}", $"BRW{tag}");
         var project = new ProjectRecord(program.Id, "Software", "Browsing Software");
         db.AddRange(program, project);
 
@@ -52,15 +61,15 @@ public sealed class ProcedureBrowsingApiTests
             }
         }
 
-        var account = new UserAccount(Member, Member, $"{Member}@example.test",
+        var account = new UserAccount(member, member, $"{member}@example.test",
             IdentityService.HashPassword(AeroLinkApiFactory.MemberPassword), now);
         db.Add(account);
         db.Add(new ProgramMembership(account.Id, program.Id, ProgramRole.Engineer, "test.setup", now));
         await db.SaveChangesAsync();
-        return project.Id;
+        return (project.Id, member);
     }
 
-    private static async Task SignInAsync(HttpClient client, string user = Member)
+    private static async Task SignInAsync(HttpClient client, string user)
     {
         using var login = await client.PostAsJsonAsync("/api/auth/login",
             new { userName = user, password = AeroLinkApiFactory.MemberPassword });
@@ -80,10 +89,10 @@ public sealed class ProcedureBrowsingApiTests
     [Fact]
     public async Task Paging_is_bounded_reports_the_total_and_walks_every_record_exactly_once()
     {
-        using var factory = new AeroLinkApiFactory();
-        using var client = factory.CreateClient();
-        var projectId = await SeedAsync(factory);
-        await SignInAsync(client);
+        using var client = _host.CreateClient();
+        var seeded = await SeedAsync(_host.Factory);
+        var projectId = seeded.ProjectId;
+        await SignInAsync(client, seeded.MemberName);
 
         var first = await PageAsync(client, projectId, "&page=1&pageSize=10");
         Assert.Equal(40, first.GetProperty("totalCount").GetInt32());
@@ -106,10 +115,10 @@ public sealed class ProcedureBrowsingApiTests
     [Fact]
     public async Task Search_state_owner_and_latest_outcome_each_narrow_the_set_and_the_total()
     {
-        using var factory = new AeroLinkApiFactory();
-        using var client = factory.CreateClient();
-        var projectId = await SeedAsync(factory);
-        await SignInAsync(client);
+        using var client = _host.CreateClient();
+        var seeded = await SeedAsync(_host.Factory);
+        var projectId = seeded.ProjectId;
+        await SignInAsync(client, seeded.MemberName);
 
         var byNumber = await PageAsync(client, projectId, "&search=SYSTP-00000007");
         Assert.Equal(1, byNumber.GetProperty("totalCount").GetInt32());
@@ -146,10 +155,10 @@ public sealed class ProcedureBrowsingApiTests
     [Fact]
     public async Task Sort_order_is_explicit_and_stable_across_pages()
     {
-        using var factory = new AeroLinkApiFactory();
-        using var client = factory.CreateClient();
-        var projectId = await SeedAsync(factory);
-        await SignInAsync(client);
+        using var client = _host.CreateClient();
+        var seeded = await SeedAsync(_host.Factory);
+        var projectId = seeded.ProjectId;
+        await SignInAsync(client, seeded.MemberName);
 
         foreach (var sort in new[] { "identifier", "title", "owner", "level" })
         {
@@ -163,10 +172,10 @@ public sealed class ProcedureBrowsingApiTests
     [Fact]
     public async Task Software_HLR_and_LLR_scopes_return_only_their_own_procedures()
     {
-        using var factory = new AeroLinkApiFactory();
-        using var client = factory.CreateClient();
-        var projectId = await SeedAsync(factory, 0);
-        using (var scope = factory.Services.CreateScope())
+        using var client = _host.CreateClient();
+        var seeded = await SeedAsync(_host.Factory, 0);
+        var projectId = seeded.ProjectId;
+        using (var scope = _host.Factory.Services.CreateScope())
         {
             var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
             var now = DateTimeOffset.UtcNow;
@@ -177,7 +186,7 @@ public sealed class ProcedureBrowsingApiTests
                 new TestProcedureRevision(llr.Id, 0, "LLR", "Ready", "Run", "Pass", TestProcedureState.Draft, "test.author", now));
             await db.SaveChangesAsync();
         }
-        await SignInAsync(client);
+        await SignInAsync(client, seeded.MemberName);
 
         Assert.Equal(["HLRTP-000001.00"], Numbers(await PageAsync(client, projectId, "&scope=HighLevelSoftware")));
         Assert.Equal(["LLRTP-000001.00"], Numbers(await PageAsync(client, projectId, "&scope=LowLevelSoftware")));
@@ -186,10 +195,10 @@ public sealed class ProcedureBrowsingApiTests
     [Fact]
     public async Task Search_accepts_a_full_display_number_with_revision()
     {
-        using var factory = new AeroLinkApiFactory();
-        using var client = factory.CreateClient();
-        var projectId = await SeedAsync(factory, 1);
-        await SignInAsync(client);
+        using var client = _host.CreateClient();
+        var seeded = await SeedAsync(_host.Factory, 1);
+        var projectId = seeded.ProjectId;
+        await SignInAsync(client, seeded.MemberName);
 
         Assert.Equal(["SYSTP-00000001.01"], Numbers(await PageAsync(client, projectId, "&search=SYSTP-00000001.01")));
     }
@@ -197,19 +206,20 @@ public sealed class ProcedureBrowsingApiTests
     [Fact]
     public async Task The_procedure_list_is_not_readable_without_access_to_the_project()
     {
-        using var factory = new AeroLinkApiFactory();
-        using var client = factory.CreateClient();
-        var projectId = await SeedAsync(factory);
+        using var client = _host.CreateClient();
+        var seeded = await SeedAsync(_host.Factory);
+        var projectId = seeded.ProjectId;
 
-        using (var scope = factory.Services.CreateScope())
+        using (var scope = _host.Factory.Services.CreateScope())
         {
             var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
-            db.Add(new UserAccount("procedure.outsider", "procedure.outsider", "outsider@example.test",
+            var outsiderName = $"procedure.outsider.{Guid.NewGuid():N}";
+            db.Add(new UserAccount(outsiderName, outsiderName, "outsider@example.test",
                 IdentityService.HashPassword(AeroLinkApiFactory.MemberPassword), DateTimeOffset.UtcNow));
             await db.SaveChangesAsync();
-        }
 
-        await SignInAsync(client, "procedure.outsider");
+            await SignInAsync(client, outsiderName);
+        }
         using var response = await client.GetAsync($"/api/test-procedures?projectId={projectId}");
         Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
     }
