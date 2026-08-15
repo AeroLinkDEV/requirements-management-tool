@@ -1,0 +1,46 @@
+name: Pull request overlap
+
+# Warns when another open pull request is editing the same high-risk surface (#569).
+#
+# Deliberately a separate workflow from the product gate, and deliberately not a required check. It is
+# advisory: it posts or updates one comment and always exits zero. A check that could fail a pull
+# request because of what a *different* branch is doing would be a worse hazard than the collisions it
+# reports.
+#
+# It runs early and costs seconds, so the warning arrives while a collision is still cheap to settle,
+# rather than after both branches have paid for a full gate.
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+# One run per pull request. Later pushes supersede earlier ones, and cancelling is safe here because the
+# comment is regenerated from scratch every time rather than appended to.
+concurrency:
+  group: pr-overlap-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  overlap:
+    name: Check for overlapping pull requests
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check out the default branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.base.ref }}
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+      - name: Report overlapping pull requests
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: node product/test-planner/tools/check-overlap.mjs
