@@ -27,7 +27,7 @@ test('every mutating route in the source is declared in the manifest', () => {
     added.map(keyOf),
     [],
     `New mutating route(s) are not in route-coverage.json. Add hosted boundary coverage, then regenerate:\n` +
-      `  node product/test-contracts/bin/generate-route-manifest.mjs\n` +
+      `  node product/test-contracts/tools/generate-route-manifest.mjs\n` +
       added.map((route) => `  ${route.method} ${route.path}  [${route.file}]`).join('\n'),
   )
 })
