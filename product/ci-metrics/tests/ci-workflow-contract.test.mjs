@@ -153,6 +153,42 @@ test('the gate derives its metrics dependency list from event and classifier pre
   assert.ok(gate.indexOf('Compute metrics gate dependencies') < gate.indexOf('Write metrics fragment'))
 })
 
+test('every gate dependency is actually enforced, not merely reported', () => {
+  // #571 added metrics-tooling to the gate's `needs`, bound its result, and printed it in the summary
+  // — and did not add it to the loop that decides whether the gate fails. Branch protection requires
+  // only this gate, so for three weeks a failing tooling job was displayed and then ignored. Reporting
+  // a result is not enforcing it, and nothing made the difference visible.
+  const lines = workflowLines()
+  const gate = jobBodies(lines)['gate']
+  const gateText = gate.join('\n')
+
+  const needsMatch = /needs:\s*\[([^\]]+)\]/.exec(gateText)
+  assert.ok(needsMatch, 'gate must declare its dependencies')
+  const declared = needsMatch[1]
+    .split(',')
+    .map((name) => name.trim())
+    // `changes` is the classifier, not a gate: it produces the selection every other job keys on and
+    // has no pass/fail meaning of its own.
+    .filter((name) => name.length > 0 && name !== 'changes')
+
+  const loopMatch = /for pair in ([^\n]*); do/.exec(gateText)
+  assert.ok(loopMatch, 'gate must contain the enforcement loop')
+  const enforced = [...loopMatch[1].matchAll(/"([a-zA-Z0-9_-]+):\$[A-Z_]+"/g)].map((match) => match[1])
+
+  const unenforced = declared.filter((name) => !enforced.includes(name))
+  assert.deepEqual(
+    unenforced,
+    [],
+    `These jobs are gate dependencies but cannot fail the gate: ${unenforced.join(', ')}. ` +
+    'Add them to the enforcement loop, or remove them from `needs` if their result genuinely does not matter.',
+  )
+
+  // And the converse: a name in the loop that is not a dependency would read as enforced while its
+  // variable stayed empty, which the `case` treats as passing.
+  const undeclared = enforced.filter((name) => !declared.includes(name))
+  assert.deepEqual(undeclared, [], `Enforced but not depended on: ${undeclared.join(', ')}`)
+})
+
 test('product enforcement in the gate has no telemetry prerequisite', () => {
   const gate = jobBodies(workflowLines())['gate'].join('\n')
   const enforceIndex = gate.indexOf('Summarise and enforce')

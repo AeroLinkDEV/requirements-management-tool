@@ -1339,7 +1339,12 @@ jobs:
           # than relying on this job's own dependency behaviour, which treats a skipped dependency as a reason
           # to skip and would take this reporter down with it.
           failed=""
-          for pair in "backend-api:$BACKEND_API" "backend-core:$BACKEND_CORE" "client:$CLIENT" "script-contracts:$CONTRACTS" "browser-pr:$BROWSER" "browser-production:$PRODUCTION" "postgresql-smoke:$POSTGRESQL"; do
+          # metrics-tooling was in `needs`, was read into METRICS_TOOLING, and was printed in the summary
+          # above — but was missing here, so a failing tooling job was displayed and then ignored. Since
+          # branch protection requires only this job, that made it unable to block a merge. The tooling it
+          # covers produces the verified test totals every gate is judged on and the provenance decision
+          # #562 intends to skip the post-merge gate with, so it is not optional evidence.
+          for pair in "backend-api:$BACKEND_API" "backend-core:$BACKEND_CORE" "client:$CLIENT" "script-contracts:$CONTRACTS" "browser-pr:$BROWSER" "browser-production:$PRODUCTION" "postgresql-smoke:$POSTGRESQL" "metrics-tooling:$METRICS_TOOLING"; do
             name="${pair%%:*}"
             result="${pair#*:}"
             case "$result" in
