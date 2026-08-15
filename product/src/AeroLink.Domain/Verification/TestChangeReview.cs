@@ -261,10 +261,27 @@ public sealed class TestChangeReview
     /// that has not concluded test work is required has nothing to propose, and an in-review package must not
     /// grow underneath the person approving it. Both rules are the requirement side's, unchanged.
     /// </summary>
-    public TestProcedureChange AddProcedureChange(string actorId, TestProcedureChangeDraft draft, DateTimeOffset now)
+    public TestProcedureChange AddProcedureChange(string actorId, TestProcedureChangeDraft draft, DateTimeOffset now,
+        bool allowIncomplete = false)
     {
         EnsureOpen();
         Required(actorId, "authoring verification engineer");
+        // Complete by default. These three used to be enforced in TestProcedureChange's constructor, which
+        // put them on every path — including an API endpoint building a package from a payload, where a
+        // decision missing its steps is malformed rather than half-written.
+        //
+        // `allowIncomplete` is passed only by the controlled-editing check-in path, where an engineer is
+        // putting a working copy down mid-sentence. SubmitForReview names whatever is still unfinished and
+        // refuses to put it in front of an approver, so this cannot escape the Draft.
+        if (!allowIncomplete && draft.Kind != TestProcedureChangeKind.Retire)
+        {
+            if (string.IsNullOrWhiteSpace(draft.Title))
+                throw new DomainException("A test procedure title is required.");
+            if (string.IsNullOrWhiteSpace(draft.Objective))
+                throw new DomainException("A test procedure objective is required.");
+            if (string.IsNullOrWhiteSpace(draft.Steps))
+                throw new DomainException("A test procedure must state its steps.");
+        }
         if (Outcome != TestChangeReviewOutcome.ChangeRequired)
             throw new DomainException("Record that test-procedure work is required before proposing changes to procedures.");
         if (draft.Level != ProcedureLevel())

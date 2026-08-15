@@ -489,8 +489,15 @@ public sealed class SystemChangeRequestTests
         // The author is interrupted with a target chosen and nothing written yet. That has to be a state the
         // record can rest in: the alternative is holding an exclusive lock overnight or deleting the work.
         var scr = CreateDraft();
+
+        // Complete by default: an API payload that omits the statement is malformed, not unfinished, and the
+        // seven endpoints that build a change request from one must keep getting that answer.
+        Assert.Throws<DomainException>(() => scr.AddRequirementChange("author", "SYSR-00002375", 1,
+            RequirementLevel.System, RequirementChangeKind.Modify, "", "", "Test", Now));
+
+        // The check-in path says so explicitly, because there the author is putting work down mid-sentence.
         scr.AddRequirementChange("author", "SYSR-00002375", 1, RequirementLevel.System,
-            RequirementChangeKind.Modify, "", "", "Test", Now);
+            RequirementChangeKind.Modify, "", "", "Test", Now, allowIncomplete: true);
         Assert.Single(scr.RequirementChanges);
 
         // It cannot be put in front of an approver in that state, and the refusal names the proposal rather
@@ -515,7 +522,8 @@ public sealed class SystemChangeRequestTests
         // A Modify with no identifier: the author opened the picker and never chose. Allowed on the shelf,
         // refused at the door, because nothing downstream could resolve what it changes.
         scr.AddRequirementChange("author", "", 0, RequirementLevel.System,
-            RequirementChangeKind.Modify, "The FMS shall do something.", "Because.", "Test", Now);
+            RequirementChangeKind.Modify, "The FMS shall do something.", "Because.", "Test", Now,
+            allowIncomplete: true);
         Assert.Throws<DomainException>(() => scr.SubmitForReview("author", Approvers(), Now));
     }
 

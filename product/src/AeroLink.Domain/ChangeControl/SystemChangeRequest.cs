@@ -129,14 +129,20 @@ public sealed class SystemChangeRequest
         string verificationMethod, DateTimeOffset now, string richText = "", string attributesJson = "{}",
         string impactDispositionJson = RequirementAuthoringJson.CompleteImpactDispositions,
         Guid? targetSectionId = null, bool administratorAuthority = false,
-        string proposedUpstreamRevisionIdsJson = "[]")
+        string proposedUpstreamRevisionIdsJson = "[]", bool allowIncomplete = false)
     {
         EnsureAuthor(actorId, administratorAuthority);
         EnsureDraft();
         EnsureRequirementLevel(level);
-        // A statement is required to ask someone to approve this, not to write it down. An author who starts a
-        // proposal and has to stop can now put the work on the shelf; the completeness check lives in
-        // ValidateReadyForReview, which is the moment it becomes a claim about readiness for another person.
+        // Complete by default, because every other caller is a request being submitted rather than work being
+        // put down: seven API endpoints build a change request from a payload, and a payload that omits the
+        // statement is malformed rather than unfinished.
+        //
+        // `allowIncomplete` is passed only by the controlled-editing check-in path, where the author is
+        // parking a working copy mid-sentence. ValidateReadyForReview refuses whatever is still unfinished
+        // when the record is offered to an approver, so the relaxation cannot escape the Draft.
+        if (!allowIncomplete && string.IsNullOrWhiteSpace(statement) && kind != RequirementChangeKind.Retire)
+            throw new DomainException("A requirement statement is required.");
         var change = new RequirementChange(Id, baseNumber, revision, level, kind, statement, rationale, verificationMethod,
             richText, attributesJson, impactDispositionJson, targetSectionId, proposedUpstreamRevisionIdsJson);
         _requirementChanges.Add(change);
@@ -150,7 +156,7 @@ public sealed class SystemChangeRequest
     public void UpdateDraft(string actorId, string title, string problem, string analysis, string solution,
         IReadOnlyList<RequirementChangeDraft> changes, DateTimeOffset now,
         string? problemRich = null, string? analysisRich = null, string? solutionRich = null,
-        bool administratorAuthority = false)
+        bool administratorAuthority = false, bool allowIncomplete = false)
     {
         EnsureAuthor(actorId, administratorAuthority);
         EnsureDraft();
@@ -161,8 +167,9 @@ public sealed class SystemChangeRequest
         _requirementChanges.Clear();
         foreach (var item in changes)
         {
-            // Unfinished is allowed on a Draft; see AddRequirementChange. ValidateReadyForReview refuses it
-            // when the Draft is offered for review, which is the point at which incompleteness matters.
+            // Complete by default; unfinished only where the caller says so. See AddRequirementChange.
+            if (!allowIncomplete && string.IsNullOrWhiteSpace(item.Statement) && item.Kind != RequirementChangeKind.Retire)
+                throw new DomainException("A requirement statement is required unless the requirement is being retired.");
             _requirementChanges.Add(new RequirementChange(Id, item.BaseNumber, item.Revision, item.Level, item.Kind,
                 item.Statement, item.Rationale, item.VerificationMethod, item.RichText, item.AttributesJson, item.ImpactDispositionJson,
                 item.TargetSectionId, item.ProposedUpstreamRevisionIdsJson));
