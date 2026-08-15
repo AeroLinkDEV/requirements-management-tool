@@ -336,20 +336,20 @@ inflated and are retained **only as the defect evidence**. The corrected baselin
 round-3 run (schema v2, non-overlapping intervals) and published in its per-shard artifacts, the PR
 body, and the table below.
 
-### Corrected baseline: run 31855245392, PR #581 head `1da0133` (schema v2)
+### Corrected baseline: run 31855848873, PR #581 head `019950c` (schema v2)
 
 Each shard reconciles exactly: TRX = attributed + ambiguous theory rows + no-factory-telemetry.
 
 | Shard | TRX | Attributed | Ambiguous theory rows | Unmatched methods | No factory telemetry | Factories | Summed wall | Summed startup | Startup % | Wall p10/median/p75/p95 | Startup p10/median/p75/p95 |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
-| 1 | 163 | 132 | 28 | 0 | 3 | 160 | 802.8s | 86.9s | 11% | 3.6 / 6.2 / 7.2 / 8.8s | 0.3 / 0.5 / 0.7 / 1.2s |
-| 2 | 163 | 138 | 15 | 1 | 10 | 162 | 810.3s | 101.0s | 12% | 3.8 / 5.4 / 6.8 / 10.3s | 0.4 / 0.6 / 0.8 / 1.3s |
-| 3 | 163 | 126 | 20 | 1 | 17 | 149 | 776.4s | 101.4s | 13% | 3.8 / 5.7 / 7.0 / 12.2s | 0.4 / 0.6 / 0.7 / 1.7s |
-| Total | 489 | 396 | 63 | 2 | 30 | 471 | 2389.4s | 289.3s | 12% | — | — |
+| 1 | 163 | 132 | 28 | 0 | 3 | 160 | 663.7s | 130.1s | 20% | 2.9 / 4.7 / 6.0 / 9.1s | 0.3 / 0.7 / 1.0 / 3.3s |
+| 2 | 163 | 138 | 15 | 1 | 10 | 162 | 899.8s | 115.7s | 13% | 4.1 / 6.0 / 7.5 / 11.9s | 0.4 / 0.6 / 0.8 / 2.2s |
+| 3 | 163 | 126 | 20 | 1 | 17 | 149 | 716.0s | 104.0s | 15% | 3.5 / 5.2 / 6.6 / 10.5s | 0.4 / 0.6 / 0.8 / 2.1s |
+| Total | 489 | 396 | 63 | 2 | 30 | 471 | 2279.6s | 349.8s | 15% | — | — |
 
 The raw host records confirm the non-overlapping boundary: pre-host construction summed to 176/131/170 ms
-across the three shards of the preceding run (216/134/162 ms on this run) while the host builds themselves
-summed to 103.7/120.7/112.3 s. The corrected startup floor (11–13% of summed wall by shard) is roughly a
+across the three shards of an earlier run (159/186/144 ms on this run) while the host builds themselves
+summed to 144.1/135.8/111.4 s. The corrected startup floor (13–20% of summed wall by shard) is roughly a
 third of the inflated round-2 fractions (40/25/31%), and the earlier per-class startup rankings were
 materially distorted by the double count.
 
