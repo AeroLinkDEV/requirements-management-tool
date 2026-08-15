@@ -8,6 +8,70 @@
 
 export const PROVENANCE_SCHEMA_VERSION = 'aerolink-validated-tree/v1'
 
+/**
+ * Evidence older than this is not trusted to authorize a skip.
+ *
+ * The manifest says a tree passed, not that it would pass today. Runner images, SDKs, browsers and
+ * transitive dependencies drift underneath an unchanged tree, which is precisely the drift the weekly
+ * full run exists to catch. A tree can also legitimately recur long after it was tested — a revert that
+ * restores an earlier tree produces a byte-identical tree SHA and would otherwise match evidence of
+ * any age. Thirty days matches the artifact retention the manifest is stored under, so this refuses
+ * nothing that is still fetchable and does not depend on retention to enforce the policy.
+ */
+export const MAX_EVIDENCE_AGE_DAYS = 30
+
+/**
+ * Tolerance for a manifest dated slightly ahead of the decision clock. Runner and API clocks are not
+ * identical; a few minutes of skew is ordinary. Anything beyond it is not a clock difference.
+ */
+export const MAX_CLOCK_SKEW_MINUTES = 10
+
+/**
+ * Paths whose contents define the gate itself, rather than the product the gate tests.
+ *
+ * A tree match proves the merged tree is the tested tree. It cannot prove the gate that tested it was
+ * trustworthy, because the change under test may be the gate. When a merge edits these paths, its own
+ * evidence was produced under the definition it is introducing, so it does not get to authorize
+ * skipping the first independent run of that definition on main.
+ */
+export const GATE_DEFINING_PATHS = [
+  '.github/workflows/ci.yml',
+  '.github/workflows/main-provenance.yml',
+  'product/ci-metrics/lib/provenance.mjs',
+  'product/ci-metrics/bin/write-validated-tree.mjs',
+  'product/ci-metrics/bin/check-main-provenance.mjs',
+]
+
+/** True when any changed path is one the gate's own trustworthiness depends on. */
+export function touchesGateDefinition(changedPaths = []) {
+  if (!Array.isArray(changedPaths)) return false
+  return changedPaths.some((path) => typeof path === 'string' && GATE_DEFINING_PATHS.includes(path))
+}
+
+/**
+ * Age verdict for one manifest. Returns a reason string when the evidence may not be used, or null.
+ * `now` is passed in rather than read from the clock so the boundary is testable and the decision is
+ * reproducible when replayed.
+ */
+export function evidenceAgeRejection(manifest, now) {
+  const stamp = manifest?.validatedAt
+  if (typeof stamp !== 'string') return 'Manifest has no validatedAt timestamp, so its evidence cannot be aged.'
+  const validatedAt = Date.parse(stamp)
+  if (!Number.isFinite(validatedAt)) return `Manifest validatedAt "${stamp.slice(0, 40)}" is not a parseable timestamp.`
+  const reference = typeof now === 'number' ? now : Date.parse(now)
+  if (!Number.isFinite(reference)) return 'The decision reference time is missing or malformed.'
+  const ageMs = reference - validatedAt
+  if (ageMs < -MAX_CLOCK_SKEW_MINUTES * 60 * 1000) {
+    return `Manifest validatedAt ${stamp} is ahead of the decision time by more than ${MAX_CLOCK_SKEW_MINUTES} minutes.`
+  }
+  const maxAgeMs = MAX_EVIDENCE_AGE_DAYS * 24 * 60 * 60 * 1000
+  if (ageMs > maxAgeMs) {
+    const ageDays = Math.floor(ageMs / (24 * 60 * 60 * 1000))
+    return `Manifest evidence is ${ageDays} days old, beyond the ${MAX_EVIDENCE_AGE_DAYS}-day limit.`
+  }
+  return null
+}
+
 export function validateManifest(manifest) {
   const errors = []
   if (manifest === null || typeof manifest !== 'object' || Array.isArray(manifest)) return ['Manifest is not an object.']
@@ -24,6 +88,11 @@ export function validateManifest(manifest) {
   if (typeof manifest.repository !== 'string' || manifest.repository.length > 200) errors.push('repository is invalid.')
   if (typeof manifest.provenance !== 'string' || manifest.provenance.length > 50) errors.push('provenance is invalid.')
   if (manifest.canAuthorizePostMergeSkip !== true && manifest.canAuthorizePostMergeSkip !== false) errors.push('canAuthorizePostMergeSkip must be boolean.')
+  // The producer has always written validatedAt; nothing read it, so a manifest without a usable one
+  // was accepted and then aged against nothing.
+  if (typeof manifest.validatedAt !== 'string' || manifest.validatedAt.length > 40 || !Number.isFinite(Date.parse(manifest.validatedAt))) {
+    errors.push('validatedAt must be a parseable ISO-8601 timestamp.')
+  }
   const gates = manifest.gates
   if (!gates || typeof gates !== 'object') {
     errors.push('Manifest has no gates evidence.')
@@ -90,12 +159,28 @@ export function bindManifest(manifest, {
   return { ok: true }
 }
 
-export function decideProvenance({ pushTreeSha, mergedPr = null, manifests = [] }) {
+export function decideProvenance({ pushTreeSha, mergedPr = null, manifests = [], now = null, changedPaths = [] }) {
   if (typeof pushTreeSha !== 'string' || !/^[0-9a-f]{40}$/.test(pushTreeSha)) {
     return { outcome: 'fallback-needed', canSkip: false, reason: 'The pushed main tree SHA is missing or malformed.' }
   }
   if (!mergedPr) {
     return { outcome: 'fallback-needed', canSkip: false, reason: 'No merged pull request was found for the pushed commit (direct push or unusual merge method).' }
+  }
+  // Checked before any manifest is examined: no manifest, however well-formed, can vouch for a gate
+  // definition that this very merge is changing.
+  if (touchesGateDefinition(changedPaths)) {
+    const edited = changedPaths.filter((path) => GATE_DEFINING_PATHS.includes(path))
+    return {
+      outcome: 'fallback-needed',
+      canSkip: false,
+      reason: `This merge changes the gate's own definition (${edited.join(', ')}); its evidence was produced under the definition it introduces, so main runs the full gate once independently.`,
+      selfModifying: true,
+    }
+  }
+  // A decision with no reference time cannot age evidence, and unaged evidence is what this rule
+  // exists to refuse. Fail closed rather than silently skipping the age check.
+  if (now === null) {
+    return { outcome: 'fallback-needed', canSkip: false, reason: 'No decision reference time was supplied, so manifest evidence could not be aged.' }
   }
   const valid = []
   const rejected = []
@@ -111,6 +196,11 @@ export function decideProvenance({ pushTreeSha, mergedPr = null, manifests = [] 
     }
     if (manifest.canAuthorizePostMergeSkip !== true) {
       rejected.push({ run: manifest.run.id, reason: 'Manifest does not authorize a post-merge skip (gate or totals incomplete).' })
+      continue
+    }
+    const stale = evidenceAgeRejection(manifest, now)
+    if (stale !== null) {
+      rejected.push({ run: manifest.run.id, reason: stale })
       continue
     }
     const eligibility = deriveEligibility(manifest)

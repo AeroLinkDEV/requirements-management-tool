@@ -8,7 +8,7 @@
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { readSingleJsonFromZip } from '../lib/zip.mjs'
-import { decideProvenance, validateManifest, bindManifest } from '../lib/provenance.mjs'
+import { decideProvenance, validateManifest, bindManifest, GATE_DEFINING_PATHS } from '../lib/provenance.mjs'
 
 const env = (name) => process.env[name] ?? ''
 
@@ -41,6 +41,15 @@ async function listAll(path, { token, apiUrl } = {}) {
 async function fetchTree(sha, { token, apiUrl, repository }) {
   const body = await api(`/repos/${repository}/git/commits/${sha}`, { token, apiUrl })
   return body.tree?.sha ?? null
+}
+
+/**
+ * The paths this merge introduced, from GitHub's own view of the pull request rather than from
+ * anything the branch supplied. Used only to decide whether the merge edits the gate's own definition.
+ */
+async function fetchMergedPaths(prNumber, { token, apiUrl, repository }) {
+  const files = await listAll(`/repos/${repository}/pulls/${prNumber}/files`, { token, apiUrl })
+  return files.map((file) => file?.filename).filter((name) => typeof name === 'string')
 }
 
 async function latestManifestForRun(runId, { token, apiUrl, repository }) {
@@ -154,7 +163,23 @@ async function main() {
         manifests.push(manifest)
       }
     }
-    const decision = decideProvenance({ pushTreeSha: pushTree, mergedPr, manifests })
+    // Fail closed: if GitHub will not tell us what the merge changed, we cannot rule out that it
+    // changed the gate itself, so the decision must be the same as if it had.
+    let changedPaths = null
+    let changedPathsError = null
+    try {
+      changedPaths = await fetchMergedPaths(mergedPr.number, { token, apiUrl, repository })
+    } catch (error) {
+      changedPathsError = error.message
+      changedPaths = [...GATE_DEFINING_PATHS]
+    }
+    const decision = decideProvenance({
+      pushTreeSha: pushTree,
+      mergedPr,
+      manifests,
+      now: Date.now(),
+      changedPaths,
+    })
     result = {
       schemaVersion: 'aerolink-main-provenance/v1',
       mode: 'shadow',
@@ -168,6 +193,8 @@ async function main() {
       reason: decision.reason,
       source: decision.source ?? null,
       rejected: decision.rejected ?? [],
+      selfModifying: decision.selfModifying === true,
+      changedPathsUnavailable: changedPathsError,
     }
   }
 
@@ -179,6 +206,10 @@ async function main() {
   if (result.push) lines.push(`- Pushed tree: \`${escapeMarkdown(result.push.treeSha)}\``)
   if (result.source) lines.push(`- Validated by PR #${result.source.pr}, run ${result.source.runId} attempt ${result.source.attempt}, tree \`${escapeMarkdown(result.source.treeSha)}\``)
   if (result.reason) lines.push(`- Reason: ${escapeMarkdown(result.reason)}`)
+  if (result.selfModifying) lines.push('- This merge changed the gate\'s own definition, so main validates it once independently regardless of tree match.')
+  if (result.changedPathsUnavailable) {
+    lines.push(`- The merge's changed-file list could not be read (${escapeMarkdown(result.changedPathsUnavailable)}); treated as gate-defining and sent to fallback.`)
+  }
   if (result.outcome === 'provenanced-match' && result.manifestsFound > 0) {
     lines.push('- Would skip under phase B: backend-api, backend-core, client, script-contracts, postgresql-smoke (lightweight cache warming would remain).')
   }

@@ -1,6 +1,10 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { validateManifest, decideProvenance, deriveEligibility, bindManifest } from '../lib/provenance.mjs'
+import {
+  validateManifest, decideProvenance, deriveEligibility, bindManifest,
+  evidenceAgeRejection, touchesGateDefinition,
+  MAX_EVIDENCE_AGE_DAYS, MAX_CLOCK_SKEW_MINUTES, GATE_DEFINING_PATHS,
+} from '../lib/provenance.mjs'
 
 function manifest(overrides = {}) {
   return {
@@ -22,6 +26,15 @@ function manifest(overrides = {}) {
   }
 }
 
+/**
+ * A reference time six hours after the fixture's validatedAt, and a changed path that is not part of
+ * the gate's definition. The cases below predate the evidence-age and self-modification rules and are
+ * about the tree/gate contract, so they hold both new variables constant rather than exercising them.
+ */
+const NOW = Date.parse('2026-08-14T06:00:00Z')
+const UNRELATED_PATH = 'product/src/AeroLink.Api/Program.cs'
+const decide = (input) => decideProvenance({ now: NOW, changedPaths: [UNRELATED_PATH], ...input })
+
 test('validateManifest enforces the closed manifest contract', () => {
   assert.deepEqual(validateManifest(manifest()), [])
   assert.ok(validateManifest({ ...manifest(), schemaVersion: 'old' }).some((e) => /Unsupported/.test(e)))
@@ -32,34 +45,34 @@ test('validateManifest enforces the closed manifest contract', () => {
 
 test('decideProvenance requires an exact tree match and complete gate evidence', () => {
   const good = manifest()
-  const match = decideProvenance({ pushTreeSha: 'd'.repeat(40), mergedPr: { number: 1 }, manifests: [good] })
+  const match = decide({ pushTreeSha: 'd'.repeat(40), mergedPr: { number: 1 }, manifests: [good] })
   assert.equal(match.outcome, 'provenanced-match')
   assert.equal(match.canSkip, false)
   assert.equal(match.source.runId, 100)
 
-  const noPr = decideProvenance({ pushTreeSha: 'd'.repeat(40), mergedPr: null, manifests: [good] })
+  const noPr = decide({ pushTreeSha: 'd'.repeat(40), mergedPr: null, manifests: [good] })
   assert.equal(noPr.outcome, 'fallback-needed')
   assert.match(noPr.reason, /No merged pull request/)
 
-  const treeMismatch = decideProvenance({ pushTreeSha: 'e'.repeat(40), mergedPr: { number: 1 }, manifests: [good] })
+  const treeMismatch = decide({ pushTreeSha: 'e'.repeat(40), mergedPr: { number: 1 }, manifests: [good] })
   assert.equal(treeMismatch.outcome, 'fallback-needed')
   assert.match(treeMismatch.reason, /does not match the pushed main tree/)
 
-  const notAuthorized = decideProvenance({ pushTreeSha: 'd'.repeat(40), mergedPr: { number: 1 }, manifests: [{ ...good, canAuthorizePostMergeSkip: false }] })
+  const notAuthorized = decide({ pushTreeSha: 'd'.repeat(40), mergedPr: { number: 1 }, manifests: [{ ...good, canAuthorizePostMergeSkip: false }] })
   assert.equal(notAuthorized.outcome, 'fallback-needed')
   assert.match(notAuthorized.reason, /does not authorize/)
 
-  const malformed = decideProvenance({ pushTreeSha: 'd'.repeat(40), mergedPr: { number: 1 }, manifests: [{ ...good, checkedOut: { ...good.checkedOut, treeSha: 'x' } }] })
+  const malformed = decide({ pushTreeSha: 'd'.repeat(40), mergedPr: { number: 1 }, manifests: [{ ...good, checkedOut: { ...good.checkedOut, treeSha: 'x' } }] })
   assert.equal(malformed.outcome, 'fallback-needed')
   assert.match(malformed.reason, /validation/)
 
-  assert.equal(decideProvenance({ pushTreeSha: 'bad', mergedPr: { number: 1 }, manifests: [] }).outcome, 'fallback-needed')
+  assert.equal(decide({ pushTreeSha: 'bad', mergedPr: { number: 1 }, manifests: [] }).outcome, 'fallback-needed')
 })
 
 test('decideProvenance picks the newest acceptable manifest', () => {
   const older = manifest({ run: { id: 100, attempt: 1, event: 'pull_request' } })
   const newer = manifest({ run: { id: 200, attempt: 2, event: 'pull_request' } })
-  const match = decideProvenance({ pushTreeSha: 'd'.repeat(40), mergedPr: { number: 1 }, manifests: [older, newer] })
+  const match = decide({ pushTreeSha: 'd'.repeat(40), mergedPr: { number: 1 }, manifests: [older, newer] })
   assert.equal(match.source.runId, 200)
   assert.equal(match.source.attempt, 2)
 })
@@ -76,12 +89,126 @@ test('canAuthorizePostMergeSkip cannot override contradictory raw gate evidence'
   for (const entry of cases) {
     const crafted = base
     entry.mutate(crafted)
-    const result = decideProvenance({ pushTreeSha: 'd'.repeat(40), mergedPr: { number: 1 }, manifests: [crafted] })
+    const result = decide({ pushTreeSha: 'd'.repeat(40), mergedPr: { number: 1 }, manifests: [crafted] })
     assert.equal(result.outcome, 'fallback-needed', entry.name)
     assert.match(result.reason, /eligible|incoherent|No selected|Missing gate/, entry.name)
     const eligibility = deriveEligibility(crafted)
     assert.equal(eligibility.eligible, false, entry.name)
   }
+})
+
+const DAY_MS = 24 * 60 * 60 * 1000
+const validatedAt = Date.parse('2026-08-14T00:00:00Z')
+
+test('evidence stops authorizing a skip once it is older than the retention limit', () => {
+  const fresh = manifest()
+  // Exactly at the limit is still inside it; the rule rejects evidence *older* than 30 days.
+  const atLimit = decide({
+    pushTreeSha: 'd'.repeat(40),
+    mergedPr: { number: 1 },
+    manifests: [fresh],
+    now: validatedAt + MAX_EVIDENCE_AGE_DAYS * DAY_MS,
+  })
+  assert.equal(atLimit.outcome, 'provenanced-match')
+
+  const justPast = decide({
+    pushTreeSha: 'd'.repeat(40),
+    mergedPr: { number: 1 },
+    manifests: [fresh],
+    now: validatedAt + MAX_EVIDENCE_AGE_DAYS * DAY_MS + 1,
+  })
+  assert.equal(justPast.outcome, 'fallback-needed')
+  assert.match(justPast.reason, /30 days old|beyond the 30-day limit/)
+})
+
+test('a revert that restores an old tree does not inherit that tree\'s old evidence', () => {
+  // The tree SHA matches exactly, the gate evidence is perfect, and every other rule passes. Only the
+  // age of the evidence stands between this and a skipped post-merge gate — which is the point: the
+  // environment underneath an unchanged tree has had three months to drift.
+  const old = manifest()
+  const result = decide({
+    pushTreeSha: 'd'.repeat(40),
+    mergedPr: { number: 1 },
+    manifests: [old],
+    now: validatedAt + 90 * DAY_MS,
+  })
+  assert.equal(result.outcome, 'fallback-needed')
+  assert.equal(result.canSkip, false)
+  assert.match(result.reason, /90 days old/)
+})
+
+test('clock skew is tolerated but a manifest genuinely from the future is not', () => {
+  const ahead = manifest()
+  const withinSkew = decide({
+    pushTreeSha: 'd'.repeat(40),
+    mergedPr: { number: 1 },
+    manifests: [ahead],
+    now: validatedAt - MAX_CLOCK_SKEW_MINUTES * 60 * 1000,
+  })
+  assert.equal(withinSkew.outcome, 'provenanced-match')
+
+  const beyondSkew = decide({
+    pushTreeSha: 'd'.repeat(40),
+    mergedPr: { number: 1 },
+    manifests: [ahead],
+    now: validatedAt - MAX_CLOCK_SKEW_MINUTES * 60 * 1000 - 1,
+  })
+  assert.equal(beyondSkew.outcome, 'fallback-needed')
+  assert.match(beyondSkew.reason, /ahead of the decision time/)
+})
+
+test('unusable or absent timestamps are refused rather than treated as age zero', () => {
+  assert.ok(validateManifest({ ...manifest(), validatedAt: undefined }).some((e) => /validatedAt/.test(e)))
+  assert.ok(validateManifest({ ...manifest(), validatedAt: 'sometime last week' }).some((e) => /validatedAt/.test(e)))
+  assert.ok(validateManifest({ ...manifest(), validatedAt: 'x'.repeat(60) }).some((e) => /validatedAt/.test(e)))
+
+  assert.equal(evidenceAgeRejection({ validatedAt: '2026-08-14T00:00:00Z' }, NaN), 'The decision reference time is missing or malformed.')
+  assert.match(evidenceAgeRejection({}, NOW), /no validatedAt timestamp/)
+
+  // No reference time at all must fail closed, not skip the age rule.
+  const noNow = decideProvenance({
+    pushTreeSha: 'd'.repeat(40),
+    mergedPr: { number: 1 },
+    manifests: [manifest()],
+    changedPaths: [UNRELATED_PATH],
+  })
+  assert.equal(noNow.outcome, 'fallback-needed')
+  assert.match(noNow.reason, /reference time/)
+})
+
+test('a merge that edits the gate\'s own definition cannot authorize skipping it', () => {
+  for (const path of GATE_DEFINING_PATHS) {
+    // Perfect, fresh, exactly-matching evidence — and it still falls back, because that evidence was
+    // produced by the very gate definition this merge introduces.
+    const result = decide({
+      pushTreeSha: 'd'.repeat(40),
+      mergedPr: { number: 1 },
+      manifests: [manifest()],
+      changedPaths: [UNRELATED_PATH, path],
+    })
+    assert.equal(result.outcome, 'fallback-needed', path)
+    assert.equal(result.canSkip, false, path)
+    assert.equal(result.selfModifying, true, path)
+    assert.match(result.reason, new RegExp(path.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')), path)
+  }
+})
+
+test('the self-modification rule does not fire on ordinary product changes', () => {
+  const ordinary = decide({
+    pushTreeSha: 'd'.repeat(40),
+    mergedPr: { number: 1 },
+    manifests: [manifest()],
+    changedPaths: ['product/src/AeroLink.Domain/ChangeControl/SystemChangeRequest.cs', 'product/client/src/App.tsx'],
+  })
+  assert.equal(ordinary.outcome, 'provenanced-match')
+  assert.notEqual(ordinary.selfModifying, true)
+
+  // A path that merely resembles a gate-defining one is not one of them.
+  assert.equal(touchesGateDefinition(['docs/.github/workflows/ci.yml']), false)
+  assert.equal(touchesGateDefinition(['product/ci-metrics/lib/provenance.test.mjs']), false)
+  assert.equal(touchesGateDefinition([]), false)
+  assert.equal(touchesGateDefinition(null), false)
+  assert.equal(touchesGateDefinition(['.github/workflows/ci.yml']), true)
 })
 
 test('bindManifest rejects any identity mismatch against trusted API metadata', () => {
