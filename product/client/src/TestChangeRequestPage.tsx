@@ -336,11 +336,9 @@ export default function TestChangeRequestPage({
 
   const checkIn = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
-    // Matches the button beside it, and says which of the two is missing rather than naming both every time.
-    if (!draft || !lockRef.current || !draft.title.trim() || !draft.procedureChanges.every(proposalCanCheckIn)) {
-      setError(!draft?.title.trim()
-        ? 'Give the Draft a title before checking it in.'
-        : 'Finish or remove each started procedure proposal before checking in this Draft.')
+    // Matches the button beside it. An unfinished proposal is checked in as it stands.
+    if (!draft || !lockRef.current || !draft.title.trim()) {
+      setError('Give the Draft a title before checking it in.')
       return
     }
     setBusy(true); setError(''); setSaved('')
@@ -469,19 +467,17 @@ export default function TestChangeRequestPage({
         // written is a no-op, so there was never an invariant behind greying it — only a convention, and the
         // reader asked for the reassurance of an explicit save.
         canSave={autosaveStatus !== 'Conflict'}
-        // `workingCopyChanged` is gone: a checkout that changed nothing could previously only be discarded,
-        // never handed back, which made "I opened this by mistake" indistinguishable from "throw my work
-        // away". An unchanged draft checks in cleanly.
+        // An unfinished proposal no longer blocks. A checkout is somewhere to put work down, and an engineer
+        // interrupted halfway through a proposal should be able to hand the lock back with the half-written
+        // work attached rather than choosing between holding it overnight and deleting what they started.
         //
-        // The proposal minimum stays. Check-in is not a client-side commit: the engine calls
-        // `ApplyDraftAsync` against the aggregate and returns `aggregate_validation_failed` as a 400 for a
-        // half-created proposal. Removing this gate would produce a button that clicks and fails, which is
-        // worse than one that is unavailable. What was actually wrong is that it never said so.
-        canCheckIn={autosaveStatus !== 'Conflict' && Boolean(draft.title.trim()) && proposalsComplete}
-        checkInBlockedReason={
-          autosaveStatus === 'Conflict' ? 'Another edit reached this Draft first. Reload to see it before checking in.'
-          : !draft.title.trim() ? 'Give the Draft a title before checking it in.'
-          : 'Finish or remove each started procedure proposal — a proposal needs its identifier, title, objective and steps before it can be checked in.'}
+        // The completeness this used to enforce now lives in `TestChangeReview.SubmitForReview`, which is
+        // where it is a claim about readiness for another person. An approver still cannot be shown a
+        // procedure with no steps; an author can simply stop mid-sentence.
+        canCheckIn={autosaveStatus !== 'Conflict' && Boolean(draft.title.trim())}
+        checkInBlockedReason={autosaveStatus === 'Conflict'
+          ? 'Another edit reached this Draft first. Reload to see it before checking in.'
+          : 'Give the Draft a title before checking it in.'}
         onDiscard={() => void discard()}
         onSave={() => void saveWorkingCopy()}
       />}

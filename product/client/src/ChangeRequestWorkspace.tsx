@@ -280,17 +280,9 @@ const proposalComplete = (item: DraftRequirement) =>
         Boolean(item.upstreamRevisionIds?.length)),
   );
 
-// Check-in returns a controlled Draft to the shared record; it is not review submission. It therefore accepts
-// unfinished case analysis, impact decisions, and upward allocation, while still refusing a half-created
-// proposal that the aggregate itself cannot represent.
-const proposalCanCheckIn = (item: DraftRequirement) => {
-  const derived = item.isDerived ?? parseObject(item.attributesJson).derived === true;
-  return Boolean(
-    (item.kind === "Introduce" || item.baseNumber) &&
-      (item.kind === "Retire" || item.statement.trim()) &&
-      (!derived || item.rationale.trim()),
-  );
-};
+// The rule this held — a proposal needs its identifier and statement — now lives in
+// `SystemChangeRequest.ValidateReadyForReview`, where it gates review submission rather than check-in. Kept
+// in one place rather than two, so the client cannot drift into refusing something the aggregate accepts.
 
 const workingCopyJson = (draft: ScrDraft, problemReportIds: string[], requirements: DraftRequirement[]) =>
   JSON.stringify({
@@ -878,10 +870,8 @@ export default function ChangeRequestWorkspace({
     event.preventDefault();
     if (!scr || !lockRef.current) return;
     // Matches the button beside it, and says which of the two is missing rather than naming both every time.
-    if (!draft.title.trim() || !requirements.every(proposalCanCheckIn)) {
-      setError(!draft.title.trim()
-        ? "Give the change request a title before checking it in."
-        : "Finish or remove each started requirement proposal before checking in this Draft.");
+    if (!draft.title.trim()) {
+      setError("Give the change request a title before checking it in.");
       return;
     }
     await withBusy(async () => {
@@ -971,7 +961,10 @@ export default function ChangeRequestWorkspace({
   const proposalsComplete = requirements.length > 0 && requirements.every(proposalComplete);
   const reviewReady = caseComplete && proposalsComplete && requirements.length > 0;
   const hasUnsavedChanges = mode === "edit" && serializedWorkingCopy !== lastSavedRef.current;
-  const draftCanCheckIn = Boolean(draft.title.trim()) && requirements.every(proposalCanCheckIn);
+  // An unfinished proposal no longer blocks a check-in. `SystemChangeRequest.ValidateReadyForReview` now
+  // carries the completeness the aggregate used to demand on every Draft write, so a proposal can rest
+  // half-written and still cannot be put in front of an approver.
+  const draftCanCheckIn = Boolean(draft.title.trim());
   const uniqueApprovers = new Set(approvers.map((item) => item.userId).filter(Boolean));
   const selectedApproverCount = uniqueApprovers.size;
   const reviewerSetupValid =
@@ -1034,10 +1027,9 @@ export default function ChangeRequestWorkspace({
             // silence.
             canSave={autosaveStatus !== "Conflict"}
             canCheckIn={autosaveStatus !== "Conflict" && draftCanCheckIn}
-            checkInBlockedReason={
-              autosaveStatus === "Conflict" ? "Another edit reached this change request first. Reload to see it before checking in."
-              : !draft.title.trim() ? "Give the change request a title before checking it in."
-              : "Finish or remove each started requirement proposal — a proposal needs its identifier and statement, and a derived one needs its rationale, before it can be checked in."}
+            checkInBlockedReason={autosaveStatus === "Conflict"
+              ? "Another edit reached this change request first. Reload to see it before checking in."
+              : "Give the change request a title before checking it in."}
             onDiscard={() => void discard()}
             onSave={() => void saveWorkingCopy()}
           />}
