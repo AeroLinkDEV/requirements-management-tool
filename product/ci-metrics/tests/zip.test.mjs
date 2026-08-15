@@ -112,3 +112,54 @@ test('a named read finds its file in an artifact that holds a directory of outpu
   const broken = buildZip([['run-metrics.json', '{not json']])
   assert.throws(() => readNamedJsonFromZip(broken, 'run-metrics.json'), /could not be parsed/)
 })
+
+test('a named read refuses to choose between candidates by position', () => {
+  // A root entry is the unambiguous answer even when a stale copy is nested beside it.
+  const withBackup = buildZip([
+    ['backup/run-metrics.json', '{"which":"stale"}'],
+    ['run-metrics.json', '{"which":"root"}'],
+  ])
+  assert.equal(readNamedJsonFromZip(withBackup, 'run-metrics.json').which, 'root')
+
+  // Duplicate central-directory entries: refused rather than resolved by listing order.
+  const duplicated = buildZip([
+    ['run-metrics.json', '{"which":"first"}'],
+    ['run-metrics.json', '{"which":"second"}'],
+  ])
+  assert.throws(() => readNamedJsonFromZip(duplicated, 'run-metrics.json'), /contains 2 entries named/)
+
+  // Two nested copies and no root entry: also refused, for the same reason.
+  const twoNested = buildZip([
+    ['a/run-metrics.json', '{"which":"a"}'],
+    ['b/run-metrics.json', '{"which":"b"}'],
+  ])
+  assert.throws(() => readNamedJsonFromZip(twoNested, 'run-metrics.json'), /2 nested copies/)
+})
+
+test('a named read bounds its own diagnostic', () => {
+  // A ZIP name may be 65,535 bytes. The message is stored in the collector's `missing` list and copied into
+  // Markdown before the report's size cap applies, so an unbounded diagnostic lets one malformed artifact
+  // abort the scheduled collector instead of being recorded as a single unreadable run.
+  const longName = `${'n'.repeat(60_000)}.json`
+  const hostile = buildZip([[longName, '{"a":1}'], ['other.json', '{"b":2}']])
+  let message = ''
+  try {
+    readNamedJsonFromZip(hostile, 'run-metrics.json')
+  } catch (error) {
+    message = error.message
+  }
+  assert.match(message, /does not contain "run-metrics.json"/)
+  assert.ok(message.length < 700, `diagnostic was ${message.length} characters`)
+  assert.ok(!message.includes('n'.repeat(200)), 'the long entry name was not truncated')
+
+  // Many entries are summarised rather than listed in full.
+  const many = buildZip(Array.from({ length: 40 }, (_, i) => [`file-${i}.json`, '{}']))
+  let manyMessage = ''
+  try {
+    readNamedJsonFromZip(many, 'run-metrics.json')
+  } catch (error) {
+    manyMessage = error.message
+  }
+  assert.match(manyMessage, /\+30 more/)
+  assert.ok(manyMessage.length < 700, `diagnostic was ${manyMessage.length} characters`)
+})

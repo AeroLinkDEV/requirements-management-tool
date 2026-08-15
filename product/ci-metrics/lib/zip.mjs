@@ -113,12 +113,40 @@ export function readSingleJsonFromZip(input) {
  * A consumer that knows which file it wants should ask for it by name rather than depend on being the only
  * writer, which is a property no shared output directory keeps for long.
  */
+/** A ZIP name is bounded at 65,535 bytes, so every name reaching a message is truncated before it gets there. */
+const MAX_DIAGNOSTIC_NAME = 80
+const MAX_DIAGNOSTIC_NAMES = 10
+const MAX_DIAGNOSTIC_LENGTH = 400
+
+const clip = (value, limit) => (value.length > limit ? `${value.slice(0, limit)}…` : value)
+
+function describeEntries(jsonEntries) {
+  if (jsonEntries.length === 0) return 'none'
+  const shown = jsonEntries.slice(0, MAX_DIAGNOSTIC_NAMES).map((entry) => clip(entry.name, MAX_DIAGNOSTIC_NAME))
+  const suffix = jsonEntries.length > MAX_DIAGNOSTIC_NAMES ? `, +${jsonEntries.length - MAX_DIAGNOSTIC_NAMES} more` : ''
+  return clip(`${shown.join(', ')}${suffix}`, MAX_DIAGNOSTIC_LENGTH)
+}
+
 export function readNamedJsonFromZip(input, fileName) {
   const jsonEntries = jsonEntriesOf(input)
-  const match = jsonEntries.find((entry) => entry.name === fileName || entry.name.endsWith(`/${fileName}`))
-  if (!match) {
-    const found = jsonEntries.map((entry) => entry.name).slice(0, 10).join(', ')
-    throw new ZipParseError(`Artifact zip does not contain "${fileName}". JSON entries: ${found || 'none'}.`)
+  // An exact root entry is the unambiguous answer. Only when there is none does a single nested copy stand in,
+  // and anything ambiguous is refused rather than resolved by position: `.find()` would have taken whichever
+  // matching basename the central directory happened to list first, so a stale `backup/run-metrics.json` or a
+  // duplicate entry could be read as the record. These artifacts are untrusted input, and an order-dependent
+  // choice among several valid-looking candidates is exactly the kind of silent wrong answer that is
+  // indistinguishable from a right one.
+  const rootMatches = jsonEntries.filter((entry) => entry.name === fileName)
+  const nestedMatches = jsonEntries.filter((entry) => entry.name.endsWith(`/${fileName}`))
+
+  if (rootMatches.length > 1) {
+    throw new ZipParseError(`Artifact zip contains ${rootMatches.length} entries named "${fileName}". JSON entries: ${describeEntries(jsonEntries)}.`)
   }
-  return parseJsonEntry(input, match)
+  if (rootMatches.length === 1) return parseJsonEntry(input, rootMatches[0])
+
+  if (nestedMatches.length > 1) {
+    throw new ZipParseError(`Artifact zip contains ${nestedMatches.length} nested copies of "${fileName}" and no root entry. JSON entries: ${describeEntries(jsonEntries)}.`)
+  }
+  if (nestedMatches.length === 1) return parseJsonEntry(input, nestedMatches[0])
+
+  throw new ZipParseError(`Artifact zip does not contain "${fileName}". JSON entries: ${describeEntries(jsonEntries)}.`)
 }
