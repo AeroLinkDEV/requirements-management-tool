@@ -163,3 +163,7 @@ test('a named read bounds its own diagnostic', () => {
   assert.match(manyMessage, /\+30 more/)
   assert.ok(manyMessage.length < 700, `diagnostic was ${manyMessage.length} characters`)
 })
+
+test('TEMPORARY defect demonstration for #591 — removed before merge', () => {
+  assert.equal(1, 2, 'Deliberate failure: proving a failing metrics-tooling job does not fail the gate.')
+})
