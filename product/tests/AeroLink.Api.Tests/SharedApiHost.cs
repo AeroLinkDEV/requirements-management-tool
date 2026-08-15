@@ -22,6 +22,10 @@ public sealed class SharedApiHost : IDisposable
         _factory = new AeroLinkApiFactory(callerFile: "SharedApiHost", callerMember: "class fixture");
     }
 
+    // Stable per fixture instance: the isolation tests use this to prove the SAME host/database is shared
+    // across the tests of the class, rather than being silently recreated per test.
+    public Guid InstanceId { get; } = Guid.NewGuid();
+
     internal AeroLinkApiFactory Factory => _factory;
 
     public HttpClient CreateClient() => _factory.CreateClient();

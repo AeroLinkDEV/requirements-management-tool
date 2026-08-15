@@ -20,6 +20,25 @@ public sealed class SharedHostIsolationTests : IClassFixture<SharedApiHost>
 {
     private readonly SharedApiHost _host;
 
+    // Cross-test reuse proof: xUnit runs a class's tests serially but does not guarantee their order, so
+    // every fact records the fixture instance it saw. Once more than one fact has run, ALL observed
+    // instance IDs must be equal: if SharedApiHost were silently recreated per test, the IDs would differ
+    // and the last fact to run fails. A filtered single-test run observes one ID and cannot prove reuse,
+    // but the two-client fact still proves session/project isolation within that one run.
+    private static readonly List<Guid> ObservedInstanceIds = [];
+
+    private void RecordObservedInstance()
+    {
+        lock (ObservedInstanceIds)
+        {
+            if (!ObservedInstanceIds.Contains(_host.InstanceId)) ObservedInstanceIds.Add(_host.InstanceId);
+            if (ObservedInstanceIds.Count > 1)
+            {
+                Assert.Single(ObservedInstanceIds.Distinct());
+            }
+        }
+    }
+
     public SharedHostIsolationTests(SharedApiHost host)
     {
         _host = host;
@@ -63,6 +82,8 @@ public sealed class SharedHostIsolationTests : IClassFixture<SharedApiHost>
     [Fact]
     public async Task A_shared_host_test_seeds_unique_data_and_cannot_cross_a_program_boundary()
     {
+        RecordObservedInstance();
+
         var tag = Guid.NewGuid().ToString("N")[..8];
         var seeded = await SeedAsync(_host.Factory, tag);
 
@@ -88,6 +109,8 @@ public sealed class SharedHostIsolationTests : IClassFixture<SharedApiHost>
     [Fact]
     public async Task A_second_shared_host_test_owns_its_own_data_and_sessions()
     {
+        RecordObservedInstance();
+
         var tag = Guid.NewGuid().ToString("N")[..8];
         var seeded = await SeedAsync(_host.Factory, tag);
 
@@ -103,5 +126,32 @@ public sealed class SharedHostIsolationTests : IClassFixture<SharedApiHost>
         await SignInAsync(outsider, seeded.OutsiderName);
         using var refused = await outsider.GetAsync($"/api/projects/{seeded.HomeProjectId}/personnel");
         Assert.Equal(HttpStatusCode.Forbidden, refused.StatusCode);
+    }
+
+    [Fact]
+    public async Task Two_clients_on_one_shared_host_do_not_leak_sessions_or_projects()
+    {
+        RecordObservedInstance();
+
+        // One test, two logical scenarios and two clients on the SAME shared host: each login must stay in
+        // its own client's cookie container, and each client must be refused the other's project.
+        var tag = Guid.NewGuid().ToString("N")[..8];
+        var seeded = await SeedAsync(_host.Factory, tag);
+
+        using var memberClient = _host.CreateClient();
+        await SignInAsync(memberClient, seeded.MemberName);
+        using var memberHome = await memberClient.GetAsync($"/api/projects/{seeded.HomeProjectId}/personnel");
+        Assert.Equal(HttpStatusCode.OK, memberHome.StatusCode);
+        using var memberForeign = await memberClient.GetAsync($"/api/projects/{seeded.ForeignProjectId}/personnel");
+        Assert.Equal(HttpStatusCode.Forbidden, memberForeign.StatusCode);
+
+        using var outsiderClient = _host.CreateClient();
+        using var unauthenticated = await outsiderClient.GetAsync($"/api/auth/me");
+        Assert.Equal(HttpStatusCode.Unauthorized, unauthenticated.StatusCode);
+        await SignInAsync(outsiderClient, seeded.OutsiderName);
+        using var outsiderRefused = await outsiderClient.GetAsync($"/api/projects/{seeded.HomeProjectId}/personnel");
+        Assert.Equal(HttpStatusCode.Forbidden, outsiderRefused.StatusCode);
+        using var outsiderForeign = await outsiderClient.GetAsync($"/api/projects/{seeded.ForeignProjectId}/personnel");
+        Assert.Equal(HttpStatusCode.OK, outsiderForeign.StatusCode);
     }
 }

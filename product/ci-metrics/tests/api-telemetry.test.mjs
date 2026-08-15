@@ -142,6 +142,10 @@ test('fixture and helper factories with no TRX row are reported as unmatched, no
   assert.equal(report.unmatchedMethods[0].className, 'ShowcaseApiFixture')
   assert.equal(report.unmatchedMethods[0].method, 'CreateFactory')
   assert.equal(report.unmatchedMethods[0].factories, 1)
+  assert.equal(report.unmatchedMethods[0].startupMs, 510)
+  assert.equal(report.totals.summedStartupMs, 610)
+  assert.equal(report.totals.summedFixtureStartupMs, 510)
+  assert.equal(report.totals.summedStartupWithFixturesMs, 1120)
 })
 
 test('credential-shaped telemetry is rejected and the markdown is bounded', () => {
