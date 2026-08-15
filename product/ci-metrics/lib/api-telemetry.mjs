@@ -244,6 +244,7 @@ export function aggregateApiTelemetry({ factoryRecords, trxTests = [] }) {
   const allWall = perTest.map((entry) => entry.wallMs).filter((value) => value !== null)
   const allStartup = perTest.map((entry) => entry.startupMs)
   const summedFixtureStartupMs = Math.round(unmatchedMethods.reduce((sum, entry) => sum + (entry.startupMs ?? 0), 0))
+  const summedAmbiguousStartupMs = Math.round(ambiguousTheories.reduce((sum, entry) => sum + (entry.startupMs ?? 0), 0))
   const summedStartupMs = Math.round(allStartup.reduce((sum, value) => sum + value, 0))
   const trxWithoutFactoryTelemetry = []
   for (const test of trxTests) {
@@ -270,7 +271,10 @@ export function aggregateApiTelemetry({ factoryRecords, trxTests = [] }) {
       summedWallMs: Math.round(allWall.reduce((sum, value) => sum + value, 0)),
       summedStartupMs,
       summedFixtureStartupMs,
-      summedStartupWithFixturesMs: summedStartupMs + summedFixtureStartupMs,
+      summedAmbiguousStartupMs,
+      // Whole-run startup: every factory's construction+host+disposal summed exactly once, across
+      // attributed tests, class fixtures/helpers, and ambiguous parameterized-theory rows.
+      summedFactoryStartupMs: summedStartupMs + summedFixtureStartupMs + summedAmbiguousStartupMs,
       summedConnectionOpenMs: Math.round(perTest.reduce((sum, entry) => sum + entry.connectionOpenMs, 0)),
       wall: quantiles(allWall),
       startup: quantiles(allStartup),
@@ -302,7 +306,7 @@ export function renderApiTelemetryMarkdown(report) {
   lines.push(`- TRX tests: ${report.totals.trxTests}; attributed (non-ambiguous) tests: ${report.totals.tests}; ambiguous theory rows: ${report.totals.ambiguousTheoryRows}; unmatched factory methods: ${report.totals.unmatchedMethods}; TRX tests without factory telemetry: ${report.totals.trxWithoutFactoryTelemetry}`)
   lines.push(`- Factories: ${report.totals.factories}; classes: ${report.totals.classes}`)
   lines.push(`- Summed wall: ${seconds(report.totals.summedWallMs)}; summed startup: ${seconds(report.totals.summedStartupMs)} (${Math.round((report.totals.startupFraction ?? 0) * 100)}% of wall)`)
-  lines.push(`- Whole-run startup including class fixtures: ${seconds(report.totals.summedStartupWithFixturesMs)} (attributed ${seconds(report.totals.summedStartupMs)} + unmatched fixture ${seconds(report.totals.summedFixtureStartupMs)})`)
+  lines.push(`- Whole-run factory startup (every factory exactly once): ${seconds(report.totals.summedFactoryStartupMs)} (attributed ${seconds(report.totals.summedStartupMs)} + class fixtures/helpers ${seconds(report.totals.summedFixtureStartupMs)} + ambiguous theory rows ${seconds(report.totals.summedAmbiguousStartupMs)})`)
   lines.push(`- Connection open (informational; all connection opens over the factory lifetime, never added to startup): ${seconds(report.totals.summedConnectionOpenMs)}`)
   lines.push(`- Wall p10/median/p75/p95: ${seconds(report.totals.wall.p10)} / ${seconds(report.totals.wall.median)} / ${seconds(report.totals.wall.p75)} / ${seconds(report.totals.wall.p95)}`)
   lines.push(`- Startup p10/median/p75/p95: ${seconds(report.totals.startup.p10)} / ${seconds(report.totals.startup.median)} / ${seconds(report.totals.startup.p75)} / ${seconds(report.totals.startup.p95)}`)

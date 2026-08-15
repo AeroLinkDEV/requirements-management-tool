@@ -31,7 +31,7 @@ Converted classes must satisfy, and were checked for:
 - After conversion they create **5 class fixtures + 1 fresh factory** (the bootstrap exception) = **6 factories**: a **-27** reduction.
 - `SharedHostIsolationTests` adds **1 class fixture** (3 tests, 1 factory).
 - Suite delta: 471 factories (489 tests, 563A baseline run 31858889257) to 445 factories (491 tests, run 31861317606) = **-26**, consistent with -27 + 1.
-- The 563A telemetry reports class fixtures under `SharedApiHost` (method `class fixture`) as unmatched methods; their construction/host/disposal time is now included in the whole-run `summedStartupWithFixturesMs` total so the before/after comparison is not structurally biased.
+- The 563A telemetry reports class fixtures under `SharedApiHost` (method `class fixture`) as unmatched methods; their construction/host/disposal time is now included in the whole-run `summedFactoryStartupMs` total (attributed + class fixtures/helpers + ambiguous theory rows, every factory exactly once) so the before/after comparison is not structurally biased.
 
 ## Exhaustive class inventory (all *.cs files in AeroLink.Api.Tests)
 
