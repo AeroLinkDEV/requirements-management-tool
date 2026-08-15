@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { deflateRawSync } from 'node:zlib'
-import { listZipEntries, readZipEntry, readSingleJsonFromZip, ZipParseError } from '../lib/zip.mjs'
+import { listZipEntries, readZipEntry, readSingleJsonFromZip, readNamedJsonFromZip, ZipParseError } from '../lib/zip.mjs'
 
 function crc32(buffer) {
   let crc = 0xffffffff
@@ -84,4 +84,31 @@ test('the zip reader refuses malformed, oversized, or multi-json archives', () =
   assert.throws(() => readSingleJsonFromZip(nonJson), /Expected exactly one JSON file/)
   const huge = buildZip([['a.json', 'x'.repeat(11 * 1024 * 1024)]])
   assert.throws(() => readSingleJsonFromZip(huge), /bounded size/)
+})
+
+test('a named read finds its file in an artifact that holds a directory of outputs', () => {
+  // The exact shape that broke the rolling collector: `ci-metrics-run-*` uploads an output directory, and
+  // tested-tree provenance began writing `validated-tree.json` beside the merged report. Two JSON files made
+  // "the only JSON" unanswerable, and 40 of 42 runs in the window were discarded as unreadable.
+  const artifact = buildZip([
+    ['run-metrics.json', '{"schemaVersion":"aerolink-ci-run/v2"}'],
+    ['validated-tree.json', '{"tree":"deadbeef"}'],
+    ['run-metrics.md', '# report'],
+  ])
+  assert.throws(() => readSingleJsonFromZip(artifact), /Expected exactly one JSON file/)
+  assert.equal(readNamedJsonFromZip(artifact, 'run-metrics.json').schemaVersion, 'aerolink-ci-run/v2')
+  assert.equal(readNamedJsonFromZip(artifact, 'validated-tree.json').tree, 'deadbeef')
+
+  // A nested upload path still resolves by file name.
+  const nested = buildZip([['out/run-metrics.json', '{"a":1}']])
+  assert.equal(readNamedJsonFromZip(nested, 'run-metrics.json').a, 1)
+
+  // Absent is absent: it names what it wanted and what was there, rather than silently taking another file.
+  const wrong = buildZip([['validated-tree.json', '{"tree":"x"}']])
+  assert.throws(() => readNamedJsonFromZip(wrong, 'run-metrics.json'), /does not contain "run-metrics.json"/)
+  assert.throws(() => readNamedJsonFromZip(wrong, 'run-metrics.json'), /validated-tree.json/)
+
+  // Malformed content is still a parse failure, not a silent skip.
+  const broken = buildZip([['run-metrics.json', '{not json']])
+  assert.throws(() => readNamedJsonFromZip(broken, 'run-metrics.json'), /could not be parsed/)
 })

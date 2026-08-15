@@ -8,7 +8,10 @@
 
 import { writeFileSync, mkdirSync } from 'node:fs'
 import { join } from 'node:path'
-import { readSingleJsonFromZip, ZipParseError } from '../lib/zip.mjs'
+import { readNamedJsonFromZip, ZipParseError } from '../lib/zip.mjs'
+
+/** The merged current-run report inside the `ci-metrics-run-*` artifact directory. */
+const RUN_METRICS_FILE = 'run-metrics.json'
 import {
   validateRunRecord, queueAndCancellation, rollingStats, flakeTrend, cacheTrend,
   detectRegressions, classifyRun, buildRollingReport, recordFormat, fullGatesPerMerge, MAX_RECORDS,
@@ -126,7 +129,10 @@ async function main() {
     let parsed
     try {
       const zip = await downloadArtifactZip(latest.artifact, { token, apiUrl })
-      parsed = readSingleJsonFromZip(zip)
+      // By name, because `ci-metrics-run-*` uploads an output directory rather than a single file. Asking for
+      // "the only JSON" made this collector depend on being the sole writer to that directory, which it
+      // stopped being the moment tested-tree provenance began writing `validated-tree.json` beside it.
+      parsed = readNamedJsonFromZip(zip, RUN_METRICS_FILE)
     } catch (error) {
       if (error instanceof ZipParseError || error.message.startsWith('Artifact ')) {
         missing.push({ runId: apiRun.id, reason: `Artifact could not be read: ${error.message}` })

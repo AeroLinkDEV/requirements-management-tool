@@ -82,16 +82,43 @@ export function readZipEntry(input, entry) {
   }
 }
 
-export function readSingleJsonFromZip(input) {
-  const entries = listZipEntries(input)
-  const jsonEntries = entries.filter((entry) => entry.name.endsWith('.json') && !entry.name.endsWith('/'))
-  if (jsonEntries.length !== 1) {
-    throw new ZipParseError(`Expected exactly one JSON file in the artifact zip, found ${jsonEntries.length}.`)
-  }
-  const content = readZipEntry(input, jsonEntries[0])
+function parseJsonEntry(input, entry) {
+  const content = readZipEntry(input, entry)
   try {
     return JSON.parse(content.toString('utf8'))
   } catch {
     throw new ZipParseError('Artifact JSON could not be parsed.')
   }
+}
+
+const jsonEntriesOf = (input) =>
+  listZipEntries(input).filter((entry) => entry.name.endsWith('.json') && !entry.name.endsWith('/'))
+
+export function readSingleJsonFromZip(input) {
+  const jsonEntries = jsonEntriesOf(input)
+  if (jsonEntries.length !== 1) {
+    throw new ZipParseError(`Expected exactly one JSON file in the artifact zip, found ${jsonEntries.length}.`)
+  }
+  return parseJsonEntry(input, jsonEntries[0])
+}
+
+/**
+ * Reads a named file from an artifact that holds a directory of outputs.
+ *
+ * `readSingleJsonFromZip` assumes an artifact carries exactly one JSON, which is only true while nothing else
+ * writes beside it. `ci-metrics-run-*` uploads a whole output directory, and once the tested-tree provenance
+ * work began writing `validated-tree.json` into that same directory every run's artifact held two JSON files
+ * and the rolling collector rejected all of them — 40 of 42 unreadable runs in the window that exposed this.
+ *
+ * A consumer that knows which file it wants should ask for it by name rather than depend on being the only
+ * writer, which is a property no shared output directory keeps for long.
+ */
+export function readNamedJsonFromZip(input, fileName) {
+  const jsonEntries = jsonEntriesOf(input)
+  const match = jsonEntries.find((entry) => entry.name === fileName || entry.name.endsWith(`/${fileName}`))
+  if (!match) {
+    const found = jsonEntries.map((entry) => entry.name).slice(0, 10).join(', ')
+    throw new ZipParseError(`Artifact zip does not contain "${fileName}". JSON entries: ${found || 'none'}.`)
+  }
+  return parseJsonEntry(input, match)
 }
