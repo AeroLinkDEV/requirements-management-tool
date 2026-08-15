@@ -129,19 +129,26 @@ public sealed class SystemChangeRequest
         string verificationMethod, DateTimeOffset now, string richText = "", string attributesJson = "{}",
         string impactDispositionJson = RequirementAuthoringJson.CompleteImpactDispositions,
         Guid? targetSectionId = null, bool administratorAuthority = false,
-        string proposedUpstreamRevisionIdsJson = "[]")
+        string proposedUpstreamRevisionIdsJson = "[]", bool allowIncomplete = false)
     {
         EnsureAuthor(actorId, administratorAuthority);
         EnsureDraft();
         EnsureRequirementLevel(level);
-        if (string.IsNullOrWhiteSpace(statement) && kind != RequirementChangeKind.Retire)
+        // Complete by default, because every other caller is a request being submitted rather than work being
+        // put down: seven API endpoints build a change request from a payload, and a payload that omits the
+        // statement is malformed rather than unfinished.
+        //
+        // `allowIncomplete` is passed only by the controlled-editing check-in path, where the author is
+        // parking a working copy mid-sentence. ValidateReadyForReview refuses whatever is still unfinished
+        // when the record is offered to an approver, so the relaxation cannot escape the Draft.
+        if (!allowIncomplete && string.IsNullOrWhiteSpace(statement) && kind != RequirementChangeKind.Retire)
             throw new DomainException("A requirement statement is required.");
         var change = new RequirementChange(Id, baseNumber, revision, level, kind, statement, rationale, verificationMethod,
             richText, attributesJson, impactDispositionJson, targetSectionId, proposedUpstreamRevisionIdsJson);
         _requirementChanges.Add(change);
         UpdatedAt = now;
         Audit("RequirementChangeAdded", actorId,
-            $"Added {change.Kind} {change.DisplayNumber}" +
+            $"Added {change.Kind} {(string.IsNullOrWhiteSpace(change.DisplayNumber) ? "for a requirement not yet chosen" : change.DisplayNumber)}" +
             (RequirementAuthoringJson.IsDerived(change.AttributesJson) ? " as a derived requirement with a documented rationale." : "."), now);
         return change;
     }
@@ -149,7 +156,7 @@ public sealed class SystemChangeRequest
     public void UpdateDraft(string actorId, string title, string problem, string analysis, string solution,
         IReadOnlyList<RequirementChangeDraft> changes, DateTimeOffset now,
         string? problemRich = null, string? analysisRich = null, string? solutionRich = null,
-        bool administratorAuthority = false)
+        bool administratorAuthority = false, bool allowIncomplete = false)
     {
         EnsureAuthor(actorId, administratorAuthority);
         EnsureDraft();
@@ -160,7 +167,8 @@ public sealed class SystemChangeRequest
         _requirementChanges.Clear();
         foreach (var item in changes)
         {
-            if (string.IsNullOrWhiteSpace(item.Statement) && item.Kind != RequirementChangeKind.Retire)
+            // Complete by default; unfinished only where the caller says so. See AddRequirementChange.
+            if (!allowIncomplete && string.IsNullOrWhiteSpace(item.Statement) && item.Kind != RequirementChangeKind.Retire)
                 throw new DomainException("A requirement statement is required unless the requirement is being retired.");
             _requirementChanges.Add(new RequirementChange(Id, item.BaseNumber, item.Revision, item.Level, item.Kind,
                 item.Statement, item.Rationale, item.VerificationMethod, item.RichText, item.AttributesJson, item.ImpactDispositionJson,
@@ -409,6 +417,20 @@ public sealed class SystemChangeRequest
         if (_requirementChanges.Count == 0)
             throw new DomainException("At least one requirement change is required before review.");
         foreach (var item in _requirementChanges) EnsureRequirementLevel(item.Level);
+        // Moved here from the Draft. A proposal may rest unfinished for as long as its author needs, but it
+        // cannot be put in front of an approver that way, and it must never reach materialization — where a
+        // requirement revision with no statement would flow into baselines, generated documents and traces.
+        //
+        // Named rather than counted: "one of your proposals is unfinished" sends the author hunting through
+        // a list they have already read.
+        foreach (var item in _requirementChanges)
+        {
+            var identity = string.IsNullOrWhiteSpace(item.BaseNumber) ? "A new requirement" : item.BaseNumber;
+            if (item.Kind != RequirementChangeKind.Retire && string.IsNullOrWhiteSpace(item.Statement))
+                throw new DomainException($"{identity} has no statement. Finish or remove it before review.");
+            if (item.Kind != RequirementChangeKind.Introduce && string.IsNullOrWhiteSpace(item.BaseNumber))
+                throw new DomainException("A proposal that changes an existing requirement must name it before review.");
+        }
     }
 
     private void EnsureRequirementLevel(RequirementLevel level)

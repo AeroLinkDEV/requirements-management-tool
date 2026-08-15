@@ -38,18 +38,21 @@ public sealed class TestProcedureChange
     {
         Id = Guid.NewGuid();
         TestChangeReviewId = testChangeReviewId;
-        BaseNumber = ArtifactNumber.ValidateBase(baseNumber);
+        // Empty means "not chosen yet", which a proposal an engineer is still writing legitimately is.
+        // Anything actually written is validated as before; only absence is permitted, and
+        // TestChangeReview.SubmitForReview refuses an unnamed proposal when review is requested.
+        BaseNumber = string.IsNullOrWhiteSpace(baseNumber) ? "" : ArtifactNumber.ValidateBase(baseNumber);
         Revision = revision;
         Level = level;
         Kind = kind;
         // A retirement removes a procedure rather than restating it, so it is the one kind that needs no
         // body — exactly as a retired requirement needs no statement.
-        if (kind != TestProcedureChangeKind.Retire && string.IsNullOrWhiteSpace(title))
-            throw new DomainException("A test procedure title is required.");
-        if (kind != TestProcedureChangeKind.Retire && string.IsNullOrWhiteSpace(objective))
-            throw new DomainException("A test procedure objective is required.");
-        if (kind != TestProcedureChangeKind.Retire && string.IsNullOrWhiteSpace(steps))
-            throw new DomainException("A test procedure must state its steps.");
+        //
+        // The title, objective and steps a procedure needs are demanded at review submission rather than
+        // here. A proposal is written over sittings, and refusing to hold a half-written one meant an
+        // engineer interrupted mid-sentence had to finish it, discard it, or keep an exclusive lock until
+        // they could. TestChangeReview.SubmitForReview names each unfinished proposal and refuses to put it
+        // in front of an approver, which is where "unfinished" actually costs something.
         Title = title?.Trim() ?? "";
         Objective = objective?.Trim() ?? "";
         Preconditions = preconditions?.Trim() ?? "";
@@ -70,7 +73,8 @@ public sealed class TestProcedureChange
     public Guid TestChangeReviewId { get; private set; }
     public string BaseNumber { get; private set; } = string.Empty;
     public int Revision { get; private set; }
-    public string DisplayNumber => ArtifactNumber.Display(BaseNumber, Revision);
+    /// <summary>Empty until the proposal names the procedure it changes. Asking does not throw.</summary>
+    public string DisplayNumber => string.IsNullOrWhiteSpace(BaseNumber) ? "" : ArtifactNumber.Display(BaseNumber, Revision);
     public TestProcedureLevel Level { get; private set; }
     public TestProcedureChangeKind Kind { get; private set; }
 

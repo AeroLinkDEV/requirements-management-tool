@@ -433,6 +433,48 @@ public sealed class TestChangeReviewTests
             reversed.ReviewCycles.Single().SnapshotHash);
     }
 
+    [Fact]
+    public void Two_proposals_nobody_has_named_yet_can_sit_in_the_same_package()
+    {
+        // One proposal per procedure — but an unnamed proposal is not yet a procedure. Comparing empty base
+        // numbers for equality refused the second with "already has a proposed change", naming a procedure
+        // neither of them identified.
+        var review = Create();
+        review.AddProcedureChange("verification.engineer", Unfinished(), Now, allowIncomplete: true);
+        review.AddProcedureChange("verification.engineer", Unfinished(), Now.AddMinutes(1), allowIncomplete: true);
+        Assert.Equal(2, review.ProcedureChanges.Count);
+
+        // Two proposals that do name the same procedure are still one too many.
+        review.AddProcedureChange("verification.engineer", ProcedureDraft("SYSTP-000501"), Now.AddMinutes(2));
+        Assert.Throws<DomainException>(() => review.AddProcedureChange("verification.engineer",
+            ProcedureDraft("SYSTP-000501"), Now.AddMinutes(3)));
+    }
+
+    [Fact]
+    public void An_unfinished_proposal_rests_in_a_package_and_review_refuses_it_by_name()
+    {
+        var review = Create();
+        review.AddProcedureChange("verification.engineer",
+            ProcedureDraftWith(rationale: "", baseNumber: "SYSTP-000502",
+                drivingJson: $"[\"{Guid.NewGuid()}\"]"), Now);
+
+        // Written down is fine. Asking somebody to sign it is not, and the refusal says which one.
+        var error = Assert.Throws<DomainException>(() => review.SubmitForReview("verification.engineer",
+            [new ChangeControl.ApproverSelection("approver", "Approver")], true, Now.AddMinutes(1)));
+        Assert.Contains("SYSTP-000502", error.Message);
+    }
+
+    /// <summary>
+    /// A driving requirement revision, so a submission fails on the thing under test rather than on the
+    /// separate rule that an introduced procedure must name what it verifies.
+    /// </summary>
+    private static string DrivingJson() => $"[\"{Guid.NewGuid()}\"]";
+
+    /// <summary>A proposal an engineer started and was interrupted in: a kind, and nothing else yet.</summary>
+    private static TestProcedureChangeDraft Unfinished() =>
+        new("", 0, TestProcedureLevel.System, TestProcedureChangeKind.Introduce,
+            "", "", "", "", "", "", "[]");
+
     private static TestProcedureChangeDraft ProcedureDraft(string baseNumber = "SYSTP-000123",
         TestProcedureChangeKind kind = TestProcedureChangeKind.Introduce,
         TestProcedureLevel level = TestProcedureLevel.System) =>
@@ -534,16 +576,45 @@ public sealed class TestChangeReviewTests
             Now.AddMinutes(1));
         Assert.Equal(TestProcedureChangeKind.Retire, retire.Kind);
 
+        // Still refused by default: an API payload missing a procedure's objective is malformed, not
+        // half-written, and the endpoint that builds a package from one must keep saying so.
         Assert.Throws<DomainException>(() => review.AddProcedureChange("verification.engineer",
             new TestProcedureChangeDraft("SYSTP-000010", 0, TestProcedureLevel.System,
-                TestProcedureChangeKind.Introduce, "Title", "", "steps", "", "", "why"), Now.AddMinutes(2)));
-        Assert.Throws<DomainException>(() => review.AddProcedureChange("verification.engineer",
+                TestProcedureChangeKind.Introduce, "Title", "", "steps", "", "", "why", DrivingJson()),
+            Now.AddMinutes(2)));
+
+        // The check-in path asks for it explicitly, and then the same three rules are checked where they
+        // mean something: an engineer stops mid-sentence, and an approver is never shown a procedure that
+        // verifies nothing.
+        review.AddProcedureChange("verification.engineer",
+            new TestProcedureChangeDraft("SYSTP-000010", 0, TestProcedureLevel.System,
+                TestProcedureChangeKind.Introduce, "Title", "", "steps", "", "", "why", DrivingJson()),
+            Now.AddMinutes(2), allowIncomplete: true);
+        var missingObjective = Assert.Throws<DomainException>(() => review.SubmitForReview("verification.engineer",
+            [new ChangeControl.ApproverSelection("approver", "Approver")], true, Now.AddMinutes(5)));
+        Assert.Contains("SYSTP-000010", missingObjective.Message);
+
+        var noSteps = new TestChangeReview(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(),
+            TestChangeReviewDiscipline.System, "SRCR-00039.00", Now);
+        noSteps.RecordTestChangeRequired("verification.engineer", Now);
+        noSteps.WriteCase("verification.engineer", "Verification case", "Problem", "Analysis", "Solution", Now);
+        noSteps.AddProcedureChange("verification.engineer",
             new TestProcedureChangeDraft("SYSTP-000011", 0, TestProcedureLevel.System,
-                TestProcedureChangeKind.Introduce, "Title", "objective", "", "", "", "why"), Now.AddMinutes(3)));
-        // A procedure the build will carry has to be called something.
-        Assert.Throws<DomainException>(() => review.AddProcedureChange("verification.engineer",
+                TestProcedureChangeKind.Introduce, "Title", "objective", "", "", "", "why", DrivingJson()),
+            Now.AddMinutes(3), allowIncomplete: true);
+        Assert.Throws<DomainException>(() => noSteps.SubmitForReview("verification.engineer",
+            [new ChangeControl.ApproverSelection("approver", "Approver")], true, Now.AddMinutes(5)));
+
+        // A procedure the build will carry still has to be called something — at review.
+        var noTitle = new TestChangeReview(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(),
+            TestChangeReviewDiscipline.System, "SRCR-00039.00", Now);
+        noTitle.RecordTestChangeRequired("verification.engineer", Now);
+        noTitle.WriteCase("verification.engineer", "Verification case", "Problem", "Analysis", "Solution", Now);
+        noTitle.AddProcedureChange("verification.engineer",
             new TestProcedureChangeDraft("SYSTP-000012", 0, TestProcedureLevel.System,
-                TestProcedureChangeKind.Introduce, "", "objective", "", "steps", "expected", "why"), Now.AddMinutes(4)));
+                TestProcedureChangeKind.Introduce, "", "objective", "", "steps", "expected", "why", DrivingJson()), Now.AddMinutes(4), allowIncomplete: true);
+        Assert.Throws<DomainException>(() => noTitle.SubmitForReview("verification.engineer",
+            [new ChangeControl.ApproverSelection("approver", "Approver")], true, Now.AddMinutes(5)));
     }
 
     [Fact]

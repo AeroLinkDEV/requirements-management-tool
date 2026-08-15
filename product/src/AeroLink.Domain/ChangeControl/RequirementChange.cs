@@ -24,7 +24,12 @@ public sealed class RequirementChange
     {
         Id = Guid.NewGuid();
         ChangeRequestId = changeRequestId;
-        BaseNumber = ArtifactNumber.ValidateBase(baseNumber);
+        // An empty identifier means "not chosen yet", which is a legitimate state for a proposal an author is
+        // still writing — they opened the picker and were interrupted. Anything actually written is still
+        // validated, so a malformed identifier is refused as loudly as before; only absence is permitted.
+        // SystemChangeRequest.ValidateReadyForReview refuses an unnamed proposal when review is requested,
+        // which is the point at which the target has to exist.
+        BaseNumber = string.IsNullOrWhiteSpace(baseNumber) ? "" : ArtifactNumber.ValidateBase(baseNumber);
         Revision = revision;
         Level = level;
         Kind = kind;
@@ -49,7 +54,12 @@ public sealed class RequirementChange
     public Guid ChangeRequestId { get; private set; }
     public string BaseNumber { get; private set; } = string.Empty;
     public int Revision { get; private set; }
-    public string DisplayNumber => ArtifactNumber.Display(BaseNumber, Revision);
+    /// <summary>
+    /// Empty while the proposal has not been pointed at a requirement yet. A number is not invented for a
+    /// target nobody has chosen, and asking for one does not throw — a half-written proposal is a state the
+    /// record can rest in, so everything that reads it has to cope with it being unnamed.
+    /// </summary>
+    public string DisplayNumber => string.IsNullOrWhiteSpace(BaseNumber) ? "" : ArtifactNumber.Display(BaseNumber, Revision);
     public RequirementLevel Level { get; private set; }
     public RequirementChangeKind Kind { get; private set; }
     public string Statement { get; private set; } = string.Empty;

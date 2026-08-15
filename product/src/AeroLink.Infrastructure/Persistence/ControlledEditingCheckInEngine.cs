@@ -289,9 +289,12 @@ public sealed class SystemChangeRequestControlledEditingAdapter(AeroLinkDbContex
         if (draft.RequirementChanges is null)
             throw new JsonException("The latest autosaved change request draft does not contain requirement changes.");
         var changes = await NormalizeAsync(item, draft.RequirementChanges, ct);
+        // Check-in is an author putting work down, not submitting it. A proposal they started and were
+        // interrupted in is stored as it stands; SystemChangeRequest.ValidateReadyForReview refuses it by
+        // name when the Draft is offered to an approver.
         item.UpdateDraft(actor, draft.Title ?? "", draft.Problem ?? "", draft.Analysis ?? "",
             draft.Solution ?? "", changes, now, draft.ProblemRich, draft.AnalysisRich, draft.SolutionRich,
-            administratorAuthority);
+            administratorAuthority, allowIncomplete: true);
         var selectedReports = (draft.ProblemReportIds ?? state.ProblemReportIds)
             .Distinct().OrderBy(id => id).ToList();
         await new ProblemReportLinkService(db).ReplaceDraftChangeRequestLinksAsync(item, selectedReports,
@@ -842,7 +845,9 @@ public sealed class TestChangeRequestControlledEditingAdapter(AeroLinkDbContext 
                 change.Title ?? "", change.Objective ?? "", change.Preconditions ?? "", change.Steps ?? "",
                 change.ExpectedResult ?? "", change.Rationale ?? "",
                 change.DrivingRequirementRevisionIdsJson ?? "[]", change.RemovedRequirementRevisionIdsJson ?? "[]",
-                change.CoverageChangeRationale ?? ""), now);
+                // As above: a half-written proposal is checked in as it stands, and SubmitForReview is what
+                // refuses to show it to an approver.
+                change.CoverageChangeRationale ?? ""), now, allowIncomplete: true);
         return Task.CompletedTask;
     }
 
