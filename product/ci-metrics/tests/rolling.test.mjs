@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import {
   median, percentile, classifyRun, runDurationMs, jobGroupDurations, queueAndCancellation,
   flakeTrend, cacheTrend, rollingStats, detectRegressions, validateRunRecord, recordFormat, buildRollingReport, trackerBody,
-  fullGatesPerMerge,
+  fullGatesPerMerge, FULL_GATE_WINDOW_DAYS, MAX_RECORDS,
 } from '../lib/rolling.mjs'
 
 function record(overrides = {}) {
@@ -203,8 +203,67 @@ test('the full-gate headline sums the current run/attempt fields and never emits
     ],
   })
   assert.doesNotMatch(report.markdown, /NaN/)
-  assert.match(report.markdown, /Full gates per merged PR \(window\): 20 full gate runs \/ 23 attempts across 2 merges/)
+  // Scope is stated in the line's own terms. Labelling an all-history figure "(window)" alongside window
+  // statistics is what made 703 runs across 200 merges read as a window total and produced a false defect
+  // report; the distribution leads because the totals are not the actionable part.
+  assert.match(report.markdown, /Full gates per merged PR \(2 merge\(s\) from the last 30 days, newest 200 kept\)/)
+  assert.match(report.markdown, /median 10, p95 10, max 10 \(20 runs \/ 23 attempts in total\)/)
   assert.match(report.markdown, /PR #572 \(merged 2026-08-14\): 10 full gate run\(s\) \/ 13 attempt\(s\) \(9 pre-merge, 1 post-merge\)/)
+})
+
+test('the full-gate headline reports a distribution, not just a mean-shaped total', () => {
+  // A long tail is the finding: on real data the median is 2 and the maximum 34, and a bare total hides that
+  // entirely. One merge costing 34 full gates is the rebase treadmill made countable.
+  const report = buildRollingReport({
+    records: [record()],
+    fullGates: [
+      { pr: 1, mergedAt: '2026-08-14T00:00:00Z', runs: 2, attempts: 2, prRuns: 1, postMergeRuns: 1 },
+      { pr: 2, mergedAt: '2026-08-14T00:00:00Z', runs: 2, attempts: 2, prRuns: 1, postMergeRuns: 1 },
+      { pr: 3, mergedAt: '2026-08-14T00:00:00Z', runs: 34, attempts: 34, prRuns: 33, postMergeRuns: 1 },
+    ],
+  })
+  assert.match(report.markdown, /median 2, p95 34, max 34 \(38 runs \/ 38 attempts in total\)/)
+  assert.doesNotMatch(report.markdown, /\(window\): 38/)
+})
+
+test('the full-gate quantiles are this module\'s, not a second set that disagrees', () => {
+  // An ad-hoc floor-based pick returned the upper middle of an even sample and a different p95 rank than the
+  // exported helpers. Two statistics in one file answering the same question differently is a defect waiting
+  // to be quoted, so these lock the line to `median` and `percentile`.
+  const gate = (pr, runs) => ({ pr, mergedAt: '2026-08-14T00:00:00Z', runs, attempts: runs, prRuns: runs - 1, postMergeRuns: 1 })
+
+  // Even sample: median averages the middle pair. `[1, 10]` is 5.5, not 10.
+  const even = buildRollingReport({ records: [record()], fullGates: [gate(1, 1), gate(2, 10)] })
+  assert.match(even.markdown, /median 5\.5,/)
+  assert.equal(median([1, 10]), 5.5)
+
+  // Twenty samples, values 1..20: nearest-rank p95 is ceil(0.95 * 20) = rank 19, so the 19th value. The
+  // discarded floor-based pick selected the 20th. Writing this assertion is how I confirmed the review was
+  // right about the rank — my first attempt asserted 20, which is the wrong answer the old code gave.
+  const twenty = Array.from({ length: 20 }, (_, index) => gate(index + 1, index + 1))
+  const report = buildRollingReport({ records: [record()], fullGates: twenty })
+  const expected = percentile(twenty.map((entry) => entry.runs), 95)
+  assert.equal(expected, 19)
+  assert.match(report.markdown, new RegExp(`p95 ${expected}, max 20`))
+})
+
+test('the full-gate scope reports the bounds the collector actually applied', () => {
+  // Two wrong labels preceded this one: "(window)", which described the run window this figure does not
+  // belong to, and "all merges seen", which described no bound at all while the collector filters to the
+  // last 30 days and keeps the newest 200. The scope now travels with the data.
+  const gates = [{ pr: 1, mergedAt: '2026-08-14T00:00:00Z', runs: 2, attempts: 2, prRuns: 1, postMergeRuns: 1 }]
+  const supplied = buildRollingReport({
+    records: [record()],
+    fullGates: gates,
+    fullGateScope: { windowDays: 7, cap: 50 },
+  })
+  assert.match(supplied.markdown, /1 merge\(s\) from the last 7 days, newest 50 kept/)
+  assert.doesNotMatch(supplied.markdown, /all .* merges seen/)
+  assert.doesNotMatch(supplied.markdown, /per merged PR \(window\)/)
+
+  // Absent metadata falls back to the module's own constants rather than inventing a scope.
+  const fallback = buildRollingReport({ records: [record()], fullGates: gates })
+  assert.match(fallback.markdown, new RegExp(`from the last ${FULL_GATE_WINDOW_DAYS} days, newest ${MAX_RECORDS} kept`))
 })
 
 test('trackerBody is single-issue and never fabricates regressions', () => {
