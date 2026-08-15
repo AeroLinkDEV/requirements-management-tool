@@ -333,8 +333,24 @@ so the value already contained the whole host build and the aggregator's
 `constructionMs + hostMs + disposeMs` added the host time twice (about 438s across the three shards in
 run 31852062285). All startup percentages and summed-startup numbers in the tables below are therefore
 inflated and are retained **only as the defect evidence**. The corrected baseline is measured by the
-round-3 run (schema v2, non-overlapping intervals) and published in its per-shard artifacts and the PR
-body; this file is updated to the corrected table once that run is verified.
+round-3 run (schema v2, non-overlapping intervals) and published in its per-shard artifacts, the PR
+body, and the table below.
+
+### Corrected baseline: run 31854519594, PR #581 head `cbd7cf6` (schema v2)
+
+Each shard reconciles exactly: TRX = attributed + ambiguous theory rows + no-factory-telemetry.
+
+| Shard | TRX | Attributed | Ambiguous theory rows | Unmatched methods | No factory telemetry | Factories | Summed wall | Summed startup | Startup % | Wall p10/median/p75/p95 | Startup p10/median/p75/p95 |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| 1 | 163 | 132 | 28 | 0 | 3 | 160 | 856.3s | 133.2s | 16% | 3.6 / 5.6 / 7.3 / 15.2s | 0.4 / 0.5 / 0.6 / 2.5s |
+| 2 | 163 | 138 | 15 | 1 | 10 | 162 | 810.5s | 109.4s | 13% | 3.7 / 5.2 / 6.9 / 10.7s | 0.4 / 0.6 / 0.8 / 1.8s |
+| 3 | 163 | 126 | 20 | 1 | 17 | 149 | 650.8s | 72.8s | 11% | 3.3 / 4.9 / 5.9 / 8.9s | 0.3 / 0.4 / 0.5 / 1.1s |
+| Total | 489 | 396 | 63 | 2 | 30 | 471 | 2317.5s | 315.3s | 14% | — | — |
+
+The raw host records confirm the non-overlapping boundary: pre-host construction summed to 176/131/170 ms
+across the three shards while the host builds themselves summed to 158.5/126.8/94.7 s. The corrected
+startup floor (11–16% of summed wall by shard) is roughly half of the inflated round-2 fractions
+(40/25/31%), and the earlier per-class startup rankings were materially distorted by the double count.
 
 ### Inflated exact-head baseline (defect evidence): run 31844562806, PR #581 head `e0d4770`
 
