@@ -261,15 +261,37 @@ public sealed class TestChangeReview
     /// that has not concluded test work is required has nothing to propose, and an in-review package must not
     /// grow underneath the person approving it. Both rules are the requirement side's, unchanged.
     /// </summary>
-    public TestProcedureChange AddProcedureChange(string actorId, TestProcedureChangeDraft draft, DateTimeOffset now)
+    public TestProcedureChange AddProcedureChange(string actorId, TestProcedureChangeDraft draft, DateTimeOffset now,
+        bool allowIncomplete = false)
     {
         EnsureOpen();
         Required(actorId, "authoring verification engineer");
+        // Complete by default. These three used to be enforced in TestProcedureChange's constructor, which
+        // put them on every path — including an API endpoint building a package from a payload, where a
+        // decision missing its steps is malformed rather than half-written.
+        //
+        // `allowIncomplete` is passed only by the controlled-editing check-in path, where an engineer is
+        // putting a working copy down mid-sentence. SubmitForReview names whatever is still unfinished and
+        // refuses to put it in front of an approver, so this cannot escape the Draft.
+        if (!allowIncomplete && draft.Kind != TestProcedureChangeKind.Retire)
+        {
+            if (string.IsNullOrWhiteSpace(draft.Title))
+                throw new DomainException("A test procedure title is required.");
+            if (string.IsNullOrWhiteSpace(draft.Objective))
+                throw new DomainException("A test procedure objective is required.");
+            if (string.IsNullOrWhiteSpace(draft.Steps))
+                throw new DomainException("A test procedure must state its steps.");
+        }
         if (Outcome != TestChangeReviewOutcome.ChangeRequired)
             throw new DomainException("Record that test-procedure work is required before proposing changes to procedures.");
         if (draft.Level != ProcedureLevel())
             throw new DomainException($"A {Discipline} test change request can contain {ProcedureLevel()} procedures only.");
-        if (_procedureChanges.Any(x => x.BaseNumber == draft.BaseNumber))
+        // One proposal per procedure, but an unnamed proposal is not yet a procedure. Two proposals an author
+        // has started and not yet pointed at anything both carry an empty base number, and comparing those
+        // for equality would refuse the second with "already has a proposed change" — naming a procedure
+        // neither of them identifies.
+        if (!string.IsNullOrWhiteSpace(draft.BaseNumber)
+            && _procedureChanges.Any(x => x.BaseNumber == draft.BaseNumber))
             throw new DomainException($"{draft.BaseNumber} already has a proposed change in this test change request.");
         var change = new TestProcedureChange(Id, draft.BaseNumber, draft.Revision, draft.Level, draft.Kind,
             draft.Title, draft.Objective, draft.Preconditions, draft.Steps, draft.ExpectedResult, draft.Rationale,
@@ -347,6 +369,26 @@ public sealed class TestChangeReview
                     || x.DrivingRequirementRevisionIdsJson.Trim() is "[]" or "")))
             throw new DomainException(
                 "Every procedure this package introduces must name the requirement revisions it verifies.");
+        // The same rule as the driving requirements above, applied to the rest of a proposal. An engineer can
+        // leave one half-written across as many sittings as the work takes; what cannot happen is an approver
+        // being asked to sign a procedure with no steps, or a retirement with no reason. This is the gate the
+        // check-in control used to stand in for, moved to the point it is actually a claim about readiness.
+        foreach (var change in _procedureChanges)
+        {
+            var identity = string.IsNullOrWhiteSpace(change.BaseNumber) ? "An unnamed procedure proposal" : change.BaseNumber;
+            if (string.IsNullOrWhiteSpace(change.BaseNumber))
+                throw new DomainException($"{identity} must name its procedure before review.");
+            if (change.Kind == TestProcedureChangeKind.Retire)
+            {
+                if (string.IsNullOrWhiteSpace(change.Rationale))
+                    throw new DomainException($"{identity} is being retired without a reason. Give one before review.");
+                continue;
+            }
+            if (string.IsNullOrWhiteSpace(change.Title) || string.IsNullOrWhiteSpace(change.Objective)
+                || string.IsNullOrWhiteSpace(change.Steps) || string.IsNullOrWhiteSpace(change.Rationale))
+                throw new DomainException(
+                    $"{identity} is unfinished. A procedure needs its title, objective, steps and rationale before review.");
+        }
         if (approvers.Any(x => string.Equals(x.UserId, actorId, StringComparison.OrdinalIgnoreCase)))
             throw new DomainException("The test change request approver must be independent from its submitting engineer.");
         // Version-zero history can still be reconstructed exactly as it was approved before procedure decisions
