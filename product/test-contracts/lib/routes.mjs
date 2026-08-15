@@ -161,3 +161,23 @@ export function uncoveredOutsideBaseline(coverage, grandfathered) {
     .filter((key) => !allowed.has(key))
     .sort()
 }
+
+/**
+ * Exceptions that have been earned out of, and must now be surrendered.
+ *
+ * The baseline has to agree with reality in *both* directions. Checking only that uncovered routes are
+ * permitted leaves an exception standing after its route gains real coverage — and a later migration can then
+ * remove that route's final hosted proof and still pass, because the stale exception still permits it. The
+ * grandfathered list would become a permanent exemption instead of a shrinking record.
+ *
+ * So a grandfathered route that is currently covered fails until its entry is removed. The list can only get
+ * shorter, which is the property that makes it a baseline rather than a loophole.
+ */
+export function coveredButStillGrandfathered(coverage, grandfathered) {
+  const allowed = grandfathered instanceof Set ? grandfathered : new Set(grandfathered)
+  return coverage
+    .filter((route) => route.coveredBy.length > 0)
+    .map((route) => routeKey(route.method, route.path))
+    .filter((key) => allowed.has(key))
+    .sort()
+}

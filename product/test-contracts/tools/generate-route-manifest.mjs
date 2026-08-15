@@ -13,7 +13,7 @@
 import { writeFileSync, readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { buildRouteCoverage, routeKey, summariseCoverage } from '../lib/routes.mjs'
+import { buildRouteCoverage, coveredButStillGrandfathered, summariseCoverage, uncoveredOutsideBaseline } from '../lib/routes.mjs'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const repoRoot = join(here, '..', '..', '..')
@@ -32,17 +32,25 @@ writeFileSync(
 )
 
 const baseline = new Set(JSON.parse(readFileSync(baselinePath, 'utf8')).uncovered)
-const outsideBaseline = summary.uncovered
-  .map((route) => routeKey(route.method, route.path))
-  .filter((key) => !baseline.has(key))
+const outsideBaseline = uncoveredOutsideBaseline(coverage, baseline)
+const earnedOut = coveredButStillGrandfathered(coverage, baseline)
 
 console.log(`routes: ${summary.total}  covered: ${summary.covered}  uncovered: ${summary.uncovered.length}`)
-console.log(`grandfathered: ${baseline.size}  uncovered outside the baseline: ${outsideBaseline.length}`)
+console.log(`grandfathered: ${baseline.size}  outside the baseline: ${outsideBaseline.length}  earned out: ${earnedOut.length}`)
 
 if (outsideBaseline.length > 0) {
   console.log('\nThese have no hosted boundary evidence and are not grandfathered. The guard will fail until')
   console.log('each is covered by a hosted test using its own HTTP method, or deliberately added to')
   console.log('grandfathered-uncovered.json as a reviewed decision:')
   for (const key of outsideBaseline) console.log(`  ${key}`)
+  process.exitCode = 1
+}
+
+// The baseline may only shrink. An exception left standing after its route gains coverage still permits the
+// next loss of that route's last hosted proof, which turns a shrinking record into a permanent exemption.
+if (earnedOut.length > 0) {
+  console.log('\nThese now have hosted boundary coverage and must surrender their exception. Remove them from')
+  console.log('grandfathered-uncovered.json:')
+  for (const key of earnedOut) console.log(`  ${key}`)
   process.exitCode = 1
 }

@@ -12,6 +12,7 @@ import {
   routeKey,
   summariseCoverage,
   uncoveredOutsideBaseline,
+  coveredButStillGrandfathered,
 } from '../lib/routes.mjs'
 
 const here = dirname(fileURLToPath(import.meta.url))
@@ -62,6 +63,38 @@ test('a new route with no hosted evidence still fails after the manifest is rege
   assert.deepEqual(uncoveredOutsideBaseline(afterAddition, grandfathered), ['POST /api/probe/newly-added'])
 })
 
+test('an exception must be surrendered once its route is covered', () => {
+  const offenders = coveredButStillGrandfathered(current, grandfathered)
+  assert.deepEqual(
+    offenders,
+    [],
+    `Route(s) now have hosted boundary coverage but are still listed in grandfathered-uncovered.json.\n` +
+      `Remove the entr(ies) — the baseline may only shrink:\n  ${offenders.join('\n  ')}`,
+  )
+})
+
+test('gaining coverage then losing it later cannot slip through a stale exception', () => {
+  // The round-2 defect, as a sequence. Checking only one direction let an exception outlive the gap it
+  // described, and a stale exception permits the *next* loss of that route's last hosted proof.
+  const exempt = [...grandfathered][0]
+  const [method, path] = [exempt.slice(0, exempt.indexOf(' ')), exempt.slice(exempt.indexOf(' ') + 1)]
+  const others = current.filter((route) => routeKey(route.method, route.path) !== exempt)
+
+  // 1. It gains real hosted coverage.
+  const gained = [...others, { method, path, file: 'X.cs', coveredBy: ['NewBoundaryApiTests'] }]
+  // 2. Leaving the exception behind must fail.
+  assert.deepEqual(coveredButStillGrandfathered(gained, grandfathered), [exempt])
+
+  // 3. Surrendering the exception makes it pass.
+  const shrunk = new Set([...grandfathered].filter((key) => key !== exempt))
+  assert.deepEqual(coveredButStillGrandfathered(gained, shrunk), [])
+  assert.deepEqual(uncoveredOutsideBaseline(gained, shrunk), [])
+
+  // 4. A later removal of that last hosted proof now fails, which it could not before.
+  const lostAgain = [...others, { method, path, file: 'X.cs', coveredBy: [] }]
+  assert.deepEqual(uncoveredOutsideBaseline(lostAgain, shrunk), [exempt])
+})
+
 test('an exercised method does not cover a different method on the same path', () => {
   // `/api/enterprise-requirements/views/{}` carries both PUT and DELETE. A PUT test must not make the DELETE
   // route appear covered, and a mutating method added later to an already-mentioned path must not inherit
@@ -83,15 +116,19 @@ test('an exercised method does not cover a different method on the same path', (
 // Keeping the observation honest. These self-heal on regeneration, which is why they are not the safeguard.
 // ---------------------------------------------------------------------------------------------------------
 
-test('the committed manifest matches the current source', () => {
-  const live = new Set(current.map(keyOf))
-  const declared = new Set(manifest.routes.map(keyOf))
-  const added = [...live].filter((key) => !declared.has(key)).sort()
-  const stale = [...declared].filter((key) => !live.has(key)).sort()
+test('the committed manifest matches the current source, coverage included', () => {
+  // Compared deeply rather than by key. Key-only matching let a route keep a stale `coveredBy` list while a
+  // test named "matches the current source" passed, which is how an observation quietly stops describing
+  // anything.
+  const shape = (routes) =>
+    [...routes]
+      .map((route) => `${keyOf(route)} <- ${[...route.coveredBy].sort().join(',')}`)
+      .sort()
   assert.deepEqual(
-    { added, stale },
-    { added: [], stale: [] },
-    `route-coverage.json is out of date. Regenerate it:\n  node product/test-contracts/tools/generate-route-manifest.mjs`,
+    shape(manifest.routes),
+    shape(current),
+    `route-coverage.json no longer describes the tree. Regenerate it:\n` +
+      `  node product/test-contracts/tools/generate-route-manifest.mjs`,
   )
 })
 
