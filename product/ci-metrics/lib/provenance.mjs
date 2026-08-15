@@ -35,11 +35,25 @@ export const MAX_CLOCK_SKEW_MINUTES = 10
  * skipping the first independent run of that definition on main.
  */
 export const GATE_DEFINING_PATHS = [
+  // The gate itself: what runs, how it shards, and what counts as passing.
   '.github/workflows/ci.yml',
-  '.github/workflows/main-provenance.yml',
+  // The trusted default-branch workflow that consumes the manifest and makes the skip decision. This was
+  // written as `main-provenance.yml` in the first round — a file that does not exist — so the guard
+  // protected nothing while appearing to protect the most important consumer in the set. Every path here
+  // is now asserted to exist on disk by a test, because a guard keyed on a typo fails silently and looks
+  // exactly like a guard that works.
+  '.github/workflows/ci-main-provenance.yml',
+  // The decision logic itself.
   'product/ci-metrics/lib/provenance.mjs',
-  'product/ci-metrics/bin/write-validated-tree.mjs',
   'product/ci-metrics/bin/check-main-provenance.mjs',
+  // The producer of the manifest, and the artifact reader the consumer resolves it through.
+  'product/ci-metrics/bin/write-validated-tree.mjs',
+  'product/ci-metrics/lib/zip.mjs',
+  // The evidence the manifest asserts — gate results and verified totals — is produced here and read by
+  // write-validated-tree as run-metrics.json. A change that alters what those totals mean changes what a
+  // passing manifest claims, without touching the decision code at all.
+  'product/ci-metrics/lib/aggregate.mjs',
+  'product/ci-metrics/bin/aggregate.mjs',
 ]
 
 /** True when any changed path is one the gate's own trustworthiness depends on. */

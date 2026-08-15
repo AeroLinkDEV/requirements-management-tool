@@ -43,13 +43,48 @@ async function fetchTree(sha, { token, apiUrl, repository }) {
   return body.tree?.sha ?? null
 }
 
+/** GitHub's files endpoint pages at 100; 30 pages covers the 3,000-file API maximum for a PR. */
+const MAX_FILE_PAGES = 30
+
 /**
  * The paths this merge introduced, from GitHub's own view of the pull request rather than from
  * anything the branch supplied. Used only to decide whether the merge edits the gate's own definition.
+ *
+ * This does not use `listAll`. That helper stops after five pages and returns what it has, with no way
+ * for a caller to tell a complete list from a truncated one — so a pull request with more than 500 files
+ * could drop a gate-defining path off the end and be judged as though it had never touched one. Here the
+ * count is reconciled against GitHub's own `changed_files` and any shortfall throws, because a partial
+ * answer to "did this merge change the gate?" is indistinguishable from "no" and must not be treated as
+ * one.
+ *
+ * Renames contribute both names. A rename away from a guarded path is a change to that path's contents
+ * from the gate's point of view, and `filename` alone reports only where it landed.
  */
 async function fetchMergedPaths(prNumber, { token, apiUrl, repository }) {
-  const files = await listAll(`/repos/${repository}/pulls/${prNumber}/files`, { token, apiUrl })
-  return files.map((file) => file?.filename).filter((name) => typeof name === 'string')
+  const meta = await api(`/repos/${repository}/pulls/${prNumber}`, { token, apiUrl })
+  const expected = Number.isInteger(meta?.changed_files) ? meta.changed_files : null
+
+  const files = []
+  for (let page = 1; page <= MAX_FILE_PAGES; page += 1) {
+    const batch = await api(`/repos/${repository}/pulls/${prNumber}/files?per_page=100&page=${page}`, { token, apiUrl })
+    if (!Array.isArray(batch) || batch.length === 0) break
+    files.push(...batch)
+    if (batch.length < 100) break
+    if (page === MAX_FILE_PAGES) {
+      throw new Error(`Pull request ${prNumber} has more files than ${MAX_FILE_PAGES} pages can enumerate; the changed-path list would be incomplete.`)
+    }
+  }
+
+  if (expected !== null && files.length < expected) {
+    throw new Error(`Pull request ${prNumber} reports ${expected} changed files but only ${files.length} were enumerated; refusing to decide on a partial list.`)
+  }
+
+  const paths = []
+  for (const file of files) {
+    if (typeof file?.filename === 'string') paths.push(file.filename)
+    if (typeof file?.previous_filename === 'string') paths.push(file.previous_filename)
+  }
+  return paths
 }
 
 async function latestManifestForRun(runId, { token, apiUrl, repository }) {

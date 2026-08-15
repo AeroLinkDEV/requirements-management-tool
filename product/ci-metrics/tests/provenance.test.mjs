@@ -1,10 +1,15 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
+import { existsSync } from 'node:fs'
+import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import {
   validateManifest, decideProvenance, deriveEligibility, bindManifest,
   evidenceAgeRejection, touchesGateDefinition,
   MAX_EVIDENCE_AGE_DAYS, MAX_CLOCK_SKEW_MINUTES, GATE_DEFINING_PATHS,
 } from '../lib/provenance.mjs'
+
+const repoRoot = fileURLToPath(new URL('../../../', import.meta.url))
 
 function manifest(overrides = {}) {
   return {
@@ -191,6 +196,55 @@ test('a merge that edits the gate\'s own definition cannot authorize skipping it
     assert.equal(result.selfModifying, true, path)
     assert.match(result.reason, new RegExp(path.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')), path)
   }
+})
+
+test('every gate-defining path names a file that exists', () => {
+  // Round 1 listed `.github/workflows/main-provenance.yml`, which does not exist — the real consumer is
+  // `ci-main-provenance.yml`. The guard therefore protected nothing for the most important file in the
+  // set, and every behavioural test still passed, because they assert that a listed path triggers the
+  // fallback and never that the path refers to anything. A guard keyed on a typo is indistinguishable
+  // from a working one until the day it is needed.
+  const missing = GATE_DEFINING_PATHS.filter((path) => !existsSync(join(repoRoot, path)))
+  assert.deepEqual(missing, [], `GATE_DEFINING_PATHS names files that do not exist: ${missing.join(', ')}`)
+})
+
+test('the gate-defining set covers the whole producer and consumer chain', () => {
+  // Named individually so removing one is a deliberate act with a failing test attached, rather than a
+  // quiet omission. Each earns its place by being able to change what a passing manifest means:
+  //   ci.yml                     — which gates run and what passing is
+  //   ci-main-provenance.yml     — the trusted workflow that acts on the decision
+  //   provenance.mjs             — the decision itself
+  //   check-main-provenance.mjs  — the consumer that applies it
+  //   write-validated-tree.mjs   — the producer of the manifest
+  //   zip.mjs                    — how the consumer reads the artifact
+  //   aggregate (lib and bin)    — where the asserted gate results and totals come from
+  for (const path of [
+    '.github/workflows/ci.yml',
+    '.github/workflows/ci-main-provenance.yml',
+    'product/ci-metrics/lib/provenance.mjs',
+    'product/ci-metrics/bin/check-main-provenance.mjs',
+    'product/ci-metrics/bin/write-validated-tree.mjs',
+    'product/ci-metrics/lib/zip.mjs',
+    'product/ci-metrics/lib/aggregate.mjs',
+    'product/ci-metrics/bin/aggregate.mjs',
+  ]) {
+    assert.ok(GATE_DEFINING_PATHS.includes(path), `${path} must be gate-defining`)
+    assert.equal(touchesGateDefinition([path]), true, path)
+  }
+})
+
+test('a rename away from a guarded path still trips the rule', () => {
+  // GitHub reports a rename with the new name in `filename` and the old one in `previous_filename`.
+  // Collecting only the former would let "rename provenance.mjs to something else" read as an ordinary
+  // change. The collector contributes both names; this asserts the predicate honours the old one.
+  const result = decide({
+    pushTreeSha: 'd'.repeat(40),
+    mergedPr: { number: 1 },
+    manifests: [manifest()],
+    changedPaths: ['product/ci-metrics/lib/provenance-renamed.mjs', 'product/ci-metrics/lib/provenance.mjs'],
+  })
+  assert.equal(result.outcome, 'fallback-needed')
+  assert.equal(result.selfModifying, true)
 })
 
 test('the self-modification rule does not fire on ordinary product changes', () => {
