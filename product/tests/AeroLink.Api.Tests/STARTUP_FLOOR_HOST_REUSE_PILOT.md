@@ -39,7 +39,7 @@ Converted classes must satisfy, and were checked for:
 
 - Classes: 9 (5 tranche 1 + 4 tranche 2a), meeting the 8?12-class pilot target.
 
-- Factories: tranche 1 -27 + isolation +1; tranche 2a -12; cumulative suite factory count drops from 471 (489 tests) to 433 (508 tests) on the tranche-2a head.
+- Factories: tranche 1 -27 + isolation +1; tranche 2a -12; cumulative suite factory count drops from 471 (489 tests) to 433 (492 tests) on the tranche-2a head. Test totals are the per-shard counts each API shard reports it ran: 163 x 3 = 489 at 563A (run 31858889257), 164 x 3 = 492 from tranche 1 onward (runs 31864364853 and 31880526966). Neither tranche adds a test, so the count is unchanged across them.
 
 ## Fresh-host required additions
 
