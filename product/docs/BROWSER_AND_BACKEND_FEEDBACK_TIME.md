@@ -316,3 +316,89 @@ costs a full gate to re-run something that already worked. Raised to 30, which s
 browser.
 
 This is the same growth that makes the shard-count reasoning above worth re-measuring rather than inheriting.
+
+## API startup floor, measured (563A, 2026-08-14)
+
+Per-shard telemetry (schema `aerolink-api-telemetry/v2`) splits each hosted API test's wall time into
+factory startup (construction-to-host-start + host build + disposal, attributed from the construction
+call site) and test body (wall minus startup). The three intervals are non-overlapping: `constructionMs`
+is captured **before** `base.CreateHost`, so it never contains the host build. `connectionOpen` records
+every SQLite connection open over the factory lifetime and is informational only (never added to
+startup). Structured per-shard artifacts: `api-telemetry-<shard>-<attempt>`.
+
+### Timing-correction note (round 2 review, 2026-08-14)
+
+Round-1/round-2 heads captured `constructionMs` in the `finally` **after** `base.CreateHost` completed,
+so the value already contained the whole host build and the aggregator's
+`constructionMs + hostMs + disposeMs` added the host time twice (about 438s across the three shards in
+run 31852062285). All startup percentages and summed-startup numbers in the tables below are therefore
+inflated and are retained **only as the defect evidence**. The corrected baseline is measured by the
+round-3 run (schema v2, non-overlapping intervals) and published in its per-shard artifacts, the PR
+body, and the table below.
+
+### Corrected baseline: run 31855848873, PR #581 head `019950c` (schema v2)
+
+Each shard reconciles exactly: TRX = attributed + ambiguous theory rows + no-factory-telemetry.
+
+| Shard | TRX | Attributed | Ambiguous theory rows | Unmatched methods | No factory telemetry | Factories | Summed wall | Summed startup | Startup % | Wall p10/median/p75/p95 | Startup p10/median/p75/p95 |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| 1 | 163 | 132 | 28 | 0 | 3 | 160 | 663.7s | 130.1s | 20% | 2.9 / 4.7 / 6.0 / 9.1s | 0.3 / 0.7 / 1.0 / 3.3s |
+| 2 | 163 | 138 | 15 | 1 | 10 | 162 | 899.8s | 115.7s | 13% | 4.1 / 6.0 / 7.5 / 11.9s | 0.4 / 0.6 / 0.8 / 2.2s |
+| 3 | 163 | 126 | 20 | 1 | 17 | 149 | 716.0s | 104.0s | 15% | 3.5 / 5.2 / 6.6 / 10.5s | 0.4 / 0.6 / 0.8 / 2.1s |
+| Total | 489 | 396 | 63 | 2 | 30 | 471 | 2279.6s | 349.8s | 15% | — | — |
+
+The raw host records confirm the non-overlapping boundary: pre-host construction summed to 176/131/170 ms
+across the three shards of an earlier run (159/186/144 ms on this run) while the host builds themselves
+summed to 144.1/135.8/111.4 s. The corrected startup floor (13–20% of summed wall by shard) is roughly a
+third of the inflated round-2 fractions (40/25/31%), and the earlier per-class startup rankings were
+materially distorted by the double count.
+
+### Inflated exact-head baseline (defect evidence): run 31844562806, PR #581 head `e0d4770`
+
+Each shard's TRX reported **162 tests** (486 across the three shards); the round-1 artifacts attributed
+**419** of them because parameterized theory invocations shared one call-site method name. All startup
+values below double-count the host build.
+
+| Shard | Tests | Factories | Summed wall | Summed startup | Startup % | Wall p10/median/p75/p95 | Startup p10/median/p75/p95 |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| 1 | 133 | 159 | 821.0s | 360.4s | 44% | 4.1 / 5.7 / 7.3 / 13.0s | 0.8 / 1.2 / 1.8 / 10.3s |
+| 2 | 152 | 163 | 838.5s | 224.7s | 27% | 3.8 / 5.5 / 7.0 / 9.8s | 0.8 / 1.1 / 1.5 / 2.4s |
+| 3 | 134 | 148 | 774.4s | 297.8s | 38% | 3.6 / 5.3 / 6.2 / 12.8s | 1.0 / 1.4 / 1.8 / 9.8s |
+| Total | 419 | 470 | 2433.9s | 882.9s | 36% | — | — |
+
+TRX totals are the authoritative test count: **162 tests per shard, 486 total**. The 67-test gap per run
+(486 TRX − 419 attributed) is the parameterized-theory and fixture/helper attribution gap measured above,
+not a suite reduction.
+
+### Inflated earlier baseline for comparison (defect evidence): run 31843343040, PR #581 head `c002890`
+
+This is the pre-rebase measurement, retained only as a comparison point. It uses the same aggregator and
+the same attribution gap; it is **not** the exact-head baseline. Its startup values also double-count the
+host build.
+
+| Shard | Tests | Factories | Summed wall | Summed startup | Startup % |
+|---|---:|---:|---:|---:|---:|
+| 1 | 133 | 159 | 778.4s | 229.9s | 30% |
+| 2 | 152 | 163 | 970.9s | 350.8s | 36% |
+| 3 | 134 | 148 | 833.8s | 194.0s | 23% |
+| Total | 419 | 470 | 2583.1s | 774.7s | 30% |
+
+Notes:
+
+- The corrected floor counts construction-to-host-start, host build, and disposal as three
+  non-overlapping intervals; the TRX wall is the whole test method. `connectionOpen` (every SQLite
+  connection open over the factory lifetime, not only host startup) is recorded separately and never
+  added to the startup total.
+- Startup percentages above 100% for classes whose factories are created in collection/class fixtures
+  (e.g., `ShowcaseApiFixture`, `CancelReviewAuthorityTests`) are expected: fixture startup occurs outside
+  any single test's TRX wall.
+- 470 factories were created for 419 attributed tests at the exact-head baseline; multiple-factory tests
+  are listed explicitly in the artifact, and parameterized-theory rows are reported separately (not merged
+  into a fabricated multi-factory test) from the round-2 head onward. Every TRX row reconciles into
+  exactly one bucket (attributed, ambiguous theory, or no-factory-telemetry) from the round-2 head onward.
+- The schema-template copy experiment remains the recorded negative result: median rose 13.4s to 19.4s,
+  p75 20.4s to 26.9s, summed CPU +22%; do not repeat a per-test database-copy strategy.
+- Phase 2 (fresh-host/reusable-host/non-hosted inventory) and phase 3 (host-reuse pilot with >=10
+  full-concurrency runs) are the next increments; this phase changes no isolation architecture.
+- This foundation does not yet break host build down into database/schema, bootstrap, evidence-root, and
+  first-client components; that attribution is a phase-2 requirement before a host-reuse design is chosen.
