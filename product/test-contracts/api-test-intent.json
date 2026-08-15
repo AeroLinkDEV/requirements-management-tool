@@ -1,0 +1,2271 @@
+{
+  "schemaVersion": "aerolink-api-test-intent/v1",
+  "totals": {
+    "tests": 442,
+    "cases": 485,
+    "classes": 81
+  },
+  "intents": {
+    "http-boundary": {
+      "label": "HTTP boundary: route, status, JSON shape",
+      "level": "API (must stay hosted)",
+      "tests": 292,
+      "cases": 319,
+      "classes": 67
+    },
+    "ef-translation": {
+      "label": "EF translation / relational constraints",
+      "level": "Infrastructure (needs a database, not a host)",
+      "tests": 74,
+      "cases": 77,
+      "classes": 31
+    },
+    "auth-policy": {
+      "label": "Authentication / authorization wiring",
+      "level": "API (must stay hosted)",
+      "tests": 52,
+      "cases": 55,
+      "classes": 33
+    },
+    "filesystem": {
+      "label": "Filesystem / evidence-root behaviour",
+      "level": "API or Infrastructure (must stay hosted)",
+      "tests": 9,
+      "cases": 9,
+      "classes": 5
+    },
+    "in-process-logic": {
+      "label": "In-process logic with no HTTP and no client",
+      "level": "Domain or Infrastructure (migration candidate)",
+      "tests": 8,
+      "cases": 8,
+      "classes": 7
+    },
+    "startup-config": {
+      "label": "Startup, hosting and configuration",
+      "level": "API (must stay hosted)",
+      "tests": 5,
+      "cases": 5,
+      "classes": 4
+    },
+    "rule-matrix": {
+      "label": "Business-rule matrix over data variations",
+      "level": "Domain (migration candidate)",
+      "tests": 2,
+      "cases": 12,
+      "classes": 2
+    }
+  },
+  "tests": [
+    {
+      "cls": "AdministratorChangeRequestApiTests",
+      "test": "Administrator_can_govern_another_authors_change_without_losing_authorship",
+      "intent": "auth-policy"
+    },
+    {
+      "cls": "ApiTestTelemetryTests",
+      "test": "An_injected_telemetry_write_failure_never_fails_the_authoritative_test",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "ApiTestTelemetryTests",
+      "test": "Host_and_dispose_records_report_the_same_pre_host_construction_latency",
+      "intent": "startup-config"
+    },
+    {
+      "cls": "ApiTestTelemetryTests",
+      "test": "Reset_for_test_clears_telemetry_state",
+      "intent": "in-process-logic"
+    },
+    {
+      "cls": "ApprovalConfigurationApiTests",
+      "test": "A_stage_naming_a_position_nobody_holds_is_reported_as_blocking",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "ApprovalConfigurationApiTests",
+      "test": "A_stage_naming_a_position_one_person_holds_resolves_to_that_person",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "ApprovalConfigurationApiTests",
+      "test": "A_standing_backup_keeps_a_stage_signable",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "ApprovalConfigurationApiTests",
+      "test": "An_artifact_with_no_procedure_is_reported_as_unconfigured_not_blocked",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "ApprovalConfigurationApiTests",
+      "test": "Ending_the_only_holder_blocks_the_stage_that_named_them",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "ApprovalConfigurationApiTests",
+      "test": "Every_artifact_type_is_reported",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "AuthoredSectionTests",
+      "test": "A_draft_may_be_saved_before_its_section_has_been_chosen",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "AuthoredSectionTests",
+      "test": "A_new_requirement_with_a_section_reaches_review",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "AuthoredSectionTests",
+      "test": "A_new_requirement_without_a_section_cannot_be_sent_for_review",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "AuthoringTracedImpactTests",
+      "test": "A_requirement_reports_what_derives_from_it_and_what_verifies_it",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "AuthoringTracedImpactTests",
+      "test": "A_requirement_that_does_not_exist_yet_answers_rather_than_failing",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "AuthoringTracedImpactTests",
+      "test": "A_suspect_link_is_reported_separately_from_the_approved_procedure_lifecycle",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "AuthoringTracedImpactTests",
+      "test": "Modification_picker_hydrates_the_current_exact_upward_allocation",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "AuthoringTracedImpactTests",
+      "test": "Modification_picker_searches_requirement_wording_as_well_as_identifier",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "AuthoringTracedImpactTests",
+      "test": "Only_what_derives_from_the_requirement_is_reported_not_what_it_derives_from",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "AuthoringTracedImpactTests",
+      "test": "Reading_the_traces_changes_no_disposition",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "AuthoringTracedImpactTests",
+      "test": "Upstream_picker_hydrates_an_exact_selected_parent_from_an_older_revision",
+      "intent": "ef-translation"
+    },
+    {
+      "cls": "BaselineImportApiTests",
+      "test": "A_released_build_in_the_workspace_does_not_refuse_an_import",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "BaselineImportApiTests",
+      "test": "A_source_identifier_retired_before_the_imported_baseline_still_answers",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "BaselineImportApiTests",
+      "test": "Abandoning_an_import_leaves_nothing_behind_for_the_next_attempt",
+      "intent": "ef-translation"
+    },
+    {
+      "cls": "BaselineImportApiTests",
+      "test": "Accepting_twice_or_onto_an_existing_build_is_refused",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "BaselineImportApiTests",
+      "test": "An_import_declares_carrying_requirements_and_test_procedures_separately",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "BaselineImportApiTests",
+      "test": "An_import_records_what_the_extract_held_and_a_re_extract_is_a_delta",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "BaselineImportApiTests",
+      "test": "An_import_walks_its_five_gates_and_becomes_a_released_build",
+      "intent": "ef-translation"
+    },
+    {
+      "cls": "BaselineImportApiTests",
+      "test": "Changing_the_mapping_makes_the_import_unacceptable_again",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "BaselineImportApiTests",
+      "test": "No_gate_can_be_skipped",
+      "intent": "ef-translation"
+    },
+    {
+      "cls": "BaselineImportApiTests",
+      "test": "Porting_a_program_in_takes_Program_authority_not_engineering_authority",
+      "intent": "auth-policy"
+    },
+    {
+      "cls": "BaselineImportApiTests",
+      "test": "Provenance_that_could_not_be_checked_later_is_refused_at_the_door",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "BaselineImportApiTests",
+      "test": "Recording_more_of_the_extract_makes_the_import_unacceptable_again",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "BaselineImportApiTests",
+      "test": "Source_history_is_recorded_as_reported_and_never_becomes_a_revision",
+      "intent": "ef-translation"
+    },
+    {
+      "cls": "BaselineImportApiTests",
+      "test": "Two_objects_claiming_the_same_source_identity_are_refused",
+      "intent": "ef-translation"
+    },
+    {
+      "cls": "BuildScopedWorkspaceApiTests",
+      "test": "Build_context_scopes_search_and_rejects_conflicting_queries_and_resources",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "BuildScopedWorkspaceApiTests",
+      "test": "In_work_execution_is_owned_by_route_build_even_without_immutable_software_build",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "BuildScopedWorkspaceApiTests",
+      "test": "My_work_orders_drafts_within_their_priority_tier_by_earliest_due_date",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "BuildScopedWorkspaceApiTests",
+      "test": "Problem_reports_are_one_project_database_visible_from_every_build",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "BuildScopedWorkspaceApiTests",
+      "test": "Released_build_execution_is_refused_without_the_build_context_header",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "BuildScopedWorkspaceApiTests",
+      "test": "Released_context_rejects_mutations_before_endpoint_execution_while_in_work_context_does_not",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "BuildTestSetApiTests",
+      "test": "A_build_can_only_be_set_to_run_approved_procedures_from_its_own_Project",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "BuildTestSetApiTests",
+      "test": "A_build_reports_a_set_for_each_discipline_starting_empty",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "BuildTestSetApiTests",
+      "test": "A_changed_requirement_procedure_cannot_be_taken_out_of_release_scope",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "BuildTestSetApiTests",
+      "test": "A_lead_chooses_procedures_and_the_set_says_who_chose_them_and_why",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "BuildTestSetApiTests",
+      "test": "A_procedure_can_be_taken_back_out",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "BuildTestSetApiTests",
+      "test": "Choosing_the_same_procedure_again_adds_nothing_and_says_so",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "BuildTestSetApiTests",
+      "test": "Choosing_what_a_build_runs_takes_lead_authority",
+      "intent": "auth-policy"
+    },
+    {
+      "cls": "CancelReviewAuthorityTests",
+      "test": "A_bystander_in_the_Program_cannot",
+      "intent": "auth-policy"
+    },
+    {
+      "cls": "CancelReviewAuthorityTests",
+      "test": "A_review_cannot_be_stopped_without_saying_why",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "CancelReviewAuthorityTests",
+      "test": "A_stale_version_is_refused_rather_than_applied",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "CancelReviewAuthorityTests",
+      "test": "Somebody_with_a_stake_can_stop_the_review",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "ChangeAuthoringInvariantApiTests",
+      "test": "Authored_attributes_and_sections_survive_creation_and_server_owned_derived_cannot_be_spoofed",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "ChangeAuthoringInvariantApiTests",
+      "test": "Change_request_type_rejects_incompatible_requirement_level",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "ChangeAuthoringInvariantApiTests",
+      "test": "Direct_api_submission_does_not_require_author_owned_impact_dispositions",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "ChangeAuthoringInvariantApiTests",
+      "test": "Legacy_impact_disposition_metadata_does_not_block_selection_or_freeze",
+      "intent": "ef-translation"
+    },
+    {
+      "cls": "ChangeAuthoringInvariantApiTests",
+      "test": "Missing_authored_attributes_are_reported_without_rewriting_history",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "ChangeRequestRenameApiTests",
+      "test": "A_created_change_request_is_numbered_for_the_level_it_may_change",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "ChangeRequestRenameApiTests",
+      "test": "A_software_change_request_without_a_level_is_refused_because_it_cannot_be_named",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "ChangeRequestRenameApiTests",
+      "test": "No_retired_identifier_can_be_created_or_recognised",
+      "intent": "ef-translation"
+    },
+    {
+      "cls": "ChangeRequestRenameApiTests",
+      "test": "The_two_software_prefixes_are_numbered_apart_and_resume_above_what_each_level_already_used",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "ChangeRequestReviewRationaleApiTests",
+      "test": "Approval_records_the_reviewers_rationale_on_the_step_and_signature",
+      "intent": "ef-translation"
+    },
+    {
+      "cls": "ChangeRequestReviewRationaleApiTests",
+      "test": "Only_the_active_reviewer_can_return_the_package",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "ChangeRequestReviewRationaleApiTests",
+      "test": "Return_records_the_active_step_and_keeps_the_cycle_after_resubmission",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "ClientHostingTests",
+      "test": "(unnamed)",
+      "intent": "rule-matrix"
+    },
+    {
+      "cls": "ClientHostingTests",
+      "test": "A_published_wwwroot_beside_the_application_is_found",
+      "intent": "filesystem"
+    },
+    {
+      "cls": "ClientHostingTests",
+      "test": "A_wwwroot_holding_no_entry_document_is_not_a_client",
+      "intent": "filesystem"
+    },
+    {
+      "cls": "ClientHostingTests",
+      "test": "An_explicitly_configured_client_directory_is_used",
+      "intent": "filesystem"
+    },
+    {
+      "cls": "ClientHostingTests",
+      "test": "An_explicitly_configured_directory_without_a_client_is_a_misconfiguration_not_an_opt_out",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "ClientHostingTests",
+      "test": "Serving_no_client_is_the_default_and_leaves_the_API_as_it_was",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "ClientHostingTests",
+      "test": "The_document_policy_permits_this_origin_and_nothing_beyond_it",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "ClosedReleaseAuthoringTests",
+      "test": "A_released_build_refuses_a_new_change_request",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "ClosedReleaseAuthoringTests",
+      "test": "The_in_work_build_accepts_the_same_change_request",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "CodeTraceabilityApiTests",
+      "test": "Code_gate_is_build_scoped_and_accepts_a_justified_no_code_decision_for_active_work",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "CodeTraceabilityApiTests",
+      "test": "Digital_thread_prefers_the_exact_procedure_with_linked_checksummed_evidence",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "CodeTraceabilityApiTests",
+      "test": "Digital_thread_returns_one_exact_SYSR_to_build_path",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "ConfigurationPublicationApiTests",
+      "test": "Configuration_publications_are_resumable_integrity_checked_and_packaged_with_verifiable_manifest",
+      "intent": "ef-translation"
+    },
+    {
+      "cls": "ControlledEditingCheckInApiTests",
+      "test": "Authoritative_change_after_checkout_returns_409_stale_artifact_version",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "ControlledEditingCheckInApiTests",
+      "test": "Remaining_controlled_families_complete_the_public_checkout_to_evidence_lifecycle",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "ControlledEditingCheckInApiTests",
+      "test": "Universal_check_in_returns_resulting_version_hash_and_released_lease",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "ControlledEditingProcedureAuthorityTests",
+      "test": "A_fabricated_test_procedure_session_cannot_autosave_or_check_in",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "ControlledEditingProcedureAuthorityTests",
+      "test": "Historical_draft_revisions_remain_non_executable",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "ControlledEditingProcedureAuthorityTests",
+      "test": "Historical_draft_revisions_remain_readable",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "ControlledEditingProcedureAuthorityTests",
+      "test": "Test_procedure_and_its_aliases_cannot_be_checked_out",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "ControlledProcedureApprovalBasisApiTests",
+      "test": "Approval_basis_uses_exact_carried_source_tcrs_and_never_leaks_into_requirement_documents",
+      "intent": "in-process-logic"
+    },
+    {
+      "cls": "ControlledProcedureDocumentApiTests",
+      "test": "A_procedure_document_renders_the_same_records_after_unrelated_later_activity",
+      "intent": "ef-translation"
+    },
+    {
+      "cls": "ControlledProcedureDocumentApiTests",
+      "test": "Introduce_modify_and_retire_procedure_documents_publish_only_exact_carried_revisions",
+      "intent": "ef-translation"
+    },
+    {
+      "cls": "ControlledProcedureDocumentApiTests",
+      "test": "Procedure_documents_are_bound_to_the_exact_manifest_after_materialization",
+      "intent": "ef-translation"
+    },
+    {
+      "cls": "ControlledProcedureDocumentApiTests",
+      "test": "Procedure_documents_cannot_be_generated_before_the_exact_procedure_manifest_exists",
+      "intent": "ef-translation"
+    },
+    {
+      "cls": "CorrectiveActionRoutingApiTests",
+      "test": "A_report_with_nothing_linked_says_the_scope_cannot_be_determined_rather_than_guessing",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "CorrectiveActionRoutingApiTests",
+      "test": "The_corrective_action_resolves_its_discipline_procedure_and_report_from_the_record",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "CorrectiveActionRoutingApiTests",
+      "test": "The_target_is_not_readable_without_access_to_the_project",
+      "intent": "auth-policy"
+    },
+    {
+      "cls": "CoverageStateFilterApiTests",
+      "test": "An_unsupported_coverage_state_is_refused_rather_than_quietly_dropped",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "CoverageStateFilterApiTests",
+      "test": "Coverage_filtering_does_not_reach_across_a_program_boundary",
+      "intent": "auth-policy"
+    },
+    {
+      "cls": "CoverageStateFilterApiTests",
+      "test": "Coverage_filters_compose_with_level_search_and_paging",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "CoverageStateFilterApiTests",
+      "test": "Coverage_naming_an_unapproved_procedure_revision_is_not_covered",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "CoverageStateFilterApiTests",
+      "test": "Each_coverage_state_returns_exactly_the_requirements_in_it",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "CoverageStateFilterApiTests",
+      "test": "The_workspace_filter_and_the_release_gate_agree_on_what_is_covered",
+      "intent": "ef-translation"
+    },
+    {
+      "cls": "DeferralAndRevisionListingTests",
+      "test": "An_approved_change_request_goes_on_the_shelf_and_comes_back_where_it_was",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "DeferralAndRevisionListingTests",
+      "test": "Deferring_without_a_reason_is_refused",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "DeferralAndRevisionListingTests",
+      "test": "The_listing_collapses_to_the_newest_revision_and_expands_on_request",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "DeferredCarryForwardApiTests",
+      "test": "A_change_request_deferred_in_one_build_is_offered_to_its_successor",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "DeferredCarryForwardApiTests",
+      "test": "Reinstating_from_the_successor_moves_the_change_request_into_that_build",
+      "intent": "ef-translation"
+    },
+    {
+      "cls": "DeferredCarryForwardApiTests",
+      "test": "Reinstating_into_a_released_build_is_refused",
+      "intent": "ef-translation"
+    },
+    {
+      "cls": "DeferredCarryForwardApiTests",
+      "test": "Reinstating_without_a_target_returns_it_to_the_build_that_shelved_it",
+      "intent": "ef-translation"
+    },
+    {
+      "cls": "DownstreamAssessmentReopenApiTests",
+      "test": "A_released_build_refuses_the_withdrawal_like_every_other_change",
+      "intent": "ef-translation"
+    },
+    {
+      "cls": "DownstreamAssessmentReopenApiTests",
+      "test": "An_assessment_with_no_conclusion_offers_nothing_to_withdraw",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "DownstreamAssessmentReopenApiTests",
+      "test": "Another_engineer_cannot_withdraw_a_conclusion_that_is_not_theirs",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "DownstreamAssessmentReopenApiTests",
+      "test": "The_engineer_who_concluded_can_withdraw_it_and_the_previous_answer_is_kept",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "DownstreamAssessmentReopenApiTests",
+      "test": "Withdrawing_an_approved_conclusion_takes_approval_authority",
+      "intent": "auth-policy"
+    },
+    {
+      "cls": "DraftDocumentApiTests",
+      "test": "A_draft_applies_introductions_modifications_and_retirements_and_ignores_unapproved_change",
+      "intent": "ef-translation"
+    },
+    {
+      "cls": "DraftDocumentApiTests",
+      "test": "An_in_work_test_procedure_document_is_available_as_a_living_draft",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "DraftDocumentApiTests",
+      "test": "Drafts_keep_the_approved_document_acronym_and_docx_pages_share_the_draft_watermark",
+      "intent": "in-process-logic"
+    },
+    {
+      "cls": "ExternalIdentityAdminApiTests",
+      "test": "Administrator_can_administer_external_identity_against_the_shipped_schema",
+      "intent": "startup-config"
+    },
+    {
+      "cls": "ExternalIdentityAdminApiTests",
+      "test": "Non_administrator_is_forbidden_from_external_identity_administration",
+      "intent": "auth-policy"
+    },
+    {
+      "cls": "GovernanceEvidenceApiTests",
+      "test": "Operations_only_claims_production_qualification_when_retained_run_meets_both_targets",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "GovernanceEvidenceApiTests",
+      "test": "Quality_portfolio_retains_objectives_attributable_waivers_evidence_and_controlled_export",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "GovernanceEvidenceApiTests",
+      "test": "Verification_coverage_metric_never_counts_another_program",
+      "intent": "startup-config"
+    },
+    {
+      "cls": "HistoricalPublicationFreezeApiTests",
+      "test": "Frozen_documents_are_byte_identical_after_live_state_changes_and_legacy_regeneration_is_labeled",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "IdentifierAllocationTests",
+      "test": "A_number_handed_out_is_not_returned_to_the_pool_when_its_record_is_never_written",
+      "intent": "ef-translation"
+    },
+    {
+      "cls": "IdentifierAllocationTests",
+      "test": "An_existing_database_starts_numbering_past_what_it_already_recorded",
+      "intent": "ef-translation"
+    },
+    {
+      "cls": "IdentifierAllocationTests",
+      "test": "Attachment_versions_are_claimed_per_logical_file_and_never_repeat",
+      "intent": "ef-translation"
+    },
+    {
+      "cls": "IdentifierAllocationTests",
+      "test": "Authoring_context_previews_do_not_claim_controlled_numbers",
+      "intent": "ef-translation"
+    },
+    {
+      "cls": "IdentifierAllocationTests",
+      "test": "Concurrent_allocations_of_one_prefix_all_receive_distinct_numbers",
+      "intent": "ef-translation"
+    },
+    {
+      "cls": "IdentifierAllocationTests",
+      "test": "Each_prefix_numbers_independently_and_continuously_across_projects",
+      "intent": "ef-translation"
+    },
+    {
+      "cls": "IdentifierAllocationTests",
+      "test": "Two_allocations_before_either_record_is_saved_do_not_collide",
+      "intent": "in-process-logic"
+    },
+    {
+      "cls": "IdentifierAllocationTests",
+      "test": "Two_uploads_of_one_logical_file_leave_exactly_one_active_version",
+      "intent": "ef-translation"
+    },
+    {
+      "cls": "IntegrityCheckpointApiTests",
+      "test": "An_altered_attachment_fails_the_checkpoint_and_changes_its_manifest",
+      "intent": "filesystem"
+    },
+    {
+      "cls": "LegacyProcedureManifestBootstrapApiTests",
+      "test": "Preview_confirmation_authority_and_idempotency_are_enforced_by_the_API",
+      "intent": "auth-policy"
+    },
+    {
+      "cls": "LiveTestRegressionApiTests",
+      "test": "Change_request_audit_projection_normalizes_legacy_requirement_padding",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "LiveTestRegressionApiTests",
+      "test": "Downstream_queue_projects_claim_capability_for_the_current_user",
+      "intent": "ef-translation"
+    },
+    {
+      "cls": "LiveTestRegressionApiTests",
+      "test": "Released_build_uses_its_effective_procedure_revision_and_exact_history_link",
+      "intent": "ef-translation"
+    },
+    {
+      "cls": "ManagedDocumentApiTests",
+      "test": "Assignments_are_validated_and_stewardship_and_revision_responsibility_transfer_independently",
+      "intent": "startup-config"
+    },
+    {
+      "cls": "ManagedDocumentApiTests",
+      "test": "Author_can_submit_and_reroute_an_ordered_named_review_and_approval_chain",
+      "intent": "startup-config"
+    },
+    {
+      "cls": "ManagedDocumentApiTests",
+      "test": "Concurrent_successor_starts_produce_one_project_revision",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "ManagedDocumentApiTests",
+      "test": "Controlled_reads_fail_closed_deduplicate_incidents_and_require_exact_hash_recovery",
+      "intent": "filesystem"
+    },
+    {
+      "cls": "ManagedDocumentApiTests",
+      "test": "Create_fault_after_metadata_commit_reconciles_to_available_and_retry_returns_the_same_result",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "ManagedDocumentApiTests",
+      "test": "Create_faults_leave_no_visible_document_and_reconcile_to_reported_rollback",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "ManagedDocumentApiTests",
+      "test": "Create_requires_a_caller_operation_key_and_distinct_keys_do_not_collapse_equal_intent",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "ManagedDocumentApiTests",
+      "test": "Delegated_authority_is_frozen_at_assignment_but_disabled_signers_fail_closed",
+      "intent": "auth-policy"
+    },
+    {
+      "cls": "ManagedDocumentApiTests",
+      "test": "Draft_and_returned_withdrawal_closes_checkouts_but_reviewed_and_released_revisions_fail_closed",
+      "intent": "ef-translation"
+    },
+    {
+      "cls": "ManagedDocumentApiTests",
+      "test": "Formal_scope_capability_is_server_derived_and_an_ended_owner_cannot_bypass_project_access",
+      "intent": "auth-policy"
+    },
+    {
+      "cls": "ManagedDocumentApiTests",
+      "test": "Formal_scope_correction_is_audited_versioned_and_bound_to_review_snapshot",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "ManagedDocumentApiTests",
+      "test": "My_work_surfaces_the_active_desktop_checkout_for_its_holder_only",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "ManagedDocumentApiTests",
+      "test": "Open_managed_document_resolver_lands_on_the_project_wide_record_without_guessing_a_build",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "ManagedDocumentApiTests",
+      "test": "Project_document_can_create_checkout_and_check_in_without_build_context",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "ManagedDocumentApiTests",
+      "test": "Project_inventory_and_histories_are_bounded_filtered_and_cursor_scoped",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "ManagedDocumentApiTests",
+      "test": "Project_without_software_builds_can_use_documentation_center",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "ManagedDocumentApiTests",
+      "test": "Relationships_are_canonical_authorized_project_scoped_review_bound_and_hashed",
+      "intent": "auth-policy"
+    },
+    {
+      "cls": "ManagedDocumentApiTests",
+      "test": "Release_candidate_rejects_unrelated_docx_bad_pdf_and_misleading_names_without_persisting_any_state",
+      "intent": "filesystem"
+    },
+    {
+      "cls": "ManagedDocumentApiTests",
+      "test": "Released_build_context_cannot_make_a_project_document_read_only_or_change_inventory",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "ManagedDocumentApiTests",
+      "test": "Repreparing_a_candidate_supersedes_the_prior_pair_and_releases_only_the_latest",
+      "intent": "filesystem"
+    },
+    {
+      "cls": "ManagedDocumentApiTests",
+      "test": "Review_decisions_bind_exact_intent_and_retry_idempotently",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "ManagedDocumentApiTests",
+      "test": "Reviewer_independence_uses_the_exact_immutable_contributor_set",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "ManagedDocumentApiTests",
+      "test": "Search_finds_managed_documents_by_acronym_type_owner_and_state_and_denies_other_projects",
+      "intent": "auth-policy"
+    },
+    {
+      "cls": "ManagedDocumentApiTests",
+      "test": "Successor_is_bound_to_the_verified_released_docx_and_missing_parent_fails_closed",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "ManagedDocumentApiTests",
+      "test": "Technical_and_release_signatures_bind_formal_summary_and_released_file_metadata",
+      "intent": "auth-policy"
+    },
+    {
+      "cls": "ManagedDocumentRecoveryApiTests",
+      "test": "Recovery_reauthenticates_exact_workspace_rotates_session_and_fails_closed_after_source_change",
+      "intent": "auth-policy"
+    },
+    {
+      "cls": "ManualTestChangeRequestApiTests",
+      "test": "A_change_allocated_to_another_build_cannot_be_covered_here",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "ManualTestChangeRequestApiTests",
+      "test": "A_change_at_the_matching_level_raises_the_package",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "ManualTestChangeRequestApiTests",
+      "test": "A_change_from_another_level_is_refused_even_when_named_directly",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "ManualTestChangeRequestApiTests",
+      "test": "A_change_request_origin_still_records_itself_as_the_originating_source",
+      "intent": "ef-translation"
+    },
+    {
+      "cls": "ManualTestChangeRequestApiTests",
+      "test": "A_malformed_procedure_decision_refuses_the_whole_package",
+      "intent": "ef-translation"
+    },
+    {
+      "cls": "ManualTestChangeRequestApiTests",
+      "test": "A_manually_raised_package_requires_a_title",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "ManualTestChangeRequestApiTests",
+      "test": "A_package_has_to_answer_for_something",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "ManualTestChangeRequestApiTests",
+      "test": "A_package_raised_from_nothing_at_all_is_refused",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "ManualTestChangeRequestApiTests",
+      "test": "A_pending_automatic_review_becomes_the_manual_package",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "ManualTestChangeRequestApiTests",
+      "test": "A_problem_report_allocated_to_another_build_cannot_be_linked",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "ManualTestChangeRequestApiTests",
+      "test": "A_problem_report_alone_can_raise_a_package",
+      "intent": "ef-translation"
+    },
+    {
+      "cls": "ManualTestChangeRequestApiTests",
+      "test": "A_problem_report_link_versus_submit_race_has_one_winner",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "ManualTestChangeRequestApiTests",
+      "test": "A_source_change_request_still_in_draft_cannot_be_covered",
+      "intent": "ef-translation"
+    },
+    {
+      "cls": "ManualTestChangeRequestApiTests",
+      "test": "A_stale_case_edit_is_refused_without_writing",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "ManualTestChangeRequestApiTests",
+      "test": "A_stale_conclusion_is_refused",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "ManualTestChangeRequestApiTests",
+      "test": "A_stale_problem_report_link_replacement_is_refused",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "ManualTestChangeRequestApiTests",
+      "test": "A_stale_procedure_proposal_is_refused_without_writing",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "ManualTestChangeRequestApiTests",
+      "test": "A_stale_procedure_withdrawal_is_refused",
+      "intent": "ef-translation"
+    },
+    {
+      "cls": "ManualTestChangeRequestApiTests",
+      "test": "A_test_lead_can_raise_a_package_too",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "ManualTestChangeRequestApiTests",
+      "test": "A_true_impact_decision_change_versus_submit_collision_when_the_decision_commits_first",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "ManualTestChangeRequestApiTests",
+      "test": "A_true_link_versus_submit_collision_when_the_link_commits_first",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "ManualTestChangeRequestApiTests",
+      "test": "A_true_link_versus_submit_collision_when_the_submit_commits_first",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "ManualTestChangeRequestApiTests",
+      "test": "A_true_two_context_case_race_returns_stale_version",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "ManualTestChangeRequestApiTests",
+      "test": "An_assessed_change_is_refused_by_name",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "ManualTestChangeRequestApiTests",
+      "test": "An_authored_package_cannot_be_submitted_with_an_incomplete_case",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "ManualTestChangeRequestApiTests",
+      "test": "An_engineer_raises_a_package_covering_two_changes_at_once",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "ManualTestChangeRequestApiTests",
+      "test": "An_impact_decision_change_versus_submit_race_has_one_winner",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "ManualTestChangeRequestApiTests",
+      "test": "An_unheld_package_case_cannot_be_edited_by_someone_else",
+      "intent": "auth-policy"
+    },
+    {
+      "cls": "ManualTestChangeRequestApiTests",
+      "test": "Concurrent_revise_requests_do_not_create_competing_successors",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "ManualTestChangeRequestApiTests",
+      "test": "Folded_changes_pending_automatic_reviews_are_superseded",
+      "intent": "ef-translation"
+    },
+    {
+      "cls": "ManualTestChangeRequestApiTests",
+      "test": "HLR_and_LLR_packages_are_numbered_and_raised_independently",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "ManualTestChangeRequestApiTests",
+      "test": "Impact_decisions_are_frozen_while_in_review_or_approved",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "ManualTestChangeRequestApiTests",
+      "test": "Problem_report_links_are_editable_only_while_the_test_change_request_is_open",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "ManualTestChangeRequestApiTests",
+      "test": "Procedure_decisions_are_saved_with_the_package_that_proposes_them",
+      "intent": "ef-translation"
+    },
+    {
+      "cls": "ManualTestChangeRequestApiTests",
+      "test": "Raising_one_takes_verification_authority",
+      "intent": "auth-policy"
+    },
+    {
+      "cls": "ManualTestChangeRequestApiTests",
+      "test": "Returning_to_open_permits_impact_rework_and_resubmission_hashes_differently",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "ManualTestChangeRequestApiTests",
+      "test": "Revising_a_package_carries_its_folded_in_change_requests_onto_the_successor",
+      "intent": "ef-translation"
+    },
+    {
+      "cls": "ManualTestChangeRequestApiTests",
+      "test": "The_engineering_case_round_trips_and_can_be_corrected_while_open",
+      "intent": "ef-translation"
+    },
+    {
+      "cls": "ManualTestChangeRequestApiTests",
+      "test": "The_picker_offers_only_changes_at_the_level_the_package_controls",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "ManualTestChangeRequestApiTests",
+      "test": "The_source_picker_reports_availability_honestly",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "OpenDigitalThreadTests",
+      "test": "Browser_mutations_require_a_session_bound_token",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "OpenDigitalThreadTests",
+      "test": "Readiness_reports_database_connectivity",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "OpenDigitalThreadTests",
+      "test": "ReqIf_export_can_be_downloaded_and_revalidated_as_an_import_preview",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "OpenDigitalThreadTests",
+      "test": "Scoped_service_identity_reads_v1_requirements_and_cannot_exceed_scope",
+      "intent": "auth-policy"
+    },
+    {
+      "cls": "OpenDigitalThreadTests",
+      "test": "Service_event_ingestion_is_idempotent_and_enters_the_transactional_outbox",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "PreReleaseEvidenceVisibilityTests",
+      "test": "An_item_owing_pre_release_evidence_still_reports_that_it_holds_the_release",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "PreReleaseEvidenceVisibilityTests",
+      "test": "An_item_resolved_without_designating_evidence_holds_nothing",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "PreReleaseEvidenceVisibilityTests",
+      "test": "Asking_for_evidence_before_release_puts_the_procedure_in_the_builds_test_set",
+      "intent": "ef-translation"
+    },
+    {
+      "cls": "ProblemReportActiveMetricApiTests",
+      "test": "Dashboard_portfolio_contract_and_export_share_the_complete_active_work_classification",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "ProblemReportApiTests",
+      "test": "A_problem_report_can_drive_each_engineering_change_request_type",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "ProblemReportApiTests",
+      "test": "Build_queue_is_numeric_oldest_first_and_reports_when_more_than_ten_match",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "ProblemReportApiTests",
+      "test": "Dashboard_exposes_unwaived_release_blockers_as_exact_records",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "ProblemReportApiTests",
+      "test": "Detail_keeps_legacy_links_readable_without_promoting_untrusted_controlled_evidence",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "ProblemReportApiTests",
+      "test": "Draft_fields_SCCB_lifecycle_filters_and_linked_change_implementation_are_audited",
+      "intent": "ef-translation"
+    },
+    {
+      "cls": "ProblemReportApiTests",
+      "test": "Generic_links_fail_closed_for_controlled_or_unknown_semantics_and_keep_context_links_versioned_and_scoped",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "ProblemReportApiTests",
+      "test": "Legacy_closed_report_is_identified_truthfully_instead_of_fabricating_a_package",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "ProblemReportApiTests",
+      "test": "Problem_report_is_server_numbered_and_cannot_be_closed_by_its_owner",
+      "intent": "auth-policy"
+    },
+    {
+      "cls": "ProblemReportApiTests",
+      "test": "Queue_search_finds_a_report_by_its_exact_displayed_number_and_revision",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "ProblemReportApiTests",
+      "test": "Universal_search_and_artifact_inspector_expose_problem_reports",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "ProblemReportCheckoutApiTests",
+      "test": "A_closed_report_refuses_the_checkout_and_reopening_is_the_route_back",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "ProblemReportCheckoutApiTests",
+      "test": "An_open_report_is_checked_out_edited_and_checked_in_like_every_other_controlled_record",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "ProblemReportCheckoutApiTests",
+      "test": "Discarding_a_checkout_restores_the_last_checked_in_content",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "ProblemReportCheckoutApiTests",
+      "test": "Identity_fields_stay_immutable_while_the_report_is_checked_out",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "ProblemReportDispositionApiTests",
+      "test": "Generic_disposition_rejects_blank_rationale_fixed_terminal_state_and_stale_version",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "ProblemReportDuplicateDispositionApiTests",
+      "test": "Canonical_root_policy_refuses_direct_and_transitive_cycles_and_arbitrary_chains",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "ProblemReportDuplicateDispositionApiTests",
+      "test": "Invalid_duplicate_targets_leave_the_controlled_record_unchanged",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "ProblemReportDuplicateDispositionApiTests",
+      "test": "Legacy_dangling_and_cyclic_relationships_are_diagnosed_without_being_rewritten",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "ProblemReportDuplicateDispositionApiTests",
+      "test": "Stale_and_simultaneous_dispositions_never_persist_competing_targets",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "ProblemReportDuplicateDispositionApiTests",
+      "test": "Valid_duplicate_is_atomic_resolvable_and_retained_as_history_after_reopen",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "ProblemReportOwnerAuthorityApiTests",
+      "test": "Membership_loss_is_visible_and_explicit_supervision_can_recover_without_rewriting_history",
+      "intent": "auth-policy"
+    },
+    {
+      "cls": "ProblemReportOwnerAuthorityApiTests",
+      "test": "Reassignment_requires_current_program_membership_and_accountable_owner_authority",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "ProblemReportPagingApiTests",
+      "test": "Project_queue_is_bounded_complete_filtered_and_stable_across_pages",
+      "intent": "auth-policy"
+    },
+    {
+      "cls": "ProblemReportVerificationApiTests",
+      "test": "A_retest_recorded_before_verification_ready_remains_refused_with_an_actionable_reason",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "ProblemReportVerificationApiTests",
+      "test": "Closure_requires_live_Software_Quality_authority_and_never_uses_generic_or_administrator_power",
+      "intent": "auth-policy"
+    },
+    {
+      "cls": "ProblemReportVerificationApiTests",
+      "test": "Concurrent_closure_approvals_freeze_exactly_one_package",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "ProblemReportVerificationApiTests",
+      "test": "Concurrent_SQA_approval_and_controlled_check_in_allow_exactly_one_outcome",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "ProblemReportVerificationApiTests",
+      "test": "Controlled_edit_invalidates_the_exact_candidate_and_reverification_closes_only_the_new_cycle",
+      "intent": "ef-translation"
+    },
+    {
+      "cls": "ProblemReportVerificationApiTests",
+      "test": "Equal_instant_closure_retest_is_accepted_and_reported_time_does_not_gate_recording",
+      "intent": "ef-translation"
+    },
+    {
+      "cls": "ProblemReportVerificationApiTests",
+      "test": "Retarget_and_reassignment_each_invalidate_current_evidence_without_deleting_history",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "ProblemReportVerificationApiTests",
+      "test": "Software_Quality_closure_remains_independent_from_reporter_and_responsible_engineer",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "ProblemReportVerificationApiTests",
+      "test": "Verify_rejects_unrelated_stale_wrong_build_and_unscoped_evidence_then_accepts_the_effective_retest_once",
+      "intent": "ef-translation"
+    },
+    {
+      "cls": "ProblemReportWaiverApiTests",
+      "test": "Release_blocker_waiver_is_independent_server_attributed_revocable_and_bound_to_one_blocker_context",
+      "intent": "auth-policy"
+    },
+    {
+      "cls": "ProcedureBaselineApiTests",
+      "test": "A_package_that_found_no_work_is_not_offered_and_cannot_be_carried",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "ProcedureBaselineApiTests",
+      "test": "A_released_baseline_refuses_materializing_an_empty_manifest_without_build_context",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "ProcedureBaselineApiTests",
+      "test": "A_released_baseline_refuses_materializing_with_a_selected_tcr_without_build_context",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "ProcedureBaselineApiTests",
+      "test": "A_released_baseline_refuses_removing_a_test_change_request_without_build_context",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "ProcedureBaselineApiTests",
+      "test": "A_released_baseline_refuses_selecting_a_test_change_request_without_build_context",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "ProcedureBaselineApiTests",
+      "test": "A_released_baseline_refuses_test_procedure_mutations_with_the_released_build_context_header",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "ProcedureBaselineApiTests",
+      "test": "A_selection_can_be_withdrawn_until_the_manifest_is_fixed",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "ProcedureBaselineApiTests",
+      "test": "Approved_procedure_work_reaches_a_build_and_fixes_its_manifest",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "ProcedureBaselineApiTests",
+      "test": "Carrying_procedure_work_into_a_build_is_a_configuration_managers_act",
+      "intent": "auth-policy"
+    },
+    {
+      "cls": "ProcedureBaselineApiTests",
+      "test": "Procedures_cannot_be_fixed_before_the_requirements_they_verify",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "ProcedureBaselineApiTests",
+      "test": "Select_remove_select_materialize_fixes_the_exact_manifest_once",
+      "intent": "ef-translation"
+    },
+    {
+      "cls": "ProcedureBrowsingApiTests",
+      "test": "Paging_is_bounded_reports_the_total_and_walks_every_record_exactly_once",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "ProcedureBrowsingApiTests",
+      "test": "Search_accepts_a_full_display_number_with_revision",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "ProcedureBrowsingApiTests",
+      "test": "Search_state_owner_and_latest_outcome_each_narrow_the_set_and_the_total",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "ProcedureBrowsingApiTests",
+      "test": "Software_HLR_and_LLR_scopes_return_only_their_own_procedures",
+      "intent": "ef-translation"
+    },
+    {
+      "cls": "ProcedureBrowsingApiTests",
+      "test": "Sort_order_is_explicit_and_stable_across_pages",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "ProcedureBrowsingApiTests",
+      "test": "The_procedure_list_is_not_readable_without_access_to_the_project",
+      "intent": "auth-policy"
+    },
+    {
+      "cls": "ProcedureDiscussionApiTests",
+      "test": "A_remark_on_a_procedure_is_stored_against_the_procedure_and_read_back",
+      "intent": "ef-translation"
+    },
+    {
+      "cls": "ProcedureDiscussionApiTests",
+      "test": "A_remark_on_a_procedure_that_does_not_exist_is_refused",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "ProcedureManifestEffectivityApiTests",
+      "test": "Controlled_procedure_and_traceability_exports_use_the_same_exact_manifest",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "ProcedureManifestEffectivityApiTests",
+      "test": "Coverage_and_traceability_only_name_manifest_procedure_revisions",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "ProcedureManifestEffectivityApiTests",
+      "test": "Explorer_search_and_history_use_each_builds_exact_manifest_revision",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "ProcedureManifestEffectivityApiTests",
+      "test": "Tcr_targets_and_mutations_are_bound_to_the_target_build_manifest",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "ProcedureSavedViewApiTests",
+      "test": "(unnamed)",
+      "intent": "in-process-logic"
+    },
+    {
+      "cls": "ProcedureSavedViewApiTests",
+      "test": "A_repeat_name_is_refused_rather_than_creating_a_second_view_nobody_can_tell_apart",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "ProcedureSavedViewApiTests",
+      "test": "A_saved_view_round_trips_on_the_procedure_list",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "ProcedureSavedViewApiTests",
+      "test": "A_view_is_not_visible_to_somebody_outside_the_project",
+      "intent": "auth-policy"
+    },
+    {
+      "cls": "ProcedureSavedViewApiTests",
+      "test": "Only_the_owner_may_rename_share_or_delete_a_view",
+      "intent": "auth-policy"
+    },
+    {
+      "cls": "ProcedureSavedViewApiTests",
+      "test": "Replacing_a_views_query_is_validated_too",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "ProcedureTraceApiTests",
+      "test": "Cross_build_revision_access_follows_the_exact_manifest",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "ProcedureTraceApiTests",
+      "test": "Each_builds_trace_is_its_own_manifest_revision_and_later_links_do_not_leak",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "ProcedureTraceApiTests",
+      "test": "Multi_source_TCR_provenance_names_each_impact_items_own_change_request",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "ProcedureTraceApiTests",
+      "test": "Trace_is_refused_for_another_program",
+      "intent": "auth-policy"
+    },
+    {
+      "cls": "ProcedureTraceApiTests",
+      "test": "Trace_lists_every_exact_requirement_revision_with_state_and_provenance",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "ProcedureTraceApiTests",
+      "test": "Zero_coverage_carried_procedure_remains_visible_and_truthful",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "ProductionConfigurationTests",
+      "test": "Production_defaults_require_postgresql_and_do_not_embed_a_database_connection",
+      "intent": "filesystem"
+    },
+    {
+      "cls": "ProductionRoutingTests",
+      "test": "The_served_shape_keeps_the_DEC_103_405_contract_and_the_404_and_deep_link_contracts",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "ProductLineApiTests",
+      "test": "Conflicting_stream_changes_require_attributable_resolution_before_apply",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "ProductLineApiTests",
+      "test": "Parallel_streams_merge_deterministically_and_produce_immutable_variant_baseline",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "ProgramRoleAuthorityApiTests",
+      "test": "A_system_engineer_can_author_without_also_holding_the_generic_engineer_role",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "ProgramRoleAuthorityApiTests",
+      "test": "An_oversight_role_reads_the_Program_without_being_able_to_author_in_it",
+      "intent": "auth-policy"
+    },
+    {
+      "cls": "ProjectPersonnelApiTests",
+      "test": "A_backup_has_to_be_on_the_project",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "ProjectPersonnelApiTests",
+      "test": "A_discipline_accepts_as_many_members_as_it_needs",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "ProjectPersonnelApiTests",
+      "test": "A_position_can_be_reassigned_once_its_holder_has_been_ended",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "ProjectPersonnelApiTests",
+      "test": "A_position_one_person_holds_refuses_a_second_holder",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "ProjectPersonnelApiTests",
+      "test": "A_program_manager_may_read_and_change_their_own_project_roster",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "ProjectPersonnelApiTests",
+      "test": "A_standing_backup_carries_the_holders_authority_with_no_end_date",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "ProjectPersonnelApiTests",
+      "test": "An_ordinary_member_reads_the_roster_but_cannot_change_it",
+      "intent": "auth-policy"
+    },
+    {
+      "cls": "ProjectPersonnelApiTests",
+      "test": "Ending_a_position_retains_the_record_and_removes_the_authority",
+      "intent": "ef-translation"
+    },
+    {
+      "cls": "ProjectPersonnelApiTests",
+      "test": "Leaving_the_project_stands_a_backup_down",
+      "intent": "ef-translation"
+    },
+    {
+      "cls": "ProjectPersonnelApiTests",
+      "test": "Project_leadership_cannot_grant_the_administrator_role",
+      "intent": "auth-policy"
+    },
+    {
+      "cls": "ProjectPersonnelApiTests",
+      "test": "Somebody_outside_the_project_cannot_read_its_roster",
+      "intent": "auth-policy"
+    },
+    {
+      "cls": "ProjectPersonnelApiTests",
+      "test": "Somebody_who_left_can_be_added_again",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "ProjectPersonnelApiTests",
+      "test": "The_holder_cannot_be_their_own_backup",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "ReleaseCampaignExactIntentApiTests",
+      "test": "Approval_after_a_package_change_is_refused_and_only_the_current_manifest_is_signed",
+      "intent": "ef-translation"
+    },
+    {
+      "cls": "ReleaseCampaignExactIntentApiTests",
+      "test": "Approve_retry_is_idempotent_and_a_changed_meaning_conflicts",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "ReleaseCampaignExactIntentApiTests",
+      "test": "Cancel_review_preserves_history_and_an_old_tab_cannot_sign_the_next_cycle",
+      "intent": "ef-translation"
+    },
+    {
+      "cls": "ReleaseCampaignExactIntentApiTests",
+      "test": "Concurrent_stale_approval_writes_conflict_on_the_campaign_version",
+      "intent": "ef-translation"
+    },
+    {
+      "cls": "ReleaseCampaignExactIntentApiTests",
+      "test": "Release_manifest_hash_covers_the_selected_test_set_and_tcr_state",
+      "intent": "in-process-logic"
+    },
+    {
+      "cls": "ReleaseCampaignExactIntentApiTests",
+      "test": "Review_can_restart_after_cancellation_with_history_retained",
+      "intent": "in-process-logic"
+    },
+    {
+      "cls": "ReleasedExecutionEvidenceApiTests",
+      "test": "A_new_execution_and_its_evidence_link_cannot_bypass_release_in_one_save",
+      "intent": "ef-translation"
+    },
+    {
+      "cls": "ReleasedExecutionEvidenceApiTests",
+      "test": "A_stale_tracked_in_work_release_cannot_bypass_a_concurrent_release",
+      "intent": "ef-translation"
+    },
+    {
+      "cls": "ReleasedExecutionEvidenceApiTests",
+      "test": "Authorized_test_engineer_can_attach_evidence_to_an_in_work_execution",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "ReleasedExecutionEvidenceApiTests",
+      "test": "Headerless_direct_api_cannot_append_evidence_to_a_released_execution",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "ReleasedExecutionEvidenceApiTests",
+      "test": "In_review_release_package_freeze_still_precedes_evidence_persistence",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "ReleasedExecutionEvidenceApiTests",
+      "test": "Project_evidence_upload_remains_available_after_an_execution_release",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "ReleasedExecutionEvidenceApiTests",
+      "test": "Released_workspace_header_refuses_the_same_evidence_mutation_as_defense_in_depth",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "ReleasedExecutionEvidenceAuthorityMismatchTests",
+      "test": "A_released_build_authority_wins_even_when_execution_release_id_is_in_work",
+      "intent": "ef-translation"
+    },
+    {
+      "cls": "RequirementFilterExactnessApiTests",
+      "test": "A_tag_matches_itself_and_not_the_tags_it_is_a_substring_of",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "RequirementFilterExactnessApiTests",
+      "test": "An_owner_matches_the_owner_field_and_not_an_unrelated_attribute_that_mentions_them",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "RequirementFilterExactnessApiTests",
+      "test": "An_unsupported_filter_field_or_value_is_refused_with_a_stable_code",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "RequirementFilterExactnessApiTests",
+      "test": "Tag_and_owner_matching_folds_case_and_accepts_non_ascii",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "RestartReviewApiTests",
+      "test": "A_restart_requires_a_recorded_reason_and_active_approvers",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "RestartReviewApiTests",
+      "test": "Someone_who_did_not_author_the_change_cannot_restart_its_review",
+      "intent": "auth-policy"
+    },
+    {
+      "cls": "RestartReviewApiTests",
+      "test": "The_author_cancels_a_misrouted_review_and_restarts_it_with_the_right_approver",
+      "intent": "ef-translation"
+    },
+    {
+      "cls": "ReviseChangeRequestApiTests",
+      "test": "A_change_request_incorporated_in_a_released_build_is_refused",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "ReviseChangeRequestApiTests",
+      "test": "A_signed_for_change_request_on_an_in_work_build_revises",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "SavedViewLifecycleApiTests",
+      "test": "A_repeated_name_is_refused_and_says_so_rather_than_creating_a_second_view",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "SavedViewLifecycleApiTests",
+      "test": "A_view_contract_is_validated_before_it_is_stored",
+      "intent": "ef-translation"
+    },
+    {
+      "cls": "SavedViewLifecycleApiTests",
+      "test": "A_view_stored_before_the_contract_existed_is_still_readable",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "SavedViewLifecycleApiTests",
+      "test": "An_owner_can_rename_reshare_and_delete_and_nobody_else_can",
+      "intent": "ef-translation"
+    },
+    {
+      "cls": "SearchableAuthoringPickerApiTests",
+      "test": "Approved_procedure_picker_hydrates_a_procedure_beyond_the_first_page",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "SearchableAuthoringPickerApiTests",
+      "test": "Forged_procedure_ids_are_not_hydrated_into_targets",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "SearchableAuthoringPickerApiTests",
+      "test": "Modify_retire_targets_are_searchable_beyond_500_and_manifest_scoped",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "SearchableAuthoringPickerApiTests",
+      "test": "Requirement_candidates_are_searchable_and_governed",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "SearchableAuthoringPickerApiTests",
+      "test": "Requirement_picker_hydrates_an_exact_revision_beyond_the_first_page",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "SearchableAuthoringPickerApiTests",
+      "test": "Workspace_payload_hydrates_only_referenced_procedure_targets",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "SecurityBoundaryTests",
+      "test": "Administrator_can_revoke_membership_and_delegation_with_audit_state_retained",
+      "intent": "ef-translation"
+    },
+    {
+      "cls": "SecurityBoundaryTests",
+      "test": "Disabling_account_revokes_session_so_reenable_does_not_resurrect_cookie",
+      "intent": "auth-policy"
+    },
+    {
+      "cls": "SecurityBoundaryTests",
+      "test": "Empty_database_bootstrap_requires_secret_runs_once_and_creates_login",
+      "intent": "auth-policy"
+    },
+    {
+      "cls": "SecurityBoundaryTests",
+      "test": "Mfa_enrollment_returns_interoperable_uri_protects_secret_and_cannot_downgrade_confirmed_factor",
+      "intent": "auth-policy"
+    },
+    {
+      "cls": "SecurityBoundaryTests",
+      "test": "Production_rejects_demo_identity_seeding_without_explicit_override",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "SecurityBoundaryTests",
+      "test": "Program_member_without_control_roles_cannot_mutate_baseline_or_release_package",
+      "intent": "auth-policy"
+    },
+    {
+      "cls": "SecurityBoundaryTests",
+      "test": "Role_session_and_delegation_lifecycle_exposes_current_state_without_erasing_history",
+      "intent": "ef-translation"
+    },
+    {
+      "cls": "SecurityHardeningTests",
+      "test": "A_forged_unsubscribe_link_changes_nothing_and_reveals_nothing",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "SecurityHardeningTests",
+      "test": "A_real_image_is_still_accepted",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "SecurityHardeningTests",
+      "test": "An_upload_that_is_not_the_image_it_claims_to_be_is_refused",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "SecurityHardeningTests",
+      "test": "Every_response_carries_protection_headers",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "SecurityHardeningTests",
+      "test": "The_unsubscribe_link_is_reachable_without_a_session",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "ServerAuthorityContractTests",
+      "test": "Authenticated_browser_contracts_expose_no_caller_selectable_identity",
+      "intent": "in-process-logic"
+    },
+    {
+      "cls": "ServerAuthorityContractTests",
+      "test": "Legacy_identity_fields_are_ignored_and_cannot_spoof_change_author",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "ServerAuthorityContractTests",
+      "test": "Standard_diagnostics_contains_no_human_login_or_committed_password",
+      "intent": "filesystem"
+    },
+    {
+      "cls": "SharedHostIsolationTests",
+      "test": "A_second_shared_host_test_owns_its_own_data_and_sessions",
+      "intent": "auth-policy"
+    },
+    {
+      "cls": "SharedHostIsolationTests",
+      "test": "A_shared_host_test_seeds_unique_data_and_cannot_cross_a_program_boundary",
+      "intent": "auth-policy"
+    },
+    {
+      "cls": "SharedHostIsolationTests",
+      "test": "Two_clients_on_one_shared_host_do_not_leak_sessions_or_projects",
+      "intent": "auth-policy"
+    },
+    {
+      "cls": "SoftwareChangeRequestLevelHistoryTests",
+      "test": "Empty_software_draft_requires_and_persists_its_workspace_level",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "SoftwareChangeRequestLevelHistoryTests",
+      "test": "Software_history_filters_by_the_level_each_change_request_declares",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "TestChangeRequestConsolidationTests",
+      "test": "A_concluded_assessment_cannot_be_folded_in",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "TestChangeRequestConsolidationTests",
+      "test": "Fold_moves_items_and_unfold_returns_them_to_a_fresh_assessment",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "TestChangeRequestConsolidationTests",
+      "test": "Fold_unfold_with_zero_items_restores_a_current_assessment",
+      "intent": "ef-translation"
+    },
+    {
+      "cls": "TestChangeRequestConsolidationTests",
+      "test": "Manual_consolidation_moves_verification_items_to_the_surviving_package",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "TestChangeRequestConsolidationTests",
+      "test": "Manual_consolidation_preserves_assignment_decision_and_history",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "TestChangeRequestConsolidationTests",
+      "test": "Picker_manual_create_and_fold_share_the_complete_source_lifecycle_matrix",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "TestChangeRequestConsolidationTests",
+      "test": "Source_that_becomes_ineligible_after_picker_read_is_refused_without_partial_fold",
+      "intent": "ef-translation"
+    },
+    {
+      "cls": "TestChangeRequestConsolidationTests",
+      "test": "Unfold_restores_availability_and_allows_refold",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "TestChangeRequestRegisterApiTests",
+      "test": "A_draft_package_can_be_checked_out",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "TestChangeRequestRegisterApiTests",
+      "test": "A_package_with_no_controlled_number_is_still_listed",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "TestChangeRequestRegisterApiTests",
+      "test": "An_unknown_lifecycle_state_is_refused_rather_than_ignored",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "TestChangeRequestRegisterApiTests",
+      "test": "Every_row_carries_what_the_register_shows",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "TestChangeRequestRegisterApiTests",
+      "test": "Only_the_current_revision_is_listed_unless_one_number_is_asked_for",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "TestChangeRequestRegisterApiTests",
+      "test": "Search_matches_the_case_and_what_the_package_was_raised_from",
+      "intent": "rule-matrix"
+    },
+    {
+      "cls": "TestChangeRequestRegisterApiTests",
+      "test": "The_discipline_filter_separates_the_registers",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "TestChangeRequestRegisterApiTests",
+      "test": "The_register_is_refused_to_somebody_outside_the_project",
+      "intent": "auth-policy"
+    },
+    {
+      "cls": "TestChangeRequestReviewWorkflowTests",
+      "test": "A_configuration_manager_only_stage_approves_a_system_change_request_through_the_real_route",
+      "intent": "ef-translation"
+    },
+    {
+      "cls": "TestChangeRequestReviewWorkflowTests",
+      "test": "A_multi_role_user_signs_the_stage_they_hold",
+      "intent": "ef-translation"
+    },
+    {
+      "cls": "TestChangeRequestReviewWorkflowTests",
+      "test": "A_package_can_be_deferred_and_reinstated_through_the_api",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "TestChangeRequestReviewWorkflowTests",
+      "test": "A_package_publishes_a_controlled_document",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "TestChangeRequestReviewWorkflowTests",
+      "test": "A_stage_approver_who_lacks_the_required_role_is_refused_at_submission",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "TestChangeRequestReviewWorkflowTests",
+      "test": "A_stage_requiring_test_lead_is_actionable_without_generic_approver_role",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "TestChangeRequestReviewWorkflowTests",
+      "test": "A_test_lead_only_stage_approves_a_system_change_request_through_the_real_route",
+      "intent": "ef-translation"
+    },
+    {
+      "cls": "TestChangeRequestReviewWorkflowTests",
+      "test": "A_test_lead_only_user_gets_create_decide_submit_capabilities",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "TestChangeRequestReviewWorkflowTests",
+      "test": "An_inactive_or_wrong_system_approver_is_refused",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "TestChangeRequestReviewWorkflowTests",
+      "test": "An_inactive_stage_approver_cannot_approve_before_their_turn",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "TestChangeRequestReviewWorkflowTests",
+      "test": "Assignment_authority_matrix_controls_capabilities_and_mutations",
+      "intent": "auth-policy"
+    },
+    {
+      "cls": "TestChangeRequestReviewWorkflowTests",
+      "test": "Configured_stage_signs_with_its_frozen_authority_without_generic_Approver",
+      "intent": "ef-translation"
+    },
+    {
+      "cls": "TestChangeRequestReviewWorkflowTests",
+      "test": "Current_automatic_package_cannot_be_submitted_without_an_engineering_case",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "TestChangeRequestReviewWorkflowTests",
+      "test": "Deferring_needs_a_reason_and_test_authority",
+      "intent": "auth-policy"
+    },
+    {
+      "cls": "TestChangeRequestReviewWorkflowTests",
+      "test": "Expired_no_workflow_delegation_cannot_complete_a_legacy_cycle",
+      "intent": "auth-policy"
+    },
+    {
+      "cls": "TestChangeRequestReviewWorkflowTests",
+      "test": "Historical_blank_package_is_read_exactly_as_stored_with_its_legacy_contract",
+      "intent": "ef-translation"
+    },
+    {
+      "cls": "TestChangeRequestReviewWorkflowTests",
+      "test": "Missing_or_incorrect_password_refuses_signature_without_any_partial_transition",
+      "intent": "auth-policy"
+    },
+    {
+      "cls": "TestChangeRequestReviewWorkflowTests",
+      "test": "Missing_signature_meaning_is_refused_without_advancing_the_active_stage",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "TestChangeRequestReviewWorkflowTests",
+      "test": "No_configured_workflow_keeps_the_single_independent_approver_fallback",
+      "intent": "ef-translation"
+    },
+    {
+      "cls": "TestChangeRequestReviewWorkflowTests",
+      "test": "No_workflow_fallback_accepts_current_delegated_Approver_authority",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "TestChangeRequestReviewWorkflowTests",
+      "test": "No_workflow_fallback_preserves_administrator_substitution",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "TestChangeRequestReviewWorkflowTests",
+      "test": "No_workflow_srcr_defensive_checks_refuse_a_legacy_cycle_with_an_ineligible_reviewer",
+      "intent": "auth-policy"
+    },
+    {
+      "cls": "TestChangeRequestReviewWorkflowTests",
+      "test": "No_workflow_srcr_generic_approver_submits_returns_and_approves_through_the_real_route",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "TestChangeRequestReviewWorkflowTests",
+      "test": "No_workflow_srcr_refuses_a_reviewer_without_approver_authority",
+      "intent": "ef-translation"
+    },
+    {
+      "cls": "TestChangeRequestReviewWorkflowTests",
+      "test": "No_workflow_srcr_system_administrator_substitution_submits_and_approves",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "TestChangeRequestReviewWorkflowTests",
+      "test": "Parallel_review_activates_all_stages_and_approves_on_the_final_approval",
+      "intent": "ef-translation"
+    },
+    {
+      "cls": "TestChangeRequestReviewWorkflowTests",
+      "test": "Read_model_exposes_the_active_stage_to_the_correct_approver",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "TestChangeRequestReviewWorkflowTests",
+      "test": "Read_model_parallel_mode_offers_every_active_approver",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "TestChangeRequestReviewWorkflowTests",
+      "test": "Reload_after_return_and_resubmit_shows_the_newest_cycle",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "TestChangeRequestReviewWorkflowTests",
+      "test": "Return_closes_the_cycle_and_resubmission_starts_a_fresh_cycle",
+      "intent": "ef-translation"
+    },
+    {
+      "cls": "TestChangeRequestReviewWorkflowTests",
+      "test": "Returned_current_package_must_restore_every_case_field_before_resubmission",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "TestChangeRequestReviewWorkflowTests",
+      "test": "Revoked_no_workflow_delegation_cannot_sign_and_changes_nothing",
+      "intent": "auth-policy"
+    },
+    {
+      "cls": "TestChangeRequestReviewWorkflowTests",
+      "test": "Self_approval_is_refused_at_submission",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "TestChangeRequestReviewWorkflowTests",
+      "test": "System_change_request_workflow_respects_multi_role_stage_authority",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "TestChangeRequestReviewWorkflowTests",
+      "test": "Too_few_or_too_many_system_approvers_are_refused_with_stage_guidance",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "TestChangeRequestReviewWorkflowTests",
+      "test": "Two_stage_sequential_review_advances_stage_by_stage_and_approves_only_at_the_end",
+      "intent": "ef-translation"
+    },
+    {
+      "cls": "TestChangeRequestScopeApiTests",
+      "test": "A_change_allocated_to_another_build_is_refused",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "TestChangeRequestScopeApiTests",
+      "test": "A_change_already_covered_elsewhere_is_refused_by_name",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "TestChangeRequestScopeApiTests",
+      "test": "A_second_change_request_can_be_folded_in_and_taken_back_out",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "TestChangeRequestScopeApiTests",
+      "test": "An_approved_change_is_raised_to_be_assessed_and_numbered_only_once_it_needs_test_work",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "TestChangeRequestScopeApiTests",
+      "test": "Concluding_that_no_test_work_is_needed_raises_no_test_change_request",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "TestChangeRequestScopeApiTests",
+      "test": "Deciding_what_a_package_covers_takes_verification_authority",
+      "intent": "auth-policy"
+    },
+    {
+      "cls": "TestExecutionEffectivityApiTests",
+      "test": "A_cross_project_release_header_is_refused",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "TestExecutionEffectivityApiTests",
+      "test": "A_scoped_execution_without_a_controlled_manifest_is_refused",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "TestExecutionEffectivityApiTests",
+      "test": "Cross_build_procedure_revisions_are_refused_and_persist_nothing",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "TestExecutionEffectivityApiTests",
+      "test": "Exact_carried_revisions_are_executable_against_their_build",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "TestExecutionEffectivityApiTests",
+      "test": "Inherited_unchanged_revision_is_executable_through_predecessor_traversal",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "TestExecutionEffectivityApiTests",
+      "test": "Release_scoped_executions_without_a_software_build_use_the_effective_revision",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "TestProcedureAuthoringApiTests",
+      "test": "A_coverage_removal_must_be_current_governed_and_rationalized",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "TestProcedureAuthoringApiTests",
+      "test": "A_decision_can_only_name_requirements_governed_by_its_package_and_target_build",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "TestProcedureAuthoringApiTests",
+      "test": "A_decision_can_only_name_this_project_and_this_level",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "TestProcedureAuthoringApiTests",
+      "test": "A_modification_exposes_current_coverage_and_requires_rationale_for_a_governed_addition",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "TestProcedureAuthoringApiTests",
+      "test": "A_modification_has_to_name_the_procedure_it_acts_on",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "TestProcedureAuthoringApiTests",
+      "test": "A_package_naming_no_procedure_work_cannot_be_sent_for_review",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "TestProcedureAuthoringApiTests",
+      "test": "A_released_build_refuses_procedure_work",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "TestProcedureAuthoringApiTests",
+      "test": "An_approved_package_advances_to_its_next_revision_carrying_its_work",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "TestProcedureAuthoringApiTests",
+      "test": "Introduce_refuses_to_create_a_procedure_without_an_exact_driving_requirement",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "TestProcedureAuthoringApiTests",
+      "test": "Introducing_a_procedure_allocates_its_number_rather_than_letting_the_caller_choose",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "TestProcedureAuthoringApiTests",
+      "test": "Nothing_can_be_proposed_until_the_assessment_has_asked_for_test_work",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "TestProcedureAuthoringApiTests",
+      "test": "Someone_without_test_authority_cannot_propose_procedure_work",
+      "intent": "auth-policy"
+    },
+    {
+      "cls": "TestProcedureAuthoringApiTests",
+      "test": "The_workspace_reads_back_what_was_proposed_and_can_withdraw_it",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "TestProcedureDocumentApiTests",
+      "test": "A_discipline_sees_only_its_own_document",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "TestProcedureDocumentApiTests",
+      "test": "A_project_created_through_the_api_has_its_documents_immediately",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "TestProcedureDocumentApiTests",
+      "test": "Document_numbers_do_not_repeat_across_projects",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "TestProcedureDocumentApiTests",
+      "test": "Every_document_is_returned_when_no_scope_is_named",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "TestProcedureDocumentApiTests",
+      "test": "Filtering_procedures_by_document_returns_only_that_documents_procedures",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "TestProcedureRevisionHistoryApiTests",
+      "test": "List_history_and_trace_keep_exact_titles_and_the_same_package_provenance_across_builds",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "TestProcedureRevisionHistoryApiTests",
+      "test": "Manual_package_without_impacts_and_legacy_revision_report_only_the_provenance_recorded",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "VerificationImpactApiTests",
+      "test": "A_procedure_cannot_be_created_outside_a_package",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "VerificationImpactApiTests",
+      "test": "An_unresolved_verification_impact_leaves_freezing_alone_and_holds_release_approval",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "VerificationImpactApiTests",
+      "test": "Confirming_coverage_requires_an_approved_procedure_not_prose",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "VerificationImpactApiTests",
+      "test": "Exact_procedure_evidence_survives_reload_and_reopen_preserves_history",
+      "intent": "ef-translation"
+    },
+    {
+      "cls": "VerificationImpactApiTests",
+      "test": "Only_the_test_lead_distributes_work_and_only_verification_engineers_resolve_it",
+      "intent": "auth-policy"
+    },
+    {
+      "cls": "VerificationImpactApiTests",
+      "test": "Test_engineer_self_claim_assigns_the_whole_test_change_request_atomically",
+      "intent": "ef-translation"
+    },
+    {
+      "cls": "VerificationImpactApiTests",
+      "test": "The_reviews_listing_returns_the_reviews_an_approved_change_created",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "VerificationProgramIsolationApiTests",
+      "test": "Cross_project_baseline_release_and_build_parameters_are_refused_deterministically",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "VerificationProgramIsolationApiTests",
+      "test": "Program_a_browser_session_retains_traceability_coverage_execution_and_evidence_reads",
+      "intent": "http-boundary"
+    },
+    {
+      "cls": "VerificationProgramIsolationApiTests",
+      "test": "Program_b_browser_session_cannot_read_any_program_a_verification_route",
+      "intent": "auth-policy"
+    },
+    {
+      "cls": "VerificationProgramIsolationApiTests",
+      "test": "Program_b_service_identity_cannot_cross_into_program_a_or_browser_verification_routes",
+      "intent": "auth-policy"
+    }
+  ]
+}
