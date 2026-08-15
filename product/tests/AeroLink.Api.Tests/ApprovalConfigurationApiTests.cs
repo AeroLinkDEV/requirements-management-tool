@@ -17,29 +17,39 @@ namespace AeroLink.Api.Tests;
 /// review stops there. These assert that the answer is available before that happens, and that a standing
 /// backup counts — a stage with an empty position but a named backup is not blocked.
 /// </summary>
-public sealed class ApprovalConfigurationApiTests
+public sealed class ApprovalConfigurationApiTests : IClassFixture<SharedApiHost>
 {
-    private const string Manager = "config.manager";
-    private const string Lead = "config.lead";
-    private const string Deputy = "config.deputy";
+    private readonly SharedApiHost _host;
 
-    private sealed record Seeded(Guid ProjectId, Guid ProgramId, Guid ManagerId, Guid LeadId, Guid DeputyId);
+    public ApprovalConfigurationApiTests(SharedApiHost host)
+    {
+        _host = host;
+    }
+
+    private sealed record Seeded(Guid ProjectId, Guid ProgramId, Guid ManagerId, Guid LeadId, Guid DeputyId,
+        string ManagerName, string LeadName, string DeputyName);
 
     private static async Task<Seeded> SeedAsync(AeroLinkApiFactory factory, IReadOnlyList<ReviewWorkflowStageDraft> stages)
     {
         using var scope = factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
         var now = DateTimeOffset.UtcNow;
-        var program = new ProgramRecord("Approval Config Program", "ACP");
+        // Unique per test: user accounts and Program codes are globally unique-constrained, so a shared
+        // host/database requires per-test identities.
+        var tag = Guid.NewGuid().ToString("N")[..8];
+        var managerName = $"config.manager.{tag}";
+        var leadName = $"config.lead.{tag}";
+        var deputyName = $"config.deputy.{tag}";
+        var program = new ProgramRecord($"Approval Config Program {tag}", $"ACP{tag}");
         var project = new ProjectRecord(program.Id, "Flight Software", "Approval Config Software");
         db.AddRange(program, project);
 
         UserAccount Account(string name) =>
             new(name, name, $"{name}@example.test", IdentityService.HashPassword(AeroLinkApiFactory.MemberPassword), now);
 
-        var manager = Account(Manager);
-        var lead = Account(Lead);
-        var deputy = Account(Deputy);
+        var manager = Account(managerName);
+        var lead = Account(leadName);
+        var deputy = Account(deputyName);
         db.AddRange(manager, lead, deputy);
         db.AddRange(
             new ProgramMembership(manager.Id, program.Id, ProgramRole.ProgramManager, "test.setup", now),
@@ -51,7 +61,7 @@ public sealed class ApprovalConfigurationApiTests
         workflow.Activate("test.setup", now);
         db.ReviewWorkflows.Add(workflow);
         await db.SaveChangesAsync();
-        return new(project.Id, program.Id, manager.Id, lead.Id, deputy.Id);
+        return new(project.Id, program.Id, manager.Id, lead.Id, deputy.Id, managerName, leadName, deputyName);
     }
 
     private static async Task SignInAsync(HttpClient client, string userName)
@@ -72,14 +82,13 @@ public sealed class ApprovalConfigurationApiTests
     [Fact]
     public async Task A_stage_naming_a_position_one_person_holds_resolves_to_that_person()
     {
-        await using var factory = new AeroLinkApiFactory();
-        var seeded = await SeedAsync(factory,
+        var seeded = await SeedAsync(_host.Factory,
         [
             new("Discipline review", ProgramRole.SystemEngineeringLead),
             new("Release approval", ProgramRole.ProgramManager, ReviewStageKind.Approval),
         ]);
-        using var client = factory.CreateClient();
-        await SignInAsync(client, Manager);
+        using var client = _host.CreateClient();
+        await SignInAsync(client, seeded.ManagerName);
 
         var system = (await ReadAsync(client, seeded.ProjectId)).Artifacts.Single(x => x.Subject == "System");
         Assert.True(system.Configured);
@@ -88,7 +97,7 @@ public sealed class ApprovalConfigurationApiTests
         var discipline = system.Stages!.Single(x => x.Name == "Discipline review");
         Assert.Equal("Review", discipline.Kind);
         Assert.True(discipline.Required.Singular);
-        Assert.Equal([Lead], discipline.Required.Holders);
+        Assert.Equal([seeded.LeadName], discipline.Required.Holders);
         Assert.False(discipline.Required.Blocking);
 
         // The kind is what makes the two signatures distinguishable; before this every step read "Reviewer".
@@ -101,13 +110,12 @@ public sealed class ApprovalConfigurationApiTests
     [Fact]
     public async Task A_stage_naming_a_position_nobody_holds_is_reported_as_blocking()
     {
-        await using var factory = new AeroLinkApiFactory();
-        var seeded = await SeedAsync(factory,
+        var seeded = await SeedAsync(_host.Factory,
         [
             new("Airworthiness review", ProgramRole.Airworthiness),
         ]);
-        using var client = factory.CreateClient();
-        await SignInAsync(client, Manager);
+        using var client = _host.CreateClient();
+        await SignInAsync(client, seeded.ManagerName);
 
         var system = (await ReadAsync(client, seeded.ProjectId)).Artifacts.Single(x => x.Subject == "System");
         Assert.Equal(1, system.BlockingStages);
@@ -123,13 +131,12 @@ public sealed class ApprovalConfigurationApiTests
     [Fact]
     public async Task A_standing_backup_keeps_a_stage_signable()
     {
-        await using var factory = new AeroLinkApiFactory();
-        var seeded = await SeedAsync(factory,
+        var seeded = await SeedAsync(_host.Factory,
         [
             new("Assurance review", ProgramRole.SoftwareQualityAnalyst),
         ]);
-        using var client = factory.CreateClient();
-        await SignInAsync(client, Manager);
+        using var client = _host.CreateClient();
+        await SignInAsync(client, seeded.ManagerName);
 
         var before = (await ReadAsync(client, seeded.ProjectId)).Artifacts.Single(x => x.Subject == "System");
         Assert.Equal(1, before.BlockingStages);
@@ -140,7 +147,7 @@ public sealed class ApprovalConfigurationApiTests
 
         var after = (await ReadAsync(client, seeded.ProjectId)).Artifacts.Single(x => x.Subject == "System");
         Assert.Equal(0, after.BlockingStages);
-        Assert.Equal([Deputy], after.Stages!.Single().Required.Backups);
+        Assert.Equal([seeded.DeputyName], after.Stages!.Single().Required.Backups);
     }
 
     /// <summary>
@@ -150,13 +157,12 @@ public sealed class ApprovalConfigurationApiTests
     [Fact]
     public async Task Ending_the_only_holder_blocks_the_stage_that_named_them()
     {
-        await using var factory = new AeroLinkApiFactory();
-        var seeded = await SeedAsync(factory,
+        var seeded = await SeedAsync(_host.Factory,
         [
             new("Discipline review", ProgramRole.SystemEngineeringLead),
         ]);
-        using var client = factory.CreateClient();
-        await SignInAsync(client, Manager);
+        using var client = _host.CreateClient();
+        await SignInAsync(client, seeded.ManagerName);
 
         Assert.Equal(0, (await ReadAsync(client, seeded.ProjectId)).Artifacts.Single(x => x.Subject == "System").BlockingStages);
 
@@ -172,10 +178,9 @@ public sealed class ApprovalConfigurationApiTests
     [Fact]
     public async Task An_artifact_with_no_procedure_is_reported_as_unconfigured_not_blocked()
     {
-        await using var factory = new AeroLinkApiFactory();
-        var seeded = await SeedAsync(factory, [new("Discipline review", ProgramRole.SystemEngineeringLead)]);
-        using var client = factory.CreateClient();
-        await SignInAsync(client, Manager);
+        var seeded = await SeedAsync(_host.Factory, [new("Discipline review", ProgramRole.SystemEngineeringLead)]);
+        using var client = _host.CreateClient();
+        await SignInAsync(client, seeded.ManagerName);
 
         var software = (await ReadAsync(client, seeded.ProjectId)).Artifacts.Single(x => x.Subject == "Software");
         Assert.False(software.Configured);
@@ -187,10 +192,9 @@ public sealed class ApprovalConfigurationApiTests
     [Fact]
     public async Task Every_artifact_type_is_reported()
     {
-        await using var factory = new AeroLinkApiFactory();
-        var seeded = await SeedAsync(factory, [new("Discipline review", ProgramRole.SystemEngineeringLead)]);
-        using var client = factory.CreateClient();
-        await SignInAsync(client, Manager);
+        var seeded = await SeedAsync(_host.Factory, [new("Discipline review", ProgramRole.SystemEngineeringLead)]);
+        using var client = _host.CreateClient();
+        await SignInAsync(client, seeded.ManagerName);
 
         var subjects = (await ReadAsync(client, seeded.ProjectId)).Artifacts.Select(x => x.Subject).ToList();
         Assert.Equal(

@@ -89,6 +89,9 @@ test('parameterized theory rows are reported as ambiguous, never merged into one
   assert.equal(report.ambiguousTheoryRows[0].factories, 2)
   assert.equal(report.multipleFactoryTests.length, 0)
   assert.equal(report.classes[0].theoryRows, 2)
+  // Whole-run total must include ambiguous-theory startup exactly once (round-2 blocker).
+  assert.equal(report.totals.summedAmbiguousStartupMs, 1120)
+  assert.equal(report.totals.summedFactoryStartupMs, 1120)
 })
 
 test('connection-open sub-phase is aggregated separately and never added to startup', () => {
@@ -142,6 +145,11 @@ test('fixture and helper factories with no TRX row are reported as unmatched, no
   assert.equal(report.unmatchedMethods[0].className, 'ShowcaseApiFixture')
   assert.equal(report.unmatchedMethods[0].method, 'CreateFactory')
   assert.equal(report.unmatchedMethods[0].factories, 1)
+  assert.equal(report.unmatchedMethods[0].startupMs, 510)
+  assert.equal(report.totals.summedStartupMs, 610)
+  assert.equal(report.totals.summedFixtureStartupMs, 510)
+  assert.equal(report.totals.summedAmbiguousStartupMs, 0)
+  assert.equal(report.totals.summedFactoryStartupMs, 1120)
 })
 
 test('credential-shaped telemetry is rejected and the markdown is bounded', () => {
