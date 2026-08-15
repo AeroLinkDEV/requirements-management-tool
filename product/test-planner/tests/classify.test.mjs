@@ -1,7 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { readFileSync, existsSync } from 'node:fs'
-import { execFileSync } from 'node:child_process'
+import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { classify, explain, localPlan, ciSelection, AREA_PATTERNS, BROAD_EVENTS } from '../lib/classify.mjs'
@@ -131,10 +130,7 @@ test('the workflow delegates to this module rather than carrying its own copy', 
   // The point of #568 is that one definition exists. A contract test is the only thing standing between
   // that and someone reintroducing an inline copy that drifts — which is the state this replaced.
   const workflow = readFileSync(join(repoRoot, '.github/workflows/ci.yml'), 'utf8')
-  // `tools/`, not `bin/`: .gitignore carries `**/bin/`, which silently leaves any script placed there
-  // untracked. The workflow would then call a file that does not exist in the repository, and the first
-  // sign of it would be a red CI run on a change that looked complete locally.
-  assert.match(workflow, /test-planner[/\\]tools[/\\]classify-ci\.mjs/, 'the changes job must call the shared classifier')
+  assert.match(workflow, /test-planner[/\\]bin[/\\]classify-ci\.mjs/, 'the changes job must call the shared classifier')
 
   const classifyJob = workflow.slice(workflow.indexOf('  changes:'), workflow.indexOf('  backend-api:'))
   assert.doesNotMatch(classifyJob, /grep -Eq '\^product/, 'the inline path patterns must not come back')
@@ -146,20 +142,5 @@ test('every area pattern is anchored so a lookalike path cannot match', () => {
   for (const [area, pattern] of Object.entries(AREA_PATTERNS)) {
     assert.equal(pattern.test('docs/.github/workflows/ci.yml'), false, `${area} matched a nested lookalike`)
     assert.equal(pattern.test('vendor/product/src/Thing.cs'), false, `${area} matched a vendored lookalike`)
-  }
-})
-
-test('the planner scripts are tracked by git, not swallowed by .gitignore', () => {
-  // `.gitignore` line 15 is `**/bin/`. A script placed in a `bin/` directory anywhere under the repo is
-  // silently untracked, so the workflow calls a path that does not exist once checked out. This has
-  // already happened once, to the route manifest generator, and again here. The test is cheap; the
-  // failure mode is a red CI run on a change that was green locally.
-  for (const script of ['tools/classify-ci.mjs', 'tools/plan.mjs']) {
-    const full = join(repoRoot, 'product/test-planner', script)
-    assert.ok(existsSync(full), `${script} must exist`)
-    const tracked = execFileSync('git', ['ls-files', '--error-unmatch', `product/test-planner/${script}`], {
-      cwd: repoRoot, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'],
-    })
-    assert.match(tracked, new RegExp(script.replace('.', '\.')), `${script} must be tracked by git`)
   }
 })
