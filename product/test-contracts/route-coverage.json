@@ -1,5 +1,5 @@
 {
-  "schemaVersion": "aerolink-route-coverage/v1",
+  "schemaVersion": "aerolink-route-coverage/v2",
   "routes": [
     {
       "method": "DELETE",
@@ -254,7 +254,6 @@
         "SearchableAuthoringPickerApiTests",
         "SecurityBoundaryTests",
         "SecurityHardeningTests",
-        "ServerAuthorityContractTests",
         "SharedHostIsolationTests",
         "SoftwareChangeRequestLevelHistoryTests",
         "TestChangeRequestConsolidationTests",
@@ -455,7 +454,6 @@
         "AuthoringTracedImpactTests",
         "BuildScopedWorkspaceApiTests",
         "ChangeAuthoringInvariantApiTests",
-        "ClosedReleaseAuthoringTests",
         "ProgramRoleAuthorityApiTests",
         "SoftwareChangeRequestLevelHistoryTests"
       ]
@@ -465,13 +463,8 @@
       "path": "/api/change-requests",
       "file": "ChangeRequestEndpoints.cs",
       "coveredBy": [
-        "BuildScopedWorkspaceApiTests",
         "ChangeRequestRenameApiTests",
-        "ClientHostingTests",
-        "ClosedReleaseAuthoringTests",
-        "DeferredCarryForwardApiTests",
         "ProblemReportApiTests",
-        "ProgramRoleAuthorityApiTests",
         "ServerAuthorityContractTests"
       ]
     },
@@ -648,9 +641,7 @@
       "method": "POST",
       "path": "/api/delegations",
       "file": "AdministrationEndpoints.cs",
-      "coveredBy": [
-        "SecurityBoundaryTests"
-      ]
+      "coveredBy": []
     },
     {
       "method": "POST",
@@ -1173,17 +1164,13 @@
       "method": "POST",
       "path": "/api/operations/qualification-runs",
       "file": "OperationsEndpoints.cs",
-      "coveredBy": [
-        "GovernanceEvidenceApiTests"
-      ]
+      "coveredBy": []
     },
     {
       "method": "POST",
       "path": "/api/operations/restore-drills",
       "file": "OperationsEndpoints.cs",
-      "coveredBy": [
-        "GovernanceEvidenceApiTests"
-      ]
+      "coveredBy": []
     },
     {
       "method": "POST",
@@ -1208,9 +1195,7 @@
         "ProblemReportCheckoutApiTests",
         "ProblemReportDispositionApiTests",
         "ProblemReportDuplicateDispositionApiTests",
-        "ProblemReportOwnerAuthorityApiTests",
-        "ProblemReportPagingApiTests",
-        "ProblemReportWaiverApiTests"
+        "ProblemReportOwnerAuthorityApiTests"
       ]
     },
     {
@@ -1364,9 +1349,7 @@
       "method": "POST",
       "path": "/api/product-line/change-sets",
       "file": "ProductLineEndpoints.cs",
-      "coveredBy": [
-        "ProductLineApiTests"
-      ]
+      "coveredBy": []
     },
     {
       "method": "POST",
@@ -1380,41 +1363,31 @@
       "method": "POST",
       "path": "/api/product-line/change-sets/{id:guid}/resolve",
       "file": "ProductLineEndpoints.cs",
-      "coveredBy": [
-        "ProductLineApiTests"
-      ]
+      "coveredBy": []
     },
     {
       "method": "POST",
       "path": "/api/product-line/components",
       "file": "ProductLineEndpoints.cs",
-      "coveredBy": [
-        "ProductLineApiTests"
-      ]
+      "coveredBy": []
     },
     {
       "method": "POST",
       "path": "/api/product-line/components/{id:guid}/approve",
       "file": "ProductLineEndpoints.cs",
-      "coveredBy": [
-        "ProductLineApiTests"
-      ]
+      "coveredBy": []
     },
     {
       "method": "POST",
       "path": "/api/product-line/components/{id:guid}/streams",
       "file": "ProductLineEndpoints.cs",
-      "coveredBy": [
-        "ProductLineApiTests"
-      ]
+      "coveredBy": []
     },
     {
       "method": "POST",
       "path": "/api/product-line/libraries",
       "file": "ProductLineCompletionEndpoints.cs",
-      "coveredBy": [
-        "ConfigurationPublicationApiTests"
-      ]
+      "coveredBy": []
     },
     {
       "method": "POST",
@@ -1432,41 +1405,31 @@
       "method": "POST",
       "path": "/api/product-line/streams/{id:guid}/revisions",
       "file": "ProductLineEndpoints.cs",
-      "coveredBy": [
-        "ProductLineApiTests"
-      ]
+      "coveredBy": []
     },
     {
       "method": "POST",
       "path": "/api/product-line/variants",
       "file": "ProductLineEndpoints.cs",
-      "coveredBy": [
-        "ProductLineApiTests"
-      ]
+      "coveredBy": []
     },
     {
       "method": "POST",
       "path": "/api/product-line/variants/{id:guid}/approve",
       "file": "ProductLineEndpoints.cs",
-      "coveredBy": [
-        "ProductLineApiTests"
-      ]
+      "coveredBy": []
     },
     {
       "method": "POST",
       "path": "/api/product-line/variants/{id:guid}/baselines",
       "file": "ProductLineEndpoints.cs",
-      "coveredBy": [
-        "ProductLineApiTests"
-      ]
+      "coveredBy": []
     },
     {
       "method": "POST",
       "path": "/api/product-line/variants/{id:guid}/components",
       "file": "ProductLineEndpoints.cs",
-      "coveredBy": [
-        "ProductLineApiTests"
-      ]
+      "coveredBy": []
     },
     {
       "method": "POST",
@@ -1484,17 +1447,14 @@
       "method": "POST",
       "path": "/api/product-line/variants/{id:guid}/propagation-decisions",
       "file": "ProductLineEndpoints.cs",
-      "coveredBy": [
-        "ProductLineApiTests"
-      ]
+      "coveredBy": []
     },
     {
       "method": "POST",
       "path": "/api/projects/{projectId:guid}/personnel",
       "file": "PersonnelEndpoints.cs",
       "coveredBy": [
-        "ProjectPersonnelApiTests",
-        "SharedHostIsolationTests"
+        "ProjectPersonnelApiTests"
       ]
     },
     {
@@ -1528,9 +1488,7 @@
       "method": "POST",
       "path": "/api/publications/configuration-jobs",
       "file": "PublicationEndpoints.cs",
-      "coveredBy": [
-        "ConfigurationPublicationApiTests"
-      ]
+      "coveredBy": []
     },
     {
       "method": "POST",
@@ -1544,24 +1502,19 @@
       "method": "POST",
       "path": "/api/publications/release-packages",
       "file": "PublicationEndpoints.cs",
-      "coveredBy": [
-        "ConfigurationPublicationApiTests"
-      ]
+      "coveredBy": []
     },
     {
       "method": "POST",
       "path": "/api/quality/evidence-index",
       "file": "QualityIntelligenceEndpoints.cs",
-      "coveredBy": [
-        "GovernanceEvidenceApiTests"
-      ]
+      "coveredBy": []
     },
     {
       "method": "POST",
       "path": "/api/quality/exports",
       "file": "QualityIntelligenceEndpoints.cs",
       "coveredBy": [
-        "GovernanceEvidenceApiTests",
         "ProblemReportActiveMetricApiTests"
       ]
     },
@@ -1569,25 +1522,19 @@
       "method": "POST",
       "path": "/api/quality/objectives",
       "file": "QualityIntelligenceEndpoints.cs",
-      "coveredBy": [
-        "GovernanceEvidenceApiTests"
-      ]
+      "coveredBy": []
     },
     {
       "method": "POST",
       "path": "/api/quality/waivers",
       "file": "QualityIntelligenceEndpoints.cs",
-      "coveredBy": [
-        "GovernanceEvidenceApiTests"
-      ]
+      "coveredBy": []
     },
     {
       "method": "POST",
       "path": "/api/release-campaigns",
       "file": "ReleaseCampaignEndpoints.cs",
-      "coveredBy": [
-        "CodeTraceabilityApiTests"
-      ]
+      "coveredBy": []
     },
     {
       "method": "POST",
@@ -1601,9 +1548,7 @@
       "method": "POST",
       "path": "/api/release-campaigns/{id:guid}/reconcile-lifecycle-links",
       "file": "ReleaseCampaignEndpoints.cs",
-      "coveredBy": [
-        "SecurityBoundaryTests"
-      ]
+      "coveredBy": []
     },
     {
       "method": "POST",
@@ -1893,9 +1838,7 @@
         "BuildScopedWorkspaceApiTests",
         "ControlledEditingProcedureAuthorityTests",
         "ProblemReportVerificationApiTests",
-        "ReleasedExecutionEvidenceApiTests",
-        "TestExecutionEffectivityApiTests",
-        "VerificationProgramIsolationApiTests"
+        "TestExecutionEffectivityApiTests"
       ]
     },
     {
@@ -1911,8 +1854,7 @@
       "path": "/api/test-procedures/{id:guid}/comments",
       "file": "VerificationEndpoints.cs",
       "coveredBy": [
-        "ProcedureDiscussionApiTests",
-        "VerificationProgramIsolationApiTests"
+        "ProcedureDiscussionApiTests"
       ]
     },
     {
@@ -2066,9 +2008,7 @@
       "method": "PUT",
       "path": "/api/v1/requirements/{id:guid}",
       "file": "IntegrationEndpoints.cs",
-      "coveredBy": [
-        "VerificationProgramIsolationApiTests"
-      ]
+      "coveredBy": []
     }
   ]
 }

@@ -52,17 +52,67 @@ export function extractRoutes(apiDirectory) {
 }
 
 /**
- * Maps every `/api/...` path appearing in a test source to the classes that mention it.
+ * The HTTP verb a test uses, read from the call that carries the URL.
+ *
+ * Keyed by method as well as path because a path alone cannot say which operation was exercised:
+ * `/api/enterprise-requirements/views/{}` carries both PUT and DELETE, and a PUT test would otherwise make
+ * the DELETE route look covered. A new mutating method added to an already-mentioned path would inherit that
+ * false coverage too.
+ */
+const METHOD_PATTERNS = [
+  [/\b(?:PostAsync|PostAsJsonAsync)\b/, 'POST'],
+  [/\b(?:PutAsync|PutAsJsonAsync)\b/, 'PUT'],
+  [/\b(?:PatchAsync|PatchAsJsonAsync)\b/, 'PATCH'],
+  [/\bDeleteAsync\b/, 'DELETE'],
+  [/HttpMethod\.Post\b/, 'POST'],
+  [/HttpMethod\.Put\b/, 'PUT'],
+  [/HttpMethod\.Patch\b/, 'PATCH'],
+  [/HttpMethod\.Delete\b/, 'DELETE'],
+  [/"POST"/, 'POST'],
+  [/"PUT"/, 'PUT'],
+  [/"PATCH"/, 'PATCH'],
+  [/"DELETE"/, 'DELETE'],
+]
+
+/** A generous ceiling; the statement boundary below is what actually bounds the search. */
+const METHOD_LOOKBEHIND = 400
+
+/**
+ * The verb must appear in the *same statement* as the URL.
+ *
+ * A fixed character window is not enough: a bare `var url = $"{api}/api/…"` sitting a line below a
+ * `PostAsync` call inherited that call's verb and was counted as evidence. Cutting the window at the previous
+ * `;` — C#'s statement terminator — means only a call actually carrying this URL can claim it. Over-crediting
+ * here is the failure mode that matters, since it manufactures coverage that was never written.
+ */
+function methodNear(source, index) {
+  const ceiling = Math.max(0, index - METHOD_LOOKBEHIND)
+  const boundary = source.lastIndexOf(';', index - 1)
+  const window = source.slice(Math.max(ceiling, boundary + 1), index)
+  let best = null
+  for (const [pattern, method] of METHOD_PATTERNS) {
+    const found = window.search(pattern)
+    // The nearest preceding verb wins within the statement.
+    if (found !== -1 && (best === null || found > best.at)) best = { at: found, method }
+  }
+  return best?.method ?? null
+}
+
+/**
+ * Maps every `METHOD /api/...` pair appearing in a test source to the classes that exercise it.
  *
  * Tests build URLs by interpolation — `$"{api}/api/change-requests/{id}/submit"` — so the path is matched
- * wherever it appears rather than only at the start of a literal.
+ * wherever it appears rather than only at the start of a literal. A URL with no identifiable verb nearby is
+ * recorded against no method, which leaves the route uncovered rather than guessing.
  */
 export function extractTestReferences(testsDirectory) {
   const references = new Map()
   for (const file of readdirSync(testsDirectory).filter((name) => name.endsWith('.cs'))) {
     const source = readFileSync(join(testsDirectory, file), 'utf8')
     for (const match of source.matchAll(/\/api\/[A-Za-z0-9/_{}$.:()-]*/g)) {
-      const key = normalisePath(match[0].split('?')[0])
+      const method = methodNear(source, match.index)
+      if (!method) continue
+      const key = `${method} ${normalisePath(match[0].split('?')[0])}`
       if (!references.has(key)) references.set(key, new Set())
       references.get(key).add(file.replace(/\.cs$/, ''))
     }
@@ -70,15 +120,16 @@ export function extractTestReferences(testsDirectory) {
   return references
 }
 
-/** Route inventory joined to the test classes that reach each one. */
+/** Route inventory joined to the test classes that exercise each one with its own method. */
 export function buildRouteCoverage(apiDirectory, testsDirectory) {
   const routes = extractRoutes(apiDirectory)
   const references = extractTestReferences(testsDirectory)
-  return routes.map((route) => {
-    const path = route.key.slice(route.key.indexOf(' ') + 1)
-    const covering = [...(references.get(path) ?? [])].sort()
-    return { method: route.method, path: route.path, file: route.file, coveredBy: covering }
-  })
+  return routes.map((route) => ({
+    method: route.method,
+    path: route.path,
+    file: route.file,
+    coveredBy: [...(references.get(route.key) ?? [])].sort(),
+  }))
 }
 
 /**
@@ -91,4 +142,22 @@ export function buildRouteCoverage(apiDirectory, testsDirectory) {
 export function summariseCoverage(coverage) {
   const uncovered = coverage.filter((route) => route.coveredBy.length === 0)
   return { total: coverage.length, covered: coverage.length - uncovered.length, uncovered }
+}
+
+/**
+ * The safety property, and the only one that survives regeneration.
+ *
+ * Comparing the current tree against the generated manifest is worthless as a guard: the documented fix for a
+ * failure is to regenerate, which makes the manifest agree with whatever just happened. So the question is
+ * asked against the frozen policy baseline instead — is anything uncovered that was not already permitted to
+ * be? A route that loses its last hosted test and a newly added uncovered route both answer yes, and
+ * regenerating changes neither answer.
+ */
+export function uncoveredOutsideBaseline(coverage, grandfathered) {
+  const allowed = grandfathered instanceof Set ? grandfathered : new Set(grandfathered)
+  return coverage
+    .filter((route) => route.coveredBy.length === 0)
+    .map((route) => routeKey(route.method, route.path))
+    .filter((key) => !allowed.has(key))
+    .sort()
 }
