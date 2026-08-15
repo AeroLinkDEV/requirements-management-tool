@@ -203,8 +203,27 @@ test('the full-gate headline sums the current run/attempt fields and never emits
     ],
   })
   assert.doesNotMatch(report.markdown, /NaN/)
-  assert.match(report.markdown, /Full gates per merged PR \(window\): 20 full gate runs \/ 23 attempts across 2 merges/)
+  // Scope is stated in the line's own terms. Labelling an all-history figure "(window)" alongside window
+  // statistics is what made 703 runs across 200 merges read as a window total and produced a false defect
+  // report; the distribution leads because the totals are not the actionable part.
+  assert.match(report.markdown, /Full gates per merged PR \(all 2 merges seen, not the run window\)/)
+  assert.match(report.markdown, /median 10, p95 10, max 10 \(20 runs \/ 23 attempts in total\)/)
   assert.match(report.markdown, /PR #572 \(merged 2026-08-14\): 10 full gate run\(s\) \/ 13 attempt\(s\) \(9 pre-merge, 1 post-merge\)/)
+})
+
+test('the full-gate headline reports a distribution, not just a mean-shaped total', () => {
+  // A long tail is the finding: on real data the median is 2 and the maximum 34, and a bare total hides that
+  // entirely. One merge costing 34 full gates is the rebase treadmill made countable.
+  const report = buildRollingReport({
+    records: [record()],
+    fullGates: [
+      { pr: 1, mergedAt: '2026-08-14T00:00:00Z', runs: 2, attempts: 2, prRuns: 1, postMergeRuns: 1 },
+      { pr: 2, mergedAt: '2026-08-14T00:00:00Z', runs: 2, attempts: 2, prRuns: 1, postMergeRuns: 1 },
+      { pr: 3, mergedAt: '2026-08-14T00:00:00Z', runs: 34, attempts: 34, prRuns: 33, postMergeRuns: 1 },
+    ],
+  })
+  assert.match(report.markdown, /median 2, p95 34, max 34 \(38 runs \/ 38 attempts in total\)/)
+  assert.doesNotMatch(report.markdown, /\(window\): 38/)
 })
 
 test('trackerBody is single-issue and never fabricates regressions', () => {

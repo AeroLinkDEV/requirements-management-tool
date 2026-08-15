@@ -326,7 +326,20 @@ export function buildRollingReport({ records, regressions = [], missing = [], fu
   if (fullGates.length > 0) {
     const totalRuns = fullGates.reduce((sum, entry) => sum + (Number.isInteger(entry.runs) ? entry.runs : 0), 0)
     const totalAttempts = fullGates.reduce((sum, entry) => sum + (Number.isInteger(entry.attempts) ? entry.attempts : 0), 0)
-    lines.push(`- Full gates per merged PR (window): ${totalRuns} full gate runs / ${totalAttempts} attempts across ${fullGates.length} merges`)
+    const perMerge = fullGates.map((entry) => (Number.isInteger(entry.runs) ? entry.runs : 0)).sort((a, b) => a - b)
+    const at = (fraction) => perMerge[Math.min(perMerge.length - 1, Math.floor(perMerge.length * fraction))]
+    // Labelled by its own scope, not the report's. This figure spans every merge the collector can see, while
+    // every other line above describes the run window — presenting both as "(window)" invited reading 703
+    // runs as a window total, which is roughly two orders of magnitude out and prompted a false defect report.
+    //
+    // The distribution leads because the totals do not answer the question anyone has. "703 across 200
+    // merges" is not actionable; a median of 2 with a maximum of 34 says a typical merge costs two full
+    // gates and a long tail costs far more, which is the rebase treadmill with a number attached.
+    lines.push(
+      `- Full gates per merged PR (all ${fullGates.length} merges seen, not the run window): ` +
+        `median ${at(0.5)}, p95 ${at(0.95)}, max ${perMerge[perMerge.length - 1]} ` +
+        `(${totalRuns} runs / ${totalAttempts} attempts in total)`,
+    )
   }
   lines.push('')
   lines.push('## Comparable groups')
