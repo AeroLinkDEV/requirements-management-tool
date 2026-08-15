@@ -9,6 +9,16 @@ import { looksLikeCredential } from './fragment.mjs'
 
 export const ROLLING_SCHEMA_VERSION = 'aerolink-ci-rolling/v1'
 export const MAX_RECORDS = 200
+
+/**
+ * How far back merged pull requests are gathered for the full-gate figure.
+ *
+ * Exported so the collector filters by it and the report can state it, rather than each side carrying its own
+ * copy of a number the other has to guess at. Guessing is exactly what produced two wrong scope labels in a
+ * row on this line: first "(window)", which described the run window it does not belong to, then "all merges
+ * seen", which described no bound at all.
+ */
+export const FULL_GATE_WINDOW_DAYS = 30
 export const MAX_TITLES = 100
 export const MAX_REGRESSIONS = 20
 export const MAX_REPORT_BYTES = 512 * 1024
@@ -304,7 +314,7 @@ function escapeMarkdown(value) {
     .replace(/\r?\n/g, ' ')
 }
 
-export function buildRollingReport({ records, regressions = [], missing = [], fullGates = [], generatedAt = new Date().toISOString() }) {
+export function buildRollingReport({ records, regressions = [], missing = [], fullGates = [], fullGateScope = null, generatedAt = new Date().toISOString() }) {
   const stats = rollingStats(records)
   const flakes = flakeTrend(records)
   const cache = cacheTrend(records)
@@ -326,18 +336,27 @@ export function buildRollingReport({ records, regressions = [], missing = [], fu
   if (fullGates.length > 0) {
     const totalRuns = fullGates.reduce((sum, entry) => sum + (Number.isInteger(entry.runs) ? entry.runs : 0), 0)
     const totalAttempts = fullGates.reduce((sum, entry) => sum + (Number.isInteger(entry.attempts) ? entry.attempts : 0), 0)
-    const perMerge = fullGates.map((entry) => (Number.isInteger(entry.runs) ? entry.runs : 0)).sort((a, b) => a - b)
-    const at = (fraction) => perMerge[Math.min(perMerge.length - 1, Math.floor(perMerge.length * fraction))]
-    // Labelled by its own scope, not the report's. This figure spans every merge the collector can see, while
-    // every other line above describes the run window — presenting both as "(window)" invited reading 703
-    // runs as a window total, which is roughly two orders of magnitude out and prompted a false defect report.
-    //
-    // The distribution leads because the totals do not answer the question anyone has. "703 across 200
-    // merges" is not actionable; a median of 2 with a maximum of 34 says a typical merge costs two full
-    // gates and a long tail costs far more, which is the rebase treadmill with a number attached.
+    const perMerge = fullGates.map((entry) => (Number.isInteger(entry.runs) ? entry.runs : 0))
+    // The module's own quantile helpers, not a second set. An ad-hoc `floor`-based pick disagreed with them
+    // on both counts: it returned the upper middle of an even sample where `median` averages the pair, and it
+    // selected a different p95 rank than `percentile`'s nearest-rank. Two statistics in one file that answer
+    // the same question differently is a defect waiting to be quoted.
+    const middle = median(perMerge)
+    const upper = percentile(perMerge, 95)
+    const worst = perMerge.length > 0 ? Math.max(...perMerge) : null
+
+    // Scope stated from what the collector actually applied. This line does not describe the run window every
+    // other line above describes, and it does not describe every merge either: the collector gathers merges
+    // from a bounded number of days and keeps the newest MAX_RECORDS of them.
+    const days = Number.isInteger(fullGateScope?.windowDays) ? fullGateScope.windowDays : FULL_GATE_WINDOW_DAYS
+    const cap = Number.isInteger(fullGateScope?.cap) ? fullGateScope.cap : MAX_RECORDS
+    const scope = `${fullGates.length} merge(s) from the last ${days} days, newest ${cap} kept`
+
+    // The distribution leads because the totals do not answer the question anyone asks. A median of 2 with a
+    // maximum of 34 says a typical merge costs two full gates and a long tail costs far more, which is the
+    // rebase treadmill with a number attached rather than an anecdote.
     lines.push(
-      `- Full gates per merged PR (all ${fullGates.length} merges seen, not the run window): ` +
-        `median ${at(0.5)}, p95 ${at(0.95)}, max ${perMerge[perMerge.length - 1]} ` +
+      `- Full gates per merged PR (${scope}): median ${middle}, p95 ${upper}, max ${worst} ` +
         `(${totalRuns} runs / ${totalAttempts} attempts in total)`,
     )
   }

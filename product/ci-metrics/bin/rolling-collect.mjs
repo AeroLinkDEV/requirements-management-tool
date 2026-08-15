@@ -14,7 +14,7 @@ import { readNamedJsonFromZip, ZipParseError } from '../lib/zip.mjs'
 const RUN_METRICS_FILE = 'run-metrics.json'
 import {
   validateRunRecord, queueAndCancellation, rollingStats, flakeTrend, cacheTrend,
-  detectRegressions, classifyRun, buildRollingReport, recordFormat, fullGatesPerMerge, MAX_RECORDS,
+  detectRegressions, classifyRun, buildRollingReport, recordFormat, fullGatesPerMerge, MAX_RECORDS, FULL_GATE_WINDOW_DAYS,
 } from '../lib/rolling.mjs'
 
 const env = (name) => process.env[name] ?? ''
@@ -179,11 +179,18 @@ async function main() {
     mergedPrs.filter((pr) => {
       if (!pr.merged_at) return false
       const mergedAt = Date.parse(pr.merged_at)
-      return Number.isFinite(mergedAt) && Date.now() - mergedAt <= 30 * 24 * 60 * 60 * 1000
+      return Number.isFinite(mergedAt) && Date.now() - mergedAt <= FULL_GATE_WINDOW_DAYS * 24 * 60 * 60 * 1000
     }),
     workflowRuns,
   )
-  const report = buildRollingReport({ records, regressions, missing, fullGates })
+  const report = buildRollingReport({
+    records,
+    regressions,
+    missing,
+    fullGates,
+    // Stated by the side that applied it, so the report cannot describe a scope it did not use.
+    fullGateScope: { windowDays: FULL_GATE_WINDOW_DAYS, cap: MAX_RECORDS },
+  })
   mkdirSync(outputDir, { recursive: true })
   writeFileSync(join(outputDir, 'rolling-metrics.json'), `${JSON.stringify(report, null, 2)}\n`, 'utf8')
   writeFileSync(join(outputDir, 'rolling-metrics.md'), `${report.markdown}\n`, 'utf8')
