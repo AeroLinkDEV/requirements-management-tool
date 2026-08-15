@@ -82,16 +82,71 @@ export function readZipEntry(input, entry) {
   }
 }
 
-export function readSingleJsonFromZip(input) {
-  const entries = listZipEntries(input)
-  const jsonEntries = entries.filter((entry) => entry.name.endsWith('.json') && !entry.name.endsWith('/'))
-  if (jsonEntries.length !== 1) {
-    throw new ZipParseError(`Expected exactly one JSON file in the artifact zip, found ${jsonEntries.length}.`)
-  }
-  const content = readZipEntry(input, jsonEntries[0])
+function parseJsonEntry(input, entry) {
+  const content = readZipEntry(input, entry)
   try {
     return JSON.parse(content.toString('utf8'))
   } catch {
     throw new ZipParseError('Artifact JSON could not be parsed.')
   }
+}
+
+const jsonEntriesOf = (input) =>
+  listZipEntries(input).filter((entry) => entry.name.endsWith('.json') && !entry.name.endsWith('/'))
+
+export function readSingleJsonFromZip(input) {
+  const jsonEntries = jsonEntriesOf(input)
+  if (jsonEntries.length !== 1) {
+    throw new ZipParseError(`Expected exactly one JSON file in the artifact zip, found ${jsonEntries.length}.`)
+  }
+  return parseJsonEntry(input, jsonEntries[0])
+}
+
+/**
+ * Reads a named file from an artifact that holds a directory of outputs.
+ *
+ * `readSingleJsonFromZip` assumes an artifact carries exactly one JSON, which is only true while nothing else
+ * writes beside it. `ci-metrics-run-*` uploads a whole output directory, and once the tested-tree provenance
+ * work began writing `validated-tree.json` into that same directory every run's artifact held two JSON files
+ * and the rolling collector rejected all of them — 40 of 42 unreadable runs in the window that exposed this.
+ *
+ * A consumer that knows which file it wants should ask for it by name rather than depend on being the only
+ * writer, which is a property no shared output directory keeps for long.
+ */
+/** A ZIP name is bounded at 65,535 bytes, so every name reaching a message is truncated before it gets there. */
+const MAX_DIAGNOSTIC_NAME = 80
+const MAX_DIAGNOSTIC_NAMES = 10
+const MAX_DIAGNOSTIC_LENGTH = 400
+
+const clip = (value, limit) => (value.length > limit ? `${value.slice(0, limit)}…` : value)
+
+function describeEntries(jsonEntries) {
+  if (jsonEntries.length === 0) return 'none'
+  const shown = jsonEntries.slice(0, MAX_DIAGNOSTIC_NAMES).map((entry) => clip(entry.name, MAX_DIAGNOSTIC_NAME))
+  const suffix = jsonEntries.length > MAX_DIAGNOSTIC_NAMES ? `, +${jsonEntries.length - MAX_DIAGNOSTIC_NAMES} more` : ''
+  return clip(`${shown.join(', ')}${suffix}`, MAX_DIAGNOSTIC_LENGTH)
+}
+
+export function readNamedJsonFromZip(input, fileName) {
+  const jsonEntries = jsonEntriesOf(input)
+  // An exact root entry is the unambiguous answer. Only when there is none does a single nested copy stand in,
+  // and anything ambiguous is refused rather than resolved by position: `.find()` would have taken whichever
+  // matching basename the central directory happened to list first, so a stale `backup/run-metrics.json` or a
+  // duplicate entry could be read as the record. These artifacts are untrusted input, and an order-dependent
+  // choice among several valid-looking candidates is exactly the kind of silent wrong answer that is
+  // indistinguishable from a right one.
+  const rootMatches = jsonEntries.filter((entry) => entry.name === fileName)
+  const nestedMatches = jsonEntries.filter((entry) => entry.name.endsWith(`/${fileName}`))
+
+  if (rootMatches.length > 1) {
+    throw new ZipParseError(`Artifact zip contains ${rootMatches.length} entries named "${fileName}". JSON entries: ${describeEntries(jsonEntries)}.`)
+  }
+  if (rootMatches.length === 1) return parseJsonEntry(input, rootMatches[0])
+
+  if (nestedMatches.length > 1) {
+    throw new ZipParseError(`Artifact zip contains ${nestedMatches.length} nested copies of "${fileName}" and no root entry. JSON entries: ${describeEntries(jsonEntries)}.`)
+  }
+  if (nestedMatches.length === 1) return parseJsonEntry(input, nestedMatches[0])
+
+  throw new ZipParseError(`Artifact zip does not contain "${fileName}". JSON entries: ${describeEntries(jsonEntries)}.`)
 }
