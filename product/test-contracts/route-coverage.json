@@ -1,0 +1,2014 @@
+{
+  "schemaVersion": "aerolink-route-coverage/v2",
+  "routes": [
+    {
+      "method": "DELETE",
+      "path": "/api/admin/users/{id:guid}/memberships/{programId:guid}/{role}",
+      "file": "AdministrationEndpoints.cs",
+      "coveredBy": []
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/baselines/{id:guid}/selections/{changeRequestId:guid}",
+      "file": "BaselineEndpoints.cs",
+      "coveredBy": [
+        "SecurityBoundaryTests"
+      ]
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/baselines/{id:guid}/test-change-requests/{testChangeRequestId:guid}",
+      "file": "BaselineEndpoints.cs",
+      "coveredBy": [
+        "ProcedureBaselineApiTests"
+      ]
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/delegations/{id:guid}",
+      "file": "AdministrationEndpoints.cs",
+      "coveredBy": [
+        "SecurityBoundaryTests"
+      ]
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/enterprise-requirements/views/{id:guid}",
+      "file": "RequirementsEndpoints.cs",
+      "coveredBy": [
+        "SavedViewLifecycleApiTests"
+      ]
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/projects/{projectId:guid}/personnel/{userId:guid}/roles/{role}",
+      "file": "PersonnelEndpoints.cs",
+      "coveredBy": [
+        "ApprovalConfigurationApiTests",
+        "ProjectPersonnelApiTests"
+      ]
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/projects/{projectId:guid}/personnel/backups/{role}",
+      "file": "PersonnelEndpoints.cs",
+      "coveredBy": []
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/releases/{releaseId:guid}/test-sets/{discipline}/procedures/{procedureRevisionId:guid}",
+      "file": "BuildTestSetEndpoints.cs",
+      "coveredBy": []
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/test-change-reviews/{id:guid}/change-requests/{changeRequestId:guid}",
+      "file": "VerificationImpactEndpoints.cs",
+      "coveredBy": [
+        "TestChangeRequestConsolidationTests",
+        "TestChangeRequestScopeApiTests"
+      ]
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/test-change-reviews/{id:guid}/procedure-changes/{changeId:guid}",
+      "file": "VerificationImpactEndpoints.cs",
+      "coveredBy": [
+        "ManualTestChangeRequestApiTests",
+        "TestProcedureAuthoringApiTests"
+      ]
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/test-procedures/views/{id:guid}",
+      "file": "VerificationEndpoints.cs",
+      "coveredBy": [
+        "ProcedureSavedViewApiTests"
+      ]
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/trace-links/{id:guid}",
+      "file": "VerificationEndpoints.cs",
+      "coveredBy": []
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/managed-documents/{id:guid}/links/{linkId:guid}",
+      "file": "ManagedDocumentEndpoints.cs",
+      "coveredBy": []
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/managed-documents/{id:guid}/steward",
+      "file": "ManagedDocumentEndpoints.cs",
+      "coveredBy": [
+        "ManagedDocumentApiTests"
+      ]
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/managed-documents/revisions/{revisionId:guid}/formal-summary",
+      "file": "ManagedDocumentEndpoints.cs",
+      "coveredBy": [
+        "ManagedDocumentApiTests"
+      ]
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/managed-documents/revisions/{revisionId:guid}/responsible-owner",
+      "file": "ManagedDocumentEndpoints.cs",
+      "coveredBy": [
+        "ManagedDocumentApiTests"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/admin/external-identity/mappings",
+      "file": "ExternalIdentityAdminEndpoints.cs",
+      "coveredBy": [
+        "ExternalIdentityAdminApiTests"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/admin/external-identity/mappings/{id:guid}/enabled",
+      "file": "ExternalIdentityAdminEndpoints.cs",
+      "coveredBy": []
+    },
+    {
+      "method": "POST",
+      "path": "/api/admin/external-identity/providers",
+      "file": "ExternalIdentityAdminEndpoints.cs",
+      "coveredBy": [
+        "ExternalIdentityAdminApiTests"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/admin/external-identity/providers/{id:guid}/enabled",
+      "file": "ExternalIdentityAdminEndpoints.cs",
+      "coveredBy": [
+        "ExternalIdentityAdminApiTests"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/admin/external-identity/resolve",
+      "file": "ExternalIdentityAdminEndpoints.cs",
+      "coveredBy": [
+        "ExternalIdentityAdminApiTests"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/admin/users",
+      "file": "AdministrationEndpoints.cs",
+      "coveredBy": [
+        "SecurityBoundaryTests"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/admin/users/{id:guid}/memberships",
+      "file": "AdministrationEndpoints.cs",
+      "coveredBy": [
+        "SecurityBoundaryTests"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/admin/users/{id:guid}/reset-password",
+      "file": "AdministrationEndpoints.cs",
+      "coveredBy": []
+    },
+    {
+      "method": "POST",
+      "path": "/api/admin/users/{id:guid}/state",
+      "file": "AdministrationEndpoints.cs",
+      "coveredBy": [
+        "SecurityBoundaryTests"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/auth/login",
+      "file": "AuthEndpoints.cs",
+      "coveredBy": [
+        "AdministratorChangeRequestApiTests",
+        "ApprovalConfigurationApiTests",
+        "AuthoredSectionTests",
+        "AuthoringTracedImpactTests",
+        "BaselineImportApiTests",
+        "BuildScopedWorkspaceApiTests",
+        "BuildTestSetApiTests",
+        "CancelReviewAuthorityTests",
+        "ChangeAuthoringInvariantApiTests",
+        "ChangeRequestReviewRationaleApiTests",
+        "ClosedReleaseAuthoringTests",
+        "CodeTraceabilityApiTests",
+        "ConfigurationPublicationApiTests",
+        "ControlledEditingCheckInApiTests",
+        "ControlledEditingProcedureAuthorityTests",
+        "ControlledProcedureDocumentApiTests",
+        "CorrectiveActionRoutingApiTests",
+        "CoverageStateFilterApiTests",
+        "DeferralAndRevisionListingTests",
+        "DeferredCarryForwardApiTests",
+        "DownstreamAssessmentReopenApiTests",
+        "DraftDocumentApiTests",
+        "ExternalIdentityAdminApiTests",
+        "GovernanceEvidenceApiTests",
+        "HistoricalPublicationFreezeApiTests",
+        "IdentifierAllocationTests",
+        "IntegrityCheckpointApiTests",
+        "LegacyProcedureManifestBootstrapApiTests",
+        "LiveTestRegressionApiTests",
+        "ManagedDocumentApiTests",
+        "ManagedDocumentRecoveryApiTests",
+        "ManualTestChangeRequestApiTests",
+        "OpenDigitalThreadTests",
+        "PreReleaseEvidenceVisibilityTests",
+        "ProblemReportActiveMetricApiTests",
+        "ProblemReportApiTests",
+        "ProblemReportOwnerAuthorityApiTests",
+        "ProblemReportPagingApiTests",
+        "ProblemReportVerificationApiTests",
+        "ProblemReportWaiverApiTests",
+        "ProcedureBaselineApiTests",
+        "ProcedureBrowsingApiTests",
+        "ProcedureDiscussionApiTests",
+        "ProcedureManifestEffectivityApiTests",
+        "ProcedureSavedViewApiTests",
+        "ProcedureTraceApiTests",
+        "ProductLineApiTests",
+        "ProductionRoutingTests",
+        "ProgramRoleAuthorityApiTests",
+        "ProjectPersonnelApiTests",
+        "ReleaseCampaignExactIntentApiTests",
+        "ReleasedExecutionEvidenceApiTests",
+        "RequirementFilterExactnessApiTests",
+        "RestartReviewApiTests",
+        "ReviseChangeRequestApiTests",
+        "SavedViewLifecycleApiTests",
+        "SearchableAuthoringPickerApiTests",
+        "SecurityBoundaryTests",
+        "SecurityHardeningTests",
+        "SharedHostIsolationTests",
+        "SoftwareChangeRequestLevelHistoryTests",
+        "TestChangeRequestConsolidationTests",
+        "TestChangeRequestRegisterApiTests",
+        "TestChangeRequestReviewWorkflowTests",
+        "TestChangeRequestScopeApiTests",
+        "TestExecutionEffectivityApiTests",
+        "TestProcedureAuthoringApiTests",
+        "TestProcedureDocumentApiTests",
+        "TestProcedureRevisionHistoryApiTests",
+        "VerificationImpactApiTests",
+        "VerificationProgramIsolationApiTests"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/auth/logout",
+      "file": "AuthEndpoints.cs",
+      "coveredBy": []
+    },
+    {
+      "method": "POST",
+      "path": "/api/auth/mfa/confirm",
+      "file": "AuthEndpoints.cs",
+      "coveredBy": [
+        "SecurityBoundaryTests"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/auth/mfa/disable",
+      "file": "AuthEndpoints.cs",
+      "coveredBy": [
+        "SecurityBoundaryTests"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/auth/mfa/enroll",
+      "file": "AuthEndpoints.cs",
+      "coveredBy": [
+        "SecurityBoundaryTests"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/auth/password",
+      "file": "AuthEndpoints.cs",
+      "coveredBy": []
+    },
+    {
+      "method": "POST",
+      "path": "/api/auth/sessions/revoke-others",
+      "file": "AuthEndpoints.cs",
+      "coveredBy": [
+        "SecurityBoundaryTests"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/baseline-imports",
+      "file": "BaselineImportEndpoints.cs",
+      "coveredBy": [
+        "BaselineImportApiTests"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/baseline-imports/{id:guid}/abandon",
+      "file": "BaselineImportEndpoints.cs",
+      "coveredBy": [
+        "BaselineImportApiTests"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/baseline-imports/{id:guid}/accept",
+      "file": "BaselineImportEndpoints.cs",
+      "coveredBy": [
+        "BaselineImportApiTests"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/baseline-imports/{id:guid}/analysis",
+      "file": "BaselineImportEndpoints.cs",
+      "coveredBy": [
+        "BaselineImportApiTests"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/baseline-imports/{id:guid}/mapping",
+      "file": "BaselineImportEndpoints.cs",
+      "coveredBy": [
+        "BaselineImportApiTests"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/baseline-imports/{id:guid}/reconciliation",
+      "file": "BaselineImportEndpoints.cs",
+      "coveredBy": [
+        "BaselineImportApiTests"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/baseline-imports/{id:guid}/source-records",
+      "file": "BaselineImportEndpoints.cs",
+      "coveredBy": [
+        "BaselineImportApiTests"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/baselines",
+      "file": "BaselineEndpoints.cs",
+      "coveredBy": [
+        "BaselineImportApiTests"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/baselines/{id:guid}/freeze",
+      "file": "BaselineEndpoints.cs",
+      "coveredBy": [
+        "ChangeAuthoringInvariantApiTests",
+        "VerificationImpactApiTests"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/baselines/{id:guid}/generate-documents",
+      "file": "BaselineEndpoints.cs",
+      "coveredBy": [
+        "ControlledProcedureDocumentApiTests",
+        "HistoricalPublicationFreezeApiTests"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/baselines/{id:guid}/legacy-procedure-manifest-bootstrap",
+      "file": "BaselineEndpoints.cs",
+      "coveredBy": [
+        "LegacyProcedureManifestBootstrapApiTests"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/baselines/{id:guid}/materialize-requirements",
+      "file": "BaselineEndpoints.cs",
+      "coveredBy": [
+        "ChangeAuthoringInvariantApiTests",
+        "ControlledProcedureDocumentApiTests",
+        "ProcedureBaselineApiTests",
+        "VerificationImpactApiTests"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/baselines/{id:guid}/materialize-test-procedures",
+      "file": "BaselineEndpoints.cs",
+      "coveredBy": [
+        "ControlledProcedureDocumentApiTests",
+        "ProcedureBaselineApiTests"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/baselines/{id:guid}/selections",
+      "file": "BaselineEndpoints.cs",
+      "coveredBy": [
+        "ChangeAuthoringInvariantApiTests"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/baselines/{id:guid}/test-change-requests",
+      "file": "BaselineEndpoints.cs",
+      "coveredBy": [
+        "ControlledProcedureDocumentApiTests",
+        "ProcedureBaselineApiTests"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/builds",
+      "file": "BaselineEndpoints.cs",
+      "coveredBy": []
+    },
+    {
+      "method": "POST",
+      "path": "/api/change-request-drafts",
+      "file": "ChangeRequestEndpoints.cs",
+      "coveredBy": [
+        "AuthoredSectionTests",
+        "AuthoringTracedImpactTests",
+        "BuildScopedWorkspaceApiTests",
+        "ChangeAuthoringInvariantApiTests",
+        "ProgramRoleAuthorityApiTests",
+        "SoftwareChangeRequestLevelHistoryTests"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/change-requests",
+      "file": "ChangeRequestEndpoints.cs",
+      "coveredBy": [
+        "ChangeRequestRenameApiTests",
+        "ProblemReportApiTests",
+        "ServerAuthorityContractTests"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/change-requests/{id:guid}/approve",
+      "file": "ChangeRequestEndpoints.cs",
+      "coveredBy": [
+        "ChangeRequestReviewRationaleApiTests",
+        "TestChangeRequestReviewWorkflowTests"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/change-requests/{id:guid}/cancel-review",
+      "file": "ChangeRequestEndpoints.cs",
+      "coveredBy": [
+        "CancelReviewAuthorityTests"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/change-requests/{id:guid}/defer",
+      "file": "ChangeRequestEndpoints.cs",
+      "coveredBy": [
+        "AdministratorChangeRequestApiTests",
+        "DeferralAndRevisionListingTests"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/change-requests/{id:guid}/jira",
+      "file": "JiraEndpoints.cs",
+      "coveredBy": []
+    },
+    {
+      "method": "POST",
+      "path": "/api/change-requests/{id:guid}/next-revision",
+      "file": "ChangeRequestEndpoints.cs",
+      "coveredBy": [
+        "AdministratorChangeRequestApiTests",
+        "DeferralAndRevisionListingTests",
+        "ReviseChangeRequestApiTests"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/change-requests/{id:guid}/reinstate",
+      "file": "ChangeRequestEndpoints.cs",
+      "coveredBy": [
+        "AdministratorChangeRequestApiTests",
+        "DeferralAndRevisionListingTests",
+        "DeferredCarryForwardApiTests"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/change-requests/{id:guid}/request-changes",
+      "file": "ChangeRequestEndpoints.cs",
+      "coveredBy": [
+        "ChangeRequestReviewRationaleApiTests",
+        "TestChangeRequestReviewWorkflowTests"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/change-requests/{id:guid}/requirements",
+      "file": "ChangeRequestEndpoints.cs",
+      "coveredBy": [
+        "AdministratorChangeRequestApiTests"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/change-requests/{id:guid}/restart-review",
+      "file": "ChangeRequestEndpoints.cs",
+      "coveredBy": [
+        "RestartReviewApiTests",
+        "TestChangeRequestReviewWorkflowTests"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/change-requests/{id:guid}/retarget",
+      "file": "ChangeRequestEndpoints.cs",
+      "coveredBy": []
+    },
+    {
+      "method": "POST",
+      "path": "/api/change-requests/{id:guid}/submit",
+      "file": "ChangeRequestEndpoints.cs",
+      "coveredBy": [
+        "AdministratorChangeRequestApiTests",
+        "AuthoredSectionTests",
+        "ChangeRequestReviewRationaleApiTests",
+        "TestChangeRequestReviewWorkflowTests"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/code-traceability",
+      "file": "CodeTraceabilityEndpoints.cs",
+      "coveredBy": [
+        "CodeTraceabilityApiTests"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/content/images",
+      "file": "RequirementsEndpoints.cs",
+      "coveredBy": [
+        "SecurityHardeningTests"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/controlled-editing/artifacts",
+      "file": "ControlledEditingEndpoints.cs",
+      "coveredBy": [
+        "ControlledEditingCheckInApiTests"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/controlled-editing/checkout",
+      "file": "ControlledEditingEndpoints.cs",
+      "coveredBy": [
+        "AdministratorChangeRequestApiTests",
+        "BuildScopedWorkspaceApiTests",
+        "ChangeAuthoringInvariantApiTests",
+        "ControlledEditingCheckInApiTests",
+        "ControlledEditingProcedureAuthorityTests",
+        "ProblemReportApiTests",
+        "ProblemReportCheckoutApiTests",
+        "ProblemReportVerificationApiTests",
+        "TestChangeRequestRegisterApiTests"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/controlled-editing/sessions/{id:guid}/check-in",
+      "file": "ControlledEditingEndpoints.cs",
+      "coveredBy": [
+        "AdministratorChangeRequestApiTests",
+        "ControlledEditingCheckInApiTests",
+        "ControlledEditingProcedureAuthorityTests",
+        "ProblemReportApiTests",
+        "ProblemReportCheckoutApiTests",
+        "ProblemReportVerificationApiTests"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/controlled-editing/sessions/{id:guid}/discard",
+      "file": "ControlledEditingEndpoints.cs",
+      "coveredBy": [
+        "ProblemReportApiTests",
+        "ProblemReportCheckoutApiTests"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/controlled-editing/sessions/{id:guid}/force-unlock",
+      "file": "ControlledEditingEndpoints.cs",
+      "coveredBy": []
+    },
+    {
+      "method": "POST",
+      "path": "/api/controlled-editing/sessions/{id:guid}/heartbeat",
+      "file": "ControlledEditingEndpoints.cs",
+      "coveredBy": []
+    },
+    {
+      "method": "POST",
+      "path": "/api/delegations",
+      "file": "AdministrationEndpoints.cs",
+      "coveredBy": []
+    },
+    {
+      "method": "POST",
+      "path": "/api/document-connector/{grantId:guid}/check-in",
+      "file": "ManagedDocumentEndpoints.cs",
+      "coveredBy": [
+        "ManagedDocumentApiTests"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/document-connector/{grantId:guid}/discard",
+      "file": "ManagedDocumentEndpoints.cs",
+      "coveredBy": [
+        "ManagedDocumentApiTests"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/document-connector/{grantId:guid}/heartbeat",
+      "file": "ManagedDocumentEndpoints.cs",
+      "coveredBy": [
+        "ManagedDocumentApiTests"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/document-connector/{grantId:guid}/release-candidate",
+      "file": "ManagedDocumentEndpoints.cs",
+      "coveredBy": [
+        "ManagedDocumentApiTests"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/document-connector/redeem/{launchToken}",
+      "file": "ManagedDocumentEndpoints.cs",
+      "coveredBy": [
+        "ManagedDocumentApiTests",
+        "ManagedDocumentRecoveryApiTests"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/downstream-assessments/{id:guid}/approve",
+      "file": "DownstreamAssessmentEndpoints.cs",
+      "coveredBy": [
+        "DownstreamAssessmentReopenApiTests"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/downstream-assessments/{id:guid}/assign",
+      "file": "DownstreamAssessmentEndpoints.cs",
+      "coveredBy": [
+        "DownstreamAssessmentReopenApiTests",
+        "LiveTestRegressionApiTests"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/downstream-assessments/{id:guid}/change-requests",
+      "file": "DownstreamAssessmentEndpoints.cs",
+      "coveredBy": [
+        "DownstreamAssessmentReopenApiTests"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/downstream-assessments/{id:guid}/change-required",
+      "file": "DownstreamAssessmentEndpoints.cs",
+      "coveredBy": [
+        "DownstreamAssessmentReopenApiTests",
+        "LiveTestRegressionApiTests"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/downstream-assessments/{id:guid}/no-change",
+      "file": "DownstreamAssessmentEndpoints.cs",
+      "coveredBy": [
+        "DownstreamAssessmentReopenApiTests"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/downstream-assessments/{id:guid}/reopen",
+      "file": "DownstreamAssessmentEndpoints.cs",
+      "coveredBy": [
+        "DownstreamAssessmentReopenApiTests"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/downstream-assessments/{id:guid}/return",
+      "file": "DownstreamAssessmentEndpoints.cs",
+      "coveredBy": []
+    },
+    {
+      "method": "POST",
+      "path": "/api/downstream-assessments/{id:guid}/submit",
+      "file": "DownstreamAssessmentEndpoints.cs",
+      "coveredBy": [
+        "DownstreamAssessmentReopenApiTests"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/edit-sessions/{id:guid}/discard",
+      "file": "EditSessionEndpoints.cs",
+      "coveredBy": []
+    },
+    {
+      "method": "POST",
+      "path": "/api/edit-sessions/{id:guid}/force-unlock",
+      "file": "EditSessionEndpoints.cs",
+      "coveredBy": []
+    },
+    {
+      "method": "POST",
+      "path": "/api/edit-sessions/{id:guid}/heartbeat",
+      "file": "EditSessionEndpoints.cs",
+      "coveredBy": []
+    },
+    {
+      "method": "POST",
+      "path": "/api/edit-sessions/checkout",
+      "file": "EditSessionEndpoints.cs",
+      "coveredBy": []
+    },
+    {
+      "method": "POST",
+      "path": "/api/enterprise-hardening/attachments",
+      "file": "EditSessionEndpoints.cs",
+      "coveredBy": [
+        "AdministratorChangeRequestApiTests",
+        "IdentifierAllocationTests"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/enterprise-hardening/attachments/{id:guid}/verify",
+      "file": "EditSessionEndpoints.cs",
+      "coveredBy": []
+    },
+    {
+      "method": "POST",
+      "path": "/api/enterprise-hardening/conflicts/{id:guid}/resolve",
+      "file": "EditSessionEndpoints.cs",
+      "coveredBy": []
+    },
+    {
+      "method": "POST",
+      "path": "/api/enterprise-hardening/edit-sessions",
+      "file": "EditSessionEndpoints.cs",
+      "coveredBy": []
+    },
+    {
+      "method": "POST",
+      "path": "/api/enterprise-hardening/integrity-checkpoints",
+      "file": "EditSessionEndpoints.cs",
+      "coveredBy": [
+        "ChangeAuthoringInvariantApiTests",
+        "IntegrityCheckpointApiTests"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/enterprise-hardening/jobs",
+      "file": "EditSessionEndpoints.cs",
+      "coveredBy": []
+    },
+    {
+      "method": "POST",
+      "path": "/api/enterprise-hardening/jobs/{id:guid}/cancel",
+      "file": "EditSessionEndpoints.cs",
+      "coveredBy": []
+    },
+    {
+      "method": "POST",
+      "path": "/api/enterprise-hardening/jobs/{id:guid}/retry",
+      "file": "EditSessionEndpoints.cs",
+      "coveredBy": []
+    },
+    {
+      "method": "POST",
+      "path": "/api/enterprise-requirements/{artifactId:guid}/assignments",
+      "file": "RequirementsEndpoints.cs",
+      "coveredBy": []
+    },
+    {
+      "method": "POST",
+      "path": "/api/enterprise-requirements/{artifactId:guid}/comments",
+      "file": "RequirementsEndpoints.cs",
+      "coveredBy": []
+    },
+    {
+      "method": "POST",
+      "path": "/api/enterprise-requirements/{artifactId:guid}/propose",
+      "file": "RequirementsEndpoints.cs",
+      "coveredBy": []
+    },
+    {
+      "method": "POST",
+      "path": "/api/enterprise-requirements/{artifactId:guid}/watch",
+      "file": "RequirementsEndpoints.cs",
+      "coveredBy": []
+    },
+    {
+      "method": "POST",
+      "path": "/api/enterprise-requirements/assignments/{id:guid}/complete",
+      "file": "RequirementsEndpoints.cs",
+      "coveredBy": []
+    },
+    {
+      "method": "POST",
+      "path": "/api/enterprise-requirements/bulk/{id:guid}/commit",
+      "file": "RequirementsEndpoints.cs",
+      "coveredBy": []
+    },
+    {
+      "method": "POST",
+      "path": "/api/enterprise-requirements/bulk/preview",
+      "file": "RequirementsEndpoints.cs",
+      "coveredBy": []
+    },
+    {
+      "method": "POST",
+      "path": "/api/enterprise-requirements/comments/{id:guid}/resolve",
+      "file": "RequirementsEndpoints.cs",
+      "coveredBy": []
+    },
+    {
+      "method": "POST",
+      "path": "/api/enterprise-requirements/import-mappings",
+      "file": "RequirementsEndpoints.cs",
+      "coveredBy": []
+    },
+    {
+      "method": "POST",
+      "path": "/api/enterprise-requirements/import/{id:guid}/commit",
+      "file": "RequirementsEndpoints.cs",
+      "coveredBy": []
+    },
+    {
+      "method": "POST",
+      "path": "/api/enterprise-requirements/import/preview",
+      "file": "RequirementsEndpoints.cs",
+      "coveredBy": []
+    },
+    {
+      "method": "POST",
+      "path": "/api/enterprise-requirements/notifications/{id:guid}/read",
+      "file": "RequirementsEndpoints.cs",
+      "coveredBy": []
+    },
+    {
+      "method": "POST",
+      "path": "/api/enterprise-requirements/schemas",
+      "file": "RequirementsEndpoints.cs",
+      "coveredBy": []
+    },
+    {
+      "method": "POST",
+      "path": "/api/enterprise-requirements/schemas/{id:guid}/fields",
+      "file": "RequirementsEndpoints.cs",
+      "coveredBy": []
+    },
+    {
+      "method": "POST",
+      "path": "/api/enterprise-requirements/specifications",
+      "file": "RequirementsEndpoints.cs",
+      "coveredBy": []
+    },
+    {
+      "method": "POST",
+      "path": "/api/enterprise-requirements/specifications/{id:guid}/sections",
+      "file": "RequirementsEndpoints.cs",
+      "coveredBy": []
+    },
+    {
+      "method": "POST",
+      "path": "/api/enterprise-requirements/views",
+      "file": "RequirementsEndpoints.cs",
+      "coveredBy": [
+        "SavedViewLifecycleApiTests"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/evidence",
+      "file": "VerificationEndpoints.cs",
+      "coveredBy": [
+        "ReleasedExecutionEvidenceApiTests"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/integrations/checkpoints/{id:guid}/replay",
+      "file": "IntegrationEndpoints.cs",
+      "coveredBy": []
+    },
+    {
+      "method": "POST",
+      "path": "/api/integrations/connectors",
+      "file": "IntegrationEndpoints.cs",
+      "coveredBy": []
+    },
+    {
+      "method": "POST",
+      "path": "/api/integrations/connectors/{id:guid}/checkpoints",
+      "file": "IntegrationEndpoints.cs",
+      "coveredBy": []
+    },
+    {
+      "method": "POST",
+      "path": "/api/integrations/deliveries/{id:guid}/replay",
+      "file": "IntegrationEndpoints.cs",
+      "coveredBy": []
+    },
+    {
+      "method": "POST",
+      "path": "/api/integrations/events/test",
+      "file": "IntegrationEndpoints.cs",
+      "coveredBy": [
+        "OpenDigitalThreadTests"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/integrations/mappings",
+      "file": "IntegrationEndpoints.cs",
+      "coveredBy": []
+    },
+    {
+      "method": "POST",
+      "path": "/api/integrations/service-identities",
+      "file": "IntegrationEndpoints.cs",
+      "coveredBy": [
+        "OpenDigitalThreadTests"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/integrations/service-identities/{id:guid}/revoke",
+      "file": "IntegrationEndpoints.cs",
+      "coveredBy": []
+    },
+    {
+      "method": "POST",
+      "path": "/api/integrations/webhooks",
+      "file": "IntegrationEndpoints.cs",
+      "coveredBy": []
+    },
+    {
+      "method": "POST",
+      "path": "/api/jira/connection/verify",
+      "file": "JiraEndpoints.cs",
+      "coveredBy": []
+    },
+    {
+      "method": "POST",
+      "path": "/api/jira/links/refresh",
+      "file": "JiraEndpoints.cs",
+      "coveredBy": []
+    },
+    {
+      "method": "POST",
+      "path": "/api/managed-documents",
+      "file": "ManagedDocumentEndpoints.cs",
+      "coveredBy": [
+        "ManagedDocumentApiTests",
+        "ManagedDocumentRecoveryApiTests"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/managed-documents/{id:guid}/links",
+      "file": "ManagedDocumentEndpoints.cs",
+      "coveredBy": [
+        "ManagedDocumentApiTests"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/managed-documents/{id:guid}/links/{linkId:guid}/supersede",
+      "file": "ManagedDocumentEndpoints.cs",
+      "coveredBy": []
+    },
+    {
+      "method": "POST",
+      "path": "/api/managed-documents/{id:guid}/revisions",
+      "file": "ManagedDocumentEndpoints.cs",
+      "coveredBy": [
+        "ManagedDocumentApiTests"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/managed-documents/attachments/{attachmentId:guid}/restore",
+      "file": "ManagedDocumentEndpoints.cs",
+      "coveredBy": [
+        "ManagedDocumentApiTests"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/managed-documents/connector-enrollment",
+      "file": "ManagedDocumentEndpoints.cs",
+      "coveredBy": [
+        "ManagedDocumentApiTests",
+        "ManagedDocumentRecoveryApiTests"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/managed-documents/projects/{projectId:guid}/integrity/scan",
+      "file": "ManagedDocumentEndpoints.cs",
+      "coveredBy": [
+        "ManagedDocumentApiTests"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/managed-documents/projects/{projectId:guid}/storage/reconcile",
+      "file": "ManagedDocumentEndpoints.cs",
+      "coveredBy": [
+        "ManagedDocumentApiTests"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/managed-documents/revisions/{revisionId:guid}/checkout",
+      "file": "ManagedDocumentEndpoints.cs",
+      "coveredBy": [
+        "ManagedDocumentApiTests",
+        "ManagedDocumentRecoveryApiTests"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/managed-documents/revisions/{revisionId:guid}/force-unlock",
+      "file": "ManagedDocumentEndpoints.cs",
+      "coveredBy": [
+        "ManagedDocumentRecoveryApiTests"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/managed-documents/revisions/{revisionId:guid}/recovery",
+      "file": "ManagedDocumentEndpoints.cs",
+      "coveredBy": [
+        "ManagedDocumentRecoveryApiTests"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/managed-documents/revisions/{revisionId:guid}/recovery/discard",
+      "file": "ManagedDocumentEndpoints.cs",
+      "coveredBy": [
+        "ManagedDocumentRecoveryApiTests"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/managed-documents/revisions/{revisionId:guid}/release-preparation",
+      "file": "ManagedDocumentEndpoints.cs",
+      "coveredBy": [
+        "ManagedDocumentApiTests",
+        "ManagedDocumentRecoveryApiTests"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/managed-documents/revisions/{revisionId:guid}/review/approve",
+      "file": "ManagedDocumentEndpoints.cs",
+      "coveredBy": [
+        "ManagedDocumentApiTests",
+        "ManagedDocumentRecoveryApiTests"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/managed-documents/revisions/{revisionId:guid}/review/return",
+      "file": "ManagedDocumentEndpoints.cs",
+      "coveredBy": [
+        "ManagedDocumentApiTests"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/managed-documents/revisions/{revisionId:guid}/submit",
+      "file": "ManagedDocumentEndpoints.cs",
+      "coveredBy": [
+        "ManagedDocumentApiTests",
+        "ManagedDocumentRecoveryApiTests"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/managed-documents/revisions/{revisionId:guid}/withdraw",
+      "file": "ManagedDocumentEndpoints.cs",
+      "coveredBy": [
+        "ManagedDocumentApiTests"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/operations/alerts",
+      "file": "OperationsEndpoints.cs",
+      "coveredBy": []
+    },
+    {
+      "method": "POST",
+      "path": "/api/operations/alerts/{id:guid}/resolve",
+      "file": "OperationsEndpoints.cs",
+      "coveredBy": []
+    },
+    {
+      "method": "POST",
+      "path": "/api/operations/qualification-runs",
+      "file": "OperationsEndpoints.cs",
+      "coveredBy": []
+    },
+    {
+      "method": "POST",
+      "path": "/api/operations/restore-drills",
+      "file": "OperationsEndpoints.cs",
+      "coveredBy": []
+    },
+    {
+      "method": "POST",
+      "path": "/api/operations/retention-policies",
+      "file": "OperationsEndpoints.cs",
+      "coveredBy": []
+    },
+    {
+      "method": "POST",
+      "path": "/api/operations/upgrade-evidence",
+      "file": "OperationsEndpoints.cs",
+      "coveredBy": []
+    },
+    {
+      "method": "POST",
+      "path": "/api/problem-reports",
+      "file": "ProblemReportEndpoints.cs",
+      "coveredBy": [
+        "BuildScopedWorkspaceApiTests",
+        "IdentifierAllocationTests",
+        "ProblemReportApiTests",
+        "ProblemReportCheckoutApiTests",
+        "ProblemReportDispositionApiTests",
+        "ProblemReportDuplicateDispositionApiTests",
+        "ProblemReportOwnerAuthorityApiTests"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/problem-reports/{id:guid}/blocker",
+      "file": "ProblemReportEndpoints.cs",
+      "coveredBy": [
+        "ProblemReportApiTests",
+        "ProblemReportWaiverApiTests"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/problem-reports/{id:guid}/closure/approve",
+      "file": "ProblemReportEndpoints.cs",
+      "coveredBy": [
+        "ProblemReportApiTests",
+        "ProblemReportVerificationApiTests"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/problem-reports/{id:guid}/disposition",
+      "file": "ProblemReportEndpoints.cs",
+      "coveredBy": [
+        "ProblemReportCheckoutApiTests",
+        "ProblemReportDispositionApiTests",
+        "ProblemReportDuplicateDispositionApiTests"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/problem-reports/{id:guid}/implementation",
+      "file": "ProblemReportEndpoints.cs",
+      "coveredBy": [
+        "ProblemReportVerificationApiTests"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/problem-reports/{id:guid}/investigation",
+      "file": "ProblemReportEndpoints.cs",
+      "coveredBy": [
+        "ProblemReportApiTests"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/problem-reports/{id:guid}/links",
+      "file": "ProblemReportEndpoints.cs",
+      "coveredBy": [
+        "ProblemReportApiTests"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/problem-reports/{id:guid}/owner",
+      "file": "ProblemReportEndpoints.cs",
+      "coveredBy": [
+        "ProblemReportOwnerAuthorityApiTests",
+        "ProblemReportVerificationApiTests"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/problem-reports/{id:guid}/ready-for-sccb",
+      "file": "ProblemReportEndpoints.cs",
+      "coveredBy": [
+        "BuildScopedWorkspaceApiTests",
+        "ProblemReportApiTests",
+        "ProblemReportCheckoutApiTests",
+        "ProblemReportDispositionApiTests",
+        "ProblemReportOwnerAuthorityApiTests"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/problem-reports/{id:guid}/release-waiver",
+      "file": "ProblemReportEndpoints.cs",
+      "coveredBy": [
+        "ProblemReportWaiverApiTests"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/problem-reports/{id:guid}/release-waiver/{waiverId:guid}/revoke",
+      "file": "ProblemReportEndpoints.cs",
+      "coveredBy": [
+        "ProblemReportWaiverApiTests"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/problem-reports/{id:guid}/reopen",
+      "file": "ProblemReportEndpoints.cs",
+      "coveredBy": [
+        "ProblemReportActiveMetricApiTests",
+        "ProblemReportCheckoutApiTests",
+        "ProblemReportDuplicateDispositionApiTests",
+        "ProblemReportVerificationApiTests"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/problem-reports/{id:guid}/resolution",
+      "file": "ProblemReportEndpoints.cs",
+      "coveredBy": [
+        "ProblemReportApiTests",
+        "ProblemReportVerificationApiTests"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/problem-reports/{id:guid}/resume",
+      "file": "ProblemReportEndpoints.cs",
+      "coveredBy": []
+    },
+    {
+      "method": "POST",
+      "path": "/api/problem-reports/{id:guid}/sccb/open",
+      "file": "ProblemReportEndpoints.cs",
+      "coveredBy": [
+        "ProblemReportApiTests",
+        "ProblemReportCheckoutApiTests",
+        "ProblemReportDispositionApiTests"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/problem-reports/{id:guid}/target-build",
+      "file": "ProblemReportEndpoints.cs",
+      "coveredBy": [
+        "ProblemReportVerificationApiTests"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/problem-reports/{id:guid}/verify",
+      "file": "ProblemReportEndpoints.cs",
+      "coveredBy": [
+        "ProblemReportVerificationApiTests"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/problem-reports/from-test-execution/{executionId:guid}",
+      "file": "ProblemReportEndpoints.cs",
+      "coveredBy": []
+    },
+    {
+      "method": "POST",
+      "path": "/api/product-line/change-sets",
+      "file": "ProductLineEndpoints.cs",
+      "coveredBy": []
+    },
+    {
+      "method": "POST",
+      "path": "/api/product-line/change-sets/{id:guid}/apply",
+      "file": "ProductLineEndpoints.cs",
+      "coveredBy": [
+        "ProductLineApiTests"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/product-line/change-sets/{id:guid}/resolve",
+      "file": "ProductLineEndpoints.cs",
+      "coveredBy": []
+    },
+    {
+      "method": "POST",
+      "path": "/api/product-line/components",
+      "file": "ProductLineEndpoints.cs",
+      "coveredBy": []
+    },
+    {
+      "method": "POST",
+      "path": "/api/product-line/components/{id:guid}/approve",
+      "file": "ProductLineEndpoints.cs",
+      "coveredBy": []
+    },
+    {
+      "method": "POST",
+      "path": "/api/product-line/components/{id:guid}/streams",
+      "file": "ProductLineEndpoints.cs",
+      "coveredBy": []
+    },
+    {
+      "method": "POST",
+      "path": "/api/product-line/libraries",
+      "file": "ProductLineCompletionEndpoints.cs",
+      "coveredBy": []
+    },
+    {
+      "method": "POST",
+      "path": "/api/product-line/libraries/{id:guid}/approve",
+      "file": "ProductLineCompletionEndpoints.cs",
+      "coveredBy": []
+    },
+    {
+      "method": "POST",
+      "path": "/api/product-line/libraries/{id:guid}/revisions",
+      "file": "ProductLineCompletionEndpoints.cs",
+      "coveredBy": []
+    },
+    {
+      "method": "POST",
+      "path": "/api/product-line/streams/{id:guid}/revisions",
+      "file": "ProductLineEndpoints.cs",
+      "coveredBy": []
+    },
+    {
+      "method": "POST",
+      "path": "/api/product-line/variants",
+      "file": "ProductLineEndpoints.cs",
+      "coveredBy": []
+    },
+    {
+      "method": "POST",
+      "path": "/api/product-line/variants/{id:guid}/approve",
+      "file": "ProductLineEndpoints.cs",
+      "coveredBy": []
+    },
+    {
+      "method": "POST",
+      "path": "/api/product-line/variants/{id:guid}/baselines",
+      "file": "ProductLineEndpoints.cs",
+      "coveredBy": []
+    },
+    {
+      "method": "POST",
+      "path": "/api/product-line/variants/{id:guid}/components",
+      "file": "ProductLineEndpoints.cs",
+      "coveredBy": []
+    },
+    {
+      "method": "POST",
+      "path": "/api/product-line/variants/{id:guid}/libraries",
+      "file": "ProductLineCompletionEndpoints.cs",
+      "coveredBy": []
+    },
+    {
+      "method": "POST",
+      "path": "/api/product-line/variants/{variantId:guid}/libraries/{reuseId:guid}/decision",
+      "file": "ProductLineCompletionEndpoints.cs",
+      "coveredBy": []
+    },
+    {
+      "method": "POST",
+      "path": "/api/product-line/variants/{id:guid}/propagation-decisions",
+      "file": "ProductLineEndpoints.cs",
+      "coveredBy": []
+    },
+    {
+      "method": "POST",
+      "path": "/api/projects/{projectId:guid}/personnel",
+      "file": "PersonnelEndpoints.cs",
+      "coveredBy": [
+        "ProjectPersonnelApiTests"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/projects/{projectId:guid}/personnel/backups",
+      "file": "PersonnelEndpoints.cs",
+      "coveredBy": [
+        "ApprovalConfigurationApiTests",
+        "ProjectPersonnelApiTests"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/publication-templates/",
+      "file": "ProductLineCompletionEndpoints.cs",
+      "coveredBy": []
+    },
+    {
+      "method": "POST",
+      "path": "/api/publication-templates/{id:guid}/approve",
+      "file": "ProductLineCompletionEndpoints.cs",
+      "coveredBy": []
+    },
+    {
+      "method": "POST",
+      "path": "/api/publication-templates/{id:guid}/begin-revision",
+      "file": "ProductLineCompletionEndpoints.cs",
+      "coveredBy": []
+    },
+    {
+      "method": "POST",
+      "path": "/api/publications/configuration-jobs",
+      "file": "PublicationEndpoints.cs",
+      "coveredBy": []
+    },
+    {
+      "method": "POST",
+      "path": "/api/publications/jobs",
+      "file": "PublicationEndpoints.cs",
+      "coveredBy": [
+        "HistoricalPublicationFreezeApiTests"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/publications/release-packages",
+      "file": "PublicationEndpoints.cs",
+      "coveredBy": []
+    },
+    {
+      "method": "POST",
+      "path": "/api/quality/evidence-index",
+      "file": "QualityIntelligenceEndpoints.cs",
+      "coveredBy": []
+    },
+    {
+      "method": "POST",
+      "path": "/api/quality/exports",
+      "file": "QualityIntelligenceEndpoints.cs",
+      "coveredBy": [
+        "ProblemReportActiveMetricApiTests"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/quality/objectives",
+      "file": "QualityIntelligenceEndpoints.cs",
+      "coveredBy": []
+    },
+    {
+      "method": "POST",
+      "path": "/api/quality/waivers",
+      "file": "QualityIntelligenceEndpoints.cs",
+      "coveredBy": []
+    },
+    {
+      "method": "POST",
+      "path": "/api/release-campaigns",
+      "file": "ReleaseCampaignEndpoints.cs",
+      "coveredBy": []
+    },
+    {
+      "method": "POST",
+      "path": "/api/release-campaigns/{id:guid}/approve",
+      "file": "ReleaseCampaignEndpoints.cs",
+      "coveredBy": [
+        "ReleaseCampaignExactIntentApiTests"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/release-campaigns/{id:guid}/reconcile-lifecycle-links",
+      "file": "ReleaseCampaignEndpoints.cs",
+      "coveredBy": []
+    },
+    {
+      "method": "POST",
+      "path": "/api/release-campaigns/{id:guid}/release",
+      "file": "ReleaseCampaignEndpoints.cs",
+      "coveredBy": []
+    },
+    {
+      "method": "POST",
+      "path": "/api/release-campaigns/{id:guid}/review",
+      "file": "ReleaseCampaignEndpoints.cs",
+      "coveredBy": []
+    },
+    {
+      "method": "POST",
+      "path": "/api/release-campaigns/{id:guid}/review/cancel",
+      "file": "ReleaseCampaignEndpoints.cs",
+      "coveredBy": [
+        "ReleaseCampaignExactIntentApiTests"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/release-campaigns/{id:guid}/start-verification",
+      "file": "ReleaseCampaignEndpoints.cs",
+      "coveredBy": [
+        "SecurityBoundaryTests"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/release-campaigns/{id:guid}/verification-build",
+      "file": "ReleaseCampaignEndpoints.cs",
+      "coveredBy": [
+        "SecurityBoundaryTests"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/release-campaigns/{id:guid}/verification-package",
+      "file": "ReleaseCampaignEndpoints.cs",
+      "coveredBy": [
+        "SecurityBoundaryTests"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/releases",
+      "file": "WorkspaceEndpoints.cs",
+      "coveredBy": []
+    },
+    {
+      "method": "POST",
+      "path": "/api/releases/{releaseId:guid}/test-change-requests",
+      "file": "VerificationImpactEndpoints.cs",
+      "coveredBy": [
+        "ManualTestChangeRequestApiTests",
+        "TestChangeRequestConsolidationTests"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/releases/{releaseId:guid}/test-sets/{discipline}/procedures",
+      "file": "BuildTestSetEndpoints.cs",
+      "coveredBy": []
+    },
+    {
+      "method": "POST",
+      "path": "/api/reqif/exports",
+      "file": "ReqIfEndpoints.cs",
+      "coveredBy": [
+        "OpenDigitalThreadTests"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/reqif/imports/preview",
+      "file": "ReqIfEndpoints.cs",
+      "coveredBy": [
+        "OpenDigitalThreadTests"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/reqif/jobs/{id:guid}/cancel",
+      "file": "ReqIfEndpoints.cs",
+      "coveredBy": []
+    },
+    {
+      "method": "POST",
+      "path": "/api/reqif/jobs/{id:guid}/commit",
+      "file": "ReqIfEndpoints.cs",
+      "coveredBy": []
+    },
+    {
+      "method": "POST",
+      "path": "/api/reqif/jobs/{id:guid}/process",
+      "file": "ReqIfEndpoints.cs",
+      "coveredBy": []
+    },
+    {
+      "method": "POST",
+      "path": "/api/reqif/jobs/{id:guid}/reject",
+      "file": "ReqIfEndpoints.cs",
+      "coveredBy": []
+    },
+    {
+      "method": "POST",
+      "path": "/api/review-workflows",
+      "file": "WorkflowEndpoints.cs",
+      "coveredBy": [
+        "TestChangeRequestReviewWorkflowTests"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/review-workflows/{id:guid}/activate",
+      "file": "WorkflowEndpoints.cs",
+      "coveredBy": [
+        "TestChangeRequestReviewWorkflowTests"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/review-workflows/{id:guid}/retire",
+      "file": "WorkflowEndpoints.cs",
+      "coveredBy": []
+    },
+    {
+      "method": "POST",
+      "path": "/api/review-workflows/{id:guid}/revise",
+      "file": "WorkflowEndpoints.cs",
+      "coveredBy": []
+    },
+    {
+      "method": "POST",
+      "path": "/api/setup/bootstrap",
+      "file": "AuthEndpoints.cs",
+      "coveredBy": [
+        "CodeTraceabilityApiTests",
+        "ConfigurationPublicationApiTests",
+        "ControlledEditingCheckInApiTests",
+        "DraftDocumentApiTests",
+        "GovernanceEvidenceApiTests",
+        "IdentifierAllocationTests",
+        "OpenDigitalThreadTests",
+        "ProblemReportActiveMetricApiTests",
+        "ProblemReportApiTests",
+        "ProcedureDiscussionApiTests",
+        "ProductLineApiTests",
+        "SecurityBoundaryTests",
+        "SecurityHardeningTests"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/showcase/seed",
+      "file": "WorkspaceEndpoints.cs",
+      "coveredBy": []
+    },
+    {
+      "method": "POST",
+      "path": "/api/showcase/upgrade",
+      "file": "WorkspaceEndpoints.cs",
+      "coveredBy": []
+    },
+    {
+      "method": "POST",
+      "path": "/api/test-change-reviews/{id:guid}/approve",
+      "file": "VerificationImpactEndpoints.cs",
+      "coveredBy": [
+        "ManualTestChangeRequestApiTests",
+        "TestChangeRequestReviewWorkflowTests"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/test-change-reviews/{id:guid}/assign",
+      "file": "VerificationImpactEndpoints.cs",
+      "coveredBy": [
+        "TestChangeRequestReviewWorkflowTests",
+        "VerificationImpactApiTests"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/test-change-reviews/{id:guid}/case",
+      "file": "VerificationImpactEndpoints.cs",
+      "coveredBy": [
+        "ManualTestChangeRequestApiTests",
+        "TestChangeRequestReviewWorkflowTests",
+        "TestProcedureAuthoringApiTests"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/test-change-reviews/{id:guid}/change-requests",
+      "file": "VerificationImpactEndpoints.cs",
+      "coveredBy": [
+        "ManualTestChangeRequestApiTests",
+        "TestChangeRequestConsolidationTests",
+        "TestChangeRequestScopeApiTests"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/test-change-reviews/{id:guid}/conclusion",
+      "file": "VerificationImpactEndpoints.cs",
+      "coveredBy": [
+        "ManualTestChangeRequestApiTests",
+        "TestChangeRequestConsolidationTests",
+        "TestChangeRequestReviewWorkflowTests",
+        "TestChangeRequestScopeApiTests",
+        "TestProcedureAuthoringApiTests"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/test-change-reviews/{id:guid}/defer",
+      "file": "VerificationImpactEndpoints.cs",
+      "coveredBy": [
+        "TestChangeRequestReviewWorkflowTests"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/test-change-reviews/{id:guid}/problem-reports",
+      "file": "VerificationImpactEndpoints.cs",
+      "coveredBy": [
+        "ManualTestChangeRequestApiTests",
+        "TestChangeRequestReviewWorkflowTests"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/test-change-reviews/{id:guid}/procedure-changes",
+      "file": "VerificationImpactEndpoints.cs",
+      "coveredBy": [
+        "ManualTestChangeRequestApiTests",
+        "ProcedureManifestEffectivityApiTests",
+        "SearchableAuthoringPickerApiTests",
+        "TestChangeRequestReviewWorkflowTests",
+        "TestProcedureAuthoringApiTests"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/test-change-reviews/{id:guid}/reinstate",
+      "file": "VerificationImpactEndpoints.cs",
+      "coveredBy": [
+        "TestChangeRequestReviewWorkflowTests"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/test-change-reviews/{id:guid}/return",
+      "file": "VerificationImpactEndpoints.cs",
+      "coveredBy": [
+        "ManualTestChangeRequestApiTests",
+        "TestChangeRequestReviewWorkflowTests"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/test-change-reviews/{id:guid}/revise",
+      "file": "VerificationImpactEndpoints.cs",
+      "coveredBy": [
+        "ManualTestChangeRequestApiTests",
+        "TestProcedureAuthoringApiTests"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/test-change-reviews/{id:guid}/submit",
+      "file": "VerificationImpactEndpoints.cs",
+      "coveredBy": [
+        "ManualTestChangeRequestApiTests",
+        "TestChangeRequestReviewWorkflowTests",
+        "TestProcedureAuthoringApiTests"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/test-executions",
+      "file": "VerificationEndpoints.cs",
+      "coveredBy": [
+        "BuildScopedWorkspaceApiTests",
+        "ControlledEditingProcedureAuthorityTests",
+        "ProblemReportVerificationApiTests",
+        "TestExecutionEffectivityApiTests"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/test-executions/{executionId:guid}/evidence/{evidenceId:guid}",
+      "file": "VerificationEndpoints.cs",
+      "coveredBy": [
+        "ReleasedExecutionEvidenceApiTests"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/test-procedures/{id:guid}/comments",
+      "file": "VerificationEndpoints.cs",
+      "coveredBy": [
+        "ProcedureDiscussionApiTests"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/test-procedures/views",
+      "file": "VerificationEndpoints.cs",
+      "coveredBy": [
+        "ProcedureSavedViewApiTests"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/trace-links",
+      "file": "VerificationEndpoints.cs",
+      "coveredBy": []
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/events",
+      "file": "IntegrationEndpoints.cs",
+      "coveredBy": [
+        "OpenDigitalThreadTests"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/oslc/rm/consume",
+      "file": "IntegrationEndpoints.cs",
+      "coveredBy": []
+    },
+    {
+      "method": "POST",
+      "path": "/api/verification-impact/{id:guid}/assign",
+      "file": "VerificationImpactEndpoints.cs",
+      "coveredBy": [
+        "PreReleaseEvidenceVisibilityTests",
+        "TestChangeRequestConsolidationTests",
+        "VerificationImpactApiTests"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/verification-impact/{id:guid}/reopen",
+      "file": "VerificationImpactEndpoints.cs",
+      "coveredBy": [
+        "ManualTestChangeRequestApiTests",
+        "VerificationImpactApiTests"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/verification-impact/{id:guid}/resolve",
+      "file": "VerificationImpactEndpoints.cs",
+      "coveredBy": [
+        "ManualTestChangeRequestApiTests",
+        "PreReleaseEvidenceVisibilityTests",
+        "TestChangeRequestConsolidationTests",
+        "TestChangeRequestReviewWorkflowTests",
+        "VerificationImpactApiTests"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/workspaces",
+      "file": "WorkspaceEndpoints.cs",
+      "coveredBy": [
+        "SecurityHardeningTests",
+        "TestProcedureDocumentApiTests"
+      ]
+    },
+    {
+      "method": "PUT",
+      "path": "/api/change-requests/{id:guid}/draft",
+      "file": "ChangeRequestEndpoints.cs",
+      "coveredBy": []
+    },
+    {
+      "method": "PUT",
+      "path": "/api/controlled-editing/sessions/{id:guid}/autosave",
+      "file": "ControlledEditingEndpoints.cs",
+      "coveredBy": [
+        "AdministratorChangeRequestApiTests",
+        "ControlledEditingCheckInApiTests",
+        "ControlledEditingProcedureAuthorityTests",
+        "ProblemReportApiTests",
+        "ProblemReportCheckoutApiTests",
+        "ProblemReportVerificationApiTests"
+      ]
+    },
+    {
+      "method": "PUT",
+      "path": "/api/edit-sessions/{id:guid}/autosave",
+      "file": "EditSessionEndpoints.cs",
+      "coveredBy": []
+    },
+    {
+      "method": "PUT",
+      "path": "/api/enterprise-hardening/edit-sessions/{id:guid}",
+      "file": "EditSessionEndpoints.cs",
+      "coveredBy": []
+    },
+    {
+      "method": "PUT",
+      "path": "/api/enterprise-requirements/views/{id:guid}",
+      "file": "RequirementsEndpoints.cs",
+      "coveredBy": [
+        "SavedViewLifecycleApiTests"
+      ]
+    },
+    {
+      "method": "PUT",
+      "path": "/api/impact-dispositions/{id:guid}",
+      "file": "ChangeRequestEndpoints.cs",
+      "coveredBy": []
+    },
+    {
+      "method": "PUT",
+      "path": "/api/integrations/mappings/{id:guid}",
+      "file": "IntegrationEndpoints.cs",
+      "coveredBy": []
+    },
+    {
+      "method": "PUT",
+      "path": "/api/integrations/webhooks/{id:guid}/state",
+      "file": "IntegrationEndpoints.cs",
+      "coveredBy": []
+    },
+    {
+      "method": "PUT",
+      "path": "/api/jira/connection",
+      "file": "JiraEndpoints.cs",
+      "coveredBy": []
+    },
+    {
+      "method": "PUT",
+      "path": "/api/release-campaigns/{id:guid}/impact-dispositions",
+      "file": "ReleaseCampaignEndpoints.cs",
+      "coveredBy": [
+        "SecurityBoundaryTests"
+      ]
+    },
+    {
+      "method": "PUT",
+      "path": "/api/test-procedures/views/{id:guid}",
+      "file": "VerificationEndpoints.cs",
+      "coveredBy": [
+        "ProcedureSavedViewApiTests"
+      ]
+    },
+    {
+      "method": "PUT",
+      "path": "/api/v1/requirements/{id:guid}",
+      "file": "IntegrationEndpoints.cs",
+      "coveredBy": []
+    }
+  ]
+}

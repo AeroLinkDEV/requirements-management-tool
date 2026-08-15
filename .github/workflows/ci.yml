@@ -490,6 +490,17 @@ jobs:
       # mode the old `dotnet test <solution>` could not have: a new test project that no job runs. It would
       # still build, so nothing would fail — the suite would simply be invisible, which is the most expensive
       # kind of green. This refuses to pass in that state rather than leaving it to be noticed.
+      # Static analysis of the endpoint sources, so it needs no API host — and it belongs in a job the gate
+      # can actually fail on. `metrics-tooling` is deliberately excluded from the gate's failure list so a
+      # reporting bug cannot redden a correct product gate, which makes it the wrong home for a contract that
+      # must block: a guard that only reports is the silent-green pattern it exists to prevent. `backend-core`
+      # is in that list and runs precisely when backend sources change.
+      - name: Install Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+      - name: Refuse a mutating route with no hosted boundary coverage
+        run: node --test product/test-contracts/tests/routes.test.mjs
       - name: Refuse a test project that no job runs
         shell: bash
         run: |
