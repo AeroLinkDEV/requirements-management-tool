@@ -1,11 +1,12 @@
 // Updates the single durable CI regression tracker issue.
 //
 // Reads the rolling report produced by rolling-collect.mjs. If no sustained regressions exist, the issue
-// is left untouched (no issue spam). If regressions exist, one fixed-title issue is created when missing
-// and its body is replaced with the current evidence. Requires `issues: write`.
+// is corrected to say so when one already exists, and none is created when one does not (no issue spam).
+// If regressions exist, one fixed-title issue is created when missing and its body is replaced with the
+// current evidence. Requires `issues: write`.
 
 import { readFileSync } from 'node:fs'
-import { trackerBody } from '../lib/rolling.mjs'
+import { trackerBody, decideTrackerAction } from '../lib/rolling.mjs'
 
 const env = (name) => process.env[name] ?? ''
 const TRACKER_TITLE = 'CI rolling regression tracker'
@@ -31,20 +32,23 @@ async function main() {
     process.exit(2)
   }
   const report = JSON.parse(readFileSync(reportPath, 'utf8'))
-  if (!Array.isArray(report.regressions) || report.regressions.length === 0) {
-    console.log('[ci-metrics] No sustained regressions; tracker left untouched.')
-    return
-  }
   const repository = env('GITHUB_REPOSITORY')
+  // The search runs before the decision now. It used to be skipped whenever there were no regressions,
+  // which is what made a cleared regression unreportable: the code never learned a tracker was there.
   const search = await api(`/search/issues?q=repo:${repository}+in:title+"${encodeURIComponent(TRACKER_TITLE)}"+type:issue+state:open`)
   const existing = search?.items?.[0] ?? null
+  const decision = decideTrackerAction({ regressions: report.regressions, trackerExists: existing !== null })
+  if (decision.action === 'none') {
+    console.log(`[ci-metrics] ${decision.reason}`)
+    return
+  }
   const body = trackerBody(report)
-  if (existing) {
+  if (decision.action === 'update') {
     await api(`/repos/${repository}/issues/${existing.number}`, { body: { body } }, 'PATCH')
-    console.log(`[ci-metrics] Updated regression tracker issue #${existing.number}.`)
+    console.log(`[ci-metrics] Updated regression tracker issue #${existing.number}. ${decision.reason}`)
   } else {
     const created = await api(`/repos/${repository}/issues`, { body: { title: TRACKER_TITLE, body } }, 'POST')
-    console.log(`[ci-metrics] Created regression tracker issue #${created.number}.`)
+    console.log(`[ci-metrics] Created regression tracker issue #${created.number}. ${decision.reason}`)
   }
 }
 

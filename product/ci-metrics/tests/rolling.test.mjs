@@ -2,7 +2,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
   median, percentile, classifyRun, runDurationMs, jobGroupDurations, queueAndCancellation,
-  flakeTrend, cacheTrend, rollingStats, detectRegressions, validateRunRecord, recordFormat, buildRollingReport, trackerBody,
+  flakeTrend, cacheTrend, rollingStats, detectRegressions, validateRunRecord, recordFormat, buildRollingReport, trackerBody, decideTrackerAction,
   fullGatesPerMerge, FULL_GATE_WINDOW_DAYS, MAX_RECORDS,
 } from '../lib/rolling.mjs'
 
@@ -275,6 +275,30 @@ test('trackerBody is single-issue and never fabricates regressions', () => {
   })
   assert.match(hot, /criticalPathMedian/)
   assert.match(hot, /current 900s vs previous 700s/)
+})
+
+test('the tracker corrects a cleared regression instead of leaving a stale claim', () => {
+  // The defect this covers: trackerBody has always rendered the clean case (asserted directly above),
+  // but the caller returned early on zero regressions and never looked for an existing tracker — so the
+  // clean body was unreachable and #587 asserted a regression for hours after it cleared. The library
+  // was tested; the decision that reaches it was not.
+  const cleared = decideTrackerAction({ regressions: [], trackerExists: true })
+  assert.equal(cleared.action, 'update')
+  assert.match(cleared.reason, /stale claim|clear/i)
+
+  // The protection that must survive: nothing to report and nothing to correct touches nothing.
+  // Creating an issue to announce there is no issue is the spam the early return was guarding against.
+  const quiet = decideTrackerAction({ regressions: [], trackerExists: false })
+  assert.equal(quiet.action, 'none')
+
+  // And the detection path is unchanged in both directions.
+  const regressions = [{ metric: 'criticalPathP95', current: 761_000, previous: 661_000, threshold: 761_000, runs: 8 }]
+  assert.equal(decideTrackerAction({ regressions, trackerExists: true }).action, 'update')
+  assert.equal(decideTrackerAction({ regressions, trackerExists: false }).action, 'create')
+
+  // Defaults must not invent work: an empty call is the quiet case, not a create.
+  assert.equal(decideTrackerAction().action, 'none')
+  assert.equal(decideTrackerAction({ regressions: null, trackerExists: true }).action, 'update')
 })
 
 test('fullGatesPerMerge attributes every quality-gate run and attempt to its merged PR', () => {

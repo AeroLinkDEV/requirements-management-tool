@@ -448,6 +448,29 @@ export function buildRollingReport({ records, regressions = [], missing = [], fu
   }
 }
 
+/**
+ * What the tracker update should do, given the current report and whether a tracker already exists.
+ *
+ * Pulled out of the bin script so all four cases are testable without a network. The case that was
+ * wrong: zero regressions with an existing tracker used to do nothing, leaving the issue asserting a
+ * regression that had already cleared. Not opening an issue on noise and not correcting a claim the
+ * tool itself published are different things, and only the first is worth protecting.
+ */
+export function decideTrackerAction({ regressions = [], trackerExists = false } = {}) {
+  const detected = Array.isArray(regressions) ? regressions.length : 0
+  if (detected > 0) {
+    return trackerExists
+      ? { action: 'update', reason: `${detected} sustained regression(s) detected; refreshing the existing tracker.` }
+      : { action: 'create', reason: `${detected} sustained regression(s) detected and no tracker exists.` }
+  }
+  if (trackerExists) {
+    return { action: 'update', reason: 'No sustained regressions; recording that the tracker is clear rather than leaving a stale claim.' }
+  }
+  // The only case that should touch nothing. Creating an issue to announce that there is nothing to
+  // announce is exactly the issue spam the tracker was built to avoid.
+  return { action: 'none', reason: 'No sustained regressions and no tracker to correct.' }
+}
+
 export function trackerBody(report) {
   const regressions = Array.isArray(report?.regressions) ? report.regressions : []
   const lines = []
