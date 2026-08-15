@@ -62,6 +62,71 @@ export function touchesGateDefinition(changedPaths = []) {
   return changedPaths.some((path) => typeof path === 'string' && GATE_DEFINING_PATHS.includes(path))
 }
 
+/** GitHub's files endpoint pages at 100; 30 pages covers the 3,000-file API maximum for a pull request. */
+export const MAX_FILE_PAGES = 30
+const FILES_PER_PAGE = 100
+
+/**
+ * Every path a merge touched, according to GitHub, as a complete list or not at all.
+ *
+ * `api` is injected rather than imported so this is testable without a network — the previous version
+ * lived in the bin script and could only be exercised by running the real workflow, which meant its
+ * pagination, its count reconciliation and its rename handling were all assertions in a comment rather
+ * than tested behaviour.
+ *
+ * Every failure path throws. The caller treats a throw as gate-defining, so an unreadable or partial
+ * answer produces the same conservative outcome as "yes, this merge changed the gate". That matters
+ * more than it sounds: a partial list is indistinguishable from a list containing nothing interesting,
+ * so silently returning one would look exactly like a clean result.
+ *
+ * Renames contribute both names. GitHub reports a rename with the destination in `filename` and the
+ * origin in `previous_filename`; taking only the former would let "rename a guarded file away" read as
+ * an ordinary change.
+ */
+export async function collectMergedPaths({ prNumber, api, maxPages = MAX_FILE_PAGES }) {
+  if (typeof api !== 'function') throw new Error('collectMergedPaths requires an api function.')
+
+  const meta = await api(`/pulls/${prNumber}`)
+  if (!meta || typeof meta !== 'object' || Array.isArray(meta)) {
+    throw new Error(`Pull request ${prNumber} metadata was not an object, so the changed-file count could not be verified.`)
+  }
+  if (!Number.isInteger(meta.changed_files) || meta.changed_files < 0) {
+    // Without an authoritative count there is nothing to reconcile the enumeration against, so
+    // completeness cannot be established and must not be assumed.
+    throw new Error(`Pull request ${prNumber} reported no usable changed_files count, so list completeness cannot be verified.`)
+  }
+  const expected = meta.changed_files
+
+  const files = []
+  for (let page = 1; page <= maxPages; page += 1) {
+    const batch = await api(`/pulls/${prNumber}/files?per_page=${FILES_PER_PAGE}&page=${page}`)
+    if (!Array.isArray(batch)) {
+      throw new Error(`Pull request ${prNumber} files page ${page} was not an array; refusing to treat a malformed response as the end of the list.`)
+    }
+    files.push(...batch)
+    if (batch.length < FILES_PER_PAGE) break
+    if (page === maxPages) {
+      throw new Error(`Pull request ${prNumber} has more files than ${maxPages} pages can enumerate; the changed-path list would be incomplete.`)
+    }
+  }
+
+  if (files.length !== expected) {
+    throw new Error(`Pull request ${prNumber} reports ${expected} changed files but ${files.length} were enumerated; refusing to decide on a list that does not reconcile.`)
+  }
+
+  const paths = []
+  for (const file of files) {
+    if (!file || typeof file !== 'object' || typeof file.filename !== 'string') {
+      throw new Error(`Pull request ${prNumber} returned a file entry with no usable filename; the changed-path list cannot be trusted.`)
+    }
+    paths.push(file.filename)
+    if (typeof file.previous_filename === 'string' && file.previous_filename.length > 0) {
+      paths.push(file.previous_filename)
+    }
+  }
+  return paths
+}
+
 /**
  * Age verdict for one manifest. Returns a reason string when the evidence may not be used, or null.
  * `now` is passed in rather than read from the clock so the boundary is testable and the decision is

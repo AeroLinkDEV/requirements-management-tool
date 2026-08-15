@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import {
   validateManifest, decideProvenance, deriveEligibility, bindManifest,
-  evidenceAgeRejection, touchesGateDefinition,
+  evidenceAgeRejection, touchesGateDefinition, collectMergedPaths,
   MAX_EVIDENCE_AGE_DAYS, MAX_CLOCK_SKEW_MINUTES, GATE_DEFINING_PATHS,
 } from '../lib/provenance.mjs'
 
@@ -245,6 +245,99 @@ test('a rename away from a guarded path still trips the rule', () => {
   })
   assert.equal(result.outcome, 'fallback-needed')
   assert.equal(result.selfModifying, true)
+})
+
+/**
+ * A fake GitHub for `collectMergedPaths`. Round 3 was blocked because the collector had no test at
+ * all: the rename case was asserted against a hand-written path array, which proves the predicate and
+ * says nothing about whether the collection ever produces both names. Pagination, count reconciliation
+ * and malformed-response handling were in the same position — described in a comment, never executed.
+ */
+function fakeApi({ changedFiles, pages, metaOverride }) {
+  const calls = []
+  return {
+    calls,
+    api: async (path) => {
+      calls.push(path)
+      if (/^\/pulls\/\d+$/.test(path)) {
+        return metaOverride !== undefined ? metaOverride : { changed_files: changedFiles }
+      }
+      // Anchored on the separator: a bare /page=(\d+)/ matches inside `per_page=100` and reads page 100.
+      const page = Number(/[?&]page=(\d+)/.exec(path)?.[1] ?? '1')
+      return pages[page - 1] ?? []
+    },
+  }
+}
+
+const file = (name, previous) => (previous ? { filename: name, previous_filename: previous } : { filename: name })
+
+test('collectMergedPaths walks every page and reconciles the count', async () => {
+  const first = Array.from({ length: 100 }, (_, i) => file(`product/src/File${i}.cs`))
+  const second = [file('.github/workflows/ci.yml'), file('README.md')]
+  const { api, calls } = fakeApi({ changedFiles: 102, pages: [first, second] })
+
+  const paths = await collectMergedPaths({ prNumber: 7, api })
+
+  assert.equal(paths.length, 102)
+  // The gate-defining path lives on the second page — the exact thing a five-page-capped, unverified
+  // enumeration could have dropped without anyone noticing.
+  assert.ok(paths.includes('.github/workflows/ci.yml'))
+  assert.equal(touchesGateDefinition(paths), true)
+  assert.deepEqual(calls, ['/pulls/7', '/pulls/7/files?per_page=100&page=1', '/pulls/7/files?per_page=100&page=2'])
+})
+
+test('collectMergedPaths returns both names for a rename', async () => {
+  const { api } = fakeApi({
+    changedFiles: 2,
+    pages: [[file('product/ci-metrics/lib/renamed.mjs', 'product/ci-metrics/lib/provenance.mjs'), file('README.md')]],
+  })
+  const paths = await collectMergedPaths({ prNumber: 3, api })
+  assert.ok(paths.includes('product/ci-metrics/lib/renamed.mjs'))
+  assert.ok(paths.includes('product/ci-metrics/lib/provenance.mjs'), 'the origin of a rename must survive collection')
+  assert.equal(touchesGateDefinition(paths), true)
+})
+
+test('collectMergedPaths fails closed on every incomplete or malformed answer', async () => {
+  const rejects = async (options, pattern, label) => {
+    const { api } = fakeApi(options)
+    await assert.rejects(() => collectMergedPaths({ prNumber: 9, api, maxPages: options.maxPages ?? 3 }), pattern, label)
+  }
+
+  // Fewer files than GitHub says exist: the list does not reconcile, so it cannot be trusted.
+  await rejects({ changedFiles: 5, pages: [[file('a.cs'), file('b.cs')]] }, /does not reconcile/, 'short list')
+
+  // And more than it says exist. A `<` comparison would accept this; the two counts disagreeing at all
+  // means one of them is wrong, and there is no basis for choosing which.
+  await rejects({ changedFiles: 1, pages: [[file('a.cs'), file('b.cs')]] }, /does not reconcile/, 'long list')
+
+  // More than the page budget can enumerate — every page full, budget exhausted.
+  const fullPage = Array.from({ length: 100 }, (_, i) => file(`f${i}.cs`))
+  await rejects({ changedFiles: 400, pages: [fullPage, fullPage, fullPage], maxPages: 3 }, /more files than/, 'page overflow')
+
+  // A malformed page must not be read as the end of the list, which is what an `Array.isArray` guard
+  // that merely `break`s would have done — silently returning a short list that looks complete.
+  await rejects({ changedFiles: 2, pages: [{ message: 'Not Found' }] }, /was not an array/, 'malformed page')
+
+  // No authoritative count means nothing to reconcile against, so completeness cannot be established.
+  await rejects({ metaOverride: {}, pages: [[file('a.cs')]] }, /no usable changed_files/, 'missing count')
+  await rejects({ metaOverride: null, pages: [[file('a.cs')]] }, /not an object/, 'null metadata')
+  await rejects({ metaOverride: { changed_files: 'two' }, pages: [[file('a.cs')]] }, /no usable changed_files/, 'non-integer count')
+
+  // An entry without a usable filename means a path we cannot see, which is the one thing this
+  // function exists to rule out.
+  await rejects({ changedFiles: 1, pages: [[{ status: 'modified' }]] }, /no usable filename/, 'entry without filename')
+
+  await assert.rejects(() => collectMergedPaths({ prNumber: 9, api: null }), /requires an api function/)
+})
+
+test('collectMergedPaths accepts an exactly-full single page', async () => {
+  // The boundary between "this page was the last" and "ask for another": a page of exactly 100 with a
+  // matching count must not trigger the overflow guard, and must not request a second page.
+  const exact = Array.from({ length: 100 }, (_, i) => file(`f${i}.cs`))
+  const { api, calls } = fakeApi({ changedFiles: 100, pages: [exact, []] })
+  const paths = await collectMergedPaths({ prNumber: 11, api })
+  assert.equal(paths.length, 100)
+  assert.equal(calls.filter((call) => call.includes('/files')).length, 2, 'a full page is followed by one more request')
 })
 
 test('the self-modification rule does not fire on ordinary product changes', () => {
