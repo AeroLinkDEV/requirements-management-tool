@@ -17,38 +17,49 @@ namespace AeroLink.Api.Tests;
 /// somebody keeps the record rather than deleting it, and a standing backup carries the holder's authority
 /// with no interval to expire.
 /// </summary>
-public sealed class ProjectPersonnelApiTests
+public sealed class ProjectPersonnelApiTests : IClassFixture<SharedApiHost>
 {
-    private const string Manager = "personnel.manager";
-    private const string Engineer = "personnel.engineer";
-    private const string Deputy = "personnel.deputy";
-    private const string Outsider = "personnel.outsider";
+    private readonly SharedApiHost _host;
 
-    private sealed record Seeded(Guid ProjectId, Guid ProgramId, Guid ManagerId, Guid EngineerId, Guid DeputyId, Guid OutsiderId);
+    public ProjectPersonnelApiTests(SharedApiHost host)
+    {
+        _host = host;
+    }
+
+    private sealed record Seeded(Guid ProjectId, Guid ProgramId, Guid ManagerId, Guid EngineerId, Guid DeputyId, Guid OutsiderId,
+        string ManagerName, string EngineerName, string DeputyName, string OutsiderName);
 
     private static async Task<Seeded> SeedAsync(AeroLinkApiFactory factory)
     {
         using var scope = factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
         var now = DateTimeOffset.UtcNow;
-        var program = new ProgramRecord("Personnel Program", "PSN");
+        // Unique per test: user accounts and Program codes are globally unique-constrained, so a shared
+        // host/database requires per-test identities.
+        var tag = Guid.NewGuid().ToString("N")[..8];
+        var managerName = $"personnel.manager.{tag}";
+        var engineerName = $"personnel.engineer.{tag}";
+        var deputyName = $"personnel.deputy.{tag}";
+        var outsiderName = $"personnel.outsider.{tag}";
+        var program = new ProgramRecord($"Personnel Program {tag}", $"PSN{tag}");
         var project = new ProjectRecord(program.Id, "Flight Software", "Personnel Software");
         db.AddRange(program, project);
 
         UserAccount Account(string name) =>
             new(name, name, $"{name}@example.test", IdentityService.HashPassword(AeroLinkApiFactory.MemberPassword), now);
 
-        var manager = Account(Manager);
-        var engineer = Account(Engineer);
-        var deputy = Account(Deputy);
-        var outsider = Account(Outsider);
+        var manager = Account(managerName);
+        var engineer = Account(engineerName);
+        var deputy = Account(deputyName);
+        var outsider = Account(outsiderName);
         db.AddRange(manager, engineer, deputy, outsider);
         db.AddRange(
             new ProgramMembership(manager.Id, program.Id, ProgramRole.ProgramManager, "test.setup", now),
             new ProgramMembership(engineer.Id, program.Id, ProgramRole.SystemEngineeringLead, "test.setup", now),
             new ProgramMembership(deputy.Id, program.Id, ProgramRole.SystemEngineer, "test.setup", now));
         await db.SaveChangesAsync();
-        return new(project.Id, program.Id, manager.Id, engineer.Id, deputy.Id, outsider.Id);
+        return new(project.Id, program.Id, manager.Id, engineer.Id, deputy.Id, outsider.Id,
+            managerName, engineerName, deputyName, outsiderName);
     }
 
     private static async Task SignInAsync(HttpClient client, string userName)
@@ -62,10 +73,9 @@ public sealed class ProjectPersonnelApiTests
     [Fact]
     public async Task A_program_manager_may_read_and_change_their_own_project_roster()
     {
-        await using var factory = new AeroLinkApiFactory();
-        var seeded = await SeedAsync(factory);
-        using var client = factory.CreateClient();
-        await SignInAsync(client, Manager);
+        var seeded = await SeedAsync(_host.Factory);
+        using var client = _host.CreateClient();
+        await SignInAsync(client, seeded.ManagerName);
 
         var response = await client.GetAsync($"/api/projects/{seeded.ProjectId}/personnel");
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
@@ -82,10 +92,9 @@ public sealed class ProjectPersonnelApiTests
     [Fact]
     public async Task An_ordinary_member_reads_the_roster_but_cannot_change_it()
     {
-        await using var factory = new AeroLinkApiFactory();
-        var seeded = await SeedAsync(factory);
-        using var client = factory.CreateClient();
-        await SignInAsync(client, Deputy);
+        var seeded = await SeedAsync(_host.Factory);
+        using var client = _host.CreateClient();
+        await SignInAsync(client, seeded.DeputyName);
 
         var read = await client.GetAsync($"/api/projects/{seeded.ProjectId}/personnel");
         Assert.Equal(HttpStatusCode.OK, read.StatusCode);
@@ -99,10 +108,9 @@ public sealed class ProjectPersonnelApiTests
     [Fact]
     public async Task Somebody_outside_the_project_cannot_read_its_roster()
     {
-        await using var factory = new AeroLinkApiFactory();
-        var seeded = await SeedAsync(factory);
-        using var client = factory.CreateClient();
-        await SignInAsync(client, Outsider);
+        var seeded = await SeedAsync(_host.Factory);
+        using var client = _host.CreateClient();
+        await SignInAsync(client, seeded.OutsiderName);
 
         var response = await client.GetAsync($"/api/projects/{seeded.ProjectId}/personnel");
         Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
@@ -115,10 +123,9 @@ public sealed class ProjectPersonnelApiTests
     [Fact]
     public async Task A_position_one_person_holds_refuses_a_second_holder()
     {
-        await using var factory = new AeroLinkApiFactory();
-        var seeded = await SeedAsync(factory);
-        using var client = factory.CreateClient();
-        await SignInAsync(client, Manager);
+        var seeded = await SeedAsync(_host.Factory);
+        using var client = _host.CreateClient();
+        await SignInAsync(client, seeded.ManagerName);
 
         var response = await client.PostAsJsonAsync($"/api/projects/{seeded.ProjectId}/personnel",
             new { userId = seeded.DeputyId, role = nameof(ProgramRole.SystemEngineeringLead) });
@@ -130,10 +137,9 @@ public sealed class ProjectPersonnelApiTests
     [Fact]
     public async Task A_discipline_accepts_as_many_members_as_it_needs()
     {
-        await using var factory = new AeroLinkApiFactory();
-        var seeded = await SeedAsync(factory);
-        using var client = factory.CreateClient();
-        await SignInAsync(client, Manager);
+        var seeded = await SeedAsync(_host.Factory);
+        using var client = _host.CreateClient();
+        await SignInAsync(client, seeded.ManagerName);
 
         var response = await client.PostAsJsonAsync($"/api/projects/{seeded.ProjectId}/personnel",
             new { userId = seeded.OutsiderId, role = nameof(ProgramRole.SystemEngineer) });
@@ -148,21 +154,20 @@ public sealed class ProjectPersonnelApiTests
     [Fact]
     public async Task Ending_a_position_retains_the_record_and_removes_the_authority()
     {
-        await using var factory = new AeroLinkApiFactory();
-        var seeded = await SeedAsync(factory);
-        using var client = factory.CreateClient();
-        await SignInAsync(client, Manager);
+        var seeded = await SeedAsync(_host.Factory);
+        using var client = _host.CreateClient();
+        await SignInAsync(client, seeded.ManagerName);
 
         var ended = await client.DeleteAsync(
             $"/api/projects/{seeded.ProjectId}/personnel/{seeded.EngineerId}/roles/{nameof(ProgramRole.SystemEngineeringLead)}");
         Assert.Equal(HttpStatusCode.NoContent, ended.StatusCode);
 
-        using var scope = factory.Services.CreateScope();
+        using var scope = _host.Factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
         var membership = await db.ProgramMemberships.AsNoTracking()
             .SingleAsync(x => x.UserId == seeded.EngineerId && x.Role == ProgramRole.SystemEngineeringLead);
         Assert.NotNull(membership.EndedAt);
-        Assert.Equal(Manager, membership.EndedBy);
+        Assert.Equal(seeded.ManagerName, membership.EndedBy);
 
         var identity = scope.ServiceProvider.GetRequiredService<IdentityService>();
         Assert.False(await identity.HasRoleAsync(seeded.EngineerId, seeded.ProgramId,
@@ -176,10 +181,9 @@ public sealed class ProjectPersonnelApiTests
     [Fact]
     public async Task A_position_can_be_reassigned_once_its_holder_has_been_ended()
     {
-        await using var factory = new AeroLinkApiFactory();
-        var seeded = await SeedAsync(factory);
-        using var client = factory.CreateClient();
-        await SignInAsync(client, Manager);
+        var seeded = await SeedAsync(_host.Factory);
+        using var client = _host.CreateClient();
+        await SignInAsync(client, seeded.ManagerName);
 
         await client.DeleteAsync($"/api/projects/{seeded.ProjectId}/personnel/{seeded.EngineerId}/roles/{nameof(ProgramRole.SystemEngineeringLead)}");
         var reassigned = await client.PostAsJsonAsync($"/api/projects/{seeded.ProjectId}/personnel",
@@ -195,10 +199,9 @@ public sealed class ProjectPersonnelApiTests
     [Fact]
     public async Task Somebody_who_left_can_be_added_again()
     {
-        await using var factory = new AeroLinkApiFactory();
-        var seeded = await SeedAsync(factory);
-        using var client = factory.CreateClient();
-        await SignInAsync(client, Manager);
+        var seeded = await SeedAsync(_host.Factory);
+        using var client = _host.CreateClient();
+        await SignInAsync(client, seeded.ManagerName);
 
         await client.DeleteAsync($"/api/projects/{seeded.ProjectId}/personnel/{seeded.DeputyId}/roles/{nameof(ProgramRole.SystemEngineer)}");
         var rejoined = await client.PostAsJsonAsync($"/api/projects/{seeded.ProjectId}/personnel",
@@ -214,12 +217,11 @@ public sealed class ProjectPersonnelApiTests
     [Fact]
     public async Task A_standing_backup_carries_the_holders_authority_with_no_end_date()
     {
-        await using var factory = new AeroLinkApiFactory();
-        var seeded = await SeedAsync(factory);
-        using var client = factory.CreateClient();
-        await SignInAsync(client, Manager);
+        var seeded = await SeedAsync(_host.Factory);
+        using var client = _host.CreateClient();
+        await SignInAsync(client, seeded.ManagerName);
 
-        using (var before = factory.Services.CreateScope())
+        using (var before = _host.Factory.Services.CreateScope())
         {
             var identity = before.ServiceProvider.GetRequiredService<IdentityService>();
             Assert.False(await identity.HasRoleAsync(seeded.DeputyId, seeded.ProgramId,
@@ -230,7 +232,7 @@ public sealed class ProjectPersonnelApiTests
             new { backupUserId = seeded.DeputyId, role = nameof(ProgramRole.SystemEngineeringLead) });
         Assert.Equal(HttpStatusCode.NoContent, named.StatusCode);
 
-        using var after = factory.Services.CreateScope();
+        using var after = _host.Factory.Services.CreateScope();
         var service = after.ServiceProvider.GetRequiredService<IdentityService>();
         Assert.True(await service.HasRoleAsync(seeded.DeputyId, seeded.ProgramId,
             ProgramRole.SystemEngineeringLead, DateTimeOffset.UtcNow, default));
@@ -242,10 +244,9 @@ public sealed class ProjectPersonnelApiTests
     [Fact]
     public async Task A_backup_has_to_be_on_the_project()
     {
-        await using var factory = new AeroLinkApiFactory();
-        var seeded = await SeedAsync(factory);
-        using var client = factory.CreateClient();
-        await SignInAsync(client, Manager);
+        var seeded = await SeedAsync(_host.Factory);
+        using var client = _host.CreateClient();
+        await SignInAsync(client, seeded.ManagerName);
 
         var response = await client.PostAsJsonAsync($"/api/projects/{seeded.ProjectId}/personnel/backups",
             new { backupUserId = seeded.OutsiderId, role = nameof(ProgramRole.SystemEngineeringLead) });
@@ -259,10 +260,9 @@ public sealed class ProjectPersonnelApiTests
     [Fact]
     public async Task The_holder_cannot_be_their_own_backup()
     {
-        await using var factory = new AeroLinkApiFactory();
-        var seeded = await SeedAsync(factory);
-        using var client = factory.CreateClient();
-        await SignInAsync(client, Manager);
+        var seeded = await SeedAsync(_host.Factory);
+        using var client = _host.CreateClient();
+        await SignInAsync(client, seeded.ManagerName);
 
         var response = await client.PostAsJsonAsync($"/api/projects/{seeded.ProjectId}/personnel/backups",
             new { backupUserId = seeded.EngineerId, role = nameof(ProgramRole.SystemEngineeringLead) });
@@ -277,16 +277,15 @@ public sealed class ProjectPersonnelApiTests
     [Fact]
     public async Task Leaving_the_project_stands_a_backup_down()
     {
-        await using var factory = new AeroLinkApiFactory();
-        var seeded = await SeedAsync(factory);
-        using var client = factory.CreateClient();
-        await SignInAsync(client, Manager);
+        var seeded = await SeedAsync(_host.Factory);
+        using var client = _host.CreateClient();
+        await SignInAsync(client, seeded.ManagerName);
 
         await client.PostAsJsonAsync($"/api/projects/{seeded.ProjectId}/personnel/backups",
             new { backupUserId = seeded.DeputyId, role = nameof(ProgramRole.SystemEngineeringLead) });
         await client.DeleteAsync($"/api/projects/{seeded.ProjectId}/personnel/{seeded.DeputyId}/roles/{nameof(ProgramRole.SystemEngineer)}");
 
-        using var scope = factory.Services.CreateScope();
+        using var scope = _host.Factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
         var backup = await db.ProjectRoleBackups.AsNoTracking().SingleAsync(x => x.BackupUserId == seeded.DeputyId);
         Assert.NotNull(backup.RemovedAt);
@@ -303,10 +302,9 @@ public sealed class ProjectPersonnelApiTests
     [Fact]
     public async Task Project_leadership_cannot_grant_the_administrator_role()
     {
-        await using var factory = new AeroLinkApiFactory();
-        var seeded = await SeedAsync(factory);
-        using var client = factory.CreateClient();
-        await SignInAsync(client, Manager);
+        var seeded = await SeedAsync(_host.Factory);
+        using var client = _host.CreateClient();
+        await SignInAsync(client, seeded.ManagerName);
 
         var response = await client.PostAsJsonAsync($"/api/projects/{seeded.ProjectId}/personnel",
             new { userId = seeded.DeputyId, role = nameof(ProgramRole.Administrator) });

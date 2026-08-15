@@ -25,12 +25,16 @@ namespace AeroLink.Api.Tests;
 /// have. They also pin the state that a naive implementation gets wrong: coverage that is not suspect, but
 /// names a procedure revision nobody has approved.
 /// </summary>
-public sealed class CoverageStateFilterApiTests
+public sealed class CoverageStateFilterApiTests : IClassFixture<SharedApiHost>
 {
-    private sealed record Fixture(Guid ProjectId, Guid OtherProjectId);
+    private readonly SharedApiHost _host;
 
-    private const string Member = "coverage.reader";
-    private const string Outsider = "coverage.outsider";
+    public CoverageStateFilterApiTests(SharedApiHost host)
+    {
+        _host = host;
+    }
+
+    private sealed record Fixture(Guid ProjectId, Guid OtherProjectId, string MemberName, string OutsiderName);
 
     /// <summary>
     /// Four requirements, one in each condition that matters:
@@ -47,10 +51,15 @@ public sealed class CoverageStateFilterApiTests
         using var scope = factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
         var now = DateTimeOffset.UtcNow;
+        // Unique per test: user accounts and Program codes are globally unique-constrained, so a shared
+        // host/database requires per-test identities. Requirement/procedure numbers are project-scoped and stay fixed.
+        var tag = Guid.NewGuid().ToString("N")[..8];
+        var member = $"coverage.reader.{tag}";
+        var outsider = $"coverage.outsider.{tag}";
 
-        var program = new ProgramRecord("Coverage Program", "CVP");
+        var program = new ProgramRecord($"Coverage Program {tag}", $"CVP{tag}");
         var project = new ProjectRecord(program.Id, "Software", "Coverage Software");
-        var otherProgram = new ProgramRecord("Foreign Program", "FGN");
+        var otherProgram = new ProgramRecord($"Foreign Program {tag}", $"FGN{tag}");
         var otherProject = new ProjectRecord(otherProgram.Id, "Software", "Foreign Software");
         var release = new SoftwareRelease(project.Id, "1.6", false);
         var scr = new SystemChangeRequest("SRCR-00800", 0, project.Id, release.Id, "Coverage", "P", "A", "S", "author", now);
@@ -91,8 +100,8 @@ public sealed class CoverageStateFilterApiTests
 
         foreach (var (user, program_, role) in new[]
                  {
-                     (Member, program, ProgramRole.Engineer),
-                     (Outsider, otherProgram, ProgramRole.Engineer)
+                     (member, program, ProgramRole.Engineer),
+                     (outsider, otherProgram, ProgramRole.Engineer)
                  })
         {
             var account = new UserAccount(user, user, $"{user}@example.test",
@@ -102,7 +111,7 @@ public sealed class CoverageStateFilterApiTests
         }
 
         await db.SaveChangesAsync();
-        return new Fixture(project.Id, otherProject.Id);
+        return new Fixture(project.Id, otherProject.Id, member, outsider);
     }
 
     private static async Task SignInAsync(HttpClient client, string user)
@@ -126,10 +135,9 @@ public sealed class CoverageStateFilterApiTests
     [Fact]
     public async Task Each_coverage_state_returns_exactly_the_requirements_in_it()
     {
-        using var factory = new AeroLinkApiFactory();
-        using var client = factory.CreateClient();
-        var fixture = await SeedAsync(factory);
-        await SignInAsync(client, Member);
+        var fixture = await SeedAsync(_host.Factory);
+        using var client = _host.CreateClient();
+        await SignInAsync(client, fixture.MemberName);
 
         Assert.Equal(["SYSR-00000801"], Numbers(await WorkspaceAsync(client, fixture.ProjectId, "&coverageState=covered")));
         Assert.Equal(["SYSR-00000802", "SYSR-00000804"], Numbers(await WorkspaceAsync(client, fixture.ProjectId, "&coverageState=suspect")));
@@ -148,10 +156,9 @@ public sealed class CoverageStateFilterApiTests
     [Fact]
     public async Task Coverage_naming_an_unapproved_procedure_revision_is_not_covered()
     {
-        using var factory = new AeroLinkApiFactory();
-        using var client = factory.CreateClient();
-        var fixture = await SeedAsync(factory);
-        await SignInAsync(client, Member);
+        var fixture = await SeedAsync(_host.Factory);
+        using var client = _host.CreateClient();
+        await SignInAsync(client, fixture.MemberName);
 
         var covered = Numbers(await WorkspaceAsync(client, fixture.ProjectId, "&coverageState=covered"));
         Assert.DoesNotContain("SYSR-00000804", covered);
@@ -169,14 +176,13 @@ public sealed class CoverageStateFilterApiTests
     [Fact]
     public async Task The_workspace_filter_and_the_release_gate_agree_on_what_is_covered()
     {
-        using var factory = new AeroLinkApiFactory();
-        using var client = factory.CreateClient();
-        var fixture = await SeedAsync(factory);
-        await SignInAsync(client, Member);
+        var fixture = await SeedAsync(_host.Factory);
+        using var client = _host.CreateClient();
+        await SignInAsync(client, fixture.MemberName);
 
         var covered = Numbers(await WorkspaceAsync(client, fixture.ProjectId, "&coverageState=covered"));
 
-        using var scope = factory.Services.CreateScope();
+        using var scope = _host.Factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
         var revisionIds = await db.RequirementRevisions.AsNoTracking()
             .Join(db.Requirements.AsNoTracking().Where(a => a.ProjectId == fixture.ProjectId),
@@ -193,10 +199,9 @@ public sealed class CoverageStateFilterApiTests
     [Fact]
     public async Task Coverage_filters_compose_with_level_search_and_paging()
     {
-        using var factory = new AeroLinkApiFactory();
-        using var client = factory.CreateClient();
-        var fixture = await SeedAsync(factory);
-        await SignInAsync(client, Member);
+        var fixture = await SeedAsync(_host.Factory);
+        using var client = _host.CreateClient();
+        await SignInAsync(client, fixture.MemberName);
 
         // Level narrows the suspect set to the one HighLevel requirement in it.
         Assert.Equal(["SYSR-00000804"],
@@ -223,10 +228,9 @@ public sealed class CoverageStateFilterApiTests
     /// </summary>
     public async Task An_unsupported_coverage_state_is_refused_rather_than_quietly_dropped()
     {
-        using var factory = new AeroLinkApiFactory();
-        using var client = factory.CreateClient();
-        var fixture = await SeedAsync(factory);
-        await SignInAsync(client, Member);
+        var fixture = await SeedAsync(_host.Factory);
+        using var client = _host.CreateClient();
+        await SignInAsync(client, fixture.MemberName);
 
         using var response = await client.GetAsync(
             $"/api/enterprise-requirements/workspace?projectId={fixture.ProjectId}&page=1&pageSize=50&coverageState=partially");
@@ -239,10 +243,9 @@ public sealed class CoverageStateFilterApiTests
     [Fact]
     public async Task Coverage_filtering_does_not_reach_across_a_program_boundary()
     {
-        using var factory = new AeroLinkApiFactory();
-        using var client = factory.CreateClient();
-        var fixture = await SeedAsync(factory);
-        await SignInAsync(client, Outsider);
+        var fixture = await SeedAsync(_host.Factory);
+        using var client = _host.CreateClient();
+        await SignInAsync(client, fixture.OutsiderName);
 
         using var response = await client.GetAsync(
             $"/api/enterprise-requirements/workspace?projectId={fixture.ProjectId}&page=1&pageSize=50&coverageState=uncovered");

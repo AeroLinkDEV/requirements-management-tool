@@ -16,16 +16,27 @@ namespace AeroLink.Api.Tests;
 /// A change-request review step now records why the reviewer decided and whether the package was returned to
 /// the author at that step. Prior cycles stay historical: a resubmission starts the next cycle and the
 /// returned step remains readable in the old one, exactly as document reviews behave.
+///
+/// #563 phase-2 pilot: this class shares one API host/database through <see cref="SharedApiHost"/>; each
+/// test seeds uniquely named users and a uniquely coded Program so the shared database never collides.
 /// </summary>
-public sealed class ChangeRequestReviewRationaleApiTests
+public sealed class ChangeRequestReviewRationaleApiTests : IClassFixture<SharedApiHost>
 {
+    private readonly SharedApiHost _host;
+
+    public ChangeRequestReviewRationaleApiTests(SharedApiHost host)
+    {
+        _host = host;
+    }
+
+    private sealed record Seeded(Guid ChangeRequestId, Guid ProjectId, string AuthorName, string ReviewerName, string OtherName);
+
     [Fact]
     public async Task Approval_records_the_reviewers_rationale_on_the_step_and_signature()
     {
-        using var factory = new AeroLinkApiFactory();
-        var fixture = await SeedAsync(factory);
-        using var client = factory.CreateClient();
-        await LoginAsync(client, "reviewer.user");
+        var fixture = await SeedAsync(_host.Factory);
+        using var client = _host.CreateClient();
+        await LoginAsync(client, fixture.ReviewerName);
 
         using var approved = await client.PostAsJsonAsync($"/api/change-requests/{fixture.ChangeRequestId}/approve",
             new
@@ -40,7 +51,7 @@ public sealed class ChangeRequestReviewRationaleApiTests
         Assert.Equal("Approved", step.GetProperty("state").GetString());
         Assert.Equal("The proposed wording matches the verified HLR behavior.", step.GetProperty("rationale").GetString());
 
-        using var scope = factory.Services.CreateScope();
+        using var scope = _host.Factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
         var signature = await db.ElectronicSignatures.AsNoTracking()
             .SingleAsync(x => x.ArtifactId == fixture.ChangeRequestId && x.Action == "Approve");
@@ -50,10 +61,9 @@ public sealed class ChangeRequestReviewRationaleApiTests
     [Fact]
     public async Task Return_records_the_active_step_and_keeps_the_cycle_after_resubmission()
     {
-        using var factory = new AeroLinkApiFactory();
-        var fixture = await SeedAsync(factory);
-        using var client = factory.CreateClient();
-        await LoginAsync(client, "reviewer.user");
+        var fixture = await SeedAsync(_host.Factory);
+        using var client = _host.CreateClient();
+        await LoginAsync(client, fixture.ReviewerName);
 
         using var returned = await client.PostAsJsonAsync($"/api/change-requests/{fixture.ChangeRequestId}/request-changes",
             new { reason = "The trigger wording needs the exact verified HLR reference." });
@@ -68,10 +78,10 @@ public sealed class ChangeRequestReviewRationaleApiTests
             returnedDetail.GetProperty("reviewCycles")[0].GetProperty("closureReason").GetString());
 
         // The author reworks and resubmits. Cycle two starts fresh; cycle one stays readable with its Returned step.
-        using var author = factory.CreateClient();
-        await LoginAsync(author, "author.user");
+        using var author = _host.CreateClient();
+        await LoginAsync(author, fixture.AuthorName);
         using var resubmitted = await author.PostAsJsonAsync($"/api/change-requests/{fixture.ChangeRequestId}/submit",
-            new { approvers = new[] { new { userId = "reviewer.user" } } });
+            new { approvers = new[] { new { userId = fixture.ReviewerName } } });
         Assert.Equal(HttpStatusCode.OK, resubmitted.StatusCode);
         var resubmittedDetail = await resubmitted.Content.ReadFromJsonAsync<JsonElement>();
         Assert.Equal(2, resubmittedDetail.GetProperty("reviewCycles").GetArrayLength());
@@ -82,28 +92,33 @@ public sealed class ChangeRequestReviewRationaleApiTests
     [Fact]
     public async Task Only_the_active_reviewer_can_return_the_package()
     {
-        using var factory = new AeroLinkApiFactory();
-        var fixture = await SeedAsync(factory);
-        using var client = factory.CreateClient();
-        await LoginAsync(client, "other.user");
+        var fixture = await SeedAsync(_host.Factory);
+        using var client = _host.CreateClient();
+        await LoginAsync(client, fixture.OtherName);
 
         using var refused = await client.PostAsJsonAsync($"/api/change-requests/{fixture.ChangeRequestId}/request-changes",
             new { reason = "I am not the active reviewer but I want changes." });
         Assert.Equal(HttpStatusCode.BadRequest, refused.StatusCode);
     }
 
-    private static async Task<(Guid ChangeRequestId, Guid ProjectId)> SeedAsync(AeroLinkApiFactory factory)
+    private static async Task<Seeded> SeedAsync(AeroLinkApiFactory factory)
     {
         using var scope = factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
         var now = DateTimeOffset.UtcNow;
+        // Unique per test: user accounts and Program codes are globally unique-constrained, so a shared
+        // host/database requires per-test identities. Change-request numbers are project-scoped and may stay fixed.
+        var tag = Guid.NewGuid().ToString("N")[..8];
+        var authorName = $"author.{tag}";
+        var reviewerName = $"reviewer.{tag}";
+        var otherName = $"other.{tag}";
 
-        var program = new ProgramRecord("Review Rationale Program", "RRP");
+        var program = new ProgramRecord($"Review Rationale Program {tag}", $"RRP{tag}");
         var project = new ProjectRecord(program.Id, "Software", "Rationale Software");
         var release = new SoftwareRelease(project.Id, "1.6", false);
         db.AddRange(program, project, release);
 
-        foreach (var (name, role) in new[] { ("author.user", ProgramRole.Engineer), ("reviewer.user", ProgramRole.Approver), ("other.user", ProgramRole.Approver) })
+        foreach (var (name, role) in new[] { (authorName, ProgramRole.Engineer), (reviewerName, ProgramRole.Approver), (otherName, ProgramRole.Approver) })
         {
             var account = new UserAccount(name, name, $"{name}@example.test",
                 IdentityService.HashPassword(AeroLinkApiFactory.MemberPassword), now);
@@ -111,13 +126,13 @@ public sealed class ChangeRequestReviewRationaleApiTests
             db.Add(new ProgramMembership(account.Id, program.Id, role, "test.setup", now));
         }
 
-        var scr = new SystemChangeRequest("SRCR-00051", 0, project.Id, release.Id, "Oceanic routing", "P", "A", "S", "author.user", now);
-        scr.AddRequirementChange("author.user", "SYSR-00000502", 0, RequirementLevel.System, RequirementChangeKind.Introduce,
+        var scr = new SystemChangeRequest("SRCR-00051", 0, project.Id, release.Id, "Oceanic routing", "P", "A", "S", authorName, now);
+        scr.AddRequirementChange(authorName, "SYSR-00000502", 0, RequirementLevel.System, RequirementChangeKind.Introduce,
             "The FMS shall sequence oceanic waypoints.", "New capability", "Test", now);
-        scr.SubmitForReview("author.user", [new("reviewer.user", "Reviewer")], now);
+        scr.SubmitForReview(authorName, [new(reviewerName, "Reviewer")], now);
         db.SystemChangeRequests.Add(scr);
         await db.SaveChangesAsync();
-        return (scr.Id, project.Id);
+        return new Seeded(scr.Id, project.Id, authorName, reviewerName, otherName);
     }
 
     private static async Task LoginAsync(HttpClient client, string userName)

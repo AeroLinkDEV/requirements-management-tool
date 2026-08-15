@@ -15,18 +15,27 @@ namespace AeroLink.Api.Tests;
 /// The Requirements Explorer groups by the requirements document a requirement belongs to. The Test Procedure
 /// Explorer had nothing to group by until procedures were given a container; this is what the rail asks for.
 /// </summary>
-public sealed class TestProcedureDocumentApiTests
+public sealed class TestProcedureDocumentApiTests : IClassFixture<SharedApiHost>
 {
-    private const string Member = "document.reader";
+    private readonly SharedApiHost _host;
 
-    private sealed record Seeded(Guid ProjectId, Guid HighLevelProcedureId);
+    public TestProcedureDocumentApiTests(SharedApiHost host)
+    {
+        _host = host;
+    }
+
+    private sealed record Seeded(Guid ProjectId, Guid ProgramId, Guid HighLevelProcedureId, string MemberName);
 
     private static async Task<Seeded> SeedAsync(AeroLinkApiFactory factory)
     {
         using var scope = factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
         var now = DateTimeOffset.UtcNow;
-        var program = new ProgramRecord("Rail Program", "RAIL");
+        // Unique per test: user accounts and Program codes are globally unique-constrained, so a shared
+        // host/database requires per-test identities. Procedure numbers are project-scoped and stay fixed.
+        var tag = Guid.NewGuid().ToString("N")[..8];
+        var member = $"document.reader.{tag}";
+        var program = new ProgramRecord($"Rail Program {tag}", $"RAIL{tag}");
         var project = new ProjectRecord(program.Id, "Flight Software", "Rail Software");
         db.AddRange(program, project);
 
@@ -36,7 +45,7 @@ public sealed class TestProcedureDocumentApiTests
             TestProcedureLevel.LowLevel);
         db.AddRange(high, low);
 
-        var account = new UserAccount(Member, Member, $"{Member}@example.test",
+        var account = new UserAccount(member, member, $"{member}@example.test",
             IdentityService.HashPassword(AeroLinkApiFactory.MemberPassword), now);
         db.Add(account);
         db.Add(new ProgramMembership(account.Id, program.Id, ProgramRole.TestEngineer, "test.setup", now));
@@ -47,13 +56,13 @@ public sealed class TestProcedureDocumentApiTests
             .EnsureForProjectAsync(project.Id);
         await db.SaveChangesAsync();
 
-        return new(project.Id, high.Id);
+        return new(project.Id, program.Id, high.Id, member);
     }
 
-    private static async Task LoginAsync(HttpClient client)
+    private static async Task LoginAsync(HttpClient client, string userName)
     {
         var login = await client.PostAsJsonAsync("/api/auth/login",
-            new { userName = Member, password = AeroLinkApiFactory.MemberPassword });
+            new { userName, password = AeroLinkApiFactory.MemberPassword });
         Assert.Equal(HttpStatusCode.OK, login.StatusCode);
         await SecurityBoundaryTests.AuthorizeMutationsAsync(client);
     }
@@ -65,10 +74,9 @@ public sealed class TestProcedureDocumentApiTests
     [Fact]
     public async Task A_discipline_sees_only_its_own_document()
     {
-        await using var factory = new AeroLinkApiFactory();
-        var seeded = await SeedAsync(factory);
-        using var client = factory.CreateClient();
-        await LoginAsync(client);
+        var seeded = await SeedAsync(_host.Factory);
+        using var client = _host.CreateClient();
+        await LoginAsync(client, seeded.MemberName);
 
         var response = await client.GetAsync(
             $"/api/projects/{seeded.ProjectId}/test-procedure-documents?scope=HighLevelSoftware");
@@ -89,10 +97,9 @@ public sealed class TestProcedureDocumentApiTests
     [Fact]
     public async Task Every_document_is_returned_when_no_scope_is_named()
     {
-        await using var factory = new AeroLinkApiFactory();
-        var seeded = await SeedAsync(factory);
-        using var client = factory.CreateClient();
-        await LoginAsync(client);
+        var seeded = await SeedAsync(_host.Factory);
+        using var client = _host.CreateClient();
+        await LoginAsync(client, seeded.MemberName);
 
         var documents = (await (await client.GetAsync(
             $"/api/projects/{seeded.ProjectId}/test-procedure-documents"))
@@ -108,10 +115,9 @@ public sealed class TestProcedureDocumentApiTests
     [Fact]
     public async Task Filtering_procedures_by_document_returns_only_that_documents_procedures()
     {
-        await using var factory = new AeroLinkApiFactory();
-        var seeded = await SeedAsync(factory);
-        using var client = factory.CreateClient();
-        await LoginAsync(client);
+        var seeded = await SeedAsync(_host.Factory);
+        using var client = _host.CreateClient();
+        await LoginAsync(client, seeded.MemberName);
 
         var documents = (await (await client.GetAsync(
             $"/api/projects/{seeded.ProjectId}/test-procedure-documents?scope=HighLevelSoftware"))
@@ -133,6 +139,8 @@ public sealed class TestProcedureDocumentApiTests
     [Fact]
     public async Task A_project_created_through_the_api_has_its_documents_immediately()
     {
+        // First-install bootstrap requires a database with no user accounts yet, so this test keeps its own
+        // fresh factory: the shared host's database already contains the other tests' seeded users.
         await using var factory = new AeroLinkApiFactory();
         using var client = factory.CreateClient();
         await SecurityBoundaryTests.BootstrapAndLoginAdministratorAsync(client);
@@ -166,16 +174,15 @@ public sealed class TestProcedureDocumentApiTests
     [Fact]
     public async Task Document_numbers_do_not_repeat_across_projects()
     {
-        await using var factory = new AeroLinkApiFactory();
-        var first = await SeedAsync(factory);
-        using var client = factory.CreateClient();
-        await LoginAsync(client);
+        var first = await SeedAsync(_host.Factory);
+        using var client = _host.CreateClient();
+        await LoginAsync(client, first.MemberName);
 
         Guid secondProjectId;
-        using (var scope = factory.Services.CreateScope())
+        using (var scope = _host.Factory.Services.CreateScope())
         {
             var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
-            var program = await db.Programs.SingleAsync();
+            var program = await db.Programs.SingleAsync(x => x.Id == first.ProgramId);
             var second = new ProjectRecord(program.Id, "Second Project", "Second Software");
             db.Add(second);
             await db.SaveChangesAsync();
