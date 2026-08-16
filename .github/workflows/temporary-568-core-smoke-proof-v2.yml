@@ -1,0 +1,179 @@
+name: Temporary #568 core smoke proof v2
+
+on:
+  push:
+    branches:
+      - chatgpt/568-core-smoke-proof-v2
+
+permissions:
+  contents: write
+
+jobs:
+  validate-and-commit:
+    if: ${{ !contains(github.event.head_commit.message, '[core-smoke-v2]') }}
+    runs-on: windows-latest
+    timeout-minutes: 25
+    steps:
+      - name: Check out proof branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+
+      - name: Install .NET 10
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Install Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: 24
+
+      - name: Apply bounded core-smoke optimization
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $utf8 = [Text.UTF8Encoding]::new($false)
+
+          $packagePath = 'product/client/package.json'
+          $package = [IO.File]::ReadAllText($packagePath)
+          $packageAnchor = '    "test:smoke": "playwright test tests/application-smoke.spec.ts tests/showcase-usability.spec.ts",'
+          if (($package.Split($packageAnchor).Count - 1) -ne 1) { throw 'package smoke anchor mismatch.' }
+          $packageReplacement = '    "test:smoke:core": "playwright test tests/application-smoke.spec.ts",' + "`n" + $packageAnchor
+          [IO.File]::WriteAllText($packagePath, $package.Replace($packageAnchor, $packageReplacement), $utf8)
+
+          $setupPath = 'product/client/tests/global-setup.ts'
+          $setup = [IO.File]::ReadAllText($setupPath)
+          $setupAnchor = 'export default async function globalSetup(){'
+          if (($setup.Split($setupAnchor).Count - 1) -ne 1) { throw 'global setup anchor mismatch.' }
+          $setupReplacement = $setupAnchor + "`n" + "  if(process.env.AEROLINK_E2E_SKIP_SHOWCASE_SEED==='true')return"
+          [IO.File]::WriteAllText($setupPath, $setup.Replace($setupAnchor, $setupReplacement), $utf8)
+
+          $classifyPath = 'product/test-planner/lib/classify.mjs'
+          $classify = [IO.File]::ReadAllText($classifyPath)
+          $browserOld = @(
+            "    steps.push({",
+            "      label: 'Browser smoke journeys',",
+            "      command: 'npm --prefix product/client run test:smoke',",
+            "      why: 'A bounded subset; the full journey set belongs in CI, not on a laptop.',",
+            "    })"
+          ) -join "`n"
+          $browserNew = @(
+            "    steps.push({",
+            "      label: 'Browser smoke journeys',",
+            "      command: classification.client",
+            "        ? 'npm --prefix product/client run test:smoke'",
+            "        : 'npm --prefix product/client run test:smoke:core',",
+            "      why: classification.client",
+            "        ? 'Client changes keep the showcase usability smoke; the full journey set still belongs in CI.'",
+            "        : 'Backend-only Fast uses the three first-install/application smoke checks without purchasing the unrelated full showcase seed; Full CI retains showcase usability coverage.',",
+            "    })"
+          ) -join "`n"
+          if (($classify.Split($browserOld).Count - 1) -ne 1) { throw 'classifier browser-plan anchor mismatch.' }
+          [IO.File]::WriteAllText($classifyPath, $classify.Replace($browserOld, $browserNew), $utf8)
+
+          $scriptPath = 'product/scripts/Get-AeroLinkTestPlan.ps1'
+          $script = [IO.File]::ReadAllText($scriptPath)
+          $scriptOld = "        'Browser smoke journeys' { Invoke-CheckedProcess 'npm.cmd' @('--prefix', 'product/client', 'run', 'test:smoke') }"
+          $scriptNew = @(
+            "        'Browser smoke journeys' {",
+            "            if (`$plan.classification.client) {",
+            "                Invoke-CheckedProcess 'npm.cmd' @('--prefix', 'product/client', 'run', 'test:smoke')",
+            "            }",
+            "            else {",
+            "                `$hadSkipShowcaseSeed = Test-Path Env:AEROLINK_E2E_SKIP_SHOWCASE_SEED",
+            "                `$previousSkipShowcaseSeed = `$env:AEROLINK_E2E_SKIP_SHOWCASE_SEED",
+            "                try {",
+            "                    `$env:AEROLINK_E2E_SKIP_SHOWCASE_SEED = 'true'",
+            "                    Invoke-CheckedProcess 'npm.cmd' @('--prefix', 'product/client', 'run', 'test:smoke:core')",
+            "                }",
+            "                finally {",
+            "                    if (`$hadSkipShowcaseSeed) { `$env:AEROLINK_E2E_SKIP_SHOWCASE_SEED = `$previousSkipShowcaseSeed }",
+            "                    else { Remove-Item Env:AEROLINK_E2E_SKIP_SHOWCASE_SEED -ErrorAction SilentlyContinue }",
+            "                }",
+            "            }",
+            "        }"
+          ) -join "`n"
+          if (($script.Split($scriptOld).Count - 1) -ne 1) { throw 'Fast browser execution anchor mismatch.' }
+          [IO.File]::WriteAllText($scriptPath, $script.Replace($scriptOld, $scriptNew), $utf8)
+
+          git diff --check
+          if ($LASTEXITCODE -ne 0) { throw 'git diff --check failed after core-smoke patch.' }
+
+      - name: Validate existing planner contracts and new plan decisions
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          node --test product/test-planner/tests/classify.test.mjs
+          if ($LASTEXITCODE -ne 0) { throw 'Classifier contract failed.' }
+          & ./product/scripts/Get-AeroLinkTestPlan.Tests.ps1
+          if ($LASTEXITCODE -ne 0) { throw 'Windows planner contract failed.' }
+
+          $backendText = & ./product/scripts/Get-AeroLinkTestPlan.ps1 -Paths 'product/src/AeroLink.Domain/Requirements/Requirement.cs' -Json -DryRun | Out-String
+          $backend = $backendText | ConvertFrom-Json
+          $backendBrowser = @($backend.local | Where-Object { $_.label -eq 'Browser smoke journeys' }) | Select-Object -First 1
+          if ($backendBrowser.command -notmatch 'test:smoke:core') { throw "Backend Fast did not select core smoke: $($backendBrowser.command)" }
+
+          $clientText = & ./product/scripts/Get-AeroLinkTestPlan.ps1 -Paths 'product/client/src/App.tsx' -Json -DryRun | Out-String
+          $client = $clientText | ConvertFrom-Json
+          $clientBrowser = @($client.local | Where-Object { $_.label -eq 'Browser smoke journeys' }) | Select-Object -First 1
+          if ($clientBrowser.command -notmatch 'test:smoke$') { throw "Client Fast did not retain showcase smoke: $($clientBrowser.command)" }
+
+          $package = Get-Content -Raw -LiteralPath product/client/package.json
+          $setup = Get-Content -Raw -LiteralPath product/client/tests/global-setup.ts
+          if ($package -notmatch 'test:smoke:core') { throw 'Core smoke package script missing.' }
+          if ($setup -notmatch 'AEROLINK_E2E_SKIP_SHOWCASE_SEED') { throw 'Global setup skip switch missing.' }
+
+      - name: Prepare warmed developer prerequisites outside timing
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          npm --prefix product/client ci
+          if ($LASTEXITCODE -ne 0) { throw 'npm ci failed.' }
+          Push-Location product/client
+          try {
+            npx playwright install chromium
+            if ($LASTEXITCODE -ne 0) { throw 'Chromium install failed.' }
+          }
+          finally { Pop-Location }
+          dotnet build product/AeroLink.slnx --configuration Release
+          if ($LASTEXITCODE -ne 0) { throw 'Warm solution build failed.' }
+
+      - name: Prove three backend-only Fast runs with margin
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $totals = [System.Collections.Generic.List[long]]::new()
+          for ($i = 1; $i -le 3; $i++) {
+            $transcript = Join-Path $env:RUNNER_TEMP "aerolink-568-core-smoke-v2-$i.txt"
+            & ./product/scripts/Get-AeroLinkTestPlan.ps1 -Paths 'product/src/AeroLink.Domain/Requirements/Requirement.cs' -Mode Fast -Explain *>&1 | Tee-Object -FilePath $transcript | ForEach-Object { Write-Host $_ }
+            $nativeExit = $LASTEXITCODE
+            $line = Get-Content -LiteralPath $transcript | Where-Object { $_ -like 'AEROLINK_TEST_PLAN_RESULT=*' } | Select-Object -Last 1
+            if (-not $line) { throw "Core-smoke Fast run $i emitted no compact result; native=$nativeExit." }
+            $json = $line.Substring('AEROLINK_TEST_PLAN_RESULT='.Length) | ConvertFrom-Json -Depth 30
+            if ($nativeExit -ne 0 -or $json.execution.status -ne 'passed') { throw "Core-smoke Fast run $i failed; native=$nativeExit status=$($json.execution.status)." }
+            if ($json.execution.authoritative -ne $false) { throw "Core-smoke Fast run $i claimed merge authority." }
+            if ($json.execution.resources.persistentPostgreSqlTouched -ne $false -or $json.execution.resources.persistentEvidenceRootTouched -ne $false) { throw "Core-smoke Fast run $i touched persistent resources." }
+            $browserStep = @($json.execution.timing.steps | Where-Object { $_.label -eq 'Browser smoke journeys' }) | Select-Object -First 1
+            if (-not $browserStep -or $browserStep.status -ne 'passed') { throw "Core-smoke browser step did not pass on run $i." }
+            $totalMs = [int64]$json.execution.timing.totalMs
+            $totals.Add($totalMs)
+            Write-Host "CORE_SMOKE_FAST_RUN_${i}_MS=$totalMs"
+          }
+          $sorted = @($totals | Sort-Object)
+          $median = [int64]$sorted[1]
+          Write-Host "CORE_SMOKE_FAST_MEDIAN_MS=$median"
+          if ($median -gt 240000) { throw "Core-smoke Fast median exceeded four minutes: $median ms." }
+          if (@($totals | Where-Object { $_ -gt 240000 }).Count -gt 1) { throw "Core-smoke Fast exceeded four minutes in more than one of three warmed runs: $($totals -join ', ')." }
+
+      - name: Commit validated product changes
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          git config user.name 'seanmccarthyns'
+          git config user.email 'seanmccarthyns@gmail.com'
+          git add product/client/package.json product/client/tests/global-setup.ts product/test-planner/lib/classify.mjs product/scripts/Get-AeroLinkTestPlan.ps1
+          $paths = @(git diff --cached --name-only)
+          if ($paths.Count -ne 4) { throw "Expected four staged product files, got $($paths.Count)." }
+          git commit -m 'Use seed-free core browser smoke for backend-only Fast [core-smoke-v2]'
+          git push origin HEAD:chatgpt/568-core-smoke-proof-v2
