@@ -45,7 +45,7 @@ const CONTROL_CHARACTERS = /[\u0000-\u001f\u007f-\u009f\u2028\u2029]/g
 const env = (name) => process.env[name] ?? ''
 const asNumber = (value) => {
   const number = Number(value)
-  return Number.isInteger(number) && number > 0 ? number : null
+  return Number.isSafeInteger(number) && number > 0 ? number : null
 }
 
 function headerValue(headers, name) {
@@ -71,8 +71,25 @@ function withPage(path, page, baseUrl) {
 export function createGithubApi({ baseUrl = 'https://api.github.com', token = '', fetchImpl = globalThis.fetch } = {}) {
   if (typeof fetchImpl !== 'function') throw new Error('A fetch implementation is required.')
   const origin = baseUrl.replace(/\/$/, '')
+  let configuredOrigin
+  try {
+    configuredOrigin = new URL(origin).origin
+  } catch {
+    throw new Error('A valid GitHub API base URL is required.')
+  }
+  const trustedUrl = (path) => {
+    let url
+    try {
+      url = new URL(path, origin)
+    } catch {
+      throw new Error('GitHub API URL is invalid.')
+    }
+    if (url.origin !== configuredOrigin) throw new Error(`GitHub API URL crossed the configured origin: ${url.origin}`)
+    return url.toString()
+  }
   const request = async (path, { method = 'GET', body } = {}) => {
-    const response = await fetchImpl(path.startsWith('http') ? path : `${origin}${path}`, {
+    const url = trustedUrl(path)
+    const response = await fetchImpl(url, {
       method,
       headers: {
         Authorization: token ? `Bearer ${token}` : undefined,
@@ -82,7 +99,7 @@ export function createGithubApi({ baseUrl = 'https://api.github.com', token = ''
       },
       body: body ? JSON.stringify(body) : undefined,
     })
-    if (!response.ok && Number(response.status) >= 400) throw new Error(`GitHub API ${path} returned ${response.status}.`)
+    if (!response.ok && Number(response.status) >= 400) throw new Error(`GitHub API ${url} returned ${response.status}.`)
     const data = Number(response.status) === 204 ? null : await response.json()
     return { data, headers: response.headers, status: response.status }
   }
@@ -100,7 +117,8 @@ export function createGithubApi({ baseUrl = 'https://api.github.com', token = ''
       items.push(...response.data)
       const linked = nextLink(response.headers)
       if (linked) {
-        next = linked
+        // Link headers are response-controlled. Validate before request() can attach the bearer token.
+        next = trustedUrl(linked)
         page += 1
       } else if (response.data.length === PAGE_SIZE) {
         page += 1
@@ -255,7 +273,7 @@ export function buildReport({ repository = 'Unknown', action = 'unknown', curren
     limits: OVERLAP_LIMITS,
     currentPr: identity,
     openPullRequests: Math.min(openCount, OVERLAP_LIMITS.maxOpenPullRequests),
-    eligiblePullRequests: Math.min(eligibleCount, OVERLAP_LIMITS.maxOpenPullRequests),
+    eligiblePullRequests: Math.min(eligibleCount, OVERLAP_LIMITS.maxEligiblePullRequests),
     peerHeads: records.map((record) => ({ number: record.number, title: boundedText(record.title, 240), author: boundedText(record.author, 120), branch: boundedText(record.branch, 240), headSha: record.headSha || 'Unknown', baseSha: record.baseSha || 'Unknown' })).slice(0, MAX_REPORT_ITEMS),
     overlaps: overlaps.slice(0, MAX_REPORT_ITEMS).map(summarizeOverlap),
     updates: updates.slice(0, MAX_REPORT_ITEMS).map((update) => ({ number: update.number, action: boundedText(update.action, 40), reason: boundedText(update.reason, 500), duplicates: Number.isSafeInteger(update.duplicates) ? update.duplicates : 0 })),
@@ -315,15 +333,22 @@ export async function runOverlapCheck({ repository, event = {}, api, analysisTim
   }
 
   const validatedOpen = []
+  const targetOpenByNumber = new Map()
   if (!openFetchFailed) {
     const seenNumbers = new Set()
     for (const [index, pr] of openRaw.entries()) {
+      const boundedNumber = asNumber(pr?.number)
+      // Keep only the bounded number for reconciliation when identity metadata is malformed. The
+      // malformed metadata never enters analysis or comment text, but an existing trusted marker
+      // must still be changed to Unknown rather than left stale.
+      if (boundedNumber && !targetOpenByNumber.has(boundedNumber)) targetOpenByNumber.set(boundedNumber, { number: boundedNumber })
       try {
         const validated = validatePullRequest(pr, `open pull request ${index + 1}`)
         const number = asNumber(validated.number)
         if (seenNumbers.has(number)) throw new Error(`open pull request #${number} is duplicated in the API response.`)
         seenNumbers.add(number)
         validatedOpen.push(validated)
+        targetOpenByNumber.set(number, validated)
       } catch (error) {
         errors.push(error)
       }
@@ -353,9 +378,11 @@ export async function runOverlapCheck({ repository, event = {}, api, analysisTim
   const analysisComplete = errors.length === 0
   const overlaps = analysisComplete ? detectOverlaps(validRecords) : []
   const peerHeads = validRecords.map((record) => record.headSha).filter(Boolean)
-  const targets = [...open]
-  if (eventPr && currentNumber && action === 'closed') targets.push({ ...eventPr, number: currentNumber, draft: false })
-  const targetByNumber = new Map(targets.map((target) => [asNumber(target.number), target]))
+  if (eventPr && currentNumber) {
+    const eventTarget = validatedEvent || { number: currentNumber }
+    if (action === 'closed' || !targetOpenByNumber.has(currentNumber) || validatedEvent) targetOpenByNumber.set(currentNumber, eventTarget)
+  }
+  const targetByNumber = targetOpenByNumber
   const updates = []
 
   // Fetch all comment lists before rendering any clear result. A later comment/API failure must

@@ -63,5 +63,5 @@ jobs:
         with:
           name: pr-overlap-report-${{ github.event.pull_request.number }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/pr-overlap.json
-          if-no-files-found: error
+          if-no-files-found: warn
           retention-days: 7

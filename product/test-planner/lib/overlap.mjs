@@ -88,6 +88,11 @@ export const SURFACES = [
     patterns: [/^product\/src\/aerolink\.api\/.*endpoints\.cs$/, /^product\/test-contracts\/(route-coverage|grandfathered-uncovered)\.json$/],
   },
   {
+    key: 'api-contracts', label: 'shared API contracts and DTOs',
+    why: 'Shared API contracts and DTO definitions are consumed by many endpoints and clients. Two independently valid edits can change the wire shape, validation assumptions or serialization contract without touching the same feature endpoint.',
+    patterns: [/^product\/src\/aerolink\.api\/apicontracts\.cs$/, /^product\/src\/aerolink\.api\/(contracts|dto)\/[^/]+\.(cs|json|ts)$/],
+  },
+  {
     key: 'migrations', label: 'the migration sequence',
     why: 'Migrations are ordered. Two branches each appending a migration will both apply cleanly in isolation and produce a broken or ambiguous sequence once both land.',
     patterns: [/^product\/src\/aerolink\.infrastructure\/persistence\/migrations\//],
@@ -185,6 +190,9 @@ const escapeMarkdown = (value, max = 240) => shorten(value, max).replace(/[&<>\\
 // A backslash does not escape a backtick inside a Markdown code span. Replace the delimiter itself
 // with a visible escape sequence so PR-controlled text cannot close the surrounding span.
 const escapeCode = (value, max = 240) => shorten(value, max).replaceAll('`', '\\x60')
+// Provenance is rendered as ordinary text, so also neutralize Markdown punctuation while
+// preserving the readable punctuation of normal ISO timestamps and hexadecimal SHAs.
+const escapeMetadata = (value, max = 240) => escapeCode(value, max).replace(/[&<>`*_[\]{}()#+!|>]/g, '\\$&')
 
 export function boundComment(body) {
   const value = String(body ?? '')
@@ -198,8 +206,8 @@ export function renderComment(prNumber, overlaps, metadata = {}) {
   const lines = [
     '## Open pull requests touching the same ground', '',
     'This is an advisory warning, not a block — nothing here prevents this pull request from proceeding.',
-    `Analysis timestamp: ${shorten(metadata.analysisTimestamp || 'Unknown', 80)}`,
-    `Current head SHA: ${shorten(metadata.currentSha || 'Unknown', 80)}`, '',
+    `Analysis timestamp: ${escapeMetadata(metadata.analysisTimestamp || 'Unknown', 80)}`,
+    `Current head SHA: ${escapeMetadata(metadata.currentSha || 'Unknown', 80)}`, '',
   ]
   for (const entry of mine.slice(0, MAX_LISTED)) {
     const other = entry.b
@@ -226,9 +234,9 @@ export function renderComment(prNumber, overlaps, metadata = {}) {
 
 export function renderClearComment({ analysisTimestamp = 'Unknown', currentSha = 'Unknown', reason = 'No open pull request currently overlaps this one', action = 'unknown', peerHeads = [] } = {}) {
   const peers = peerHeads.filter(Boolean).slice(0, 20).map((sha) => `\`${escapeCode(sha, 80)}\``).join(', ') || 'None'
-  return boundComment(['## Open pull request overlap status', '', 'No current overlap is reported for this pull request. Any earlier warning is retained as this single marker comment so stale claims are visibly cleared.', `Status: Clear`, `Reason: ${escapeMarkdown(reason)}`, `Action: ${escapeMarkdown(action, 40)}`, `Analysis timestamp: ${escapeCode(analysisTimestamp, 80)}`, `Current head SHA: ${escapeCode(currentSha || 'Unknown', 80)}`, `Peer head SHAs considered: ${peers}`].join('\n'))
+  return boundComment(['## Open pull request overlap status', '', 'No current overlap is reported for this pull request. Any earlier warning is retained as this single marker comment so stale claims are visibly cleared.', `Status: Clear`, `Reason: ${escapeMarkdown(reason)}`, `Action: ${escapeMarkdown(action, 40)}`, `Analysis timestamp: ${escapeMetadata(analysisTimestamp, 80)}`, `Current head SHA: ${escapeMetadata(currentSha || 'Unknown', 80)}`, `Peer head SHAs considered: ${peers}`].join('\n'))
 }
 
 export function renderUnknownComment({ analysisTimestamp = 'Unknown', currentSha = 'Unknown', reason = 'GitHub API failure', action = 'unknown' } = {}) {
-  return boundComment(['## Open pull request overlap status', '', '**Status: Unknown** — the advisory checker could not establish whether an overlap exists. It did not treat an API failure as a clean result.', `Reason: ${escapeMarkdown(reason)}`, `Action: ${escapeMarkdown(action, 40)}`, `Analysis timestamp: ${escapeCode(analysisTimestamp, 80)}`, `Current head SHA: ${escapeCode(currentSha || 'Unknown', 80)}`].join('\n'))
+  return boundComment(['## Open pull request overlap status', '', '**Status: Unknown** — the advisory checker could not establish whether an overlap exists. It did not treat an API failure as a clean result.', `Reason: ${escapeMarkdown(reason)}`, `Action: ${escapeMarkdown(action, 40)}`, `Analysis timestamp: ${escapeMetadata(analysisTimestamp, 80)}`, `Current head SHA: ${escapeMetadata(currentSha || 'Unknown', 80)}`].join('\n'))
 }

@@ -82,13 +82,15 @@ test('the real CI collision is detected without flagging unrelated metrics prove
 })
 
 test('every requested hotspot has a reason and migration risk remains actionable', () => {
-  for (const key of ['solution', 'project', 'lock', 'build', 'startup', 'identity', 'security', 'routing', 'test-harness']) {
+  for (const key of ['solution', 'project', 'lock', 'build', 'startup', 'identity', 'security', 'routing', 'api-contracts', 'test-harness']) {
     const surface = SURFACES.find((candidate) => candidate.key === key)
     assert.ok(surface, `${key} hotspot is present`)
     assert.ok(surface.why.length > 40)
   }
   const hits = surfacesFor(['product/src/AeroLink.Infrastructure/Persistence/Migrations/0007.cs', 'product/src/AeroLink.Infrastructure/Persistence/Migrations/0008.cs'])
   assert.ok(hits.has('migrations'))
+  assert.ok(surfacesFor(['product/src/AeroLink.Api/ApiContracts.cs']).has('api-contracts'))
+  assert.equal(surfacesFor(['product/src/AeroLink.Api/RequirementsEndpoints.cs']).has('api-contracts'), false)
 })
 
 test('ordinary files do not match a hotspot', () => {
@@ -103,6 +105,17 @@ test('rendered warning carries analysis timestamp and current/peer SHA provenanc
   assert.match(body, /Analysis timestamp: 2026-08-16T00:00:00Z/)
   assert.match(body, /Current head SHA: current-sha/)
   assert.match(body, /Peer head SHA: peer-sha/)
+})
+
+test('rendered warning code-escapes timestamp and current SHA metadata', () => {
+  const body = renderComment(1, detectOverlaps([
+    pr(1, ['product/src/AeroLink.Domain/A.cs'], { headSha: 'current-sha' }),
+    pr(2, ['product/src/AeroLink.Domain/A.cs'], { headSha: 'peer-sha' }),
+  ]), { analysisTimestamp: '2026-08-16T00:00:00Z\n`timestamp`', currentSha: 'current`sha\n[x](url)' })
+  assert.ok(body.includes('Analysis timestamp: 2026-08-16T00:00:00Z \\x60timestamp\\x60'))
+  assert.ok(body.includes('Current head SHA: current\\x60sha'))
+  assert.ok(body.includes('\\[x\\]\\(url\\)'))
+  assert.doesNotMatch(body, /00Z\n`timestamp`/)
 })
 
 test('rendering neutralizes PR-controlled Markdown, controls and code delimiters', () => {
@@ -139,12 +152,14 @@ test('report schema preserves identity provenance and explicit completeness limi
     records: [{ number: 8, title: 'Peer', author: 'peer', branch: 'feature/8', headSha: sha(8), baseSha: sha(8, 'b') }],
     errors: ['incomplete'],
     analysisComplete: false,
+    eligibleCount: OVERLAP_LIMITS.maxEligiblePullRequests + 1,
   })
   assert.equal(report.status, 'Unknown')
   assert.equal(report.analysisComplete, false)
   assert.deepEqual(report.limits, OVERLAP_LIMITS)
   assert.equal(report.currentPr.baseSha, sha(7, 'b'))
   assert.equal(report.peerHeads[0].title, 'Peer')
+  assert.equal(report.eligiblePullRequests, OVERLAP_LIMITS.maxEligiblePullRequests)
 })
 
 test('the API client follows link and full-page pagination', async () => {
@@ -157,6 +172,24 @@ test('the API client follows link and full-page pagination', async () => {
   } })
   assert.deepEqual(await api.paginate('/items'), [{ id: 1 }, { id: 2 }])
   assert.equal(calls.length, 2)
+})
+
+test('the API client rejects a cross-origin pagination link before bearer exfiltration', async () => {
+  const calls = []
+  const api = createGithubApi({ baseUrl: 'https://api.example.test', token: 'secret-token', fetchImpl: async (url, options) => {
+    calls.push({ url, options })
+    return {
+      ok: true,
+      status: 200,
+      headers: { get: (name) => name.toLowerCase() === 'link' ? '<https://evil.example.test/steal?page=2>; rel="next"' : '' },
+      json: async () => [{ id: 1 }],
+    }
+  } })
+  await assert.rejects(() => api.paginate('/items'), /crossed the configured origin/)
+  assert.equal(calls.length, 1)
+  assert.equal(calls[0].url, 'https://api.example.test/items?per_page=100&page=1')
+  assert.equal(calls.some(({ url }) => url.includes('evil.example.test')), false)
+  assert.equal(calls[0].options.headers.Authorization, 'Bearer secret-token')
 })
 
 test('the API client fails closed when an item bound would be exceeded', async () => {
@@ -267,6 +300,29 @@ test('incomplete PR identity produces Unknown rather than Clear', async () => {
   assert.equal(report.status, 'Unknown')
   assert.equal(report.analysisComplete, false)
   assert.ok(report.errors.some((error) => error.includes('base SHA is invalid')))
+})
+
+test('malformed open peers still reconcile by bounded number without trusting metadata', async () => {
+  const malformed = {
+    ...rawPr(2),
+    title: 'evil\n## forged peer title',
+    head: { ...rawPr(2).head, sha: 'not-a-sha' },
+  }
+  const api = mockedApi({
+    open: [rawPr(1), malformed],
+    files: {},
+    comments: {
+      1: [],
+      2: [botComment(20, '<!-- AEROLINK_PR_OVERLAP --> stale warning')],
+    },
+  })
+  const report = await runOverlapCheck({ repository: 'owner/repo', event: { action: 'opened', pull_request: rawPr(1) }, api, analysisTimestamp: '2026-08-16T01:02:03Z' })
+  assert.equal(report.status, 'Unknown')
+  const peerPatch = api.calls.find((call) => call.options.method === 'PATCH' && call.path.endsWith('/20'))
+  assert.ok(peerPatch)
+  assert.match(peerPatch.options.body.body, /Status: Unknown/)
+  assert.match(peerPatch.options.body.body, /Current head SHA: Unknown/)
+  assert.doesNotMatch(peerPatch.options.body.body, /forged peer title|not-a-sha/)
 })
 
 test('duplicate PR identities in the open-list response produce Unknown', async () => {
