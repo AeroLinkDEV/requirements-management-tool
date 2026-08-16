@@ -463,7 +463,13 @@ internal static class Program
         {
             File.Copy(Environment.GetEnvironmentVariable("ComSpec") ?? "cmd.exe", shell);
             File.WriteAllText(env, "AEROLINK_FAULT_TEST=1\r\n");
-            var exit = RunOwned(CreateOptions(shell, status, output, error, env, new[] { "/d", "/c", "echo", "fault" }));
+            // Keep a descendant alive for terminate-job so DrainJobAfterRootExit must invoke the injected
+            // TerminateJobObject failure. The old one-shot echo could leave an already-empty job,
+            // making this fault-path self-test timing-dependent on the Windows runner.
+            var commandArgs = string.Equals(fault, "terminate-job", StringComparison.Ordinal)
+                ? new[] { "/d", "/c", "start /b ping -n 31 127.0.0.1 > nul" }
+                : new[] { "/d", "/c", "echo", "fault" };
+            var exit = RunOwned(CreateOptions(shell, status, output, error, env, commandArgs));
             var statusText = File.Exists(status) ? File.ReadAllText(status) : string.Empty;
             return (exit != 0 || statusText.Contains("CLEANUP|handles=failed", StringComparison.Ordinal))
                 && statusText.Contains("CLEANUP|handles=", StringComparison.Ordinal);
