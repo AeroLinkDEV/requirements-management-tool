@@ -16,6 +16,21 @@ import { PLANNER_VERSION, plannerHash } from '../lib/planner-meta.mjs'
 
 const env = (name) => process.env[name] ?? ''
 
+// GitHub's environment-file parser treats each physical line as a separate output assignment. Paths and
+// classifier reasons originate in the PR tree, so a filename containing CR/LF must never be able to add or
+// overwrite another output. Keep the values readable while making every emitted value one physical line.
+function outputSafe(value) {
+  return String(value ?? '').replace(/[\u0000-\u001f\u007f-\u009f\u2028\u2029]/g, (character) => {
+    return `\\u${character.codePointAt(0).toString(16).padStart(4, '0')}`
+  })
+}
+
+function outputLine(name, value) {
+  const safeValue = outputSafe(value)
+  if (/[\r\n]/.test(safeValue)) throw new Error(`Output value for ${name} was not reduced to one line.`)
+  return `${name}=${safeValue}`
+}
+
 const event = env('EVENT_NAME')
 const baseSha = env('BASE_SHA')
 const headSha = env('HEAD_SHA')
@@ -80,16 +95,17 @@ if (!outputPath) {
 }
 
 appendFileSync(outputPath, [
-  `docs_only=${result.docsOnly}`,
-  `backend=${result.backend}`,
-  `client=${result.client}`,
-  `browser=${result.browser}`,
-  `postgresql=${result.postgresql}`,
-  `planner_version=${PLANNER_VERSION}`,
-  `planner_hash=${plannerHashValue}`,
-  `planner_unknown_paths=${unknownPaths.join(', ')}`,
-  `planner_selected_jobs=${decisions.selected.map((job) => job.id).join(',')}`,
-  `planner_skipped_jobs=${decisions.skipped.map((job) => job.id).join(',')}`,
-  `planner_decisions=${JSON.stringify(decisions)}`,
+  outputLine('docs_only', result.docsOnly),
+  outputLine('backend', result.backend),
+  outputLine('client', result.client),
+  outputLine('browser', result.browser),
+  outputLine('postgresql', result.postgresql),
+  outputLine('planner_version', PLANNER_VERSION),
+  outputLine('planner_hash', plannerHashValue),
+  outputLine('planner_unknown_paths', unknownPaths.join(', ')),
+  outputLine('planner_reason', result.reason ?? ''),
+  outputLine('planner_selected_jobs', decisions.selected.map((job) => job.id).join(',')),
+  outputLine('planner_skipped_jobs', decisions.skipped.map((job) => job.id).join(',')),
+  outputLine('planner_decisions', JSON.stringify(decisions)),
   '',
 ].join('\n'), 'utf8')

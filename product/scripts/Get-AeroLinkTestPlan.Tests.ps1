@@ -19,6 +19,12 @@ function Invoke-Plan([string[]]$Arguments) {
     return [pscustomobject]@{ ExitCode = $LASTEXITCODE; Output = ($output -join "`n") }
 }
 
+function Invoke-PlanFrom([string]$WorkingDirectory, [string[]]$Arguments) {
+    Push-Location -LiteralPath $WorkingDirectory
+    try { return Invoke-Plan $Arguments }
+    finally { Pop-Location }
+}
+
 $plain = Invoke-Plan @('-Paths', 'PRODUCT\SRC\AeroLink.Infrastructure\Persistence\Thing.cs', '-Explain', '-DryRun')
 Assert-True ($plain.ExitCode -eq 0) "Windows dry-run should succeed: $($plain.Output)"
 Assert-True ($plain.Output -match 'persistent PostgreSQL') 'Dry-run must state persistent PostgreSQL safety.'
@@ -41,7 +47,9 @@ if (-not $originMainExists) {
     if ($LASTEXITCODE -ne 0) { throw "Could not create disposable $originMainRef for the planner contract." }
 }
 try {
-    $originPlan = Invoke-Plan @('-SinceOriginMain', '-Head', 'HEAD', '-DryRun')
+    # The wrapper resolves its repository from $PSScriptRoot, so the stale-ref warning must also work when
+    # the operator launches the PowerShell entry point from an unrelated directory.
+    $originPlan = Invoke-PlanFrom ([System.IO.Path]::GetTempPath()) @('-SinceOriginMain', '-Head', 'HEAD', '-DryRun')
     Assert-True ($originPlan.ExitCode -eq 0) "origin/main dry-run should succeed: $($originPlan.Output)"
     Assert-True ($originPlan.Output -match 'merge base:') 'origin/main mode must report the merge base.'
     Assert-True ($originPlan.Output -match 'origin/main is a local remote-tracking ref') 'origin/main mode must warn about stale local refs.'

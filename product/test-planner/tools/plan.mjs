@@ -19,6 +19,8 @@ const FLAG_OPTIONS = new Map([
   ['dry-run', 'dryRun'],
 ])
 
+const USAGE = 'Usage: node plan.mjs [--base <ref>|--since-origin-main] [--head <ref>] [--event <name>] [--files <path>...] [--json] [--dry-run] [--help]'
+
 /** Parse options explicitly, stopping a file list at the next option. */
 function parseArgs(argv) {
   const options = { files: null, base: null, head: null, event: null, json: false, help: false, sinceOriginMain: false, dryRun: false }
@@ -53,12 +55,21 @@ try {
   options = parseArgs(process.argv.slice(2))
 } catch (error) {
   console.error(error.message)
-  console.error('Usage: node plan.mjs [--base <ref>|--since-origin-main] [--head <ref>] [--event <name>] [--files <path>...] [--json] [--dry-run]')
+  console.error(USAGE)
   process.exit(2)
+}
+
+if (options.help) {
+  console.log(USAGE)
+  process.exit(0)
 }
 
 function gitText(args) {
   return execFileSync('git', args, { encoding: 'utf8' }).trim()
+}
+
+function gitCommitSha(ref) {
+  return gitText(['rev-parse', '--verify', `${ref}^{commit}`])
 }
 
 function changedPathsFromDiff(base, head) {
@@ -73,12 +84,14 @@ function changedPathsFromDiff(base, head) {
   return paths.filter((path) => typeof path === 'string' && path.length > 0)
 }
 
-const range = { base: null, head: options.head ?? 'HEAD', mergeBase: null }
+const range = { base: null, head: options.head ?? 'HEAD', baseSha: null, headSha: null, mergeBase: null }
 function changedPaths() {
   if (options.files !== null) return options.files
 
   range.base = options.sinceOriginMain ? 'origin/main' : (options.base ?? 'origin/main')
   try {
+    range.baseSha = gitCommitSha(range.base)
+    range.headSha = gitCommitSha(range.head)
     range.mergeBase = gitText(['merge-base', range.base, range.head])
     // Three dots compare from the merge base. Name-status with rename detection is parsed into both old
     // and new paths so sensitive coverage cannot disappear when a file moves out of a guarded area.
@@ -100,7 +113,14 @@ const hash = plannerHash(repoRoot)
 const unknownPaths = explain(paths).filter((row) => row.product && row.areas.length === 0 && !row.broad).map((row) => row.path)
 const compact = {
   planner: { version: PLANNER_VERSION, hash },
-  source: { base: range.base, head: range.head, mergeBase: range.mergeBase, paths: options.files !== null ? 'explicit' : 'git-diff' },
+  source: {
+    base: range.base,
+    head: range.head,
+    baseSha: range.baseSha,
+    headSha: range.headSha,
+    mergeBase: range.mergeBase,
+    paths: options.files !== null ? 'explicit' : 'git-diff',
+  },
   event,
   areas: { docsOnly: result.docsOnly, backend: result.backend, client: result.client, browser: result.browser, postgresql: result.postgresql },
   unknownPaths,
@@ -111,6 +131,8 @@ if (options.json) {
   console.log(JSON.stringify({
     event,
     changedPaths: paths,
+    baseSha: range.baseSha,
+    headSha: range.headSha,
     mergeBase: range.mergeBase,
     explain: explain(paths),
     classification: result,

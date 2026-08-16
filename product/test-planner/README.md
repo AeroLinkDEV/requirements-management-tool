@@ -32,7 +32,8 @@ The switches are deliberately explicit:
   runs a broader local disposable SQLite/browser subset. Full is not full CI parity. `-DryRun` always stops
   after printing the plan.
 - `-Explain` prints each changed path and its selected areas. `-Json` emits a machine-readable,
-  plan-only result with provenance, CI selections, and safety fields.
+  plan-only result with symbolic refs, resolved base/head commit SHAs, provenance, CI selections, and safety
+  fields. `node product/test-planner/tools/plan.mjs --help` prints usage without consulting Git.
 
 The wrapper does not fetch, rebase, touch persistent PostgreSQL, write the product evidence roots, or
 claim that local output is merge evidence. PostgreSQL-sensitive checks and the complete gate remain
@@ -59,6 +60,6 @@ node product/test-planner/tools/plan.mjs --files START_AEROLINK_PRODUCTION.bat -
 node product/test-planner/tools/plan.mjs --files product/client/src/App.tsx product/src/AeroLink.Infrastructure/Persistence/Migrations/0001_init.cs --dry-run
 ```
 
-The workflow calls `tools/classify-ci.mjs` and publishes planner version/hash, unknown paths, selected
-and skipped jobs, and each job's condition/reason in the gate summary. The authoritative backend-core
+The workflow calls `tools/classify-ci.mjs` and publishes planner version/hash, the fallback reason and unknown
+paths, selected and skipped jobs, and each job's condition/reason in the gate summary. The authoritative backend-core
 contract invocation is directory-driven, so every `product/test-contracts/tests/*.test.mjs` file runs.

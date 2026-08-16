@@ -50,6 +50,7 @@ jobs:
       planner_version: ${{ steps.classify.outputs.planner_version }}
       planner_hash: ${{ steps.classify.outputs.planner_hash }}
       planner_unknown_paths: ${{ steps.classify.outputs.planner_unknown_paths }}
+      planner_reason: ${{ steps.classify.outputs.planner_reason }}
       planner_selected_jobs: ${{ steps.classify.outputs.planner_selected_jobs }}
       planner_skipped_jobs: ${{ steps.classify.outputs.planner_skipped_jobs }}
       planner_decisions: ${{ steps.classify.outputs.planner_decisions }}
@@ -457,7 +458,7 @@ jobs:
       # classifier that decides which gates run at all. Two silent-green failures came from that code, and
       # a guard on it that cannot fail the gate would be worth nothing.
       - name: Verify the changed-area classifier and its workflow contract
-        run: node --test product/test-planner/tests/classify.test.mjs product/test-planner/tests/plan-cli.test.mjs
+        run: node --test product/test-planner/tests/classify.test.mjs product/test-planner/tests/plan-cli.test.mjs product/test-planner/tests/planner-meta.test.mjs product/test-planner/tests/classify-ci.test.mjs
       - name: Refuse a test project that no job runs
         shell: bash
         run: |
@@ -1274,6 +1275,7 @@ jobs:
           PLANNER_VERSION: ${{ needs.changes.outputs.planner_version }}
           PLANNER_HASH: ${{ needs.changes.outputs.planner_hash }}
           PLANNER_UNKNOWN_PATHS: ${{ needs.changes.outputs.planner_unknown_paths }}
+          PLANNER_REASON: ${{ needs.changes.outputs.planner_reason }}
           PLANNER_SELECTED_JOBS: ${{ needs.changes.outputs.planner_selected_jobs }}
           PLANNER_SKIPPED_JOBS: ${{ needs.changes.outputs.planner_skipped_jobs }}
           PLANNER_DECISIONS: ${{ needs.changes.outputs.planner_decisions }}
@@ -1292,6 +1294,7 @@ jobs:
             echo
             echo "Planner: $PLANNER_VERSION ($PLANNER_HASH)"
             echo "Event: $EVENT_NAME"
+            echo "Planner reason: ${PLANNER_REASON:-none}"
             echo "Unknown product paths forcing fallback: ${PLANNER_UNKNOWN_PATHS:-none}"
             echo "Selected jobs: ${PLANNER_SELECTED_JOBS:-none}"
             echo "Skipped jobs: ${PLANNER_SKIPPED_JOBS:-none}"

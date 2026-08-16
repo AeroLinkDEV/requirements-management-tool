@@ -98,6 +98,24 @@ test('an unknown option or a bare argument is refused', () => {
   assert.match(bare.out, /must start with --/)
 })
 
+test('--help is deterministic and does not inspect Git or emit a plan', () => {
+  const { code, out } = run(['--help'])
+  assert.equal(code, 0)
+  assert.match(out, /^Usage: node plan\.mjs/m)
+  assert.doesNotMatch(out, /AeroLink test planner|AEROLINK_TEST_PLAN_RESULT/)
+})
+
+test('Git-ref plans retain symbolic refs and record resolved commit SHAs', () => {
+  const parsed = JSON.parse(run(['--base', 'HEAD', '--head', 'HEAD', '--json']).out)
+  assert.equal(parsed.compact.source.base, 'HEAD')
+  assert.equal(parsed.compact.source.head, 'HEAD')
+  assert.match(parsed.compact.source.baseSha, /^[0-9a-f]{40}$/)
+  assert.match(parsed.compact.source.headSha, /^[0-9a-f]{40}$/)
+  assert.equal(parsed.baseSha, parsed.compact.source.baseSha)
+  assert.equal(parsed.headSha, parsed.compact.source.headSha)
+  assert.equal(parsed.compact.source.mergeBase, parsed.compact.source.baseSha)
+})
+
 test('paths beginning with a dash can be passed after a bare --', () => {
   // `--` is POSIX: everything after it is positional. So other options must come *before* it, which is
   // why `--json` leads here. Writing this test the other way round was my own error, and it is worth

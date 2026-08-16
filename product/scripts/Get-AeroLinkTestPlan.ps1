@@ -33,7 +33,7 @@ if (-not (Test-Path -LiteralPath $planner -PathType Leaf)) { throw "Shared plann
 
 function Invoke-GitText {
     param([Parameter(Mandatory)][string[]]$Arguments)
-    $output = & git @Arguments 2>&1
+    $output = & git -C $repositoryRoot @Arguments 2>&1
     if ($LASTEXITCODE -ne 0) { throw "git $($Arguments -join ' ') failed: $($output -join ' ')" }
     return ($output -join "`n").Trim()
 }

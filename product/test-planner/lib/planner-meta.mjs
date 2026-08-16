@@ -2,11 +2,13 @@ import { createHash } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 
-// The version is a stable contract label; the content hash identifies the exact planner implementation.
-// Keeping both in local output and CI summaries makes a copied plan auditable without trusting a branch name.
+// The version is a stable contract label; the content hash identifies the exact planner implementation and
+// the workflow semantics from which its CI forecast is derived. Keeping both in local output and CI summaries
+// makes a copied plan auditable without trusting a branch name.
 export const PLANNER_VERSION = 'aerolink-test-planner/v1'
 
 export const PLANNER_FILES = [
+  '.github/workflows/ci.yml',
   'product/test-planner/lib/planner-meta.mjs',
   'product/test-planner/lib/classify.mjs',
   'product/test-planner/lib/workflow-jobs.mjs',
