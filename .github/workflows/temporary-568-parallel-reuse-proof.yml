@@ -1,0 +1,75 @@
+name: Temporary #568 parallel Fast plus prebuilt API proof
+
+on:
+  push:
+    branches:
+      - chatgpt/568-parallel-reuse-proof
+
+permissions:
+  contents: read
+
+jobs:
+  fast-proof:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out exact #616 proof tree
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - name: Install .NET 10
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v5.2.0
+        with:
+          dotnet-version: 10.0.x
+      - name: Install Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+      - name: Prepare normal warmed developer state outside timing
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          npm --prefix product/client ci
+          if ($LASTEXITCODE -ne 0) { throw 'npm ci failed.' }
+          Push-Location product/client
+          try {
+            npx playwright install chromium
+            if ($LASTEXITCODE -ne 0) { throw 'Chromium install failed.' }
+          }
+          finally { Pop-Location }
+          dotnet build product/AeroLink.slnx --configuration Release
+          if ($LASTEXITCODE -ne 0) { throw 'Warm solution build failed.' }
+      - name: Measure parallel Fast with same-run API reuse
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $transcript = Join-Path $env:RUNNER_TEMP 'aerolink-568-parallel-reuse.txt'
+          $resultPath = Join-Path $env:RUNNER_TEMP 'aerolink-568-parallel-reuse.json'
+          $previous = $env:AEROLINK_E2E_SKIP_BUILD
+          try {
+            $env:AEROLINK_E2E_SKIP_BUILD = 'true'
+            & ./product/scripts/Get-AeroLinkTestPlan.ps1 -Paths 'product/src/AeroLink.Domain/Requirements/Requirement.cs' -Mode Fast -Explain *>&1 | Tee-Object -FilePath $transcript | ForEach-Object { Write-Host $_ }
+            $nativeExit = $LASTEXITCODE
+          }
+          finally { $env:AEROLINK_E2E_SKIP_BUILD = $previous }
+          $line = Get-Content -LiteralPath $transcript | Where-Object { $_ -like 'AEROLINK_TEST_PLAN_RESULT=*' } | Select-Object -Last 1
+          if (-not $line) { throw "Fast wrapper emitted no compact result; native exit=$nativeExit." }
+          $json = $line.Substring('AEROLINK_TEST_PLAN_RESULT='.Length) | ConvertFrom-Json -Depth 30
+          $json | ConvertTo-Json -Depth 30 | Out-File -LiteralPath $resultPath -Encoding utf8
+          if ($nativeExit -ne 0 -or $json.execution.status -ne 'passed') { throw "Parallel+reuse Fast wrapper failed; native=$nativeExit status=$($json.execution.status)." }
+          if ($json.execution.authoritative -ne $false) { throw 'Fast proof incorrectly claimed merge authority.' }
+          if ($json.execution.resources.persistentPostgreSqlTouched -ne $false -or $json.execution.resources.persistentEvidenceRootTouched -ne $false) { throw 'Fast proof touched persistent state.' }
+          $totalMs = [int64]$json.execution.timing.totalMs
+          $steps = (@($json.execution.timing.steps) | ForEach-Object { "$($_.label)=$($_.elapsedMs)ms" }) -join '; '
+          @('## #568 parallel + prebuilt API Fast proof','',"- Exact #616 tree: d2fb68d4617d87ab1e07f2c29d91ab964fc37fa5","- Status: **$($json.execution.status)**","- Total wrapper time: **$totalMs ms**",'- Target: <=240000 ms',"- Steps: $steps",'- Browser smoke reused the Release API built in this same warmed validation state','- Infrastructure and browser smoke remained concurrent under #616','- Persistent PostgreSQL/evidence untouched','- Result remained non-authoritative') | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+          if ($totalMs -gt 240000) { throw "Parallel+reuse Fast still exceeded four minutes: $totalMs ms." }
+      - name: Upload bounded proof
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: aerolink-568-parallel-reuse-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}\aerolink-568-parallel-reuse.txt
+            ${{ runner.temp }}\aerolink-568-parallel-reuse.json
+          if-no-files-found: warn
+          retention-days: 14
