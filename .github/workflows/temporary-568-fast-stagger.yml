@@ -26,6 +26,7 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
+          $utf8 = [System.Text.UTF8Encoding]::new($false)
           $path = 'product/scripts/Get-AeroLinkTestPlan.ps1'
           $text = Get-Content -Raw -LiteralPath $path
           $anchor = '            $job = Start-Job -ArgumentList $definition.label, $repositoryRoot -ScriptBlock {'
@@ -37,14 +38,14 @@ jobs:
             '            }',
             $anchor
           ) -join "`n"
-          Set-Content -LiteralPath $path -Value ($text.Replace($anchor, $insert)) -Encoding utf8
+          [IO.File]::WriteAllText((Resolve-Path $path).Path, $text.Replace($anchor, $insert), $utf8)
 
           $testPath = 'product/scripts/Get-AeroLinkTestPlan.Tests.ps1'
           $tests = Get-Content -Raw -LiteralPath $testPath
           $marker = 'Assert-True ($plannerSource -match "Infrastructure and browser smoke Fast checks concurrently") ''Fast execution must make the measured independent pair explicit.'''
           if (($tests.Split($marker).Count - 1) -ne 1) { throw 'Expected one Fast contract marker.' }
           $extra = $marker + "`n" + 'Assert-True ($plannerSource -match ''Start-Sleep -Seconds 45'') ''Fast overlap must retain the measured browser stagger that limits runner contention.'''
-          Set-Content -LiteralPath $testPath -Value ($tests.Replace($marker, $extra)) -Encoding utf8
+          [IO.File]::WriteAllText((Resolve-Path $testPath).Path, $tests.Replace($marker, $extra), $utf8)
       - name: Validate planner contract and diff
         shell: pwsh
         run: |
