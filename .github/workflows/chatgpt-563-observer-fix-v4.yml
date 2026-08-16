@@ -1,0 +1,111 @@
+name: "Temporary #563 observer repair v4"
+
+on:
+  push:
+    branches:
+      - chatgpt/563-measurement-observer-fix
+
+permissions:
+  contents: write
+
+jobs:
+  repair:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - name: Check out branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+
+      - name: Install .NET 10
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Install Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: 24
+
+      - name: Apply product observer changes
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $carrier = Get-Content -LiteralPath '.github/workflows/chatgpt-563-observer-fix-v2.yml' -Raw
+          if ($carrier -notmatch "\$encoded = '([^']+)'" ) { throw 'Could not recover the reviewed patch payload.' }
+          $encoded = $Matches[1]
+          $script = Join-Path $env:RUNNER_TEMP 'apply563.py'
+          [IO.File]::WriteAllBytes($script, [Convert]::FromBase64String($encoded))
+          $output = @(& python $script 2>&1)
+          $exit = $LASTEXITCODE
+          $text = $output -join "`n"
+          if ($exit -ne 1 -or $text -notmatch 'test marker count was 0') {
+            Write-Host $text
+            throw "Unexpected patch payload result: exit=$exit"
+          }
+
+          @'
+          from pathlib import Path
+
+          tests_path = Path('product/test-contracts/tests/api-host-reuse-measurement.test.mjs')
+          tests = tests_path.read_text(encoding='utf-8')
+          marker = '  assert.match(source, /Job containment cleanup/)'
+          if tests.count(marker) != 1:
+              raise SystemExit(f'test marker count was {tests.count(marker)}')
+          extra = r'''  assert.match(source, /JOB_OBJECT_BASIC_AND_IO_ACCOUNTING_INFORMATION/)
+          assert.match(source, /public static AccountingResult QueryAccounting/)
+          assert.match(source, /ReadTransferBytes/)
+          assert.match(source, /function Update-ShardAccounting/)
+          assert.match(source, /stdout = ''/)
+          assert.match(source, /wallMs = 0\.0/)
+          assert.doesNotMatch(source, /Get-Counter/)
+          assert.doesNotMatch(source, /\$pid\s*=/i)
+          assert.doesNotMatch(source, /totals\.tests -ne \$shard\.expectedCases/)
+          '''
+          tests_path.write_text(tests.replace(marker, marker + '\n' + extra, 1), encoding='utf-8')
+
+          docs_path = Path('product/docs/API_HOST_REUSE_MEASUREMENT.md')
+          docs = docs_path.read_text(encoding='utf-8')
+          old = '- process-tree CPU milliseconds and Windows process-counter disk read/write bytes when available;'
+          new = '- Job Object cumulative CPU milliseconds and disk read/write bytes, with CIM process-tree identity retained as diagnostic evidence;'
+          if docs.count(old) != 1:
+              raise SystemExit(f'docs metric bullet count was {docs.count(old)}')
+          docs_path.write_text(docs.replace(old, new, 1), encoding='utf-8')
+          '@ | Set-Content -LiteralPath (Join-Path $env:RUNNER_TEMP 'finish563.py') -Encoding utf8
+          python (Join-Path $env:RUNNER_TEMP 'finish563.py')
+
+      - name: Validate harness
+        shell: pwsh
+        run: |
+          node --test product/test-contracts/tests/api-host-reuse-measurement.test.mjs
+          pwsh -NoProfile -File product/tools/measure-api-host-reuse.ps1 -JobSmoke
+          git diff --check
+
+      - name: Commit product-only fix
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Remove-Item '.github/workflows/chatgpt-563-observer-fix.yml' -Force
+          Remove-Item '.github/workflows/chatgpt-563-observer-fix-v2.yml' -Force
+          Remove-Item '.github/workflows/chatgpt-563-observer-fix-v4.yml' -Force
+          $allowed = @(
+            'product/tools/measure-api-host-reuse.ps1',
+            'product/test-contracts/tests/api-host-reuse-measurement.test.mjs',
+            'product/docs/API_HOST_REUSE_MEASUREMENT.md'
+          )
+          $temp = @(
+            '.github/workflows/chatgpt-563-observer-fix.yml',
+            '.github/workflows/chatgpt-563-observer-fix-v2.yml',
+            '.github/workflows/chatgpt-563-observer-fix-v4.yml'
+          )
+          $paths = @(git status --short | ForEach-Object { $_.Substring(3) })
+          $bad = @($paths | Where-Object { $temp -notcontains $_ -and $allowed -notcontains $_ })
+          if ($bad.Count -gt 0) { throw "Unexpected paths: $($bad -join ', ')" }
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -- $allowed
+          git add -u -- $temp
+          git diff --cached --check
+          git commit -m 'Harden #563 measurement observer accounting'
+          git push origin HEAD:chatgpt/563-measurement-observer-fix
