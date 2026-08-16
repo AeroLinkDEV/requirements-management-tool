@@ -85,8 +85,14 @@ rather than a claimed pass. A completed shard that produced no successful active
 
 Each shard is bounded by `-TimeoutMinutes` (30 by default). Restore, build, discovery, and aggregation processes are
 bounded by `-ProcessTimeoutMinutes` (60 by default). Process cleanup tracks PID creation identities and refuses to kill
-unverified or over-bound process trees. A timeout stops only the exact process tree launched by the harness, verifies
-owned descendants exit, and invalidates that observation; it is never silently converted into a pass.
+unverified or over-bound process trees. If the launch identity is unavailable, cleanup performs no kill at all and
+returns a cleanup failure, which invalidates the observation. While the root remains alive, fresh ancestry snapshots
+are merged into the bounded identity set; after cleanup every previously observed identity is independently checked,
+even if the root exited or a child was reparented. An identity change is an error and never authorizes a kill. A child
+spawned after the final ancestry snapshot can still escape observation on Windows; the harness fails closed on snapshot,
+identity, or cleanup uncertainty rather than claiming the tree was safely stopped. A timeout stops only the exact
+identity-verified process objects launched by the harness and invalidates that observation; it is never silently
+converted into a pass.
 
 No failure may be removed from the ten-run denominator. Re-run a failed seed only as a separately identified
 diagnostic; it does not replace the failed observation.
@@ -105,8 +111,13 @@ I/O are supporting evidence, not substitutes for the critical-path wall-clock ga
 
 Evaluate recomputes validity, metrics completeness, required counts, unique/equal seed sets, and paired-seed joins from
 the observations. It does not trust caller-provided `allValid`, `validObservationCount`, `metricsComplete`, or array
-ordering; forged or inconsistent summaries are inconclusive and cannot pass. It also canonicalizes reparse-point
-ancestors before applying output containment against the recorded condition worktrees.
+ordering; forged or inconsistent summaries are inconclusive and cannot pass. Each summary persists the complete sorted
+case-name manifest and class facts. Evaluate then reopens both recorded condition paths, requires each to remain clean at
+its recorded distinct SHA, rediscovers the live test manifest and environment, and compares those facts to both the
+summary and every condition metadata record. Matching hashes alone are not authentication. Missing or invalid paths
+fail before any decision file is written. It also canonicalizes every filesystem component, including absolute or
+relative NTFS junction/symlink targets and bounded loop detection, before applying output containment against the live
+condition worktrees.
 
 To evaluate already-produced condition summaries without running tests:
 

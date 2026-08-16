@@ -44,6 +44,9 @@ function Stop-ProcessSafely {
     )
 
     $rootId = $Process.Id
+    if (-not $ExpectedIdentity) {
+        return [pscustomobject]@{ ownedIds = @($rootId); exited = $false; remainingIds = @($rootId); error = 'No expected process identity was available; no process was killed.' }
+    }
     $snapshot = Get-ProcessTreeSnapshot @($rootId)
     if (-not $snapshot.success) {
         return [pscustomobject]@{ ownedIds = @($rootId); exited = $false; remainingIds = @($rootId); error = $snapshot.error }
@@ -51,55 +54,87 @@ function Stop-ProcessSafely {
     if (@($KnownRecords).Count -gt $MaxProcessTreeCount) {
         return [pscustomobject]@{ ownedIds = @($rootId); exited = $false; remainingIds = @($rootId); error = "Known owned process records exceeded MaxProcessTreeCount=$MaxProcessTreeCount." }
     }
-    if (-not $ExpectedIdentity) {
-        try {
-            if (-not $Process.HasExited) { $Process.Kill() }
-            $rootExited = $Process.WaitForExit($TimeoutMilliseconds)
-            $remainingUnverified = @($snapshot.records | Where-Object { [int]$_.processId -ne $rootId } | ForEach-Object processId)
-            return [pscustomobject]@{ ownedIds = @($rootId); exited = ($rootExited -and $remainingUnverified.Count -eq 0); remainingIds = $remainingUnverified; error = if ($remainingUnverified.Count) { 'Root identity was unavailable; unverified descendants were not killed.' } else { $null } }
-        } catch {
-            return [pscustomobject]@{ ownedIds = @($rootId); exited = $false; remainingIds = @($rootId); error = $_.Exception.Message }
+
+    # Keep every identity ever observed.  A descendant can be reparented or the
+    # root can exit before cleanup; relying only on a fresh parent-tree walk in
+    # that case could either leak an owned process or make a PID-reuse mistake.
+    $known = @{}
+    $mergeRecords = {
+        param([object[]]$Records)
+        foreach ($record in @($Records)) {
+            if ($null -eq $record -or $null -eq $record.processId -or [string]::IsNullOrWhiteSpace([string]$record.creationDate)) { continue }
+            $key = "{0}|{1}" -f [int]$record.processId, [string]$record.creationDate
+            if (-not $known.ContainsKey($key)) { $known[$key] = [pscustomobject]@{ processId = [int]$record.processId; parentProcessId = [int]$record.parentProcessId; creationDate = [string]$record.creationDate; name = [string]$record.name } }
         }
     }
-    $rootCurrent = Get-ProcessIdentity $rootId
-    if ($ExpectedIdentity -and $rootCurrent -and -not (Test-ProcessIdentity $rootCurrent $ExpectedIdentity)) {
-        return [pscustomobject]@{ ownedIds = @($rootId); exited = $false; remainingIds = @($rootId); error = 'Root PID identity changed; no kill was attempted.' }
+    & $mergeRecords @($snapshot.records + $KnownRecords + $ExpectedIdentity)
+    if ($known.Count -gt $MaxProcessTreeCount) {
+        return [pscustomobject]@{ ownedIds = @($known.Values | ForEach-Object processId | Sort-Object -Unique); exited = $false; remainingIds = @($known.Values | ForEach-Object processId | Sort-Object -Unique); error = "Known owned process records exceeded MaxProcessTreeCount=$MaxProcessTreeCount." }
     }
-    $targets = @($snapshot.records + $KnownRecords | Sort-Object processId, creationDate -Unique)
-    $killError = $null
-    foreach ($record in @($targets | Sort-Object @{ Expression = { if ([int]$_.processId -eq $rootId) { 1 } else { 0 } } })) {
-        $current = Get-ProcessIdentity ([int]$record.processId)
-        if (-not $current) { continue }
-        if (-not (Test-ProcessIdentity $current $record)) {
-            $killError = "Process identity changed for PID $($record.processId); no kill was attempted."
-            continue
-        }
-        try {
-            $ownedProcess = if ([int]$record.processId -eq $rootId) { $Process } else { Get-Process -Id ([int]$record.processId) -ErrorAction Stop }
-            if (-not $ownedProcess.HasExited) { $ownedProcess.Kill() }
-        } catch { $killError = $_.Exception.Message }
-    }
+
+    $errors = [System.Collections.Generic.List[string]]::new()
+    $attempted = @{}
     $deadline = [DateTimeOffset]::UtcNow.AddMilliseconds($TimeoutMilliseconds)
-    $remaining = @($rootId)
     do {
-        try { $check = Get-ProcessTreeSnapshot @($rootId) } catch { $check = [pscustomobject]@{ success = $false; error = $_.Exception.Message; records = @() } }
-        if (-not $check.success) { $killError = $check.error; break }
-        $remaining = @($check.records | ForEach-Object processId | Sort-Object -Unique)
-        if ($remaining.Count -eq 0) { break }
-        foreach ($record in @($check.records)) {
-            $current = Get-ProcessIdentity ([int]$record.processId)
-            if ($current -and (Test-ProcessIdentity $current $record)) {
-                try { $ownedProcess = Get-Process -Id ([int]$record.processId) -ErrorAction Stop; if (-not $ownedProcess.HasExited) { $ownedProcess.Kill() } } catch { $killError = $_.Exception.Message }
-            } else { $killError = "Process identity could not be verified for PID $($record.processId); no kill was attempted." }
+        # While the root is still alive, refresh the ancestry and merge it into
+        # the immutable identity set. This is the best bounded protection
+        # available against a child being spawned between snapshots.
+        $rootCurrent = Get-ProcessIdentity $rootId
+        if ($rootCurrent -and -not (Test-ProcessIdentity $rootCurrent $ExpectedIdentity)) {
+            $errors.Add('Root PID identity changed; no kill was attempted.')
+            break
+        }
+        if ($rootCurrent) {
+            try {
+                $fresh = Get-ProcessTreeSnapshot @($rootId)
+                if (-not $fresh.success) { $errors.Add($fresh.error); break }
+                & $mergeRecords @($fresh.records)
+                if ($known.Count -gt $MaxProcessTreeCount) { $errors.Add("Known owned process records exceeded MaxProcessTreeCount=$MaxProcessTreeCount."); break }
+            } catch { $errors.Add("Process-tree refresh failed: $($_.Exception.Message)"); break }
+        }
+
+        foreach ($record in @($known.Values | Sort-Object @{ Expression = { if ([int]$_.processId -eq $rootId) { 0 } else { 1 } } }, processId)) {
+            $pid = [int]$record.processId
+            $current = Get-ProcessIdentity $pid
+            if (-not $current) { continue }
+            if (-not (Test-ProcessIdentity $current $record)) {
+                $errors.Add("Process identity changed for PID $pid; no kill was attempted.")
+                $attempted["$pid|$($record.creationDate)"] = $true
+                continue
+            }
+            $key = "$pid|$($record.creationDate)"
+            if ($attempted.ContainsKey($key)) { continue }
+            try {
+                $ownedProcess = if ($pid -eq $rootId) { $Process } else { Get-Process -Id $pid -ErrorAction Stop }
+                if (-not $ownedProcess.HasExited) { $ownedProcess.Kill() }
+                $attempted[$key] = $true
+            } catch { $errors.Add("PID $pid cleanup failed: $($_.Exception.Message)"); $attempted[$key] = $true }
         }
         Start-Sleep -Milliseconds 100
+        $remainingNow = @()
+        foreach ($record in @($known.Values)) {
+            $current = Get-ProcessIdentity ([int]$record.processId)
+            if ($current -and (Test-ProcessIdentity $current $record)) { $remainingNow += $record }
+            elseif ($current) { $errors.Add("Process identity changed for PID $($record.processId); no kill was attempted.") }
+        }
+        if ($remainingNow.Count -eq 0 -and [DateTimeOffset]::UtcNow -ge $deadline) { break }
+        if ($remainingNow.Count -eq 0 -and -not $rootCurrent) { break }
     } while ([DateTimeOffset]::UtcNow -lt $deadline)
-    $exited = ($remaining.Count -eq 0)
+
+    # Final verification is against every known identity, not merely the
+    # current process tree. An absent PID is safe; a changed identity is not.
+    $remaining = [System.Collections.Generic.List[int]]::new()
+    foreach ($record in @($known.Values)) {
+        $current = Get-ProcessIdentity ([int]$record.processId)
+        if ($current -and (Test-ProcessIdentity $current $record)) { $remaining.Add([int]$record.processId) }
+        elseif ($current) { $errors.Add("Process identity changed for PID $($record.processId); no kill was attempted.") }
+    }
+    $uniqueErrors = @($errors | Sort-Object -Unique)
     [pscustomobject]@{
-        ownedIds = @($targets | ForEach-Object processId | Sort-Object -Unique)
-        exited = ($exited -and $null -eq $killError)
-        remainingIds = $remaining
-        error = $killError
+        ownedIds = @($known.Values | ForEach-Object processId | Sort-Object -Unique)
+        exited = ($remaining.Count -eq 0 -and $uniqueErrors.Count -eq 0)
+        remainingIds = @($remaining | Sort-Object -Unique)
+        error = if ($uniqueErrors.Count -gt 0) { $uniqueErrors -join ' ' } else { $null }
     }
 }
 
@@ -133,6 +168,7 @@ function Invoke-CapturedProcess {
     $stderrTask = $null
     $timedOut = $false
     $cleanup = $null
+    $primaryError = $null
     $stdout = ''
     $stderr = ''
     $exitCode = 1
@@ -147,8 +183,7 @@ function Invoke-CapturedProcess {
         $stderr = if ($stderrTask.Wait(5000)) { $stderrTask.GetAwaiter().GetResult() } else { '' }
         $exitCode = if ($timedOut) { 124 } else { $process.ExitCode }
     } catch {
-        if ($cleanup -and $cleanup.error) { throw "Process $FileName failed after start; cleanup failure: $($cleanup.error)" }
-        throw
+        $primaryError = $_
     } finally {
         try {
             if (-not $process.HasExited) {
@@ -157,6 +192,11 @@ function Invoke-CapturedProcess {
         } catch {
             if (-not $cleanup) { $cleanup = [pscustomobject]@{ exited = $false; remainingIds = @($process.Id); error = $_.Exception.Message } }
         }
+    }
+    if ($primaryError) {
+        $message = "Process $FileName failed after start: $($primaryError.Exception.Message)"
+        if ($cleanup -and $cleanup.error) { $message += " Cleanup failure: $($cleanup.error)" }
+        throw $message
     }
     [pscustomobject]@{
         ExitCode = $exitCode
@@ -273,6 +313,7 @@ function Get-ManifestFacts([object]$Manifest) {
         caseCount = [int]$Manifest.caseCount
         classCount = [int]$Manifest.classCount
         classFacts = @($Manifest.classFacts)
+        caseNames = @($Manifest.cases | ForEach-Object name | Sort-Object)
     }
 }
 
@@ -329,6 +370,17 @@ function Assert-SameManifest([object]$Expected, [object]$Actual) {
     if (Compare-Object $expectedCases $actualCases) { Fail 'Baseline and treatment discovered different API test-case names.' }
     if ($Expected.caseCount -ne $Actual.caseCount) { Fail "Baseline/treatment case counts differ: $($Expected.caseCount) vs $($Actual.caseCount)." }
     if ([string]$Expected.manifestHash -ne [string]$Actual.manifestHash) { Fail 'Baseline and treatment manifest hashes differ.' }
+}
+
+function Assert-SummaryManifestMatchesLive([object]$Persisted, [object]$Live, [string]$Condition) {
+    $persistedNames = @($Persisted.caseNames | ForEach-Object { [string]$_ } | Sort-Object)
+    $liveNames = @($Live.cases | ForEach-Object name | Sort-Object)
+    if (Compare-Object $persistedNames $liveNames) { Fail "$Condition persisted case-name manifest differs from live discovery." }
+    if ([string]$Persisted.manifestHash -ne [string]$Live.manifestHash) { Fail "$Condition persisted manifest hash differs from live discovery." }
+    if ([int]$Persisted.caseCount -ne [int]$Live.caseCount -or [int]$Persisted.classCount -ne [int]$Live.classCount) { Fail "$Condition persisted manifest counts differ from live discovery." }
+    $persistedFacts = @($Persisted.classFacts | ForEach-Object { "{0}|{1}" -f $_.name, $_.cases } | Sort-Object)
+    $liveFacts = @($Live.classFacts | ForEach-Object { "{0}|{1}" -f $_.name, $_.cases } | Sort-Object)
+    if (Compare-Object $persistedFacts $liveFacts) { Fail "$Condition persisted class facts differ from live discovery." }
 }
 
 function Get-ProcessIdentity([int]$Id) {
@@ -472,8 +524,13 @@ function New-TestProcess {
             successfulSamples = 0
         }
     } catch {
-        try { if (-not $process.HasExited) { [void](Stop-ProcessSafely -Process $process -ExpectedIdentity (Get-ProcessIdentity $process.Id)) } } catch { }
-        throw
+        $primary = $_.Exception.Message
+        $cleanup = $null
+        try {
+            if (-not $process.HasExited) { $cleanup = Stop-ProcessSafely -Process $process -ExpectedIdentity (Get-ProcessIdentity $process.Id) }
+        } catch { $cleanup = [pscustomobject]@{ exited = $false; error = $_.Exception.Message } }
+        if ($cleanup -and $cleanup.error) { throw "API shard launch failed: $primary Cleanup failure: $($cleanup.error)" }
+        throw $primary
     }
 }
 
@@ -791,6 +848,16 @@ function Get-ValidatedSummary([object]$Summary, [string]$ExpectedCondition) {
     $summaryManifest = $Summary.manifest
     $summaryMetadata = $Summary.conditionMetadata
     if ($null -eq $summaryManifest -or [string]::IsNullOrWhiteSpace([string]$summaryManifest.manifestHash)) { $errors.Add("$ExpectedCondition summary is missing its canonical manifest facts.") }
+    $caseNames = @($summaryManifest.caseNames | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) } | ForEach-Object { [string]$_ } | Sort-Object)
+    if ($caseNames.Count -eq 0) {
+        $errors.Add("$ExpectedCondition summary is missing its full sorted case-name manifest.")
+    } else {
+        $manifestHashInput = (($caseNames -join "`n") + "`n")
+        $manifestHashProvider = [System.Security.Cryptography.SHA256]::Create()
+        try { $recomputedManifestHash = ([System.BitConverter]::ToString($manifestHashProvider.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($manifestHashInput)))).Replace('-', '').ToLowerInvariant() } finally { $manifestHashProvider.Dispose() }
+        if ($recomputedManifestHash -ne [string]$summaryManifest.manifestHash) { $errors.Add("$ExpectedCondition summary manifestHash does not reconcile with its full case-name manifest.") }
+        if ($summaryManifest.caseCount -and [int]$summaryManifest.caseCount -ne $caseNames.Count) { $errors.Add("$ExpectedCondition summary caseCount does not reconcile with its full case-name manifest.") }
+    }
     if ($null -eq $summaryMetadata -or [string]::IsNullOrWhiteSpace([string]$summaryMetadata.head) -or [string]::IsNullOrWhiteSpace([string]$summaryMetadata.path) -or [string]::IsNullOrWhiteSpace([string]$summaryMetadata.environmentFingerprint) -or -not [bool]$summaryMetadata.cleanAtStart) { $errors.Add("$ExpectedCondition summary is missing condition identity metadata.") }
     if ($summaryMetadata -and [string]$summaryMetadata.condition -ne $ExpectedCondition) { $errors.Add("$ExpectedCondition summary condition metadata is inconsistent.") }
     $required = 0
@@ -813,7 +880,7 @@ function Get-ValidatedSummary([object]$Summary, [string]$ExpectedCondition) {
         $evidenceMetricsComplete = $true
         $shards = @($observation.shards)
         $observationMetadata = $observation.conditionMetadata
-        $finalWorktree = if ($observation.finalWorktree) { $observation.finalWorktree } else { $observation.worktree }
+        $finalWorktree = $observation.finalWorktree
         if ($null -eq $observationMetadata -or [string]$observationMetadata.head -ne [string]$summaryMetadata.head -or
             [string]$observationMetadata.path -ne [string]$summaryMetadata.path -or
             [string]$observationMetadata.environmentFingerprint -ne [string]$summaryMetadata.environmentFingerprint -or
@@ -966,20 +1033,46 @@ function Get-Decision([object]$Baseline, [object]$Treatment) {
 
 function Get-CanonicalPath([string]$Path) {
     $full = [System.IO.Path]::GetFullPath($Path)
-    $suffix = [System.Collections.Generic.List[string]]::new()
-    $cursor = $full
-    while (-not (Test-Path -LiteralPath $cursor)) {
-        $leaf = Split-Path -Leaf $cursor
-        if ([string]::IsNullOrEmpty($leaf)) { break }
-        $suffix.Insert(0, $leaf)
-        $parent = Split-Path -Parent $cursor
-        if ($parent -eq $cursor) { break }
-        $cursor = $parent
+    $root = [System.IO.Path]::GetPathRoot($full)
+    if ([string]::IsNullOrEmpty($root)) { Fail "Could not determine a filesystem root for path: $Path" }
+    $components = @($full.Substring($root.Length) -split '[\\/]+' | Where-Object { $_ -ne '' })
+    $current = $root
+    $visited = @{}
+    for ($depth = 0; $depth -lt 64; $depth++) {
+        $restarted = $false
+        for ($index = 0; $index -lt $components.Count; $index++) {
+            $candidate = Join-Path $current $components[$index]
+            if (-not (Test-Path -LiteralPath $candidate)) {
+                $tail = @($components[$index..($components.Count - 1)]) -join [System.IO.Path]::DirectorySeparatorChar
+                $result = Join-Path $current $tail
+                return $result.TrimEnd('\', '/')
+            }
+            $item = Get-Item -LiteralPath $candidate -Force -ErrorAction Stop
+            $linkType = [string]$item.LinkType
+            $isReparse = ($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0
+            if (-not $isReparse -and [string]::IsNullOrEmpty($linkType)) {
+                $current = [string]$item.FullName
+                continue
+            }
+            $targetValues = @($item.Target | Where-Object { -not [string]::IsNullOrEmpty([string]$_) })
+            $target = if ($targetValues.Count -gt 0) { [string]$targetValues[0] } else { [string](Resolve-Path -LiteralPath $candidate -ErrorAction Stop).Path }
+            if (-not [System.IO.Path]::IsPathRooted($target)) { $target = Join-Path (Split-Path -Parent $candidate) $target }
+            $target = [System.IO.Path]::GetFullPath($target)
+            $remaining = @($components[$index..($components.Count - 1)]) -join '|'
+            $visitKey = ("{0}|{1}" -f $target.ToLowerInvariant(), $remaining.ToLowerInvariant())
+            if ($visited.ContainsKey($visitKey)) { Fail "Reparse-point resolution loop detected at: $candidate" }
+            $visited[$visitKey] = $true
+            $current = $target
+            $components = @($components[$index..($components.Count - 1)])
+            $restarted = $true
+            break
+        }
+        if (-not $restarted) {
+            if ($current -match '^[A-Za-z]:\\$' -or $current -match '^\\\\[^\\]+\\[^\\]+\\$') { return $current }
+            return $current.TrimEnd('\', '/')
+        }
     }
-    if (-not (Test-Path -LiteralPath $cursor)) { return $full.TrimEnd('\', '/') }
-    $resolved = (Resolve-Path -LiteralPath $cursor -ErrorAction Stop).Path
-    foreach ($part in $suffix) { $resolved = Join-Path $resolved $part }
-    $resolved.TrimEnd('\', '/')
+    Fail "Reparse-point resolution exceeded the component/depth bound for: $Path"
 }
 
 function Assert-OutputOutsideWorktrees([string]$OutputPath, [object[]]$Worktrees) {
@@ -1040,6 +1133,8 @@ function New-Plan([string]$Root, [object]$BaselineInfo, [object]$TreatmentInfo, 
         treatment = $TreatmentInfo
         baselineManifest = $Manifest.baseline
         treatmentManifest = $Manifest.treatment
+        baselineConditionMetadata = $Manifest.baselineMetadata
+        treatmentConditionMetadata = $Manifest.treatmentMetadata
         observations = $observations
         decisionRule = 'Require ten valid observations per condition, no test/telemetry/lock failures, and at least 15% reduction in median worst-shard wall clock plus paired-seed median improvement.'
         execution = if ($PlanMode -eq 'Plan') { 'This plan does not build, launch test shards, touch PostgreSQL, or change either worktree.' } else { 'Saved Run plan. The harness will restore/build sequentially, then launch only the planned shards; baseline and treatment never run concurrently.' }
@@ -1078,15 +1173,35 @@ function Main {
     }
     if ($seedValues.Count -lt $Runs) { Fail "Provide at least $Runs deterministic seeds." }
     $Seeds = $seedValues
+    if (-not $IsWindows) { Fail 'This harness is intentionally Windows-only.' }
     if ($Mode -eq 'Evaluate') {
         if (-not $BaselineSummaryPath -or -not $TreatmentSummaryPath) { Fail 'Evaluate mode requires BaselineSummaryPath and TreatmentSummaryPath.' }
         $baseline = Get-Content -Raw -LiteralPath $BaselineSummaryPath | ConvertFrom-Json
         $treatment = Get-Content -Raw -LiteralPath $TreatmentSummaryPath | ConvertFrom-Json
-        if ($baseline.conditionMetadata.path -and $treatment.conditionMetadata.path) {
-            Assert-OutputOutsideWorktrees $OutputRoot @(
-                [pscustomobject]@{ path = [string]$baseline.conditionMetadata.path },
-                [pscustomobject]@{ path = [string]$treatment.conditionMetadata.path }
-            )
+        $baselineRecordedPath = [string]$baseline.conditionMetadata.path
+        $treatmentRecordedPath = [string]$treatment.conditionMetadata.path
+        if ([string]::IsNullOrWhiteSpace($baselineRecordedPath) -or [string]::IsNullOrWhiteSpace($treatmentRecordedPath) -or
+            -not (Test-Path -LiteralPath $baselineRecordedPath -PathType Container) -or
+            -not (Test-Path -LiteralPath $treatmentRecordedPath -PathType Container)) {
+            Fail 'Evaluate requires both recorded condition worktree paths to exist before writing output.'
+        }
+        $liveBaselineInfo = Get-RepoInfo $baselineRecordedPath
+        $liveTreatmentInfo = Get-RepoInfo $treatmentRecordedPath
+        Assert-OutputOutsideWorktrees $OutputRoot @($liveBaselineInfo, $liveTreatmentInfo)
+        Assert-EmptyOutput $OutputRoot 'Evaluate'
+        foreach ($pair in @(@($baseline, $liveBaselineInfo, 'baseline'), @($treatment, $liveTreatmentInfo, 'treatment'))) {
+            $summary = $pair[0]
+            $liveInfo = $pair[1]
+            $condition = $pair[2]
+            if (-not $liveInfo.clean) { Fail "Evaluate $condition worktree is dirty; no decision output was written." }
+            if ([string]$liveInfo.head -ne [string]$summary.conditionMetadata.head) { Fail "Evaluate $condition worktree HEAD no longer matches the recorded SHA." }
+            if (-not $liveInfo.path.Equals([string]$summary.conditionMetadata.path, [StringComparison]::OrdinalIgnoreCase)) { Fail "Evaluate $condition worktree path no longer matches the recorded canonical path." }
+            $liveManifest = Get-TestManifest $liveInfo.path $null
+            Assert-SummaryManifestMatchesLive $summary.manifest $liveManifest $condition
+            Assert-SummaryManifestMatchesLive $summary.conditionMetadata.manifest $liveManifest "$condition condition metadata"
+            $liveEnvironment = Get-EnvironmentInfo $liveInfo.path
+            $liveFingerprint = Get-EnvironmentFingerprint $liveEnvironment
+            if ([string]$liveFingerprint -ne [string]$summary.conditionMetadata.environmentFingerprint) { Fail "Evaluate $condition environment fingerprint no longer matches the recorded evidence." }
         }
         $decision = Get-Decision $baseline $treatment
         Write-JsonFile (Join-Path $OutputRoot 'decision.json') $decision
@@ -1138,7 +1253,7 @@ function Main {
         environmentFingerprint = Get-EnvironmentFingerprint $environment.treatment
     }
     $partitions = @($Seeds[0..($Runs - 1)] | ForEach-Object { New-Partition $baselineManifest.classes $_ $ShardCount })
-    $manifest = [pscustomobject]@{ baseline = $baselineManifest; treatment = $treatmentManifest }
+    $manifest = [pscustomobject]@{ baseline = $baselineManifest; treatment = $treatmentManifest; baselineMetadata = $baselineMetadata; treatmentMetadata = $treatmentMetadata }
     if ($Mode -eq 'Plan') {
         Assert-EmptyOutput $OutputRoot 'Plan'
         $plan = New-Plan $OutputRoot $baselineInfo $treatmentInfo $manifest $partitions 'Plan'
