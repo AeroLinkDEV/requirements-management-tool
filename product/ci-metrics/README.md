@@ -180,10 +180,11 @@ this phase.
 
 - Documented historical baseline (from #553-#559): 10m14s critical path; measurements and decisions are
   recorded in `product/docs/BROWSER_AND_BACKEND_FEEDBACK_TIME.md`.
-- Current phase-A per-run measurements (dogfood runs, July/August 2026): full PR critical path gate
+- Historical phase-A per-run measurements (dogfood runs, July/August 2026): full PR critical path gate
   672-723s (browser shard 1 + gate), API suite 486 tests across 3 shards, domain+infrastructure 758 tests,
-  production journeys 10 tests, metrics tooling 103 tests; caches NuGet 9 hit / Chromium 5 hit per full
-  run. These values are re-measured automatically by the rolling collector; the checked-in journey
+  production journeys 10 tests, and **103 metrics-tooling tests in those runs**. The metrics-tooling suite
+  has since grown; these are historical run counts. Caches were NuGet 9 hit / Chromium 5 hit per full run.
+  The critical-path values are re-measured automatically by the rolling collector; the checked-in journey
   durations continue to be refreshed from `journey-durations-*` artifacts.
 
 ## Security and trust
@@ -269,7 +270,7 @@ Run the full suite exactly as CI does:
 node --test product/ci-metrics/tests/trx.test.mjs product/ci-metrics/tests/playwright.test.mjs product/ci-metrics/tests/fragment.test.mjs product/ci-metrics/tests/aggregate.test.mjs product/ci-metrics/tests/build-run-meta.test.mjs product/ci-metrics/tests/junit.test.mjs product/ci-metrics/tests/ci-workflow-contract.test.mjs product/ci-metrics/tests/zip.test.mjs product/ci-metrics/tests/rolling.test.mjs product/ci-metrics/tests/provenance.test.mjs product/ci-metrics/tests/api-telemetry.test.mjs
 ```
 
-The suite (135 tests) covers schema-driven nested validation, real-format Playwright suite traversal,
+The exact command above currently runs **164 tests** (the former 154-test count predates the later metrics-test additions in #599 and #602). The suite covers schema-driven nested validation, real-format Playwright suite traversal,
 representative TRX success/failure fixtures, Node JUnit parsing, valid/missing/malformed/oversized
 fragments and artifacts, unknown schema versions, failed/cancelled/skipped jobs, missing test reports,
 count mismatches, retried Playwright tests, empty test sets, comparable-run grouping and rolling
