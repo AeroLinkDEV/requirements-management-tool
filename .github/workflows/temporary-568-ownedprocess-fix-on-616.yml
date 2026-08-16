@@ -1,0 +1,79 @@
+name: Temporary deterministic terminate-job validation
+
+on:
+  push:
+    branches:
+      - chatgpt/568-ownedprocess-fix-on-616
+
+permissions:
+  contents: write
+
+jobs:
+  validate:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68
+        with:
+          dotnet-version: 10.0.x
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: 24
+      - name: Apply deterministic terminate-job fixture
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $utf8 = [System.Text.UTF8Encoding]::new($false)
+
+          $programPath = 'product/test-planner/tools/OwnedProcess/Program.cs'
+          $program = Get-Content -Raw -LiteralPath $programPath
+          $old = '            var exit = RunOwned(CreateOptions(shell, status, output, error, env, new[] { "/d", "/c", "echo", "fault" }));'
+          $new = @'
+            // Keep a descendant alive for terminate-job so DrainJobAfterRootExit must invoke the injected
+            // TerminateJobObject failure. The old one-shot echo could exit with an already-empty job,
+            // making this fault-path self-test timing-dependent on the Windows runner.
+            var commandArgs = string.Equals(fault, "terminate-job", StringComparison.Ordinal)
+                ? new[] { "/d", "/c", "start /b ping -n 31 127.0.0.1 > nul" }
+                : new[] { "/d", "/c", "echo", "fault" };
+            var exit = RunOwned(CreateOptions(shell, status, output, error, env, commandArgs));
+'@
+          $new = $new.TrimEnd("`r", "`n")
+          if (($program.Split($old).Count - 1) -ne 1) { throw 'Expected one FaultSelfTest launch anchor.' }
+          [IO.File]::WriteAllText((Resolve-Path $programPath).Path, $program.Replace($old, $new), $utf8)
+
+          $testPath = 'product/test-planner/tests/execution-contract.test.mjs'
+          $test = Get-Content -Raw -LiteralPath $testPath
+          $marker = '  assert.match(ownedProcessSource, /CLEANUP\\|handles=failed/)'
+          $extra = $marker + "`n" + '  assert.match(ownedProcessSource, /string\\.Equals\\(fault, "terminate-job"/) ' + "`n" + '  assert.match(ownedProcessSource, /start \\/b ping -n 31/)'
+          if (($test.Split($marker).Count - 1) -ne 1) { throw 'Expected one OwnedProcess source-contract marker.' }
+          [IO.File]::WriteAllText((Resolve-Path $testPath).Path, $test.Replace($marker, $extra), $utf8)
+
+      - name: Stress deterministic fault path and contract
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          dotnet build product/test-planner/tools/OwnedProcess/OwnedProcess.csproj --configuration Release
+          if ($LASTEXITCODE -ne 0) { throw 'OwnedProcess build failed.' }
+          1..20 | ForEach-Object {
+            dotnet run --project product/test-planner/tools/OwnedProcess/OwnedProcess.csproj --configuration Release --no-build --no-restore -- --self-test-fault terminate-job
+            if ($LASTEXITCODE -ne 0) { throw "terminate-job deterministic stress failed on iteration $_." }
+          }
+          node --test --test-name-pattern='owned process boundary kills late descendants' product/test-planner/tests/execution-contract.test.mjs
+          if ($LASTEXITCODE -ne 0) { throw 'OwnedProcess execution contract failed.' }
+          git diff --check
+          if ($LASTEXITCODE -ne 0) { throw 'git diff --check failed.' }
+
+      - name: Commit validated product repair
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          git config user.name 'seanmccarthyns'
+          git config user.email 'seanmccarthyns@gmail.com'
+          git add product/test-planner/tools/OwnedProcess/Program.cs product/test-planner/tests/execution-contract.test.mjs
+          $paths = @(git diff --cached --name-only)
+          if ($paths.Count -ne 2) { throw "Expected two staged product files, got $($paths.Count)." }
+          git commit -m 'Make terminate-job fault validation deterministic'
+          git push origin HEAD:chatgpt/568-ownedprocess-fix-on-616
