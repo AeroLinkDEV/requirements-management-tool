@@ -1,0 +1,78 @@
+name: Temporary #568 Full closeout proof
+
+on:
+  push:
+    branches:
+      - chatgpt/568-full-closeout-proof
+
+permissions:
+  contents: read
+
+jobs:
+  full-proof:
+    runs-on: windows-latest
+    timeout-minutes: 90
+    steps:
+      - name: Check out exact proof branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - name: Install .NET 10
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v5.2.0
+        with:
+          dotnet-version: 10.0.x
+      - name: Install Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+      - name: Run real Docker-backed Full wrapper
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $transcript = Join-Path $env:RUNNER_TEMP 'aerolink-568-full-proof.txt'
+          $before = if (Test-Path -LiteralPath 'product/.local') {
+            Get-ChildItem -LiteralPath 'product/.local' -Force -Recurse -File | Sort-Object FullName | ForEach-Object {
+              "$($_.FullName.Substring((Resolve-Path '.').Path.Length))|$($_.Length)|$((Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash)"
+            }
+          } else { @('<absent>') }
+          $output = & ./product/scripts/Get-AeroLinkTestPlan.ps1 -Paths 'product/src/AeroLink.Infrastructure/Persistence/Migrations/20260712115723_AddScaleIndexesAndConcurrency.cs' -Mode Full -Explain 2>&1
+          $exit = $LASTEXITCODE
+          $output | Tee-Object -FilePath $transcript | ForEach-Object { Write-Host $_ }
+          $line = @($output | ForEach-Object { [string]$_ } | Where-Object { $_ -like 'AEROLINK_TEST_PLAN_RESULT=*' }) | Select-Object -Last 1
+          if (-not $line) { throw "Full wrapper emitted no bounded result (native exit=$exit)." }
+          $json = $line.Substring('AEROLINK_TEST_PLAN_RESULT='.Length) | ConvertFrom-Json -Depth 30
+          $json | ConvertTo-Json -Depth 30 | Out-File -LiteralPath (Join-Path $env:RUNNER_TEMP 'aerolink-568-full-result.json') -Encoding utf8
+          $after = if (Test-Path -LiteralPath 'product/.local') {
+            Get-ChildItem -LiteralPath 'product/.local' -Force -Recurse -File | Sort-Object FullName | ForEach-Object {
+              "$($_.FullName.Substring((Resolve-Path '.').Path.Length))|$($_.Length)|$((Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash)"
+            }
+          } else { @('<absent>') }
+          if (Compare-Object -ReferenceObject @($before) -DifferenceObject @($after)) { throw 'product/.local changed during Full proof.' }
+          if ($exit -ne 0 -or $json.execution.status -ne 'passed') { throw "Full wrapper was not proven: status=$($json.execution.status), error=$($json.execution.error)" }
+          if ($json.execution.authoritative -ne $false) { throw 'Local Full proof incorrectly claimed merge authority.' }
+          if ($json.execution.resources.persistentPostgreSqlTouched -ne $false) { throw 'Full proof touched persistent PostgreSQL.' }
+          if ($json.execution.resources.persistentEvidenceRootTouched -ne $false) { throw 'Full proof touched persistent evidence.' }
+          if ($json.execution.resources.disposableDockerPostgreSql -notmatch 'required') { throw 'Full proof did not select the disposable Docker PostgreSQL gate.' }
+          if ('postgresql-smoke' -notin @($json.execution.executedCiJobs)) { throw 'Full proof did not execute the PostgreSQL CI-equivalent family.' }
+          @(
+            '## #568 Docker-backed Full closeout proof',
+            '',
+            '- Status: **passed**',
+            "- Total wrapper time: $($json.execution.timing.totalMs) ms",
+            "- Selected CI jobs: $(@($json.execution.selectedCiJobs) -join ', ')",
+            "- Executed CI-equivalent jobs: $(@($json.execution.executedCiJobs) -join ', ')",
+            '- Disposable Docker PostgreSQL: executed and cleaned by the wrapper',
+            '- Persistent PostgreSQL: untouched',
+            '- Persistent product/.local evidence: unchanged',
+            '- Local result remains non-authoritative; GitHub merge evidence is unchanged'
+          ) | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+      - name: Upload bounded Full proof
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: aerolink-568-full-proof-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}\aerolink-568-full-proof.txt
+            ${{ runner.temp }}\aerolink-568-full-result.json
+          if-no-files-found: warn
+          retention-days: 14
