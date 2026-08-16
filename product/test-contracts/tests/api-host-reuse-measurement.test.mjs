@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { join, dirname } from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
-import { test } from 'node:test'
+import { after, test } from 'node:test'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const repoRoot = join(here, '..', '..', '..')
@@ -95,6 +95,10 @@ test('script contract keeps telemetry aggregation, isolated evidence, and altern
   assert.match(source, /process-tree enumeration unavailable/)
   assert.match(source, /manifestHash/)
   assert.match(source, /environmentFingerprint/)
+  assert.match(source, /authoritative CIM operating-system fingerprint/)
+  assert.match(source, /CIM operating-system fingerprint was null or incomplete/)
+  assert.match(source, /authoritative CIM processor fingerprint/)
+  assert.match(source, /CIM processor fingerprint was null or incomplete/)
   assert.match(source, /finalWorktree/)
   assert.doesNotMatch(source, /Stop-Process -Id/)
   assert.doesNotMatch(source, /\.Kill\(\)/)
@@ -137,28 +141,66 @@ function ensureBuilt(worktree) {
   return result.status === 0 && existsSync(dll)
 }
 
-function findLivePlan(t) {
-  const candidates = [repoRoot, 'C:\\Sean Project\\Requirements Management Tool']
-    .filter((path, index, all) => all.indexOf(path) === index && existsSync(path))
-  for (const baselinePath of candidates) {
-    for (const treatmentPath of candidates) {
-      if (baselinePath === treatmentPath || !ensureBuilt(baselinePath) || !ensureBuilt(treatmentPath)) continue
-      const output = mkdtempSync(join(tmpdir(), 'aerolink-563-live-plan-'))
+let liveFixture = null
+
+function runGit(args, cwd = repoRoot) {
+  const result = spawnSync('git', args, { cwd, encoding: 'utf8', windowsHide: true, timeout: 180000, maxBuffer: 8 * 1024 * 1024 })
+  assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`)
+  return result
+}
+
+function createLiveFixture() {
+  const root = mkdtempSync(join(tmpdir(), 'aerolink-563-live-fixture-'))
+  const baselinePath = join(root, 'baseline')
+  const treatmentPath = join(root, 'treatment')
+  try {
+    runGit(['worktree', 'add', '--detach', baselinePath, 'HEAD'])
+    runGit(['worktree', 'add', '--detach', treatmentPath, 'HEAD'])
+    const marker = join(treatmentPath, '.round6-live-fixture-marker')
+    writeFileSync(marker, 'distinct clean fixture commit\n')
+    runGit(['-C', treatmentPath, 'add', '.round6-live-fixture-marker'])
+    runGit(['-C', treatmentPath, '-c', 'user.name=contract', '-c', 'user.email=contract@example.invalid', 'commit', '--quiet', '-m', 'Round 6 live fixture'])
+    assert.equal(ensureBuilt(baselinePath), true, 'baseline live fixture build failed')
+    assert.equal(ensureBuilt(treatmentPath), true, 'treatment live fixture build failed')
+    const output = mkdtempSync(join(tmpdir(), 'aerolink-563-live-plan-'))
+    try {
       const result = runPowerShellRaw([
         '-Mode', 'Plan', '-BaselinePath', baselinePath, '-TreatmentPath', treatmentPath,
         '-OutputRoot', output, '-Runs', '10', '-Seeds', '563000,563001,563002,563003,563004,563005,563006,563007,563008,563009',
       ])
-      if (result.status === 0) {
-        const plan = JSON.parse(readFileSync(join(output, 'plan.json'), 'utf8'))
-        rmSync(output, { recursive: true, force: true })
-        if (plan.baseline.clean && plan.treatment.clean && plan.baseline.head !== plan.treatment.head) return plan
-      }
+      assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`)
+      const plan = JSON.parse(readFileSync(join(output, 'plan.json'), 'utf8'))
+      assert.equal(plan.baseline.clean, true)
+      assert.equal(plan.treatment.clean, true)
+      assert.notEqual(plan.baseline.head, plan.treatment.head)
+      assert.equal(plan.baselineManifest.manifestHash, plan.treatmentManifest.manifestHash)
+      liveFixture = { plan, root }
+    } finally {
       rmSync(output, { recursive: true, force: true })
     }
+  } catch (error) {
+    for (const path of [baselinePath, treatmentPath]) {
+      if (existsSync(path)) spawnSync('git', ['worktree', 'remove', '--force', path], { cwd: repoRoot, encoding: 'utf8', windowsHide: true })
+    }
+    rmSync(root, { recursive: true, force: true })
+    throw error
   }
-  t.skip('No two distinct clean, built current worktrees with an identical live API test manifest were available.')
-  return null
+  return liveFixture.plan
 }
+
+function findLivePlan() {
+  return liveFixture?.plan ?? createLiveFixture()
+}
+
+after(() => {
+  if (!liveFixture) return
+  for (const name of ['baseline', 'treatment']) {
+    const path = join(liveFixture.root, name)
+    if (existsSync(path)) spawnSync('git', ['worktree', 'remove', '--force', path], { cwd: repoRoot, encoding: 'utf8', windowsHide: true })
+  }
+  rmSync(liveFixture.root, { recursive: true, force: true })
+  liveFixture = null
+})
 
 function manifestFacts(manifest) {
   return {
@@ -177,9 +219,9 @@ function makeLiveSummary(plan, condition, wall) {
   const observations = plan.observations.map((planned, index) => {
     const shards = planned.partition.shards.map((shard) => ({
       shard: shard.shard,
-      classes: shard.classes,
-      expectedCaseNames: shard.caseNames,
-      testNames: shard.caseNames,
+      classes: [...shard.classes],
+      expectedCaseNames: [...shard.caseNames],
+      testNames: [...shard.caseNames],
       expectedCases: shard.expectedCases,
       exitCode: 0,
       wallMs: wall,
@@ -266,22 +308,30 @@ test('evaluate authenticates a positive ten-run decision against live manifests 
   assert.ok(Math.abs(decision.pairedImprovement.median - 0.2) < 1e-12)
 })
 
-test('evaluate rejects a same-count TRX case-name substitution', (t) => {
+test('evaluate rejects forged same-count, duplicate, missing, and extra TRX identities', (t) => {
   const plan = findLivePlan(t)
-  if (!plan) return
-  const baseline = makeLiveSummary(plan, 'baseline', 100)
-  const treatment = makeLiveSummary(plan, 'treatment', 80)
-  const shard = baseline.observations[0].shards.find((item) => item.testNames.length > 0)
-  assert.ok(shard)
-  const replacement = baseline.observations[0].shards.find((item) => item !== shard && item.testNames.length > 0).testNames[0]
-  assert.notEqual(replacement, shard.testNames[0])
-  shard.testNames[0] = replacement
-  const evaluated = evaluateLive(plan, baseline, treatment)
-  t.after(() => rmSync(evaluated.directory, { recursive: true, force: true }))
-  assert.equal(evaluated.result.status, 0, `${evaluated.result.stdout}\n${evaluated.result.stderr}`)
-  const decision = JSON.parse(readFileSync(join(evaluated.output, 'decision.json'), 'utf8'))
-  assert.equal(decision.status, 'inconclusive')
-  assert.ok(decision.validationErrors.some((error) => error.includes('case identity')))
+  const mutations = [
+    ['same-count substitution', (names, replacement) => { names[0] = replacement }],
+    ['duplicate', (names) => { names[0] = names[1] }],
+    ['missing', (names) => { names.pop() }],
+    ['extra', (names, replacement) => { names.push(replacement) }],
+  ]
+  for (const [label, mutate] of mutations) {
+    const baseline = makeLiveSummary(plan, 'baseline', 100)
+    const treatment = makeLiveSummary(plan, 'treatment', 80)
+    const shard = baseline.observations[0].shards.find((item) => item.testNames.length > 1)
+    assert.ok(shard, `fixture needs a multi-case shard for ${label}`)
+    const replacement = baseline.observations[0].shards.find((item) => item !== shard && item.testNames.length > 0).testNames[0]
+    const beforeExpected = [...shard.expectedCaseNames]
+    mutate(shard.testNames, replacement)
+    assert.deepEqual(shard.expectedCaseNames, beforeExpected, `${label} must not mutate expected names`)
+    const evaluated = evaluateLive(plan, baseline, treatment)
+    t.after(() => rmSync(evaluated.directory, { recursive: true, force: true }))
+    assert.equal(evaluated.result.status, 0, `${label}: ${evaluated.result.stdout}\n${evaluated.result.stderr}`)
+    const decision = JSON.parse(readFileSync(join(evaluated.output, 'decision.json'), 'utf8'))
+    assert.equal(decision.status, 'inconclusive', label)
+    assert.ok(decision.validationErrors.some((error) => error.includes('case identity')), label)
+  }
 })
 
 test('evaluate rejects forged matching manifests and missing final worktree evidence', (t) => {
@@ -407,7 +457,9 @@ test('job containment smoke drains a late-spawned grandchild', () => {
   assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`)
   const smoke = JSON.parse(result.stdout)
   assert.equal(smoke.smoke, 'job-containment')
-  assert.equal(smoke.jobEmpty, true)
-  assert.equal(smoke.handlesClosed, true)
-  assert.match(smoke.cleanupError, /residual job processes/)
+  assert.equal(smoke.cleanSuccess, true)
+  assert.equal(smoke.lateChildFailClosed, true)
+  assert.match(smoke.lateChildEvidence, /completed without proven Job Object cleanup/)
+  assert.match(smoke.lateChildEvidence, /jobEmpty=False/)
+  assert.match(smoke.lateChildEvidence, /handlesClosed=True/)
 })

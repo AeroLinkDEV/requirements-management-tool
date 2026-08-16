@@ -290,19 +290,25 @@ public static class AeroLinkJobNative
         result.ProcessExited = wait == WAIT_OBJECT_0;
         if (!result.ProcessExited) errors.Append(wait == WAIT_TIMEOUT ? "Process did not exit before cleanup timeout. " : LastError("WaitForSingleObject") + " ");
         var deadline = DateTime.UtcNow.AddMilliseconds(Math.Max(1, timeoutMilliseconds));
+        var unexpectedResidualWasTerminated = false;
         do
         {
             active = QueryActiveProcessCount(launch.JobHandle, out queryError);
             if (active < 0) { errors.Append(queryError + " "); break; }
             if (active == 0) break;
-            if (!terminate)
+            if (!terminate && DateTime.UtcNow >= deadline)
             {
                 if (!TerminateJobObject(launch.JobHandle, 1)) errors.Append("Unexpected residual job processes; " + LastError("TerminateJobObject") + " ");
-                else errors.Append("Unexpected residual job processes were found and terminated. ");
+                else { errors.Append("Unexpected residual job processes were found and terminated. "); unexpectedResidualWasTerminated = true; deadline = DateTime.UtcNow.AddMilliseconds(Math.Max(1, timeoutMilliseconds)); }
                 terminate = true;
             }
+            if (terminate && DateTime.UtcNow >= deadline && active > 0) { errors.Append("Job processes remained active after termination. "); break; }
             System.Threading.Thread.Sleep(25);
         } while (DateTime.UtcNow < deadline);
+        if (active > 0 && terminate && !unexpectedResidualWasTerminated)
+        {
+            errors.Append("Job processes remained active after termination. ");
+        }
         result.ActiveProcesses = active;
         result.JobEmpty = active == 0;
         var processClosed = CloseHandle(launch.ProcessHandle);
@@ -391,10 +397,22 @@ function Stop-JobContainedProcess {
     [pscustomobject]@{
         exited = [bool]$cleanup.Success
         remainingIds = if ($cleanup.ActiveProcesses -gt 0) { @($Launch.ProcessId) } else { @() }
-        error = if ($cleanup.Error) { [string]$cleanup.Error } elseif (-not $cleanup.Success) { 'Job containment cleanup did not prove process exit, job drain, and handle closure.' } else { $null }
+        error = if (-not $cleanup.Success) { "$(if ($cleanup.Error) { [string]$cleanup.Error } else { 'Job containment cleanup did not prove process exit, job drain, and handle closure.' }) processExited=$([bool]$cleanup.ProcessExited); jobEmpty=$([bool]$cleanup.JobEmpty); handlesClosed=$([bool]$cleanup.HandlesClosed); active=$([int]$cleanup.ActiveProcesses)" } else { $null }
         jobEmpty = [bool]$cleanup.JobEmpty
         handlesClosed = [bool]$cleanup.HandlesClosed
     }
+}
+
+function Get-CleanupFailure([object]$Cleanup) {
+    if ($null -eq $Cleanup) { return 'cleanup result was unavailable' }
+    if (-not [string]::IsNullOrWhiteSpace([string]$Cleanup.error)) {
+        return "$( [string]$Cleanup.error ) (exited=$([bool]$Cleanup.exited); jobEmpty=$([bool]$Cleanup.jobEmpty); handlesClosed=$([bool]$Cleanup.handlesClosed); residualIds=$(@($Cleanup.remainingIds).Count))"
+    }
+    if (-not [bool]$Cleanup.exited) { return 'process exit was not proven' }
+    if (-not [bool]$Cleanup.jobEmpty) { return 'job drain was not proven' }
+    if (-not [bool]$Cleanup.handlesClosed) { return 'process/job handle closure was not proven' }
+    if (@($Cleanup.remainingIds).Count -ne 0) { return "owned residual process IDs remain: $(@($Cleanup.remainingIds) -join ',')" }
+    $null
 }
 
 function Invoke-CapturedProcess {
@@ -441,15 +459,13 @@ function Invoke-CapturedProcess {
         try { if (Test-Path -LiteralPath $stderrPath) { Remove-Item -LiteralPath $stderrPath -Force -ErrorAction SilentlyContinue } } catch { }
         try { if (Test-Path -LiteralPath $scratch) { Remove-Item -LiteralPath $scratch -Recurse -Force -ErrorAction SilentlyContinue } } catch { }
     }
+    $cleanupFailure = Get-CleanupFailure $cleanup
     if ($primaryError) {
         $message = "Process $FileName failed after start: $($primaryError.Exception.Message)"
-        $cleanupFailed = ($null -eq $cleanup) -or (-not [bool]$cleanup.exited) -or (@($cleanup.remainingIds).Count -gt 0) -or $cleanup.error
-        if ($cleanupFailed) {
-            $cleanupMessage = if ($cleanup -and $cleanup.error) { [string]$cleanup.error } elseif ($cleanup) { "remaining owned processes: $(@($cleanup.remainingIds) -join ',')" } else { 'cleanup result was unavailable' }
-            $message += " Cleanup failure: $cleanupMessage"
-        }
+        if ($cleanupFailure) { $message += " Cleanup failure: $cleanupFailure" }
         throw $message
     }
+    if ($cleanupFailure) { throw "Process $FileName completed without proven Job Object cleanup: $cleanupFailure" }
     [pscustomobject]@{
         ExitCode = $exitCode
         Stdout = $stdout
@@ -465,12 +481,18 @@ function Invoke-JobContainmentSmoke {
     $root = Join-Path ([IO.Path]::GetTempPath()) ("aerolink-job-smoke-" + [guid]::NewGuid().ToString('N'))
     New-Item -ItemType Directory -Path $root -Force | Out-Null
     try {
+        $clean = Invoke-CapturedProcess -FileName 'pwsh' -Arguments @('-NoProfile', '-Command', 'Write-Output clean') -WorkingDirectory $root -TimeoutSeconds 20
+        if ($null -eq $clean.Cleanup -or (Get-CleanupFailure $clean.Cleanup)) { Fail "Job containment smoke clean command did not prove successful cleanup: $(Get-CleanupFailure $clean.Cleanup)" }
         $childScript = '$child = Start-Process -FilePath ''pwsh'' -ArgumentList @(''-NoProfile'', ''-Command'', ''Start-Sleep -Seconds 30'') -PassThru; Start-Sleep -Milliseconds 250'
-        $result = Invoke-CapturedProcess -FileName 'pwsh' -Arguments @('-NoProfile', '-Command', $childScript) -WorkingDirectory $root -TimeoutSeconds 20
-        if ($null -eq $result.Cleanup -or -not [bool]$result.Cleanup.jobEmpty -or @($result.Cleanup.remainingIds).Count -ne 0) {
-            Fail 'Job containment smoke did not prove that the late-spawned child was drained.'
+        $lateFailure = $null
+        try {
+            [void](Invoke-CapturedProcess -FileName 'pwsh' -Arguments @('-NoProfile', '-Command', $childScript) -WorkingDirectory $root -TimeoutSeconds 20)
+            Fail 'Job containment smoke unexpectedly accepted a residual late-spawned child.'
+        } catch {
+            $lateFailure = $_.Exception.Message
+            if ($lateFailure -notmatch 'completed without proven Job Object cleanup' -or $lateFailure -notmatch 'jobEmpty=False' -or $lateFailure -notmatch 'handlesClosed=True') { throw }
         }
-        [ordered]@{ smoke = 'job-containment'; exitCode = $result.ExitCode; jobEmpty = $result.Cleanup.jobEmpty; handlesClosed = $result.Cleanup.handlesClosed; cleanupError = $result.Cleanup.error } | ConvertTo-Json -Depth 10
+        [ordered]@{ smoke = 'job-containment'; cleanSuccess = $true; lateChildFailClosed = $true; lateChildEvidence = $lateFailure } | ConvertTo-Json -Depth 10
     } finally {
         if (Test-Path -LiteralPath $root) { Remove-Item -LiteralPath $root -Recurse -Force -ErrorAction SilentlyContinue }
     }
@@ -503,8 +525,14 @@ function Get-EnvironmentInfo([string]$Path) {
     if ($nodeResult.ExitCode -ne 0) { Fail "Could not read the Node.js version in $Path. ExitCode=$($nodeResult.ExitCode) TimedOut=$($nodeResult.TimedOut)`nstdout=$($nodeResult.Stdout)`nstderr=$($nodeResult.Stderr)" }
     $dotnet = $dotnetResult.Stdout.Trim()
     $node = $nodeResult.Stdout.Trim()
-    $os = try { Get-CimInstance Win32_OperatingSystem | Select-Object Caption, Version, BuildNumber } catch { $null }
-    $cpu = try { @(Get-CimInstance Win32_Processor | Select-Object Name, NumberOfCores, NumberOfLogicalProcessors) } catch { $null }
+    try { $os = Get-CimInstance Win32_OperatingSystem -ErrorAction Stop | Select-Object -First 1 Caption, Version, BuildNumber } catch { Fail "Could not read authoritative CIM operating-system fingerprint in ${Path}: $($_.Exception.Message)" }
+    if ($null -eq $os -or [string]::IsNullOrWhiteSpace([string]$os.Caption) -or [string]::IsNullOrWhiteSpace([string]$os.Version) -or [string]::IsNullOrWhiteSpace([string]$os.BuildNumber)) {
+        Fail "CIM operating-system fingerprint was null or incomplete in ${Path}."
+    }
+    try { $cpu = @(Get-CimInstance Win32_Processor -ErrorAction Stop | Select-Object Name, NumberOfCores, NumberOfLogicalProcessors) } catch { Fail "Could not read authoritative CIM processor fingerprint in ${Path}: $($_.Exception.Message)" }
+    if ($cpu.Count -eq 0 -or @($cpu | Where-Object { [string]::IsNullOrWhiteSpace([string]$_.Name) -or [int]$_.NumberOfLogicalProcessors -le 0 }).Count -gt 0) {
+        Fail "CIM processor fingerprint was null or incomplete in ${Path}."
+    }
     [ordered]@{
         os = $os
         cpu = $cpu
