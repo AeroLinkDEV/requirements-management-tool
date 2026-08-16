@@ -1,0 +1,113 @@
+name: Temporary #563 exit-code capture repair
+
+on:
+  push:
+    branches:
+      - chatgpt/563-exitcode-before-cleanup
+
+permissions:
+  contents: write
+
+jobs:
+  repair:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - name: Check out exact repair branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - name: Install .NET 10
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v5.2.0
+        with:
+          dotnet-version: 10.0.x
+      - name: Install Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+      - name: Apply bounded product repair
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          @'
+          from pathlib import Path
+
+          def exact(text, old, new, label):
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f'{label}: expected exactly one match, found {count}')
+              return text.replace(old, new, 1)
+
+          script = Path('product/tools/measure-api-host-reuse.ps1')
+          s = script.read_text(encoding='utf-8')
+          cleanup_anchor = '''            try {
+              if ($shard.job) {
+                  $cleanup = Stop-JobContainedProcess -Launch $shard.job -Terminate:(!$shard.process.HasExited) -TimeoutMilliseconds 5000
+          '''
+          replacement = '''            # Capture the managed process exit code while its Process handle is still authoritative.
+              # Job Object cleanup closes the native containment handles; reading ExitCode only afterwards can
+              # throw even though the test process completed successfully, which would turn a valid shard into
+              # a null exit code and invalidate the entire paired observation.
+              try {
+                  if ($shard.timedOut) { $shard.exitCode = 124 }
+                  elseif ($shard.process.HasExited) { $shard.exitCode = [int]$shard.process.ExitCode }
+              } catch {
+                  $shard.exitCode = $null
+                  $exitMessage = "Exit-code capture failed: $($_.Exception.Message)"
+                  $shard.waitError = if ($shard.waitError) { "$($shard.waitError) $exitMessage" } else { $exitMessage }
+              }
+              try {
+                  if ($shard.job) {
+                      $cleanup = Stop-JobContainedProcess -Launch $shard.job -Terminate:(!$shard.process.HasExited) -TimeoutMilliseconds 5000
+          '''
+          s = exact(s, cleanup_anchor, replacement, 'pre-cleanup exit-code capture')
+          s = exact(s,
+              '''            $shard.endedAt = [DateTimeOffset]::UtcNow
+              try { $shard.exitCode = $shard.process.ExitCode } catch { $shard.exitCode = $null }
+              $shard.wallMs = ($shard.endedAt - $shard.shardStartedAt).TotalMilliseconds
+          ''',
+              '''            $shard.endedAt = [DateTimeOffset]::UtcNow
+              $shard.wallMs = ($shard.endedAt - $shard.shardStartedAt).TotalMilliseconds
+          ''',
+              'remove post-cleanup exit-code read')
+          script.write_text(s, encoding='utf-8')
+
+          test_file = Path('product/test-contracts/tests/api-host-reuse-measurement.test.mjs')
+          t = test_file.read_text(encoding='utf-8')
+          test_anchor = '''assert.match(source, /wallMs = 0\\.0/)
+          assert.doesNotMatch(source, /Get-Counter/)
+          '''
+          test_replacement = '''assert.match(source, /wallMs = 0\\.0/)
+          const exitCaptureIndex = source.indexOf('elseif ($shard.process.HasExited) { $shard.exitCode = [int]$shard.process.ExitCode }')
+          const cleanupIndex = source.indexOf('$cleanup = Stop-JobContainedProcess -Launch $shard.job -Terminate:(!$shard.process.HasExited)')
+          assert.ok(exitCaptureIndex >= 0, 'completed process exit code must be captured explicitly')
+          assert.ok(cleanupIndex >= 0, 'Job Object cleanup must remain explicit')
+          assert.ok(exitCaptureIndex < cleanupIndex, 'exit code must be captured before Job Object cleanup closes containment handles')
+          assert.doesNotMatch(source, /endedAt = \[DateTimeOffset\]::UtcNow\s+try \{ \$shard\.exitCode = \$shard\.process\.ExitCode/)
+          assert.doesNotMatch(source, /Get-Counter/)
+          '''
+          t = exact(t, test_anchor, test_replacement, 'exit-code ordering contract')
+          test_file.write_text(t, encoding='utf-8')
+          '@ | python -
+      - name: Validate measurement contracts
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          node --test product/test-contracts/tests/api-host-reuse-measurement.test.mjs
+          if ($LASTEXITCODE -ne 0) { throw 'Measurement contract suite failed.' }
+          & ./product/tools/measure-api-host-reuse.ps1 -JobSmoke
+          if ($LASTEXITCODE -ne 0) { throw 'Native Job Object smoke failed.' }
+          git diff --check
+          if ($LASTEXITCODE -ne 0) { throw 'git diff --check failed.' }
+      - name: Commit only the validated product repair
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          git config user.name 'seanmccarthyns'
+          git config user.email 'seanmccarthyns@gmail.com'
+          git add product/tools/measure-api-host-reuse.ps1 product/test-contracts/tests/api-host-reuse-measurement.test.mjs
+          $staged = @(git diff --cached --name-only)
+          $expected = @('product/test-contracts/tests/api-host-reuse-measurement.test.mjs','product/tools/measure-api-host-reuse.ps1')
+          if ((Compare-Object ($staged | Sort-Object) ($expected | Sort-Object))) { throw "Unexpected staged paths: $($staged -join ', ')" }
+          git commit -m 'Capture #563 shard exit codes before Job Object cleanup'
+          git push origin HEAD:chatgpt/563-exitcode-before-cleanup
