@@ -26,45 +26,41 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          @'
-          from pathlib import Path
+          $utf8 = New-Object System.Text.UTF8Encoding($false)
 
-          program = Path('product/test-planner/tools/OwnedProcess/Program.cs')
-          s = program.read_text(encoding='utf-8')
-          old = '''            var exit = RunOwned(CreateOptions(shell, status, output, error, env, new[] { "/d", "/c", "echo", "fault" }));
-            var statusText = File.Exists(status) ? File.ReadAllText(status) : string.Empty;
-          '''
-          new = '''            // The terminate-job fault must reach TerminateJobAndDrain deterministically. A one-shot
-            // `echo` root can disappear before the job count is sampled, making the injected failure timing-
-            // dependent. For this one fault, launch a child that remains in the Job Object after cmd exits;
-            // DrainJobAfterRootExit must then attempt TerminateJobObject and exercise the injected failure.
-            var commandArgs = string.Equals(fault, "terminate-job", StringComparison.Ordinal)
-                ? new[] { "/d", "/c", "start", "/b", "ping", "-n", "31", "127.0.0.1", ">", "nul" }
-                : new[] { "/d", "/c", "echo", "fault" };
-            var exit = RunOwned(CreateOptions(shell, status, output, error, env, commandArgs));
-            var statusText = File.Exists(status) ? File.ReadAllText(status) : string.Empty;
-          '''
-          if s.count(old) != 1:
-              raise SystemExit(f'FaultSelfTest anchor mismatch: {s.count(old)}')
-          program.write_text(s.replace(old, new, 1), encoding='utf-8')
+          $programPath = 'product/test-planner/tools/OwnedProcess/Program.cs'
+          $program = Get-Content -Raw -LiteralPath $programPath
+          $old = '            var exit = RunOwned(CreateOptions(shell, status, output, error, env, new[] { "/d", "/c", "echo", "fault" }));'
+          if (($program.Split($old).Count - 1) -ne 1) { throw 'FaultSelfTest anchor must occur exactly once.' }
+          $replacement = @(
+            '            // Keep a descendant alive for the terminate-job injection so DrainJobAfterRootExit must exercise it.'
+            '            var commandArgs = string.Equals(fault, "terminate-job", StringComparison.Ordinal)'
+            '                ? new[] { "/d", "/c", "start", "/b", "ping", "-n", "31", "127.0.0.1", ">", "nul" }'
+            '                : new[] { "/d", "/c", "echo", "fault" };'
+            '            var exit = RunOwned(CreateOptions(shell, status, output, error, env, commandArgs));'
+          ) -join "`n"
+          $program = $program.Replace($old, $replacement)
+          [IO.File]::WriteAllText((Resolve-Path $programPath), $program, $utf8)
 
-          test = Path('product/test-planner/tests/execution-contract.test.mjs')
-          t = test.read_text(encoding='utf-8')
-          marker = '''  for (const fault of ['create-job', 'set-job', 'close-job-create', 'create-pipe', 'set-handle', 'close-child-write', 'assign', 'resume', 'terminate-process', 'wait', 'exit-code', 'process-times', 'process-id', 'terminate-job', 'query-job', 'close-child-read-final', 'close-thread', 'close-process', 'close-job', 'capture-timeout', 'cancel-capture']) {
-    execFileSync('dotnet', ['run', '--project', ownedProcessProject, '--configuration', 'Release', '--no-build', '--no-restore', '--', '--self-test-fault', fault], { cwd: repoRoot, stdio: 'ignore' })
-  }
-          '''
-          replacement = marker + '''  // The terminate-job case used to be timing-sensitive because its root process could disappear before
-  // job-drain sampled the job. Exercise it repeatedly so that regression cannot hide behind one lucky pass.
-  for (let attempt = 0; attempt < 10; attempt += 1) {
-    execFileSync('dotnet', ['run', '--project', ownedProcessProject, '--configuration', 'Release', '--no-build', '--no-restore', '--', '--self-test-fault', 'terminate-job'], { cwd: repoRoot, stdio: 'ignore' })
-  }
-'''
-          if t.count(marker) != 1:
-              raise SystemExit(f'execution contract anchor mismatch: {t.count(marker)}')
-          test.write_text(t.replace(marker, replacement, 1), encoding='utf-8')
-          '@ | python -
-      - name: Validate targeted OwnedProcess fault contract
+          $testPath = 'product/test-planner/tests/execution-contract.test.mjs'
+          $tests = Get-Content -Raw -LiteralPath $testPath
+          $marker = '  assert.match(ownedProcessSource, /CLEANUP\|handles=failed/)'
+          if (($tests.Split($marker).Count - 1) -ne 1) { throw 'OwnedProcess source assertion anchor must occur exactly once.' }
+          $extra = $marker + "`n" + '  assert.match(ownedProcessSource, /string\.Equals\(fault, "terminate-job", StringComparison\.Ordinal\)/)' + "`n" + '  assert.match(ownedProcessSource, /"start", "\/b", "ping", "-n", "31"/)'
+          $tests = $tests.Replace($marker, $extra)
+          [IO.File]::WriteAllText((Resolve-Path $testPath), $tests, $utf8)
+      - name: Stress the repaired terminate-job fault path
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $project = 'product/test-planner/tools/OwnedProcess/OwnedProcess.csproj'
+          dotnet build $project --configuration Release
+          if ($LASTEXITCODE -ne 0) { throw 'OwnedProcess build failed.' }
+          foreach ($attempt in 1..20) {
+            dotnet run --project $project --configuration Release --no-build --no-restore -- --self-test-fault terminate-job
+            if ($LASTEXITCODE -ne 0) { throw "terminate-job fault self-test failed on stress iteration $attempt." }
+          }
+      - name: Validate targeted contract and diff
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
