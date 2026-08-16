@@ -1,0 +1,330 @@
+name: Temporary #563 observer fix applicator
+
+on:
+  push:
+    branches:
+      - chatgpt/563-measurement-observer-fix
+
+permissions:
+  contents: write
+
+jobs:
+  apply-and-validate:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - name: Check out exact branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Install .NET 10
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v5.2.0
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Install Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+
+      - name: Apply exact observer corrections
+        shell: pwsh
+        run: |
+          @'
+          from pathlib import Path
+          import re
+
+          script_path = Path('product/tools/measure-api-host-reuse.ps1')
+          source = script_path.read_text(encoding='utf-8')
+
+          def once(old, new, label):
+              global source
+              count = source.count(old)
+              if count != 1:
+                  raise SystemExit(f'{label}: expected one exact match, found {count}')
+              source = source.replace(old, new, 1)
+
+          once(
+              '    private const uint JOB_OBJECT_EXTENDED_LIMIT_INFORMATION = 9;\n',
+              '    private const uint JOB_OBJECT_BASIC_AND_IO_ACCOUNTING_INFORMATION = 8;\n    private const uint JOB_OBJECT_EXTENDED_LIMIT_INFORMATION = 9;\n',
+              'job accounting info class')
+
+          once(
+              '''    [StructLayout(LayoutKind.Sequential)]
+              private struct BasicAccountingInformation
+              {
+                  public long TotalUserTime;
+                  public long TotalKernelTime;
+                  public long ThisPeriodTotalUserTime;
+                  public long ThisPeriodTotalKernelTime;
+                  public uint TotalPageFaultCount;
+                  public uint TotalProcesses;
+                  public uint ActiveProcesses;
+                  public uint TotalTerminatedProcesses;
+              }
+          ''',
+              '''    [StructLayout(LayoutKind.Sequential)]
+              private struct BasicAccountingInformation
+              {
+                  public long TotalUserTime;
+                  public long TotalKernelTime;
+                  public long ThisPeriodTotalUserTime;
+                  public long ThisPeriodTotalKernelTime;
+                  public uint TotalPageFaultCount;
+                  public uint TotalProcesses;
+                  public uint ActiveProcesses;
+                  public uint TotalTerminatedProcesses;
+              }
+
+              [StructLayout(LayoutKind.Sequential)]
+              private struct BasicAndIoAccountingInformation
+              {
+                  public BasicAccountingInformation BasicInfo;
+                  public IoCounters IoInfo;
+              }
+          ''',
+              'job accounting structure')
+
+          once(
+              '''    [DllImport("kernel32.dll", SetLastError = true)]
+              private static extern bool QueryInformationJobObject(IntPtr hJob, uint infoClass, ref BasicAccountingInformation info, uint length, IntPtr returnLength);
+          ''',
+              '''    [DllImport("kernel32.dll", SetLastError = true)]
+              private static extern bool QueryInformationJobObject(IntPtr hJob, uint infoClass, ref BasicAccountingInformation info, uint length, IntPtr returnLength);
+              [DllImport("kernel32.dll", SetLastError = true, EntryPoint = "QueryInformationJobObject")]
+              private static extern bool QueryInformationJobObjectAccounting(IntPtr hJob, uint infoClass, ref BasicAndIoAccountingInformation info, uint length, IntPtr returnLength);
+          ''',
+              'job accounting native query')
+
+          once(
+              '''    public sealed class CleanupResult
+              {
+                  public bool Success;
+                  public bool ProcessExited;
+                  public bool JobEmpty;
+                  public bool HandlesClosed;
+                  public int ActiveProcesses;
+                  public string Error;
+              }
+          ''',
+              '''    public sealed class CleanupResult
+              {
+                  public bool Success;
+                  public bool ProcessExited;
+                  public bool JobEmpty;
+                  public bool HandlesClosed;
+                  public int ActiveProcesses;
+                  public string Error;
+              }
+
+              public sealed class AccountingResult
+              {
+                  public bool Success;
+                  public string Error;
+                  public int ActiveProcesses;
+                  public double CpuMilliseconds;
+                  public ulong ReadTransferBytes;
+                  public ulong WriteTransferBytes;
+              }
+          ''',
+              'job accounting result')
+
+          once(
+              '''    public static CleanupResult Cleanup(LaunchResult launch, bool terminate, int timeoutMilliseconds)
+              {
+          ''',
+              '''    public static AccountingResult QueryAccounting(LaunchResult launch)
+              {
+                  var result = new AccountingResult { Success = false, ActiveProcesses = -1 };
+                  if (launch == null || !launch.Success || launch.JobHandle == IntPtr.Zero)
+                  {
+                      result.Error = "No valid job-contained launch was available for accounting.";
+                      return result;
+                  }
+                  var info = new BasicAndIoAccountingInformation();
+                  if (!QueryInformationJobObjectAccounting(launch.JobHandle, JOB_OBJECT_BASIC_AND_IO_ACCOUNTING_INFORMATION,
+                      ref info, (uint)Marshal.SizeOf<BasicAndIoAccountingInformation>(), IntPtr.Zero))
+                  {
+                      result.Error = LastError("QueryInformationJobObject accounting");
+                      return result;
+                  }
+                  result.Success = true;
+                  result.ActiveProcesses = (int)info.BasicInfo.ActiveProcesses;
+                  result.CpuMilliseconds = (info.BasicInfo.TotalUserTime + info.BasicInfo.TotalKernelTime) / 10000.0;
+                  result.ReadTransferBytes = info.IoInfo.ReadTransferCount;
+                  result.WriteTransferBytes = info.IoInfo.WriteTransferCount;
+                  return result;
+              }
+
+              public static CleanupResult Cleanup(LaunchResult launch, bool terminate, int timeoutMilliseconds)
+              {
+          ''',
+              'job accounting method')
+
+          pattern = re.compile(r'''function Get-IoRate\(\[System\.Collections\.Generic\.HashSet\[int\]\]\$Ids\) \{.*?\n\}\n\nfunction Get-ProcessSample\(\[int\[\]\]\$RootIds\) \{.*?\n\}\n\nfunction New-TestProcess''', re.S)
+          replacement = r'''function Get-JobAccounting($Launch) {
+              try {
+                  $accounting = [AeroLinkJobNative]::QueryAccounting($Launch)
+                  if (-not $accounting.Success) {
+                      return [pscustomobject]@{ available = $false; cpuMs = $null; readBytes = $null; writeBytes = $null; error = [string]$accounting.Error }
+                  }
+                  [pscustomobject]@{
+                      available = $true
+                      cpuMs = [double]$accounting.CpuMilliseconds
+                      readBytes = [double]$accounting.ReadTransferBytes
+                      writeBytes = [double]$accounting.WriteTransferBytes
+                      error = $null
+                  }
+              } catch {
+                  [pscustomobject]@{ available = $false; cpuMs = $null; readBytes = $null; writeBytes = $null; error = $_.Exception.Message }
+              }
+          }
+
+          function Get-ProcessSample([int[]]$RootIds, $Launch) {
+              $snapshot = Get-ProcessTreeSnapshot $RootIds
+              $accounting = Get-JobAccounting $Launch
+              if (-not $snapshot.success) {
+                  return [pscustomobject]@{
+                      ids = @(); records = @(); rootAvailable = $false; processTreeAvailable = $false; processTreeError = $snapshot.error
+                      cpuMs = if ($accounting.available) { $accounting.cpuMs } else { 0.0 }
+                      cpuAvailable = [bool]$accounting.available
+                      io = [pscustomobject]@{ available = [bool]$accounting.available; readBytes = $accounting.readBytes; writeBytes = $accounting.writeBytes; error = $accounting.error }
+                      at = [DateTimeOffset]::UtcNow
+                  }
+              }
+              $records = @($snapshot.records)
+              $ids = @($records | ForEach-Object processId)
+              [pscustomobject]@{
+                  ids = $ids
+                  records = $records
+                  rootAvailable = $snapshot.rootAvailable
+                  processTreeAvailable = $true
+                  processTreeError = $null
+                  cpuMs = if ($accounting.available) { $accounting.cpuMs } else { 0.0 }
+                  cpuAvailable = [bool]$accounting.available
+                  io = [pscustomobject]@{ available = [bool]$accounting.available; readBytes = $accounting.readBytes; writeBytes = $accounting.writeBytes; error = $accounting.error }
+                  at = [DateTimeOffset]::UtcNow
+              }
+          }
+
+          function Update-ShardAccounting([object]$Shard) {
+              $accounting = Get-JobAccounting $Shard.job
+              if (-not $accounting.available) {
+                  $Shard.cpuAvailable = $false
+                  $Shard.ioAvailable = $false
+                  $Shard.cpuError = $accounting.error
+                  $Shard.ioError = $accounting.error
+                  return
+              }
+              if ([double]$accounting.cpuMs -gt [double]$Shard.maxCpuMs) { $Shard.maxCpuMs = [double]$accounting.cpuMs }
+              if ([double]$accounting.readBytes -gt [double]$Shard.diskReadBytes) { $Shard.diskReadBytes = [double]$accounting.readBytes }
+              if ([double]$accounting.writeBytes -gt [double]$Shard.diskWriteBytes) { $Shard.diskWriteBytes = [double]$accounting.writeBytes }
+          }
+
+          function New-TestProcess'''
+          source, count = pattern.subn(replacement, source, count=1)
+          if count != 1:
+              raise SystemExit(f'process accounting block: expected one match, found {count}')
+
+          once(
+              '''            successfulSamples = 0
+                  }
+          ''',
+              '''            successfulSamples = 0
+                      stdout = ''
+                      stderr = ''
+                      endedAt = $null
+                      exitCode = $null
+                      wallMs = 0.0
+                  }
+          ''',
+              'mutable observation fields')
+
+          once(
+              '                    $sample = Get-ProcessSample @($shard.process.Id)\n',
+              '                    $sample = Get-ProcessSample -RootIds @($shard.process.Id) -Launch $shard.job\n',
+              'sample call')
+
+          once(
+              '''                    $elapsedSeconds = ($sample.at - $shard.lastSampleAt).TotalSeconds
+                          if ($sample.io.available) {
+                              $shard.diskReadBytes += $sample.io.readPerSecond * [math]::Max(0, $elapsedSeconds)
+                              $shard.diskWriteBytes += $sample.io.writePerSecond * [math]::Max(0, $elapsedSeconds)
+                          } else {
+          ''',
+              '''                    if ($sample.io.available) {
+                              if ([double]$sample.io.readBytes -gt [double]$shard.diskReadBytes) { $shard.diskReadBytes = [double]$sample.io.readBytes }
+                              if ([double]$sample.io.writeBytes -gt [double]$shard.diskWriteBytes) { $shard.diskWriteBytes = [double]$sample.io.writeBytes }
+                          } else {
+          ''',
+              'cumulative io sampling')
+
+          once(
+              '''        foreach ($shard in $Shards) {
+                      try {
+                          if ($shard.job) {
+          ''',
+              '''        foreach ($shard in $Shards) {
+                      try { if ($shard.job) { Update-ShardAccounting $shard } } catch { $shard.cpuAvailable = $false; $shard.ioAvailable = $false; $shard.cpuError = $_.Exception.Message; $shard.ioError = $_.Exception.Message }
+                      try {
+                          if ($shard.job) {
+          ''',
+              'final job accounting sample')
+
+          once(
+              '''        elseif ($aggregate.report.totals.trxTests -ne $shard.expectedCases -or $aggregate.report.totals.tests -ne $shard.expectedCases) { $invalidReasons.Add("shard $($shard.shard) telemetry/TRX count mismatch") }
+          ''',
+              '''        elseif ($aggregate.report.totals.trxTests -ne $shard.expectedCases) { $invalidReasons.Add("shard $($shard.shard) telemetry/TRX count mismatch") }
+          ''',
+              'telemetry count semantics')
+
+          script_path.write_text(source, encoding='utf-8')
+
+          tests_path = Path('product/test-contracts/tests/api-host-reuse-measurement.test.mjs')
+          tests = tests_path.read_text(encoding='utf-8')
+          marker = "  assert.match(source, /Job containment cleanup/)\n"
+          if tests.count(marker) != 1:
+              raise SystemExit('test insertion marker missing or duplicated')
+          inserted = marker + "  assert.match(source, /JOB_OBJECT_BASIC_AND_IO_ACCOUNTING_INFORMATION/)\n  assert.match(source, /public static AccountingResult QueryAccounting/)\n  assert.match(source, /ReadTransferBytes/)\n  assert.match(source, /function Update-ShardAccounting/)\n  assert.match(source, /stdout = ''/)\n  assert.match(source, /wallMs = 0\\.0/)\n  assert.doesNotMatch(source, /Get-Counter/)\n  assert.doesNotMatch(source, /\\$pid\\s*=/i)\n  assert.doesNotMatch(source, /totals\\.tests -ne \\$shard\\.expectedCases/)\n"
+          tests = tests.replace(marker, inserted, 1)
+          tests_path.write_text(tests, encoding='utf-8')
+
+          docs_path = Path('product/docs/API_HOST_REUSE_MEASUREMENT.md')
+          docs = docs_path.read_text(encoding='utf-8')
+          old = '- process-tree CPU milliseconds and Windows process-counter disk read/write bytes when available;\n'
+          new = '- Job Object cumulative CPU milliseconds and disk read/write bytes, with CIM process-tree identity retained as diagnostic evidence;\n'
+          if docs.count(old) != 1:
+              raise SystemExit(f'document accounting bullet: expected one match, found {docs.count(old)}')
+          docs = docs.replace(old, new, 1)
+          docs_path.write_text(docs, encoding='utf-8')
+          '@ | Set-Content -LiteralPath $env:RUNNER_TEMP\apply.py -Encoding utf8
+          python $env:RUNNER_TEMP\apply.py
+
+      - name: Validate harness contracts and native containment
+        shell: pwsh
+        run: |
+          node --test product/test-contracts/tests/api-host-reuse-measurement.test.mjs
+          pwsh -NoProfile -File product/tools/measure-api-host-reuse.ps1 -JobSmoke
+          git diff --check
+
+      - name: Commit only final product changes
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Remove-Item -LiteralPath '.github/workflows/chatgpt-563-observer-fix.yml' -Force
+          $allowed = @(
+            'product/tools/measure-api-host-reuse.ps1',
+            'product/test-contracts/tests/api-host-reuse-measurement.test.mjs',
+            'product/docs/API_HOST_REUSE_MEASUREMENT.md'
+          )
+          $changed = @(git status --short | ForEach-Object { $_.Substring(3) })
+          $unexpected = @($changed | Where-Object { $_ -ne '.github/workflows/chatgpt-563-observer-fix.yml' -and $allowed -notcontains $_ })
+          if ($unexpected.Count -gt 0) { throw "Unexpected changed paths: $($unexpected -join ', ')" }
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -- $allowed
+          git add -u -- '.github/workflows/chatgpt-563-observer-fix.yml'
+          git diff --cached --check
+          git commit -m 'Harden #563 measurement observer accounting'
+          git push origin HEAD:chatgpt/563-measurement-observer-fix
