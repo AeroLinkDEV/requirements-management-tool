@@ -1,0 +1,105 @@
+name: Temporary #568 core smoke proof v3
+
+on:
+  push:
+    branches:
+      - chatgpt/568-core-smoke-proof-v3
+
+permissions:
+  contents: write
+
+jobs:
+  validate-and-commit:
+    if: ${{ !contains(github.event.head_commit.message, '[core-smoke-v3]') }}
+    runs-on: windows-latest
+    timeout-minutes: 25
+    steps:
+      - name: Check out proof branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+      - name: Install .NET 10
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68
+        with:
+          dotnet-version: 10.0.x
+      - name: Install Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: 24
+      - name: Apply bounded core-smoke optimization
+        shell: pwsh
+        run: ./product/tools/temporary-apply-568-core-smoke-v3.ps1
+      - name: Validate planner contracts and semantic split
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          node --test product/test-planner/tests/classify.test.mjs
+          if ($LASTEXITCODE -ne 0) { throw 'Classifier contract failed.' }
+          & ./product/scripts/Get-AeroLinkTestPlan.Tests.ps1
+          if ($LASTEXITCODE -ne 0) { throw 'Windows planner contract failed.' }
+          $backend = (& ./product/scripts/Get-AeroLinkTestPlan.ps1 -Paths 'product/src/AeroLink.Domain/Requirements/Requirement.cs' -Json -DryRun | Out-String) | ConvertFrom-Json
+          $backendBrowser = @($backend.local | Where-Object { $_.label -eq 'Browser smoke journeys' }) | Select-Object -First 1
+          if ($backendBrowser.command -notmatch 'test:smoke:core') { throw "Backend Fast did not select core smoke: $($backendBrowser.command)" }
+          $client = (& ./product/scripts/Get-AeroLinkTestPlan.ps1 -Paths 'product/client/src/App.tsx' -Json -DryRun | Out-String) | ConvertFrom-Json
+          $clientBrowser = @($client.local | Where-Object { $_.label -eq 'Browser smoke journeys' }) | Select-Object -First 1
+          if ($clientBrowser.command -notmatch 'test:smoke$') { throw "Client Fast did not retain showcase smoke: $($clientBrowser.command)" }
+          $smokeSource = Get-Content -Raw -LiteralPath product/client/tests/application-smoke.spec.ts
+          if ($smokeSource -notmatch "openProject:!seedless") { throw 'Seed-free application smoke does not explicitly stay at first-install entry state.' }
+          if ($smokeSource -notmatch "seedless \? 'Create your first program' : 'Command Center'") { throw 'Application smoke does not assert distinct seeded/seed-free entry states.' }
+      - name: Prepare warmed developer prerequisites outside timing
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          npm --prefix product/client ci
+          if ($LASTEXITCODE -ne 0) { throw 'npm ci failed.' }
+          Push-Location product/client
+          try {
+            npx playwright install chromium
+            if ($LASTEXITCODE -ne 0) { throw 'Chromium install failed.' }
+          }
+          finally { Pop-Location }
+          dotnet build product/AeroLink.slnx --configuration Release
+          if ($LASTEXITCODE -ne 0) { throw 'Warm solution build failed.' }
+      - name: Prove three backend-only Fast runs with margin
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $totals = [System.Collections.Generic.List[long]]::new()
+          $browserTotals = [System.Collections.Generic.List[long]]::new()
+          for ($i = 1; $i -le 3; $i++) {
+            $transcript = Join-Path $env:RUNNER_TEMP "aerolink-568-core-smoke-v3-$i.txt"
+            & ./product/scripts/Get-AeroLinkTestPlan.ps1 -Paths 'product/src/AeroLink.Domain/Requirements/Requirement.cs' -Mode Fast -Explain *>&1 | Tee-Object -FilePath $transcript | ForEach-Object { Write-Host $_ }
+            $nativeExit = $LASTEXITCODE
+            $line = Get-Content -LiteralPath $transcript | Where-Object { $_ -like 'AEROLINK_TEST_PLAN_RESULT=*' } | Select-Object -Last 1
+            if (-not $line) { throw "Core-smoke Fast run $i emitted no compact result; native=$nativeExit." }
+            $json = $line.Substring('AEROLINK_TEST_PLAN_RESULT='.Length) | ConvertFrom-Json -Depth 30
+            if ($nativeExit -ne 0 -or $json.execution.status -ne 'passed') { throw "Core-smoke Fast run $i failed; native=$nativeExit status=$($json.execution.status)." }
+            if ($json.execution.authoritative -ne $false) { throw "Core-smoke Fast run $i claimed merge authority." }
+            if ($json.execution.resources.persistentPostgreSqlTouched -ne $false -or $json.execution.resources.persistentEvidenceRootTouched -ne $false) { throw "Core-smoke Fast run $i touched persistent resources." }
+            $browserStep = @($json.execution.timing.steps | Where-Object { $_.label -eq 'Browser smoke journeys' }) | Select-Object -First 1
+            if (-not $browserStep -or $browserStep.status -ne 'passed') { throw "Core-smoke browser step did not pass on run $i." }
+            $totalMs = [int64]$json.execution.timing.totalMs
+            $browserMs = [int64]$browserStep.elapsedMs
+            $totals.Add($totalMs)
+            $browserTotals.Add($browserMs)
+            Write-Host "CORE_SMOKE_FAST_RUN_${i}_MS=$totalMs"
+            Write-Host "CORE_SMOKE_BROWSER_RUN_${i}_MS=$browserMs"
+          }
+          $sorted = @($totals | Sort-Object)
+          $median = [int64]$sorted[1]
+          Write-Host "CORE_SMOKE_FAST_MEDIAN_MS=$median"
+          Write-Host "CORE_SMOKE_FAST_RUNS_MS=$($totals -join ',')"
+          Write-Host "CORE_SMOKE_BROWSER_RUNS_MS=$($browserTotals -join ',')"
+          if ($median -gt 240000) { throw "Core-smoke Fast median exceeded four minutes: $median ms." }
+          if (@($totals | Where-Object { $_ -gt 240000 }).Count -gt 1) { throw "Core-smoke Fast exceeded four minutes in more than one of three warmed runs: $($totals -join ', ')." }
+      - name: Commit validated product changes
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          git config user.name 'seanmccarthyns'
+          git config user.email 'seanmccarthyns@gmail.com'
+          git add product/client/package.json product/client/tests/global-setup.ts product/client/tests/application-smoke.spec.ts product/test-planner/lib/classify.mjs product/scripts/Get-AeroLinkTestPlan.ps1
+          $paths = @(git diff --cached --name-only)
+          if ($paths.Count -ne 5) { throw "Expected five staged product files, got $($paths.Count)." }
+          git commit -m 'Use seed-free first-install smoke for backend-only Fast [core-smoke-v3]'
+          git push origin HEAD:chatgpt/568-core-smoke-proof-v3
