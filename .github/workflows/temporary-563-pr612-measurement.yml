@@ -1,0 +1,113 @@
+name: Temporary #563 PR 612 paired measurement
+
+on:
+  push:
+    branches:
+      - chatgpt/563-measure-pr612
+
+permissions:
+  contents: read
+
+concurrency:
+  group: aerolink-563-pr612-measurement
+  cancel-in-progress: false
+
+jobs:
+  paired-windows-measurement:
+    runs-on: windows-latest
+    timeout-minutes: 360
+    env:
+      BASELINE_SHA: 08682c11e1d62f3eb5f38c2a467376216ef7052e
+      TREATMENT_SHA: df5dc1b6cc34e11933e73413749a2984018bb7ea
+      SEEDS: 563001,563002,563003,563004,563005,563006,563007,563008,563009,563010
+    steps:
+      - name: Check out measurement orchestrator
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Install .NET 10
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v5.2.0
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Install Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+
+      - name: Prepare exact clean condition worktrees
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          git config --global core.longpaths true
+          $baseline = Join-Path $env:RUNNER_TEMP 'aerolink-563-baseline'
+          $treatment = Join-Path $env:RUNNER_TEMP 'aerolink-563-treatment'
+          $results = Join-Path $env:RUNNER_TEMP 'aerolink-563-results'
+          foreach ($path in @($baseline, $treatment, $results)) {
+            if (Test-Path -LiteralPath $path) { Remove-Item -LiteralPath $path -Recurse -Force }
+          }
+          git worktree prune
+          git worktree add --detach $baseline $env:BASELINE_SHA
+          git worktree add --detach $treatment $env:TREATMENT_SHA
+          if ((git -C $baseline rev-parse HEAD).Trim() -ne $env:BASELINE_SHA) { throw 'Baseline worktree SHA mismatch.' }
+          if ((git -C $treatment rev-parse HEAD).Trim() -ne $env:TREATMENT_SHA) { throw 'Treatment worktree SHA mismatch.' }
+          if (git -C $baseline status --porcelain) { throw 'Baseline worktree is not clean.' }
+          if (git -C $treatment status --porcelain) { throw 'Treatment worktree is not clean.' }
+          "BASELINE_PATH=$baseline" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "TREATMENT_PATH=$treatment" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "RESULTS_PATH=$results" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Run ten paired authoritative observations
+        id: benchmark
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          & (Join-Path $env:TREATMENT_PATH 'product/tools/measure-api-host-reuse.ps1') `
+            -Mode Run `
+            -BaselinePath $env:BASELINE_PATH `
+            -TreatmentPath $env:TREATMENT_PATH `
+            -OutputRoot $env:RESULTS_PATH `
+            -Runs 10 `
+            -ShardCount 3 `
+            -TimeoutMinutes 30 `
+            -ProcessTimeoutMinutes 60 `
+            -MaxProcessTreeCount 256 `
+            -Seeds $env:SEEDS `
+            -Warmup
+
+      - name: Publish bounded decision summary
+        if: always()
+        shell: pwsh
+        run: |
+          $summaryPath = Join-Path $env:RESULTS_PATH 'summary.json'
+          if (-not (Test-Path -LiteralPath $summaryPath)) {
+            '## #563 PR 612 paired measurement' | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+            '' | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+            'No final summary was produced; inspect the uploaded partial evidence.' | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+            exit 0
+          }
+          $summary = Get-Content -LiteralPath $summaryPath -Raw | ConvertFrom-Json -Depth 100
+          $decision = $summary.decision
+          @(
+            '## #563 PR 612 paired measurement',
+            '',
+            "- Baseline: ``$env:BASELINE_SHA``",
+            "- Treatment: ``$env:TREATMENT_SHA``",
+            "- Decision: **$($decision.status)**",
+            "- Reason: $($decision.reason)",
+            "- Baseline valid observations: $($summary.baseline.validObservationCount)/$($summary.baseline.requiredRuns)",
+            "- Treatment valid observations: $($summary.treatment.validObservationCount)/$($summary.treatment.requiredRuns)",
+            "- Baseline median worst-shard wall (ms): $($summary.baseline.quantiles.worstShardWallMs.median)",
+            "- Treatment median worst-shard wall (ms): $($summary.treatment.quantiles.worstShardWallMs.median)",
+            "- Median paired improvement: $($decision.medianPairedImprovementPercent)%"
+          ) | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+
+      - name: Upload complete or partial measurement evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: aerolink-563-pr612-paired-measurement-${{ github.run_id }}
+          path: ${{ runner.temp }}\aerolink-563-results
+          if-no-files-found: warn
+          retention-days: 14
