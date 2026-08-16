@@ -623,6 +623,78 @@ function Invoke-FastStep {
     }
 }
 
+function Invoke-ParallelFastPair {
+    param(
+        [Parameter(Mandatory)]$InfrastructureStep,
+        [Parameter(Mandatory)]$BrowserStep
+    )
+    $selectedCiJobs = Get-StringArray $plan.compact.ci.selected
+    $definitions = @(
+        [pscustomobject]@{ step = $InfrastructureStep; label = 'Infrastructure suite' },
+        [pscustomobject]@{ step = $BrowserStep; label = 'Browser smoke journeys' }
+    )
+    $jobs = [System.Collections.Generic.List[object]]::new()
+    try {
+        foreach ($definition in $definitions) {
+            $job = Start-Job -ArgumentList $definition.label, $repositoryRoot -ScriptBlock {
+                param($Label, $Root)
+                Set-Location -LiteralPath $Root
+                $watch = [Diagnostics.Stopwatch]::StartNew()
+                $output = @()
+                $exitCode = 1
+                try {
+                    switch ($Label) {
+                        'Infrastructure suite' {
+                            $output = @(& dotnet test product/tests/AeroLink.Infrastructure.Tests --configuration Release --no-build 2>&1)
+                            $exitCode = $LASTEXITCODE
+                        }
+                        'Browser smoke journeys' {
+                            $output = @(& npm.cmd --prefix product/client run test:smoke 2>&1)
+                            $exitCode = $LASTEXITCODE
+                        }
+                        default { throw "Unsupported parallel Fast step: $Label" }
+                    }
+                }
+                catch {
+                    $output = @($output) + @($_.Exception.Message)
+                    $exitCode = 1
+                }
+                finally { $watch.Stop() }
+                [pscustomobject]@{
+                    label = $Label
+                    exitCode = [int]$exitCode
+                    elapsedMs = [int64]$watch.ElapsedMilliseconds
+                    output = @($output | ForEach-Object { [string]$_ })
+                }
+            }
+            [void]$jobs.Add([pscustomobject]@{ definition = $definition; job = $job })
+        }
+        Wait-Job -Job @($jobs | ForEach-Object job) | Out-Null
+        $failed = [System.Collections.Generic.List[string]]::new()
+        foreach ($entry in $jobs) {
+            $result = @(Receive-Job -Job $entry.job -ErrorAction Stop)
+            if ($result.Count -ne 1) { throw "Parallel Fast step '$($entry.definition.label)' returned no bounded result." }
+            $result = $result[0]
+            foreach ($line in @($result.output)) { if (-not [string]::IsNullOrWhiteSpace([string]$line)) { Write-Host ([string]$line) } }
+            $status = if ([int]$result.exitCode -eq 0) { 'passed' } else { 'failed' }
+            $ciJobs = @(Get-CiJobsForStep $entry.definition.label | Where-Object { $selectedCiJobs -contains $_ })
+            [void]$executionSteps.Add([ordered]@{
+                label = $entry.definition.label
+                status = $status
+                elapsedMs = [int64]$result.elapsedMs
+                ciJobs = @($ciJobs)
+            })
+            if ($status -ne 'passed') { [void]$failed.Add($entry.definition.label) }
+        }
+        if ($failed.Count -gt 0) { throw "Parallel Fast checks failed: $($failed -join ', ')." }
+    }
+    finally {
+        foreach ($entry in $jobs) {
+            try { if ($entry.job) { Remove-Job -Job $entry.job -Force -ErrorAction SilentlyContinue } } catch { }
+        }
+    }
+}
+
 function Invoke-FullPlan {
     $classification = $plan.classification
     $selectedCiJobs = Get-StringArray $plan.compact.ci.selected
@@ -685,15 +757,27 @@ Push-Location $repositoryRoot
 try {
     try {
         if ($Mode -eq 'Fast') {
-            foreach ($step in $plan.local) {
-                if ($step.label -eq 'Nothing') { continue }
-                if (-not $step.fullOnly) {
-                    $ciJobs = @(Get-CiJobsForStep $step.label | Where-Object { (Get-StringArray $plan.compact.ci.selected) -contains $_ })
-                    Invoke-TimedAction -Label $step.label -CiJobs $ciJobs -Action { Invoke-FastStep -Step $step }
-                }
-                else { Invoke-FastStep -Step $step }
+    $fastSteps = @($plan.local | Where-Object { $_.label -ne 'Nothing' })
+    $infrastructureStep = @($fastSteps | Where-Object { $_.label -eq 'Infrastructure suite' -and -not $_.fullOnly }) | Select-Object -First 1
+    $browserStep = @($fastSteps | Where-Object { $_.label -eq 'Browser smoke journeys' -and -not $_.fullOnly }) | Select-Object -First 1
+    $parallelPairAvailable = ($null -ne $infrastructureStep -and $null -ne $browserStep)
+    $parallelPairCompleted = $false
+    foreach ($step in $fastSteps) {
+        if ($parallelPairAvailable -and $step.label -in @('Infrastructure suite', 'Browser smoke journeys')) {
+            if (-not $parallelPairCompleted) {
+                Write-Host '  Running independent Infrastructure and browser smoke Fast checks concurrently.' -ForegroundColor Cyan
+                Invoke-ParallelFastPair -InfrastructureStep $infrastructureStep -BrowserStep $browserStep
+                $parallelPairCompleted = $true
             }
+            continue
         }
+        if (-not $step.fullOnly) {
+            $ciJobs = @(Get-CiJobsForStep $step.label | Where-Object { (Get-StringArray $plan.compact.ci.selected) -contains $_ })
+            Invoke-TimedAction -Label $step.label -CiJobs $ciJobs -Action { Invoke-FastStep -Step $step }
+        }
+        else { Invoke-FastStep -Step $step }
+    }
+}
         else {
             Invoke-FullPlan
         }

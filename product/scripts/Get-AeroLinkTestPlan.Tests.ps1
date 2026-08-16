@@ -122,6 +122,13 @@ foreach ($area in @('backend', 'client', 'browser', 'postgresql')) {
 
 Assert-True (Test-Path -LiteralPath (Join-Path $root 'TEST_AEROLINK_CHANGED.bat') -PathType Leaf) 'Friendly root BAT entry point is missing.'
 
+$plannerSource = Get-Content -Raw -LiteralPath $scriptPath
+Assert-True ($plannerSource -match 'function Invoke-ParallelFastPair') 'Fast wrapper must define its bounded parallel pair helper.'
+Assert-True ($plannerSource -match 'Start-Job -ArgumentList') 'Fast parallel pair must use owned PowerShell jobs rather than detached background processes.'
+Assert-True ($plannerSource -match 'Wait-Job -Job') 'Fast parallel pair must wait for both selected checks before deciding.'
+Assert-True ($plannerSource -match "Parallel Fast checks failed") 'Fast parallel failures must fail the wrapper rather than being ignored.'
+Assert-True ($plannerSource -match "Infrastructure and browser smoke Fast checks concurrently") 'Fast execution must make the measured independent pair explicit.'
+
 if ($failures.Count -gt 0) {
     $failures | ForEach-Object { Write-Host "FAIL: $_" -ForegroundColor Red }
     Write-Host "Windows test planner contract FAILED ($($failures.Count) failure(s))." -ForegroundColor Red
