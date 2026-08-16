@@ -158,7 +158,7 @@ function New-ExecutionResult {
         resources = [ordered]@{
             persistentPostgreSqlTouched = $false
             persistentEvidenceRootTouched = $false
-            disposableDockerPostgreSql = if ($selected -contains 'postgresql-smoke') { 'required for Full; unique container, loopback port and labeled volume' } else { 'not selected' }
+            disposableDockerPostgreSql = if ($selected -contains 'postgresql-smoke') { 'required for Full; unique container, Docker-assigned loopback port and labeled volume' } else { 'not selected' }
             networkAccessPossible = [bool]($selected -contains 'postgresql-smoke')
         }
         timing = [ordered]@{ totalMs = $totalMs; steps = $timedSteps }
@@ -285,183 +285,237 @@ function Invoke-ScriptContractSuite {
     }
 }
 
-function Get-FreeLoopbackPort {
-    $listener = [System.Net.Sockets.TcpListener]::new([System.Net.IPAddress]::Loopback, 0)
-    try {
-        $listener.Start()
-        return ([System.Net.IPEndPoint]$listener.LocalEndpoint).Port
-    }
-    finally {
-        $listener.Stop()
-    }
+function Get-SafeFailureMessage {
+    param([AllowNull()][string]$Message)
+    if ([string]::IsNullOrWhiteSpace($Message)) { return 'Local validation failed.' }
+    if ($Message -match '(?i)(password|secret|token|authorization|connectionstrings|connection string|postgresql://|--env|env-file|Host=127\.0\.0\.1|User Id=|Password=)') { return 'Local validation failed; sensitive details were redacted.' }
+    if ($Message.Length -gt 512) { return $Message.Substring(0, 512) + '...' }
+    return $Message
 }
-
+function ConvertTo-WindowsArgument {
+    param([Parameter(Mandatory)][string]$Value)
+    if ($Value.Length -eq 0) { return '""' }
+    if ($Value -notmatch '[\s"]') { return $Value }
+    $result = New-Object System.Text.StringBuilder
+    [void]$result.Append('"'); $slashes = 0
+    foreach ($character in $Value.ToCharArray()) {
+        if ($character -eq '\') { $slashes++; continue }
+        if ($character -eq '"') { [void]$result.Append((('\' * ($slashes * 2 + 1)) -join '')); [void]$result.Append('"'); $slashes = 0; continue }
+        if ($slashes -gt 0) { [void]$result.Append((('\' * $slashes) -join '')); $slashes = 0 }
+        [void]$result.Append($character)
+    }
+    if ($slashes -gt 0) { [void]$result.Append((('\' * ($slashes * 2)) -join '')) }
+    [void]$result.Append('"'); return $result.ToString()
+}
 function Invoke-CheckedDocker {
-    param([Parameter(Mandatory)][string]$Docker, [Parameter(Mandatory)][string[]]$Arguments)
-    & $Docker @Arguments
-    if ($LASTEXITCODE -ne 0) { throw "docker $($Arguments -join ' ') exited with code $LASTEXITCODE." }
+    param([Parameter(Mandatory)][string]$Docker, [Parameter(Mandatory)][string]$Operation, [Parameter(Mandatory)][string[]]$Arguments)
+    try { & $Docker @Arguments *> $null; if ($LASTEXITCODE -ne 0) { throw 'native command failed' } }
+    catch { throw "Disposable Docker operation '$Operation' failed." }
 }
-
+function Invoke-DockerText {
+    param([Parameter(Mandatory)][string]$Docker, [Parameter(Mandatory)][string]$Operation, [Parameter(Mandatory)][string[]]$Arguments)
+    try { $output = @(& $Docker @Arguments 2>&1); if ($LASTEXITCODE -ne 0) { throw 'native command failed' }; return ($output -join [Environment]::NewLine).Trim() }
+    catch { throw "Disposable Docker operation '$Operation' failed." }
+}
+function Get-DockerOwnedResource {
+    param([Parameter(Mandatory)][string]$Docker, [Parameter(Mandatory)][ValidateSet('container', 'volume')][string]$Kind, [Parameter(Mandatory)][string]$Name)
+    $arguments = if ($Kind -eq 'container') { @('inspect', '--format', '{{ index .Config.Labels "com.aerolink.planner.run" }}', $Name) } else { @('volume', 'inspect', '--format', '{{ index .Labels "com.aerolink.planner.run" }}', $Name) }
+    try {
+        $output = @(& $Docker @arguments 2>&1)
+        if ($LASTEXITCODE -eq 0) { return (($output -join [Environment]::NewLine).Trim()) }
+        if (($output -join [Environment]::NewLine) -match '(?i)no such object') { return $null }
+        throw 'inspect was not conclusive'
+    } catch { throw "Disposable Docker $Kind ownership could not be verified." }
+}
+function Remove-DockerOwnedResource {
+    param([Parameter(Mandatory)][string]$Docker, [Parameter(Mandatory)][ValidateSet('container', 'volume')][string]$Kind, [Parameter(Mandatory)][string]$Name, [Parameter(Mandatory)][string]$RunId, [Parameter(Mandatory)]$CleanupErrors)
+    try {
+        $owner = Get-DockerOwnedResource -Docker $Docker -Kind $Kind -Name $Name
+        if ($null -eq $owner) { return }
+        if ($owner -ne $RunId) { throw 'ownership label did not match this run' }
+        $args = if ($Kind -eq 'container') { @('rm', '--force', $Name) } else { @('volume', 'rm', '--force', $Name) }
+        Invoke-CheckedDocker -Docker $Docker -Operation "remove-$Kind" -Arguments $args
+        if ($null -ne (Get-DockerOwnedResource -Docker $Docker -Kind $Kind -Name $Name)) { throw 'resource remained after removal' }
+    } catch { [void]$CleanupErrors.Add("Disposable Docker $Kind cleanup was not proven.") }
+}
+function Get-RestrictedSecretFile {
+    param([Parameter(Mandatory)][string]$Path, [Parameter(Mandatory)][string[]]$Lines)
+    foreach ($line in $Lines) { if ($line -match '[\r\n]') { throw 'Disposable secret values contained a line break.' } }
+    $utf8 = New-Object System.Text.UTF8Encoding($false)
+    [IO.File]::WriteAllText($Path, (($Lines -join [Environment]::NewLine) + [Environment]::NewLine), $utf8)
+    $acl = Get-Acl -LiteralPath $Path; $acl.SetAccessRuleProtection($true, $false)
+    $identity = [Security.Principal.WindowsIdentity]::GetCurrent().Name
+    $rule = New-Object System.Security.AccessControl.FileSystemAccessRule($identity, 'FullControl', 'Allow')
+    $acl.SetAccessRule($rule); Set-Acl -LiteralPath $Path -AclObject $acl
+}
+function Remove-ExactTemporaryFile {
+    param([Parameter(Mandatory)][string]$Path, [Parameter(Mandatory)]$CleanupErrors)
+    try {
+        if (Test-Path -LiteralPath $Path) { Remove-Item -LiteralPath $Path -Force -ErrorAction Stop }
+        if (Test-Path -LiteralPath $Path) { throw 'temporary file remained' }
+    } catch { [void]$CleanupErrors.Add('A disposable temporary file could not be removed.') }
+}
+function Read-BoundedTextFile {
+    param([Parameter(Mandatory)][string]$Path)
+    try {
+        if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { return '' }
+        if ((Get-Item -LiteralPath $Path -ErrorAction Stop).Length -gt 131072) { return '' }
+        return [IO.File]::ReadAllText($Path)
+    } catch { return '' }
+}
+function Invoke-SafeApiRequest {
+    param([Parameter(Mandatory)][string]$Label, [Parameter(Mandatory)][string]$Uri, [ValidateSet('Get', 'Post')][string]$Method = 'Get', [AllowNull()]$Body, [AllowNull()]$Headers, [AllowNull()]$WebSession)
+    $parameters = @{ Uri = $Uri; Method = $Method; ErrorAction = 'Stop'; TimeoutSec = 5 }
+    if ($null -ne $Body) { $parameters.Body = $Body; $parameters.ContentType = 'application/json' }
+    if ($null -ne $Headers) { $parameters.Headers = $Headers }
+    if ($null -ne $WebSession) { $parameters.WebSession = $WebSession }
+    try { return Invoke-RestMethod @parameters } catch { throw "Disposable API request '$Label' failed." }
+}
 function Get-DisposableDockerCommand {
     $dockerCommand = Get-Command docker.exe -ErrorAction SilentlyContinue
     if (-not $dockerCommand) { $dockerCommand = Get-Command docker -ErrorAction SilentlyContinue }
     if (-not $dockerCommand) { throw 'Docker is unavailable; the PostgreSQL gate is not-proven and Full mode cannot report success.' }
-    & $dockerCommand.Source version --format '{{.Server.Version}}' *> $null
-    if ($LASTEXITCODE -ne 0) { throw 'Docker is unavailable; the daemon could not be queried, so the PostgreSQL gate is not-proven.' }
+    try { & $dockerCommand.Source version --format '{{.Server.Version}}' *> $null; if ($LASTEXITCODE -ne 0) { throw 'daemon unavailable' } }
+    catch { throw 'Docker is unavailable; the daemon could not be queried, so the PostgreSQL gate is not-proven.' }
     return $dockerCommand.Source
 }
-
 function Invoke-DisposablePostgreSqlGate {
     $docker = Get-DisposableDockerCommand
-
     $runId = ([Guid]::NewGuid().ToString('N'))
-    $containerName = "aerolink-planner-pg-$runId"
-    $volumeName = "aerolink-planner-pg-$runId"
-    $database = "aerolink_ci_$runId"
-    $databaseUser = 'aerolink'
-    $databasePassword = "ci-$runId"
+    $containerName = "aerolink-planner-pg-$runId"; $volumeName = "aerolink-planner-pg-$runId"
+    $database = "aerolink_ci_$runId"; $databaseUser = 'aerolink'; $databasePassword = "ci-$runId"; $apiSecret = "planner-bootstrap-$runId"
     $labelKey = 'com.aerolink.planner.run'
-    $hostPostgreSqlPort = Get-FreeLoopbackPort
-    $hostApiPort = Get-FreeLoopbackPort
-    $containerStarted = $false
-    $volumeCreated = $false
-    $apiProcess = $null
+    if ($containerName -notmatch '^aerolink-planner-pg-[0-9a-f]{32}$' -or $volumeName -notmatch '^aerolink-planner-pg-[0-9a-f]{32}$') { throw 'Disposable resource name validation failed.' }
+    $containerIntent = $true; $volumeIntent = $true; $secretFileIntent = $true
+    $apiOwnershipIntent = $false; $apiProcessStarted = $false; $helper = $null; $apiPid = $null; $apiStart = $null; $apiPort = $null
     $cleanupErrors = [System.Collections.Generic.List[string]]::new()
-    $apiOutput = Join-Path ([IO.Path]::GetTempPath()) "aerolink-planner-$runId-api.out.log"
-    $apiError = Join-Path ([IO.Path]::GetTempPath()) "aerolink-planner-$runId-api.err.log"
-    $oldEnvironment = @{}
-    foreach ($name in @('ASPNETCORE_ENVIRONMENT', 'Database__Provider', 'ConnectionStrings__AeroLink', 'DemoData__Enabled', 'Identity__SeedDemoAccounts', 'Identity__AllowDemoAccounts', 'Identity__CookieSecure', 'Identity__BootstrapSecret')) {
-        $oldEnvironment[$name] = [Environment]::GetEnvironmentVariable($name, 'Process')
-    }
+    $tempRoot = [IO.Path]::GetTempPath()
+    $dockerEnvFile = Join-Path $tempRoot "aerolink-planner-$runId-docker.env"; $apiEnvFile = Join-Path $tempRoot "aerolink-planner-$runId-api.env"
+    $apiStatus = Join-Path $tempRoot "aerolink-planner-$runId-api.status"; $apiOutput = Join-Path $tempRoot "aerolink-planner-$runId-api.out.log"; $apiError = Join-Path $tempRoot "aerolink-planner-$runId-api.err.log"
     try {
-        $existing = & $docker inspect $containerName 2>$null
-        if ($LASTEXITCODE -eq 0) { throw "Refusing to use pre-existing Docker container '$containerName'." }
-        Invoke-CheckedDocker $docker @('volume', 'create', '--label', "$labelKey=$runId", $volumeName)
-        $volumeCreated = $true
-        Invoke-CheckedDocker $docker @(
-            'run', '--detach', '--name', $containerName,
-            '--label', "$labelKey=$runId",
-            '--env', "POSTGRES_DB=$database",
-            '--env', "POSTGRES_USER=$databaseUser",
-            '--env', "POSTGRES_PASSWORD=$databasePassword",
-            '--publish', "127.0.0.1:${hostPostgreSqlPort}:5432",
-            '--volume', "${volumeName}:/var/lib/postgresql/data",
-            'postgres:17'
-        )
-        $containerStarted = $true
+        if ($null -ne (Get-DockerOwnedResource -Docker $docker -Kind container -Name $containerName)) { throw 'Refusing to use a pre-existing disposable container name.' }
+        if ($null -ne (Get-DockerOwnedResource -Docker $docker -Kind volume -Name $volumeName)) { throw 'Refusing to use a pre-existing disposable volume name.' }
+        Get-RestrictedSecretFile -Path $dockerEnvFile -Lines @("POSTGRES_DB=$database", "POSTGRES_USER=$databaseUser", "POSTGRES_PASSWORD=$databasePassword")
+        Invoke-CheckedDocker -Docker $docker -Operation 'create-volume' -Arguments @('volume', 'create', '--label', "$labelKey=$runId", $volumeName)
+        if ((Get-DockerOwnedResource -Docker $docker -Kind volume -Name $volumeName) -ne $runId) { throw 'Disposable volume ownership was not verified.' }
+        Invoke-CheckedDocker -Docker $docker -Operation 'start-container' -Arguments @('run', '--detach', '--name', $containerName, '--label', "$labelKey=$runId", '--env-file', $dockerEnvFile, '--publish', '127.0.0.1::5432', '--volume', ($volumeName + ':/var/lib/postgresql/data'), 'postgres:17')
+        if ((Get-DockerOwnedResource -Docker $docker -Kind container -Name $containerName) -ne $runId) { throw 'Disposable container ownership was not verified.' }
+        $mappingJson = Invoke-DockerText -Docker $docker -Operation 'inspect-port-mapping' -Arguments @('inspect', '--format', '{{json (index .NetworkSettings.Ports "5432/tcp")}}', $containerName)
+        $mapping = @($mappingJson | ConvertFrom-Json)
+        if ($mapping.Count -ne 1 -or $mapping[0].HostIp -ne '127.0.0.1' -or $mapping[0].HostPort -notmatch '^[1-9][0-9]{0,4}$') { throw 'Disposable PostgreSQL loopback mapping was not verified.' }
+        $hostPostgreSqlPort = [int]$mapping[0].HostPort
+        if ($hostPostgreSqlPort -lt 1024 -or $hostPostgreSqlPort -gt 65535) { throw 'Disposable PostgreSQL mapped port was outside the bounded range.' }
         $ready = $false
-        for ($attempt = 0; $attempt -lt 60; $attempt++) {
-            & $docker exec $containerName pg_isready -U $databaseUser -d $database *> $null
-            if ($LASTEXITCODE -eq 0) { $ready = $true; break }
-            Start-Sleep -Seconds 1
-        }
+        for ($attempt = 0; $attempt -lt 60; $attempt++) { & $docker exec $containerName pg_isready -U $databaseUser -d $database *> $null; if ($LASTEXITCODE -eq 0) { $ready = $true; break }; Start-Sleep -Seconds 1 }
         if (-not $ready) { throw 'The disposable PostgreSQL container did not become ready within 60 seconds.' }
-
-        # The API process inherits only these disposable connection settings. The host process is stopped in
-        # finally before the owned container and volume are removed, including when a bootstrap assertion fails.
-        $env:ASPNETCORE_ENVIRONMENT = 'Production'
-        $env:Database__Provider = 'PostgreSql'
-        $env:ConnectionStrings__AeroLink = "Host=127.0.0.1;Port=$hostPostgreSqlPort;Database=$database;Username=$databaseUser;Password=$databasePassword"
-        $env:DemoData__Enabled = 'false'
-        $env:Identity__SeedDemoAccounts = 'false'
-        $env:Identity__AllowDemoAccounts = 'false'
-        $env:Identity__CookieSecure = 'false'
-        $env:Identity__BootstrapSecret = "planner-bootstrap-$runId"
         $apiDll = Join-Path $repositoryRoot 'product/src/AeroLink.Api/bin/Release/net10.0/AeroLink.Api.dll'
-        if (-not (Test-Path -LiteralPath $apiDll -PathType Leaf)) { throw "The disposable PostgreSQL API build is missing: $apiDll." }
-        # Launch the built DLL directly so the owned Process object is the API process itself, not a
-        # dotnet-run parent that could leave a child behind after cleanup.
-        $apiProcess = Start-Process -FilePath 'dotnet' -ArgumentList @($apiDll, '--urls', "http://127.0.0.1:$hostApiPort") -WorkingDirectory $repositoryRoot -RedirectStandardOutput $apiOutput -RedirectStandardError $apiError -PassThru
-
-        $health = $false
-        for ($attempt = 0; $attempt -lt 60; $attempt++) {
-            if ($apiProcess.HasExited) { break }
-            try {
-                $healthResponse = Invoke-RestMethod -Uri "http://127.0.0.1:$hostApiPort/health" -Method Get -TimeoutSec 2
-                if ($healthResponse.status -eq 'healthy') { $health = $true; break }
+        if (-not (Test-Path -LiteralPath $apiDll -PathType Leaf)) { throw 'The disposable PostgreSQL API build is missing.' }
+        Get-RestrictedSecretFile -Path $apiEnvFile -Lines @(
+            'ASPNETCORE_ENVIRONMENT=Production', 'ASPNETCORE_URLS=http://127.0.0.1:0', 'Database__Provider=PostgreSql',
+            "ConnectionStrings__AeroLink=Host=127.0.0.1;Port=$hostPostgreSqlPort;Database=$database;Username=$databaseUser;Password=$databasePassword",
+            'DemoData__Enabled=false', 'Identity__SeedDemoAccounts=false', 'Identity__AllowDemoAccounts=false', 'Identity__CookieSecure=false', "Identity__BootstrapSecret=$apiSecret"
+        )
+        $dotnetCommand = Get-Command dotnet.exe -ErrorAction SilentlyContinue
+        if (-not $dotnetCommand) { $dotnetCommand = Get-Command dotnet -ErrorAction SilentlyContinue }
+        if (-not $dotnetCommand) { throw 'dotnet is required for the disposable API process boundary.' }
+        $ownedProject = Join-Path $repositoryRoot 'product/test-planner/tools/OwnedProcess/OwnedProcess.csproj'; $ownedDll = Join-Path $repositoryRoot 'product/test-planner/tools/OwnedProcess/bin/Release/net10.0/OwnedProcess.dll'
+        if (-not (Test-Path -LiteralPath $ownedDll -PathType Leaf)) { Invoke-CheckedProcess $dotnetCommand.Source @('build', $ownedProject, '--configuration', 'Release') }
+        if (-not (Test-Path -LiteralPath $ownedDll -PathType Leaf)) { throw 'The owned process helper build was not produced.' }
+        $helperArguments = @($ownedDll, '--executable', $dotnetCommand.Source, '--arg', $apiDll, '--arg', '--urls', '--arg', 'http://127.0.0.1:0', '--status-file', $apiStatus, '--stdout-file', $apiOutput, '--stderr-file', $apiError, '--env-file', $apiEnvFile)
+        $startInfo = New-Object System.Diagnostics.ProcessStartInfo; $startInfo.FileName = $dotnetCommand.Source; $startInfo.Arguments = (($helperArguments | ForEach-Object { ConvertTo-WindowsArgument ([string]$_) }) -join ' ')
+        $startInfo.WorkingDirectory = $repositoryRoot; $startInfo.UseShellExecute = $false; $startInfo.CreateNoWindow = $true; $startInfo.RedirectStandardInput = $true; $startInfo.RedirectStandardOutput = $true; $startInfo.RedirectStandardError = $true
+        $helper = New-Object System.Diagnostics.Process; $helper.StartInfo = $startInfo; $apiOwnershipIntent = $true
+        if (-not $helper.Start()) { throw 'The owned disposable API process helper could not start.' }
+        $apiProcessStarted = $true; $null = $helper.StandardOutput.ReadToEndAsync(); $null = $helper.StandardError.ReadToEndAsync()
+        $started = $false
+        for ($attempt = 0; $attempt -lt 120; $attempt++) {
+            $statusText = Read-BoundedTextFile -Path $apiStatus
+            if ($statusText -match '(?m)^STARTED\|pid=(?<pid>[0-9]+)\|start=(?<start>[0-9]+)\|job=assigned$') { $apiPid = [int]$Matches['pid']; $apiStart = [Int64]$Matches['start']; $started = $true; break }
+            if ($statusText -match '(?m)^ERROR\|') { throw 'The owned disposable API process failed before job assignment.' }
+            if ($helper.HasExited) { throw 'The owned disposable API process helper exited before job assignment.' }
+            Start-Sleep -Milliseconds 250
+        }
+        if (-not $started) { throw 'The owned disposable API process did not report bounded job ownership.' }
+        $listenerOwned = $false
+        for ($attempt = 0; $attempt -lt 120; $attempt++) {
+            $apiText = Read-BoundedTextFile -Path $apiOutput
+            if ($apiText -match 'Now listening on:\s*http://127\.0\.0\.1:(?<port>[0-9]{1,5})') {
+                $apiPort = [int]$Matches['port']
+                if ($apiPort -lt 1024 -or $apiPort -gt 65535) { throw 'The disposable API listener port was outside the bounded range.' }
+                try {
+                    $connections = @(Get-NetTCPConnection -State Listen -LocalPort $apiPort -ErrorAction Stop | Where-Object { $_.LocalAddress -eq '127.0.0.1' })
+                    $target = Get-Process -Id $apiPid -ErrorAction Stop; $cimTarget = @(Get-CimInstance Win32_Process -Filter "ProcessId=$apiPid" -ErrorAction Stop)
+                    if ($connections.Count -eq 1 -and [int]$connections[0].OwningProcess -eq $apiPid -and $cimTarget.Count -eq 1 -and ([Int64]$target.StartTime.ToFileTimeUtc() -eq $apiStart)) { $listenerOwned = $true; break }
+                } catch { }
             }
-            catch { }
+            if ($helper.HasExited) { throw 'The owned disposable API process exited before listener ownership was proven.' }
+            Start-Sleep -Milliseconds 250
+        }
+        if (-not $listenerOwned) { throw 'The disposable API listener could not be proven to belong to the exact job-owned API process.' }
+        $baseUri = "http://127.0.0.1:$apiPort"; $health = $false
+        for ($attempt = 0; $attempt -lt 60; $attempt++) {
+            try { $healthResponse = Invoke-SafeApiRequest -Label 'health' -Uri "$baseUri/health"; if ($healthResponse.status -eq 'healthy') { $health = $true; break } } catch { }
             Start-Sleep -Seconds 1
         }
-        if (-not $health) { throw "Disposable PostgreSQL API did not become healthy. See $apiError." }
-
-        $setup = Invoke-RestMethod -Uri "http://127.0.0.1:$hostApiPort/api/setup/status" -Method Get
+        if (-not $health) { throw 'Disposable PostgreSQL API did not become healthy.' }
+        $setup = Invoke-SafeApiRequest -Label 'setup-status-before-bootstrap' -Uri "$baseUri/api/setup/status"
         if (-not $setup.bootstrapRequired -or -not $setup.bootstrapEnabled) { throw 'Disposable PostgreSQL setup did not report bootstrapRequired/bootstrapEnabled.' }
         $bootstrapBody = @{ displayName = 'CI Administrator'; email = 'ci-admin@example.invalid'; password = "CiOnly!$runId" } | ConvertTo-Json -Compress
-        Invoke-RestMethod -Uri "http://127.0.0.1:$hostApiPort/api/setup/bootstrap" -Method Post -ContentType 'application/json' -Headers @{ 'X-AeroLink-Bootstrap-Secret' = $env:Identity__BootstrapSecret } -Body $bootstrapBody | Out-Null
-        $setupAfter = Invoke-RestMethod -Uri "http://127.0.0.1:$hostApiPort/api/setup/status" -Method Get
+        Invoke-SafeApiRequest -Label 'bootstrap' -Uri "$baseUri/api/setup/bootstrap" -Method Post -Headers @{ 'X-AeroLink-Bootstrap-Secret' = $apiSecret } -Body $bootstrapBody | Out-Null
+        $setupAfter = Invoke-SafeApiRequest -Label 'setup-status-after-bootstrap' -Uri "$baseUri/api/setup/status"
         if ($setupAfter.bootstrapRequired -or $setupAfter.bootstrapEnabled) { throw 'Disposable PostgreSQL bootstrap did not close the setup window.' }
         $session = New-Object Microsoft.PowerShell.Commands.WebRequestSession
         $loginBody = @{ userName = 'admin'; password = "CiOnly!$runId" } | ConvertTo-Json -Compress
-        $login = Invoke-RestMethod -Uri "http://127.0.0.1:$hostApiPort/api/auth/login" -Method Post -ContentType 'application/json' -Body $loginBody -WebSession $session
+        $login = Invoke-SafeApiRequest -Label 'login' -Uri "$baseUri/api/auth/login" -Method Post -Body $loginBody -WebSession $session
         if ($login.userName -ne 'admin' -or -not $login.isAdministrator) { throw 'Disposable PostgreSQL administrator login did not succeed.' }
-        $me = Invoke-RestMethod -Uri "http://127.0.0.1:$hostApiPort/api/auth/me" -Method Get -WebSession $session
+        $me = Invoke-SafeApiRequest -Label 'authenticated-identity' -Uri "$baseUri/api/auth/me" -WebSession $session
         if ($me.userName -ne 'admin' -or -not $me.isAdministrator) { throw 'Disposable PostgreSQL authenticated identity did not persist.' }
         $providerBody = @{ key = 'ci-entra'; displayName = 'CI Entra'; protocol = 'OpenIdConnect'; issuer = 'https://login.ci.example/tenant/'; subjectClaim = 'sub'; groupClaim = 'groups' } | ConvertTo-Json -Compress
-        $provider = Invoke-RestMethod -Uri "http://127.0.0.1:$hostApiPort/api/admin/external-identity/providers" -Method Post -ContentType 'application/json' -Body $providerBody -WebSession $session
+        $provider = Invoke-SafeApiRequest -Label 'external-identity-provider-create' -Uri "$baseUri/api/admin/external-identity/providers" -Method Post -Body $providerBody -WebSession $session
         if (-not $provider.enabled -or $provider.issuer -ne 'https://login.ci.example/tenant') { throw 'Disposable PostgreSQL external-identity provider was not normalized and enabled.' }
-        $providers = Invoke-RestMethod -Uri "http://127.0.0.1:$hostApiPort/api/admin/external-identity/providers" -Method Get -WebSession $session
+        $providers = Invoke-SafeApiRequest -Label 'external-identity-provider-list' -Uri "$baseUri/api/admin/external-identity/providers" -WebSession $session
         if (@($providers).Count -ne 1) { throw 'Disposable PostgreSQL provider listing did not contain exactly one provider.' }
         $duplicateStatus = $null
         try {
             $duplicateBody = @{ key = 'ci-entra-two'; displayName = 'CI Duplicate'; protocol = 'OpenIdConnect'; issuer = 'HTTPS://LOGIN.CI.EXAMPLE:443/tenant'; subjectClaim = 'sub'; groupClaim = 'groups' } | ConvertTo-Json -Compress
-            Invoke-RestMethod -Uri "http://127.0.0.1:$hostApiPort/api/admin/external-identity/providers" -Method Post -ContentType 'application/json' -Body $duplicateBody -WebSession $session | Out-Null
-        }
-        catch { $duplicateStatus = [int]$_.Exception.Response.StatusCode }
-        if ($duplicateStatus -ne 409) { throw "Disposable PostgreSQL duplicate trust anchor returned HTTP $duplicateStatus instead of 409." }
+            Invoke-SafeApiRequest -Label 'external-identity-duplicate' -Uri "$baseUri/api/admin/external-identity/providers" -Method Post -Body $duplicateBody -WebSession $session | Out-Null
+        } catch { try { $duplicateStatus = [int]$_.Exception.Response.StatusCode } catch { $duplicateStatus = $null } }
+        if ($duplicateStatus -ne 409) { throw 'Disposable PostgreSQL duplicate trust anchor did not return the expected conflict.' }
         $workspaceCode = "CIP$($runId.Substring(0, 8))"
         $workspaceBody = @{ programName = 'CI Program'; programCode = $workspaceCode; projectName = 'CI Project'; softwareProduct = 'CI Product'; initialRelease = '1.0'; initialReleaseIsReleased = $false } | ConvertTo-Json -Compress
-        $workspace = Invoke-RestMethod -Uri "http://127.0.0.1:$hostApiPort/api/workspaces" -Method Post -ContentType 'application/json' -Body $workspaceBody -WebSession $session
+        $workspace = Invoke-SafeApiRequest -Label 'workspace-create' -Uri "$baseUri/api/workspaces" -Method Post -Body $workspaceBody -WebSession $session
         $programId = [string]$workspace.program.id
         if ([string]::IsNullOrWhiteSpace($programId)) { throw 'Disposable PostgreSQL workspace did not return a program identifier.' }
         $mappingBody = @{ providerId = $provider.id; externalGroup = 'CI-Approvers'; programId = $programId; role = 'Approver' } | ConvertTo-Json -Compress
-        Invoke-RestMethod -Uri "http://127.0.0.1:$hostApiPort/api/admin/external-identity/mappings" -Method Post -ContentType 'application/json' -Body $mappingBody -WebSession $session | Out-Null
+        Invoke-SafeApiRequest -Label 'external-identity-mapping' -Uri "$baseUri/api/admin/external-identity/mappings" -Method Post -Body $mappingBody -WebSession $session | Out-Null
         $resolveBody = @{ providerId = $provider.id; issuer = 'https://login.ci.example/tenant'; externalGroups = @('CI-APPROVERS'); programId = $programId } | ConvertTo-Json -Compress
-        $resolved = Invoke-RestMethod -Uri "http://127.0.0.1:$hostApiPort/api/admin/external-identity/resolve" -Method Post -ContentType 'application/json' -Body $resolveBody -WebSession $session
+        $resolved = Invoke-SafeApiRequest -Label 'external-identity-resolve' -Uri "$baseUri/api/admin/external-identity/resolve" -Method Post -Body $resolveBody -WebSession $session
         if (@($resolved.roles) -notcontains 'Approver') { throw 'Disposable PostgreSQL external-identity mapping did not resolve the expected role.' }
         $attackerBody = @{ providerId = $provider.id; issuer = 'https://login.ci.example.attacker.test/tenant'; externalGroups = @('CI-APPROVERS'); programId = $programId } | ConvertTo-Json -Compress
-        $attackerResolved = Invoke-RestMethod -Uri "http://127.0.0.1:$hostApiPort/api/admin/external-identity/resolve" -Method Post -ContentType 'application/json' -Body $attackerBody -WebSession $session
+        $attackerResolved = Invoke-SafeApiRequest -Label 'external-identity-attacker-resolve' -Uri "$baseUri/api/admin/external-identity/resolve" -Method Post -Body $attackerBody -WebSession $session
         if (@($attackerResolved.roles).Count -ne 0) { throw 'Disposable PostgreSQL look-alike issuer unexpectedly resolved a role.' }
-        Write-Host "  Disposable PostgreSQL gate passed (container=$containerName port=$hostPostgreSqlPort database=$database)." -ForegroundColor Green
+        Write-Host '  Disposable PostgreSQL gate passed after exact process/listener ownership proof.' -ForegroundColor Green
     }
     finally {
-        if ($apiProcess) {
+        if ($apiOwnershipIntent -and $null -ne $helper) {
             try {
-                if (-not $apiProcess.HasExited) {
-                    Stop-Process -InputObject $apiProcess -Force -ErrorAction Stop
-                    [void]$apiProcess.WaitForExit(5000)
-                    if (-not $apiProcess.HasExited) { $cleanupErrors.Add('The disposable API process did not exit after the bounded stop wait.') }
+                if ($apiProcessStarted) {
+                    if (-not $helper.HasExited) { $helper.StandardInput.WriteLine('stop'); $helper.StandardInput.Flush() }
+                    if (-not $helper.WaitForExit(10000)) { try { $helper.Kill() } catch { }; [void]$cleanupErrors.Add('The owned API process helper did not exit within the bounded cleanup wait.') }
+                    $statusAfter = Read-BoundedTextFile -Path $apiStatus
+                    if ($statusAfter -notmatch '(?m)^(STOPPED|EXITED)\|.*\|jobCount=0$' -or $statusAfter -notmatch '(?m)^CLEANUP\|handles=closed$') { [void]$cleanupErrors.Add('Owned API job cleanup was not proven.') }
+                    if ($null -ne $apiPid) { try { if ($null -ne (Get-Process -Id $apiPid -ErrorAction SilentlyContinue)) { [void]$cleanupErrors.Add('The owned API process remained after cleanup.') } } catch { [void]$cleanupErrors.Add('The owned API process exit could not be verified.') } }
+                    if ($null -ne $apiPort) { try { if (@(Get-NetTCPConnection -State Listen -LocalPort $apiPort -ErrorAction Stop | Where-Object { [int]$_.OwningProcess -eq $apiPid }).Count -gt 0) { [void]$cleanupErrors.Add('The owned API listener remained after cleanup.') } } catch { [void]$cleanupErrors.Add('The owned API listener cleanup could not be verified.') } }
                 }
-            }
-            catch { [void]$cleanupErrors.Add("The disposable API process could not be cleaned up: $($_.Exception.Message)") }
+                else {
+                    try { if (-not $helper.HasExited) { $helper.Kill(); [void]$cleanupErrors.Add('The API helper start outcome was uncertain.') } } catch { [void]$cleanupErrors.Add('The API helper start outcome was uncertain.') }
+                }
+            } catch { [void]$cleanupErrors.Add('Owned API process cleanup was not proven.') }
         }
-        foreach ($name in $oldEnvironment.Keys) {
-            try { [Environment]::SetEnvironmentVariable($name, $oldEnvironment[$name], 'Process') }
-            catch { [void]$cleanupErrors.Add("The process environment '$name' could not be restored: $($_.Exception.Message)") }
-        }
-        if ($containerStarted) {
-            $owner = (& $docker inspect --format '{{ index .Config.Labels "com.aerolink.planner.run" }}' $containerName 2>$null | Out-String).Trim()
-            if ($owner -ne $runId) {
-                [void]$cleanupErrors.Add("Refused to remove Docker container '$containerName' because its ownership label was not verified.")
-            }
-            else {
-                & $docker rm --force $containerName *> $null
-                if ($LASTEXITCODE -ne 0) { [void]$cleanupErrors.Add("Docker container '$containerName' could not be removed.") }
-            }
-        }
-        if ($volumeCreated) {
-            $owner = (& $docker volume inspect --format '{{ index .Labels "com.aerolink.planner.run" }}' $volumeName 2>$null | Out-String).Trim()
-            if ($owner -ne $runId) {
-                [void]$cleanupErrors.Add("Refused to remove Docker volume '$volumeName' because its ownership label was not verified.")
-            }
-            else {
-                & $docker volume rm --force $volumeName *> $null
-                if ($LASTEXITCODE -ne 0) { [void]$cleanupErrors.Add("Docker volume '$volumeName' could not be removed.") }
-            }
-        }
-        try { Remove-Item -LiteralPath $apiOutput, $apiError -Force -ErrorAction Stop }
-        catch { [void]$cleanupErrors.Add("Temporary PostgreSQL API logs could not be removed: $($_.Exception.Message)") }
-        if ($cleanupErrors.Count -gt 0) { throw "Disposable PostgreSQL cleanup failed: $($cleanupErrors -join '; ')" }
+        if ($containerIntent) { Remove-DockerOwnedResource -Docker $docker -Kind container -Name $containerName -RunId $runId -CleanupErrors $cleanupErrors }
+        if ($volumeIntent) { Remove-DockerOwnedResource -Docker $docker -Kind volume -Name $volumeName -RunId $runId -CleanupErrors $cleanupErrors }
+        if ($secretFileIntent) { foreach ($path in @($dockerEnvFile, $apiEnvFile, $apiStatus, $apiOutput, $apiError)) { Remove-ExactTemporaryFile -Path $path -CleanupErrors $cleanupErrors } }
+        if ($cleanupErrors.Count -gt 0) { throw 'Disposable PostgreSQL cleanup was not proven; Full mode is non-authoritative.' }
     }
 }
 
@@ -551,7 +605,7 @@ try {
     }
     catch {
         $executionStatus = 'failed'
-        $executionError = $_.Exception.Message
+        $executionError = Get-SafeFailureMessage -Message $_.Exception.Message
         throw
     }
 }

@@ -32,8 +32,10 @@ The switches are deliberately explicit:
 - `-Mode Fast` runs the selected low-cost local commands without claiming merge authority; `-Mode Full`
   runs the selected local suites, the non-documentation operator/recovery script-contract family, and the
   broader disposable SQLite/browser subset. When the CI forecast selects PostgreSQL, Full requires Docker
-  and runs the migration/bootstrap proof only in a uniquely named container, loopback port, database and
-  labeled temporary volume. Missing Docker fails as `not-proven`; it never falls back to the persistent
+  and runs the migration/bootstrap proof only in a uniquely named container, Docker-assigned loopback port,
+  database and labeled temporary volume. Secrets travel through restrictive temporary env-files; the API
+  starts in a kill-on-close Windows Job Object and its port is used only after exact PID/start-time and
+  listener ownership are proven. Missing Docker fails as `not-proven`; it never falls back to the persistent
   PostgreSQL service. `-DryRun` always stops after printing the plan.
 - `-Explain` prints each changed path and its selected areas. `-Json` emits a machine-readable,
   plan-only result with symbolic refs, resolved base/head commit SHAs, provenance, CI selections, and safety
@@ -47,9 +49,11 @@ plus one elapsed duration per executed step. Plan-only JSON reports `execution.s
 elapsed time. These measurements are evidence for feedback only; they do not fabricate or imply the
 3–4 minute #561 target until a representative disposable-checkout measurement is collected.
 
-The disposable PostgreSQL lane owns and removes its container, loopback port, database and labeled volume
-in a `finally` block. It also stops its API process and restores the parent process environment. It never
-calls the persistent `Start-Postgres` launcher, port 54329, or writes `product/.local` evidence.
+The disposable PostgreSQL lane unconditionally verifies ownership and removes its uniquely named container
+and labeled volume in a `finally` block, then verifies that each temporary secret/status/log file is gone.
+It stops the API through the Job Object boundary and fails closed if the job, handles, process, or listener
+cannot be proven clean. It never calls the persistent `Start-Postgres` launcher, port 54329, or writes
+`product/.local` evidence.
 
 ## Node planner
 
