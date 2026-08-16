@@ -72,6 +72,29 @@ contract invocation is directory-driven, so every `product/test-contracts/tests/
 it never checks out or executes pull-request-head code. The signal is not a
 merge gate.
 
+Before applying `ready-for-full-ci`, inspect the latest overlap comment or JSON
+artifact and confirm that its `Current head SHA` matches the pull request you
+are reviewing. The report also names the affected planner/CI lanes and bounded
+reasons; use those lanes to decide what to coordinate, not as proof that a
+test ran.
+
+The status vocabulary and action are:
+
+- `Critical overlap`: an exact changed-file overlap. Coordinate merge order,
+  integrate/rebase the peer, or record an explicit reviewed disposition before
+  requesting full CI. This remains advisory and never blocks by itself.
+- `Coordinate`: different files share a reviewed hotspot/surface. Inspect the
+  peer intent and affected lanes before full CI; it is a non-blocking warning.
+- `Clear`: no active exact-file or reviewed-surface overlap was found for this
+  SHA. Continue with the normal planner and full-gate process.
+- `Unknown`: the API response, labels, files, comments, or bounds were
+  incomplete. Do not treat it as Clear; repair or re-run the analysis first.
+
+The exact PR label `overlap-reviewed` is an acknowledgement that a human or
+agent reviewed the coordination decision. It is trusted metadata only: it is
+shown in the report, never suppresses an overlap, and does not create a block.
+An incomplete label list is `Unknown`, not an implicit absence of the label.
+
 The checker compares eligible open pull requests by canonical changed paths
 and by the repository hotspots in `lib/overlap.mjs`. Rename records include
 both `filename` and `previous_filename`. Every PR identity and every returned
@@ -80,8 +103,9 @@ file status, and rename source where applicable. An absent, malformed, or
 incomplete API record is `Unknown`, never `Clear`.
 
 Analysis is deliberately bounded: at most 100 open pull requests, 30 eligible
-pull requests, 1,000 files per pull request, 4,096 characters per path, 1,000
-comments per target, 100,000 characters per comment, 435 pair comparisons,
+pull requests, 1,000 files per pull request, 4,096 characters per path, 100
+labels per pull request with 256 characters per label name, 1,000 comments per
+target, 100,000 characters per comment, 435 pair comparisons,
 and 30,000 analyzed file paths. The checker fails closed to `Unknown` when a
 bound is exceeded; it does not truncate the input and claim that the remaining
 evidence is clean. The JSON artifact reports `analysisComplete` and the limits
