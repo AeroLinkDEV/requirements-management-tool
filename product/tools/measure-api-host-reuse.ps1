@@ -10,6 +10,7 @@ param(
     [int]$Runs = 10,
     [int]$ShardCount = 3,
     [int]$TimeoutMinutes = 30,
+    [int]$ProcessTimeoutMinutes = 60,
     [string]$Seeds,
     [string]$ProjectPath = 'product/tests/AeroLink.Api.Tests/AeroLink.Api.Tests.csproj',
     [string]$SolutionPath = 'product/AeroLink.slnx',
@@ -33,12 +34,49 @@ function Write-JsonFile([string]$Path, [object]$Value) {
     $Value | ConvertTo-Json -Depth 40 | Set-Content -LiteralPath $Path -Encoding utf8
 }
 
+function Get-LiveProcessIds([int[]]$Ids) {
+    @($Ids | Where-Object {
+        try { Get-Process -Id $_ -ErrorAction Stop | Out-Null; $true } catch { $false }
+    })
+}
+
+function Stop-ProcessSafely {
+    param(
+        [Parameter(Mandatory = $true)][System.Diagnostics.Process]$Process,
+        [int]$TimeoutMilliseconds = 5000
+    )
+
+    $ownedIds = @()
+    try { $ownedIds = @(Get-ProcessTreeIds @($Process.Id)) } catch { $ownedIds = @($Process.Id) }
+    $killError = $null
+    try {
+        if (-not $Process.HasExited) {
+            try { $Process.Kill($true) }
+            catch {
+                foreach ($id in @($ownedIds | Sort-Object -Descending)) {
+                    Stop-Process -Id $id -Force -ErrorAction SilentlyContinue
+                }
+            }
+        }
+    } catch { $killError = $_.Exception.Message }
+    $exited = $false
+    try { $exited = $Process.WaitForExit($TimeoutMilliseconds) } catch { $killError = $_.Exception.Message }
+    $remaining = @(Get-LiveProcessIds $ownedIds)
+    [pscustomobject]@{
+        ownedIds = $ownedIds
+        exited = ($exited -and $remaining.Count -eq 0)
+        remainingIds = $remaining
+        error = $killError
+    }
+}
+
 function Invoke-CapturedProcess {
     param(
         [Parameter(Mandatory = $true)][string]$FileName,
         [Parameter(Mandatory = $true)][string[]]$Arguments,
         [Parameter(Mandatory = $true)][string]$WorkingDirectory,
-        [hashtable]$Environment
+        [hashtable]$Environment,
+        [int]$TimeoutSeconds = ($ProcessTimeoutMinutes * 60)
     )
 
     $startInfo = [System.Diagnostics.ProcessStartInfo]::new()
@@ -59,11 +97,18 @@ function Invoke-CapturedProcess {
     if (-not $process.Start()) { Fail "Could not start $FileName." }
     $stdoutTask = $process.StandardOutput.ReadToEndAsync()
     $stderrTask = $process.StandardError.ReadToEndAsync()
-    $process.WaitForExit()
+    $timedOut = -not $process.WaitForExit($TimeoutSeconds * 1000)
+    $cleanup = $null
+    if ($timedOut) { $cleanup = Stop-ProcessSafely -Process $process }
+    else { $process.WaitForExit() }
+    $stdout = if ($stdoutTask.Wait(5000)) { $stdoutTask.GetAwaiter().GetResult() } else { '' }
+    $stderr = if ($stderrTask.Wait(5000)) { $stderrTask.GetAwaiter().GetResult() } else { '' }
     [pscustomobject]@{
-        ExitCode = $process.ExitCode
-        Stdout = $stdoutTask.GetAwaiter().GetResult()
-        Stderr = $stderrTask.GetAwaiter().GetResult()
+        ExitCode = if ($timedOut) { 124 } else { $process.ExitCode }
+        Stdout = $stdout
+        Stderr = $stderr
+        TimedOut = $timedOut
+        Cleanup = $cleanup
         StartedAt = $startedAt
         EndedAt = [DateTimeOffset]::UtcNow
     }
@@ -195,6 +240,9 @@ function Assert-SameManifest([object]$Expected, [object]$Actual) {
     $expectedNames = @($Expected.classes | ForEach-Object name | Sort-Object)
     $actualNames = @($Actual.classes | ForEach-Object name | Sort-Object)
     if (Compare-Object $expectedNames $actualNames) { Fail 'Baseline and treatment discovered different API class sets.' }
+    $expectedCases = @($Expected.cases | ForEach-Object name | Sort-Object)
+    $actualCases = @($Actual.cases | ForEach-Object name | Sort-Object)
+    if (Compare-Object $expectedCases $actualCases) { Fail 'Baseline and treatment discovered different API test-case names.' }
     if ($Expected.caseCount -ne $Actual.caseCount) { Fail "Baseline/treatment case counts differ: $($Expected.caseCount) vs $($Actual.caseCount)." }
 }
 
@@ -235,12 +283,16 @@ function Get-IoRate([System.Collections.Generic.HashSet[int]]$Ids) {
 function Get-ProcessSample([int[]]$RootIds) {
     $ids = Get-ProcessTreeIds $RootIds
     $cpu = 0.0
-    $cpuAvailable = $true
+    $cpuSamples = 0
     foreach ($id in $ids) {
-        try { $cpu += (Get-Process -Id $id -ErrorAction Stop).TotalProcessorTime.TotalMilliseconds } catch { $cpuAvailable = $false }
+        try { $cpu += (Get-Process -Id $id -ErrorAction Stop).TotalProcessorTime.TotalMilliseconds; $cpuSamples++ } catch { }
+    }
+    $rootAvailable = $false
+    foreach ($root in $RootIds) {
+        try { Get-Process -Id $root -ErrorAction Stop | Out-Null; $rootAvailable = $true; break } catch { }
     }
     $io = Get-IoRate ([System.Collections.Generic.HashSet[int]]::new([int[]]$ids))
-    [pscustomobject]@{ ids = $ids; cpuMs = $cpu; cpuAvailable = $cpuAvailable; io = $io; at = [DateTimeOffset]::UtcNow }
+    [pscustomobject]@{ ids = $ids; rootAvailable = $rootAvailable; cpuMs = $cpu; cpuAvailable = ($rootAvailable -and $cpuSamples -gt 0); io = $io; at = [DateTimeOffset]::UtcNow }
 }
 
 function New-TestProcess {
@@ -270,71 +322,112 @@ function New-TestProcess {
     $process = [System.Diagnostics.Process]::new()
     $process.StartInfo = $startInfo
     $startedAt = [DateTimeOffset]::UtcNow
-    if (-not $process.Start()) { Fail "Could not start the API test shard for $Worktree." }
-    [pscustomobject]@{
-        process = $process
-        shardStartedAt = $startedAt
-        stdoutTask = $process.StandardOutput.ReadToEndAsync()
-        stderrTask = $process.StandardError.ReadToEndAsync()
-        telemetryPath = $TelemetryPath
-        resultsPath = $ResultsPath
-        stdoutPath = $StdoutPath
-        stderrPath = $StderrPath
-        maxCpuMs = 0.0
-        diskReadBytes = 0.0
-        diskWriteBytes = 0.0
-        ioAvailable = $true
-        ioError = $null
-        cpuAvailable = $true
-        cpuError = $null
-        timedOut = $false
-        lastSampleAt = $startedAt
-        samples = 0
+    try {
+        if (-not $process.Start()) { Fail "Could not start the API test shard for $Worktree." }
+        [pscustomobject]@{
+            process = $process
+            shardStartedAt = $startedAt
+            stdoutTask = $process.StandardOutput.ReadToEndAsync()
+            stderrTask = $process.StandardError.ReadToEndAsync()
+            telemetryPath = $TelemetryPath
+            resultsPath = $ResultsPath
+            stdoutPath = $StdoutPath
+            stderrPath = $StderrPath
+            maxCpuMs = 0.0
+            diskReadBytes = 0.0
+            diskWriteBytes = 0.0
+            ioAvailable = $true
+            ioError = $null
+            cpuAvailable = $true
+            cpuError = $null
+            timedOut = $false
+            cleanupFailure = $null
+            waitError = $null
+            ownedProcessIds = @($process.Id)
+            lastSampleAt = $startedAt
+            samples = 0
+            successfulSamples = 0
+        }
+    } catch {
+        try { if (-not $process.HasExited) { [void](Stop-ProcessSafely -Process $process) } } catch { }
+        throw
     }
 }
 
 function Wait-TestProcesses([object[]]$Shards) {
     $deadline = [DateTimeOffset]::UtcNow.AddMinutes($TimeoutMinutes)
-    while ($true) {
-        $active = @($Shards | Where-Object { -not $_.process.HasExited })
-        foreach ($shard in $Shards) {
-            $sample = Get-ProcessSample @($shard.process.Id)
-            $shard.samples++
-            if ($sample.cpuMs -gt $shard.maxCpuMs) { $shard.maxCpuMs = $sample.cpuMs }
-            $elapsedSeconds = ($sample.at - $shard.lastSampleAt).TotalSeconds
-            if ($sample.io.available) {
-                $shard.diskReadBytes += $sample.io.readPerSecond * [math]::Max(0, $elapsedSeconds)
-                $shard.diskWriteBytes += $sample.io.writePerSecond * [math]::Max(0, $elapsedSeconds)
-            } else {
-                $shard.ioAvailable = $false
-                $shard.ioError = $sample.io.error
-            }
-            if (-not $sample.cpuAvailable) {
-                $shard.cpuAvailable = $false
-                $shard.cpuError = 'One or more process-tree CPU samples were unavailable.'
-            }
-            $shard.lastSampleAt = $sample.at
-        }
-        if ($active.Count -eq 0) { break }
-        if ([DateTimeOffset]::UtcNow -gt $deadline) {
+    try {
+        while ($true) {
+            $active = @($Shards | Where-Object { -not $_.process.HasExited })
             foreach ($shard in $active) {
-                $ids = Get-ProcessTreeIds @($shard.process.Id)
-                foreach ($id in $ids) { Stop-Process -Id $id -Force -ErrorAction SilentlyContinue }
-                $shard.timedOut = $true
+                try {
+                    $sample = Get-ProcessSample @($shard.process.Id)
+                    if (-not $sample.rootAvailable) { continue }
+                    $shard.ownedProcessIds = @($shard.ownedProcessIds + $sample.ids | Sort-Object -Unique)
+                    $shard.samples++
+                    if ($sample.cpuAvailable) { $shard.successfulSamples++ }
+                    if ($sample.cpuMs -gt $shard.maxCpuMs) { $shard.maxCpuMs = $sample.cpuMs }
+                    $elapsedSeconds = ($sample.at - $shard.lastSampleAt).TotalSeconds
+                    if ($sample.io.available) {
+                        $shard.diskReadBytes += $sample.io.readPerSecond * [math]::Max(0, $elapsedSeconds)
+                        $shard.diskWriteBytes += $sample.io.writePerSecond * [math]::Max(0, $elapsedSeconds)
+                    } else {
+                        $shard.ioAvailable = $false
+                        $shard.ioError = $sample.io.error
+                    }
+                    if (-not $sample.cpuAvailable) {
+                        $shard.cpuAvailable = $false
+                        $shard.cpuError = 'No active process-tree CPU sample was available.'
+                    }
+                    $shard.lastSampleAt = $sample.at
+                } catch {
+                    $shard.waitError = $_.Exception.Message
+                    $shard.cpuAvailable = $false
+                    $shard.ioAvailable = $false
+                }
             }
-            break
+            if ($active.Count -eq 0) { break }
+            if ([DateTimeOffset]::UtcNow -gt $deadline) {
+                foreach ($shard in $active) {
+                    $cleanup = Stop-ProcessSafely -Process $shard.process
+                    $shard.timedOut = $true
+                    if (-not $cleanup.exited) { $shard.cleanupFailure = "Owned process tree did not exit: $($cleanup.remainingIds -join ',')" }
+                    if ($cleanup.error) { $shard.cleanupFailure = $cleanup.error }
+                }
+                break
+            }
+            Start-Sleep -Milliseconds 500
         }
-        Start-Sleep -Milliseconds 500
-    }
-    foreach ($shard in $Shards) {
-        $shard.process.WaitForExit()
-        $shard.stdout = $shard.stdoutTask.GetAwaiter().GetResult()
-        $shard.stderr = $shard.stderrTask.GetAwaiter().GetResult()
-        $shard.endedAt = [DateTimeOffset]::UtcNow
-        Set-Content -LiteralPath $shard.stdoutPath -Value $shard.stdout -Encoding utf8
-        Set-Content -LiteralPath $shard.stderrPath -Value $shard.stderr -Encoding utf8
-        $shard.exitCode = $shard.process.ExitCode
-        $shard.wallMs = ($shard.endedAt - $shard.shardStartedAt).TotalMilliseconds
+    } catch {
+        foreach ($shard in $Shards) { $shard.waitError = $_.Exception.Message }
+    } finally {
+        foreach ($shard in $Shards) {
+            try {
+                if (-not $shard.process.HasExited) {
+                    $cleanup = Stop-ProcessSafely -Process $shard.process
+                    if (-not $cleanup.exited) { $shard.cleanupFailure = "Owned process tree did not exit: $($cleanup.remainingIds -join ',')" }
+                    if ($cleanup.error) { $shard.cleanupFailure = $cleanup.error }
+                }
+                $remainingOwned = @(Get-LiveProcessIds $shard.ownedProcessIds)
+                if ($remainingOwned.Count -gt 0) {
+                    foreach ($id in $remainingOwned) { Stop-Process -Id $id -Force -ErrorAction SilentlyContinue }
+                    $stopDeadline = [DateTimeOffset]::UtcNow.AddMilliseconds(5000)
+                    do {
+                        Start-Sleep -Milliseconds 100
+                        $remainingOwned = @(Get-LiveProcessIds $shard.ownedProcessIds)
+                    } while ($remainingOwned.Count -gt 0 -and [DateTimeOffset]::UtcNow -lt $stopDeadline)
+                    if ($remainingOwned.Count -gt 0) { $shard.cleanupFailure = "Owned descendants remained: $($remainingOwned -join ',')" }
+                }
+                if (-not $shard.process.WaitForExit(5000)) { $shard.cleanupFailure = 'Process did not exit within the cleanup wait.' }
+            } catch { $shard.cleanupFailure = $_.Exception.Message }
+            try { $shard.stdout = if ($shard.stdoutTask.Wait(5000)) { $shard.stdoutTask.GetAwaiter().GetResult() } else { '' } } catch { $shard.stdout = '' }
+            try { $shard.stderr = if ($shard.stderrTask.Wait(5000)) { $shard.stderrTask.GetAwaiter().GetResult() } else { '' } } catch { $shard.stderr = '' }
+            $shard.endedAt = [DateTimeOffset]::UtcNow
+            Set-Content -LiteralPath $shard.stdoutPath -Value $shard.stdout -Encoding utf8
+            Set-Content -LiteralPath $shard.stderrPath -Value $shard.stderr -Encoding utf8
+            try { $shard.exitCode = $shard.process.ExitCode } catch { $shard.exitCode = $null }
+            $shard.wallMs = ($shard.endedAt - $shard.shardStartedAt).TotalMilliseconds
+        }
     }
 }
 
@@ -356,10 +449,11 @@ function Get-TrxCounts([string]$Path) {
 
 function Invoke-TelemetryAggregator([string]$Worktree, [string]$TelemetryPath, [string]$TrxPath, [string]$OutputPath) {
     if (-not (Test-Path -LiteralPath $TelemetryPath -PathType Leaf) -or -not (Test-Path -LiteralPath $TrxPath -PathType Leaf)) {
-        return [pscustomobject]@{ report = $null; malformed = $null; truncated = $null; output = 'telemetry or TRX missing' }
+        return [pscustomobject]@{ report = $null; malformed = $null; truncated = $null; output = 'telemetry or TRX missing'; exitCode = 2; timedOut = $false; cleanup = $null }
     }
     $aggregator = Join-Path $Worktree 'product/ci-metrics/bin/aggregate-api-telemetry.mjs'
-    $result = Invoke-CapturedProcess -FileName $NodeExecutable -Arguments @($aggregator, $TelemetryPath, $TrxPath, $OutputPath) -WorkingDirectory $Worktree
+    try { $result = Invoke-CapturedProcess -FileName $NodeExecutable -Arguments @($aggregator, $TelemetryPath, $TrxPath, $OutputPath) -WorkingDirectory $Worktree }
+    catch { return [pscustomobject]@{ report = $null; malformed = $null; truncated = $null; output = $_.Exception.Message; exitCode = 1; timedOut = $false; cleanup = $null } }
     $combined = "$($result.Stdout)`n$($result.Stderr)"
     $malformed = $null
     $truncated = $null
@@ -368,8 +462,9 @@ function Invoke-TelemetryAggregator([string]$Worktree, [string]$TelemetryPath, [
         $truncated = [bool]::Parse($Matches[2])
     }
     $reportPath = Join-Path $OutputPath 'api-telemetry.json'
-    $report = if (Test-Path -LiteralPath $reportPath -PathType Leaf) { Get-Content -Raw -LiteralPath $reportPath | ConvertFrom-Json } else { $null }
-    [pscustomobject]@{ report = $report; malformed = $malformed; truncated = $truncated; output = $combined; exitCode = $result.ExitCode }
+    $report = $null
+    try { if (Test-Path -LiteralPath $reportPath -PathType Leaf) { $report = Get-Content -Raw -LiteralPath $reportPath | ConvertFrom-Json } } catch { $combined = "$combined`n$($_.Exception.Message)" }
+    [pscustomobject]@{ report = $report; malformed = $malformed; truncated = $truncated; output = $combined; exitCode = $result.ExitCode; timedOut = $result.TimedOut; cleanup = $result.Cleanup }
 }
 
 function Invoke-Observation {
@@ -385,37 +480,68 @@ function Invoke-Observation {
         [switch]$IsWarmup
     )
     $runDirectory = Join-Path $Root (if ($IsWarmup) { "warmup-$Condition-seed-$Seed" } else { "$Condition\run-$('{0:D2}' -f $RunNumber)-seed-$Seed" })
+    if (Test-Path -LiteralPath $runDirectory) {
+        $existing = @(Get-ChildItem -LiteralPath $runDirectory -Force -ErrorAction Stop)
+        if ($existing.Count -gt 0) { Fail "Refusing to reuse non-empty observation directory: $runDirectory" }
+    }
     New-Item -ItemType Directory -Force -Path $runDirectory | Out-Null
     $shards = @()
-    foreach ($entry in $Partition.shards) {
-        $shardDirectory = Join-Path $runDirectory "shard-$($entry.shard)"
-        $telemetry = Join-Path $shardDirectory 'api-telemetry.jsonl'
-        $results = Join-Path $shardDirectory 'TestResults'
-        $stdout = Join-Path $shardDirectory 'stdout.log'
-        $stderr = Join-Path $shardDirectory 'stderr.log'
-        $shards += New-TestProcess -Worktree $Worktree -Filter $entry.filters -TelemetryPath $telemetry -ResultsPath $results -StdoutPath $stdout -StderrPath $stderr
-        $shards[-1] | Add-Member -NotePropertyName expectedCases -NotePropertyValue $entry.expectedCases
-        $shards[-1] | Add-Member -NotePropertyName shard -NotePropertyValue $entry.shard
-        $shards[-1] | Add-Member -NotePropertyName classNames -NotePropertyValue @($entry.classes)
+    $launchError = $null
+    try {
+        foreach ($entry in $Partition.shards) {
+            $shardDirectory = Join-Path $runDirectory "shard-$($entry.shard)"
+            $telemetry = Join-Path $shardDirectory 'api-telemetry.jsonl'
+            $results = Join-Path $shardDirectory 'TestResults'
+            $stdout = Join-Path $shardDirectory 'stdout.log'
+            $stderr = Join-Path $shardDirectory 'stderr.log'
+            $shards += New-TestProcess -Worktree $Worktree -Filter $entry.filters -TelemetryPath $telemetry -ResultsPath $results -StdoutPath $stdout -StderrPath $stderr
+            $shards[-1] | Add-Member -NotePropertyName expectedCases -NotePropertyValue $entry.expectedCases
+            $shards[-1] | Add-Member -NotePropertyName shard -NotePropertyValue $entry.shard
+            $shards[-1] | Add-Member -NotePropertyName classNames -NotePropertyValue @($entry.classes)
+        }
+        Wait-TestProcesses $shards
+    } catch {
+        $launchError = $_.Exception.Message
+        foreach ($shard in $shards) {
+            try {
+                if (-not $shard.process.HasExited) {
+                    $cleanup = Stop-ProcessSafely -Process $shard.process
+                    if (-not $cleanup.exited) { $shard.cleanupFailure = "Owned process tree did not exit: $($cleanup.remainingIds -join ',')" }
+                }
+            } catch { $shard.cleanupFailure = $_.Exception.Message }
+        }
     }
-    Wait-TestProcesses $shards
 
     $invalidReasons = [System.Collections.Generic.List[string]]::new()
+    if ($launchError) { $invalidReasons.Add("process launch/wait failed: $launchError") }
     $errorPattern = '(?i)(SQLITE_BUSY|SQLITE_LOCKED|database is locked|MSB3027|UnauthorizedAccessException|file.*locked|testhost.*crash)'
     $shardReports = foreach ($shard in $shards) {
         $trx = Join-Path $shard.resultsPath 'shard.trx'
-        $counts = Get-TrxCounts $trx
+        $trxError = $null
+        try { $counts = Get-TrxCounts $trx } catch { $counts = $null; $trxError = $_.Exception.Message }
+        $telemetryHasRecords = (Test-Path -LiteralPath $shard.telemetryPath -PathType Leaf) -and
+            (@(Get-Content -LiteralPath $shard.telemetryPath -ErrorAction SilentlyContinue | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }).Count -gt 0)
         $aggregateDirectory = Join-Path $shard.resultsPath 'api-telemetry'
-        $aggregate = Invoke-TelemetryAggregator -Worktree $Worktree -TelemetryPath $shard.telemetryPath -TrxPath $trx -OutputPath $aggregateDirectory
+        $aggregateError = $null
+        try { $aggregate = Invoke-TelemetryAggregator -Worktree $Worktree -TelemetryPath $shard.telemetryPath -TrxPath $trx -OutputPath $aggregateDirectory } catch { $aggregate = [pscustomobject]@{ report = $null; malformed = $null; truncated = $null; output = ''; exitCode = 1; timedOut = $false; cleanup = $null }; $aggregateError = $_.Exception.Message }
         $signals = @(("$($shard.stdout)`n$($shard.stderr)") | Select-String -Pattern $errorPattern -AllMatches | ForEach-Object { $_.Matches.Value } | Sort-Object -Unique)
         if ($shard.exitCode -ne 0) { $invalidReasons.Add("shard $($shard.shard) exit code $($shard.exitCode)") }
         if ($shard.timedOut) { $invalidReasons.Add("shard $($shard.shard) exceeded the $TimeoutMinutes minute timeout") }
+        if ($shard.waitError) { $invalidReasons.Add("shard $($shard.shard) wait error: $($shard.waitError)") }
+        if ($shard.cleanupFailure) { $invalidReasons.Add("shard $($shard.shard) cleanup failure: $($shard.cleanupFailure)") }
+        if ($shard.successfulSamples -eq 0) { $invalidReasons.Add("shard $($shard.shard) had no successful active process sample") }
         if ($null -eq $counts) { $invalidReasons.Add("shard $($shard.shard) TRX missing") }
+        if ($trxError) { $invalidReasons.Add("shard $($shard.shard) TRX parse failed: $trxError") }
         elseif ($counts.total -ne $shard.expectedCases) { $invalidReasons.Add("shard $($shard.shard) expected $($shard.expectedCases) cases but TRX has $($counts.total)") }
         if ($counts -and ($counts.failed -gt 0 -or $counts.skipped -gt 0 -or $counts.other -gt 0)) { $invalidReasons.Add("shard $($shard.shard) has failed/skipped/other outcomes") }
+        if (-not $telemetryHasRecords) { $invalidReasons.Add("shard $($shard.shard) telemetry JSONL was missing or empty") }
         if ($null -eq $aggregate.report) { $invalidReasons.Add("shard $($shard.shard) telemetry aggregation missing") }
-        elseif ($aggregate.report.totals.trxTests -ne $shard.expectedCases) { $invalidReasons.Add("shard $($shard.shard) telemetry/TRX count mismatch") }
+        elseif ($aggregate.report.totals.trxTests -ne $shard.expectedCases -or $aggregate.report.totals.tests -ne $shard.expectedCases) { $invalidReasons.Add("shard $($shard.shard) telemetry/TRX count mismatch") }
+        if ($aggregate.report -and $aggregate.report.totals.factories -le 0) { $invalidReasons.Add("shard $($shard.shard) telemetry reported zero factories") }
         if ($aggregate.exitCode -ne 0) { $invalidReasons.Add("shard $($shard.shard) telemetry aggregator exit code $($aggregate.exitCode)") }
+        if ($aggregateError) { $invalidReasons.Add("shard $($shard.shard) telemetry aggregation failed: $aggregateError") }
+        if ($aggregate.timedOut) { $invalidReasons.Add("shard $($shard.shard) telemetry aggregator timed out") }
+        if ($aggregate.cleanup -and -not $aggregate.cleanup.exited) { $invalidReasons.Add("shard $($shard.shard) telemetry aggregator cleanup failure") }
         if ($aggregate.malformed -ne 0 -or $aggregate.truncated -eq $true) { $invalidReasons.Add("shard $($shard.shard) telemetry malformed or truncated") }
         if ($signals.Count -gt 0) { $invalidReasons.Add("shard $($shard.shard) lock/cleanup signal: $($signals -join ', ')") }
         [pscustomobject]@{
@@ -432,6 +558,7 @@ function Invoke-Observation {
             stderrPath = $shard.stderrPath
             malformedTelemetry = $aggregate.malformed
             telemetryTruncated = $aggregate.truncated
+            telemetryHasRecords = $telemetryHasRecords
             cpuMs = [math]::Round($shard.maxCpuMs, 3)
             cpuAvailable = $shard.cpuAvailable
             cpuError = $shard.cpuError
@@ -440,9 +567,13 @@ function Invoke-Observation {
             ioAvailable = $shard.ioAvailable
             ioError = $shard.ioError
             samples = $shard.samples
+            successfulSamples = $shard.successfulSamples
+            ownedProcessIds = $shard.ownedProcessIds
+            cleanupFailure = $shard.cleanupFailure
             errorSignals = $signals
         }
     }
+    if ($shards.Count -ne @($Partition.shards).Count) { $invalidReasons.Add("expected $(@($Partition.shards).Count) shards but launched $($shards.Count)") }
     if (@($shardReports | Where-Object { -not $_.ioAvailable }).Count -gt 0) { $invalidReasons.Add('disk performance counters were unavailable') }
     if (@($shardReports | Where-Object { -not $_.cpuAvailable }).Count -gt 0) { $invalidReasons.Add('process-tree CPU samples were unavailable') }
     $metrics = [ordered]@{
@@ -455,6 +586,8 @@ function Invoke-Observation {
         startupMs = [math]::Round((@($shardReports | ForEach-Object { $_.telemetry.summedFactoryStartupMs } | Measure-Object -Sum).Sum), 3)
         testCount = [int](@($shardReports | ForEach-Object { $_.counts.total } | Measure-Object -Sum).Sum)
     }
+    $startedValues = @($shards | ForEach-Object shardStartedAt | Sort-Object)
+    $endedValues = @($shards | ForEach-Object endedAt | Sort-Object -Descending)
     $observation = [ordered]@{
         schemaVersion = 'aerolink-api-host-reuse-measurement/v1'
         condition = $Condition
@@ -465,11 +598,11 @@ function Invoke-Observation {
         worktree = (Get-RepoInfo $Worktree)
         environment = $Environment
         partition = $Partition
-        startedAt = ($shards | ForEach-Object shardStartedAt | Sort-Object | Select-Object -First 1).ToString('o')
-        endedAt = ($shards | ForEach-Object endedAt | Sort-Object -Descending | Select-Object -First 1).ToString('o')
+        startedAt = if ($startedValues.Count -gt 0) { $startedValues[0].ToString('o') } else { $null }
+        endedAt = if ($endedValues.Count -gt 0) { $endedValues[0].ToString('o') } else { $null }
         valid = ($invalidReasons.Count -eq 0)
         invalidReasons = @($invalidReasons)
-        metricsComplete = (@($shardReports | Where-Object { -not $_.ioAvailable -or -not $_.cpuAvailable }).Count -eq 0)
+        metricsComplete = (@($shardReports | Where-Object { -not $_.ioAvailable -or -not $_.cpuAvailable -or $_.successfulSamples -le 0 }).Count -eq 0)
         metrics = $metrics
         shards = @($shardReports)
     }
@@ -496,7 +629,7 @@ function Get-ConditionSummary([string]$Condition, [object[]]$Observations, [int]
     $metrics = @('worstShardWallMs', 'summedShardWallMs', 'cpuMs', 'diskReadBytes', 'diskWriteBytes', 'factories', 'startupMs')
     $quantiles = [ordered]@{}
     foreach ($metric in $metrics) {
-        $quantiles[$metric] = Get-Quantiles @($Observations | ForEach-Object { [double]$_.metrics.$metric })
+        $quantiles[$metric] = Get-Quantiles @($valid | ForEach-Object { [double]$_.metrics.$metric })
     }
     [ordered]@{
         schemaVersion = 'aerolink-api-host-reuse-measurement/v1'
@@ -511,17 +644,140 @@ function Get-ConditionSummary([string]$Condition, [object[]]$Observations, [int]
     }
 }
 
+function Test-NonNegativeNumber([object]$Value) {
+    $number = 0.0
+    if ($null -eq $Value -or -not [double]::TryParse(([string]$Value), [ref]$number)) { return $false }
+    -not [double]::IsNaN($number) -and -not [double]::IsInfinity($number) -and $number -ge 0
+}
+
+function Get-ValidatedSummary([object]$Summary, [string]$ExpectedCondition) {
+    $errors = [System.Collections.Generic.List[string]]::new()
+    $schema = [string]$Summary.schemaVersion
+    if ($schema -ne 'aerolink-api-host-reuse-measurement/v1') { $errors.Add("$ExpectedCondition summary has unsupported schemaVersion '$schema'.") }
+    if ([string]$Summary.condition -ne $ExpectedCondition) { $errors.Add("Summary condition is '$($Summary.condition)', expected '$ExpectedCondition'.") }
+    $required = 0
+    if (-not [int]::TryParse(([string]$Summary.requiredRuns), [ref]$required) -or $required -lt 1) { $errors.Add("$ExpectedCondition summary has an invalid requiredRuns value.") }
+    $observations = @($Summary.observations)
+    if ($observations.Count -ne $required) { $errors.Add("$ExpectedCondition summary has $($observations.Count) observations; expected $required.") }
+    $seenSeeds = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
+    $normalized = [System.Collections.Generic.List[object]]::new()
+    foreach ($observation in $observations) {
+        $seedText = [string]$observation.seed
+        foreach ($property in @('valid', 'metricsComplete', 'invalidReasons', 'metrics', 'shards')) {
+            if (-not ($observation.PSObject.Properties.Name -contains $property)) { $errors.Add("Observation seed '$seedText' is missing '$property'.") }
+        }
+        if (-not $seenSeeds.Add($seedText)) { $errors.Add("$ExpectedCondition summary repeats seed '$seedText'.") }
+        if ([string]$observation.condition -ne $ExpectedCondition) { $errors.Add("Observation seed '$seedText' has the wrong condition.") }
+        $claimedValid = [bool]$observation.valid
+        $claimedMetricsComplete = [bool]$observation.metricsComplete
+        $evidenceValid = $true
+        $evidenceMetricsComplete = $true
+        $shards = @($observation.shards)
+        $wallValues = [System.Collections.Generic.List[double]]::new()
+        $cpuValues = [System.Collections.Generic.List[double]]::new()
+        $readValues = [System.Collections.Generic.List[double]]::new()
+        $writeValues = [System.Collections.Generic.List[double]]::new()
+        $factoryValues = [System.Collections.Generic.List[double]]::new()
+        $startupValues = [System.Collections.Generic.List[double]]::new()
+        $testValues = [System.Collections.Generic.List[double]]::new()
+        if ($shards.Count -eq 0) { $evidenceValid = $false; $evidenceMetricsComplete = $false }
+        foreach ($shard in $shards) {
+            if ([int]$shard.exitCode -ne 0 -or [int]$shard.expectedCases -le 0) { $evidenceValid = $false }
+            if ($null -eq $shard.counts -or [int]$shard.counts.total -ne [int]$shard.expectedCases -or
+                [int]$shard.counts.failed -ne 0 -or [int]$shard.counts.skipped -ne 0 -or [int]$shard.counts.other -ne 0) { $evidenceValid = $false }
+            if (-not [bool]$shard.telemetryHasRecords -or [int]$shard.malformedTelemetry -ne 0 -or [bool]$shard.telemetryTruncated) { $evidenceValid = $false }
+            if ($null -eq $shard.telemetry -or [int]$shard.telemetry.tests -ne [int]$shard.expectedCases -or [int]$shard.telemetry.factories -le 0) { $evidenceValid = $false }
+            if (-not [bool]$shard.cpuAvailable -or -not [bool]$shard.ioAvailable -or [int]$shard.successfulSamples -le 0) { $evidenceMetricsComplete = $false }
+            if ($shard.cleanupFailure -or $shard.waitError -or @($shard.errorSignals).Count -gt 0) { $evidenceValid = $false }
+            foreach ($pair in @(
+                @($wallValues, $shard.wallMs),
+                @($cpuValues, $shard.cpuMs),
+                @($readValues, $shard.diskReadBytes),
+                @($writeValues, $shard.diskWriteBytes),
+                @($factoryValues, $shard.telemetry.factories),
+                @($startupValues, $shard.telemetry.summedFactoryStartupMs),
+                @($testValues, $shard.counts.total))) {
+                if (Test-NonNegativeNumber $pair[1]) { $pair[0].Add([double]$pair[1]) } else { $evidenceValid = $false }
+            }
+        }
+        $invalidReasons = @($observation.invalidReasons)
+        $actualValid = $evidenceValid -and $invalidReasons.Count -eq 0
+        if ($claimedValid -ne $actualValid) { $errors.Add("Observation seed '$seedText' valid flag does not match its evidence.") }
+        if ($claimedMetricsComplete -ne $evidenceMetricsComplete) { $errors.Add("Observation seed '$seedText' metricsComplete flag does not match its evidence.") }
+        foreach ($metric in @('worstShardWallMs', 'summedShardWallMs', 'cpuMs', 'diskReadBytes', 'diskWriteBytes', 'factories', 'startupMs')) {
+            if (-not (Test-NonNegativeNumber $observation.metrics.$metric)) { $errors.Add("Observation seed '$seedText' has invalid metric '$metric'.") }
+        }
+        $derivedMetrics = @{
+            worstShardWallMs = if ($wallValues.Count) { ($wallValues | Measure-Object -Maximum).Maximum } else { 0 }
+            summedShardWallMs = ($wallValues | Measure-Object -Sum).Sum
+            cpuMs = ($cpuValues | Measure-Object -Sum).Sum
+            diskReadBytes = ($readValues | Measure-Object -Sum).Sum
+            diskWriteBytes = ($writeValues | Measure-Object -Sum).Sum
+            factories = ($factoryValues | Measure-Object -Sum).Sum
+            startupMs = ($startupValues | Measure-Object -Sum).Sum
+            testCount = ($testValues | Measure-Object -Sum).Sum
+        }
+        foreach ($metric in $derivedMetrics.Keys) {
+            if (-not (Test-NonNegativeNumber $observation.metrics.$metric) -or [math]::Abs([double]$observation.metrics.$metric - [double]$derivedMetrics[$metric]) -gt 0.01) {
+                $errors.Add("Observation seed '$seedText' metric '$metric' does not reconcile with shard evidence.")
+            }
+        }
+        $normalized.Add([pscustomobject]@{
+            seed = $seedText
+            valid = $actualValid
+            metricsComplete = $evidenceMetricsComplete
+            metrics = $observation.metrics
+        })
+    }
+    $actualValidCount = @($normalized | Where-Object valid).Count
+    $actualMetricsComplete = (@($normalized | Where-Object { -not $_.metricsComplete }).Count -eq 0 -and $normalized.Count -eq $required)
+    if ([int]$Summary.observationCount -ne $observations.Count) { $errors.Add("$ExpectedCondition summary observationCount does not match its observations.") }
+    if ([int]$Summary.validObservationCount -ne $actualValidCount) { $errors.Add("$ExpectedCondition summary validObservationCount does not match recomputed evidence.") }
+    if ([bool]$Summary.allValid -ne ($normalized.Count -eq $required -and $actualValidCount -eq $required)) { $errors.Add("$ExpectedCondition summary allValid flag does not match recomputed evidence.") }
+    if ([bool]$Summary.metricsComplete -ne $actualMetricsComplete) { $errors.Add("$ExpectedCondition summary metricsComplete flag does not match recomputed evidence.") }
+    [pscustomobject]@{
+        valid = ($errors.Count -eq 0)
+        errors = @($errors)
+        condition = $ExpectedCondition
+        requiredRuns = $required
+        observations = @($normalized)
+        validObservationCount = $actualValidCount
+        allValid = ($normalized.Count -eq $required -and $actualValidCount -eq $required)
+        metricsComplete = $actualMetricsComplete
+    }
+}
+
 function Get-Decision([object]$Baseline, [object]$Treatment) {
-    $baseValues = @($Baseline.observations | ForEach-Object { [double]$_.metrics.worstShardWallMs })
-    $treatmentValues = @($Treatment.observations | ForEach-Object { [double]$_.metrics.worstShardWallMs })
+    $base = Get-ValidatedSummary $Baseline 'baseline'
+    $treat = Get-ValidatedSummary $Treatment 'treatment'
+    $validationErrors = @($base.errors + $treat.errors)
+    $baseValid = @($base.observations | Where-Object valid)
+    $treatmentValid = @($treat.observations | Where-Object valid)
+    $baseValues = @($baseValid | ForEach-Object { [double]$_.metrics.worstShardWallMs })
+    $treatmentValues = @($treatmentValid | ForEach-Object { [double]$_.metrics.worstShardWallMs })
     $baseMedian = (Get-Quantiles $baseValues).median
     $treatmentMedian = (Get-Quantiles $treatmentValues).median
     $improvement = if ($baseMedian -gt 0) { 1 - ($treatmentMedian / $baseMedian) } else { $null }
     $paired = @()
-    $pairCount = [math]::Min($baseValues.Count, $treatmentValues.Count)
-    for ($index = 0; $index -lt $pairCount; $index++) { $paired += 1 - ($treatmentValues[$index] / $baseValues[$index]) }
+    $baseBySeed = @{}
+    foreach ($observation in $baseValid) { $baseBySeed[$observation.seed] = $observation }
+    $treatmentBySeed = @{}
+    foreach ($observation in $treatmentValid) { $treatmentBySeed[$observation.seed] = $observation }
+    $baseSeeds = @($baseBySeed.Keys | Sort-Object)
+    $treatmentSeeds = @($treatmentBySeed.Keys | Sort-Object)
+    if (Compare-Object $baseSeeds $treatmentSeeds) { $validationErrors += 'Baseline and treatment valid observations do not have the same seed set.' }
+    foreach ($seed in $baseSeeds) {
+        if (-not $treatmentBySeed.ContainsKey($seed)) { continue }
+        $baseWall = [double]$baseBySeed[$seed].metrics.worstShardWallMs
+        $treatmentWall = [double]$treatmentBySeed[$seed].metrics.worstShardWallMs
+        if ($baseWall -le 0) { $validationErrors += "Baseline seed '$seed' has a non-positive worst-shard wall time."; continue }
+        if ($treatmentWall -lt 0) { $validationErrors += "Treatment seed '$seed' has a negative worst-shard wall time."; continue }
+        $paired += 1 - ($treatmentWall / $baseWall)
+    }
+    foreach ($value in $baseValues) { if ($value -le 0) { $validationErrors += 'A baseline worst-shard wall time is non-positive.' } }
+    foreach ($value in $treatmentValues) { if ($value -lt 0) { $validationErrors += 'A treatment worst-shard wall time is negative.' } }
     $pairedMedian = if ($paired.Count -gt 0) { (Get-Quantiles $paired).median } else { $null }
-    $complete = $Baseline.allValid -and $Treatment.allValid -and $Baseline.metricsComplete -and $Treatment.metricsComplete
+    $complete = $base.allValid -and $treat.allValid -and $base.metricsComplete -and $treat.metricsComplete -and $validationErrors.Count -eq 0
     $pass = $complete -and $improvement -ge 0.15 -and $pairedMedian -ge 0.15
     [ordered]@{
         rule = 'Both conditions require the configured number of valid, fully instrumented observations. The treatment median worst-shard wall must be at least 15% lower, and the paired-seed median must also be at least 15% lower.'
@@ -530,11 +786,48 @@ function Get-Decision([object]$Baseline, [object]$Treatment) {
         aggregateImprovement = $improvement
         pairedImprovement = Get-Quantiles $paired
         completeEvidence = $complete
+        validationErrors = @($validationErrors | Sort-Object -Unique)
         status = if (-not $complete) { 'inconclusive' } elseif ($pass) { 'pass' } else { 'fail' }
     }
 }
 
-function New-Plan([string]$Root, [object]$BaselineInfo, [object]$TreatmentInfo, [object]$Manifest, [object[]]$Partitions) {
+function Assert-OutputOutsideWorktrees([string]$OutputPath, [object[]]$Worktrees) {
+    $fullOutput = [System.IO.Path]::GetFullPath($OutputPath).TrimEnd('\', '/')
+    foreach ($worktree in $Worktrees) {
+        $fullWorktree = ([string]$worktree.path).TrimEnd('\', '/')
+        $prefix = $fullWorktree + [System.IO.Path]::DirectorySeparatorChar
+        if ($fullOutput.Equals($fullWorktree, [StringComparison]::OrdinalIgnoreCase) -or
+            $fullOutput.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase)) {
+            Fail "Output must be outside the condition worktrees: $OutputPath"
+        }
+    }
+}
+
+function Assert-EmptyOutput([string]$Path, [string]$Mode = 'Run') {
+    if (Test-Path -LiteralPath $Path -PathType Leaf) { Fail "Run output path is a file: $Path" }
+    if (Test-Path -LiteralPath $Path -PathType Container) {
+        $items = @(Get-ChildItem -LiteralPath $Path -Force -ErrorAction Stop)
+        if ($items.Count -gt 0) { Fail "Refusing to reuse non-empty $Mode output directory: $Path" }
+    }
+}
+
+function Assert-WorktreeStable([object]$Expected) {
+    $current = Get-RepoInfo $Expected.path
+    if (-not $current.clean) { Fail "Worktree became dirty: $($Expected.path)" }
+    if (-not $current.head.Equals($Expected.head, [StringComparison]::OrdinalIgnoreCase)) {
+        Fail "Worktree HEAD changed from $($Expected.head) to $($current.head): $($Expected.path)"
+    }
+}
+
+function Assert-ComparableEnvironment([object]$Baseline, [object]$Treatment) {
+    foreach ($property in @('dotnet', 'node', 'powershell', 'processorCount', 'machine', 'os', 'cpu')) {
+        $left = $Baseline.$property | ConvertTo-Json -Depth 10 -Compress
+        $right = $Treatment.$property | ConvertTo-Json -Depth 10 -Compress
+        if ($left -ne $right) { Fail "Baseline/treatment environment differs for '$property'." }
+    }
+}
+
+function New-Plan([string]$Root, [object]$BaselineInfo, [object]$TreatmentInfo, [object]$Manifest, [object[]]$Partitions, [string]$PlanMode = 'Plan') {
     New-Item -ItemType Directory -Force -Path $Root | Out-Null
     $observations = @($Partitions | ForEach-Object {
         $index = [array]::IndexOf($Partitions, $_)
@@ -547,8 +840,8 @@ function New-Plan([string]$Root, [object]$BaselineInfo, [object]$TreatmentInfo, 
     })
     $plan = [ordered]@{
         schemaVersion = 'aerolink-api-host-reuse-measurement/v1'
-        mode = 'Plan'
-        planOnly = $true
+        mode = $PlanMode
+        planOnly = ($PlanMode -eq 'Plan')
         runs = $Runs
         shardCount = $ShardCount
         warmup = [bool]$Warmup
@@ -558,9 +851,10 @@ function New-Plan([string]$Root, [object]$BaselineInfo, [object]$TreatmentInfo, 
         treatmentManifest = $Manifest.treatment
         observations = $observations
         decisionRule = 'Require ten valid observations per condition, no test/telemetry/lock failures, and at least 15% reduction in median worst-shard wall clock plus paired-seed median improvement.'
-        execution = 'This plan does not build, launch test shards, touch PostgreSQL, or change either worktree.'
+        execution = if ($PlanMode -eq 'Plan') { 'This plan does not build, launch test shards, touch PostgreSQL, or change either worktree.' } else { 'Saved Run plan. The harness will restore/build sequentially, then launch only the planned shards; baseline and treatment never run concurrently.' }
     }
     Write-JsonFile (Join-Path $Root 'plan.json') $plan
+    $planMarkdownExecution = if ($PlanMode -eq 'Plan') { '- No tests, builds, database connections, or GitHub operations were started in plan mode.' } else { '- This is the saved execution plan for Run mode; restore/build and shard execution occur after this file is written.' }
     @(
         '# API host-reuse measurement plan',
         '',
@@ -568,7 +862,7 @@ function New-Plan([string]$Root, [object]$BaselineInfo, [object]$TreatmentInfo, 
         "- Runs: $Runs; shards per observation: $ShardCount; warmup: $Warmup",
         "- Cases: $($Manifest.baseline.caseCount); classes: $($Manifest.baseline.classCount)",
         '- The plan is deterministic for each seed and reuses the same partition for baseline and treatment.',
-        '- No tests, builds, database connections, or GitHub operations were started in plan mode.',
+        $planMarkdownExecution,
         '',
         'Run mode requires two clean, already prepared worktrees and writes only beneath the selected output directory.'
     ) | Set-Content -LiteralPath (Join-Path $Root 'plan.md') -Encoding utf8
@@ -579,6 +873,7 @@ function Main {
     if (-not $OutputRoot) { $OutputRoot = Join-Path ([System.IO.Path]::GetTempPath()) 'aerolink-api-host-reuse-measurement' }
     if ($ShardCount -lt 1) { Fail 'ShardCount must be positive.' }
     if ($TimeoutMinutes -lt 1) { Fail 'TimeoutMinutes must be positive.' }
+    if ($ProcessTimeoutMinutes -lt 1) { Fail 'ProcessTimeoutMinutes must be positive.' }
     if ($Runs -lt 1) { Fail 'Runs must be positive.' }
     if ($Seeds) {
         $seedValues = @($Seeds -split ',' | ForEach-Object {
@@ -602,6 +897,7 @@ function Main {
     }
     if (-not $BaselinePath) { $BaselinePath = (Get-Location).Path }
     if (-not $TreatmentPath) { $TreatmentPath = $BaselinePath }
+    if ($Mode -eq 'Run' -and $TestListPath) { Fail 'Run mode requires live discovery; TestListPath is allowed only for Plan contract smoke.' }
     if ($Mode -eq 'Run' -and -not $SkipBuild -and -not $Warmup) {
         # A warmup is optional, but a build is never optional unless SkipBuild was explicitly requested.
         # This branch exists only to make the safety warning visible in the generated plan.
@@ -613,10 +909,15 @@ function Main {
     if ($Mode -eq 'Run' -and $baselineInfo.path.Equals($treatmentInfo.path, [StringComparison]::OrdinalIgnoreCase)) {
         Fail 'Run mode requires distinct baseline and treatment worktrees.'
     }
+    Assert-OutputOutsideWorktrees $OutputRoot @($baselineInfo, $treatmentInfo)
+    if ($Mode -eq 'Run' -and $baselineInfo.head.Equals($treatmentInfo.head, [StringComparison]::OrdinalIgnoreCase)) {
+        Fail 'Run mode rejects identical baseline and treatment SHAs; provide two distinct commits.'
+    }
     $environment = [ordered]@{
         baseline = Get-EnvironmentInfo $BaselinePath
         treatment = Get-EnvironmentInfo $TreatmentPath
     }
+    if ($Mode -eq 'Run') { Assert-ComparableEnvironment $environment.baseline $environment.treatment }
     $baselineList = if ($TestListPath) { $TestListPath } else { $null }
     $baselineManifest = Get-TestManifest $BaselinePath $baselineList
     $treatmentManifest = Get-TestManifest $TreatmentPath $baselineList
@@ -624,39 +925,47 @@ function Main {
     $partitions = @($Seeds[0..($Runs - 1)] | ForEach-Object { New-Partition $baselineManifest.classes $_ $ShardCount })
     $manifest = [pscustomobject]@{ baseline = $baselineManifest; treatment = $treatmentManifest }
     if ($Mode -eq 'Plan') {
-        $plan = New-Plan $OutputRoot $baselineInfo $treatmentInfo $manifest $partitions
+        Assert-EmptyOutput $OutputRoot 'Plan'
+        $plan = New-Plan $OutputRoot $baselineInfo $treatmentInfo $manifest $partitions 'Plan'
         $plan | ConvertTo-Json -Depth 20
         return
     }
 
     if (-not $baselineInfo.clean -or -not $treatmentInfo.clean) { Fail 'Run mode requires clean baseline and treatment worktrees.' }
-    $outputFullPath = [System.IO.Path]::GetFullPath($OutputRoot)
-    foreach ($worktree in @($baselineInfo.path, $treatmentInfo.path)) {
-        $parentPrefix = $worktree.TrimEnd('\', '/') + [System.IO.Path]::DirectorySeparatorChar
-        if ($outputFullPath.Equals($worktree, [StringComparison]::OrdinalIgnoreCase) -or
-            $outputFullPath.StartsWith($parentPrefix, [StringComparison]::OrdinalIgnoreCase)) {
-            Fail "Run output must be outside the condition worktrees: $OutputRoot"
-        }
-    }
-    New-Item -ItemType Directory -Force -Path $OutputRoot | Out-Null
+    Assert-EmptyOutput $OutputRoot
+    $plan = New-Plan $OutputRoot $baselineInfo $treatmentInfo $manifest $partitions 'Run'
+    Assert-WorktreeStable $baselineInfo
+    Assert-WorktreeStable $treatmentInfo
     if (-not $SkipBuild) {
         foreach ($condition in @(@('baseline', $BaselinePath), @('treatment', $TreatmentPath))) {
+            if ($condition[0] -eq 'baseline') { Assert-WorktreeStable $baselineInfo } else { Assert-WorktreeStable $treatmentInfo }
             $restore = Invoke-CapturedProcess -FileName $DotnetExecutable -Arguments @('restore', (Join-Path $condition[1] $SolutionPath)) -WorkingDirectory $condition[1]
             if ($restore.ExitCode -ne 0) { Fail "$($condition[0]) restore failed.`n$($restore.Stdout)`n$($restore.Stderr)" }
+            if ($condition[0] -eq 'baseline') { Assert-WorktreeStable $baselineInfo } else { Assert-WorktreeStable $treatmentInfo }
             $build = Invoke-CapturedProcess -FileName $DotnetExecutable -Arguments @('build', (Join-Path $condition[1] $SolutionPath), '--configuration', 'Release', '--no-restore') -WorkingDirectory $condition[1]
             if ($build.ExitCode -ne 0) { Fail "$($condition[0]) build failed.`n$($build.Stdout)`n$($build.Stderr)" }
         }
     }
+    Assert-WorktreeStable $baselineInfo
+    Assert-WorktreeStable $treatmentInfo
     $all = @{ baseline = [System.Collections.Generic.List[object]]::new(); treatment = [System.Collections.Generic.List[object]]::new() }
     if ($Warmup) {
         $warmupPartition = $partitions[0]
-        Invoke-Observation -Condition baseline -Worktree $BaselinePath -Partition $warmupPartition -RunNumber 0 -Seed $warmupPartition.seed -Root $OutputRoot -Order @('baseline') -Environment $environment -IsWarmup | Out-Null
-        Invoke-Observation -Condition treatment -Worktree $TreatmentPath -Partition $warmupPartition -RunNumber 0 -Seed $warmupPartition.seed -Root $OutputRoot -Order @('treatment') -Environment $environment -IsWarmup | Out-Null
+        Assert-WorktreeStable $baselineInfo
+        Assert-WorktreeStable $treatmentInfo
+        $warmupBaseline = Invoke-Observation -Condition baseline -Worktree $BaselinePath -Partition $warmupPartition -RunNumber 0 -Seed $warmupPartition.seed -Root $OutputRoot -Order @('baseline') -Environment $environment -IsWarmup
+        if (-not $warmupBaseline.valid) { Fail 'Baseline warmup was invalid; no measured observations were started.' }
+        Assert-WorktreeStable $baselineInfo
+        Assert-WorktreeStable $treatmentInfo
+        $warmupTreatment = Invoke-Observation -Condition treatment -Worktree $TreatmentPath -Partition $warmupPartition -RunNumber 0 -Seed $warmupPartition.seed -Root $OutputRoot -Order @('treatment') -Environment $environment -IsWarmup
+        if (-not $warmupTreatment.valid) { Fail 'Treatment warmup was invalid; no measured observations were started.' }
     }
     for ($index = 0; $index -lt $Runs; $index++) {
         $partition = $partitions[$index]
         $order = if (($index % 2) -eq 0) { @('baseline', 'treatment') } else { @('treatment', 'baseline') }
         foreach ($condition in $order) {
+            Assert-WorktreeStable $baselineInfo
+            Assert-WorktreeStable $treatmentInfo
             $path = if ($condition -eq 'baseline') { $BaselinePath } else { $TreatmentPath }
             $observation = Invoke-Observation -Condition $condition -Worktree $path -Partition $partition -RunNumber ($index + 1) -Seed $partition.seed -Root $OutputRoot -Order $order -Environment $environment
             $all[$condition].Add($observation)

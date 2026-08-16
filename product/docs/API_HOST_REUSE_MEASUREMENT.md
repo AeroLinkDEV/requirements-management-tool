@@ -3,13 +3,13 @@
 `product/tools/measure-api-host-reuse.ps1` is a Windows-only, read-only-to-source benchmark harness for the
 #563 host-reuse decision. It never checks out, fetches, merges, or changes either condition worktree. It writes
 only to the selected output directory, apart from the normal `dotnet restore/build` outputs when `Run` mode is
-used without `-SkipBuild`.
+used without `-SkipBuild`. The output directory must be outside both worktrees.
 
 ## Plan first
 
 Plan mode is the default. It discovers the API test list when the Release test assembly is already built, or it
 can consume a test-list file for a contract smoke. It creates no API hosts, databases, evidence roots, or test
-processes.
+processes. Plan output must be a new or empty directory and must be outside both condition worktrees.
 
 ```powershell
 $root = 'C:\work\aerolink'
@@ -32,8 +32,10 @@ class union, and alternating order. Plan mode writes only `plan.json` and `plan.
 ## Run the paired observations
 
 Prepare two clean worktrees at the exact baseline and treatment commits. The test lists must describe the same
-classes and case count; a difference is rejected. Build is performed once per condition before measurement unless
-`-SkipBuild` is explicitly supplied.
+classes, exact test-case names, and case count; a difference is rejected. Run mode requires distinct clean worktrees
+at distinct SHAs, rejects `-TestListPath`, and refuses a non-empty output directory. Build is performed once per
+condition before measurement unless `-SkipBuild` is explicitly supplied. Run mode saves `plan.json` and `plan.md`
+before any restore/build; those files describe the execution that will follow.
 
 ```powershell
 pwsh -NoProfile -File "$root\product\tools\measure-api-host-reuse.ps1" `
@@ -43,6 +45,7 @@ pwsh -NoProfile -File "$root\product\tools\measure-api-host-reuse.ps1" `
   -OutputRoot 'C:\work\aerolink-563-results' `
   -Runs 10 `
   -TimeoutMinutes 30 `
+  -ProcessTimeoutMinutes 60 `
   -Seeds '563001,563002,563003,563004,563005,563006,563007,563008,563009,563010' `
   -Warmup
 ```
@@ -71,13 +74,15 @@ logs. The root contains:
 - `baseline-summary.json` and `treatment-summary.json`;
 - `summary.json`, including quantiles and the decision.
 
-An observation is invalid when a shard exits non-zero, its TRX count differs from the manifest, telemetry is missing,
-telemetry is malformed/truncated, a test is failed/skipped/other, or lock/cleanup evidence is found. Missing disk
-performance counters or process-tree CPU samples make the measurement incomplete; the test result remains visible, but
-the rollout decision is `inconclusive` rather than a claimed pass.
+An observation is invalid when a shard exits non-zero, its TRX count or exact test-case names differ from the manifest,
+telemetry is missing or empty, telemetry is malformed/truncated, aggregation reports zero records or factories, a test
+is failed/skipped/other, or lock/cleanup evidence is found. Missing disk performance counters or process-tree CPU
+samples make the measurement incomplete; the test result remains visible, but the rollout decision is `inconclusive`
+rather than a claimed pass. A completed shard that produced no successful active process sample is invalid.
 
-Each shard is bounded by `-TimeoutMinutes` (30 by default). A timeout stops only the exact process tree launched by
-the harness and invalidates that observation; it is never silently converted into a pass.
+Each shard is bounded by `-TimeoutMinutes` (30 by default). Restore, build, discovery, and aggregation processes are
+bounded by `-ProcessTimeoutMinutes` (60 by default). A timeout stops only the exact process tree launched by the
+harness, verifies owned descendants exit, and invalidates that observation; it is never silently converted into a pass.
 
 No failure may be removed from the ten-run denominator. Re-run a failed seed only as a separately identified
 diagnostic; it does not replace the failed observation.
@@ -93,6 +98,10 @@ median(treatment worst-shard wall) <= 0.85 * median(baseline worst-shard wall)
 and the median paired-seed improvement is also at least 15%. Factory-count reduction, summed startup, CPU, or disk
 I/O are supporting evidence, not substitutes for the critical-path wall-clock gate. The existing `p10`, `median`,
 `p75`, and `p95` quantiles are emitted for worst-shard wall, summed wall, CPU, disk, factories, and startup.
+
+Evaluate recomputes validity, metrics completeness, required counts, unique/equal seed sets, and paired-seed joins from
+the observations. It does not trust caller-provided `allValid`, `validObservationCount`, `metricsComplete`, or array
+ordering; forged or inconsistent summaries are inconclusive and cannot pass.
 
 To evaluate already-produced condition summaries without running tests:
 

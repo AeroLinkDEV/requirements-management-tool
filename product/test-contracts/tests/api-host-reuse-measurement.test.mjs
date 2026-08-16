@@ -13,15 +13,19 @@ const fixture = join(here, 'fixtures', 'api-test-list.txt')
 const pwsh = process.env.PWSH_EXE ?? 'pwsh'
 
 function runPowerShell(args) {
-  const result = spawnSync(pwsh, ['-NoProfile', '-File', script, ...args], {
+  const result = runPowerShellRaw(args)
+  assert.equal(result.error, undefined, result.error?.message)
+  assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`)
+  return result
+}
+
+function runPowerShellRaw(args) {
+  return spawnSync(pwsh, ['-NoProfile', '-File', script, ...args], {
     cwd: repoRoot,
     encoding: 'utf8',
     windowsHide: true,
     maxBuffer: 8 * 1024 * 1024,
   })
-  assert.equal(result.error, undefined, result.error?.message)
-  assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`)
-  return result
 }
 
 function planAt(output) {
@@ -70,33 +74,68 @@ test('script contract keeps telemetry aggregation, isolated evidence, and altern
   assert.match(source, /order = @\(\$Order\)/)
   assert.match(source, /telemetry aggregator exit code/)
   assert.match(source, /SQLITE_BUSY\|SQLITE_LOCKED/)
+  assert.match(source, /Stop-ProcessSafely/)
+  assert.match(source, /finally \{/)
+  assert.match(source, /Assert-EmptyOutput/)
+  assert.match(source, /Assert-OutputOutsideWorktrees/)
+  assert.match(source, /Assert-WorktreeStable/)
+  assert.match(source, /different API test-case names/)
+  assert.match(source, /telemetry JSONL was missing or empty/)
+  assert.match(source, /telemetry reported zero factories/)
+  assert.match(source, /TestListPath is allowed only for Plan contract smoke/)
+  assert.match(source, /Refusing to reuse non-empty observation directory/)
+  assert.ok(source.indexOf('Assert-EmptyOutput $OutputRoot') < source.indexOf("New-Plan $OutputRoot $baselineInfo $treatmentInfo $manifest $partitions 'Run'"))
 })
 
 test('evaluate mode applies the 15 percent aggregate and paired decision rule', (t) => {
   const directory = mkdtempSync(join(tmpdir(), 'aerolink-563-evaluate-'))
   t.after(() => rmSync(directory, { recursive: true, force: true }))
   const observations = (wall) => Array.from({ length: 10 }, (_, index) => ({
+    schemaVersion: 'aerolink-api-host-reuse-measurement/v1',
+    condition: 'baseline',
     valid: true,
     seed: 100 + index,
     metricsComplete: true,
+    invalidReasons: [],
+    shards: [{
+      exitCode: 0,
+      expectedCases: 1,
+      wallMs: wall,
+      cpuMs: wall * 3,
+      diskReadBytes: 10,
+      diskWriteBytes: 10,
+      counts: { total: 1, failed: 0, skipped: 0, other: 0 },
+      telemetryHasRecords: true,
+      malformedTelemetry: 0,
+      telemetryTruncated: false,
+      telemetry: { tests: 1, factories: 1, summedFactoryStartupMs: 100 },
+      cpuAvailable: true,
+      ioAvailable: true,
+      successfulSamples: 1,
+      cleanupFailure: null,
+      waitError: null,
+      errorSignals: [],
+    }],
     metrics: {
       worstShardWallMs: wall,
-      summedShardWallMs: wall * 2,
+      summedShardWallMs: wall,
       cpuMs: wall * 3,
-      diskReadBytes: 100,
-      diskWriteBytes: 100,
-      factories: 10,
+      diskReadBytes: 10,
+      diskWriteBytes: 10,
+      factories: 1,
       startupMs: 100,
+      testCount: 1,
     },
   }))
   const summary = (condition, wall) => ({
+    schemaVersion: 'aerolink-api-host-reuse-measurement/v1',
     condition,
     requiredRuns: 10,
     observationCount: 10,
     validObservationCount: 10,
     allValid: true,
     metricsComplete: true,
-    observations: observations(wall),
+    observations: observations(wall).map((observation) => ({ ...observation, condition })),
   })
   const baseline = join(directory, 'baseline.json')
   const treatment = join(directory, 'treatment.json')
@@ -112,4 +151,64 @@ test('evaluate mode applies the 15 percent aggregate and paired decision rule', 
   assert.equal(decision.status, 'pass')
   assert.ok(Math.abs(decision.aggregateImprovement - 0.2) < 1e-12)
   assert.ok(Math.abs(decision.pairedImprovement.median - 0.2) < 1e-12)
+
+  const zeroBaseline = JSON.parse(readFileSync(baseline, 'utf8'))
+  zeroBaseline.observations[0].metrics.worstShardWallMs = 0
+  zeroBaseline.observations[0].shards[0].wallMs = 0
+  writeFileSync(baseline, JSON.stringify(zeroBaseline))
+  runPowerShell(['-Mode', 'Evaluate', '-BaselineSummaryPath', baseline, '-TreatmentSummaryPath', treatment, '-OutputRoot', directory])
+  const zeroDecision = JSON.parse(readFileSync(join(directory, 'decision.json'), 'utf8'))
+  assert.equal(zeroDecision.status, 'inconclusive')
+  assert.ok(zeroDecision.validationErrors.some((error) => error.includes('non-positive')))
+
+  zeroBaseline.observations[0].metrics.worstShardWallMs = 100
+  zeroBaseline.observations[0].shards[0].wallMs = 100
+  writeFileSync(baseline, JSON.stringify(zeroBaseline))
+  const forged = JSON.parse(readFileSync(baseline, 'utf8'))
+  forged.observations[0].valid = false
+  writeFileSync(baseline, JSON.stringify(forged))
+  runPowerShell(['-Mode', 'Evaluate', '-BaselineSummaryPath', baseline, '-TreatmentSummaryPath', treatment, '-OutputRoot', directory])
+  const forgedDecision = JSON.parse(readFileSync(join(directory, 'decision.json'), 'utf8'))
+  assert.equal(forgedDecision.status, 'inconclusive')
+  assert.ok(forgedDecision.validationErrors.some((error) => error.includes('valid flag')))
+
+  const restored = JSON.parse(readFileSync(baseline, 'utf8'))
+  restored.observations[0].valid = true
+  writeFileSync(baseline, JSON.stringify(restored))
+  const treatmentReordered = JSON.parse(readFileSync(treatment, 'utf8'))
+  treatmentReordered.observations.reverse()
+  writeFileSync(treatment, JSON.stringify(treatmentReordered))
+  runPowerShell(['-Mode', 'Evaluate', '-BaselineSummaryPath', baseline, '-TreatmentSummaryPath', treatment, '-OutputRoot', directory])
+  const reorderedDecision = JSON.parse(readFileSync(join(directory, 'decision.json'), 'utf8'))
+  assert.equal(reorderedDecision.status, 'pass')
+
+  const duplicate = JSON.parse(readFileSync(treatment, 'utf8'))
+  duplicate.observations[1].seed = duplicate.observations[0].seed
+  writeFileSync(treatment, JSON.stringify(duplicate))
+  runPowerShell(['-Mode', 'Evaluate', '-BaselineSummaryPath', baseline, '-TreatmentSummaryPath', treatment, '-OutputRoot', directory])
+  const duplicateDecision = JSON.parse(readFileSync(join(directory, 'decision.json'), 'utf8'))
+  assert.equal(duplicateDecision.status, 'inconclusive')
+  assert.ok(duplicateDecision.validationErrors.some((error) => error.includes('repeats seed')))
+
+  const mismatched = JSON.parse(readFileSync(treatment, 'utf8'))
+  mismatched.observations[1].seed = 9999
+  writeFileSync(treatment, JSON.stringify(mismatched))
+  runPowerShell(['-Mode', 'Evaluate', '-BaselineSummaryPath', baseline, '-TreatmentSummaryPath', treatment, '-OutputRoot', directory])
+  const mismatchedDecision = JSON.parse(readFileSync(join(directory, 'decision.json'), 'utf8'))
+  assert.equal(mismatchedDecision.status, 'inconclusive')
+  assert.ok(mismatchedDecision.validationErrors.some((error) => error.includes('same seed set')))
+})
+
+test('plan rejects output inside a condition worktree', () => {
+  const result = runPowerShellRaw([
+    '-Mode', 'Plan',
+    '-BaselinePath', repoRoot,
+    '-TreatmentPath', repoRoot,
+    '-OutputRoot', repoRoot,
+    '-Runs', '2',
+    '-Seeds', '41,42',
+    '-TestListPath', fixture,
+  ])
+  assert.notEqual(result.status, 0)
+  assert.match(`${result.stdout}\n${result.stderr}`, /Output must be outside the condition worktrees/)
 })
