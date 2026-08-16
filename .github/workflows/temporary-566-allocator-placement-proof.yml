@@ -1,0 +1,58 @@
+name: Temporary #566 allocator placement proof
+
+on:
+  push:
+    branches:
+      - chatgpt/566-allocator-test-placement
+
+permissions:
+  contents: read
+
+jobs:
+  prove-placement:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out exact branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install .NET 10
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v5.2.0
+        with:
+          dotnet-version: 10.0.x
+      - name: Prove four direct allocator rules without a web host
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          dotnet test product/tests/AeroLink.Infrastructure.Tests --configuration Release --filter 'FullyQualifiedName~IdentifierAllocationPersistenceTests'
+          if ($LASTEXITCODE -ne 0) { throw 'Infrastructure allocator tests failed.' }
+      - name: Prove the migrated tests kill an allocator off-by-one mutation
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $path = 'product/src/AeroLink.Infrastructure/Persistence/IdentifierAllocator.cs'
+          $source = [IO.File]::ReadAllText($path)
+          $old = 'RETURNING "NextValue" - 1'
+          $new = 'RETURNING "NextValue"'
+          if (($source.Split($old).Count - 1) -ne 1) { throw 'Expected allocator mutation anchor exactly once.' }
+          [IO.File]::WriteAllText($path, $source.Replace($old, $new), [Text.UTF8Encoding]::new($false))
+          $savedPreference = $ErrorActionPreference
+          $ErrorActionPreference = 'Continue'
+          try {
+            dotnet test product/tests/AeroLink.Infrastructure.Tests --configuration Release --no-restore --filter 'FullyQualifiedName~IdentifierAllocationPersistenceTests'
+            $mutantExit = $LASTEXITCODE
+          }
+          finally {
+            $ErrorActionPreference = $savedPreference
+            git checkout -- $path
+          }
+          if ($mutantExit -eq 0) { throw 'Allocator off-by-one mutant survived the migrated Infrastructure tests.' }
+          if (git status --short -- $path) { throw 'Allocator source was not restored after mutation proof.' }
+          Write-Host 'Mutation proof passed: direct Infrastructure tests reject the off-by-one allocator defect.'
+      - name: Verify source tree cleanliness outside intended test addition
+        shell: pwsh
+        run: |
+          $status = @(git status --short)
+          $unexpected = @($status | Where-Object { $_ -notmatch 'IdentifierAllocationPersistenceTests.cs' })
+          if ($unexpected.Count -gt 0) { throw "Unexpected working-tree changes: $($unexpected -join '; ')" }
+          git diff --check
+          if ($LASTEXITCODE -ne 0) { throw 'git diff --check failed.' }
