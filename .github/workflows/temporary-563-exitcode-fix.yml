@@ -10,7 +10,6 @@ permissions:
 
 jobs:
   repair:
-    if: github.event.head_commit.message != 'Capture #563 shard exit codes before Job Object cleanup'
     runs-on: windows-latest
     timeout-minutes: 45
     steps:
@@ -94,5 +93,5 @@ jobs:
           $staged = @(git diff --cached --name-only)
           $expected = @('product/test-contracts/tests/api-host-reuse-measurement.test.mjs','product/tools/measure-api-host-reuse.ps1')
           if ((Compare-Object ($staged | Sort-Object) ($expected | Sort-Object))) { throw "Unexpected staged paths: $($staged -join ', ')" }
-          git commit -m 'Capture #563 shard exit codes before Job Object cleanup'
+          git commit -m 'Capture shard exit codes before Job Object cleanup'
           git push origin HEAD:chatgpt/563-exitcode-before-cleanup
