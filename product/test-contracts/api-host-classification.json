@@ -1,31 +1,43 @@
 {
-  "schemaVersion": "aerolink-api-host-classification/v2",
+  "schemaVersion": "aerolink-api-host-classification/v3",
   "totals": {
     "classes": 81,
-    "tests": 442
+    "tests": 442,
+    "knownCases": 492,
+    "unknownCaseTests": 0
   },
   "summary": {
     "converted": {
       "classes": 10,
-      "tests": 52
+      "tests": 52,
+      "knownCases": 52,
+      "unknownCaseTests": 0
     },
     "fresh-host": {
       "classes": 37,
-      "tests": 189
+      "tests": 189,
+      "knownCases": 214,
+      "unknownCaseTests": 0
     },
     "migration-candidate": {
       "classes": 1,
-      "tests": 1
+      "tests": 1,
+      "knownCases": 1,
+      "unknownCaseTests": 0
     },
     "reusable-host": {
       "classes": 33,
-      "tests": 200
+      "tests": 200,
+      "knownCases": 225,
+      "unknownCaseTests": 0
     }
   },
   "classes": [
     {
       "cls": "ProjectPersonnelApiTests",
       "tests": 13,
+      "knownCases": 13,
+      "unknownCaseTests": 0,
       "classification": "converted",
       "reason": "Already sharing a host through the #563 pilot.",
       "intents": [
@@ -37,6 +49,8 @@
     {
       "cls": "ApprovalConfigurationApiTests",
       "tests": 6,
+      "knownCases": 6,
+      "unknownCaseTests": 0,
       "classification": "converted",
       "reason": "Already sharing a host through the #563 pilot.",
       "intents": [
@@ -46,6 +60,8 @@
     {
       "cls": "CoverageStateFilterApiTests",
       "tests": 6,
+      "knownCases": 6,
+      "unknownCaseTests": 0,
       "classification": "converted",
       "reason": "Already sharing a host through the #563 pilot.",
       "intents": [
@@ -57,6 +73,8 @@
     {
       "cls": "ProcedureBrowsingApiTests",
       "tests": 6,
+      "knownCases": 6,
+      "unknownCaseTests": 0,
       "classification": "converted",
       "reason": "Already sharing a host through the #563 pilot.",
       "intents": [
@@ -68,6 +86,8 @@
     {
       "cls": "DownstreamAssessmentReopenApiTests",
       "tests": 5,
+      "knownCases": 5,
+      "unknownCaseTests": 0,
       "classification": "converted",
       "reason": "Already sharing a host through the #563 pilot.",
       "intents": [
@@ -79,6 +99,8 @@
     {
       "cls": "TestProcedureDocumentApiTests",
       "tests": 5,
+      "knownCases": 5,
+      "unknownCaseTests": 0,
       "classification": "converted",
       "reason": "Already sharing a host through the #563 pilot.",
       "intents": [
@@ -88,6 +110,8 @@
     {
       "cls": "ChangeRequestReviewRationaleApiTests",
       "tests": 3,
+      "knownCases": 3,
+      "unknownCaseTests": 0,
       "classification": "converted",
       "reason": "Already sharing a host through the #563 pilot.",
       "intents": [
@@ -98,6 +122,8 @@
     {
       "cls": "LiveTestRegressionApiTests",
       "tests": 3,
+      "knownCases": 3,
+      "unknownCaseTests": 0,
       "classification": "converted",
       "reason": "Already sharing a host through the #563 pilot.",
       "intents": [
@@ -108,6 +134,8 @@
     {
       "cls": "SharedHostIsolationTests",
       "tests": 3,
+      "knownCases": 3,
+      "unknownCaseTests": 0,
       "classification": "converted",
       "reason": "Already sharing a host through the #563 pilot.",
       "intents": [
@@ -117,6 +145,8 @@
     {
       "cls": "TestProcedureRevisionHistoryApiTests",
       "tests": 2,
+      "knownCases": 2,
+      "unknownCaseTests": 0,
       "classification": "converted",
       "reason": "Already sharing a host through the #563 pilot.",
       "intents": [
@@ -126,6 +156,8 @@
     {
       "cls": "TestChangeRequestReviewWorkflowTests",
       "tests": 36,
+      "knownCases": 40,
+      "unknownCaseTests": 0,
       "classification": "fresh-host",
       "reason": "Reviewed #563 hold: this class bootstraps an empty database or workspace. A class-scoped SharedApiHost would make first-install state and fixed bootstrap identities order-dependent. Keep fresh-host until a bootstrap-once fixture and per-test workspace tagging are proven.",
       "intents": [
@@ -137,6 +169,8 @@
     {
       "cls": "ManagedDocumentApiTests",
       "tests": 25,
+      "knownCases": 30,
+      "unknownCaseTests": 0,
       "classification": "fresh-host",
       "reason": "Customizes host state (interceptor-or-fault-injection); sharing could change the subject or leak configuration.",
       "intents": [
@@ -150,6 +184,8 @@
     {
       "cls": "BaselineImportApiTests",
       "tests": 14,
+      "knownCases": 14,
+      "unknownCaseTests": 0,
       "classification": "fresh-host",
       "reason": "Reviewed #563 hold: this class bootstraps an empty database or workspace. A class-scoped SharedApiHost would make first-install state and fixed bootstrap identities order-dependent. Keep fresh-host until a bootstrap-once fixture and per-test workspace tagging are proven.",
       "intents": [
@@ -161,6 +197,8 @@
     {
       "cls": "ProblemReportApiTests",
       "tests": 10,
+      "knownCases": 11,
+      "unknownCaseTests": 0,
       "classification": "fresh-host",
       "reason": "Reviewed #563 hold: this class bootstraps an empty database or workspace. A class-scoped SharedApiHost would make first-install state and fixed bootstrap identities order-dependent. Keep fresh-host until a bootstrap-once fixture and per-test workspace tagging are proven.",
       "intents": [
@@ -172,6 +210,8 @@
     {
       "cls": "ProblemReportVerificationApiTests",
       "tests": 9,
+      "knownCases": 10,
+      "unknownCaseTests": 0,
       "classification": "fresh-host",
       "reason": "Reviewed #563 hold: this class bootstraps an empty database or workspace. A class-scoped SharedApiHost would make first-install state and fixed bootstrap identities order-dependent. Keep fresh-host until a bootstrap-once fixture and per-test workspace tagging are proven.",
       "intents": [
@@ -183,6 +223,8 @@
     {
       "cls": "IdentifierAllocationTests",
       "tests": 8,
+      "knownCases": 8,
+      "unknownCaseTests": 0,
       "classification": "fresh-host",
       "reason": "Reviewed #563 hold: exact initial identifier sequences and concurrent allocation exercise a pristine file-backed SQLite database. Keep fresh-host; only isolated domain-only logic may later become a migration candidate.",
       "intents": [
@@ -193,6 +235,8 @@
     {
       "cls": "ClientHostingTests",
       "tests": 7,
+      "knownCases": 16,
+      "unknownCaseTests": 0,
       "classification": "fresh-host",
       "reason": "Owns host-scoped state (filesystem); sharing would leak it between tests.",
       "intents": [
@@ -204,6 +248,8 @@
     {
       "cls": "ReleasedExecutionEvidenceApiTests",
       "tests": 7,
+      "knownCases": 7,
+      "unknownCaseTests": 0,
       "classification": "fresh-host",
       "reason": "Customizes host state (service-replacement); sharing could change the subject or leak configuration.",
       "intents": [
@@ -214,6 +260,8 @@
     {
       "cls": "SecurityBoundaryTests",
       "tests": 7,
+      "knownCases": 7,
+      "unknownCaseTests": 0,
       "classification": "fresh-host",
       "reason": "Customizes host state (service-replacement, factory-host-options); sharing could change the subject or leak configuration.",
       "intents": [
@@ -225,6 +273,8 @@
     {
       "cls": "ReleaseCampaignExactIntentApiTests",
       "tests": 6,
+      "knownCases": 6,
+      "unknownCaseTests": 0,
       "classification": "fresh-host",
       "reason": "Reviewed #563 hold: this class bootstraps an empty database or workspace. A class-scoped SharedApiHost would make first-install state and fixed bootstrap identities order-dependent. Keep fresh-host until a bootstrap-once fixture and per-test workspace tagging are proven.",
       "intents": [
@@ -236,6 +286,8 @@
     {
       "cls": "OpenDigitalThreadTests",
       "tests": 5,
+      "knownCases": 5,
+      "unknownCaseTests": 0,
       "classification": "fresh-host",
       "reason": "Reviewed #563 hold: this class bootstraps an empty database or workspace. A class-scoped SharedApiHost would make first-install state and fixed bootstrap identities order-dependent. Keep fresh-host until stateless methods are split from bootstrap-dependent methods and per-test workspace tagging is proven.",
       "intents": [
@@ -246,6 +298,8 @@
     {
       "cls": "ProblemReportDuplicateDispositionApiTests",
       "tests": 5,
+      "knownCases": 5,
+      "unknownCaseTests": 0,
       "classification": "fresh-host",
       "reason": "Reviewed #563 hold: this class bootstraps an empty database or workspace. A class-scoped SharedApiHost would make first-install state and fixed bootstrap identities order-dependent. Keep fresh-host until a bootstrap-once fixture and per-test workspace tagging are proven.",
       "intents": [
@@ -255,6 +309,8 @@
     {
       "cls": "SecurityHardeningTests",
       "tests": 5,
+      "knownCases": 5,
+      "unknownCaseTests": 0,
       "classification": "fresh-host",
       "reason": "Reviewed #563 hold: bootstrap-dependent image-upload methods share first-install state and fixed workspace data. Keep those methods fresh; split any stateless header/auth methods before considering SharedApiHost.",
       "intents": [
@@ -264,6 +320,8 @@
     {
       "cls": "ChangeRequestRenameApiTests",
       "tests": 4,
+      "knownCases": 6,
+      "unknownCaseTests": 0,
       "classification": "fresh-host",
       "reason": "Reviewed #563 hold: this class bootstraps an empty database or workspace. A class-scoped SharedApiHost would make first-install state and fixed bootstrap identities order-dependent. Keep fresh-host until a bootstrap-once fixture and per-test workspace tagging are proven.",
       "intents": [
@@ -274,6 +332,8 @@
     {
       "cls": "ProblemReportCheckoutApiTests",
       "tests": 4,
+      "knownCases": 4,
+      "unknownCaseTests": 0,
       "classification": "fresh-host",
       "reason": "Reviewed #563 hold: this class bootstraps an empty database or workspace. A class-scoped SharedApiHost would make first-install state and fixed bootstrap identities order-dependent. Keep fresh-host until a bootstrap-once fixture and per-test workspace tagging are proven.",
       "intents": [
@@ -283,6 +343,8 @@
     {
       "cls": "ApiTestTelemetryTests",
       "tests": 3,
+      "knownCases": 3,
+      "unknownCaseTests": 0,
       "classification": "fresh-host",
       "reason": "Customizes host state (interceptor-or-fault-injection); sharing could change the subject or leak configuration.",
       "intents": [
@@ -294,6 +356,8 @@
     {
       "cls": "CodeTraceabilityApiTests",
       "tests": 3,
+      "knownCases": 3,
+      "unknownCaseTests": 0,
       "classification": "fresh-host",
       "reason": "Customizes host state (showcase-template-copy); sharing could change the subject or leak configuration.",
       "intents": [
@@ -303,6 +367,8 @@
     {
       "cls": "ControlledEditingCheckInApiTests",
       "tests": 3,
+      "knownCases": 5,
+      "unknownCaseTests": 0,
       "classification": "fresh-host",
       "reason": "Reviewed #563 hold: this class bootstraps an empty database or workspace. A class-scoped SharedApiHost would make first-install state and fixed bootstrap identities order-dependent. Keep fresh-host until a bootstrap-once fixture and per-test workspace tagging are proven.",
       "intents": [
@@ -312,6 +378,8 @@
     {
       "cls": "DraftDocumentApiTests",
       "tests": 3,
+      "knownCases": 3,
+      "unknownCaseTests": 0,
       "classification": "fresh-host",
       "reason": "Customizes host state (showcase-template-copy); sharing could change the subject or leak configuration.",
       "intents": [
@@ -323,6 +391,8 @@
     {
       "cls": "GovernanceEvidenceApiTests",
       "tests": 3,
+      "knownCases": 3,
+      "unknownCaseTests": 0,
       "classification": "fresh-host",
       "reason": "Owns host-scoped state (startup-config); sharing would leak it between tests.",
       "intents": [
@@ -333,6 +403,8 @@
     {
       "cls": "ServerAuthorityContractTests",
       "tests": 3,
+      "knownCases": 3,
+      "unknownCaseTests": 0,
       "classification": "fresh-host",
       "reason": "Host use is unknown for one or more invocations; isolate it until method-level evidence is completed.",
       "intents": [
@@ -344,6 +416,8 @@
     {
       "cls": "ExternalIdentityAdminApiTests",
       "tests": 2,
+      "knownCases": 2,
+      "unknownCaseTests": 0,
       "classification": "fresh-host",
       "reason": "Owns host-scoped state (startup-config); sharing would leak it between tests.",
       "intents": [
@@ -354,6 +428,8 @@
     {
       "cls": "ProcedureDiscussionApiTests",
       "tests": 2,
+      "knownCases": 2,
+      "unknownCaseTests": 0,
       "classification": "fresh-host",
       "reason": "Customizes host state (showcase-template-copy); sharing could change the subject or leak configuration.",
       "intents": [
@@ -364,6 +440,8 @@
     {
       "cls": "ProductLineApiTests",
       "tests": 2,
+      "knownCases": 2,
+      "unknownCaseTests": 0,
       "classification": "fresh-host",
       "reason": "Reviewed #563 hold: this class bootstraps an empty database or workspace and uses fixed product-line/component identities. Keep fresh-host until a bootstrap-once fixture and per-test tagging are proven; its two methods provide only one theoretical host-build saving.",
       "intents": [
@@ -373,6 +451,8 @@
     {
       "cls": "AdministratorChangeRequestApiTests",
       "tests": 1,
+      "knownCases": 2,
+      "unknownCaseTests": 0,
       "classification": "fresh-host",
       "reason": "Reviewed #563 hold: this one-method class provides zero theoretical host-build savings under one host per class. Keep fresh-host until it is grouped or a separate measured benefit justifies changing the fixture.",
       "intents": [
@@ -382,6 +462,8 @@
     {
       "cls": "ConfigurationPublicationApiTests",
       "tests": 1,
+      "knownCases": 1,
+      "unknownCaseTests": 0,
       "classification": "fresh-host",
       "reason": "Customizes host state (showcase-template-copy); sharing could change the subject or leak configuration.",
       "intents": [
@@ -391,6 +473,8 @@
     {
       "cls": "HistoricalPublicationFreezeApiTests",
       "tests": 1,
+      "knownCases": 1,
+      "unknownCaseTests": 0,
       "classification": "fresh-host",
       "reason": "Reviewed #563 hold: this one-method class provides zero theoretical host-build savings under one host per class. Keep fresh-host until it is grouped or a separate measured benefit justifies changing the fixture.",
       "intents": [
@@ -400,6 +484,8 @@
     {
       "cls": "IntegrityCheckpointApiTests",
       "tests": 1,
+      "knownCases": 1,
+      "unknownCaseTests": 0,
       "classification": "fresh-host",
       "reason": "Owns host-scoped state (filesystem); sharing would leak it between tests.",
       "intents": [
@@ -409,6 +495,8 @@
     {
       "cls": "LegacyProcedureManifestBootstrapApiTests",
       "tests": 1,
+      "knownCases": 1,
+      "unknownCaseTests": 0,
       "classification": "fresh-host",
       "reason": "Reviewed #563 hold: this one-method bootstrap class provides zero theoretical host-build savings under one host per class. Keep fresh-host until its first-install semantics are explicitly isolated or it is grouped with a proven shared fixture.",
       "intents": [
@@ -418,6 +506,8 @@
     {
       "cls": "ManagedDocumentRecoveryApiTests",
       "tests": 1,
+      "knownCases": 1,
+      "unknownCaseTests": 0,
       "classification": "fresh-host",
       "reason": "Reviewed #563 hold: this one-method class provides zero theoretical host-build savings under one host per class and exercises recovery/bootstrap state. Keep fresh-host until it is grouped or a separate measured benefit justifies changing the fixture.",
       "intents": [
@@ -427,6 +517,8 @@
     {
       "cls": "ProblemReportActiveMetricApiTests",
       "tests": 1,
+      "knownCases": 1,
+      "unknownCaseTests": 0,
       "classification": "fresh-host",
       "reason": "Reviewed #563 hold: this one-method class provides zero theoretical host-build savings under one host per class and uses bootstrap-dependent problem-report state. Keep fresh-host until it is grouped or a separate measured benefit justifies changing the fixture.",
       "intents": [
@@ -436,6 +528,8 @@
     {
       "cls": "ProblemReportDispositionApiTests",
       "tests": 1,
+      "knownCases": 1,
+      "unknownCaseTests": 0,
       "classification": "fresh-host",
       "reason": "Reviewed #563 hold: this one-method class provides zero theoretical host-build savings under one host per class and uses bootstrap-dependent problem-report state. Keep fresh-host until it is grouped or a separate measured benefit justifies changing the fixture.",
       "intents": [
@@ -445,6 +539,8 @@
     {
       "cls": "ProblemReportPagingApiTests",
       "tests": 1,
+      "knownCases": 1,
+      "unknownCaseTests": 0,
       "classification": "fresh-host",
       "reason": "Customizes host state (interceptor-or-fault-injection); sharing could change the subject or leak configuration.",
       "intents": [
@@ -454,6 +550,8 @@
     {
       "cls": "ProblemReportWaiverApiTests",
       "tests": 1,
+      "knownCases": 1,
+      "unknownCaseTests": 0,
       "classification": "fresh-host",
       "reason": "Reviewed #563 hold: this one-method class provides zero theoretical host-build savings under one host per class and uses bootstrap-dependent problem-report state. Keep fresh-host until it is grouped or a separate measured benefit justifies changing the fixture.",
       "intents": [
@@ -463,6 +561,8 @@
     {
       "cls": "ProductionConfigurationTests",
       "tests": 1,
+      "knownCases": 1,
+      "unknownCaseTests": 0,
       "classification": "fresh-host",
       "reason": "Owns host-scoped state (filesystem); sharing would leak it between tests.",
       "intents": [
@@ -472,6 +572,8 @@
     {
       "cls": "ProductionRoutingTests",
       "tests": 1,
+      "knownCases": 1,
+      "unknownCaseTests": 0,
       "classification": "fresh-host",
       "reason": "Customizes host state (factory-host-options); sharing could change the subject or leak configuration.",
       "intents": [
@@ -481,6 +583,8 @@
     {
       "cls": "ReleasedExecutionEvidenceAuthorityMismatchTests",
       "tests": 1,
+      "knownCases": 1,
+      "unknownCaseTests": 0,
       "classification": "fresh-host",
       "reason": "Customizes host state (service-replacement); sharing could change the subject or leak configuration.",
       "intents": [
@@ -490,6 +594,8 @@
     {
       "cls": "ControlledProcedureApprovalBasisApiTests",
       "tests": 1,
+      "knownCases": 1,
+      "unknownCaseTests": 0,
       "classification": "migration-candidate",
       "reason": "Every test is in-process logic or a rule matrix; it needs a database or nothing, not a host.",
       "intents": [
@@ -499,6 +605,8 @@
     {
       "cls": "ManualTestChangeRequestApiTests",
       "tests": 40,
+      "knownCases": 42,
+      "unknownCaseTests": 0,
       "classification": "reusable-host",
       "reason": "Exercises the HTTP surface with no host-scoped state or custom host configuration; a shared host is safe only with per-test clients.",
       "intents": [
@@ -510,6 +618,8 @@
     {
       "cls": "TestProcedureAuthoringApiTests",
       "tests": 13,
+      "knownCases": 13,
+      "unknownCaseTests": 0,
       "classification": "reusable-host",
       "reason": "Exercises the HTTP surface with no host-scoped state or custom host configuration; a shared host is safe only with per-test clients.",
       "intents": [
@@ -520,6 +630,8 @@
     {
       "cls": "ProcedureBaselineApiTests",
       "tests": 11,
+      "knownCases": 11,
+      "unknownCaseTests": 0,
       "classification": "reusable-host",
       "reason": "Exercises the HTTP surface with no host-scoped state or custom host configuration; a shared host is safe only with per-test clients.",
       "intents": [
@@ -531,6 +643,8 @@
     {
       "cls": "AuthoringTracedImpactTests",
       "tests": 8,
+      "knownCases": 8,
+      "unknownCaseTests": 0,
       "classification": "reusable-host",
       "reason": "Exercises the HTTP surface with no host-scoped state or custom host configuration; a shared host is safe only with per-test clients.",
       "intents": [
@@ -541,6 +655,8 @@
     {
       "cls": "TestChangeRequestConsolidationTests",
       "tests": 8,
+      "knownCases": 12,
+      "unknownCaseTests": 0,
       "classification": "reusable-host",
       "reason": "Exercises the HTTP surface with no host-scoped state or custom host configuration; a shared host is safe only with per-test clients.",
       "intents": [
@@ -551,6 +667,8 @@
     {
       "cls": "TestChangeRequestRegisterApiTests",
       "tests": 8,
+      "knownCases": 9,
+      "unknownCaseTests": 0,
       "classification": "reusable-host",
       "reason": "Exercises the HTTP surface with no host-scoped state or custom host configuration; a shared host is safe only with per-test clients.",
       "intents": [
@@ -562,6 +680,8 @@
     {
       "cls": "BuildTestSetApiTests",
       "tests": 7,
+      "knownCases": 8,
+      "unknownCaseTests": 0,
       "classification": "reusable-host",
       "reason": "Exercises the HTTP surface with no host-scoped state or custom host configuration; a shared host is safe only with per-test clients.",
       "intents": [
@@ -572,6 +692,8 @@
     {
       "cls": "VerificationImpactApiTests",
       "tests": 7,
+      "knownCases": 7,
+      "unknownCaseTests": 0,
       "classification": "reusable-host",
       "reason": "Exercises the HTTP surface with no host-scoped state or custom host configuration; a shared host is safe only with per-test clients.",
       "intents": [
@@ -583,6 +705,8 @@
     {
       "cls": "BuildScopedWorkspaceApiTests",
       "tests": 6,
+      "knownCases": 6,
+      "unknownCaseTests": 0,
       "classification": "reusable-host",
       "reason": "Exercises the HTTP surface with no host-scoped state or custom host configuration; a shared host is safe only with per-test clients.",
       "intents": [
@@ -592,6 +716,8 @@
     {
       "cls": "ProcedureSavedViewApiTests",
       "tests": 6,
+      "knownCases": 13,
+      "unknownCaseTests": 0,
       "classification": "reusable-host",
       "reason": "Exercises the HTTP surface with no host-scoped state or custom host configuration; a shared host is safe only with per-test clients.",
       "intents": [
@@ -602,6 +728,8 @@
     {
       "cls": "ProcedureTraceApiTests",
       "tests": 6,
+      "knownCases": 6,
+      "unknownCaseTests": 0,
       "classification": "reusable-host",
       "reason": "Exercises the HTTP surface with no host-scoped state or custom host configuration; a shared host is safe only with per-test clients.",
       "intents": [
@@ -612,6 +740,8 @@
     {
       "cls": "SearchableAuthoringPickerApiTests",
       "tests": 6,
+      "knownCases": 6,
+      "unknownCaseTests": 0,
       "classification": "reusable-host",
       "reason": "Exercises the HTTP surface with no host-scoped state or custom host configuration; a shared host is safe only with per-test clients.",
       "intents": [
@@ -621,6 +751,8 @@
     {
       "cls": "TestChangeRequestScopeApiTests",
       "tests": 6,
+      "knownCases": 6,
+      "unknownCaseTests": 0,
       "classification": "reusable-host",
       "reason": "Exercises the HTTP surface with no host-scoped state or custom host configuration; a shared host is safe only with per-test clients.",
       "intents": [
@@ -631,6 +763,8 @@
     {
       "cls": "TestExecutionEffectivityApiTests",
       "tests": 6,
+      "knownCases": 6,
+      "unknownCaseTests": 0,
       "classification": "reusable-host",
       "reason": "Exercises the HTTP surface with no host-scoped state or custom host configuration; a shared host is safe only with per-test clients.",
       "intents": [
@@ -640,6 +774,8 @@
     {
       "cls": "ChangeAuthoringInvariantApiTests",
       "tests": 5,
+      "knownCases": 6,
+      "unknownCaseTests": 0,
       "classification": "reusable-host",
       "reason": "Exercises the HTTP surface with no host-scoped state or custom host configuration; a shared host is safe only with per-test clients.",
       "intents": [
@@ -650,6 +786,8 @@
     {
       "cls": "CancelReviewAuthorityTests",
       "tests": 4,
+      "knownCases": 6,
+      "unknownCaseTests": 0,
       "classification": "reusable-host",
       "reason": "Exercises the HTTP surface with no host-scoped state or custom host configuration; a shared host is safe only with per-test clients.",
       "intents": [
@@ -660,6 +798,8 @@
     {
       "cls": "ControlledEditingProcedureAuthorityTests",
       "tests": 4,
+      "knownCases": 6,
+      "unknownCaseTests": 0,
       "classification": "reusable-host",
       "reason": "Exercises the HTTP surface with no host-scoped state or custom host configuration; a shared host is safe only with per-test clients.",
       "intents": [
@@ -669,6 +809,8 @@
     {
       "cls": "ControlledProcedureDocumentApiTests",
       "tests": 4,
+      "knownCases": 4,
+      "unknownCaseTests": 0,
       "classification": "reusable-host",
       "reason": "Exercises the HTTP surface with no host-scoped state or custom host configuration; a shared host is safe only with per-test clients.",
       "intents": [
@@ -678,6 +820,8 @@
     {
       "cls": "DeferredCarryForwardApiTests",
       "tests": 4,
+      "knownCases": 4,
+      "unknownCaseTests": 0,
       "classification": "reusable-host",
       "reason": "Exercises the HTTP surface with no host-scoped state or custom host configuration; a shared host is safe only with per-test clients.",
       "intents": [
@@ -688,6 +832,8 @@
     {
       "cls": "ProcedureManifestEffectivityApiTests",
       "tests": 4,
+      "knownCases": 4,
+      "unknownCaseTests": 0,
       "classification": "reusable-host",
       "reason": "Exercises the HTTP surface with no host-scoped state or custom host configuration; a shared host is safe only with per-test clients.",
       "intents": [
@@ -697,6 +843,8 @@
     {
       "cls": "RequirementFilterExactnessApiTests",
       "tests": 4,
+      "knownCases": 4,
+      "unknownCaseTests": 0,
       "classification": "reusable-host",
       "reason": "Exercises the HTTP surface with no host-scoped state or custom host configuration; a shared host is safe only with per-test clients.",
       "intents": [
@@ -706,6 +854,8 @@
     {
       "cls": "SavedViewLifecycleApiTests",
       "tests": 4,
+      "knownCases": 4,
+      "unknownCaseTests": 0,
       "classification": "reusable-host",
       "reason": "Exercises the HTTP surface with no host-scoped state or custom host configuration; a shared host is safe only with per-test clients.",
       "intents": [
@@ -716,6 +866,8 @@
     {
       "cls": "VerificationProgramIsolationApiTests",
       "tests": 4,
+      "knownCases": 4,
+      "unknownCaseTests": 0,
       "classification": "reusable-host",
       "reason": "Exercises the HTTP surface with no host-scoped state or custom host configuration; a shared host is safe only with per-test clients.",
       "intents": [
@@ -726,6 +878,8 @@
     {
       "cls": "AuthoredSectionTests",
       "tests": 3,
+      "knownCases": 3,
+      "unknownCaseTests": 0,
       "classification": "reusable-host",
       "reason": "Exercises the HTTP surface with no host-scoped state or custom host configuration; a shared host is safe only with per-test clients.",
       "intents": [
@@ -735,6 +889,8 @@
     {
       "cls": "CorrectiveActionRoutingApiTests",
       "tests": 3,
+      "knownCases": 3,
+      "unknownCaseTests": 0,
       "classification": "reusable-host",
       "reason": "Exercises the HTTP surface with no host-scoped state or custom host configuration; a shared host is safe only with per-test clients.",
       "intents": [
@@ -745,6 +901,8 @@
     {
       "cls": "DeferralAndRevisionListingTests",
       "tests": 3,
+      "knownCases": 3,
+      "unknownCaseTests": 0,
       "classification": "reusable-host",
       "reason": "Exercises the HTTP surface with no host-scoped state or custom host configuration; a shared host is safe only with per-test clients.",
       "intents": [
@@ -754,6 +912,8 @@
     {
       "cls": "PreReleaseEvidenceVisibilityTests",
       "tests": 3,
+      "knownCases": 3,
+      "unknownCaseTests": 0,
       "classification": "reusable-host",
       "reason": "Exercises the HTTP surface with no host-scoped state or custom host configuration; a shared host is safe only with per-test clients.",
       "intents": [
@@ -764,6 +924,8 @@
     {
       "cls": "RestartReviewApiTests",
       "tests": 3,
+      "knownCases": 3,
+      "unknownCaseTests": 0,
       "classification": "reusable-host",
       "reason": "Exercises the HTTP surface with no host-scoped state or custom host configuration; a shared host is safe only with per-test clients.",
       "intents": [
@@ -775,6 +937,8 @@
     {
       "cls": "ClosedReleaseAuthoringTests",
       "tests": 2,
+      "knownCases": 4,
+      "unknownCaseTests": 0,
       "classification": "reusable-host",
       "reason": "Exercises the HTTP surface with no host-scoped state or custom host configuration; a shared host is safe only with per-test clients.",
       "intents": [
@@ -784,6 +948,8 @@
     {
       "cls": "ProblemReportOwnerAuthorityApiTests",
       "tests": 2,
+      "knownCases": 2,
+      "unknownCaseTests": 0,
       "classification": "reusable-host",
       "reason": "Exercises the HTTP surface with no host-scoped state or custom host configuration; a shared host is safe only with per-test clients.",
       "intents": [
@@ -794,6 +960,8 @@
     {
       "cls": "ProgramRoleAuthorityApiTests",
       "tests": 2,
+      "knownCases": 3,
+      "unknownCaseTests": 0,
       "classification": "reusable-host",
       "reason": "Exercises the HTTP surface with no host-scoped state or custom host configuration; a shared host is safe only with per-test clients.",
       "intents": [
@@ -804,6 +972,8 @@
     {
       "cls": "ReviseChangeRequestApiTests",
       "tests": 2,
+      "knownCases": 4,
+      "unknownCaseTests": 0,
       "classification": "reusable-host",
       "reason": "Exercises the HTTP surface with no host-scoped state or custom host configuration; a shared host is safe only with per-test clients.",
       "intents": [
@@ -813,6 +983,8 @@
     {
       "cls": "SoftwareChangeRequestLevelHistoryTests",
       "tests": 2,
+      "knownCases": 2,
+      "unknownCaseTests": 0,
       "classification": "reusable-host",
       "reason": "Exercises the HTTP surface with no host-scoped state or custom host configuration; a shared host is safe only with per-test clients.",
       "intents": [

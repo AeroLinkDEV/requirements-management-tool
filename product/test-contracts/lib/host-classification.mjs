@@ -15,6 +15,24 @@ function classCustomization(source) {
   return CUSTOM_HOST_RULES.filter(([, pattern]) => pattern.test(source)).map(([key]) => key)
 }
 
+function caseCounts(rows) {
+  return {
+    knownCases: rows.reduce((sum, row) => sum + (typeof row.cases === 'number' ? row.cases : 0), 0),
+    unknownCaseTests: rows.filter((row) => typeof row.cases !== 'number').length,
+  }
+}
+
+function classified({ cls, rows, classification, reason, intents }) {
+  return {
+    cls,
+    tests: rows.length,
+    ...caseCounts(rows),
+    classification,
+    reason,
+    intents,
+  }
+}
+
 export function classifyClass({ cls, source, rows, override }) {
   if (override) {
     if (!['fresh-host', 'reusable-host', 'converted', 'migration-candidate'].includes(override.classification)) {
@@ -23,78 +41,29 @@ export function classifyClass({ cls, source, rows, override }) {
     if (typeof override.reason !== 'string' || override.reason.trim() === '') {
       throw new Error(`Reviewed host classification for ${cls} must include a reason`)
     }
-    return {
-      cls,
-      tests: rows.length,
-      classification: override.classification,
-      reason: override.reason,
-      intents: [...new Set(rows.map((row) => row.intent))].sort(),
-    }
+    return classified({ cls, rows, classification: override.classification, reason: override.reason, intents: [...new Set(rows.map((row) => row.intent))].sort() })
   }
   const customizations = classCustomization(source)
   const intents = new Set(rows.map((row) => row.intent))
-  const tests = rows.length
   if (customizations.length > 0) {
-    return {
-      cls,
-      tests,
-      classification: 'fresh-host',
-      reason: `Customizes host state (${customizations.join(', ')}); sharing could change the subject or leak configuration.`,
-      intents: [...intents].sort(),
-    }
+    return classified({ cls, rows, classification: 'fresh-host', reason: `Customizes host state (${customizations.join(', ')}); sharing could change the subject or leak configuration.`, intents: [...intents].sort() })
   }
   if (rows.some((row) => row.hosted === 'unknown')) {
-    return {
-      cls,
-      tests,
-      classification: 'fresh-host',
-      reason: 'Host use is unknown for one or more invocations; isolate it until method-level evidence is completed.',
-      intents: [...intents].sort(),
-    }
+    return classified({ cls, rows, classification: 'fresh-host', reason: 'Host use is unknown for one or more invocations; isolate it until method-level evidence is completed.', intents: [...intents].sort() })
   }
   if (cls !== 'SharedApiHost' && /\bSharedApiHost\b/.test(source)) {
-    return {
-      cls,
-      tests,
-      classification: 'converted',
-      reason: 'Already sharing a host through the #563 pilot.',
-      intents: [...intents].sort(),
-    }
+    return classified({ cls, rows, classification: 'converted', reason: 'Already sharing a host through the #563 pilot.', intents: [...intents].sort() })
   }
   if (rows.some((row) => row.hosted === 'not-hosted') && rows.some((row) => row.hosted === 'hosted')) {
-    return {
-      cls,
-      tests,
-      classification: 'fresh-host',
-      reason: 'Mixed hosted and non-hosted invocations require an explicit fixture boundary before reuse.',
-      intents: [...intents].sort(),
-    }
+    return classified({ cls, rows, classification: 'fresh-host', reason: 'Mixed hosted and non-hosted invocations require an explicit fixture boundary before reuse.', intents: [...intents].sort() })
   }
   if ([...intents].every((intent) => MIGRATABLE.has(intent))) {
-    return {
-      cls,
-      tests,
-      classification: 'migration-candidate',
-      reason: 'Every test is in-process logic or a rule matrix; it needs a database or nothing, not a host.',
-      intents: [...intents].sort(),
-    }
+    return classified({ cls, rows, classification: 'migration-candidate', reason: 'Every test is in-process logic or a rule matrix; it needs a database or nothing, not a host.', intents: [...intents].sort() })
   }
   if ([...intents].some((intent) => NEEDS_FRESH.has(intent))) {
-    return {
-      cls,
-      tests,
-      classification: 'fresh-host',
-      reason: `Owns host-scoped state (${[...intents].filter((intent) => NEEDS_FRESH.has(intent)).join(', ')}); sharing would leak it between tests.`,
-      intents: [...intents].sort(),
-    }
+    return classified({ cls, rows, classification: 'fresh-host', reason: `Owns host-scoped state (${[...intents].filter((intent) => NEEDS_FRESH.has(intent)).join(', ')}); sharing would leak it between tests.`, intents: [...intents].sort() })
   }
-  return {
-    cls,
-    tests,
-    classification: 'reusable-host',
-    reason: 'Exercises the HTTP surface with no host-scoped state or custom host configuration; a shared host is safe only with per-test clients.',
-    intents: [...intents].sort(),
-  }
+  return classified({ cls, rows, classification: 'reusable-host', reason: 'Exercises the HTTP surface with no host-scoped state or custom host configuration; a shared host is safe only with per-test clients.', intents: [...intents].sort() })
 }
 
 export function classifyInventory({ testsDirectory, inventory, overrides = {} }) {
@@ -120,18 +89,29 @@ export function classifyInventory({ testsDirectory, inventory, overrides = {} })
   classes.sort((a, b) => a.classification.localeCompare(b.classification) || b.tests - a.tests || a.cls.localeCompare(b.cls))
   const summary = {}
   for (const row of classes) {
-    summary[row.classification] = summary[row.classification] ?? { classes: 0, tests: 0 }
+    summary[row.classification] = summary[row.classification] ?? { classes: 0, tests: 0, knownCases: 0, unknownCaseTests: 0 }
     summary[row.classification].classes += 1
     summary[row.classification].tests += row.tests
+    summary[row.classification].knownCases += row.knownCases
+    summary[row.classification].unknownCaseTests += row.unknownCaseTests
   }
-  return { classes, summary, totals: { classes: classes.length, tests: classes.reduce((sum, row) => sum + row.tests, 0) } }
+  return {
+    classes,
+    summary,
+    totals: {
+      classes: classes.length,
+      tests: classes.reduce((sum, row) => sum + row.tests, 0),
+      knownCases: classes.reduce((sum, row) => sum + row.knownCases, 0),
+      unknownCaseTests: classes.reduce((sum, row) => sum + row.unknownCaseTests, 0),
+    },
+  }
 }
 
 /** Build the committed artifact shape from a current-source intent inventory. */
 export function buildHostArtifact({ testsDirectory, inventory, overrides = {} }) {
   const result = classifyInventory({ testsDirectory, inventory, overrides })
   return {
-    schemaVersion: 'aerolink-api-host-classification/v2',
+    schemaVersion: 'aerolink-api-host-classification/v3',
     totals: result.totals,
     summary: result.summary,
     classes: result.classes,
