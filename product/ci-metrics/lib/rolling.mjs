@@ -532,9 +532,9 @@ function legacyTrackerCategories(body) {
 /**
  * Read the machine-readable category identity from a tracker body.
  *
- * New tracker bodies carry this as an HTML comment so the human-facing issue stays readable. Legacy
- * bodies have no trustworthy category identity; returning null makes a clean report leave them alone
- * rather than guessing from prose and possibly clearing the wrong category.
+ * New tracker bodies carry this as an HTML comment so the human-facing issue stays readable. The one
+ * canonical pre-marker #587 layout can be migrated structurally; malformed or unknown legacy bodies return
+ * null so a clean report leaves them alone rather than guessing and possibly clearing the wrong category.
  */
 export function trackerCategoriesFromBody(body) {
   const match = new RegExp(`<!--\\s*${TRACKER_METADATA_PREFIX}\\s+([\\s\\S]*?)\\s*-->`).exec(String(body ?? ''))
@@ -583,8 +583,9 @@ export function decideTrackerAction({ regressions = [], trackerExists = false, t
     // An empty result is only evidence of recovery for every category the tracker was actually
     // tracking. Missing artifacts, a thin window, or a shift in the category mix all produce the same
     // empty array, and clearing on those would replace a real finding with a claim nothing supports.
-    // A legacy body has no structured category identity, so it is deliberately not clearable until a
-    // detected report rewrites it with the metadata marker below.
+    // A canonical pre-marker #587 body can supply category identity through the exact legacy parser above.
+    // Malformed or unknown legacy bodies return null and remain deliberately un-clearable until a detected
+    // report rewrites them with the metadata marker below.
     return trackerCategoriesAreDeterminate(trackerCategories, determinacyByCategory)
       ? { action: 'update', reason: 'No sustained regressions over a sufficient window; recording that the tracker is clear rather than leaving a stale claim.' }
       : { action: 'none', reason: 'No regressions found, but the tracked category evidence was missing or insufficient; leaving the existing tracker rather than clearing it on ignorance.' }
