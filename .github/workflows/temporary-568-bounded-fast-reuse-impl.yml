@@ -78,12 +78,12 @@ jobs:
           if (($tests.Split($marker).Count - 1) -ne 1) { throw 'Planner source contract anchor mismatch.' }
           $contractLines = @(
             $marker,
-            "Assert-True (`$plannerSource -match '\`$fastReleaseBuildProven = \`$false') 'Fast execution must start without assuming a Release build exists.'",
-            "Assert-True (`$plannerSource -match '\`$script:fastReleaseBuildProven = \`$true') 'Fast execution must mark API reuse only after its own Release solution build succeeds.'",
-            "Assert-True (`$plannerSource -match \"AEROLINK_E2E_SKIP_BUILD = 'true'\") 'Fast browser smoke must reuse the API only after the same invocation proves a Release build.'",
-            "Assert-True (`$plannerSource -match 'Fast Release build was marked complete but the Release API output is missing') 'Fast API reuse must verify the expected Release API output exists.'",
-            "Assert-True (`$plannerSource -match 'previousSkipBuildExists') 'Fast browser smoke must preserve caller environment state.'",
-            "Assert-True (`$plannerSource -match 'Remove-Item Env:AEROLINK_E2E_SKIP_BUILD') 'Fast browser smoke must clear unproven caller skip-build state.'"
+            'Assert-True ($plannerSource -match ''\$fastReleaseBuildProven = \$false'') ''Fast execution must start without assuming a Release build exists.''',
+            'Assert-True ($plannerSource -match ''\$script:fastReleaseBuildProven = \$true'') ''Fast execution must mark API reuse only after its own Release solution build succeeds.''',
+            'Assert-True ($plannerSource -match "AEROLINK_E2E_SKIP_BUILD = ''true''") ''Fast browser smoke must reuse the API only after the same invocation proves a Release build.''',
+            'Assert-True ($plannerSource -match ''Fast Release build was marked complete but the Release API output is missing'') ''Fast API reuse must verify the expected Release API output exists.''',
+            'Assert-True ($plannerSource -match ''previousSkipBuildExists'') ''Fast browser smoke must preserve caller environment state.''',
+            'Assert-True ($plannerSource -match ''Remove-Item Env:AEROLINK_E2E_SKIP_BUILD'') ''Fast browser smoke must clear unproven caller skip-build state.'''
           )
           $tests = $tests.Replace($marker, ($contractLines -join "`n"))
           [IO.File]::WriteAllText((Resolve-Path $testPath), $tests, $utf8)
