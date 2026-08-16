@@ -92,6 +92,9 @@ test('script contract keeps telemetry aggregation, isolated evidence, and altern
   assert.match(source, /Get-Item -LiteralPath \$candidate/)
   assert.match(source, /MaxProcessTreeCount/)
   assert.match(source, /Get-ProcessIdentityResult/)
+  assert.match(source, /Get-RequiredProcessIdentity/)
+  assert.match(source, /Required process identity lookup failed/)
+  assert.match(source, /\$rootIdentity = Get-RequiredProcessIdentity \$process\.Id/)
   assert.match(source, /process-tree enumeration unavailable/)
   assert.match(source, /manifestHash/)
   assert.match(source, /environmentFingerprint/)
@@ -113,6 +116,17 @@ test('script contract keeps telemetry aggregation, isolated evidence, and altern
   assert.match(source, /authoritative seeded planner/)
   assert.match(source, /Run mode always restores and builds/)
   assert.match(source, /Job containment cleanup/)
+  assert.match(source, /if \(!CloseHandle\(stdout\)\)/)
+  assert.match(source, /if \(!CloseHandle\(stderr\)\)/)
+  assert.match(source, /if \(!TerminateProcess\(pi\.hProcess, 1\)\)/)
+  assert.match(source, /wait != WAIT_OBJECT_0/)
+  assert.match(source, /if \(!CloseHandle\(pi\.hProcess\)\)/)
+  assert.match(source, /if \(!result\.Success && !TerminateJobObject\(job, 1\)\)/)
+  assert.match(source, /if \(!CloseHandle\(job\)\)/)
+  assert.match(source, /reported duplicate shard ID/)
+  assert.match(source, /reported extra shard ID/)
+  assert.match(source, /omitted authenticated partition shard/)
+  assert.match(source, /expected test names differ from its authenticated partition/)
   assert.doesNotMatch(source, /Get-KnownProcessResidualError/)
   assert.match(source, /cleanup result was unavailable/)
   assert.match(source, /remaining owned processes/)
@@ -294,6 +308,23 @@ function evaluateLive(plan, baseline, treatment) {
   return { directory, output, result }
 }
 
+function recomputeObservation(observation) {
+  const shards = observation.shards
+  observation.metrics = {
+    worstShardWallMs: Math.max(...shards.map((shard) => shard.wallMs)),
+    summedShardWallMs: shards.reduce((sum, shard) => sum + shard.wallMs, 0),
+    cpuMs: shards.reduce((sum, shard) => sum + shard.cpuMs, 0),
+    diskReadBytes: shards.reduce((sum, shard) => sum + shard.diskReadBytes, 0),
+    diskWriteBytes: shards.reduce((sum, shard) => sum + shard.diskWriteBytes, 0),
+    factories: shards.reduce((sum, shard) => sum + shard.telemetry.factories, 0),
+    startupMs: shards.reduce((sum, shard) => sum + shard.telemetry.summedFactoryStartupMs, 0),
+    testCount: shards.reduce((sum, shard) => sum + shard.counts.total, 0),
+  }
+  observation.valid = true
+  observation.metricsComplete = true
+  observation.invalidReasons = []
+}
+
 test('evaluate authenticates a positive ten-run decision against live manifests and exact worktrees', (t) => {
   const plan = findLivePlan(t)
   if (!plan) return
@@ -331,6 +362,53 @@ test('evaluate rejects forged same-count, duplicate, missing, and extra TRX iden
     const decision = JSON.parse(readFileSync(join(evaluated.output, 'decision.json'), 'utf8'))
     assert.equal(decision.status, 'inconclusive', label)
     assert.ok(decision.validationErrors.some((error) => error.includes('case identity')), label)
+  }
+})
+
+test('evaluate binds the complete exact reported shard set to its authenticated partition', (t) => {
+  const plan = findLivePlan(t)
+  const attacks = [
+    ['omitted slow shard', (observation) => {
+      observation.shards.at(-1).wallMs = 1000
+      observation.shards.pop()
+    }],
+    ['extra shard', (observation) => {
+      const extra = clone(observation.shards[0])
+      extra.shard = 99
+      observation.shards.push(extra)
+    }],
+    ['duplicate shard', (observation) => {
+      observation.shards.push(clone(observation.shards[0]))
+    }],
+    ['swapped shard IDs', (observation) => {
+      const first = observation.shards[0].shard
+      observation.shards[0].shard = observation.shards[1].shard
+      observation.shards[1].shard = first
+    }],
+    ['swapped shard classes', (observation) => {
+      const first = observation.shards[0].classes
+      observation.shards[0].classes = observation.shards[1].classes
+      observation.shards[1].classes = first
+    }],
+    ['same-count alternate expected and actual arrays', (observation) => {
+      const shard = observation.shards.find((item) => item.expectedCaseNames.length > 1)
+      assert.ok(shard, 'fixture needs a multi-case shard')
+      const alternates = shard.expectedCaseNames.map((_, index) => `AeroLink.Api.Tests.Alternate.Case${index}`)
+      shard.expectedCaseNames = [...alternates]
+      shard.testNames = [...alternates]
+    }],
+  ]
+  for (const [label, attack] of attacks) {
+    const baseline = makeLiveSummary(plan, 'baseline', 100)
+    const treatment = makeLiveSummary(plan, 'treatment', 80)
+    attack(baseline.observations[0])
+    recomputeObservation(baseline.observations[0])
+    const evaluated = evaluateLive(plan, baseline, treatment)
+    t.after(() => rmSync(evaluated.directory, { recursive: true, force: true }))
+    assert.equal(evaluated.result.status, 0, `${label}: ${evaluated.result.stdout}\n${evaluated.result.stderr}`)
+    const decision = JSON.parse(readFileSync(join(evaluated.output, 'decision.json'), 'utf8'))
+    assert.equal(decision.status, 'inconclusive', label)
+    assert.ok(decision.validationErrors.some((error) => /authenticated partition|duplicate shard ID|extra shard ID/.test(error)), `${label}: ${decision.validationErrors.join('\n')}`)
   }
 })
 
@@ -462,4 +540,10 @@ test('job containment smoke drains a late-spawned grandchild', () => {
   assert.match(smoke.lateChildEvidence, /completed without proven Job Object cleanup/)
   assert.match(smoke.lateChildEvidence, /jobEmpty=False/)
   assert.match(smoke.lateChildEvidence, /handlesClosed=True/)
+  assert.equal(smoke.identityLookupFailClosed, true)
+  assert.match(smoke.identityFailureEvidence, /Required process identity lookup failed/)
+  assert.match(smoke.identityFailureEvidence, /injected CIM failure/)
+  assert.equal(smoke.nativeLaunchFailClosed, true)
+  assert.match(smoke.nativeLaunchFailureEvidence, /Job-contained launch failed/)
+  assert.match(smoke.nativeLaunchFailureEvidence, /CreateFile stdout/)
 })

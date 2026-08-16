@@ -188,6 +188,12 @@ public static class AeroLinkJobNative
         return operation + " failed with Win32 error " + Marshal.GetLastWin32Error();
     }
 
+    private static void AppendError(LaunchResult result, string error)
+    {
+        if (String.IsNullOrWhiteSpace(error)) return;
+        result.Error = String.IsNullOrWhiteSpace(result.Error) ? error : result.Error + " " + error;
+    }
+
     public static LaunchResult Launch(string applicationName, string commandLine, string currentDirectory, string stdoutPath, string stderrPath, string[] environmentEntries)
     {
         var result = new LaunchResult { Success = false, StdoutPath = stdoutPath, StderrPath = stderrPath };
@@ -220,25 +226,23 @@ public static class AeroLinkJobNative
             if (!AssignProcessToJobObject(job, pi.hProcess))
             {
                 result.Error = LastError("AssignProcessToJobObject");
-                TerminateProcess(pi.hProcess, 1);
-                WaitForSingleObject(pi.hProcess, 5000);
                 return result;
             }
             if (ResumeThread(pi.hThread) == UInt32.MaxValue)
             {
                 result.Error = LastError("ResumeThread");
-                TerminateJobObject(job, 1);
-                WaitForSingleObject(pi.hProcess, 5000);
                 return result;
             }
             if (!CloseHandle(pi.hThread))
             {
                 result.Error = LastError("CloseHandle thread");
-                TerminateJobObject(job, 1);
-                WaitForSingleObject(pi.hProcess, 5000);
                 return result;
             }
             pi.hThread = IntPtr.Zero;
+            if (!CloseHandle(stdout)) { result.Error = LastError("CloseHandle stdout"); return result; }
+            stdout = IntPtr.Zero;
+            if (!CloseHandle(stderr)) { result.Error = LastError("CloseHandle stderr"); return result; }
+            stderr = IntPtr.Zero;
             result.Success = true;
             result.ProcessId = pi.dwProcessId;
             result.ProcessHandle = pi.hProcess;
@@ -250,18 +254,23 @@ public static class AeroLinkJobNative
         finally
         {
             if (environment != IntPtr.Zero) Marshal.FreeHGlobal(environment);
-            if (stdout != IntPtr.Zero && stdout != INVALID_HANDLE_VALUE) CloseHandle(stdout);
-            if (stderr != IntPtr.Zero && stderr != INVALID_HANDLE_VALUE) CloseHandle(stderr);
-            if (pi.hThread != IntPtr.Zero) CloseHandle(pi.hThread);
+            if (stdout != IntPtr.Zero && stdout != INVALID_HANDLE_VALUE && !CloseHandle(stdout)) AppendError(result, LastError("CloseHandle stdout during failure cleanup"));
+            if (stderr != IntPtr.Zero && stderr != INVALID_HANDLE_VALUE && !CloseHandle(stderr)) AppendError(result, LastError("CloseHandle stderr during failure cleanup"));
+            if (pi.hThread != IntPtr.Zero && !CloseHandle(pi.hThread)) AppendError(result, LastError("CloseHandle thread during failure cleanup"));
             if (pi.hProcess != IntPtr.Zero)
             {
-                if (!result.Success) { TerminateProcess(pi.hProcess, 1); WaitForSingleObject(pi.hProcess, 5000); }
-                CloseHandle(pi.hProcess);
+                if (!result.Success)
+                {
+                    if (!TerminateProcess(pi.hProcess, 1)) AppendError(result, LastError("TerminateProcess during failure cleanup"));
+                    var wait = WaitForSingleObject(pi.hProcess, 5000);
+                    if (wait != WAIT_OBJECT_0) AppendError(result, wait == WAIT_TIMEOUT ? "Process did not exit during launch-failure cleanup." : LastError("WaitForSingleObject during failure cleanup"));
+                }
+                if (!CloseHandle(pi.hProcess)) AppendError(result, LastError("CloseHandle process during failure cleanup"));
             }
             if (job != IntPtr.Zero)
             {
-                if (!result.Success) TerminateJobObject(job, 1);
-                CloseHandle(job);
+                if (!result.Success && !TerminateJobObject(job, 1)) AppendError(result, LastError("TerminateJobObject during failure cleanup"));
+                if (!CloseHandle(job)) AppendError(result, LastError("CloseHandle job during failure cleanup"));
             }
         }
     }
@@ -492,7 +501,32 @@ function Invoke-JobContainmentSmoke {
             $lateFailure = $_.Exception.Message
             if ($lateFailure -notmatch 'completed without proven Job Object cleanup' -or $lateFailure -notmatch 'jobEmpty=False' -or $lateFailure -notmatch 'handlesClosed=True') { throw }
         }
-        [ordered]@{ smoke = 'job-containment'; cleanSuccess = $true; lateChildFailClosed = $true; lateChildEvidence = $lateFailure } | ConvertTo-Json -Depth 10
+        $identityFailure = $null
+        try {
+            [void](Get-RequiredProcessIdentity 424242 { param($id) [pscustomobject]@{ found = $false; identity = $null; error = "injected CIM failure for $id" } })
+            Fail 'Identity smoke unexpectedly accepted an injected CIM lookup failure.'
+        } catch {
+            $identityFailure = $_.Exception.Message
+            if ($identityFailure -notmatch 'Required process identity lookup failed' -or $identityFailure -notmatch 'injected CIM failure') { throw }
+        }
+        $nativeLaunchFailure = $null
+        try {
+            [void](Start-JobContainedProcess -FileName 'pwsh' -Arguments @('-NoProfile', '-Command', 'exit 0') -WorkingDirectory $root -StdoutPath (Join-Path $root 'missing\stdout.log') -StderrPath (Join-Path $root 'missing\stderr.log'))
+            Fail 'Native launch smoke unexpectedly accepted an invalid capture path.'
+        } catch {
+            $nativeLaunchFailure = $_.Exception.Message
+            if ($nativeLaunchFailure -notmatch 'Job-contained launch failed' -or $nativeLaunchFailure -notmatch 'CreateFile stdout') { throw }
+        }
+        [ordered]@{
+            smoke = 'job-containment'
+            cleanSuccess = $true
+            lateChildFailClosed = $true
+            lateChildEvidence = $lateFailure
+            identityLookupFailClosed = $true
+            identityFailureEvidence = $identityFailure
+            nativeLaunchFailClosed = $true
+            nativeLaunchFailureEvidence = $nativeLaunchFailure
+        } | ConvertTo-Json -Depth 10
     } finally {
         if (Test-Path -LiteralPath $root) { Remove-Item -LiteralPath $root -Recurse -Force -ErrorAction SilentlyContinue }
     }
@@ -704,7 +738,6 @@ function Assert-SummaryPartitionsMatchLive([object]$Summary, [object]$LiveManife
             $classes = @($shard.classes | ForEach-Object { [string]$_ })
             $partitionCaseNames = @($shard.caseNames | ForEach-Object { [string]$_ } | Sort-Object)
             if ($partitionCaseNames.Count -ne [int]$shard.expectedCases) { Fail "$Condition seed $seed shard $($shard.shard) case-name load does not match expectedCases." }
-            $expectedShardCaseNames = @($classes | ForEach-Object { @($liveLoads[$_]) } )
             $expectedShardCaseNames = @($LiveManifest.classes | Where-Object { $classes -contains [string]$_.name } | ForEach-Object { $_.caseNames } | Sort-Object)
             if (Compare-Object $partitionCaseNames $expectedShardCaseNames) { Fail "$Condition seed $seed shard $($shard.shard) case-name set does not match live class loads." }
             foreach ($className in $classes) {
@@ -749,9 +782,11 @@ function Get-ProcessIdentityResult([int]$Id) {
     }
 }
 
-function Get-ProcessIdentity([int]$Id) {
-    $result = Get-ProcessIdentityResult $Id
-    if ($result.error) { return $null }
+function Get-RequiredProcessIdentity([int]$Id, [scriptblock]$Lookup) {
+    $result = if ($Lookup) { & $Lookup $Id } else { Get-ProcessIdentityResult $Id }
+    if ($null -eq $result) { Fail "CIM identity lookup returned no result for PID $Id." }
+    if ($result.error) { Fail "Required process identity lookup failed for PID ${Id}: $($result.error)" }
+    if (-not [bool]$result.found -or $null -eq $result.identity) { Fail "Required process identity was not found for PID $Id." }
     $result.identity
 }
 
@@ -845,7 +880,7 @@ function New-TestProcess {
     try {
         $launch = Start-JobContainedProcess -FileName $DotnetExecutable -Arguments $arguments -WorkingDirectory $Worktree -StdoutPath $StdoutPath -StderrPath $StderrPath -Environment @{ AEROLINK_API_TELEMETRY_JSONL = $TelemetryPath; DOTNET_CLI_TELEMETRY_OPTOUT = '1' }
         $process = [System.Diagnostics.Process]::GetProcessById($launch.ProcessId)
-        $rootIdentity = Get-ProcessIdentity $process.Id
+        $rootIdentity = Get-RequiredProcessIdentity $process.Id
         $initialTree = Get-ProcessTreeSnapshot @($process.Id)
         [pscustomobject]@{
             job = $launch
@@ -996,8 +1031,14 @@ function Get-TrxEvidence([string]$Path) {
 function Compare-NameMultiset([string[]]$Expected, [string[]]$Actual) {
     $expectedCounts = [System.Collections.Generic.Dictionary[string,int]]::new([StringComparer]::Ordinal)
     $actualCounts = [System.Collections.Generic.Dictionary[string,int]]::new([StringComparer]::Ordinal)
-    foreach ($name in @($Expected)) { if ($expectedCounts.ContainsKey($name)) { $expectedCounts[$name]++ } else { $expectedCounts[$name] = 1 } }
-    foreach ($name in @($Actual)) { if ($actualCounts.ContainsKey($name)) { $actualCounts[$name]++ } else { $actualCounts[$name] = 1 } }
+    foreach ($name in @($Expected)) {
+        if ([string]::IsNullOrEmpty($name)) { return 'expected case identities contain a null or empty value' }
+        if ($expectedCounts.ContainsKey($name)) { $expectedCounts[$name]++ } else { $expectedCounts[$name] = 1 }
+    }
+    foreach ($name in @($Actual)) {
+        if ([string]::IsNullOrEmpty($name)) { return 'actual case identities contain a null or empty value' }
+        if ($actualCounts.ContainsKey($name)) { $actualCounts[$name]++ } else { $actualCounts[$name] = 1 }
+    }
     $keySet = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
     foreach ($key in $expectedCounts.Keys) { [void]$keySet.Add($key) }
     foreach ($key in $actualCounts.Keys) { [void]$keySet.Add($key) }
@@ -1232,6 +1273,16 @@ function Test-NonNegativeNumber([object]$Value) {
     -not [double]::IsNaN($number) -and -not [double]::IsInfinity($number) -and $number -ge 0
 }
 
+function Test-OrdinalStringSequence([object[]]$Expected, [object[]]$Actual) {
+    $expectedValues = @($Expected | ForEach-Object { [string]$_ })
+    $actualValues = @($Actual | ForEach-Object { [string]$_ })
+    if ($expectedValues.Count -ne $actualValues.Count) { return $false }
+    for ($index = 0; $index -lt $expectedValues.Count; $index++) {
+        if ($expectedValues[$index] -cne $actualValues[$index]) { return $false }
+    }
+    $true
+}
+
 function Get-ValidatedSummary([object]$Summary, [string]$ExpectedCondition) {
     $errors = [System.Collections.Generic.List[string]]::new()
     $schema = [string]$Summary.schemaVersion
@@ -1285,8 +1336,31 @@ function Get-ValidatedSummary([object]$Summary, [string]$ExpectedCondition) {
             $errors.Add("Observation seed '$seedText' final worktree state is not the expected clean SHA/path.")
             $evidenceValid = $false
         }
-        if ($null -eq $observation.partition) { $errors.Add("Observation seed '$seedText' is missing its saved partition."); $evidenceValid = $false }
-        elseif ([string]$observation.partition.seed -ne $seedText) { $errors.Add("Observation seed '$seedText' partition seed does not match."); $evidenceValid = $false }
+        $partitionShards = @()
+        $partitionById = @{}
+        if ($null -eq $observation.partition) {
+            $errors.Add("Observation seed '$seedText' is missing its saved partition.")
+            $evidenceValid = $false
+            $evidenceMetricsComplete = $false
+        } else {
+            if ([string]$observation.partition.seed -ne $seedText) { $errors.Add("Observation seed '$seedText' partition seed does not match."); $evidenceValid = $false }
+            $partitionShards = @($observation.partition.shards)
+            if ([int]$observation.partition.shardCount -le 0 -or $partitionShards.Count -ne [int]$observation.partition.shardCount) {
+                $errors.Add("Observation seed '$seedText' partition has an incomplete declared shard set.")
+                $evidenceValid = $false
+                $evidenceMetricsComplete = $false
+            }
+            foreach ($partitionShard in $partitionShards) {
+                $partitionShardId = 0
+                if (-not [int]::TryParse(([string]$partitionShard.shard), [ref]$partitionShardId) -or $partitionShardId -lt 1 -or $partitionById.ContainsKey($partitionShardId)) {
+                    $errors.Add("Observation seed '$seedText' partition has an invalid or duplicate shard ID '$($partitionShard.shard)'.")
+                    $evidenceValid = $false
+                    $evidenceMetricsComplete = $false
+                    continue
+                }
+                $partitionById[$partitionShardId] = $partitionShard
+            }
+        }
         $wallValues = [System.Collections.Generic.List[double]]::new()
         $cpuValues = [System.Collections.Generic.List[double]]::new()
         $readValues = [System.Collections.Generic.List[double]]::new()
@@ -1295,19 +1369,59 @@ function Get-ValidatedSummary([object]$Summary, [string]$ExpectedCondition) {
         $startupValues = [System.Collections.Generic.List[double]]::new()
         $testValues = [System.Collections.Generic.List[double]]::new()
         if ($shards.Count -eq 0) { $evidenceValid = $false; $evidenceMetricsComplete = $false }
+        if ($shards.Count -ne $partitionShards.Count) {
+            $errors.Add("Observation seed '$seedText' reported $($shards.Count) shards; its authenticated partition requires $($partitionShards.Count).")
+            $evidenceValid = $false
+            $evidenceMetricsComplete = $false
+        }
+        $observedShardIds = [System.Collections.Generic.HashSet[int]]::new()
         foreach ($shard in $shards) {
-            if ([int]$shard.exitCode -ne 0 -or [int]$shard.expectedCases -le 0) { $evidenceValid = $false }
-            if ($null -eq $shard.counts -or [int]$shard.counts.total -ne [int]$shard.expectedCases -or
-                [int]$shard.counts.failed -ne 0 -or [int]$shard.counts.skipped -ne 0 -or [int]$shard.counts.other -ne 0) { $evidenceValid = $false }
-            $expectedNames = @($shard.expectedCaseNames | ForEach-Object { [string]$_ } | Sort-Object)
-            $actualNames = @($shard.testNames | ForEach-Object { [string]$_ })
-            $nameMismatch = Compare-NameMultiset $expectedNames $actualNames
-            if ($expectedNames.Count -ne [int]$shard.expectedCases -or $actualNames.Count -ne [int]$shard.expectedCases -or $nameMismatch) {
+            $shardId = 0
+            $partitionShard = $null
+            if (-not [int]::TryParse(([string]$shard.shard), [ref]$shardId) -or $shardId -lt 1) {
+                $errors.Add("Observation seed '$seedText' reported an invalid shard ID '$($shard.shard)'.")
                 $evidenceValid = $false
-                $errors.Add("Observation seed '$seedText' has TRX case identity mismatch: $nameMismatch")
+                $evidenceMetricsComplete = $false
+            } elseif (-not $observedShardIds.Add($shardId)) {
+                $errors.Add("Observation seed '$seedText' reported duplicate shard ID '$shardId'.")
+                $evidenceValid = $false
+                $evidenceMetricsComplete = $false
+            } elseif (-not $partitionById.ContainsKey($shardId)) {
+                $errors.Add("Observation seed '$seedText' reported extra shard ID '$shardId' outside its authenticated partition.")
+                $evidenceValid = $false
+                $evidenceMetricsComplete = $false
+            } else {
+                $partitionShard = $partitionById[$shardId]
+            }
+            $partitionExpectedCases = if ($partitionShard) { [int]$partitionShard.expectedCases } else { -1 }
+            $partitionExpectedNames = if ($partitionShard) { @($partitionShard.caseNames | ForEach-Object { [string]$_ } | Sort-Object) } else { @() }
+            if ($partitionShard) {
+                if ([int]$shard.expectedCases -ne $partitionExpectedCases) {
+                    $errors.Add("Observation seed '$seedText' shard '$shardId' expectedCases differs from its authenticated partition.")
+                    $evidenceValid = $false
+                }
+                if (-not (Test-OrdinalStringSequence -Expected (@($partitionShard.classes)) -Actual (@($shard.classes)))) {
+                    $errors.Add("Observation seed '$seedText' shard '$shardId' classes differ from its authenticated partition.")
+                    $evidenceValid = $false
+                }
+                $reportedExpectedNames = @($shard.expectedCaseNames | ForEach-Object { [string]$_ } | Sort-Object)
+                $reportedExpectedMismatch = Compare-NameMultiset $partitionExpectedNames $reportedExpectedNames
+                if ($reportedExpectedMismatch) {
+                    $errors.Add("Observation seed '$seedText' shard '$shardId' expected test names differ from its authenticated partition: $reportedExpectedMismatch")
+                    $evidenceValid = $false
+                }
+            }
+            if ([int]$shard.exitCode -ne 0 -or $partitionExpectedCases -le 0) { $evidenceValid = $false }
+            if ($null -eq $shard.counts -or [int]$shard.counts.total -ne $partitionExpectedCases -or
+                [int]$shard.counts.failed -ne 0 -or [int]$shard.counts.skipped -ne 0 -or [int]$shard.counts.other -ne 0) { $evidenceValid = $false }
+            $actualNames = @($shard.testNames | ForEach-Object { [string]$_ })
+            $nameMismatch = Compare-NameMultiset $partitionExpectedNames $actualNames
+            if ($partitionExpectedNames.Count -ne $partitionExpectedCases -or $actualNames.Count -ne $partitionExpectedCases -or $nameMismatch) {
+                $evidenceValid = $false
+                $errors.Add("Observation seed '$seedText' shard '$shardId' has TRX case identity mismatch against its authenticated partition: $nameMismatch")
             }
             if (-not [bool]$shard.telemetryHasRecords -or [int]$shard.malformedTelemetry -ne 0 -or [bool]$shard.telemetryTruncated) { $evidenceValid = $false }
-            if ($null -eq $shard.telemetry -or [int]$shard.telemetry.tests -ne [int]$shard.expectedCases -or [int]$shard.telemetry.factories -le 0) { $evidenceValid = $false }
+            if ($null -eq $shard.telemetry -or [int]$shard.telemetry.tests -ne $partitionExpectedCases -or [int]$shard.telemetry.factories -le 0) { $evidenceValid = $false }
             if (-not [bool]$shard.cpuAvailable -or -not [bool]$shard.ioAvailable -or [int]$shard.successfulSamples -le 0 -or -not [bool]$shard.processTreeAvailable -or $shard.processTreeError) { $evidenceMetricsComplete = $false }
             if ($shard.cleanupFailure -or $shard.waitError -or @($shard.errorSignals).Count -gt 0) { $evidenceValid = $false }
             if (-not (Test-NonNegativeNumber $shard.wallMs) -or [double]$shard.wallMs -le 0) { $evidenceValid = $false; $errors.Add("Observation seed '$seedText' has non-positive shard wall time.") }
@@ -1320,6 +1434,13 @@ function Get-ValidatedSummary([object]$Summary, [string]$ExpectedCondition) {
                 @($startupValues, $shard.telemetry.summedFactoryStartupMs),
                 @($testValues, $shard.counts.total))) {
                 if (Test-NonNegativeNumber $pair[1]) { $pair[0].Add([double]$pair[1]) } else { $evidenceValid = $false }
+            }
+        }
+        foreach ($partitionShardId in @($partitionById.Keys)) {
+            if (-not $observedShardIds.Contains([int]$partitionShardId)) {
+                $errors.Add("Observation seed '$seedText' omitted authenticated partition shard '$partitionShardId'.")
+                $evidenceValid = $false
+                $evidenceMetricsComplete = $false
             }
         }
         $invalidReasons = @($observation.invalidReasons)
