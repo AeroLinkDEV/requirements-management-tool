@@ -450,41 +450,51 @@ inventory and current source rather than hand-maintained:
 | fresh-host | 8 | 45 | 10.2% |
 | migration-candidate | 1 | 1 | 0.2% |
 
-### Why the rollout gate cannot be met
+### What full conversion is worth — corrected
 
-Criterion 10 requires **at least a 15% reduction in the API critical-path job**. Taking the best case —
-every one of the 62 reusable classes collapsing to exactly one host:
+An earlier revision of this section put the figure at 12.9% and concluded the gate was unreachable.
+**That was wrong.** It multiplied a derived count of removable builds by the *median* host cost.
+Total cost is mean x count by definition, and this distribution is heavily right-skewed (p95 3,581 ms
+against a 665 ms median), so the median understated the total by 43%. The inconsistency was visible in
+this very document — 433 x 665 ms = 288 s against a measured 503.8 s — and I did not check it.
+
+Recomputed from the host builds and host time actually attributable to the reusable classes, taking the
+median across eight runs so one slow run cannot dominate:
 
 | | |
 |---|---:|
-| Host builds removed | 282 of 433 (65%) |
-| Host time removed, all shards | 188 s |
-| Per shard | 63 s |
-| Median shard wall clock | 484 s |
-| Predicted after | 421 s |
-| **Predicted improvement** | **12.9%** |
+| All host builds, median run | 433 |
+| All host time, median run | 415.4 s |
+| Implied mean per build | 959 ms |
+| Reusable-host classes with telemetry | 58 of 62 |
+| Their host builds | 372 |
+| Their host time | 352.4 s |
+| Builds removed by full conversion | 314 of 372 (84%) |
+| Host time removed, all shards | 297.5 s |
+| Per shard | 99.2 s |
+| **Share of a 484 s median shard** | **20.5%** |
 
-**12.9% is below the 15% gate, and it is an upper bound**, for two reasons:
+### What this does and does not settle
 
-1. Summed host time does not map one-to-one onto wall clock. xUnit runs tests in parallel, so removing
-   63 s of summed host construction removes less than 63 s of elapsed time.
-2. It assumes perfect collapse to one host per class with no new synchronisation cost.
+20.5% is **above** the 15% gate in criterion 10, so the evidence no longer supports abandoning the
+rollout. It does not prove the gate is met either, for one reason that has not changed: **summed host
+construction is not wall clock.** xUnit runs tests in parallel, so removing 99 s of summed construction
+removes less than 99 s of elapsed time, by a factor nobody has measured.
 
-The measured run-to-run spread of **+/-23%** is nearly double the predicted **12.9%** effect. Even if the
-full rollout were completed, demonstrating the gain would require enough runs to see past variance that
-exceeds the signal — which is why the pilot's factory reduction of 471 -> 433 produced no visible wall-clock
-movement.
+So the honest position is that this figure is an upper bound on elapsed improvement and cannot be
+compared directly with a wall-clock gate. Settling it requires converting the reusable classes and
+measuring, across enough runs to see past the +/-23% run-to-run spread recorded above.
 
 ### Disposition
 
-**Host reuse is not pursued beyond the pilot.** The instrumentation (#581) and the ten converted classes
-(#584, #585) stay: they are correct, they are proven isolated, and they reduce real work. The remaining
-62 classes are not converted, because the best available estimate of the complete rollout falls short of
-the gate the issue itself sets, and the effect is smaller than the noise it would have to be measured
-against.
+**The rollout is not abandoned.** The corrected upper bound clears the gate with enough margin that the
+work is worth doing and measuring, which the earlier figure appeared to rule out.
 
-Recorded as a negative result rather than left open, so it is not re-proposed. The schema-template copy
-experiment above is the other one.
+What remains true from the pilot: factories fell 471 -> 433 and the wall clock did not visibly follow,
+because that reduction was ~8% of builds against a +/-23% spread. A full conversion removes 84% of the
+reusable builds, which is an order of magnitude more signal against the same noise.
+
+The schema-template copy experiment above remains a negative result and should not be repeated.
 
 ## Baseline provenance (#567 acceptance criterion 14)
 

@@ -15,7 +15,7 @@ byte-identical `product/test-contracts/api-test-intent.json`.
 
 ## Result
 
-**442 test methods, 485 cases, 81 classes.**
+**442 test methods, 492 cases, 81 classes.** Of these, **434 actually build a host**; 8 never do and are excluded from the ceiling below, because #566 asks about *hosted* invocations.
 
 | Intent | Tests | Cases | Classes | Correct level |
 |---|---:|---:|---:|---|
@@ -27,7 +27,7 @@ byte-identical `product/test-contracts/api-test-intent.json`.
 | Startup, hosting and configuration | 5 | 5 | 4 | API — must stay hosted |
 | **Business-rule matrix over data variations** | **2** | **12** | **2** | **Domain — candidate** |
 
-**Migration candidates: 10 of 442 test methods (2.3%).**
+**Migration candidates: 8 of 434 hosted test methods (1.8%).**
 
 ## How intent is assigned
 
@@ -47,14 +47,26 @@ latter because a test can reach HTTP through a same-class helper without naming 
 The ordering matters and it is why this inventory is stricter than a structural count. A test with
 `InlineData` that also crosses HTTP is an HTTP-boundary test whose data variation is incidental, not a
 rule matrix that happens to use a host. An earlier structural pass over the same suite suggested roughly
-11% were migratable; classifying by intent rather than by shape gives **2.3%**.
+11% were migratable; classifying by intent rather than by shape gives **1.8%**.
+
+Two figures in an earlier revision were wrong and are corrected here.
+
+The parser took the first `{` after the attribute rather than after the method signature. Whenever an
+attribute argument contains a brace — which `[InlineData("{}", …)]` and raw JSON string literals do
+routinely — the "body" it extracted was the attribute's own braces. Two tests were misclassified into
+the migration bucket as a result, one of them an HTTP-boundary test that creates a client and posts to
+a route. Both showed up in the generated artifact with no method name at all, which was a signal in my
+own output that I did not read.
+
+And the denominator counted every xUnit method in the project, including the 8 that never build a host.
+#566 asks about *hosted* invocations, so those inflate the total and understate the ceiling.
 
 ## What this means for #566
 
 Criterion 7 asks for at least 20% of hosted test invocations to be removed or consolidated, *"unless the
 completed inventory demonstrates a smaller safe ceiling with evidence."*
 
-The inventory demonstrates exactly that. **The safe ceiling is 2.3%**, and the reason is not that the
+The inventory demonstrates exactly that. **The safe ceiling is 1.8%**, and the reason is not that the
 tests are poorly written:
 
 - **66% are HTTP-boundary tests.** Criterion 8 requires public route, status, JSON, authorization, audit
@@ -71,7 +83,7 @@ calling a static allocator directly. Two are genuine rule matrices.
 
 Moving those 10 is worth doing on placement grounds: a test that needs a database and not a host belongs
 in the infrastructure suite. It is not worth doing for speed. At the measured median host cost of 665 ms
-it saves roughly **6.7 seconds**.
+it saves roughly **8 seconds** at the measured mean host cost of 959 ms.
 
 ## Where the time actually goes
 
@@ -79,7 +91,7 @@ Measured from #563 phase-1 telemetry across eight runs: **433 host constructions
 tests** — very close to one host per test — at a median of 665 ms and a p95 of 3,581 ms, totalling
 503.8 s summed across the three API shards in a single run.
 
-The cost is not the number of tests. It is that each one builds a host. Reducing the count by 2.3%
+The cost is not the number of tests. It is that each one builds a host. Reducing the count by 1.8%
 changes almost nothing; making hosts reusable changes the multiplier for all 442. That is #563's thesis,
 and this inventory is the evidence that it is the only lever of the two that matters.
 
@@ -87,7 +99,7 @@ and this inventory is the evidence that it is the only lever of the two that mat
 
 - Static analysis cannot see runtime-dispatched helpers, so a test reaching HTTP through an unusual
   indirection could be misclassified. The classification is deliberately conservative in the direction
-  of "must stay hosted", so the 2.3% is a floor on what must remain, not a ceiling on what could move.
+  of "must stay hosted", so the 1.8% is a floor on what must remain, not a ceiling on what could move.
 - Intent is inferred from what a test *does*, not from what its author meant. A test asserting a status
   code while really proving a business rule is counted as HTTP-boundary.
 - The counts move when tests are added. The figure to re-derive is the ratio, not the absolute number.

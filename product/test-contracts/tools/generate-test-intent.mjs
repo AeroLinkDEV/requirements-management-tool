@@ -28,8 +28,17 @@ function tests(source) {
   const attr = /^[ \t]*\[(Fact|Theory)\]/gm
   let match
   while ((match = attr.exec(source)) !== null) {
-    const signature = /public\s+(?:async\s+)?[\w<>\[\]?]+\s+(\w+)\s*\(/.exec(source.slice(match.index, match.index + 600))
-    const open = source.indexOf('{', match.index)
+    // Find the *method signature* first, then the brace after it. Taking the first `{` from the
+    // attribute position instead is wrong whenever an attribute argument contains one, which
+    // `[InlineData("{}", ...)]` and raw JSON string literals routinely do: the "body" extracted is then
+    // the attribute's own braces, so the test reads as having no HTTP call and no name at all. Two
+    // tests were misclassified this way, and both landed in the migration-candidate bucket that the
+    // whole 2.3% figure rests on.
+    const window = source.slice(match.index, match.index + 4000)
+    const signatureMatch = /(?:public|private|internal)\s+(?:static\s+)?(?:async\s+)?[\w<>\[\],\s?]+?\s+(\w+)\s*\([^)]*\)\s*(?:=>|\{)/.exec(window)
+    if (!signatureMatch) continue
+    const signature = [, signatureMatch[1]]
+    const open = source.indexOf('{', match.index + signatureMatch.index + signatureMatch[0].length - 1)
     if (open === -1) continue
     let depth = 0
     let end = open
@@ -91,6 +100,16 @@ const INTENTS = [
 const FALLBACK = { key: 'in-process-logic', label: 'In-process logic with no HTTP and no client', level: 'Domain or Infrastructure (migration candidate)' }
 const CLIENT = /CreateClient|HttpClient|\bclient\b|_host\b/
 
+/**
+ * Whether a test actually pays for a host.
+ *
+ * #566 asks what share of *hosted invocations* can be removed, and this project contains tests that
+ * never build one — `ClientHostingTests`, `ProductionConfigurationTests`, telemetry unit tests. Counting
+ * them in the denominator understates the ceiling by inflating the total, which was the third finding
+ * against the first version of this inventory.
+ */
+const HOSTED = /new AeroLinkApiFactory|SharedApiHost|_host\b|_factory\b|ShowcaseApiFixture|CreateClient/
+
 const rows = []
 for (const file of walk(ROOT)) {
   const source = readFileSync(file, 'utf8')
@@ -104,7 +123,8 @@ for (const file of walk(ROOT)) {
         ? { key: 'http-boundary', label: INTENTS.find((i) => i.key === 'http-boundary').label, level: 'API (must stay hosted)' }
         : FALLBACK
     }
-    rows.push({ cls, test: t.name, intent: intent.key, label: intent.label, level: intent.level, cases: Math.max(1, t.inlineData) })
+    const classSource = readFileSync(file, 'utf8')
+    rows.push({ cls, test: t.name, intent: intent.key, label: intent.label, level: intent.level, cases: Math.max(1, t.inlineData), hosted: HOSTED.test(t.body) || HOSTED.test(classSource) })
   }
 }
 
@@ -129,17 +149,22 @@ for (const [key, entry] of ordered) {
   )
 }
 
+const hostedRows = rows.filter((row) => row.hosted)
+const nonHosted = rows.length - hostedRows.length
+const hostedCandidates = hostedRows.filter((row) => /in-process-logic|rule-matrix/.test(row.intent)).length
+
 const migratable = ordered.filter(([, e]) => /migration candidate/.test(e.level))
 const migratableTests = migratable.reduce((s, [, e]) => s + e.tests, 0)
 console.log('')
-console.log(`Migration candidates: ${migratableTests} of ${totalTests} test methods (${((migratableTests / totalTests) * 100).toFixed(1)}%)`)
+console.log(`Non-hosted tests excluded from the denominator: ${nonHosted}`)
+console.log(`Migration candidates: ${hostedCandidates} of ${hostedRows.length} HOSTED test methods (${((hostedCandidates / hostedRows.length) * 100).toFixed(1)}%)`)
 console.log(`#566 criterion 7 target: >= 20% of hosted test invocations removed or consolidated`)
-console.log(migratableTests / totalTests >= 0.2 ? '  -> target reachable' : '  -> target NOT reachable; the escape clause applies')
+console.log(hostedCandidates / hostedRows.length >= 0.2 ? '  -> target reachable' : '  -> target NOT reachable; the escape clause applies')
 
 const outputPath = process.argv[2] ?? join(repoRoot, 'product/test-contracts/api-test-intent.json')
 writeFileSync(outputPath, `${JSON.stringify({
   schemaVersion: 'aerolink-api-test-intent/v1',
-  totals: { tests: totalTests, cases: totalCases, classes: new Set(rows.map((r) => r.cls)).size },
+  totals: { tests: totalTests, hostedTests: hostedRows.length, nonHostedTests: nonHosted, hostedCandidates, cases: totalCases, classes: new Set(rows.map((r) => r.cls)).size },
   intents: Object.fromEntries(ordered.map(([key, e]) => [key, { label: e.label, level: e.level, tests: e.tests, cases: e.cases, classes: e.classes.size }])),
   tests: rows.map(({ cls, test, intent }) => ({ cls, test, intent })).sort((a, b) => a.cls.localeCompare(b.cls) || a.test.localeCompare(b.test)),
 }, null, 2)}\n`, 'utf8')

@@ -391,8 +391,7 @@
       "reason": "Exercises the HTTP surface with no host-scoped state; a shared host is safe with per-test clients.",
       "intents": [
         "auth-policy",
-        "http-boundary",
-        "in-process-logic"
+        "http-boundary"
       ]
     },
     {

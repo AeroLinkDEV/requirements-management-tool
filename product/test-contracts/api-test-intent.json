@@ -2,15 +2,18 @@
   "schemaVersion": "aerolink-api-test-intent/v1",
   "totals": {
     "tests": 442,
-    "cases": 485,
+    "hostedTests": 434,
+    "nonHostedTests": 8,
+    "hostedCandidates": 8,
+    "cases": 492,
     "classes": 81
   },
   "intents": {
     "http-boundary": {
       "label": "HTTP boundary: route, status, JSON shape",
       "level": "API (must stay hosted)",
-      "tests": 292,
-      "cases": 319,
+      "tests": 293,
+      "cases": 327,
       "classes": 67
     },
     "ef-translation": {
@@ -37,9 +40,9 @@
     "in-process-logic": {
       "label": "In-process logic with no HTTP and no client",
       "level": "Domain or Infrastructure (migration candidate)",
-      "tests": 8,
-      "cases": 8,
-      "classes": 7
+      "tests": 7,
+      "cases": 7,
+      "classes": 6
     },
     "startup-config": {
       "label": "Startup, hosting and configuration",
@@ -379,11 +382,6 @@
     },
     {
       "cls": "ClientHostingTests",
-      "test": "(unnamed)",
-      "intent": "rule-matrix"
-    },
-    {
-      "cls": "ClientHostingTests",
       "test": "A_published_wwwroot_beside_the_application_is_found",
       "intent": "filesystem"
     },
@@ -401,6 +399,11 @@
       "cls": "ClientHostingTests",
       "test": "An_explicitly_configured_directory_without_a_client_is_a_misconfiguration_not_an_opt_out",
       "intent": "http-boundary"
+    },
+    {
+      "cls": "ClientHostingTests",
+      "test": "Api_paths_are_distinguished_from_client_routes",
+      "intent": "rule-matrix"
     },
     {
       "cls": "ClientHostingTests",
@@ -1374,11 +1377,6 @@
     },
     {
       "cls": "ProcedureSavedViewApiTests",
-      "test": "(unnamed)",
-      "intent": "in-process-logic"
-    },
-    {
-      "cls": "ProcedureSavedViewApiTests",
       "test": "A_repeat_name_is_refused_rather_than_creating_a_second_view_nobody_can_tell_apart",
       "intent": "http-boundary"
     },
@@ -1391,6 +1389,11 @@
       "cls": "ProcedureSavedViewApiTests",
       "test": "A_view_is_not_visible_to_somebody_outside_the_project",
       "intent": "auth-policy"
+    },
+    {
+      "cls": "ProcedureSavedViewApiTests",
+      "test": "A_view_the_explorer_cannot_apply_is_refused",
+      "intent": "http-boundary"
     },
     {
       "cls": "ProcedureSavedViewApiTests",
