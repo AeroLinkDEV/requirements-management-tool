@@ -37,55 +37,55 @@ jobs:
           $source = $source.Replace($stateAnchor, $stateAnchor + "`n" + '$fastReleaseBuildProven = $false')
 
           $buildOld = "        'Build the solution' { Invoke-CheckedProcess 'dotnet' @('build', 'product/AeroLink.slnx', '--configuration', 'Release') }"
-          $buildNew = @"
-        'Build the solution' {
-            Invoke-CheckedProcess 'dotnet' @('build', 'product/AeroLink.slnx', '--configuration', 'Release')
-            `$script:fastReleaseBuildProven = `$true
-        }
-"@.TrimEnd()
+          $buildNew = @(
+            "        'Build the solution' {",
+            "            Invoke-CheckedProcess 'dotnet' @('build', 'product/AeroLink.slnx', '--configuration', 'Release')",
+            '            $script:fastReleaseBuildProven = $true',
+            '        }'
+          ) -join "`n"
           if (($source.Split($buildOld).Count - 1) -ne 1) { throw 'Fast Release build case anchor mismatch.' }
           $source = $source.Replace($buildOld, $buildNew)
 
           $browserOld = "        'Browser smoke journeys' { Invoke-CheckedProcess 'npm.cmd' @('--prefix', 'product/client', 'run', 'test:smoke') }"
-          $browserNew = @"
-        'Browser smoke journeys' {
-            `$previousSkipBuildExists = Test-Path Env:AEROLINK_E2E_SKIP_BUILD
-            `$previousSkipBuild = `$env:AEROLINK_E2E_SKIP_BUILD
-            try {
-                if (`$script:fastReleaseBuildProven) {
-                    `$apiDll = Join-Path `$repositoryRoot 'product/src/AeroLink.Api/bin/Release/net10.0/AeroLink.Api.dll'
-                    if (-not (Test-Path -LiteralPath `$apiDll -PathType Leaf)) { throw 'Fast Release build was marked complete but the Release API output is missing.' }
-                    `$env:AEROLINK_E2E_SKIP_BUILD = 'true'
-                }
-                else {
-                    Remove-Item Env:AEROLINK_E2E_SKIP_BUILD -ErrorAction SilentlyContinue
-                }
-                Invoke-CheckedProcess 'npm.cmd' @('--prefix', 'product/client', 'run', 'test:smoke')
-            }
-            finally {
-                if (`$previousSkipBuildExists) { `$env:AEROLINK_E2E_SKIP_BUILD = `$previousSkipBuild }
-                else { Remove-Item Env:AEROLINK_E2E_SKIP_BUILD -ErrorAction SilentlyContinue }
-            }
-        }
-"@.TrimEnd()
+          $browserNew = @(
+            "        'Browser smoke journeys' {",
+            '            $previousSkipBuildExists = Test-Path Env:AEROLINK_E2E_SKIP_BUILD',
+            '            $previousSkipBuild = $env:AEROLINK_E2E_SKIP_BUILD',
+            '            try {',
+            '                if ($script:fastReleaseBuildProven) {',
+            "                    `$apiDll = Join-Path `$repositoryRoot 'product/src/AeroLink.Api/bin/Release/net10.0/AeroLink.Api.dll'",
+            "                    if (-not (Test-Path -LiteralPath `$apiDll -PathType Leaf)) { throw 'Fast Release build was marked complete but the Release API output is missing.' }",
+            "                    `$env:AEROLINK_E2E_SKIP_BUILD = 'true'",
+            '                }',
+            '                else {',
+            '                    Remove-Item Env:AEROLINK_E2E_SKIP_BUILD -ErrorAction SilentlyContinue',
+            '                }',
+            "                Invoke-CheckedProcess 'npm.cmd' @('--prefix', 'product/client', 'run', 'test:smoke')",
+            '            }',
+            '            finally {',
+            '                if ($previousSkipBuildExists) { $env:AEROLINK_E2E_SKIP_BUILD = $previousSkipBuild }',
+            '                else { Remove-Item Env:AEROLINK_E2E_SKIP_BUILD -ErrorAction SilentlyContinue }',
+            '            }',
+            '        }'
+          ) -join "`n"
           if (($source.Split($browserOld).Count - 1) -ne 1) { throw 'Fast browser case anchor mismatch.' }
           $source = $source.Replace($browserOld, $browserNew)
           [IO.File]::WriteAllText((Resolve-Path $path), $source, $utf8)
 
           $testPath = 'product/scripts/Get-AeroLinkTestPlan.Tests.ps1'
           $tests = Get-Content -Raw -LiteralPath $testPath
-          $marker = "$plannerSource = Get-Content -Raw -LiteralPath $scriptPath"
+          $marker = '$plannerSource = Get-Content -Raw -LiteralPath $scriptPath'
           if (($tests.Split($marker).Count - 1) -ne 1) { throw 'Planner source contract anchor mismatch.' }
-          $extra = @'
-$plannerSource = Get-Content -Raw -LiteralPath $scriptPath
-Assert-True ($plannerSource -match '\$fastReleaseBuildProven = \$false') 'Fast execution must start without assuming a Release build exists.'
-Assert-True ($plannerSource -match '\$script:fastReleaseBuildProven = \$true') 'Fast execution must mark API reuse only after its own Release solution build succeeds.'
-Assert-True ($plannerSource -match "AEROLINK_E2E_SKIP_BUILD = 'true'") 'Fast browser smoke must reuse the API only after the same invocation proves a Release build.'
-Assert-True ($plannerSource -match 'Fast Release build was marked complete but the Release API output is missing') 'Fast API reuse must verify the expected Release API output exists.'
-Assert-True ($plannerSource -match 'previousSkipBuildExists') 'Fast browser smoke must preserve caller environment state.'
-Assert-True ($plannerSource -match 'Remove-Item Env:AEROLINK_E2E_SKIP_BUILD') 'Fast browser smoke must clear unproven caller skip-build state.'
-'@
-          $tests = $tests.Replace($marker, $extra.TrimEnd())
+          $contractLines = @(
+            $marker,
+            "Assert-True (`$plannerSource -match '\`$fastReleaseBuildProven = \`$false') 'Fast execution must start without assuming a Release build exists.'",
+            "Assert-True (`$plannerSource -match '\`$script:fastReleaseBuildProven = \`$true') 'Fast execution must mark API reuse only after its own Release solution build succeeds.'",
+            "Assert-True (`$plannerSource -match \"AEROLINK_E2E_SKIP_BUILD = 'true'\") 'Fast browser smoke must reuse the API only after the same invocation proves a Release build.'",
+            "Assert-True (`$plannerSource -match 'Fast Release build was marked complete but the Release API output is missing') 'Fast API reuse must verify the expected Release API output exists.'",
+            "Assert-True (`$plannerSource -match 'previousSkipBuildExists') 'Fast browser smoke must preserve caller environment state.'",
+            "Assert-True (`$plannerSource -match 'Remove-Item Env:AEROLINK_E2E_SKIP_BUILD') 'Fast browser smoke must clear unproven caller skip-build state.'"
+          )
+          $tests = $tests.Replace($marker, ($contractLines -join "`n"))
           [IO.File]::WriteAllText((Resolve-Path $testPath), $tests, $utf8)
       - name: Validate Windows planner contract
         shell: pwsh
