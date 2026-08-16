@@ -31,23 +31,26 @@ jobs:
           $programPath = 'product/test-planner/tools/OwnedProcess/Program.cs'
           $program = Get-Content -Raw -LiteralPath $programPath
           $old = '            var exit = RunOwned(CreateOptions(shell, status, output, error, env, new[] { "/d", "/c", "echo", "fault" }));'
-          $new = @'
-            // Keep a descendant alive for terminate-job so DrainJobAfterRootExit must invoke the injected
-            // TerminateJobObject failure. The old one-shot echo could exit with an already-empty job,
-            // making this fault-path self-test timing-dependent on the Windows runner.
-            var commandArgs = string.Equals(fault, "terminate-job", StringComparison.Ordinal)
-                ? new[] { "/d", "/c", "start /b ping -n 31 127.0.0.1 > nul" }
-                : new[] { "/d", "/c", "echo", "fault" };
-            var exit = RunOwned(CreateOptions(shell, status, output, error, env, commandArgs));
-'@
-          $new = $new.TrimEnd("`r", "`n")
+          $new = @(
+            '            // Keep a descendant alive for terminate-job so DrainJobAfterRootExit must invoke the injected',
+            '            // TerminateJobObject failure. The old one-shot echo could leave an already-empty job,',
+            '            // making this fault-path self-test timing-dependent on the Windows runner.',
+            '            var commandArgs = string.Equals(fault, "terminate-job", StringComparison.Ordinal)',
+            '                ? new[] { "/d", "/c", "start /b ping -n 31 127.0.0.1 > nul" }',
+            '                : new[] { "/d", "/c", "echo", "fault" };',
+            '            var exit = RunOwned(CreateOptions(shell, status, output, error, env, commandArgs));'
+          ) -join "`n"
           if (($program.Split($old).Count - 1) -ne 1) { throw 'Expected one FaultSelfTest launch anchor.' }
           [IO.File]::WriteAllText((Resolve-Path $programPath).Path, $program.Replace($old, $new), $utf8)
 
           $testPath = 'product/test-planner/tests/execution-contract.test.mjs'
           $test = Get-Content -Raw -LiteralPath $testPath
-          $marker = '  assert.match(ownedProcessSource, /CLEANUP\\|handles=failed/)'
-          $extra = $marker + "`n" + '  assert.match(ownedProcessSource, /string\\.Equals\\(fault, "terminate-job"/) ' + "`n" + '  assert.match(ownedProcessSource, /start \\/b ping -n 31/)'
+          $marker = '  assert.match(ownedProcessSource, /CLEANUP\|handles=failed/)'
+          $extra = @(
+            $marker,
+            '  assert.match(ownedProcessSource, /string\.Equals\(fault, "terminate-job"/)',
+            '  assert.match(ownedProcessSource, /start \/b ping -n 31/)'
+          ) -join "`n"
           if (($test.Split($marker).Count - 1) -ne 1) { throw 'Expected one OwnedProcess source-contract marker.' }
           [IO.File]::WriteAllText((Resolve-Path $testPath).Path, $test.Replace($marker, $extra), $utf8)
 
