@@ -1,0 +1,96 @@
+name: Temporary #568 bounded Fast infrastructure profile proof
+
+on:
+  push:
+    branches:
+      - chatgpt/568-fast-profile-proof
+
+permissions:
+  contents: read
+
+jobs:
+  fast-profile-proof:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out exact proof branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install .NET 10
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v5.2.0
+        with:
+          dotnet-version: 10.0.x
+      - name: Install Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+      - name: Prepare normal warmed developer state outside timing
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          npm --prefix product/client ci
+          if ($LASTEXITCODE -ne 0) { throw 'npm ci failed.' }
+          Push-Location product/client
+          try {
+            npx playwright install chromium
+            if ($LASTEXITCODE -ne 0) { throw 'Chromium install failed.' }
+          }
+          finally { Pop-Location }
+          dotnet build product/AeroLink.slnx --configuration Release
+          if ($LASTEXITCODE -ne 0) { throw 'Warm solution build failed.' }
+      - name: Measure sequential Fast profile with heavyweight showcase maintenance left to Full CI
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $watch = [Diagnostics.Stopwatch]::StartNew()
+          $steps = [System.Collections.Generic.List[object]]::new()
+          function Run-Step([string]$Name, [scriptblock]$Action) {
+            $stepWatch = [Diagnostics.Stopwatch]::StartNew()
+            & $Action
+            $stepWatch.Stop()
+            [void]$steps.Add([pscustomobject]@{ name = $Name; elapsedMs = [int64]$stepWatch.ElapsedMilliseconds })
+          }
+
+          Run-Step 'Build the solution' {
+            dotnet build product/AeroLink.slnx --configuration Release
+            if ($LASTEXITCODE -ne 0) { throw 'Fast solution build failed.' }
+          }
+          Run-Step 'Domain suite' {
+            dotnet test product/tests/AeroLink.Domain.Tests --configuration Release --no-build
+            if ($LASTEXITCODE -ne 0) { throw 'Fast domain suite failed.' }
+          }
+          $filter = 'FullyQualifiedName!~AeroLink.Infrastructure.Tests.FmsShowcaseSeederTests&FullyQualifiedName!~AeroLink.Infrastructure.Tests.ShowcaseUpgradeTests'
+          Run-Step 'Infrastructure fast profile' {
+            dotnet test product/tests/AeroLink.Infrastructure.Tests --configuration Release --no-build --filter $filter --logger 'trx;LogFileName=fast-infrastructure.trx' --results-directory FastTestResults
+            if ($LASTEXITCODE -ne 0) { throw 'Fast infrastructure profile failed.' }
+          }
+          Run-Step 'Browser smoke journeys' {
+            npm --prefix product/client run test:smoke
+            if ($LASTEXITCODE -ne 0) { throw 'Browser smoke failed.' }
+          }
+          $watch.Stop()
+
+          [xml]$trx = Get-Content -LiteralPath 'FastTestResults/fast-infrastructure.trx' -Raw
+          $executed = [int]$trx.TestRun.ResultSummary.Counters.executed
+          $passed = [int]$trx.TestRun.ResultSummary.Counters.passed
+          $failed = [int]$trx.TestRun.ResultSummary.Counters.failed
+          if ($executed -ne 349 -or $passed -ne 349 -or $failed -ne 0) {
+            throw "Expected 349/349 passing bounded infrastructure cases after excluding the six Full-only showcase cases; got executed=$executed passed=$passed failed=$failed."
+          }
+          $trxText = Get-Content -LiteralPath 'FastTestResults/fast-infrastructure.trx' -Raw
+          foreach ($fullOnly in @('AeroLink.Infrastructure.Tests.FmsShowcaseSeederTests','AeroLink.Infrastructure.Tests.ShowcaseUpgradeTests')) {
+            if ($trxText.Contains($fullOnly)) { throw "Full-only showcase class leaked into Fast profile: $fullOnly" }
+          }
+
+          $stepText = ($steps | ForEach-Object { "$($_.name)=$($_.elapsedMs)ms" }) -join '; '
+          @(
+            '## #568 bounded Fast infrastructure profile proof',
+            '',
+            "- Total measured Fast time: **$($watch.ElapsedMilliseconds) ms**",
+            '- Target: <= 240000 ms',
+            "- Steps: $stepText",
+            '- Infrastructure Fast profile: **349/349 passed**',
+            '- Excluded from local Fast only: FmsShowcaseSeederTests (2 cases), ShowcaseUpgradeTests (4 cases)',
+            '- Full GitHub backend-core remains unfiltered and authoritative',
+            '- Persistent PostgreSQL and product/.local were not targeted by these commands'
+          ) | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+          if ($watch.ElapsedMilliseconds -gt 240000) { throw "Bounded Fast profile still exceeded four minutes: $($watch.ElapsedMilliseconds) ms." }
