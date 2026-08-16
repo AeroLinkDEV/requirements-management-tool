@@ -1,0 +1,49 @@
+{
+  "schemaVersion": 1,
+  "id": "aerolink-fast-ci/v1",
+  "authoritative": false,
+  "targetMs": 240000,
+  "safety": {
+    "persistentPostgreSql": "forbidden",
+    "persistentEvidenceRoot": "forbidden",
+    "mergeAuthority": "The existing Product quality gate remains the only merge authority during phase 1."
+  },
+  "backend": {
+    "build": "product/AeroLink.slnx",
+    "domainProject": "product/tests/AeroLink.Domain.Tests/AeroLink.Domain.Tests.csproj",
+    "infrastructureProject": "product/tests/AeroLink.Infrastructure.Tests/AeroLink.Infrastructure.Tests.csproj",
+    "infrastructureClasses": [
+      "ArtifactScopingTests",
+      "BaselinePersistenceTests",
+      "ConcurrencyTests",
+      "IdentityPersistenceTests",
+      "MigrationRegistrationTests"
+    ],
+    "apiProject": "product/tests/AeroLink.Api.Tests/AeroLink.Api.Tests.csproj",
+    "apiClasses": [
+      "SharedHostIsolationTests"
+    ]
+  },
+  "client": {
+    "workingDirectory": "product/client",
+    "commands": [
+      "npm ci",
+      "npm run lint",
+      "npm run typecheck"
+    ]
+  },
+  "fullOnlyEvidence": [
+    "complete API suite",
+    "complete infrastructure suite",
+    "PostgreSQL migration and secure-bootstrap lane",
+    "production-browser journeys",
+    "full browser matrix",
+    "operator and recovery contract family"
+  ],
+  "notes": [
+    "Phase 1 is measurement-only and additive: the existing Full Product quality gate still runs unchanged on every pull request.",
+    "The selected Infrastructure tests use unique temp/in-memory SQLite, except MigrationRegistrationTests which builds the Npgsql model against an invalid host without opening a connection.",
+    "SharedHostIsolationTests uses one disposable SharedApiHost/SQLite database with unique logical data and fresh clients to cover hosted startup, authentication/session isolation, persistence, and project authorization.",
+    "Browser smoke is intentionally not in v1 because the current hosted Windows smoke path alone can consume most of the four-minute budget; it remains fully covered by the unchanged Full gate while Fast timing is established."
+  ]
+}
