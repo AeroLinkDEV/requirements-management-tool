@@ -515,8 +515,8 @@ copy experiment above remains a negative result and should not be repeated.
 
 ## Baseline provenance (#567 acceptance criterion 14)
 
-The `14m12s -> 10m14s` critical-path figure recorded above is the sum of these merged changes, listed so
-the baseline can be traced to the work that produced it rather than taken on trust:
+The `14m12s -> 10m14s` critical-path figure recorded above is the measured result of this sequence of merged
+changes. They are listed so the baseline can be traced to the work that produced it rather than taken on trust:
 
 | PR | Change | Effect on the critical path |
 |---|---|---|
