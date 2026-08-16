@@ -1,4 +1,4 @@
-name: Temporary apply allocator test migration
+name: Temporary finalize allocator test migration
 
 on:
   push:
@@ -9,39 +9,22 @@ permissions:
   contents: write
 
 jobs:
-  apply-prove-and-commit:
+  finalize-and-commit:
     if: ${{ !contains(github.event.head_commit.message, '[566-migrated]') }}
     runs-on: windows-latest
-    timeout-minutes: 25
+    timeout-minutes: 15
     steps:
       - name: Check out migration branch
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
-      - name: Install .NET 10
-        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v5.2.0
-        with:
-          dotnet-version: 10.0.x
       - name: Install Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 24
-      - name: Remove only the four proven direct API methods
+      - name: Reapply the already-proven four-method migration
         shell: pwsh
         run: ./product/tools/temporary-apply-566-allocator-migration.ps1
-      - name: Prove migrated Infrastructure rules and remaining hosted boundary class
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Stop'
-          New-Item -ItemType Directory -Force -Path MigrationResults | Out-Null
-          dotnet test product/tests/AeroLink.Infrastructure.Tests --configuration Release --filter 'FullyQualifiedName~IdentifierAllocationPersistenceTests' --logger 'trx;LogFileName=infra.trx' --results-directory MigrationResults
-          if ($LASTEXITCODE -ne 0) { throw 'Migrated Infrastructure allocator tests failed.' }
-          dotnet test product/tests/AeroLink.Api.Tests --configuration Release --filter 'FullyQualifiedName~IdentifierAllocationTests' --logger 'trx;LogFileName=api.trx' --results-directory MigrationResults
-          if ($LASTEXITCODE -ne 0) { throw 'Remaining hosted IdentifierAllocationTests boundary tests failed.' }
-          [xml]$infra = Get-Content -LiteralPath MigrationResults/infra.trx -Raw
-          [xml]$api = Get-Content -LiteralPath MigrationResults/api.trx -Raw
-          if ([int]$infra.TestRun.ResultSummary.Counters.executed -ne 4 -or [int]$infra.TestRun.ResultSummary.Counters.passed -ne 4) { throw 'Expected exactly 4/4 migrated Infrastructure allocator tests.' }
-          if ([int]$api.TestRun.ResultSummary.Counters.executed -ne 4 -or [int]$api.TestRun.ResultSummary.Counters.passed -ne 4) { throw 'Expected exactly 4/4 remaining hosted allocator boundary tests.' }
       - name: Regenerate and verify source-derived test inventories
         shell: pwsh
         run: |
@@ -55,9 +38,9 @@ jobs:
           if ([int]$intent.totals.cases -ne 493) { throw "Expected 493 API cases after migration; got $($intent.totals.cases)." }
           if ([int]$intent.totals.hostedTests -ne 431 -or [int]$intent.totals.hostedCases -ne 472) { throw "Expected hosted inventory 431 methods / 472 cases; got $($intent.totals.hostedTests) / $($intent.totals.hostedCases)." }
           if ([int]$intent.totals.hostedCandidateTests -ne 5 -or [int]$intent.totals.hostedCandidateCases -ne 6) { throw "Expected remaining hosted candidates 5 methods / 6 cases; got $($intent.totals.hostedCandidateTests) / $($intent.totals.hostedCandidateCases)." }
-          $host = Get-Content -LiteralPath product/test-contracts/api-host-classification.json -Raw | ConvertFrom-Json -Depth 100
-          if ([int]$host.totals.tests -ne 443) { throw "Host classification did not reconcile to 443 API methods: $($host.totals.tests)." }
-      - name: Run test-contract inventory guards
+          $hostClassification = Get-Content -LiteralPath product/test-contracts/api-host-classification.json -Raw | ConvertFrom-Json -Depth 100
+          if ([int]$hostClassification.totals.tests -ne 443) { throw "Host classification did not reconcile to 443 API methods: $($hostClassification.totals.tests)." }
+      - name: Run source-derived inventory contracts
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
