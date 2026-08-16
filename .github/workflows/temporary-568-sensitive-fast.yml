@@ -5,7 +5,7 @@ on:
     branches:
       - chatgpt/568-bounded-fast-sensitive
     paths:
-      - product/tools/temporary-patch-568-sensitive-fast.mjs
+      - product/tools/temporary-patch-568-sensitive-fast-v2.mjs
       - product/tools/temporary-trigger-568-sensitive-fast.txt
 
 permissions:
@@ -32,7 +32,7 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          node product/tools/temporary-patch-568-sensitive-fast.mjs
+          node product/tools/temporary-patch-568-sensitive-fast-v2.mjs
           if ($LASTEXITCODE -ne 0) { throw 'Safety patch helper failed.' }
       - name: Validate shared classifier and Windows wrapper contracts
         shell: pwsh
@@ -48,8 +48,12 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          $normal = node product/test-planner/tools/plan.mjs --files -- product/src/AeroLink.Domain/Requirements/Requirement.cs --json --dry-run | ConvertFrom-Json
-          $sensitive = node product/test-planner/tools/plan.mjs --files -- product/src/AeroLink.Infrastructure/Persistence/FmsShowcaseSeeder.cs --json --dry-run | ConvertFrom-Json
+          $normalText = & ./product/scripts/Get-AeroLinkTestPlan.ps1 -Paths 'product/src/AeroLink.Domain/Requirements/Requirement.cs' -Json -DryRun
+          if ($LASTEXITCODE -ne 0) { throw 'Normal Fast plan failed.' }
+          $normal = ($normalText -join "`n") | ConvertFrom-Json
+          $sensitiveText = & ./product/scripts/Get-AeroLinkTestPlan.ps1 -Paths 'product/src/AeroLink.Infrastructure/Persistence/FmsShowcaseSeeder.cs' -Json -DryRun
+          if ($LASTEXITCODE -ne 0) { throw 'Showcase-sensitive Fast plan failed.' }
+          $sensitive = ($sensitiveText -join "`n") | ConvertFrom-Json
           $normalInfra = @($normal.local | Where-Object { $_.label -eq 'Infrastructure suite' }) | Select-Object -First 1
           $sensitiveInfra = @($sensitive.local | Where-Object { $_.label -eq 'Infrastructure suite' }) | Select-Object -First 1
           if ($normal.classification.fastFullInfrastructure -ne $false -or $normalInfra.command -notmatch '--filter=') { throw 'Normal Fast plan did not retain bounded Infrastructure coverage.' }
