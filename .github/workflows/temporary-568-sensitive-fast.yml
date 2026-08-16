@@ -6,6 +6,7 @@ on:
       - chatgpt/568-bounded-fast-sensitive
     paths:
       - product/tools/temporary-patch-568-sensitive-fast.mjs
+      - product/tools/temporary-trigger-568-sensitive-fast.txt
 
 permissions:
   contents: write
