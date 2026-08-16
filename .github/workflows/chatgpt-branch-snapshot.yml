@@ -130,7 +130,8 @@ jobs:
               '.github/workflows/chatgpt-branch-snapshot.yml',
               '.github/chatgpt/aerolink-563-files.part-00',
               '.github/chatgpt/aerolink-563-files.part-01',
-              '.github/chatgpt/aerolink-563-files.part-02',
+              '.github/chatgpt/aerolink-563-files.part-02-0',
+              '.github/chatgpt/aerolink-563-files.part-02-1',
               '.github/chatgpt/aerolink-563-files.part-03',
           }
           rows = subprocess.check_output(['git', 'status', '--short'], text=True).splitlines()
