@@ -19,7 +19,7 @@ $smokePath = 'product/client/tests/application-smoke.spec.ts'
 $loginAnchor = '  await login(page)'
 $loginReplacement = @(
   "  const seedless = process.env.AEROLINK_E2E_SKIP_SHOWCASE_SEED === 'true'",
-  '  await login(page,{openProject:!seedless})'
+  "  await login(page,'admin',{openProject:!seedless})"
 ) -join "`n"
 Replace-ExactlyOnce $smokePath $loginAnchor $loginReplacement 'application smoke login'
 $headingAnchor = "  await expect(page.getByRole('heading', { name: /Create your first program|Command Center/ })).toBeVisible()"
