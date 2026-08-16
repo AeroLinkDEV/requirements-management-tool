@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Http.Json;
 using System.Diagnostics;
 using System.Runtime.CompilerServices;
+using System.Runtime.ExceptionServices;
 using System.Text.Json;
 using AeroLink.Domain.Baselines;
 using AeroLink.Domain.Identity;
@@ -580,13 +581,46 @@ internal sealed class AeroLinkApiFactory(bool seedDemoAccounts = false, bool all
     protected override void Dispose(bool disposing)
     {
         var stopwatch = Stopwatch.StartNew();
-        base.Dispose(disposing);
-        SqliteConnection.ClearAllPools();
-        DeleteDatabaseArtifacts(_databasePath);
-        try { if (Directory.Exists(_evidenceRoot)) Directory.Delete(_evidenceRoot, true); }
-        catch (IOException) { } catch (UnauthorizedAccessException) { }
-        DeleteIfPresent(_connectorKeyPath);
-        ApiTestTelemetry.RecordFactoryPhase("dispose", _constructionBeforeHostMs, stopwatch.Elapsed.TotalMilliseconds, _callerFile, _callerMember, _factoryId, _telemetryObserver);
+        ExceptionDispatchInfo? baseDisposeException = null;
+        ExceptionDispatchInfo? cleanupException = null;
+        try
+        {
+            try
+            {
+                base.Dispose(disposing);
+            }
+            catch (Exception problem)
+            {
+                baseDisposeException = ExceptionDispatchInfo.Capture(problem);
+            }
+        }
+        finally
+        {
+            try
+            {
+                SqliteConnection.ClearAllPools();
+                DeleteDatabaseArtifacts(_databasePath);
+                try { if (Directory.Exists(_evidenceRoot)) Directory.Delete(_evidenceRoot, true); }
+                catch (IOException) { } catch (UnauthorizedAccessException) { }
+                DeleteIfPresent(_connectorKeyPath);
+            }
+            catch (Exception problem)
+            {
+                cleanupException = ExceptionDispatchInfo.Capture(problem);
+            }
+
+            try
+            {
+                ApiTestTelemetry.RecordFactoryPhase("dispose", _constructionBeforeHostMs, stopwatch.Elapsed.TotalMilliseconds, _callerFile, _callerMember, _factoryId, _telemetryObserver);
+            }
+            catch when (baseDisposeException is not null || cleanupException is not null)
+            {
+                // Preserve the first failure; telemetry must not mask a disposal or cleanup exception.
+            }
+        }
+
+        if (baseDisposeException is not null) baseDisposeException.Throw();
+        if (cleanupException is not null) cleanupException.Throw();
     }
 
     internal static void DeleteDatabaseArtifacts(string path)
