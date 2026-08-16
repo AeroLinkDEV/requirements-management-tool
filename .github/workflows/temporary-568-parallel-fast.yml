@@ -1,0 +1,190 @@
+name: Temporary #568 parallel Fast repair
+
+on:
+  push:
+    branches:
+      - chatgpt/568-parallel-fast
+
+permissions:
+  contents: write
+
+jobs:
+  repair:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - name: Check out exact repair branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - name: Install .NET 10
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v5.2.0
+        with:
+          dotnet-version: 10.0.x
+      - name: Install Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+      - name: Apply bounded Fast parallelism repair
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          @'
+          from pathlib import Path
+
+          script = Path('product/scripts/Get-AeroLinkTestPlan.ps1')
+          s = script.read_text(encoding='utf-8')
+          anchor = 'function Invoke-FullPlan {\n'
+          if s.count(anchor) != 1:
+              raise SystemExit(f'Invoke-FullPlan anchor: expected one match, found {s.count(anchor)}')
+          helper = r'''function Invoke-ParallelFastPair {
+              param(
+                  [Parameter(Mandatory)]$InfrastructureStep,
+                  [Parameter(Mandatory)]$BrowserStep
+              )
+              $selectedCiJobs = Get-StringArray $plan.compact.ci.selected
+              $definitions = @(
+                  [pscustomobject]@{ step = $InfrastructureStep; label = 'Infrastructure suite' },
+                  [pscustomobject]@{ step = $BrowserStep; label = 'Browser smoke journeys' }
+              )
+              $jobs = [System.Collections.Generic.List[object]]::new()
+              try {
+                  foreach ($definition in $definitions) {
+                      $job = Start-Job -ArgumentList $definition.label, $repositoryRoot -ScriptBlock {
+                          param($Label, $Root)
+                          Set-Location -LiteralPath $Root
+                          $watch = [Diagnostics.Stopwatch]::StartNew()
+                          $output = @()
+                          $exitCode = 1
+                          try {
+                              switch ($Label) {
+                                  'Infrastructure suite' {
+                                      $output = @(& dotnet test product/tests/AeroLink.Infrastructure.Tests --configuration Release --no-build 2>&1)
+                                      $exitCode = $LASTEXITCODE
+                                  }
+                                  'Browser smoke journeys' {
+                                      $output = @(& npm.cmd --prefix product/client run test:smoke 2>&1)
+                                      $exitCode = $LASTEXITCODE
+                                  }
+                                  default { throw "Unsupported parallel Fast step: $Label" }
+                              }
+                          }
+                          catch {
+                              $output = @($output) + @($_.Exception.Message)
+                              $exitCode = 1
+                          }
+                          finally { $watch.Stop() }
+                          [pscustomobject]@{
+                              label = $Label
+                              exitCode = [int]$exitCode
+                              elapsedMs = [int64]$watch.ElapsedMilliseconds
+                              output = @($output | ForEach-Object { [string]$_ })
+                          }
+                      }
+                      [void]$jobs.Add([pscustomobject]@{ definition = $definition; job = $job })
+                  }
+
+                  Wait-Job -Job @($jobs | ForEach-Object job) | Out-Null
+                  $failed = [System.Collections.Generic.List[string]]::new()
+                  foreach ($entry in $jobs) {
+                      $result = Receive-Job -Job $entry.job -ErrorAction Stop
+                      if ($null -eq $result -or @($result).Count -ne 1) { throw "Parallel Fast step '$($entry.definition.label)' returned no bounded result." }
+                      $result = @($result)[0]
+                      foreach ($line in @($result.output)) { if (-not [string]::IsNullOrWhiteSpace([string]$line)) { Write-Host ([string]$line) } }
+                      $status = if ([int]$result.exitCode -eq 0) { 'passed' } else { 'failed' }
+                      $ciJobs = @(Get-CiJobsForStep $entry.definition.label | Where-Object { $selectedCiJobs -contains $_ })
+                      [void]$executionSteps.Add([ordered]@{
+                          label = $entry.definition.label
+                          status = $status
+                          elapsedMs = [int64]$result.elapsedMs
+                          ciJobs = @($ciJobs)
+                      })
+                      if ($status -ne 'passed') { [void]$failed.Add($entry.definition.label) }
+                  }
+                  if ($failed.Count -gt 0) { throw "Parallel Fast checks failed: $($failed -join ', ')." }
+              }
+              finally {
+                  foreach ($entry in $jobs) {
+                      try { if ($entry.job) { Remove-Job -Job $entry.job -Force -ErrorAction SilentlyContinue } } catch { }
+                  }
+              }
+          }
+
+          '''
+          s = s.replace(anchor, helper + anchor, 1)
+
+          old = r'''        if ($Mode -eq 'Fast') {
+              foreach ($step in $plan.local) {
+                  if ($step.label -eq 'Nothing') { continue }
+                  if (-not $step.fullOnly) {
+                      $ciJobs = @(Get-CiJobsForStep $step.label | Where-Object { (Get-StringArray $plan.compact.ci.selected) -contains $_ })
+                      Invoke-TimedAction -Label $step.label -CiJobs $ciJobs -Action { Invoke-FastStep -Step $step }
+                  }
+                  else { Invoke-FastStep -Step $step }
+              }
+          }
+          '''
+          new = r'''        if ($Mode -eq 'Fast') {
+              $fastSteps = @($plan.local | Where-Object { $_.label -ne 'Nothing' })
+              $infrastructureStep = @($fastSteps | Where-Object { $_.label -eq 'Infrastructure suite' -and -not $_.fullOnly }) | Select-Object -First 1
+              $browserStep = @($fastSteps | Where-Object { $_.label -eq 'Browser smoke journeys' -and -not $_.fullOnly }) | Select-Object -First 1
+              $parallelPairAvailable = ($null -ne $infrastructureStep -and $null -ne $browserStep)
+              $parallelPairCompleted = $false
+              foreach ($step in $fastSteps) {
+                  if ($parallelPairAvailable -and $step.label -in @('Infrastructure suite', 'Browser smoke journeys')) {
+                      if (-not $parallelPairCompleted) {
+                          Write-Host '  Running independent Infrastructure and browser smoke Fast checks concurrently.' -ForegroundColor Cyan
+                          Invoke-ParallelFastPair -InfrastructureStep $infrastructureStep -BrowserStep $browserStep
+                          $parallelPairCompleted = $true
+                      }
+                      continue
+                  }
+                  if (-not $step.fullOnly) {
+                      $ciJobs = @(Get-CiJobsForStep $step.label | Where-Object { (Get-StringArray $plan.compact.ci.selected) -contains $_ })
+                      Invoke-TimedAction -Label $step.label -CiJobs $ciJobs -Action { Invoke-FastStep -Step $step }
+                  }
+                  else { Invoke-FastStep -Step $step }
+              }
+          }
+          '''
+          if s.count(old) != 1:
+              raise SystemExit(f'Fast execution loop: expected one match, found {s.count(old)}')
+          s = s.replace(old, new, 1)
+          script.write_text(s, encoding='utf-8')
+
+          tests = Path('product/scripts/Get-AeroLinkTestPlan.Tests.ps1')
+          t = tests.read_text(encoding='utf-8')
+          marker = "Assert-True (Test-Path -LiteralPath (Join-Path $root 'TEST_AEROLINK_CHANGED.bat') -PathType Leaf) 'Friendly root BAT entry point is missing.'\n"
+          if t.count(marker) != 1:
+              raise SystemExit(f'planner contract marker: expected one match, found {t.count(marker)}')
+          addition = marker + r'''
+          $plannerSource = Get-Content -Raw -LiteralPath $scriptPath
+          Assert-True ($plannerSource -match 'function Invoke-ParallelFastPair') 'Fast wrapper must define its bounded parallel pair helper.'
+          Assert-True ($plannerSource -match 'Start-Job -ArgumentList') 'Fast parallel pair must use owned PowerShell jobs rather than detached background processes.'
+          Assert-True ($plannerSource -match 'Wait-Job -Job') 'Fast parallel pair must wait for both selected checks before deciding.'
+          Assert-True ($plannerSource -match "Parallel Fast checks failed") 'Fast parallel failures must fail the wrapper rather than being ignored.'
+          Assert-True ($plannerSource -match "Infrastructure and browser smoke Fast checks concurrently") 'Fast execution must make the measured independent pair explicit.'
+          '''
+          t = t.replace(marker, addition, 1)
+          tests.write_text(t, encoding='utf-8')
+          '@ | python -
+      - name: Validate Windows planner contracts
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          & ./product/scripts/Get-AeroLinkTestPlan.Tests.ps1
+          if ($LASTEXITCODE -ne 0) { throw 'Windows planner contract failed.' }
+          git diff --check
+          if ($LASTEXITCODE -ne 0) { throw 'git diff --check failed.' }
+      - name: Commit only validated planner changes
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          git config user.name 'seanmccarthyns'
+          git config user.email 'seanmccarthyns@gmail.com'
+          git add product/scripts/Get-AeroLinkTestPlan.ps1 product/scripts/Get-AeroLinkTestPlan.Tests.ps1
+          $staged = @(git diff --cached --name-only)
+          $expected = @('product/scripts/Get-AeroLinkTestPlan.Tests.ps1','product/scripts/Get-AeroLinkTestPlan.ps1')
+          if ((Compare-Object ($staged | Sort-Object) ($expected | Sort-Object))) { throw "Unexpected staged paths: $($staged -join ', ')" }
+          git commit -m 'Parallelize independent #568 Fast checks'
+          git push origin HEAD:chatgpt/568-parallel-fast
