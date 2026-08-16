@@ -124,16 +124,21 @@ test('fragment artifacts are attempt-scoped and the report pattern excludes merg
 
 test('download-artifact uses download inputs while upload-only inputs stay on uploads', () => {
   const reportBlocks = stepBlocks(jobBodies(workflowLines())['metrics-report'])
-  const download = reportBlocks.find((block) => /uses:\s*actions\/download-artifact/.test(block.lines.join('\n')))
-  assert.ok(download, 'metrics-report must have a download-artifact step')
+  const downloadBlocks = reportBlocks.filter((block) => block.name === 'Download fragments')
+  assert.equal(downloadBlocks.length, 1, 'metrics-report must have exactly one Download fragments step')
+  const download = downloadBlocks[0]
   const downloadText = download.lines.join('\n')
+  assert.match(downloadText, /uses:\s*actions\/download-artifact/, 'Download fragments must use download-artifact')
   assert.match(downloadText, /pattern:\s*ci-metrics-fragment-\*/)
   assert.match(downloadText, /path:\s*\$\{\{\s*runner\.temp\s*\}\}\/fragments/)
   assert.doesNotMatch(downloadText, /^\s*if-no-files-found:/m, 'if-no-files-found belongs to upload-artifact, not download-artifact')
 
-  const upload = reportBlocks.find((block) => /uses:\s*actions\/upload-artifact/.test(block.lines.join('\n')))
-  assert.ok(upload, 'metrics-report must have an upload-artifact step')
-  assert.match(upload.lines.join('\n'), /^\s*if-no-files-found:\s*ignore/m, 'upload-only missing-file policy must remain explicit')
+  const uploadBlocks = reportBlocks.filter((block) => block.name === 'Upload merged metrics')
+  assert.equal(uploadBlocks.length, 1, 'metrics-report must have exactly one Upload merged metrics step')
+  const upload = uploadBlocks[0]
+  const uploadText = upload.lines.join('\n')
+  assert.match(uploadText, /uses:\s*actions\/upload-artifact/, 'Upload merged metrics must use upload-artifact')
+  assert.match(uploadText, /^\s*if-no-files-found:\s*ignore/m, 'upload-only missing-file policy must remain explicit')
 })
 
 test('metrics-report waits for every independently selected producer', () => {
