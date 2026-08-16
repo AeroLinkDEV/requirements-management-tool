@@ -31,11 +31,28 @@ Assert-True ($plain.Output -match 'SQLite:') 'Human output must state SQLite pos
 Assert-True ($plain.Output -match 'Browser:') 'Human output must state browser-process posture.'
 Assert-True ($plain.Output -match 'AEROLINK_TEST_PLAN_RESULT=') 'Human output must include a compact copyable result.'
 
-$originPlan = Invoke-Plan @('-SinceOriginMain', '-Head', 'HEAD', '-DryRun')
-Assert-True ($originPlan.ExitCode -eq 0) "origin/main dry-run should succeed: $($originPlan.Output)"
-Assert-True ($originPlan.Output -match 'merge base:') 'origin/main mode must report the merge base.'
-Assert-True ($originPlan.Output -match 'origin/main is a local remote-tracking ref') 'origin/main mode must warn about stale local refs.'
-Assert-True ($originPlan.Output -match 'No\s+fetch\s+or\s+rebase\s+was\s+performed') 'origin/main mode must not silently fetch or rebase.'
+$originMainRef = 'refs/remotes/origin/main'
+& git -C $root show-ref --verify --quiet $originMainRef
+$originMainExists = $LASTEXITCODE -eq 0
+if (-not $originMainExists) {
+    # actions/checkout tests a synthetic merge commit without fetching remote-tracking refs. Create only the
+    # disposable ref needed by this contract, then remove it below; the wrapper itself must still do no fetch.
+    & git -C $root update-ref $originMainRef HEAD
+    if ($LASTEXITCODE -ne 0) { throw "Could not create disposable $originMainRef for the planner contract." }
+}
+try {
+    $originPlan = Invoke-Plan @('-SinceOriginMain', '-Head', 'HEAD', '-DryRun')
+    Assert-True ($originPlan.ExitCode -eq 0) "origin/main dry-run should succeed: $($originPlan.Output)"
+    Assert-True ($originPlan.Output -match 'merge base:') 'origin/main mode must report the merge base.'
+    Assert-True ($originPlan.Output -match 'origin/main is a local remote-tracking ref') 'origin/main mode must warn about stale local refs.'
+    Assert-True ($originPlan.Output -match 'No\s+fetch\s+or\s+rebase\s+was\s+performed') 'origin/main mode must not silently fetch or rebase.'
+}
+finally {
+    if (-not $originMainExists) {
+        & git -C $root update-ref -d $originMainRef
+        if ($LASTEXITCODE -ne 0) { throw "Could not remove disposable $originMainRef after the planner contract." }
+    }
+}
 
 $jsonRun = Invoke-Plan @('-Paths', 'README.md', '-Json', '-DryRun')
 Assert-True ($jsonRun.ExitCode -eq 0) "JSON dry-run should succeed: $($jsonRun.Output)"
