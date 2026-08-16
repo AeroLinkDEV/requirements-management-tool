@@ -10,16 +10,16 @@
       "tests": 52
     },
     "fresh-host": {
-      "classes": 17,
-      "tests": 71
+      "classes": 37,
+      "tests": 189
     },
     "migration-candidate": {
       "classes": 1,
       "tests": 1
     },
     "reusable-host": {
-      "classes": 53,
-      "tests": 318
+      "classes": 33,
+      "tests": 200
     }
   },
   "classes": [
@@ -124,6 +124,17 @@
       ]
     },
     {
+      "cls": "TestChangeRequestReviewWorkflowTests",
+      "tests": 36,
+      "classification": "fresh-host",
+      "reason": "Reviewed #563 hold: this class bootstraps an empty database or workspace. A class-scoped SharedApiHost would make first-install state and fixed bootstrap identities order-dependent. Keep fresh-host until a bootstrap-once fixture and per-test workspace tagging are proven.",
+      "intents": [
+        "auth-policy",
+        "ef-translation",
+        "http-boundary"
+      ]
+    },
+    {
       "cls": "ManagedDocumentApiTests",
       "tests": 25,
       "classification": "fresh-host",
@@ -134,6 +145,49 @@
         "filesystem",
         "http-boundary",
         "startup-config"
+      ]
+    },
+    {
+      "cls": "BaselineImportApiTests",
+      "tests": 14,
+      "classification": "fresh-host",
+      "reason": "Reviewed #563 hold: this class bootstraps an empty database or workspace. A class-scoped SharedApiHost would make first-install state and fixed bootstrap identities order-dependent. Keep fresh-host until a bootstrap-once fixture and per-test workspace tagging are proven.",
+      "intents": [
+        "auth-policy",
+        "ef-translation",
+        "http-boundary"
+      ]
+    },
+    {
+      "cls": "ProblemReportApiTests",
+      "tests": 10,
+      "classification": "fresh-host",
+      "reason": "Reviewed #563 hold: this class bootstraps an empty database or workspace. A class-scoped SharedApiHost would make first-install state and fixed bootstrap identities order-dependent. Keep fresh-host until a bootstrap-once fixture and per-test workspace tagging are proven.",
+      "intents": [
+        "auth-policy",
+        "ef-translation",
+        "http-boundary"
+      ]
+    },
+    {
+      "cls": "ProblemReportVerificationApiTests",
+      "tests": 9,
+      "classification": "fresh-host",
+      "reason": "Reviewed #563 hold: this class bootstraps an empty database or workspace. A class-scoped SharedApiHost would make first-install state and fixed bootstrap identities order-dependent. Keep fresh-host until a bootstrap-once fixture and per-test workspace tagging are proven.",
+      "intents": [
+        "auth-policy",
+        "ef-translation",
+        "http-boundary"
+      ]
+    },
+    {
+      "cls": "IdentifierAllocationTests",
+      "tests": 8,
+      "classification": "fresh-host",
+      "reason": "Reviewed #563 hold: exact initial identifier sequences and concurrent allocation exercise a pristine file-backed SQLite database. Keep fresh-host; only isolated domain-only logic may later become a migration candidate.",
+      "intents": [
+        "ef-translation",
+        "in-process-logic"
       ]
     },
     {
@@ -169,6 +223,64 @@
       ]
     },
     {
+      "cls": "ReleaseCampaignExactIntentApiTests",
+      "tests": 6,
+      "classification": "fresh-host",
+      "reason": "Reviewed #563 hold: this class bootstraps an empty database or workspace. A class-scoped SharedApiHost would make first-install state and fixed bootstrap identities order-dependent. Keep fresh-host until a bootstrap-once fixture and per-test workspace tagging are proven.",
+      "intents": [
+        "ef-translation",
+        "http-boundary",
+        "in-process-logic"
+      ]
+    },
+    {
+      "cls": "OpenDigitalThreadTests",
+      "tests": 5,
+      "classification": "fresh-host",
+      "reason": "Reviewed #563 hold: this class bootstraps an empty database or workspace. A class-scoped SharedApiHost would make first-install state and fixed bootstrap identities order-dependent. Keep fresh-host until stateless methods are split from bootstrap-dependent methods and per-test workspace tagging is proven.",
+      "intents": [
+        "auth-policy",
+        "http-boundary"
+      ]
+    },
+    {
+      "cls": "ProblemReportDuplicateDispositionApiTests",
+      "tests": 5,
+      "classification": "fresh-host",
+      "reason": "Reviewed #563 hold: this class bootstraps an empty database or workspace. A class-scoped SharedApiHost would make first-install state and fixed bootstrap identities order-dependent. Keep fresh-host until a bootstrap-once fixture and per-test workspace tagging are proven.",
+      "intents": [
+        "http-boundary"
+      ]
+    },
+    {
+      "cls": "SecurityHardeningTests",
+      "tests": 5,
+      "classification": "fresh-host",
+      "reason": "Reviewed #563 hold: bootstrap-dependent image-upload methods share first-install state and fixed workspace data. Keep those methods fresh; split any stateless header/auth methods before considering SharedApiHost.",
+      "intents": [
+        "http-boundary"
+      ]
+    },
+    {
+      "cls": "ChangeRequestRenameApiTests",
+      "tests": 4,
+      "classification": "fresh-host",
+      "reason": "Reviewed #563 hold: this class bootstraps an empty database or workspace. A class-scoped SharedApiHost would make first-install state and fixed bootstrap identities order-dependent. Keep fresh-host until a bootstrap-once fixture and per-test workspace tagging are proven.",
+      "intents": [
+        "ef-translation",
+        "http-boundary"
+      ]
+    },
+    {
+      "cls": "ProblemReportCheckoutApiTests",
+      "tests": 4,
+      "classification": "fresh-host",
+      "reason": "Reviewed #563 hold: this class bootstraps an empty database or workspace. A class-scoped SharedApiHost would make first-install state and fixed bootstrap identities order-dependent. Keep fresh-host until a bootstrap-once fixture and per-test workspace tagging are proven.",
+      "intents": [
+        "http-boundary"
+      ]
+    },
+    {
       "cls": "ApiTestTelemetryTests",
       "tests": 3,
       "classification": "fresh-host",
@@ -184,6 +296,15 @@
       "tests": 3,
       "classification": "fresh-host",
       "reason": "Customizes host state (showcase-template-copy); sharing could change the subject or leak configuration.",
+      "intents": [
+        "http-boundary"
+      ]
+    },
+    {
+      "cls": "ControlledEditingCheckInApiTests",
+      "tests": 3,
+      "classification": "fresh-host",
+      "reason": "Reviewed #563 hold: this class bootstraps an empty database or workspace. A class-scoped SharedApiHost would make first-install state and fixed bootstrap identities order-dependent. Keep fresh-host until a bootstrap-once fixture and per-test workspace tagging are proven.",
       "intents": [
         "http-boundary"
       ]
@@ -241,12 +362,39 @@
       ]
     },
     {
+      "cls": "ProductLineApiTests",
+      "tests": 2,
+      "classification": "fresh-host",
+      "reason": "Reviewed #563 hold: this class bootstraps an empty database or workspace and uses fixed product-line/component identities. Keep fresh-host until a bootstrap-once fixture and per-test tagging are proven; its two methods provide only one theoretical host-build saving.",
+      "intents": [
+        "http-boundary"
+      ]
+    },
+    {
+      "cls": "AdministratorChangeRequestApiTests",
+      "tests": 1,
+      "classification": "fresh-host",
+      "reason": "Reviewed #563 hold: this one-method class provides zero theoretical host-build savings under one host per class. Keep fresh-host until it is grouped or a separate measured benefit justifies changing the fixture.",
+      "intents": [
+        "auth-policy"
+      ]
+    },
+    {
       "cls": "ConfigurationPublicationApiTests",
       "tests": 1,
       "classification": "fresh-host",
       "reason": "Customizes host state (showcase-template-copy); sharing could change the subject or leak configuration.",
       "intents": [
         "ef-translation"
+      ]
+    },
+    {
+      "cls": "HistoricalPublicationFreezeApiTests",
+      "tests": 1,
+      "classification": "fresh-host",
+      "reason": "Reviewed #563 hold: this one-method class provides zero theoretical host-build savings under one host per class. Keep fresh-host until it is grouped or a separate measured benefit justifies changing the fixture.",
+      "intents": [
+        "http-boundary"
       ]
     },
     {
@@ -259,10 +407,55 @@
       ]
     },
     {
+      "cls": "LegacyProcedureManifestBootstrapApiTests",
+      "tests": 1,
+      "classification": "fresh-host",
+      "reason": "Reviewed #563 hold: this one-method bootstrap class provides zero theoretical host-build savings under one host per class. Keep fresh-host until its first-install semantics are explicitly isolated or it is grouped with a proven shared fixture.",
+      "intents": [
+        "auth-policy"
+      ]
+    },
+    {
+      "cls": "ManagedDocumentRecoveryApiTests",
+      "tests": 1,
+      "classification": "fresh-host",
+      "reason": "Reviewed #563 hold: this one-method class provides zero theoretical host-build savings under one host per class and exercises recovery/bootstrap state. Keep fresh-host until it is grouped or a separate measured benefit justifies changing the fixture.",
+      "intents": [
+        "auth-policy"
+      ]
+    },
+    {
+      "cls": "ProblemReportActiveMetricApiTests",
+      "tests": 1,
+      "classification": "fresh-host",
+      "reason": "Reviewed #563 hold: this one-method class provides zero theoretical host-build savings under one host per class and uses bootstrap-dependent problem-report state. Keep fresh-host until it is grouped or a separate measured benefit justifies changing the fixture.",
+      "intents": [
+        "http-boundary"
+      ]
+    },
+    {
+      "cls": "ProblemReportDispositionApiTests",
+      "tests": 1,
+      "classification": "fresh-host",
+      "reason": "Reviewed #563 hold: this one-method class provides zero theoretical host-build savings under one host per class and uses bootstrap-dependent problem-report state. Keep fresh-host until it is grouped or a separate measured benefit justifies changing the fixture.",
+      "intents": [
+        "http-boundary"
+      ]
+    },
+    {
       "cls": "ProblemReportPagingApiTests",
       "tests": 1,
       "classification": "fresh-host",
       "reason": "Customizes host state (interceptor-or-fault-injection); sharing could change the subject or leak configuration.",
+      "intents": [
+        "auth-policy"
+      ]
+    },
+    {
+      "cls": "ProblemReportWaiverApiTests",
+      "tests": 1,
+      "classification": "fresh-host",
+      "reason": "Reviewed #563 hold: this one-method class provides zero theoretical host-build savings under one host per class and uses bootstrap-dependent problem-report state. Keep fresh-host until it is grouped or a separate measured benefit justifies changing the fixture.",
       "intents": [
         "auth-policy"
       ]
@@ -315,28 +508,6 @@
       ]
     },
     {
-      "cls": "TestChangeRequestReviewWorkflowTests",
-      "tests": 36,
-      "classification": "reusable-host",
-      "reason": "Exercises the HTTP surface with no host-scoped state or custom host configuration; a shared host is safe only with per-test clients.",
-      "intents": [
-        "auth-policy",
-        "ef-translation",
-        "http-boundary"
-      ]
-    },
-    {
-      "cls": "BaselineImportApiTests",
-      "tests": 14,
-      "classification": "reusable-host",
-      "reason": "Exercises the HTTP surface with no host-scoped state or custom host configuration; a shared host is safe only with per-test clients.",
-      "intents": [
-        "auth-policy",
-        "ef-translation",
-        "http-boundary"
-      ]
-    },
-    {
       "cls": "TestProcedureAuthoringApiTests",
       "tests": 13,
       "classification": "reusable-host",
@@ -358,28 +529,6 @@
       ]
     },
     {
-      "cls": "ProblemReportApiTests",
-      "tests": 10,
-      "classification": "reusable-host",
-      "reason": "Exercises the HTTP surface with no host-scoped state or custom host configuration; a shared host is safe only with per-test clients.",
-      "intents": [
-        "auth-policy",
-        "ef-translation",
-        "http-boundary"
-      ]
-    },
-    {
-      "cls": "ProblemReportVerificationApiTests",
-      "tests": 9,
-      "classification": "reusable-host",
-      "reason": "Exercises the HTTP surface with no host-scoped state or custom host configuration; a shared host is safe only with per-test clients.",
-      "intents": [
-        "auth-policy",
-        "ef-translation",
-        "http-boundary"
-      ]
-    },
-    {
       "cls": "AuthoringTracedImpactTests",
       "tests": 8,
       "classification": "reusable-host",
@@ -387,16 +536,6 @@
       "intents": [
         "ef-translation",
         "http-boundary"
-      ]
-    },
-    {
-      "cls": "IdentifierAllocationTests",
-      "tests": 8,
-      "classification": "reusable-host",
-      "reason": "Exercises the HTTP surface with no host-scoped state or custom host configuration; a shared host is safe only with per-test clients.",
-      "intents": [
-        "ef-translation",
-        "in-process-logic"
       ]
     },
     {
@@ -471,17 +610,6 @@
       ]
     },
     {
-      "cls": "ReleaseCampaignExactIntentApiTests",
-      "tests": 6,
-      "classification": "reusable-host",
-      "reason": "Exercises the HTTP surface with no host-scoped state or custom host configuration; a shared host is safe only with per-test clients.",
-      "intents": [
-        "ef-translation",
-        "http-boundary",
-        "in-process-logic"
-      ]
-    },
-    {
       "cls": "SearchableAuthoringPickerApiTests",
       "tests": 6,
       "classification": "reusable-host",
@@ -520,50 +648,12 @@
       ]
     },
     {
-      "cls": "OpenDigitalThreadTests",
-      "tests": 5,
-      "classification": "reusable-host",
-      "reason": "Exercises the HTTP surface with no host-scoped state or custom host configuration; a shared host is safe only with per-test clients.",
-      "intents": [
-        "auth-policy",
-        "http-boundary"
-      ]
-    },
-    {
-      "cls": "ProblemReportDuplicateDispositionApiTests",
-      "tests": 5,
-      "classification": "reusable-host",
-      "reason": "Exercises the HTTP surface with no host-scoped state or custom host configuration; a shared host is safe only with per-test clients.",
-      "intents": [
-        "http-boundary"
-      ]
-    },
-    {
-      "cls": "SecurityHardeningTests",
-      "tests": 5,
-      "classification": "reusable-host",
-      "reason": "Exercises the HTTP surface with no host-scoped state or custom host configuration; a shared host is safe only with per-test clients.",
-      "intents": [
-        "http-boundary"
-      ]
-    },
-    {
       "cls": "CancelReviewAuthorityTests",
       "tests": 4,
       "classification": "reusable-host",
       "reason": "Exercises the HTTP surface with no host-scoped state or custom host configuration; a shared host is safe only with per-test clients.",
       "intents": [
         "auth-policy",
-        "http-boundary"
-      ]
-    },
-    {
-      "cls": "ChangeRequestRenameApiTests",
-      "tests": 4,
-      "classification": "reusable-host",
-      "reason": "Exercises the HTTP surface with no host-scoped state or custom host configuration; a shared host is safe only with per-test clients.",
-      "intents": [
-        "ef-translation",
         "http-boundary"
       ]
     },
@@ -592,15 +682,6 @@
       "reason": "Exercises the HTTP surface with no host-scoped state or custom host configuration; a shared host is safe only with per-test clients.",
       "intents": [
         "ef-translation",
-        "http-boundary"
-      ]
-    },
-    {
-      "cls": "ProblemReportCheckoutApiTests",
-      "tests": 4,
-      "classification": "reusable-host",
-      "reason": "Exercises the HTTP surface with no host-scoped state or custom host configuration; a shared host is safe only with per-test clients.",
-      "intents": [
         "http-boundary"
       ]
     },
@@ -644,15 +725,6 @@
     },
     {
       "cls": "AuthoredSectionTests",
-      "tests": 3,
-      "classification": "reusable-host",
-      "reason": "Exercises the HTTP surface with no host-scoped state or custom host configuration; a shared host is safe only with per-test clients.",
-      "intents": [
-        "http-boundary"
-      ]
-    },
-    {
-      "cls": "ControlledEditingCheckInApiTests",
       "tests": 3,
       "classification": "reusable-host",
       "reason": "Exercises the HTTP surface with no host-scoped state or custom host configuration; a shared host is safe only with per-test clients.",
@@ -720,15 +792,6 @@
       ]
     },
     {
-      "cls": "ProductLineApiTests",
-      "tests": 2,
-      "classification": "reusable-host",
-      "reason": "Exercises the HTTP surface with no host-scoped state or custom host configuration; a shared host is safe only with per-test clients.",
-      "intents": [
-        "http-boundary"
-      ]
-    },
-    {
       "cls": "ProgramRoleAuthorityApiTests",
       "tests": 2,
       "classification": "reusable-host",
@@ -754,69 +817,6 @@
       "reason": "Exercises the HTTP surface with no host-scoped state or custom host configuration; a shared host is safe only with per-test clients.",
       "intents": [
         "http-boundary"
-      ]
-    },
-    {
-      "cls": "AdministratorChangeRequestApiTests",
-      "tests": 1,
-      "classification": "reusable-host",
-      "reason": "Exercises the HTTP surface with no host-scoped state or custom host configuration; a shared host is safe only with per-test clients.",
-      "intents": [
-        "auth-policy"
-      ]
-    },
-    {
-      "cls": "HistoricalPublicationFreezeApiTests",
-      "tests": 1,
-      "classification": "reusable-host",
-      "reason": "Exercises the HTTP surface with no host-scoped state or custom host configuration; a shared host is safe only with per-test clients.",
-      "intents": [
-        "http-boundary"
-      ]
-    },
-    {
-      "cls": "LegacyProcedureManifestBootstrapApiTests",
-      "tests": 1,
-      "classification": "reusable-host",
-      "reason": "Exercises the HTTP surface with no host-scoped state or custom host configuration; a shared host is safe only with per-test clients.",
-      "intents": [
-        "auth-policy"
-      ]
-    },
-    {
-      "cls": "ManagedDocumentRecoveryApiTests",
-      "tests": 1,
-      "classification": "reusable-host",
-      "reason": "Exercises the HTTP surface with no host-scoped state or custom host configuration; a shared host is safe only with per-test clients.",
-      "intents": [
-        "auth-policy"
-      ]
-    },
-    {
-      "cls": "ProblemReportActiveMetricApiTests",
-      "tests": 1,
-      "classification": "reusable-host",
-      "reason": "Exercises the HTTP surface with no host-scoped state or custom host configuration; a shared host is safe only with per-test clients.",
-      "intents": [
-        "http-boundary"
-      ]
-    },
-    {
-      "cls": "ProblemReportDispositionApiTests",
-      "tests": 1,
-      "classification": "reusable-host",
-      "reason": "Exercises the HTTP surface with no host-scoped state or custom host configuration; a shared host is safe only with per-test clients.",
-      "intents": [
-        "http-boundary"
-      ]
-    },
-    {
-      "cls": "ProblemReportWaiverApiTests",
-      "tests": 1,
-      "classification": "reusable-host",
-      "reason": "Exercises the HTTP surface with no host-scoped state or custom host configuration; a shared host is safe only with per-test clients.",
-      "intents": [
-        "auth-policy"
       ]
     }
   ]

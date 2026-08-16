@@ -15,7 +15,22 @@ function classCustomization(source) {
   return CUSTOM_HOST_RULES.filter(([, pattern]) => pattern.test(source)).map(([key]) => key)
 }
 
-export function classifyClass({ cls, source, rows }) {
+export function classifyClass({ cls, source, rows, override }) {
+  if (override) {
+    if (!['fresh-host', 'reusable-host', 'converted', 'migration-candidate'].includes(override.classification)) {
+      throw new Error(`Unsupported reviewed host classification for ${cls}: ${override.classification}`)
+    }
+    if (typeof override.reason !== 'string' || override.reason.trim() === '') {
+      throw new Error(`Reviewed host classification for ${cls} must include a reason`)
+    }
+    return {
+      cls,
+      tests: rows.length,
+      classification: override.classification,
+      reason: override.reason,
+      intents: [...new Set(rows.map((row) => row.intent))].sort(),
+    }
+  }
   const customizations = classCustomization(source)
   const intents = new Set(rows.map((row) => row.intent))
   const tests = rows.length
@@ -82,7 +97,7 @@ export function classifyClass({ cls, source, rows }) {
   }
 }
 
-export function classifyInventory({ testsDirectory, inventory }) {
+export function classifyInventory({ testsDirectory, inventory, overrides = {} }) {
   const sourceByClass = new Map()
   for (const row of inventory.tests) {
     if (!sourceByClass.has(row.cls)) {
@@ -96,7 +111,12 @@ export function classifyInventory({ testsDirectory, inventory }) {
     rows.push(row)
     rowsByClass.set(row.cls, rows)
   }
-  const classes = [...rowsByClass.entries()].map(([cls, rows]) => classifyClass({ cls, source: sourceByClass.get(cls), rows }))
+  for (const cls of Object.keys(overrides)) {
+    if (!rowsByClass.has(cls)) {
+      throw new Error(`Reviewed host classification names a class absent from the current inventory: ${cls}`)
+    }
+  }
+  const classes = [...rowsByClass.entries()].map(([cls, rows]) => classifyClass({ cls, source: sourceByClass.get(cls), rows, override: overrides[cls] }))
   classes.sort((a, b) => a.classification.localeCompare(b.classification) || b.tests - a.tests || a.cls.localeCompare(b.cls))
   const summary = {}
   for (const row of classes) {
@@ -108,8 +128,8 @@ export function classifyInventory({ testsDirectory, inventory }) {
 }
 
 /** Build the committed artifact shape from a current-source intent inventory. */
-export function buildHostArtifact({ testsDirectory, inventory }) {
-  const result = classifyInventory({ testsDirectory, inventory })
+export function buildHostArtifact({ testsDirectory, inventory, overrides = {} }) {
+  const result = classifyInventory({ testsDirectory, inventory, overrides })
   return {
     schemaVersion: 'aerolink-api-host-classification/v2',
     totals: result.totals,

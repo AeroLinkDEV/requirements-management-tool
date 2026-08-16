@@ -8,6 +8,7 @@ import { buildIntentArtifact, classifyFile, summariseInventory } from '../lib/te
 
 const intentArtifact = JSON.parse(readFileSync(new URL('../api-test-intent.json', import.meta.url), 'utf8'))
 const hostArtifact = JSON.parse(readFileSync(new URL('../api-host-classification.json', import.meta.url), 'utf8'))
+const hostOverrides = JSON.parse(readFileSync(new URL('../api-host-classification-overrides.json', import.meta.url), 'utf8'))
 const testsDirectory = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'tests', 'AeroLink.Api.Tests')
 
 test('brace-bearing InlineData is parsed as an attribute, not as the method body', () => {
@@ -196,6 +197,42 @@ test('every ShowcaseApiFixture consumer is fresh-host in the committed classific
   }
 })
 
+test('reviewed #563 holds keep every unsafe reusable class out of reuse headroom', () => {
+  const expectedHeldClasses = [
+    'AdministratorChangeRequestApiTests',
+    'BaselineImportApiTests',
+    'ChangeRequestRenameApiTests',
+    'ControlledEditingCheckInApiTests',
+    'HistoricalPublicationFreezeApiTests',
+    'IdentifierAllocationTests',
+    'LegacyProcedureManifestBootstrapApiTests',
+    'ManagedDocumentRecoveryApiTests',
+    'OpenDigitalThreadTests',
+    'ProblemReportActiveMetricApiTests',
+    'ProblemReportApiTests',
+    'ProblemReportDispositionApiTests',
+    'ProblemReportDuplicateDispositionApiTests',
+    'ProblemReportVerificationApiTests',
+    'ProblemReportWaiverApiTests',
+    'ProblemReportCheckoutApiTests',
+    'ProductLineApiTests',
+    'ReleaseCampaignExactIntentApiTests',
+    'SecurityHardeningTests',
+    'TestChangeRequestReviewWorkflowTests',
+  ].sort()
+  assert.deepEqual(Object.keys(hostOverrides.classes).sort(), expectedHeldClasses)
+  for (const [cls, override] of Object.entries(hostOverrides.classes)) {
+    const row = hostArtifact.classes.find((candidate) => candidate.cls === cls)
+    assert.equal(row?.classification, override.classification, cls)
+    assert.equal(row?.reason, override.reason, cls)
+    assert.match(row?.reason ?? '', /^Reviewed #563 hold:/, cls)
+  }
+  assert.deepEqual(hostArtifact.summary['reusable-host'], { classes: 33, tests: 200 })
+  assert.deepEqual(hostArtifact.summary['fresh-host'], { classes: 37, tests: 189 })
+  assert.deepEqual(hostArtifact.summary.converted, { classes: 10, tests: 52 })
+  assert.deepEqual(hostArtifact.summary['migration-candidate'], { classes: 1, tests: 1 })
+})
+
 test('committed inventories expose per-row case and host evidence', () => {
   assert.equal(intentArtifact.schemaVersion, 'aerolink-api-test-intent/v2')
   assert.equal(intentArtifact.totals.tests, 442)
@@ -211,5 +248,12 @@ test('committed inventories expose per-row case and host evidence', () => {
 test('committed inventories exactly match the current C# source tree', () => {
   const expectedIntent = buildIntentArtifact(testsDirectory)
   assert.deepEqual(intentArtifact, expectedIntent)
-  assert.deepEqual(hostArtifact, buildHostArtifact({ testsDirectory, inventory: expectedIntent }))
+  assert.deepEqual(hostArtifact, buildHostArtifact({ testsDirectory, inventory: expectedIntent, overrides: hostOverrides.classes }))
+})
+
+test('committed generated artifacts are byte-stable', () => {
+  const expectedIntent = buildIntentArtifact(testsDirectory)
+  const expectedHost = buildHostArtifact({ testsDirectory, inventory: expectedIntent, overrides: hostOverrides.classes })
+  assert.equal(readFileSync(new URL('../api-test-intent.json', import.meta.url), 'utf8'), `${JSON.stringify(expectedIntent, null, 2)}\n`)
+  assert.equal(readFileSync(new URL('../api-host-classification.json', import.meta.url), 'utf8'), `${JSON.stringify(expectedHost, null, 2)}\n`)
 })
