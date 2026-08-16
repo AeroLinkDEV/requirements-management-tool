@@ -15,21 +15,12 @@ $newFast = "        'Infrastructure suite' { Invoke-CheckedProcess 'dotnet' @('t
 Replace-ExactlyOnce $plannerScript $oldFast $newFast
 
 $classify = 'product/test-planner/lib/classify.mjs'
-$oldPlan = @'
-    steps.push({
-      label: 'Infrastructure suite',
-      command: 'dotnet test product/tests/AeroLink.Infrastructure.Tests --configuration Release --no-build',
-      why: 'Persistence and EF behaviour, still without building an API host.',
-    })
-'@
-$newPlan = @"
-    steps.push({
-      label: 'Infrastructure suite',
-      command: 'dotnet test product/tests/AeroLink.Infrastructure.Tests --configuration Release --no-build --filter `"$filter`"',
-      why: 'Fast persistence/provider coverage excludes six synthetic showcase seed/upgrade maintenance cases; the authoritative GitHub backend-core lane still runs the complete infrastructure suite.',
-    })
-"@
-Replace-ExactlyOnce $classify $oldPlan $newPlan
+$oldCommand = "      command: 'dotnet test product/tests/AeroLink.Infrastructure.Tests --configuration Release --no-build',"
+$newCommand = "      command: 'dotnet test product/tests/AeroLink.Infrastructure.Tests --configuration Release --no-build --filter `"$filter`"',"
+Replace-ExactlyOnce $classify $oldCommand $newCommand
+$oldWhy = "      why: 'Persistence and EF behaviour, still without building an API host.',"
+$newWhy = "      why: 'Fast persistence/provider coverage excludes six synthetic showcase seed/upgrade maintenance cases; the authoritative GitHub backend-core lane still runs the complete infrastructure suite.',"
+Replace-ExactlyOnce $classify $oldWhy $newWhy
 
 $plannerTests = 'product/test-planner/tests/classify.test.mjs'
 $anchor = "test('the CI forecast is read from the workflow, not restated', () => {"
