@@ -24,6 +24,16 @@ permissions:
   contents: read
   issues: write
 
+# This workflow fires on every completed quality gate and hourly, so executions can overlap. They all
+# write the same tracker issue, and an older execution finishing last would publish a staler view than
+# the one already there. Serialising them removes the overlap; `cancel-in-progress` stays false because
+# a superseded collection is still a complete, valid observation and there is nothing to gain by
+# killing it. The collector also refuses to overwrite a tracker body stamped later than its own report,
+# because a concurrency group orders nothing on its own — it only prevents simultaneity.
+concurrency:
+  group: ci-metrics-rolling-collector
+  cancel-in-progress: false
+
 jobs:
   collect:
     name: Collect rolling CI metrics
