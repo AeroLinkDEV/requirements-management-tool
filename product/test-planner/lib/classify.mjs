@@ -192,8 +192,8 @@ export function localPlan(classification) {
     })
     steps.push({
       label: 'Infrastructure suite',
-      command: 'dotnet test product/tests/AeroLink.Infrastructure.Tests --configuration Release --no-build',
-      why: 'Persistence and EF behaviour, still without building an API host.',
+      command: 'dotnet test product/tests/AeroLink.Infrastructure.Tests --configuration Release --no-build --filter=FullyQualifiedName!~AeroLink.Infrastructure.Tests.FmsShowcaseSeederTests&FullyQualifiedName!~AeroLink.Infrastructure.Tests.ShowcaseUpgradeTests',
+      why: 'Fast persistence/provider coverage excludes six synthetic showcase seed/upgrade maintenance cases; the authoritative GitHub backend-core lane still runs the complete infrastructure suite.',
     })
   }
   if (classification.client) {

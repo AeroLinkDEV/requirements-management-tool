@@ -616,7 +616,7 @@ function Invoke-FastStep {
     switch ($Step.label) {
         'Build the solution' { Invoke-CheckedProcess 'dotnet' @('build', 'product/AeroLink.slnx', '--configuration', 'Release') }
         'Domain suite' { Invoke-CheckedProcess 'dotnet' @('test', 'product/tests/AeroLink.Domain.Tests', '--configuration', 'Release', '--no-build') }
-        'Infrastructure suite' { Invoke-CheckedProcess 'dotnet' @('test', 'product/tests/AeroLink.Infrastructure.Tests', '--configuration', 'Release', '--no-build') }
+        'Infrastructure suite' { Invoke-CheckedProcess 'dotnet' @('test', 'product/tests/AeroLink.Infrastructure.Tests', '--configuration', 'Release', '--no-build', '--filter', 'FullyQualifiedName!~AeroLink.Infrastructure.Tests.FmsShowcaseSeederTests&FullyQualifiedName!~AeroLink.Infrastructure.Tests.ShowcaseUpgradeTests') }
         'Client lint, type-check and build' { Invoke-CheckedProcess 'npm.cmd' @('--prefix', 'product/client', 'run', 'lint'); Invoke-CheckedProcess 'npm.cmd' @('--prefix', 'product/client', 'run', 'build') }
         'Browser smoke journeys' { Invoke-CheckedProcess 'npm.cmd' @('--prefix', 'product/client', 'run', 'test:smoke') }
         default { Write-Host "  [CI-only] $($Step.label): $($Step.why)" -ForegroundColor Yellow }

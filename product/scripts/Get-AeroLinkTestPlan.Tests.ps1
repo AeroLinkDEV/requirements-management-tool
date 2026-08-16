@@ -120,6 +120,9 @@ foreach ($area in @('backend', 'client', 'browser', 'postgresql')) {
     Assert-True ($broadJson.classification.$area -eq $true) "Planner self-change must select $area."
 }
 
+$plannerSource = Get-Content -Raw -LiteralPath $scriptPath
+$fastInfrastructureFilter = 'FullyQualifiedName!~AeroLink.Infrastructure.Tests.FmsShowcaseSeederTests&FullyQualifiedName!~AeroLink.Infrastructure.Tests.ShowcaseUpgradeTests'
+Assert-True (([regex]::Matches($plannerSource, [regex]::Escape($fastInfrastructureFilter))).Count -eq 1) 'The six-case Fast infrastructure filter must appear exactly once so Full remains unfiltered.'
 Assert-True (Test-Path -LiteralPath (Join-Path $root 'TEST_AEROLINK_CHANGED.bat') -PathType Leaf) 'Friendly root BAT entry point is missing.'
 
 if ($failures.Count -gt 0) {

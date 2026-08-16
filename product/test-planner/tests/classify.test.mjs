@@ -193,6 +193,16 @@ test('explain attributes each path to the areas it selected', () => {
   assert.deepEqual(rows[2].areas, ['client', 'browser'])
 })
 
+test('the local Fast infrastructure profile leaves only synthetic showcase maintenance to Full CI', () => {
+  const plan = localPlan(of(['product/src/AeroLink.Domain/Requirements/Requirement.cs']))
+  const infrastructure = plan.find((step) => step.label === 'Infrastructure suite')
+  assert.ok(infrastructure)
+  assert.match(infrastructure.command, /--filter=/)
+  assert.match(infrastructure.command, /FmsShowcaseSeederTests/)
+  assert.match(infrastructure.command, /ShowcaseUpgradeTests/)
+  assert.match(infrastructure.why, /authoritative GitHub backend-core/)
+})
+
 test('the CI forecast is read from the workflow, not restated', () => {
   // The first version carried a hand-written list of jobs per area, which is the drift #568 exists to
   // remove: a restatement of the workflow is wrong the first time either changes and nothing notices.
