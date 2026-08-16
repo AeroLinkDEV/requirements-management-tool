@@ -1517,7 +1517,6 @@ jobs:
           # and ci-metrics-run-* merged reports are excluded by this prefix.
           pattern: ci-metrics-fragment-*
           path: ${{ runner.temp }}/fragments
-          if-no-files-found: ignore
       - name: Aggregate and publish summary
         if: always()
         continue-on-error: true
