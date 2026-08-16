@@ -1,0 +1,152 @@
+name: Temporary #568 bounded Fast same-run API reuse
+
+on:
+  push:
+    branches:
+      - chatgpt/568-bounded-fast-reuse-impl
+    paths:
+      - .github/workflows/temporary-568-bounded-fast-reuse-impl.yml
+
+permissions:
+  contents: write
+
+jobs:
+  validate:
+    runs-on: windows-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68
+        with:
+          dotnet-version: 10.0.x
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: 24
+      - name: Apply safe same-run API reuse
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $utf8 = New-Object System.Text.UTF8Encoding($false)
+          $path = 'product/scripts/Get-AeroLinkTestPlan.ps1'
+          $source = Get-Content -Raw -LiteralPath $path
+
+          $stateAnchor = '$evidenceFingerprintBefore = $null'
+          if (($source.Split($stateAnchor).Count - 1) -ne 1) { throw 'Fast build-state anchor mismatch.' }
+          $source = $source.Replace($stateAnchor, $stateAnchor + "`n" + '$fastReleaseBuildProven = $false')
+
+          $buildOld = "        'Build the solution' { Invoke-CheckedProcess 'dotnet' @('build', 'product/AeroLink.slnx', '--configuration', 'Release') }"
+          $buildNew = @"
+        'Build the solution' {
+            Invoke-CheckedProcess 'dotnet' @('build', 'product/AeroLink.slnx', '--configuration', 'Release')
+            `$script:fastReleaseBuildProven = `$true
+        }
+"@.TrimEnd()
+          if (($source.Split($buildOld).Count - 1) -ne 1) { throw 'Fast Release build case anchor mismatch.' }
+          $source = $source.Replace($buildOld, $buildNew)
+
+          $browserOld = "        'Browser smoke journeys' { Invoke-CheckedProcess 'npm.cmd' @('--prefix', 'product/client', 'run', 'test:smoke') }"
+          $browserNew = @"
+        'Browser smoke journeys' {
+            `$previousSkipBuildExists = Test-Path Env:AEROLINK_E2E_SKIP_BUILD
+            `$previousSkipBuild = `$env:AEROLINK_E2E_SKIP_BUILD
+            try {
+                if (`$script:fastReleaseBuildProven) {
+                    `$apiDll = Join-Path `$repositoryRoot 'product/src/AeroLink.Api/bin/Release/net10.0/AeroLink.Api.dll'
+                    if (-not (Test-Path -LiteralPath `$apiDll -PathType Leaf)) { throw 'Fast Release build was marked complete but the Release API output is missing.' }
+                    `$env:AEROLINK_E2E_SKIP_BUILD = 'true'
+                }
+                else {
+                    Remove-Item Env:AEROLINK_E2E_SKIP_BUILD -ErrorAction SilentlyContinue
+                }
+                Invoke-CheckedProcess 'npm.cmd' @('--prefix', 'product/client', 'run', 'test:smoke')
+            }
+            finally {
+                if (`$previousSkipBuildExists) { `$env:AEROLINK_E2E_SKIP_BUILD = `$previousSkipBuild }
+                else { Remove-Item Env:AEROLINK_E2E_SKIP_BUILD -ErrorAction SilentlyContinue }
+            }
+        }
+"@.TrimEnd()
+          if (($source.Split($browserOld).Count - 1) -ne 1) { throw 'Fast browser case anchor mismatch.' }
+          $source = $source.Replace($browserOld, $browserNew)
+          [IO.File]::WriteAllText((Resolve-Path $path), $source, $utf8)
+
+          $testPath = 'product/scripts/Get-AeroLinkTestPlan.Tests.ps1'
+          $tests = Get-Content -Raw -LiteralPath $testPath
+          $marker = "$plannerSource = Get-Content -Raw -LiteralPath $scriptPath"
+          if (($tests.Split($marker).Count - 1) -ne 1) { throw 'Planner source contract anchor mismatch.' }
+          $extra = @'
+$plannerSource = Get-Content -Raw -LiteralPath $scriptPath
+Assert-True ($plannerSource -match '\$fastReleaseBuildProven = \$false') 'Fast execution must start without assuming a Release build exists.'
+Assert-True ($plannerSource -match '\$script:fastReleaseBuildProven = \$true') 'Fast execution must mark API reuse only after its own Release solution build succeeds.'
+Assert-True ($plannerSource -match "AEROLINK_E2E_SKIP_BUILD = 'true'") 'Fast browser smoke must reuse the API only after the same invocation proves a Release build.'
+Assert-True ($plannerSource -match 'Fast Release build was marked complete but the Release API output is missing') 'Fast API reuse must verify the expected Release API output exists.'
+Assert-True ($plannerSource -match 'previousSkipBuildExists') 'Fast browser smoke must preserve caller environment state.'
+Assert-True ($plannerSource -match 'Remove-Item Env:AEROLINK_E2E_SKIP_BUILD') 'Fast browser smoke must clear unproven caller skip-build state.'
+'@
+          $tests = $tests.Replace($marker, $extra.TrimEnd())
+          [IO.File]::WriteAllText((Resolve-Path $testPath), $tests, $utf8)
+      - name: Validate Windows planner contract
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          & ./product/scripts/Get-AeroLinkTestPlan.Tests.ps1
+          if ($LASTEXITCODE -ne 0) { throw 'Windows planner contract failed.' }
+          git diff --check
+          if ($LASTEXITCODE -ne 0) { throw 'git diff --check failed.' }
+      - name: Prepare warmed developer state outside timing
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          npm --prefix product/client ci
+          if ($LASTEXITCODE -ne 0) { throw 'npm ci failed.' }
+          Push-Location product/client
+          try {
+            npx playwright install chromium
+            if ($LASTEXITCODE -ne 0) { throw 'Chromium install failed.' }
+          } finally { Pop-Location }
+          dotnet build product/AeroLink.slnx --configuration Release
+          if ($LASTEXITCODE -ne 0) { throw 'Warm solution build failed.' }
+      - name: Prove automatic same-run reuse and timing
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $transcript = Join-Path $env:RUNNER_TEMP 'aerolink-568-bounded-automatic-reuse.txt'
+          $resultPath = Join-Path $env:RUNNER_TEMP 'aerolink-568-bounded-automatic-reuse.json'
+          $env:AEROLINK_E2E_SKIP_BUILD = 'caller-value-must-be-restored'
+          & ./product/scripts/Get-AeroLinkTestPlan.ps1 -Paths 'product/src/AeroLink.Domain/Requirements/Requirement.cs' -Mode Fast -Explain *>&1 | Tee-Object -FilePath $transcript | ForEach-Object { Write-Host $_ }
+          $nativeExit = $LASTEXITCODE
+          if ($env:AEROLINK_E2E_SKIP_BUILD -ne 'caller-value-must-be-restored') { throw 'Fast wrapper did not restore caller skip-build state.' }
+          Remove-Item Env:AEROLINK_E2E_SKIP_BUILD -ErrorAction SilentlyContinue
+          $line = Get-Content -LiteralPath $transcript | Where-Object { $_ -like 'AEROLINK_TEST_PLAN_RESULT=*' } | Select-Object -Last 1
+          if (-not $line) { throw "Fast wrapper emitted no compact result; native=$nativeExit." }
+          $json = $line.Substring('AEROLINK_TEST_PLAN_RESULT='.Length) | ConvertFrom-Json -Depth 30
+          $json | ConvertTo-Json -Depth 30 | Out-File -LiteralPath $resultPath -Encoding utf8
+          if ($nativeExit -ne 0 -or $json.execution.status -ne 'passed') { throw "Automatic-reuse Fast failed; native=$nativeExit status=$($json.execution.status)." }
+          if ($json.execution.authoritative -ne $false) { throw 'Fast result claimed merge authority.' }
+          if ($json.execution.resources.persistentPostgreSqlTouched -ne $false -or $json.execution.resources.persistentEvidenceRootTouched -ne $false) { throw 'Persistent resources were touched.' }
+          $totalMs = [int64]$json.execution.timing.totalMs
+          Write-Host "AUTOMATIC_REUSE_FAST_TOTAL_MS=$totalMs"
+          if ($totalMs -gt 240000) { throw "Automatic-reuse Fast exceeded four minutes: $totalMs ms." }
+      - name: Commit validated product-only implementation
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          git config user.name 'seanmccarthyns'
+          git config user.email 'seanmccarthyns@gmail.com'
+          git add product/scripts/Get-AeroLinkTestPlan.ps1 product/scripts/Get-AeroLinkTestPlan.Tests.ps1
+          $paths = @(git diff --cached --name-only)
+          if ($paths.Count -ne 2) { throw "Expected two staged product files, got $($paths.Count)." }
+          git commit -m 'Reuse same-run Release API during Fast browser smoke'
+          git push origin HEAD:chatgpt/568-bounded-fast-reuse-impl
+      - name: Upload bounded proof
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: aerolink-568-bounded-automatic-reuse-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}\aerolink-568-bounded-automatic-reuse.txt
+            ${{ runner.temp }}\aerolink-568-bounded-automatic-reuse.json
+          if-no-files-found: warn
+          retention-days: 14
