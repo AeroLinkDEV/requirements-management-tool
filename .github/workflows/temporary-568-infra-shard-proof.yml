@@ -1,0 +1,213 @@
+name: Temporary #568 Infrastructure shard proof
+
+on:
+  push:
+    branches:
+      - chatgpt/568-infra-shard-proof
+
+permissions:
+  contents: read
+
+jobs:
+  measure:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - name: Check out exact proof branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - name: Install .NET 10
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v5.2.0
+        with:
+          dotnet-version: 10.0.x
+      - name: Build once and derive disjoint class shards
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $project = 'product/tests/AeroLink.Infrastructure.Tests/AeroLink.Infrastructure.Tests.csproj'
+          dotnet build product/AeroLink.slnx --configuration Release
+          if ($LASTEXITCODE -ne 0) { throw 'Warm Release build failed.' }
+
+          $raw = @(& dotnet test $project --configuration Release --no-build --list-tests 2>&1 | ForEach-Object { [string]$_ })
+          if ($LASTEXITCODE -ne 0) { throw 'Infrastructure test discovery failed.' }
+          $markerIndex = [Array]::FindIndex([string[]]$raw, [Predicate[string]]{ param($x) $x -match '^The following Tests are available:' })
+          if ($markerIndex -lt 0) { throw 'Could not locate the discovered-test marker.' }
+          $tests = @($raw[($markerIndex + 1)..($raw.Count - 1)] | ForEach-Object { $_.Trim() } | Where-Object { $_ -and $_ -notmatch '^Test Run Successful\.' -and $_ -notmatch '^Total tests:' })
+          if ($tests.Count -lt 300) { throw "Expected at least 300 Infrastructure tests, discovered $($tests.Count)." }
+
+          $rows = foreach ($test in $tests) {
+            $withoutArgs = $test -replace '\(.*$',''
+            $lastDot = $withoutArgs.LastIndexOf('.')
+            if ($lastDot -le 0) { throw "Could not derive class from discovered test '$test'." }
+            [pscustomobject]@{ test = $test; class = $withoutArgs.Substring(0, $lastDot) }
+          }
+          $classCounts = @($rows | Group-Object class | Sort-Object Count -Descending)
+          $shards = @([System.Collections.Generic.List[string]]::new(), [System.Collections.Generic.List[string]]::new())
+          $loads = @(0, 0)
+          foreach ($group in $classCounts) {
+            $target = if ($loads[0] -le $loads[1]) { 0 } else { 1 }
+            $shards[$target].Add([string]$group.Name)
+            $loads[$target] += [int]$group.Count
+          }
+          if (($loads[0] + $loads[1]) -ne $tests.Count) { throw 'Shard planning lost discovered tests.' }
+          $filter1 = ($shards[0] | ForEach-Object { "FullyQualifiedName~$_." }) -join '|'
+          $filter2 = ($shards[1] | ForEach-Object { "FullyQualifiedName~$_." }) -join '|'
+          if ([string]::IsNullOrWhiteSpace($filter1) -or [string]::IsNullOrWhiteSpace($filter2)) { throw 'One Infrastructure shard was empty.' }
+
+          $plan = [ordered]@{
+            discoveredTests = $tests.Count
+            classes = $classCounts.Count
+            shard1PlannedTests = $loads[0]
+            shard2PlannedTests = $loads[1]
+            shard1Classes = @($shards[0])
+            shard2Classes = @($shards[1])
+          }
+          $plan | ConvertTo-Json -Depth 5 | Out-File (Join-Path $env:RUNNER_TEMP 'infra-shard-plan.json') -Encoding utf8
+          "INFRA_PROJECT=$project" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          "INFRA_FILTER_1=$filter1" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          "INFRA_FILTER_2=$filter2" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          "INFRA_DISCOVERED=$($tests.Count)" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          "INFRA_PLANNED_1=$($loads[0])" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          "INFRA_PLANNED_2=$($loads[1])" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          Write-Host "Discovered $($tests.Count) tests across $($classCounts.Count) classes; planned loads $($loads[0])/$($loads[1])."
+      - name: Capture persistent evidence fingerprint
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $root = 'product/.local'
+          $fingerprint = if (Test-Path -LiteralPath $root) {
+            @(Get-ChildItem -LiteralPath $root -Force -Recurse -File | Sort-Object FullName | ForEach-Object {
+              "$($_.FullName)|$($_.Length)|$((Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash)"
+            })
+          } else { @('<absent>') }
+          $fingerprint | Out-File (Join-Path $env:RUNNER_TEMP 'infra-persistent-before.txt') -Encoding utf8
+      - name: Measure normal single-process baseline A
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $dir = Join-Path $env:RUNNER_TEMP 'infra-baseline-a'
+          New-Item -ItemType Directory -Path $dir -Force | Out-Null
+          $watch = [Diagnostics.Stopwatch]::StartNew()
+          & dotnet test $env:INFRA_PROJECT --configuration Release --no-build --logger 'trx;LogFileName=baseline-a.trx' --results-directory $dir
+          $exit = $LASTEXITCODE
+          $watch.Stop()
+          if ($exit -ne 0) { throw "Baseline A failed with exit $exit." }
+          "INFRA_BASELINE_A_MS=$($watch.ElapsedMilliseconds)" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+      - name: Measure two isolated Infrastructure processes
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $root = (Resolve-Path '.').Path
+          $dir1 = Join-Path $env:RUNNER_TEMP 'infra-shard-1'
+          $dir2 = Join-Path $env:RUNNER_TEMP 'infra-shard-2'
+          New-Item -ItemType Directory -Path $dir1,$dir2 -Force | Out-Null
+          $watch = [Diagnostics.Stopwatch]::StartNew()
+          $jobs = @(
+            Start-Job -ArgumentList $root,$env:INFRA_PROJECT,$env:INFRA_FILTER_1,$dir1,1 -ScriptBlock {
+              param($Root,$Project,$Filter,$Dir,$Index)
+              Set-Location -LiteralPath $Root
+              $w = [Diagnostics.Stopwatch]::StartNew()
+              $output = @(& dotnet test $Project --configuration Release --no-build --filter $Filter --logger "trx;LogFileName=shard-$Index.trx" --results-directory $Dir 2>&1 | ForEach-Object { [string]$_ })
+              $exit = $LASTEXITCODE
+              $w.Stop()
+              [pscustomobject]@{ index=$Index; exit=$exit; elapsedMs=$w.ElapsedMilliseconds; output=@($output) }
+            },
+            Start-Job -ArgumentList $root,$env:INFRA_PROJECT,$env:INFRA_FILTER_2,$dir2,2 -ScriptBlock {
+              param($Root,$Project,$Filter,$Dir,$Index)
+              Set-Location -LiteralPath $Root
+              $w = [Diagnostics.Stopwatch]::StartNew()
+              $output = @(& dotnet test $Project --configuration Release --no-build --filter $Filter --logger "trx;LogFileName=shard-$Index.trx" --results-directory $Dir 2>&1 | ForEach-Object { [string]$_ })
+              $exit = $LASTEXITCODE
+              $w.Stop()
+              [pscustomobject]@{ index=$Index; exit=$exit; elapsedMs=$w.ElapsedMilliseconds; output=@($output) }
+            }
+          )
+          try {
+            Wait-Job -Job $jobs | Out-Null
+            $results = @($jobs | ForEach-Object { Receive-Job -Job $_ -ErrorAction Stop }) | Sort-Object index
+            $watch.Stop()
+            foreach ($result in $results) {
+              $result.output | ForEach-Object { Write-Host "[shard $($result.index)] $_" }
+              if ([int]$result.exit -ne 0) { throw "Infrastructure shard $($result.index) failed with exit $($result.exit)." }
+            }
+            "INFRA_SHARD_WALL_MS=$($watch.ElapsedMilliseconds)" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+            "INFRA_SHARD_1_MS=$($results[0].elapsedMs)" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+            "INFRA_SHARD_2_MS=$($results[1].elapsedMs)" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          } finally {
+            $jobs | Remove-Job -Force -ErrorAction SilentlyContinue
+          }
+      - name: Measure normal single-process baseline B
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $dir = Join-Path $env:RUNNER_TEMP 'infra-baseline-b'
+          New-Item -ItemType Directory -Path $dir -Force | Out-Null
+          $watch = [Diagnostics.Stopwatch]::StartNew()
+          & dotnet test $env:INFRA_PROJECT --configuration Release --no-build --logger 'trx;LogFileName=baseline-b.trx' --results-directory $dir
+          $exit = $LASTEXITCODE
+          $watch.Stop()
+          if ($exit -ne 0) { throw "Baseline B failed with exit $exit." }
+          "INFRA_BASELINE_B_MS=$($watch.ElapsedMilliseconds)" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+      - name: Authenticate counts, identities and persistent safety
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          function Read-Trx([string]$Path) {
+            [xml]$trx = Get-Content -Raw -LiteralPath $Path
+            $counters = $trx.TestRun.ResultSummary.Counters
+            $ids = @($trx.TestRun.TestDefinitions.UnitTest | ForEach-Object { "$($_.TestMethod.className)|$($_.name)" })
+            [pscustomobject]@{ total=[int]$counters.total; passed=[int]$counters.passed; failed=[int]$counters.failed; ids=$ids }
+          }
+          $a = Read-Trx (Join-Path $env:RUNNER_TEMP 'infra-baseline-a/baseline-a.trx')
+          $b = Read-Trx (Join-Path $env:RUNNER_TEMP 'infra-baseline-b/baseline-b.trx')
+          $s1 = Read-Trx (Join-Path $env:RUNNER_TEMP 'infra-shard-1/shard-1.trx')
+          $s2 = Read-Trx (Join-Path $env:RUNNER_TEMP 'infra-shard-2/shard-2.trx')
+          foreach ($baseline in @($a,$b)) {
+            if ($baseline.total -ne [int]$env:INFRA_DISCOVERED -or $baseline.passed -ne $baseline.total -or $baseline.failed -ne 0) { throw 'A baseline TRX did not match the complete discovered passing suite.' }
+          }
+          if (($s1.total + $s2.total) -ne [int]$env:INFRA_DISCOVERED -or ($s1.passed + $s2.passed) -ne [int]$env:INFRA_DISCOVERED -or ($s1.failed + $s2.failed) -ne 0) { throw 'Sharded TRX counts were incomplete or failing.' }
+          if ($s1.total -ne [int]$env:INFRA_PLANNED_1 -or $s2.total -ne [int]$env:INFRA_PLANNED_2) { throw 'Actual shard counts did not match the deterministic plan.' }
+          $combined = @($s1.ids + $s2.ids)
+          $duplicates = @($combined | Group-Object | Where-Object Count -gt 1)
+          if ($duplicates.Count -gt 0) { throw "Sharded execution duplicated $($duplicates.Count) test identities." }
+          $delta = @(Compare-Object -ReferenceObject @($a.ids | Sort-Object) -DifferenceObject @($combined | Sort-Object))
+          if ($delta.Count -gt 0) { throw "Sharded execution identity set differed from baseline by $($delta.Count) entries." }
+
+          $root = 'product/.local'
+          $after = if (Test-Path -LiteralPath $root) {
+            @(Get-ChildItem -LiteralPath $root -Force -Recurse -File | Sort-Object FullName | ForEach-Object { "$($_.FullName)|$($_.Length)|$((Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash)" })
+          } else { @('<absent>') }
+          $before = @(Get-Content -LiteralPath (Join-Path $env:RUNNER_TEMP 'infra-persistent-before.txt'))
+          if (Compare-Object -ReferenceObject $before -DifferenceObject $after) { throw 'product/.local changed during Infrastructure shard proof.' }
+
+          $baselineMedian = [int64](([int64]$env:INFRA_BASELINE_A_MS + [int64]$env:INFRA_BASELINE_B_MS) / 2)
+          $shardWall = [int64]$env:INFRA_SHARD_WALL_MS
+          $improvement = [math]::Round(100 * (1 - ($shardWall / [double]$baselineMedian)), 2)
+          @(
+            '## #568 Infrastructure two-process shard proof',
+            '',
+            "- Discovered/authenticated tests: $env:INFRA_DISCOVERED",
+            "- Planned shard counts: $env:INFRA_PLANNED_1 / $env:INFRA_PLANNED_2",
+            "- Baseline A: $env:INFRA_BASELINE_A_MS ms",
+            "- Baseline B: $env:INFRA_BASELINE_B_MS ms",
+            "- Two-process wall: $env:INFRA_SHARD_WALL_MS ms",
+            "- Shard durations: $env:INFRA_SHARD_1_MS / $env:INFRA_SHARD_2_MS ms",
+            "- Improvement vs mean baseline: $improvement%",
+            '- TRX identity set: exact, no duplicates/missing tests',
+            '- Persistent product/.local: unchanged',
+            '- This is measurement only; no product change or merge authority claimed.'
+          ) | Out-File $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+      - name: Upload bounded proof evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: aerolink-568-infra-shard-proof-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}\infra-shard-plan.json
+            ${{ runner.temp }}\infra-baseline-a
+            ${{ runner.temp }}\infra-baseline-b
+            ${{ runner.temp }}\infra-shard-1
+            ${{ runner.temp }}\infra-shard-2
+          if-no-files-found: warn
+          retention-days: 14
