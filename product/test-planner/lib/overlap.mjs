@@ -271,7 +271,22 @@ export function detectOverlaps(pullRequests = []) {
 export function overlapsFor(prNumber, overlaps) {
   return (Array.isArray(overlaps) ? overlaps : [])
     .filter((entry) => entry?.a?.number === prNumber || entry?.b?.number === prNumber)
-    .map((entry) => (entry.a.number === prNumber ? entry : { ...entry, a: entry.b, b: entry.a }))
+    .map((entry) => {
+      if (entry.a.number === prNumber) return entry
+      return {
+        ...entry,
+        a: entry.b,
+        b: entry.a,
+        // Surface paths are directional evidence. Keep them aligned with the
+        // normalized endpoint identities when the requested PR was originally
+        // detected as `b`.
+        sharedSurfaces: entry.sharedSurfaces.map((surface) => ({
+          ...surface,
+          aPaths: [...surface.bPaths],
+          bPaths: [...surface.aPaths],
+        })),
+      }
+    })
 }
 
 const MAX_LISTED = 10
