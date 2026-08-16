@@ -122,6 +122,7 @@ test('script contract keeps telemetry aggregation, isolated evidence, and altern
   assert.match(source, /\$relativeRunPath = if \(\$IsWarmup\)/)
   assert.doesNotMatch(source, /Join-Path \$Root \(if \(\$IsWarmup\)/)
   assert.match(source, /Job containment cleanup/)
+  assert.match(source, /\$global:LASTEXITCODE = 0/)
   assert.match(source, /JOB_OBJECT_BASIC_AND_IO_ACCOUNTING_INFORMATION/)
 assert.match(source, /public static AccountingResult QueryAccounting/)
 assert.match(source, /ReadTransferBytes/)

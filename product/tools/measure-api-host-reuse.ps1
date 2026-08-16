@@ -1808,6 +1808,9 @@ function Main {
     if ($JobSmoke) {
         if (-not $IsWindows) { Fail 'This harness is intentionally Windows-only.' }
         Invoke-JobContainmentSmoke
+        # The smoke intentionally launches fail-closed native children. Do not leak one of those
+        # expected child exit codes into a same-session caller after the smoke itself succeeded.
+        $global:LASTEXITCODE = 0
         return
     }
     if (-not $OutputRoot) { $OutputRoot = Join-Path ([System.IO.Path]::GetTempPath()) 'aerolink-api-host-reuse-measurement' }
