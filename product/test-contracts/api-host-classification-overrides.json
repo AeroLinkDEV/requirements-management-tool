@@ -1,0 +1,98 @@
+{
+  "schemaVersion": "aerolink-api-host-classification-overrides/v1",
+  "review": "#563 conservative pre-#593 source-tree review",
+  "classes": {
+    "TestChangeRequestReviewWorkflowTests": {
+      "classification": "fresh-host",
+      "reason": "Reviewed #563 hold: this class bootstraps an empty database or workspace. A class-scoped SharedApiHost would make first-install state and fixed bootstrap identities order-dependent. Keep fresh-host until a bootstrap-once fixture and per-test workspace tagging are proven."
+    },
+    "BaselineImportApiTests": {
+      "classification": "fresh-host",
+      "reason": "Reviewed #563 hold: this class bootstraps an empty database or workspace. A class-scoped SharedApiHost would make first-install state and fixed bootstrap identities order-dependent. Keep fresh-host until a bootstrap-once fixture and per-test workspace tagging are proven."
+    },
+    "ProblemReportApiTests": {
+      "classification": "fresh-host",
+      "reason": "Reviewed #563 hold: this class bootstraps an empty database or workspace. A class-scoped SharedApiHost would make first-install state and fixed bootstrap identities order-dependent. Keep fresh-host until a bootstrap-once fixture and per-test workspace tagging are proven."
+    },
+    "ProblemReportVerificationApiTests": {
+      "classification": "fresh-host",
+      "reason": "Reviewed #563 hold: this class bootstraps an empty database or workspace. A class-scoped SharedApiHost would make first-install state and fixed bootstrap identities order-dependent. Keep fresh-host until a bootstrap-once fixture and per-test workspace tagging are proven."
+    },
+    "ReleaseCampaignExactIntentApiTests": {
+      "classification": "fresh-host",
+      "reason": "Reviewed #563 hold: this class bootstraps an empty database or workspace. A class-scoped SharedApiHost would make first-install state and fixed bootstrap identities order-dependent. Keep fresh-host until a bootstrap-once fixture and per-test workspace tagging are proven."
+    },
+    "OpenDigitalThreadTests": {
+      "classification": "fresh-host",
+      "reason": "Reviewed #563 hold: this class bootstraps an empty database or workspace. A class-scoped SharedApiHost would make first-install state and fixed bootstrap identities order-dependent. Keep fresh-host until stateless methods are split from bootstrap-dependent methods and per-test workspace tagging is proven."
+    },
+    "ProblemReportDuplicateDispositionApiTests": {
+      "classification": "fresh-host",
+      "reason": "Reviewed #563 hold: this class bootstraps an empty database or workspace. A class-scoped SharedApiHost would make first-install state and fixed bootstrap identities order-dependent. Keep fresh-host until a bootstrap-once fixture and per-test workspace tagging are proven."
+    },
+    "SecurityHardeningTests": {
+      "classification": "fresh-host",
+      "reason": "Reviewed #563 hold: bootstrap-dependent image-upload methods share first-install state and fixed workspace data. Keep those methods fresh; split any stateless header/auth methods before considering SharedApiHost."
+    },
+    "ChangeRequestRenameApiTests": {
+      "classification": "fresh-host",
+      "reason": "Reviewed #563 hold: this class bootstraps an empty database or workspace. A class-scoped SharedApiHost would make first-install state and fixed bootstrap identities order-dependent. Keep fresh-host until a bootstrap-once fixture and per-test workspace tagging are proven."
+    },
+    "ProblemReportCheckoutApiTests": {
+      "classification": "fresh-host",
+      "reason": "Reviewed #563 hold: this class bootstraps an empty database or workspace. A class-scoped SharedApiHost would make first-install state and fixed bootstrap identities order-dependent. Keep fresh-host until a bootstrap-once fixture and per-test workspace tagging are proven."
+    },
+    "ControlledEditingCheckInApiTests": {
+      "classification": "fresh-host",
+      "reason": "Reviewed #563 hold: this class bootstraps an empty database or workspace. A class-scoped SharedApiHost would make first-install state and fixed bootstrap identities order-dependent. Keep fresh-host until a bootstrap-once fixture and per-test workspace tagging are proven."
+    },
+    "ProductLineApiTests": {
+      "classification": "fresh-host",
+      "reason": "Reviewed #563 hold: this class bootstraps an empty database or workspace and uses fixed product-line/component identities. Keep fresh-host until a bootstrap-once fixture and per-test tagging are proven; its two methods provide only one theoretical host-build saving."
+    },
+    "AdministratorChangeRequestApiTests": {
+      "classification": "fresh-host",
+      "reason": "Reviewed #563 hold: this one-method class provides zero theoretical host-build savings under one host per class. Keep fresh-host until it is grouped or a separate measured benefit justifies changing the fixture."
+    },
+    "HistoricalPublicationFreezeApiTests": {
+      "classification": "fresh-host",
+      "reason": "Reviewed #563 hold: this one-method class provides zero theoretical host-build savings under one host per class. Keep fresh-host until it is grouped or a separate measured benefit justifies changing the fixture."
+    },
+    "LegacyProcedureManifestBootstrapApiTests": {
+      "classification": "fresh-host",
+      "reason": "Reviewed #563 hold: this one-method bootstrap class provides zero theoretical host-build savings under one host per class. Keep fresh-host until its first-install semantics are explicitly isolated or it is grouped with a proven shared fixture."
+    },
+    "ManagedDocumentRecoveryApiTests": {
+      "classification": "fresh-host",
+      "reason": "Reviewed #563 hold: this one-method class provides zero theoretical host-build savings under one host per class and exercises recovery/bootstrap state. Keep fresh-host until it is grouped or a separate measured benefit justifies changing the fixture."
+    },
+    "ProblemReportActiveMetricApiTests": {
+      "classification": "fresh-host",
+      "reason": "Reviewed #563 hold: this one-method class provides zero theoretical host-build savings under one host per class and uses bootstrap-dependent problem-report state. Keep fresh-host until it is grouped or a separate measured benefit justifies changing the fixture."
+    },
+    "ProblemReportDispositionApiTests": {
+      "classification": "fresh-host",
+      "reason": "Reviewed #563 hold: this one-method class provides zero theoretical host-build savings under one host per class and uses bootstrap-dependent problem-report state. Keep fresh-host until it is grouped or a separate measured benefit justifies changing the fixture."
+    },
+    "ProblemReportWaiverApiTests": {
+      "classification": "fresh-host",
+      "reason": "Reviewed #563 hold: this one-method class provides zero theoretical host-build savings under one host per class and uses bootstrap-dependent problem-report state. Keep fresh-host until it is grouped or a separate measured benefit justifies changing the fixture."
+    },
+    "IdentifierAllocationTests": {
+      "classification": "fresh-host",
+      "reason": "Reviewed #563 hold: exact initial identifier sequences and concurrent allocation exercise a pristine file-backed SQLite database. Keep fresh-host; only isolated domain-only logic may later become a migration candidate."
+    },
+    "TestExecutionEffectivityApiTests": {
+      "classification": "fresh-host",
+      "reason": "Reviewed #563 hold: unscoped absolute TestExecutions and TestExecutionEvidence counts at lines 193-194, 215, 259-260, 296-297, 328-329, and 352-353 would be contaminated by prior class tests in a shared host. Keep fresh-host until the assertions are fixture/project-scoped and fixed identities are explicitly tagged."
+    },
+    "SavedViewLifecycleApiTests": {
+      "classification": "fresh-host",
+      "reason": "Reviewed #563 hold: the absolute SavedRequirementViews.CountAsync() == 1 assertion at line 106 is not safe against prior class tests in a shared host. Keep fresh-host until it is filtered by per-test project/owner and fixed seed identities are explicitly tagged."
+    },
+    "VerificationProgramIsolationApiTests": {
+      "classification": "fresh-host",
+      "reason": "Reviewed #563 hold: fixed Program A/B users, controlled IDs/filename, and direct EvidenceFileStore.StoreAsync writes into the factory's shared evidence root lack reviewed per-test isolation proof. Keep fresh-host until all identities and IDs are tagged and shared evidence-root isolation is proven."
+    }
+  }
+}
