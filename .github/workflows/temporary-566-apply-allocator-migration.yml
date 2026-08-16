@@ -48,8 +48,8 @@ jobs:
           $text = [IO.File]::ReadAllText($path)
           $replacements = @(
             @("assert.deepEqual(hostArtifact.summary['fresh-host'], { classes: 40, tests: 208, knownCases: 233, unknownCaseTests: 0 })", "assert.deepEqual(hostArtifact.summary['fresh-host'], { classes: 40, tests: 204, knownCases: 229, unknownCaseTests: 0 })"),
-            @('/reusable-host\\s+30\\s+186\\s+211\\s+0\\s+41\\.6%/', '/reusable-host\\s+30\\s+186\\s+211\\s+0\\s+42\\.0%/'),
-            @('/fresh-host\\s+40\\s+208\\s+233\\s+0\\s+46\\.5%/', '/fresh-host\\s+40\\s+204\\s+229\\s+0\\s+46\\.0%/'),
+            @('/reusable-host\s+30\s+186\s+211\s+0\s+41\.6%/', '/reusable-host\s+30\s+186\s+211\s+0\s+42\.0%/'),
+            @('/fresh-host\s+40\s+208\s+233\s+0\s+46\.5%/', '/fresh-host\s+40\s+204\s+229\s+0\s+46\.0%/'),
             @('assert.equal(intentArtifact.totals.tests, 447)', 'assert.equal(intentArtifact.totals.tests, 443)'),
             @('assert.equal(intentArtifact.totals.cases, 497)', 'assert.equal(intentArtifact.totals.cases, 493)'),
             @('assert.equal(hostArtifact.totals.knownCases, 497)', 'assert.equal(hostArtifact.totals.knownCases, 493)')
