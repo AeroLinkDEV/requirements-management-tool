@@ -1,0 +1,75 @@
+name: Temporary #568 sensitive Fast profile validation
+
+on:
+  push:
+    branches:
+      - chatgpt/568-bounded-fast-sensitive
+    paths:
+      - product/tools/temporary-patch-568-sensitive-fast.mjs
+
+permissions:
+  contents: write
+
+jobs:
+  validate-and-commit:
+    runs-on: windows-latest
+    timeout-minutes: 25
+    steps:
+      - name: Check out exact branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - name: Install .NET 10
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v5.2.0
+        with:
+          dotnet-version: 10.0.x
+      - name: Install Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+      - name: Apply bounded safety refinement
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          node product/tools/temporary-patch-568-sensitive-fast.mjs
+          if ($LASTEXITCODE -ne 0) { throw 'Safety patch helper failed.' }
+      - name: Validate shared classifier and Windows wrapper contracts
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          node --test product/test-planner/tests/classify.test.mjs
+          if ($LASTEXITCODE -ne 0) { throw 'Classifier contract suite failed.' }
+          & ./product/scripts/Get-AeroLinkTestPlan.Tests.ps1
+          if ($LASTEXITCODE -ne 0) { throw 'Windows planner contract failed.' }
+          git diff --check
+          if ($LASTEXITCODE -ne 0) { throw 'git diff --check failed.' }
+      - name: Prove normal and showcase-sensitive plans diverge safely
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $normal = node product/test-planner/tools/plan.mjs --files -- product/src/AeroLink.Domain/Requirements/Requirement.cs --json --dry-run | ConvertFrom-Json
+          $sensitive = node product/test-planner/tools/plan.mjs --files -- product/src/AeroLink.Infrastructure/Persistence/FmsShowcaseSeeder.cs --json --dry-run | ConvertFrom-Json
+          $normalInfra = @($normal.local | Where-Object { $_.label -eq 'Infrastructure suite' }) | Select-Object -First 1
+          $sensitiveInfra = @($sensitive.local | Where-Object { $_.label -eq 'Infrastructure suite' }) | Select-Object -First 1
+          if ($normal.classification.fastFullInfrastructure -ne $false -or $normalInfra.command -notmatch '--filter=') { throw 'Normal Fast plan did not retain bounded Infrastructure coverage.' }
+          if ($sensitive.classification.fastFullInfrastructure -ne $true -or $sensitiveInfra.command -match '--filter=') { throw 'Showcase-sensitive Fast plan did not restore complete Infrastructure coverage.' }
+          Write-Host "Normal Infrastructure command: $($normalInfra.command)"
+          Write-Host "Sensitive Infrastructure command: $($sensitiveInfra.command)"
+      - name: Commit only validated product changes
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          git config user.name 'seanmccarthyns'
+          git config user.email 'seanmccarthyns@gmail.com'
+          $paths = @(
+            'product/test-planner/lib/classify.mjs',
+            'product/test-planner/tests/classify.test.mjs',
+            'product/scripts/Get-AeroLinkTestPlan.ps1',
+            'product/scripts/Get-AeroLinkTestPlan.Tests.ps1'
+          )
+          git add -- $paths
+          $staged = @(git diff --cached --name-only)
+          if ($staged.Count -ne 4) { throw "Expected exactly four staged product files, got $($staged.Count): $($staged -join ', ')" }
+          foreach ($path in $paths) { if ($staged -notcontains $path) { throw "Missing staged path $path" } }
+          git commit -m 'Restore full Fast infrastructure for showcase-sensitive changes'
+          git push origin HEAD:chatgpt/568-bounded-fast-sensitive
