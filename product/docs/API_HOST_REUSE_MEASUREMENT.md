@@ -46,6 +46,7 @@ pwsh -NoProfile -File "$root\product\tools\measure-api-host-reuse.ps1" `
   -Runs 10 `
   -TimeoutMinutes 30 `
   -ProcessTimeoutMinutes 60 `
+  -MaxProcessTreeCount 256 `
   -Seeds '563001,563002,563003,563004,563005,563006,563007,563008,563009,563010' `
   -Warmup
 ```
@@ -58,6 +59,8 @@ The harness reuses `product/ci-metrics/bin/aggregate-api-telemetry.mjs`; it does
 attribution rules. It records per-shard and per-observation:
 
 - exact Git SHA, branch, clean-status snapshot, SDK/OS/CPU metadata, seed, order, start/end, and exit code;
+- canonical SHA-256 case-manifest facts, condition identity metadata, saved partitions, final clean worktree state,
+  and comparable environment fingerprints;
 - test count, passed/failed/skipped/other outcomes and class-to-shard assignment;
 - worst-shard and summed-shard wall time;
 - process-tree CPU milliseconds and Windows process-counter disk read/write bytes when available;
@@ -81,8 +84,9 @@ samples make the measurement incomplete; the test result remains visible, but th
 rather than a claimed pass. A completed shard that produced no successful active process sample is invalid.
 
 Each shard is bounded by `-TimeoutMinutes` (30 by default). Restore, build, discovery, and aggregation processes are
-bounded by `-ProcessTimeoutMinutes` (60 by default). A timeout stops only the exact process tree launched by the
-harness, verifies owned descendants exit, and invalidates that observation; it is never silently converted into a pass.
+bounded by `-ProcessTimeoutMinutes` (60 by default). Process cleanup tracks PID creation identities and refuses to kill
+unverified or over-bound process trees. A timeout stops only the exact process tree launched by the harness, verifies
+owned descendants exit, and invalidates that observation; it is never silently converted into a pass.
 
 No failure may be removed from the ten-run denominator. Re-run a failed seed only as a separately identified
 diagnostic; it does not replace the failed observation.
@@ -101,7 +105,8 @@ I/O are supporting evidence, not substitutes for the critical-path wall-clock ga
 
 Evaluate recomputes validity, metrics completeness, required counts, unique/equal seed sets, and paired-seed joins from
 the observations. It does not trust caller-provided `allValid`, `validObservationCount`, `metricsComplete`, or array
-ordering; forged or inconsistent summaries are inconclusive and cannot pass.
+ordering; forged or inconsistent summaries are inconclusive and cannot pass. It also canonicalizes reparse-point
+ancestors before applying output containment against the recorded condition worktrees.
 
 To evaluate already-produced condition summaries without running tests:
 

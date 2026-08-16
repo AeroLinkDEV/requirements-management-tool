@@ -49,6 +49,8 @@ test('plan-only mode is safe, deterministic, and produces disjoint complete shar
   const one = planAt(first)
   const two = planAt(second)
   assert.equal(one.planOnly, true)
+  assert.match(one.baselineManifest.manifestHash, /^[0-9a-f]{64}$/)
+  assert.equal(one.baselineManifest.manifestHash, one.treatmentManifest.manifestHash)
   assert.equal(one.execution.includes('does not build'), true)
   assert.deepEqual(one.observations.map((x) => x.partition), two.observations.map((x) => x.partition))
   assert.deepEqual(one.observations.map((x) => x.order), [['baseline', 'treatment'], ['treatment', 'baseline']])
@@ -78,11 +80,26 @@ test('script contract keeps telemetry aggregation, isolated evidence, and altern
   assert.match(source, /finally \{/)
   assert.match(source, /Assert-EmptyOutput/)
   assert.match(source, /Assert-OutputOutsideWorktrees/)
+  assert.match(source, /Get-CanonicalPath/)
+  assert.match(source, /Resolve-Path -LiteralPath \$cursor/)
+  assert.match(source, /MaxProcessTreeCount/)
+  assert.match(source, /Get-ProcessIdentity/)
+  assert.match(source, /Test-ProcessIdentity/)
+  assert.match(source, /process-tree enumeration unavailable/)
+  assert.match(source, /manifestHash/)
+  assert.match(source, /environmentFingerprint/)
+  assert.match(source, /finalWorktree/)
+  assert.doesNotMatch(source, /Stop-Process -Id/)
+  assert.match(source, /\.Kill\(\)/)
+  assert.match(source, /PID identity changed; no kill was attempted/)
+  assert.match(source, /Known owned process records exceeded MaxProcessTreeCount/)
   assert.match(source, /Assert-WorktreeStable/)
   assert.match(source, /different API test-case names/)
   assert.match(source, /telemetry JSONL was missing or empty/)
   assert.match(source, /telemetry reported zero factories/)
   assert.match(source, /TestListPath is allowed only for Plan contract smoke/)
+  assert.match(source, /Run mode requires exactly 10 measured observations/)
+  assert.match(source, /summary must contain exactly 10 required runs/)
   assert.match(source, /Refusing to reuse non-empty observation directory/)
   assert.ok(source.indexOf('Assert-EmptyOutput $OutputRoot') < source.indexOf("New-Plan $OutputRoot $baselineInfo $treatmentInfo $manifest $partitions 'Run'"))
 })
@@ -90,13 +107,25 @@ test('script contract keeps telemetry aggregation, isolated evidence, and altern
 test('evaluate mode applies the 15 percent aggregate and paired decision rule', (t) => {
   const directory = mkdtempSync(join(tmpdir(), 'aerolink-563-evaluate-'))
   t.after(() => rmSync(directory, { recursive: true, force: true }))
-  const observations = (wall) => Array.from({ length: 10 }, (_, index) => ({
+  const manifest = { manifestHash: 'manifest-hash', caseCount: 1, classCount: 1, classFacts: [{ name: 'AeroLink.Api.Tests.SampleTests', cases: 1 }] }
+  const metadata = (condition) => ({
+    condition,
+    path: `C:\\synthetic-${condition}`,
+    head: `${condition}-sha`,
+    cleanAtStart: true,
+    manifest,
+    environmentFingerprint: 'synthetic-environment',
+  })
+  const observations = (condition, wall) => Array.from({ length: 10 }, (_, index) => ({
     schemaVersion: 'aerolink-api-host-reuse-measurement/v1',
-    condition: 'baseline',
+    condition,
     valid: true,
     seed: 100 + index,
     metricsComplete: true,
     invalidReasons: [],
+    conditionMetadata: metadata(condition),
+    finalWorktree: { path: `C:\\synthetic-${condition}`, head: `${condition}-sha`, clean: true },
+    partition: { algorithm: 'synthetic', seed: 100 + index, shardCount: 1, totalCases: 1, shards: [{ shard: 1, expectedCases: 1, classes: ['AeroLink.Api.Tests.SampleTests'], filters: 'FullyQualifiedName~AeroLink.Api.Tests.SampleTests.' }] },
     shards: [{
       exitCode: 0,
       expectedCases: 1,
@@ -111,6 +140,8 @@ test('evaluate mode applies the 15 percent aggregate and paired decision rule', 
       telemetry: { tests: 1, factories: 1, summedFactoryStartupMs: 100 },
       cpuAvailable: true,
       ioAvailable: true,
+      processTreeAvailable: true,
+      processTreeError: null,
       successfulSamples: 1,
       cleanupFailure: null,
       waitError: null,
@@ -135,7 +166,9 @@ test('evaluate mode applies the 15 percent aggregate and paired decision rule', 
     validObservationCount: 10,
     allValid: true,
     metricsComplete: true,
-    observations: observations(wall).map((observation) => ({ ...observation, condition })),
+    manifest,
+    conditionMetadata: metadata(condition),
+    observations: observations(condition, wall),
   })
   const baseline = join(directory, 'baseline.json')
   const treatment = join(directory, 'treatment.json')
@@ -151,6 +184,77 @@ test('evaluate mode applies the 15 percent aggregate and paired decision rule', 
   assert.equal(decision.status, 'pass')
   assert.ok(Math.abs(decision.aggregateImprovement - 0.2) < 1e-12)
   assert.ok(Math.abs(decision.pairedImprovement.median - 0.2) < 1e-12)
+
+  const oneRun = JSON.parse(readFileSync(baseline, 'utf8'))
+  oneRun.requiredRuns = 1
+  oneRun.observationCount = 1
+  oneRun.observations = [oneRun.observations[0]]
+  writeFileSync(baseline, JSON.stringify(oneRun))
+  runPowerShell(['-Mode', 'Evaluate', '-BaselineSummaryPath', baseline, '-TreatmentSummaryPath', treatment, '-OutputRoot', directory])
+  const oneRunDecision = JSON.parse(readFileSync(join(directory, 'decision.json'), 'utf8'))
+  assert.equal(oneRunDecision.status, 'inconclusive')
+  assert.ok(oneRunDecision.validationErrors.some((error) => error.includes('exactly 10')))
+
+  writeFileSync(baseline, JSON.stringify(summary('baseline', 100)))
+  const zeroTreatment = JSON.parse(readFileSync(treatment, 'utf8'))
+  zeroTreatment.observations[0].metrics.worstShardWallMs = 0
+  zeroTreatment.observations[0].shards[0].wallMs = 0
+  writeFileSync(treatment, JSON.stringify(zeroTreatment))
+  runPowerShell(['-Mode', 'Evaluate', '-BaselineSummaryPath', baseline, '-TreatmentSummaryPath', treatment, '-OutputRoot', directory])
+  const zeroTreatmentDecision = JSON.parse(readFileSync(join(directory, 'decision.json'), 'utf8'))
+  assert.equal(zeroTreatmentDecision.status, 'inconclusive')
+  assert.ok(zeroTreatmentDecision.validationErrors.some((error) => error.includes('non-positive')))
+  writeFileSync(treatment, JSON.stringify(summary('treatment', 80)))
+
+  const manifestMismatch = JSON.parse(readFileSync(treatment, 'utf8'))
+  manifestMismatch.manifest.manifestHash = 'different-manifest'
+  writeFileSync(treatment, JSON.stringify(manifestMismatch))
+  runPowerShell(['-Mode', 'Evaluate', '-BaselineSummaryPath', baseline, '-TreatmentSummaryPath', treatment, '-OutputRoot', directory])
+  const manifestDecision = JSON.parse(readFileSync(join(directory, 'decision.json'), 'utf8'))
+  assert.equal(manifestDecision.status, 'inconclusive')
+  assert.ok(manifestDecision.validationErrors.some((error) => error.includes('manifest hashes differ')))
+  writeFileSync(treatment, JSON.stringify(summary('treatment', 80)))
+
+  const shaMismatch = JSON.parse(readFileSync(treatment, 'utf8'))
+  shaMismatch.conditionMetadata.head = 'baseline-sha'
+  for (const observation of shaMismatch.observations) {
+    observation.conditionMetadata.head = 'baseline-sha'
+    observation.finalWorktree.head = 'baseline-sha'
+  }
+  writeFileSync(treatment, JSON.stringify(shaMismatch))
+  runPowerShell(['-Mode', 'Evaluate', '-BaselineSummaryPath', baseline, '-TreatmentSummaryPath', treatment, '-OutputRoot', directory])
+  const shaDecision = JSON.parse(readFileSync(join(directory, 'decision.json'), 'utf8'))
+  assert.equal(shaDecision.status, 'inconclusive')
+  assert.ok(shaDecision.validationErrors.some((error) => error.includes('SHAs must be distinct')))
+  writeFileSync(treatment, JSON.stringify(summary('treatment', 80)))
+
+  const environmentMismatch = JSON.parse(readFileSync(treatment, 'utf8'))
+  environmentMismatch.conditionMetadata.environmentFingerprint = 'different-environment'
+  for (const observation of environmentMismatch.observations) observation.conditionMetadata.environmentFingerprint = 'different-environment'
+  writeFileSync(treatment, JSON.stringify(environmentMismatch))
+  runPowerShell(['-Mode', 'Evaluate', '-BaselineSummaryPath', baseline, '-TreatmentSummaryPath', treatment, '-OutputRoot', directory])
+  const environmentDecision = JSON.parse(readFileSync(join(directory, 'decision.json'), 'utf8'))
+  assert.equal(environmentDecision.status, 'inconclusive')
+  assert.ok(environmentDecision.validationErrors.some((error) => error.includes('environment fingerprints differ')))
+  writeFileSync(treatment, JSON.stringify(summary('treatment', 80)))
+
+  const partitionMismatch = JSON.parse(readFileSync(treatment, 'utf8'))
+  partitionMismatch.observations[0].partition.shards[0].expectedCases = 99
+  writeFileSync(treatment, JSON.stringify(partitionMismatch))
+  runPowerShell(['-Mode', 'Evaluate', '-BaselineSummaryPath', baseline, '-TreatmentSummaryPath', treatment, '-OutputRoot', directory])
+  const partitionDecision = JSON.parse(readFileSync(join(directory, 'decision.json'), 'utf8'))
+  assert.equal(partitionDecision.status, 'inconclusive')
+  assert.ok(partitionDecision.validationErrors.some((error) => error.includes('Partition differs')))
+  writeFileSync(treatment, JSON.stringify(summary('treatment', 80)))
+
+  const dirtyFinal = JSON.parse(readFileSync(baseline, 'utf8'))
+  dirtyFinal.observations[0].finalWorktree.clean = false
+  writeFileSync(baseline, JSON.stringify(dirtyFinal))
+  runPowerShell(['-Mode', 'Evaluate', '-BaselineSummaryPath', baseline, '-TreatmentSummaryPath', treatment, '-OutputRoot', directory])
+  const dirtyDecision = JSON.parse(readFileSync(join(directory, 'decision.json'), 'utf8'))
+  assert.equal(dirtyDecision.status, 'inconclusive')
+  assert.ok(dirtyDecision.validationErrors.some((error) => error.includes('final worktree state')))
+  writeFileSync(baseline, JSON.stringify(summary('baseline', 100)))
 
   const zeroBaseline = JSON.parse(readFileSync(baseline, 'utf8'))
   zeroBaseline.observations[0].metrics.worstShardWallMs = 0
@@ -211,4 +315,10 @@ test('plan rejects output inside a condition worktree', () => {
   ])
   assert.notEqual(result.status, 0)
   assert.match(`${result.stdout}\n${result.stderr}`, /Output must be outside the condition worktrees/)
+})
+
+test('run rejects a non-authoritative one-run configuration before touching worktrees', () => {
+  const result = runPowerShellRaw(['-Mode', 'Run', '-Runs', '1', '-BaselinePath', repoRoot, '-TreatmentPath', repoRoot])
+  assert.notEqual(result.status, 0)
+  assert.match(`${result.stdout}\n${result.stderr}`, /requires exactly 10 measured observations/)
 })
