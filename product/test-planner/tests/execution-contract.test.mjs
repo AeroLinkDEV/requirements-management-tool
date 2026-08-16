@@ -1,14 +1,27 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { createHash } from 'node:crypto'
+import { existsSync, lstatSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, relative } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const repoRoot = fileURLToPath(new URL('../../../', import.meta.url))
 const wrapperPath = join(repoRoot, 'product/scripts/Get-AeroLinkTestPlan.ps1')
 const wrapper = readFileSync(wrapperPath, 'utf8')
+const backupContractPath = join(repoRoot, 'product/scripts/AeroLinkBackupVerification.Tests.ps1')
+const backupContract = readFileSync(backupContractPath, 'utf8')
+const backupVerifier = readFileSync(join(repoRoot, 'product/scripts/Verify-AeroLinkBackup.ps1'), 'utf8')
+const scriptContractNames = [
+  'AeroLinkEvidenceStore.Tests.ps1',
+  'AeroLinkBackupVerification.Tests.ps1',
+  'AeroLinkRestoreContract.Tests.ps1',
+  'AeroLinkMigrationPosture.Tests.ps1',
+  'AeroLinkRemoteDemo.Tests.ps1',
+  'AeroLinkRemoteDemoRecovery.Tests.ps1',
+  'Get-AeroLinkTestPlan.Tests.ps1',
+]
 const ownedProcessProject = join(repoRoot, 'product/test-planner/tools/OwnedProcess/OwnedProcess.csproj')
 const ownedProcessSource = readFileSync(join(repoRoot, 'product/test-planner/tools/OwnedProcess/Program.cs'), 'utf8')
 
@@ -20,6 +33,8 @@ test('wrapper exposes bounded non-authoritative timing and CI execution accounti
   assert.match(wrapper, /executedCiJobs\s*=\s*\$executed/)
   assert.match(wrapper, /ciOnlyJobs\s*=\s*\$ciOnly/)
   assert.match(wrapper, /totalMs\s*=\s*\$totalMs/)
+  assert.match(wrapper, /Get-PersistentEvidenceFingerprint/)
+  assert.match(wrapper, /persistentEvidenceRootTouched\s*=\s*\$persistentEvidenceRootTouched/)
   assert.match(wrapper, /elapsedMs\s*=\s*\[int64\]\$watch\.ElapsedMilliseconds/)
   assert.match(wrapper, /StartNew\(\)/)
 })
@@ -49,13 +64,15 @@ test('disposable PostgreSQL commands are uniquely labeled, loopback-bound, and o
   assert.match(gate, /Get-RestrictedSecretFile/)
   assert.match(wrapper, /SetAccessRuleProtection/)
   assert.match(gate, /127\.0\.0\.1:0/)
-  assert.match(gate, /Get-NetTCPConnection/)
+  assert.match(wrapper, /Get-NetTCPConnection/)
+  assert.match(gate, /Get-BoundedListenerConnections/)
   assert.match(gate, /Get-CimInstance Win32_Process/)
   assert.match(gate, /apiOwnershipIntent/)
   assert.match(gate, /postgres:17/)
   assert.match(gate, /finally\s*\{/)
   assert.doesNotMatch(gate, /Get-FreeLoopbackPort|hostApiPort|Start-Process|Stop-Process|containerStarted|volumeCreated/)
   assert.match(gate, /WaitForExit\(10000\)/)
+  assert.match(gate, /\$helper\.ExitCode -ne 0/)
   assert.match(gate, /Invoke-SafeApiRequest/)
   assert.ok(gate.indexOf('if (-not $listenerOwned)') < gate.indexOf('Invoke-SafeApiRequest'))
   assert.ok(gate.indexOf('$containerIntent = $true') < gate.indexOf("'start-container'"))
@@ -88,6 +105,28 @@ test('owned process boundary kills late descendants before bounded pipe capture 
   execFileSync('dotnet', ['run', '--project', ownedProcessProject, '--configuration', 'Release', '--no-build', '--no-restore', '--', '--self-test-late-child'], { cwd: repoRoot, stdio: 'ignore' })
   for (const fault of ['create-job', 'set-job', 'close-job-create', 'create-pipe', 'set-handle', 'close-child-write', 'assign', 'resume', 'terminate-process', 'wait', 'exit-code', 'process-times', 'process-id', 'terminate-job', 'query-job', 'close-child-read-final', 'close-thread', 'close-process', 'close-job', 'capture-timeout', 'cancel-capture']) {
     execFileSync('dotnet', ['run', '--project', ownedProcessProject, '--configuration', 'Release', '--no-build', '--no-restore', '--', '--self-test-fault', fault], { cwd: repoRoot, stdio: 'ignore' })
+  }
+})
+
+test('owned process boundary authenticates natural exits and controlled stop', () => {
+  execFileSync('dotnet', ['run', '--project', ownedProcessProject, '--configuration', 'Release', '--no-build', '--no-restore', '--', '--self-test-exit-codes'], { cwd: repoRoot, stdio: 'ignore' })
+  const fixture = mkdtempSync(join(tmpdir(), 'aerolink-owned-stop-'))
+  const status = join(fixture, 'status.log')
+  const stdout = join(fixture, 'stdout.log')
+  const stderr = join(fixture, 'stderr.log')
+  const env = join(fixture, 'environment.env')
+  try {
+    writeFileSync(env, 'AEROLINK_STOP_TEST=1\r\n')
+    execFileSync('dotnet', [
+      'run', '--project', ownedProcessProject, '--configuration', 'Release', '--no-build', '--no-restore', '--',
+      '--executable', process.env.ComSpec ?? 'cmd.exe', '--arg', '/d', '--arg', '/c', '--arg', 'ping -n 31 127.0.0.1 > nul',
+      '--status-file', status, '--stdout-file', stdout, '--stderr-file', stderr, '--env-file', env,
+    ], { cwd: repoRoot, input: 'stop\n', stdio: ['pipe', 'ignore', 'ignore'], timeout: 15000 })
+    const statusText = readFileSync(status, 'utf8')
+    assert.match(statusText, /^STOPPED\|.*\|jobCount=0$/m)
+    assert.match(statusText, /^CLEANUP\|handles=closed$/m)
+  } finally {
+    rmSync(fixture, { recursive: true, force: true })
   }
 })
 
@@ -155,6 +194,98 @@ if ($errors.Count -ne 1) { throw 'owner mismatch was not recorded' }
   } finally {
     rmSync(fixture, { recursive: true, force: true })
   }
+})
+
+test('Docker volume ownership recognizes current missing-volume wording without masking failures', () => {
+  const fixture = mkdtempSync(join(tmpdir(), 'aerolink-fake-volume-wording-'))
+  const fakeScript = join(fixture, 'fake-docker.ps1')
+  const fakeCommand = join(fixture, 'docker.cmd')
+  const harness = join(fixture, 'harness.ps1')
+  const fake = String.raw`param([Parameter(ValueFromRemainingArguments = $true)][string[]]$Arguments)
+if ($env:FAKE_DOCKER_MODE -eq 'real-missing') { [Console]::Error.WriteLine('Error response from daemon: get fixture: no such volume: fixture'); exit 1 }
+if ($env:FAKE_DOCKER_MODE -eq 'ambiguous') { [Console]::Error.WriteLine('Error response from daemon: permission denied while inspecting fixture'); exit 1 }
+Write-Output 'run-id'; exit 0
+`
+  const command = '@echo off\r\npwsh -NoProfile -File "%~dp0fake-docker.ps1" %*\r\nexit /b %ERRORLEVEL%\r\n'
+  const harnessText = String.raw`$source = '${wrapperPath.replaceAll("'", "''")}'
+$tokens = $null; $parseErrors = $null
+$ast = [System.Management.Automation.Language.Parser]::ParseFile($source, [ref]$tokens, [ref]$parseErrors)
+$node = $ast.Find({ param($candidate) $candidate -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $candidate.Name -eq 'Get-DockerOwnedResource' }, $true)
+. ([scriptblock]::Create($node.Extent.Text))
+$docker = '${fakeCommand.replaceAll("'", "''")}'
+$env:FAKE_DOCKER_MODE = 'real-missing'
+if ($null -ne (Get-DockerOwnedResource -Docker $docker -Kind volume -Name 'fixture')) { throw 'real missing volume was not treated as absent' }
+$env:FAKE_DOCKER_MODE = 'ambiguous'
+try { Get-DockerOwnedResource -Docker $docker -Kind volume -Name 'fixture'; throw 'ambiguous volume error was accepted' } catch { if ($_.Exception.Message -notmatch 'ownership could not be verified') { throw } }
+`
+  try {
+    writeFileSync(fakeScript, fake)
+    writeFileSync(fakeCommand, command)
+    writeFileSync(harness, harnessText)
+    execFileSync('pwsh', ['-NoProfile', '-File', harness], { cwd: repoRoot, stdio: 'ignore' })
+  } finally {
+    rmSync(fixture, { recursive: true, force: true })
+  }
+})
+
+test('listener cleanup treats an expected no-result as empty but fails on query errors', () => {
+  const fixture = mkdtempSync(join(tmpdir(), 'aerolink-listener-query-'))
+  const harness = join(fixture, 'harness.ps1')
+  const harnessText = String.raw`$source = '${wrapperPath.replaceAll("'", "''")}'
+$tokens = $null; $parseErrors = $null
+$ast = [System.Management.Automation.Language.Parser]::ParseFile($source, [ref]$tokens, [ref]$parseErrors)
+$node = $ast.Find({ param($candidate) $candidate -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $candidate.Name -eq 'Get-BoundedListenerConnections' }, $true)
+. ([scriptblock]::Create($node.Extent.Text))
+function Get-NetTCPConnection {
+  if ($env:FAKE_LISTENER_MODE -eq 'empty') { Write-Error 'No MSFT_NetTCPConnection objects found with property LocalPort' -ErrorAction Stop; return }
+  if ($env:FAKE_LISTENER_MODE -eq 'failure') { Write-Error 'Access denied querying listener state' -ErrorAction Stop; return }
+  [pscustomobject]@{ LocalPort = 49152; LocalAddress = '127.0.0.1'; OwningProcess = 42 }
+}
+$env:FAKE_LISTENER_MODE = 'empty'
+if (@(Get-BoundedListenerConnections -Port 49152).Count -ne 0) { throw 'expected no-result listener query to be empty' }
+$env:FAKE_LISTENER_MODE = 'failure'
+try { Get-BoundedListenerConnections -Port 49152; throw 'listener query failure was accepted' } catch { if ($_.Exception.Message -notmatch 'bounded listener query failed') { throw } }
+$env:FAKE_LISTENER_MODE = 'one'
+if (@(Get-BoundedListenerConnections -Port 49152).Count -ne 1) { throw 'listener result was not returned' }
+`
+  try {
+    writeFileSync(harness, harnessText)
+    execFileSync('pwsh', ['-NoProfile', '-File', harness], { cwd: repoRoot, stdio: 'ignore' })
+  } finally {
+    rmSync(fixture, { recursive: true, force: true })
+  }
+})
+
+function snapshotTree(root) {
+  if (!existsSync(root)) return ['<absent>']
+  const entries = []
+  const visit = (current) => {
+    for (const entry of readdirSync(current, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
+      const absolute = join(current, entry.name)
+      const name = relative(root, absolute)
+      if (entry.isDirectory()) {
+        entries.push(`${name}/`)
+        visit(absolute)
+      } else {
+        const stat = lstatSync(absolute)
+        const digest = entry.isFile() ? createHash('sha256').update(readFileSync(absolute)).digest('hex') : 'non-file'
+        entries.push(`${name}|${stat.size}|${stat.mtimeMs}|${digest}`)
+      }
+    }
+  }
+  visit(root)
+  return entries
+}
+
+test('script-contract family uses disposable verification storage and preserves product/.local', () => {
+  assert.match(backupVerifier, /VerificationRoot/)
+  assert.match(backupContract, /-VerificationRoot \$verificationRoot/)
+  const evidenceRoot = join(repoRoot, 'product/.local')
+  const before = snapshotTree(evidenceRoot)
+  for (const name of scriptContractNames) {
+    execFileSync('pwsh', ['-NoProfile', '-File', join(repoRoot, 'product/scripts', name)], { cwd: repoRoot, stdio: 'ignore' })
+  }
+  assert.deepEqual(snapshotTree(evidenceRoot), before)
 })
 
 test('wrapper failure and cleanup contracts are redacted and fail closed', () => {

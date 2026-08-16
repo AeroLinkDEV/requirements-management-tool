@@ -29,6 +29,7 @@ internal static class Program
         {
             if (args.Contains("--self-test-space-path", StringComparer.Ordinal)) return SpacePathSelfTest() ? 0 : 1;
             if (args.Contains("--self-test-late-child", StringComparer.Ordinal)) return LateChildSelfTest() ? 0 : 1;
+            if (args.Contains("--self-test-exit-codes", StringComparer.Ordinal)) return ExitCodeSelfTest() ? 0 : 1;
             var faultIndex = Array.FindIndex(args, arg => string.Equals(arg, "--self-test-fault", StringComparison.Ordinal));
             if (faultIndex >= 0 && faultIndex + 1 < args.Length)
             {
@@ -292,6 +293,11 @@ internal static class Program
                 catch { operationFailed = true; }
             }
 
+            if (!stopped && exitCode != 0)
+            {
+                Append(statusFile, "ERROR|code=target-exit");
+                operationFailed = true;
+            }
             Append(statusFile, $"{(stopped ? "STOPPED" : "EXITED")}|pid={pid}|exit={exitCode}|jobCount={jobCount}");
             return operationFailed || !jobEmpty || !captureCompleted ? 1 : 0;
         }
@@ -415,6 +421,31 @@ internal static class Program
                 || !File.ReadAllText(status).Contains("CLEANUP|handles=closed", StringComparison.Ordinal)) return false;
             if (!int.TryParse(File.ReadAllText(pidFile).Trim(), out var childPid)) return false;
             try { using var child = Process.GetProcessById(childPid); return false; } catch (ArgumentException) { return true; }
+        }
+        finally { try { Directory.Delete(root, true); } catch { } }
+    }
+
+    private static bool ExitCodeSelfTest()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "aerolink exit codes " + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        var shell = Path.Combine(root, "command shell.exe");
+        var env = Path.Combine(root, "environment.env");
+        try
+        {
+            File.Copy(Environment.GetEnvironmentVariable("ComSpec") ?? "cmd.exe", shell);
+            File.WriteAllText(env, "AEROLINK_EXIT_CODE_TEST=1\r\n");
+            foreach (var code in new[] { 0, 7 })
+            {
+                var status = Path.Combine(root, $"status-{code}.log");
+                var output = Path.Combine(root, $"stdout-{code}.log");
+                var error = Path.Combine(root, $"stderr-{code}.log");
+                var exit = RunOwned(CreateOptions(shell, status, output, error, env, new[] { "/d", "/c", "exit", code.ToString(System.Globalization.CultureInfo.InvariantCulture) }));
+                var expectedSuccess = code == 0;
+                if ((exit == 0) != expectedSuccess || !File.ReadAllText(status).Contains($"exit={code}|jobCount=0", StringComparison.Ordinal)
+                    || !File.ReadAllText(status).Contains("CLEANUP|handles=closed", StringComparison.Ordinal)) return false;
+            }
+            return true;
         }
         finally { try { Directory.Delete(root, true); } catch { } }
     }

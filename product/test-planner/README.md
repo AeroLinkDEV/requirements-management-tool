@@ -54,7 +54,8 @@ and labeled volume in a `finally` block, then verifies that each temporary secre
 It stops the API through the Job Object boundary, drains late descendants before awaiting inherited-pipe
 output, and fails closed if bounded capture or any job, handles, process, or listener cleanup cannot be
 proven clean. It never calls the persistent `Start-Postgres` launcher, port 54329, or writes
-`product/.local` evidence.
+`product/.local` evidence. The backup verification contract passes an explicit unique temporary verification
+root, and the wrapper fingerprints `product/.local` before and after every non-dry execution.
 
 ## Node planner
 

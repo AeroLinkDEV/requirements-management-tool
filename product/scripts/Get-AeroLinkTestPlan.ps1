@@ -106,11 +106,36 @@ $executionSteps = [System.Collections.Generic.List[object]]::new()
 $executionStatus = 'not-run'
 $executionError = $null
 $executionClock = $null
+$persistentEvidenceRootTouched = $false
+$evidenceFingerprintBefore = $null
 
 function Get-StringArray {
     param($Values)
     if ($null -eq $Values) { return @() }
     return @($Values | ForEach-Object { [string]$_ })
+}
+
+function Get-PersistentEvidenceFingerprint {
+    param([Parameter(Mandatory)][string]$Root)
+    if (-not (Test-Path -LiteralPath $Root)) { return @('<absent>') }
+    $rootFull = [IO.Path]::GetFullPath($Root).TrimEnd('\')
+    $items = @(Get-ChildItem -LiteralPath $Root -Force -Recurse -ErrorAction Stop | Sort-Object FullName)
+    if ($items.Count -gt 10000) { throw 'Persistent evidence fingerprint exceeded its entry bound.' }
+    $fingerprint = [System.Collections.Generic.List[string]]::new()
+    $totalBytes = [int64]0
+    foreach ($item in $items) {
+        $relative = $item.FullName.Substring($rootFull.Length).TrimStart('\', '/')
+        if ($item.PSIsContainer) {
+            [void]$fingerprint.Add("$relative|D|$($item.LastWriteTimeUtc.Ticks)")
+        }
+        else {
+            $totalBytes += [int64]$item.Length
+            if ($totalBytes -gt 268435456) { throw 'Persistent evidence fingerprint exceeded its byte bound.' }
+            $hash = (Get-FileHash -LiteralPath $item.FullName -Algorithm SHA256 -ErrorAction Stop).Hash
+            [void]$fingerprint.Add("$relative|F|$($item.Length)|$($item.LastWriteTimeUtc.Ticks)|$hash")
+        }
+    }
+    return @($fingerprint.ToArray())
 }
 
 function Get-CiJobsForStep {
@@ -157,7 +182,7 @@ function New-ExecutionResult {
         ciOnlyJobs = $ciOnly
         resources = [ordered]@{
             persistentPostgreSqlTouched = $false
-            persistentEvidenceRootTouched = $false
+            persistentEvidenceRootTouched = $persistentEvidenceRootTouched
             disposableDockerPostgreSql = if ($selected -contains 'postgresql-smoke') { 'required for Full; unique container, Docker-assigned loopback port and labeled volume' } else { 'not selected' }
             networkAccessPossible = [bool]($selected -contains 'postgresql-smoke')
         }
@@ -326,10 +351,10 @@ function Get-DockerOwnedResource {
         if ($exitCode -eq 0) { return (($output -join [Environment]::NewLine).Trim()) }
         $diagnostic = ($output -join [Environment]::NewLine).Trim()
         $absent = if ($Kind -eq 'container') {
-            $diagnostic -match '(?im)^\s*(?:error:\s*)?no such object\s*:'
+            $diagnostic -match '(?im)^\s*(?:error:\s*|error response from daemon:\s*)?no such object\s*:'
         }
         else {
-            $diagnostic -match '(?im)^\s*(?:error response from daemon:\s*)?no such volume\s*:'
+            $diagnostic -match '(?im)^\s*(?:error response from daemon:\s*)?(?:get\s+[^:]+:\s*)?no such volume\s*:'
         }
         if ($absent) { return $null }
         throw 'inspect was not conclusive'
@@ -345,6 +370,18 @@ function Remove-DockerOwnedResource {
         Invoke-CheckedDocker -Docker $Docker -Operation "remove-$Kind" -Arguments $args
         if ($null -ne (Get-DockerOwnedResource -Docker $Docker -Kind $Kind -Name $Name)) { throw 'resource remained after removal' }
     } catch { [void]$CleanupErrors.Add("Disposable Docker $Kind cleanup was not proven.") }
+}
+function Get-BoundedListenerConnections {
+    param([Parameter(Mandatory)][int]$Port)
+    try {
+        $connections = @(Get-NetTCPConnection -State Listen -LocalPort $Port -ErrorAction Stop)
+    }
+    catch {
+        if ($_.Exception.Message -notmatch '(?i)No (?:matching )?MSFT_NetTCPConnection objects found') { throw 'The bounded listener query failed.' }
+        return @()
+    }
+    if ($connections.Count -gt 128) { throw 'The bounded listener query exceeded its result limit.' }
+    return @($connections)
 }
 function Get-RestrictedSecretFile {
     param([Parameter(Mandatory)][string]$Path, [Parameter(Mandatory)][string[]]$Lines)
@@ -451,7 +488,7 @@ function Invoke-DisposablePostgreSqlGate {
                 $apiPort = [int]$Matches['port']
                 if ($apiPort -lt 1024 -or $apiPort -gt 65535) { throw 'The disposable API listener port was outside the bounded range.' }
                 try {
-                    $connections = @(Get-NetTCPConnection -State Listen -LocalPort $apiPort -ErrorAction Stop | Where-Object { $_.LocalAddress -eq '127.0.0.1' })
+                    $connections = @(Get-BoundedListenerConnections -Port $apiPort | Where-Object { $_.LocalAddress -eq '127.0.0.1' })
                     $target = Get-Process -Id $apiPid -ErrorAction Stop; $cimTarget = @(Get-CimInstance Win32_Process -Filter "ProcessId=$apiPid" -ErrorAction Stop)
                     if ($connections.Count -eq 1 -and [int]$connections[0].OwningProcess -eq $apiPid -and $cimTarget.Count -eq 1 -and ([Int64]$target.StartTime.ToFileTimeUtc() -eq $apiStart)) { $listenerOwned = $true; break }
                 } catch { }
@@ -509,11 +546,13 @@ function Invoke-DisposablePostgreSqlGate {
             try {
                 if ($apiProcessStarted) {
                     if (-not $helper.HasExited) { $helper.StandardInput.WriteLine('stop'); $helper.StandardInput.Flush() }
-                    if (-not $helper.WaitForExit(10000)) { try { $helper.Kill() } catch { }; [void]$cleanupErrors.Add('The owned API process helper did not exit within the bounded cleanup wait.') }
+                    $helperExited = $helper.WaitForExit(10000)
+                    if (-not $helperExited) { try { $helper.Kill() } catch { }; [void]$cleanupErrors.Add('The owned API process helper did not exit within the bounded cleanup wait.') }
+                    if ($helper.HasExited -and $helper.ExitCode -ne 0) { [void]$cleanupErrors.Add('The owned API process helper exited nonzero.') }
                     $statusAfter = Read-BoundedTextFile -Path $apiStatus
                     if ($statusAfter -notmatch '(?m)^(STOPPED|EXITED)\|.*\|jobCount=0$' -or $statusAfter -notmatch '(?m)^CLEANUP\|handles=closed$') { [void]$cleanupErrors.Add('Owned API job cleanup was not proven.') }
                     if ($null -ne $apiPid) { try { if ($null -ne (Get-Process -Id $apiPid -ErrorAction SilentlyContinue)) { [void]$cleanupErrors.Add('The owned API process remained after cleanup.') } } catch { [void]$cleanupErrors.Add('The owned API process exit could not be verified.') } }
-                    if ($null -ne $apiPort) { try { if (@(Get-NetTCPConnection -State Listen -LocalPort $apiPort -ErrorAction Stop | Where-Object { [int]$_.OwningProcess -eq $apiPid }).Count -gt 0) { [void]$cleanupErrors.Add('The owned API listener remained after cleanup.') } } catch { [void]$cleanupErrors.Add('The owned API listener cleanup could not be verified.') } }
+                    if ($null -ne $apiPort) { try { if (@(Get-BoundedListenerConnections -Port $apiPort | Where-Object { [int]$_.OwningProcess -eq $apiPid }).Count -gt 0) { [void]$cleanupErrors.Add('The owned API listener remained after cleanup.') } } catch { [void]$cleanupErrors.Add('The owned API listener cleanup could not be verified.') } }
                 }
                 else {
                     try { if (-not $helper.HasExited) { $helper.Kill(); [void]$cleanupErrors.Add('The API helper start outcome was uncertain.') } } catch { [void]$cleanupErrors.Add('The API helper start outcome was uncertain.') }
@@ -593,6 +632,14 @@ if ($Mode -eq 'Full' -and $confirmation -notmatch '^(?i:y|yes)$') {
 }
 
 $executionClock = [Diagnostics.Stopwatch]::StartNew()
+$evidenceRoot = Join-Path $repositoryRoot 'product\.local'
+try {
+    $evidenceFingerprintBefore = Get-PersistentEvidenceFingerprint -Root $evidenceRoot
+}
+catch {
+    $persistentEvidenceRootTouched = $true
+    throw 'Persistent evidence root could not be fingerprinted; local execution was refused.'
+}
 Push-Location $repositoryRoot
 try {
     try {
@@ -620,7 +667,22 @@ try {
 finally {
     Pop-Location
     if ($executionClock) { $executionClock.Stop() }
+    try {
+        $evidenceFingerprintAfter = Get-PersistentEvidenceFingerprint -Root $evidenceRoot
+        if ($null -eq $evidenceFingerprintBefore -or $null -ne (Compare-Object -ReferenceObject $evidenceFingerprintBefore -DifferenceObject $evidenceFingerprintAfter)) {
+            $persistentEvidenceRootTouched = $true
+            $executionStatus = 'failed'
+            $executionError = 'Persistent evidence root changed or could not be proven unchanged.'
+        }
+    }
+    catch {
+        $persistentEvidenceRootTouched = $true
+        $executionStatus = 'failed'
+        $executionError = 'Persistent evidence root changed or could not be proven unchanged.'
+    }
+    $wrapperSafety.persistentEvidenceRootTouched = $persistentEvidenceRootTouched
     Write-CompactResult
+    if ($persistentEvidenceRootTouched) { throw 'Persistent evidence root changed or could not be proven unchanged.' }
 }
 
 Write-Host ''
