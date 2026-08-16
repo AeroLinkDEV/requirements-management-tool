@@ -40,6 +40,25 @@ jobs:
           if ([int]$intent.totals.hostedCandidateTests -ne 5 -or [int]$intent.totals.hostedCandidateCases -ne 6) { throw "Expected remaining hosted candidates 5 methods / 6 cases; got $($intent.totals.hostedCandidateTests) / $($intent.totals.hostedCandidateCases)." }
           $hostClassification = Get-Content -LiteralPath product/test-contracts/api-host-classification.json -Raw | ConvertFrom-Json -Depth 100
           if ([int]$hostClassification.totals.tests -ne 443) { throw "Host classification did not reconcile to 443 API methods: $($hostClassification.totals.tests)." }
+      - name: Update reviewed inventory assertions for the migrated source tree
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $path = 'product/test-contracts/tests/inventory.test.mjs'
+          $text = [IO.File]::ReadAllText($path)
+          $replacements = @(
+            @("assert.deepEqual(hostArtifact.summary['fresh-host'], { classes: 40, tests: 208, knownCases: 233, unknownCaseTests: 0 })", "assert.deepEqual(hostArtifact.summary['fresh-host'], { classes: 40, tests: 204, knownCases: 229, unknownCaseTests: 0 })"),
+            @('/reusable-host\\s+30\\s+186\\s+211\\s+0\\s+41\\.6%/', '/reusable-host\\s+30\\s+186\\s+211\\s+0\\s+42\\.0%/'),
+            @('/fresh-host\\s+40\\s+208\\s+233\\s+0\\s+46\\.5%/', '/fresh-host\\s+40\\s+204\\s+229\\s+0\\s+46\\.0%/'),
+            @('assert.equal(intentArtifact.totals.tests, 447)', 'assert.equal(intentArtifact.totals.tests, 443)'),
+            @('assert.equal(intentArtifact.totals.cases, 497)', 'assert.equal(intentArtifact.totals.cases, 493)'),
+            @('assert.equal(hostArtifact.totals.knownCases, 497)', 'assert.equal(hostArtifact.totals.knownCases, 493)')
+          )
+          foreach ($pair in $replacements) {
+            if (($text.Split($pair[0]).Count - 1) -ne 1) { throw "Expected inventory assertion exactly once: $($pair[0])" }
+            $text = $text.Replace($pair[0], $pair[1])
+          }
+          [IO.File]::WriteAllText($path, $text, [Text.UTF8Encoding]::new($false))
       - name: Run source-derived inventory contracts
         shell: pwsh
         run: |
@@ -55,6 +74,6 @@ jobs:
           $ErrorActionPreference = 'Stop'
           git config user.name 'seanmccarthyns'
           git config user.email 'seanmccarthyns@gmail.com'
-          git add product/tests/AeroLink.Api.Tests/IdentifierAllocationTests.cs product/tests/AeroLink.Infrastructure.Tests/IdentifierAllocationPersistenceTests.cs product/test-contracts/api-test-intent.json product/test-contracts/api-host-classification.json
+          git add product/tests/AeroLink.Api.Tests/IdentifierAllocationTests.cs product/tests/AeroLink.Infrastructure.Tests/IdentifierAllocationPersistenceTests.cs product/test-contracts/api-test-intent.json product/test-contracts/api-host-classification.json product/test-contracts/tests/inventory.test.mjs
           git commit -m 'Move direct allocator rules out of hosted API tests [566-migrated]'
           git push origin HEAD:chatgpt/566-allocator-test-placement
