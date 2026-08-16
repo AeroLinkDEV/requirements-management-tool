@@ -452,24 +452,25 @@ pre-#593 #563 holds that static host evidence cannot safely clear:
 
 | Classification | Classes | Methods | Known invocations | Unknown-case methods | Share of methods |
 |---|---:|---:|---:|---:|---:|
-| reusable-host | 33 | 200 | 225 | 0 | 45.2% |
+| reusable-host | 30 | 186 | 211 | 0 | 42.1% |
 | converted (pilot) | 10 | 52 | 52 | 0 | 11.8% |
-| fresh-host | 37 | 189 | 214 | 0 | 42.8% |
+| fresh-host | 40 | 203 | 228 | 0 | 45.9% |
 | migration-candidate | 1 | 1 | 1 | 0 | 0.2% |
 
-Concrete service-replacement, custom-factory, and showcase-template-copy classes are fresh-host until
-their isolation is explicitly reviewed. In addition, 12 bootstrap-dependent classes, seven one-method
-zero-saving classes, and `IdentifierAllocationTests` are explicitly held fresh-host by review. The
-generated artifact records the reason for every class and applies those reviewed holds; it is not a claim
-that static evidence alone proves shared-host safety.
+Concrete service-replacement, custom-factory, showcase-template-copy, unscoped-count, and
+shared-evidence classes are fresh-host until their isolation is explicitly reviewed. In addition, the
+reviewed bootstrap-dependent, zero-saving, identifier-allocation, effectivity-count, saved-view-count,
+and evidence-isolation holds are explicitly held fresh-host by review. The generated artifact records
+the reason for every class and applies those reviewed holds; it is not a claim that static evidence alone
+proves shared-host safety.
 
 ### What the current telemetry does and does not establish
 
 An earlier revision put the full-conversion figure at 12.9% and concluded the gate was unreachable. That
 calculation was wrong because it multiplied a removable-build estimate by the median host cost. The
 historical accounting below is numerically reproducible, but it predates the conservative safety
-reclassification above: its 62-class candidate pool is not identical to the current 33 reusable classes
-and 20 reviewed holds.
+reclassification above: its 62-class candidate pool is not identical to the current 30 reusable classes
+and 23 reviewed holds.
 It must not be read as current class-safety evidence:
 
 | | |
@@ -488,10 +489,10 @@ three would produce **99.2 s as an illustrative average**, but it is not a measu
 shard and is not an upper bound on wall-clock improvement. The current class-to-shard placement, xUnit
 parallelism, and synchronization costs remain unresolved.
 
-At the reviewed current tree, the 33 reusable classes contain **200 test methods and 225 known xUnit
+At the reviewed current tree, the 30 reusable classes contain **186 test methods and 211 known xUnit
 invocations**. If every one were safely converted to exactly one class-scoped host, the method-level
-conversion arithmetic is **167 method-to-class units (200 - 33)**. The invocation-level theoretical
-factory-construction reduction is **192 (225 - 33)**. Both are planning arithmetic, exclude the 20
+conversion arithmetic is **156 method-to-class units (186 - 30)**. The invocation-level theoretical
+factory-construction reduction is **181 (211 - 30)**. Both are planning arithmetic, exclude the 23
 reviewed holds, and are not measured wall-clock savings. Any future unknown-case method must be excluded
 from invocation arithmetic until its case count is supplied; runtime telemetry and randomized
 full-concurrency wall-clock runs remain authoritative.

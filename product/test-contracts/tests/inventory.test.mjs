@@ -220,7 +220,10 @@ test('reviewed #563 holds keep every unsafe reusable class out of reuse headroom
     'ProductLineApiTests',
     'ReleaseCampaignExactIntentApiTests',
     'SecurityHardeningTests',
+    'SavedViewLifecycleApiTests',
     'TestChangeRequestReviewWorkflowTests',
+    'TestExecutionEffectivityApiTests',
+    'VerificationProgramIsolationApiTests',
   ].sort()
   assert.deepEqual(Object.keys(hostOverrides.classes).sort(), expectedHeldClasses)
   for (const [cls, override] of Object.entries(hostOverrides.classes)) {
@@ -229,8 +232,8 @@ test('reviewed #563 holds keep every unsafe reusable class out of reuse headroom
     assert.equal(row?.reason, override.reason, cls)
     assert.match(row?.reason ?? '', /^Reviewed #563 hold:/, cls)
   }
-  assert.deepEqual(hostArtifact.summary['reusable-host'], { classes: 33, tests: 200, knownCases: 225, unknownCaseTests: 0 })
-  assert.deepEqual(hostArtifact.summary['fresh-host'], { classes: 37, tests: 189, knownCases: 214, unknownCaseTests: 0 })
+  assert.deepEqual(hostArtifact.summary['reusable-host'], { classes: 30, tests: 186, knownCases: 211, unknownCaseTests: 0 })
+  assert.deepEqual(hostArtifact.summary['fresh-host'], { classes: 40, tests: 203, knownCases: 228, unknownCaseTests: 0 })
   assert.deepEqual(hostArtifact.summary.converted, { classes: 10, tests: 52, knownCases: 52, unknownCaseTests: 0 })
   assert.deepEqual(hostArtifact.summary['migration-candidate'], { classes: 1, tests: 1, knownCases: 1, unknownCaseTests: 0 })
 })
@@ -262,8 +265,8 @@ test('host-classification case totals join exactly to the intent inventory', () 
   assert.equal(hostArtifact.totals.knownCases, intentArtifact.totals.cases)
   assert.equal(hostArtifact.totals.unknownCaseTests, intentArtifact.totals.unknownCaseTests)
   const reusable = hostArtifact.summary['reusable-host']
-  assert.equal(reusable.tests - reusable.classes, 167)
-  assert.equal(reusable.knownCases - reusable.classes, 192)
+  assert.equal(reusable.tests - reusable.classes, 156)
+  assert.equal(reusable.knownCases - reusable.classes, 181)
 })
 
 test('host classification CLI distinguishes known cases from unknown-case methods', () => {
@@ -274,6 +277,9 @@ test('host classification CLI distinguishes known cases from unknown-case method
       join(temporaryDirectory, 'artifact.json'),
     ], { encoding: 'utf8' })
     assert.match(output, /classification\s+classes\s+methods\s+known cases\s+unknown-case methods\s+share of methods/)
+    assert.match(output, /reusable-host\s+30\s+186\s+211\s+0\s+42\.1%/)
+    assert.match(output, /fresh-host\s+40\s+203\s+228\s+0\s+45\.9%/)
+    assert.match(output, /Remaining reuse headroom:\s+30 classes, 186 methods, 211 known cases/)
   } finally {
     rmSync(temporaryDirectory, { recursive: true, force: true })
   }

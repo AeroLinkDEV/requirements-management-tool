@@ -81,6 +81,18 @@
     "IdentifierAllocationTests": {
       "classification": "fresh-host",
       "reason": "Reviewed #563 hold: exact initial identifier sequences and concurrent allocation exercise a pristine file-backed SQLite database. Keep fresh-host; only isolated domain-only logic may later become a migration candidate."
+    },
+    "TestExecutionEffectivityApiTests": {
+      "classification": "fresh-host",
+      "reason": "Reviewed #563 hold: unscoped absolute TestExecutions and TestExecutionEvidence counts at lines 193-194, 215, 259-260, 296-297, 328-329, and 352-353 would be contaminated by prior class tests in a shared host. Keep fresh-host until the assertions are fixture/project-scoped and fixed identities are explicitly tagged."
+    },
+    "SavedViewLifecycleApiTests": {
+      "classification": "fresh-host",
+      "reason": "Reviewed #563 hold: the absolute SavedRequirementViews.CountAsync() == 1 assertion at line 106 is not safe against prior class tests in a shared host. Keep fresh-host until it is filtered by per-test project/owner and fixed seed identities are explicitly tagged."
+    },
+    "VerificationProgramIsolationApiTests": {
+      "classification": "fresh-host",
+      "reason": "Reviewed #563 hold: fixed Program A/B users, controlled IDs/filename, and direct EvidenceFileStore.StoreAsync writes into the factory's shared evidence root lack reviewed per-test isolation proof. Keep fresh-host until all identities and IDs are tagged and shared evidence-root isolation is proven."
     }
   }
 }

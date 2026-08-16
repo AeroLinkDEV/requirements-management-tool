@@ -14,9 +14,9 @@
       "unknownCaseTests": 0
     },
     "fresh-host": {
-      "classes": 37,
-      "tests": 189,
-      "knownCases": 214,
+      "classes": 40,
+      "tests": 203,
+      "knownCases": 228,
       "unknownCaseTests": 0
     },
     "migration-candidate": {
@@ -26,9 +26,9 @@
       "unknownCaseTests": 0
     },
     "reusable-host": {
-      "classes": 33,
-      "tests": 200,
-      "knownCases": 225,
+      "classes": 30,
+      "tests": 186,
+      "knownCases": 211,
       "unknownCaseTests": 0
     }
   },
@@ -284,6 +284,17 @@
       ]
     },
     {
+      "cls": "TestExecutionEffectivityApiTests",
+      "tests": 6,
+      "knownCases": 6,
+      "unknownCaseTests": 0,
+      "classification": "fresh-host",
+      "reason": "Reviewed #563 hold: unscoped absolute TestExecutions and TestExecutionEvidence counts at lines 193-194, 215, 259-260, 296-297, 328-329, and 352-353 would be contaminated by prior class tests in a shared host. Keep fresh-host until the assertions are fixture/project-scoped and fixed identities are explicitly tagged.",
+      "intents": [
+        "http-boundary"
+      ]
+    },
+    {
       "cls": "OpenDigitalThreadTests",
       "tests": 5,
       "knownCases": 5,
@@ -337,6 +348,30 @@
       "classification": "fresh-host",
       "reason": "Reviewed #563 hold: this class bootstraps an empty database or workspace. A class-scoped SharedApiHost would make first-install state and fixed bootstrap identities order-dependent. Keep fresh-host until a bootstrap-once fixture and per-test workspace tagging are proven.",
       "intents": [
+        "http-boundary"
+      ]
+    },
+    {
+      "cls": "SavedViewLifecycleApiTests",
+      "tests": 4,
+      "knownCases": 4,
+      "unknownCaseTests": 0,
+      "classification": "fresh-host",
+      "reason": "Reviewed #563 hold: the absolute SavedRequirementViews.CountAsync() == 1 assertion at line 106 is not safe against prior class tests in a shared host. Keep fresh-host until it is filtered by per-test project/owner and fixed seed identities are explicitly tagged.",
+      "intents": [
+        "ef-translation",
+        "http-boundary"
+      ]
+    },
+    {
+      "cls": "VerificationProgramIsolationApiTests",
+      "tests": 4,
+      "knownCases": 4,
+      "unknownCaseTests": 0,
+      "classification": "fresh-host",
+      "reason": "Reviewed #563 hold: fixed Program A/B users, controlled IDs/filename, and direct EvidenceFileStore.StoreAsync writes into the factory's shared evidence root lack reviewed per-test isolation proof. Keep fresh-host until all identities and IDs are tagged and shared evidence-root isolation is proven.",
+      "intents": [
+        "auth-policy",
         "http-boundary"
       ]
     },
@@ -761,17 +796,6 @@
       ]
     },
     {
-      "cls": "TestExecutionEffectivityApiTests",
-      "tests": 6,
-      "knownCases": 6,
-      "unknownCaseTests": 0,
-      "classification": "reusable-host",
-      "reason": "Exercises the HTTP surface with no host-scoped state or custom host configuration; a shared host is safe only with per-test clients.",
-      "intents": [
-        "http-boundary"
-      ]
-    },
-    {
       "cls": "ChangeAuthoringInvariantApiTests",
       "tests": 5,
       "knownCases": 6,
@@ -848,30 +872,6 @@
       "classification": "reusable-host",
       "reason": "Exercises the HTTP surface with no host-scoped state or custom host configuration; a shared host is safe only with per-test clients.",
       "intents": [
-        "http-boundary"
-      ]
-    },
-    {
-      "cls": "SavedViewLifecycleApiTests",
-      "tests": 4,
-      "knownCases": 4,
-      "unknownCaseTests": 0,
-      "classification": "reusable-host",
-      "reason": "Exercises the HTTP surface with no host-scoped state or custom host configuration; a shared host is safe only with per-test clients.",
-      "intents": [
-        "ef-translation",
-        "http-boundary"
-      ]
-    },
-    {
-      "cls": "VerificationProgramIsolationApiTests",
-      "tests": 4,
-      "knownCases": 4,
-      "unknownCaseTests": 0,
-      "classification": "reusable-host",
-      "reason": "Exercises the HTTP surface with no host-scoped state or custom host configuration; a shared host is safe only with per-test clients.",
-      "intents": [
-        "auth-policy",
         "http-boundary"
       ]
     },
