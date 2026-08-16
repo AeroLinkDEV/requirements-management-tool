@@ -54,7 +54,7 @@ jobs:
           if ([int]$intent.totals.tests -ne 443) { throw "Expected 443 API test methods after migration; got $($intent.totals.tests)." }
           if ([int]$intent.totals.cases -ne 493) { throw "Expected 493 API cases after migration; got $($intent.totals.cases)." }
           if ([int]$intent.totals.hostedTests -ne 431 -or [int]$intent.totals.hostedCases -ne 472) { throw "Expected hosted inventory 431 methods / 472 cases; got $($intent.totals.hostedTests) / $($intent.totals.hostedCases)." }
-          if ([int]$intent.totals.hostedCandidateTests -ne 2 -or [int]$intent.totals.hostedCandidateCases -ne 3) { throw "Expected remaining hosted candidates 2 methods / 3 cases; got $($intent.totals.hostedCandidateTests) / $($intent.totals.hostedCandidateCases)." }
+          if ([int]$intent.totals.hostedCandidateTests -ne 5 -or [int]$intent.totals.hostedCandidateCases -ne 6) { throw "Expected remaining hosted candidates 5 methods / 6 cases; got $($intent.totals.hostedCandidateTests) / $($intent.totals.hostedCandidateCases)." }
           $host = Get-Content -LiteralPath product/test-contracts/api-host-classification.json -Raw | ConvertFrom-Json -Depth 100
           if ([int]$host.totals.tests -ne 443) { throw "Host classification did not reconcile to 443 API methods: $($host.totals.tests)." }
       - name: Run test-contract inventory guards
