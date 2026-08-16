@@ -463,14 +463,6 @@ function Get-DisposableDockerCommand {
     if (-not $dockerCommand) { throw 'Docker is unavailable; the PostgreSQL gate is not-proven and Full mode cannot report success.' }
     try { & $dockerCommand.Source version --format '{{.Server.Version}}' *> $null; if ($LASTEXITCODE -ne 0) { throw 'daemon unavailable' } }
     catch { throw 'Docker is unavailable; the daemon could not be queried, so the PostgreSQL gate is not-proven.' }
-    try {
-        $serverOsType = ((& $dockerCommand.Source info --format '{{.OSType}}' 2>$null) -join '').Trim()
-        if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($serverOsType)) { throw 'server OS type unavailable' }
-    }
-    catch { throw 'Docker is unavailable; the daemon OS type could not be verified, so the PostgreSQL gate is not-proven.' }
-    if ($serverOsType -cne 'linux') {
-        throw "Docker server OSType '$serverOsType' cannot run the required Linux postgres:17 image; the PostgreSQL gate is not-proven. Switch Docker Desktop to Linux containers before Full mode."
-    }
     return $dockerCommand.Source
 }
 function Invoke-DisposablePostgreSqlGate {
@@ -624,9 +616,32 @@ function Invoke-FastStep {
     switch ($Step.label) {
         'Build the solution' { Invoke-CheckedProcess 'dotnet' @('build', 'product/AeroLink.slnx', '--configuration', 'Release') }
         'Domain suite' { Invoke-CheckedProcess 'dotnet' @('test', 'product/tests/AeroLink.Domain.Tests', '--configuration', 'Release', '--no-build') }
-        'Infrastructure suite' { Invoke-CheckedProcess 'dotnet' @('test', 'product/tests/AeroLink.Infrastructure.Tests', '--configuration', 'Release', '--no-build') }
+        'Infrastructure suite' {
+            if ($plan.classification.fastFullInfrastructure) {
+                Invoke-CheckedProcess 'dotnet' @('test', 'product/tests/AeroLink.Infrastructure.Tests', '--configuration', 'Release', '--no-build')
+            }
+            else {
+                Invoke-CheckedProcess 'dotnet' @('test', 'product/tests/AeroLink.Infrastructure.Tests', '--configuration', 'Release', '--no-build', '--filter', 'FullyQualifiedName!~AeroLink.Infrastructure.Tests.FmsShowcaseSeederTests&FullyQualifiedName!~AeroLink.Infrastructure.Tests.ShowcaseUpgradeTests')
+            }
+        }
         'Client lint, type-check and build' { Invoke-CheckedProcess 'npm.cmd' @('--prefix', 'product/client', 'run', 'lint'); Invoke-CheckedProcess 'npm.cmd' @('--prefix', 'product/client', 'run', 'build') }
-        'Browser smoke journeys' { Invoke-CheckedProcess 'npm.cmd' @('--prefix', 'product/client', 'run', 'test:smoke') }
+        'Browser smoke journeys' {
+            if ($plan.classification.client) {
+                Invoke-CheckedProcess 'npm.cmd' @('--prefix', 'product/client', 'run', 'test:smoke')
+            }
+            else {
+                $hadSkipShowcaseSeed = Test-Path Env:AEROLINK_E2E_SKIP_SHOWCASE_SEED
+                $previousSkipShowcaseSeed = $env:AEROLINK_E2E_SKIP_SHOWCASE_SEED
+                try {
+                    $env:AEROLINK_E2E_SKIP_SHOWCASE_SEED = 'true'
+                    Invoke-CheckedProcess 'npm.cmd' @('--prefix', 'product/client', 'run', 'test:smoke:core')
+                }
+                finally {
+                    if ($hadSkipShowcaseSeed) { $env:AEROLINK_E2E_SKIP_SHOWCASE_SEED = $previousSkipShowcaseSeed }
+                    else { Remove-Item Env:AEROLINK_E2E_SKIP_SHOWCASE_SEED -ErrorAction SilentlyContinue }
+                }
+            }
+        }
         default { Write-Host "  [CI-only] $($Step.label): $($Step.why)" -ForegroundColor Yellow }
     }
 }
