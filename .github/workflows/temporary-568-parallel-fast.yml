@@ -83,13 +83,12 @@ jobs:
                       }
                       [void]$jobs.Add([pscustomobject]@{ definition = $definition; job = $job })
                   }
-
                   Wait-Job -Job @($jobs | ForEach-Object job) | Out-Null
                   $failed = [System.Collections.Generic.List[string]]::new()
                   foreach ($entry in $jobs) {
-                      $result = Receive-Job -Job $entry.job -ErrorAction Stop
-                      if ($null -eq $result -or @($result).Count -ne 1) { throw "Parallel Fast step '$($entry.definition.label)' returned no bounded result." }
-                      $result = @($result)[0]
+                      $result = @(Receive-Job -Job $entry.job -ErrorAction Stop)
+                      if ($result.Count -ne 1) { throw "Parallel Fast step '$($entry.definition.label)' returned no bounded result." }
+                      $result = $result[0]
                       foreach ($line in @($result.output)) { if (-not [string]::IsNullOrWhiteSpace([string]$line)) { Write-Host ([string]$line) } }
                       $status = if ([int]$result.exitCode -eq 0) { 'passed' } else { 'failed' }
                       $ciJobs = @(Get-CiJobsForStep $entry.definition.label | Where-Object { $selectedCiJobs -contains $_ })
@@ -113,18 +112,16 @@ jobs:
           '''
           s = s.replace(anchor, helper + anchor, 1)
 
-          old = r'''        if ($Mode -eq 'Fast') {
-              foreach ($step in $plan.local) {
-                  if ($step.label -eq 'Nothing') { continue }
-                  if (-not $step.fullOnly) {
-                      $ciJobs = @(Get-CiJobsForStep $step.label | Where-Object { (Get-StringArray $plan.compact.ci.selected) -contains $_ })
-                      Invoke-TimedAction -Label $step.label -CiJobs $ciJobs -Action { Invoke-FastStep -Step $step }
-                  }
-                  else { Invoke-FastStep -Step $step }
-              }
-          }
-          '''
-          new = r'''        if ($Mode -eq 'Fast') {
+          search_from = s.index('Push-Location $repositoryRoot')
+          start_token = "        if ($Mode -eq 'Fast') {"
+          else_token = "\n        else {\n            Invoke-FullPlan\n        }"
+          start = s.find(start_token, search_from)
+          if start < 0:
+              raise SystemExit('Fast execution block start was not found')
+          end = s.find(else_token, start)
+          if end < 0:
+              raise SystemExit('Fast execution block end was not found')
+          new_fast = r'''        if ($Mode -eq 'Fast') {
               $fastSteps = @($plan.local | Where-Object { $_.label -ne 'Nothing' })
               $infrastructureStep = @($fastSteps | Where-Object { $_.label -eq 'Infrastructure suite' -and -not $_.fullOnly }) | Select-Object -First 1
               $browserStep = @($fastSteps | Where-Object { $_.label -eq 'Browser smoke journeys' -and -not $_.fullOnly }) | Select-Object -First 1
@@ -145,11 +142,8 @@ jobs:
                   }
                   else { Invoke-FastStep -Step $step }
               }
-          }
-          '''
-          if s.count(old) != 1:
-              raise SystemExit(f'Fast execution loop: expected one match, found {s.count(old)}')
-          s = s.replace(old, new, 1)
+          }'''
+          s = s[:start] + new_fast + s[end:]
           script.write_text(s, encoding='utf-8')
 
           tests = Path('product/scripts/Get-AeroLinkTestPlan.Tests.ps1')
@@ -186,5 +180,5 @@ jobs:
           $staged = @(git diff --cached --name-only)
           $expected = @('product/scripts/Get-AeroLinkTestPlan.Tests.ps1','product/scripts/Get-AeroLinkTestPlan.ps1')
           if ((Compare-Object ($staged | Sort-Object) ($expected | Sort-Object))) { throw "Unexpected staged paths: $($staged -join ', ')" }
-          git commit -m 'Parallelize independent #568 Fast checks'
+          git commit -m 'Parallelize independent Fast checks'
           git push origin HEAD:chatgpt/568-parallel-fast
