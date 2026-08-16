@@ -480,10 +480,21 @@ export function buildRollingReport({ records, regressions = [], missing = [], fu
 }
 
 const TRACKER_METADATA_PREFIX = 'ci-metrics-tracker:v1'
-const LEGACY_TRACKER_CATEGORIES = new Set([
+const TRACKER_CATEGORIES = new Set([
   'backend-only', 'browser-only', 'client-only', 'docs-only', 'manual', 'mixed', 'postgresql-only',
   'push-main', 'scheduled', 'unclassified',
 ])
+const MAX_TRACKER_CATEGORIES = 20
+const MAX_TRACKER_CATEGORY_LENGTH = 100
+const LEGACY_TRACKER_INTRO = [
+  '# CI rolling regression tracker',
+  '',
+  'This single issue is the durable tracking item for sustained CI regressions. It is updated',
+  'only when the trusted rolling collector detects a threshold crossing; ordinary runner noise',
+  'never opens or updates issues.',
+  '',
+]
+const LEGACY_TRACKER_ENTRY = /^- ([a-z][a-z0-9-]*): [A-Za-z][A-Za-z0-9]*: current \d+s vs previous \d+s \(threshold \d+s, \d+ runs\)$/
 
 function trackedRegressionCategories(report) {
   const regressions = Array.isArray(report?.regressions) ? report.regressions : []
@@ -492,25 +503,29 @@ function trackedRegressionCategories(report) {
     if (typeof entry?.category !== 'string' || entry.category.trim() === '') return null
     categories.push(entry.category.trim())
   }
-  return [...new Set(categories)].sort()
+  return normalizeStructuredTrackerCategories(categories)
 }
 
 function normalizeStructuredTrackerCategories(categories) {
-  if (!Array.isArray(categories) || categories.length === 0 || categories.length > 20) return null
-  if (categories.some((category) => typeof category !== 'string' || category.trim() === '' || category.length > 100)) return null
-  return [...new Set(categories.map((category) => category.trim()))].sort()
+  if (!Array.isArray(categories) || categories.length === 0 || categories.length > MAX_TRACKER_CATEGORIES) return null
+  const normalized = categories.map((category) => typeof category === 'string' ? category.trim() : category)
+  if (normalized.some((category) => typeof category !== 'string' || category === '' || category.length > MAX_TRACKER_CATEGORY_LENGTH || !TRACKER_CATEGORIES.has(category))) return null
+  return [...new Set(normalized)].sort()
 }
 
 function legacyTrackerCategories(body) {
-  const text = String(body ?? '')
-  if (!/^# CI rolling regression tracker\r?\n\r?\n/.test(text)) return null
-  const countMatch = /^Detected (\d+) sustained regression\(s\):\r?$/m.exec(text)
+  const lines = String(body ?? '').replace(/\r\n?/g, '\n').split('\n')
+  if (lines.length < 10 || lines.slice(0, LEGACY_TRACKER_INTRO.length).join('\n') !== LEGACY_TRACKER_INTRO.join('\n')) return null
+  const countMatch = /^Detected (\d+) sustained regression\(s\):$/.exec(lines[6])
   if (!countMatch || Number(countMatch[1]) < 1 || Number(countMatch[1]) > 20) return null
-  const entries = [...text.matchAll(/^- ([a-z][a-z0-9-]*): [A-Za-z][A-Za-z0-9]*: current \d+s vs previous \d+s \(threshold \d+s, \d+ runs\)\r?$/gm)]
-  const updatedMatch = /^Last updated: [^\r\n]+$/m.exec(text)
-  if (entries.length !== Number(countMatch[1]) || !updatedMatch || text.slice(updatedMatch.index + updatedMatch[0].length).trim() !== '') return null
+  const count = Number(countMatch[1])
+  const entryStart = 8
+  const entryEnd = entryStart + count
+  const updatedMatch = /^Last updated: ([^\n]+)$/.exec(lines[entryEnd + 1] ?? '')
+  if (lines[7] !== '' || lines.length !== entryEnd + 2 || lines[entryEnd] !== '' || !updatedMatch || !Number.isFinite(Date.parse(updatedMatch[1]))) return null
+  const entries = lines.slice(entryStart, entryEnd).map((line) => LEGACY_TRACKER_ENTRY.exec(line))
+  if (entries.some((entry) => entry === null)) return null
   const categories = entries.map((entry) => entry[1])
-  if (categories.some((category) => !LEGACY_TRACKER_CATEGORIES.has(category))) return null
   return normalizeStructuredTrackerCategories(categories)
 }
 
@@ -538,6 +553,13 @@ function trackerCategoriesAreDeterminate(trackerCategories, determinacyByCategor
   return trackerCategories.every((category) => determinacyByCategory[category]?.determinate === true)
 }
 
+function carryForwardTrackerCategories(trackerCategories, regressions, determinacyByCategory) {
+  const tracked = normalizeStructuredTrackerCategories(trackerCategories)
+  if (!tracked) return []
+  const current = new Set(trackedRegressionCategories({ regressions }) ?? [])
+  return tracked.filter((category) => !current.has(category) && determinacyByCategory?.[category]?.determinate !== true)
+}
+
 /**
  * What the tracker update should do, given the current report and whether a tracker already exists.
  *
@@ -550,7 +572,11 @@ export function decideTrackerAction({ regressions = [], trackerExists = false, t
   const detected = Array.isArray(regressions) ? regressions.length : 0
   if (detected > 0) {
     return trackerExists
-      ? { action: 'update', reason: `${detected} sustained regression(s) detected; refreshing the existing tracker.` }
+      ? {
+          action: 'update',
+          carryForwardCategories: carryForwardTrackerCategories(trackerCategories, regressions, determinacyByCategory),
+          reason: `${detected} sustained regression(s) detected; refreshing the existing tracker.`,
+        }
       : { action: 'create', reason: `${detected} sustained regression(s) detected and no tracker exists.` }
   }
   if (trackerExists) {
@@ -589,14 +615,17 @@ export function writeWouldRegressTracker(existingBody, generatedAt) {
   return null
 }
 
-export function trackerBody(report) {
+export function trackerBody(report, { carryForwardCategories = [] } = {}) {
   const regressions = Array.isArray(report?.regressions) ? report.regressions : []
+  const carried = normalizeStructuredTrackerCategories(carryForwardCategories) ?? []
+  const currentCategories = trackedRegressionCategories(report) ?? []
+  const markerCategories = normalizeStructuredTrackerCategories([...currentCategories, ...carried])
   const lines = []
   lines.push('# CI rolling regression tracker')
   lines.push('')
   lines.push('This single issue is the durable tracking item for sustained CI regressions. It is updated')
-  lines.push('only when the trusted rolling collector detects a threshold crossing; ordinary runner noise')
-  lines.push('never opens or updates issues.')
+  lines.push('only by the trusted rolling collector when current regression or determinate recovery evidence')
+  lines.push('exists; ordinary runner noise never creates a new issue.')
   lines.push('')
   if (regressions.length === 0) {
     lines.push('No sustained regressions in the current window.')
@@ -612,9 +641,17 @@ export function trackerBody(report) {
     lines.push('')
     lines.push(`Last updated: ${report?.generatedAt ?? 'unknown'}`)
   }
+  if (carried.length > 0) {
+    lines.push('')
+    lines.push('## Previously tracked categories not cleared')
+    lines.push('')
+    for (const category of carried) {
+      lines.push(`- ${escapeMarkdown(category)}: status unknown/not cleared (current evidence was absent or insufficient)`)
+    }
+  }
   lines.push('')
   // Keep category identity out of the prose decision boundary. A legacy body without this marker is
   // treated as unknown and cannot be cleared safely; the next real detection upgrades it in place.
-  lines.push(`<!-- ${TRACKER_METADATA_PREFIX} ${JSON.stringify({ categories: trackedRegressionCategories(report) })} -->`)
+  lines.push(`<!-- ${TRACKER_METADATA_PREFIX} ${JSON.stringify({ categories: markerCategories })} -->`)
   return lines.join('\n')
 }
