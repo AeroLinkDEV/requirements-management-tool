@@ -84,17 +84,14 @@ samples make the measurement incomplete; the test result remains visible, but th
 rather than a claimed pass. A completed shard that produced no successful active process sample is invalid.
 
 Each shard is bounded by `-TimeoutMinutes` (30 by default). Restore, build, discovery, and aggregation processes are
-bounded by `-ProcessTimeoutMinutes` (60 by default). Process cleanup tracks PID creation identities and refuses to kill
-unverified or over-bound process trees. If the launch identity is unavailable, cleanup performs no kill at all and
-returns a cleanup failure, which invalidates the observation. This harness does not claim Windows Job Object containment:
-any forced cleanup is unconditionally fail-closed, kills no process, and records the possible residual-process risk.
-While the root remains alive, fresh ancestry snapshots are merged into the bounded identity set; after normal exit every
-previously observed identity is independently checked, even if the root exited or a child was reparented. An identity
-change or CIM/enumeration failure is an error and never authorizes a kill. For the non-forced cleanup path, a process is
-opened by handle, its StartTime is immediately checked against the recorded identity, and only that verified Process
-object may be killed. A child spawned after the final ancestry snapshot can still escape observation on Windows; the
-harness fails closed rather than claiming the tree was safely stopped. Any cleanup uncertainty invalidates the
-observation and is never silently converted into a pass.
+bounded by `-ProcessTimeoutMinutes` (60 by default). Every harness-launched process uses the native Windows Job Object
+boundary: the job is configured with `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`, the process is created suspended, assigned to
+the job, and resumed only after assignment. Job drain, process exit, termination (when needed), and handle closure are
+all queried and proven. A create/assign/resume/query/terminate/close failure is a cleanup failure and invalidates the
+observation; no PID ancestry walk is treated as process-ownership authority. Nested-job assignment failures abort before
+the process can run, and a job that cannot prove zero active processes is never reported as clean. Process-tree snapshots
+remain diagnostic-only for CPU and disk attribution. Any cleanup uncertainty invalidates the observation and is never
+silently converted into a pass.
 
 No failure may be removed from the ten-run denominator. Re-run a failed seed only as a separately identified
 diagnostic; it does not replace the failed observation.

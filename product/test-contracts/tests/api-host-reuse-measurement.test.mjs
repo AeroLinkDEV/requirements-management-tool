@@ -61,6 +61,7 @@ test('plan-only mode is safe, deterministic, and produces disjoint complete shar
     assert.equal(new Set(classes).size, one.baselineManifest.classCount)
     assert.equal(observation.partition.totalCases, one.baselineManifest.caseCount)
     assert.equal(observation.partition.shards.reduce((sum, shard) => sum + shard.expectedCases, 0), one.baselineManifest.caseCount)
+    assert.equal(observation.partition.shards.reduce((names, shard) => names.concat(shard.caseNames), []).length, one.baselineManifest.caseCount)
   }
 })
 
@@ -76,26 +77,27 @@ test('script contract keeps telemetry aggregation, isolated evidence, and altern
   assert.match(source, /order = @\(\$Order\)/)
   assert.match(source, /telemetry aggregator exit code/)
   assert.match(source, /SQLITE_BUSY\|SQLITE_LOCKED/)
-  assert.match(source, /Stop-ProcessSafely/)
+  assert.match(source, /AeroLinkJobNative/)
+  assert.match(source, /JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE/)
+  assert.match(source, /CREATE_SUSPENDED/)
+  assert.match(source, /AssignProcessToJobObject/)
+  assert.match(source, /ResumeThread/)
+  assert.match(source, /QueryActiveProcessCount/)
+  assert.match(source, /Stop-JobContainedProcess/)
+  assert.doesNotMatch(source, /Stop-ProcessSafely/)
   assert.match(source, /finally \{/)
   assert.match(source, /Assert-EmptyOutput/)
   assert.match(source, /Assert-OutputOutsideWorktrees/)
   assert.match(source, /Get-CanonicalPath/)
   assert.match(source, /Get-Item -LiteralPath \$candidate/)
   assert.match(source, /MaxProcessTreeCount/)
-  assert.match(source, /Get-ProcessIdentity/)
-  assert.match(source, /Test-ProcessIdentity/)
+  assert.match(source, /Get-ProcessIdentityResult/)
   assert.match(source, /process-tree enumeration unavailable/)
   assert.match(source, /manifestHash/)
   assert.match(source, /environmentFingerprint/)
   assert.match(source, /finalWorktree/)
   assert.doesNotMatch(source, /Stop-Process -Id/)
-  assert.match(source, /\.Kill\(\)/)
-  assert.match(source, /PID identity changed; no kill was attempted/)
-  assert.match(source, /Known owned process records exceeded MaxProcessTreeCount/)
-  assert.match(source, /No expected process identity was available; no process was killed/)
-  assert.match(source, /Final verification is against every known identity/)
-  assert.match(source, /Process-tree refresh failed/)
+  assert.doesNotMatch(source, /\.Kill\(\)/)
   assert.match(source, /Assert-WorktreeStable/)
   assert.match(source, /different API test-case names/)
   assert.match(source, /telemetry JSONL was missing or empty/)
@@ -106,9 +108,8 @@ test('script contract keeps telemetry aggregation, isolated evidence, and altern
   assert.match(source, /full sorted case-name manifest/)
   assert.match(source, /authoritative seeded planner/)
   assert.match(source, /Run mode always restores and builds/)
-  assert.match(source, /Forced cleanup is fail-closed without Windows Job Object containment/)
-  assert.match(source, /Get-ProcessIdentityResult/)
-  assert.match(source, /Test-OpenedProcessIdentity/)
+  assert.match(source, /Job containment cleanup/)
+  assert.doesNotMatch(source, /Get-KnownProcessResidualError/)
   assert.match(source, /cleanup result was unavailable/)
   assert.match(source, /remaining owned processes/)
   assert.match(source, /live discovery/)
@@ -177,6 +178,8 @@ function makeLiveSummary(plan, condition, wall) {
     const shards = planned.partition.shards.map((shard) => ({
       shard: shard.shard,
       classes: shard.classes,
+      expectedCaseNames: shard.caseNames,
+      testNames: shard.caseNames,
       expectedCases: shard.expectedCases,
       exitCode: 0,
       wallMs: wall,
@@ -261,6 +264,24 @@ test('evaluate authenticates a positive ten-run decision against live manifests 
   assert.equal(decision.status, 'pass')
   assert.ok(Math.abs(decision.aggregateImprovement - 0.2) < 1e-12)
   assert.ok(Math.abs(decision.pairedImprovement.median - 0.2) < 1e-12)
+})
+
+test('evaluate rejects a same-count TRX case-name substitution', (t) => {
+  const plan = findLivePlan(t)
+  if (!plan) return
+  const baseline = makeLiveSummary(plan, 'baseline', 100)
+  const treatment = makeLiveSummary(plan, 'treatment', 80)
+  const shard = baseline.observations[0].shards.find((item) => item.testNames.length > 0)
+  assert.ok(shard)
+  const replacement = baseline.observations[0].shards.find((item) => item !== shard && item.testNames.length > 0).testNames[0]
+  assert.notEqual(replacement, shard.testNames[0])
+  shard.testNames[0] = replacement
+  const evaluated = evaluateLive(plan, baseline, treatment)
+  t.after(() => rmSync(evaluated.directory, { recursive: true, force: true }))
+  assert.equal(evaluated.result.status, 0, `${evaluated.result.stdout}\n${evaluated.result.stderr}`)
+  const decision = JSON.parse(readFileSync(join(evaluated.output, 'decision.json'), 'utf8'))
+  assert.equal(decision.status, 'inconclusive')
+  assert.ok(decision.validationErrors.some((error) => error.includes('case identity')))
 })
 
 test('evaluate rejects forged matching manifests and missing final worktree evidence', (t) => {
@@ -379,4 +400,14 @@ test('run rejects a non-authoritative one-run configuration before touching work
   const result = runPowerShellRaw(['-Mode', 'Run', '-Runs', '1', '-BaselinePath', repoRoot, '-TreatmentPath', repoRoot])
   assert.notEqual(result.status, 0)
   assert.match(`${result.stdout}\n${result.stderr}`, /requires exactly 10 measured observations/)
+})
+
+test('job containment smoke drains a late-spawned grandchild', () => {
+  const result = runPowerShellRaw(['-JobSmoke'])
+  assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`)
+  const smoke = JSON.parse(result.stdout)
+  assert.equal(smoke.smoke, 'job-containment')
+  assert.equal(smoke.jobEmpty, true)
+  assert.equal(smoke.handlesClosed, true)
+  assert.match(smoke.cleanupError, /residual job processes/)
 })

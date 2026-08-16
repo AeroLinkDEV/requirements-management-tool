@@ -18,12 +18,305 @@ param(
     [string]$TestListPath,
     [switch]$Warmup,
     [switch]$SkipBuild,
+    [switch]$JobSmoke,
     [string]$DotnetExecutable = 'dotnet',
     [string]$NodeExecutable = 'node'
 )
 
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
+
+if (-not ('AeroLinkJobNative' -as [type])) {
+    Add-Type -TypeDefinition @'
+using System;
+using System.ComponentModel;
+using System.Runtime.InteropServices;
+using System.Text;
+
+public static class AeroLinkJobNative
+{
+    private const uint CREATE_SUSPENDED = 0x00000004;
+    private const uint CREATE_UNICODE_ENVIRONMENT = 0x00000400;
+    private const uint CREATE_NO_WINDOW = 0x08000000;
+    private const uint STARTF_USESTDHANDLES = 0x00000100;
+    private const uint JOB_OBJECT_EXTENDED_LIMIT_INFORMATION = 9;
+    private const long JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE = 0x00002000;
+    private const uint GENERIC_WRITE = 0x40000000;
+    private const uint FILE_SHARE_READ = 0x00000001;
+    private const uint FILE_SHARE_WRITE = 0x00000002;
+    private const uint CREATE_ALWAYS = 2;
+    private const uint FILE_ATTRIBUTE_NORMAL = 0x00000080;
+    private const uint WAIT_OBJECT_0 = 0;
+    private const uint WAIT_TIMEOUT = 0x00000102;
+    private static readonly IntPtr INVALID_HANDLE_VALUE = new IntPtr(-1);
+
+    [StructLayout(LayoutKind.Sequential)]
+    private sealed class SecurityAttributes
+    {
+        public int nLength = Marshal.SizeOf<SecurityAttributes>();
+        public IntPtr lpSecurityDescriptor = IntPtr.Zero;
+        public int bInheritHandle = 1;
+    }
+
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+    private sealed class StartupInfo
+    {
+        public int cb = Marshal.SizeOf<StartupInfo>();
+        public string lpReserved;
+        public string lpDesktop;
+        public string lpTitle;
+        public int dwX;
+        public int dwY;
+        public int dwXSize;
+        public int dwYSize;
+        public int dwXCountChars;
+        public int dwYCountChars;
+        public int dwFillAttribute;
+        public uint dwFlags;
+        public short wShowWindow;
+        public short cbReserved2;
+        public IntPtr lpReserved2;
+        public IntPtr hStdInput;
+        public IntPtr hStdOutput;
+        public IntPtr hStdError;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct ProcessInformation
+    {
+        public IntPtr hProcess;
+        public IntPtr hThread;
+        public int dwProcessId;
+        public int dwThreadId;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct BasicLimitInformation
+    {
+        public long PerProcessUserTimeLimit;
+        public long PerJobUserTimeLimit;
+        public long LimitFlags;
+        public UIntPtr MinimumWorkingSetSize;
+        public UIntPtr MaximumWorkingSetSize;
+        public uint ActiveProcessLimit;
+        public UIntPtr Affinity;
+        public uint PriorityClass;
+        public uint SchedulingClass;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct IoCounters
+    {
+        public ulong ReadOperationCount;
+        public ulong WriteOperationCount;
+        public ulong OtherOperationCount;
+        public ulong ReadTransferCount;
+        public ulong WriteTransferCount;
+        public ulong OtherTransferCount;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct ExtendedLimitInformation
+    {
+        public BasicLimitInformation BasicLimitInformation;
+        public IoCounters IoInfo;
+        public UIntPtr ProcessMemoryLimit;
+        public UIntPtr JobMemoryLimit;
+        public UIntPtr PeakProcessMemoryUsed;
+        public UIntPtr PeakJobMemoryUsed;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct BasicAccountingInformation
+    {
+        public long TotalUserTime;
+        public long TotalKernelTime;
+        public long ThisPeriodTotalUserTime;
+        public long ThisPeriodTotalKernelTime;
+        public uint TotalPageFaultCount;
+        public uint TotalProcesses;
+        public uint ActiveProcesses;
+        public uint TotalTerminatedProcesses;
+    }
+
+    [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+    private static extern IntPtr CreateJobObjectW(IntPtr lpJobAttributes, string lpName);
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern bool SetInformationJobObject(IntPtr hJob, uint infoClass, ref ExtendedLimitInformation info, uint length);
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern bool QueryInformationJobObject(IntPtr hJob, uint infoClass, ref BasicAccountingInformation info, uint length, IntPtr returnLength);
+    [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+    private static extern bool CreateProcessW(string applicationName, StringBuilder commandLine, SecurityAttributes processAttributes, SecurityAttributes threadAttributes, bool inheritHandles, uint creationFlags, IntPtr environment, string currentDirectory, StartupInfo startupInfo, out ProcessInformation processInformation);
+    [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+    private static extern IntPtr CreateFileW(string fileName, uint desiredAccess, uint shareMode, SecurityAttributes securityAttributes, uint creationDisposition, uint flagsAndAttributes, IntPtr templateFile);
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern bool AssignProcessToJobObject(IntPtr job, IntPtr process);
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern uint ResumeThread(IntPtr thread);
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern bool TerminateJobObject(IntPtr job, uint exitCode);
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern bool TerminateProcess(IntPtr process, uint exitCode);
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern uint WaitForSingleObject(IntPtr handle, uint milliseconds);
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern bool CloseHandle(IntPtr handle);
+
+    public sealed class LaunchResult
+    {
+        public bool Success;
+        public string Error;
+        public int ProcessId;
+        public IntPtr ProcessHandle;
+        public IntPtr JobHandle;
+        public string StdoutPath;
+        public string StderrPath;
+    }
+
+    public sealed class CleanupResult
+    {
+        public bool Success;
+        public bool ProcessExited;
+        public bool JobEmpty;
+        public bool HandlesClosed;
+        public int ActiveProcesses;
+        public string Error;
+    }
+
+    private static string LastError(string operation)
+    {
+        return operation + " failed with Win32 error " + Marshal.GetLastWin32Error();
+    }
+
+    public static LaunchResult Launch(string applicationName, string commandLine, string currentDirectory, string stdoutPath, string stderrPath, string[] environmentEntries)
+    {
+        var result = new LaunchResult { Success = false, StdoutPath = stdoutPath, StderrPath = stderrPath };
+        IntPtr job = IntPtr.Zero;
+        IntPtr stdout = IntPtr.Zero;
+        IntPtr stderr = IntPtr.Zero;
+        ProcessInformation pi = default(ProcessInformation);
+        IntPtr environment = IntPtr.Zero;
+        try
+        {
+            job = CreateJobObjectW(IntPtr.Zero, null);
+            if (job == IntPtr.Zero) { result.Error = LastError("CreateJobObject"); return result; }
+            var limits = new ExtendedLimitInformation();
+            limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+            if (!SetInformationJobObject(job, JOB_OBJECT_EXTENDED_LIMIT_INFORMATION, ref limits, (uint)Marshal.SizeOf<ExtendedLimitInformation>())) { result.Error = LastError("SetInformationJobObject"); return result; }
+            var attributes = new SecurityAttributes();
+            stdout = CreateFileW(stdoutPath, GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE, attributes, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, IntPtr.Zero);
+            if (stdout == IntPtr.Zero || stdout == INVALID_HANDLE_VALUE) { result.Error = LastError("CreateFile stdout"); return result; }
+            stderr = CreateFileW(stderrPath, GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE, attributes, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, IntPtr.Zero);
+            if (stderr == IntPtr.Zero || stderr == INVALID_HANDLE_VALUE) { result.Error = LastError("CreateFile stderr"); return result; }
+            if (environmentEntries != null && environmentEntries.Length > 0)
+            {
+                var block = string.Join("\0", environmentEntries) + "\0\0";
+                environment = Marshal.StringToHGlobalUni(block);
+            }
+            var startup = new StartupInfo { dwFlags = STARTF_USESTDHANDLES, hStdOutput = stdout, hStdError = stderr, hStdInput = IntPtr.Zero };
+            var command = new StringBuilder(commandLine);
+            var flags = CREATE_SUSPENDED | CREATE_UNICODE_ENVIRONMENT | CREATE_NO_WINDOW;
+            if (!CreateProcessW(applicationName, command, attributes, attributes, true, flags, environment, currentDirectory, startup, out pi)) { result.Error = LastError("CreateProcess"); return result; }
+            if (!AssignProcessToJobObject(job, pi.hProcess))
+            {
+                result.Error = LastError("AssignProcessToJobObject");
+                TerminateProcess(pi.hProcess, 1);
+                WaitForSingleObject(pi.hProcess, 5000);
+                return result;
+            }
+            if (ResumeThread(pi.hThread) == UInt32.MaxValue)
+            {
+                result.Error = LastError("ResumeThread");
+                TerminateJobObject(job, 1);
+                WaitForSingleObject(pi.hProcess, 5000);
+                return result;
+            }
+            if (!CloseHandle(pi.hThread))
+            {
+                result.Error = LastError("CloseHandle thread");
+                TerminateJobObject(job, 1);
+                WaitForSingleObject(pi.hProcess, 5000);
+                return result;
+            }
+            pi.hThread = IntPtr.Zero;
+            result.Success = true;
+            result.ProcessId = pi.dwProcessId;
+            result.ProcessHandle = pi.hProcess;
+            result.JobHandle = job;
+            job = IntPtr.Zero;
+            pi.hProcess = IntPtr.Zero;
+            return result;
+        }
+        finally
+        {
+            if (environment != IntPtr.Zero) Marshal.FreeHGlobal(environment);
+            if (stdout != IntPtr.Zero && stdout != INVALID_HANDLE_VALUE) CloseHandle(stdout);
+            if (stderr != IntPtr.Zero && stderr != INVALID_HANDLE_VALUE) CloseHandle(stderr);
+            if (pi.hThread != IntPtr.Zero) CloseHandle(pi.hThread);
+            if (pi.hProcess != IntPtr.Zero)
+            {
+                if (!result.Success) { TerminateProcess(pi.hProcess, 1); WaitForSingleObject(pi.hProcess, 5000); }
+                CloseHandle(pi.hProcess);
+            }
+            if (job != IntPtr.Zero)
+            {
+                if (!result.Success) TerminateJobObject(job, 1);
+                CloseHandle(job);
+            }
+        }
+    }
+
+    public static int QueryActiveProcessCount(IntPtr job, out string error)
+    {
+        error = null;
+        var info = new BasicAccountingInformation();
+        if (!QueryInformationJobObject(job, 1, ref info, (uint)Marshal.SizeOf<BasicAccountingInformation>(), IntPtr.Zero)) { error = LastError("QueryInformationJobObject"); return -1; }
+        return (int)info.ActiveProcesses;
+    }
+
+    public static CleanupResult Cleanup(LaunchResult launch, bool terminate, int timeoutMilliseconds)
+    {
+        var result = new CleanupResult { Success = false, ProcessExited = false, JobEmpty = false, HandlesClosed = false, ActiveProcesses = -1 };
+        if (launch == null || !launch.Success || launch.ProcessHandle == IntPtr.Zero || launch.JobHandle == IntPtr.Zero) { result.Error = "No valid job-contained launch was available for cleanup."; return result; }
+        var errors = new StringBuilder();
+        string queryError;
+        var active = QueryActiveProcessCount(launch.JobHandle, out queryError);
+        if (active < 0) errors.Append(queryError + " ");
+        if (active > 0 && terminate)
+        {
+            if (!TerminateJobObject(launch.JobHandle, 1)) errors.Append(LastError("TerminateJobObject") + " ");
+        }
+        var wait = WaitForSingleObject(launch.ProcessHandle, (uint)Math.Max(1, timeoutMilliseconds));
+        result.ProcessExited = wait == WAIT_OBJECT_0;
+        if (!result.ProcessExited) errors.Append(wait == WAIT_TIMEOUT ? "Process did not exit before cleanup timeout. " : LastError("WaitForSingleObject") + " ");
+        var deadline = DateTime.UtcNow.AddMilliseconds(Math.Max(1, timeoutMilliseconds));
+        do
+        {
+            active = QueryActiveProcessCount(launch.JobHandle, out queryError);
+            if (active < 0) { errors.Append(queryError + " "); break; }
+            if (active == 0) break;
+            if (!terminate)
+            {
+                if (!TerminateJobObject(launch.JobHandle, 1)) errors.Append("Unexpected residual job processes; " + LastError("TerminateJobObject") + " ");
+                else errors.Append("Unexpected residual job processes were found and terminated. ");
+                terminate = true;
+            }
+            System.Threading.Thread.Sleep(25);
+        } while (DateTime.UtcNow < deadline);
+        result.ActiveProcesses = active;
+        result.JobEmpty = active == 0;
+        var processClosed = CloseHandle(launch.ProcessHandle);
+        var jobClosed = CloseHandle(launch.JobHandle);
+        result.HandlesClosed = processClosed && jobClosed;
+        if (!processClosed) errors.Append(LastError("CloseHandle process") + " ");
+        if (!jobClosed) errors.Append(LastError("CloseHandle job") + " ");
+        result.Error = errors.Length == 0 ? null : errors.ToString().Trim();
+        result.Success = result.ProcessExited && result.JobEmpty && result.HandlesClosed && result.Error == null;
+        return result;
+    }
+}
+'@
+}
 
 function Fail([string]$Message) {
     throw "[api-host-reuse] $Message"
@@ -35,126 +328,72 @@ function Write-JsonFile([string]$Path, [object]$Value) {
     $Value | ConvertTo-Json -Depth 40 | Set-Content -LiteralPath $Path -Encoding utf8
 }
 
-function Stop-ProcessSafely {
+function ConvertTo-WindowsArgument([string]$Value) {
+    if ($null -eq $Value -or $Value.Length -eq 0) { return '""' }
+    if ($Value -notmatch '[\s"]') { return $Value }
+    $builder = [Text.StringBuilder]::new()
+    [void]$builder.Append('"')
+    $slashes = 0
+    foreach ($character in $Value.ToCharArray()) {
+        if ($character -eq '\') { $slashes++; continue }
+        if ($character -eq '"') { [void]$builder.Append(('\' * (($slashes * 2) + 1))); [void]$builder.Append('"'); $slashes = 0; continue }
+        if ($slashes -gt 0) { [void]$builder.Append(('\' * $slashes)); $slashes = 0 }
+        [void]$builder.Append($character)
+    }
+    if ($slashes -gt 0) { [void]$builder.Append(('\' * ($slashes * 2))) }
+    [void]$builder.Append('"')
+    $builder.ToString()
+}
+
+function Get-EnvironmentEntries([hashtable]$Overrides) {
+    $values = @{}
+    foreach ($entry in Get-ChildItem Env:) { $values[$entry.Name] = [string]$entry.Value }
+    if ($Overrides) { foreach ($entry in $Overrides.GetEnumerator()) { $values[$entry.Key] = [string]$entry.Value } }
+    @($values.GetEnumerator() | Sort-Object Name | ForEach-Object { "{0}={1}" -f $_.Key, $_.Value })
+}
+
+function Start-JobContainedProcess {
     param(
-        [Parameter(Mandatory = $true)][System.Diagnostics.Process]$Process,
-        [object]$ExpectedIdentity,
-        [object[]]$KnownRecords = @(),
-        [int]$TimeoutMilliseconds = 5000,
-        [switch]$Forced
+        [Parameter(Mandatory = $true)][string]$FileName,
+        [Parameter(Mandatory = $true)][string[]]$Arguments,
+        [Parameter(Mandatory = $true)][string]$WorkingDirectory,
+        [Parameter(Mandatory = $true)][string]$StdoutPath,
+        [Parameter(Mandatory = $true)][string]$StderrPath,
+        [hashtable]$Environment
     )
+    $resolvedFileName = $FileName
+    if (-not [IO.Path]::IsPathRooted($resolvedFileName) -and $resolvedFileName -notmatch '[\\/]') {
+        $commandInfo = Get-Command $resolvedFileName -CommandType Application -ErrorAction Stop | Select-Object -First 1
+        if (-not $commandInfo -or [string]::IsNullOrWhiteSpace([string]$commandInfo.Source)) { Fail "Could not resolve executable on PATH: $FileName" }
+        $resolvedFileName = [string]$commandInfo.Source
+    }
+    $command = @($resolvedFileName) + @($Arguments) | ForEach-Object { ConvertTo-WindowsArgument ([string]$_) }
+    $launch = [AeroLinkJobNative]::Launch($resolvedFileName, ($command -join ' '), $WorkingDirectory, $StdoutPath, $StderrPath, (Get-EnvironmentEntries $Environment))
+    if (-not $launch.Success) { Fail "Job-contained launch failed for ${FileName}: $($launch.Error)" }
+    $launch
+}
 
-    $rootId = $Process.Id
-    if (-not $ExpectedIdentity) {
-        return [pscustomobject]@{ ownedIds = @($rootId); exited = $false; remainingIds = @($rootId); error = 'No expected process identity was available; no process was killed.' }
-    }
-    if ($Forced) {
-        $knownIds = @(@($KnownRecords) | ForEach-Object processId | Where-Object { $null -ne $_ } | Sort-Object -Unique)
-        if ($knownIds -notcontains $rootId) { $knownIds = @($rootId) + $knownIds }
-        return [pscustomobject]@{
-            ownedIds = $knownIds
-            exited = $false
-            remainingIds = $knownIds
-            error = 'Forced cleanup is fail-closed without Windows Job Object containment; no process was killed and residual descendants remain unverified.'
-        }
-    }
-    $snapshot = Get-ProcessTreeSnapshot @($rootId)
-    if (-not $snapshot.success) {
-        return [pscustomobject]@{ ownedIds = @($rootId); exited = $false; remainingIds = @($rootId); error = $snapshot.error }
-    }
-    if (@($KnownRecords).Count -gt $MaxProcessTreeCount) {
-        return [pscustomobject]@{ ownedIds = @($rootId); exited = $false; remainingIds = @($rootId); error = "Known owned process records exceeded MaxProcessTreeCount=$MaxProcessTreeCount." }
-    }
+function Get-BoundedTextFile([string]$Path, [int]$MaxBytes = 8388608) {
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { return '' }
+    $item = Get-Item -LiteralPath $Path -Force -ErrorAction Stop
+    if ($item.Length -gt $MaxBytes) { Fail "Captured process output exceeded the $MaxBytes byte safety bound: $Path" }
+    [IO.File]::ReadAllText($Path)
+}
 
-    # Keep every identity ever observed.  A descendant can be reparented or the
-    # root can exit before cleanup; relying only on a fresh parent-tree walk in
-    # that case could either leak an owned process or make a PID-reuse mistake.
-    $known = @{}
-    $mergeRecords = {
-        param([object[]]$Records)
-        foreach ($record in @($Records)) {
-            if ($null -eq $record -or $null -eq $record.processId -or [string]::IsNullOrWhiteSpace([string]$record.creationDate)) { continue }
-            $key = "{0}|{1}" -f [int]$record.processId, [string]$record.creationDate
-            if (-not $known.ContainsKey($key)) { $known[$key] = [pscustomobject]@{ processId = [int]$record.processId; parentProcessId = [int]$record.parentProcessId; creationDate = [string]$record.creationDate; name = [string]$record.name } }
-        }
-    }
-    & $mergeRecords @($snapshot.records + $KnownRecords + $ExpectedIdentity)
-    if ($known.Count -gt $MaxProcessTreeCount) {
-        return [pscustomobject]@{ ownedIds = @($known.Values | ForEach-Object processId | Sort-Object -Unique); exited = $false; remainingIds = @($known.Values | ForEach-Object processId | Sort-Object -Unique); error = "Known owned process records exceeded MaxProcessTreeCount=$MaxProcessTreeCount." }
-    }
-
-    $errors = [System.Collections.Generic.List[string]]::new()
-    $attempted = @{}
-    $deadline = [DateTimeOffset]::UtcNow.AddMilliseconds($TimeoutMilliseconds)
-    do {
-        # While the root is still alive, refresh the ancestry and merge it into
-        # the immutable identity set. This is the best bounded protection
-        # available against a child being spawned between snapshots.
-        $rootResult = Get-ProcessIdentityResult $rootId
-        if ($rootResult.error) { $errors.Add($rootResult.error); break }
-        $rootCurrent = $rootResult.identity
-        if ($rootCurrent -and -not (Test-ProcessIdentity $rootCurrent $ExpectedIdentity)) {
-            $errors.Add('Root PID identity changed; no kill was attempted.')
-            break
-        }
-        if ($rootCurrent) {
-            try {
-                $fresh = Get-ProcessTreeSnapshot @($rootId)
-                if (-not $fresh.success) { $errors.Add($fresh.error); break }
-                & $mergeRecords @($fresh.records)
-                if ($known.Count -gt $MaxProcessTreeCount) { $errors.Add("Known owned process records exceeded MaxProcessTreeCount=$MaxProcessTreeCount."); break }
-            } catch { $errors.Add("Process-tree refresh failed: $($_.Exception.Message)"); break }
-        }
-
-        foreach ($record in @($known.Values | Sort-Object @{ Expression = { if ([int]$_.processId -eq $rootId) { 0 } else { 1 } } }, processId)) {
-            $pid = [int]$record.processId
-            $currentResult = Get-ProcessIdentityResult $pid
-            if ($currentResult.error) { $errors.Add($currentResult.error); continue }
-            $current = $currentResult.identity
-            if (-not $current) { continue }
-            if (-not (Test-ProcessIdentity $current $record)) {
-                $errors.Add("Process identity changed for PID $pid; no kill was attempted.")
-                $attempted["$pid|$($record.creationDate)"] = $true
-                continue
-            }
-            $key = "$pid|$($record.creationDate)"
-            if ($attempted.ContainsKey($key)) { continue }
-            try {
-                $ownedProcess = if ($pid -eq $rootId) { $Process } else { Get-Process -Id $pid -ErrorAction Stop }
-                if (-not (Test-OpenedProcessIdentity $ownedProcess $record)) { throw "Opened process handle identity did not match PID $pid; no kill was attempted." }
-                if (-not $ownedProcess.HasExited) { $ownedProcess.Kill() }
-                $attempted[$key] = $true
-            } catch { $errors.Add("PID $pid cleanup failed: $($_.Exception.Message)"); $attempted[$key] = $true }
-        }
-        Start-Sleep -Milliseconds 100
-        $remainingNow = @()
-        foreach ($record in @($known.Values)) {
-            $currentResult = Get-ProcessIdentityResult ([int]$record.processId)
-            if ($currentResult.error) { $errors.Add($currentResult.error); continue }
-            $current = $currentResult.identity
-            if ($current -and (Test-ProcessIdentity $current $record)) { $remainingNow += $record }
-            elseif ($current) { $errors.Add("Process identity changed for PID $($record.processId); no kill was attempted.") }
-        }
-        if ($remainingNow.Count -eq 0 -and [DateTimeOffset]::UtcNow -ge $deadline) { break }
-        if ($remainingNow.Count -eq 0 -and -not $rootCurrent) { break }
-    } while ([DateTimeOffset]::UtcNow -lt $deadline)
-
-    # Final verification is against every known identity, not merely the
-    # current process tree. An absent PID is safe; a changed identity is not.
-    $remaining = [System.Collections.Generic.List[int]]::new()
-    foreach ($record in @($known.Values)) {
-        $currentResult = Get-ProcessIdentityResult ([int]$record.processId)
-        if ($currentResult.error) { $errors.Add($currentResult.error); continue }
-        $current = $currentResult.identity
-        if ($current -and (Test-ProcessIdentity $current $record)) { $remaining.Add([int]$record.processId) }
-        elseif ($current) { $errors.Add("Process identity changed for PID $($record.processId); no kill was attempted.") }
-    }
-    $uniqueErrors = @($errors | Sort-Object -Unique)
+function Stop-JobContainedProcess {
+    param(
+        [Parameter(Mandatory = $true)]$Launch,
+        [switch]$Terminate,
+        [int]$TimeoutMilliseconds = 5000
+    )
+    if ($null -eq $Launch) { return [pscustomobject]@{ exited = $false; remainingIds = @(); error = 'No job-contained launch was available for cleanup.' } }
+    $cleanup = [AeroLinkJobNative]::Cleanup($Launch, [bool]$Terminate, $TimeoutMilliseconds)
     [pscustomobject]@{
-        ownedIds = @($known.Values | ForEach-Object processId | Sort-Object -Unique)
-        exited = ($remaining.Count -eq 0 -and $uniqueErrors.Count -eq 0)
-        remainingIds = @($remaining | Sort-Object -Unique)
-        error = if ($uniqueErrors.Count -gt 0) { $uniqueErrors -join ' ' } else { $null }
+        exited = [bool]$cleanup.Success
+        remainingIds = if ($cleanup.ActiveProcesses -gt 0) { @($Launch.ProcessId) } else { @() }
+        error = if ($cleanup.Error) { [string]$cleanup.Error } elseif (-not $cleanup.Success) { 'Job containment cleanup did not prove process exit, job drain, and handle closure.' } else { $null }
+        jobEmpty = [bool]$cleanup.JobEmpty
+        handlesClosed = [bool]$cleanup.HandlesClosed
     }
 }
 
@@ -167,25 +406,13 @@ function Invoke-CapturedProcess {
         [int]$TimeoutSeconds = ($ProcessTimeoutMinutes * 60)
     )
 
-    $startInfo = [System.Diagnostics.ProcessStartInfo]::new()
-    $startInfo.FileName = $FileName
-    $startInfo.WorkingDirectory = $WorkingDirectory
-    $startInfo.UseShellExecute = $false
-    $startInfo.RedirectStandardOutput = $true
-    $startInfo.RedirectStandardError = $true
-    if ($null -eq $startInfo.ArgumentList) { Fail 'PowerShell 7 or later is required for safe argument passing.' }
-    foreach ($argument in $Arguments) { [void]$startInfo.ArgumentList.Add([string]$argument) }
-    if ($Environment) {
-        foreach ($entry in $Environment.GetEnumerator()) { $startInfo.Environment[$entry.Key] = [string]$entry.Value }
-    }
-
-    $process = [System.Diagnostics.Process]::new()
-    $process.StartInfo = $startInfo
+    $scratch = Join-Path ([IO.Path]::GetTempPath()) ("aerolink-captured-" + [guid]::NewGuid().ToString('N'))
+    New-Item -ItemType Directory -Path $scratch -Force | Out-Null
+    $stdoutPath = Join-Path $scratch 'stdout.log'
+    $stderrPath = Join-Path $scratch 'stderr.log'
+    $launch = $null
+    $process = $null
     $startedAt = [DateTimeOffset]::UtcNow
-    if (-not $process.Start()) { Fail "Could not start $FileName." }
-    $rootIdentity = $null
-    $stdoutTask = $null
-    $stderrTask = $null
     $timedOut = $false
     $cleanup = $null
     $primaryError = $null
@@ -193,25 +420,26 @@ function Invoke-CapturedProcess {
     $stderr = ''
     $exitCode = 1
     try {
-        $rootIdentity = Get-ProcessIdentity $process.Id
-        $stdoutTask = $process.StandardOutput.ReadToEndAsync()
-        $stderrTask = $process.StandardError.ReadToEndAsync()
+        $launch = Start-JobContainedProcess -FileName $FileName -Arguments $Arguments -WorkingDirectory $WorkingDirectory -StdoutPath $stdoutPath -StderrPath $stderrPath -Environment $Environment
+        $process = [System.Diagnostics.Process]::GetProcessById($launch.ProcessId)
         $timedOut = -not $process.WaitForExit($TimeoutSeconds * 1000)
-        if ($timedOut) { $cleanup = Stop-ProcessSafely -Process $process -ExpectedIdentity $rootIdentity -Forced }
-        else { $process.WaitForExit() }
-        $stdout = if ($stdoutTask.Wait(5000)) { $stdoutTask.GetAwaiter().GetResult() } else { '' }
-        $stderr = if ($stderrTask.Wait(5000)) { $stderrTask.GetAwaiter().GetResult() } else { '' }
-        $exitCode = if ($timedOut) { 124 } else { $process.ExitCode }
+        $exitCode = if ($timedOut) { 124 } else { [int]$process.ExitCode }
+        $cleanup = Stop-JobContainedProcess -Launch $launch -Terminate:$timedOut -TimeoutMilliseconds 5000
+        $stdout = Get-BoundedTextFile $stdoutPath
+        $stderr = Get-BoundedTextFile $stderrPath
     } catch {
         $primaryError = $_
     } finally {
         try {
-            if (-not $process.HasExited) {
-                $cleanup = Stop-ProcessSafely -Process $process -ExpectedIdentity $rootIdentity -Forced
+            if ($launch -and $null -eq $cleanup) {
+                $cleanup = Stop-JobContainedProcess -Launch $launch -Terminate -TimeoutMilliseconds 5000
             }
         } catch {
-            if (-not $cleanup) { $cleanup = [pscustomobject]@{ exited = $false; remainingIds = @($process.Id); error = $_.Exception.Message } }
+            $cleanup = [pscustomobject]@{ exited = $false; remainingIds = @($launch.ProcessId); error = $_.Exception.Message; jobEmpty = $false; handlesClosed = $false }
         }
+        try { if (Test-Path -LiteralPath $stdoutPath) { Remove-Item -LiteralPath $stdoutPath -Force -ErrorAction SilentlyContinue } } catch { }
+        try { if (Test-Path -LiteralPath $stderrPath) { Remove-Item -LiteralPath $stderrPath -Force -ErrorAction SilentlyContinue } } catch { }
+        try { if (Test-Path -LiteralPath $scratch) { Remove-Item -LiteralPath $scratch -Recurse -Force -ErrorAction SilentlyContinue } } catch { }
     }
     if ($primaryError) {
         $message = "Process $FileName failed after start: $($primaryError.Exception.Message)"
@@ -233,13 +461,32 @@ function Invoke-CapturedProcess {
     }
 }
 
+function Invoke-JobContainmentSmoke {
+    $root = Join-Path ([IO.Path]::GetTempPath()) ("aerolink-job-smoke-" + [guid]::NewGuid().ToString('N'))
+    New-Item -ItemType Directory -Path $root -Force | Out-Null
+    try {
+        $childScript = '$child = Start-Process -FilePath ''pwsh'' -ArgumentList @(''-NoProfile'', ''-Command'', ''Start-Sleep -Seconds 30'') -PassThru; Start-Sleep -Milliseconds 250'
+        $result = Invoke-CapturedProcess -FileName 'pwsh' -Arguments @('-NoProfile', '-Command', $childScript) -WorkingDirectory $root -TimeoutSeconds 20
+        if ($null -eq $result.Cleanup -or -not [bool]$result.Cleanup.jobEmpty -or @($result.Cleanup.remainingIds).Count -ne 0) {
+            Fail 'Job containment smoke did not prove that the late-spawned child was drained.'
+        }
+        [ordered]@{ smoke = 'job-containment'; exitCode = $result.ExitCode; jobEmpty = $result.Cleanup.jobEmpty; handlesClosed = $result.Cleanup.handlesClosed; cleanupError = $result.Cleanup.error } | ConvertTo-Json -Depth 10
+    } finally {
+        if (Test-Path -LiteralPath $root) { Remove-Item -LiteralPath $root -Recurse -Force -ErrorAction SilentlyContinue }
+    }
+}
+
 function Get-RepoInfo([string]$Path) {
     if (-not (Test-Path -LiteralPath $Path -PathType Container)) { Fail "Worktree does not exist: $Path" }
-    $head = (& git -C $Path rev-parse HEAD 2>&1 | Out-String).Trim()
-    if ($LASTEXITCODE -ne 0) { Fail "Could not read the Git head for ${Path}: $head" }
-    $status = @(& git -C $Path status --porcelain 2>&1)
-    if ($LASTEXITCODE -ne 0) { Fail "Could not read Git status for $Path." }
-    $branch = (& git -C $Path branch --show-current 2>&1 | Out-String).Trim()
+    $headResult = Invoke-CapturedProcess -FileName 'git' -Arguments @('-C', $Path, 'rev-parse', 'HEAD') -WorkingDirectory $Path
+    $head = $headResult.Stdout.Trim()
+    if ($headResult.ExitCode -ne 0) { Fail "Could not read the Git head for ${Path}: $head`n$($headResult.Stderr)" }
+    $statusResult = Invoke-CapturedProcess -FileName 'git' -Arguments @('-C', $Path, 'status', '--porcelain') -WorkingDirectory $Path
+    $status = @($statusResult.Stdout -split "`r?`n" | Where-Object { $_ -ne '' })
+    if ($statusResult.ExitCode -ne 0) { Fail "Could not read Git status for $Path.`n$($statusResult.Stderr)" }
+    $branchResult = Invoke-CapturedProcess -FileName 'git' -Arguments @('-C', $Path, 'branch', '--show-current') -WorkingDirectory $Path
+    $branch = $branchResult.Stdout.Trim()
+    if ($branchResult.ExitCode -ne 0) { Fail "Could not read Git branch for $Path.`n$($branchResult.Stderr)" }
     [pscustomobject]@{
         path = (Get-CanonicalPath $Path)
         head = $head
@@ -251,9 +498,9 @@ function Get-RepoInfo([string]$Path) {
 
 function Get-EnvironmentInfo([string]$Path) {
     $dotnetResult = Invoke-CapturedProcess -FileName $DotnetExecutable -Arguments @('--version') -WorkingDirectory $Path
-    if ($dotnetResult.ExitCode -ne 0) { Fail "Could not read the .NET SDK version in $Path.`n$($dotnetResult.Stderr)" }
+    if ($dotnetResult.ExitCode -ne 0) { Fail "Could not read the .NET SDK version in $Path. ExitCode=$($dotnetResult.ExitCode) TimedOut=$($dotnetResult.TimedOut)`nstdout=$($dotnetResult.Stdout)`nstderr=$($dotnetResult.Stderr)" }
     $nodeResult = Invoke-CapturedProcess -FileName $NodeExecutable -Arguments @('--version') -WorkingDirectory $Path
-    if ($nodeResult.ExitCode -ne 0) { Fail "Could not read the Node.js version in $Path.`n$($nodeResult.Stderr)" }
+    if ($nodeResult.ExitCode -ne 0) { Fail "Could not read the Node.js version in $Path. ExitCode=$($nodeResult.ExitCode) TimedOut=$($nodeResult.TimedOut)`nstdout=$($nodeResult.Stdout)`nstderr=$($nodeResult.Stderr)" }
     $dotnet = $dotnetResult.Stdout.Trim()
     $node = $nodeResult.Stdout.Trim()
     $os = try { Get-CimInstance Win32_OperatingSystem | Select-Object Caption, Version, BuildNumber } catch { $null }
@@ -315,6 +562,7 @@ function Get-TestManifest([string]$Worktree, [string]$ListFile) {
         [pscustomobject]@{
             name = $_.Name
             cases = $_.Count
+            caseNames = @($_.Group | ForEach-Object name | Sort-Object)
         }
     } | Sort-Object name)
     $manifest = [pscustomobject]@{
@@ -327,7 +575,7 @@ function Get-TestManifest([string]$Worktree, [string]$ListFile) {
     $hash = [System.Security.Cryptography.SHA256]::Create()
     try { $manifestHash = ([System.BitConverter]::ToString($hash.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($manifestHashInput)))).Replace('-', '').ToLowerInvariant() } finally { $hash.Dispose() }
     $manifest | Add-Member -NotePropertyName manifestHash -NotePropertyValue $manifestHash
-    $manifest | Add-Member -NotePropertyName classFacts -NotePropertyValue @($manifest.classes | ForEach-Object { [ordered]@{ name = $_.name; cases = $_.cases } })
+    $manifest | Add-Member -NotePropertyName classFacts -NotePropertyValue @($manifest.classes | ForEach-Object { [ordered]@{ name = $_.name; cases = $_.cases; caseNames = @($_.caseNames) } })
     $manifest
 }
 
@@ -373,6 +621,7 @@ function New-Partition([object[]]$Classes, [int]$Seed, [int]$Count) {
             shard = $_ + 1
             expectedCases = $loads[$_]
             classes = @($ordered | ForEach-Object { $_.name })
+            caseNames = @($ordered | ForEach-Object { $_.caseNames } | Sort-Object)
             filters = (@($ordered | ForEach-Object { "FullyQualifiedName~$($_.name)." }) -join '|')
         }
     })
@@ -402,8 +651,8 @@ function Assert-SummaryManifestMatchesLive([object]$Persisted, [object]$Live, [s
     if (Compare-Object $persistedNames $liveNames) { Fail "$Condition persisted case-name manifest differs from live discovery." }
     if ([string]$Persisted.manifestHash -ne [string]$Live.manifestHash) { Fail "$Condition persisted manifest hash differs from live discovery." }
     if ([int]$Persisted.caseCount -ne [int]$Live.caseCount -or [int]$Persisted.classCount -ne [int]$Live.classCount) { Fail "$Condition persisted manifest counts differ from live discovery." }
-    $persistedFacts = @($Persisted.classFacts | ForEach-Object { "{0}|{1}" -f $_.name, $_.cases } | Sort-Object)
-    $liveFacts = @($Live.classFacts | ForEach-Object { "{0}|{1}" -f $_.name, $_.cases } | Sort-Object)
+    $persistedFacts = @($Persisted.classFacts | ForEach-Object { "{0}|{1}|{2}" -f $_.name, $_.cases, (@($_.caseNames) -join "`u{1f}") } | Sort-Object)
+    $liveFacts = @($Live.classFacts | ForEach-Object { "{0}|{1}|{2}" -f $_.name, $_.cases, (@($_.caseNames) -join "`u{1f}") } | Sort-Object)
     if (Compare-Object $persistedFacts $liveFacts) { Fail "$Condition persisted class facts differ from live discovery." }
 }
 
@@ -425,6 +674,11 @@ function Assert-SummaryPartitionsMatchLive([object]$Summary, [object]$LiveManife
         $recomputedCases = 0
         foreach ($shard in $shards) {
             $classes = @($shard.classes | ForEach-Object { [string]$_ })
+            $partitionCaseNames = @($shard.caseNames | ForEach-Object { [string]$_ } | Sort-Object)
+            if ($partitionCaseNames.Count -ne [int]$shard.expectedCases) { Fail "$Condition seed $seed shard $($shard.shard) case-name load does not match expectedCases." }
+            $expectedShardCaseNames = @($classes | ForEach-Object { @($liveLoads[$_]) } )
+            $expectedShardCaseNames = @($LiveManifest.classes | Where-Object { $classes -contains [string]$_.name } | ForEach-Object { $_.caseNames } | Sort-Object)
+            if (Compare-Object $partitionCaseNames $expectedShardCaseNames) { Fail "$Condition seed $seed shard $($shard.shard) case-name set does not match live class loads." }
             foreach ($className in $classes) {
                 if (-not $seen.Add($className)) { Fail "$Condition seed $seed partition repeats class '$className'." }
                 if (-not $liveLoads.ContainsKey($className)) { Fail "$Condition seed $seed partition contains unknown class '$className'." }
@@ -445,6 +699,7 @@ function Assert-SummaryPartitionsMatchLive([object]$Summary, [object]$LiveManife
             if ([int]$actualShard.shard -ne [int]$expectedShard.shard -or
                 [int]$actualShard.expectedCases -ne [int]$expectedShard.expectedCases -or
                 (Compare-Object @($actualShard.classes) @($expectedShard.classes)) -or
+                (Compare-Object @($actualShard.caseNames | Sort-Object) @($expectedShard.caseNames | Sort-Object)) -or
                 [string]$actualShard.filters -cne [string]$expectedShard.filters) {
                 Fail "$Condition seed $seed shard $($index + 1) does not match the authoritative seeded planner."
             }
@@ -470,43 +725,6 @@ function Get-ProcessIdentity([int]$Id) {
     $result = Get-ProcessIdentityResult $Id
     if ($result.error) { return $null }
     $result.identity
-}
-
-function Convert-ProcessCreationDate([string]$Value) {
-    try {
-        if ($Value -match '^\d{14}\.\d{6}[+-]\d{3}') {
-            return [System.Management.ManagementDateTimeConverter]::ToDateTime($Value).ToUniversalTime()
-        }
-        return [DateTimeOffset]::Parse($Value).UtcDateTime
-    } catch { return $null }
-}
-
-function Test-OpenedProcessIdentity([System.Diagnostics.Process]$Process, [object]$Expected) {
-    try {
-        if ($null -eq $Process -or $null -eq $Expected -or [int]$Process.Id -ne [int]$Expected.processId) { return $false }
-        $openedStart = $Process.StartTime.ToUniversalTime()
-        $expectedStart = Convert-ProcessCreationDate ([string]$Expected.creationDate)
-        if ($null -eq $expectedStart) { return $false }
-        [math]::Abs(($openedStart - $expectedStart).TotalMilliseconds) -le 1
-    } catch { $false }
-}
-
-function Get-KnownProcessResidualError([object[]]$Records) {
-    $remaining = [System.Collections.Generic.List[int]]::new()
-    $errors = [System.Collections.Generic.List[string]]::new()
-    foreach ($record in @($Records)) {
-        $result = Get-ProcessIdentityResult ([int]$record.processId)
-        if ($result.error) { $errors.Add($result.error); continue }
-        if (-not $result.found) { continue }
-        if (Test-ProcessIdentity $result.identity $record) { $remaining.Add([int]$record.processId) }
-        else { $errors.Add("Process identity changed for PID $($record.processId); no kill was attempted.") }
-    }
-    if ($remaining.Count -gt 0) { $errors.Add("Previously observed owned processes remain: $($remaining -join ',').") }
-    @($errors | Sort-Object -Unique) -join ' '
-}
-
-function Test-ProcessIdentity([object]$Actual, [object]$Expected) {
-    $null -ne $Actual -and $null -ne $Expected -and [int]$Actual.processId -eq [int]$Expected.processId -and [string]$Actual.creationDate -eq [string]$Expected.creationDate
 }
 
 function Get-ProcessTreeSnapshot([int[]]$RootIds) {
@@ -590,34 +808,24 @@ function New-TestProcess {
     )
     New-Item -ItemType Directory -Force -Path (Split-Path -Parent $TelemetryPath), $ResultsPath, (Split-Path -Parent $StdoutPath) | Out-Null
     $project = Join-Path $Worktree $ProjectPath
-    $startInfo = [System.Diagnostics.ProcessStartInfo]::new()
-    $startInfo.FileName = $DotnetExecutable
-    $startInfo.WorkingDirectory = $Worktree
-    $startInfo.UseShellExecute = $false
-    $startInfo.RedirectStandardOutput = $true
-    $startInfo.RedirectStandardError = $true
-    if ($null -eq $startInfo.ArgumentList) { Fail 'PowerShell 7 or later is required for the Windows process harness.' }
     $arguments = @('test', $project, '--configuration', 'Release', '--no-build', '--filter', $Filter,
         '--logger', 'console;verbosity=normal', '--logger', 'trx;LogFileName=shard.trx',
         '--results-directory', $ResultsPath)
-    foreach ($argument in $arguments) { [void]$startInfo.ArgumentList.Add([string]$argument) }
-    $startInfo.Environment['AEROLINK_API_TELEMETRY_JSONL'] = $TelemetryPath
-    $startInfo.Environment['DOTNET_CLI_TELEMETRY_OPTOUT'] = '1'
-    $process = [System.Diagnostics.Process]::new()
-    $process.StartInfo = $startInfo
     $startedAt = [DateTimeOffset]::UtcNow
+    $launch = $null
+    $process = $null
     try {
-        if (-not $process.Start()) { Fail "Could not start the API test shard for $Worktree." }
+        $launch = Start-JobContainedProcess -FileName $DotnetExecutable -Arguments $arguments -WorkingDirectory $Worktree -StdoutPath $StdoutPath -StderrPath $StderrPath -Environment @{ AEROLINK_API_TELEMETRY_JSONL = $TelemetryPath; DOTNET_CLI_TELEMETRY_OPTOUT = '1' }
+        $process = [System.Diagnostics.Process]::GetProcessById($launch.ProcessId)
         $rootIdentity = Get-ProcessIdentity $process.Id
         $initialTree = Get-ProcessTreeSnapshot @($process.Id)
         [pscustomobject]@{
+            job = $launch
             process = $process
             rootIdentity = $rootIdentity
             processTreeAvailable = $initialTree.success
             processTreeError = $initialTree.error
             shardStartedAt = $startedAt
-            stdoutTask = $process.StandardOutput.ReadToEndAsync()
-            stderrTask = $process.StandardError.ReadToEndAsync()
             telemetryPath = $TelemetryPath
             resultsPath = $ResultsPath
             stdoutPath = $StdoutPath
@@ -642,8 +850,8 @@ function New-TestProcess {
         $primary = $_.Exception.Message
         $cleanup = $null
         try {
-            if (-not $process.HasExited) { $cleanup = Stop-ProcessSafely -Process $process -ExpectedIdentity (Get-ProcessIdentity $process.Id) -Forced }
-        } catch { $cleanup = [pscustomobject]@{ exited = $false; error = $_.Exception.Message } }
+            if ($launch) { $cleanup = Stop-JobContainedProcess -Launch $launch -Terminate -TimeoutMilliseconds 5000 }
+        } catch { $cleanup = [pscustomobject]@{ exited = $false; remainingIds = @($launch.ProcessId); error = $_.Exception.Message } }
         $cleanupFailed = ($null -eq $cleanup) -or (-not [bool]$cleanup.exited) -or (@($cleanup.remainingIds).Count -gt 0) -or $cleanup.error
         if ($cleanupFailed) {
             $cleanupMessage = if ($cleanup -and $cleanup.error) { [string]$cleanup.error } elseif ($cleanup) { "remaining owned processes: $(@($cleanup.remainingIds) -join ',')" } else { 'cleanup result was unavailable' }
@@ -697,9 +905,9 @@ function Wait-TestProcesses([object[]]$Shards) {
             if ($active.Count -eq 0) { break }
             if ([DateTimeOffset]::UtcNow -gt $deadline) {
                 foreach ($shard in $active) {
-                    $cleanup = Stop-ProcessSafely -Process $shard.process -ExpectedIdentity $shard.rootIdentity -KnownRecords @($shard.ownedProcessRecords) -Forced
+                    $cleanup = Stop-JobContainedProcess -Launch $shard.job -Terminate -TimeoutMilliseconds 5000
                     $shard.timedOut = $true
-                    if (-not $cleanup.exited) { $shard.cleanupFailure = "Owned process tree did not exit: $($cleanup.remainingIds -join ',')" }
+                    if (-not $cleanup.exited) { $shard.cleanupFailure = "Job-contained process did not exit: $($cleanup.remainingIds -join ',')" }
                     if ($cleanup.error) { $shard.cleanupFailure = $cleanup.error }
                 }
                 break
@@ -711,33 +919,42 @@ function Wait-TestProcesses([object[]]$Shards) {
     } finally {
         foreach ($shard in $Shards) {
             try {
-                if (-not $shard.process.HasExited) {
-                    $cleanup = Stop-ProcessSafely -Process $shard.process -ExpectedIdentity $shard.rootIdentity -KnownRecords @($shard.ownedProcessRecords) -Forced
-                    if (-not $cleanup.exited) { $shard.cleanupFailure = "Owned process tree was not force-cleaned: $($cleanup.remainingIds -join ',')" }
+                if ($shard.job) {
+                    $cleanup = Stop-JobContainedProcess -Launch $shard.job -Terminate:(!$shard.process.HasExited) -TimeoutMilliseconds 5000
+                    if (-not $cleanup.exited) { $shard.cleanupFailure = "Job containment cleanup was not proven: $($cleanup.remainingIds -join ',')" }
                     if ($cleanup.error) { $shard.cleanupFailure = $cleanup.error }
-                } elseif (@($shard.ownedProcessRecords).Count -gt 0) {
-                    $residualError = Get-KnownProcessResidualError @($shard.ownedProcessRecords)
-                    if ($residualError) { $shard.cleanupFailure = $residualError }
                 }
-                if (-not $shard.process.WaitForExit(5000)) { $shard.cleanupFailure = 'Process did not exit within the cleanup wait.' }
             } catch { $shard.cleanupFailure = $_.Exception.Message }
-            try { $shard.stdout = if ($shard.stdoutTask.Wait(5000)) { $shard.stdoutTask.GetAwaiter().GetResult() } else { '' } } catch { $shard.stdout = '' }
-            try { $shard.stderr = if ($shard.stderrTask.Wait(5000)) { $shard.stderrTask.GetAwaiter().GetResult() } else { '' } } catch { $shard.stderr = '' }
+            try { $shard.stdout = Get-BoundedTextFile $shard.stdoutPath } catch { $shard.stdout = ''; $shard.waitError = $_.Exception.Message }
+            try { $shard.stderr = Get-BoundedTextFile $shard.stderrPath } catch { $shard.stderr = ''; $shard.waitError = $_.Exception.Message }
             $shard.endedAt = [DateTimeOffset]::UtcNow
-            Set-Content -LiteralPath $shard.stdoutPath -Value $shard.stdout -Encoding utf8
-            Set-Content -LiteralPath $shard.stderrPath -Value $shard.stderr -Encoding utf8
             try { $shard.exitCode = $shard.process.ExitCode } catch { $shard.exitCode = $null }
             $shard.wallMs = ($shard.endedAt - $shard.shardStartedAt).TotalMilliseconds
         }
     }
 }
 
-function Get-TrxCounts([string]$Path) {
+function Get-TrxEvidence([string]$Path) {
     if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { return $null }
+    $item = Get-Item -LiteralPath $Path -Force -ErrorAction Stop
+    if ($item.Length -gt 33554432) { Fail "TRX exceeded the 32 MiB safety bound: $Path" }
     $xml = [xml](Get-Content -Raw -LiteralPath $Path)
+    $unitTests = @{}
+    foreach ($unitTest in @($xml.SelectNodes("//*[local-name()='UnitTest']"))) {
+        $id = [string]$unitTest.id
+        $name = [string]$unitTest.name
+        if ($id.Length -gt 1024 -or $name.Length -gt 4096) { Fail "TRX test identity exceeded the safety bound: $Path" }
+        if ($id) { $unitTests[$id] = $name }
+    }
     $nodes = @($xml.SelectNodes("//*[local-name()='UnitTestResult']"))
+    if ($nodes.Count -gt 100000) { Fail "TRX contained more than 100000 test results: $Path" }
+    $names = [System.Collections.Generic.List[string]]::new()
     $counts = @{ total = $nodes.Count; passed = 0; failed = 0; skipped = 0; other = 0 }
     foreach ($node in $nodes) {
+        $name = [string]$node.testName
+        if (-not $name) { $name = [string]$unitTests[[string]$node.testId] }
+        if ([string]::IsNullOrWhiteSpace($name) -or $name.Length -gt 4096) { Fail "TRX result had no bounded testName identity: $Path" }
+        $names.Add($name)
         switch ([string]$node.outcome) {
             'Passed' { $counts.passed++ }
             'Failed' { $counts.failed++ }
@@ -745,7 +962,23 @@ function Get-TrxCounts([string]$Path) {
             default { $counts.other++ }
         }
     }
-    [pscustomobject]$counts
+    [pscustomobject]@{ counts = [pscustomobject]$counts; names = @($names) }
+}
+
+function Compare-NameMultiset([string[]]$Expected, [string[]]$Actual) {
+    $expectedCounts = [System.Collections.Generic.Dictionary[string,int]]::new([StringComparer]::Ordinal)
+    $actualCounts = [System.Collections.Generic.Dictionary[string,int]]::new([StringComparer]::Ordinal)
+    foreach ($name in @($Expected)) { if ($expectedCounts.ContainsKey($name)) { $expectedCounts[$name]++ } else { $expectedCounts[$name] = 1 } }
+    foreach ($name in @($Actual)) { if ($actualCounts.ContainsKey($name)) { $actualCounts[$name]++ } else { $actualCounts[$name] = 1 } }
+    $keySet = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
+    foreach ($key in $expectedCounts.Keys) { [void]$keySet.Add($key) }
+    foreach ($key in $actualCounts.Keys) { [void]$keySet.Add($key) }
+    $keys = @($keySet | Sort-Object)
+    $differences = @($keys | Where-Object { [int]$expectedCounts[$_] -ne [int]$actualCounts[$_] })
+    if ($differences.Count -gt 0) {
+        return (($differences | ForEach-Object { "$_ (expected=$($expectedCounts[$_]), actual=$($actualCounts[$_]))" }) -join '; ')
+    }
+    $null
 }
 
 function Invoke-TelemetryAggregator([string]$Worktree, [string]$TelemetryPath, [string]$TrxPath, [string]$OutputPath) {
@@ -798,6 +1031,7 @@ function Invoke-Observation {
             $stderr = Join-Path $shardDirectory 'stderr.log'
             $shards += New-TestProcess -Worktree $Worktree -Filter $entry.filters -TelemetryPath $telemetry -ResultsPath $results -StdoutPath $stdout -StderrPath $stderr
             $shards[-1] | Add-Member -NotePropertyName expectedCases -NotePropertyValue $entry.expectedCases
+            $shards[-1] | Add-Member -NotePropertyName expectedCaseNames -NotePropertyValue @($entry.caseNames | ForEach-Object { [string]$_ } | Sort-Object)
             $shards[-1] | Add-Member -NotePropertyName shard -NotePropertyValue $entry.shard
             $shards[-1] | Add-Member -NotePropertyName classNames -NotePropertyValue @($entry.classes)
         }
@@ -806,9 +1040,9 @@ function Invoke-Observation {
         $launchError = $_.Exception.Message
         foreach ($shard in $shards) {
             try {
-                if (-not $shard.process.HasExited) {
-                    $cleanup = Stop-ProcessSafely -Process $shard.process -ExpectedIdentity $shard.rootIdentity -KnownRecords @($shard.ownedProcessRecords) -Forced
-                    if (-not $cleanup.exited) { $shard.cleanupFailure = "Owned process tree did not exit: $($cleanup.remainingIds -join ',')" }
+                if ($shard.job) {
+                    $cleanup = Stop-JobContainedProcess -Launch $shard.job -Terminate -TimeoutMilliseconds 5000
+                    if (-not $cleanup.exited) { $shard.cleanupFailure = "Job-contained process did not exit: $($cleanup.remainingIds -join ',')" }
                 }
             } catch { $shard.cleanupFailure = $_.Exception.Message }
         }
@@ -820,7 +1054,13 @@ function Invoke-Observation {
     $shardReports = foreach ($shard in $shards) {
         $trx = Join-Path $shard.resultsPath 'shard.trx'
         $trxError = $null
-        try { $counts = Get-TrxCounts $trx } catch { $counts = $null; $trxError = $_.Exception.Message }
+        $trxEvidence = $null
+        try { $trxEvidence = Get-TrxEvidence $trx; $counts = if ($trxEvidence) { $trxEvidence.counts } else { $null } } catch { $counts = $null; $trxError = $_.Exception.Message }
+        $testNames = if ($trxEvidence) { @($trxEvidence.names | ForEach-Object { [string]$_ }) } else { @() }
+        if ($trxEvidence) {
+            $nameMismatch = Compare-NameMultiset $shard.expectedCaseNames $testNames
+            if ($nameMismatch) { $invalidReasons.Add("shard $($shard.shard) TRX exact case identity mismatch: $nameMismatch") }
+        }
         $telemetryHasRecords = (Test-Path -LiteralPath $shard.telemetryPath -PathType Leaf) -and
             (@(Get-Content -LiteralPath $shard.telemetryPath -ErrorAction SilentlyContinue | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }).Count -gt 0)
         $aggregateDirectory = Join-Path $shard.resultsPath 'api-telemetry'
@@ -852,6 +1092,8 @@ function Invoke-Observation {
             shard = $shard.shard
             classes = $shard.classNames
             expectedCases = $shard.expectedCases
+            expectedCaseNames = $shard.expectedCaseNames
+            testNames = $testNames
             wallMs = [math]::Round($shard.wallMs, 3)
             exitCode = $shard.exitCode
             counts = $counts
@@ -1029,6 +1271,13 @@ function Get-ValidatedSummary([object]$Summary, [string]$ExpectedCondition) {
             if ([int]$shard.exitCode -ne 0 -or [int]$shard.expectedCases -le 0) { $evidenceValid = $false }
             if ($null -eq $shard.counts -or [int]$shard.counts.total -ne [int]$shard.expectedCases -or
                 [int]$shard.counts.failed -ne 0 -or [int]$shard.counts.skipped -ne 0 -or [int]$shard.counts.other -ne 0) { $evidenceValid = $false }
+            $expectedNames = @($shard.expectedCaseNames | ForEach-Object { [string]$_ } | Sort-Object)
+            $actualNames = @($shard.testNames | ForEach-Object { [string]$_ })
+            $nameMismatch = Compare-NameMultiset $expectedNames $actualNames
+            if ($expectedNames.Count -ne [int]$shard.expectedCases -or $actualNames.Count -ne [int]$shard.expectedCases -or $nameMismatch) {
+                $evidenceValid = $false
+                $errors.Add("Observation seed '$seedText' has TRX case identity mismatch: $nameMismatch")
+            }
             if (-not [bool]$shard.telemetryHasRecords -or [int]$shard.malformedTelemetry -ne 0 -or [bool]$shard.telemetryTruncated) { $evidenceValid = $false }
             if ($null -eq $shard.telemetry -or [int]$shard.telemetry.tests -ne [int]$shard.expectedCases -or [int]$shard.telemetry.factories -le 0) { $evidenceValid = $false }
             if (-not [bool]$shard.cpuAvailable -or -not [bool]$shard.ioAvailable -or [int]$shard.successfulSamples -le 0 -or -not [bool]$shard.processTreeAvailable -or $shard.processTreeError) { $evidenceMetricsComplete = $false }
@@ -1279,6 +1528,11 @@ function New-Plan([string]$Root, [object]$BaselineInfo, [object]$TreatmentInfo, 
 }
 
 function Main {
+    if ($JobSmoke) {
+        if (-not $IsWindows) { Fail 'This harness is intentionally Windows-only.' }
+        Invoke-JobContainmentSmoke
+        return
+    }
     if (-not $OutputRoot) { $OutputRoot = Join-Path ([System.IO.Path]::GetTempPath()) 'aerolink-api-host-reuse-measurement' }
     if ($ShardCount -lt 1) { Fail 'ShardCount must be positive.' }
     if ($TimeoutMinutes -lt 1) { Fail 'TimeoutMinutes must be positive.' }
