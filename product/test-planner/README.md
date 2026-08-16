@@ -51,8 +51,9 @@ elapsed time. These measurements are evidence for feedback only; they do not fab
 
 The disposable PostgreSQL lane unconditionally verifies ownership and removes its uniquely named container
 and labeled volume in a `finally` block, then verifies that each temporary secret/status/log file is gone.
-It stops the API through the Job Object boundary and fails closed if the job, handles, process, or listener
-cannot be proven clean. It never calls the persistent `Start-Postgres` launcher, port 54329, or writes
+It stops the API through the Job Object boundary, drains late descendants before awaiting inherited-pipe
+output, and fails closed if bounded capture or any job, handles, process, or listener cleanup cannot be
+proven clean. It never calls the persistent `Start-Postgres` launcher, port 54329, or writes
 `product/.local` evidence.
 
 ## Node planner

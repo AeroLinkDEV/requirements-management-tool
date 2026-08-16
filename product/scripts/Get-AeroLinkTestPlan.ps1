@@ -322,8 +322,16 @@ function Get-DockerOwnedResource {
     $arguments = if ($Kind -eq 'container') { @('inspect', '--format', '{{ index .Config.Labels "com.aerolink.planner.run" }}', $Name) } else { @('volume', 'inspect', '--format', '{{ index .Labels "com.aerolink.planner.run" }}', $Name) }
     try {
         $output = @(& $Docker @arguments 2>&1)
-        if ($LASTEXITCODE -eq 0) { return (($output -join [Environment]::NewLine).Trim()) }
-        if (($output -join [Environment]::NewLine) -match '(?i)no such object') { return $null }
+        $exitCode = $LASTEXITCODE
+        if ($exitCode -eq 0) { return (($output -join [Environment]::NewLine).Trim()) }
+        $diagnostic = ($output -join [Environment]::NewLine).Trim()
+        $absent = if ($Kind -eq 'container') {
+            $diagnostic -match '(?im)^\s*(?:error:\s*)?no such object\s*:'
+        }
+        else {
+            $diagnostic -match '(?im)^\s*(?:error response from daemon:\s*)?no such volume\s*:'
+        }
+        if ($absent) { return $null }
         throw 'inspect was not conclusive'
     } catch { throw "Disposable Docker $Kind ownership could not be verified." }
 }

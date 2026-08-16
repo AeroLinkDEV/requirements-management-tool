@@ -1,7 +1,8 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
-import { readFileSync } from 'node:fs'
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -73,9 +74,87 @@ test('owned process boundary uses suspended job assignment and proves a real spa
   assert.match(ownedProcessSource, /TerminateJobObject/)
   assert.match(ownedProcessSource, /QueryJobProcessCount/)
   assert.match(ownedProcessSource, /handles=closed/)
+  assert.match(ownedProcessSource, /StringBuilder\(Quote\(executable\)/)
+  assert.match(ownedProcessSource, /SafeFileHandle\(childRead, false\)/)
   assert.match(ownedProcessSource, /SpacePathSelfTest/)
   execFileSync('dotnet', ['build', ownedProcessProject, '--configuration', 'Release'], { cwd: repoRoot, stdio: 'ignore' })
   execFileSync('dotnet', ['run', '--project', ownedProcessProject, '--configuration', 'Release', '--no-build', '--no-restore', '--', '--self-test-space-path'], { cwd: repoRoot, stdio: 'ignore' })
+})
+
+test('owned process boundary kills late descendants before bounded pipe capture and exercises native fault paths', () => {
+  assert.match(ownedProcessSource, /DrainJobAfterRootExit/)
+  assert.match(ownedProcessSource, /capture\.Wait\(TimeSpan\.FromSeconds\(5\)\)/)
+  assert.match(ownedProcessSource, /CLEANUP\|handles=failed/)
+  execFileSync('dotnet', ['run', '--project', ownedProcessProject, '--configuration', 'Release', '--no-build', '--no-restore', '--', '--self-test-late-child'], { cwd: repoRoot, stdio: 'ignore' })
+  for (const fault of ['create-job', 'set-job', 'close-job-create', 'create-pipe', 'set-handle', 'close-child-write', 'assign', 'resume', 'terminate-process', 'wait', 'exit-code', 'process-times', 'process-id', 'terminate-job', 'query-job', 'close-child-read-final', 'close-thread', 'close-process', 'close-job', 'capture-timeout', 'cancel-capture']) {
+    execFileSync('dotnet', ['run', '--project', ownedProcessProject, '--configuration', 'Release', '--no-build', '--no-restore', '--', '--self-test-fault', fault], { cwd: repoRoot, stdio: 'ignore' })
+  }
+})
+
+test('Docker ownership boundary distinguishes real absence from arbitrary and daemon errors', () => {
+  const fixture = mkdtempSync(join(tmpdir(), 'aerolink-fake-docker-'))
+  const fakeScript = join(fixture, 'fake-docker.ps1')
+  const fakeCommand = join(fixture, 'docker.cmd')
+  const harness = join(fixture, 'harness.ps1')
+  const state = join(fixture, 'state')
+  const fake = String.raw`param([Parameter(ValueFromRemainingArguments = $true)][string[]]$Arguments)
+$kind = if ($Arguments -contains 'volume') { 'volume' } else { 'container' }
+$mode = [string]$env:FAKE_DOCKER_MODE
+$stateFile = Join-Path $env:FAKE_DOCKER_STATE ($kind + '.state')
+if ($Arguments -contains 'rm') { Set-Content -LiteralPath $stateFile -Value 'absent'; exit 0 }
+if ($mode -eq 'daemon') { [Console]::Error.WriteLine('Cannot connect to the Docker daemon'); exit 1 }
+if ($mode -eq 'arbitrary') { [Console]::Error.WriteLine('object not found'); exit 1 }
+if ($mode -eq 'mismatch') { Write-Output 'other-run'; exit 0 }
+if (-not (Test-Path -LiteralPath $stateFile) -or (Get-Content -LiteralPath $stateFile -Raw).Trim() -eq 'absent') {
+  if ($kind -eq 'volume') { [Console]::Error.WriteLine('Error response from daemon: no such volume: fixture') }
+  else { [Console]::Error.WriteLine('Error: No such object: fixture') }
+  exit 1
+}
+Write-Output 'run-id'
+exit 0
+`
+  const command = '@echo off\r\npwsh -NoProfile -File "%~dp0fake-docker.ps1" %*\r\nexit /b %ERRORLEVEL%\r\n'
+  const harnessText = String.raw`$source = '${wrapperPath.replaceAll("'", "''")}'
+$tokens = $null; $parseErrors = $null
+$ast = [System.Management.Automation.Language.Parser]::ParseFile($source, [ref]$tokens, [ref]$parseErrors)
+foreach ($name in @('Invoke-CheckedDocker', 'Get-DockerOwnedResource', 'Remove-DockerOwnedResource')) {
+  $node = $ast.Find({ param($candidate) $candidate -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $candidate.Name -eq $name }, $true)
+  if ($null -eq $node) { throw "missing function $name" }
+  . ([scriptblock]::Create($node.Extent.Text))
+}
+$docker = '${fakeCommand.replaceAll("'", "''")}'
+$env:FAKE_DOCKER_STATE = '${state.replaceAll("'", "''")}'
+New-Item -ItemType Directory -Path $env:FAKE_DOCKER_STATE -Force | Out-Null
+function Assert-Absent([string]$Kind) {
+  if ($null -ne (Get-DockerOwnedResource -Docker $docker -Kind $Kind -Name 'fixture')) { throw "expected absent $Kind" }
+}
+$env:FAKE_DOCKER_MODE = 'absent-container'; Assert-Absent 'container'
+$env:FAKE_DOCKER_MODE = 'absent-volume'; Assert-Absent 'volume'
+foreach ($kind in @('container', 'volume')) {
+  $env:FAKE_DOCKER_MODE = 'daemon'; try { Get-DockerOwnedResource -Docker $docker -Kind $kind -Name 'fixture'; throw 'daemon ambiguity accepted' } catch { if ($_.Exception.Message -notmatch 'ownership could not be verified') { throw } }
+  $env:FAKE_DOCKER_MODE = 'arbitrary'; try { Get-DockerOwnedResource -Docker $docker -Kind $kind -Name 'fixture'; throw 'arbitrary error accepted' } catch { if ($_.Exception.Message -notmatch 'ownership could not be verified') { throw } }
+}
+Set-Content -LiteralPath (Join-Path $env:FAKE_DOCKER_STATE 'container.state') -Value 'present'
+Set-Content -LiteralPath (Join-Path $env:FAKE_DOCKER_STATE 'volume.state') -Value 'present'
+$errors = [System.Collections.Generic.List[string]]::new()
+$env:FAKE_DOCKER_MODE = 'owner'; Remove-DockerOwnedResource -Docker $docker -Kind container -Name 'fixture' -RunId 'run-id' -CleanupErrors $errors
+if ($errors.Count -ne 0) { throw 'owner-matched container cleanup failed' }
+$env:FAKE_DOCKER_MODE = 'owner'; Remove-DockerOwnedResource -Docker $docker -Kind volume -Name 'fixture' -RunId 'run-id' -CleanupErrors $errors
+if ($errors.Count -ne 0) { throw 'owner-matched volume cleanup failed' }
+$env:FAKE_DOCKER_MODE = 'absent-volume'; Remove-DockerOwnedResource -Docker $docker -Kind volume -Name 'fixture' -RunId 'run-id' -CleanupErrors $errors
+if ($errors.Count -ne 0) { throw 'partial-create absent volume cleanup was not accepted' }
+Set-Content -LiteralPath (Join-Path $env:FAKE_DOCKER_STATE 'volume.state') -Value 'present'
+$env:FAKE_DOCKER_MODE = 'mismatch'; Remove-DockerOwnedResource -Docker $docker -Kind volume -Name 'fixture' -RunId 'run-id' -CleanupErrors $errors
+if ($errors.Count -ne 1) { throw 'owner mismatch was not recorded' }
+`
+  try {
+    writeFileSync(fakeScript, fake)
+    writeFileSync(fakeCommand, command)
+    writeFileSync(harness, harnessText)
+    execFileSync('pwsh', ['-NoProfile', '-File', harness], { cwd: repoRoot, stdio: 'ignore' })
+  } finally {
+    rmSync(fixture, { recursive: true, force: true })
+  }
 })
 
 test('wrapper failure and cleanup contracts are redacted and fail closed', () => {
