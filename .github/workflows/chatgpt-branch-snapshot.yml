@@ -1,0 +1,29 @@
+name: Temporary ChatGPT branch snapshot
+
+on:
+  push:
+    branches:
+      - chatgpt/563-shared-host-tranche-2b
+
+permissions:
+  contents: read
+
+jobs:
+  snapshot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out exact branch head
+        uses: actions/checkout@v4
+
+      - name: Archive exact source tree
+        shell: bash
+        run: git archive --format=zip --output=aerolink-source.zip HEAD
+
+      - name: Upload source snapshot
+        uses: actions/upload-artifact@v4
+        with:
+          name: chatgpt-563-source-${{ github.run_id }}
+          path: aerolink-source.zip
+          if-no-files-found: error
+          retention-days: 1
