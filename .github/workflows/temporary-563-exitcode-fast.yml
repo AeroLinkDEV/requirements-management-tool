@@ -1,0 +1,82 @@
+name: Temporary #563 exit-code fast validation
+
+on:
+  push:
+    branches:
+      - chatgpt/563-exitcode-fast-validate
+
+permissions:
+  contents: write
+
+jobs:
+  repair:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v5.2.0
+        with:
+          dotnet-version: 10.0.x
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+      - name: Apply bounded exit-code repair
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          @'
+          from pathlib import Path
+          script = Path('product/tools/measure-api-host-reuse.ps1')
+          s = script.read_text(encoding='utf-8')
+          cleanup_line = '$cleanup = Stop-JobContainedProcess -Launch $shard.job -Terminate:(!$shard.process.HasExited) -TimeoutMilliseconds 5000'
+          if s.count(cleanup_line) != 1: raise SystemExit('cleanup anchor mismatch')
+          cleanup_index = s.index(cleanup_line)
+          try_index = s.rfind('            try {', 0, cleanup_index)
+          if try_index < 0: raise SystemExit('cleanup try not found')
+          block = '''            # Capture the managed process exit code while its Process handle is still authoritative.
+              try {
+                  if ($shard.timedOut) { $shard.exitCode = 124 }
+                  elseif ($shard.process.HasExited) { $shard.exitCode = [int]$shard.process.ExitCode }
+              } catch {
+                  $shard.exitCode = $null
+                  $exitMessage = "Exit-code capture failed: $($_.Exception.Message)"
+                  $shard.waitError = if ($shard.waitError) { "$($shard.waitError) $exitMessage" } else { $exitMessage }
+              }
+          '''
+          s = s[:try_index] + block + s[try_index:]
+          old = '            try { $shard.exitCode = $shard.process.ExitCode } catch { $shard.exitCode = $null }\n'
+          if s.count(old) != 1: raise SystemExit('post-cleanup exit read mismatch')
+          s = s.replace(old, '', 1)
+          script.write_text(s, encoding='utf-8')
+
+          test_file = Path('product/test-contracts/tests/api-host-reuse-measurement.test.mjs')
+          t = test_file.read_text(encoding='utf-8')
+          marker = "assert.match(source, /wallMs = 0\\.0/)\n"
+          if t.count(marker) != 1: raise SystemExit('contract marker mismatch')
+          addition = """assert.match(source, /wallMs = 0\\.0/)\nconst exitCaptureIndex = source.indexOf('elseif ($shard.process.HasExited) { $shard.exitCode = [int]$shard.process.ExitCode }')\nconst cleanupIndex = source.indexOf('$cleanup = Stop-JobContainedProcess -Launch $shard.job -Terminate:(!$shard.process.HasExited)')\nassert.ok(exitCaptureIndex >= 0, 'completed process exit code must be captured explicitly')\nassert.ok(cleanupIndex >= 0, 'Job Object cleanup must remain explicit')\nassert.ok(exitCaptureIndex < cleanupIndex, 'exit code must be captured before Job Object cleanup closes containment handles')\nassert.doesNotMatch(source, /endedAt = \\[DateTimeOffset\\]::UtcNow\\s+try \\{ \\$shard\\.exitCode = \\$shard\\.process\\.ExitCode/)\n"""
+          t = t.replace(marker, addition, 1)
+          test_file.write_text(t, encoding='utf-8')
+          '@ | python -
+      - name: Run targeted ordering contract and native smoke
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          node --test --test-name-pattern='script contract keeps telemetry aggregation' product/test-contracts/tests/api-host-reuse-measurement.test.mjs
+          if ($LASTEXITCODE -ne 0) { throw 'Targeted measurement source contract failed.' }
+          & ./product/tools/measure-api-host-reuse.ps1 -JobSmoke
+          if ($LASTEXITCODE -ne 0) { throw 'Native Job Object smoke failed.' }
+          git diff --check
+          if ($LASTEXITCODE -ne 0) { throw 'git diff --check failed.' }
+      - name: Commit validated product-only repair
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          git config user.name 'seanmccarthyns'
+          git config user.email 'seanmccarthyns@gmail.com'
+          git add product/tools/measure-api-host-reuse.ps1 product/test-contracts/tests/api-host-reuse-measurement.test.mjs
+          $staged = @(git diff --cached --name-only)
+          if ($staged.Count -ne 2) { throw "Expected two staged paths, found $($staged.Count)." }
+          git commit -m 'Capture shard exit codes before Job Object cleanup'
+          git push origin HEAD:chatgpt/563-exitcode-fast-validate
