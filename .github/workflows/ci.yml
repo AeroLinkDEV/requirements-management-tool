@@ -24,6 +24,7 @@ on:
         type: boolean
 
 permissions:
+  actions: read
   contents: read
 
 # A pull request groups by its number, so a new push cancels the run it supersedes. Everything else groups by
@@ -54,6 +55,8 @@ jobs:
       planner_selected_jobs: ${{ steps.classify.outputs.planner_selected_jobs }}
       planner_skipped_jobs: ${{ steps.classify.outputs.planner_skipped_jobs }}
       planner_decisions: ${{ steps.classify.outputs.planner_decisions }}
+      post_merge_skip: ${{ steps.provenance.outputs.can_skip }}
+      provenance_outcome: ${{ steps.provenance.outputs.outcome }}
     steps:
       - name: Capture job start
         continue-on-error: true
@@ -67,6 +70,18 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+      - name: Resolve already-validated main tree
+        id: provenance
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        continue-on-error: true
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_API_URL: ${{ github.api_url }}
+          GITHUB_EVENT_PATH: ${{ github.event_path }}
+          PROVENANCE_OUTPUT_DIR: ${{ runner.temp }}/provenance-preflight
+          PROVENANCE_MODE: enforce
+        run: node "${{ github.workspace }}/product/ci-metrics/bin/check-main-provenance.mjs"
       - name: Mark setup complete
         continue-on-error: true
         run: node "${{ github.workspace }}/product/ci-metrics/bin/mark.mjs" setup-end
@@ -212,7 +227,7 @@ jobs:
   backend-api:
     name: API test suite (${{ matrix.shard }}/${{ strategy.job-total }})
     needs: changes
-    if: needs.changes.outputs.docs_only != 'true' && needs.changes.outputs.backend == 'true'
+    if: needs.changes.outputs.post_merge_skip != 'true' && needs.changes.outputs.docs_only != 'true' && needs.changes.outputs.backend == 'true'
     runs-on: windows-latest
     timeout-minutes: 30
     env:
@@ -396,7 +411,7 @@ jobs:
   backend-core:
     name: Domain and infrastructure test suites
     needs: changes
-    if: needs.changes.outputs.docs_only != 'true' && needs.changes.outputs.backend == 'true'
+    if: needs.changes.outputs.post_merge_skip != 'true' && needs.changes.outputs.docs_only != 'true' && needs.changes.outputs.backend == 'true'
     runs-on: windows-latest
     timeout-minutes: 20
     env:
@@ -520,7 +535,7 @@ jobs:
   client:
     name: Client lint, type-check, and build
     needs: changes
-    if: needs.changes.outputs.docs_only != 'true' && needs.changes.outputs.client == 'true'
+    if: needs.changes.outputs.post_merge_skip != 'true' && needs.changes.outputs.docs_only != 'true' && needs.changes.outputs.client == 'true'
     runs-on: windows-latest
     timeout-minutes: 20
     env:
@@ -590,7 +605,7 @@ jobs:
   script-contracts:
     name: Operator and recovery script contracts
     needs: changes
-    if: needs.changes.outputs.docs_only != 'true'
+    if: needs.changes.outputs.post_merge_skip != 'true' && needs.changes.outputs.docs_only != 'true'
     runs-on: windows-latest
     timeout-minutes: 15
     env:
@@ -1095,7 +1110,7 @@ jobs:
   postgresql-smoke:
     name: PostgreSQL migrations and secure bootstrap
     needs: changes
-    if: needs.changes.outputs.postgresql == 'true'
+    if: needs.changes.outputs.post_merge_skip != 'true' && needs.changes.outputs.postgresql == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
@@ -1285,6 +1300,8 @@ jobs:
           PLANNER_SELECTED_JOBS: ${{ needs.changes.outputs.planner_selected_jobs }}
           PLANNER_SKIPPED_JOBS: ${{ needs.changes.outputs.planner_skipped_jobs }}
           PLANNER_DECISIONS: ${{ needs.changes.outputs.planner_decisions }}
+          POST_MERGE_SKIP: ${{ needs.changes.outputs.post_merge_skip }}
+          PROVENANCE_OUTCOME: ${{ needs.changes.outputs.provenance_outcome }}
         run: |
           set -euo pipefail
           describe() {
@@ -1300,6 +1317,7 @@ jobs:
             echo
             echo "Planner: $PLANNER_VERSION ($PLANNER_HASH)"
             echo "Event: $EVENT_NAME"
+            echo "Post-merge provenance: ${PROVENANCE_OUTCOME:-not-applicable}"
             echo "Planner reason: ${PLANNER_REASON:-none}"
             echo "Unknown product paths forcing fallback: ${PLANNER_UNKNOWN_PATHS:-none}"
             echo "Selected jobs: ${PLANNER_SELECTED_JOBS:-none}"
@@ -1320,7 +1338,9 @@ jobs:
             describe "PostgreSQL migrations and secure bootstrap" "$POSTGRESQL"
             describe "CI metrics tooling tests" "$METRICS_TOOLING"
             echo
-            if [ "$DOCS_ONLY" = "true" ]; then
+            if [ "$POST_MERGE_SKIP" = "true" ]; then
+              echo "Trusted tested-tree provenance matched this exact main tree; the redundant post-merge product retest was skipped. Cache warming and the weekly/manual validation paths remain."
+            elif [ "$DOCS_ONLY" = "true" ]; then
               echo "Classified as a documentation-only change, so no product gate ran. This tick is not evidence about the product."
             fi
           } >> "$GITHUB_STEP_SUMMARY"
@@ -1346,7 +1366,7 @@ jobs:
           # must have had its backend tested or its client validated; if neither ran, this tick is not evidence
           # about the product and must not be usable as one. The classifier already avoids selecting nothing —
           # this stays machine-checkable in case that ever regresses.
-          if [ "$DOCS_ONLY" != "true" ] && [ "$BACKEND_API" != "success" ] && [ "$CLIENT" != "success" ]; then
+          if [ "$POST_MERGE_SKIP" != "true" ] && [ "$DOCS_ONLY" != "true" ] && [ "$BACKEND_API" != "success" ] && [ "$CLIENT" != "success" ]; then
             echo "::error::This run tested no backend and validated no client, so its result is not evidence."
             echo "Classify the changed paths in the changes job, or mark the change as documentation-only."
             exit 1
@@ -1388,16 +1408,18 @@ jobs:
         shell: bash
         run: |
           needs="changes,metrics-tooling"
-          if [ "${{ needs.changes.outputs.backend }}" = "true" ]; then needs="$needs,backend-api,backend-core"; fi
-          if [ "${{ needs.changes.outputs.client }}" = "true" ]; then needs="$needs,client"; fi
-          if [ "${{ needs.changes.outputs.docs_only }}" != "true" ]; then needs="$needs,script-contracts"; fi
+          if [ "${{ needs.changes.outputs.post_merge_skip }}" != "true" ]; then
+            if [ "${{ needs.changes.outputs.backend }}" = "true" ]; then needs="$needs,backend-api,backend-core"; fi
+            if [ "${{ needs.changes.outputs.client }}" = "true" ]; then needs="$needs,client"; fi
+            if [ "${{ needs.changes.outputs.docs_only }}" != "true" ]; then needs="$needs,script-contracts"; fi
+          fi
           if [ "${{ needs.changes.outputs.browser }}" = "true" ]; then
             if [ "${{ github.event_name }}" = "pull_request" ] || [ "${{ github.event_name }}" = "merge_group" ]; then
               needs="$needs,browser-pr"
             fi
             if [ "${{ github.event_name }}" != "push" ]; then needs="$needs,browser-production"; fi
           fi
-          if [ "${{ needs.changes.outputs.postgresql }}" = "true" ]; then needs="$needs,postgresql-smoke"; fi
+          if [ "${{ needs.changes.outputs.post_merge_skip }}" != "true" ] && [ "${{ needs.changes.outputs.postgresql }}" = "true" ]; then needs="$needs,postgresql-smoke"; fi
           echo "METRICS_NEEDS=$needs" >> "$GITHUB_ENV"
       - name: Write metrics fragment
         if: always()
