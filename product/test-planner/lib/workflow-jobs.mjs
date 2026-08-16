@@ -7,7 +7,8 @@
 //
 // The evaluator understands only the small expression subset the workflow actually uses, and throws on
 // anything else. Guessing at an unrecognised condition would produce a confident wrong forecast, which
-// is worse than refusing.
+// is worse than refusing. `post_merge_skip` is a trusted runtime provenance decision rather than a
+// changed-area classification; planner callers therefore model it explicitly and default it to false.
 
 /** Extract `{ id, name, condition }` for every job that gates on the classifier or the event. */
 export function parseJobConditions(workflowText) {
@@ -35,7 +36,7 @@ export function parseJobConditions(workflowText) {
   return jobs
 }
 
-const OUTPUT = /^needs\.changes\.outputs\.(docs_only|backend|client|browser|postgresql)$/
+const OUTPUT = /^needs\.changes\.outputs\.(docs_only|backend|client|browser|postgresql|post_merge_skip)$/
 const EVENT = /^github\.event_name$/
 
 function literal(token) {
@@ -93,7 +94,7 @@ export function evaluateCondition(condition, context) {
 }
 
 /** Jobs that would run, derived from the workflow text. */
-export function selectJobs(workflowText, classification, { event = 'pull_request' } = {}) {
+export function selectJobs(workflowText, classification, { event = 'pull_request', postMergeSkip = false } = {}) {
   const context = {
     event,
     outputs: {
@@ -102,6 +103,10 @@ export function selectJobs(workflowText, classification, { event = 'pull_request
       client: classification.client,
       browser: classification.browser,
       postgresql: classification.postgresql,
+      // Changed-area planning must never assume that future trusted provenance will exist. The default is
+      // therefore the conservative full-test posture; callers may pass true only when modelling a known
+      // provenance decision explicitly.
+      post_merge_skip: postMergeSkip,
     },
   }
 
