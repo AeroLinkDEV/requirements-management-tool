@@ -64,12 +64,14 @@ jobs:
           "WRAPPER_PATH=$wrapper" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
       - name: Reconfirm native containment smoke
         shell: pwsh
-        working-directory: ${{ env.HARNESS_PATH }}
         run: |
           $ErrorActionPreference = 'Stop'
-          & ./product/tools/measure-api-host-reuse.ps1 -JobSmoke
-          if ($LASTEXITCODE -ne 0) { throw 'Merged native Job Object smoke failed.' }
-          if (git status --porcelain) { throw 'Merged harness tree became dirty during smoke validation.' }
+          Push-Location $env:HARNESS_PATH
+          try {
+            & ./product/tools/measure-api-host-reuse.ps1 -JobSmoke
+            if ($LASTEXITCODE -ne 0) { throw 'Merged native Job Object smoke failed.' }
+            if (git status --porcelain) { throw 'Merged harness tree became dirty during smoke validation.' }
+          } finally { Pop-Location }
       - name: Run ten paired authoritative observations
         shell: pwsh
         run: |
