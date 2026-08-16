@@ -6,7 +6,7 @@
 // current evidence. Requires `issues: write`.
 
 import { readFileSync } from 'node:fs'
-import { trackerBody, decideTrackerAction, writeWouldRegressTracker } from '../lib/rolling.mjs'
+import { trackerBody, trackerCategoriesFromBody, decideTrackerAction, writeWouldRegressTracker } from '../lib/rolling.mjs'
 
 const env = (name) => process.env[name] ?? ''
 const TRACKER_TITLE = 'CI rolling regression tracker'
@@ -40,7 +40,8 @@ async function main() {
   const decision = decideTrackerAction({
     regressions: report.regressions,
     trackerExists: existing !== null,
-    determinate: report.determinacy?.determinate === true,
+    trackerCategories: existing ? trackerCategoriesFromBody(existing.body) : [],
+    determinacyByCategory: report.determinacy?.categories ?? null,
   })
   if (decision.action === 'none') {
     console.log(`[ci-metrics] ${decision.reason}`)

@@ -2,7 +2,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
   median, percentile, classifyRun, runDurationMs, jobGroupDurations, queueAndCancellation,
-  flakeTrend, cacheTrend, rollingStats, detectRegressions, validateRunRecord, recordFormat, buildRollingReport, trackerBody, decideTrackerAction, regressionDeterminacy, writeWouldRegressTracker,
+  flakeTrend, cacheTrend, rollingStats, detectRegressions, validateRunRecord, recordFormat, buildRollingReport, trackerBody, trackerCategoriesFromBody, decideTrackerAction, regressionDeterminacy, writeWouldRegressTracker,
   fullGatesPerMerge, FULL_GATE_WINDOW_DAYS, MAX_RECORDS,
 } from '../lib/rolling.mjs'
 
@@ -282,9 +282,14 @@ test('the tracker corrects a cleared regression instead of leaving a stale claim
   // but the caller returned early on zero regressions and never looked for an existing tracker — so the
   // clean body was unreachable and #587 asserted a regression for hours after it cleared. The library
   // was tested; the decision that reaches it was not.
-  // `determinate` is required for a clear: an empty regression list alone is not evidence of recovery,
-  // which the test below this one covers in full.
-  const cleared = decideTrackerAction({ regressions: [], trackerExists: true, determinate: true })
+  // The tracked category must have a determinate comparison: an empty regression list alone is not
+  // evidence of recovery, which the test below this one covers in full.
+  const cleared = decideTrackerAction({
+    regressions: [],
+    trackerExists: true,
+    trackerCategories: ['mixed'],
+    determinacyByCategory: { mixed: { determinate: true, reason: null } },
+  })
   assert.equal(cleared.action, 'update')
   assert.match(cleared.reason, /stale claim|clear/i)
 
@@ -300,25 +305,117 @@ test('the tracker corrects a cleared regression instead of leaving a stale claim
 
   // Defaults must not invent work: an empty call is the quiet case, not a create.
   assert.equal(decideTrackerAction().action, 'none')
-  assert.equal(decideTrackerAction({ regressions: null, trackerExists: true, determinate: true }).action, 'update')
+  assert.equal(decideTrackerAction({
+    regressions: null,
+    trackerExists: true,
+    trackerCategories: ['mixed'],
+    determinacyByCategory: { mixed: { determinate: true, reason: null } },
+  }).action, 'update')
 })
 
 test('an empty result clears the tracker only when a comparison actually happened', () => {
   // Review finding: detectRegressions returns [] both when nothing regressed and when there was not
   // enough comparable data — too few runs, or unavailable durations. Treating the second as recovery
   // would replace a real finding with a claim nothing supports, which is worse than a stale one.
-  const indeterminate = decideTrackerAction({ regressions: [], trackerExists: true, determinate: false })
+  const indeterminate = decideTrackerAction({
+    regressions: [],
+    trackerExists: true,
+    trackerCategories: ['mixed'],
+    determinacyByCategory: { mixed: { determinate: false, reason: 'thin' } },
+  })
   assert.equal(indeterminate.action, 'none')
   assert.match(indeterminate.reason, /insufficient|ignorance/i)
 
-  const determinate = decideTrackerAction({ regressions: [], trackerExists: true, determinate: true })
+  const determinate = decideTrackerAction({
+    regressions: [],
+    trackerExists: true,
+    trackerCategories: ['mixed'],
+    determinacyByCategory: { mixed: { determinate: true, reason: null } },
+  })
   assert.equal(determinate.action, 'update')
 
   // Determinacy must never suppress a real detection — a regression is reportable even if other
   // categories could not be compared.
   const regressions = [{ metric: 'criticalPathP95', current: 761_000, previous: 661_000, threshold: 761_000, runs: 8 }]
-  assert.equal(decideTrackerAction({ regressions, trackerExists: true, determinate: false }).action, 'update')
-  assert.equal(decideTrackerAction({ regressions, trackerExists: false, determinate: false }).action, 'create')
+  assert.equal(decideTrackerAction({ regressions, trackerExists: true }).action, 'update')
+  assert.equal(decideTrackerAction({ regressions, trackerExists: false }).action, 'create')
+})
+
+test('tracker clearing follows the previously tracked categories, not unrelated category evidence', () => {
+  const trackedBody = trackerBody({
+    generatedAt: '2026-08-15T20:00:00Z',
+    regressions: [{ category: 'mixed', metric: 'criticalPathP95', current: 761_000, previous: 661_000, threshold: 761_000, runs: 8 }],
+  })
+  const trackedCategories = trackerCategoriesFromBody(trackedBody)
+  assert.deepEqual(trackedCategories, ['mixed'])
+
+  const thinTracked = decideTrackerAction({
+    regressions: [],
+    trackerExists: true,
+    trackerCategories: trackedCategories,
+    determinacyByCategory: {
+      mixed: { determinate: false, reason: 'thin' },
+      'backend-only': { determinate: true, reason: null },
+    },
+  })
+  assert.equal(thinTracked.action, 'none')
+
+  const absentTracked = decideTrackerAction({
+    regressions: [],
+    trackerExists: true,
+    trackerCategories: ['mixed'],
+    determinacyByCategory: { 'backend-only': { determinate: true, reason: null } },
+  })
+  assert.equal(absentTracked.action, 'none')
+
+  const allRelevantClean = decideTrackerAction({
+    regressions: [],
+    trackerExists: true,
+    trackerCategories: ['mixed', 'backend-only'],
+    determinacyByCategory: {
+      mixed: { determinate: true, reason: null },
+      'backend-only': { determinate: true, reason: null },
+      client: { determinate: false, reason: 'unrelated thin category' },
+    },
+  })
+  assert.equal(allRelevantClean.action, 'update')
+
+  const realRegression = decideTrackerAction({
+    regressions: [{ category: 'mixed', metric: 'criticalPathP95', current: 761_000, previous: 661_000, threshold: 761_000, runs: 8 }],
+    trackerExists: true,
+    trackerCategories: ['mixed'],
+    determinacyByCategory: {
+      mixed: { determinate: false, reason: 'thin' },
+      'backend-only': { determinate: false, reason: 'missing' },
+    },
+  })
+  assert.equal(realRegression.action, 'update')
+})
+
+test('legacy tracker bodies migrate only when their controlled shape identifies a known category', () => {
+  const current = trackerBody({
+    generatedAt: '2026-08-15T20:00:00Z',
+    regressions: [{ category: 'mixed', metric: 'criticalPathP95', current: 761_000, previous: 661_000, threshold: 761_000, runs: 8 }],
+  })
+  const legacy = current.replace(/\n<!-- ci-metrics-tracker:v1 [\s\S]* -->$/, '')
+  assert.deepEqual(trackerCategoriesFromBody(legacy), ['mixed'])
+  assert.equal(trackerCategoriesFromBody(`${legacy}\nEdited by a human`), null)
+
+  const legacyDecision = decideTrackerAction({
+    regressions: [],
+    trackerExists: true,
+    trackerCategories: trackerCategoriesFromBody(legacy),
+    determinacyByCategory: { mixed: { determinate: true, reason: null } },
+  })
+  assert.equal(legacyDecision.action, 'update')
+
+  const unknownLegacyDecision = decideTrackerAction({
+    regressions: [],
+    trackerExists: true,
+    trackerCategories: trackerCategoriesFromBody('Detected 1 sustained regression(s):\n- mixed: hand-edited'),
+    determinacyByCategory: { mixed: { determinate: true, reason: null } },
+  })
+  assert.equal(unknownLegacyDecision.action, 'none')
 })
 
 test('regressionDeterminacy separates "nothing regressed" from "nothing could be compared"', () => {

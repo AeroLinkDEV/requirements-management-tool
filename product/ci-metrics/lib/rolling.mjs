@@ -479,6 +479,65 @@ export function buildRollingReport({ records, regressions = [], missing = [], fu
   }
 }
 
+const TRACKER_METADATA_PREFIX = 'ci-metrics-tracker:v1'
+const LEGACY_TRACKER_CATEGORIES = new Set([
+  'backend-only', 'browser-only', 'client-only', 'docs-only', 'manual', 'mixed', 'postgresql-only',
+  'push-main', 'scheduled', 'unclassified',
+])
+
+function trackedRegressionCategories(report) {
+  const regressions = Array.isArray(report?.regressions) ? report.regressions : []
+  const categories = []
+  for (const entry of regressions) {
+    if (typeof entry?.category !== 'string' || entry.category.trim() === '') return null
+    categories.push(entry.category.trim())
+  }
+  return [...new Set(categories)].sort()
+}
+
+function normalizeStructuredTrackerCategories(categories) {
+  if (!Array.isArray(categories) || categories.length === 0 || categories.length > 20) return null
+  if (categories.some((category) => typeof category !== 'string' || category.trim() === '' || category.length > 100)) return null
+  return [...new Set(categories.map((category) => category.trim()))].sort()
+}
+
+function legacyTrackerCategories(body) {
+  const text = String(body ?? '')
+  if (!/^# CI rolling regression tracker\r?\n\r?\n/.test(text)) return null
+  const countMatch = /^Detected (\d+) sustained regression\(s\):\r?$/m.exec(text)
+  if (!countMatch || Number(countMatch[1]) < 1 || Number(countMatch[1]) > 20) return null
+  const entries = [...text.matchAll(/^- ([a-z][a-z0-9-]*): [A-Za-z][A-Za-z0-9]*: current \d+s vs previous \d+s \(threshold \d+s, \d+ runs\)\r?$/gm)]
+  const updatedMatch = /^Last updated: [^\r\n]+$/m.exec(text)
+  if (entries.length !== Number(countMatch[1]) || !updatedMatch || text.slice(updatedMatch.index + updatedMatch[0].length).trim() !== '') return null
+  const categories = entries.map((entry) => entry[1])
+  if (categories.some((category) => !LEGACY_TRACKER_CATEGORIES.has(category))) return null
+  return normalizeStructuredTrackerCategories(categories)
+}
+
+/**
+ * Read the machine-readable category identity from a tracker body.
+ *
+ * New tracker bodies carry this as an HTML comment so the human-facing issue stays readable. Legacy
+ * bodies have no trustworthy category identity; returning null makes a clean report leave them alone
+ * rather than guessing from prose and possibly clearing the wrong category.
+ */
+export function trackerCategoriesFromBody(body) {
+  const match = new RegExp(`<!--\\s*${TRACKER_METADATA_PREFIX}\\s+([\\s\\S]*?)\\s*-->`).exec(String(body ?? ''))
+  if (!match) return legacyTrackerCategories(body)
+  try {
+    const metadata = JSON.parse(match[1])
+    return normalizeStructuredTrackerCategories(metadata?.categories)
+  } catch {
+    return null
+  }
+}
+
+function trackerCategoriesAreDeterminate(trackerCategories, determinacyByCategory) {
+  if (!Array.isArray(trackerCategories) || trackerCategories.length === 0) return false
+  if (!determinacyByCategory || typeof determinacyByCategory !== 'object' || Array.isArray(determinacyByCategory)) return false
+  return trackerCategories.every((category) => determinacyByCategory[category]?.determinate === true)
+}
+
 /**
  * What the tracker update should do, given the current report and whether a tracker already exists.
  *
@@ -487,7 +546,7 @@ export function buildRollingReport({ records, regressions = [], missing = [], fu
  * regression that had already cleared. Not opening an issue on noise and not correcting a claim the
  * tool itself published are different things, and only the first is worth protecting.
  */
-export function decideTrackerAction({ regressions = [], trackerExists = false, determinate = false } = {}) {
+export function decideTrackerAction({ regressions = [], trackerExists = false, trackerCategories = null, determinacyByCategory = null } = {}) {
   const detected = Array.isArray(regressions) ? regressions.length : 0
   if (detected > 0) {
     return trackerExists
@@ -495,13 +554,14 @@ export function decideTrackerAction({ regressions = [], trackerExists = false, d
       : { action: 'create', reason: `${detected} sustained regression(s) detected and no tracker exists.` }
   }
   if (trackerExists) {
-    // An empty result is only evidence of recovery when a comparison actually happened. Missing
-    // artifacts, a thin window, or a shift in the category mix all produce the same empty array, and
-    // clearing on those would replace a real finding with a claim nothing supports — trading a stale
-    // truth for a fresh falsehood, which is the worse of the two.
-    return determinate
+    // An empty result is only evidence of recovery for every category the tracker was actually
+    // tracking. Missing artifacts, a thin window, or a shift in the category mix all produce the same
+    // empty array, and clearing on those would replace a real finding with a claim nothing supports.
+    // A legacy body has no structured category identity, so it is deliberately not clearable until a
+    // detected report rewrites it with the metadata marker below.
+    return trackerCategoriesAreDeterminate(trackerCategories, determinacyByCategory)
       ? { action: 'update', reason: 'No sustained regressions over a sufficient window; recording that the tracker is clear rather than leaving a stale claim.' }
-      : { action: 'none', reason: 'No regressions found, but the window was insufficient to compare; leaving the existing tracker rather than clearing it on ignorance.' }
+      : { action: 'none', reason: 'No regressions found, but the tracked category evidence was missing or insufficient; leaving the existing tracker rather than clearing it on ignorance.' }
   }
   // The only other case that touches nothing. Creating an issue to announce that there is nothing to
   // announce is exactly the issue spam the tracker was built to avoid.
@@ -552,5 +612,9 @@ export function trackerBody(report) {
     lines.push('')
     lines.push(`Last updated: ${report?.generatedAt ?? 'unknown'}`)
   }
+  lines.push('')
+  // Keep category identity out of the prose decision boundary. A legacy body without this marker is
+  // treated as unknown and cannot be cleared safely; the next real detection upgrades it in place.
+  lines.push(`<!-- ${TRACKER_METADATA_PREFIX} ${JSON.stringify({ categories: trackedRegressionCategories(report) })} -->`)
   return lines.join('\n')
 }
