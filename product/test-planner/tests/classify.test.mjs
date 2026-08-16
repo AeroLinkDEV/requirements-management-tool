@@ -4,7 +4,7 @@ import { readFileSync, existsSync } from 'node:fs'
 import { execFileSync } from 'node:child_process'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { classify, explain, localPlan, ciSelection, AREA_PATTERNS, BROAD_EVENTS } from '../lib/classify.mjs'
+import { classify, explain, localPlan, selectJobs, AREA_PATTERNS, BROAD_EVENTS } from '../lib/classify.mjs'
 
 const repoRoot = fileURLToPath(new URL('../../../', import.meta.url))
 
@@ -107,18 +107,22 @@ test('explain attributes each path to the areas it selected', () => {
   assert.deepEqual(rows[2].areas, ['client', 'browser'])
 })
 
-test('the CI selection matches the areas chosen', () => {
-  const jobs = ciSelection(of(['product/client/src/App.tsx']))
-  assert.ok(jobs.includes('client'))
-  assert.ok(jobs.some((job) => job.startsWith('browser-pr')))
-  assert.ok(!jobs.includes('backend-core'))
-  assert.ok(jobs.includes('gate'), 'the gate always runs')
+test('the CI forecast is read from the workflow, not restated', () => {
+  // The first version carried a hand-written list of jobs per area, which is the drift #568 exists to
+  // remove: a restatement of the workflow is wrong the first time either changes and nothing notices.
+  const workflow = readFileSync(join(repoRoot, '.github/workflows/ci.yml'), 'utf8')
 
-  const docs = ciSelection(of(['README.md']))
-  assert.ok(!docs.includes('backend-core'))
-  assert.ok(docs.includes('gate'))
+  const client = selectJobs(workflow, of(['product/client/src/App.tsx']), { event: 'pull_request' })
+  const names = client.selected.map((job) => job.name ?? job.id)
+  assert.ok(names.some((name) => /Client lint/.test(name)), 'a client change must select the client job')
+  assert.ok(!names.some((name) => /API test suite/.test(name)), 'and must not select the API suites')
+  assert.ok(client.skipped.some((job) => /API test suite/.test(job.name ?? job.id)))
+
+  const docs = selectJobs(workflow, of(['README.md']), { event: 'pull_request' })
+  const docNames = docs.selected.map((job) => job.name ?? job.id)
+  assert.ok(!docNames.some((name) => /Client lint|API test suite|Domain and infrastructure/.test(name)))
+  assert.ok(docNames.some((name) => /Report what this run validated/.test(name)), 'the gate always reports')
 })
-
 test('the local plan never claims a PostgreSQL-sensitive change was proven locally', () => {
   const plan = localPlan(of(['product/src/AeroLink.Infrastructure/Persistence/Thing.cs']))
   const postgres = plan.find((step) => /PostgreSQL/.test(step.label))
@@ -162,4 +166,27 @@ test('the planner scripts are tracked by git, not swallowed by .gitignore', () =
     })
     assert.match(tracked, new RegExp(script.replace('.', '\.')), `${script} must be tracked by git`)
   }
+})
+
+test('every emitted command is a single valid dotnet test target', () => {
+  // `dotnet test` accepts one project, solution or directory. The first version passed two directories
+  // in one invocation and produced `MSBUILD : error MSB1008: Only one project can be specified` before
+  // either suite ran — a plan that recommended a command that could not work.
+  const plan = localPlan(of(['product/src/AeroLink.Domain/X.cs', 'product/client/src/App.tsx']))
+  const dotnet = plan.filter((step) => step.command?.startsWith('dotnet test'))
+  assert.ok(dotnet.length >= 2, 'both backend suites must be offered')
+  for (const step of dotnet) {
+    const targets = step.command
+      .replace(/^dotnet test\s+/, '')
+      .split(/\s+/)
+      .filter((token) => !token.startsWith('--') && token !== 'Release')
+    assert.equal(targets.length, 1, `"${step.command}" passes ${targets.length} targets; dotnet test accepts one`)
+    assert.ok(existsSync(join(repoRoot, targets[0])), `${targets[0]} must exist`)
+  }
+})
+
+test('both backend suites are actually named, not merged into one target', () => {
+  const commands = localPlan(of(['product/src/AeroLink.Domain/X.cs'])).map((s) => s.command).filter(Boolean).join(' ')
+  assert.match(commands, /AeroLink\.Domain\.Tests/)
+  assert.match(commands, /AeroLink\.Infrastructure\.Tests/)
 })

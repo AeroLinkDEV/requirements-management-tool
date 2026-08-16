@@ -122,10 +122,19 @@ export function localPlan(classification) {
       command: 'dotnet build product/AeroLink.slnx --configuration Release',
       why: 'A compile error costs a full CI cycle to discover and seconds to find here.',
     })
+    // Two invocations, not one. `dotnet test` accepts a single project, solution or directory target;
+    // passing two produces `MSBUILD : error MSB1008: Only one project can be specified` before either
+    // suite runs. The first version of this printed exactly that broken command, which is what happens
+    // when a tool's output is reviewed by reading it rather than by running it.
     steps.push({
-      label: 'Domain and infrastructure suites',
-      command: 'dotnet test product/tests/AeroLink.Domain.Tests product/tests/AeroLink.Infrastructure.Tests --configuration Release --no-build',
+      label: 'Domain suite',
+      command: 'dotnet test product/tests/AeroLink.Domain.Tests --configuration Release --no-build',
       why: 'Fast, no host construction, and covers most backend rule changes.',
+    })
+    steps.push({
+      label: 'Infrastructure suite',
+      command: 'dotnet test product/tests/AeroLink.Infrastructure.Tests --configuration Release --no-build',
+      why: 'Persistence and EF behaviour, still without building an API host.',
     })
   }
   if (classification.client) {
@@ -152,13 +161,8 @@ export function localPlan(classification) {
   return steps
 }
 
-/** The CI jobs a classification selects, so the planner can say what will run after the push. */
-export function ciSelection(classification) {
-  const always = ['changes', 'metrics-tooling', 'script-contracts', 'gate']
-  const selected = [...always]
-  if (classification.backend) selected.push('backend-api (x3 shards)', 'backend-core')
-  if (classification.client) selected.push('client')
-  if (classification.browser) selected.push('browser-pr (x4 shards)', 'browser-production')
-  if (classification.postgresql) selected.push('postgresql-smoke')
-  return selected
-}
+// The CI forecast is deliberately not implemented here. A hand-written list of jobs per area is a
+// restatement of the workflow that is wrong the first time either changes, with nothing to detect it —
+// the same class of drift this module exists to remove. `selectJobs` in ./workflow-jobs.mjs parses the
+// conditions out of ci.yml and evaluates them, so the forecast comes from the text the runner obeys.
+export { selectJobs } from './workflow-jobs.mjs'

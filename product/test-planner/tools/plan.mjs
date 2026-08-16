@@ -5,27 +5,70 @@
 // one place and not the other is invisible until a gate skips something it should have run.
 //
 // Usage:
-//   node product/test-planner/bin/plan.mjs                 # against origin/main
-//   node product/test-planner/bin/plan.mjs --base <ref>
-//   node product/test-planner/bin/plan.mjs --files a.cs b.ts
-//   node product/test-planner/bin/plan.mjs --json
-//   node product/test-planner/bin/plan.mjs --event merge_group
+//   node product/test-planner/tools/plan.mjs                 # against origin/main
+//   node product/test-planner/tools/plan.mjs --base <ref>
+//   node product/test-planner/tools/plan.mjs --files a.cs b.ts
+//   node product/test-planner/tools/plan.mjs --json
+//   node product/test-planner/tools/plan.mjs --event merge_group
 
 import { execFileSync } from 'node:child_process'
-import { classify, explain, localPlan, ciSelection } from '../lib/classify.mjs'
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
+import { classify, explain, localPlan, selectJobs } from '../lib/classify.mjs'
 
-function arg(name, fallback = null) {
-  const index = process.argv.indexOf(`--${name}`)
-  return index >= 0 && process.argv[index + 1] && !process.argv[index + 1].startsWith('--')
-    ? process.argv[index + 1]
-    : fallback
+/**
+ * Parse options explicitly, stopping a list at the next option.
+ *
+ * The first version sliced everything after `--files` and dropped only tokens starting with `--`, so
+ * `--files README.md --event pull_request` classified the literal path `pull_request` — turning a
+ * documentation-only change into an unclassified one and printing a plan for work that was not needed.
+ * A parser that silently absorbs another option's value produces confident wrong answers.
+ */
+const VALUE_OPTIONS = new Set(['base', 'event'])
+const LIST_OPTIONS = new Set(['files'])
+const FLAG_OPTIONS = new Set(['json', 'help'])
+
+function parseArgs(argv) {
+  const options = { files: null, base: null, event: null, json: false, help: false }
+  for (let i = 0; i < argv.length; i += 1) {
+    const token = argv[i]
+    if (!token.startsWith('--')) throw new Error(`Unexpected argument "${token}"; options must start with --.`)
+    const name = token.slice(2)
+    if (FLAG_OPTIONS.has(name)) { options[name] = true; continue }
+    if (VALUE_OPTIONS.has(name)) {
+      const value = argv[i + 1]
+      if (value === undefined || value.startsWith('--')) throw new Error(`--${name} requires a value.`)
+      options[name] = value
+      i += 1
+      continue
+    }
+    if (LIST_OPTIONS.has(name)) {
+      const values = []
+      // Stops at the next option. A path that genuinely begins with a dash can be passed after `--`.
+      while (i + 1 < argv.length && !argv[i + 1].startsWith('--')) { values.push(argv[i + 1]); i += 1 }
+      if (argv[i + 1] === '--') { i += 1; while (i + 1 < argv.length) { values.push(argv[i + 1]); i += 1 } }
+      options[name] = values
+      continue
+    }
+    throw new Error(`Unknown option --${name}.`)
+  }
+  return options
+}
+
+let options
+try {
+  options = parseArgs(process.argv.slice(2))
+} catch (error) {
+  console.error(error.message)
+  console.error('Usage: node plan.mjs [--base <ref>] [--event <name>] [--files <path>...] [--json]')
+  process.exit(2)
 }
 
 function changedPaths() {
-  const explicit = process.argv.indexOf('--files')
-  if (explicit >= 0) return process.argv.slice(explicit + 1).filter((value) => !value.startsWith('--'))
+  if (options.files !== null) return options.files
 
-  const base = arg('base', 'origin/main')
+  const base = options.base ?? 'origin/main'
   try {
     // Three dots. A two-dot diff compares the two trees directly, so once the base moves ahead every
     // file changed there appears here as though this branch had touched it — which is exactly how a
@@ -40,11 +83,15 @@ function changedPaths() {
 }
 
 const paths = changedPaths()
-const event = arg('event', 'pull_request')
+const event = options.event ?? 'pull_request'
 const result = classify(paths, { event })
 
-if (process.argv.includes('--json')) {
-  console.log(JSON.stringify({ event, changedPaths: paths, classification: result, local: localPlan(result), ci: ciSelection(result) }, null, 2))
+const repoRoot = fileURLToPath(new URL('../../../', import.meta.url))
+const workflowText = readFileSync(join(repoRoot, '.github/workflows/ci.yml'), 'utf8')
+const jobs = selectJobs(workflowText, result, { event })
+
+if (options.json) {
+  console.log(JSON.stringify({ event, changedPaths: paths, classification: result, local: localPlan(result), ci: jobs }, null, 2))
   process.exit(0)
 }
 
@@ -78,8 +125,8 @@ for (const step of localPlan(result)) {
 }
 
 console.log('')
-console.log('GitHub will then run:')
-for (const job of ciSelection(result)) console.log(`  - ${job}`)
+console.log('GitHub will then run (read from ci.yml, not restated):')
+for (const job of jobs.selected) console.log(`  - ${job.name ?? job.id}${job.always ? '  (always)' : ''}`)
 
 if (result.unclassified) {
   console.log('')
