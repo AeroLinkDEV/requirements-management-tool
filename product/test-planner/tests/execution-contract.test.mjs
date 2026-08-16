@@ -2,7 +2,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { existsSync, lstatSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, relative } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -202,8 +202,18 @@ test('Docker volume ownership recognizes current missing-volume wording without 
   const fakeCommand = join(fixture, 'docker.cmd')
   const harness = join(fixture, 'harness.ps1')
   const fake = String.raw`param([Parameter(ValueFromRemainingArguments = $true)][string[]]$Arguments)
-if ($env:FAKE_DOCKER_MODE -eq 'real-missing') { [Console]::Error.WriteLine('Error response from daemon: get fixture: no such volume: fixture'); exit 1 }
-if ($env:FAKE_DOCKER_MODE -eq 'ambiguous') { [Console]::Error.WriteLine('Error response from daemon: permission denied while inspecting fixture'); exit 1 }
+switch ($env:FAKE_DOCKER_MODE) {
+  'real-missing' { [Console]::Error.WriteLine('Error response from daemon: get fixture: no such volume'); exit 1 }
+  'real-missing-suffix' { [Console]::Error.WriteLine('Error response from daemon: get fixture: no such volume: fixture'); exit 1 }
+  'legacy-missing' { [Console]::Error.WriteLine('Error response from daemon: no such volume: fixture'); exit 1 }
+  'daemon' { [Console]::Error.WriteLine('Cannot connect to the Docker daemon'); exit 1 }
+  'permission' { [Console]::Error.WriteLine('Error response from daemon: permission denied while inspecting fixture'); exit 1 }
+  'wrong-get-name' { [Console]::Error.WriteLine('Error response from daemon: get other: no such volume'); exit 1 }
+  'wrong-suffix-name' { [Console]::Error.WriteLine('Error response from daemon: get fixture: no such volume: other'); exit 1 }
+  'malformed' { [Console]::Error.WriteLine('Error response from daemon: get fixture: no such volume permission denied'); exit 1 }
+  'bare' { [Console]::Error.WriteLine('no such volume: fixture'); exit 1 }
+  'multiline' { [Console]::Error.WriteLine('Error response from daemon: get fixture: no such volume' + [Environment]::NewLine + 'permission denied'); exit 1 }
+}
 Write-Output 'run-id'; exit 0
 `
   const command = '@echo off\r\npwsh -NoProfile -File "%~dp0fake-docker.ps1" %*\r\nexit /b %ERRORLEVEL%\r\n'
@@ -213,16 +223,84 @@ $ast = [System.Management.Automation.Language.Parser]::ParseFile($source, [ref]$
 $node = $ast.Find({ param($candidate) $candidate -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $candidate.Name -eq 'Get-DockerOwnedResource' }, $true)
 . ([scriptblock]::Create($node.Extent.Text))
 $docker = '${fakeCommand.replaceAll("'", "''")}'
-$env:FAKE_DOCKER_MODE = 'real-missing'
-if ($null -ne (Get-DockerOwnedResource -Docker $docker -Kind volume -Name 'fixture')) { throw 'real missing volume was not treated as absent' }
-$env:FAKE_DOCKER_MODE = 'ambiguous'
-try { Get-DockerOwnedResource -Docker $docker -Kind volume -Name 'fixture'; throw 'ambiguous volume error was accepted' } catch { if ($_.Exception.Message -notmatch 'ownership could not be verified') { throw } }
+foreach ($mode in @('real-missing', 'real-missing-suffix', 'legacy-missing')) {
+  $env:FAKE_DOCKER_MODE = $mode
+  if ($null -ne (Get-DockerOwnedResource -Docker $docker -Kind volume -Name 'fixture')) { throw "missing volume form $mode was not treated as absent" }
+}
+foreach ($mode in @('daemon', 'permission', 'wrong-get-name', 'wrong-suffix-name', 'malformed', 'bare', 'multiline')) {
+  $env:FAKE_DOCKER_MODE = $mode
+  try { Get-DockerOwnedResource -Docker $docker -Kind volume -Name 'fixture'; throw "unsafe volume diagnostic $mode was accepted" } catch { if ($_.Exception.Message -notmatch 'ownership could not be verified') { throw } }
+}
 `
   try {
     writeFileSync(fakeScript, fake)
     writeFileSync(fakeCommand, command)
     writeFileSync(harness, harnessText)
     execFileSync('pwsh', ['-NoProfile', '-File', harness], { cwd: repoRoot, stdio: 'ignore' })
+  } finally {
+    rmSync(fixture, { recursive: true, force: true })
+  }
+})
+
+test('persistent evidence fingerprint distinguishes absent, empty, and changed disposable roots', () => {
+  const fixture = mkdtempSync(join(tmpdir(), 'aerolink-fingerprint-'))
+  const harness = join(fixture, 'harness.ps1')
+  const empty = join(fixture, 'empty')
+  const nonempty = join(fixture, 'nonempty')
+  const absent = join(fixture, 'absent')
+  const created = join(fixture, 'created-after-fingerprint')
+  const removed = join(fixture, 'removed-after-fingerprint')
+  const content = join(fixture, 'content-change')
+  const metadata = join(fixture, 'metadata-change')
+  const structure = join(fixture, 'structure-change')
+  for (const root of [empty, nonempty, removed, content, metadata, structure]) mkdirSync(root)
+  writeFileSync(join(nonempty, 'sentinel.bin'), Buffer.from([0, 1, 2, 3, 255]))
+  writeFileSync(join(content, 'sentinel.txt'), 'before')
+  writeFileSync(join(metadata, 'sentinel.txt'), 'stable')
+  const harnessText = String.raw`$source = '${wrapperPath.replaceAll("'", "''")}'
+$tokens = $null; $parseErrors = $null
+$ast = [System.Management.Automation.Language.Parser]::ParseFile($source, [ref]$tokens, [ref]$parseErrors)
+$node = $ast.Find({ param($candidate) $candidate -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $candidate.Name -eq 'Get-PersistentEvidenceFingerprint' }, $true)
+if ($null -eq $node) { throw 'missing fingerprint function' }
+. ([scriptblock]::Create($node.Extent.Text))
+function Assert-Unchanged([string]$Root, [string]$ExpectedMarker) {
+  $before = Get-PersistentEvidenceFingerprint -Root $Root
+  $after = Get-PersistentEvidenceFingerprint -Root $Root
+  $beforeValues = @($before)
+  if ($null -eq $before -or $beforeValues.Count -lt 1 -or ([string]$beforeValues[0]) -notlike $ExpectedMarker) { throw "invalid fingerprint marker for $Root" }
+  if ($null -ne (Compare-Object -ReferenceObject $before -DifferenceObject $after)) { throw "unchanged root differed for $Root" }
+}
+function Assert-Changed($Before, [string]$Root) {
+  $after = Get-PersistentEvidenceFingerprint -Root $Root
+  if ($null -eq (Compare-Object -ReferenceObject $Before -DifferenceObject $after)) { throw "changed root was accepted for $Root" }
+}
+Assert-Unchanged '${absent.replaceAll("'", "''")}' '<absent>'
+Assert-Unchanged '${empty.replaceAll("'", "''")}' '<root>|D|*'
+Assert-Unchanged '${nonempty.replaceAll("'", "''")}' '<root>|D|*'
+$before = Get-PersistentEvidenceFingerprint -Root '${created.replaceAll("'", "''")}'
+New-Item -ItemType Directory -Path '${created.replaceAll("'", "''")}' | Out-Null
+Assert-Changed $before '${created.replaceAll("'", "''")}'
+$before = Get-PersistentEvidenceFingerprint -Root '${removed.replaceAll("'", "''")}'
+Remove-Item -LiteralPath '${removed.replaceAll("'", "''")}' -Force
+Assert-Changed $before '${removed.replaceAll("'", "''")}'
+$before = Get-PersistentEvidenceFingerprint -Root '${content.replaceAll("'", "''")}'
+[IO.File]::WriteAllText((Join-Path '${content.replaceAll("'", "''")}' 'sentinel.txt'), 'after!')
+Assert-Changed $before '${content.replaceAll("'", "''")}'
+$before = Get-PersistentEvidenceFingerprint -Root '${metadata.replaceAll("'", "''")}'
+$metadataItem = Get-Item -LiteralPath (Join-Path '${metadata.replaceAll("'", "''")}' 'sentinel.txt')
+$metadataItem.LastWriteTimeUtc = $metadataItem.LastWriteTimeUtc.AddMinutes(-5)
+Assert-Changed $before '${metadata.replaceAll("'", "''")}'
+$before = Get-PersistentEvidenceFingerprint -Root '${structure.replaceAll("'", "''")}'
+New-Item -ItemType Directory -Path (Join-Path '${structure.replaceAll("'", "''")}' 'child') | Out-Null
+Assert-Changed $before '${structure.replaceAll("'", "''")}'
+function Get-FileHash { throw 'simulated hash uncertainty' }
+try { Get-PersistentEvidenceFingerprint -Root '${nonempty.replaceAll("'", "''")}' | Out-Null; throw 'hash uncertainty was accepted' } catch { if ($_.Exception.Message -notmatch 'simulated hash uncertainty') { throw } }
+function Get-ChildItem { throw 'simulated read uncertainty' }
+try { Get-PersistentEvidenceFingerprint -Root '${empty.replaceAll("'", "''")}' | Out-Null; throw 'read uncertainty was accepted' } catch { if ($_.Exception.Message -notmatch 'simulated read uncertainty') { throw } }
+`
+  try {
+    writeFileSync(harness, harnessText)
+    execFileSync('pwsh', ['-NoProfile', '-File', harness], { cwd: repoRoot, stdio: 'pipe' })
   } finally {
     rmSync(fixture, { recursive: true, force: true })
   }

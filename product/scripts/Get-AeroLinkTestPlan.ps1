@@ -117,22 +117,25 @@ function Get-StringArray {
 
 function Get-PersistentEvidenceFingerprint {
     param([Parameter(Mandatory)][string]$Root)
-    if (-not (Test-Path -LiteralPath $Root)) { return @('<absent>') }
+    if (-not (Test-Path -LiteralPath $Root -ErrorAction Stop)) { return @('<absent>') }
+    if (-not (Test-Path -LiteralPath $Root -PathType Container -ErrorAction Stop)) { throw 'Persistent evidence root was not a directory.' }
     $rootFull = [IO.Path]::GetFullPath($Root).TrimEnd('\')
+    $rootItem = Get-Item -LiteralPath $rootFull -Force -ErrorAction Stop
     $items = @(Get-ChildItem -LiteralPath $Root -Force -Recurse -ErrorAction Stop | Sort-Object FullName)
     if ($items.Count -gt 10000) { throw 'Persistent evidence fingerprint exceeded its entry bound.' }
     $fingerprint = [System.Collections.Generic.List[string]]::new()
+    [void]$fingerprint.Add("<root>|D|$($rootItem.CreationTimeUtc.Ticks)|$($rootItem.LastWriteTimeUtc.Ticks)|$([int64]$rootItem.Attributes)")
     $totalBytes = [int64]0
     foreach ($item in $items) {
         $relative = $item.FullName.Substring($rootFull.Length).TrimStart('\', '/')
         if ($item.PSIsContainer) {
-            [void]$fingerprint.Add("$relative|D|$($item.LastWriteTimeUtc.Ticks)")
+            [void]$fingerprint.Add("$relative|D|$($item.CreationTimeUtc.Ticks)|$($item.LastWriteTimeUtc.Ticks)|$([int64]$item.Attributes)")
         }
         else {
             $totalBytes += [int64]$item.Length
             if ($totalBytes -gt 268435456) { throw 'Persistent evidence fingerprint exceeded its byte bound.' }
             $hash = (Get-FileHash -LiteralPath $item.FullName -Algorithm SHA256 -ErrorAction Stop).Hash
-            [void]$fingerprint.Add("$relative|F|$($item.Length)|$($item.LastWriteTimeUtc.Ticks)|$hash")
+            [void]$fingerprint.Add("$relative|F|$($item.Length)|$($item.CreationTimeUtc.Ticks)|$($item.LastWriteTimeUtc.Ticks)|$([int64]$item.Attributes)|$hash")
         }
     }
     return @($fingerprint.ToArray())
@@ -354,7 +357,8 @@ function Get-DockerOwnedResource {
             $diagnostic -match '(?im)^\s*(?:error:\s*|error response from daemon:\s*)?no such object\s*:'
         }
         else {
-            $diagnostic -match '(?im)^\s*(?:error response from daemon:\s*)?(?:get\s+[^:]+:\s*)?no such volume\s*:'
+            $escapedName = [regex]::Escape($Name)
+            $diagnostic -match "(?is)\A\s*error response from daemon:\s*(?:get\s+$escapedName\s*:\s*)?no such volume(?:\s*:\s*$escapedName)?\s*\z"
         }
         if ($absent) { return $null }
         throw 'inspect was not conclusive'
