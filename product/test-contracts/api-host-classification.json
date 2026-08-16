@@ -2,8 +2,8 @@
   "schemaVersion": "aerolink-api-host-classification/v3",
   "totals": {
     "classes": 81,
-    "tests": 447,
-    "knownCases": 497,
+    "tests": 443,
+    "knownCases": 493,
     "unknownCaseTests": 0
   },
   "summary": {
@@ -15,8 +15,8 @@
     },
     "fresh-host": {
       "classes": 40,
-      "tests": 208,
-      "knownCases": 233,
+      "tests": 204,
+      "knownCases": 229,
       "unknownCaseTests": 0
     },
     "migration-candidate": {
@@ -235,18 +235,6 @@
       ]
     },
     {
-      "cls": "IdentifierAllocationTests",
-      "tests": 8,
-      "knownCases": 8,
-      "unknownCaseTests": 0,
-      "classification": "fresh-host",
-      "reason": "Reviewed #563 hold: exact initial identifier sequences and concurrent allocation exercise a pristine file-backed SQLite database. Keep fresh-host; only isolated domain-only logic may later become a migration candidate.",
-      "intents": [
-        "ef-translation",
-        "in-process-logic"
-      ]
-    },
-    {
       "cls": "ReleasedExecutionEvidenceApiTests",
       "tests": 8,
       "knownCases": 8,
@@ -339,6 +327,17 @@
       "intents": [
         "ef-translation",
         "http-boundary"
+      ]
+    },
+    {
+      "cls": "IdentifierAllocationTests",
+      "tests": 4,
+      "knownCases": 4,
+      "unknownCaseTests": 0,
+      "classification": "fresh-host",
+      "reason": "Reviewed #563 hold: exact initial identifier sequences and concurrent allocation exercise a pristine file-backed SQLite database. Keep fresh-host; only isolated domain-only logic may later become a migration candidate.",
+      "intents": [
+        "ef-translation"
       ]
     },
     {

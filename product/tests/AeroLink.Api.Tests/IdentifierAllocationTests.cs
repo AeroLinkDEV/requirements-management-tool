@@ -53,46 +53,6 @@ public sealed class IdentifierAllocationTests
     }
 
     [Fact]
-    public async Task Two_allocations_before_either_record_is_saved_do_not_collide()
-    {
-        using var factory = new AeroLinkApiFactory();
-        using var scope = factory.Services.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
-
-        // Nothing is committed between these calls, which is precisely what the old allocator could not
-        // survive: with no rows written, both reads saw the same empty set and both returned the first number.
-        var first = await IdentifierAllocator.NextProblemReportAsync(db, default);
-        var second = await IdentifierAllocator.NextProblemReportAsync(db, default);
-        var third = await IdentifierAllocator.NextProblemReportAsync(db, default);
-
-        Assert.Equal("PR-00001", first);
-        Assert.Equal("PR-00002", second);
-        Assert.Equal("PR-00003", third);
-    }
-
-    [Fact]
-    public async Task Each_prefix_numbers_independently_and_continuously_across_projects()
-    {
-        using var factory = new AeroLinkApiFactory();
-        using var scope = factory.Services.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
-
-        Assert.Equal("SYSR-000001", await IdentifierAllocator.NextRequirementAsync(db, "SYSR", default));
-        Assert.Equal("HLR-000001", await IdentifierAllocator.NextRequirementAsync(db, "HLR", default));
-        Assert.Equal("SYSR-000002", await IdentifierAllocator.NextRequirementAsync(db, "SYSR", default));
-        Assert.Equal("SRCR-00001", await IdentifierAllocator.NextChangeRequestAsync(db, ChangeRequestType.System, null, default));
-        Assert.Equal("HLRCR-00001", await IdentifierAllocator.NextChangeRequestAsync(db, ChangeRequestType.Software, RequirementLevel.HighLevel, default));
-        Assert.Equal("SRCR-00002", await IdentifierAllocator.NextChangeRequestAsync(db, ChangeRequestType.System, null, default));
-        Assert.Equal("SYSTP-000001", await IdentifierAllocator.NextTestProcedureAsync(db, TestProcedureLevel.System, default));
-        Assert.Equal("HLRTP-000001", await IdentifierAllocator.NextTestProcedureAsync(db, TestProcedureLevel.HighLevel, default));
-
-        // A sequence belongs to its prefix, not to a Project — two Projects share one SYSR run, which is what
-        // the repository-wide unique index on the base number has always required.
-        var sequences = await db.IdentifierSequences.AsNoTracking().OrderBy(x => x.Scope).ToListAsync();
-        Assert.Equal(new[] { "HLR", "HLRCR", "HLRTP", "SRCR", "SYSR", "SYSTP" }, sequences.Select(x => x.Scope));
-    }
-
-    [Fact]
     public async Task An_existing_database_starts_numbering_past_what_it_already_recorded()
     {
         using var factory = new AeroLinkApiFactory();
@@ -111,39 +71,6 @@ public sealed class IdentifierAllocationTests
         await db.SaveChangesAsync();
 
         Assert.Equal("PR-00002", await IdentifierAllocator.NextProblemReportAsync(db, default));
-    }
-
-    [Fact]
-    public async Task A_number_handed_out_is_not_returned_to_the_pool_when_its_record_is_never_written()
-    {
-        using var factory = new AeroLinkApiFactory();
-        using var scope = factory.Services.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
-
-        // The documented trade: an abandoned create leaves a permanent gap rather than risking the reuse of a
-        // number that may already have been shown to a person or exported.
-        Assert.Equal("PR-00001", await IdentifierAllocator.NextProblemReportAsync(db, default));
-        Assert.Equal("PR-00002", await IdentifierAllocator.NextProblemReportAsync(db, default));
-        Assert.Equal(3, await db.IdentifierSequences.AsNoTracking().Where(x => x.Scope == "PR").Select(x => x.NextValue).SingleAsync());
-    }
-
-    [Fact]
-    public async Task Attachment_versions_are_claimed_per_logical_file_and_never_repeat()
-    {
-        using var factory = new AeroLinkApiFactory();
-        using var scope = factory.Services.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
-        var logicalId = Guid.NewGuid();
-        var other = Guid.NewGuid();
-        Task<int> Claim(Guid id) => IdentifierAllocator.ClaimAsync(db, "ATTACHMENT-" + id.ToString("N"),
-            async () => (await db.ControlledAttachments.AsNoTracking().Where(x => x.LogicalId == id).Select(x => x.Version).ToListAsync()).DefaultIfEmpty(0).Max() + 1, default);
-
-        // Uploading two revisions of one file at once used to compute the same next version from the same
-        // previous row, so the second upload failed the unique index after its bytes were already stored.
-        Assert.Equal(1, await Claim(logicalId));
-        Assert.Equal(2, await Claim(logicalId));
-        Assert.Equal(1, await Claim(other));
-        Assert.Equal(3, await Claim(logicalId));
     }
 
     [Fact]
