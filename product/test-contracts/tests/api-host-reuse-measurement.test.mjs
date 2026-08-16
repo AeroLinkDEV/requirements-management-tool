@@ -104,6 +104,13 @@ test('script contract keeps telemetry aggregation, isolated evidence, and altern
   assert.match(source, /Run mode requires exactly 10 measured observations/)
   assert.match(source, /summary must contain exactly 10 required runs/)
   assert.match(source, /full sorted case-name manifest/)
+  assert.match(source, /authoritative seeded planner/)
+  assert.match(source, /Run mode always restores and builds/)
+  assert.match(source, /Forced cleanup is fail-closed without Windows Job Object containment/)
+  assert.match(source, /Get-ProcessIdentityResult/)
+  assert.match(source, /Test-OpenedProcessIdentity/)
+  assert.match(source, /cleanup result was unavailable/)
+  assert.match(source, /remaining owned processes/)
   assert.match(source, /live discovery/)
   assert.match(source, /recorded condition worktree paths to exist/)
   assert.match(source, /Refusing to reuse non-empty observation directory/)
@@ -270,6 +277,26 @@ test('evaluate rejects forged matching manifests and missing final worktree evid
   assert.notEqual(forged.result.status, 0)
   assert.equal(existsSync(join(forged.output, 'decision.json')), false)
 
+  const partitionBaseline = makeLiveSummary(plan, 'baseline', 100)
+  const partitionTreatment = makeLiveSummary(plan, 'treatment', 80)
+  const partition = partitionBaseline.observations[0].partition
+  const sourceIndex = partition.shards.findIndex((shard) => shard.classes.length > 0)
+  const targetIndex = partition.shards.findIndex((shard, index) => index !== sourceIndex && shard.classes.length > 0)
+  assert.notEqual(sourceIndex, -1)
+  assert.notEqual(targetIndex, -1)
+  const movedClass = partition.shards[sourceIndex].classes.shift()
+  partition.shards[targetIndex].classes.push(movedClass)
+  const classLoads = new Map(plan.baselineManifest.classFacts.map((item) => [item.name, item.cases]))
+  for (const shard of partition.shards) {
+    shard.classes.sort()
+    shard.expectedCases = shard.classes.reduce((sum, className) => sum + classLoads.get(className), 0)
+    shard.filters = shard.classes.map((className) => `FullyQualifiedName~${className}.`).join('|')
+  }
+  const forgedPartition = evaluateLive(plan, partitionBaseline, partitionTreatment)
+  t.after(() => rmSync(forgedPartition.directory, { recursive: true, force: true }))
+  assert.notEqual(forgedPartition.result.status, 0)
+  assert.equal(existsSync(join(forgedPartition.output, 'decision.json')), false)
+
   const validBaseline = makeLiveSummary(plan, 'baseline', 100)
   const validTreatment = makeLiveSummary(plan, 'treatment', 80)
   delete validBaseline.observations[0].finalWorktree
@@ -297,9 +324,31 @@ test('plan rejects output inside a condition worktree', () => {
 
 test('plan rejects an NTFS junction resolving into a condition worktree', (t) => {
   const parent = mkdtempSync(join(tmpdir(), 'aerolink-563-junction-'))
-  const junction = join(parent, 'output-junction')
+  const baselineTarget = join(parent, 'baseline-target')
+  const treatmentTarget = join(parent, 'treatment-target')
+  const baselineAlias = join(parent, 'baseline-alias')
+  mkdirSync(baselineTarget, { recursive: true })
+  mkdirSync(treatmentTarget, { recursive: true })
+  writeFileSync(join(baselineTarget, 'README.md'), 'junction containment fixture\n')
+  writeFileSync(join(treatmentTarget, 'README.md'), 'independent treatment fixture\n')
+  const gitCommands = [
+    ['init', '--quiet', baselineTarget],
+    ['-C', baselineTarget, 'add', 'README.md'],
+    ['-C', baselineTarget, '-c', 'user.name=contract', '-c', 'user.email=contract@example.invalid', 'commit', '--quiet', '-m', 'fixture'],
+    ['init', '--quiet', treatmentTarget],
+    ['-C', treatmentTarget, 'add', 'README.md'],
+    ['-C', treatmentTarget, '-c', 'user.name=contract', '-c', 'user.email=contract@example.invalid', 'commit', '--quiet', '-m', 'fixture'],
+  ]
+  for (const args of gitCommands) {
+    const gitResult = spawnSync('git', args, { encoding: 'utf8', windowsHide: true })
+    if (gitResult.status !== 0) {
+      rmSync(parent, { recursive: true, force: true })
+      t.skip(`Temporary Git fixture unavailable: ${gitResult.stderr || gitResult.stdout}`)
+      return
+    }
+  }
   const quotePs = (value) => `'${value.replaceAll("'", "''")}'`
-  const create = spawnSync(pwsh, ['-NoProfile', '-Command', `New-Item -ItemType Junction -Path ${quotePs(junction)} -Target ${quotePs(repoRoot)} | Out-Null`], {
+  const create = spawnSync(pwsh, ['-NoProfile', '-Command', `New-Item -ItemType Junction -Path ${quotePs(baselineAlias)} -Target ${quotePs(baselineTarget)} | Out-Null`], {
     encoding: 'utf8',
     windowsHide: true,
   })
@@ -309,15 +358,19 @@ test('plan rejects an NTFS junction resolving into a condition worktree', (t) =>
     return
   }
   t.after(() => {
-    spawnSync(pwsh, ['-NoProfile', '-Command', `Remove-Item -LiteralPath ${quotePs(junction)} -Force -ErrorAction SilentlyContinue`], { encoding: 'utf8', windowsHide: true })
+    spawnSync(pwsh, ['-NoProfile', '-Command', `Remove-Item -LiteralPath ${quotePs(baselineAlias)} -Force -ErrorAction SilentlyContinue`], { encoding: 'utf8', windowsHide: true })
     rmSync(parent, { recursive: true, force: true })
   })
+  const output = join(baselineTarget, 'measurement-output')
   const result = runPowerShellRaw([
-    '-Mode', 'Plan', '-BaselinePath', repoRoot, '-TreatmentPath', repoRoot,
-    '-OutputRoot', junction, '-Runs', '2', '-Seeds', '41,42', '-TestListPath', fixture,
+    '-Mode', 'Plan', '-BaselinePath', baselineAlias, '-TreatmentPath', treatmentTarget,
+    '-OutputRoot', output, '-Runs', '2', '-Seeds', '41,42', '-TestListPath', fixture,
   ])
   assert.notEqual(result.status, 0)
   assert.match(`${result.stdout}\n${result.stderr}`, /Output must be outside the condition worktrees/)
+  assert.equal(existsSync(join(output, 'plan.json')), false)
+  assert.equal(existsSync(join(baselineTarget, 'plan.json')), false)
+  assert.equal(existsSync(join(baselineTarget, 'plan.md')), false)
 })
 
 test('run rejects a non-authoritative one-run configuration before touching worktrees', () => {

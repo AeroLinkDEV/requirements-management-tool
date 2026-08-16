@@ -2,8 +2,8 @@
 
 `product/tools/measure-api-host-reuse.ps1` is a Windows-only, read-only-to-source benchmark harness for the
 #563 host-reuse decision. It never checks out, fetches, merges, or changes either condition worktree. It writes
-only to the selected output directory, apart from the normal `dotnet restore/build` outputs when `Run` mode is
-used without `-SkipBuild`. The output directory must be outside both worktrees.
+only to the selected output directory, apart from the normal `dotnet restore/build` outputs required by `Run` mode.
+The output directory must be outside both worktrees.
 
 ## Plan first
 
@@ -33,9 +33,9 @@ class union, and alternating order. Plan mode writes only `plan.json` and `plan.
 
 Prepare two clean worktrees at the exact baseline and treatment commits. The test lists must describe the same
 classes, exact test-case names, and case count; a difference is rejected. Run mode requires distinct clean worktrees
-at distinct SHAs, rejects `-TestListPath`, and refuses a non-empty output directory. Build is performed once per
-condition before measurement unless `-SkipBuild` is explicitly supplied. Run mode saves `plan.json` and `plan.md`
-before any restore/build; those files describe the execution that will follow.
+at distinct SHAs, rejects `-TestListPath`, rejects `-SkipBuild`, and refuses a non-empty output directory. It restores
+and builds each exact clean SHA before live test discovery and partition generation, then saves `plan.json` and
+`plan.md` before any measured shard starts; those files describe the freshly built execution that will follow.
 
 ```powershell
 pwsh -NoProfile -File "$root\product\tools\measure-api-host-reuse.ps1" `
@@ -86,13 +86,15 @@ rather than a claimed pass. A completed shard that produced no successful active
 Each shard is bounded by `-TimeoutMinutes` (30 by default). Restore, build, discovery, and aggregation processes are
 bounded by `-ProcessTimeoutMinutes` (60 by default). Process cleanup tracks PID creation identities and refuses to kill
 unverified or over-bound process trees. If the launch identity is unavailable, cleanup performs no kill at all and
-returns a cleanup failure, which invalidates the observation. While the root remains alive, fresh ancestry snapshots
-are merged into the bounded identity set; after cleanup every previously observed identity is independently checked,
-even if the root exited or a child was reparented. An identity change is an error and never authorizes a kill. A child
-spawned after the final ancestry snapshot can still escape observation on Windows; the harness fails closed on snapshot,
-identity, or cleanup uncertainty rather than claiming the tree was safely stopped. A timeout stops only the exact
-identity-verified process objects launched by the harness and invalidates that observation; it is never silently
-converted into a pass.
+returns a cleanup failure, which invalidates the observation. This harness does not claim Windows Job Object containment:
+any forced cleanup is unconditionally fail-closed, kills no process, and records the possible residual-process risk.
+While the root remains alive, fresh ancestry snapshots are merged into the bounded identity set; after normal exit every
+previously observed identity is independently checked, even if the root exited or a child was reparented. An identity
+change or CIM/enumeration failure is an error and never authorizes a kill. For the non-forced cleanup path, a process is
+opened by handle, its StartTime is immediately checked against the recorded identity, and only that verified Process
+object may be killed. A child spawned after the final ancestry snapshot can still escape observation on Windows; the
+harness fails closed rather than claiming the tree was safely stopped. Any cleanup uncertainty invalidates the
+observation and is never silently converted into a pass.
 
 No failure may be removed from the ten-run denominator. Re-run a failed seed only as a separately identified
 diagnostic; it does not replace the failed observation.

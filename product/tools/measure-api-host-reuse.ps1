@@ -40,12 +40,23 @@ function Stop-ProcessSafely {
         [Parameter(Mandatory = $true)][System.Diagnostics.Process]$Process,
         [object]$ExpectedIdentity,
         [object[]]$KnownRecords = @(),
-        [int]$TimeoutMilliseconds = 5000
+        [int]$TimeoutMilliseconds = 5000,
+        [switch]$Forced
     )
 
     $rootId = $Process.Id
     if (-not $ExpectedIdentity) {
         return [pscustomobject]@{ ownedIds = @($rootId); exited = $false; remainingIds = @($rootId); error = 'No expected process identity was available; no process was killed.' }
+    }
+    if ($Forced) {
+        $knownIds = @(@($KnownRecords) | ForEach-Object processId | Where-Object { $null -ne $_ } | Sort-Object -Unique)
+        if ($knownIds -notcontains $rootId) { $knownIds = @($rootId) + $knownIds }
+        return [pscustomobject]@{
+            ownedIds = $knownIds
+            exited = $false
+            remainingIds = $knownIds
+            error = 'Forced cleanup is fail-closed without Windows Job Object containment; no process was killed and residual descendants remain unverified.'
+        }
     }
     $snapshot = Get-ProcessTreeSnapshot @($rootId)
     if (-not $snapshot.success) {
@@ -79,7 +90,9 @@ function Stop-ProcessSafely {
         # While the root is still alive, refresh the ancestry and merge it into
         # the immutable identity set. This is the best bounded protection
         # available against a child being spawned between snapshots.
-        $rootCurrent = Get-ProcessIdentity $rootId
+        $rootResult = Get-ProcessIdentityResult $rootId
+        if ($rootResult.error) { $errors.Add($rootResult.error); break }
+        $rootCurrent = $rootResult.identity
         if ($rootCurrent -and -not (Test-ProcessIdentity $rootCurrent $ExpectedIdentity)) {
             $errors.Add('Root PID identity changed; no kill was attempted.')
             break
@@ -95,7 +108,9 @@ function Stop-ProcessSafely {
 
         foreach ($record in @($known.Values | Sort-Object @{ Expression = { if ([int]$_.processId -eq $rootId) { 0 } else { 1 } } }, processId)) {
             $pid = [int]$record.processId
-            $current = Get-ProcessIdentity $pid
+            $currentResult = Get-ProcessIdentityResult $pid
+            if ($currentResult.error) { $errors.Add($currentResult.error); continue }
+            $current = $currentResult.identity
             if (-not $current) { continue }
             if (-not (Test-ProcessIdentity $current $record)) {
                 $errors.Add("Process identity changed for PID $pid; no kill was attempted.")
@@ -106,6 +121,7 @@ function Stop-ProcessSafely {
             if ($attempted.ContainsKey($key)) { continue }
             try {
                 $ownedProcess = if ($pid -eq $rootId) { $Process } else { Get-Process -Id $pid -ErrorAction Stop }
+                if (-not (Test-OpenedProcessIdentity $ownedProcess $record)) { throw "Opened process handle identity did not match PID $pid; no kill was attempted." }
                 if (-not $ownedProcess.HasExited) { $ownedProcess.Kill() }
                 $attempted[$key] = $true
             } catch { $errors.Add("PID $pid cleanup failed: $($_.Exception.Message)"); $attempted[$key] = $true }
@@ -113,7 +129,9 @@ function Stop-ProcessSafely {
         Start-Sleep -Milliseconds 100
         $remainingNow = @()
         foreach ($record in @($known.Values)) {
-            $current = Get-ProcessIdentity ([int]$record.processId)
+            $currentResult = Get-ProcessIdentityResult ([int]$record.processId)
+            if ($currentResult.error) { $errors.Add($currentResult.error); continue }
+            $current = $currentResult.identity
             if ($current -and (Test-ProcessIdentity $current $record)) { $remainingNow += $record }
             elseif ($current) { $errors.Add("Process identity changed for PID $($record.processId); no kill was attempted.") }
         }
@@ -125,7 +143,9 @@ function Stop-ProcessSafely {
     # current process tree. An absent PID is safe; a changed identity is not.
     $remaining = [System.Collections.Generic.List[int]]::new()
     foreach ($record in @($known.Values)) {
-        $current = Get-ProcessIdentity ([int]$record.processId)
+        $currentResult = Get-ProcessIdentityResult ([int]$record.processId)
+        if ($currentResult.error) { $errors.Add($currentResult.error); continue }
+        $current = $currentResult.identity
         if ($current -and (Test-ProcessIdentity $current $record)) { $remaining.Add([int]$record.processId) }
         elseif ($current) { $errors.Add("Process identity changed for PID $($record.processId); no kill was attempted.") }
     }
@@ -177,7 +197,7 @@ function Invoke-CapturedProcess {
         $stdoutTask = $process.StandardOutput.ReadToEndAsync()
         $stderrTask = $process.StandardError.ReadToEndAsync()
         $timedOut = -not $process.WaitForExit($TimeoutSeconds * 1000)
-        if ($timedOut) { $cleanup = Stop-ProcessSafely -Process $process -ExpectedIdentity $rootIdentity }
+        if ($timedOut) { $cleanup = Stop-ProcessSafely -Process $process -ExpectedIdentity $rootIdentity -Forced }
         else { $process.WaitForExit() }
         $stdout = if ($stdoutTask.Wait(5000)) { $stdoutTask.GetAwaiter().GetResult() } else { '' }
         $stderr = if ($stderrTask.Wait(5000)) { $stderrTask.GetAwaiter().GetResult() } else { '' }
@@ -187,7 +207,7 @@ function Invoke-CapturedProcess {
     } finally {
         try {
             if (-not $process.HasExited) {
-                $cleanup = Stop-ProcessSafely -Process $process -ExpectedIdentity $rootIdentity
+                $cleanup = Stop-ProcessSafely -Process $process -ExpectedIdentity $rootIdentity -Forced
             }
         } catch {
             if (-not $cleanup) { $cleanup = [pscustomobject]@{ exited = $false; remainingIds = @($process.Id); error = $_.Exception.Message } }
@@ -195,7 +215,11 @@ function Invoke-CapturedProcess {
     }
     if ($primaryError) {
         $message = "Process $FileName failed after start: $($primaryError.Exception.Message)"
-        if ($cleanup -and $cleanup.error) { $message += " Cleanup failure: $($cleanup.error)" }
+        $cleanupFailed = ($null -eq $cleanup) -or (-not [bool]$cleanup.exited) -or (@($cleanup.remainingIds).Count -gt 0) -or $cleanup.error
+        if ($cleanupFailed) {
+            $cleanupMessage = if ($cleanup -and $cleanup.error) { [string]$cleanup.error } elseif ($cleanup) { "remaining owned processes: $(@($cleanup.remainingIds) -join ',')" } else { 'cleanup result was unavailable' }
+            $message += " Cleanup failure: $cleanupMessage"
+        }
         throw $message
     }
     [pscustomobject]@{
@@ -383,11 +407,102 @@ function Assert-SummaryManifestMatchesLive([object]$Persisted, [object]$Live, [s
     if (Compare-Object $persistedFacts $liveFacts) { Fail "$Condition persisted class facts differ from live discovery." }
 }
 
-function Get-ProcessIdentity([int]$Id) {
+function Assert-SummaryPartitionsMatchLive([object]$Summary, [object]$LiveManifest, [string]$Condition) {
+    $liveLoads = @{}
+    foreach ($class in @($LiveManifest.classes)) { $liveLoads[[string]$class.name] = [int]$class.cases }
+    $liveNames = @($LiveManifest.classes | ForEach-Object name | Sort-Object)
+    foreach ($observation in @($Summary.observations)) {
+        $seed = 0
+        if (-not [int]::TryParse(([string]$observation.seed), [ref]$seed)) { Fail "$Condition partition has a non-integer observation seed." }
+        $partition = $observation.partition
+        if ($null -eq $partition -or [string]$partition.algorithm -ne 'fisher-yates-then-lightest-shard') { Fail "$Condition seed $seed partition algorithm is not authoritative." }
+        if ([int]$partition.seed -ne $seed) { Fail "$Condition seed $seed partition seed does not match the observation." }
+        $shardCount = [int]$partition.shardCount
+        if ($shardCount -lt 1 -or $shardCount -gt $liveNames.Count) { Fail "$Condition seed $seed partition shardCount is invalid." }
+        $shards = @($partition.shards)
+        if ($shards.Count -ne $shardCount) { Fail "$Condition seed $seed partition shard count is incomplete." }
+        $seen = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
+        $recomputedCases = 0
+        foreach ($shard in $shards) {
+            $classes = @($shard.classes | ForEach-Object { [string]$_ })
+            foreach ($className in $classes) {
+                if (-not $seen.Add($className)) { Fail "$Condition seed $seed partition repeats class '$className'." }
+                if (-not $liveLoads.ContainsKey($className)) { Fail "$Condition seed $seed partition contains unknown class '$className'." }
+            }
+            $expectedCases = ($classes | ForEach-Object { $liveLoads[$_] } | Measure-Object -Sum).Sum
+            if ([int]$shard.expectedCases -ne [int]$expectedCases) { Fail "$Condition seed $seed shard $($shard.shard) expectedCases does not match live class loads." }
+            $expectedFilters = (@($classes | ForEach-Object { "FullyQualifiedName~$($_)." }) -join '|')
+            if ([string]$shard.filters -cne $expectedFilters) { Fail "$Condition seed $seed shard $($shard.shard) filters do not match its exact class list." }
+            $recomputedCases += [int]$expectedCases
+        }
+        if (Compare-Object @($seen | Sort-Object) $liveNames) { Fail "$Condition seed $seed partition class union does not exactly match live discovery." }
+        if ([int]$partition.totalCases -ne [int]$LiveManifest.caseCount -or $recomputedCases -ne [int]$LiveManifest.caseCount) { Fail "$Condition seed $seed partition totalCases does not match live discovery." }
+        $expected = New-Partition $LiveManifest.classes $seed $shardCount
+        if ([string]$partition.algorithm -ne [string]$expected.algorithm -or [int]$partition.totalCases -ne [int]$expected.totalCases) { Fail "$Condition seed $seed partition does not match the authoritative seeded planner." }
+        for ($index = 0; $index -lt $shardCount; $index++) {
+            $actualShard = $shards[$index]
+            $expectedShard = @($expected.shards)[$index]
+            if ([int]$actualShard.shard -ne [int]$expectedShard.shard -or
+                [int]$actualShard.expectedCases -ne [int]$expectedShard.expectedCases -or
+                (Compare-Object @($actualShard.classes) @($expectedShard.classes)) -or
+                [string]$actualShard.filters -cne [string]$expectedShard.filters) {
+                Fail "$Condition seed $seed shard $($index + 1) does not match the authoritative seeded planner."
+            }
+        }
+    }
+}
+
+function Get-ProcessIdentityResult([int]$Id) {
     try {
         $record = Get-CimInstance Win32_Process -Filter "ProcessId = $Id" -ErrorAction Stop | Select-Object -First 1 ProcessId, ParentProcessId, CreationDate, Name
-        if ($record) { [pscustomobject]@{ processId = [int]$record.ProcessId; parentProcessId = [int]$record.ParentProcessId; creationDate = [string]$record.CreationDate; name = [string]$record.Name } }
-    } catch { $null }
+        if (-not $record) { return [pscustomobject]@{ found = $false; identity = $null; error = $null } }
+        return [pscustomobject]@{
+            found = $true
+            identity = [pscustomobject]@{ processId = [int]$record.ProcessId; parentProcessId = [int]$record.ParentProcessId; creationDate = [string]$record.CreationDate; name = [string]$record.Name }
+            error = $null
+        }
+    } catch {
+        return [pscustomobject]@{ found = $false; identity = $null; error = "CIM identity lookup failed for PID ${Id}: $($_.Exception.Message)" }
+    }
+}
+
+function Get-ProcessIdentity([int]$Id) {
+    $result = Get-ProcessIdentityResult $Id
+    if ($result.error) { return $null }
+    $result.identity
+}
+
+function Convert-ProcessCreationDate([string]$Value) {
+    try {
+        if ($Value -match '^\d{14}\.\d{6}[+-]\d{3}') {
+            return [System.Management.ManagementDateTimeConverter]::ToDateTime($Value).ToUniversalTime()
+        }
+        return [DateTimeOffset]::Parse($Value).UtcDateTime
+    } catch { return $null }
+}
+
+function Test-OpenedProcessIdentity([System.Diagnostics.Process]$Process, [object]$Expected) {
+    try {
+        if ($null -eq $Process -or $null -eq $Expected -or [int]$Process.Id -ne [int]$Expected.processId) { return $false }
+        $openedStart = $Process.StartTime.ToUniversalTime()
+        $expectedStart = Convert-ProcessCreationDate ([string]$Expected.creationDate)
+        if ($null -eq $expectedStart) { return $false }
+        [math]::Abs(($openedStart - $expectedStart).TotalMilliseconds) -le 1
+    } catch { $false }
+}
+
+function Get-KnownProcessResidualError([object[]]$Records) {
+    $remaining = [System.Collections.Generic.List[int]]::new()
+    $errors = [System.Collections.Generic.List[string]]::new()
+    foreach ($record in @($Records)) {
+        $result = Get-ProcessIdentityResult ([int]$record.processId)
+        if ($result.error) { $errors.Add($result.error); continue }
+        if (-not $result.found) { continue }
+        if (Test-ProcessIdentity $result.identity $record) { $remaining.Add([int]$record.processId) }
+        else { $errors.Add("Process identity changed for PID $($record.processId); no kill was attempted.") }
+    }
+    if ($remaining.Count -gt 0) { $errors.Add("Previously observed owned processes remain: $($remaining -join ',').") }
+    @($errors | Sort-Object -Unique) -join ' '
 }
 
 function Test-ProcessIdentity([object]$Actual, [object]$Expected) {
@@ -527,9 +642,13 @@ function New-TestProcess {
         $primary = $_.Exception.Message
         $cleanup = $null
         try {
-            if (-not $process.HasExited) { $cleanup = Stop-ProcessSafely -Process $process -ExpectedIdentity (Get-ProcessIdentity $process.Id) }
+            if (-not $process.HasExited) { $cleanup = Stop-ProcessSafely -Process $process -ExpectedIdentity (Get-ProcessIdentity $process.Id) -Forced }
         } catch { $cleanup = [pscustomobject]@{ exited = $false; error = $_.Exception.Message } }
-        if ($cleanup -and $cleanup.error) { throw "API shard launch failed: $primary Cleanup failure: $($cleanup.error)" }
+        $cleanupFailed = ($null -eq $cleanup) -or (-not [bool]$cleanup.exited) -or (@($cleanup.remainingIds).Count -gt 0) -or $cleanup.error
+        if ($cleanupFailed) {
+            $cleanupMessage = if ($cleanup -and $cleanup.error) { [string]$cleanup.error } elseif ($cleanup) { "remaining owned processes: $(@($cleanup.remainingIds) -join ',')" } else { 'cleanup result was unavailable' }
+            throw "API shard launch failed: $primary Cleanup failure: $cleanupMessage"
+        }
         throw $primary
     }
 }
@@ -578,7 +697,7 @@ function Wait-TestProcesses([object[]]$Shards) {
             if ($active.Count -eq 0) { break }
             if ([DateTimeOffset]::UtcNow -gt $deadline) {
                 foreach ($shard in $active) {
-                    $cleanup = Stop-ProcessSafely -Process $shard.process -ExpectedIdentity $shard.rootIdentity -KnownRecords @($shard.ownedProcessRecords)
+                    $cleanup = Stop-ProcessSafely -Process $shard.process -ExpectedIdentity $shard.rootIdentity -KnownRecords @($shard.ownedProcessRecords) -Forced
                     $shard.timedOut = $true
                     if (-not $cleanup.exited) { $shard.cleanupFailure = "Owned process tree did not exit: $($cleanup.remainingIds -join ',')" }
                     if ($cleanup.error) { $shard.cleanupFailure = $cleanup.error }
@@ -592,10 +711,13 @@ function Wait-TestProcesses([object[]]$Shards) {
     } finally {
         foreach ($shard in $Shards) {
             try {
-                if (-not $shard.process.HasExited -or @($shard.ownedProcessRecords).Count -gt 0) {
-                    $cleanup = Stop-ProcessSafely -Process $shard.process -ExpectedIdentity $shard.rootIdentity -KnownRecords @($shard.ownedProcessRecords)
-                    if (-not $cleanup.exited) { $shard.cleanupFailure = "Owned process tree did not exit: $($cleanup.remainingIds -join ',')" }
+                if (-not $shard.process.HasExited) {
+                    $cleanup = Stop-ProcessSafely -Process $shard.process -ExpectedIdentity $shard.rootIdentity -KnownRecords @($shard.ownedProcessRecords) -Forced
+                    if (-not $cleanup.exited) { $shard.cleanupFailure = "Owned process tree was not force-cleaned: $($cleanup.remainingIds -join ',')" }
                     if ($cleanup.error) { $shard.cleanupFailure = $cleanup.error }
+                } elseif (@($shard.ownedProcessRecords).Count -gt 0) {
+                    $residualError = Get-KnownProcessResidualError @($shard.ownedProcessRecords)
+                    if ($residualError) { $shard.cleanupFailure = $residualError }
                 }
                 if (-not $shard.process.WaitForExit(5000)) { $shard.cleanupFailure = 'Process did not exit within the cleanup wait.' }
             } catch { $shard.cleanupFailure = $_.Exception.Message }
@@ -685,7 +807,7 @@ function Invoke-Observation {
         foreach ($shard in $shards) {
             try {
                 if (-not $shard.process.HasExited) {
-                    $cleanup = Stop-ProcessSafely -Process $shard.process -ExpectedIdentity $shard.rootIdentity -KnownRecords @($shard.ownedProcessRecords)
+                    $cleanup = Stop-ProcessSafely -Process $shard.process -ExpectedIdentity $shard.rootIdentity -KnownRecords @($shard.ownedProcessRecords) -Forced
                     if (-not $cleanup.exited) { $shard.cleanupFailure = "Owned process tree did not exit: $($cleanup.remainingIds -join ',')" }
                 }
             } catch { $shard.cleanupFailure = $_.Exception.Message }
@@ -1058,12 +1180,13 @@ function Get-CanonicalPath([string]$Path) {
             $target = if ($targetValues.Count -gt 0) { [string]$targetValues[0] } else { [string](Resolve-Path -LiteralPath $candidate -ErrorAction Stop).Path }
             if (-not [System.IO.Path]::IsPathRooted($target)) { $target = Join-Path (Split-Path -Parent $candidate) $target }
             $target = [System.IO.Path]::GetFullPath($target)
-            $remaining = @($components[$index..($components.Count - 1)]) -join '|'
+            $remainingComponents = if (($index + 1) -lt $components.Count) { @($components[($index + 1)..($components.Count - 1)]) } else { @() }
+            $remaining = $remainingComponents -join '|'
             $visitKey = ("{0}|{1}" -f $target.ToLowerInvariant(), $remaining.ToLowerInvariant())
             if ($visited.ContainsKey($visitKey)) { Fail "Reparse-point resolution loop detected at: $candidate" }
             $visited[$visitKey] = $true
             $current = $target
-            $components = @($components[$index..($components.Count - 1)])
+            $components = $remainingComponents
             $restarted = $true
             break
         }
@@ -1199,6 +1322,7 @@ function Main {
             $liveManifest = Get-TestManifest $liveInfo.path $null
             Assert-SummaryManifestMatchesLive $summary.manifest $liveManifest $condition
             Assert-SummaryManifestMatchesLive $summary.conditionMetadata.manifest $liveManifest "$condition condition metadata"
+            Assert-SummaryPartitionsMatchLive $summary $liveManifest $condition
             $liveEnvironment = Get-EnvironmentInfo $liveInfo.path
             $liveFingerprint = Get-EnvironmentFingerprint $liveEnvironment
             if ([string]$liveFingerprint -ne [string]$summary.conditionMetadata.environmentFingerprint) { Fail "Evaluate $condition environment fingerprint no longer matches the recorded evidence." }
@@ -1212,10 +1336,7 @@ function Main {
     if (-not $TreatmentPath) { $TreatmentPath = $BaselinePath }
     if ($Mode -eq 'Run' -and $Runs -ne 10) { Fail 'Run mode requires exactly 10 measured observations.' }
     if ($Mode -eq 'Run' -and $TestListPath) { Fail 'Run mode requires live discovery; TestListPath is allowed only for Plan contract smoke.' }
-    if ($Mode -eq 'Run' -and -not $SkipBuild -and -not $Warmup) {
-        # A warmup is optional, but a build is never optional unless SkipBuild was explicitly requested.
-        # This branch exists only to make the safety warning visible in the generated plan.
-    }
+    if ($Mode -eq 'Run' -and $SkipBuild) { Fail 'Run mode always restores and builds each exact clean SHA before live test discovery; SkipBuild is not allowed.' }
     if (-not $IsWindows) { Fail 'This harness is intentionally Windows-only.' }
 
     $baselineInfo = Get-RepoInfo $BaselinePath
@@ -1226,6 +1347,19 @@ function Main {
     Assert-OutputOutsideWorktrees $OutputRoot @($baselineInfo, $treatmentInfo)
     if ($Mode -eq 'Run' -and $baselineInfo.head.Equals($treatmentInfo.head, [StringComparison]::OrdinalIgnoreCase)) {
         Fail 'Run mode rejects identical baseline and treatment SHAs; provide two distinct commits.'
+    }
+    if ($Mode -eq 'Run') {
+        if (-not $baselineInfo.clean -or -not $treatmentInfo.clean) { Fail 'Run mode requires clean baseline and treatment worktrees before restore/build.' }
+        Assert-EmptyOutput $OutputRoot 'Run'
+        foreach ($condition in @(@('baseline', $BaselinePath), @('treatment', $TreatmentPath))) {
+            if ($condition[0] -eq 'baseline') { Assert-WorktreeStable $baselineInfo } else { Assert-WorktreeStable $treatmentInfo }
+            $restore = Invoke-CapturedProcess -FileName $DotnetExecutable -Arguments @('restore', (Join-Path $condition[1] $SolutionPath)) -WorkingDirectory $condition[1]
+            if ($restore.ExitCode -ne 0) { Fail "$($condition[0]) restore failed.`n$($restore.Stdout)`n$($restore.Stderr)" }
+            if ($condition[0] -eq 'baseline') { Assert-WorktreeStable $baselineInfo } else { Assert-WorktreeStable $treatmentInfo }
+            $build = Invoke-CapturedProcess -FileName $DotnetExecutable -Arguments @('build', (Join-Path $condition[1] $SolutionPath), '--configuration', 'Release', '--no-restore') -WorkingDirectory $condition[1]
+            if ($build.ExitCode -ne 0) { Fail "$($condition[0]) build failed.`n$($build.Stdout)`n$($build.Stderr)" }
+            if ($condition[0] -eq 'baseline') { Assert-WorktreeStable $baselineInfo } else { Assert-WorktreeStable $treatmentInfo }
+        }
     }
     $environment = [ordered]@{
         baseline = Get-EnvironmentInfo $BaselinePath
@@ -1253,6 +1387,10 @@ function Main {
         environmentFingerprint = Get-EnvironmentFingerprint $environment.treatment
     }
     $partitions = @($Seeds[0..($Runs - 1)] | ForEach-Object { New-Partition $baselineManifest.classes $_ $ShardCount })
+    if ($Mode -eq 'Run') {
+        Assert-WorktreeStable $baselineInfo
+        Assert-WorktreeStable $treatmentInfo
+    }
     $manifest = [pscustomobject]@{ baseline = $baselineManifest; treatment = $treatmentManifest; baselineMetadata = $baselineMetadata; treatmentMetadata = $treatmentMetadata }
     if ($Mode -eq 'Plan') {
         Assert-EmptyOutput $OutputRoot 'Plan'
@@ -1261,21 +1399,9 @@ function Main {
         return
     }
 
-    if (-not $baselineInfo.clean -or -not $treatmentInfo.clean) { Fail 'Run mode requires clean baseline and treatment worktrees.' }
-    Assert-EmptyOutput $OutputRoot
     $plan = New-Plan $OutputRoot $baselineInfo $treatmentInfo $manifest $partitions 'Run'
     Assert-WorktreeStable $baselineInfo
     Assert-WorktreeStable $treatmentInfo
-    if (-not $SkipBuild) {
-        foreach ($condition in @(@('baseline', $BaselinePath), @('treatment', $TreatmentPath))) {
-            if ($condition[0] -eq 'baseline') { Assert-WorktreeStable $baselineInfo } else { Assert-WorktreeStable $treatmentInfo }
-            $restore = Invoke-CapturedProcess -FileName $DotnetExecutable -Arguments @('restore', (Join-Path $condition[1] $SolutionPath)) -WorkingDirectory $condition[1]
-            if ($restore.ExitCode -ne 0) { Fail "$($condition[0]) restore failed.`n$($restore.Stdout)`n$($restore.Stderr)" }
-            if ($condition[0] -eq 'baseline') { Assert-WorktreeStable $baselineInfo } else { Assert-WorktreeStable $treatmentInfo }
-            $build = Invoke-CapturedProcess -FileName $DotnetExecutable -Arguments @('build', (Join-Path $condition[1] $SolutionPath), '--configuration', 'Release', '--no-restore') -WorkingDirectory $condition[1]
-            if ($build.ExitCode -ne 0) { Fail "$($condition[0]) build failed.`n$($build.Stdout)`n$($build.Stderr)" }
-        }
-    }
     Assert-WorktreeStable $baselineInfo
     Assert-WorktreeStable $treatmentInfo
     $all = @{ baseline = [System.Collections.Generic.List[object]]::new(); treatment = [System.Collections.Generic.List[object]]::new() }
