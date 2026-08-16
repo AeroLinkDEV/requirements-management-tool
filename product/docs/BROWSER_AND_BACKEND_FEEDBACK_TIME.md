@@ -418,9 +418,11 @@ support or refute the rollout gate.
 | `dispose` | 843 | 1.7 ms | 78.0 ms | 19.1 s |
 | `connectionOpen` | 451 | 0.4 ms | 2.0 ms | 0.4 s |
 
-433 host constructions for roughly 442 hosted test methods — not the larger xUnit invocation-case count.
-Disposal and connection opening are negligible; the entire floor is building the host. The p95 at more
-than five times the median means averages understate the tail.
+The eight-run telemetry recorded **433 host constructions**. Independently, the current inventory has
+**442 total test methods: 431 direct-host, 3 host-unknown, and 8 explicitly non-hosted**, across **492
+known xUnit cases**. These are distinct measures; runtime telemetry is authoritative for factory counts.
+Disposal and connection opening are negligible in that telemetry. The p95 at more than five times the
+median means averages understate the tail.
 
 ### Per-shard host cost and wall clock, eight runs
 

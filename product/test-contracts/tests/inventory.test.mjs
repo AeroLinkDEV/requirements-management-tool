@@ -1,8 +1,10 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { readFileSync } from 'node:fs'
+import { execFileSync } from 'node:child_process'
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { tmpdir } from 'node:os'
 import { buildHostArtifact, classifyClass } from '../lib/host-classification.mjs'
 import { buildIntentArtifact, classifyFile, summariseInventory } from '../lib/test-intent.mjs'
 
@@ -262,6 +264,19 @@ test('host-classification case totals join exactly to the intent inventory', () 
   const reusable = hostArtifact.summary['reusable-host']
   assert.equal(reusable.tests - reusable.classes, 167)
   assert.equal(reusable.knownCases - reusable.classes, 192)
+})
+
+test('host classification CLI distinguishes known cases from unknown-case methods', () => {
+  const temporaryDirectory = mkdtempSync(join(tmpdir(), 'aerolink-host-classification-cli-'))
+  try {
+    const output = execFileSync(process.execPath, [
+      fileURLToPath(new URL('../tools/generate-host-classification.mjs', import.meta.url)),
+      join(temporaryDirectory, 'artifact.json'),
+    ], { encoding: 'utf8' })
+    assert.match(output, /classification\s+classes\s+methods\s+known cases\s+unknown-case methods\s+share of methods/)
+  } finally {
+    rmSync(temporaryDirectory, { recursive: true, force: true })
+  }
 })
 
 test('committed inventories expose per-row case and host evidence', () => {

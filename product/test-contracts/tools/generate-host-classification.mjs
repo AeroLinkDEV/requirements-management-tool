@@ -15,7 +15,7 @@ const artifact = buildHostArtifact({ testsDirectory, inventory, overrides })
 const result = { totals: artifact.totals, summary: artifact.summary }
 
 console.log(`Classified ${result.totals.classes} API test classes (${result.totals.tests} methods, ${result.totals.knownCases} known cases)\n`)
-console.log('classification         classes   methods   cases   unknown methods   share of methods')
+console.log('classification         classes   methods   known cases   unknown-case methods   share of methods')
 for (const [key, entry] of Object.entries(result.summary).sort((a, b) => b[1].tests - a[1].tests)) {
   console.log(`${key.padEnd(22)}${String(entry.classes).padStart(8)}${String(entry.tests).padStart(9)}${String(entry.knownCases).padStart(8)}${String(entry.unknownCaseTests).padStart(17)}   ${((entry.tests / result.totals.tests) * 100).toFixed(1)}%`)
 }
