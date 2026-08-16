@@ -1,5 +1,4 @@
 name: Pull request overlap
-# Temporary #569 lifecycle proof B: shared CI surface; never merge.
 
 # Trusted-base advisory analysis. This workflow deliberately does not execute pull-request-head code:
 # the write-capable token is only exposed to the checker checked out from the default branch.

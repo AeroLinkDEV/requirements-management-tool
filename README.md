@@ -1,5 +1,7 @@
 # Aerospace Development Assurance Platform
 
+<!-- Temporary #569 lifecycle proof B: unrelated path; never merge. -->
+
 > **New here — human or model? Read [PROJECT_STATE.md](PROJECT_STATE.md) first, then the
 > [current product handoff](CURRENT_PRODUCT_HANDOFF_2026-08-10.md).** They record what
 > exists today, what is deliberately excluded, where delivery stands, and the known limitations. The
