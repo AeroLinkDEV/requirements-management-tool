@@ -120,6 +120,10 @@ foreach ($area in @('backend', 'client', 'browser', 'postgresql')) {
     Assert-True ($broadJson.classification.$area -eq $true) "Planner self-change must select $area."
 }
 
+$plannerSource = Get-Content -Raw -LiteralPath $scriptPath
+Assert-True ($plannerSource.Contains("info --format '{{.OSType}}'")) 'Full PostgreSQL preflight must inspect the Docker server OS type before expensive gates.'
+Assert-True ($plannerSource.Contains("serverOsType -cne 'linux'")) 'Full PostgreSQL preflight must refuse a non-Linux Docker daemon.'
+Assert-True ($plannerSource.Contains('Switch Docker Desktop to Linux containers before Full mode')) 'Docker incompatibility must give the developer an actionable recovery message.'
 Assert-True (Test-Path -LiteralPath (Join-Path $root 'TEST_AEROLINK_CHANGED.bat') -PathType Leaf) 'Friendly root BAT entry point is missing.'
 
 if ($failures.Count -gt 0) {
