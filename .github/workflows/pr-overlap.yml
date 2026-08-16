@@ -30,17 +30,30 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - name: Check out the default branch
+      # The pull request's own head, not the base branch. Checking out the base made this unable to run
+      # on the pull request that introduces it — the script does not exist there yet — which is how the
+      # first version failed. This is a `pull_request` event, not `pull_request_target`, so the token is
+      # scoped to this repository and forks get a read-only one; the step below reads the GitHub API and
+      # writes one comment, and executes nothing from the branch beyond this single script.
+      - name: Check out the pull request head
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: ${{ github.event.pull_request.base.ref }}
       - name: Set up Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 24
+      # `continue-on-error` because "always exits zero" was not actually true: the first version failed
+      # when node could not resolve the module at all, which happens before any handler inside it can
+      # run. An advisory check must be unable to redden a pull request for any reason, including its own
+      # absence.
       - name: Report overlapping pull requests
+        continue-on-error: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_REPOSITORY: ${{ github.repository }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
-        run: node product/test-planner/tools/check-overlap.mjs
+        run: |
+          if [ ! -f product/test-planner/tools/check-overlap.mjs ]; then
+            echo "The overlap checker is not present on this branch; nothing to do."
+            exit 0
+          fi
+          node product/test-planner/tools/check-overlap.mjs
