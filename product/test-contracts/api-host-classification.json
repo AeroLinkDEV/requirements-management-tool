@@ -1,5 +1,5 @@
 {
-  "schemaVersion": "aerolink-api-host-classification/v1",
+  "schemaVersion": "aerolink-api-host-classification/v2",
   "totals": {
     "classes": 81,
     "tests": 442
@@ -10,16 +10,16 @@
       "tests": 52
     },
     "fresh-host": {
-      "classes": 8,
-      "tests": 45
+      "classes": 17,
+      "tests": 71
     },
     "migration-candidate": {
       "classes": 1,
       "tests": 1
     },
     "reusable-host": {
-      "classes": 62,
-      "tests": 344
+      "classes": 53,
+      "tests": 318
     }
   },
   "classes": [
@@ -127,7 +127,7 @@
       "cls": "ManagedDocumentApiTests",
       "tests": 25,
       "classification": "fresh-host",
-      "reason": "Owns host-scoped state (startup-config, filesystem); sharing would leak it between tests.",
+      "reason": "Customizes host state (interceptor-or-fault-injection); sharing could change the subject or leak configuration.",
       "intents": [
         "auth-policy",
         "ef-translation",
@@ -148,14 +148,55 @@
       ]
     },
     {
+      "cls": "ReleasedExecutionEvidenceApiTests",
+      "tests": 7,
+      "classification": "fresh-host",
+      "reason": "Customizes host state (service-replacement); sharing could change the subject or leak configuration.",
+      "intents": [
+        "ef-translation",
+        "http-boundary"
+      ]
+    },
+    {
+      "cls": "SecurityBoundaryTests",
+      "tests": 7,
+      "classification": "fresh-host",
+      "reason": "Customizes host state (service-replacement, factory-host-options); sharing could change the subject or leak configuration.",
+      "intents": [
+        "auth-policy",
+        "ef-translation",
+        "http-boundary"
+      ]
+    },
+    {
       "cls": "ApiTestTelemetryTests",
       "tests": 3,
       "classification": "fresh-host",
-      "reason": "Owns host-scoped state (startup-config); sharing would leak it between tests.",
+      "reason": "Customizes host state (interceptor-or-fault-injection); sharing could change the subject or leak configuration.",
       "intents": [
         "http-boundary",
         "in-process-logic",
         "startup-config"
+      ]
+    },
+    {
+      "cls": "CodeTraceabilityApiTests",
+      "tests": 3,
+      "classification": "fresh-host",
+      "reason": "Customizes host state (showcase-template-copy); sharing could change the subject or leak configuration.",
+      "intents": [
+        "http-boundary"
+      ]
+    },
+    {
+      "cls": "DraftDocumentApiTests",
+      "tests": 3,
+      "classification": "fresh-host",
+      "reason": "Customizes host state (showcase-template-copy); sharing could change the subject or leak configuration.",
+      "intents": [
+        "ef-translation",
+        "http-boundary",
+        "in-process-logic"
       ]
     },
     {
@@ -172,7 +213,7 @@
       "cls": "ServerAuthorityContractTests",
       "tests": 3,
       "classification": "fresh-host",
-      "reason": "Owns host-scoped state (filesystem); sharing would leak it between tests.",
+      "reason": "Host use is unknown for one or more invocations; isolate it until method-level evidence is completed.",
       "intents": [
         "filesystem",
         "http-boundary",
@@ -190,6 +231,25 @@
       ]
     },
     {
+      "cls": "ProcedureDiscussionApiTests",
+      "tests": 2,
+      "classification": "fresh-host",
+      "reason": "Customizes host state (showcase-template-copy); sharing could change the subject or leak configuration.",
+      "intents": [
+        "ef-translation",
+        "http-boundary"
+      ]
+    },
+    {
+      "cls": "ConfigurationPublicationApiTests",
+      "tests": 1,
+      "classification": "fresh-host",
+      "reason": "Customizes host state (showcase-template-copy); sharing could change the subject or leak configuration.",
+      "intents": [
+        "ef-translation"
+      ]
+    },
+    {
       "cls": "IntegrityCheckpointApiTests",
       "tests": 1,
       "classification": "fresh-host",
@@ -199,12 +259,39 @@
       ]
     },
     {
+      "cls": "ProblemReportPagingApiTests",
+      "tests": 1,
+      "classification": "fresh-host",
+      "reason": "Customizes host state (interceptor-or-fault-injection); sharing could change the subject or leak configuration.",
+      "intents": [
+        "auth-policy"
+      ]
+    },
+    {
       "cls": "ProductionConfigurationTests",
       "tests": 1,
       "classification": "fresh-host",
       "reason": "Owns host-scoped state (filesystem); sharing would leak it between tests.",
       "intents": [
         "filesystem"
+      ]
+    },
+    {
+      "cls": "ProductionRoutingTests",
+      "tests": 1,
+      "classification": "fresh-host",
+      "reason": "Customizes host state (factory-host-options); sharing could change the subject or leak configuration.",
+      "intents": [
+        "http-boundary"
+      ]
+    },
+    {
+      "cls": "ReleasedExecutionEvidenceAuthorityMismatchTests",
+      "tests": 1,
+      "classification": "fresh-host",
+      "reason": "Customizes host state (service-replacement); sharing could change the subject or leak configuration.",
+      "intents": [
+        "ef-translation"
       ]
     },
     {
@@ -220,7 +307,7 @@
       "cls": "ManualTestChangeRequestApiTests",
       "tests": 40,
       "classification": "reusable-host",
-      "reason": "Exercises the HTTP surface with no host-scoped state; a shared host is safe with per-test clients.",
+      "reason": "Exercises the HTTP surface with no host-scoped state or custom host configuration; a shared host is safe only with per-test clients.",
       "intents": [
         "auth-policy",
         "ef-translation",
@@ -231,7 +318,7 @@
       "cls": "TestChangeRequestReviewWorkflowTests",
       "tests": 36,
       "classification": "reusable-host",
-      "reason": "Exercises the HTTP surface with no host-scoped state; a shared host is safe with per-test clients.",
+      "reason": "Exercises the HTTP surface with no host-scoped state or custom host configuration; a shared host is safe only with per-test clients.",
       "intents": [
         "auth-policy",
         "ef-translation",
@@ -242,7 +329,7 @@
       "cls": "BaselineImportApiTests",
       "tests": 14,
       "classification": "reusable-host",
-      "reason": "Exercises the HTTP surface with no host-scoped state; a shared host is safe with per-test clients.",
+      "reason": "Exercises the HTTP surface with no host-scoped state or custom host configuration; a shared host is safe only with per-test clients.",
       "intents": [
         "auth-policy",
         "ef-translation",
@@ -253,7 +340,7 @@
       "cls": "TestProcedureAuthoringApiTests",
       "tests": 13,
       "classification": "reusable-host",
-      "reason": "Exercises the HTTP surface with no host-scoped state; a shared host is safe with per-test clients.",
+      "reason": "Exercises the HTTP surface with no host-scoped state or custom host configuration; a shared host is safe only with per-test clients.",
       "intents": [
         "auth-policy",
         "http-boundary"
@@ -263,7 +350,7 @@
       "cls": "ProcedureBaselineApiTests",
       "tests": 11,
       "classification": "reusable-host",
-      "reason": "Exercises the HTTP surface with no host-scoped state; a shared host is safe with per-test clients.",
+      "reason": "Exercises the HTTP surface with no host-scoped state or custom host configuration; a shared host is safe only with per-test clients.",
       "intents": [
         "auth-policy",
         "ef-translation",
@@ -274,7 +361,7 @@
       "cls": "ProblemReportApiTests",
       "tests": 10,
       "classification": "reusable-host",
-      "reason": "Exercises the HTTP surface with no host-scoped state; a shared host is safe with per-test clients.",
+      "reason": "Exercises the HTTP surface with no host-scoped state or custom host configuration; a shared host is safe only with per-test clients.",
       "intents": [
         "auth-policy",
         "ef-translation",
@@ -285,7 +372,7 @@
       "cls": "ProblemReportVerificationApiTests",
       "tests": 9,
       "classification": "reusable-host",
-      "reason": "Exercises the HTTP surface with no host-scoped state; a shared host is safe with per-test clients.",
+      "reason": "Exercises the HTTP surface with no host-scoped state or custom host configuration; a shared host is safe only with per-test clients.",
       "intents": [
         "auth-policy",
         "ef-translation",
@@ -296,7 +383,7 @@
       "cls": "AuthoringTracedImpactTests",
       "tests": 8,
       "classification": "reusable-host",
-      "reason": "Exercises the HTTP surface with no host-scoped state; a shared host is safe with per-test clients.",
+      "reason": "Exercises the HTTP surface with no host-scoped state or custom host configuration; a shared host is safe only with per-test clients.",
       "intents": [
         "ef-translation",
         "http-boundary"
@@ -306,7 +393,7 @@
       "cls": "IdentifierAllocationTests",
       "tests": 8,
       "classification": "reusable-host",
-      "reason": "Exercises the HTTP surface with no host-scoped state; a shared host is safe with per-test clients.",
+      "reason": "Exercises the HTTP surface with no host-scoped state or custom host configuration; a shared host is safe only with per-test clients.",
       "intents": [
         "ef-translation",
         "in-process-logic"
@@ -316,7 +403,7 @@
       "cls": "TestChangeRequestConsolidationTests",
       "tests": 8,
       "classification": "reusable-host",
-      "reason": "Exercises the HTTP surface with no host-scoped state; a shared host is safe with per-test clients.",
+      "reason": "Exercises the HTTP surface with no host-scoped state or custom host configuration; a shared host is safe only with per-test clients.",
       "intents": [
         "ef-translation",
         "http-boundary"
@@ -326,7 +413,7 @@
       "cls": "TestChangeRequestRegisterApiTests",
       "tests": 8,
       "classification": "reusable-host",
-      "reason": "Exercises the HTTP surface with no host-scoped state; a shared host is safe with per-test clients.",
+      "reason": "Exercises the HTTP surface with no host-scoped state or custom host configuration; a shared host is safe only with per-test clients.",
       "intents": [
         "auth-policy",
         "http-boundary",
@@ -337,30 +424,9 @@
       "cls": "BuildTestSetApiTests",
       "tests": 7,
       "classification": "reusable-host",
-      "reason": "Exercises the HTTP surface with no host-scoped state; a shared host is safe with per-test clients.",
+      "reason": "Exercises the HTTP surface with no host-scoped state or custom host configuration; a shared host is safe only with per-test clients.",
       "intents": [
         "auth-policy",
-        "http-boundary"
-      ]
-    },
-    {
-      "cls": "ReleasedExecutionEvidenceApiTests",
-      "tests": 7,
-      "classification": "reusable-host",
-      "reason": "Exercises the HTTP surface with no host-scoped state; a shared host is safe with per-test clients.",
-      "intents": [
-        "ef-translation",
-        "http-boundary"
-      ]
-    },
-    {
-      "cls": "SecurityBoundaryTests",
-      "tests": 7,
-      "classification": "reusable-host",
-      "reason": "Exercises the HTTP surface with no host-scoped state; a shared host is safe with per-test clients.",
-      "intents": [
-        "auth-policy",
-        "ef-translation",
         "http-boundary"
       ]
     },
@@ -368,7 +434,7 @@
       "cls": "VerificationImpactApiTests",
       "tests": 7,
       "classification": "reusable-host",
-      "reason": "Exercises the HTTP surface with no host-scoped state; a shared host is safe with per-test clients.",
+      "reason": "Exercises the HTTP surface with no host-scoped state or custom host configuration; a shared host is safe only with per-test clients.",
       "intents": [
         "auth-policy",
         "ef-translation",
@@ -379,7 +445,7 @@
       "cls": "BuildScopedWorkspaceApiTests",
       "tests": 6,
       "classification": "reusable-host",
-      "reason": "Exercises the HTTP surface with no host-scoped state; a shared host is safe with per-test clients.",
+      "reason": "Exercises the HTTP surface with no host-scoped state or custom host configuration; a shared host is safe only with per-test clients.",
       "intents": [
         "http-boundary"
       ]
@@ -388,7 +454,7 @@
       "cls": "ProcedureSavedViewApiTests",
       "tests": 6,
       "classification": "reusable-host",
-      "reason": "Exercises the HTTP surface with no host-scoped state; a shared host is safe with per-test clients.",
+      "reason": "Exercises the HTTP surface with no host-scoped state or custom host configuration; a shared host is safe only with per-test clients.",
       "intents": [
         "auth-policy",
         "http-boundary"
@@ -398,7 +464,7 @@
       "cls": "ProcedureTraceApiTests",
       "tests": 6,
       "classification": "reusable-host",
-      "reason": "Exercises the HTTP surface with no host-scoped state; a shared host is safe with per-test clients.",
+      "reason": "Exercises the HTTP surface with no host-scoped state or custom host configuration; a shared host is safe only with per-test clients.",
       "intents": [
         "auth-policy",
         "http-boundary"
@@ -408,7 +474,7 @@
       "cls": "ReleaseCampaignExactIntentApiTests",
       "tests": 6,
       "classification": "reusable-host",
-      "reason": "Exercises the HTTP surface with no host-scoped state; a shared host is safe with per-test clients.",
+      "reason": "Exercises the HTTP surface with no host-scoped state or custom host configuration; a shared host is safe only with per-test clients.",
       "intents": [
         "ef-translation",
         "http-boundary",
@@ -419,7 +485,7 @@
       "cls": "SearchableAuthoringPickerApiTests",
       "tests": 6,
       "classification": "reusable-host",
-      "reason": "Exercises the HTTP surface with no host-scoped state; a shared host is safe with per-test clients.",
+      "reason": "Exercises the HTTP surface with no host-scoped state or custom host configuration; a shared host is safe only with per-test clients.",
       "intents": [
         "http-boundary"
       ]
@@ -428,7 +494,7 @@
       "cls": "TestChangeRequestScopeApiTests",
       "tests": 6,
       "classification": "reusable-host",
-      "reason": "Exercises the HTTP surface with no host-scoped state; a shared host is safe with per-test clients.",
+      "reason": "Exercises the HTTP surface with no host-scoped state or custom host configuration; a shared host is safe only with per-test clients.",
       "intents": [
         "auth-policy",
         "http-boundary"
@@ -438,7 +504,7 @@
       "cls": "TestExecutionEffectivityApiTests",
       "tests": 6,
       "classification": "reusable-host",
-      "reason": "Exercises the HTTP surface with no host-scoped state; a shared host is safe with per-test clients.",
+      "reason": "Exercises the HTTP surface with no host-scoped state or custom host configuration; a shared host is safe only with per-test clients.",
       "intents": [
         "http-boundary"
       ]
@@ -447,7 +513,7 @@
       "cls": "ChangeAuthoringInvariantApiTests",
       "tests": 5,
       "classification": "reusable-host",
-      "reason": "Exercises the HTTP surface with no host-scoped state; a shared host is safe with per-test clients.",
+      "reason": "Exercises the HTTP surface with no host-scoped state or custom host configuration; a shared host is safe only with per-test clients.",
       "intents": [
         "ef-translation",
         "http-boundary"
@@ -457,7 +523,7 @@
       "cls": "OpenDigitalThreadTests",
       "tests": 5,
       "classification": "reusable-host",
-      "reason": "Exercises the HTTP surface with no host-scoped state; a shared host is safe with per-test clients.",
+      "reason": "Exercises the HTTP surface with no host-scoped state or custom host configuration; a shared host is safe only with per-test clients.",
       "intents": [
         "auth-policy",
         "http-boundary"
@@ -467,7 +533,7 @@
       "cls": "ProblemReportDuplicateDispositionApiTests",
       "tests": 5,
       "classification": "reusable-host",
-      "reason": "Exercises the HTTP surface with no host-scoped state; a shared host is safe with per-test clients.",
+      "reason": "Exercises the HTTP surface with no host-scoped state or custom host configuration; a shared host is safe only with per-test clients.",
       "intents": [
         "http-boundary"
       ]
@@ -476,7 +542,7 @@
       "cls": "SecurityHardeningTests",
       "tests": 5,
       "classification": "reusable-host",
-      "reason": "Exercises the HTTP surface with no host-scoped state; a shared host is safe with per-test clients.",
+      "reason": "Exercises the HTTP surface with no host-scoped state or custom host configuration; a shared host is safe only with per-test clients.",
       "intents": [
         "http-boundary"
       ]
@@ -485,7 +551,7 @@
       "cls": "CancelReviewAuthorityTests",
       "tests": 4,
       "classification": "reusable-host",
-      "reason": "Exercises the HTTP surface with no host-scoped state; a shared host is safe with per-test clients.",
+      "reason": "Exercises the HTTP surface with no host-scoped state or custom host configuration; a shared host is safe only with per-test clients.",
       "intents": [
         "auth-policy",
         "http-boundary"
@@ -495,7 +561,7 @@
       "cls": "ChangeRequestRenameApiTests",
       "tests": 4,
       "classification": "reusable-host",
-      "reason": "Exercises the HTTP surface with no host-scoped state; a shared host is safe with per-test clients.",
+      "reason": "Exercises the HTTP surface with no host-scoped state or custom host configuration; a shared host is safe only with per-test clients.",
       "intents": [
         "ef-translation",
         "http-boundary"
@@ -505,7 +571,7 @@
       "cls": "ControlledEditingProcedureAuthorityTests",
       "tests": 4,
       "classification": "reusable-host",
-      "reason": "Exercises the HTTP surface with no host-scoped state; a shared host is safe with per-test clients.",
+      "reason": "Exercises the HTTP surface with no host-scoped state or custom host configuration; a shared host is safe only with per-test clients.",
       "intents": [
         "http-boundary"
       ]
@@ -514,7 +580,7 @@
       "cls": "ControlledProcedureDocumentApiTests",
       "tests": 4,
       "classification": "reusable-host",
-      "reason": "Exercises the HTTP surface with no host-scoped state; a shared host is safe with per-test clients.",
+      "reason": "Exercises the HTTP surface with no host-scoped state or custom host configuration; a shared host is safe only with per-test clients.",
       "intents": [
         "ef-translation"
       ]
@@ -523,7 +589,7 @@
       "cls": "DeferredCarryForwardApiTests",
       "tests": 4,
       "classification": "reusable-host",
-      "reason": "Exercises the HTTP surface with no host-scoped state; a shared host is safe with per-test clients.",
+      "reason": "Exercises the HTTP surface with no host-scoped state or custom host configuration; a shared host is safe only with per-test clients.",
       "intents": [
         "ef-translation",
         "http-boundary"
@@ -533,7 +599,7 @@
       "cls": "ProblemReportCheckoutApiTests",
       "tests": 4,
       "classification": "reusable-host",
-      "reason": "Exercises the HTTP surface with no host-scoped state; a shared host is safe with per-test clients.",
+      "reason": "Exercises the HTTP surface with no host-scoped state or custom host configuration; a shared host is safe only with per-test clients.",
       "intents": [
         "http-boundary"
       ]
@@ -542,7 +608,7 @@
       "cls": "ProcedureManifestEffectivityApiTests",
       "tests": 4,
       "classification": "reusable-host",
-      "reason": "Exercises the HTTP surface with no host-scoped state; a shared host is safe with per-test clients.",
+      "reason": "Exercises the HTTP surface with no host-scoped state or custom host configuration; a shared host is safe only with per-test clients.",
       "intents": [
         "http-boundary"
       ]
@@ -551,7 +617,7 @@
       "cls": "RequirementFilterExactnessApiTests",
       "tests": 4,
       "classification": "reusable-host",
-      "reason": "Exercises the HTTP surface with no host-scoped state; a shared host is safe with per-test clients.",
+      "reason": "Exercises the HTTP surface with no host-scoped state or custom host configuration; a shared host is safe only with per-test clients.",
       "intents": [
         "http-boundary"
       ]
@@ -560,7 +626,7 @@
       "cls": "SavedViewLifecycleApiTests",
       "tests": 4,
       "classification": "reusable-host",
-      "reason": "Exercises the HTTP surface with no host-scoped state; a shared host is safe with per-test clients.",
+      "reason": "Exercises the HTTP surface with no host-scoped state or custom host configuration; a shared host is safe only with per-test clients.",
       "intents": [
         "ef-translation",
         "http-boundary"
@@ -570,7 +636,7 @@
       "cls": "VerificationProgramIsolationApiTests",
       "tests": 4,
       "classification": "reusable-host",
-      "reason": "Exercises the HTTP surface with no host-scoped state; a shared host is safe with per-test clients.",
+      "reason": "Exercises the HTTP surface with no host-scoped state or custom host configuration; a shared host is safe only with per-test clients.",
       "intents": [
         "auth-policy",
         "http-boundary"
@@ -580,16 +646,7 @@
       "cls": "AuthoredSectionTests",
       "tests": 3,
       "classification": "reusable-host",
-      "reason": "Exercises the HTTP surface with no host-scoped state; a shared host is safe with per-test clients.",
-      "intents": [
-        "http-boundary"
-      ]
-    },
-    {
-      "cls": "CodeTraceabilityApiTests",
-      "tests": 3,
-      "classification": "reusable-host",
-      "reason": "Exercises the HTTP surface with no host-scoped state; a shared host is safe with per-test clients.",
+      "reason": "Exercises the HTTP surface with no host-scoped state or custom host configuration; a shared host is safe only with per-test clients.",
       "intents": [
         "http-boundary"
       ]
@@ -598,7 +655,7 @@
       "cls": "ControlledEditingCheckInApiTests",
       "tests": 3,
       "classification": "reusable-host",
-      "reason": "Exercises the HTTP surface with no host-scoped state; a shared host is safe with per-test clients.",
+      "reason": "Exercises the HTTP surface with no host-scoped state or custom host configuration; a shared host is safe only with per-test clients.",
       "intents": [
         "http-boundary"
       ]
@@ -607,7 +664,7 @@
       "cls": "CorrectiveActionRoutingApiTests",
       "tests": 3,
       "classification": "reusable-host",
-      "reason": "Exercises the HTTP surface with no host-scoped state; a shared host is safe with per-test clients.",
+      "reason": "Exercises the HTTP surface with no host-scoped state or custom host configuration; a shared host is safe only with per-test clients.",
       "intents": [
         "auth-policy",
         "http-boundary"
@@ -617,27 +674,16 @@
       "cls": "DeferralAndRevisionListingTests",
       "tests": 3,
       "classification": "reusable-host",
-      "reason": "Exercises the HTTP surface with no host-scoped state; a shared host is safe with per-test clients.",
+      "reason": "Exercises the HTTP surface with no host-scoped state or custom host configuration; a shared host is safe only with per-test clients.",
       "intents": [
         "http-boundary"
-      ]
-    },
-    {
-      "cls": "DraftDocumentApiTests",
-      "tests": 3,
-      "classification": "reusable-host",
-      "reason": "Exercises the HTTP surface with no host-scoped state; a shared host is safe with per-test clients.",
-      "intents": [
-        "ef-translation",
-        "http-boundary",
-        "in-process-logic"
       ]
     },
     {
       "cls": "PreReleaseEvidenceVisibilityTests",
       "tests": 3,
       "classification": "reusable-host",
-      "reason": "Exercises the HTTP surface with no host-scoped state; a shared host is safe with per-test clients.",
+      "reason": "Exercises the HTTP surface with no host-scoped state or custom host configuration; a shared host is safe only with per-test clients.",
       "intents": [
         "ef-translation",
         "http-boundary"
@@ -647,7 +693,7 @@
       "cls": "RestartReviewApiTests",
       "tests": 3,
       "classification": "reusable-host",
-      "reason": "Exercises the HTTP surface with no host-scoped state; a shared host is safe with per-test clients.",
+      "reason": "Exercises the HTTP surface with no host-scoped state or custom host configuration; a shared host is safe only with per-test clients.",
       "intents": [
         "auth-policy",
         "ef-translation",
@@ -658,7 +704,7 @@
       "cls": "ClosedReleaseAuthoringTests",
       "tests": 2,
       "classification": "reusable-host",
-      "reason": "Exercises the HTTP surface with no host-scoped state; a shared host is safe with per-test clients.",
+      "reason": "Exercises the HTTP surface with no host-scoped state or custom host configuration; a shared host is safe only with per-test clients.",
       "intents": [
         "http-boundary"
       ]
@@ -667,19 +713,9 @@
       "cls": "ProblemReportOwnerAuthorityApiTests",
       "tests": 2,
       "classification": "reusable-host",
-      "reason": "Exercises the HTTP surface with no host-scoped state; a shared host is safe with per-test clients.",
+      "reason": "Exercises the HTTP surface with no host-scoped state or custom host configuration; a shared host is safe only with per-test clients.",
       "intents": [
         "auth-policy",
-        "http-boundary"
-      ]
-    },
-    {
-      "cls": "ProcedureDiscussionApiTests",
-      "tests": 2,
-      "classification": "reusable-host",
-      "reason": "Exercises the HTTP surface with no host-scoped state; a shared host is safe with per-test clients.",
-      "intents": [
-        "ef-translation",
         "http-boundary"
       ]
     },
@@ -687,7 +723,7 @@
       "cls": "ProductLineApiTests",
       "tests": 2,
       "classification": "reusable-host",
-      "reason": "Exercises the HTTP surface with no host-scoped state; a shared host is safe with per-test clients.",
+      "reason": "Exercises the HTTP surface with no host-scoped state or custom host configuration; a shared host is safe only with per-test clients.",
       "intents": [
         "http-boundary"
       ]
@@ -696,7 +732,7 @@
       "cls": "ProgramRoleAuthorityApiTests",
       "tests": 2,
       "classification": "reusable-host",
-      "reason": "Exercises the HTTP surface with no host-scoped state; a shared host is safe with per-test clients.",
+      "reason": "Exercises the HTTP surface with no host-scoped state or custom host configuration; a shared host is safe only with per-test clients.",
       "intents": [
         "auth-policy",
         "http-boundary"
@@ -706,7 +742,7 @@
       "cls": "ReviseChangeRequestApiTests",
       "tests": 2,
       "classification": "reusable-host",
-      "reason": "Exercises the HTTP surface with no host-scoped state; a shared host is safe with per-test clients.",
+      "reason": "Exercises the HTTP surface with no host-scoped state or custom host configuration; a shared host is safe only with per-test clients.",
       "intents": [
         "http-boundary"
       ]
@@ -715,7 +751,7 @@
       "cls": "SoftwareChangeRequestLevelHistoryTests",
       "tests": 2,
       "classification": "reusable-host",
-      "reason": "Exercises the HTTP surface with no host-scoped state; a shared host is safe with per-test clients.",
+      "reason": "Exercises the HTTP surface with no host-scoped state or custom host configuration; a shared host is safe only with per-test clients.",
       "intents": [
         "http-boundary"
       ]
@@ -724,25 +760,16 @@
       "cls": "AdministratorChangeRequestApiTests",
       "tests": 1,
       "classification": "reusable-host",
-      "reason": "Exercises the HTTP surface with no host-scoped state; a shared host is safe with per-test clients.",
+      "reason": "Exercises the HTTP surface with no host-scoped state or custom host configuration; a shared host is safe only with per-test clients.",
       "intents": [
         "auth-policy"
-      ]
-    },
-    {
-      "cls": "ConfigurationPublicationApiTests",
-      "tests": 1,
-      "classification": "reusable-host",
-      "reason": "Exercises the HTTP surface with no host-scoped state; a shared host is safe with per-test clients.",
-      "intents": [
-        "ef-translation"
       ]
     },
     {
       "cls": "HistoricalPublicationFreezeApiTests",
       "tests": 1,
       "classification": "reusable-host",
-      "reason": "Exercises the HTTP surface with no host-scoped state; a shared host is safe with per-test clients.",
+      "reason": "Exercises the HTTP surface with no host-scoped state or custom host configuration; a shared host is safe only with per-test clients.",
       "intents": [
         "http-boundary"
       ]
@@ -751,7 +778,7 @@
       "cls": "LegacyProcedureManifestBootstrapApiTests",
       "tests": 1,
       "classification": "reusable-host",
-      "reason": "Exercises the HTTP surface with no host-scoped state; a shared host is safe with per-test clients.",
+      "reason": "Exercises the HTTP surface with no host-scoped state or custom host configuration; a shared host is safe only with per-test clients.",
       "intents": [
         "auth-policy"
       ]
@@ -760,7 +787,7 @@
       "cls": "ManagedDocumentRecoveryApiTests",
       "tests": 1,
       "classification": "reusable-host",
-      "reason": "Exercises the HTTP surface with no host-scoped state; a shared host is safe with per-test clients.",
+      "reason": "Exercises the HTTP surface with no host-scoped state or custom host configuration; a shared host is safe only with per-test clients.",
       "intents": [
         "auth-policy"
       ]
@@ -769,7 +796,7 @@
       "cls": "ProblemReportActiveMetricApiTests",
       "tests": 1,
       "classification": "reusable-host",
-      "reason": "Exercises the HTTP surface with no host-scoped state; a shared host is safe with per-test clients.",
+      "reason": "Exercises the HTTP surface with no host-scoped state or custom host configuration; a shared host is safe only with per-test clients.",
       "intents": [
         "http-boundary"
       ]
@@ -778,45 +805,18 @@
       "cls": "ProblemReportDispositionApiTests",
       "tests": 1,
       "classification": "reusable-host",
-      "reason": "Exercises the HTTP surface with no host-scoped state; a shared host is safe with per-test clients.",
+      "reason": "Exercises the HTTP surface with no host-scoped state or custom host configuration; a shared host is safe only with per-test clients.",
       "intents": [
         "http-boundary"
-      ]
-    },
-    {
-      "cls": "ProblemReportPagingApiTests",
-      "tests": 1,
-      "classification": "reusable-host",
-      "reason": "Exercises the HTTP surface with no host-scoped state; a shared host is safe with per-test clients.",
-      "intents": [
-        "auth-policy"
       ]
     },
     {
       "cls": "ProblemReportWaiverApiTests",
       "tests": 1,
       "classification": "reusable-host",
-      "reason": "Exercises the HTTP surface with no host-scoped state; a shared host is safe with per-test clients.",
+      "reason": "Exercises the HTTP surface with no host-scoped state or custom host configuration; a shared host is safe only with per-test clients.",
       "intents": [
         "auth-policy"
-      ]
-    },
-    {
-      "cls": "ProductionRoutingTests",
-      "tests": 1,
-      "classification": "reusable-host",
-      "reason": "Exercises the HTTP surface with no host-scoped state; a shared host is safe with per-test clients.",
-      "intents": [
-        "http-boundary"
-      ]
-    },
-    {
-      "cls": "ReleasedExecutionEvidenceAuthorityMismatchTests",
-      "tests": 1,
-      "classification": "reusable-host",
-      "reason": "Exercises the HTTP surface with no host-scoped state; a shared host is safe with per-test clients.",
-      "intents": [
-        "ef-translation"
       ]
     }
   ]

@@ -1,171 +1,36 @@
-// #566 criterion 1: classify every API test by primary intent.
+// #566 criterion 1: classify every API test by primary intent and hosted invocation evidence.
 //
-// The question the issue asks is "what does this test prove, and is a hosted server necessary to
-// prove it?" Intent is read from what the test body actually does, not from its name. Each test gets
-// exactly one primary intent, resolved in a fixed order, because a test that touches persistence *and*
-// asserts a status code is primarily an HTTP-boundary test — the persistence is setup.
+// The inventory is deliberately conservative. A test whose method body does not show a host operation,
+// but whose class contains a host fixture, is `unknown` rather than silently inheriting class-level host
+// evidence. Unknown rows cannot be used to claim the criterion-7 escape clause.
 
-import { readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs'
+import { writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { buildIntentArtifact } from '../lib/test-intent.mjs'
 
 const repoRoot = fileURLToPath(new URL('../../../', import.meta.url))
 const ROOT = join(repoRoot, 'product/tests/AeroLink.Api.Tests')
+const artifact = buildIntentArtifact(ROOT)
+const summary = { ...artifact.totals, intents: artifact.intents }
 
-function walk(dir) {
-  const out = []
-  for (const entry of readdirSync(dir)) {
-    const full = join(dir, entry)
-    if (statSync(full).isDirectory()) out.push(...walk(full))
-    else if (entry.endsWith('.cs')) out.push(full)
-  }
-  return out
-}
-
-/** Split into test methods by brace depth from each [Fact]/[Theory], keeping the attribute block. */
-function tests(source) {
-  const out = []
-  const attr = /^[ \t]*\[(Fact|Theory)\]/gm
-  let match
-  while ((match = attr.exec(source)) !== null) {
-    // Find the *method signature* first, then the brace after it. Taking the first `{` from the
-    // attribute position instead is wrong whenever an attribute argument contains one, which
-    // `[InlineData("{}", ...)]` and raw JSON string literals routinely do: the "body" extracted is then
-    // the attribute's own braces, so the test reads as having no HTTP call and no name at all. Two
-    // tests were misclassified this way, and both landed in the migration-candidate bucket that the
-    // whole 2.3% figure rests on.
-    const window = source.slice(match.index, match.index + 4000)
-    const signatureMatch = /(?:public|private|internal)\s+(?:static\s+)?(?:async\s+)?[\w<>\[\],\s?]+?\s+(\w+)\s*\([^)]*\)\s*(?:=>|\{)/.exec(window)
-    if (!signatureMatch) continue
-    const signature = [, signatureMatch[1]]
-    const open = source.indexOf('{', match.index + signatureMatch.index + signatureMatch[0].length - 1)
-    if (open === -1) continue
-    let depth = 0
-    let end = open
-    for (let i = open; i < source.length; i += 1) {
-      if (source[i] === '{') depth += 1
-      else if (source[i] === '}') { depth -= 1; if (depth === 0) { end = i; break } }
-    }
-    const attrBlock = source.slice(match.index, open)
-    out.push({
-      name: signature?.[1] ?? '(unnamed)',
-      body: source.slice(open, end + 1),
-      inlineData: (attrBlock.match(/\[InlineData\(/g) || []).length,
-      kind: match[1],
-    })
-  }
-  return out
-}
-
-// Resolved in order. The first match wins, so the ordering encodes "what is this test really for".
-const INTENTS = [
-  {
-    key: 'auth-policy',
-    label: 'Authentication / authorization wiring',
-    level: 'API (must stay hosted)',
-    test: (b) => /Unauthorized|Forbidden|StatusCodes\.Status401|StatusCodes\.Status403|SignInAsync\(.*wrong|WithoutRole|AsRole|RequireAuth|AllowAnonymous/.test(b),
-  },
-  {
-    key: 'filesystem',
-    label: 'Filesystem / evidence-root behaviour',
-    level: 'API or Infrastructure (must stay hosted)',
-    test: (b) => /EvidenceRoot|Path\.Combine|File\.(Exists|ReadAll|WriteAll)|Directory\.(Exists|Create)|FileStream|\.zip"/.test(b),
-  },
-  {
-    key: 'startup-config',
-    label: 'Startup, hosting and configuration',
-    level: 'API (must stay hosted)',
-    test: (b) => /CreateHost|UseSetting|IConfiguration|Environment\.|Program\.|StaticFiles|Kestrel|appsettings/.test(b),
-  },
-  {
-    key: 'ef-translation',
-    label: 'EF translation / relational constraints',
-    level: 'Infrastructure (needs a database, not a host)',
-    test: (b) => /DbUpdate|UniqueConstraint|SaveChangesAsync\(\)[\s\S]{0,80}Assert|AsNoTracking|Include\(|ThenInclude|FromSql|ExecuteUpdate|ExecuteDelete/.test(b),
-  },
-  {
-    key: 'http-boundary',
-    label: 'HTTP boundary: route, status, JSON shape',
-    level: 'API (must stay hosted)',
-    test: (b) => /HttpStatusCode\.|StatusCode|EnsureSuccessStatusCode|\.Content\.ReadFromJsonAsync|GetFromJsonAsync|PostAsJsonAsync|PutAsJsonAsync|\.(GetAsync|PostAsync|PutAsync|DeleteAsync|PatchAsync|SendAsync)\(/.test(b),
-  },
-  {
-    key: 'rule-matrix',
-    label: 'Business-rule matrix over data variations',
-    level: 'Domain (migration candidate)',
-    test: (_b, t) => t.inlineData >= 2,
-  },
-]
-
-const FALLBACK = { key: 'in-process-logic', label: 'In-process logic with no HTTP and no client', level: 'Domain or Infrastructure (migration candidate)' }
-const CLIENT = /CreateClient|HttpClient|\bclient\b|_host\b/
-
-/**
- * Whether a test actually pays for a host.
- *
- * #566 asks what share of *hosted invocations* can be removed, and this project contains tests that
- * never build one — `ClientHostingTests`, `ProductionConfigurationTests`, telemetry unit tests. Counting
- * them in the denominator understates the ceiling by inflating the total, which was the third finding
- * against the first version of this inventory.
- */
-const HOSTED = /new AeroLinkApiFactory|SharedApiHost|_host\b|_factory\b|ShowcaseApiFixture|CreateClient/
-
-const rows = []
-for (const file of walk(ROOT)) {
-  const source = readFileSync(file, 'utf8')
-  const cls = file.replace(/\\/g, '/').split('/').pop().replace(/\.cs$/, '')
-  for (const t of tests(source)) {
-    let intent = INTENTS.find((candidate) => candidate.test(t.body, t))
-    if (!intent) {
-      // Nothing matched: if it never names a client it is genuinely in-process; if it does, it is an
-      // HTTP test whose assertions run through a helper.
-      intent = CLIENT.test(t.body)
-        ? { key: 'http-boundary', label: INTENTS.find((i) => i.key === 'http-boundary').label, level: 'API (must stay hosted)' }
-        : FALLBACK
-    }
-    const classSource = readFileSync(file, 'utf8')
-    rows.push({ cls, test: t.name, intent: intent.key, label: intent.label, level: intent.level, cases: Math.max(1, t.inlineData), hosted: HOSTED.test(t.body) || HOSTED.test(classSource) })
-  }
-}
-
-const byIntent = new Map()
-for (const row of rows) {
-  const entry = byIntent.get(row.intent) ?? { label: row.label, level: row.level, tests: 0, cases: 0, classes: new Set() }
-  entry.tests += 1
-  entry.cases += row.cases
-  entry.classes.add(row.cls)
-  byIntent.set(row.intent, entry)
-}
-
-const totalTests = rows.length
-const totalCases = rows.reduce((sum, r) => sum + r.cases, 0)
-
-console.log(`Classified ${totalTests} test methods (${totalCases} cases) across ${new Set(rows.map((r) => r.cls)).size} classes\n`)
+console.log(`Classified ${summary.tests} test methods (${summary.cases} known cases) across ${summary.classes} classes\n`)
 console.log('intent                tests   cases   classes   level')
-const ordered = [...byIntent.entries()].sort((a, b) => b[1].tests - a[1].tests)
-for (const [key, entry] of ordered) {
-  console.log(
-    `${key.padEnd(20)}${String(entry.tests).padStart(6)}${String(entry.cases).padStart(8)}${String(entry.classes.size).padStart(10)}   ${entry.level}`,
-  )
+for (const [key, entry] of Object.entries(summary.intents)) {
+  console.log(`${key.padEnd(20)}${String(entry.tests).padStart(6)}${String(entry.cases).padStart(8)}${String(entry.classes).padStart(10)}   ${entry.level}`)
 }
 
-const hostedRows = rows.filter((row) => row.hosted)
-const nonHosted = rows.length - hostedRows.length
-const hostedCandidates = hostedRows.filter((row) => /in-process-logic|rule-matrix/.test(row.intent)).length
-
-const migratable = ordered.filter(([, e]) => /migration candidate/.test(e.level))
-const migratableTests = migratable.reduce((s, [, e]) => s + e.tests, 0)
 console.log('')
-console.log(`Non-hosted tests excluded from the denominator: ${nonHosted}`)
-console.log(`Migration candidates: ${hostedCandidates} of ${hostedRows.length} HOSTED test methods (${((hostedCandidates / hostedRows.length) * 100).toFixed(1)}%)`)
+console.log(`Explicitly hosted:     ${summary.hostedTests} methods / ${summary.hostedCases} cases`)
+console.log(`Hosted candidates:     ${summary.hostedCandidateTests} methods / ${summary.hostedCandidateCases} cases (${((summary.hostedCandidateCases / summary.hostedCases) * 100).toFixed(1)}%)`)
+console.log(`Explicitly not hosted:  ${summary.nonHostedTests} methods / ${summary.nonHostedCases} cases`)
+console.log(`Host use unknown:       ${summary.unknownHostTests} methods / ${summary.unknownHostCases} cases`)
+console.log(`Unknown candidate use:  ${summary.unknownCandidateTests} methods / ${summary.unknownCandidateCases} cases`)
 console.log(`#566 criterion 7 target: >= 20% of hosted test invocations removed or consolidated`)
-console.log(hostedCandidates / hostedRows.length >= 0.2 ? '  -> target reachable' : '  -> target NOT reachable; the escape clause applies')
+console.log(`  -> static evidence status: ${summary.criterion7}`)
 
 const outputPath = process.argv[2] ?? join(repoRoot, 'product/test-contracts/api-test-intent.json')
 writeFileSync(outputPath, `${JSON.stringify({
-  schemaVersion: 'aerolink-api-test-intent/v1',
-  totals: { tests: totalTests, hostedTests: hostedRows.length, nonHostedTests: nonHosted, hostedCandidates, cases: totalCases, classes: new Set(rows.map((r) => r.cls)).size },
-  intents: Object.fromEntries(ordered.map(([key, e]) => [key, { label: e.label, level: e.level, tests: e.tests, cases: e.cases, classes: e.classes.size }])),
-  tests: rows.map(({ cls, test, intent }) => ({ cls, test, intent })).sort((a, b) => a.cls.localeCompare(b.cls) || a.test.localeCompare(b.test)),
+  ...artifact,
 }, null, 2)}\n`, 'utf8')
 console.log(`\nwrote ${outputPath}`)
