@@ -13,7 +13,6 @@
 #>
 
 $ErrorActionPreference = 'Stop'
-$repositoryRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 $planner = Join-Path $PSScriptRoot 'Get-AeroLinkTestPlan.ps1'
 if (-not (Test-Path -LiteralPath $planner -PathType Leaf)) {
     Write-Error "Changed-area planner not found: $planner"
@@ -64,8 +63,18 @@ function Invoke-PlannerProcess {
         return [pscustomobject]@{ ExitCode = $exitCode; Output = $output }
     }
 
-    & $shell.Source @childArguments
-    return $LASTEXITCODE
+    # Stream the child planner's human output, but do not let that output become this function's return value.
+    # The caller must receive one integer exit code rather than an array containing every console line.
+    $savedPreference = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        & $shell.Source @childArguments 2>&1 | ForEach-Object { Write-Host $_ }
+        $exitCode = $LASTEXITCODE
+    }
+    finally {
+        $ErrorActionPreference = $savedPreference
+    }
+    return [int]$exitCode
 }
 
 function Assert-LinuxDockerForPostgreSqlFull {
