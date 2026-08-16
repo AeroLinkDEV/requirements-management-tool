@@ -1,0 +1,37 @@
+name: Temporary #566 final candidate audit
+
+on:
+  push:
+    branches:
+      - chatgpt/566-final-candidate-audit
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+
+      - name: Print finite hosted non-HTTP candidate set
+        shell: bash
+        run: |
+          node <<'NODE'
+          const fs = require('fs')
+          const p = 'product/test-contracts/api-test-intent.json'
+          const inventory = JSON.parse(fs.readFileSync(p, 'utf8'))
+          const candidates = inventory.tests.filter(t => {
+            if (t.hosted !== 'hosted') return false
+            if (t.intent === 'in-process-logic' || t.intent === 'rule-matrix') return true
+            if (t.intent === 'ef-translation' && !t.hostEvidence?.includes('factory-client')) return true
+            return false
+          }).map(t => ({ cls: t.cls, test: t.test, intent: t.intent, cases: t.cases, hostEvidence: t.hostEvidence }))
+          console.log('FINAL_566_CANDIDATES=' + JSON.stringify(candidates))
+          console.log('FINAL_566_METHODS=' + candidates.length)
+          console.log('FINAL_566_CASES=' + candidates.reduce((n, t) => n + Number(t.cases || 0), 0))
+          const keepHosted = inventory.tests.filter(t => t.hosted === 'hosted' && (t.intent === 'http-boundary' || t.intent === 'auth-policy' || t.intent === 'startup-config' || t.intent === 'filesystem' || (t.intent === 'ef-translation' && t.hostEvidence?.includes('factory-client'))))
+          console.log('REVIEWED_KEEP_HOSTED_METHODS=' + keepHosted.length)
+          NODE
