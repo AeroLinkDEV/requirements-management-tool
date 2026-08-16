@@ -17,4 +17,3 @@ if not "%RESULT%"=="0" (
 )
 echo AeroLink changed validation finished. GitHub Actions full evidence is still required for merge.
 exit /b 0
-
