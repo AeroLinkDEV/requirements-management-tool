@@ -16,7 +16,7 @@ Replace-ExactlyOnce $plannerScript $oldFast $newFast
 
 $classify = 'product/test-planner/lib/classify.mjs'
 $oldCommand = "      command: 'dotnet test product/tests/AeroLink.Infrastructure.Tests --configuration Release --no-build',"
-$newCommand = "      command: 'dotnet test product/tests/AeroLink.Infrastructure.Tests --configuration Release --no-build --filter `"$filter`"',"
+$newCommand = "      command: 'dotnet test product/tests/AeroLink.Infrastructure.Tests --configuration Release --no-build --filter=$filter',"
 Replace-ExactlyOnce $classify $oldCommand $newCommand
 $oldWhy = "      why: 'Persistence and EF behaviour, still without building an API host.',"
 $newWhy = "      why: 'Fast persistence/provider coverage excludes six synthetic showcase seed/upgrade maintenance cases; the authoritative GitHub backend-core lane still runs the complete infrastructure suite.',"
@@ -29,7 +29,7 @@ test('the local Fast infrastructure profile leaves only synthetic showcase maint
   const plan = localPlan(of(['product/src/AeroLink.Domain/Requirements/Requirement.cs']))
   const infrastructure = plan.find((step) => step.label === 'Infrastructure suite')
   assert.ok(infrastructure)
-  assert.match(infrastructure.command, /--filter/)
+  assert.match(infrastructure.command, /--filter=/)
   assert.match(infrastructure.command, /FmsShowcaseSeederTests/)
   assert.match(infrastructure.command, /ShowcaseUpgradeTests/)
   assert.match(infrastructure.why, /authoritative GitHub backend-core/)
