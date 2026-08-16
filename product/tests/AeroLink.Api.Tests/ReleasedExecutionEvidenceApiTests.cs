@@ -28,6 +28,15 @@ public sealed class ReleasedExecutionEvidenceApiTests
     private const string UserName = "released.evidence.tester";
 
     [Fact]
+    public async Task Guarded_factory_preserves_the_file_backed_sqlite_contract()
+    {
+        using var root = new AeroLinkApiFactory();
+        using var factory = GuardedFactory(root);
+        using var client = factory.CreateClient();
+        await SecurityBoundaryTests.AssertSqliteConfigurationAsync(factory.Services);
+    }
+
+    [Fact]
     public async Task Headerless_direct_api_cannot_append_evidence_to_a_released_execution()
     {
         using var root = new AeroLinkApiFactory();
@@ -218,9 +227,8 @@ public sealed class ReleasedExecutionEvidenceApiTests
             services.RemoveAll<AeroLinkDbContext>();
             services.RemoveAll<DbContextOptions<AeroLinkDbContext>>();
             services.RemoveAll<IDbContextOptionsConfiguration<AeroLinkDbContext>>();
-            services.AddDbContext<AeroLinkDbContext>(options => options
-                .UseSqlite(root.ConnectionString)
-                .AddInterceptors(new ReleasedExecutionEvidenceInterceptor()));
+            services.AddDbContext<AeroLinkDbContext>(options =>
+                AeroLinkApiFactory.ConfigureSqliteOptions(options, root.ConnectionString, new ReleasedExecutionEvidenceInterceptor()));
         }));
 
     private static async Task LoginAsync(HttpClient client)
