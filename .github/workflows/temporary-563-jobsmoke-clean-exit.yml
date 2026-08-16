@@ -1,0 +1,79 @@
+name: Temporary #563 JobSmoke caller exit-state validation
+
+on:
+  push:
+    branches:
+      - chatgpt/563-jobsmoke-clean-exit
+    paths:
+      - .github/workflows/temporary-563-jobsmoke-clean-exit.yml
+
+permissions:
+  contents: write
+
+jobs:
+  validate:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+      - name: Apply bounded JobSmoke exit-state repair
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $utf8 = New-Object System.Text.UTF8Encoding($false)
+
+          $scriptPath = 'product/tools/measure-api-host-reuse.ps1'
+          $source = Get-Content -Raw -LiteralPath $scriptPath
+          $old = @'
+          if ($JobSmoke) {
+              if (-not $IsWindows) { Fail 'This harness is intentionally Windows-only.' }
+              Invoke-JobContainmentSmoke
+              return
+          }
+          '@
+          $new = @'
+          if ($JobSmoke) {
+              if (-not $IsWindows) { Fail 'This harness is intentionally Windows-only.' }
+              Invoke-JobContainmentSmoke
+              # The smoke intentionally launches fail-closed native children. Do not leak one of those
+              # expected child exit codes into a same-session caller after the smoke itself succeeded.
+              $global:LASTEXITCODE = 0
+              return
+          }
+          '@
+          if (($source.Split($old).Count - 1) -ne 1) { throw 'JobSmoke main-branch anchor mismatch.' }
+          [IO.File]::WriteAllText((Resolve-Path $scriptPath), $source.Replace($old, $new), $utf8)
+
+          $testPath = 'product/test-contracts/tests/api-host-reuse-measurement.test.mjs'
+          $tests = Get-Content -Raw -LiteralPath $testPath
+          $marker = '  assert.match(source, /Job containment cleanup/)'
+          if (($tests.Split($marker).Count - 1) -ne 1) { throw 'Measurement source-contract anchor mismatch.' }
+          $extra = $marker + "`n" + '  assert.match(source, /\$global:LASTEXITCODE = 0/)'
+          [IO.File]::WriteAllText((Resolve-Path $testPath), $tests.Replace($marker, $extra), $utf8)
+      - name: Prove smoke and same-session caller state
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          node --test --test-name-pattern='job containment smoke drains a late-spawned grandchild' product/test-contracts/tests/api-host-reuse-measurement.test.mjs
+          if ($LASTEXITCODE -ne 0) { throw 'Existing JobSmoke contract failed.' }
+          $command = '$null = & ''./product/tools/measure-api-host-reuse.ps1'' -JobSmoke; exit [int]$global:LASTEXITCODE'
+          & pwsh -NoProfile -Command $command
+          if ($LASTEXITCODE -ne 0) { throw 'Successful JobSmoke leaked a non-zero native exit state to its caller.' }
+          git diff --check
+          if ($LASTEXITCODE -ne 0) { throw 'git diff --check failed.' }
+      - name: Commit validated product-only repair
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          git config user.name 'seanmccarthyns'
+          git config user.email 'seanmccarthyns@gmail.com'
+          git add product/tools/measure-api-host-reuse.ps1 product/test-contracts/tests/api-host-reuse-measurement.test.mjs
+          $paths = @(git diff --cached --name-only)
+          if ($paths.Count -ne 2) { throw "Expected two staged product files, got $($paths.Count)." }
+          git commit -m 'Reset JobSmoke caller exit state after successful containment proof'
+          git push origin HEAD:chatgpt/563-jobsmoke-clean-exit
