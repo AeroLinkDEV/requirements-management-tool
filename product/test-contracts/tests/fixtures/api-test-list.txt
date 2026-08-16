@@ -1,0 +1,6 @@
+The following Tests are available:
+    AeroLink.Api.Tests.AlphaApiTests.First_test
+    AeroLink.Api.Tests.AlphaApiTests.Second_test
+    AeroLink.Api.Tests.BetaApiTests.Only_test
+    AeroLink.Api.Tests.GammaApiTests.Theory_case(value: 1)
+    AeroLink.Api.Tests.GammaApiTests.Theory_case(value: 2)
