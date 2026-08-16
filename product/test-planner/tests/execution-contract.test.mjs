@@ -102,6 +102,8 @@ test('owned process boundary kills late descendants before bounded pipe capture 
   assert.match(ownedProcessSource, /DrainJobAfterRootExit/)
   assert.match(ownedProcessSource, /capture\.Wait\(TimeSpan\.FromSeconds\(5\)\)/)
   assert.match(ownedProcessSource, /CLEANUP\|handles=failed/)
+  assert.match(ownedProcessSource, /string\.Equals\(fault, "terminate-job", StringComparison\.Ordinal\)/)
+  assert.match(ownedProcessSource, /"start", "\/b", "ping", "-n", "31"/)
   execFileSync('dotnet', ['run', '--project', ownedProcessProject, '--configuration', 'Release', '--no-build', '--no-restore', '--', '--self-test-late-child'], { cwd: repoRoot, stdio: 'ignore' })
   for (const fault of ['create-job', 'set-job', 'close-job-create', 'create-pipe', 'set-handle', 'close-child-write', 'assign', 'resume', 'terminate-process', 'wait', 'exit-code', 'process-times', 'process-id', 'terminate-job', 'query-job', 'close-child-read-final', 'close-thread', 'close-process', 'close-job', 'capture-timeout', 'cancel-capture']) {
     execFileSync('dotnet', ['run', '--project', ownedProcessProject, '--configuration', 'Release', '--no-build', '--no-restore', '--', '--self-test-fault', fault], { cwd: repoRoot, stdio: 'ignore' })
