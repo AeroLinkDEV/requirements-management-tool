@@ -196,23 +196,49 @@ if ($errors.Count -ne 1) { throw 'owner mismatch was not recorded' }
   }
 })
 
-test('Docker volume ownership recognizes current missing-volume wording without masking failures', () => {
-  const fixture = mkdtempSync(join(tmpdir(), 'aerolink-fake-volume-wording-'))
+test('Docker absence requires one exact name-bound container or volume diagnostic', () => {
+  const fixture = mkdtempSync(join(tmpdir(), 'aerolink-fake-absence-wording-'))
   const fakeScript = join(fixture, 'fake-docker.ps1')
   const fakeCommand = join(fixture, 'docker.cmd')
   const harness = join(fixture, 'harness.ps1')
   const fake = String.raw`param([Parameter(ValueFromRemainingArguments = $true)][string[]]$Arguments)
 switch ($env:FAKE_DOCKER_MODE) {
-  'real-missing' { [Console]::Error.WriteLine('Error response from daemon: get fixture: no such volume'); exit 1 }
-  'real-missing-suffix' { [Console]::Error.WriteLine('Error response from daemon: get fixture: no such volume: fixture'); exit 1 }
-  'legacy-missing' { [Console]::Error.WriteLine('Error response from daemon: no such volume: fixture'); exit 1 }
+  'container-exact' { [Console]::Error.WriteLine('Error: No such object: fixture'); exit 1 }
+  'container-empty-list' { Write-Output '[]'; [Console]::Error.WriteLine('Error: No such object: fixture'); exit 1 }
+  'container-regex-name' { [Console]::Error.WriteLine('Error: No such object: fixture[1]'); exit 1 }
+  'container-wrong-name' { [Console]::Error.WriteLine('Error: No such object: other'); exit 1 }
+  'container-wrong-case' { [Console]::Error.WriteLine('error: no such object: fixture'); exit 1 }
+  'container-daemon-prefix' { [Console]::Error.WriteLine('Error response from daemon: No such object: fixture'); exit 1 }
+  'container-bare' { [Console]::Error.WriteLine('No such object: fixture'); exit 1 }
+  'container-leading-space' { [Console]::Error.WriteLine(' Error: No such object: fixture'); exit 1 }
+  'container-trailing-space' { [Console]::Error.WriteLine('Error: No such object: fixture '); exit 1 }
+  'container-permission-suffix' { [Console]::Error.WriteLine('Error: No such object: fixture permission denied'); exit 1 }
+  'container-multiline-prefix' { [Console]::Error.WriteLine('permission denied' + [Environment]::NewLine + 'Error: No such object: fixture'); exit 1 }
+  'container-multiline-suffix' { [Console]::Error.WriteLine('Error: No such object: fixture' + [Environment]::NewLine + 'permission denied'); exit 1 }
+  'container-arbitrary-companion' { Write-Output 'arbitrary'; [Console]::Error.WriteLine('Error: No such object: fixture'); exit 1 }
+  'container-duplicate-empty-list' { Write-Output '[]'; Write-Output '[]'; [Console]::Error.WriteLine('Error: No such object: fixture'); exit 1 }
+  'container-empty-list-only' { Write-Output '[]'; exit 1 }
+  'volume-get-exact' { [Console]::Error.WriteLine('Error response from daemon: get fixture: no such volume'); exit 1 }
+  'volume-suffix-exact' { [Console]::Error.WriteLine('Error response from daemon: no such volume: fixture'); exit 1 }
+  'volume-get-empty-list' { Write-Output '[]'; [Console]::Error.WriteLine('Error response from daemon: get fixture: no such volume'); exit 1 }
+  'volume-suffix-empty-list' { Write-Output '[]'; [Console]::Error.WriteLine('Error response from daemon: no such volume: fixture'); exit 1 }
+  'volume-regex-name' { [Console]::Error.WriteLine('Error response from daemon: get fixture[1]: no such volume'); exit 1 }
+  'volume-combined' { [Console]::Error.WriteLine('Error response from daemon: get fixture: no such volume: fixture'); exit 1 }
+  'volume-wrong-case' { [Console]::Error.WriteLine('error response from daemon: get fixture: no such volume'); exit 1 }
   'daemon' { [Console]::Error.WriteLine('Cannot connect to the Docker daemon'); exit 1 }
   'permission' { [Console]::Error.WriteLine('Error response from daemon: permission denied while inspecting fixture'); exit 1 }
   'wrong-get-name' { [Console]::Error.WriteLine('Error response from daemon: get other: no such volume'); exit 1 }
-  'wrong-suffix-name' { [Console]::Error.WriteLine('Error response from daemon: get fixture: no such volume: other'); exit 1 }
+  'wrong-suffix-name' { [Console]::Error.WriteLine('Error response from daemon: no such volume: other'); exit 1 }
   'malformed' { [Console]::Error.WriteLine('Error response from daemon: get fixture: no such volume permission denied'); exit 1 }
   'bare' { [Console]::Error.WriteLine('no such volume: fixture'); exit 1 }
-  'multiline' { [Console]::Error.WriteLine('Error response from daemon: get fixture: no such volume' + [Environment]::NewLine + 'permission denied'); exit 1 }
+  'leading-space' { [Console]::Error.WriteLine(' Error response from daemon: get fixture: no such volume'); exit 1 }
+  'trailing-space' { [Console]::Error.WriteLine('Error response from daemon: get fixture: no such volume '); exit 1 }
+  'multiline-prefix' { [Console]::Error.WriteLine('permission denied' + [Environment]::NewLine + 'Error response from daemon: get fixture: no such volume'); exit 1 }
+  'multiline-suffix' { [Console]::Error.WriteLine('Error response from daemon: get fixture: no such volume' + [Environment]::NewLine + 'permission denied'); exit 1 }
+  'multiple-records' { [Console]::Error.WriteLine('Error response from daemon: get fixture: no such volume'); [Console]::Error.WriteLine('permission denied'); exit 1 }
+  'arbitrary-companion' { Write-Output 'arbitrary'; [Console]::Error.WriteLine('Error response from daemon: get fixture: no such volume'); exit 1 }
+  'duplicate-empty-list' { Write-Output '[]'; Write-Output '[]'; [Console]::Error.WriteLine('Error response from daemon: get fixture: no such volume'); exit 1 }
+  'empty-list-only' { Write-Output '[]'; exit 1 }
 }
 Write-Output 'run-id'; exit 0
 `
@@ -223,14 +249,27 @@ $ast = [System.Management.Automation.Language.Parser]::ParseFile($source, [ref]$
 $node = $ast.Find({ param($candidate) $candidate -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $candidate.Name -eq 'Get-DockerOwnedResource' }, $true)
 . ([scriptblock]::Create($node.Extent.Text))
 $docker = '${fakeCommand.replaceAll("'", "''")}'
-foreach ($mode in @('real-missing', 'real-missing-suffix', 'legacy-missing')) {
+foreach ($mode in @('container-exact', 'container-empty-list')) {
+  $env:FAKE_DOCKER_MODE = $mode
+  if ($null -ne (Get-DockerOwnedResource -Docker $docker -Kind container -Name 'fixture')) { throw "missing container form $mode was not treated as absent" }
+}
+foreach ($mode in @('container-wrong-name', 'container-wrong-case', 'container-daemon-prefix', 'container-bare', 'container-leading-space', 'container-trailing-space', 'container-permission-suffix', 'container-multiline-prefix', 'container-multiline-suffix', 'container-arbitrary-companion', 'container-duplicate-empty-list', 'container-empty-list-only', 'daemon', 'permission')) {
+  $env:FAKE_DOCKER_MODE = $mode
+  try { Get-DockerOwnedResource -Docker $docker -Kind container -Name 'fixture'; throw "unsafe container diagnostic $mode was accepted" } catch { if ($_.Exception.Message -notmatch 'ownership could not be verified') { throw } }
+}
+$env:FAKE_DOCKER_MODE = 'container-regex-name'
+if ($null -ne (Get-DockerOwnedResource -Docker $docker -Kind container -Name 'fixture[1]')) { throw 'escaped container name was not treated as absent' }
+foreach ($mode in @('volume-get-exact', 'volume-suffix-exact', 'volume-get-empty-list', 'volume-suffix-empty-list')) {
   $env:FAKE_DOCKER_MODE = $mode
   if ($null -ne (Get-DockerOwnedResource -Docker $docker -Kind volume -Name 'fixture')) { throw "missing volume form $mode was not treated as absent" }
 }
-foreach ($mode in @('daemon', 'permission', 'wrong-get-name', 'wrong-suffix-name', 'malformed', 'bare', 'multiline')) {
+foreach ($mode in @('volume-combined', 'volume-wrong-case', 'daemon', 'permission', 'wrong-get-name', 'wrong-suffix-name', 'malformed', 'bare', 'leading-space', 'trailing-space', 'multiline-prefix', 'multiline-suffix', 'multiple-records', 'arbitrary-companion', 'duplicate-empty-list', 'empty-list-only')) {
   $env:FAKE_DOCKER_MODE = $mode
   try { Get-DockerOwnedResource -Docker $docker -Kind volume -Name 'fixture'; throw "unsafe volume diagnostic $mode was accepted" } catch { if ($_.Exception.Message -notmatch 'ownership could not be verified') { throw } }
 }
+$env:FAKE_DOCKER_MODE = 'volume-regex-name'
+if ($null -ne (Get-DockerOwnedResource -Docker $docker -Kind volume -Name 'fixture[1]')) { throw 'escaped volume name was not treated as absent' }
+try { Get-DockerOwnedResource -Docker $docker -Kind volume -Name ("fixture" + [Environment]::NewLine + "other"); throw 'multiline requested name was accepted' } catch { if ($_.Exception.Message -notmatch 'ownership could not be verified') { throw } }
 `
   try {
     writeFileSync(fakeScript, fake)
@@ -306,29 +345,62 @@ try { Get-PersistentEvidenceFingerprint -Root '${empty.replaceAll("'", "''")}' |
   }
 })
 
-test('listener cleanup treats an expected no-result as empty but fails on query errors', () => {
+test('listener cleanup accepts only the structured one-line unused-port CIM diagnostic', () => {
   const fixture = mkdtempSync(join(tmpdir(), 'aerolink-listener-query-'))
   const harness = join(fixture, 'harness.ps1')
   const harnessText = String.raw`$source = '${wrapperPath.replaceAll("'", "''")}'
 $tokens = $null; $parseErrors = $null
 $ast = [System.Management.Automation.Language.Parser]::ParseFile($source, [ref]$tokens, [ref]$parseErrors)
-$node = $ast.Find({ param($candidate) $candidate -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $candidate.Name -eq 'Get-BoundedListenerConnections' }, $true)
-. ([scriptblock]::Create($node.Extent.Text))
-function Get-NetTCPConnection {
-  if ($env:FAKE_LISTENER_MODE -eq 'empty') { Write-Error 'No MSFT_NetTCPConnection objects found with property LocalPort' -ErrorAction Stop; return }
-  if ($env:FAKE_LISTENER_MODE -eq 'failure') { Write-Error 'Access denied querying listener state' -ErrorAction Stop; return }
-  [pscustomobject]@{ LocalPort = 49152; LocalAddress = '127.0.0.1'; OwningProcess = 42 }
+foreach ($name in @('Test-IsExpectedEmptyListenerDiagnostic', 'Get-BoundedListenerConnections')) {
+  $node = $ast.Find({ param($candidate) $candidate -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $candidate.Name -eq $name }, $true)
+  if ($null -eq $node) { throw "missing function $name" }
+  . ([scriptblock]::Create($node.Extent.Text))
 }
-$env:FAKE_LISTENER_MODE = 'empty'
-if (@(Get-BoundedListenerConnections -Port 49152).Count -ne 0) { throw 'expected no-result listener query to be empty' }
+$port = 49152
+$realError = $null
+while ($port -le 49252 -and $null -eq $realError) {
+  try { NetTCPIP\Get-NetTCPConnection -State Listen -LocalPort $port -ErrorAction Stop | Out-Null; $port++ }
+  catch { $realError = $_ }
+}
+if ($null -eq $realError) { throw 'could not find an unused listener port' }
+$baseline = @{
+  ExceptionType = $realError.Exception.GetType().FullName
+  FullyQualifiedErrorId = $realError.FullyQualifiedErrorId
+  Category = [string]$realError.CategoryInfo.Category
+  Reason = $realError.CategoryInfo.Reason
+  TargetName = $realError.CategoryInfo.TargetName
+  TargetType = $realError.CategoryInfo.TargetType
+  Message = $realError.Exception.Message
+  Port = $port
+}
+if (-not (Test-IsExpectedEmptyListenerDiagnostic @baseline)) { throw 'real unused-port diagnostic was not accepted' }
+if (@(Get-BoundedListenerConnections -Port $port).Count -ne 0) { throw 'real unused-port query was not empty' }
+function Assert-Rejected([hashtable]$Candidate, [string]$Attack) {
+  if (Test-IsExpectedEmptyListenerDiagnostic @Candidate) { throw "unsafe listener diagnostic $Attack was accepted" }
+}
+foreach ($field in @('ExceptionType', 'FullyQualifiedErrorId', 'Category', 'Reason', 'TargetName', 'TargetType')) {
+  $candidate = $baseline.Clone(); $candidate[$field] = 'forged-value'; Assert-Rejected $candidate "wrong-$field"
+}
+$candidate = $baseline.Clone(); $candidate.ExceptionType = $baseline.ExceptionType.ToLowerInvariant(); Assert-Rejected $candidate 'identity-case-change'
+$candidate = $baseline.Clone(); $candidate.Message = $baseline.Message.Replace('No matching', 'no matching'); Assert-Rejected $candidate 'message-case-change'
+$candidate = $baseline.Clone(); $candidate.Message = 'Access denied. ' + $baseline.Message; Assert-Rejected $candidate 'permission-prefix'
+$candidate = $baseline.Clone(); $candidate.Message = $baseline.Message + ' Access denied.'; Assert-Rejected $candidate 'permission-suffix'
+$candidate = $baseline.Clone(); $candidate.Message = $baseline.Message + [Environment]::NewLine + 'Access denied.'; Assert-Rejected $candidate 'multiline-suffix'
+$candidate = $baseline.Clone(); $candidate.Message = 'Access denied.' + [Environment]::NewLine + $baseline.Message; Assert-Rejected $candidate 'multiline-prefix'
+$candidate = $baseline.Clone(); $candidate.Message = $baseline.Message.Replace("LocalPort = $port", "LocalPort = $($port + 1)"); Assert-Rejected $candidate 'wrong-port'
+$candidate = $baseline.Clone(); $candidate.Message = 'No matching MSFT_NetTCPConnection objects found'; Assert-Rejected $candidate 'bare-message'
+function Get-NetTCPConnection {
+  if ($env:FAKE_LISTENER_MODE -eq 'failure') { Write-Error 'Access denied querying listener state' -ErrorAction Stop; return }
+  [pscustomobject]@{ LocalPort = $port; LocalAddress = '127.0.0.1'; OwningProcess = 42 }
+}
 $env:FAKE_LISTENER_MODE = 'failure'
-try { Get-BoundedListenerConnections -Port 49152; throw 'listener query failure was accepted' } catch { if ($_.Exception.Message -notmatch 'bounded listener query failed') { throw } }
+try { Get-BoundedListenerConnections -Port $port; throw 'listener query failure was accepted' } catch { if ($_.Exception.Message -notmatch 'bounded listener query failed') { throw } }
 $env:FAKE_LISTENER_MODE = 'one'
-if (@(Get-BoundedListenerConnections -Port 49152).Count -ne 1) { throw 'listener result was not returned' }
+if (@(Get-BoundedListenerConnections -Port $port).Count -ne 1) { throw 'listener result was not returned' }
 `
   try {
     writeFileSync(harness, harnessText)
-    execFileSync('pwsh', ['-NoProfile', '-File', harness], { cwd: repoRoot, stdio: 'ignore' })
+    execFileSync('pwsh', ['-NoProfile', '-File', harness], { cwd: repoRoot, stdio: 'pipe' })
   } finally {
     rmSync(fixture, { recursive: true, force: true })
   }

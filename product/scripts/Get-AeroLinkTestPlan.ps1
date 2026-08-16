@@ -347,18 +347,24 @@ function Invoke-DockerText {
 }
 function Get-DockerOwnedResource {
     param([Parameter(Mandatory)][string]$Docker, [Parameter(Mandatory)][ValidateSet('container', 'volume')][string]$Kind, [Parameter(Mandatory)][string]$Name)
+    if ([string]::IsNullOrEmpty($Name) -or $Name -match '[\r\n]') { throw "Disposable Docker $Kind ownership could not be verified." }
     $arguments = if ($Kind -eq 'container') { @('inspect', '--format', '{{ index .Config.Labels "com.aerolink.planner.run" }}', $Name) } else { @('volume', 'inspect', '--format', '{{ index .Labels "com.aerolink.planner.run" }}', $Name) }
     try {
         $output = @(& $Docker @arguments 2>&1)
         $exitCode = $LASTEXITCODE
         if ($exitCode -eq 0) { return (($output -join [Environment]::NewLine).Trim()) }
-        $diagnostic = ($output -join [Environment]::NewLine).Trim()
+        if ($output.Count -lt 1 -or $output.Count -gt 2) { throw 'inspect returned an unexpected diagnostic count' }
+        $lines = @($output | ForEach-Object { [string]$_ })
+        if (@($lines | Where-Object { $_ -match '[\r\n]' }).Count -ne 0) { throw 'inspect returned a multiline diagnostic' }
+        $diagnostics = @($lines | Where-Object { $_ -ne '[]' })
+        if ($diagnostics.Count -ne 1 -or ($lines.Count - $diagnostics.Count) -gt 1) { throw 'inspect returned an unexpected companion record' }
+        $diagnostic = $diagnostics[0]
+        $escapedName = [regex]::Escape($Name)
         $absent = if ($Kind -eq 'container') {
-            $diagnostic -match '(?im)^\s*(?:error:\s*|error response from daemon:\s*)?no such object\s*:'
+            $diagnostic -cmatch "\AError: No such object: $escapedName\z"
         }
         else {
-            $escapedName = [regex]::Escape($Name)
-            $diagnostic -match "(?is)\A\s*error response from daemon:\s*(?:get\s+$escapedName\s*:\s*)?no such volume(?:\s*:\s*$escapedName)?\s*\z"
+            $diagnostic -cmatch "\AError response from daemon: (?:get ${escapedName}: no such volume|no such volume: $escapedName)\z"
         }
         if ($absent) { return $null }
         throw 'inspect was not conclusive'
@@ -375,13 +381,44 @@ function Remove-DockerOwnedResource {
         if ($null -ne (Get-DockerOwnedResource -Docker $Docker -Kind $Kind -Name $Name)) { throw 'resource remained after removal' }
     } catch { [void]$CleanupErrors.Add("Disposable Docker $Kind cleanup was not proven.") }
 }
+function Test-IsExpectedEmptyListenerDiagnostic {
+    param(
+        [AllowEmptyString()][string]$ExceptionType,
+        [AllowEmptyString()][string]$FullyQualifiedErrorId,
+        [AllowEmptyString()][string]$Category,
+        [AllowEmptyString()][string]$Reason,
+        [AllowEmptyString()][string]$TargetName,
+        [AllowEmptyString()][string]$TargetType,
+        [AllowEmptyString()][string]$Message,
+        [Parameter(Mandatory)][int]$Port
+    )
+    if ($ExceptionType -cne 'Microsoft.PowerShell.Cmdletization.Cim.CimJobException' -or
+        $FullyQualifiedErrorId -cne 'CmdletizationQuery_NotFound,Get-NetTCPConnection' -or
+        $Category -cne 'ObjectNotFound' -or
+        $Reason -cne 'CimJobException' -or
+        $TargetName -cne 'MSFT_NetTCPConnection' -or
+        $TargetType -cne 'String' -or
+        $Message -match '[\r\n]') { return $false }
+    $escapedPort = [regex]::Escape([string]$Port)
+    $messagePattern = "\ANo matching MSFT_NetTCPConnection objects found by CIM query for instances of the ROOT/StandardCimv2/MSFT_NetTCPConnection class on the[ \t]+CIM server: SELECT \* FROM[ \t]+MSFT_NetTCPConnection[ \t]+WHERE \(\(LocalPort = $escapedPort\)\) AND \(\(State = 2\)\)\. Verify query parameters and retry\.\z"
+    return $Message -cmatch $messagePattern
+}
 function Get-BoundedListenerConnections {
     param([Parameter(Mandatory)][int]$Port)
     try {
         $connections = @(Get-NetTCPConnection -State Listen -LocalPort $Port -ErrorAction Stop)
     }
     catch {
-        if ($_.Exception.Message -notmatch '(?i)No (?:matching )?MSFT_NetTCPConnection objects found') { throw 'The bounded listener query failed.' }
+        $expectedEmpty = Test-IsExpectedEmptyListenerDiagnostic `
+            -ExceptionType $_.Exception.GetType().FullName `
+            -FullyQualifiedErrorId $_.FullyQualifiedErrorId `
+            -Category ([string]$_.CategoryInfo.Category) `
+            -Reason $_.CategoryInfo.Reason `
+            -TargetName $_.CategoryInfo.TargetName `
+            -TargetType $_.CategoryInfo.TargetType `
+            -Message $_.Exception.Message `
+            -Port $Port
+        if (-not $expectedEmpty) { throw 'The bounded listener query failed.' }
         return @()
     }
     if ($connections.Count -gt 128) { throw 'The bounded listener query exceeded its result limit.' }
