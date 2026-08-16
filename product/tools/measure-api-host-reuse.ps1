@@ -1083,7 +1083,8 @@ function Invoke-Observation {
         [object]$ConditionMetadata,
         [switch]$IsWarmup
     )
-    $runDirectory = Join-Path $Root (if ($IsWarmup) { "warmup-$Condition-seed-$Seed" } else { "$Condition\run-$('{0:D2}' -f $RunNumber)-seed-$Seed" })
+    $relativeRunPath = if ($IsWarmup) { "warmup-$Condition-seed-$Seed" } else { "$Condition\run-$('{0:D2}' -f $RunNumber)-seed-$Seed" }
+    $runDirectory = Join-Path $Root $relativeRunPath
     if (Test-Path -LiteralPath $runDirectory) {
         $existing = @(Get-ChildItem -LiteralPath $runDirectory -Force -ErrorAction Stop)
         if ($existing.Count -gt 0) { Fail "Refusing to reuse non-empty observation directory: $runDirectory" }
