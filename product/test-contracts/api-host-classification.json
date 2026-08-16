@@ -2,8 +2,8 @@
   "schemaVersion": "aerolink-api-host-classification/v3",
   "totals": {
     "classes": 81,
-    "tests": 442,
-    "knownCases": 492,
+    "tests": 447,
+    "knownCases": 497,
     "unknownCaseTests": 0
   },
   "summary": {
@@ -15,8 +15,8 @@
     },
     "fresh-host": {
       "classes": 40,
-      "tests": 203,
-      "knownCases": 228,
+      "tests": 208,
+      "knownCases": 233,
       "unknownCaseTests": 0
     },
     "migration-candidate": {
@@ -208,6 +208,20 @@
       ]
     },
     {
+      "cls": "SecurityBoundaryTests",
+      "tests": 10,
+      "knownCases": 10,
+      "unknownCaseTests": 0,
+      "classification": "fresh-host",
+      "reason": "Customizes host state (service-replacement, factory-host-options); sharing could change the subject or leak configuration.",
+      "intents": [
+        "auth-policy",
+        "ef-translation",
+        "filesystem",
+        "http-boundary"
+      ]
+    },
+    {
       "cls": "ProblemReportVerificationApiTests",
       "tests": 9,
       "knownCases": 10,
@@ -233,6 +247,18 @@
       ]
     },
     {
+      "cls": "ReleasedExecutionEvidenceApiTests",
+      "tests": 8,
+      "knownCases": 8,
+      "unknownCaseTests": 0,
+      "classification": "fresh-host",
+      "reason": "Customizes host state (service-replacement); sharing could change the subject or leak configuration.",
+      "intents": [
+        "ef-translation",
+        "http-boundary"
+      ]
+    },
+    {
       "cls": "ClientHostingTests",
       "tests": 7,
       "knownCases": 16,
@@ -243,31 +269,6 @@
         "filesystem",
         "http-boundary",
         "rule-matrix"
-      ]
-    },
-    {
-      "cls": "ReleasedExecutionEvidenceApiTests",
-      "tests": 7,
-      "knownCases": 7,
-      "unknownCaseTests": 0,
-      "classification": "fresh-host",
-      "reason": "Customizes host state (service-replacement); sharing could change the subject or leak configuration.",
-      "intents": [
-        "ef-translation",
-        "http-boundary"
-      ]
-    },
-    {
-      "cls": "SecurityBoundaryTests",
-      "tests": 7,
-      "knownCases": 7,
-      "unknownCaseTests": 0,
-      "classification": "fresh-host",
-      "reason": "Customizes host state (service-replacement, factory-host-options); sharing could change the subject or leak configuration.",
-      "intents": [
-        "auth-policy",
-        "ef-translation",
-        "http-boundary"
       ]
     },
     {
@@ -484,6 +485,18 @@
       ]
     },
     {
+      "cls": "ReleasedExecutionEvidenceAuthorityMismatchTests",
+      "tests": 2,
+      "knownCases": 2,
+      "unknownCaseTests": 0,
+      "classification": "fresh-host",
+      "reason": "Customizes host state (service-replacement); sharing could change the subject or leak configuration.",
+      "intents": [
+        "ef-translation",
+        "http-boundary"
+      ]
+    },
+    {
       "cls": "AdministratorChangeRequestApiTests",
       "tests": 1,
       "knownCases": 2,
@@ -613,17 +626,6 @@
       "reason": "Customizes host state (factory-host-options); sharing could change the subject or leak configuration.",
       "intents": [
         "http-boundary"
-      ]
-    },
-    {
-      "cls": "ReleasedExecutionEvidenceAuthorityMismatchTests",
-      "tests": 1,
-      "knownCases": 1,
-      "unknownCaseTests": 0,
-      "classification": "fresh-host",
-      "reason": "Customizes host state (service-replacement); sharing could change the subject or leak configuration.",
-      "intents": [
-        "ef-translation"
       ]
     },
     {

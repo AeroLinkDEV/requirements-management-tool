@@ -14,7 +14,7 @@ import { readNamedJsonFromZip, ZipParseError } from '../lib/zip.mjs'
 const RUN_METRICS_FILE = 'run-metrics.json'
 import {
   validateRunRecord, queueAndCancellation, rollingStats, flakeTrend, cacheTrend,
-  detectRegressions, classifyRun, buildRollingReport, recordFormat, fullGatesPerMerge, MAX_RECORDS, FULL_GATE_WINDOW_DAYS,
+  detectRegressions, regressionDeterminacy, classifyRun, buildRollingReport, recordFormat, fullGatesPerMerge, MAX_RECORDS, FULL_GATE_WINDOW_DAYS,
 } from '../lib/rolling.mjs'
 
 const env = (name) => process.env[name] ?? ''
@@ -171,8 +171,32 @@ async function main() {
     byCategory.set(category, list)
   }
   const regressions = []
+  // Determinacy is tracked with the same options the detection uses, so "no regression" and "could not
+  // compare" cannot be confused downstream. Keep the verdict by category: an existing tracker may be
+  // about one category while unrelated categories are thin or absent from this rolling window.
+  const determinateCategories = []
+  const indeterminateCategories = []
+  const determinacyByCategory = {}
   for (const [category, list] of byCategory) {
-    regressions.push(...detectRegressions(list, { window: 8, minRuns: 3, ratio: 1.15, minDeltaMs: 60_000 }).map((entry) => ({ ...entry, category })))
+    const options = { window: 8, minRuns: 3, ratio: 1.15, minDeltaMs: 60_000 }
+    regressions.push(...detectRegressions(list, options).map((entry) => ({ ...entry, category })))
+    const verdict = regressionDeterminacy(list, options)
+    determinacyByCategory[category] = verdict
+    if (verdict.determinate) determinateCategories.push(category)
+    else indeterminateCategories.push({ category, reason: verdict.reason })
+  }
+  const determinacy = {
+    // This aggregate is only a summary. Tracker clearing uses `categories` so an unrelated category
+    // cannot make a thin tracked category look clean.
+    determinate: determinateCategories.length > 0 && indeterminateCategories.length === 0,
+    categories: determinacyByCategory,
+    comparedCategories: determinateCategories.sort(),
+    skippedCategories: indeterminateCategories.sort((a, b) => a.category.localeCompare(b.category)).slice(0, 20),
+    reason: determinateCategories.length === 0
+      ? 'No category had enough comparable data to detect a regression, so an empty result is not evidence of recovery.'
+      : indeterminateCategories.length > 0
+        ? 'At least one category had insufficient comparable data, so an empty result is not evidence of recovery for that category.'
+        : null,
   }
 
   const fullGates = fullGatesPerMerge(
@@ -190,6 +214,7 @@ async function main() {
     fullGates,
     // Stated by the side that applied it, so the report cannot describe a scope it did not use.
     fullGateScope: { windowDays: FULL_GATE_WINDOW_DAYS, cap: MAX_RECORDS },
+    determinacy,
   })
   mkdirSync(outputDir, { recursive: true })
   writeFileSync(join(outputDir, 'rolling-metrics.json'), `${JSON.stringify(report, null, 2)}\n`, 'utf8')

@@ -418,9 +418,9 @@ support or refute the rollout gate.
 | `dispose` | 843 | 1.7 ms | 78.0 ms | 19.1 s |
 | `connectionOpen` | 451 | 0.4 ms | 2.0 ms | 0.4 s |
 
-The eight-run telemetry recorded **433 host constructions**. Independently, the current inventory has
-**442 total test methods: 431 direct-host, 3 host-unknown, and 8 explicitly non-hosted**, across **492
-known xUnit cases**. These are distinct measures; runtime telemetry is authoritative for factory counts.
+The eight-run telemetry recorded **433 host constructions**. Independently, the current source-exact inventory
+forecast has **447 total test methods: 435 direct-host, 4 host-unknown, and 8 explicitly non-hosted**, across
+**497 known xUnit cases**. These are distinct measures; runtime telemetry is authoritative for factory counts.
 Disposal and connection opening are negligible in that telemetry. The p95 at more than five times the
 median means averages understate the tail.
 
@@ -452,9 +452,9 @@ pre-#593 #563 holds that static host evidence cannot safely clear:
 
 | Classification | Classes | Methods | Known invocations | Unknown-case methods | Share of methods |
 |---|---:|---:|---:|---:|---:|
-| reusable-host | 30 | 186 | 211 | 0 | 42.1% |
-| converted (pilot) | 10 | 52 | 52 | 0 | 11.8% |
-| fresh-host | 40 | 203 | 228 | 0 | 45.9% |
+| reusable-host | 30 | 186 | 211 | 0 | 41.6% |
+| converted (pilot) | 10 | 52 | 52 | 0 | 11.6% |
+| fresh-host | 40 | 208 | 233 | 0 | 46.5% |
 | migration-candidate | 1 | 1 | 1 | 0 | 0.2% |
 
 `reusable-host` identifies a static conversion candidate, not an implementation-ready safety approval.
@@ -508,7 +508,7 @@ converted full-concurrency run can establish whether the 15% wall-clock gate is 
 
 ### Disposition
 
-**#563 remains open.** Do not close the rollout issue or treat the aggregate host-time accounting as a
+**#563 and #566 remain open.** Do not close the rollout issue, claim the migration ceiling, or treat the aggregate host-time accounting as a
 wall-clock gate result. Convert the reusable classes incrementally, publish class-by-shard attribution,
 and measure enough randomized full-concurrency runs to see past the observed spread. The schema-template
 copy experiment above remains a negative result and should not be repeated.

@@ -130,7 +130,10 @@ default-branch code and never executes PR content.
 - publishes `rolling-metrics.json` + `rolling-metrics.md` as a 30-day artifact.
 
 `bin/update-regression-tracker.mjs` updates a single durable issue (`CI rolling regression tracker`)
-only when sustained regressions exist; an empty result never opens or touches an issue.
+when sustained regressions exist or when every previously tracked category has determinate recovery
+evidence. An empty result never creates an issue; an indeterminate category leaves the existing tracker
+untouched, and a current regression carries that category forward as `status unknown/not cleared` until
+category-specific evidence permits clearing it.
 
 Rolling output is never merge authority. The required check remains `Report what this run validated`.
 
@@ -267,7 +270,7 @@ Run the full suite exactly as CI does:
 node --test product/ci-metrics/tests/trx.test.mjs product/ci-metrics/tests/playwright.test.mjs product/ci-metrics/tests/fragment.test.mjs product/ci-metrics/tests/aggregate.test.mjs product/ci-metrics/tests/build-run-meta.test.mjs product/ci-metrics/tests/junit.test.mjs product/ci-metrics/tests/ci-workflow-contract.test.mjs product/ci-metrics/tests/zip.test.mjs product/ci-metrics/tests/rolling.test.mjs product/ci-metrics/tests/provenance.test.mjs product/ci-metrics/tests/api-telemetry.test.mjs
 ```
 
-The exact command above currently runs **154 tests**. The suite covers schema-driven nested validation, real-format Playwright suite traversal,
+The exact command above currently runs **164 tests** (the former 154-test count predates the post-#601 metrics-contract additions). The suite covers schema-driven nested validation, real-format Playwright suite traversal,
 representative TRX success/failure fixtures, Node JUnit parsing, valid/missing/malformed/oversized
 fragments and artifacts, unknown schema versions, failed/cancelled/skipped jobs, missing test reports,
 count mismatches, retried Playwright tests, empty test sets, comparable-run grouping and rolling

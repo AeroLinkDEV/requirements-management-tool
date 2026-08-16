@@ -122,6 +122,25 @@ test('fragment artifacts are attempt-scoped and the report pattern excludes merg
   assert.match(report, /if:\s*success\(\)\s*\n\s*continue-on-error:\s*true\s*\n\s*uses: actions\/upload-artifact/, 'validated-tree manifest upload must be success-gated and isolated')
 })
 
+test('download-artifact uses download inputs while upload-only inputs stay on uploads', () => {
+  const reportBlocks = stepBlocks(jobBodies(workflowLines())['metrics-report'])
+  const downloadBlocks = reportBlocks.filter((block) => block.name === 'Download fragments')
+  assert.equal(downloadBlocks.length, 1, 'metrics-report must have exactly one Download fragments step')
+  const download = downloadBlocks[0]
+  const downloadText = download.lines.join('\n')
+  assert.match(downloadText, /uses:\s*actions\/download-artifact/, 'Download fragments must use download-artifact')
+  assert.match(downloadText, /pattern:\s*ci-metrics-fragment-\*/)
+  assert.match(downloadText, /path:\s*\$\{\{\s*runner\.temp\s*\}\}\/fragments/)
+  assert.doesNotMatch(downloadText, /^\s*if-no-files-found:/m, 'if-no-files-found belongs to upload-artifact, not download-artifact')
+
+  const uploadBlocks = reportBlocks.filter((block) => block.name === 'Upload merged metrics')
+  assert.equal(uploadBlocks.length, 1, 'metrics-report must have exactly one Upload merged metrics step')
+  const upload = uploadBlocks[0]
+  const uploadText = upload.lines.join('\n')
+  assert.match(uploadText, /uses:\s*actions\/upload-artifact/, 'Upload merged metrics must use upload-artifact')
+  assert.match(uploadText, /^\s*if-no-files-found:\s*ignore/m, 'upload-only missing-file policy must remain explicit')
+})
+
 test('metrics-report waits for every independently selected producer', () => {
   const report = jobBodies(workflowLines())['metrics-report'].join('\n')
   assert.match(report, /needs:\s*\[gate,\s*changes,\s*warm-chromium-cache,\s*browser-full\]/)

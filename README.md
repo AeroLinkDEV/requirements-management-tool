@@ -34,6 +34,8 @@ Run [`SCHEDULE_AEROLINK_BACKUP.bat`](SCHEDULE_AEROLINK_BACKUP.bat) once to regis
 
 Operational shortcuts are also provided for [stopping AeroLink](STOP_AEROLINK.bat), [diagnostics](AEROLINK_DIAGNOSTICS.bat), [backup verification](VERIFY_AEROLINK_BACKUP.bat), and isolated [restore validation](RESTORE_AEROLINK.bat). The safety model and production recovery procedure are documented in [Operations and recovery](product/docs/OPERATIONS.md).
 
+For a safe changed-test forecast before pushing, use the [changed-test planner](product/test-planner/README.md).
+
 Run [`INSTALL_AEROLINK_DOCUMENT_CONNECTOR.bat`](INSTALL_AEROLINK_DOCUMENT_CONNECTOR.bat) once per Windows user
 to connect Documentation Center checkouts to Microsoft Word. AeroLink then controls checkout, working-version
 history, review, signatures, and the released DOCX/PDF pair; Word remains the authoring application. See

@@ -1,15 +1,15 @@
 {
   "schemaVersion": "aerolink-api-test-intent/v2",
   "totals": {
-    "tests": 442,
-    "cases": 492,
+    "tests": 447,
+    "cases": 497,
     "classes": 81,
-    "hostedTests": 431,
-    "hostedCases": 472,
+    "hostedTests": 435,
+    "hostedCases": 476,
     "nonHostedTests": 8,
     "nonHostedCases": 17,
-    "unknownHostTests": 3,
-    "unknownHostCases": 3,
+    "unknownHostTests": 4,
+    "unknownHostCases": 4,
     "hostedCandidateTests": 6,
     "hostedCandidateCases": 7,
     "unknownCandidateTests": 2,
@@ -21,10 +21,10 @@
     "http-boundary": {
       "label": "HTTP boundary: route, status, JSON shape",
       "level": "API (must stay hosted)",
-      "tests": 293,
-      "cases": 327,
+      "tests": 297,
+      "cases": 331,
       "unknownCases": 0,
-      "classes": 67
+      "classes": 68
     },
     "ef-translation": {
       "label": "EF translation / relational constraints",
@@ -45,10 +45,10 @@
     "filesystem": {
       "label": "Filesystem / evidence-root behaviour",
       "level": "API or Infrastructure (must stay hosted)",
-      "tests": 9,
-      "cases": 9,
+      "tests": 10,
+      "cases": 10,
       "unknownCases": 0,
-      "classes": 5
+      "classes": 6
     },
     "in-process-logic": {
       "label": "In-process logic with no HTTP and no client",
@@ -5303,8 +5303,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 145,
-        "end": 176
+        "start": 154,
+        "end": 185
       }
     },
     {
@@ -5320,8 +5320,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 178,
-        "end": 213
+        "start": 187,
+        "end": 222
       }
     },
     {
@@ -5338,8 +5338,26 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 76,
-        "end": 100
+        "start": 85,
+        "end": 109
+      }
+    },
+    {
+      "cls": "ReleasedExecutionEvidenceApiTests",
+      "test": "Guarded_factory_preserves_the_file_backed_sqlite_contract",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 30,
+        "end": 37
       }
     },
     {
@@ -5356,8 +5374,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 30,
-        "end": 55
+        "start": 39,
+        "end": 64
       }
     },
     {
@@ -5374,8 +5392,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 127,
-        "end": 143
+        "start": 136,
+        "end": 152
       }
     },
     {
@@ -5392,8 +5410,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 102,
-        "end": 125
+        "start": 111,
+        "end": 134
       }
     },
     {
@@ -5410,8 +5428,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 57,
-        "end": 74
+        "start": 66,
+        "end": 83
       }
     },
     {
@@ -5427,8 +5445,26 @@
         "factory-services"
       ],
       "sourceLines": {
+        "start": 30,
+        "end": 86
+      }
+    },
+    {
+      "cls": "ReleasedExecutionEvidenceAuthorityMismatchTests",
+      "test": "Guarded_factory_preserves_the_file_backed_sqlite_contract",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
         "start": 21,
-        "end": 77
+        "end": 28
       }
     },
     {
@@ -5774,8 +5810,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 158,
-        "end": 204
+        "start": 278,
+        "end": 324
       }
     },
     {
@@ -5791,8 +5827,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 130,
-        "end": 156
+        "start": 250,
+        "end": 276
       }
     },
     {
@@ -5808,8 +5844,58 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 49,
-        "end": 78
+        "start": 169,
+        "end": 198
+      }
+    },
+    {
+      "cls": "SecurityBoundaryTests",
+      "test": "File_backed_sqlite_contention_uses_the_provider_lock_retry_budget_without_a_custom_busy_handler",
+      "kind": "Fact",
+      "intent": "filesystem",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "unknown",
+      "hostEvidence": [],
+      "sourceLines": {
+        "start": 43,
+        "end": 106
+      }
+    },
+    {
+      "cls": "SecurityBoundaryTests",
+      "test": "File_backed_test_database_uses_wal_and_provider_lock_retry_budget",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 27,
+        "end": 33
+      }
+    },
+    {
+      "cls": "SecurityBoundaryTests",
+      "test": "File_backed_test_database_uses_wal_and_provider_lock_retry_budget_when_opened_synchronously",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 35,
+        "end": 41
       }
     },
     {
@@ -5826,8 +5912,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 26,
-        "end": 47
+        "start": 146,
+        "end": 167
       }
     },
     {
@@ -5843,8 +5929,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 80,
-        "end": 86
+        "start": 200,
+        "end": 206
       }
     },
     {
@@ -5861,8 +5947,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 88,
-        "end": 128
+        "start": 208,
+        "end": 248
       }
     },
     {
@@ -5879,8 +5965,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 206,
-        "end": 277
+        "start": 326,
+        "end": 397
       }
     },
     {

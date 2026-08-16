@@ -1,0 +1,67 @@
+name: Pull request overlap
+
+# Trusted-base advisory analysis. This workflow deliberately does not execute pull-request-head code:
+# the write-capable token is only exposed to the checker checked out from the default branch.
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened, ready_for_review, converted_to_draft, closed]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+# A lifecycle event refreshes every affected peer, so runs must not race and re-introduce stale claims.
+concurrency:
+  group: pr-overlap-global
+  cancel-in-progress: false
+
+jobs:
+  overlap:
+    name: Check for overlapping pull requests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      # pull_request_target checks out the repository's default branch. Never replace this ref with
+      # github.event.pull_request.head.sha: that would execute untrusted PR code with write authority.
+      - name: Check out trusted default branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          fetch-depth: 1
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+      - name: Verify trusted overlap checker
+        id: checker
+        continue-on-error: true
+        shell: bash
+        env:
+          OVERLAP_JSON_OUTPUT: ${{ runner.temp }}/pr-overlap.json
+        run: |
+          if [[ -f product/test-planner/tools/check-overlap.mjs ]]; then
+            echo 'present=true' >> "$GITHUB_OUTPUT"
+          else
+            echo 'present=false' >> "$GITHUB_OUTPUT"
+            printf '%s\n' '{"version":1,"status":"Unknown","analysisComplete":false,"repository":"Unknown","action":"unknown","analysisTimestamp":"Unknown","limits":{"maxOpenPullRequests":100,"maxEligiblePullRequests":30,"maxFilesPerPullRequest":1000,"maxPathLength":4096,"maxCommentsPerTarget":1000,"maxCommentBodyLength":100000,"maxAnalysisPairs":435,"maxAnalysisFiles":30000,"maxReportItems":100,"maxReportErrors":25},"currentPr":null,"openPullRequests":0,"eligiblePullRequests":0,"peerHeads":[],"overlaps":[],"updates":[],"errors":["Trusted overlap checker is absent from the checked-out default branch."]}' > "$OVERLAP_JSON_OUTPUT"
+            echo '::warning::Trusted overlap checker is absent from the checked-out default branch; emitted a bounded Unknown report.'
+          fi
+      - name: Report overlapping pull requests
+        if: steps.checker.outputs.present == 'true'
+        continue-on-error: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_API_URL: ${{ github.api_url }}
+          GITHUB_EVENT_PATH: ${{ github.event_path }}
+          OVERLAP_JSON_OUTPUT: ${{ runner.temp }}/pr-overlap.json
+          OVERLAP_ANALYSIS_TIMESTAMP: ${{ github.run_started_at }}
+        run: node product/test-planner/tools/check-overlap.mjs
+      - name: Upload bounded overlap report
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: pr-overlap-report-${{ github.event.pull_request.number }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/pr-overlap.json
+          if-no-files-found: warn
+          retention-days: 7
