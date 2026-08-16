@@ -29,25 +29,21 @@ jobs:
 
           $scriptPath = 'product/tools/measure-api-host-reuse.ps1'
           $source = Get-Content -Raw -LiteralPath $scriptPath
-          $old = @'
-          if ($JobSmoke) {
-              if (-not $IsWindows) { Fail 'This harness is intentionally Windows-only.' }
-              Invoke-JobContainmentSmoke
-              return
-          }
-          '@
-          $new = @'
-          if ($JobSmoke) {
-              if (-not $IsWindows) { Fail 'This harness is intentionally Windows-only.' }
-              Invoke-JobContainmentSmoke
-              # The smoke intentionally launches fail-closed native children. Do not leak one of those
-              # expected child exit codes into a same-session caller after the smoke itself succeeded.
-              $global:LASTEXITCODE = 0
-              return
-          }
-          '@
-          if (($source.Split($old).Count - 1) -ne 1) { throw 'JobSmoke main-branch anchor mismatch.' }
-          [IO.File]::WriteAllText((Resolve-Path $scriptPath), $source.Replace($old, $new), $utf8)
+          $pattern = '(?m)^(?<indent>[ \t]*)Invoke-JobContainmentSmoke\r?\n\k<indent>return$'
+          $matches = [regex]::Matches($source, $pattern)
+          if ($matches.Count -ne 1) { throw "JobSmoke main-branch anchor count was $($matches.Count), expected 1." }
+          $source = [regex]::Replace($source, $pattern, {
+            param($match)
+            $indent = $match.Groups['indent'].Value
+            return @(
+              ($indent + 'Invoke-JobContainmentSmoke'),
+              ($indent + '# The smoke intentionally launches fail-closed native children. Do not leak one of those'),
+              ($indent + '# expected child exit codes into a same-session caller after the smoke itself succeeded.'),
+              ($indent + '$global:LASTEXITCODE = 0'),
+              ($indent + 'return')
+            ) -join "`n"
+          }, 1)
+          [IO.File]::WriteAllText((Resolve-Path $scriptPath), $source, $utf8)
 
           $testPath = 'product/test-contracts/tests/api-host-reuse-measurement.test.mjs'
           $tests = Get-Content -Raw -LiteralPath $testPath
