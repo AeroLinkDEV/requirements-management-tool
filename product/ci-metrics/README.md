@@ -130,7 +130,10 @@ default-branch code and never executes PR content.
 - publishes `rolling-metrics.json` + `rolling-metrics.md` as a 30-day artifact.
 
 `bin/update-regression-tracker.mjs` updates a single durable issue (`CI rolling regression tracker`)
-only when sustained regressions exist; an empty result never opens or touches an issue.
+when sustained regressions exist or when every previously tracked category has determinate recovery
+evidence. An empty result never creates an issue; an indeterminate category leaves the existing tracker
+untouched, and a current regression carries that category forward as `status unknown/not cleared` until
+category-specific evidence permits clearing it.
 
 Rolling output is never merge authority. The required check remains `Report what this run validated`.
 

@@ -219,6 +219,33 @@ function windowMedian(records, count) {
   return median(records.slice(-count).map(runDurationMs))
 }
 
+/**
+ * Whether a comparison was possible at all, independent of what it found.
+ *
+ * `detectRegressions` returns an empty array for two very different reasons: nothing regressed, or
+ * there was not enough comparable data to say. Both look identical to a caller, which is safe while
+ * the only consequence is "do not raise an alarm" and unsafe the moment a caller treats empty as
+ * evidence of recovery. This reports the difference using the same guards, so the two cannot drift.
+ */
+export function regressionDeterminacy(records, { window = 10, minRuns = 3 } = {}) {
+  const undetermined = (reason) => ({ determinate: false, reason })
+  if (!Array.isArray(records)) return undetermined('No records were supplied.')
+  if (records.length < minRuns * 2) return undetermined(`Only ${records.length} comparable runs; ${minRuns * 2} are needed to compare two windows.`)
+  const recent = records.slice(-window)
+  const previous = records.slice(-window * 2, -window)
+  if (recent.length < minRuns || previous.length < minRuns) {
+    return undetermined(`Windows are too small to compare (recent ${recent.length}, previous ${previous.length}, minimum ${minRuns}).`)
+  }
+  const durations = [
+    median(recent.map(runDurationMs)), median(previous.map(runDurationMs)),
+    percentile(recent.map(runDurationMs), 95), percentile(previous.map(runDurationMs), 95),
+  ]
+  if (durations.some((value) => value === null)) {
+    return undetermined('Critical-path durations were unavailable for at least one window, so no comparison was made.')
+  }
+  return { determinate: true, reason: null }
+}
+
 export function detectRegressions(records, { window = 10, minRuns = 3, ratio = 1.15, minDeltaMs = 60_000 } = {}) {
   if (records.length < minRuns * 2) return []
   const recent = records.slice(-window)
@@ -314,7 +341,7 @@ function escapeMarkdown(value) {
     .replace(/\r?\n/g, ' ')
 }
 
-export function buildRollingReport({ records, regressions = [], missing = [], fullGates = [], fullGateScope = null, generatedAt = new Date().toISOString() }) {
+export function buildRollingReport({ records, regressions = [], missing = [], fullGates = [], fullGateScope = null, determinacy = null, generatedAt = new Date().toISOString() }) {
   const stats = rollingStats(records)
   const flakes = flakeTrend(records)
   const cache = cacheTrend(records)
@@ -418,6 +445,10 @@ export function buildRollingReport({ records, regressions = [], missing = [], fu
   return {
     schemaVersion: ROLLING_SCHEMA_VERSION,
     generatedAt,
+    // Whether any category had enough comparable data for the regression check to mean anything.
+    // Published so a consumer can tell "nothing regressed" from "nothing could be compared" without
+    // re-deriving the collector's thresholds — the two are the same empty array otherwise.
+    determinacy: determinacy ?? { determinate: false, reason: 'The collector did not report whether a comparison was possible.' },
     records: records.slice(-MAX_RECORDS).map((record) => ({
       id: record.run?.id ?? null,
       attempt: record.run?.attempt ?? null,
@@ -448,14 +479,154 @@ export function buildRollingReport({ records, regressions = [], missing = [], fu
   }
 }
 
-export function trackerBody(report) {
+const TRACKER_METADATA_PREFIX = 'ci-metrics-tracker:v1'
+const TRACKER_CATEGORIES = new Set([
+  'backend-only', 'browser-only', 'client-only', 'docs-only', 'manual', 'mixed', 'postgresql-only',
+  'push-main', 'scheduled', 'unclassified',
+])
+const MAX_TRACKER_CATEGORIES = 20
+const MAX_TRACKER_CATEGORY_LENGTH = 100
+const LEGACY_TRACKER_INTRO = [
+  '# CI rolling regression tracker',
+  '',
+  'This single issue is the durable tracking item for sustained CI regressions. It is updated',
+  'only when the trusted rolling collector detects a threshold crossing; ordinary runner noise',
+  'never opens or updates issues.',
+  '',
+]
+const LEGACY_TRACKER_ENTRY = /^- ([a-z][a-z0-9-]*): [A-Za-z][A-Za-z0-9]*: current \d+s vs previous \d+s \(threshold \d+s, \d+ runs\)$/
+
+function trackedRegressionCategories(report) {
   const regressions = Array.isArray(report?.regressions) ? report.regressions : []
+  const categories = []
+  for (const entry of regressions) {
+    if (typeof entry?.category !== 'string' || entry.category.trim() === '') return null
+    categories.push(entry.category.trim())
+  }
+  return normalizeStructuredTrackerCategories(categories)
+}
+
+function normalizeStructuredTrackerCategories(categories) {
+  if (!Array.isArray(categories) || categories.length === 0 || categories.length > MAX_TRACKER_CATEGORIES) return null
+  const normalized = categories.map((category) => typeof category === 'string' ? category.trim() : category)
+  if (normalized.some((category) => typeof category !== 'string' || category === '' || category.length > MAX_TRACKER_CATEGORY_LENGTH || !TRACKER_CATEGORIES.has(category))) return null
+  return [...new Set(normalized)].sort()
+}
+
+function legacyTrackerCategories(body) {
+  const lines = String(body ?? '').replace(/\r\n?/g, '\n').split('\n')
+  if (lines.length < 10 || lines.slice(0, LEGACY_TRACKER_INTRO.length).join('\n') !== LEGACY_TRACKER_INTRO.join('\n')) return null
+  const countMatch = /^Detected (\d+) sustained regression\(s\):$/.exec(lines[6])
+  if (!countMatch || Number(countMatch[1]) < 1 || Number(countMatch[1]) > 20) return null
+  const count = Number(countMatch[1])
+  const entryStart = 8
+  const entryEnd = entryStart + count
+  const updatedMatch = /^Last updated: ([^\n]+)$/.exec(lines[entryEnd + 1] ?? '')
+  if (lines[7] !== '' || lines.length !== entryEnd + 2 || lines[entryEnd] !== '' || !updatedMatch || !Number.isFinite(Date.parse(updatedMatch[1]))) return null
+  const entries = lines.slice(entryStart, entryEnd).map((line) => LEGACY_TRACKER_ENTRY.exec(line))
+  if (entries.some((entry) => entry === null)) return null
+  const categories = entries.map((entry) => entry[1])
+  return normalizeStructuredTrackerCategories(categories)
+}
+
+/**
+ * Read the machine-readable category identity from a tracker body.
+ *
+ * New tracker bodies carry this as an HTML comment so the human-facing issue stays readable. The one
+ * canonical pre-marker #587 layout can be migrated structurally; malformed or unknown legacy bodies return
+ * null so a clean report leaves them alone rather than guessing and possibly clearing the wrong category.
+ */
+export function trackerCategoriesFromBody(body) {
+  const match = new RegExp(`<!--\\s*${TRACKER_METADATA_PREFIX}\\s+([\\s\\S]*?)\\s*-->`).exec(String(body ?? ''))
+  if (!match) return legacyTrackerCategories(body)
+  try {
+    const metadata = JSON.parse(match[1])
+    return normalizeStructuredTrackerCategories(metadata?.categories)
+  } catch {
+    return null
+  }
+}
+
+function trackerCategoriesAreDeterminate(trackerCategories, determinacyByCategory) {
+  if (!Array.isArray(trackerCategories) || trackerCategories.length === 0) return false
+  if (!determinacyByCategory || typeof determinacyByCategory !== 'object' || Array.isArray(determinacyByCategory)) return false
+  return trackerCategories.every((category) => determinacyByCategory[category]?.determinate === true)
+}
+
+function carryForwardTrackerCategories(trackerCategories, regressions, determinacyByCategory) {
+  const tracked = normalizeStructuredTrackerCategories(trackerCategories)
+  if (!tracked) return []
+  const current = new Set(trackedRegressionCategories({ regressions }) ?? [])
+  return tracked.filter((category) => !current.has(category) && determinacyByCategory?.[category]?.determinate !== true)
+}
+
+/**
+ * What the tracker update should do, given the current report and whether a tracker already exists.
+ *
+ * Pulled out of the bin script so all four cases are testable without a network. The case that was
+ * wrong: zero regressions with an existing tracker used to do nothing, leaving the issue asserting a
+ * regression that had already cleared. Not opening an issue on noise and not correcting a claim the
+ * tool itself published are different things, and only the first is worth protecting.
+ */
+export function decideTrackerAction({ regressions = [], trackerExists = false, trackerCategories = null, determinacyByCategory = null } = {}) {
+  const detected = Array.isArray(regressions) ? regressions.length : 0
+  if (detected > 0) {
+    return trackerExists
+      ? {
+          action: 'update',
+          carryForwardCategories: carryForwardTrackerCategories(trackerCategories, regressions, determinacyByCategory),
+          reason: `${detected} sustained regression(s) detected; refreshing the existing tracker.`,
+        }
+      : { action: 'create', reason: `${detected} sustained regression(s) detected and no tracker exists.` }
+  }
+  if (trackerExists) {
+    // An empty result is only evidence of recovery for every category the tracker was actually
+    // tracking. Missing artifacts, a thin window, or a shift in the category mix all produce the same
+    // empty array, and clearing on those would replace a real finding with a claim nothing supports.
+    // A canonical pre-marker #587 body can supply category identity through the exact legacy parser above.
+    // Malformed or unknown legacy bodies return null and remain deliberately un-clearable until a detected
+    // report rewrites them with the metadata marker below.
+    return trackerCategoriesAreDeterminate(trackerCategories, determinacyByCategory)
+      ? { action: 'update', reason: 'No sustained regressions over a sufficient window; recording that the tracker is clear rather than leaving a stale claim.' }
+      : { action: 'none', reason: 'No regressions found, but the tracked category evidence was missing or insufficient; leaving the existing tracker rather than clearing it on ignorance.' }
+  }
+  // The only other case that touches nothing. Creating an issue to announce that there is nothing to
+  // announce is exactly the issue spam the tracker was built to avoid.
+  return { action: 'none', reason: 'No sustained regressions and no tracker to correct.' }
+}
+
+/**
+ * Whether writing a report generated at `generatedAt` over `existingBody` would move the tracker
+ * backwards in time. Returns an explanation when the write should be skipped, or null when it is safe.
+ *
+ * Reads the timestamp the tracker body already carries rather than any external state, so two
+ * collector executions racing on the same issue converge on the newer one regardless of which
+ * finishes last.
+ */
+export function writeWouldRegressTracker(existingBody, generatedAt) {
+  const incoming = Date.parse(generatedAt)
+  if (!Number.isFinite(incoming)) return 'The incoming report has no usable generation timestamp.'
+  const stamped = /^Last (?:updated|checked): (.+)$/m.exec(String(existingBody ?? ''))
+  if (!stamped) return null // An unstamped body predates this guard; the newer content is an improvement.
+  const current = Date.parse(stamped[1].trim())
+  if (!Number.isFinite(current)) return null
+  if (incoming < current) {
+    return `This report was generated at ${generatedAt}, older than the tracker's current ${stamped[1].trim()}.`
+  }
+  return null
+}
+
+export function trackerBody(report, { carryForwardCategories = [] } = {}) {
+  const regressions = Array.isArray(report?.regressions) ? report.regressions : []
+  const carried = normalizeStructuredTrackerCategories(carryForwardCategories) ?? []
+  const currentCategories = trackedRegressionCategories(report) ?? []
+  const markerCategories = normalizeStructuredTrackerCategories([...currentCategories, ...carried])
   const lines = []
   lines.push('# CI rolling regression tracker')
   lines.push('')
   lines.push('This single issue is the durable tracking item for sustained CI regressions. It is updated')
-  lines.push('only when the trusted rolling collector detects a threshold crossing; ordinary runner noise')
-  lines.push('never opens or updates issues.')
+  lines.push('only by the trusted rolling collector when current regression or determinate recovery evidence')
+  lines.push('exists; ordinary runner noise never creates a new issue.')
   lines.push('')
   if (regressions.length === 0) {
     lines.push('No sustained regressions in the current window.')
@@ -471,5 +642,17 @@ export function trackerBody(report) {
     lines.push('')
     lines.push(`Last updated: ${report?.generatedAt ?? 'unknown'}`)
   }
+  if (carried.length > 0) {
+    lines.push('')
+    lines.push('## Previously tracked categories not cleared')
+    lines.push('')
+    for (const category of carried) {
+      lines.push(`- ${escapeMarkdown(category)}: status unknown/not cleared (current evidence was absent or insufficient)`)
+    }
+  }
+  lines.push('')
+  // Keep category identity out of the prose decision boundary. A legacy body without this marker is
+  // treated as unknown and cannot be cleared safely; the next real detection upgrades it in place.
+  lines.push(`<!-- ${TRACKER_METADATA_PREFIX} ${JSON.stringify({ categories: markerCategories })} -->`)
   return lines.join('\n')
 }
