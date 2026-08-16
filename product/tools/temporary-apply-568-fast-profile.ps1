@@ -40,11 +40,12 @@ $anchor
 Replace-ExactlyOnce $plannerTests $anchor $insert
 
 $psTests = 'product/scripts/Get-AeroLinkTestPlan.Tests.ps1'
-$psAnchor = '$plannerSource = Get-Content -Raw -LiteralPath $scriptPath'
+$psAnchor = "Assert-True (Test-Path -LiteralPath (Join-Path `$root 'TEST_AEROLINK_CHANGED.bat') -PathType Leaf) 'Friendly root BAT entry point is missing.'"
 $psInsert = @"
-$psAnchor
+`$plannerSource = Get-Content -Raw -LiteralPath `$scriptPath
 `$fastInfrastructureFilter = '$filter'
 Assert-True (([regex]::Matches(`$plannerSource, [regex]::Escape(`$fastInfrastructureFilter))).Count -eq 1) 'The six-case Fast infrastructure filter must appear exactly once so Full remains unfiltered.'
+$psAnchor
 "@
 Replace-ExactlyOnce $psTests $psAnchor $psInsert
 
