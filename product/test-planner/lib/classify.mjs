@@ -19,12 +19,23 @@
 
 /** Normalize paths before matching so a Windows caller and git's slash-separated paths agree. */
 export function normalizePath(path) {
-  return String(path).trim().replaceAll('\\', '/').replace(/^\.\//, '').toLowerCase()
+  // Git permits leading and trailing whitespace in a path. Preserve it: trimming would turn a
+  // deliberately unknown path such as ` docs/changed.cs` into a documentation path and could suppress
+  // every product gate.
+  return String(path).replaceAll('\\', '/').replace(/^\.\//, '').toLowerCase()
 }
 
-/** Paths that are documentation or design assets rather than product code. */
-const NON_PRODUCT = /(^|\/)(docs?|design|showcase)\//i
-const MARKDOWN = /\.md$/i
+/**
+ * Documentation roots and files are explicit. A nested product path containing a `docs`, `design`, or
+ * `showcase` directory is not documentation by convention: it remains product code and must not make the change
+ * docs-only. Root Markdown files are repository documentation; product documentation has its own root.
+ */
+const DOCUMENTATION_ROOTS = /^(?:docs|design|showcase|product\/docs)(?:\/|$)/i
+const DOCUMENTATION_FILES = /^[^/]+\.md$/i
+
+function isDocumentationPath(path) {
+  return DOCUMENTATION_ROOTS.test(path) || DOCUMENTATION_FILES.test(path)
+}
 
 /**
  * The workflow file selects and shards every suite, so a change to it can alter any gate — including
@@ -87,9 +98,9 @@ export function classify(changedPaths, { event = 'pull_request' } = {}) {
     }
   }
 
-  const paths = (Array.isArray(changedPaths) ? changedPaths : []).filter((p) => typeof p === 'string' && p.trim().length > 0)
+  const paths = (Array.isArray(changedPaths) ? changedPaths : []).filter((p) => typeof p === 'string' && p.length > 0)
   const normalizedPaths = paths.map(normalizePath)
-  const productFiles = normalizedPaths.filter((path) => !NON_PRODUCT.test(path) && !MARKDOWN.test(path))
+  const productFiles = normalizedPaths.filter((path) => !isDocumentationPath(path))
   const docsOnly = productFiles.length === 0
   const broadPath = matchingBroadPath(paths)
 
@@ -147,7 +158,7 @@ export function explain(changedPaths) {
       .filter(([, pattern]) => pattern.test(normalizedPath))
       .map(([area]) => area)
     const areas = matchedAreas.length > 0 ? matchedAreas : (broad ? ['all'] : matchedAreas)
-    const isProduct = !NON_PRODUCT.test(normalizedPath) && !MARKDOWN.test(normalizedPath)
+    const isProduct = !isDocumentationPath(normalizedPath)
     rows.push({ path, normalizedPath, areas, product: isProduct, broad })
   }
   return rows

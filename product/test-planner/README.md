@@ -24,8 +24,9 @@ From the repository root, double-click `TEST_AEROLINK_CHANGED.bat` or run the Po
 The switches are deliberately explicit:
 
 - `-Base` and `-Head` compare Git refs. The planner uses `merge-base` and a three-dot diff.
-- `-SinceOriginMain` is shorthand for the local `origin/main` ref; it never fetches or rebases and warns
-  when that ref may be stale.
+- `-SinceOriginMain` requires an existing local `origin/main` ref; it never creates, fetches, or rebases
+  that ref. If it is absent, the planner fails clearly and asks for an explicit `-Base` or `-Paths`; when
+  present, it warns that the remote-tracking ref may be stale.
 - `-Paths` supplies paths directly and accepts Windows separators. It cannot be combined with `-Base`,
   `-Head`, or `-SinceOriginMain`.
 - `-Mode Fast` runs the selected low-cost local commands after the wrapper's safety prompt; `-Mode Full`

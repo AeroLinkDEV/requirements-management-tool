@@ -76,6 +76,26 @@ test('Windows separators and case are normalized before matching', () => {
   assert.equal(result.postgresql, true)
 })
 
+test('legal path whitespace is preserved and cannot turn an unknown file into documentation', () => {
+  assert.equal(normalizePath(' docs/changed.cs '), ' docs/changed.cs ')
+  const result = of([' docs/changed.cs '])
+  assert.equal(result.docsOnly, false)
+  assert.equal(result.unclassified, true)
+  for (const area of ['backend', 'client', 'browser', 'postgresql']) assert.equal(result[area], true, area)
+})
+
+test('nested product docs/design/showcase lookalikes remain product paths', () => {
+  for (const path of [
+    'product/src/docs/DocumentationLoader.cs',
+    'product/client/src/showcase/ShowcasePanel.tsx',
+    'product/src/AeroLink.Api/design/DesignPreview.cs',
+  ]) {
+    const result = of([path])
+    assert.equal(result.docsOnly, false, path)
+    assert.equal(result.unclassified || result.backend || result.client, true, path)
+  }
+})
+
 test('a rename keeps both old and new sensitive paths in the supplied fixture', () => {
   const result = of([
     'product/src/AeroLink.Infrastructure/Persistence/Migrations/0001_old.cs',
@@ -221,6 +241,16 @@ test('backend-core runs every hosted contract test file', () => {
   assert.match(backendCore, /Get-ChildItem\s+-LiteralPath\s+product\/test-contracts\/tests\s+-Filter\s+'\*\.test\.mjs'/)
   assert.match(backendCore, /node\s+--test\s+\$tests/)
   assert.match(backendCore, /No hosted test-contracts test files were found/)
+})
+
+test('CI runs every planner test file directory-driven', () => {
+  const workflow = readFileSync(join(repoRoot, '.github/workflows/ci.yml'), 'utf8')
+  const plannerStart = workflow.indexOf('product/test-planner/tests')
+  assert.notEqual(plannerStart, -1)
+  const plannerJob = workflow.slice(Math.max(0, plannerStart - 500), plannerStart + 1000)
+  assert.match(plannerJob, /Get-ChildItem\s+-LiteralPath\s+product\/test-planner\/tests\s+-Filter\s+'\*\.test\.mjs'/)
+  assert.match(plannerJob, /node\s+--test\s+\$tests/)
+  assert.match(plannerJob, /No planner tests were found/)
 })
 
 test('every area pattern is anchored so a lookalike path cannot match', () => {

@@ -458,7 +458,13 @@ jobs:
       # classifier that decides which gates run at all. Two silent-green failures came from that code, and
       # a guard on it that cannot fail the gate would be worth nothing.
       - name: Verify the changed-area classifier and its workflow contract
-        run: node --test product/test-planner/tests/classify.test.mjs product/test-planner/tests/plan-cli.test.mjs product/test-planner/tests/planner-meta.test.mjs product/test-planner/tests/classify-ci.test.mjs
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $tests = @(Get-ChildItem -LiteralPath product/test-planner/tests -Filter '*.test.mjs' -File | Sort-Object FullName | ForEach-Object { $_.FullName })
+          if ($tests.Count -eq 0) { throw 'No planner tests were found.' }
+          & node --test $tests
+          if ($LASTEXITCODE -ne 0) { throw 'A planner test suite failed.' }
       - name: Refuse a test project that no job runs
         shell: bash
         run: |

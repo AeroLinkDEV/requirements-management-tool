@@ -13,6 +13,9 @@ function Assert-True([bool]$Condition, [string]$Message) {
 }
 
 function Invoke-Plan([string[]]$Arguments) {
+    # Some contract cases intentionally exercise a non-zero planner exit. Keep native stderr as captured
+    # output rather than allowing the outer Stop preference to abort before the exit code can be asserted.
+    $ErrorActionPreference = 'Continue'
     $pwsh = (Get-Command powershell.exe -ErrorAction SilentlyContinue)
     if (-not $pwsh) { $pwsh = (Get-Command pwsh.exe -ErrorAction Stop) }
     $output = & $pwsh.Source -NoProfile -ExecutionPolicy Bypass -File $scriptPath @Arguments 2>&1
@@ -40,12 +43,36 @@ Assert-True ($plain.Output -match 'AEROLINK_TEST_PLAN_RESULT=') 'Human output mu
 $originMainRef = 'refs/remotes/origin/main'
 & git -C $root show-ref --verify --quiet $originMainRef
 $originMainExists = $LASTEXITCODE -eq 0
-if (-not $originMainExists) {
-    # actions/checkout tests a synthetic merge commit without fetching remote-tracking refs. Create only the
-    # disposable ref needed by this contract, then remove it below; the wrapper itself must still do no fetch.
-    & git -C $root update-ref $originMainRef HEAD
-    if ($LASTEXITCODE -ne 0) { throw "Could not create disposable $originMainRef for the planner contract." }
+$originMainSha = $null
+if ($originMainExists) {
+    $originMainSha = (& git -C $root rev-parse --verify $originMainRef 2>&1 | Out-String).Trim()
+    if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($originMainSha)) { throw "Could not read $originMainRef for the planner contract." }
 }
+
+# First prove that a shallow checkout without origin/main fails explicitly and safely. The wrapper must not
+# invent a base or fetch one. If this checkout already has the ref, remove it only for this short contract
+# assertion and restore the exact SHA in finally.
+if ($originMainExists) {
+    & git -C $root update-ref -d $originMainRef
+    if ($LASTEXITCODE -ne 0) { throw "Could not temporarily remove $originMainRef for the absent-ref contract." }
+}
+try {
+    $missingOriginPlan = Invoke-PlanFrom ([System.IO.Path]::GetTempPath()) @('-SinceOriginMain', '-Head', 'HEAD', '-DryRun')
+    Assert-True ($missingOriginPlan.ExitCode -ne 0) "Missing origin/main must fail: $($missingOriginPlan.Output)"
+    Assert-True ($missingOriginPlan.Output -match 'local origin/main ref is required') 'Missing origin/main must explain the required local ref.'
+    Assert-True ($missingOriginPlan.Output -match 'no fetch or rebase') 'Missing origin/main must not fetch or rebase.'
+}
+finally {
+    if ($originMainExists) {
+        & git -C $root update-ref $originMainRef $originMainSha
+        if ($LASTEXITCODE -ne 0) { throw "Could not restore $originMainRef after the absent-ref contract." }
+    }
+}
+
+# Then exercise the successful stale-warning path with a disposable local ref. This simulates a checkout
+# that has a remote-tracking ref without granting the wrapper permission to refresh it.
+& git -C $root update-ref $originMainRef HEAD
+if ($LASTEXITCODE -ne 0) { throw "Could not create disposable $originMainRef for the stale-ref contract." }
 try {
     # The wrapper resolves its repository from $PSScriptRoot, so the stale-ref warning must also work when
     # the operator launches the PowerShell entry point from an unrelated directory.
@@ -56,10 +83,13 @@ try {
     Assert-True ($originPlan.Output -match 'No\s+fetch\s+or\s+rebase\s+was\s+performed') 'origin/main mode must not silently fetch or rebase.'
 }
 finally {
-    if (-not $originMainExists) {
-        & git -C $root update-ref -d $originMainRef
-        if ($LASTEXITCODE -ne 0) { throw "Could not remove disposable $originMainRef after the planner contract." }
+    if ($originMainExists) {
+        & git -C $root update-ref $originMainRef $originMainSha
     }
+    else {
+        & git -C $root update-ref -d $originMainRef
+    }
+    if ($LASTEXITCODE -ne 0) { throw "Could not restore $originMainRef after the stale-ref contract." }
 }
 
 $jsonRun = Invoke-Plan @('-Paths', 'README.md', '-Json', '-DryRun')

@@ -98,7 +98,12 @@ function changedPaths() {
     return changedPathsFromDiff(range.base, range.head)
   } catch (error) {
     console.error(`Could not diff against ${range.base}...${range.head}: ${error.message.split('\n')[0]}`)
-    console.error('Pass --base/--head or --files <paths...> instead; no fetch or rebase is performed.')
+    if (range.base === 'origin/main') {
+      console.error('A local origin/main ref is required for this mode. Pass --base <available-ref> or --files <paths...>; no fetch or rebase is performed.')
+    }
+    else {
+      console.error('Pass --base/--head or --files <paths...> instead; no fetch or rebase is performed.')
+    }
     process.exit(2)
   }
 }

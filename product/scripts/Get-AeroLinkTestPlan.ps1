@@ -60,8 +60,19 @@ else {
 
 Push-Location $repositoryRoot
 try {
-    $jsonOutput = & $node.Source @nodeArguments 2>&1
-    if ($LASTEXITCODE -ne 0) { throw "The shared planner failed: $($jsonOutput -join ' ')" }
+    # The planner intentionally writes actionable failures to stderr. Capture all of that output before
+    # restoring Stop semantics so a missing local origin/main ref is reported clearly instead of PowerShell
+    # terminating on the first native stderr record.
+    $plannerErrorPreference = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        $jsonOutput = & $node.Source @nodeArguments 2>&1
+        $plannerExitCode = $LASTEXITCODE
+    }
+    finally {
+        $ErrorActionPreference = $plannerErrorPreference
+    }
+    if ($plannerExitCode -ne 0) { throw "The shared planner failed: $($jsonOutput -join ' ')" }
     $plan = ($jsonOutput -join "`n") | ConvertFrom-Json
 }
 finally {
