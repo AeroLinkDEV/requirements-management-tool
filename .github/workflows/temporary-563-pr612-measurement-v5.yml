@@ -39,98 +39,40 @@ jobs:
         with:
           node-version: 24
 
-      - name: Prepare exact clean condition worktrees and patch observer only
+      - name: Prepare exact worktrees and observer patch
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
           git config --global core.longpaths true
-
           $harness = Join-Path $env:RUNNER_TEMP 'aerolink-563-harness-v5'
           $baseline = Join-Path $env:RUNNER_TEMP 'aerolink-563-baseline-v5'
           $treatment = Join-Path $env:RUNNER_TEMP 'aerolink-563-treatment-v5'
           $results = Join-Path $env:RUNNER_TEMP 'aerolink-563-results-v5'
           $wrapper = Join-Path $env:RUNNER_TEMP 'aerolink-563-wrapper-v5'
-
           foreach ($path in @($harness, $baseline, $treatment, $results, $wrapper)) {
             if (Test-Path -LiteralPath $path) { Remove-Item -LiteralPath $path -Recurse -Force }
           }
-
           New-Item -ItemType Directory -Path $wrapper -Force | Out-Null
           git worktree prune
           git worktree add --detach $harness $env:HARNESS_SHA
           git worktree add --detach $baseline $env:BASELINE_SHA
           git worktree add --detach $treatment $env:TREATMENT_SHA
-
-          $expected = @{
-            $harness = $env:HARNESS_SHA
-            $baseline = $env:BASELINE_SHA
-            $treatment = $env:TREATMENT_SHA
+          foreach ($pair in @(@($harness,$env:HARNESS_SHA), @($baseline,$env:BASELINE_SHA), @($treatment,$env:TREATMENT_SHA))) {
+            $actual = (git -C $pair[0] rev-parse HEAD).Trim()
+            if ($actual -ne $pair[1]) { throw "Worktree SHA mismatch: expected $($pair[1]), got $actual." }
+            if (git -C $pair[0] status --porcelain) { throw "Worktree is not clean before observer patch: $($pair[0])" }
           }
-          foreach ($entry in $expected.GetEnumerator()) {
-            $actual = (git -C $entry.Key rev-parse HEAD).Trim()
-            if ($actual -ne $entry.Value) { throw "Worktree SHA mismatch for $($entry.Key): expected $($entry.Value), got $actual." }
-            if (git -C $entry.Key status --porcelain) { throw "Worktree is not clean before observer patch: $($entry.Key)" }
-          }
-
-          $script = Join-Path $harness 'product/tools/measure-api-host-reuse.ps1'
-          $source = [IO.File]::ReadAllText($script)
-          $oldCleanup = @'
-            try {
-                if ($shard.job) {
-                    $cleanup = Stop-JobContainedProcess -Launch $shard.job -Terminate:(!$shard.process.HasExited) -TimeoutMilliseconds 5000
-'@
-          $newCleanup = @'
-            $processExitedBeforeCleanup = $false
-            try {
-                $processExitedBeforeCleanup = $shard.process.HasExited
-                if ($processExitedBeforeCleanup) {
-                    $shard.process.WaitForExit()
-                    $shard.exitCode = [int]$shard.process.ExitCode
-                } elseif ($shard.timedOut) {
-                    $shard.exitCode = 124
-                }
-            } catch {
-                $shard.exitCode = $null
-                $exitCaptureError = "exit-code capture failed before cleanup: $($_.Exception.Message)"
-                $shard.waitError = if ($shard.waitError) { "$($shard.waitError); $exitCaptureError" } else { $exitCaptureError }
-            }
-            try {
-                if ($shard.job) {
-                    $cleanup = Stop-JobContainedProcess -Launch $shard.job -Terminate:(!$processExitedBeforeCleanup) -TimeoutMilliseconds 5000
-'@
-          $oldTail = @'
-            $shard.endedAt = [DateTimeOffset]::UtcNow
-            try { $shard.exitCode = $shard.process.ExitCode } catch { $shard.exitCode = $null }
-            $shard.wallMs = ($shard.endedAt - $shard.shardStartedAt).TotalMilliseconds
-'@
-          $newTail = @'
-            $shard.endedAt = [DateTimeOffset]::UtcNow
-            $shard.wallMs = ($shard.endedAt - $shard.shardStartedAt).TotalMilliseconds
-'@
-
-          if (($source.Split($oldCleanup).Count - 1) -ne 1) { throw 'Expected cleanup anchor exactly once in merged harness.' }
-          if (($source.Split($oldTail).Count - 1) -ne 1) { throw 'Expected post-cleanup ExitCode anchor exactly once in merged harness.' }
-          $source = $source.Replace($oldCleanup, $newCleanup).Replace($oldTail, $newTail)
-          [IO.File]::WriteAllText($script, $source, [Text.UTF8Encoding]::new($false))
-
-          $patched = [IO.File]::ReadAllText($script)
-          $capture = $patched.IndexOf('$shard.exitCode = [int]$shard.process.ExitCode', [StringComparison]::Ordinal)
-          $cleanup = $patched.IndexOf('Stop-JobContainedProcess -Launch $shard.job -Terminate:(!$processExitedBeforeCleanup)', [StringComparison]::Ordinal)
-          if ($capture -lt 0 -or $cleanup -lt 0 -or $capture -ge $cleanup) { throw 'Observer patch did not place exit-code capture before native cleanup.' }
-          if ($patched.Contains('try { $shard.exitCode = $shard.process.ExitCode } catch { $shard.exitCode = $null }')) { throw 'Old post-cleanup exit-code capture still exists.' }
-
+          & ./product/tools/temporary-patch-563-exit-code.ps1 -HarnessPath $harness
+          if ($LASTEXITCODE -ne 0) { throw 'Observer patch helper failed.' }
           if (git -C $baseline status --porcelain) { throw 'Baseline condition tree became dirty.' }
           if (git -C $treatment status --porcelain) { throw 'Treatment condition tree became dirty.' }
-          if ((git -C $baseline rev-parse HEAD).Trim() -ne $env:BASELINE_SHA) { throw 'Baseline SHA moved.' }
-          if ((git -C $treatment rev-parse HEAD).Trim() -ne $env:TREATMENT_SHA) { throw 'Treatment SHA moved.' }
-
           "HARNESS_PATH=$harness" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
           "BASELINE_PATH=$baseline" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
           "TREATMENT_PATH=$treatment" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
           "RESULTS_PATH=$results" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
           "WRAPPER_PATH=$wrapper" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
 
-      - name: Prove patched harness contracts before measurement
+      - name: Prove patched harness contracts
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
@@ -139,14 +81,11 @@ jobs:
             node --test product/test-contracts/tests/api-host-reuse-measurement.test.mjs
             if ($LASTEXITCODE -ne 0) { throw 'Patched measurement harness contract suite failed.' }
             & ./product/tools/measure-api-host-reuse.ps1 -JobSmoke
-            if ($LASTEXITCODE -ne 0) { throw 'Patched measurement harness native Job Object smoke failed.' }
+            if ($LASTEXITCODE -ne 0) { throw 'Patched native Job Object smoke failed.' }
           }
-          finally {
-            Pop-Location
-          }
+          finally { Pop-Location }
 
       - name: Run ten paired authoritative observations
-        id: benchmark
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
@@ -168,53 +107,24 @@ jobs:
               -Warmup
           }
           catch {
-            @(
-              '=== Exception ===',
-              ($_ | Format-List * -Force | Out-String),
-              '=== Script stack ===',
-              $_.ScriptStackTrace,
-              '=== Invocation ===',
-              $_.InvocationInfo.PositionMessage
-            ) | Out-File -LiteralPath (Join-Path $env:WRAPPER_PATH 'measurement-error.txt') -Encoding utf8
+            @('=== Exception ===', ($_ | Format-List * -Force | Out-String), '=== Script stack ===', $_.ScriptStackTrace, '=== Invocation ===', $_.InvocationInfo.PositionMessage) | Out-File -LiteralPath (Join-Path $env:WRAPPER_PATH 'measurement-error.txt') -Encoding utf8
             throw
           }
-          finally {
-            try { Stop-Transcript | Out-Null } catch {}
-          }
+          finally { try { Stop-Transcript | Out-Null } catch {} }
 
       - name: Publish bounded decision summary
         if: always()
         shell: pwsh
         run: |
           $summaryPath = Join-Path $env:RESULTS_PATH 'summary.json'
-          @(
-            '## #563 PR 612 paired measurement v5',
-            '',
-            "- Merged harness source: ``$env:HARNESS_SHA`` plus pre-cleanup ExitCode observer patch",
-            "- Baseline: ``$env:BASELINE_SHA``",
-            "- Treatment: ``$env:TREATMENT_SHA``"
-          ) | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
-
+          @('## #563 PR 612 paired measurement v5','',"- Harness source: $env:HARNESS_SHA plus pre-cleanup ExitCode observer patch","- Baseline: $env:BASELINE_SHA","- Treatment: $env:TREATMENT_SHA") | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
           if (-not (Test-Path -LiteralPath $summaryPath)) {
-            '' | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
-            'No final summary was produced; inspect the uploaded transcript and partial evidence.' | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+            'No final summary was produced; inspect uploaded partial evidence.' | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
             exit 0
           }
-
           $summary = Get-Content -LiteralPath $summaryPath -Raw | ConvertFrom-Json -Depth 100
           $decision = $summary.decision
-          @(
-            '',
-            "- Decision: **$($decision.status)**",
-            "- Complete evidence: $($decision.completeEvidence)",
-            "- Baseline valid observations: $($summary.baseline.validObservationCount)/$($summary.baseline.requiredRuns)",
-            "- Treatment valid observations: $($summary.treatment.validObservationCount)/$($summary.treatment.requiredRuns)",
-            "- Baseline median worst-shard wall (ms): $($decision.baselineMedianWorstShardWallMs)",
-            "- Treatment median worst-shard wall (ms): $($decision.treatmentMedianWorstShardWallMs)",
-            "- Aggregate improvement: $([math]::Round(100 * [double]$decision.aggregateImprovement, 2))%",
-            "- Paired-seed median improvement: $([math]::Round(100 * [double]$decision.pairedImprovement.median, 2))%",
-            "- Validation errors: $(@($decision.validationErrors).Count)"
-          ) | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+          @('',"- Decision: $($decision.status)","- Complete evidence: $($decision.completeEvidence)","- Baseline valid: $($summary.baseline.validObservationCount)/$($summary.baseline.requiredRuns)","- Treatment valid: $($summary.treatment.validObservationCount)/$($summary.treatment.requiredRuns)","- Aggregate improvement: $([math]::Round(100 * [double]$decision.aggregateImprovement, 2))%","- Paired median improvement: $([math]::Round(100 * [double]$decision.pairedImprovement.median, 2))%","- Validation errors: $(@($decision.validationErrors).Count)") | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
 
       - name: Upload complete or partial measurement evidence
         if: always()
