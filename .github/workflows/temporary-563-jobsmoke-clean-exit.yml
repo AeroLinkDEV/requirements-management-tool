@@ -28,22 +28,17 @@ jobs:
           $utf8 = New-Object System.Text.UTF8Encoding($false)
 
           $scriptPath = 'product/tools/measure-api-host-reuse.ps1'
-          $source = Get-Content -Raw -LiteralPath $scriptPath
-          $pattern = '(?m)^(?<indent>[ \t]*)Invoke-JobContainmentSmoke\r?\n\k<indent>return$'
-          $matches = [regex]::Matches($source, $pattern)
-          if ($matches.Count -ne 1) { throw "JobSmoke main-branch anchor count was $($matches.Count), expected 1." }
-          $source = [regex]::Replace($source, $pattern, {
-            param($match)
-            $indent = $match.Groups['indent'].Value
-            return @(
-              ($indent + 'Invoke-JobContainmentSmoke'),
-              ($indent + '# The smoke intentionally launches fail-closed native children. Do not leak one of those'),
-              ($indent + '# expected child exit codes into a same-session caller after the smoke itself succeeded.'),
-              ($indent + '$global:LASTEXITCODE = 0'),
-              ($indent + 'return')
-            ) -join "`n"
-          }, 1)
-          [IO.File]::WriteAllText((Resolve-Path $scriptPath), $source, $utf8)
+          $lines = [System.Collections.Generic.List[string]]::new()
+          foreach ($line in [IO.File]::ReadAllLines((Resolve-Path $scriptPath))) { [void]$lines.Add($line) }
+          $indices = @(0..($lines.Count - 1) | Where-Object { $lines[$_].Trim() -ceq 'Invoke-JobContainmentSmoke' })
+          if ($indices.Count -ne 1) { throw "Expected one Invoke-JobContainmentSmoke call, found $($indices.Count)." }
+          $index = $indices[0]
+          if ($index -lt 2 -or $index + 1 -ge $lines.Count -or $lines[$index - 2].Trim() -cne 'if ($JobSmoke) {' -or $lines[$index + 1].Trim() -cne 'return') { throw 'JobSmoke call was not in the expected Main control-flow branch.' }
+          $indent = $lines[$index].Substring(0, $lines[$index].Length - $lines[$index].TrimStart().Length)
+          $lines.Insert($index + 1, $indent + '# The smoke intentionally launches fail-closed native children. Do not leak one of those')
+          $lines.Insert($index + 2, $indent + '# expected child exit codes into a same-session caller after the smoke itself succeeded.')
+          $lines.Insert($index + 3, $indent + '$global:LASTEXITCODE = 0')
+          [IO.File]::WriteAllText((Resolve-Path $scriptPath), (($lines -join "`n") + "`n"), $utf8)
 
           $testPath = 'product/test-contracts/tests/api-host-reuse-measurement.test.mjs'
           $tests = Get-Content -Raw -LiteralPath $testPath
