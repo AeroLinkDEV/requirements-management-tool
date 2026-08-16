@@ -1,4 +1,4 @@
-name: Temporary #568 apply bounded Fast profile
+name: Temporary apply bounded Fast profile
 
 on:
   push:
@@ -10,7 +10,6 @@ permissions:
 
 jobs:
   apply-and-prove:
-    if: ${{ !contains(github.event.head_commit.message, '[fast-profile-patched]') }}
     runs-on: windows-latest
     timeout-minutes: 20
     steps:
@@ -105,5 +104,5 @@ Assert-True (([regex]::Matches(`$plannerSource, [regex]::Escape(`$fastInfrastruc
           git config user.name 'seanmccarthyns'
           git config user.email 'seanmccarthyns@gmail.com'
           git add product/scripts/Get-AeroLinkTestPlan.ps1 product/scripts/Get-AeroLinkTestPlan.Tests.ps1 product/test-planner/lib/classify.mjs product/test-planner/tests/classify.test.mjs
-          git commit -m 'Bound local Fast infrastructure to non-showcase checks [fast-profile-patched]'
+          git commit -m 'Bound local Fast infrastructure to non-showcase checks [skip ci] [fast-profile-patched]'
           git push origin HEAD:chatgpt/568-bounded-fast-profile
