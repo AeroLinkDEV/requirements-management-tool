@@ -1,0 +1,96 @@
+name: Temporary #568 launcher validation
+
+on:
+  push:
+    branches:
+      - chatgpt/568-fast-wrapper-hardening
+
+permissions:
+  contents: read
+
+jobs:
+  validate-launcher:
+    runs-on: windows-latest
+    timeout-minutes: 25
+    steps:
+      - name: Check out exact validation branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - name: Install .NET 10
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v5.2.0
+        with:
+          dotnet-version: 10.0.x
+      - name: Install Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+      - name: Prepare normal warmed developer state
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          npm --prefix product/client ci
+          if ($LASTEXITCODE -ne 0) { throw 'npm ci failed.' }
+          Push-Location product/client
+          try {
+            npx playwright install chromium
+            if ($LASTEXITCODE -ne 0) { throw 'Chromium install failed.' }
+          }
+          finally { Pop-Location }
+          dotnet build product/AeroLink.slnx --configuration Release
+          if ($LASTEXITCODE -ne 0) { throw 'Warm solution build failed.' }
+      - name: Prove canonical BAT Fast path reuses the build and meets target
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $before = if (Test-Path -LiteralPath 'product/.local') {
+            Get-ChildItem -LiteralPath 'product/.local' -Force -Recurse -File | Sort-Object FullName | ForEach-Object {
+              "$($_.FullName.Substring((Resolve-Path '.').Path.Length))|$($_.Length)|$((Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash)"
+            }
+          } else { @('<absent>') }
+          $output = @(& cmd.exe /d /c "TEST_AEROLINK_CHANGED.bat -Paths product\src\AeroLink.Domain\Requirements\Requirement.cs -Mode Fast -Explain" 2>&1)
+          $exit = $LASTEXITCODE
+          $output | ForEach-Object { Write-Host $_ }
+          if ($exit -ne 0) { throw "Canonical Fast BAT exited $exit." }
+          $text = ($output | ForEach-Object { [string]$_ }) -join "`n"
+          if ($text -notmatch 'Fast optimization: browser smoke will reuse the Release API') { throw 'Launcher did not activate the bounded prebuilt-API optimization.' }
+          $line = @($output | ForEach-Object { [string]$_ } | Where-Object { $_ -like 'AEROLINK_TEST_PLAN_RESULT=*' }) | Select-Object -Last 1
+          if (-not $line) { throw 'Fast BAT emitted no compact result.' }
+          $json = $line.Substring('AEROLINK_TEST_PLAN_RESULT='.Length) | ConvertFrom-Json -Depth 30
+          if ($json.execution.status -ne 'passed') { throw "Fast execution status was $($json.execution.status)." }
+          if ($json.execution.authoritative -ne $false) { throw 'Fast execution incorrectly claimed merge authority.' }
+          if ([int64]$json.execution.timing.totalMs -gt 240000) { throw "Fast launcher exceeded four minutes: $($json.execution.timing.totalMs) ms." }
+          if ($json.execution.resources.persistentPostgreSqlTouched -ne $false -or $json.execution.resources.persistentEvidenceRootTouched -ne $false) { throw 'Fast launcher touched persistent state.' }
+          $after = if (Test-Path -LiteralPath 'product/.local') {
+            Get-ChildItem -LiteralPath 'product/.local' -Force -Recurse -File | Sort-Object FullName | ForEach-Object {
+              "$($_.FullName.Substring((Resolve-Path '.').Path.Length))|$($_.Length)|$((Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash)"
+            }
+          } else { @('<absent>') }
+          if (Compare-Object -ReferenceObject @($before) -DifferenceObject @($after)) { throw 'product/.local changed during Fast launcher proof.' }
+          @('## #568 canonical Fast launcher proof','',"- Status: **passed**","- Total wrapper time: **$($json.execution.timing.totalMs) ms**",'- Target: <=240000 ms',"- Steps: $((@($json.execution.timing.steps) | ForEach-Object { $_.label + '=' + $_.elapsedMs + 'ms' }) -join '; ')",'- Browser reused the Release API from this same validation run','- Persistent PostgreSQL/evidence untouched','- Result remained non-authoritative') | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+      - name: Prove incompatible PostgreSQL Full fails before heavy validation
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $dockerType = (& docker info --format '{{.OSType}}' 2>$null | Out-String).Trim().ToLowerInvariant()
+          if ($LASTEXITCODE -ne 0) { throw 'Hosted runner Docker daemon could not be queried for the preflight proof.' }
+          if ($dockerType -eq 'linux') {
+            Write-Host 'Runner unexpectedly provides Linux Docker; incompatibility negative case is not applicable here.'
+            exit 0
+          }
+          $watch = [Diagnostics.Stopwatch]::StartNew()
+          $savedPreference = $ErrorActionPreference
+          $ErrorActionPreference = 'Continue'
+          try {
+            $output = @(& cmd.exe /d /c "TEST_AEROLINK_CHANGED.bat -Paths product\src\AeroLink.Infrastructure\Persistence\Migrations\20260712115723_AddScaleIndexesAndConcurrency.cs -Mode Full -Explain" 2>&1)
+            $exit = $LASTEXITCODE
+          }
+          finally { $ErrorActionPreference = $savedPreference }
+          $watch.Stop()
+          $output | ForEach-Object { Write-Host $_ }
+          $text = ($output | ForEach-Object { [string]$_ }) -join "`n"
+          if ($exit -eq 0) { throw 'Incompatible Docker Full proof unexpectedly succeeded.' }
+          if ($text -notmatch 'requires a Linux-container Docker daemon') { throw 'Full preflight did not explain the Linux-container requirement.' }
+          if ($text -match 'Local plan:|Build the solution|API suite') { throw 'Heavy Full validation started before Docker compatibility was rejected.' }
+          if ($watch.ElapsedMilliseconds -gt 60000) { throw "Docker incompatibility preflight took too long: $($watch.ElapsedMilliseconds) ms." }
+          @('','## #568 PostgreSQL Full preflight proof','',"- Docker OSType: **$dockerType**","- Rejected before heavy validation in **$($watch.ElapsedMilliseconds) ms**",'- No product build/test/PostgreSQL lane was started') | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
