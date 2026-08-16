@@ -115,6 +115,8 @@ test('script contract keeps telemetry aggregation, isolated evidence, and altern
   assert.match(source, /recorded condition worktree paths to exist/)
   assert.match(source, /Refusing to reuse non-empty observation directory/)
   assert.ok(source.indexOf('Assert-EmptyOutput $OutputRoot') < source.indexOf("New-Plan $OutputRoot $baselineInfo $treatmentInfo $manifest $partitions 'Run'"))
+  assert.ok(source.indexOf("Arguments @('build'") < source.indexOf('$baselineManifest = Get-TestManifest'))
+  assert.ok(source.indexOf("$Mode -eq 'Run' -and $SkipBuild") < source.indexOf('$baselineManifest = Get-TestManifest'))
 })
 
 function clone(value) {
