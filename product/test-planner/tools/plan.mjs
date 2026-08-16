@@ -7,7 +7,7 @@ import { execFileSync } from 'node:child_process'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { classify, explain, localPlan, selectJobs } from '../lib/classify.mjs'
+import { BROAD_EVENTS, classify, explain, localPlan, selectJobs } from '../lib/classify.mjs'
 import { PLANNER_VERSION, plannerHash } from '../lib/planner-meta.mjs'
 
 const VALUE_OPTIONS = new Set(['base', 'head', 'event'])
@@ -115,7 +115,11 @@ const repoRoot = fileURLToPath(new URL('../../../', import.meta.url))
 const workflowText = readFileSync(join(repoRoot, '.github/workflows/ci.yml'), 'utf8')
 const jobs = selectJobs(workflowText, result, { event })
 const hash = plannerHash(repoRoot)
-const unknownPaths = explain(paths).filter((row) => row.product && row.areas.length === 0 && !row.broad).map((row) => row.path)
+// Broad Actions events intentionally classify without a pull-request diff. Match the CI entry point's
+// empty path stream rather than reporting unknown paths from a local branch diff that CI never consumed.
+const unknownPaths = BROAD_EVENTS.has(event)
+  ? []
+  : explain(paths).filter((row) => row.product && row.areas.length === 0 && !row.broad).map((row) => row.path)
 const compact = {
   planner: { version: PLANNER_VERSION, hash },
   source: {

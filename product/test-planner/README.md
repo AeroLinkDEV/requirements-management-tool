@@ -29,17 +29,33 @@ The switches are deliberately explicit:
   present, it warns that the remote-tracking ref may be stale.
 - `-Paths` supplies paths directly and accepts Windows separators. It cannot be combined with `-Base`,
   `-Head`, or `-SinceOriginMain`.
-- `-Mode Fast` runs the selected low-cost local commands after the wrapper's safety prompt; `-Mode Full`
-  runs a broader local disposable SQLite/browser subset. Full is not full CI parity. `-DryRun` always stops
-  after printing the plan.
+- `-Mode Fast` runs the selected low-cost local commands without claiming merge authority; `-Mode Full`
+  runs the selected local suites, the non-documentation operator/recovery script-contract family, and the
+  broader disposable SQLite/browser subset. When the CI forecast selects PostgreSQL, Full requires Docker
+  and runs the migration/bootstrap proof only in a uniquely named container, Docker-assigned loopback port,
+  database and labeled temporary volume. Secrets travel through restrictive temporary env-files; the API
+  starts in a kill-on-close Windows Job Object and its port is used only after exact PID/start-time and
+  listener ownership are proven. Missing Docker fails as `not-proven`; it never falls back to the persistent
+  PostgreSQL service. `-DryRun` always stops after printing the plan.
 - `-Explain` prints each changed path and its selected areas. `-Json` emits a machine-readable,
   plan-only result with symbolic refs, resolved base/head commit SHAs, provenance, CI selections, and safety
   fields. `node product/test-planner/tools/plan.mjs --help` prints usage without consulting Git.
 
 The wrapper does not fetch, rebase, touch persistent PostgreSQL, write the product evidence roots, or
-claim that local output is merge evidence. PostgreSQL-sensitive checks and the complete gate remain
-authoritative in GitHub Actions. Full mode uses the repository's temporary SQLite/browser test subset;
-it is not full CI parity, and you should review the commands before allowing it to run.
+claim that local output is merge evidence. The complete gate and merge authority remain in GitHub Actions;
+this tool preserves #561's Fast/full-gate hold. Full reports every selected CI job as `executedCiJobs` or
+`ciOnlyJobs`, and its compact `AEROLINK_TEST_PLAN_RESULT` includes monotonic `execution.timing.totalMs`
+plus one elapsed duration per executed step. Plan-only JSON reports `execution.status=not-run` and zero
+elapsed time. These measurements are evidence for feedback only; they do not fabricate or imply the
+3–4 minute #561 target until a representative disposable-checkout measurement is collected.
+
+The disposable PostgreSQL lane unconditionally verifies ownership and removes its uniquely named container
+and labeled volume in a `finally` block, then verifies that each temporary secret/status/log file is gone.
+It stops the API through the Job Object boundary, drains late descendants before awaiting inherited-pipe
+output, and fails closed if bounded capture or any job, handles, process, or listener cleanup cannot be
+proven clean. It never calls the persistent `Start-Postgres` launcher, port 54329, or writes
+`product/.local` evidence. The backup verification contract passes an explicit unique temporary verification
+root, and the wrapper fingerprints `product/.local` before and after every non-dry execution.
 
 ## Node planner
 
@@ -64,6 +80,16 @@ node product/test-planner/tools/plan.mjs --files product/client/src/App.tsx prod
 The workflow calls `tools/classify-ci.mjs` and publishes planner version/hash, the fallback reason and unknown
 paths, selected and skipped jobs, and each job's condition/reason in the gate summary. The authoritative backend-core
 contract invocation is directory-driven, so every `product/test-contracts/tests/*.test.mjs` file runs.
+
+## Safe timing protocol
+
+For a bounded feedback measurement, use a disposable clean worktree at the exact SHA under review. Start
+with `-Json -DryRun` for representative docs, backend, client, browser and mixed paths; then run one Fast
+and one Full case at a time, capture the compact result and wall-clock output, and verify `git status`, the
+local `origin/main` SHA, `product/.local`, and persistent PostgreSQL are unchanged. A PostgreSQL case is
+valid only when Docker is available and the result says the disposable gate passed; a missing daemon or a
+failed cleanup is `not-proven`, never a green Full result. Remove the disposable worktree and any temporary
+logs after each case. This protocol measures the target; it does not claim the target was met.
 
 ## Pull-request overlap advisory
 

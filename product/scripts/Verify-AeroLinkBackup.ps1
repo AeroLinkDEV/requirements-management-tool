@@ -1,5 +1,5 @@
 [CmdletBinding()]
-param([string]$BackupArchive)
+param([string]$BackupArchive,[string]$VerificationRoot)
 
 $ErrorActionPreference='Stop'
 $productRoot=(Resolve-Path (Join-Path $PSScriptRoot '..')).Path
@@ -11,7 +11,7 @@ if([IO.Path]::GetExtension($archive) -ne '.zip'){throw 'The selected backup is n
 $sidecar="$archive.sha256";if(-not(Test-Path -LiteralPath $sidecar)){throw 'The archive SHA-256 sidecar is missing.'}
 $expected=((Get-Content -LiteralPath $sidecar -Raw).Trim() -split '\s+')[0].ToLowerInvariant();$actual=(Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant()
 if($expected -ne $actual){throw "Backup archive hash mismatch. Expected $expected; calculated $actual."}
-$verificationRoot=Join-Path $productRoot '.local\backup-verification';New-Item -ItemType Directory -Path $verificationRoot -Force|Out-Null
+$verificationRoot=if($VerificationRoot){[IO.Path]::GetFullPath($VerificationRoot)}else{Join-Path $productRoot '.local\backup-verification'};New-Item -ItemType Directory -Path $verificationRoot -Force|Out-Null
 $temporary=Join-Path $verificationRoot ([Guid]::NewGuid().ToString('N'));New-Item -ItemType Directory -Path $temporary|Out-Null
 try{
  Add-Type -AssemblyName System.IO.Compression.FileSystem

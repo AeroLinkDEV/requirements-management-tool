@@ -210,11 +210,22 @@ export function localPlan(classification) {
       why: 'A bounded subset; the full journey set belongs in CI, not on a laptop.',
     })
   }
+  // The hosted script-contract job is deliberately available to Full mode. Fast keeps it as a
+  // CI-only step because the contracts include several PowerShell suites and the planner contract
+  // exercises disposable Git ref assertions. Keeping the step in the shared plan means the local
+  // wrapper can report the same selected family that Actions will run instead of silently omitting it.
+  steps.push({
+    label: 'Operator and recovery script contracts',
+    command: null,
+    fullOnly: true,
+    why: 'Full mode can run the same non-documentation script-contract family in the disposable checkout; Fast leaves this hosted family CI-only.',
+  })
   if (classification.postgresql) {
     steps.push({
-      label: 'PostgreSQL-sensitive checks',
+      label: 'PostgreSQL migration and secure bootstrap',
       command: null,
-      why: 'This change touches persistence, migrations or identity. CI runs these against a real PostgreSQL service container; SQLite locally will accept expressions Npgsql cannot produce, so a local pass is not evidence.',
+      fullOnly: true,
+      why: 'Full mode may run this only through a uniquely named disposable Docker PostgreSQL service; an unavailable Docker runtime fails as not-proven, so a local pass is not evidence. Persistent PostgreSQL and product evidence are never used.',
     })
   }
   return steps

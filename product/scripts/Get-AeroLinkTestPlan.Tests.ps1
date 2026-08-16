@@ -100,6 +100,18 @@ Assert-True ($json.wrapper.safety.persistentPostgreSqlTouched -eq $false) 'JSON 
 Assert-True ($json.wrapper.safety.persistentEvidenceRootTouched -eq $false) 'JSON must prove evidence was untouched.'
 Assert-True ($json.wrapper.safety.fetchOrRebasePerformed -eq $false) 'JSON must prove no fetch/rebase occurred.'
 Assert-True ($json.classification.docsOnly -eq $true) 'README-only JSON plan should be documentation-only.'
+Assert-True ($json.wrapper.execution.status -eq 'not-run') 'JSON mode must report that execution did not run.'
+Assert-True ($json.wrapper.execution.authoritative -eq $false) 'Local JSON output must remain non-authoritative.'
+Assert-True ($json.wrapper.execution.timing.totalMs -eq 0) 'Plan-only JSON must not fabricate elapsed execution time.'
+Assert-True ($null -ne $json.wrapper.execution.ciOnlyJobs) 'JSON must expose selected CI-only jobs.'
+
+$fullPostgresJsonRun = Invoke-Plan @('-Paths', 'product\src\AeroLink.Infrastructure\Persistence\Migrations\0001_init.cs', '-Mode', 'Full', '-Json', '-DryRun')
+Assert-True ($fullPostgresJsonRun.ExitCode -eq 0) "Full PostgreSQL dry-run should succeed without Docker: $($fullPostgresJsonRun.Output)"
+$fullPostgresJson = $fullPostgresJsonRun.Output | ConvertFrom-Json
+Assert-True ($fullPostgresJson.wrapper.execution.selectedCiJobs -contains 'postgresql-smoke') 'Full PostgreSQL plan must expose the selected PostgreSQL CI job.'
+Assert-True ($fullPostgresJson.wrapper.execution.ciOnlyJobs -contains 'postgresql-smoke') 'A dry-run must report PostgreSQL as not executed.'
+Assert-True ($fullPostgresJson.wrapper.execution.resources.persistentPostgreSqlTouched -eq $false) 'Full PostgreSQL dry-run must prove persistent PostgreSQL was untouched.'
+Assert-True ($fullPostgresJson.wrapper.execution.resources.disposableDockerPostgreSql -match 'unique container') 'Full PostgreSQL output must describe its disposable Docker boundary.'
 
 $broad = Invoke-Plan @('-Paths', 'product\test-planner\lib\classify.mjs', '-Json', '-DryRun')
 Assert-True ($broad.ExitCode -eq 0) 'Planner self-change dry-run should succeed.'
