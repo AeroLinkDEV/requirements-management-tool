@@ -155,6 +155,23 @@ test('surface-only overlap renders Coordinate while exact overlap renders Critic
   assert.match(exact, /Status: Critical overlap/)
 })
 
+test('surface provenance stays attached to the correct PR in both marker renderings', () => {
+  const overlaps = detectOverlaps([
+    pr(605, ['.github/workflows/ci.yml']),
+    pr(606, ['.github/workflows/pr-overlap.yml']),
+  ])
+
+  const earlierPrComment = renderComment(605, overlaps)
+  assert.match(earlierPrComment, /- this pull request: `\.github\/workflows\/ci\.yml`/)
+  assert.match(earlierPrComment, /- #606: `\.github\/workflows\/pr-overlap\.yml`/)
+  assert.doesNotMatch(earlierPrComment, /- this pull request: `\.github\/workflows\/pr-overlap\.yml`/)
+
+  const laterPrComment = renderComment(606, overlaps)
+  assert.match(laterPrComment, /- this pull request: `\.github\/workflows\/pr-overlap\.yml`/)
+  assert.match(laterPrComment, /- #605: `\.github\/workflows\/ci\.yml`/)
+  assert.doesNotMatch(laterPrComment, /- this pull request: `\.github\/workflows\/ci\.yml`/)
+})
+
 test('reviewed disposition is rendered without suppressing overlap', () => {
   const body = renderComment(1, detectOverlaps([
     pr(1, ['src/shared.cs']),
