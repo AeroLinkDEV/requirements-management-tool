@@ -4,7 +4,7 @@ name: Pull request overlap
 # the write-capable token is only exposed to the checker checked out from the default branch.
 on:
   pull_request_target:
-    types: [opened, synchronize, reopened, ready_for_review, converted_to_draft, closed]
+    types: [opened, synchronize, reopened, ready_for_review, converted_to_draft, labeled, unlabeled, closed]
 
 permissions:
   contents: read
@@ -43,7 +43,7 @@ jobs:
             echo 'present=true' >> "$GITHUB_OUTPUT"
           else
             echo 'present=false' >> "$GITHUB_OUTPUT"
-            printf '%s\n' '{"version":1,"status":"Unknown","analysisComplete":false,"repository":"Unknown","action":"unknown","analysisTimestamp":"Unknown","limits":{"maxOpenPullRequests":100,"maxEligiblePullRequests":30,"maxFilesPerPullRequest":1000,"maxPathLength":4096,"maxCommentsPerTarget":1000,"maxCommentBodyLength":100000,"maxAnalysisPairs":435,"maxAnalysisFiles":30000,"maxReportItems":100,"maxReportErrors":25},"currentPr":null,"openPullRequests":0,"eligiblePullRequests":0,"peerHeads":[],"overlaps":[],"updates":[],"errors":["Trusted overlap checker is absent from the checked-out default branch."]}' > "$OVERLAP_JSON_OUTPUT"
+            printf '%s\n' '{"version":2,"status":"Unknown","analysisComplete":false,"repository":"Unknown","action":"unknown","analysisTimestamp":"Unknown","limits":{"maxOpenPullRequests":100,"maxEligiblePullRequests":30,"maxFilesPerPullRequest":1000,"maxPathLength":4096,"maxLabelsPerPullRequest":100,"maxLabelNameLength":256,"maxJobsPerAffectedLane":12,"maxCommentsPerTarget":1000,"maxCommentBodyLength":100000,"maxAnalysisPairs":435,"maxAnalysisFiles":30000,"maxReportItems":100,"maxReportErrors":25},"currentPr":null,"openPullRequests":0,"eligiblePullRequests":0,"peerHeads":[],"overlaps":[],"updates":[],"errors":["Trusted overlap checker is absent from the checked-out default branch."]}' > "$OVERLAP_JSON_OUTPUT"
             echo '::warning::Trusted overlap checker is absent from the checked-out default branch; emitted a bounded Unknown report.'
           fi
       - name: Report overlapping pull requests
