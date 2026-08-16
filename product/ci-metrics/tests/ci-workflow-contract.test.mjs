@@ -122,6 +122,20 @@ test('fragment artifacts are attempt-scoped and the report pattern excludes merg
   assert.match(report, /if:\s*success\(\)\s*\n\s*continue-on-error:\s*true\s*\n\s*uses: actions\/upload-artifact/, 'validated-tree manifest upload must be success-gated and isolated')
 })
 
+test('download-artifact uses download inputs while upload-only inputs stay on uploads', () => {
+  const reportBlocks = stepBlocks(jobBodies(workflowLines())['metrics-report'])
+  const download = reportBlocks.find((block) => /uses:\s*actions\/download-artifact/.test(block.lines.join('\n')))
+  assert.ok(download, 'metrics-report must have a download-artifact step')
+  const downloadText = download.lines.join('\n')
+  assert.match(downloadText, /pattern:\s*ci-metrics-fragment-\*/)
+  assert.match(downloadText, /path:\s*\$\{\{\s*runner\.temp\s*\}\}\/fragments/)
+  assert.doesNotMatch(downloadText, /^\s*if-no-files-found:/m, 'if-no-files-found belongs to upload-artifact, not download-artifact')
+
+  const upload = reportBlocks.find((block) => /uses:\s*actions\/upload-artifact/.test(block.lines.join('\n')))
+  assert.ok(upload, 'metrics-report must have an upload-artifact step')
+  assert.match(upload.lines.join('\n'), /^\s*if-no-files-found:\s*ignore/m, 'upload-only missing-file policy must remain explicit')
+})
+
 test('metrics-report waits for every independently selected producer', () => {
   const report = jobBodies(workflowLines())['metrics-report'].join('\n')
   assert.match(report, /needs:\s*\[gate,\s*changes,\s*warm-chromium-cache,\s*browser-full\]/)
