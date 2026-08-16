@@ -10,6 +10,7 @@ permissions:
 
 jobs:
   validate:
+    if: github.event.head_commit.message != 'Stagger Fast browser smoke to reduce runner contention'
     runs-on: windows-latest
     timeout-minutes: 25
     steps:
@@ -31,15 +32,15 @@ jobs:
           p = Path('product/scripts/Get-AeroLinkTestPlan.ps1')
           s = p.read_text(encoding='utf-8')
           old = '''        foreach ($definition in $definitions) {
-              $job = Start-Job -ArgumentList $definition.label, $repositoryRoot -ScriptBlock {
-          '''
+            $job = Start-Job -ArgumentList $definition.label, $repositoryRoot -ScriptBlock {
+'''
           new = '''        foreach ($definition in $definitions) {
-              if ($definition.label -eq 'Browser smoke journeys') {
-                  Write-Host '  Staggering browser smoke by 45 seconds to reduce Windows runner contention.' -ForegroundColor DarkCyan
-                  Start-Sleep -Seconds 45
-              }
-              $job = Start-Job -ArgumentList $definition.label, $repositoryRoot -ScriptBlock {
-          '''
+            if ($definition.label -eq 'Browser smoke journeys') {
+                Write-Host '  Staggering browser smoke by 45 seconds to reduce Windows runner contention.' -ForegroundColor DarkCyan
+                Start-Sleep -Seconds 45
+            }
+            $job = Start-Job -ArgumentList $definition.label, $repositoryRoot -ScriptBlock {
+'''
           if s.count(old) != 1:
               raise SystemExit(f'parallel launch anchor: expected one match, found {s.count(old)}')
           p.write_text(s.replace(old, new, 1), encoding='utf-8')
