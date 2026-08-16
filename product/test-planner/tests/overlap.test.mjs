@@ -71,6 +71,17 @@ test('a shared migration surface with no shared file is reported', () => {
   assert.equal(overlaps[0].affectedLanes.some((lane) => lane.key === 'postgresql'), true)
 })
 
+test('a surface-only client-shell overlap uses only the reviewed surface lanes', () => {
+  const overlaps = detectOverlaps([
+    pr(1, ['product/client/src/App.tsx']),
+    pr(2, ['product/client/src/workspace/Workspace.tsx']),
+  ])
+  assert.equal(overlaps.length, 1)
+  assert.equal(overlaps[0].severity, 'medium')
+  assert.deepEqual(overlaps[0].affectedLanes.map((lane) => lane.key), ['client', 'browser'])
+  assert.doesNotMatch(renderComment(1, overlaps), /documentation-only review/)
+})
+
 test('planner lane manifest is structured, bounded and follows the shared classifier', () => {
   assert.deepEqual(plannerLanesForPaths(['product/client/src/App.tsx']).map((lane) => lane.key), ['client', 'browser'])
   assert.deepEqual(plannerLanesForPaths(['product/ci-metrics/lib/rolling.mjs']).map((lane) => lane.key), ['full'])
@@ -78,7 +89,7 @@ test('planner lane manifest is structured, bounded and follows the shared classi
   for (const lane of Object.values(PLANNER_LANES)) {
     assert.ok(lane.label.length > 0)
     assert.ok(lane.reason.length > 20)
-    assert.ok(lane.jobs.length <= 10)
+    assert.ok(lane.jobs.length <= OVERLAP_LIMITS.maxJobsPerAffectedLane)
   }
   for (const surface of SURFACES) {
     assert.ok(Array.isArray(surface.laneKeys), surface.key)
@@ -163,11 +174,30 @@ test('trusted overlap-reviewed label is carried into the report and current mark
   const report = await runOverlapCheck({ repository: 'owner/repo', event: { action: 'synchronize', pull_request: current }, api })
   assert.equal(report.status, 'Critical overlap')
   assert.equal(report.currentPr.reviewedDisposition, true)
+  assert.equal(report.peerHeads.find((record) => record.number === 1).reviewedDisposition, true)
+  assert.equal(report.peerHeads.find((record) => record.number === 2).reviewedDisposition, false)
+  assert.equal(report.overlaps[0].a.reviewedDisposition, true)
+  assert.equal(report.overlaps[0].b.reviewedDisposition, false)
   const currentPatch = api.calls.find((call) => call.options.method === 'PATCH' && call.path.endsWith('/10'))
   const peerPatch = api.calls.find((call) => call.options.method === 'PATCH' && call.path.endsWith('/20'))
   assert.match(currentPatch.options.body.body, /Reviewed disposition: `overlap-reviewed`/)
   assert.doesNotMatch(peerPatch.options.body.body, /Reviewed disposition: `overlap-reviewed`/)
   assert.match(currentPatch.options.body.body, /Status: Critical overlap/)
+})
+
+test('full affected-lane jobs are identical in the comment and bounded artifact', () => {
+  const overlaps = detectOverlaps([
+    pr(1, ['.github/workflows/ci.yml']),
+    pr(2, ['.github/workflows/ci.yml']),
+  ])
+  const expectedJobs = [...PLANNER_LANES.full.jobs]
+  assert.equal(expectedJobs.length, 10)
+  assert.ok(expectedJobs.length <= OVERLAP_LIMITS.maxJobsPerAffectedLane)
+  assert.deepEqual(overlaps[0].affectedLanes[0].jobs, expectedJobs)
+  const report = buildReport({ overlaps, analysisComplete: true })
+  assert.deepEqual(report.overlaps[0].affectedLanes[0].jobs, expectedJobs)
+  const comment = renderComment(1, overlaps)
+  for (const job of expectedJobs) assert.match(comment, new RegExp(`\\\`${job}\\\``))
 })
 
 test('rendered warning code-escapes timestamp and current SHA metadata', () => {
@@ -334,6 +364,36 @@ test('opened, ready and converted-to-draft lifecycle actions all refresh peers',
     const report = await runOverlapCheck({ repository: 'owner/repo', event: { action, pull_request: current }, api, analysisTimestamp: '2026-08-16T01:02:03Z' })
     assert.notEqual(report.status, 'Unknown', action)
     assert.equal(api.calls.filter((call) => call.options.method === 'PATCH').length, 2, action)
+  }
+})
+
+test('overlap-reviewed label add and remove refresh current and peer markers', async () => {
+  for (const action of ['labeled', 'unlabeled']) {
+    const reviewed = action === 'labeled'
+    const eventLabels = reviewed ? [{ name: REVIEWED_DISPOSITION_LABEL }] : []
+    const staleApiLabels = reviewed ? [] : [{ name: REVIEWED_DISPOSITION_LABEL }]
+    const current = rawPr(1, { labels: eventLabels })
+    const api = mockedApi({
+      open: [rawPr(1, { labels: staleApiLabels }), rawPr(2)],
+      files: { 1: [file('src/Shared.cs')], 2: [file('src/Shared.cs')] },
+      comments: { 1: [botComment(10, '<!-- AEROLINK_PR_OVERLAP --> old')], 2: [botComment(20, '<!-- AEROLINK_PR_OVERLAP --> old')] },
+    })
+    const report = await runOverlapCheck({
+      repository: 'owner/repo',
+      event: { action, label: { name: REVIEWED_DISPOSITION_LABEL }, pull_request: current },
+      api,
+      analysisTimestamp: '2026-08-16T01:02:03Z',
+    })
+    assert.equal(report.status, 'Critical overlap', action)
+    assert.equal(report.currentPr.reviewedDisposition, reviewed, action)
+    assert.equal(report.peerHeads.find((record) => record.number === 1).reviewedDisposition, reviewed, action)
+    assert.equal(report.overlaps[0].a.reviewedDisposition, reviewed, action)
+    const currentPatch = api.calls.find((call) => call.options.method === 'PATCH' && call.path.endsWith('/10'))
+    const peerPatch = api.calls.find((call) => call.options.method === 'PATCH' && call.path.endsWith('/20'))
+    assert.ok(currentPatch, `${action}: current marker`)
+    assert.ok(peerPatch, `${action}: peer marker`)
+    assert.equal(currentPatch.options.body.body.includes('Reviewed disposition: `overlap-reviewed`'), reviewed, action)
+    assert.doesNotMatch(peerPatch.options.body.body, /Reviewed disposition: `overlap-reviewed`/, action)
   }
 })
 

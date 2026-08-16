@@ -104,8 +104,8 @@ incomplete API record is `Unknown`, never `Clear`.
 
 Analysis is deliberately bounded: at most 100 open pull requests, 30 eligible
 pull requests, 1,000 files per pull request, 4,096 characters per path, 100
-labels per pull request with 256 characters per label name, 1,000 comments per
-target, 100,000 characters per comment, 435 pair comparisons,
+labels per pull request with 256 characters per label name, 12 jobs per affected
+lane, 1,000 comments per target, 100,000 characters per comment, 435 pair comparisons,
 and 30,000 analyzed file paths. The checker fails closed to `Unknown` when a
 bound is exceeded; it does not truncate the input and claim that the remaining
 evidence is clean. The JSON artifact reports `analysisComplete` and the limits

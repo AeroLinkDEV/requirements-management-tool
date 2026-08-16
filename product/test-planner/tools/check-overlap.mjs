@@ -17,6 +17,7 @@ import {
   boundComment,
   normalizeFileList,
   normalizePath,
+  MAX_JOBS_PER_AFFECTED_LANE,
   statusForOverlapList,
 } from '../lib/overlap.mjs'
 
@@ -33,6 +34,7 @@ export const OVERLAP_LIMITS = Object.freeze({
   maxPathLength: 4_096,
   maxLabelsPerPullRequest: 100,
   maxLabelNameLength: 256,
+  maxJobsPerAffectedLane: MAX_JOBS_PER_AFFECTED_LANE,
   maxCommentsPerTarget: 1_000,
   maxCommentBodyLength: 100_000,
   maxAnalysisPairs: 435,
@@ -272,7 +274,7 @@ function summarizeOverlap(entry) {
     affectedLanes: (entry.affectedLanes ?? []).slice(0, 8).map((lane) => ({
       key: lane.key,
       label: boundedText(lane.label, 240),
-      jobs: lane.jobs.slice(0, 8).map((job) => boundedText(job, 120)),
+      jobs: lane.jobs.slice(0, OVERLAP_LIMITS.maxJobsPerAffectedLane).map((job) => boundedText(job, 120)),
       reason: boundedText(lane.reason, 500),
     })),
   }

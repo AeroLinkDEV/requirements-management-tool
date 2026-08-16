@@ -74,6 +74,10 @@ export const PLANNER_LANES = Object.freeze({
   }),
 })
 
+// The artifact and comment must carry every job declared by a lane. Keep this explicit bound above
+// the largest reviewed manifest entry; the contract test fails if the manifest ever outgrows it.
+export const MAX_JOBS_PER_AFFECTED_LANE = 12
+
 const LANE_ORDER = ['full', 'backend', 'client', 'browser', 'postgresql', 'metrics', 'documentation', 'unknown']
 
 const laneKeysForClassification = (classification) => {
@@ -95,7 +99,9 @@ export function plannerLanesForPaths(paths) {
 }
 
 function laneMetadataForOverlap(sharedFiles, sharedSurfaces) {
-  const keys = new Set(plannerLanesForPaths(sharedFiles).map((lane) => lane.key))
+  // An empty path set is documentation-only to the general planner, but a surface-only overlap has
+  // no exact shared path to classify. In that case only the reviewed surface metadata is evidence.
+  const keys = new Set(sharedFiles.length > 0 ? plannerLanesForPaths(sharedFiles).map((lane) => lane.key) : [])
   for (const surface of sharedSurfaces) for (const key of surface.laneKeys ?? []) if (PLANNER_LANES[key]) keys.add(key)
   return LANE_ORDER.filter((key) => keys.has(key)).map((key) => PLANNER_LANES[key])
 }
@@ -249,8 +255,8 @@ export function detectOverlaps(pullRequests = []) {
       }
       if (sharedFiles.length === 0 && sharedSurfaces.length === 0) continue
       overlaps.push({
-        a: { number: a.number, title: a.title ?? null, author: a.author ?? null, branch: a.branch ?? null, headSha: a.headSha ?? null, baseSha: a.baseSha ?? null },
-        b: { number: b.number, title: b.title ?? null, author: b.author ?? null, branch: b.branch ?? null, headSha: b.headSha ?? null, baseSha: b.baseSha ?? null },
+        a: { number: a.number, title: a.title ?? null, author: a.author ?? null, branch: a.branch ?? null, headSha: a.headSha ?? null, baseSha: a.baseSha ?? null, reviewedDisposition: a.reviewedDisposition === true },
+        b: { number: b.number, title: b.title ?? null, author: b.author ?? null, branch: b.branch ?? null, headSha: b.headSha ?? null, baseSha: b.baseSha ?? null, reviewedDisposition: b.reviewedDisposition === true },
         severity: sharedFiles.length > 0 ? 'high' : 'medium', sharedFiles, sharedSurfaces,
         affectedLanes: laneMetadataForOverlap(sharedFiles, sharedSurfaces),
       })
