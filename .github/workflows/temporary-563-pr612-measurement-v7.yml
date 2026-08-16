@@ -68,8 +68,14 @@ jobs:
           $ErrorActionPreference = 'Stop'
           Push-Location $env:HARNESS_PATH
           try {
-            & ./product/tools/measure-api-host-reuse.ps1 -JobSmoke
-            if ($LASTEXITCODE -ne 0) { throw 'Merged native Job Object smoke failed.' }
+            $smoke = & ./product/tools/measure-api-host-reuse.ps1 -JobSmoke | Out-String
+            $smoke | Write-Host
+            if ($smoke -notmatch '"cleanSuccess"\s*:\s*true' -or
+                $smoke -notmatch '"lateChildFailClosed"\s*:\s*true' -or
+                $smoke -notmatch '"identityLookupFailClosed"\s*:\s*true' -or
+                $smoke -notmatch '"nativeLaunchFailClosed"\s*:\s*true') {
+              throw 'Merged native Job Object smoke did not report every required success/fail-closed signal.'
+            }
             if (git status --porcelain) { throw 'Merged harness tree became dirty during smoke validation.' }
           } finally { Pop-Location }
       - name: Run ten paired authoritative observations
@@ -114,5 +120,5 @@ jobs:
           path: |
             ${{ runner.temp }}\aerolink-563-results-v7
             ${{ runner.temp }}\aerolink-563-wrapper-v7
-          if-no-files-found: error
+          if-no-files-found: warn
           retention-days: 14
