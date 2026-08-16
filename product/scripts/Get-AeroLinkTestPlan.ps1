@@ -625,7 +625,23 @@ function Invoke-FastStep {
             }
         }
         'Client lint, type-check and build' { Invoke-CheckedProcess 'npm.cmd' @('--prefix', 'product/client', 'run', 'lint'); Invoke-CheckedProcess 'npm.cmd' @('--prefix', 'product/client', 'run', 'build') }
-        'Browser smoke journeys' { Invoke-CheckedProcess 'npm.cmd' @('--prefix', 'product/client', 'run', 'test:smoke') }
+        'Browser smoke journeys' {
+            if ($plan.classification.client) {
+                Invoke-CheckedProcess 'npm.cmd' @('--prefix', 'product/client', 'run', 'test:smoke')
+            }
+            else {
+                $hadSkipShowcaseSeed = Test-Path Env:AEROLINK_E2E_SKIP_SHOWCASE_SEED
+                $previousSkipShowcaseSeed = $env:AEROLINK_E2E_SKIP_SHOWCASE_SEED
+                try {
+                    $env:AEROLINK_E2E_SKIP_SHOWCASE_SEED = 'true'
+                    Invoke-CheckedProcess 'npm.cmd' @('--prefix', 'product/client', 'run', 'test:smoke:core')
+                }
+                finally {
+                    if ($hadSkipShowcaseSeed) { $env:AEROLINK_E2E_SKIP_SHOWCASE_SEED = $previousSkipShowcaseSeed }
+                    else { Remove-Item Env:AEROLINK_E2E_SKIP_SHOWCASE_SEED -ErrorAction SilentlyContinue }
+                }
+            }
+        }
         default { Write-Host "  [CI-only] $($Step.label): $($Step.why)" -ForegroundColor Yellow }
     }
 }

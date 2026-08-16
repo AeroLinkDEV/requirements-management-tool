@@ -229,8 +229,12 @@ export function localPlan(classification) {
   if (classification.browser) {
     steps.push({
       label: 'Browser smoke journeys',
-      command: 'npm --prefix product/client run test:smoke',
-      why: 'A bounded subset; the full journey set belongs in CI, not on a laptop.',
+      command: classification.client
+        ? 'npm --prefix product/client run test:smoke'
+        : 'npm --prefix product/client run test:smoke:core',
+      why: classification.client
+        ? 'Client changes keep the showcase usability smoke; the full journey set still belongs in CI.'
+        : 'Backend-only Fast uses the three first-install/application smoke checks without purchasing the unrelated full showcase seed; Full CI retains showcase usability coverage.',
     })
   }
   // The hosted script-contract job is deliberately available to Full mode. Fast keeps it as a
