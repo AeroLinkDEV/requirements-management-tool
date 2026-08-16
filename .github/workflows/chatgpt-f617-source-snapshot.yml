@@ -1,0 +1,27 @@
+name: Temporary exact-source snapshot
+
+on:
+  push:
+    branches:
+      - chatgpt/f617-source-snapshot
+
+permissions:
+  contents: read
+
+jobs:
+  snapshot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out exact branch head
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - name: Archive source tree
+        shell: bash
+        run: git archive --format=zip --output=aerolink-source.zip HEAD
+      - name: Upload source snapshot
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: chatgpt-f617-source-${{ github.run_id }}
+          path: aerolink-source.zip
+          if-no-files-found: error
+          retention-days: 1
