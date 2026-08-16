@@ -1,0 +1,32 @@
+name: Temporary #568 Docker diagnostic
+
+on:
+  push:
+    branches:
+      - chatgpt/568-docker-diagnostic
+
+permissions:
+  contents: read
+
+jobs:
+  diagnostic:
+    runs-on: windows-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check Docker server posture
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $docker = Get-Command docker.exe -ErrorAction SilentlyContinue
+          if (-not $docker) { $docker = Get-Command docker -ErrorAction SilentlyContinue }
+          if (-not $docker) { throw 'Docker CLI is absent.' }
+          docker version
+          if ($LASTEXITCODE -ne 0) { throw 'Docker daemon is unavailable.' }
+          $osType = (docker info --format '{{.OSType}}').Trim()
+          if ($LASTEXITCODE -ne 0) { throw 'Docker info failed.' }
+          Write-Host "Docker server OSType=$osType"
+          Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value "Docker server OSType: $osType"
+          if ($osType -ne 'linux') { throw "PostgreSQL 17 Linux container cannot prove the Full lane on Docker OSType=$osType." }
+          docker pull postgres:17
+          if ($LASTEXITCODE -ne 0) { throw 'postgres:17 pull failed.' }
+          Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value 'postgres:17 pull: success'
