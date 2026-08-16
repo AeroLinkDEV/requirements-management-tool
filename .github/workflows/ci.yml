@@ -1,5 +1,4 @@
 name: Product quality gate
-# Temporary #569 lifecycle proof B: exact-file overlap; never merge.
 
 on:
   pull_request:
