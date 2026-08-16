@@ -1,11 +1,11 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { existsSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import {
   validateManifest, decideProvenance, deriveEligibility, bindManifest,
-  evidenceAgeRejection, touchesGateDefinition, collectMergedPaths,
+  evidenceAgeRejection, touchesGateDefinition, collectMergedPaths, normalizeProvenanceTrigger, applyProvenanceMode,
   MAX_EVIDENCE_AGE_DAYS, MAX_CLOCK_SKEW_MINUTES, GATE_DEFINING_PATHS,
 } from '../lib/provenance.mjs'
 
@@ -39,6 +39,37 @@ function manifest(overrides = {}) {
 const NOW = Date.parse('2026-08-14T06:00:00Z')
 const UNRELATED_PATH = 'product/src/AeroLink.Api/Program.cs'
 const decide = (input) => decideProvenance({ now: NOW, changedPaths: [UNRELATED_PATH], ...input })
+
+test('provenance trigger normalization supports trusted workflow_run audit and main-push preflight', () => {
+  const workflowRun = { id: 10, event: 'push', head_branch: 'main', head_sha: 'a'.repeat(40) }
+  assert.deepEqual(normalizeProvenanceTrigger({ event: { workflow_run: workflowRun }, eventName: 'workflow_run' }), workflowRun)
+  assert.deepEqual(normalizeProvenanceTrigger({ event: { ref: 'refs/heads/main', after: 'b'.repeat(40) }, eventName: 'push', runId: '42', sha: 'c'.repeat(40) }),
+    { id: 42, event: 'push', head_branch: 'main', head_sha: 'b'.repeat(40) })
+  assert.equal(normalizeProvenanceTrigger({ event: {}, eventName: 'pull_request' }), null)
+})
+
+test('only enforcement mode authorizes an exact provenanced match', () => {
+  const decision = { outcome: 'provenanced-match', canSkip: false, source: { runId: 100 } }
+  assert.equal(applyProvenanceMode(decision, 'shadow').canSkip, false)
+  assert.equal(applyProvenanceMode(decision, 'enforce').canSkip, true)
+  assert.equal(applyProvenanceMode({ outcome: 'fallback-needed', canSkip: false }, 'enforce').canSkip, false)
+})
+
+test('main quality gate enforcement is fail-safe and leaves cache warming active', () => {
+  const workflow = readFileSync(join(repoRoot, '.github/workflows/ci.yml'), 'utf8')
+  assert.match(workflow, /permissions:\s+actions: read\s+contents: read/)
+  assert.match(workflow, /id: provenance[\s\S]*github\.event_name == 'push'[\s\S]*continue-on-error: true[\s\S]*PROVENANCE_MODE: enforce/)
+  assert.equal((workflow.match(/if: needs\.changes\.outputs\.post_merge_skip != 'true' && needs\.changes\.outputs\.docs_only != 'true' && needs\.changes\.outputs\.backend == 'true'/g) ?? []).length, 2)
+  assert.match(workflow, /if: needs\.changes\.outputs\.post_merge_skip != 'true' && needs\.changes\.outputs\.docs_only != 'true' && needs\.changes\.outputs\.client == 'true'/)
+  assert.match(workflow, /script-contracts:[\s\S]*?if: needs\.changes\.outputs\.post_merge_skip != 'true' && needs\.changes\.outputs\.docs_only != 'true'/)
+  assert.match(workflow, /postgresql-smoke:[\s\S]*?if: needs\.changes\.outputs\.post_merge_skip != 'true' && needs\.changes\.outputs\.postgresql == 'true'/)
+  const warmer = workflow.slice(workflow.indexOf('  warm-chromium-cache:'), workflow.indexOf('  backend-api:'))
+  assert.match(warmer, /if: github\.event_name == 'push'/)
+  assert.doesNotMatch(warmer, /post_merge_skip/)
+  const gate = workflow.slice(workflow.indexOf('  gate:'), workflow.indexOf('  metrics-tooling:'))
+  assert.match(gate, /POST_MERGE_SKIP/)
+  assert.match(gate, /Trusted tested-tree provenance matched this exact main tree/)
+})
 
 test('validateManifest enforces the closed manifest contract', () => {
   assert.deepEqual(validateManifest(manifest()), [])

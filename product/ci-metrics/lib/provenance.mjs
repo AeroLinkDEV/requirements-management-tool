@@ -1,4 +1,4 @@
-// Tested-tree provenance logic for #562 (phase A: shadow observation).
+// Tested-tree provenance logic for #562 (shadow observation plus fail-safe enforcement).
 //
 // The decision is deliberately conservative: a main push may be considered provenanced only when a
 // validated-tree manifest exists for the exact tree, its gate evidence says every selected product job
@@ -236,6 +236,28 @@ export function bindManifest(manifest, {
     return fail('The manifest checkout commit GitHub-side tree does not match the manifest tree.')
   }
   return { ok: true }
+}
+
+export function normalizeProvenanceTrigger({ event = {}, eventName = '', runId = '', sha = '' } = {}) {
+  if (event?.workflow_run && typeof event.workflow_run === 'object') return event.workflow_run
+  if (eventName !== 'push') return null
+  const ref = typeof event?.ref === 'string' ? event.ref : ''
+  const headBranch = ref.startsWith('refs/heads/') ? ref.slice('refs/heads/'.length) : null
+  const numericRunId = Number(runId)
+  return {
+    id: Number.isInteger(numericRunId) && numericRunId > 0 ? numericRunId : null,
+    event: 'push',
+    head_branch: headBranch,
+    head_sha: (typeof event?.after === 'string' && event.after.length > 0) ? event.after : (sha || null),
+  }
+}
+
+export function applyProvenanceMode(decision, mode = 'shadow') {
+  const normalized = mode === 'enforce' ? 'enforce' : 'shadow'
+  return {
+    ...decision,
+    canSkip: normalized === 'enforce' && decision?.outcome === 'provenanced-match',
+  }
 }
 
 export function decideProvenance({ pushTreeSha, mergedPr = null, manifests = [], now = null, changedPaths = [] }) {

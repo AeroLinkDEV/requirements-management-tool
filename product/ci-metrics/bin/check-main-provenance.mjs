@@ -1,14 +1,14 @@
-// Shadow provenance checker for #562 (phase A).
+// Trusted provenance checker for #562: shadow audit by workflow_run and fail-safe enforcement on main push.
 //
 // Triggered by workflow_run for every completed quality-gate run. For a main push it resolves the merged
 // pull request, locates validated-tree manifests from that PR's successful gate runs, and decides whether
 // the pushed tree was already validated. Phase A is observation only: the post-merge product gate still
 // runs, and canSkip is always false in the output.
 
-import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs'
+import { readFileSync, writeFileSync, appendFileSync, mkdirSync, existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { readSingleJsonFromZip } from '../lib/zip.mjs'
-import { decideProvenance, validateManifest, bindManifest, collectMergedPaths, GATE_DEFINING_PATHS } from '../lib/provenance.mjs'
+import { decideProvenance, validateManifest, bindManifest, collectMergedPaths, GATE_DEFINING_PATHS, normalizeProvenanceTrigger, applyProvenanceMode } from '../lib/provenance.mjs'
 
 const env = (name) => process.env[name] ?? ''
 
@@ -105,7 +105,8 @@ async function main() {
     process.exit(2)
   }
   const event = JSON.parse(readFileSync(eventPath, 'utf8'))
-  const run = event.workflow_run
+  const mode = env('PROVENANCE_MODE') === 'enforce' ? 'enforce' : 'shadow'
+  const run = normalizeProvenanceTrigger({ event, eventName: env('GITHUB_EVENT_NAME'), runId: env('GITHUB_RUN_ID'), sha: env('GITHUB_SHA') })
   const pushSha = run?.head_sha ?? null
   const isMainPush = run?.event === 'push' && run?.head_branch === 'main'
 
@@ -113,7 +114,7 @@ async function main() {
   if (!isMainPush) {
     result = {
       schemaVersion: 'aerolink-main-provenance/v1',
-      mode: 'shadow',
+      mode,
       triggeringRun: { id: run?.id ?? null, event: run?.event ?? null, branch: run?.head_branch ?? null },
       outcome: 'not-applicable',
       reason: 'Only main push quality-gate runs are provenance candidates.',
@@ -179,16 +180,16 @@ async function main() {
       changedPathsError = error.message
       changedPaths = [...GATE_DEFINING_PATHS]
     }
-    const decision = decideProvenance({
+    const decision = applyProvenanceMode(decideProvenance({
       pushTreeSha: pushTree,
       mergedPr,
       manifests,
       now: Date.now(),
       changedPaths,
-    })
+    }), mode)
     result = {
       schemaVersion: 'aerolink-main-provenance/v1',
-      mode: 'shadow',
+      mode,
       triggeringRun: { id: run?.id ?? null, event: run?.event ?? null, branch: run?.head_branch ?? null },
       push: { commitSha: pushSha, treeSha: pushTree },
       mergedPr: mergedPr ? { number: mergedPr.number, mergedAt: mergedPr.merged_at, headRef: mergedPr.head.ref } : null,
@@ -205,9 +206,11 @@ async function main() {
   }
 
   const lines = []
-  lines.push('# Main-push provenance check (shadow)')
+  lines.push(`# Main-push provenance check (${escapeMarkdown(result.mode)})`)
   lines.push('')
-  lines.push(`- Mode: ${escapeMarkdown(result.mode)} (observation only; the post-merge gate still runs)`)
+  lines.push(result.mode === 'enforce'
+    ? '- Mode: enforce (trusted exact-tree matches may skip the redundant post-merge product retest)'
+    : '- Mode: shadow (observation only; the post-merge gate still runs)')
   lines.push(`- Outcome: ${escapeMarkdown(result.outcome)}`)
   if (result.push) lines.push(`- Pushed tree: \`${escapeMarkdown(result.push.treeSha)}\``)
   if (result.source) lines.push(`- Validated by PR #${result.source.pr}, run ${result.source.runId} attempt ${result.source.attempt}, tree \`${escapeMarkdown(result.source.treeSha)}\``)
@@ -217,14 +220,20 @@ async function main() {
     lines.push(`- The merge's changed-file list could not be read (${escapeMarkdown(result.changedPathsUnavailable)}); treated as gate-defining and sent to fallback.`)
   }
   if (result.outcome === 'provenanced-match' && result.manifestsFound > 0) {
-    lines.push('- Would skip under phase B: backend-api, backend-core, client, script-contracts, postgresql-smoke (lightweight cache warming would remain).')
+    lines.push(result.canSkip
+      ? '- Trusted tree match: backend-api, backend-core, client, script-contracts, and postgresql-smoke may skip; lightweight cache warming remains.'
+      : '- Would skip under enforcement: backend-api, backend-core, client, script-contracts, postgresql-smoke (lightweight cache warming would remain).')
   }
   result.markdown = lines.join('\n')
 
   mkdirSync(outputDir, { recursive: true })
   writeFileSync(join(outputDir, 'main-provenance.json'), `${JSON.stringify(result, null, 2)}\n`, 'utf8')
   writeFileSync(join(outputDir, 'main-provenance.md'), `${result.markdown}\n`, 'utf8')
-  console.log(`[ci-metrics] Provenance check: ${result.outcome} (mode=${result.mode}).`)
+  const githubOutput = env('GITHUB_OUTPUT')
+  if (githubOutput) {
+    appendFileSync(githubOutput, `can_skip=${result.canSkip ? 'true' : 'false'}\noutcome=${result.outcome}\n`, 'utf8')
+  }
+  console.log(`[ci-metrics] Provenance check: ${result.outcome} (mode=${result.mode}, canSkip=${result.canSkip}).`)
 }
 
 main().catch((error) => {
