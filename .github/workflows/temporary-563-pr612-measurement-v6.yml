@@ -1,0 +1,120 @@
+name: Temporary #563 PR 612 paired measurement v6
+
+on:
+  push:
+    branches:
+      - chatgpt/563-measure-pr612-v6
+
+permissions:
+  contents: read
+
+concurrency:
+  group: aerolink-563-pr612-measurement-v6
+  cancel-in-progress: false
+
+jobs:
+  paired-windows-measurement:
+    runs-on: windows-latest
+    timeout-minutes: 360
+    env:
+      BASELINE_SHA: 08682c11e1d62f3eb5f38c2a467376216ef7052e
+      TREATMENT_SHA: df5dc1b6cc34e11933e73413749a2984018bb7ea
+      HARNESS_SHA: fafb8f4da8c8033fa06557ee69af0f8448f876b2
+      SEEDS: 563001,563002,563003,563004,563005,563006,563007,563008,563009,563010
+      DOTNET_CLI_TELEMETRY_OPTOUT: 1
+      DOTNET_NOLOGO: 1
+    steps:
+      - name: Check out measurement orchestrator
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - name: Install .NET 10
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v5.2.0
+        with:
+          dotnet-version: 10.0.x
+      - name: Install Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+      - name: Prepare exact clean harness and condition worktrees
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          git config --global core.longpaths true
+          $harness = Join-Path $env:RUNNER_TEMP 'aerolink-563-harness-v6'
+          $baseline = Join-Path $env:RUNNER_TEMP 'aerolink-563-baseline-v6'
+          $treatment = Join-Path $env:RUNNER_TEMP 'aerolink-563-treatment-v6'
+          $results = Join-Path $env:RUNNER_TEMP 'aerolink-563-results-v6'
+          $wrapper = Join-Path $env:RUNNER_TEMP 'aerolink-563-wrapper-v6'
+          foreach ($path in @($harness,$baseline,$treatment,$results,$wrapper)) { if (Test-Path -LiteralPath $path) { Remove-Item -LiteralPath $path -Recurse -Force } }
+          New-Item -ItemType Directory -Path $wrapper -Force | Out-Null
+          git worktree prune
+          git worktree add --detach $harness $env:HARNESS_SHA
+          git worktree add --detach $baseline $env:BASELINE_SHA
+          git worktree add --detach $treatment $env:TREATMENT_SHA
+          foreach ($pair in @(@($harness,$env:HARNESS_SHA),@($baseline,$env:BASELINE_SHA),@($treatment,$env:TREATMENT_SHA))) {
+            $actual = (git -C $pair[0] rev-parse HEAD).Trim()
+            if ($actual -ne $pair[1]) { throw "Worktree SHA mismatch: expected $($pair[1]), got $actual." }
+            if (git -C $pair[0] status --porcelain) { throw "Worktree is not clean: $($pair[0])" }
+          }
+          "HARNESS_PATH=$harness" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "BASELINE_PATH=$baseline" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "TREATMENT_PATH=$treatment" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "RESULTS_PATH=$results" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "WRAPPER_PATH=$wrapper" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+      - name: Prove exact merged harness contracts
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Push-Location $env:HARNESS_PATH
+          try {
+            node --test product/test-contracts/tests/api-host-reuse-measurement.test.mjs
+            if ($LASTEXITCODE -ne 0) { throw 'Merged measurement harness contract suite failed.' }
+            & ./product/tools/measure-api-host-reuse.ps1 -JobSmoke
+            if ($LASTEXITCODE -ne 0) { throw 'Merged native Job Object smoke failed.' }
+            if (git status --porcelain) { throw 'Merged harness tree became dirty during validation.' }
+          } finally { Pop-Location }
+      - name: Run ten paired authoritative observations
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $ErrorView = 'DetailedView'
+          $transcript = Join-Path $env:WRAPPER_PATH 'measurement-transcript.txt'
+          Start-Transcript -LiteralPath $transcript -Force | Out-Null
+          try {
+            & (Join-Path $env:HARNESS_PATH 'product/tools/measure-api-host-reuse.ps1') `
+              -Mode Run `
+              -BaselinePath $env:BASELINE_PATH `
+              -TreatmentPath $env:TREATMENT_PATH `
+              -OutputRoot $env:RESULTS_PATH `
+              -Runs 10 `
+              -ShardCount 3 `
+              -TimeoutMinutes 30 `
+              -ProcessTimeoutMinutes 60 `
+              -MaxProcessTreeCount 256 `
+              -Seeds $env:SEEDS `
+              -Warmup
+          } catch {
+            @('=== Exception ===',($_ | Format-List * -Force | Out-String),'=== Script stack ===',$_.ScriptStackTrace,'=== Invocation ===',$_.InvocationInfo.PositionMessage) | Out-File -LiteralPath (Join-Path $env:WRAPPER_PATH 'measurement-error.txt') -Encoding utf8
+            throw
+          } finally { try { Stop-Transcript | Out-Null } catch {} }
+      - name: Publish bounded decision summary
+        if: always()
+        shell: pwsh
+        run: |
+          $summaryPath = Join-Path $env:RESULTS_PATH 'summary.json'
+          @('## #563 PR 612 paired measurement v6','',"- Exact merged harness: $env:HARNESS_SHA","- Baseline: $env:BASELINE_SHA","- Treatment: $env:TREATMENT_SHA",'- Runtime harness patching: none') | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+          if (-not (Test-Path -LiteralPath $summaryPath)) { 'No final summary was produced; inspect uploaded partial evidence.' | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8; exit 0 }
+          $summary = Get-Content -LiteralPath $summaryPath -Raw | ConvertFrom-Json -Depth 100
+          $decision = $summary.decision
+          @('',"- Decision: $($decision.status)","- Complete evidence: $($decision.completeEvidence)","- Baseline valid: $($summary.baseline.validObservationCount)/$($summary.baseline.requiredRuns)","- Treatment valid: $($summary.treatment.validObservationCount)/$($summary.treatment.requiredRuns)","- Aggregate improvement: $([math]::Round(100 * [double]$decision.aggregateImprovement, 2))%","- Paired median improvement: $([math]::Round(100 * [double]$decision.pairedImprovement.median, 2))%","- Validation errors: $(@($decision.validationErrors).Count)") | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+      - name: Upload complete or partial measurement evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: aerolink-563-pr612-paired-measurement-v6-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}\aerolink-563-results-v6
+            ${{ runner.temp }}\aerolink-563-wrapper-v6
+          if-no-files-found: error
+          retention-days: 14
