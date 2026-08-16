@@ -1,4 +1,4 @@
-name: Temporary #568 staggered Fast validation
+name: Temporary staggered Fast validation
 
 on:
   push:
@@ -13,45 +13,38 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 25
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           fetch-depth: 0
-      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v5.2.0
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68
         with:
           dotnet-version: 10.0.x
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
         with:
           node-version: 24
       - name: Apply staggered overlap
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          @'
-          from pathlib import Path
-          p = Path('product/scripts/Get-AeroLinkTestPlan.ps1')
-          s = p.read_text(encoding='utf-8')
-          old = '''        foreach ($definition in $definitions) {
-            $job = Start-Job -ArgumentList $definition.label, $repositoryRoot -ScriptBlock {
-'''
-          new = '''        foreach ($definition in $definitions) {
-            if ($definition.label -eq 'Browser smoke journeys') {
-                Write-Host '  Staggering browser smoke by 45 seconds to reduce Windows runner contention.' -ForegroundColor DarkCyan
-                Start-Sleep -Seconds 45
-            }
-            $job = Start-Job -ArgumentList $definition.label, $repositoryRoot -ScriptBlock {
-'''
-          if s.count(old) != 1:
-              raise SystemExit(f'parallel launch anchor: expected one match, found {s.count(old)}')
-          p.write_text(s.replace(old, new, 1), encoding='utf-8')
+          $path = 'product/scripts/Get-AeroLinkTestPlan.ps1'
+          $text = Get-Content -Raw -LiteralPath $path
+          $anchor = '            $job = Start-Job -ArgumentList $definition.label, $repositoryRoot -ScriptBlock {'
+          if (($text.Split($anchor).Count - 1) -ne 1) { throw 'Expected one parallel Start-Job anchor.' }
+          $insert = @(
+            "            if (`$definition.label -eq 'Browser smoke journeys') {",
+            "                Write-Host '  Staggering browser smoke by 45 seconds to reduce Windows runner contention.' -ForegroundColor DarkCyan",
+            '                Start-Sleep -Seconds 45',
+            '            }',
+            $anchor
+          ) -join "`n"
+          Set-Content -LiteralPath $path -Value ($text.Replace($anchor, $insert)) -Encoding utf8
 
-          tpath = Path('product/scripts/Get-AeroLinkTestPlan.Tests.ps1')
-          t = tpath.read_text(encoding='utf-8')
-          marker = "Assert-True ($plannerSource -match \"Infrastructure and browser smoke Fast checks concurrently\") 'Fast execution must make the measured independent pair explicit.'\n"
-          if t.count(marker) != 1:
-              raise SystemExit(f'contract marker: expected one match, found {t.count(marker)}')
-          extra = marker + "Assert-True ($plannerSource -match 'Start-Sleep -Seconds 45') 'Fast overlap must retain the measured browser stagger that limits runner contention.'\n"
-          tpath.write_text(t.replace(marker, extra, 1), encoding='utf-8')
-          '@ | python -
+          $testPath = 'product/scripts/Get-AeroLinkTestPlan.Tests.ps1'
+          $tests = Get-Content -Raw -LiteralPath $testPath
+          $marker = 'Assert-True ($plannerSource -match "Infrastructure and browser smoke Fast checks concurrently") ''Fast execution must make the measured independent pair explicit.'''
+          if (($tests.Split($marker).Count - 1) -ne 1) { throw 'Expected one Fast contract marker.' }
+          $extra = $marker + "`n" + 'Assert-True ($plannerSource -match ''Start-Sleep -Seconds 45'') ''Fast overlap must retain the measured browser stagger that limits runner contention.'''
+          Set-Content -LiteralPath $testPath -Value ($tests.Replace($marker, $extra)) -Encoding utf8
       - name: Validate planner contract and diff
         shell: pwsh
         run: |
@@ -106,7 +99,7 @@ jobs:
           git push origin HEAD:chatgpt/568-fast-stagger
       - name: Upload bounded timing evidence
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: aerolink-568-stagger-proof-${{ github.run_id }}
           path: |
