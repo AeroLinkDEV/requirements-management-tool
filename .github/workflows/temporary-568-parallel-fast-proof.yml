@@ -1,4 +1,4 @@
-name: Temporary #568 exact warmed Fast proof
+name: Temporary #568 exact warmed Fast proof v2
 
 on:
   push:
@@ -56,29 +56,31 @@ jobs:
           $transcript = Join-Path $env:RUNNER_TEMP 'aerolink-568-parallel-fast-proof.txt'
           $resultPath = Join-Path $env:RUNNER_TEMP 'aerolink-568-parallel-fast-result.json'
           & ./product/scripts/Get-AeroLinkTestPlan.ps1 -Paths 'product/src/AeroLink.Domain/Requirements/Requirement.cs' -Mode Fast -Explain *>&1 | Tee-Object -FilePath $transcript | ForEach-Object { Write-Host $_ }
-          $exit = $LASTEXITCODE
+          $nativeExit = $LASTEXITCODE
           $line = Get-Content -LiteralPath $transcript | Where-Object { $_ -like 'AEROLINK_TEST_PLAN_RESULT=*' } | Select-Object -Last 1
-          if (-not $line) { throw "Fast wrapper emitted no bounded result (native exit=$exit)." }
+          if (-not $line) { throw "Fast wrapper emitted no bounded result; native exit was $nativeExit." }
           $json = $line.Substring('AEROLINK_TEST_PLAN_RESULT='.Length) | ConvertFrom-Json -Depth 30
           $json | ConvertTo-Json -Depth 30 | Out-File -LiteralPath $resultPath -Encoding utf8
-          if ($exit -ne 0 -or $json.execution.status -ne 'passed') { throw "Fast wrapper failed: nativeExit=$exit status=$($json.execution.status) error=$($json.execution.error)" }
+          if ($nativeExit -ne 0 -or $json.execution.status -ne 'passed') { throw "Fast wrapper failed; status=$($json.execution.status)." }
           if ($json.execution.authoritative -ne $false) { throw 'Fast proof incorrectly claimed merge authority.' }
           if ($json.execution.resources.persistentPostgreSqlTouched -ne $false -or $json.execution.resources.persistentEvidenceRootTouched -ne $false) { throw 'Fast proof touched a persistent resource.' }
-          if ([int64]$json.execution.timing.totalMs -gt 240000) { throw "Exact warmed Fast proof exceeded 4 minutes: $($json.execution.timing.totalMs) ms." }
-          @(
-            '## #568 exact PR #616 warmed Fast proof', '', '- Status: **passed**',
-            "- Exact target: `6abaa473e676c0fcd59655b22df9dd8034beb134`",
-            "- Measured wrapper time: **$($json.execution.timing.totalMs) ms**",
-            '- Target: <=240000 ms',
-            "- Steps: $((@($json.execution.timing.steps) | ForEach-Object { $_.label + '=' + $_.elapsedMs + 'ms' }) -join '; ')",
-            '- Persistent PostgreSQL/evidence: untouched',
-            '- Result: non-authoritative local feedback only; protected GitHub PR gate remains merge authority'
-          ) | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+          $totalMs = [int64]$json.execution.timing.totalMs
+          if ($totalMs -gt 240000) { throw "Exact warmed Fast proof exceeded four minutes: $totalMs ms." }
+          $stepText = @($json.execution.timing.steps | ForEach-Object { "$($_.label)=$($_.elapsedMs)ms" }) -join '; '
+          Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value '## 568 exact PR 616 warmed Fast proof'
+          Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value ''
+          Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value 'Status: passed'
+          Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value "Exact target: 6abaa473e676c0fcd59655b22df9dd8034beb134"
+          Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value "Measured wrapper time: $totalMs ms"
+          Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value 'Target: <= 240000 ms'
+          Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value "Steps: $stepText"
+          Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value 'Persistent PostgreSQL/evidence: untouched'
+          Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value 'Result is non-authoritative local feedback; protected GitHub PR gate remains merge authority.'
       - name: Upload bounded timing proof
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: aerolink-568-exact-warmed-fast-${{ github.run_id }}
+          name: aerolink-568-exact-warmed-fast-v2-${{ github.run_id }}
           path: |
             ${{ runner.temp }}\aerolink-568-parallel-fast-proof.txt
             ${{ runner.temp }}\aerolink-568-parallel-fast-result.json
