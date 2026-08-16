@@ -24,7 +24,7 @@ namespace AeroLink.Api.Tests;
 public sealed class SecurityBoundaryTests
 {
     [Fact]
-    public async Task File_backed_test_database_uses_wal_and_explicit_busy_timeout()
+    public async Task File_backed_test_database_uses_wal_and_provider_lock_retry_budget()
     {
         using var factory = new AeroLinkApiFactory();
         using var client = factory.CreateClient();
@@ -32,11 +32,76 @@ public sealed class SecurityBoundaryTests
     }
 
     [Fact]
-    public void File_backed_test_database_uses_wal_and_explicit_busy_timeout_when_opened_synchronously()
+    public void File_backed_test_database_uses_wal_and_provider_lock_retry_budget_when_opened_synchronously()
     {
         using var factory = new AeroLinkApiFactory();
         using var client = factory.CreateClient();
         AssertSqliteConfiguration(factory.Services);
+    }
+
+    [Fact]
+    public void File_backed_sqlite_contention_uses_the_provider_lock_retry_budget_without_a_custom_busy_handler()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"aerolink-sqlite-contention-{Guid.NewGuid():N}.db");
+        try
+        {
+            var holderConnectionString = new SqliteConnectionStringBuilder
+            {
+                DataSource = path,
+                Pooling = false,
+                DefaultTimeout = AeroLinkApiFactory.CommandTimeoutSeconds,
+            }.ToString();
+            using var holder = new SqliteConnection(holderConnectionString);
+            holder.Open();
+            using (var journalMode = holder.CreateCommand())
+            {
+                journalMode.CommandText = "PRAGMA journal_mode=WAL;";
+                Assert.Equal("wal", journalMode.ExecuteScalar()?.ToString()?.ToLowerInvariant());
+            }
+            using (var createTable = holder.CreateCommand())
+            {
+                createTable.CommandText = "CREATE TABLE lock_probe (id INTEGER PRIMARY KEY);";
+                createTable.ExecuteNonQuery();
+            }
+
+            using var holderTransaction = holder.BeginTransaction();
+            using (var holderWrite = holder.CreateCommand())
+            {
+                holderWrite.Transaction = holderTransaction;
+                holderWrite.CommandText = "INSERT INTO lock_probe DEFAULT VALUES;";
+                holderWrite.ExecuteNonQuery();
+            }
+
+            var contenderConnectionString = new SqliteConnectionStringBuilder
+            {
+                DataSource = path,
+                Pooling = false,
+                DefaultTimeout = 1,
+            }.ToString();
+            using var contender = new SqliteConnection(contenderConnectionString);
+            contender.Open();
+            Assert.Equal(1, contender.DefaultTimeout);
+
+            using var busyTimeout = contender.CreateCommand();
+            busyTimeout.CommandText = "PRAGMA busy_timeout;";
+            Assert.Equal(0L, Convert.ToInt64(busyTimeout.ExecuteScalar()));
+
+            using var contenderWrite = contender.CreateCommand();
+            Assert.Equal(1, contenderWrite.CommandTimeout);
+            contenderWrite.CommandText = "INSERT INTO lock_probe DEFAULT VALUES;";
+            var stopwatch = Stopwatch.StartNew();
+            var error = Assert.Throws<SqliteException>(() => contenderWrite.ExecuteNonQuery());
+            stopwatch.Stop();
+            Assert.True(
+                stopwatch.Elapsed >= TimeSpan.FromMilliseconds(750),
+                $"The provider returned SQLITE_BUSY too early after {stopwatch.Elapsed.TotalMilliseconds:F0} ms.");
+            Assert.Equal(5, error.SqliteErrorCode);
+        }
+        finally
+        {
+            SqliteConnection.ClearAllPools();
+            AeroLinkApiFactory.DeleteDatabaseArtifacts(path);
+        }
     }
 
     internal static void AssertSqliteConfiguration(IServiceProvider services)
@@ -46,6 +111,8 @@ public sealed class SecurityBoundaryTests
         db.Database.OpenConnection();
         var connection = db.Database.GetDbConnection();
         Assert.Equal(AeroLinkApiFactory.CommandTimeoutSeconds, ((SqliteConnection)connection).DefaultTimeout);
+        using var commandTimeout = connection.CreateCommand();
+        Assert.Equal(AeroLinkApiFactory.CommandTimeoutSeconds, commandTimeout.CommandTimeout);
 
         using var journalMode = connection.CreateCommand();
         journalMode.CommandText = "PRAGMA journal_mode;";
@@ -53,9 +120,7 @@ public sealed class SecurityBoundaryTests
 
         using var busyTimeout = connection.CreateCommand();
         busyTimeout.CommandText = "PRAGMA busy_timeout;";
-        Assert.Equal(
-            (long)SqliteBusyTimeoutInterceptor.BusyTimeoutMilliseconds,
-            Convert.ToInt64(busyTimeout.ExecuteScalar()));
+        Assert.Equal(0L, Convert.ToInt64(busyTimeout.ExecuteScalar()));
     }
 
     internal static async Task AssertSqliteConfigurationAsync(IServiceProvider services)
@@ -65,6 +130,8 @@ public sealed class SecurityBoundaryTests
         await db.Database.OpenConnectionAsync();
         var connection = db.Database.GetDbConnection();
         Assert.Equal(AeroLinkApiFactory.CommandTimeoutSeconds, ((SqliteConnection)connection).DefaultTimeout);
+        using var commandTimeout = connection.CreateCommand();
+        Assert.Equal(AeroLinkApiFactory.CommandTimeoutSeconds, commandTimeout.CommandTimeout);
 
         using var journalMode = connection.CreateCommand();
         journalMode.CommandText = "PRAGMA journal_mode;";
@@ -72,9 +139,7 @@ public sealed class SecurityBoundaryTests
 
         using var busyTimeout = connection.CreateCommand();
         busyTimeout.CommandText = "PRAGMA busy_timeout;";
-        Assert.Equal(
-            (long)SqliteBusyTimeoutInterceptor.BusyTimeoutMilliseconds,
-            Convert.ToInt64(await busyTimeout.ExecuteScalarAsync()));
+        Assert.Equal(0L, Convert.ToInt64(await busyTimeout.ExecuteScalarAsync()));
     }
 
     [Fact]
@@ -380,8 +445,8 @@ internal sealed class AeroLinkApiFactory(bool seedDemoAccounts = false, bool all
     public const string BootstrapSecret = "test-bootstrap-secret-0123456789-abcdef";
     public const string AdministratorPassword = "Bootstrap-Admin!2026";
     public const string MemberPassword = "Program-Member!2026";
-    // Keep the command budget at the provider's previous 30-second value. SQLite lock waiting is a separate
-    // per-connection busy-handler budget and is deliberately longer so brief WAL writer contention can clear.
+    // Keep Microsoft.Data.Sqlite's provider retry budget at the previous 30-second value. This is the
+    // SQLITE_BUSY/SQLITE_LOCKED retry budget, not a whole-command wall-clock budget.
     internal const int CommandTimeoutSeconds = 30;
     private readonly string _databasePath = NewDatabase(showcaseTemplate);
     public string ConnectionString => DatabaseConnectionString(_databasePath);
@@ -401,8 +466,8 @@ internal sealed class AeroLinkApiFactory(bool seedDemoAccounts = false, bool all
         {
             if (template is not null) File.Copy(template, path);
             // The API host and test-scoped contexts intentionally use separate connections to this file. WAL lets
-            // readers run while a writer is active; the interceptor below applies the per-connection wait for the
-            // remaining serialized-writer case without changing the product's PostgreSQL or SQLite configuration.
+            // readers run while a writer is active; the provider retry budget handles remaining serialized-writer
+            // contention without changing the product's PostgreSQL or SQLite configuration.
             using var connection = new SqliteConnection(DatabaseConnectionString(path));
             connection.Open();
             using var command = connection.CreateCommand();
@@ -428,7 +493,6 @@ internal sealed class AeroLinkApiFactory(bool seedDemoAccounts = false, bool all
     internal static void ConfigureSqliteOptions(DbContextOptionsBuilder options, string connectionString, params IInterceptor[] interceptors)
     {
         options.UseSqlite(connectionString)
-            .AddInterceptors(new SqliteBusyTimeoutInterceptor())
             .AddInterceptors(interceptors);
     }
 
@@ -525,7 +589,7 @@ internal sealed class AeroLinkApiFactory(bool seedDemoAccounts = false, bool all
         ApiTestTelemetry.RecordFactoryPhase("dispose", _constructionBeforeHostMs, stopwatch.Elapsed.TotalMilliseconds, _callerFile, _callerMember, _factoryId, _telemetryObserver);
     }
 
-    private static void DeleteDatabaseArtifacts(string path)
+    internal static void DeleteDatabaseArtifacts(string path)
     {
         DeleteIfPresent(path);
         DeleteIfPresent(path + "-shm");
