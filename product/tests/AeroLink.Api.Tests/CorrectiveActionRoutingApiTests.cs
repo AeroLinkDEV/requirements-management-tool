@@ -23,20 +23,28 @@ namespace AeroLink.Api.Tests;
 /// raised from a failure names the execution that raised it, and that execution names the exact procedure
 /// revision, whose level decides the discipline.
 /// </summary>
-public sealed class CorrectiveActionRoutingApiTests
+public sealed class CorrectiveActionRoutingApiTests : IClassFixture<SharedApiHost>
 {
-    private const string Member = "corrective.engineer";
+    private readonly SharedApiHost _host;
+
+    public CorrectiveActionRoutingApiTests(SharedApiHost host)
+    {
+        _host = host;
+    }
 
     private sealed record Fixture(Guid ProjectId, Guid SystemReportId, Guid SoftwareReportId, Guid UnlinkedReportId,
-        string SystemProcedureNumber, string SoftwareProcedureNumber);
+        string SystemProcedureNumber, string SoftwareProcedureNumber, string MemberName, string OutsiderName);
 
     private static async Task<Fixture> SeedAsync(AeroLinkApiFactory factory)
     {
         using var scope = factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
         var now = DateTimeOffset.UtcNow;
+        var tag = Guid.NewGuid().ToString("N")[..8];
+        var memberName = $"corrective.engineer.{tag}";
+        var outsiderName = $"corrective.outsider.{tag}";
 
-        var program = new ProgramRecord("Corrective Program", "CRP");
+        var program = new ProgramRecord($"Corrective Program {tag}", $"CRP{tag}");
         var project = new ProjectRecord(program.Id, "Software", "Corrective Software");
         var release = new SoftwareRelease(project.Id, "1.0", false);
         var baseline = new CandidateBaseline("SW-09.01", 0, project.Id, release.Id, null,
@@ -70,7 +78,7 @@ public sealed class CorrectiveActionRoutingApiTests
             "Engineering anomaly", ProblemReportSeverity.Minor, ProblemReportPriority.Normal, "Manual report", "");
         db.Add(unlinked);
 
-        var account = new UserAccount(Member, Member, $"{Member}@example.test",
+        var account = new UserAccount(memberName, memberName, $"{memberName}@example.test",
             IdentityService.HashPassword(AeroLinkApiFactory.MemberPassword), now);
         db.Add(account);
         db.Add(new ProgramMembership(account.Id, program.Id, ProgramRole.Engineer, "test.setup", now));
@@ -80,7 +88,8 @@ public sealed class CorrectiveActionRoutingApiTests
             .SetProperty(x => x.TestProceduresMaterializedAt, now)
             .SetProperty(x => x.TestProceduresHash, "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"));
 
-        return new Fixture(project.Id, systemReport, softwareReport, unlinked.Id, "SYSTP-00000901", "LLRTP-00000901");
+        return new Fixture(project.Id, systemReport, softwareReport, unlinked.Id, "SYSTP-00000901", "LLRTP-00000901",
+            memberName, outsiderName);
     }
 
     private static async Task<JsonElement> TargetAsync(HttpClient client, Guid reportId)
@@ -94,11 +103,10 @@ public sealed class CorrectiveActionRoutingApiTests
     [Fact]
     public async Task The_corrective_action_resolves_its_discipline_procedure_and_report_from_the_record()
     {
-        using var factory = new AeroLinkApiFactory();
-        using var client = factory.CreateClient();
-        var fixture = await SeedAsync(factory);
+        using var client = _host.CreateClient();
+        var fixture = await SeedAsync(_host.Factory);
         using (var login = await client.PostAsJsonAsync("/api/auth/login",
-            new { userName = Member, password = AeroLinkApiFactory.MemberPassword }))
+            new { userName = fixture.MemberName, password = AeroLinkApiFactory.MemberPassword }))
             Assert.Equal(HttpStatusCode.OK, login.StatusCode);
 
         var system = await TargetAsync(client, fixture.SystemReportId);
@@ -127,11 +135,10 @@ public sealed class CorrectiveActionRoutingApiTests
     [Fact]
     public async Task A_report_with_nothing_linked_says_the_scope_cannot_be_determined_rather_than_guessing()
     {
-        using var factory = new AeroLinkApiFactory();
-        using var client = factory.CreateClient();
-        var fixture = await SeedAsync(factory);
+        using var client = _host.CreateClient();
+        var fixture = await SeedAsync(_host.Factory);
         using (var login = await client.PostAsJsonAsync("/api/auth/login",
-            new { userName = Member, password = AeroLinkApiFactory.MemberPassword }))
+            new { userName = fixture.MemberName, password = AeroLinkApiFactory.MemberPassword }))
             Assert.Equal(HttpStatusCode.OK, login.StatusCode);
 
         var unresolved = await TargetAsync(client, fixture.UnlinkedReportId);
@@ -143,19 +150,18 @@ public sealed class CorrectiveActionRoutingApiTests
     [Fact]
     public async Task The_target_is_not_readable_without_access_to_the_project()
     {
-        using var factory = new AeroLinkApiFactory();
-        using var client = factory.CreateClient();
-        var fixture = await SeedAsync(factory);
+        using var client = _host.CreateClient();
+        var fixture = await SeedAsync(_host.Factory);
 
-        using var scope = factory.Services.CreateScope();
+        using var scope = _host.Factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
-        var outsider = new UserAccount("corrective.outsider", "corrective.outsider", "outsider@example.test",
+        var outsider = new UserAccount(fixture.OutsiderName, fixture.OutsiderName, $"{fixture.OutsiderName}@example.test",
             IdentityService.HashPassword(AeroLinkApiFactory.MemberPassword), DateTimeOffset.UtcNow);
         db.Add(outsider);
         await db.SaveChangesAsync();
 
         using (var login = await client.PostAsJsonAsync("/api/auth/login",
-            new { userName = "corrective.outsider", password = AeroLinkApiFactory.MemberPassword }))
+            new { userName = fixture.OutsiderName, password = AeroLinkApiFactory.MemberPassword }))
             Assert.Equal(HttpStatusCode.OK, login.StatusCode);
 
         using var response = await client.GetAsync($"/api/problem-reports/{fixture.SystemReportId}/corrective-action");

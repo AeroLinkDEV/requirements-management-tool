@@ -259,12 +259,13 @@
       "caseEvidence": "Fact",
       "hosted": "hosted",
       "hostEvidence": [
-        "factory-construction",
-        "factory-client"
+        "shared-host-fixture",
+        "factory-client",
+        "factory-services"
       ],
       "sourceLines": {
-        "start": 81,
-        "end": 93
+        "start": 93,
+        "end": 104
       }
     },
     {
@@ -276,12 +277,13 @@
       "caseEvidence": "Fact",
       "hosted": "hosted",
       "hostEvidence": [
-        "factory-construction",
-        "factory-client"
+        "shared-host-fixture",
+        "factory-client",
+        "factory-services"
       ],
       "sourceLines": {
-        "start": 118,
-        "end": 136
+        "start": 128,
+        "end": 145
       }
     },
     {
@@ -293,12 +295,13 @@
       "caseEvidence": "Fact",
       "hosted": "hosted",
       "hostEvidence": [
-        "factory-construction",
-        "factory-client"
+        "shared-host-fixture",
+        "factory-client",
+        "factory-services"
       ],
       "sourceLines": {
-        "start": 95,
-        "end": 116
+        "start": 106,
+        "end": 126
       }
     },
     {
@@ -1612,12 +1615,13 @@
       "caseEvidence": "Fact",
       "hosted": "hosted",
       "hostEvidence": [
-        "factory-construction",
-        "factory-client"
+        "shared-host-fixture",
+        "factory-client",
+        "factory-services"
       ],
       "sourceLines": {
-        "start": 127,
-        "end": 141
+        "start": 135,
+        "end": 148
       }
     },
     {
@@ -1629,12 +1633,13 @@
       "caseEvidence": "Fact",
       "hosted": "hosted",
       "hostEvidence": [
-        "factory-construction",
-        "factory-client"
+        "shared-host-fixture",
+        "factory-client",
+        "factory-services"
       ],
       "sourceLines": {
-        "start": 94,
-        "end": 125
+        "start": 103,
+        "end": 133
       }
     },
     {
@@ -1646,13 +1651,13 @@
       "caseEvidence": "Fact",
       "hosted": "hosted",
       "hostEvidence": [
-        "factory-construction",
+        "shared-host-fixture",
         "factory-client",
         "factory-services"
       ],
       "sourceLines": {
-        "start": 143,
-        "end": 163
+        "start": 150,
+        "end": 169
       }
     },
     {
@@ -1772,12 +1777,13 @@
       "caseEvidence": "Fact",
       "hosted": "hosted",
       "hostEvidence": [
-        "factory-construction",
-        "factory-client"
+        "shared-host-fixture",
+        "factory-client",
+        "factory-services"
       ],
       "sourceLines": {
-        "start": 62,
-        "end": 83
+        "start": 74,
+        "end": 94
       }
     },
     {
@@ -1789,12 +1795,13 @@
       "caseEvidence": "Fact",
       "hosted": "hosted",
       "hostEvidence": [
-        "factory-construction",
-        "factory-client"
+        "shared-host-fixture",
+        "factory-client",
+        "factory-services"
       ],
       "sourceLines": {
-        "start": 85,
-        "end": 97
+        "start": 96,
+        "end": 107
       }
     },
     {
@@ -1806,12 +1813,13 @@
       "caseEvidence": "Fact",
       "hosted": "hosted",
       "hostEvidence": [
-        "factory-construction",
-        "factory-client"
+        "shared-host-fixture",
+        "factory-client",
+        "factory-services"
       ],
       "sourceLines": {
-        "start": 107,
-        "end": 133
+        "start": 117,
+        "end": 142
       }
     },
     {
@@ -3620,12 +3628,13 @@
       "caseEvidence": "Fact",
       "hosted": "hosted",
       "hostEvidence": [
-        "factory-construction",
-        "factory-client"
+        "shared-host-fixture",
+        "factory-client",
+        "factory-services"
       ],
       "sourceLines": {
-        "start": 125,
-        "end": 143
+        "start": 135,
+        "end": 152
       }
     },
     {
@@ -3637,12 +3646,13 @@
       "caseEvidence": "Fact",
       "hosted": "hosted",
       "hostEvidence": [
-        "factory-construction",
-        "factory-client"
+        "shared-host-fixture",
+        "factory-client",
+        "factory-services"
       ],
       "sourceLines": {
-        "start": 146,
-        "end": 172
+        "start": 155,
+        "end": 180
       }
     },
     {
@@ -3654,13 +3664,13 @@
       "caseEvidence": "Fact",
       "hosted": "hosted",
       "hostEvidence": [
-        "factory-construction",
+        "shared-host-fixture",
         "factory-client",
         "factory-services"
       ],
       "sourceLines": {
-        "start": 79,
-        "end": 97
+        "start": 90,
+        "end": 107
       }
     },
     {
@@ -5476,12 +5486,13 @@
       "caseEvidence": "Fact",
       "hosted": "hosted",
       "hostEvidence": [
-        "factory-construction",
-        "factory-client"
+        "shared-host-fixture",
+        "factory-client",
+        "factory-services"
       ],
       "sourceLines": {
-        "start": 92,
-        "end": 109
+        "start": 101,
+        "end": 117
       }
     },
     {
@@ -5493,12 +5504,13 @@
       "caseEvidence": "Fact",
       "hosted": "hosted",
       "hostEvidence": [
-        "factory-construction",
-        "factory-client"
+        "shared-host-fixture",
+        "factory-client",
+        "factory-services"
       ],
       "sourceLines": {
-        "start": 128,
-        "end": 142
+        "start": 135,
+        "end": 148
       }
     },
     {
@@ -5510,12 +5522,13 @@
       "caseEvidence": "Fact",
       "hosted": "hosted",
       "hostEvidence": [
-        "factory-construction",
-        "factory-client"
+        "shared-host-fixture",
+        "factory-client",
+        "factory-services"
       ],
       "sourceLines": {
-        "start": 144,
-        "end": 160
+        "start": 150,
+        "end": 165
       }
     },
     {
@@ -5527,12 +5540,13 @@
       "caseEvidence": "Fact",
       "hosted": "hosted",
       "hostEvidence": [
-        "factory-construction",
-        "factory-client"
+        "shared-host-fixture",
+        "factory-client",
+        "factory-services"
       ],
       "sourceLines": {
-        "start": 111,
-        "end": 126
+        "start": 119,
+        "end": 133
       }
     },
     {
@@ -5544,12 +5558,13 @@
       "caseEvidence": "Fact",
       "hosted": "hosted",
       "hostEvidence": [
-        "factory-construction",
-        "factory-client"
+        "shared-host-fixture",
+        "factory-client",
+        "factory-services"
       ],
       "sourceLines": {
-        "start": 102,
-        "end": 117
+        "start": 113,
+        "end": 127
       }
     },
     {
@@ -5561,12 +5576,13 @@
       "caseEvidence": "Fact",
       "hosted": "hosted",
       "hostEvidence": [
-        "factory-construction",
-        "factory-client"
+        "shared-host-fixture",
+        "factory-client",
+        "factory-services"
       ],
       "sourceLines": {
-        "start": 89,
-        "end": 100
+        "start": 101,
+        "end": 111
       }
     },
     {
@@ -5578,13 +5594,13 @@
       "caseEvidence": "Fact",
       "hosted": "hosted",
       "hostEvidence": [
-        "factory-construction",
+        "shared-host-fixture",
         "factory-client",
         "factory-services"
       ],
       "sourceLines": {
-        "start": 59,
-        "end": 87
+        "start": 72,
+        "end": 99
       }
     },
     {

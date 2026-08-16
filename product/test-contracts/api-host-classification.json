@@ -8,9 +8,9 @@
   },
   "summary": {
     "converted": {
-      "classes": 10,
-      "tests": 52,
-      "knownCases": 52,
+      "classes": 16,
+      "tests": 71,
+      "knownCases": 71,
       "unknownCaseTests": 0
     },
     "fresh-host": {
@@ -26,9 +26,9 @@
       "unknownCaseTests": 0
     },
     "reusable-host": {
-      "classes": 30,
-      "tests": 186,
-      "knownCases": 211,
+      "classes": 24,
+      "tests": 167,
+      "knownCases": 192,
       "unknownCaseTests": 0
     }
   },
@@ -108,6 +108,28 @@
       ]
     },
     {
+      "cls": "RequirementFilterExactnessApiTests",
+      "tests": 4,
+      "knownCases": 4,
+      "unknownCaseTests": 0,
+      "classification": "converted",
+      "reason": "Already sharing a host through the #563 pilot.",
+      "intents": [
+        "http-boundary"
+      ]
+    },
+    {
+      "cls": "AuthoredSectionTests",
+      "tests": 3,
+      "knownCases": 3,
+      "unknownCaseTests": 0,
+      "classification": "converted",
+      "reason": "Already sharing a host through the #563 pilot.",
+      "intents": [
+        "http-boundary"
+      ]
+    },
+    {
       "cls": "ChangeRequestReviewRationaleApiTests",
       "tests": 3,
       "knownCases": 3,
@@ -120,6 +142,29 @@
       ]
     },
     {
+      "cls": "CorrectiveActionRoutingApiTests",
+      "tests": 3,
+      "knownCases": 3,
+      "unknownCaseTests": 0,
+      "classification": "converted",
+      "reason": "Already sharing a host through the #563 pilot.",
+      "intents": [
+        "auth-policy",
+        "http-boundary"
+      ]
+    },
+    {
+      "cls": "DeferralAndRevisionListingTests",
+      "tests": 3,
+      "knownCases": 3,
+      "unknownCaseTests": 0,
+      "classification": "converted",
+      "reason": "Already sharing a host through the #563 pilot.",
+      "intents": [
+        "http-boundary"
+      ]
+    },
+    {
       "cls": "LiveTestRegressionApiTests",
       "tests": 3,
       "knownCases": 3,
@@ -127,6 +172,31 @@
       "classification": "converted",
       "reason": "Already sharing a host through the #563 pilot.",
       "intents": [
+        "ef-translation",
+        "http-boundary"
+      ]
+    },
+    {
+      "cls": "PreReleaseEvidenceVisibilityTests",
+      "tests": 3,
+      "knownCases": 3,
+      "unknownCaseTests": 0,
+      "classification": "converted",
+      "reason": "Already sharing a host through the #563 pilot.",
+      "intents": [
+        "ef-translation",
+        "http-boundary"
+      ]
+    },
+    {
+      "cls": "RestartReviewApiTests",
+      "tests": 3,
+      "knownCases": 3,
+      "unknownCaseTests": 0,
+      "classification": "converted",
+      "reason": "Already sharing a host through the #563 pilot.",
+      "intents": [
+        "auth-policy",
         "ef-translation",
         "http-boundary"
       ]
@@ -863,76 +933,6 @@
       "classification": "reusable-host",
       "reason": "Static reuse candidate, not an implementation-ready safety finding: shared-host conversion requires fresh per-test clients, unique per-test tagged logical data, and assertions scoped to that data.",
       "intents": [
-        "http-boundary"
-      ]
-    },
-    {
-      "cls": "RequirementFilterExactnessApiTests",
-      "tests": 4,
-      "knownCases": 4,
-      "unknownCaseTests": 0,
-      "classification": "reusable-host",
-      "reason": "Static reuse candidate, not an implementation-ready safety finding: shared-host conversion requires fresh per-test clients, unique per-test tagged logical data, and assertions scoped to that data.",
-      "intents": [
-        "http-boundary"
-      ]
-    },
-    {
-      "cls": "AuthoredSectionTests",
-      "tests": 3,
-      "knownCases": 3,
-      "unknownCaseTests": 0,
-      "classification": "reusable-host",
-      "reason": "Static reuse candidate, not an implementation-ready safety finding: shared-host conversion requires fresh per-test clients, unique per-test tagged logical data, and assertions scoped to that data.",
-      "intents": [
-        "http-boundary"
-      ]
-    },
-    {
-      "cls": "CorrectiveActionRoutingApiTests",
-      "tests": 3,
-      "knownCases": 3,
-      "unknownCaseTests": 0,
-      "classification": "reusable-host",
-      "reason": "Static reuse candidate, not an implementation-ready safety finding: shared-host conversion requires fresh per-test clients, unique per-test tagged logical data, and assertions scoped to that data.",
-      "intents": [
-        "auth-policy",
-        "http-boundary"
-      ]
-    },
-    {
-      "cls": "DeferralAndRevisionListingTests",
-      "tests": 3,
-      "knownCases": 3,
-      "unknownCaseTests": 0,
-      "classification": "reusable-host",
-      "reason": "Static reuse candidate, not an implementation-ready safety finding: shared-host conversion requires fresh per-test clients, unique per-test tagged logical data, and assertions scoped to that data.",
-      "intents": [
-        "http-boundary"
-      ]
-    },
-    {
-      "cls": "PreReleaseEvidenceVisibilityTests",
-      "tests": 3,
-      "knownCases": 3,
-      "unknownCaseTests": 0,
-      "classification": "reusable-host",
-      "reason": "Static reuse candidate, not an implementation-ready safety finding: shared-host conversion requires fresh per-test clients, unique per-test tagged logical data, and assertions scoped to that data.",
-      "intents": [
-        "ef-translation",
-        "http-boundary"
-      ]
-    },
-    {
-      "cls": "RestartReviewApiTests",
-      "tests": 3,
-      "knownCases": 3,
-      "unknownCaseTests": 0,
-      "classification": "reusable-host",
-      "reason": "Static reuse candidate, not an implementation-ready safety finding: shared-host conversion requires fresh per-test clients, unique per-test tagged logical data, and assertions scoped to that data.",
-      "intents": [
-        "auth-policy",
-        "ef-translation",
         "http-boundary"
       ]
     },

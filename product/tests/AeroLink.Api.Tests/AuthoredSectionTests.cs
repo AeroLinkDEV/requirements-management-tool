@@ -19,15 +19,27 @@ namespace AeroLink.Api.Tests;
 /// A modification is different. It already sits somewhere, so leaving it alone is a real answer, and the
 /// existing option stays. A retirement has no section to be in at all.
 /// </summary>
-public sealed class AuthoredSectionTests
+public sealed class AuthoredSectionTests : IClassFixture<SharedApiHost>
 {
-    private static async Task<(Guid ProjectId, Guid ReleaseId, Guid SectionId)> SeedAsync(AeroLinkApiFactory factory)
+    private readonly SharedApiHost _host;
+
+    public AuthoredSectionTests(SharedApiHost host)
+    {
+        _host = host;
+    }
+
+    private sealed record Seeded(Guid ProjectId, Guid ReleaseId, Guid SectionId, string AuthorName, string ApproverName);
+
+    private static async Task<Seeded> SeedAsync(AeroLinkApiFactory factory)
     {
         using var scope = factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
         var now = DateTimeOffset.UtcNow;
+        var tag = Guid.NewGuid().ToString("N")[..8];
+        var authorName = $"section.author.{tag}";
+        var approverName = $"section.approver.{tag}";
 
-        var program = new ProgramRecord("Authored Section Program", "ASP");
+        var program = new ProgramRecord($"Authored Section Program {tag}", $"ASP{tag}");
         var project = new ProjectRecord(program.Id, "Flight Software", "Authored Section Software");
         var release = new SoftwareRelease(project.Id, "2.0", false);
         db.AddRange(program, project, release);
@@ -39,16 +51,16 @@ public sealed class AuthoredSectionTests
             "Functional Behavior", null, "seed", now);
         db.Add(section);
 
-        var account = new UserAccount("section.author", "section.author", "section.author@example.test",
+        var account = new UserAccount(authorName, authorName, $"{authorName}@example.test",
             IdentityService.HashPassword(AeroLinkApiFactory.MemberPassword), now);
         db.Add(account);
         db.Add(new ProgramMembership(account.Id, program.Id, ProgramRole.Engineer, "test.setup", now));
-        var approver = new UserAccount("section.approver", "section.approver", "section.approver@example.test",
+        var approver = new UserAccount(approverName, approverName, $"{approverName}@example.test",
             IdentityService.HashPassword(AeroLinkApiFactory.MemberPassword), now);
         db.Add(approver);
         db.Add(new ProgramMembership(approver.Id, program.Id, ProgramRole.Approver, "test.setup", now));
         await db.SaveChangesAsync();
-        return (project.Id, release.Id, section.Id);
+        return new(project.Id, release.Id, section.Id, authorName, approverName);
     }
 
     private static object Body(Guid projectId, Guid releaseId, string kind, Guid? sectionId, string baseNumber = "")
@@ -81,13 +93,12 @@ public sealed class AuthoredSectionTests
     [Fact]
     public async Task A_draft_may_be_saved_before_its_section_has_been_chosen()
     {
-        using var factory = new AeroLinkApiFactory();
-        using var client = factory.CreateClient();
-        var (projectId, releaseId, _) = await SeedAsync(factory);
-        await SignInAsync(client);
+        using var client = _host.CreateClient();
+        var seeded = await SeedAsync(_host.Factory);
+        await SignInAsync(client, seeded.AuthorName);
 
         using var response = await client.PostAsJsonAsync("/api/change-request-drafts",
-            Body(projectId, releaseId, "Introduce", null));
+            Body(seeded.ProjectId, seeded.ReleaseId, "Introduce", null));
         var body = await response.Content.ReadAsStringAsync();
         Assert.True(response.StatusCode == HttpStatusCode.Created, $"{(int)response.StatusCode}: {body}");
     }
@@ -95,17 +106,16 @@ public sealed class AuthoredSectionTests
     [Fact]
     public async Task A_new_requirement_without_a_section_cannot_be_sent_for_review()
     {
-        using var factory = new AeroLinkApiFactory();
-        using var client = factory.CreateClient();
-        var (projectId, releaseId, _) = await SeedAsync(factory);
-        await SignInAsync(client);
+        using var client = _host.CreateClient();
+        var seeded = await SeedAsync(_host.Factory);
+        await SignInAsync(client, seeded.AuthorName);
 
-        var draft = await CreateDraftAsync(client, Body(projectId, releaseId, "Introduce", null));
+        var draft = await CreateDraftAsync(client, Body(seeded.ProjectId, seeded.ReleaseId, "Introduce", null));
         using var response = await client.PostAsJsonAsync($"/api/change-requests/{draft.Id}/submit", new
         {
             expectedVersion = draft.Version,
             mode = "Sequential",
-            approvers = new[] { new { userId = "section.approver", name = "Section Approver" } },
+            approvers = new[] { new { userId = seeded.ApproverName, name = "Section Approver" } },
         });
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
         var body = await response.Content.ReadAsStringAsync();
@@ -118,17 +128,16 @@ public sealed class AuthoredSectionTests
     [Fact]
     public async Task A_new_requirement_with_a_section_reaches_review()
     {
-        using var factory = new AeroLinkApiFactory();
-        using var client = factory.CreateClient();
-        var (projectId, releaseId, sectionId) = await SeedAsync(factory);
-        await SignInAsync(client);
+        using var client = _host.CreateClient();
+        var seeded = await SeedAsync(_host.Factory);
+        await SignInAsync(client, seeded.AuthorName);
 
-        var draft = await CreateDraftAsync(client, Body(projectId, releaseId, "Introduce", sectionId));
+        var draft = await CreateDraftAsync(client, Body(seeded.ProjectId, seeded.ReleaseId, "Introduce", seeded.SectionId));
         using var response = await client.PostAsJsonAsync($"/api/change-requests/{draft.Id}/submit", new
         {
             expectedVersion = draft.Version,
             mode = "Sequential",
-            approvers = new[] { new { userId = "section.approver", name = "Section Approver" } },
+            approvers = new[] { new { userId = seeded.ApproverName, name = "Section Approver" } },
         });
         var body = await response.Content.ReadAsStringAsync();
         // Asserted against the body, so a refusal explains itself rather than arriving as a bare status.
@@ -149,10 +158,10 @@ public sealed class AuthoredSectionTests
     // requirement that exists in a materialized baseline, which is a showcase's worth of setup. It is proven
     // against real data by the "modifying a requirement offers to leave it where it already is" journey.
 
-    private static async Task SignInAsync(HttpClient client)
+    private static async Task SignInAsync(HttpClient client, string userName)
     {
         var login = await client.PostAsJsonAsync("/api/auth/login",
-            new { userName = "section.author", password = AeroLinkApiFactory.MemberPassword });
+            new { userName, password = AeroLinkApiFactory.MemberPassword });
         Assert.Equal(HttpStatusCode.OK, login.StatusCode);
         await SecurityBoundaryTests.AuthorizeMutationsAsync(client);
     }

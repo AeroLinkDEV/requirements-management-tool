@@ -18,20 +18,32 @@ namespace AeroLink.Api.Tests;
 /// one could come into being was for the demonstration seeder to create it. The shelf was visible and
 /// unreachable — which is the same class of defect as a Revise button gated on a state nothing rests in.
 /// </summary>
-public sealed class DeferralAndRevisionListingTests
+public sealed class DeferralAndRevisionListingTests : IClassFixture<SharedApiHost>
 {
-    private static async Task<(Guid ProjectId, Guid ReleaseId, Guid ChangeRequestId)> SeedAsync(AeroLinkApiFactory factory)
+    private readonly SharedApiHost _host;
+
+    public DeferralAndRevisionListingTests(SharedApiHost host)
+    {
+        _host = host;
+    }
+
+    private sealed record Seeded(Guid ProjectId, Guid ReleaseId, Guid ChangeRequestId, string AuthorName, string ApproverName);
+
+    private static async Task<Seeded> SeedAsync(AeroLinkApiFactory factory)
     {
         using var scope = factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
         var now = DateTimeOffset.UtcNow;
+        var tag = Guid.NewGuid().ToString("N")[..8];
+        var authorName = $"shelf.author.{tag}";
+        var approverName = $"shelf.approver.{tag}";
 
-        var program = new ProgramRecord("Shelf Program", "SHP");
+        var program = new ProgramRecord($"Shelf Program {tag}", $"SHP{tag}");
         var project = new ProjectRecord(program.Id, "Flight Software", "Shelf Software");
         var release = new SoftwareRelease(project.Id, "1.6", false);
         db.AddRange(program, project, release);
 
-        foreach (var (name, role) in new[] { ("shelf.author", ProgramRole.Engineer), ("shelf.approver", ProgramRole.Approver) })
+        foreach (var (name, role) in new[] { (authorName, ProgramRole.Engineer), (approverName, ProgramRole.Approver) })
         {
             var account = new UserAccount(name, name, $"{name}@example.test",
                 IdentityService.HashPassword(AeroLinkApiFactory.MemberPassword), now);
@@ -41,17 +53,17 @@ public sealed class DeferralAndRevisionListingTests
         await db.SaveChangesAsync();
 
         var scr = new SystemChangeRequest("SRCR-00070", 0, project.Id, release.Id,
-            "Oceanic waypoint sequencing", "P", "A", "S", "shelf.author", now);
-        scr.AddRequirementChange("shelf.author", "SYSR-00000701", 0, RequirementLevel.System,
+            "Oceanic waypoint sequencing", "P", "A", "S", authorName, now);
+        scr.AddRequirementChange(authorName, "SYSR-00000701", 0, RequirementLevel.System,
             RequirementChangeKind.Introduce, "The FMS shall sequence oceanic waypoints.", "New", "Test", now);
-        scr.SubmitForReview("shelf.author", [new("shelf.approver", "Shelf Approver")], now);
-        scr.ApproveActiveStage("shelf.approver", now);
+        scr.SubmitForReview(authorName, [new(approverName, "Shelf Approver")], now);
+        scr.ApproveActiveStage(approverName, now);
         db.SystemChangeRequests.Add(scr);
         await db.SaveChangesAsync();
-        return (project.Id, release.Id, scr.Id);
+        return new(project.Id, release.Id, scr.Id, authorName, approverName);
     }
 
-    private static async Task SignInAsync(HttpClient client, string userName = "shelf.author")
+    private static async Task SignInAsync(HttpClient client, string userName)
     {
         var login = await client.PostAsJsonAsync("/api/auth/login",
             new { userName, password = AeroLinkApiFactory.MemberPassword });
@@ -62,12 +74,11 @@ public sealed class DeferralAndRevisionListingTests
     [Fact]
     public async Task An_approved_change_request_goes_on_the_shelf_and_comes_back_where_it_was()
     {
-        using var factory = new AeroLinkApiFactory();
-        using var client = factory.CreateClient();
-        var (_, _, changeRequestId) = await SeedAsync(factory);
-        await SignInAsync(client);
+        using var client = _host.CreateClient();
+        var seeded = await SeedAsync(_host.Factory);
+        await SignInAsync(client, seeded.AuthorName);
 
-        using var deferred = await client.PostAsJsonAsync($"/api/change-requests/{changeRequestId}/defer",
+        using var deferred = await client.PostAsJsonAsync($"/api/change-requests/{seeded.ChangeRequestId}/defer",
             new { reason = "Correct, but not shipping in 1.6." });
         var body = await deferred.Content.ReadAsStringAsync();
         Assert.True(deferred.StatusCode == HttpStatusCode.OK, $"{(int)deferred.StatusCode}: {body}");
@@ -75,7 +86,7 @@ public sealed class DeferralAndRevisionListingTests
         Assert.Contains("\"state\":\"Deferred\"", body);
         Assert.Contains("\"deferredFromState\":\"Approved\"", body);
 
-        using var reinstated = await client.PostAsync($"/api/change-requests/{changeRequestId}/reinstate", null);
+        using var reinstated = await client.PostAsync($"/api/change-requests/{seeded.ChangeRequestId}/reinstate", null);
         var back = await reinstated.Content.ReadAsStringAsync();
         Assert.True(reinstated.StatusCode == HttpStatusCode.OK, $"{(int)reinstated.StatusCode}: {back}");
         Assert.Contains("\"state\":\"Approved\"", back);
@@ -85,13 +96,12 @@ public sealed class DeferralAndRevisionListingTests
     [Fact]
     public async Task Deferring_without_a_reason_is_refused()
     {
-        using var factory = new AeroLinkApiFactory();
-        using var client = factory.CreateClient();
-        var (_, _, changeRequestId) = await SeedAsync(factory);
-        await SignInAsync(client);
+        using var client = _host.CreateClient();
+        var seeded = await SeedAsync(_host.Factory);
+        await SignInAsync(client, seeded.AuthorName);
 
         // A shelf whose entries do not say why they are on it is a shelf nobody can plan from.
-        using var response = await client.PostAsJsonAsync($"/api/change-requests/{changeRequestId}/defer", new { reason = "   " });
+        using var response = await client.PostAsJsonAsync($"/api/change-requests/{seeded.ChangeRequestId}/defer", new { reason = "   " });
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
         Assert.Contains("reason", await response.Content.ReadAsStringAsync());
     }
@@ -107,15 +117,14 @@ public sealed class DeferralAndRevisionListingTests
     [Fact]
     public async Task The_listing_collapses_to_the_newest_revision_and_expands_on_request()
     {
-        using var factory = new AeroLinkApiFactory();
-        using var client = factory.CreateClient();
-        var (projectId, _, changeRequestId) = await SeedAsync(factory);
-        await SignInAsync(client);
+        using var client = _host.CreateClient();
+        var seeded = await SeedAsync(_host.Factory);
+        await SignInAsync(client, seeded.AuthorName);
 
-        using var revised = await client.PostAsJsonAsync($"/api/change-requests/{changeRequestId}/next-revision", new { });
+        using var revised = await client.PostAsJsonAsync($"/api/change-requests/{seeded.ChangeRequestId}/next-revision", new { });
         Assert.Equal(HttpStatusCode.Created, revised.StatusCode);
 
-        using var collapsed = await client.GetAsync($"/api/history/change-requests?projectId={projectId}&page=1&pageSize=50");
+        using var collapsed = await client.GetAsync($"/api/history/change-requests?projectId={seeded.ProjectId}&page=1&pageSize=50");
         using var page = JsonDocument.Parse(await collapsed.Content.ReadAsStringAsync());
         var rows = page.RootElement.GetProperty("items").EnumerateArray().ToList();
         var row = Assert.Single(rows);
@@ -125,7 +134,7 @@ public sealed class DeferralAndRevisionListingTests
         Assert.Equal(1, page.RootElement.GetProperty("totalCount").GetInt32());
 
         using var expanded = await client.GetAsync(
-            $"/api/history/change-requests?projectId={projectId}&baseNumber=SRCR-00070&page=1&pageSize=50");
+            $"/api/history/change-requests?projectId={seeded.ProjectId}&baseNumber=SRCR-00070&page=1&pageSize=50");
         using var all = JsonDocument.Parse(await expanded.Content.ReadAsStringAsync());
         var numbers = all.RootElement.GetProperty("items").EnumerateArray()
             .Select(x => x.GetProperty("displayNumber").GetString()).OrderBy(x => x).ToList();

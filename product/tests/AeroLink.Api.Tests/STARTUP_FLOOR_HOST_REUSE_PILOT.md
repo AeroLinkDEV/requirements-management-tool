@@ -1,161 +1,86 @@
-# #563 phase 2 ? bounded API host-reuse pilot and class inventory
+# #563 phase 2 — bounded API host-reuse rollout
 
-Date: 2026-08-15. Branch: `deepseek/563-api-host-reuse-tranche-2`. Review round: 1.
+Date: 2026-08-16
 
-## Pilot design
+Branch: `chatgpt/563-shared-host-tranche-2b`
+Issue state: implementation tranche only; #563 remains open pending measured Windows evidence and any further source-audited conversions.
 
-`SharedApiHost` is a class-scoped xUnit fixture owning one `AeroLinkApiFactory` (one host, one SQLite database file) for the whole test class. xUnit runs the tests of one class serially, so the class fixture is the reuse boundary: the host/database is built once per class instead of once per test. Each test still gets a fresh `HttpClient` (fresh cookie/session container) and seeds its own uniquely named logical data. The fixture is opt-in; the rest of the suite keeps per-test factories.
+## Design retained
 
-Converted classes must satisfy, and were checked for:
+`SharedApiHost` is an opt-in, class-scoped xUnit fixture. It owns one `AeroLinkApiFactory`, one API host, and one disposable SQLite database for a test class. xUnit keeps the methods in one class serial, so the class is the reuse boundary.
 
-- every test uses the default factory options (exceptional tests keep their own fresh factory);
-- every seed uses per-test unique user accounts and Program codes (both globally unique-constrained);
-- every assertion is scoped by project/program identity or by the test's own seeded IDs ? no empty-table, first-install-bootstrap, or whole-database-count assumptions;
-- authentication isolation is proven per test: a fresh client is a fresh session, and an unaffiliated user is refused.
+Every converted test still receives a fresh `HttpClient`, and therefore a fresh cookie/session container. Converted classes must also satisfy all of the following:
 
-## Tranche 1 (merged as #584, `ec75f91`)
+- default `AeroLinkApiFactory` options only;
+- unique per-test data for globally constrained values such as Program codes, user names, and email addresses;
+- assertions scoped to the test's own project, release, package, or seeded identifiers;
+- no empty-database, first-install, fixed-bootstrap, whole-database-count, custom-service, custom-filesystem, or startup-configuration assumptions;
+- no persistent PostgreSQL or persistent evidence-root use.
 
-| Class | Shared tests | Fresh-host exceptions |
-|---|---:|---:|
-| ChangeRequestReviewRationaleApiTests | 3 | 0 |
-| CoverageStateFilterApiTests | 6 | 0 |
-| TestProcedureDocumentApiTests | 4 | 1 (first-install bootstrap) |
-| ApprovalConfigurationApiTests | 6 | 0 |
-| ProjectPersonnelApiTests | 13 | 0 |
-| SharedHostIsolationTests | 3 (isolation facts) | 0 |
-| **Tranche 1 totals** | **32 shared + 3 isolation** | **1** |
+Tests that need a fresh host/database remain outside this fixture. No global xUnit parallelism setting changed.
 
-## Tranche 2a (this PR)
+## Previously merged pilot
 
-| Class | Shared tests | Fresh-host exceptions | Basis |
-|---|---:|---:|---|
-| DownstreamAssessmentReopenApiTests | 5 | 0 | Withdraw/reopen capability and authority, project-scoped; decidedBy/actor assertions use per-test names |
-| LiveTestRegressionApiTests | 3 | 0 | Released-build effectivity and audit projection, seeded IDs and project scoping |
-| ProcedureBrowsingApiTests | 6 | 0 | Paging/filter/sort/search all project-scoped; outsider refusal retained |
-| TestProcedureRevisionHistoryApiTests | 2 | 0 | History/trace/coverage/search scoped by projectId and seeded IDs |
-| **Tranche 2a totals** | **16** | **0** | 16 per-test factories -> 4 class fixtures (**-12**) |
+| Increment | Classes | Methods/cases sharing a host | Fresh-host exceptions | Theoretical per-method factory reduction |
+|---|---:|---:|---:|---:|
+| PR #584, tranche 1 | 5 product classes | 32 | 1 first-install method | 27 |
+| PR #585, tranche 2a | 4 product classes | 16 | 0 | 12 |
+| SharedHostIsolationTests | 1 isolation class | 3 | 0 | 2 |
+| **Merged total before this tranche** | **10 classes** | **52** | **1** | **42** |
 
-## Cumulative pilot scope
+The generated v3 host-classification artifact is authoritative. Historical hand-maintained candidate counts in earlier versions of this document are intentionally not repeated.
 
-- Classes: 9 (5 tranche 1 + 4 tranche 2a), meeting the 8?12-class pilot target.
+## Tranche 2b — this branch
 
-- Factories: tranche 1 -27 + isolation +1; tranche 2a -12; cumulative suite factory count drops from 471 (489 tests) to 433 (492 tests) on the tranche-2a head. Test totals are the per-shard counts each API shard reports it ran: 163 x 3 = 489 at 563A (run 31858889257), 164 x 3 = 492 from tranche 1 onward (runs 31864364853 and 31880526966). Neither tranche adds a test, so the count is unchanged across them.
+This tranche converts six smaller legacy classes whose only blockers were fixed globally constrained seed identities and per-test factory construction.
 
-## Fresh-host required additions
+| Class | Methods/cases | Isolation correction | Assertion scope | Factory change |
+|---|---:|---|---|---:|
+| `AuthoredSectionTests` | 3 | Unique Program code and author/approver accounts per test | Seeded project, release, draft, and section | 3 → 1 |
+| `CorrectiveActionRoutingApiTests` | 3 | Unique Program code, engineer, and outsider accounts per test | Seeded project, reports, procedures, and IDs | 3 → 1 |
+| `DeferralAndRevisionListingTests` | 3 | Unique Program code and author/approver accounts per test | Seeded change request and project-filtered history | 3 → 1 |
+| `PreReleaseEvidenceVisibilityTests` | 3 | Unique Program code and engineer/lead accounts per test | Seeded release, impact, procedure, and build set | 3 → 1 |
+| `RequirementFilterExactnessApiTests` | 4 | Unique Program code and reader account per test | Seeded project workspace | 4 → 1 |
+| `RestartReviewApiTests` | 3 | Unique Program code and author/approver accounts per test | Seeded change request and review-cycle ID | 3 → 1 |
+| **Tranche 2b total** | **19** |  |  | **19 → 6 (-13)** |
 
-- `ChangeRequestRenameApiTests` uses `ProblemReportApiTests.BootstrapAndLoginAsync` (first-install bootstrap requires a user-less DB), so it cannot share a host with tests that seed users; it remains fresh-host required.
+No test was removed, skipped, merged, or weakened. The HTTP, authorization, EF translation, audit-history, and error-mapping assertions remain hosted.
 
-## Exhaustive class inventory (all *.cs files in AeroLink.Api.Tests)
+## Generated inventory after tranche 2b
 
-### pilot (11)
+| Classification | Classes | Test methods | Known cases |
+|---|---:|---:|---:|
+| converted | 16 | 71 | 71 |
+| reusable-host | 24 | 167 | 192 |
+| fresh-host | 40 | 208 | 233 |
+| migration-candidate | 1 | 1 | 1 |
+| **Total** | **81** | **447** | **497** |
 
-- ApprovalConfigurationApiTests.cs
-- ChangeRequestReviewRationaleApiTests.cs
-- CoverageStateFilterApiTests.cs
-- DownstreamAssessmentReopenApiTests.cs
-- LiveTestRegressionApiTests.cs
-- ProcedureBrowsingApiTests.cs
-- ProjectPersonnelApiTests.cs
-- SharedApiHost.cs
-- SharedHostIsolationTests.cs
-- TestProcedureDocumentApiTests.cs
-- TestProcedureRevisionHistoryApiTests.cs
+The converted classes now replace 71 per-method factories with 16 class fixtures, a theoretical reduction of 55 factory/host/database starts for those methods. This tranche contributes 13 of those reductions.
 
-### fresh-host required (7)
+The remaining static reuse headroom is 24 classes, 167 methods, and 192 known cases. Its method-level theoretical maximum is 143 additional factory reductions; that number is planning evidence, not a claim that every remaining class is safe or worthwhile to convert.
 
-- ApiTestTelemetryTests.cs
-- BaselineImportApiTests.cs
-- ChangeRequestRenameApiTests.cs
-- ManagedDocumentApiTests.cs
-- ProblemReportPagingApiTests.cs
-- ProductionRoutingTests.cs
-- SecurityBoundaryTests.cs
+## Validation completed in the implementation workspace
 
-### fixture-hosted (ShowcaseApiFixture) (4)
+- regenerated `api-test-intent.json` from the current C# source;
+- regenerated `api-host-classification.json` from the current C# source and reviewed overrides;
+- regenerated `route-coverage.json` from the current source;
+- inventory and route-contract tests: **31 passed, 0 failed**;
+- generated-artifact byte-stability: passed;
+- exact method/case totals remained **447 / 497**;
+- no test discovery reduction occurred.
 
-- CodeTraceabilityApiTests.cs
-- ConfigurationPublicationApiTests.cs
-- DraftDocumentApiTests.cs
-- ProcedureDiscussionApiTests.cs
+The local execution environment did not contain the .NET SDK or PowerShell, so C# compilation, the API suite, and the Windows-only measurement-contract tests are GitHub Actions responsibilities for this branch. This limitation is recorded rather than represented as a passing result.
 
-### reuse candidate (not converted) (58)
+## Performance evidence still required
 
-- AdministratorChangeRequestApiTests.cs
-- AuthoredSectionTests.cs
-- AuthoringTracedImpactTests.cs
-- BuildScopedWorkspaceApiTests.cs
-- BuildTestSetApiTests.cs
-- CancelReviewAuthorityTests.cs
-- ChangeAuthoringInvariantApiTests.cs
-- ClosedReleaseAuthoringTests.cs
-- ControlledEditingCheckInApiTests.cs
-- ControlledEditingProcedureAuthorityTests.cs
-- ControlledProcedureApprovalBasisApiTests.cs
-- ControlledProcedureDocumentApiTests.cs
-- CorrectiveActionRoutingApiTests.cs
-- DeferralAndRevisionListingTests.cs
-- DeferredCarryForwardApiTests.cs
-- ExternalIdentityAdminApiTests.cs
-- GovernanceEvidenceApiTests.cs
-- HistoricalPublicationFreezeApiTests.cs
-- IdentifierAllocationTests.cs
-- IntegrityCheckpointApiTests.cs
-- LegacyProcedureManifestBootstrapApiTests.cs
-- ManagedDocumentRecoveryApiTests.cs
-- ManualTestChangeRequestApiTests.cs
-- OpenDigitalThreadTests.cs
-- PreReleaseEvidenceVisibilityTests.cs
-- ProblemReportActiveMetricApiTests.cs
-- ProblemReportApiTests.cs
-- ProblemReportCheckoutApiTests.cs
-- ProblemReportDispositionApiTests.cs
-- ProblemReportDuplicateDispositionApiTests.cs
-- ProblemReportOwnerAuthorityApiTests.cs
-- ProblemReportVerificationApiTests.cs
-- ProblemReportWaiverApiTests.cs
-- ProcedureBaselineApiTests.cs
-- ProcedureManifestEffectivityApiTests.cs
-- ProcedureSavedViewApiTests.cs
-- ProcedureTraceApiTests.cs
-- ProductLineApiTests.cs
-- ProgramRoleAuthorityApiTests.cs
-- ReleaseCampaignExactIntentApiTests.cs
-- ReleasedExecutionEvidenceApiTests.cs
-- ReleasedExecutionEvidenceAuthorityMismatchTests.cs
-- RequirementFilterExactnessApiTests.cs
-- RestartReviewApiTests.cs
-- ReviseChangeRequestApiTests.cs
-- SavedViewLifecycleApiTests.cs
-- SearchableAuthoringPickerApiTests.cs
-- SecurityHardeningTests.cs
-- ServerAuthorityContractTests.cs
-- SoftwareChangeRequestLevelHistoryTests.cs
-- TestChangeRequestConsolidationTests.cs
-- TestChangeRequestRegisterApiTests.cs
-- TestChangeRequestReviewWorkflowTests.cs
-- TestChangeRequestScopeApiTests.cs
-- TestExecutionEffectivityApiTests.cs
-- TestProcedureAuthoringApiTests.cs
-- VerificationImpactApiTests.cs
-- VerificationProgramIsolationApiTests.cs
+This tranche does not claim the #563 performance threshold is met. Before broad rollout or issue closure:
 
-### non-hosted (2)
+1. GitHub Actions must compile and run the complete applicable API suite with exact totals.
+2. The paired Windows harness must compare an exact baseline tree with the exact treatment tree using ten valid seeds and identical discovered test identities.
+3. The treatment must improve the median worst API shard by at least 15%, with at least 15% median paired-seed improvement, without cleanup, authentication-isolation, or test-count failures.
+4. Negative or variance-dominated results must remain recorded; they are not grounds to weaken tests or hide the experiment.
 
-- ClientHostingTests.cs
-- ProductionConfigurationTests.cs
+## Persistent-data confirmation
 
-### support (4)
-
-- ApiTestTelemetry.cs
-- SaveRaceGate.cs
-- ShowcaseApiFixture.cs
-- TimingConnectionInterceptor.cs
-
-## Measurement model
-
-- Factory/host/database starts: 563A telemetry (`factories` per class and whole-run `summedFactoryStartupMs`, schema v2). After this PR, each converted class reports one `SharedApiHost` factory instead of one per test, and the whole-run total includes every factory exactly once (attributed + fixtures/helpers + ambiguous theories).
-- Wall clock: the API shards' summed wall and startup come from the same telemetry; a before/after comparison is made on exact-head CI runs. Single runs are variance-dominated; the broad-rollout decision requires at least ten repeated full-concurrency observations, order randomization, summed CPU/disk-I/O, and the >=15% API critical-path threshold.
-
-## Persistent data
-
-No persistent PostgreSQL (port 54329) is used, migrated, or reset. The pilot uses only disposable SQLite databases in the system temp directory and the repository's existing disposable test evidence roots.
+Only disposable SQLite databases and disposable test evidence roots are used. Persistent PostgreSQL on port `54329` and the persistent AeroLink evidence store are untouched.

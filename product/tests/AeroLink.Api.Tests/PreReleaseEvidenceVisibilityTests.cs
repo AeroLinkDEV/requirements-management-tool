@@ -21,9 +21,17 @@ namespace AeroLink.Api.Tests;
 /// until that evidence arrived. The verification workspace filters its queue on exactly that flag, so the
 /// one place an engineer looks for outstanding work had quietly dropped it.
 /// </summary>
-public sealed class PreReleaseEvidenceVisibilityTests
+public sealed class PreReleaseEvidenceVisibilityTests : IClassFixture<SharedApiHost>
 {
-    private sealed record Fixture(Guid ProjectId, Guid ReleaseId, Guid ImpactId, Guid ProcedureId, Guid ProcedureRevisionId);
+    private readonly SharedApiHost _host;
+
+    public PreReleaseEvidenceVisibilityTests(SharedApiHost host)
+    {
+        _host = host;
+    }
+
+    private sealed record Fixture(Guid ProjectId, Guid ReleaseId, Guid ImpactId, Guid ProcedureId,
+        Guid ProcedureRevisionId, string EngineerName, string LeadName);
 
     private static async Task<Fixture> SeedAsync(AeroLinkApiFactory factory)
     {
@@ -31,8 +39,11 @@ public sealed class PreReleaseEvidenceVisibilityTests
         var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
         var impact = scope.ServiceProvider.GetRequiredService<VerificationImpactService>();
         var now = DateTimeOffset.UtcNow;
+        var tag = Guid.NewGuid().ToString("N")[..8];
+        var engineerName = $"evidence.engineer.{tag}";
+        var leadName = $"evidence.lead.{tag}";
 
-        var program = new ProgramRecord("Evidence Program", "EVP");
+        var program = new ProgramRecord($"Evidence Program {tag}", $"EVP{tag}");
         var project = new ProjectRecord(program.Id, "Software", "Evidence Software");
         var release = new SoftwareRelease(project.Id, "1.6", false);
         var scr = new SystemChangeRequest("SRCR-00910", 0, project.Id, release.Id, "Oceanic", "P", "A", "S", "author", now);
@@ -42,17 +53,17 @@ public sealed class PreReleaseEvidenceVisibilityTests
         scr.ApproveActiveStage("reviewer", now);
         db.AddRange(program, project, release, scr);
 
-        var procedure = new TestProcedure(project.Id, "SYSTP-000900", "Oceanic sequencing", "evidence.engineer", now,
+        var procedure = new TestProcedure(project.Id, "SYSTP-000900", "Oceanic sequencing", engineerName, now,
             TestProcedureLevel.System);
         // Approved as materialisation writes it, on the authority of the package that carried the change.
         var revision = new TestProcedureRevision(procedure.Id, 0, "Objective", "Preconditions",
-            "Steps", "Expected", TestProcedureState.Approved, "evidence.engineer", now);
+            "Steps", "Expected", TestProcedureState.Approved, engineerName, now);
         db.AddRange(procedure, revision);
 
         foreach (var (user, role) in new[]
                  {
-                     ("evidence.engineer", ProgramRole.TestEngineer),
-                     ("evidence.lead", ProgramRole.TestLead),
+                     (engineerName, ProgramRole.TestEngineer),
+                     (leadName, ProgramRole.TestLead),
                  })
         {
             var account = new UserAccount(user, user, $"{user}@example.test",
@@ -67,7 +78,7 @@ public sealed class PreReleaseEvidenceVisibilityTests
         await db.SaveChangesAsync();
 
         var item = await db.VerificationImpactItems.AsNoTracking().FirstAsync(x => x.ReleaseId == release.Id);
-        return new(project.Id, release.Id, item.Id, procedure.Id, revision.Id);
+        return new(project.Id, release.Id, item.Id, procedure.Id, revision.Id, engineerName, leadName);
     }
 
     /// <summary>
@@ -79,13 +90,12 @@ public sealed class PreReleaseEvidenceVisibilityTests
     [Fact]
     public async Task Asking_for_evidence_before_release_puts_the_procedure_in_the_builds_test_set()
     {
-        using var factory = new AeroLinkApiFactory();
-        using var client = factory.CreateClient();
-        var fixture = await SeedAsync(factory);
-        await LoginAsync(client, "evidence.lead");
+        using var client = _host.CreateClient();
+        var fixture = await SeedAsync(_host.Factory);
+        await LoginAsync(client, fixture.LeadName);
         await ResolveRequiringEvidenceAsync(client, fixture);
 
-        using var scope = factory.Services.CreateScope();
+        using var scope = _host.Factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
         var entries = await db.BuildTestSetEntries.AsNoTracking()
             .Where(x => db.BuildTestSets.Any(set => set.Id == x.BuildTestSetId && set.ReleaseId == fixture.ReleaseId))
@@ -107,7 +117,7 @@ public sealed class PreReleaseEvidenceVisibilityTests
     private static async Task<JsonElement> ResolveRequiringEvidenceAsync(HttpClient client, Fixture fixture)
     {
         using var assigned = await client.PostAsJsonAsync($"/api/verification-impact/{fixture.ImpactId}/assign",
-            new { engineerId = "evidence.engineer" });
+            new { engineerId = fixture.EngineerName });
         Assert.True(assigned.IsSuccessStatusCode, await assigned.Content.ReadAsStringAsync());
 
         using var resolved = await client.PostAsJsonAsync($"/api/verification-impact/{fixture.ImpactId}/resolve", new
@@ -125,10 +135,9 @@ public sealed class PreReleaseEvidenceVisibilityTests
     [Fact]
     public async Task An_item_owing_pre_release_evidence_still_reports_that_it_holds_the_release()
     {
-        using var factory = new AeroLinkApiFactory();
-        using var client = factory.CreateClient();
-        var fixture = await SeedAsync(factory);
-        await LoginAsync(client, "evidence.lead");
+        using var client = _host.CreateClient();
+        var fixture = await SeedAsync(_host.Factory);
+        await LoginAsync(client, fixture.LeadName);
         await ResolveRequiringEvidenceAsync(client, fixture);
 
         using var listed = await client.GetAsync($"/api/releases/{fixture.ReleaseId}/verification-impact");
@@ -146,13 +155,12 @@ public sealed class PreReleaseEvidenceVisibilityTests
     [Fact]
     public async Task An_item_resolved_without_designating_evidence_holds_nothing()
     {
-        using var factory = new AeroLinkApiFactory();
-        using var client = factory.CreateClient();
-        var fixture = await SeedAsync(factory);
-        await LoginAsync(client, "evidence.lead");
+        using var client = _host.CreateClient();
+        var fixture = await SeedAsync(_host.Factory);
+        await LoginAsync(client, fixture.LeadName);
 
         using var assigned = await client.PostAsJsonAsync($"/api/verification-impact/{fixture.ImpactId}/assign",
-            new { engineerId = "evidence.engineer" });
+            new { engineerId = fixture.EngineerName });
         Assert.True(assigned.IsSuccessStatusCode, await assigned.Content.ReadAsStringAsync());
         using var resolved = await client.PostAsJsonAsync($"/api/verification-impact/{fixture.ImpactId}/resolve", new
         {
