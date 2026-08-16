@@ -1,0 +1,158 @@
+name: Fast PR feedback (advisory)
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fast-pr-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+env:
+  DOTNET_CLI_TELEMETRY_OPTOUT: 1
+  DOTNET_NOLOGO: 1
+
+jobs:
+  backend-fast:
+    name: Fast backend smoke
+    runs-on: windows-latest
+    timeout-minutes: 10
+    outputs:
+      elapsed_ms: ${{ steps.run.outputs.elapsed_ms }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install .NET 10
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v5.2.0
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Cache NuGet packages
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v5.0.4
+        with:
+          path: ~/.nuget/packages
+          key: fast-nuget-${{ runner.os }}-${{ hashFiles('product/**/*.csproj', 'product/**/*.props', 'product/**/*.targets', 'product/global.json') }}
+          restore-keys: |
+            fast-nuget-${{ runner.os }}-
+            nuget-${{ runner.os }}-
+
+      - name: Build and run explicit Fast backend manifest
+        id: run
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $manifest = Get-Content -Raw -LiteralPath product/test-planner/fast-ci-manifest.json | ConvertFrom-Json -Depth 20
+          if ($manifest.authoritative -ne $false -or $manifest.targetMs -ne 240000) { throw 'Fast manifest authority or target changed unexpectedly.' }
+          if ($manifest.safety.persistentPostgreSql -ne 'forbidden' -or $manifest.safety.persistentEvidenceRoot -ne 'forbidden') { throw 'Fast manifest persistent-resource safety changed unexpectedly.' }
+
+          $clock = [Diagnostics.Stopwatch]::StartNew()
+          try {
+            dotnet restore $manifest.backend.build
+            if ($LASTEXITCODE -ne 0) { throw 'Fast solution restore failed.' }
+            dotnet build $manifest.backend.build --configuration Release --no-restore
+            if ($LASTEXITCODE -ne 0) { throw 'Fast solution build failed.' }
+
+            dotnet test $manifest.backend.domainProject --configuration Release --no-build --logger 'console;verbosity=minimal'
+            if ($LASTEXITCODE -ne 0) { throw 'Fast domain suite failed.' }
+
+            $infraFilter = @($manifest.backend.infrastructureClasses | ForEach-Object { "FullyQualifiedName~AeroLink.Infrastructure.Tests.$_" }) -join '|'
+            dotnet test $manifest.backend.infrastructureProject --configuration Release --no-build --filter $infraFilter --logger 'console;verbosity=minimal'
+            if ($LASTEXITCODE -ne 0) { throw 'Fast Infrastructure smoke failed.' }
+
+            $apiFilter = @($manifest.backend.apiClasses | ForEach-Object { "FullyQualifiedName~AeroLink.Api.Tests.$_" }) -join '|'
+            dotnet test $manifest.backend.apiProject --configuration Release --no-build --filter $apiFilter --logger 'console;verbosity=minimal'
+            if ($LASTEXITCODE -ne 0) { throw 'Fast API smoke failed.' }
+          }
+          finally {
+            $clock.Stop()
+            "elapsed_ms=$([int64]$clock.ElapsedMilliseconds)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          }
+
+      - name: State advisory resource boundary
+        if: always()
+        shell: pwsh
+        run: |
+          Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value 'Fast feedback is advisory. Persistent PostgreSQL and product/.local are forbidden; the existing Product quality gate remains merge authority.'
+
+  client-fast:
+    name: Fast client lint and type-check
+    runs-on: windows-latest
+    timeout-minutes: 10
+    outputs:
+      elapsed_ms: ${{ steps.run.outputs.elapsed_ms }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: product/client/package-lock.json
+
+      - name: Run explicit Fast client manifest
+        id: run
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $manifest = Get-Content -Raw -LiteralPath product/test-planner/fast-ci-manifest.json | ConvertFrom-Json -Depth 20
+          $clock = [Diagnostics.Stopwatch]::StartNew()
+          Push-Location $manifest.client.workingDirectory
+          try {
+            foreach ($command in @($manifest.client.commands)) {
+              switch ($command) {
+                'npm ci' { npm ci }
+                'npm run lint' { npm run lint }
+                'npm run typecheck' { npm run typecheck }
+                default { throw "Unreviewed Fast client command: $command" }
+              }
+              if ($LASTEXITCODE -ne 0) { throw "Fast client command failed: $command" }
+            }
+          }
+          finally {
+            Pop-Location
+            $clock.Stop()
+            "elapsed_ms=$([int64]$clock.ElapsedMilliseconds)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          }
+
+      - name: State advisory resource boundary
+        if: always()
+        shell: pwsh
+        run: |
+          Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value 'Fast feedback is advisory. Heavy browser/PostgreSQL evidence remains in the unchanged Product quality gate.'
+
+  fast-feedback:
+    name: Fast feedback aggregate (advisory)
+    if: always()
+    needs: [backend-fast, client-fast]
+    runs-on: windows-latest
+    timeout-minutes: 5
+    steps:
+      - name: Summarize Fast feedback
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $backend = '${{ needs.backend-fast.result }}'
+          $client = '${{ needs.client-fast.result }}'
+          $backendMs = [int64]('0${{ needs.backend-fast.outputs.elapsed_ms }}')
+          $clientMs = [int64]('0${{ needs.client-fast.outputs.elapsed_ms }}')
+          $commandCriticalPathMs = [Math]::Max($backendMs, $clientMs)
+          @(
+            '## Advisory Fast PR feedback',
+            '',
+            "- backend-fast: $backend ($backendMs ms command time)",
+            "- client-fast: $client ($clientMs ms command time)",
+            "- command critical path: $commandCriticalPathMs ms",
+            '- target: 240000 ms',
+            '- browser/PostgreSQL/full matrices: intentionally Full-only in phase 1',
+            '- merge authority: unchanged Product quality gate',
+            '- workflow start-to-aggregate timing must be measured from Actions job timestamps before phase 2'
+          ) | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+
+          if ($backend -ne 'success' -or $client -ne 'success') { throw 'Advisory Fast feedback failed.' }
+          if ($commandCriticalPathMs -gt 240000) { throw "Advisory Fast command critical path exceeded 240000 ms: $commandCriticalPathMs ms." }
