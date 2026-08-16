@@ -115,6 +115,12 @@ test('script contract keeps telemetry aggregation, isolated evidence, and altern
   assert.match(source, /full sorted case-name manifest/)
   assert.match(source, /authoritative seeded planner/)
   assert.match(source, /Run mode always restores and builds/)
+  assert.match(source, /Arguments @\('restore', \(Join-Path \$condition\[1\] \$SolutionPath\), '--disable-build-servers'\)/)
+  assert.match(source, /Arguments @\('build', \(Join-Path \$condition\[1\] \$SolutionPath\), '--configuration', 'Release', '--no-restore', '--disable-build-servers'\)/)
+  assert.match(source, /Arguments @\('test', \$project, '--configuration', 'Release', '--no-build', '--disable-build-servers', '--list-tests'\)/)
+  assert.match(source, /\$arguments = @\('test', \$project, '--configuration', 'Release', '--no-build', '--disable-build-servers', '--filter'/)
+  assert.match(source, /\$relativeRunPath = if \(\$IsWarmup\)/)
+  assert.doesNotMatch(source, /Join-Path \$Root \(if \(\$IsWarmup\)/)
   assert.match(source, /Job containment cleanup/)
   assert.match(source, /if \(!CloseHandle\(stdout\)\)/)
   assert.match(source, /if \(!CloseHandle\(stderr\)\)/)
@@ -145,7 +151,7 @@ function clone(value) {
 function ensureBuilt(worktree) {
   const dll = join(worktree, 'product', 'tests', 'AeroLink.Api.Tests', 'bin', 'Release', 'net10.0', 'AeroLink.Api.Tests.dll')
   if (existsSync(dll)) return true
-  const result = spawnSync('dotnet', ['build', 'product/AeroLink.slnx', '--configuration', 'Release', '--nologo'], {
+  const result = spawnSync('dotnet', ['build', 'product/AeroLink.slnx', '--configuration', 'Release', '--nologo', '--disable-build-servers'], {
     cwd: worktree,
     encoding: 'utf8',
     windowsHide: true,

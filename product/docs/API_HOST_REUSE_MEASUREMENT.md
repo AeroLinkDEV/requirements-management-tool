@@ -37,6 +37,10 @@ at distinct SHAs, rejects `-TestListPath`, rejects `-SkipBuild`, and refuses a n
 and builds each exact clean SHA before live test discovery and partition generation, then saves `plan.json` and
 `plan.md` before any measured shard starts; those files describe the freshly built execution that will follow.
 
+Every benchmark-owned `dotnet restore`, `dotnet build`, and `dotnet test` invocation includes
+`--disable-build-servers`. Persistent MSBuild or compiler servers must not outlive the Job Object root, create
+false cleanup failures, or leak warm build-server state from one paired condition into the other.
+
 ```powershell
 pwsh -NoProfile -File "$root\product\tools\measure-api-host-reuse.ps1" `
   -Mode Run `
