@@ -1,17 +1,17 @@
 {
   "schemaVersion": "aerolink-api-test-intent/v2",
   "totals": {
-    "tests": 447,
-    "cases": 497,
+    "tests": 443,
+    "cases": 493,
     "classes": 81,
-    "hostedTests": 435,
-    "hostedCases": 476,
+    "hostedTests": 431,
+    "hostedCases": 472,
     "nonHostedTests": 8,
     "nonHostedCases": 17,
     "unknownHostTests": 4,
     "unknownHostCases": 4,
-    "hostedCandidateTests": 6,
-    "hostedCandidateCases": 7,
+    "hostedCandidateTests": 5,
+    "hostedCandidateCases": 6,
     "unknownCandidateTests": 2,
     "unknownCandidateCases": 2,
     "unknownCaseTests": 0,
@@ -29,8 +29,8 @@
     "ef-translation": {
       "label": "EF translation / relational constraints",
       "level": "Infrastructure (needs a database, not a host)",
-      "tests": 74,
-      "cases": 77,
+      "tests": 71,
+      "cases": 74,
       "unknownCases": 0,
       "classes": 31
     },
@@ -53,10 +53,10 @@
     "in-process-logic": {
       "label": "In-process logic with no HTTP and no client",
       "level": "Domain or Infrastructure (migration candidate)",
-      "tests": 7,
-      "cases": 7,
+      "tests": 6,
+      "cases": 6,
       "unknownCases": 0,
-      "classes": 6
+      "classes": 5
     },
     "startup-config": {
       "label": "Startup, hosting and configuration",
@@ -2135,23 +2135,6 @@
     },
     {
       "cls": "IdentifierAllocationTests",
-      "test": "A_number_handed_out_is_not_returned_to_the_pool_when_its_record_is_never_written",
-      "kind": "Fact",
-      "intent": "ef-translation",
-      "cases": 1,
-      "caseEvidence": "Fact",
-      "hosted": "hosted",
-      "hostEvidence": [
-        "factory-construction",
-        "factory-services"
-      ],
-      "sourceLines": {
-        "start": 116,
-        "end": 128
-      }
-    },
-    {
-      "cls": "IdentifierAllocationTests",
       "test": "An_existing_database_starts_numbering_past_what_it_already_recorded",
       "kind": "Fact",
       "intent": "ef-translation",
@@ -2164,25 +2147,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 95,
-        "end": 114
-      }
-    },
-    {
-      "cls": "IdentifierAllocationTests",
-      "test": "Attachment_versions_are_claimed_per_logical_file_and_never_repeat",
-      "kind": "Fact",
-      "intent": "ef-translation",
-      "cases": 1,
-      "caseEvidence": "Fact",
-      "hosted": "hosted",
-      "hostEvidence": [
-        "factory-construction",
-        "factory-services"
-      ],
-      "sourceLines": {
-        "start": 130,
-        "end": 147
+        "start": 55,
+        "end": 74
       }
     },
     {
@@ -2217,42 +2183,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 210,
-        "end": 229
-      }
-    },
-    {
-      "cls": "IdentifierAllocationTests",
-      "test": "Each_prefix_numbers_independently_and_continuously_across_projects",
-      "kind": "Fact",
-      "intent": "ef-translation",
-      "cases": 1,
-      "caseEvidence": "Fact",
-      "hosted": "hosted",
-      "hostEvidence": [
-        "factory-construction",
-        "factory-services"
-      ],
-      "sourceLines": {
-        "start": 73,
-        "end": 93
-      }
-    },
-    {
-      "cls": "IdentifierAllocationTests",
-      "test": "Two_allocations_before_either_record_is_saved_do_not_collide",
-      "kind": "Fact",
-      "intent": "in-process-logic",
-      "cases": 1,
-      "caseEvidence": "Fact",
-      "hosted": "hosted",
-      "hostEvidence": [
-        "factory-construction",
-        "factory-services"
-      ],
-      "sourceLines": {
-        "start": 55,
-        "end": 71
+        "start": 137,
+        "end": 156
       }
     },
     {
@@ -2269,8 +2201,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 149,
-        "end": 193
+        "start": 76,
+        "end": 120
       }
     },
     {
