@@ -269,6 +269,7 @@ test('the full-gate scope reports the bounds the collector actually applied', ()
 test('trackerBody is single-issue and never fabricates regressions', () => {
   const clean = trackerBody({ generatedAt: '2026-08-14T00:00:00Z', regressions: [] })
   assert.match(clean, /No sustained regressions/)
+  assert.match(clean, /ordinary runner noise never creates a new issue/)
   const hot = trackerBody({
     generatedAt: '2026-08-14T00:00:00Z',
     regressions: [{ metric: 'criticalPathMedian', current: 900_000, previous: 700_000, threshold: 805_000, runs: 8 }],
@@ -392,14 +393,80 @@ test('tracker clearing follows the previously tracked categories, not unrelated 
   assert.equal(realRegression.action, 'update')
 })
 
-test('legacy tracker bodies migrate only when their controlled shape identifies a known category', () => {
-  const current = trackerBody({
+test('a new regression carries an absent prior category forward without inventing metrics', () => {
+  const trackedBody = trackerBody({
     generatedAt: '2026-08-15T20:00:00Z',
     regressions: [{ category: 'mixed', metric: 'criticalPathP95', current: 761_000, previous: 661_000, threshold: 761_000, runs: 8 }],
   })
-  const legacy = current.replace(/\n<!-- ci-metrics-tracker:v1 [\s\S]* -->$/, '')
+  const decision = decideTrackerAction({
+    regressions: [{ category: 'backend-only', metric: 'criticalPathMedian', current: 900_000, previous: 700_000, threshold: 805_000, runs: 8 }],
+    trackerExists: true,
+    trackerCategories: trackerCategoriesFromBody(trackedBody),
+    determinacyByCategory: { 'backend-only': { determinate: true, reason: null }, mixed: { determinate: false, reason: 'category absent' } },
+  })
+  assert.equal(decision.action, 'update')
+  assert.deepEqual(decision.carryForwardCategories, ['mixed'])
+  const thinDecision = decideTrackerAction({
+    regressions: [{ category: 'backend-only', metric: 'criticalPathMedian', current: 900_000, previous: 700_000, threshold: 805_000, runs: 8 }],
+    trackerExists: true,
+    trackerCategories: ['mixed'],
+    determinacyByCategory: { mixed: { determinate: false, reason: 'thin window' } },
+  })
+  assert.deepEqual(thinDecision.carryForwardCategories, ['mixed'])
+
+  const body = trackerBody({
+    generatedAt: '2026-08-15T21:00:00Z',
+    regressions: [{ category: 'backend-only', metric: 'criticalPathMedian', current: 900_000, previous: 700_000, threshold: 805_000, runs: 8 }],
+  }, { carryForwardCategories: decision.carryForwardCategories })
+  assert.match(body, /backend-only: criticalPathMedian: current 900s vs previous 700s/)
+  assert.match(body, /mixed: status unknown\/not cleared \(current evidence was absent or insufficient\)/)
+  assert.doesNotMatch(body, /mixed: criticalPath/)
+  assert.deepEqual(trackerCategoriesFromBody(body), ['backend-only', 'mixed'])
+})
+
+test('a prior category with determinate clean evidence is not carried into an unrelated regression', () => {
+  const trackedBody = trackerBody({
+    generatedAt: '2026-08-15T20:00:00Z',
+    regressions: [{ category: 'mixed', metric: 'criticalPathP95', current: 761_000, previous: 661_000, threshold: 761_000, runs: 8 }],
+  })
+  const decision = decideTrackerAction({
+    regressions: [{ category: 'backend-only', metric: 'criticalPathMedian', current: 900_000, previous: 700_000, threshold: 805_000, runs: 8 }],
+    trackerExists: true,
+    trackerCategories: trackerCategoriesFromBody(trackedBody),
+    determinacyByCategory: { 'backend-only': { determinate: true, reason: null }, mixed: { determinate: true, reason: null } },
+  })
+  assert.deepEqual(decision.carryForwardCategories, [])
+  const body = trackerBody({
+    generatedAt: '2026-08-15T21:00:00Z',
+    regressions: [{ category: 'backend-only', metric: 'criticalPathMedian', current: 900_000, previous: 700_000, threshold: 805_000, runs: 8 }],
+  }, { carryForwardCategories: decision.carryForwardCategories })
+  assert.doesNotMatch(body, /status unknown\/not cleared/)
+  assert.deepEqual(trackerCategoriesFromBody(body), ['backend-only'])
+})
+
+test('legacy tracker migration requires the exact canonical pre-marker body shape', () => {
+  // This is the body currently used by #587 before the structured marker was introduced.
+  const legacy = [
+    '# CI rolling regression tracker',
+    '',
+    'This single issue is the durable tracking item for sustained CI regressions. It is updated',
+    'only when the trusted rolling collector detects a threshold crossing; ordinary runner noise',
+    'never opens or updates issues.',
+    '',
+    'Detected 1 sustained regression(s):',
+    '',
+    '- mixed: criticalPathMedian: current 613s vs previous 521s (threshold 599s, 8 runs)',
+    '',
+    'Last updated: 2026-08-16T01:06:36.108Z',
+  ].join('\n')
   assert.deepEqual(trackerCategoriesFromBody(legacy), ['mixed'])
   assert.equal(trackerCategoriesFromBody(`${legacy}\nEdited by a human`), null)
+  assert.equal(trackerCategoriesFromBody(legacy.replace('Detected 1 sustained regression(s):', 'Inserted prose\nDetected 1 sustained regression(s):')), null)
+  assert.equal(trackerCategoriesFromBody(legacy.replace('Last updated: 2026-08-16T01:06:36.108Z', 'Last updated: edited by a human')), null)
+  assert.equal(trackerCategoriesFromBody(legacy.replace(
+    'only when the trusted rolling collector detects a threshold crossing; ordinary runner noise\nnever opens or updates issues.',
+    'never opens or updates issues.\nonly when the trusted rolling collector detects a threshold crossing; ordinary runner noise',
+  )), null)
 
   const legacyDecision = decideTrackerAction({
     regressions: [],
@@ -416,6 +483,15 @@ test('legacy tracker bodies migrate only when their controlled shape identifies 
     determinacyByCategory: { mixed: { determinate: true, reason: null } },
   })
   assert.equal(unknownLegacyDecision.action, 'none')
+})
+
+test('structured tracker markers are bounded and reject injection categories', () => {
+  const marker = (categories) => `<!-- ci-metrics-tracker:v1 ${JSON.stringify({ categories })} -->`
+  assert.deepEqual(trackerCategoriesFromBody(marker(['mixed'])), ['mixed'])
+  assert.equal(trackerCategoriesFromBody(marker(Array.from({ length: 21 }, () => 'mixed'))), null)
+  assert.equal(trackerCategoriesFromBody(marker(['x'.repeat(101)])), null)
+  assert.equal(trackerCategoriesFromBody(marker(['__proto__'])), null)
+  assert.equal(trackerCategoriesFromBody(marker(['constructor'])), null)
 })
 
 test('regressionDeterminacy separates "nothing regressed" from "nothing could be compared"', () => {

@@ -47,7 +47,7 @@ async function main() {
     console.log(`[ci-metrics] ${decision.reason}`)
     return
   }
-  const body = trackerBody(report)
+  const body = trackerBody(report, { carryForwardCategories: decision.carryForwardCategories ?? [] })
   if (decision.action === 'update') {
     // The collector runs on every completed quality gate and hourly, so two executions can overlap.
     // Before this change a clean execution never wrote at all, so a stale snapshot could not clobber a
