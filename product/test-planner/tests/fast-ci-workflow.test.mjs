@@ -72,8 +72,14 @@ test('Fast client manifest stays lint/typecheck-only and Full retains heavyweigh
 
 test('Fast workflow contains no persistent-database or persistent-evidence escape hatch', () => {
   assert.doesNotMatch(workflow, /54329/)
-  assert.doesNotMatch(workflow, /product[\\/]\.local/)
   assert.doesNotMatch(workflow, /ConnectionStrings__AeroLink|Database__Provider|postgres:17/i)
   assert.doesNotMatch(workflow, /docker\s+(run|compose)|Start-Postgres/i)
+
+  const persistentEvidenceMentions = workflow.match(/product[\\/]\.local/gi) ?? []
+  assert.equal(persistentEvidenceMentions.length, 1, 'Fast workflow may mention product/.local only in its explicit safety statement.')
   assert.match(workflow, /persistent PostgreSQL and product\/.local are forbidden/i)
+  assert.doesNotMatch(
+    workflow,
+    /(?:Get|Set|Remove|New|Test)-(?:Item|Content|ChildItem|Path)[^\n]*product[\\/]\.local|(?:path|working-directory):[^\n]*product[\\/]\.local/i,
+  )
 })
