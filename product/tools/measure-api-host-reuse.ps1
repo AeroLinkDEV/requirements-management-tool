@@ -601,7 +601,7 @@ function Get-TestManifest([string]$Worktree, [string]$ListFile) {
     } else {
         $project = Join-Path $Worktree $ProjectPath
         if (-not (Test-Path -LiteralPath $project -PathType Leaf)) { Fail "API test project does not exist: $project" }
-        $result = Invoke-CapturedProcess -FileName $DotnetExecutable -Arguments @('test', $project, '--configuration', 'Release', '--no-build', '--list-tests') -WorkingDirectory $Worktree
+        $result = Invoke-CapturedProcess -FileName $DotnetExecutable -Arguments @('test', $project, '--configuration', 'Release', '--no-build', '--disable-build-servers', '--list-tests') -WorkingDirectory $Worktree
         if ($result.ExitCode -ne 0) { Fail "Test discovery failed in $Worktree.`n$($result.Stdout)`n$($result.Stderr)" }
         @($result.Stdout -split "`r?`n")
     }
@@ -871,7 +871,7 @@ function New-TestProcess {
     )
     New-Item -ItemType Directory -Force -Path (Split-Path -Parent $TelemetryPath), $ResultsPath, (Split-Path -Parent $StdoutPath) | Out-Null
     $project = Join-Path $Worktree $ProjectPath
-    $arguments = @('test', $project, '--configuration', 'Release', '--no-build', '--filter', $Filter,
+    $arguments = @('test', $project, '--configuration', 'Release', '--no-build', '--disable-build-servers', '--filter', $Filter,
         '--logger', 'console;verbosity=normal', '--logger', 'trx;LogFileName=shard.trx',
         '--results-directory', $ResultsPath)
     $startedAt = [DateTimeOffset]::UtcNow
@@ -1756,10 +1756,10 @@ function Main {
         Assert-EmptyOutput $OutputRoot 'Run'
         foreach ($condition in @(@('baseline', $BaselinePath), @('treatment', $TreatmentPath))) {
             if ($condition[0] -eq 'baseline') { Assert-WorktreeStable $baselineInfo } else { Assert-WorktreeStable $treatmentInfo }
-            $restore = Invoke-CapturedProcess -FileName $DotnetExecutable -Arguments @('restore', (Join-Path $condition[1] $SolutionPath)) -WorkingDirectory $condition[1]
+            $restore = Invoke-CapturedProcess -FileName $DotnetExecutable -Arguments @('restore', (Join-Path $condition[1] $SolutionPath), '--disable-build-servers') -WorkingDirectory $condition[1]
             if ($restore.ExitCode -ne 0) { Fail "$($condition[0]) restore failed.`n$($restore.Stdout)`n$($restore.Stderr)" }
             if ($condition[0] -eq 'baseline') { Assert-WorktreeStable $baselineInfo } else { Assert-WorktreeStable $treatmentInfo }
-            $build = Invoke-CapturedProcess -FileName $DotnetExecutable -Arguments @('build', (Join-Path $condition[1] $SolutionPath), '--configuration', 'Release', '--no-restore') -WorkingDirectory $condition[1]
+            $build = Invoke-CapturedProcess -FileName $DotnetExecutable -Arguments @('build', (Join-Path $condition[1] $SolutionPath), '--configuration', 'Release', '--no-restore', '--disable-build-servers') -WorkingDirectory $condition[1]
             if ($build.ExitCode -ne 0) { Fail "$($condition[0]) build failed.`n$($build.Stdout)`n$($build.Stderr)" }
             if ($condition[0] -eq 'baseline') { Assert-WorktreeStable $baselineInfo } else { Assert-WorktreeStable $treatmentInfo }
         }
