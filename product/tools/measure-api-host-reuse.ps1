@@ -1100,6 +1100,18 @@ function Wait-TestProcesses([object[]]$Shards) {
                 $shard.cpuError = $_.Exception.Message
                 $shard.ioError = $_.Exception.Message
             }
+            # Capture the managed process exit code while its Process handle is still authoritative.
+    # Job Object cleanup closes the native containment handles; reading ExitCode only afterwards can
+    # throw even though the test process completed successfully, which would turn a valid shard into
+    # a null exit code and invalidate the entire paired observation.
+    try {
+        if ($shard.timedOut) { $shard.exitCode = 124 }
+        elseif ($shard.process.HasExited) { $shard.exitCode = [int]$shard.process.ExitCode }
+    } catch {
+        $shard.exitCode = $null
+        $exitMessage = "Exit-code capture failed: $($_.Exception.Message)"
+        $shard.waitError = if ($shard.waitError) { "$($shard.waitError) $exitMessage" } else { $exitMessage }
+    }
             try {
                 if ($shard.job) {
                     $cleanup = Stop-JobContainedProcess -Launch $shard.job -Terminate:(!$shard.process.HasExited) -TimeoutMilliseconds 5000
@@ -1110,7 +1122,6 @@ function Wait-TestProcesses([object[]]$Shards) {
             try { $shard.stdout = Get-BoundedTextFile $shard.stdoutPath } catch { $shard.stdout = ''; $shard.waitError = $_.Exception.Message }
             try { $shard.stderr = Get-BoundedTextFile $shard.stderrPath } catch { $shard.stderr = ''; $shard.waitError = $_.Exception.Message }
             $shard.endedAt = [DateTimeOffset]::UtcNow
-            try { $shard.exitCode = $shard.process.ExitCode } catch { $shard.exitCode = $null }
             $shard.wallMs = ($shard.endedAt - $shard.shardStartedAt).TotalMilliseconds
         }
     }
