@@ -1,0 +1,116 @@
+name: Temporary #568 staggered Fast validation
+
+on:
+  push:
+    branches:
+      - chatgpt/568-fast-stagger
+
+permissions:
+  contents: write
+
+jobs:
+  validate:
+    runs-on: windows-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v5.2.0
+        with:
+          dotnet-version: 10.0.x
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+      - name: Apply staggered overlap
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          @'
+          from pathlib import Path
+          p = Path('product/scripts/Get-AeroLinkTestPlan.ps1')
+          s = p.read_text(encoding='utf-8')
+          old = '''        foreach ($definition in $definitions) {
+              $job = Start-Job -ArgumentList $definition.label, $repositoryRoot -ScriptBlock {
+          '''
+          new = '''        foreach ($definition in $definitions) {
+              if ($definition.label -eq 'Browser smoke journeys') {
+                  Write-Host '  Staggering browser smoke by 45 seconds to reduce Windows runner contention.' -ForegroundColor DarkCyan
+                  Start-Sleep -Seconds 45
+              }
+              $job = Start-Job -ArgumentList $definition.label, $repositoryRoot -ScriptBlock {
+          '''
+          if s.count(old) != 1:
+              raise SystemExit(f'parallel launch anchor: expected one match, found {s.count(old)}')
+          p.write_text(s.replace(old, new, 1), encoding='utf-8')
+
+          tpath = Path('product/scripts/Get-AeroLinkTestPlan.Tests.ps1')
+          t = tpath.read_text(encoding='utf-8')
+          marker = "Assert-True ($plannerSource -match \"Infrastructure and browser smoke Fast checks concurrently\") 'Fast execution must make the measured independent pair explicit.'\n"
+          if t.count(marker) != 1:
+              raise SystemExit(f'contract marker: expected one match, found {t.count(marker)}')
+          extra = marker + "Assert-True ($plannerSource -match 'Start-Sleep -Seconds 45') 'Fast overlap must retain the measured browser stagger that limits runner contention.'\n"
+          tpath.write_text(t.replace(marker, extra, 1), encoding='utf-8')
+          '@ | python -
+      - name: Validate planner contract and diff
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          & ./product/scripts/Get-AeroLinkTestPlan.Tests.ps1
+          if ($LASTEXITCODE -ne 0) { throw 'Windows planner contract failed.' }
+          git diff --check
+          if ($LASTEXITCODE -ne 0) { throw 'git diff --check failed.' }
+      - name: Prepare warmed developer state outside timing
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          dotnet restore product/AeroLink.slnx
+          if ($LASTEXITCODE -ne 0) { throw 'Restore failed.' }
+          dotnet build product/AeroLink.slnx --configuration Release --no-restore
+          if ($LASTEXITCODE -ne 0) { throw 'Initial build failed.' }
+          Push-Location product/client
+          try {
+            npm ci
+            if ($LASTEXITCODE -ne 0) { throw 'npm ci failed.' }
+            npx playwright install chromium
+            if ($LASTEXITCODE -ne 0) { throw 'Chromium install failed.' }
+          } finally { Pop-Location }
+      - name: Prove warmed Fast target
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $transcript = Join-Path $env:RUNNER_TEMP 'aerolink-568-stagger-proof.txt'
+          & ./product/scripts/Get-AeroLinkTestPlan.ps1 -Paths 'product/src/AeroLink.Domain/Requirements/Requirement.cs' -Mode Fast -Explain *>&1 | Tee-Object -FilePath $transcript | ForEach-Object { Write-Host $_ }
+          $nativeExit = $LASTEXITCODE
+          $line = Get-Content -LiteralPath $transcript | Where-Object { $_ -like 'AEROLINK_TEST_PLAN_RESULT=*' } | Select-Object -Last 1
+          if (-not $line) { throw 'No bounded Fast result was emitted.' }
+          $json = $line.Substring('AEROLINK_TEST_PLAN_RESULT='.Length) | ConvertFrom-Json -Depth 30
+          $json | ConvertTo-Json -Depth 30 | Out-File -LiteralPath (Join-Path $env:RUNNER_TEMP 'aerolink-568-stagger-result.json') -Encoding utf8
+          if ($nativeExit -ne 0 -or $json.execution.status -ne 'passed') { throw 'Staggered Fast wrapper did not pass.' }
+          if ($json.execution.authoritative -ne $false) { throw 'Local Fast result claimed merge authority.' }
+          if ($json.execution.resources.persistentPostgreSqlTouched -ne $false -or $json.execution.resources.persistentEvidenceRootTouched -ne $false) { throw 'Persistent resources were touched.' }
+          $totalMs = [int64]$json.execution.timing.totalMs
+          Write-Host "STAGGERED_FAST_TOTAL_MS=$totalMs"
+          if ($totalMs -gt 240000) { throw "Staggered warmed Fast still exceeds four minutes: $totalMs ms." }
+          Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value "Staggered warmed Fast: $totalMs ms (target <=240000 ms)"
+      - name: Commit only after timing proof passes
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          git config user.name 'seanmccarthyns'
+          git config user.email 'seanmccarthyns@gmail.com'
+          git add product/scripts/Get-AeroLinkTestPlan.ps1 product/scripts/Get-AeroLinkTestPlan.Tests.ps1
+          $staged = @(git diff --cached --name-only)
+          if ($staged.Count -ne 2) { throw "Expected two staged product files, got $($staged.Count)." }
+          git commit -m 'Stagger Fast browser smoke to reduce runner contention'
+          git push origin HEAD:chatgpt/568-fast-stagger
+      - name: Upload bounded timing evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: aerolink-568-stagger-proof-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}\aerolink-568-stagger-proof.txt
+            ${{ runner.temp }}\aerolink-568-stagger-result.json
+          if-no-files-found: warn
+          retention-days: 14
