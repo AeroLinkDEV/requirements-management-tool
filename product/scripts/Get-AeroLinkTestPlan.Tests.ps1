@@ -123,6 +123,9 @@ foreach ($area in @('backend', 'client', 'browser', 'postgresql')) {
 Assert-True (Test-Path -LiteralPath (Join-Path $root 'TEST_AEROLINK_CHANGED.bat') -PathType Leaf) 'Friendly root BAT entry point is missing.'
 
 $plannerSource = Get-Content -Raw -LiteralPath $scriptPath
+Assert-True ($plannerSource -match "info --format '\{\{\.OSType\}\}'") 'Full PostgreSQL preflight must inspect the Docker server OS type before expensive gates.'
+Assert-True ($plannerSource -match "serverOsType -cne 'linux'") 'Full PostgreSQL preflight must refuse a non-Linux Docker daemon.'
+Assert-True ($plannerSource -match 'Switch Docker Desktop to Linux containers before Full mode') 'Docker incompatibility must give the developer an actionable recovery message.'
 Assert-True ($plannerSource -match 'function Invoke-ParallelFastPair') 'Fast wrapper must define its bounded parallel pair helper.'
 Assert-True ($plannerSource -match 'Start-Job -ArgumentList') 'Fast parallel pair must use owned PowerShell jobs rather than detached background processes.'
 Assert-True ($plannerSource -match 'Wait-Job -Job') 'Fast parallel pair must wait for both selected checks before deciding.'
