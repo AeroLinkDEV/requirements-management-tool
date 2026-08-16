@@ -17,10 +17,13 @@ import {
   boundComment,
   normalizeFileList,
   normalizePath,
+  MAX_JOBS_PER_AFFECTED_LANE,
+  statusForOverlapList,
 } from '../lib/overlap.mjs'
 
 export const MARKER = '<!-- AEROLINK_PR_OVERLAP -->'
-export const REPORT_VERSION = 1
+export const REPORT_VERSION = 2
+export const REVIEWED_DISPOSITION_LABEL = 'overlap-reviewed'
 const PAGE_SIZE = 100
 const MAX_API_PAGES = 300
 export const TRUSTED_MARKER_LOGINS = Object.freeze(['github-actions[bot]'])
@@ -29,6 +32,9 @@ export const OVERLAP_LIMITS = Object.freeze({
   maxEligiblePullRequests: 30,
   maxFilesPerPullRequest: 1_000,
   maxPathLength: 4_096,
+  maxLabelsPerPullRequest: 100,
+  maxLabelNameLength: 256,
+  maxJobsPerAffectedLane: MAX_JOBS_PER_AFFECTED_LANE,
   maxCommentsPerTarget: 1_000,
   maxCommentBodyLength: 100_000,
   maxAnalysisPairs: 435,
@@ -145,6 +151,20 @@ function requiredText(value, label) {
   return value
 }
 
+function validateLabels(labels, context) {
+  if (!Array.isArray(labels)) throw new Error(`${context} labels are missing or malformed.`)
+  if (labels.length > OVERLAP_LIMITS.maxLabelsPerPullRequest) throw new Error(`${context} has more than ${OVERLAP_LIMITS.maxLabelsPerPullRequest} labels.`)
+  return labels.map((label, index) => {
+    if (!label || typeof label !== 'object' || typeof label.name !== 'string' || label.name.trim() === '') throw new Error(`${context} label ${index + 1} is incomplete.`)
+    if (label.name.length > OVERLAP_LIMITS.maxLabelNameLength) throw new Error(`${context} label ${index + 1} exceeds ${OVERLAP_LIMITS.maxLabelNameLength} characters.`)
+    return label
+  })
+}
+
+function hasReviewedDisposition(pr) {
+  return Array.isArray(pr?.labels) && pr.labels.some((label) => label?.name === REVIEWED_DISPOSITION_LABEL)
+}
+
 /** Reject incomplete GitHub identity records rather than allowing them to become a clean result. */
 export function validatePullRequest(pr, context = 'pull request') {
   if (!pr || typeof pr !== 'object') throw new Error(`${context} is not an object.`)
@@ -157,6 +177,7 @@ export function validatePullRequest(pr, context = 'pull request') {
   if (typeof pr.head?.sha !== 'string' || !SHA_PATTERN.test(pr.head.sha)) throw new Error(`${context} #${number} head SHA is invalid.`)
   if (typeof pr.base?.sha !== 'string' || !SHA_PATTERN.test(pr.base.sha)) throw new Error(`${context} #${number} base SHA is invalid.`)
   if (typeof pr.draft !== 'boolean') throw new Error(`${context} #${number} draft state is invalid.`)
+  validateLabels(pr.labels, `${context} #${number}`)
   return pr
 }
 
@@ -215,6 +236,7 @@ function pullRequestRecord(pr, files = []) {
     headSha: typeof pr.head?.sha === 'string' ? pr.head.sha : null,
     baseSha: typeof pr.base?.sha === 'string' ? pr.base.sha : null,
     draft: Boolean(pr.draft),
+    reviewedDisposition: hasReviewedDisposition(pr),
     files: normalizeFileList(files),
   }
 }
@@ -241,6 +263,7 @@ function summarizeOverlap(entry) {
     branch: boundedText(value.branch, 240),
     headSha: value.headSha || 'Unknown',
     baseSha: value.baseSha || 'Unknown',
+    reviewedDisposition: value.reviewedDisposition === true,
   })
   return {
     severity: entry.severity,
@@ -248,13 +271,19 @@ function summarizeOverlap(entry) {
     b: identity(entry.b),
     sharedFiles: entry.sharedFiles.slice(0, 20).map(boundedPath),
     sharedSurfaces: entry.sharedSurfaces.slice(0, 10).map((surface) => ({ key: surface.key, label: boundedText(surface.label, 240), aPaths: surface.aPaths.slice(0, 4).map(boundedPath), bPaths: surface.bPaths.slice(0, 4).map(boundedPath) })),
+    affectedLanes: (entry.affectedLanes ?? []).slice(0, 8).map((lane) => ({
+      key: lane.key,
+      label: boundedText(lane.label, 240),
+      jobs: lane.jobs.slice(0, OVERLAP_LIMITS.maxJobsPerAffectedLane).map((job) => boundedText(job, 120)),
+      reason: boundedText(lane.reason, 500),
+    })),
   }
 }
 
 export function buildReport({ repository = 'Unknown', action = 'unknown', currentPr = null, analysisTimestamp = 'Unknown', openCount = 0, eligibleCount = 0, records = [], overlaps = [], errors = [], updates = [], analysisComplete } = {}) {
   const boundedErrors = errors.slice(0, MAX_REPORT_ERRORS).map(reportError)
   const complete = analysisComplete === undefined ? boundedErrors.length === 0 : Boolean(analysisComplete) && boundedErrors.length === 0
-  const status = !complete ? 'Unknown' : overlaps.length > 0 ? 'Overlap' : 'Clear'
+  const status = !complete ? 'Unknown' : statusForOverlapList(overlaps)
   const identity = currentPr ? {
     number: currentPr.number,
     title: boundedText(currentPr.title, 240),
@@ -262,6 +291,7 @@ export function buildReport({ repository = 'Unknown', action = 'unknown', curren
     branch: boundedText(currentPr.branch, 240),
     headSha: currentPr.headSha || 'Unknown',
     baseSha: currentPr.baseSha || 'Unknown',
+    reviewedDisposition: currentPr.reviewedDisposition === true,
   } : null
   return {
     version: REPORT_VERSION,
@@ -274,7 +304,7 @@ export function buildReport({ repository = 'Unknown', action = 'unknown', curren
     currentPr: identity,
     openPullRequests: Math.min(openCount, OVERLAP_LIMITS.maxOpenPullRequests),
     eligiblePullRequests: Math.min(eligibleCount, OVERLAP_LIMITS.maxEligiblePullRequests),
-    peerHeads: records.map((record) => ({ number: record.number, title: boundedText(record.title, 240), author: boundedText(record.author, 120), branch: boundedText(record.branch, 240), headSha: record.headSha || 'Unknown', baseSha: record.baseSha || 'Unknown' })).slice(0, MAX_REPORT_ITEMS),
+    peerHeads: records.map((record) => ({ number: record.number, title: boundedText(record.title, 240), author: boundedText(record.author, 120), branch: boundedText(record.branch, 240), headSha: record.headSha || 'Unknown', baseSha: record.baseSha || 'Unknown', reviewedDisposition: record.reviewedDisposition === true })).slice(0, MAX_REPORT_ITEMS),
     overlaps: overlaps.slice(0, MAX_REPORT_ITEMS).map(summarizeOverlap),
     updates: updates.slice(0, MAX_REPORT_ITEMS).map((update) => ({ number: update.number, action: boundedText(update.action, 40), reason: boundedText(update.reason, 500), duplicates: Number.isSafeInteger(update.duplicates) ? update.duplicates : 0 })),
     errors: boundedErrors,
@@ -416,12 +446,12 @@ export async function runOverlapCheck({ repository, event = {}, api, analysisTim
     } else if (!target.draft && !(action === 'closed' && number === currentNumber)) {
       const mine = overlapsFor(number, overlaps)
       body = mine.length > 0
-        ? renderComment(number, overlaps, { analysisTimestamp, currentSha: target.head?.sha })
+        ? renderComment(number, overlaps, { analysisTimestamp, currentSha: target.head?.sha, reviewedDisposition: hasReviewedDisposition(target) })
         : markerExists
-          ? renderClearComment({ analysisTimestamp, currentSha: target.head?.sha, action, peerHeads })
+          ? renderClearComment({ analysisTimestamp, currentSha: target.head?.sha, action, peerHeads, reviewedDisposition: hasReviewedDisposition(target) })
           : null
     } else if (markerExists) {
-      body = renderClearComment({ analysisTimestamp, currentSha: target.head?.sha, action, reason: target.draft ? 'Draft pull requests are not compared' : 'Pull request is closed', peerHeads })
+      body = renderClearComment({ analysisTimestamp, currentSha: target.head?.sha, action, reason: target.draft ? 'Draft pull requests are not compared' : 'Pull request is closed', peerHeads, reviewedDisposition: hasReviewedDisposition(target) })
     }
     try {
       updates.push(await reconcileComment(api, repository, { number }, comments, body, { dryRun }))
