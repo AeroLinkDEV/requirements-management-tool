@@ -4,7 +4,7 @@ import { readFileSync, existsSync } from 'node:fs'
 import { execFileSync } from 'node:child_process'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { classify, explain, localPlan, selectJobs, AREA_PATTERNS, BROAD_EVENTS } from '../lib/classify.mjs'
+import { classify, explain, localPlan, selectJobs, AREA_PATTERNS, BROAD_EVENTS, normalizePath } from '../lib/classify.mjs'
 
 const repoRoot = fileURLToPath(new URL('../../../', import.meta.url))
 
@@ -50,6 +50,41 @@ test('a workflow change selects every area, including backend and client', () =>
   assert.equal(result.unclassified, false, 'the workflow is recognised, not a fallback')
 })
 
+test('planner and shared build changes force every area', () => {
+  for (const path of [
+    'product/test-planner/lib/classify.mjs',
+    'product/test-planner/tools/plan.mjs',
+    'product/test-contracts/tests/inventory.test.mjs',
+    'product/Directory.Build.props',
+    'product/client/package-lock.json',
+    '.github/workflows/pr-overlap.yml',
+    'product/src/AeroLink.Domain/Contracts/RequirementDto.cs',
+    'product/src/AeroLink.Domain/RequirementDto.cs',
+    'product/src/AeroLink.Domain/RequirementContract.cs',
+  ]) {
+    const result = of([path])
+    for (const area of ['backend', 'client', 'browser', 'postgresql']) assert.equal(result[area], true, `${path} must select ${area}`)
+    assert.equal(result.broad, true, `${path} must be marked broad`)
+  }
+})
+
+test('Windows separators and case are normalized before matching', () => {
+  assert.equal(normalizePath('.\\PRODUCT\\SRC\\AEROLINK.INFRASTRUCTURE\\PERSISTENCE\\Thing.cs'), 'product/src/aerolink.infrastructure/persistence/thing.cs')
+  const result = of(['.\\PRODUCT\\SRC\\AEROLINK.INFRASTRUCTURE\\PERSISTENCE\\Thing.cs'])
+  assert.equal(result.backend, true)
+  assert.equal(result.browser, true)
+  assert.equal(result.postgresql, true)
+})
+
+test('a rename keeps both old and new sensitive paths in the supplied fixture', () => {
+  const result = of([
+    'product/src/AeroLink.Infrastructure/Persistence/Migrations/0001_old.cs',
+    'product/src/AeroLink.Domain/Rules/0001_new.cs',
+  ])
+  assert.equal(result.postgresql, true, 'the old migration path must continue selecting PostgreSQL')
+  assert.equal(result.browser, true, 'the new domain path must select browser validation')
+})
+
 test('backend, client and browser select on their own paths', () => {
   const backend = of(['product/src/AeroLink.Domain/ChangeControl/SystemChangeRequest.cs'])
   assert.equal(backend.backend, true)
@@ -77,7 +112,7 @@ test('postgresql keys on persistence as well as migrations, case-insensitively',
   assert.equal(of(['product/src/AeroLink.Domain/ChangeControl/Rules.cs']).postgresql, false)
 })
 
-test('an unrecognised product path runs full backend and client rather than nothing', () => {
+test('an unrecognised product path runs broad validation rather than nothing', () => {
   // The failure this prevents: a change that was neither documentation nor recognised product code
   // selected nothing, every step skipped on its condition, and the job reported success having executed
   // no test at all. A launcher script, a root config file, or a new top-level directory all landed here.
@@ -85,19 +120,50 @@ test('an unrecognised product path runs full backend and client rather than noth
   assert.equal(result.docsOnly, false)
   assert.equal(result.backend, true)
   assert.equal(result.client, true)
+  assert.equal(result.browser, true)
+  assert.equal(result.postgresql, true)
   assert.equal(result.unclassified, true)
+  assert.equal(result.broad, true)
   assert.match(result.reason, /Unclassified/)
 
   // And the case observed in practice: ci-metrics and test-contracts tooling match no area rule.
   const tooling = of(['product/ci-metrics/lib/rolling.mjs'])
   assert.equal(tooling.unclassified, true)
   assert.equal(tooling.backend, true)
+  assert.equal(tooling.client, true)
+  assert.equal(tooling.browser, true)
+  assert.equal(tooling.postgresql, true)
 })
 
 test('a documentation file alongside product code does not make the change docs-only', () => {
   const result = of(['README.md', 'product/client/src/App.tsx'])
   assert.equal(result.docsOnly, false)
   assert.equal(result.client, true)
+})
+
+test('scripts, docs, deletions and unknown paths have explicit conservative fixtures', () => {
+  const docs = of(['docs/OPERATIONS.md', 'design/mockup.png', 'README.md'])
+  assert.equal(docs.docsOnly, true)
+
+  const script = of(['START_AEROLINK_PRODUCTION.bat'])
+  assert.equal(script.unclassified, true)
+  assert.equal(script.backend, true)
+  assert.equal(script.client, true)
+  assert.equal(script.browser, true)
+  assert.equal(script.postgresql, true)
+
+  // The classifier receives the old path from a deletion/rename diff. It must retain the sensitive area
+  // even when the new tree no longer contains the file.
+  const deletedMigration = of(['product/src/AeroLink.Infrastructure/Persistence/Migrations/DeletedMigration.cs'])
+  assert.equal(deletedMigration.postgresql, true)
+
+  const unknown = of(['product/new-tooling/unknown-format.xyz'])
+  assert.equal(unknown.unclassified, true)
+  assert.equal(unknown.backend, true)
+  assert.equal(unknown.client, true)
+  assert.equal(unknown.browser, true)
+  assert.equal(unknown.postgresql, true)
+  assert.equal(unknown.broad, true)
 })
 
 test('explain attributes each path to the areas it selected', () => {
@@ -143,6 +209,18 @@ test('the workflow delegates to this module rather than carrying its own copy', 
   const classifyJob = workflow.slice(workflow.indexOf('  changes:'), workflow.indexOf('  backend-api:'))
   assert.doesNotMatch(classifyJob, /grep -Eq '\^product/, 'the inline path patterns must not come back')
   assert.doesNotMatch(classifyJob, /backend=true/, 'the inline classification must not come back')
+})
+
+test('backend-core runs every hosted contract test file', () => {
+  // A single named route test let a later inventory contract be green locally but invisible in CI.
+  // Keep the workflow contract directory-driven so adding another `*.test.mjs` is automatically gated.
+  const workflow = readFileSync(join(repoRoot, '.github/workflows/ci.yml'), 'utf8')
+  const backendStart = workflow.indexOf('\n  backend-core:')
+  const clientStart = workflow.indexOf('\n  client:', backendStart)
+  const backendCore = workflow.slice(backendStart, clientStart)
+  assert.match(backendCore, /Get-ChildItem\s+-LiteralPath\s+product\/test-contracts\/tests\s+-Filter\s+'\*\.test\.mjs'/)
+  assert.match(backendCore, /node\s+--test\s+\$tests/)
+  assert.match(backendCore, /No hosted test-contracts test files were found/)
 })
 
 test('every area pattern is anchored so a lookalike path cannot match', () => {

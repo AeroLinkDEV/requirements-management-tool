@@ -17,20 +17,43 @@
 //
 // Every rule below is expressed once and consumed by both the workflow and the local planner.
 
+/** Normalize paths before matching so a Windows caller and git's slash-separated paths agree. */
+export function normalizePath(path) {
+  return String(path).trim().replaceAll('\\', '/').replace(/^\.\//, '').toLowerCase()
+}
+
 /** Paths that are documentation or design assets rather than product code. */
-const NON_PRODUCT = /(^|\/)(docs?|design|showcase)\//
-const MARKDOWN = /\.md$/
+const NON_PRODUCT = /(^|\/)(docs?|design|showcase)\//i
+const MARKDOWN = /\.md$/i
 
 /**
  * The workflow file selects and shards every suite, so a change to it can alter any gate — including
  * by not running one. It therefore keys every area.
  */
-const WORKFLOW = '^\\.github/workflows/ci\\.yml$'
+const WORKFLOW = '^\\.github/workflows/'
+
+/** A change to the planner or shared build contract can change what every gate means. */
+const BROAD_PATHS = [
+  new RegExp(WORKFLOW, 'i'),
+  /^product\/test-planner\//i,
+  /^product\/test-contracts\//i,
+  /(^|\/)(package-lock\.json|npm-shrinkwrap\.json|yarn\.lock|pnpm-lock\.yaml)$/i,
+  /^product\/.*\.(slnx|sln|csproj|props|targets)$/i,
+  /^product\/src\/.*(?:\/(?:contracts?|dtos?)\/|\/[^/]*(?:contract|dto)[^/]*\.[^/]+$)/i,
+]
+
+export function isBroadPath(path) {
+  return BROAD_PATHS.some((pattern) => pattern.test(normalizePath(path)))
+}
+
+function matchingBroadPath(paths) {
+  return paths.find((path) => isBroadPath(path)) ?? null
+}
 
 export const AREA_PATTERNS = {
-  backend: new RegExp(`^product/(src|tests)/|^product/.*\\.(cs|csproj|slnx|props|targets)$|${WORKFLOW}`),
-  client: new RegExp(`^product/client/|${WORKFLOW}`),
-  browser: new RegExp(`^product/(client|src/AeroLink\\.Api|src/AeroLink\\.Domain|src/AeroLink\\.Infrastructure)/|${WORKFLOW}`),
+  backend: new RegExp(`^product/(src|tests)/|^product/.*\\.(cs|csproj|sln|slnx|props|targets)$|${WORKFLOW}`, 'i'),
+  client: new RegExp(`^product/client/|${WORKFLOW}`, 'i'),
+  browser: new RegExp(`^product/(client|src/AeroLink\\.Api|src/AeroLink\\.Domain|src/AeroLink\\.Infrastructure)/|${WORKFLOW}`, 'i'),
   // Keyed on persistence as well as the migration/identity keywords: a change to an EF query needs the
   // real provider even when no schema moves, because translation is not portable and the SQLite path
   // every other gate runs on will accept an expression Npgsql cannot produce.
@@ -60,32 +83,54 @@ export function classify(changedPaths, { event = 'pull_request' } = {}) {
       postgresql: true,
       reason: `The ${event} event classifies every area, because it has no single base to diff against and is the last gate before main.`,
       unclassified: false,
+      broad: true,
     }
   }
 
-  const paths = (Array.isArray(changedPaths) ? changedPaths : []).filter((p) => typeof p === 'string' && p.length > 0)
-  const productFiles = paths.filter((path) => !NON_PRODUCT.test(path) && !MARKDOWN.test(path))
+  const paths = (Array.isArray(changedPaths) ? changedPaths : []).filter((p) => typeof p === 'string' && p.trim().length > 0)
+  const normalizedPaths = paths.map(normalizePath)
+  const productFiles = normalizedPaths.filter((path) => !NON_PRODUCT.test(path) && !MARKDOWN.test(path))
   const docsOnly = productFiles.length === 0
+  const broadPath = matchingBroadPath(paths)
+
+  if (!docsOnly && broadPath) {
+    return {
+      docsOnly: false,
+      backend: true,
+      client: true,
+      browser: true,
+      postgresql: true,
+      reason: `Broad validation forced by ${broadPath}; this path can change the planner, workflow, or shared product contract.`,
+      unclassified: false,
+      broad: true,
+    }
+  }
 
   const result = {
     docsOnly,
-    backend: paths.some((path) => AREA_PATTERNS.backend.test(path)),
-    client: paths.some((path) => AREA_PATTERNS.client.test(path)),
-    browser: paths.some((path) => AREA_PATTERNS.browser.test(path)),
-    postgresql: paths.some((path) => AREA_PATTERNS.postgresql.test(path)),
+    backend: normalizedPaths.some((path) => AREA_PATTERNS.backend.test(path)),
+    client: normalizedPaths.some((path) => AREA_PATTERNS.client.test(path)),
+    browser: normalizedPaths.some((path) => AREA_PATTERNS.browser.test(path)),
+    postgresql: normalizedPaths.some((path) => AREA_PATTERNS.postgresql.test(path)),
     reason: null,
     unclassified: false,
+    broad: false,
   }
 
   // A change that is neither documentation nor recognised product code used to select nothing: the gate
   // ran, every step skipped on its condition, and the job reported success having executed no test at
   // all. A launcher script, a root configuration file or a new top-level directory all landed there.
   // Being slower on a file nobody anticipated is the right trade against a green tick that means nothing.
+  // Unknown means all four product areas, not merely backend/client: the path may affect a browser journey
+  // or provider-sensitive behavior in a way the manifest cannot see.
   if (!result.docsOnly && !result.backend && !result.client) {
     result.backend = true
     result.client = true
+    result.browser = true
+    result.postgresql = true
     result.unclassified = true
-    result.reason = 'Unclassified product change; running full backend and client validation rather than reporting a skipped pass.'
+    result.broad = true
+    result.reason = 'Unclassified product change; running broad backend, client, browser and PostgreSQL validation rather than reporting a skipped pass.'
   }
 
   return result
@@ -96,11 +141,14 @@ export function explain(changedPaths) {
   const rows = []
   for (const path of Array.isArray(changedPaths) ? changedPaths : []) {
     if (typeof path !== 'string' || path.length === 0) continue
-    const areas = Object.entries(AREA_PATTERNS)
-      .filter(([, pattern]) => pattern.test(path))
+    const normalizedPath = normalizePath(path)
+    const broad = isBroadPath(path)
+    const matchedAreas = Object.entries(AREA_PATTERNS)
+      .filter(([, pattern]) => pattern.test(normalizedPath))
       .map(([area]) => area)
-    const isProduct = !NON_PRODUCT.test(path) && !MARKDOWN.test(path)
-    rows.push({ path, areas, product: isProduct })
+    const areas = matchedAreas.length > 0 ? matchedAreas : (broad ? ['all'] : matchedAreas)
+    const isProduct = !NON_PRODUCT.test(normalizedPath) && !MARKDOWN.test(normalizedPath)
+    rows.push({ path, normalizedPath, areas, product: isProduct, broad })
   }
   return rows
 }

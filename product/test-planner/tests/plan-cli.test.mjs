@@ -49,11 +49,42 @@ test('multiple files are all collected', () => {
   assert.equal(parsed.classification.client, true)
 })
 
+test('Windows paths preserve the same area decisions as git paths', () => {
+  const parsed = JSON.parse(run(['--files', '.\\product\\src\\AeroLink.Infrastructure\\Persistence\\Thing.cs', '--dry-run', '--json']).out)
+  assert.equal(parsed.classification.backend, true)
+  assert.equal(parsed.classification.browser, true)
+  assert.equal(parsed.classification.postgresql, true)
+  assert.equal(parsed.safety.dryRun, true)
+  assert.equal(parsed.safety.persistentDatabaseTouched, false)
+  assert.equal(parsed.safety.evidenceRootTouched, false)
+  assert.equal(parsed.safety.fetchedOrRebased, false)
+})
+
+test('planner changes and rename-sensitive old paths force broad coverage', () => {
+  const parsed = JSON.parse(run([
+    '--files', 'product/test-planner/lib/classify.mjs', 'product/src/AeroLink.Infrastructure/Persistence/Migrations/0001_old.cs', 'product/src/AeroLink.Domain/Rules/0001_new.cs', '--json',
+  ]).out)
+  for (const area of ['backend', 'client', 'browser', 'postgresql']) assert.equal(parsed.classification[area], true, area)
+  assert.equal(parsed.classification.broad, true)
+})
+
 test('an option missing its value is refused rather than guessed', () => {
   for (const args of [['--event'], ['--base'], ['--files', 'a.cs', '--event']]) {
     const { code, out } = run(args)
     assert.equal(code, 2, `${args.join(' ')} should exit 2`)
     assert.match(out, /requires a value/)
+  }
+})
+
+test('explicit paths cannot silently ignore Git refs', () => {
+  for (const args of [
+    ['--files', 'a.cs', '--base', 'origin/main'],
+    ['--files', 'a.cs', '--head', 'HEAD'],
+    ['--files', 'a.cs', '--since-origin-main'],
+  ]) {
+    const { code, out } = run(args)
+    assert.equal(code, 2)
+    assert.match(out, /cannot be combined/)
   }
 })
 

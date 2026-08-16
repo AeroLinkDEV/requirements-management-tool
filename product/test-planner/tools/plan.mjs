@@ -1,41 +1,32 @@
 // Answers, for the branch you are on: what should I run before I push, and what will GitHub run after?
 //
-// This is the local half of #568. The classification comes from the same module the workflow uses, so
-// the two answers cannot disagree — which was the other half of the problem, since a path recognised in
-// one place and not the other is invisible until a gate skips something it should have run.
-//
-// Usage:
-//   node product/test-planner/tools/plan.mjs                 # against origin/main
-//   node product/test-planner/tools/plan.mjs --base <ref>
-//   node product/test-planner/tools/plan.mjs --files a.cs b.ts
-//   node product/test-planner/tools/plan.mjs --json
-//   node product/test-planner/tools/plan.mjs --event merge_group
+// The classification comes from the same module the workflow uses. This command is intentionally plan-only;
+// the Windows wrapper owns optional execution and safety prompts.
 
 import { execFileSync } from 'node:child_process'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { classify, explain, localPlan, selectJobs } from '../lib/classify.mjs'
+import { PLANNER_VERSION, plannerHash } from '../lib/planner-meta.mjs'
 
-/**
- * Parse options explicitly, stopping a list at the next option.
- *
- * The first version sliced everything after `--files` and dropped only tokens starting with `--`, so
- * `--files README.md --event pull_request` classified the literal path `pull_request` — turning a
- * documentation-only change into an unclassified one and printing a plan for work that was not needed.
- * A parser that silently absorbs another option's value produces confident wrong answers.
- */
-const VALUE_OPTIONS = new Set(['base', 'event'])
+const VALUE_OPTIONS = new Set(['base', 'head', 'event'])
 const LIST_OPTIONS = new Set(['files'])
-const FLAG_OPTIONS = new Set(['json', 'help'])
+const FLAG_OPTIONS = new Map([
+  ['json', 'json'],
+  ['help', 'help'],
+  ['since-origin-main', 'sinceOriginMain'],
+  ['dry-run', 'dryRun'],
+])
 
+/** Parse options explicitly, stopping a file list at the next option. */
 function parseArgs(argv) {
-  const options = { files: null, base: null, event: null, json: false, help: false }
+  const options = { files: null, base: null, head: null, event: null, json: false, help: false, sinceOriginMain: false, dryRun: false }
   for (let i = 0; i < argv.length; i += 1) {
     const token = argv[i]
     if (!token.startsWith('--')) throw new Error(`Unexpected argument "${token}"; options must start with --.`)
     const name = token.slice(2)
-    if (FLAG_OPTIONS.has(name)) { options[name] = true; continue }
+    if (FLAG_OPTIONS.has(name)) { options[FLAG_OPTIONS.get(name)] = true; continue }
     if (VALUE_OPTIONS.has(name)) {
       const value = argv[i + 1]
       if (value === undefined || value.startsWith('--')) throw new Error(`--${name} requires a value.`)
@@ -45,7 +36,6 @@ function parseArgs(argv) {
     }
     if (LIST_OPTIONS.has(name)) {
       const values = []
-      // Stops at the next option. A path that genuinely begins with a dash can be passed after `--`.
       while (i + 1 < argv.length && !argv[i + 1].startsWith('--')) { values.push(argv[i + 1]); i += 1 }
       if (argv[i + 1] === '--') { i += 1; while (i + 1 < argv.length) { values.push(argv[i + 1]); i += 1 } }
       options[name] = values
@@ -53,6 +43,8 @@ function parseArgs(argv) {
     }
     throw new Error(`Unknown option --${name}.`)
   }
+  if (options.sinceOriginMain && options.base) throw new Error('--since-origin-main cannot be combined with --base.')
+  if (options.files !== null && (options.base || options.head || options.sinceOriginMain)) throw new Error('--files cannot be combined with --base, --head or --since-origin-main.')
   return options
 }
 
@@ -61,23 +53,39 @@ try {
   options = parseArgs(process.argv.slice(2))
 } catch (error) {
   console.error(error.message)
-  console.error('Usage: node plan.mjs [--base <ref>] [--event <name>] [--files <path>...] [--json]')
+  console.error('Usage: node plan.mjs [--base <ref>|--since-origin-main] [--head <ref>] [--event <name>] [--files <path>...] [--json] [--dry-run]')
   process.exit(2)
 }
 
+function gitText(args) {
+  return execFileSync('git', args, { encoding: 'utf8' }).trim()
+}
+
+function changedPathsFromDiff(base, head) {
+  const output = execFileSync('git', ['diff', '--name-status', '--find-renames', '--find-copies', '-z', `${base}...${head}`], { encoding: 'utf8' })
+  const fields = output.split('\0').filter(Boolean)
+  const paths = []
+  for (let index = 0; index < fields.length;) {
+    const status = fields[index++]
+    if (/^[RC]/.test(status)) paths.push(fields[index++], fields[index++])
+    else paths.push(fields[index++])
+  }
+  return paths.filter((path) => typeof path === 'string' && path.length > 0)
+}
+
+const range = { base: null, head: options.head ?? 'HEAD', mergeBase: null }
 function changedPaths() {
   if (options.files !== null) return options.files
 
-  const base = options.base ?? 'origin/main'
+  range.base = options.sinceOriginMain ? 'origin/main' : (options.base ?? 'origin/main')
   try {
-    // Three dots. A two-dot diff compares the two trees directly, so once the base moves ahead every
-    // file changed there appears here as though this branch had touched it — which is exactly how a
-    // pull request once classified as client-only and skipped the backend suites it was about.
-    const output = execFileSync('git', ['diff', '--name-only', `${base}...HEAD`], { encoding: 'utf8' })
-    return output.split('\n').map((line) => line.trim()).filter(Boolean)
+    range.mergeBase = gitText(['merge-base', range.base, range.head])
+    // Three dots compare from the merge base. Name-status with rename detection is parsed into both old
+    // and new paths so sensitive coverage cannot disappear when a file moves out of a guarded area.
+    return changedPathsFromDiff(range.base, range.head)
   } catch (error) {
-    console.error(`Could not diff against ${base}: ${error.message.split('\n')[0]}`)
-    console.error('Pass --base <ref> or --files <paths...> instead.')
+    console.error(`Could not diff against ${range.base}...${range.head}: ${error.message.split('\n')[0]}`)
+    console.error('Pass --base/--head or --files <paths...> instead; no fetch or rebase is performed.')
     process.exit(2)
   }
 }
@@ -85,18 +93,45 @@ function changedPaths() {
 const paths = changedPaths()
 const event = options.event ?? 'pull_request'
 const result = classify(paths, { event })
-
 const repoRoot = fileURLToPath(new URL('../../../', import.meta.url))
 const workflowText = readFileSync(join(repoRoot, '.github/workflows/ci.yml'), 'utf8')
 const jobs = selectJobs(workflowText, result, { event })
+const hash = plannerHash(repoRoot)
+const unknownPaths = explain(paths).filter((row) => row.product && row.areas.length === 0 && !row.broad).map((row) => row.path)
+const compact = {
+  planner: { version: PLANNER_VERSION, hash },
+  source: { base: range.base, head: range.head, mergeBase: range.mergeBase, paths: options.files !== null ? 'explicit' : 'git-diff' },
+  event,
+  areas: { docsOnly: result.docsOnly, backend: result.backend, client: result.client, browser: result.browser, postgresql: result.postgresql },
+  unknownPaths,
+  ci: { selected: jobs.selected.map((job) => job.id), skipped: jobs.skipped.map((job) => job.id) },
+}
 
 if (options.json) {
-  console.log(JSON.stringify({ event, changedPaths: paths, classification: result, local: localPlan(result), ci: jobs }, null, 2))
+  console.log(JSON.stringify({
+    event,
+    changedPaths: paths,
+    mergeBase: range.mergeBase,
+    explain: explain(paths),
+    classification: result,
+    local: localPlan(result),
+    ci: jobs,
+    safety: {
+      planOnly: true,
+      dryRun: options.dryRun || options.json,
+      persistentDatabaseTouched: false,
+      evidenceRootTouched: false,
+      fetchedOrRebased: false,
+      remainingFullEvidence: 'GitHub Actions full gate remains authoritative.',
+    },
+    compact,
+  }, null, 2))
   process.exit(0)
 }
 
 const tick = (value) => (value ? 'yes' : 'no ')
-
+console.log(`AeroLink test planner ${PLANNER_VERSION}`)
+console.log(`Planner hash: ${hash}`)
 console.log(`Changed files: ${paths.length}${paths.length === 0 ? ' (nothing to classify)' : ''}`)
 if (paths.length > 0 && paths.length <= 20) {
   for (const row of explain(paths)) {
@@ -115,7 +150,11 @@ console.log(`  client       ${tick(result.client)}`)
 console.log(`  browser      ${tick(result.browser)}`)
 console.log(`  postgresql   ${tick(result.postgresql)}`)
 if (result.reason) console.log(`  note: ${result.reason}`)
+console.log(`  merge base   ${range.mergeBase ?? '(explicit paths; no Git diff)'}`)
 
+console.log('')
+console.log(`Safety: ${options.dryRun ? 'dry run; ' : ''}persistent PostgreSQL and evidence roots are untouched; no fetch or rebase is performed.`)
+console.log('Full merge evidence remains with the GitHub Actions gate; a local Fast plan never substitutes for it.')
 console.log('')
 console.log('Before you push:')
 for (const step of localPlan(result)) {
@@ -127,10 +166,11 @@ for (const step of localPlan(result)) {
 console.log('')
 console.log('GitHub will then run (read from ci.yml, not restated):')
 for (const job of jobs.selected) console.log(`  - ${job.name ?? job.id}${job.always ? '  (always)' : ''}`)
+console.log('')
+console.log(`AEROLINK_TEST_PLAN_RESULT=${JSON.stringify(compact)}`)
 
 if (result.unclassified) {
   console.log('')
-  console.log('One or more changed paths matched no area rule, so backend and client were selected as a')
-  console.log('precaution. If this path should map to a narrower set, add it to AREA_PATTERNS in')
-  console.log('product/test-planner/lib/classify.mjs — the workflow reads the same definitions.')
+  console.log('One or more changed paths matched no area rule, so broad backend, client, browser and PostgreSQL validation was selected as a precaution.')
+  console.log('If this path should map to a narrower set, add it to AREA_PATTERNS in product/test-planner/lib/classify.mjs.')
 }

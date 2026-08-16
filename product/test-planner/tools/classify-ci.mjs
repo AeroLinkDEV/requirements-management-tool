@@ -7,9 +7,12 @@
 //
 // Writes GitHub Actions outputs; prints the decision and its reasoning to the job log.
 
-import { appendFileSync } from 'node:fs'
+import { appendFileSync, readFileSync } from 'node:fs'
 import { execFileSync } from 'node:child_process'
-import { classify, explain, BROAD_EVENTS } from '../lib/classify.mjs'
+import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
+import { classify, explain, BROAD_EVENTS, selectJobs } from '../lib/classify.mjs'
+import { PLANNER_VERSION, plannerHash } from '../lib/planner-meta.mjs'
 
 const env = (name) => process.env[name] ?? ''
 
@@ -29,12 +32,32 @@ if (!BROAD_EVENTS.has(event)) {
   // not cosmetic: on 2026-08-13 it silently changed which gates ran, and a pull request that modified
   // only the workflow classified as client-only on its second run — the backend suites skipped and the
   // gate went green having never run the tests the change was about.
-  const output = execFileSync('git', ['diff', '--name-only', `${baseSha}...${headSha}`], { encoding: 'utf8' })
-  paths = output.split('\n').map((line) => line.trim()).filter(Boolean)
+  // Include both sides of renames. A rename out of a migration or identity area must keep the old
+  // sensitive path in the classification or the real-provider gate can silently disappear.
+  const output = execFileSync('git', ['diff', '--name-status', '--find-renames', '--find-copies', '-z', `${baseSha}...${headSha}`], { encoding: 'utf8' })
+  const fields = output.split('\0').filter(Boolean)
+  for (let index = 0; index < fields.length;) {
+    const status = fields[index++]
+    if (/^[RC]/.test(status)) {
+      paths.push(fields[index++], fields[index++])
+    } else {
+      paths.push(fields[index++])
+    }
+  }
   for (const path of paths) console.log(path)
 }
 
 const result = classify(paths, { event })
+
+const repoRoot = fileURLToPath(new URL('../../../', import.meta.url))
+const workflowText = readFileSync(join(repoRoot, '.github/workflows/ci.yml'), 'utf8')
+const jobs = selectJobs(workflowText, result, { event })
+const decisions = {
+  selected: jobs.selected.map((job) => ({ id: job.id, name: job.name ?? job.id, reason: job.always ? 'always-running reporting job' : `condition matched: ${job.condition ?? 'none'}` })),
+  skipped: jobs.skipped.map((job) => ({ id: job.id, name: job.name ?? job.id, reason: `condition not matched: ${job.condition ?? 'none'}` })),
+}
+const unknownPaths = explain(paths).filter((row) => row.product && row.areas.length === 0 && !row.broad).map((row) => row.path)
+const plannerHashValue = plannerHash(repoRoot)
 
 console.log('')
 console.log(`Event: ${event}`)
@@ -45,6 +68,11 @@ for (const row of explain(paths).slice(0, 100)) {
 console.log('')
 console.log(`docs_only=${result.docsOnly} backend=${result.backend} client=${result.client} browser=${result.browser} postgresql=${result.postgresql}`)
 if (result.reason) console.log(result.reason)
+console.log(`planner_version=${PLANNER_VERSION}`)
+console.log(`planner_hash=${plannerHashValue}`)
+console.log(`planner_unknown_paths=${unknownPaths.length > 0 ? unknownPaths.join(', ') : '(none)'}`)
+console.log(`planner_selected_jobs=${decisions.selected.map((job) => job.id).join(', ') || '(none)'}`)
+console.log(`planner_skipped_jobs=${decisions.skipped.map((job) => job.id).join(', ') || '(none)'}`)
 
 if (!outputPath) {
   console.error('::error::GITHUB_OUTPUT is not set; the classification could not be published.')
@@ -57,5 +85,11 @@ appendFileSync(outputPath, [
   `client=${result.client}`,
   `browser=${result.browser}`,
   `postgresql=${result.postgresql}`,
+  `planner_version=${PLANNER_VERSION}`,
+  `planner_hash=${plannerHashValue}`,
+  `planner_unknown_paths=${unknownPaths.join(', ')}`,
+  `planner_selected_jobs=${decisions.selected.map((job) => job.id).join(',')}`,
+  `planner_skipped_jobs=${decisions.skipped.map((job) => job.id).join(',')}`,
+  `planner_decisions=${JSON.stringify(decisions)}`,
   '',
 ].join('\n'), 'utf8')

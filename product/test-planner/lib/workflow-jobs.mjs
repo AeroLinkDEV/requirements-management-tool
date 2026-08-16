@@ -111,11 +111,11 @@ export function selectJobs(workflowText, classification, { event = 'pull_request
     // `always()` and job-status functions describe reporting jobs that run regardless; they are not a
     // classification decision, so they are reported as always-running rather than evaluated.
     if (job.condition && /always\(\)|success\(\)|failure\(\)|cancelled\(\)/.test(job.condition)) {
-      selected.push({ id: job.id, name: job.name, always: true })
+      selected.push({ id: job.id, name: job.name, always: true, condition: job.condition })
       continue
     }
-    if (evaluateCondition(job.condition, context)) selected.push({ id: job.id, name: job.name, always: false })
-    else skipped.push({ id: job.id, name: job.name })
+    if (evaluateCondition(job.condition, context)) selected.push({ id: job.id, name: job.name, always: false, condition: job.condition })
+    else skipped.push({ id: job.id, name: job.name, condition: job.condition })
   }
   return { selected, skipped }
 }

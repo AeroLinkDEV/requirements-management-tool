@@ -47,6 +47,12 @@ jobs:
       client: ${{ steps.classify.outputs.client }}
       browser: ${{ steps.classify.outputs.browser }}
       postgresql: ${{ steps.classify.outputs.postgresql }}
+      planner_version: ${{ steps.classify.outputs.planner_version }}
+      planner_hash: ${{ steps.classify.outputs.planner_hash }}
+      planner_unknown_paths: ${{ steps.classify.outputs.planner_unknown_paths }}
+      planner_selected_jobs: ${{ steps.classify.outputs.planner_selected_jobs }}
+      planner_skipped_jobs: ${{ steps.classify.outputs.planner_skipped_jobs }}
+      planner_decisions: ${{ steps.classify.outputs.planner_decisions }}
     steps:
       - name: Capture job start
         continue-on-error: true
@@ -437,8 +443,16 @@ jobs:
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 24
-      - name: Refuse a mutating route with no hosted boundary coverage
-        run: node --test product/test-contracts/tests/routes.test.mjs
+      # Keep this as a directory-driven invocation. A new hosted contract must not be silently omitted
+      # because this job still names the first contract file that happened to exist.
+      - name: Run every hosted boundary contract
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $tests = @(Get-ChildItem -LiteralPath product/test-contracts/tests -Filter '*.test.mjs' -File | Sort-Object FullName | ForEach-Object { $_.FullName })
+          if ($tests.Count -eq 0) { throw 'No hosted test-contracts test files were found.' }
+          & node --test $tests
+          if ($LASTEXITCODE -ne 0) { throw 'A hosted test-contracts suite failed.' }
       # Here for the same reason as the route contract above, and more urgently: this suite guards the
       # classifier that decides which gates run at all. Two silent-green failures came from that code, and
       # a guard on it that cannot fail the gate would be worth nothing.
@@ -636,6 +650,12 @@ jobs:
           $ErrorActionPreference = 'Stop'
           & ./product/scripts/AeroLinkRemoteDemoRecovery.Tests.ps1
           if ($LASTEXITCODE -ne 0) { throw 'Remote-demo recovery regression failed.' }
+      - name: Validate the changed-test planner Windows contract
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          & ./product/scripts/Get-AeroLinkTestPlan.Tests.ps1
+          if ($LASTEXITCODE -ne 0) { throw 'Windows test planner contract failed.' }
       - name: Mark test complete
         if: always()
         continue-on-error: true
@@ -1251,6 +1271,12 @@ jobs:
           METRICS_TOOLING: ${{ needs.metrics-tooling.result }}
           DOCS_ONLY: ${{ needs.changes.outputs.docs_only }}
           EVENT_NAME: ${{ github.event_name }}
+          PLANNER_VERSION: ${{ needs.changes.outputs.planner_version }}
+          PLANNER_HASH: ${{ needs.changes.outputs.planner_hash }}
+          PLANNER_UNKNOWN_PATHS: ${{ needs.changes.outputs.planner_unknown_paths }}
+          PLANNER_SELECTED_JOBS: ${{ needs.changes.outputs.planner_selected_jobs }}
+          PLANNER_SKIPPED_JOBS: ${{ needs.changes.outputs.planner_skipped_jobs }}
+          PLANNER_DECISIONS: ${{ needs.changes.outputs.planner_decisions }}
         run: |
           set -euo pipefail
           describe() {
@@ -1263,6 +1289,18 @@ jobs:
           }
           {
             echo "## What this run validated"
+            echo
+            echo "Planner: $PLANNER_VERSION ($PLANNER_HASH)"
+            echo "Event: $EVENT_NAME"
+            echo "Unknown product paths forcing fallback: ${PLANNER_UNKNOWN_PATHS:-none}"
+            echo "Selected jobs: ${PLANNER_SELECTED_JOBS:-none}"
+            echo "Skipped jobs: ${PLANNER_SKIPPED_JOBS:-none}"
+            echo "Planner job decisions and reasons:"
+            if [ -n "${PLANNER_DECISIONS:-}" ]; then
+              printf '%s\n' "$PLANNER_DECISIONS"
+            else
+              echo "{}"
+            fi
             echo
             describe "API test suite" "$BACKEND_API"
             describe "Domain and infrastructure test suites" "$BACKEND_CORE"
