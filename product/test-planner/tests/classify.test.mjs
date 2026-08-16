@@ -193,6 +193,44 @@ test('explain attributes each path to the areas it selected', () => {
   assert.deepEqual(rows[2].areas, ['client', 'browser'])
 })
 
+test('the normal local Fast infrastructure profile leaves only synthetic showcase maintenance to Full CI', () => {
+  const classification = of(['product/src/AeroLink.Domain/Requirements/Requirement.cs'])
+  assert.equal(classification.fastFullInfrastructure, false)
+  const plan = localPlan(classification)
+  const infrastructure = plan.find((step) => step.label === 'Infrastructure suite')
+  assert.ok(infrastructure)
+  assert.match(infrastructure.command, /--filter=/)
+  assert.match(infrastructure.command, /FmsShowcaseSeederTests/)
+  assert.match(infrastructure.command, /ShowcaseUpgradeTests/)
+  assert.match(infrastructure.why, /authoritative GitHub backend-core/)
+})
+
+test('showcase-sensitive and broad changes restore the complete Infrastructure suite in Fast', () => {
+  const sensitivePaths = [
+    'product/src/AeroLink.Infrastructure/Persistence/FmsShowcaseSeeder.cs',
+    'product/tests/AeroLink.Infrastructure.Tests/FmsShowcaseSeederTests.cs',
+    'product/tests/AeroLink.Infrastructure.Tests/ShowcaseUpgradeTests.cs',
+    'product/tests/AeroLink.Infrastructure.Tests/ShowcaseDatabaseFixture.cs',
+  ]
+  for (const path of sensitivePaths) {
+    const classification = of([path])
+    assert.equal(classification.fastFullInfrastructure, true, `${path} must restore complete local Infrastructure coverage`)
+    const infrastructure = localPlan(classification).find((step) => step.label === 'Infrastructure suite')
+    assert.ok(infrastructure)
+    assert.doesNotMatch(infrastructure.command, /--filter=/)
+    assert.match(infrastructure.why, /complete Infrastructure suite/)
+  }
+
+  const windows = of(['PRODUCT\\SRC\\AeroLink.Infrastructure\\Persistence\\FmsShowcaseSeeder.cs'])
+  assert.equal(windows.fastFullInfrastructure, true, 'Windows path normalization must retain the showcase-sensitive escape hatch')
+
+  const broad = of(['product/test-planner/lib/classify.mjs'])
+  assert.equal(broad.fastFullInfrastructure, true, 'planner changes must use complete local Infrastructure coverage')
+
+  const unknown = of(['product/new-tooling/unknown-format.xyz'])
+  assert.equal(unknown.fastFullInfrastructure, true, 'unknown broad fallback must use complete local Infrastructure coverage')
+})
+
 test('the CI forecast is read from the workflow, not restated', () => {
   // The first version carried a hand-written list of jobs per area, which is the drift #568 exists to
   // remove: a restatement of the workflow is wrong the first time either changes and nothing notices.
