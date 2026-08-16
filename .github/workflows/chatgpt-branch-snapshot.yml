@@ -1,4 +1,4 @@
-name: Temporary ChatGPT branch snapshot
+name: Temporary ChatGPT implementation applicator
 
 on:
   push:
@@ -6,24 +6,142 @@ on:
       - chatgpt/563-shared-host-tranche-2b
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
-  snapshot:
+  apply:
+    if: github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
       - name: Check out exact branch head
         uses: actions/checkout@v4
-
-      - name: Archive exact source tree
-        shell: bash
-        run: git archive --format=zip --output=aerolink-source.zip HEAD
-
-      - name: Upload source snapshot
-        uses: actions/upload-artifact@v4
         with:
-          name: chatgpt-563-source-${{ github.run_id }}
-          path: aerolink-source.zip
-          if-no-files-found: error
-          retention-days: 1
+          fetch-depth: 0
+
+      - name: Apply audited source changes
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat .github/chatgpt/aerolink-563-files.part-* > /tmp/aerolink-563-files.b64
+          base64 --decode /tmp/aerolink-563-files.b64 > /tmp/aerolink-563-files.tar.gz
+          tar -xzf /tmp/aerolink-563-files.tar.gz -C "$GITHUB_WORKSPACE"
+
+      - name: Regenerate source-derived contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          node product/test-contracts/tools/generate-test-intent.mjs
+          node product/test-contracts/tools/generate-host-classification.mjs
+          node product/test-contracts/tools/generate-route-manifest.mjs
+
+      - name: Verify inventory and route contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --test \
+            product/test-contracts/tests/inventory.test.mjs \
+            product/test-contracts/tests/routes.test.mjs
+
+      - name: Verify the bounded shared-host tranche
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          import json
+
+          classes = [
+              'AuthoredSectionTests',
+              'CorrectiveActionRoutingApiTests',
+              'DeferralAndRevisionListingTests',
+              'PreReleaseEvidenceVisibilityTests',
+              'RequirementFilterExactnessApiTests',
+              'RestartReviewApiTests',
+          ]
+          root = Path('product/tests/AeroLink.Api.Tests')
+          facts = {}
+          for cls in classes:
+              text = (root / f'{cls}.cs').read_text(encoding='utf-8')
+              facts[cls] = {
+                  'fixture': f'class {cls} : IClassFixture<SharedApiHost>' in text,
+                  'facts': text.count('[Fact]') + text.count('[Theory]'),
+                  'freshClients': text.count('_host.CreateClient()'),
+                  'sharedSeeds': text.count('SeedAsync(_host.Factory)'),
+                  'perTestFactories': text.count('new AeroLinkApiFactory('),
+                  'uniqueTag': 'Guid.NewGuid().ToString("N")[..8]' in text,
+              }
+          for cls, row in facts.items():
+              assert row['fixture'], (cls, row)
+              assert row['facts'] == row['freshClients'] == row['sharedSeeds'], (cls, row)
+              assert row['perTestFactories'] == 0, (cls, row)
+              assert row['uniqueTag'], (cls, row)
+          assert sum(row['facts'] for row in facts.values()) == 19, facts
+
+          artifact = json.loads(Path('product/test-contracts/api-host-classification.json').read_text())
+          by_class = {row['cls']: row for row in artifact['classes']}
+          assert artifact['totals'] == {
+              'classes': 81,
+              'tests': 447,
+              'knownCases': 497,
+              'unknownCaseTests': 0,
+          }
+          assert artifact['summary']['converted'] == {
+              'classes': 16,
+              'tests': 71,
+              'knownCases': 71,
+              'unknownCaseTests': 0,
+          }
+          assert artifact['summary']['reusable-host'] == {
+              'classes': 24,
+              'tests': 167,
+              'knownCases': 192,
+              'unknownCaseTests': 0,
+          }
+          for cls in classes:
+              assert by_class[cls]['classification'] == 'converted', by_class[cls]
+          print(json.dumps(facts, indent=2))
+          PY
+
+      - name: Commit only the final implementation
+        shell: bash
+        env:
+          BRANCH: chatgpt/563-shared-host-tranche-2b
+        run: |
+          set -euo pipefail
+          rm .github/workflows/chatgpt-branch-snapshot.yml
+          rm .github/chatgpt/aerolink-563-files.part-*
+          rmdir .github/chatgpt
+          git diff --check
+          python - <<'PY'
+          import subprocess
+
+          allowed = {
+              'product/test-contracts/api-host-classification.json',
+              'product/test-contracts/api-test-intent.json',
+              'product/test-contracts/tests/inventory.test.mjs',
+              'product/tests/AeroLink.Api.Tests/AuthoredSectionTests.cs',
+              'product/tests/AeroLink.Api.Tests/CorrectiveActionRoutingApiTests.cs',
+              'product/tests/AeroLink.Api.Tests/DeferralAndRevisionListingTests.cs',
+              'product/tests/AeroLink.Api.Tests/PreReleaseEvidenceVisibilityTests.cs',
+              'product/tests/AeroLink.Api.Tests/RequirementFilterExactnessApiTests.cs',
+              'product/tests/AeroLink.Api.Tests/RestartReviewApiTests.cs',
+              'product/tests/AeroLink.Api.Tests/STARTUP_FLOOR_HOST_REUSE_PILOT.md',
+              '.github/workflows/chatgpt-branch-snapshot.yml',
+              '.github/chatgpt/aerolink-563-files.part-00',
+              '.github/chatgpt/aerolink-563-files.part-01',
+              '.github/chatgpt/aerolink-563-files.part-02',
+              '.github/chatgpt/aerolink-563-files.part-03',
+          }
+          rows = subprocess.check_output(['git', 'status', '--short'], text=True).splitlines()
+          changed = {row[3:] for row in rows}
+          assert changed == allowed, {
+              'unexpected': sorted(changed - allowed),
+              'missing': sorted(allowed - changed),
+          }
+          PY
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m 'Expand safe API host reuse tranche'
+          git push origin "HEAD:$BRANCH"
