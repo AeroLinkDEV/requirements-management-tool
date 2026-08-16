@@ -63,7 +63,7 @@ export function classifyClass({ cls, source, rows, override }) {
   if ([...intents].some((intent) => NEEDS_FRESH.has(intent))) {
     return classified({ cls, rows, classification: 'fresh-host', reason: `Owns host-scoped state (${[...intents].filter((intent) => NEEDS_FRESH.has(intent)).join(', ')}); sharing would leak it between tests.`, intents: [...intents].sort() })
   }
-  return classified({ cls, rows, classification: 'reusable-host', reason: 'Exercises the HTTP surface with no host-scoped state or custom host configuration; a shared host is safe only with per-test clients.', intents: [...intents].sort() })
+  return classified({ cls, rows, classification: 'reusable-host', reason: 'Static reuse candidate, not an implementation-ready safety finding: shared-host conversion requires fresh per-test clients, unique per-test tagged logical data, and assertions scoped to that data.', intents: [...intents].sort() })
 }
 
 export function classifyInventory({ testsDirectory, inventory, overrides = {} }) {

@@ -457,6 +457,11 @@ pre-#593 #563 holds that static host evidence cannot safely clear:
 | fresh-host | 40 | 203 | 228 | 0 | 45.9% |
 | migration-candidate | 1 | 1 | 1 | 0 | 0.2% |
 
+`reusable-host` identifies a static conversion candidate, not an implementation-ready safety approval.
+Every conversion still requires fresh per-test clients, unique per-test tagged logical data, and
+assertions scoped to that data. Fixed seed identities and controlled values must be tagged or replaced
+during conversion so one test cannot contaminate another test's setup or assertions.
+
 Concrete service-replacement, custom-factory, showcase-template-copy, unscoped-count, and
 shared-evidence classes are fresh-host until their isolation is explicitly reviewed. In addition, the
 reviewed bootstrap-dependent, zero-saving, identifier-allocation, effectivity-count, saved-view-count,

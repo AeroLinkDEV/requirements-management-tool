@@ -186,6 +186,22 @@ test('showcase template-copy factories are conservatively fresh-host', () => {
   assert.match(result.reason, /showcase-template-copy/)
 })
 
+test('reusable-host remains a conversion candidate until client and logical-data isolation are implemented', () => {
+  const result = classifyClass({
+    cls: 'CandidateApiTests',
+    source: 'using var factory = new AeroLinkApiFactory(); using var client = factory.CreateClient();',
+    rows: [{ intent: 'http-boundary', hosted: 'hosted' }],
+  })
+  assert.equal(result.classification, 'reusable-host')
+  assert.match(result.reason, /Static reuse candidate, not an implementation-ready safety finding/)
+  assert.match(result.reason, /fresh per-test clients/)
+  assert.match(result.reason, /unique per-test tagged logical data/)
+  assert.match(result.reason, /assertions scoped to that data/)
+  for (const row of hostArtifact.classes.filter((candidate) => candidate.classification === 'reusable-host')) {
+    assert.equal(row.reason, result.reason, row.cls)
+  }
+})
+
 test('every ShowcaseApiFixture consumer is fresh-host in the committed classification', () => {
   for (const cls of [
     'CodeTraceabilityApiTests',

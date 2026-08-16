@@ -643,7 +643,7 @@
       "knownCases": 42,
       "unknownCaseTests": 0,
       "classification": "reusable-host",
-      "reason": "Exercises the HTTP surface with no host-scoped state or custom host configuration; a shared host is safe only with per-test clients.",
+      "reason": "Static reuse candidate, not an implementation-ready safety finding: shared-host conversion requires fresh per-test clients, unique per-test tagged logical data, and assertions scoped to that data.",
       "intents": [
         "auth-policy",
         "ef-translation",
@@ -656,7 +656,7 @@
       "knownCases": 13,
       "unknownCaseTests": 0,
       "classification": "reusable-host",
-      "reason": "Exercises the HTTP surface with no host-scoped state or custom host configuration; a shared host is safe only with per-test clients.",
+      "reason": "Static reuse candidate, not an implementation-ready safety finding: shared-host conversion requires fresh per-test clients, unique per-test tagged logical data, and assertions scoped to that data.",
       "intents": [
         "auth-policy",
         "http-boundary"
@@ -668,7 +668,7 @@
       "knownCases": 11,
       "unknownCaseTests": 0,
       "classification": "reusable-host",
-      "reason": "Exercises the HTTP surface with no host-scoped state or custom host configuration; a shared host is safe only with per-test clients.",
+      "reason": "Static reuse candidate, not an implementation-ready safety finding: shared-host conversion requires fresh per-test clients, unique per-test tagged logical data, and assertions scoped to that data.",
       "intents": [
         "auth-policy",
         "ef-translation",
@@ -681,7 +681,7 @@
       "knownCases": 8,
       "unknownCaseTests": 0,
       "classification": "reusable-host",
-      "reason": "Exercises the HTTP surface with no host-scoped state or custom host configuration; a shared host is safe only with per-test clients.",
+      "reason": "Static reuse candidate, not an implementation-ready safety finding: shared-host conversion requires fresh per-test clients, unique per-test tagged logical data, and assertions scoped to that data.",
       "intents": [
         "ef-translation",
         "http-boundary"
@@ -693,7 +693,7 @@
       "knownCases": 12,
       "unknownCaseTests": 0,
       "classification": "reusable-host",
-      "reason": "Exercises the HTTP surface with no host-scoped state or custom host configuration; a shared host is safe only with per-test clients.",
+      "reason": "Static reuse candidate, not an implementation-ready safety finding: shared-host conversion requires fresh per-test clients, unique per-test tagged logical data, and assertions scoped to that data.",
       "intents": [
         "ef-translation",
         "http-boundary"
@@ -705,7 +705,7 @@
       "knownCases": 9,
       "unknownCaseTests": 0,
       "classification": "reusable-host",
-      "reason": "Exercises the HTTP surface with no host-scoped state or custom host configuration; a shared host is safe only with per-test clients.",
+      "reason": "Static reuse candidate, not an implementation-ready safety finding: shared-host conversion requires fresh per-test clients, unique per-test tagged logical data, and assertions scoped to that data.",
       "intents": [
         "auth-policy",
         "http-boundary",
@@ -718,7 +718,7 @@
       "knownCases": 8,
       "unknownCaseTests": 0,
       "classification": "reusable-host",
-      "reason": "Exercises the HTTP surface with no host-scoped state or custom host configuration; a shared host is safe only with per-test clients.",
+      "reason": "Static reuse candidate, not an implementation-ready safety finding: shared-host conversion requires fresh per-test clients, unique per-test tagged logical data, and assertions scoped to that data.",
       "intents": [
         "auth-policy",
         "http-boundary"
@@ -730,7 +730,7 @@
       "knownCases": 7,
       "unknownCaseTests": 0,
       "classification": "reusable-host",
-      "reason": "Exercises the HTTP surface with no host-scoped state or custom host configuration; a shared host is safe only with per-test clients.",
+      "reason": "Static reuse candidate, not an implementation-ready safety finding: shared-host conversion requires fresh per-test clients, unique per-test tagged logical data, and assertions scoped to that data.",
       "intents": [
         "auth-policy",
         "ef-translation",
@@ -743,7 +743,7 @@
       "knownCases": 6,
       "unknownCaseTests": 0,
       "classification": "reusable-host",
-      "reason": "Exercises the HTTP surface with no host-scoped state or custom host configuration; a shared host is safe only with per-test clients.",
+      "reason": "Static reuse candidate, not an implementation-ready safety finding: shared-host conversion requires fresh per-test clients, unique per-test tagged logical data, and assertions scoped to that data.",
       "intents": [
         "http-boundary"
       ]
@@ -754,7 +754,7 @@
       "knownCases": 13,
       "unknownCaseTests": 0,
       "classification": "reusable-host",
-      "reason": "Exercises the HTTP surface with no host-scoped state or custom host configuration; a shared host is safe only with per-test clients.",
+      "reason": "Static reuse candidate, not an implementation-ready safety finding: shared-host conversion requires fresh per-test clients, unique per-test tagged logical data, and assertions scoped to that data.",
       "intents": [
         "auth-policy",
         "http-boundary"
@@ -766,7 +766,7 @@
       "knownCases": 6,
       "unknownCaseTests": 0,
       "classification": "reusable-host",
-      "reason": "Exercises the HTTP surface with no host-scoped state or custom host configuration; a shared host is safe only with per-test clients.",
+      "reason": "Static reuse candidate, not an implementation-ready safety finding: shared-host conversion requires fresh per-test clients, unique per-test tagged logical data, and assertions scoped to that data.",
       "intents": [
         "auth-policy",
         "http-boundary"
@@ -778,7 +778,7 @@
       "knownCases": 6,
       "unknownCaseTests": 0,
       "classification": "reusable-host",
-      "reason": "Exercises the HTTP surface with no host-scoped state or custom host configuration; a shared host is safe only with per-test clients.",
+      "reason": "Static reuse candidate, not an implementation-ready safety finding: shared-host conversion requires fresh per-test clients, unique per-test tagged logical data, and assertions scoped to that data.",
       "intents": [
         "http-boundary"
       ]
@@ -789,7 +789,7 @@
       "knownCases": 6,
       "unknownCaseTests": 0,
       "classification": "reusable-host",
-      "reason": "Exercises the HTTP surface with no host-scoped state or custom host configuration; a shared host is safe only with per-test clients.",
+      "reason": "Static reuse candidate, not an implementation-ready safety finding: shared-host conversion requires fresh per-test clients, unique per-test tagged logical data, and assertions scoped to that data.",
       "intents": [
         "auth-policy",
         "http-boundary"
@@ -801,7 +801,7 @@
       "knownCases": 6,
       "unknownCaseTests": 0,
       "classification": "reusable-host",
-      "reason": "Exercises the HTTP surface with no host-scoped state or custom host configuration; a shared host is safe only with per-test clients.",
+      "reason": "Static reuse candidate, not an implementation-ready safety finding: shared-host conversion requires fresh per-test clients, unique per-test tagged logical data, and assertions scoped to that data.",
       "intents": [
         "ef-translation",
         "http-boundary"
@@ -813,7 +813,7 @@
       "knownCases": 6,
       "unknownCaseTests": 0,
       "classification": "reusable-host",
-      "reason": "Exercises the HTTP surface with no host-scoped state or custom host configuration; a shared host is safe only with per-test clients.",
+      "reason": "Static reuse candidate, not an implementation-ready safety finding: shared-host conversion requires fresh per-test clients, unique per-test tagged logical data, and assertions scoped to that data.",
       "intents": [
         "auth-policy",
         "http-boundary"
@@ -825,7 +825,7 @@
       "knownCases": 6,
       "unknownCaseTests": 0,
       "classification": "reusable-host",
-      "reason": "Exercises the HTTP surface with no host-scoped state or custom host configuration; a shared host is safe only with per-test clients.",
+      "reason": "Static reuse candidate, not an implementation-ready safety finding: shared-host conversion requires fresh per-test clients, unique per-test tagged logical data, and assertions scoped to that data.",
       "intents": [
         "http-boundary"
       ]
@@ -836,7 +836,7 @@
       "knownCases": 4,
       "unknownCaseTests": 0,
       "classification": "reusable-host",
-      "reason": "Exercises the HTTP surface with no host-scoped state or custom host configuration; a shared host is safe only with per-test clients.",
+      "reason": "Static reuse candidate, not an implementation-ready safety finding: shared-host conversion requires fresh per-test clients, unique per-test tagged logical data, and assertions scoped to that data.",
       "intents": [
         "ef-translation"
       ]
@@ -847,7 +847,7 @@
       "knownCases": 4,
       "unknownCaseTests": 0,
       "classification": "reusable-host",
-      "reason": "Exercises the HTTP surface with no host-scoped state or custom host configuration; a shared host is safe only with per-test clients.",
+      "reason": "Static reuse candidate, not an implementation-ready safety finding: shared-host conversion requires fresh per-test clients, unique per-test tagged logical data, and assertions scoped to that data.",
       "intents": [
         "ef-translation",
         "http-boundary"
@@ -859,7 +859,7 @@
       "knownCases": 4,
       "unknownCaseTests": 0,
       "classification": "reusable-host",
-      "reason": "Exercises the HTTP surface with no host-scoped state or custom host configuration; a shared host is safe only with per-test clients.",
+      "reason": "Static reuse candidate, not an implementation-ready safety finding: shared-host conversion requires fresh per-test clients, unique per-test tagged logical data, and assertions scoped to that data.",
       "intents": [
         "http-boundary"
       ]
@@ -870,7 +870,7 @@
       "knownCases": 4,
       "unknownCaseTests": 0,
       "classification": "reusable-host",
-      "reason": "Exercises the HTTP surface with no host-scoped state or custom host configuration; a shared host is safe only with per-test clients.",
+      "reason": "Static reuse candidate, not an implementation-ready safety finding: shared-host conversion requires fresh per-test clients, unique per-test tagged logical data, and assertions scoped to that data.",
       "intents": [
         "http-boundary"
       ]
@@ -881,7 +881,7 @@
       "knownCases": 3,
       "unknownCaseTests": 0,
       "classification": "reusable-host",
-      "reason": "Exercises the HTTP surface with no host-scoped state or custom host configuration; a shared host is safe only with per-test clients.",
+      "reason": "Static reuse candidate, not an implementation-ready safety finding: shared-host conversion requires fresh per-test clients, unique per-test tagged logical data, and assertions scoped to that data.",
       "intents": [
         "http-boundary"
       ]
@@ -892,7 +892,7 @@
       "knownCases": 3,
       "unknownCaseTests": 0,
       "classification": "reusable-host",
-      "reason": "Exercises the HTTP surface with no host-scoped state or custom host configuration; a shared host is safe only with per-test clients.",
+      "reason": "Static reuse candidate, not an implementation-ready safety finding: shared-host conversion requires fresh per-test clients, unique per-test tagged logical data, and assertions scoped to that data.",
       "intents": [
         "auth-policy",
         "http-boundary"
@@ -904,7 +904,7 @@
       "knownCases": 3,
       "unknownCaseTests": 0,
       "classification": "reusable-host",
-      "reason": "Exercises the HTTP surface with no host-scoped state or custom host configuration; a shared host is safe only with per-test clients.",
+      "reason": "Static reuse candidate, not an implementation-ready safety finding: shared-host conversion requires fresh per-test clients, unique per-test tagged logical data, and assertions scoped to that data.",
       "intents": [
         "http-boundary"
       ]
@@ -915,7 +915,7 @@
       "knownCases": 3,
       "unknownCaseTests": 0,
       "classification": "reusable-host",
-      "reason": "Exercises the HTTP surface with no host-scoped state or custom host configuration; a shared host is safe only with per-test clients.",
+      "reason": "Static reuse candidate, not an implementation-ready safety finding: shared-host conversion requires fresh per-test clients, unique per-test tagged logical data, and assertions scoped to that data.",
       "intents": [
         "ef-translation",
         "http-boundary"
@@ -927,7 +927,7 @@
       "knownCases": 3,
       "unknownCaseTests": 0,
       "classification": "reusable-host",
-      "reason": "Exercises the HTTP surface with no host-scoped state or custom host configuration; a shared host is safe only with per-test clients.",
+      "reason": "Static reuse candidate, not an implementation-ready safety finding: shared-host conversion requires fresh per-test clients, unique per-test tagged logical data, and assertions scoped to that data.",
       "intents": [
         "auth-policy",
         "ef-translation",
@@ -940,7 +940,7 @@
       "knownCases": 4,
       "unknownCaseTests": 0,
       "classification": "reusable-host",
-      "reason": "Exercises the HTTP surface with no host-scoped state or custom host configuration; a shared host is safe only with per-test clients.",
+      "reason": "Static reuse candidate, not an implementation-ready safety finding: shared-host conversion requires fresh per-test clients, unique per-test tagged logical data, and assertions scoped to that data.",
       "intents": [
         "http-boundary"
       ]
@@ -951,7 +951,7 @@
       "knownCases": 2,
       "unknownCaseTests": 0,
       "classification": "reusable-host",
-      "reason": "Exercises the HTTP surface with no host-scoped state or custom host configuration; a shared host is safe only with per-test clients.",
+      "reason": "Static reuse candidate, not an implementation-ready safety finding: shared-host conversion requires fresh per-test clients, unique per-test tagged logical data, and assertions scoped to that data.",
       "intents": [
         "auth-policy",
         "http-boundary"
@@ -963,7 +963,7 @@
       "knownCases": 3,
       "unknownCaseTests": 0,
       "classification": "reusable-host",
-      "reason": "Exercises the HTTP surface with no host-scoped state or custom host configuration; a shared host is safe only with per-test clients.",
+      "reason": "Static reuse candidate, not an implementation-ready safety finding: shared-host conversion requires fresh per-test clients, unique per-test tagged logical data, and assertions scoped to that data.",
       "intents": [
         "auth-policy",
         "http-boundary"
@@ -975,7 +975,7 @@
       "knownCases": 4,
       "unknownCaseTests": 0,
       "classification": "reusable-host",
-      "reason": "Exercises the HTTP surface with no host-scoped state or custom host configuration; a shared host is safe only with per-test clients.",
+      "reason": "Static reuse candidate, not an implementation-ready safety finding: shared-host conversion requires fresh per-test clients, unique per-test tagged logical data, and assertions scoped to that data.",
       "intents": [
         "http-boundary"
       ]
@@ -986,7 +986,7 @@
       "knownCases": 2,
       "unknownCaseTests": 0,
       "classification": "reusable-host",
-      "reason": "Exercises the HTTP surface with no host-scoped state or custom host configuration; a shared host is safe only with per-test clients.",
+      "reason": "Static reuse candidate, not an implementation-ready safety finding: shared-host conversion requires fresh per-test clients, unique per-test tagged logical data, and assertions scoped to that data.",
       "intents": [
         "http-boundary"
       ]
