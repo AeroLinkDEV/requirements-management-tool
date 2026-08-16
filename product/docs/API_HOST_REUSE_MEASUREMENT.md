@@ -67,7 +67,7 @@ attribution rules. It records per-shard and per-observation:
   and comparable environment fingerprints;
 - test count, passed/failed/skipped/other outcomes and class-to-shard assignment;
 - worst-shard and summed-shard wall time;
-- process-tree CPU milliseconds and Windows process-counter disk read/write bytes when available;
+- Job Object cumulative CPU milliseconds and disk read/write bytes, with CIM process-tree identity retained as diagnostic evidence;
 - factory count and `summedFactoryStartupMs` from the existing telemetry report;
 - malformed/truncated telemetry and lock/cleanup signals.
 

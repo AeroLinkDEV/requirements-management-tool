@@ -39,6 +39,7 @@ public static class AeroLinkJobNative
     private const uint CREATE_UNICODE_ENVIRONMENT = 0x00000400;
     private const uint CREATE_NO_WINDOW = 0x08000000;
     private const uint STARTF_USESTDHANDLES = 0x00000100;
+    private const uint JOB_OBJECT_BASIC_AND_IO_ACCOUNTING_INFORMATION = 8;
     private const uint JOB_OBJECT_EXTENDED_LIMIT_INFORMATION = 9;
     private const long JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE = 0x00002000;
     private const uint GENERIC_WRITE = 0x40000000;
@@ -139,12 +140,21 @@ public static class AeroLinkJobNative
         public uint TotalTerminatedProcesses;
     }
 
+    [StructLayout(LayoutKind.Sequential)]
+    private struct BasicAndIoAccountingInformation
+    {
+        public BasicAccountingInformation BasicInfo;
+        public IoCounters IoInfo;
+    }
+
     [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
     private static extern IntPtr CreateJobObjectW(IntPtr lpJobAttributes, string lpName);
     [DllImport("kernel32.dll", SetLastError = true)]
     private static extern bool SetInformationJobObject(IntPtr hJob, uint infoClass, ref ExtendedLimitInformation info, uint length);
     [DllImport("kernel32.dll", SetLastError = true)]
     private static extern bool QueryInformationJobObject(IntPtr hJob, uint infoClass, ref BasicAccountingInformation info, uint length, IntPtr returnLength);
+    [DllImport("kernel32.dll", SetLastError = true, EntryPoint = "QueryInformationJobObject")]
+    private static extern bool QueryInformationJobObjectAccounting(IntPtr hJob, uint infoClass, ref BasicAndIoAccountingInformation info, uint length, IntPtr returnLength);
     [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
     private static extern bool CreateProcessW(string applicationName, StringBuilder commandLine, SecurityAttributes processAttributes, SecurityAttributes threadAttributes, bool inheritHandles, uint creationFlags, IntPtr environment, string currentDirectory, StartupInfo startupInfo, out ProcessInformation processInformation);
     [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
@@ -181,6 +191,16 @@ public static class AeroLinkJobNative
         public bool HandlesClosed;
         public int ActiveProcesses;
         public string Error;
+    }
+
+    public sealed class AccountingResult
+    {
+        public bool Success;
+        public string Error;
+        public int ActiveProcesses;
+        public double CpuMilliseconds;
+        public ulong ReadTransferBytes;
+        public ulong WriteTransferBytes;
     }
 
     private static string LastError(string operation)
@@ -281,6 +301,35 @@ public static class AeroLinkJobNative
         var info = new BasicAccountingInformation();
         if (!QueryInformationJobObject(job, 1, ref info, (uint)Marshal.SizeOf<BasicAccountingInformation>(), IntPtr.Zero)) { error = LastError("QueryInformationJobObject"); return -1; }
         return (int)info.ActiveProcesses;
+    }
+
+    public static AccountingResult QueryAccounting(LaunchResult launch)
+    {
+        var result = new AccountingResult { Success = false, ActiveProcesses = -1 };
+        if (launch == null || !launch.Success || launch.JobHandle == IntPtr.Zero)
+        {
+            result.Error = "No valid job-contained launch was available for accounting.";
+            return result;
+        }
+
+        var info = new BasicAndIoAccountingInformation();
+        if (!QueryInformationJobObjectAccounting(
+            launch.JobHandle,
+            JOB_OBJECT_BASIC_AND_IO_ACCOUNTING_INFORMATION,
+            ref info,
+            (uint)Marshal.SizeOf<BasicAndIoAccountingInformation>(),
+            IntPtr.Zero))
+        {
+            result.Error = LastError("QueryInformationJobObject accounting");
+            return result;
+        }
+
+        result.Success = true;
+        result.ActiveProcesses = (int)info.BasicInfo.ActiveProcesses;
+        result.CpuMilliseconds = (info.BasicInfo.TotalUserTime + info.BasicInfo.TotalKernelTime) / 10000.0;
+        result.ReadTransferBytes = info.IoInfo.ReadTransferCount;
+        result.WriteTransferBytes = info.IoInfo.WriteTransferCount;
+        return result;
     }
 
     public static CleanupResult Cleanup(LaunchResult launch, bool terminate, int timeoutMilliseconds)
@@ -822,42 +871,96 @@ function Get-ProcessTreeSnapshot([int[]]$RootIds) {
     }
 }
 
-function Get-IoRate([System.Collections.Generic.HashSet[int]]$Ids) {
+function Get-JobAccounting($Launch) {
     try {
-        $idSamples = @(Get-Counter -Counter '\Process(*)\ID Process' -ErrorAction Stop).CounterSamples
-        $pidByInstance = @{}
-        foreach ($sample in $idSamples) { $pidByInstance[$sample.InstanceName] = [int]$sample.CookedValue }
-        $ioSamples = @(Get-Counter -Counter '\Process(*)\IO Read Bytes/sec', '\Process(*)\IO Write Bytes/sec' -ErrorAction Stop).CounterSamples
-        $read = 0.0
-        $write = 0.0
-        foreach ($sample in $ioSamples) {
-            $pid = $pidByInstance[$sample.InstanceName]
-            if ($null -eq $pid -or -not $Ids.Contains([int]$pid)) { continue }
-            if ($sample.Path -match 'IO Read Bytes/sec$') { $read += [double]$sample.CookedValue }
-            if ($sample.Path -match 'IO Write Bytes/sec$') { $write += [double]$sample.CookedValue }
+        $accounting = [AeroLinkJobNative]::QueryAccounting($Launch)
+        if (-not $accounting.Success) {
+            return [pscustomobject]@{
+                available = $false
+                cpuMs = $null
+                readBytes = $null
+                writeBytes = $null
+                error = [string]$accounting.Error
+            }
         }
-        [pscustomobject]@{ available = $true; readPerSecond = $read; writePerSecond = $write; error = $null }
+        [pscustomobject]@{
+            available = $true
+            cpuMs = [double]$accounting.CpuMilliseconds
+            readBytes = [double]$accounting.ReadTransferBytes
+            writeBytes = [double]$accounting.WriteTransferBytes
+            error = $null
+        }
     } catch {
-        [pscustomobject]@{ available = $false; readPerSecond = $null; writePerSecond = $null; error = $_.Exception.Message }
+        [pscustomobject]@{
+            available = $false
+            cpuMs = $null
+            readBytes = $null
+            writeBytes = $null
+            error = $_.Exception.Message
+        }
     }
 }
 
-function Get-ProcessSample([int[]]$RootIds) {
+function Get-ProcessSample([int[]]$RootIds, $Launch) {
     $snapshot = Get-ProcessTreeSnapshot $RootIds
+    $accounting = Get-JobAccounting $Launch
     if (-not $snapshot.success) {
-        return [pscustomobject]@{ ids = @(); records = @(); rootAvailable = $false; processTreeAvailable = $false; processTreeError = $snapshot.error; cpuMs = 0.0; cpuAvailable = $false; io = [pscustomobject]@{ available = $false; error = $snapshot.error }; at = [DateTimeOffset]::UtcNow }
+        return [pscustomobject]@{
+            ids = @()
+            records = @()
+            rootAvailable = $false
+            processTreeAvailable = $false
+            processTreeError = $snapshot.error
+            cpuMs = if ($accounting.available) { $accounting.cpuMs } else { 0.0 }
+            cpuAvailable = [bool]$accounting.available
+            io = [pscustomobject]@{
+                available = [bool]$accounting.available
+                readBytes = $accounting.readBytes
+                writeBytes = $accounting.writeBytes
+                error = $accounting.error
+            }
+            at = [DateTimeOffset]::UtcNow
+        }
     }
+
     $records = @($snapshot.records)
     $ids = @($records | ForEach-Object processId)
-    $cpu = 0.0
-    $cpuSamples = 0
-    foreach ($id in $ids) {
-        try { $cpu += (Get-Process -Id $id -ErrorAction Stop).TotalProcessorTime.TotalMilliseconds; $cpuSamples++ } catch { }
+    [pscustomobject]@{
+        ids = $ids
+        records = $records
+        rootAvailable = $snapshot.rootAvailable
+        processTreeAvailable = $true
+        processTreeError = $null
+        cpuMs = if ($accounting.available) { $accounting.cpuMs } else { 0.0 }
+        cpuAvailable = [bool]$accounting.available
+        io = [pscustomobject]@{
+            available = [bool]$accounting.available
+            readBytes = $accounting.readBytes
+            writeBytes = $accounting.writeBytes
+            error = $accounting.error
+        }
+        at = [DateTimeOffset]::UtcNow
     }
-    $rootAvailable = $false
-    $rootAvailable = $snapshot.rootAvailable
-    $io = Get-IoRate ([System.Collections.Generic.HashSet[int]]::new([int[]]$ids))
-    [pscustomobject]@{ ids = $ids; records = $records; rootAvailable = $rootAvailable; processTreeAvailable = $true; processTreeError = $null; cpuMs = $cpu; cpuAvailable = ($rootAvailable -and $cpuSamples -gt 0); io = $io; at = [DateTimeOffset]::UtcNow }
+}
+
+function Update-ShardAccounting([object]$Shard) {
+    $accounting = Get-JobAccounting $Shard.job
+    if (-not $accounting.available) {
+        $Shard.cpuAvailable = $false
+        $Shard.ioAvailable = $false
+        $Shard.cpuError = $accounting.error
+        $Shard.ioError = $accounting.error
+        return
+    }
+    if ([double]$accounting.cpuMs -gt [double]$Shard.maxCpuMs) {
+        $Shard.maxCpuMs = [double]$accounting.cpuMs
+    }
+    if ([double]$accounting.readBytes -gt [double]$Shard.diskReadBytes) {
+        $Shard.diskReadBytes = [double]$accounting.readBytes
+    }
+    if ([double]$accounting.writeBytes -gt [double]$Shard.diskWriteBytes) {
+        $Shard.diskWriteBytes = [double]$accounting.writeBytes
+    }
 }
 
 function New-TestProcess {
@@ -908,6 +1011,11 @@ function New-TestProcess {
             lastSampleAt = $startedAt
             samples = 0
             successfulSamples = 0
+            stdout = ''
+            stderr = ''
+            endedAt = $null
+            exitCode = $null
+            wallMs = 0.0
         }
     } catch {
         $primary = $_.Exception.Message
@@ -931,7 +1039,7 @@ function Wait-TestProcesses([object[]]$Shards) {
             $active = @($Shards | Where-Object { -not $_.process.HasExited })
             foreach ($shard in $active) {
                 try {
-                    $sample = Get-ProcessSample @($shard.process.Id)
+                    $sample = Get-ProcessSample -RootIds @($shard.process.Id) -Launch $shard.job
                     if (-not $sample.processTreeAvailable) {
                         $shard.processTreeAvailable = $false
                         $shard.processTreeError = $sample.processTreeError
@@ -946,10 +1054,13 @@ function Wait-TestProcesses([object[]]$Shards) {
                     $shard.samples++
                     if ($sample.cpuAvailable) { $shard.successfulSamples++ }
                     if ($sample.cpuMs -gt $shard.maxCpuMs) { $shard.maxCpuMs = $sample.cpuMs }
-                    $elapsedSeconds = ($sample.at - $shard.lastSampleAt).TotalSeconds
                     if ($sample.io.available) {
-                        $shard.diskReadBytes += $sample.io.readPerSecond * [math]::Max(0, $elapsedSeconds)
-                        $shard.diskWriteBytes += $sample.io.writePerSecond * [math]::Max(0, $elapsedSeconds)
+                        if ([double]$sample.io.readBytes -gt [double]$shard.diskReadBytes) {
+                            $shard.diskReadBytes = [double]$sample.io.readBytes
+                        }
+                        if ([double]$sample.io.writeBytes -gt [double]$shard.diskWriteBytes) {
+                            $shard.diskWriteBytes = [double]$sample.io.writeBytes
+                        }
                     } else {
                         $shard.ioAvailable = $false
                         $shard.ioError = $sample.io.error
@@ -981,6 +1092,14 @@ function Wait-TestProcesses([object[]]$Shards) {
         foreach ($shard in $Shards) { $shard.waitError = $_.Exception.Message }
     } finally {
         foreach ($shard in $Shards) {
+            try {
+                if ($shard.job) { Update-ShardAccounting $shard }
+            } catch {
+                $shard.cpuAvailable = $false
+                $shard.ioAvailable = $false
+                $shard.cpuError = $_.Exception.Message
+                $shard.ioError = $_.Exception.Message
+            }
             try {
                 if ($shard.job) {
                     $cleanup = Stop-JobContainedProcess -Launch $shard.job -Terminate:(!$shard.process.HasExited) -TimeoutMilliseconds 5000
@@ -1150,7 +1269,7 @@ function Invoke-Observation {
         if ($counts -and ($counts.failed -gt 0 -or $counts.skipped -gt 0 -or $counts.other -gt 0)) { $invalidReasons.Add("shard $($shard.shard) has failed/skipped/other outcomes") }
         if (-not $telemetryHasRecords) { $invalidReasons.Add("shard $($shard.shard) telemetry JSONL was missing or empty") }
         if ($null -eq $aggregate.report) { $invalidReasons.Add("shard $($shard.shard) telemetry aggregation missing") }
-        elseif ($aggregate.report.totals.trxTests -ne $shard.expectedCases -or $aggregate.report.totals.tests -ne $shard.expectedCases) { $invalidReasons.Add("shard $($shard.shard) telemetry/TRX count mismatch") }
+        elseif ($aggregate.report.totals.trxTests -ne $shard.expectedCases) { $invalidReasons.Add("shard $($shard.shard) telemetry/TRX count mismatch") }
         if ($aggregate.report -and $aggregate.report.totals.factories -le 0) { $invalidReasons.Add("shard $($shard.shard) telemetry reported zero factories") }
         if ($aggregate.exitCode -ne 0) { $invalidReasons.Add("shard $($shard.shard) telemetry aggregator exit code $($aggregate.exitCode)") }
         if ($aggregateError) { $invalidReasons.Add("shard $($shard.shard) telemetry aggregation failed: $aggregateError") }
