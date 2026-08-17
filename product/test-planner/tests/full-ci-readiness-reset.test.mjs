@@ -12,9 +12,9 @@ test('readiness reset runs only from trusted pull_request_target synchronize eve
   assert.doesNotMatch(workflow, /actions\/checkout|git\s+(?:checkout|switch|clone)|github\.event\.pull_request\.head/)
 })
 
-test('readiness reset has one bounded label write and no repository-content write permission', () => {
-  assert.match(workflow, /permissions:\s*\n\s*contents:\s*read\s*\n\s*issues:\s*write/)
-  assert.doesNotMatch(workflow, /contents:\s*write|pull-requests:\s*write|actions:\s*write/)
+test('readiness reset has only the bounded label-write permissions it requires', () => {
+  assert.match(workflow, /permissions:\s*\n\s*contents:\s*read\s*\n\s*issues:\s*write\s*\n\s*pull-requests:\s*write/)
+  assert.doesNotMatch(workflow, /contents:\s*write|actions:\s*write/)
   assert.match(workflow, /--method DELETE/)
   assert.match(workflow, /issues\/\$\{PR_NUMBER\}\/labels\/ready-for-full-ci/)
   assert.match(workflow, /GH_TOKEN:\s*\$\{\{ github\.token \}\}/)
