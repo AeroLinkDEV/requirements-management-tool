@@ -122,6 +122,45 @@ public sealed class ReviewCommentApiTests(SharedApiHost host) : IClassFixture<Sh
     }
 
     [Fact]
+    public async Task My_work_tells_the_author_there_are_comments_without_anything_being_sent()
+    {
+        var fixture = await SeedAsync(host.Factory);
+        using var reviewer = host.CreateClient();
+        await LoginAsync(reviewer, fixture.FirstReviewer);
+        await PostCommentAsync(reviewer, fixture.ChangeRequestId, "Tolerance is not stated.");
+
+        using var author = host.CreateClient();
+        await LoginAsync(author, fixture.Author);
+
+        // A draft is not the author's to know about, so nothing appears yet.
+        Assert.Empty(await MyWorkCommentsAsync(author));
+
+        using var approved = await reviewer.PostAsJsonAsync($"/api/change-requests/{fixture.ChangeRequestId}/approve",
+            new { password = AeroLinkApiFactory.MemberPassword, meaning = "I approve this change request." });
+        Assert.Equal(HttpStatusCode.OK, approved.StatusCode);
+
+        var waiting = Assert.Single(await MyWorkCommentsAsync(author));
+        Assert.Equal("A reviewer commented on your package", waiting.GetProperty("title").GetString());
+
+        // Nothing was sent. The package is still locked, so a message now would be noise followed minutes
+        // later by the one that actually matters.
+        using var scope = host.Factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+        Assert.Empty(await db.UserNotifications.AsNoTracking()
+            .Where(x => x.ArtifactId == fixture.ChangeRequestId && x.Recipient == fixture.Author).ToListAsync());
+    }
+
+    private static async Task<List<JsonElement>> MyWorkCommentsAsync(HttpClient client)
+    {
+        using var response = await client.GetAsync("/api/my-work");
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var payload = await response.Content.ReadFromJsonAsync<JsonElement>();
+        return payload.GetProperty("tasks").EnumerateArray()
+            .Where(task => task.GetProperty("type").GetString() == "Reviewer comments")
+            .ToList();
+    }
+
+    [Fact]
     public async Task A_comment_cannot_name_a_revision_from_a_different_package()
     {
         var fixture = await SeedAsync(host.Factory);

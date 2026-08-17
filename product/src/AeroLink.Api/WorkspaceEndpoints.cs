@@ -337,6 +337,33 @@ public static class WorkspaceEndpoints
             var authoredDrafts = (await db.SystemChangeRequests.AsNoTracking().Where(x => x.AuthorId == actor.UserName && x.State == ChangeRequestState.Draft && (projectId == null || x.ProjectId == projectId) && (releaseId == null || x.TargetReleaseId == releaseId))
                 .Select(x => new { id = x.Id, type = "Draft to complete", artifact = x.BaseNumber + "." + (x.Revision < 10 ? "0" : "") + x.Revision, title = x.Title, priority = "Normal", dueAt = x.UpdatedAt.AddDays(10), ageDays = (int)(now - x.UpdatedAt).TotalDays, route = "scr", discipline = x.Type == ChangeRequestType.Software ? "software" : "system" }).ToListAsync(ct))
                 .OrderBy(x => x.dueAt).ToList();
+            // Comments a reviewer published while the cycle is still open. Nothing is sent for these: the
+            // author cannot edit the package until the cycle closes, so an email would be noise followed
+            // minutes later by the one that actually matters. My Work notices them when it is opened, which
+            // is where this author already looks for what is on their plate.
+            var commentsToRead = (await (from comment in db.ReviewComments.AsNoTracking()
+                                             .Where(x => x.State == ReviewCommentState.Published)
+                                         join cycle in db.ReviewCycles.AsNoTracking() on comment.ReviewCycleId equals cycle.Id
+                                         join scr in db.SystemChangeRequests.AsNoTracking() on cycle.ChangeRequestId equals scr.Id
+                                         where scr.AuthorId == actor.UserName && cycle.State == ReviewCycleState.Active
+                                             && (projectId == null || scr.ProjectId == projectId)
+                                             && (releaseId == null || scr.TargetReleaseId == releaseId)
+                                         select new { scr.Id, scr.BaseNumber, scr.Revision, scr.Title, scr.Type, cycle.StartedAt })
+                    .ToListAsync(ct))
+                .GroupBy(x => x.Id)
+                .Select(g => new
+                {
+                    id = g.Key,
+                    type = "Reviewer comments",
+                    artifact = g.First().BaseNumber + "." + (g.First().Revision < 10 ? "0" : "") + g.First().Revision,
+                    title = g.Count() == 1 ? "A reviewer commented on your package" : $"{g.Count()} reviewers' comments on your package",
+                    priority = "Normal",
+                    dueAt = g.First().StartedAt.AddDays(5),
+                    ageDays = (int)(now - g.First().StartedAt).TotalDays,
+                    route = "scr",
+                    discipline = g.First().Type == ChangeRequestType.Software ? "software" : "system",
+                })
+                .OrderBy(x => x.dueAt).ToList();
             var assignedTestWork = (await db.TestChangeReviews.AsNoTracking().Where(x =>
                     x.AssignedEngineerId == actor.UserName && x.State == TestChangeReviewState.Draft
                     && (projectId == null || x.ProjectId == projectId) && (releaseId == null || x.ReleaseId == releaseId))
@@ -384,7 +411,7 @@ public static class WorkspaceEndpoints
                                                   && session.State == EditSessionState.Active && session.UserName == actor.UserName
                                                   && (projectId == null || document.ProjectId == projectId)
                                               select new { id = document.Id, type = "Project document checkout", artifact = document.DocumentNumber + "." + (revision.Revision < 10 ? "0" : "") + revision.Revision, title = "Recover the active desktop checkout", priority = "Normal", dueAt = session.ExpiresAt, ageDays = (int)(now - session.OpenedAt).TotalDays, route = "managedDocuments", discipline = "project" }).ToListAsync(ct)).OrderBy(x => x.dueAt).ToList();
-            var tasks = activeScrSteps.Cast<object>().Concat(releaseSteps).Concat(authoredDrafts).Concat(assignedTestWork).Concat(managedOwnerWork).Concat(managedReviewWork).Concat(managedRecoveryWork).Concat(managedCheckoutWork).ToList();
+            var tasks = activeScrSteps.Cast<object>().Concat(releaseSteps).Concat(authoredDrafts).Concat(commentsToRead).Concat(assignedTestWork).Concat(managedOwnerWork).Concat(managedReviewWork).Concat(managedRecoveryWork).Concat(managedCheckoutWork).ToList();
             return Results.Ok(new { generatedAt = now, summary = new { total = tasks.Count, approvals = activeScrSteps.Count + releaseSteps.Count + managedReviewWork.Count, overdue = activeScrSteps.Count(x => x.dueAt < now) + releaseSteps.Count(x => x.dueAt < now) + authoredDrafts.Count(x => x.dueAt < now) + managedOwnerWork.Count(x => x.dueAt < now) + managedReviewWork.Count(x => x.dueAt < now) + managedRecoveryWork.Count, drafts = authoredDrafts.Count + managedOwnerWork.Count }, tasks });
         });
 
