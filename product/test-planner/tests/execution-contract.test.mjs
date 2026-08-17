@@ -207,9 +207,11 @@ test('Docker absence requires one exact name-bound container or volume diagnosti
 switch ($env:FAKE_DOCKER_MODE) {
   'container-exact' { [Console]::Error.WriteLine('Error: No such object: fixture'); exit 1 }
   'container-empty-list' { Write-Output '[]'; [Console]::Error.WriteLine('Error: No such object: fixture'); exit 1 }
+  'container-lowercase-exact' { [Console]::Error.WriteLine('error: no such object: fixture'); exit 1 }
+  'container-lowercase-empty-list' { Write-Output '[]'; [Console]::Error.WriteLine('error: no such object: fixture'); exit 1 }
   'container-regex-name' { [Console]::Error.WriteLine('Error: No such object: fixture[1]'); exit 1 }
   'container-wrong-name' { [Console]::Error.WriteLine('Error: No such object: other'); exit 1 }
-  'container-wrong-case' { [Console]::Error.WriteLine('error: no such object: fixture'); exit 1 }
+  'container-wrong-case' { [Console]::Error.WriteLine('eRrOr: no such object: fixture'); exit 1 }
   'container-daemon-prefix' { [Console]::Error.WriteLine('Error response from daemon: No such object: fixture'); exit 1 }
   'container-bare' { [Console]::Error.WriteLine('No such object: fixture'); exit 1 }
   'container-leading-space' { [Console]::Error.WriteLine(' Error: No such object: fixture'); exit 1 }
@@ -251,7 +253,7 @@ $ast = [System.Management.Automation.Language.Parser]::ParseFile($source, [ref]$
 $node = $ast.Find({ param($candidate) $candidate -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $candidate.Name -eq 'Get-DockerOwnedResource' }, $true)
 . ([scriptblock]::Create($node.Extent.Text))
 $docker = '${fakeCommand.replaceAll("'", "''")}'
-foreach ($mode in @('container-exact', 'container-empty-list')) {
+foreach ($mode in @('container-exact', 'container-empty-list', 'container-lowercase-exact', 'container-lowercase-empty-list')) {
   $env:FAKE_DOCKER_MODE = $mode
   if ($null -ne (Get-DockerOwnedResource -Docker $docker -Kind container -Name 'fixture')) { throw "missing container form $mode was not treated as absent" }
 }
