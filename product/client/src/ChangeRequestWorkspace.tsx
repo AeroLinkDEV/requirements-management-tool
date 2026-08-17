@@ -16,6 +16,7 @@ import { PersonName } from "./People";
 import { personLabel } from "./PeopleRegistry";
 import ReviewCycleCard from "./ReviewCycleCard";
 import { EarlierCycleComments, ReviewCommentBlock, useReviewComments } from "./ReviewComments";
+import { ReviewEndedNotice } from "./ReviewEndedNotice";
 import {
   ControlledChangeAuthoringActions,
   ControlledChangeAuthoringForm,
@@ -1242,6 +1243,15 @@ export default function ChangeRequestWorkspace({
             />
 
             <ReviewCommentBlock store={comments} anchor="ChangeCase" canComment={canComment} label="the change case" />
+
+            {/* Arrives only when the server flagged the redirect, which it does solely for somebody who held
+                a step on a cycle that has since closed. */}
+            <ReviewEndedNotice
+              currentState={stateLabel(scr.state)}
+              outcome={latest && latest.state !== "Active"
+                ? { state: latest.state, completedAt: latest.completedAt, closureReason: latest.closureReason }
+                : undefined}
+            />
 
             {drivingProblemReports.length > 0 && (
               <section className="workspaceCard">

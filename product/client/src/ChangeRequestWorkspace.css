@@ -1328,3 +1328,32 @@ html .deferAction:disabled { cursor: not-allowed; opacity: .5; }
 .earlierComments summary b { color: #26405a; }
 .earlierComments summary span { color: #7b8ea2; }
 .earlierComments .reviewComment { margin-top: 8px; }
+
+/* The review a link outlived. A modal rather than a banner: the reader arrived expecting to decide
+   something, and a notice they can scroll past would leave them hunting for controls that are not there. */
+.reviewEndedBackdrop {
+  position: fixed; inset: 0; z-index: 60;
+  display: grid; place-items: center; padding: 20px;
+  background: rgb(12 26 44 / 55%);
+}
+.reviewEndedDialog {
+  width: 430px; max-width: 100%;
+  border-radius: 13px; background: white; overflow: hidden;
+  box-shadow: 0 22px 60px rgb(8 22 43 / 34%);
+}
+.reviewEndedRule { height: 4px; background: #d39a30; }
+.reviewEndedBody { display: flex; flex-direction: column; gap: 10px; padding: 22px 24px 20px; }
+.reviewEndedBody h2 { margin: 0; color: #102a44; font-size: 18px; }
+.reviewEndedBody p { margin: 0; color: #56687b; font-size: 13px; line-height: 1.55; }
+.reviewEndedFacts {
+  display: flex; flex-direction: column; gap: 6px; margin: 0;
+  border: 1px solid #e5ebef; border-radius: 8px; background: #f7f9fa; padding: 10px 12px;
+}
+.reviewEndedFacts > div { display: flex; justify-content: space-between; gap: 12px; font-size: 12px; }
+.reviewEndedFacts dt { color: #748396; }
+.reviewEndedFacts dd { margin: 0; color: #2e4357; font-weight: 700; text-align: right; }
+.reviewEndedActions { display: flex; justify-content: flex-end; padding-top: 4px; }
+.reviewEndedActions button {
+  border: 0; border-radius: 8px; background: #153b5e; color: white;
+  font-size: 13px; font-weight: 700; min-height: 38px; padding: 10px 26px; cursor: pointer;
+}

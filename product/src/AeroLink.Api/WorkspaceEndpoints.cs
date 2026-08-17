@@ -518,6 +518,24 @@ public static class WorkspaceEndpoints
 
             if (projectId is null) return Results.Redirect("/");
             if (!await http.HasProjectAccessAsync(db, projectId.Value, ct)) return Results.Redirect("/");
+
+            // Somebody following a review link after the review ended gets told so rather than left to work
+            // out why the decision controls are missing. Asked only after the access check above, and only
+            // of someone who actually held a step: the resolver's standing promise is that missing,
+            // unauthorized and unauthenticated all end in the same place, so this must never be the thing
+            // that reveals a record exists to a person who could not already see it.
+            if (normalized is "scr" or "swcr" or "change-request")
+            {
+                var mySteps = from step in db.ApprovalSteps.AsNoTracking()
+                              join cycle in db.ReviewCycles.AsNoTracking() on step.ReviewCycleId equals cycle.Id
+                              where cycle.ChangeRequestId == id && step.ApproverId == user.UserName
+                              select cycle.State;
+                var states = await mySteps.ToListAsync(ct);
+                // An open cycle wins: they still have a live decision, so there is nothing to explain.
+                if (states.Count > 0 && states.All(x => x != ReviewCycleState.Active))
+                    tail += tail.Contains('?') ? "&reviewEnded=1" : "?reviewEnded=1";
+            }
+
             var programId = await db.Projects.AsNoTracking().Where(x => x.Id == projectId).Select(x => (Guid?)x.ProgramId).SingleOrDefaultAsync(ct);
             if (programId is null) return Results.Redirect("/");
             if (projectWide) return Results.Redirect($"/programs/{programId}/projects/{projectId}{tail}");
