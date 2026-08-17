@@ -1,0 +1,395 @@
+name: Temporary #566 resolve unknown host evidence
+
+on:
+  push:
+    branches:
+      - chatgpt/566-resolve-unknown-hosts-temp
+    paths:
+      - .github/workflows/temporary-566-resolve-unknown-hosts.yml
+
+permissions:
+  contents: write
+
+jobs:
+  resolve-and-verify:
+    runs-on: windows-latest
+    steps:
+      - name: Check out stacked validation branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+
+      - name: Install .NET 10
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Install Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: 24
+
+      - name: Split all four unknown methods out of mixed host classes
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $script = @'
+          from pathlib import Path
+          import re
+
+          def replace_once(path, pattern, replacement, flags=re.S):
+              file = Path(path)
+              text = file.read_text(encoding='utf-8')
+              updated, count = re.subn(pattern, replacement, text, count=1, flags=flags)
+              if count != 1:
+                  raise SystemExit(f'{path}: expected one replacement, found {count}')
+              file.write_text(updated, encoding='utf-8', newline='')
+
+          api = 'product/tests/AeroLink.Api.Tests/ApiTestTelemetryTests.cs'
+          replace_once(api,
+              r'''\n    \[Fact\]\n    public void Reset_for_test_clears_telemetry_state\(\)\n    \{\n        ApiTestTelemetry\.ResetForTest\(\);\n        Assert\.Null\(ApiTestTelemetry\.UnavailableReason\);\n    \}\n(?=\})''',
+              '\n')
+          Path('product/tests/AeroLink.Api.Tests/ApiTestTelemetryStateTests.cs').write_text('''namespace AeroLink.Api.Tests;
+
+          public sealed class ApiTestTelemetryStateTests
+          {
+              [Fact]
+              public void Reset_for_test_clears_telemetry_state()
+              {
+                  ApiTestTelemetry.ResetForTest();
+                  Assert.Null(ApiTestTelemetry.UnavailableReason);
+              }
+          }
+          ''', encoding='utf-8', newline='')
+
+          authority = Path('product/tests/AeroLink.Api.Tests/ServerAuthorityContractTests.cs')
+          authority_text = authority.read_text(encoding='utf-8').replace('using System.Reflection;\n', '')
+          authority.write_text(authority_text, encoding='utf-8', newline='')
+          replace_once(authority,
+              r'''\n    private static readonly string\[\] AuthenticatedMutationContracts =.*?\n    \[Fact\]\n    public async Task Legacy_identity_fields_are_ignored_and_cannot_spoof_change_author''',
+              '\n    [Fact]\n    public async Task Legacy_identity_fields_are_ignored_and_cannot_spoof_change_author')
+          replace_once(authority,
+              r'''\n    \[Fact\]\n    public void Standard_diagnostics_contains_no_human_login_or_committed_password\(\).*?\n    private static string FindProductRoot\(\).*?\n    \}\n(?=\})''',
+              '\n')
+
+          Path('product/tests/AeroLink.Api.Tests/ServerAuthorityIdentityShapeTests.cs').write_text('''using System.Reflection;
+
+          namespace AeroLink.Api.Tests;
+
+          public sealed class ServerAuthorityIdentityShapeTests
+          {
+              private static readonly string[] AuthenticatedMutationContracts =
+              [
+                  "CreateChangeRequestRequest",
+                  "CreateChangeRequestDraftRequest",
+                  "RequirementChangeRequest",
+                  "SubmitReviewRequest",
+                  "ActorRequest",
+                  "RequestChangesRequest",
+                  "CreateBaselineRequest",
+                  "BaselineSelectionRequest",
+                  "EmptyMutationRequest",
+                  "CreateBuildRequest",
+                  "RecordTestExecutionRequest",
+                  "DispositionImpactRequest",
+                  "BulkDispositionImpactRequest",
+                  "SelectBuildRequest",
+                  "StartReleaseReviewRequest"
+              ];
+
+              private static readonly string[] CallerSelectableIdentityProperties =
+              [
+                  "ActorId", "AuthorId", "RecordedBy", "ExecutedBy", "OwnerId"
+              ];
+
+              [Fact]
+              public void Authenticated_browser_contracts_expose_no_caller_selectable_identity()
+              {
+                  var contracts = typeof(Program).Assembly.GetTypes()
+                      .Where(type => AuthenticatedMutationContracts.Contains(type.Name))
+                      .ToDictionary(type => type.Name);
+
+                  Assert.Equal(AuthenticatedMutationContracts.Length, contracts.Count);
+                  foreach (var contractName in AuthenticatedMutationContracts)
+                  {
+                      var properties = contracts[contractName].GetProperties(BindingFlags.Instance | BindingFlags.Public);
+                      Assert.DoesNotContain(properties, property =>
+                          CallerSelectableIdentityProperties.Contains(property.Name, StringComparer.OrdinalIgnoreCase));
+                  }
+              }
+          }
+          ''', encoding='utf-8', newline='')
+
+          Path('product/tests/AeroLink.Api.Tests/ServerAuthorityDiagnosticsTests.cs').write_text('''namespace AeroLink.Api.Tests;
+
+          public sealed class ServerAuthorityDiagnosticsTests
+          {
+              [Fact]
+              public void Standard_diagnostics_contains_no_human_login_or_committed_password()
+              {
+                  var productRoot = FindProductRoot();
+                  var script = File.ReadAllText(Path.Combine(productRoot, "scripts", "Get-AeroLinkDiagnostics.ps1"));
+
+                  Assert.DoesNotContain("/api/auth/login", script, StringComparison.OrdinalIgnoreCase);
+                  Assert.DoesNotContain("AeroLink!2026", script, StringComparison.Ordinal);
+                  Assert.DoesNotContain("[string]$Password", script, StringComparison.OrdinalIgnoreCase);
+                  Assert.Contains("/health/live", script, StringComparison.Ordinal);
+                  Assert.Contains("/health/ready", script, StringComparison.Ordinal);
+                  Assert.Contains("CreatesBrowserSession = $false", script, StringComparison.Ordinal);
+              }
+
+              private static string FindProductRoot()
+              {
+                  var current = new DirectoryInfo(AppContext.BaseDirectory);
+                  while (current is not null && !File.Exists(Path.Combine(current.FullName, "AeroLink.slnx")))
+                      current = current.Parent;
+                  return current?.FullName ?? throw new InvalidOperationException("Could not locate the product root.");
+              }
+          }
+          ''', encoding='utf-8', newline='')
+
+          security = 'product/tests/AeroLink.Api.Tests/SecurityBoundaryTests.cs'
+          replace_once(security,
+              r'''\n    \[Fact\]\n    public void File_backed_sqlite_contention_uses_the_provider_lock_retry_budget_without_a_custom_busy_handler\(\).*?\n    \}\n\n    internal static void AssertSqliteConfiguration''',
+              '\n    internal static void AssertSqliteConfiguration')
+
+          Path('product/tests/AeroLink.Api.Tests/SqliteContentionContractTests.cs').write_text('''using System.Diagnostics;
+          using Microsoft.Data.Sqlite;
+
+          namespace AeroLink.Api.Tests;
+
+          public sealed class SqliteContentionContractTests
+          {
+              [Fact]
+              public void File_backed_sqlite_contention_uses_the_provider_lock_retry_budget_without_a_custom_busy_handler()
+              {
+                  var path = Path.Combine(Path.GetTempPath(), $"aerolink-sqlite-contention-{Guid.NewGuid():N}.db");
+                  try
+                  {
+                      var holderConnectionString = new SqliteConnectionStringBuilder
+                      {
+                          DataSource = path,
+                          Pooling = false,
+                          DefaultTimeout = AeroLinkApiFactory.CommandTimeoutSeconds,
+                      }.ToString();
+                      using var holder = new SqliteConnection(holderConnectionString);
+                      holder.Open();
+                      using (var journalMode = holder.CreateCommand())
+                      {
+                          journalMode.CommandText = "PRAGMA journal_mode=WAL;";
+                          Assert.Equal("wal", journalMode.ExecuteScalar()?.ToString()?.ToLowerInvariant());
+                      }
+                      using (var createTable = holder.CreateCommand())
+                      {
+                          createTable.CommandText = "CREATE TABLE lock_probe (id INTEGER PRIMARY KEY);";
+                          createTable.ExecuteNonQuery();
+                      }
+
+                      using var holderTransaction = holder.BeginTransaction();
+                      using (var holderWrite = holder.CreateCommand())
+                      {
+                          holderWrite.Transaction = holderTransaction;
+                          holderWrite.CommandText = "INSERT INTO lock_probe DEFAULT VALUES;";
+                          holderWrite.ExecuteNonQuery();
+                      }
+
+                      var contenderConnectionString = new SqliteConnectionStringBuilder
+                      {
+                          DataSource = path,
+                          Pooling = false,
+                          DefaultTimeout = 1,
+                      }.ToString();
+                      using var contender = new SqliteConnection(contenderConnectionString);
+                      contender.Open();
+                      Assert.Equal(1, contender.DefaultTimeout);
+
+                      using var busyTimeout = contender.CreateCommand();
+                      busyTimeout.CommandText = "PRAGMA busy_timeout;";
+                      Assert.Equal(0L, Convert.ToInt64(busyTimeout.ExecuteScalar()));
+
+                      using var contenderWrite = contender.CreateCommand();
+                      Assert.Equal(1, contenderWrite.CommandTimeout);
+                      contenderWrite.CommandText = "INSERT INTO lock_probe DEFAULT VALUES;";
+                      var stopwatch = Stopwatch.StartNew();
+                      var error = Assert.Throws<SqliteException>(() => contenderWrite.ExecuteNonQuery());
+                      stopwatch.Stop();
+                      Assert.True(
+                          stopwatch.Elapsed >= TimeSpan.FromMilliseconds(750),
+                          $"The provider returned SQLITE_BUSY too early after {stopwatch.Elapsed.TotalMilliseconds:F0} ms.");
+                      Assert.Equal(5, error.SqliteErrorCode);
+                  }
+                  finally
+                  {
+                      SqliteConnection.ClearAllPools();
+                      AeroLinkApiFactory.DeleteDatabaseArtifacts(path);
+                  }
+              }
+          }
+          ''', encoding='utf-8', newline='')
+          '@
+          $script | python -
+          if ($LASTEXITCODE -ne 0) { throw 'Unknown-host source split failed.' }
+
+      - name: Regenerate source-derived inventories
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          node product/test-contracts/tools/generate-test-intent.mjs
+          if ($LASTEXITCODE -ne 0) { throw 'Intent generation failed.' }
+          node product/test-contracts/tools/generate-host-classification.mjs
+          if ($LASTEXITCODE -ne 0) { throw 'Host classification generation failed.' }
+
+      - name: Prove exact safe-ceiling arithmetic and refresh pinned snapshots
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $script = @'
+          import json
+          from pathlib import Path
+
+          intent_path = Path('product/test-contracts/api-test-intent.json')
+          host_path = Path('product/test-contracts/api-host-classification.json')
+          intent = json.loads(intent_path.read_text(encoding='utf-8'))
+          host = json.loads(host_path.read_text(encoding='utf-8'))
+          t = intent['totals']
+          expected = {
+              'tests': 442,
+              'cases': 492,
+              'classes': 85,
+              'hostedTests': 430,
+              'hostedCases': 471,
+              'nonHostedTests': 12,
+              'nonHostedCases': 21,
+              'unknownHostTests': 0,
+              'unknownHostCases': 0,
+              'hostedCandidateTests': 3,
+              'hostedCandidateCases': 3,
+              'unknownCandidateTests': 0,
+              'unknownCandidateCases': 0,
+              'unknownCaseTests': 0,
+              'criterion7': 'escape-clause-supported',
+          }
+          for key, value in expected.items():
+              if t.get(key) != value:
+                  raise SystemExit(f'intent total {key}: expected {value!r}, got {t.get(key)!r}')
+
+          expected_summary = {
+              'converted': {'classes': 10, 'tests': 52, 'knownCases': 52, 'unknownCaseTests': 0},
+              'fresh-host': {'classes': 41, 'tests': 200, 'knownCases': 225, 'unknownCaseTests': 0},
+              'migration-candidate': {'classes': 3, 'tests': 3, 'knownCases': 3, 'unknownCaseTests': 0},
+              'reusable-host': {'classes': 31, 'tests': 187, 'knownCases': 212, 'unknownCaseTests': 0},
+          }
+          if host['summary'] != expected_summary:
+              raise SystemExit(f'unexpected host summary: {host["summary"]!r}')
+          if host['totals'] != {'classes': 85, 'tests': 442, 'knownCases': 492, 'unknownCaseTests': 0}:
+              raise SystemExit(f'unexpected host totals: {host["totals"]!r}')
+
+          rows = {f"{row['cls']}.{row['test']}": row for row in intent['tests']}
+          moved = [
+              'ApiTestTelemetryStateTests.Reset_for_test_clears_telemetry_state',
+              'ServerAuthorityIdentityShapeTests.Authenticated_browser_contracts_expose_no_caller_selectable_identity',
+              'ServerAuthorityDiagnosticsTests.Standard_diagnostics_contains_no_human_login_or_committed_password',
+              'SqliteContentionContractTests.File_backed_sqlite_contention_uses_the_provider_lock_retry_budget_without_a_custom_busy_handler',
+          ]
+          for key in moved:
+              if rows.get(key, {}).get('hosted') != 'not-hosted':
+                  raise SystemExit(f'{key} did not become explicitly not-hosted: {rows.get(key)!r}')
+
+          test_path = Path('product/test-contracts/tests/inventory.test.mjs')
+          text = test_path.read_text(encoding='utf-8')
+          replacements = {
+              "assert.deepEqual(hostArtifact.summary['reusable-host'], { classes: 30, tests: 186, knownCases: 211, unknownCaseTests: 0 })": "assert.deepEqual(hostArtifact.summary['reusable-host'], { classes: 31, tests: 187, knownCases: 212, unknownCaseTests: 0 })",
+              "assert.deepEqual(hostArtifact.summary['fresh-host'], { classes: 40, tests: 203, knownCases: 228, unknownCaseTests: 0 })": "assert.deepEqual(hostArtifact.summary['fresh-host'], { classes: 41, tests: 200, knownCases: 225, unknownCaseTests: 0 })",
+              "assert.deepEqual(hostArtifact.summary['migration-candidate'], { classes: 1, tests: 1, knownCases: 1, unknownCaseTests: 0 })": "assert.deepEqual(hostArtifact.summary['migration-candidate'], { classes: 3, tests: 3, knownCases: 3, unknownCaseTests: 0 })",
+              r"reusable-host\s+30\s+186\s+211\s+0\s+42\.1%": r"reusable-host\s+31\s+187\s+212\s+0\s+42\.3%",
+              r"fresh-host\s+40\s+203\s+228\s+0\s+45\.9%": r"fresh-host\s+41\s+200\s+225\s+0\s+45\.2%",
+              r"Remaining reuse headroom:\s+30 classes, 186 methods, 211 known cases": r"Remaining reuse headroom:\s+31 classes, 187 methods, 212 known cases",
+              "assert.equal(intentArtifact.totals.criterion7, 'unresolved')": "assert.equal(intentArtifact.totals.criterion7, 'escape-clause-supported')\n  assert.equal(intentArtifact.totals.unknownHostTests, 0)\n  assert.equal(intentArtifact.totals.unknownCandidateTests, 0)\n  assert.equal(intentArtifact.totals.hostedCandidateCases, 3)",
+          }
+          for old, new in replacements.items():
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f'expected one snapshot anchor {old!r}, found {count}')
+              text = text.replace(old, new)
+          test_path.write_text(text, encoding='utf-8', newline='')
+
+          intents = intent['intents']
+          table = []
+          for key, row in intents.items():
+              table.append(f"| {row['label']} | {row['tests']} | {row['cases']} | {row['classes']} | {row['level']} |")
+          doc = f'''# API test intent inventory
+
+Every test in `product/tests/AeroLink.Api.Tests` is classified by primary intent and per-method host evidence. Regenerate the committed artifacts with:
+
+```bash
+node product/test-contracts/tools/generate-test-intent.mjs
+node product/test-contracts/tools/generate-host-classification.mjs
+node --test product/test-contracts/tests/inventory.test.mjs
+```
+
+## Current source-exact result
+
+**{t['tests']} test methods, {t['cases']} known invocations, {t['classes']} API test classes.** All theory case counts are known. Host evidence is now complete: **{t['hostedTests']} methods / {t['hostedCases']} cases are hosted, {t['nonHostedTests']} methods / {t['nonHostedCases']} cases are explicitly non-hosted, and {t['unknownHostTests']} methods remain unknown.**
+
+| Intent | Tests | Cases | Classes | Intended level |
+|---|---:|---:|---:|---|
+{chr(10).join(table)}
+
+Criterion 7 is now machine-derived as **`{t['criterion7']}`**. There are **{t['hostedCandidateTests']} explicitly hosted candidate methods / {t['hostedCandidateCases']} cases**, or {100*t['hostedCandidateCases']/t['hostedCases']:.1f}% of hosted invocations, with **zero unknown candidate methods and zero unknown-case theories**. This supports #566's evidence-based smaller-safe-ceiling alternative; it does not authorize deleting the remaining integration tests.
+
+The previously ambiguous methods are now structurally separated into host-free classes, so the analyzer does not need an override or class-level guess. The remaining candidate methods have been source-audited in #566: document-generation/persistence checks remain integration tests, and the release-manifest calculation requires a production application/service extraction before a lower-layer test could preserve the same defect sensitivity.
+
+## Classification rules
+
+Intent is assigned in conservative order: authentication/policy, filesystem, startup/configuration, EF translation/relational behavior, HTTP boundary, then multi-case rule matrix. An unmatched method is in-process logic only when it has no client evidence.
+
+Host status is method-level:
+
+- `hosted` requires direct factory/client/shared-host evidence in the method body;
+- `not-hosted` means the method is in a class with no host context;
+- `unknown` means the class has host context but the method body does not prove whether it uses that context.
+
+Unknown host evidence deliberately blocks criterion 7; it is never converted to zero or assumed safe.
+
+## Placement policy
+
+`product/docs/TEST_RISK_LAYERS.md` is the placement source of truth. Tests live at the lowest layer that preserves the defect class: Domain for deterministic rules, application/service tests for extracted decisions, Infrastructure for provider/filesystem behavior, hosted API for HTTP/security/transaction boundaries, and browser layers for user-visible integration. Release, security, audit, destructive, and exact-intent behavior may intentionally retain evidence at multiple layers when each layer catches a distinct failure mode.
+
+## Limits
+
+The inventory is static source analysis. It is exact for the syntax it recognizes and fails closed on unknown host/case evidence, but it does not replace runtime performance measurement. #566 performance closeout still requires Windows wall-clock, CPU, and host-start evidence rather than extrapolating from counts.
+'''
+          Path('product/docs/API_TEST_INTENT_INVENTORY.md').write_text(doc, encoding='utf-8', newline='')
+          '@
+          $script | python -
+          if ($LASTEXITCODE -ne 0) { throw 'Safe-ceiling validation/snapshot refresh failed.' }
+
+      - name: Run inventory contracts
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $tests = @(Get-ChildItem -LiteralPath product/test-contracts/tests -Filter '*.test.mjs' -File | Sort-Object FullName | ForEach-Object { $_.FullName })
+          & node --test $tests
+          if ($LASTEXITCODE -ne 0) { throw 'Inventory contract suite failed.' }
+
+      - name: Run affected API tests without persistent resources
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          dotnet test product/tests/AeroLink.Api.Tests/AeroLink.Api.Tests.csproj --configuration Release --filter "FullyQualifiedName~ApiTestTelemetryTests|FullyQualifiedName~ApiTestTelemetryStateTests|FullyQualifiedName~ServerAuthorityContractTests|FullyQualifiedName~ServerAuthorityIdentityShapeTests|FullyQualifiedName~ServerAuthorityDiagnosticsTests|FullyQualifiedName~SqliteContentionContractTests"
+          if ($LASTEXITCODE -ne 0) { throw 'Affected API tests failed.' }
+
+      - name: Commit validated non-workflow result
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          git diff --check
+          if ($LASTEXITCODE -ne 0) { throw 'git diff --check failed.' }
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add product/tests/AeroLink.Api.Tests/ApiTestTelemetryTests.cs product/tests/AeroLink.Api.Tests/ApiTestTelemetryStateTests.cs product/tests/AeroLink.Api.Tests/ServerAuthorityContractTests.cs product/tests/AeroLink.Api.Tests/ServerAuthorityIdentityShapeTests.cs product/tests/AeroLink.Api.Tests/ServerAuthorityDiagnosticsTests.cs product/tests/AeroLink.Api.Tests/SecurityBoundaryTests.cs product/tests/AeroLink.Api.Tests/SqliteContentionContractTests.cs product/test-contracts/api-test-intent.json product/test-contracts/api-host-classification.json product/test-contracts/tests/inventory.test.mjs product/docs/API_TEST_INTENT_INVENTORY.md
+          git diff --cached --check
+          if ($LASTEXITCODE -ne 0) { throw 'staged diff check failed.' }
+          git diff --cached --stat
+          git commit -m 'Resolve #566 unknown API host evidence'
+          git push origin HEAD:chatgpt/566-resolve-unknown-hosts-temp
