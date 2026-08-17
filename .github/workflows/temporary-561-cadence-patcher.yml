@@ -22,7 +22,7 @@ jobs:
       - name: Prepare bounded cadence branch
         shell: bash
         env:
-          TARGET_BRANCH: chatgpt/561-cadence-switch-v2
+          TARGET_BRANCH: chatgpt/561-cadence-switch-v3
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
@@ -40,6 +40,9 @@ jobs:
             exit 1
           fi
           grep -q '^  workflow_dispatch:$' .github/workflows/ci.yml
+          grep -Fq "inputs.pull_request_number != ''" .github/workflows/ci.yml
+          grep -Fq "inputs.pull_request_number == '' && inputs.full_diagnostics == true" .github/workflows/ci.yml
+          grep -Fq 'effective_event=' .github/workflows/ci.yml
           grep -q '^  pull_request:$' .github/workflows/fast-pr-feedback.yml
           grep -q '^  pull_request_target:$' .github/workflows/reset-full-ci-readiness.yml
           grep -q 'ready-for-full-ci' product/docs/MERGING.md
