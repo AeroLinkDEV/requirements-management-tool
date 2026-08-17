@@ -88,7 +88,9 @@ export function useReviewComments(api: string, changeRequestId: string, enabled:
     mutate(() => fetch(`${api}/api/change-requests/${changeRequestId}/review-comments/${id}`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ anchor: "ChangeCase", body }),
+      // No anchor. Where a comment sits is settled when it is written, and a revise that could restate it
+      // is a revise that could silently move somebody's remark to a different requirement.
+      body: JSON.stringify({ body }),
     }), "The comment could not be updated. It is unchanged."),
     [api, changeRequestId, mutate]);
 

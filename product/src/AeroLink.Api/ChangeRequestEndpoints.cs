@@ -748,7 +748,7 @@ public static class ChangeRequestEndpoints
         });
 
         app.MapPut("/api/change-requests/{id:guid}/review-comments/{commentId:guid}", async (Guid id, Guid commentId,
-            ReviewCommentRequest request, HttpContext http, IChangeRequestRepository repository, CancellationToken ct) =>
+            ReviseReviewCommentRequest request, HttpContext http, IChangeRequestRepository repository, CancellationToken ct) =>
         {
             var scr = await repository.GetAsync(id, ct); if (scr is null) return Results.NotFound();
             try

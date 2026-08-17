@@ -45,6 +45,12 @@ record RequestChangesRequest(long? ExpectedVersion, string Reason);
 /// <paramref name="RequirementChangeId"/> is set for the second and omitted for the first.
 /// </summary>
 record ReviewCommentRequest(string Anchor, Guid? RequirementChangeId, string Body);
+/// <summary>
+/// Revising carries the new text and nothing else. Where a comment is anchored is settled when it is
+/// written: a request that could restate the anchor is a request that could silently move a comment to a
+/// different requirement, and no caller has any business doing that.
+/// </summary>
+record ReviseReviewCommentRequest(string Body);
 record CreateBaselineRequest(string BaseNumber, int Revision, Guid ProjectId, Guid ReleaseId, Guid? PredecessorBaselineId, string Name);
 record CreateReleaseCampaignRequest(Guid ProjectId, Guid ReleaseId, Guid BaselineId, string Name);
 record BaselineSelectionRequest(Guid ChangeRequestId);

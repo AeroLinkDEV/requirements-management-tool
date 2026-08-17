@@ -108,7 +108,7 @@ public sealed class ReviewCommentApiTests(SharedApiHost host) : IClassFixture<Sh
         await LoginAsync(second, fixture.SecondReviewer);
         using var refused = await second.PutAsJsonAsync(
             $"/api/change-requests/{fixture.ChangeRequestId}/review-comments/{commentId}",
-            new { anchor = "ChangeCase", body = "Not yours." });
+            new { body = "Not yours." });
         Assert.Equal(HttpStatusCode.BadRequest, refused.StatusCode);
 
         using var deleted = await second.DeleteAsync(
@@ -117,7 +117,7 @@ public sealed class ReviewCommentApiTests(SharedApiHost host) : IClassFixture<Sh
 
         using var revised = await first.PutAsJsonAsync(
             $"/api/change-requests/{fixture.ChangeRequestId}/review-comments/{commentId}",
-            new { anchor = "ChangeCase", body = "Second thought." });
+            new { body = "Second thought." });
         Assert.Equal(HttpStatusCode.OK, revised.StatusCode);
     }
 
