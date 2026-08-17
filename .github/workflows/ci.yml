@@ -22,17 +22,33 @@ on:
         required: false
         default: true
         type: boolean
+      pull_request_number:
+        description: Trusted ready-for-full-ci pull request number; leave blank for manual diagnostics
+        required: false
+        default: ''
+        type: string
+      pull_request_base_sha:
+        description: Trusted ready-for-full-ci base SHA
+        required: false
+        default: ''
+        type: string
+      pull_request_head_sha:
+        description: Trusted ready-for-full-ci exact head SHA
+        required: false
+        default: ''
+        type: string
 
 permissions:
   actions: read
   contents: read
+  pull-requests: read
 
 # A pull request groups by its number, so a new push cancels the run it supersedes. Everything else groups by
 # ref — and a merge-queue entry's ref is its own `gh-readonly-queue/...` branch, unique per candidate. Queue
 # entries therefore cannot cancel each other, and a pull request's own run cannot cancel its queue run. That
 # matters more than it looks: a queue whose runs cancel one another does not fail, it deadlocks.
 concurrency:
-  group: quality-${{ github.event.pull_request.number || github.ref }}
+  group: quality-${{ inputs.pull_request_number || github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -82,6 +98,31 @@ jobs:
           PROVENANCE_OUTPUT_DIR: ${{ runner.temp }}/provenance-preflight
           PROVENANCE_MODE: enforce
         run: node "${{ github.workspace }}/product/ci-metrics/bin/check-main-provenance.mjs"
+      - name: Authenticate label-dispatched pull-request context
+        if: github.event_name == 'workflow_dispatch' && inputs.pull_request_number != ''
+        shell: pwsh
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          REQUESTED_PR_NUMBER: ${{ inputs.pull_request_number }}
+          REQUESTED_BASE_SHA: ${{ inputs.pull_request_base_sha }}
+          REQUESTED_HEAD_SHA: ${{ inputs.pull_request_head_sha }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ($env:REQUESTED_PR_NUMBER -notmatch '^[1-9][0-9]*$') { throw 'Invalid pull-request number.' }
+          if ($env:REQUESTED_BASE_SHA -notmatch '^[0-9a-f]{40}$') { throw 'Invalid requested base SHA.' }
+          if ($env:REQUESTED_HEAD_SHA -notmatch '^[0-9a-f]{40}$') { throw 'Invalid requested head SHA.' }
+          $headers = @{
+            Authorization = "Bearer $env:GITHUB_TOKEN"
+            Accept = 'application/vnd.github+json'
+            'X-GitHub-Api-Version' = '2022-11-28'
+          }
+          $pr = Invoke-RestMethod -Headers $headers -Uri "$env:GITHUB_API_URL/repos/$env:GITHUB_REPOSITORY/pulls/$env:REQUESTED_PR_NUMBER"
+          if ($pr.state -ne 'open') { throw 'The requested pull request is not open.' }
+          if ($pr.head.repo.full_name -ne $env:GITHUB_REPOSITORY) { throw 'Fork pull requests cannot request privileged Full validation.' }
+          if ($pr.head.sha -ne $env:REQUESTED_HEAD_SHA -or $env:GITHUB_SHA -ne $env:REQUESTED_HEAD_SHA) { throw 'The requested Full run is not attached to the exact current PR head.' }
+          if ($pr.base.sha -ne $env:REQUESTED_BASE_SHA) { throw 'The requested Full run does not match the current PR base.' }
+          if ($env:GITHUB_REF -ne "refs/heads/$($pr.head.ref)") { throw 'Workflow dispatch ref does not match the PR head branch.' }
+          if (-not @($pr.labels | ForEach-Object { $_.name }).Contains('ready-for-full-ci')) { throw 'ready-for-full-ci is no longer present on this pull request.' }
       - name: Mark setup complete
         continue-on-error: true
         run: node "${{ github.workspace }}/product/ci-metrics/bin/mark.mjs" setup-end
@@ -89,9 +130,9 @@ jobs:
         id: classify
         shell: bash
         env:
-          EVENT_NAME: ${{ github.event_name }}
-          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
-          HEAD_SHA: ${{ github.sha }}
+          EVENT_NAME: ${{ inputs.pull_request_number != '' && 'pull_request' || github.event_name }}
+          BASE_SHA: ${{ inputs.pull_request_base_sha || github.event.pull_request.base.sha || github.event.before }}
+          HEAD_SHA: ${{ inputs.pull_request_head_sha || github.sha }}
         run: node "${{ github.workspace }}/product/test-planner/tools/classify-ci.mjs"
       - name: Mark test complete
         if: always()

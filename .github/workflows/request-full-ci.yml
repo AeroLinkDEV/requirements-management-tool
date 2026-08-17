@@ -1,0 +1,45 @@
+name: Request full merge validation
+
+on:
+  pull_request_target:
+    types: [labeled]
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  dispatch:
+    name: Dispatch exact ready-for-full-ci head
+    if: github.event.label.name == 'ready-for-full-ci' && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    steps:
+      - name: Dispatch Product quality gate for exact PR head
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          python - <<'PY' > "$RUNNER_TEMP/full-ci-dispatch.json"
+          import json, os
+          print(json.dumps({
+              "ref": os.environ["HEAD_REF"],
+              "inputs": {
+                  "pull_request_number": os.environ["PR_NUMBER"],
+                  "pull_request_base_sha": os.environ["BASE_SHA"],
+                  "pull_request_head_sha": os.environ["HEAD_SHA"],
+                  "full_diagnostics": "false",
+              },
+          }))
+          PY
+          curl --fail-with-body --silent --show-error \
+            --request POST \
+            --header "Authorization: Bearer $GITHUB_TOKEN" \
+            --header "Accept: application/vnd.github+json" \
+            --header "X-GitHub-Api-Version: 2022-11-28" \
+            --header "Content-Type: application/json" \
+            --data-binary "@$RUNNER_TEMP/full-ci-dispatch.json" \
+            "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/dispatches"
