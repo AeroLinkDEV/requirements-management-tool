@@ -1,0 +1,77 @@
+name: Temporary #561 ready-full dispatcher validation v4
+
+on:
+  push:
+    branches:
+      - chatgpt/561-ready-full-dispatch
+    paths:
+      - .github/workflows/temporary-561-ready-full-dispatch-v4.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply-and-verify:
+    runs-on: windows-latest
+    steps:
+      - name: Check out stacked task branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+
+      - name: Install Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: 24
+
+      - name: Reuse v3 source with raw contract literal
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $extractor = @'
+          from pathlib import Path
+          import re
+          import textwrap
+
+          workflow = Path('.github/workflows/temporary-561-ready-full-dispatch-v3.yml').read_text(encoding='utf-8')
+          match = re.search(r"\$script = @'\n(?P<script>.*?)\n\s+'@\n\s+\$script \| python -", workflow, re.S)
+          if not match:
+              raise SystemExit('Could not locate the reviewed v3 source transformation')
+          script = textwrap.dedent(match.group('script'))
+          old = "contract.write_text('''import { test } from 'node:test'"
+          new = "contract.write_text(r'''import { test } from 'node:test'"
+          if script.count(old) != 1:
+              raise SystemExit(f'Expected one contract literal anchor, found {script.count(old)}')
+          script = script.replace(old, new)
+          exec(compile(script, '<temporary-561-v3-source-raw-contract>', 'exec'))
+          '@
+          $extractor | python -
+          if ($LASTEXITCODE -ne 0) { throw 'Bounded #561 v4 source transformation failed.' }
+
+      - name: Validate YAML and planner contracts
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          ruby -e "require 'yaml'; YAML.load_file('.github/workflows/ci.yml', aliases: true); YAML.load_file('.github/workflows/request-full-ci.yml', aliases: true)"
+          if ($LASTEXITCODE -ne 0) { throw 'Generated workflow YAML did not parse.' }
+          $tests = @(Get-ChildItem -LiteralPath product/test-planner/tests -Filter '*.test.mjs' -File | Sort-Object FullName | ForEach-Object { $_.FullName })
+          & node --test $tests
+          if ($LASTEXITCODE -ne 0) { throw 'Planner/dispatcher contract suite failed.' }
+          git diff --check
+          if ($LASTEXITCODE -ne 0) { throw 'git diff --check failed.' }
+
+      - name: Build exact production commit object
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add .github/workflows/ci.yml .github/workflows/request-full-ci.yml product/test-planner/tests/full-ci-readiness-dispatch.test.mjs
+          git rm .github/workflows/temporary-561-ready-full-dispatch.yml .github/workflows/temporary-561-ready-full-dispatch-v2.yml .github/workflows/temporary-561-ready-full-dispatch-v3.yml .github/workflows/temporary-561-ready-full-dispatch-v4.yml
+          git diff --cached --check
+          if ($LASTEXITCODE -ne 0) { throw 'Staged diff check failed.' }
+          git diff --cached --stat
+          git commit -m 'Add trusted ready-for-full-ci dispatcher'
+          Write-Host ("PRODUCTION_COMMIT=" + (git rev-parse HEAD))
+          git push origin HEAD:chatgpt/561-ready-full-dispatch
+          if ($LASTEXITCODE -eq 0) { throw 'Expected workflow-file push to be blocked; connector publication is required.' }
