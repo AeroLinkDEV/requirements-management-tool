@@ -1,17 +1,17 @@
 {
   "schemaVersion": "aerolink-api-test-intent/v2",
   "totals": {
-    "tests": 443,
-    "cases": 493,
+    "tests": 442,
+    "cases": 492,
     "classes": 81,
-    "hostedTests": 431,
-    "hostedCases": 472,
+    "hostedTests": 430,
+    "hostedCases": 471,
     "nonHostedTests": 8,
     "nonHostedCases": 17,
     "unknownHostTests": 4,
     "unknownHostCases": 4,
-    "hostedCandidateTests": 4,
-    "hostedCandidateCases": 4,
+    "hostedCandidateTests": 3,
+    "hostedCandidateCases": 3,
     "unknownCandidateTests": 2,
     "unknownCandidateCases": 2,
     "unknownCaseTests": 0,
@@ -53,8 +53,8 @@
     "in-process-logic": {
       "label": "In-process logic with no HTTP and no client",
       "level": "Domain or Infrastructure (migration candidate)",
-      "tests": 6,
-      "cases": 6,
+      "tests": 5,
+      "cases": 5,
       "unknownCases": 0,
       "classes": 5
     },
@@ -5184,8 +5184,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 200,
-        "end": 223
+        "start": 169,
+        "end": 192
       }
     },
     {
@@ -5201,25 +5201,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 225,
-        "end": 250
-      }
-    },
-    {
-      "cls": "ReleaseCampaignExactIntentApiTests",
-      "test": "Review_can_restart_after_cancellation_with_history_retained",
-      "kind": "Fact",
-      "intent": "in-process-logic",
-      "cases": 1,
-      "caseEvidence": "Fact",
-      "hosted": "hosted",
-      "hostEvidence": [
-        "factory-construction",
-        "factory-services"
-      ],
-      "sourceLines": {
-        "start": 169,
-        "end": 198
+        "start": 194,
+        "end": 219
       }
     },
     {
