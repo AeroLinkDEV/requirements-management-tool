@@ -1,50 +1,52 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 
-const read = (relative) => readFileSync(new URL(`../../../${relative}`, import.meta.url), 'utf8')
+const root = new URL('../../../', import.meta.url)
+const read = (relative) => readFileSync(new URL(relative, root), 'utf8')
 const requester = read('.github/workflows/request-full-ci.yml')
-const bridge = read('.github/workflows/full-ci-required-check.yml')
 const full = read('.github/workflows/ci.yml')
 const fast = read('.github/workflows/fast-pr-feedback.yml')
 const reset = read('.github/workflows/reset-full-ci-readiness.yml')
 
-test('ready label requester is trusted-base, exact-label, same-repository, and dispatch-only', () => {
+test('ready label requester is trusted-base, exact-label, same-repository, and the sole protected binding', () => {
   assert.match(requester, /pull_request_target:/)
   assert.match(requester, /types: \[labeled\]/)
   assert.match(requester, /actions: write/)
   assert.match(requester, /contents: read/)
+  assert.match(requester, /pull-requests: read/)
   assert.doesNotMatch(requester, /actions\/checkout|git checkout|git clone/)
   assert.match(requester, /github\.event\.label\.name == 'ready-for-full-ci'/)
   assert.match(requester, /github\.event\.pull_request\.head\.repo\.full_name == github\.repository/)
+  assert.match(requester, /'Report what this run validated'/)
   assert.match(requester, /actions\/workflows\/ci\.yml\/dispatches/)
+  assert.equal(existsSync(new URL('.github/workflows/full-ci-required-check.yml', root)), false)
 })
 
-test('ready label requester creates at most one Product dispatch per exact SHA', () => {
+test('ready label requester creates or reuses at most one trusted Product dispatch per exact PR SHA', () => {
   assert.match(requester, /concurrency:/)
   assert.match(requester, /group: full-ci-request-/)
   assert.match(requester, /cancel-in-progress: false/)
-  assert.match(requester, /Refuse duplicate Product dispatch for exact SHA/)
   assert.match(requester, /actions\/workflows\/ci\.yml\/runs\?head_sha=\$HEAD_SHA&event=workflow_dispatch&per_page=100/)
-  assert.match(requester, /refusing to create a second required-check suite with the same job names/)
-  assert.match(requester, /Re-run the existing failed\/cancelled workflow when appropriate, or push a corrective commit/)
+  assert.match(requester, /multiple trusted Product workflow_dispatch runs exist for this exact PR SHA/)
+  assert.match(requester, /run\.get\("actor".*github-actions\[bot\]/s)
+  assert.match(requester, /run\.get\("triggering_actor".*github-actions\[bot\]/s)
+  assert.match(requester, /pr_number in prs/)
 })
 
-test('native PR readiness bridge cannot become an always-green required placeholder', () => {
-  assert.match(bridge, /^  pull_request:\n    types: \[labeled\]$/m)
-  assert.match(bridge, /actions: read/)
-  assert.match(bridge, /contents: read/)
-  assert.match(bridge, /pull-requests: read/)
-  assert.doesNotMatch(bridge, /actions: write|contents: write|actions\/checkout|git checkout|git clone/)
-  assert.match(bridge, /github\.event\.label\.name == 'ready-for-full-ci'/)
-  assert.match(bridge, /github\.event\.pull_request\.head\.repo\.full_name == github\.repository/)
-  assert.match(bridge, /Report what this run validated/)
-  assert.match(bridge, /Readiness bridge not applicable/)
-  assert.match(bridge, /event=workflow_dispatch/)
-  assert.match(bridge, /expected exactly one Product workflow_dispatch/)
-  assert.match(bridge, /Product aggregate did not pass/)
-  assert.match(bridge, /Pull request head changed while Full validation was running/)
-  assert.match(bridge, /ready-for-full-ci is no longer present/)
+test('protected binding requires Product readiness authentication and the real Full aggregate', () => {
+  assert.match(requester, /Classify changed product areas/)
+  assert.match(requester, /Authenticate label-dispatched pull-request context/)
+  assert.match(requester, /expected exactly one Product readiness-authentication step/)
+  assert.match(requester, /Product readiness authentication is not authoritative success/)
+  assert.match(requester, /Report what this run validated/)
+  assert.match(requester, /Full Product evidence aggregate/)
+  assert.match(requester, /expected exactly one Product aggregate job/)
+  assert.match(requester, /Product aggregate is not authoritative success/)
+  assert.match(requester, /verify_live_pr/)
+  assert.match(requester, /head SHA moved/)
+  assert.match(requester, /base SHA moved/)
+  assert.match(requester, /ready-for-full-ci is no longer present/)
 })
 
 test('full workflow authenticates exact ready PR state before trusting dispatch inputs', () => {
