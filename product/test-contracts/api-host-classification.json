@@ -2,8 +2,8 @@
   "schemaVersion": "aerolink-api-host-classification/v3",
   "totals": {
     "classes": 81,
-    "tests": 443,
-    "knownCases": 493,
+    "tests": 442,
+    "knownCases": 492,
     "unknownCaseTests": 0
   },
   "summary": {
@@ -15,8 +15,8 @@
     },
     "fresh-host": {
       "classes": 40,
-      "tests": 204,
-      "knownCases": 229,
+      "tests": 203,
+      "knownCases": 228,
       "unknownCaseTests": 0
     },
     "migration-candidate": {
@@ -260,19 +260,6 @@
       ]
     },
     {
-      "cls": "ReleaseCampaignExactIntentApiTests",
-      "tests": 6,
-      "knownCases": 6,
-      "unknownCaseTests": 0,
-      "classification": "fresh-host",
-      "reason": "Reviewed #563 hold: this class bootstraps an empty database or workspace. A class-scoped SharedApiHost would make first-install state and fixed bootstrap identities order-dependent. Keep fresh-host until a bootstrap-once fixture and per-test workspace tagging are proven.",
-      "intents": [
-        "ef-translation",
-        "http-boundary",
-        "in-process-logic"
-      ]
-    },
-    {
       "cls": "TestExecutionEffectivityApiTests",
       "tests": 6,
       "knownCases": 6,
@@ -304,6 +291,19 @@
       "reason": "Reviewed #563 hold: this class bootstraps an empty database or workspace. A class-scoped SharedApiHost would make first-install state and fixed bootstrap identities order-dependent. Keep fresh-host until a bootstrap-once fixture and per-test workspace tagging are proven.",
       "intents": [
         "http-boundary"
+      ]
+    },
+    {
+      "cls": "ReleaseCampaignExactIntentApiTests",
+      "tests": 5,
+      "knownCases": 5,
+      "unknownCaseTests": 0,
+      "classification": "fresh-host",
+      "reason": "Reviewed #563 hold: this class bootstraps an empty database or workspace. A class-scoped SharedApiHost would make first-install state and fixed bootstrap identities order-dependent. Keep fresh-host until a bootstrap-once fixture and per-test workspace tagging are proven.",
+      "intents": [
+        "ef-translation",
+        "http-boundary",
+        "in-process-logic"
       ]
     },
     {
