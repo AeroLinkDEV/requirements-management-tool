@@ -41,3 +41,24 @@ test('an explicit provenanced main-push model skips exactly the redundant produc
   }
   assert.ok(provenancedSelected.has('warm-chromium-cache'), 'cache warming remains selected')
 })
+
+
+test('workflow-dispatch readiness inputs preserve PR browser selection while diagnostics stay separate', () => {
+  const ready = selectJobs(workflow, fullClassification, {
+    event: 'workflow_dispatch',
+    inputs: { pull_request_number: '652', full_diagnostics: false },
+  })
+  const readySelected = ids(ready.selected)
+  const readySkipped = ids(ready.skipped)
+  assert.ok(readySelected.has('browser-pr'), 'ready Full dispatch runs the ordinary PR browser shards')
+  assert.ok(readySkipped.has('browser-full'), 'ready Full dispatch does not run the diagnostic browser matrix')
+
+  const diagnostic = selectJobs(workflow, fullClassification, {
+    event: 'workflow_dispatch',
+    inputs: { pull_request_number: '', full_diagnostics: true },
+  })
+  const diagnosticSelected = ids(diagnostic.selected)
+  const diagnosticSkipped = ids(diagnostic.skipped)
+  assert.ok(diagnosticSelected.has('browser-full'), 'manual diagnostics retain the full browser matrix')
+  assert.ok(diagnosticSkipped.has('browser-pr'), 'manual diagnostics do not impersonate a pull request')
+})

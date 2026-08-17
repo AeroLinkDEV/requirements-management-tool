@@ -2,18 +2,33 @@
 
 **Read before merging anything.** How a pull request lands changed on 13 August 2026.
 
-## Arm it and walk away
+## Request Full CI only when the current SHA is merge-ready
+
+Every pull-request SHA receives **advisory Fast feedback automatically**. Fast is for development feedback; it
+is not merge authority and cannot satisfy branch protection.
+
+When implementation and review are finished and the **current SHA is the one you intend to merge**, request
+the existing Full Product gate by applying the repository label:
+
+```bash
+gh pr edit <number> --add-label ready-for-full-ci
+```
+
+The trusted default-branch requester authenticates the live pull request, exact head SHA, base SHA, head ref,
+same-repository origin and readiness label before dispatching Full validation. Product's internal
+`Full Product evidence aggregate` must pass, including Product's own readiness-input authentication. Only then
+does the trusted requester complete the protected `Report what this run validated` context for that exact SHA.
+
+Only after readiness is requested for the final SHA, arm auto-merge:
 
 ```bash
 gh pr merge <number> --squash --auto
 ```
 
-The pull request merges by itself the moment its required check passes. Do this **as soon as the pull request
-is ready** — not after you have watched CI go green. Watching CI is wasted time, and the gap between "green"
-and "somebody noticed it was green" was routinely the longest part of a merge overnight. That gap is also the
-window in which another agent merges first and puts you behind `main`, so closing it means fewer rebases.
+If another commit is pushed, the trusted synchronize guard removes `ready-for-full-ci`. The old Full result
+belongs to the old SHA and cannot authorize the new one; finish the fix, then request readiness again.
 
-To disarm:
+To disarm auto-merge:
 
 ```bash
 gh pr merge <number> --disable-auto

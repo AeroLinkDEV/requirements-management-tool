@@ -245,7 +245,7 @@ test('the CI forecast is read from the workflow, not restated', () => {
   const docs = selectJobs(workflow, of(['README.md']), { event: 'pull_request' })
   const docNames = docs.selected.map((job) => job.name ?? job.id)
   assert.ok(!docNames.some((name) => /Client lint|API test suite|Domain and infrastructure/.test(name)))
-  assert.ok(docNames.some((name) => /Report what this run validated/.test(name)), 'the gate always reports')
+  assert.ok(docNames.some((name) => /Full Product evidence aggregate/.test(name)), 'the Product Full gate always reports its internal aggregate')
 })
 test('the local plan never claims a PostgreSQL-sensitive change was proven locally', () => {
   const plan = localPlan(of(['product/src/AeroLink.Infrastructure/Persistence/Thing.cs']))
