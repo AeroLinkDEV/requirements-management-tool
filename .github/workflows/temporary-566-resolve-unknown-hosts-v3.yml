@@ -1,0 +1,85 @@
+name: Temporary #566 resolve unknown host evidence v3
+
+on:
+  push:
+    branches:
+      - chatgpt/566-resolve-unknown-hosts-temp
+    paths:
+      - .github/workflows/temporary-566-resolve-unknown-hosts-v3.yml
+
+permissions:
+  contents: write
+
+jobs:
+  resolve-and-verify:
+    runs-on: windows-latest
+    steps:
+      - name: Check out validation branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+      - name: Install .NET 10
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68
+        with:
+          dotnet-version: 10.0.x
+      - name: Install Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: 24
+      - name: Apply exact source split with telemetry serialization
+        shell: pwsh
+        run: |
+          python product/test-contracts/tools/temporary-resolve-566-unknown-hosts.py apply
+          if ($LASTEXITCODE -ne 0) { throw 'Unknown-host source split failed.' }
+          $patch = @'
+          from pathlib import Path
+          for relative in [
+              'product/tests/AeroLink.Api.Tests/ApiTestTelemetryTests.cs',
+              'product/tests/AeroLink.Api.Tests/ApiTestTelemetryStateTests.cs',
+          ]:
+              path = Path(relative)
+              text = path.read_text(encoding='utf-8')
+              anchor = 'public sealed class '
+              if text.count(anchor) != 1:
+                  raise SystemExit(f'{relative}: class anchor count={text.count(anchor)}')
+              text = text.replace(anchor, '[Collection("ApiTestTelemetrySerial")]\n' + anchor, 1)
+              path.write_text(text, encoding='utf-8', newline='')
+          '@
+          $patch | python -
+          if ($LASTEXITCODE -ne 0) { throw 'Telemetry serialization patch failed.' }
+      - name: Regenerate inventories
+        shell: pwsh
+        run: |
+          node product/test-contracts/tools/generate-test-intent.mjs
+          if ($LASTEXITCODE -ne 0) { throw 'Intent generation failed.' }
+          node product/test-contracts/tools/generate-host-classification.mjs
+          if ($LASTEXITCODE -ne 0) { throw 'Host classification generation failed.' }
+      - name: Prove safe-ceiling arithmetic and refresh snapshots
+        shell: pwsh
+        run: python product/test-contracts/tools/temporary-resolve-566-unknown-hosts.py post
+      - name: Run inventory contracts
+        shell: pwsh
+        run: |
+          $tests = @(Get-ChildItem -LiteralPath product/test-contracts/tests -Filter '*.test.mjs' -File | Sort-Object FullName | ForEach-Object { $_.FullName })
+          & node --test $tests
+          if ($LASTEXITCODE -ne 0) { throw 'Inventory contracts failed.' }
+      - name: Run affected API tests twice to prove serialization is stable
+        shell: pwsh
+        run: |
+          $filter = "FullyQualifiedName~ApiTestTelemetryTests|FullyQualifiedName~ApiTestTelemetryStateTests|FullyQualifiedName~ServerAuthorityContractTests|FullyQualifiedName~ServerAuthorityIdentityShapeTests|FullyQualifiedName~ServerAuthorityDiagnosticsTests|FullyQualifiedName~SqliteContentionContractTests"
+          dotnet test product/tests/AeroLink.Api.Tests/AeroLink.Api.Tests.csproj --configuration Release --filter $filter
+          if ($LASTEXITCODE -ne 0) { throw 'Affected API tests failed on pass 1.' }
+          dotnet test product/tests/AeroLink.Api.Tests/AeroLink.Api.Tests.csproj --configuration Release --no-build --filter $filter
+          if ($LASTEXITCODE -ne 0) { throw 'Affected API tests failed on pass 2.' }
+      - name: Commit validated non-workflow result
+        shell: pwsh
+        run: |
+          git diff --check
+          if ($LASTEXITCODE -ne 0) { throw 'git diff --check failed.' }
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add product/tests/AeroLink.Api.Tests/ApiTestTelemetryTests.cs product/tests/AeroLink.Api.Tests/ApiTestTelemetryStateTests.cs product/tests/AeroLink.Api.Tests/ServerAuthorityContractTests.cs product/tests/AeroLink.Api.Tests/ServerAuthorityIdentityShapeTests.cs product/tests/AeroLink.Api.Tests/ServerAuthorityDiagnosticsTests.cs product/tests/AeroLink.Api.Tests/SecurityBoundaryTests.cs product/tests/AeroLink.Api.Tests/SqliteContentionContractTests.cs product/test-contracts/api-test-intent.json product/test-contracts/api-host-classification.json product/test-contracts/tests/inventory.test.mjs
+          git diff --cached --check
+          if ($LASTEXITCODE -ne 0) { throw 'staged diff check failed.' }
+          git commit -m 'Resolve #566 unknown API host evidence'
+          git push origin HEAD:chatgpt/566-resolve-unknown-hosts-temp
