@@ -1253,3 +1253,78 @@ html .deferAction:disabled { cursor: not-allowed; opacity: .5; }
   padding: 3px 9px;
   cursor: pointer;
 }
+
+/* Reviewer comments.
+   One convention carries the whole feature: controlled content is bounded by solid rules, and anything a
+   reviewer types is bounded by dashed ones. A reviewer should never have to wonder whether what they are
+   writing becomes part of the signed package — the border answers it before they read a word. */
+.reviewComments { display: flex; flex-direction: column; gap: 8px; margin-top: 10px; }
+.reviewComment {
+  border: 1px dashed #9db6d0;
+  border-left: 2px dashed #6f97be;
+  border-radius: 8px;
+  background: #f4f8fc;
+  padding: 10px 12px;
+}
+.reviewComment.own { border-color: #9ec8bd; border-left-color: #57a08e; background: #f2f9f7; }
+.reviewComment header { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 5px; }
+.reviewComment header b { color: #26405a; font-size: 12px; }
+.reviewComment p { margin: 0; color: #3f556b; font-size: 12.5px; line-height: 1.5; }
+.reviewCommentTag {
+  border-radius: 999px;
+  background: #e8f1f8;
+  color: #3d6797;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 2px 8px;
+}
+.reviewCommentTag.stranded { background: #fff3db; color: #86611b; }
+.reviewCommentActions { display: flex; gap: 10px; margin-top: 6px; }
+.reviewCommentActions button {
+  border: 0; background: none; padding: 0;
+  color: #5b81a5; font-size: 11.5px; font-weight: 500; cursor: pointer;
+}
+.reviewCommentActions button:disabled { color: #9aabbd; cursor: default; }
+.reviewCommentAdd {
+  display: flex; align-items: center; width: 100%;
+  min-height: 34px; padding: 7px 11px;
+  border: 1px dashed #b0c3d6; border-radius: 8px; background: #fbfdff;
+  color: #4a6c8d; font-size: 12px; text-align: left; cursor: pointer;
+}
+.reviewCommentAdd:hover { background: #f4f9ff; border-color: #8fabc6; }
+.reviewCommentDraft {
+  border: 1px dashed #9db6d0; border-left: 2px dashed #6f97be;
+  border-radius: 8px; background: white; padding: 10px 11px;
+}
+.reviewCommentDraft textarea {
+  width: 100%; min-height: 68px; box-sizing: border-box;
+  border: 1px solid #dbe4ec; border-radius: 6px; padding: 8px 9px;
+  color: #33495e; font: inherit; font-size: 12.5px; resize: vertical;
+}
+.reviewCommentDraftBar {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  margin-top: 8px; padding-top: 8px; border-top: 1px solid #e7eef4;
+}
+.reviewCommentDraftBar small { color: #8b9cae; font-size: 11px; }
+.reviewCommentDraftBar span { display: flex; gap: 8px; }
+.reviewCommentDraftBar button {
+  border: 1px solid #cfd9e2; border-radius: 6px; background: white;
+  color: #4a6178; font-size: 11.5px; font-weight: 700; min-height: 28px; padding: 4px 11px; cursor: pointer;
+}
+.reviewCommentDraftBar button.primary { border-color: #153b5e; background: #153b5e; color: white; }
+.reviewCommentDraftBar button:disabled { opacity: .55; cursor: default; }
+.reviewCommentFailure { margin: 0; color: #8e3a45; font-size: 12px; }
+
+/* Superseded cycles are not deleted, only moved out of the way: their comments were written about a package
+   that has since been revised, so inline they would sit stale beside current statements. */
+.earlierComments { display: flex; flex-direction: column; gap: 8px; margin-top: 14px; }
+.earlierComments details {
+  border: 1px dashed #b0c3d6; border-radius: 8px; background: #fbfdff; padding: 8px 11px;
+}
+.earlierComments summary {
+  display: flex; align-items: center; gap: 10px;
+  color: #3f5a75; font-size: 12px; cursor: pointer;
+}
+.earlierComments summary b { color: #26405a; }
+.earlierComments summary span { color: #7b8ea2; }
+.earlierComments .reviewComment { margin-top: 8px; }

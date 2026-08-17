@@ -15,6 +15,7 @@ import ChangeRequestJiraLink from "./ChangeRequestJiraLink";
 import { PersonName } from "./People";
 import { personLabel } from "./PeopleRegistry";
 import ReviewCycleCard from "./ReviewCycleCard";
+import { EarlierCycleComments, ReviewCommentBlock, useReviewComments } from "./ReviewComments";
 import {
   ControlledChangeAuthoringActions,
   ControlledChangeAuthoringForm,
@@ -673,6 +674,10 @@ export default function ChangeRequestWorkspace({
     };
   }, [api, autosave, mode]);
 
+  // Above the early returns below, because hooks cannot be called conditionally. The store fetches nothing
+  // until the record has actually been submitted for review at least once.
+  const comments = useReviewComments(api, changeRequestId, (scr?.reviewCycles.length ?? 0) > 0);
+
   const discard = async () => {
     const current = lockRef.current;
     if (current) {
@@ -936,6 +941,10 @@ export default function ChangeRequestWorkspace({
     latest?.steps.find((step) => step.state === "Active" && step.approverId === user.userName) ??
     latest?.steps.find((step) => step.state === "Active");
   const isAuthor = scr.authorId === user.userName || user.isAdministrator;
+  // Anyone holding a step on the open cycle may write, not only whoever is active. A later reviewer reads
+  // ahead, and refusing them somewhere to put it only means the observation arrives by some other route.
+  const canComment = scr.state === "InReview" && latest?.state === "Active"
+    && (latest?.steps ?? []).some((step) => step.approverId.toLowerCase() === user.userName.toLowerCase());
   const targetRelease = releases.find((item) => item.id === scr.targetReleaseId);
   // Signed for, whichever of the two stored states it sits in. See StartNextRevision in the domain for why
   // both count, and why a released target build takes the action away again.
@@ -1232,6 +1241,8 @@ export default function ChangeRequestWorkspace({
               ]}
             />
 
+            <ReviewCommentBlock store={comments} anchor="ChangeCase" canComment={canComment} label="the change case" />
+
             {drivingProblemReports.length > 0 && (
               <section className="workspaceCard">
                 <div className="workspaceTitle"><div><h2>Driving Problem Reports</h2><p>The problem records that authorized this engineering response</p></div></div>
@@ -1277,9 +1288,12 @@ export default function ChangeRequestWorkspace({
                       </div>
                     )}
                     <footer><small>{item.verificationMethod} · {item.rationale || "No rationale recorded"}</small><em>Downstream impact assessed after approval</em></footer>
+                    <ReviewCommentBlock store={comments} anchor="RequirementRevision" requirementChangeId={item.id}
+                      canComment={canComment} label={item.displayNumber} />
                   </article>
                 );
               })}
+              <EarlierCycleComments store={comments} />
             </section>
 
             <section className="workspaceCard">
