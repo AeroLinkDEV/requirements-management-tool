@@ -19,6 +19,16 @@ test('ready label requester is trusted-base, exact-label, same-repository, and d
   assert.match(requester, /actions\/workflows\/ci\.yml\/dispatches/)
 })
 
+test('ready label requester creates at most one Product dispatch per exact SHA', () => {
+  assert.match(requester, /concurrency:/)
+  assert.match(requester, /group: full-ci-request-/)
+  assert.match(requester, /cancel-in-progress: false/)
+  assert.match(requester, /Refuse duplicate Product dispatch for exact SHA/)
+  assert.match(requester, /actions\/workflows\/ci\.yml\/runs\?head_sha=\$HEAD_SHA&event=workflow_dispatch&per_page=100/)
+  assert.match(requester, /refusing to create a second required-check suite with the same job names/)
+  assert.match(requester, /Re-run the existing failed\/cancelled workflow when appropriate, or push a corrective commit/)
+})
+
 test('full workflow authenticates exact ready PR state before trusting dispatch inputs', () => {
   for (const input of ['pull_request_number', 'pull_request_base_sha', 'pull_request_head_sha']) {
     assert.match(full, new RegExp(`${input}:`))
@@ -37,7 +47,6 @@ test('label-dispatched Full reuses PR classification and exact indentation', () 
   assert.match(full, /          BASE_SHA: .*inputs\.pull_request_base_sha/)
   assert.match(full, /          HEAD_SHA: .*inputs\.pull_request_head_sha/)
 })
-
 
 test('Full runs only by trusted readiness while Fast stays on development PR updates', () => {
   assert.doesNotMatch(full, /^  pull_request:\s*$/m)
