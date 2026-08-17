@@ -452,11 +452,12 @@ export function hostEvidence(body) {
 }
 
 export function classifyIntent(test) {
-  const intent = INTENTS.find((candidate) => candidate.test(test.body, test))
-  if (intent) return intent
-  return CLIENT.test(test.body)
-    ? INTENTS.find((item) => item.key === 'http-boundary')
-    : FALLBACK
+  const directIntent = INTENTS.find((candidate) => candidate.key !== 'rule-matrix' && candidate.test(test.body, test))
+  if (directIntent) return directIntent
+  if (CLIENT.test(test.body)) return INTENTS.find((item) => item.key === 'http-boundary')
+  const matrix = INTENTS.find((item) => item.key === 'rule-matrix')
+  if (matrix.test(test.body, test)) return matrix
+  return FALLBACK
 }
 
 export function classifyFile(source, cls) {
