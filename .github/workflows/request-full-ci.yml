@@ -8,12 +8,60 @@ permissions:
   actions: write
   contents: read
 
+concurrency:
+  group: full-ci-request-${{ github.event.pull_request.number }}-${{ github.event.pull_request.head.sha }}
+  cancel-in-progress: false
+
 jobs:
   dispatch:
     name: Dispatch exact ready-for-full-ci head
     if: github.event.label.name == 'ready-for-full-ci' && github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     steps:
+      - name: Refuse duplicate Product dispatch for exact SHA
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          curl --fail-with-body --silent --show-error \
+            --header "Authorization: Bearer $GITHUB_TOKEN" \
+            --header "Accept: application/vnd.github+json" \
+            --header "X-GitHub-Api-Version: 2022-11-28" \
+            "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs?head_sha=$HEAD_SHA&event=workflow_dispatch&per_page=100" \
+            --output "$RUNNER_TEMP/existing-full-ci-runs.json"
+
+          python - "$RUNNER_TEMP/existing-full-ci-runs.json" "$HEAD_SHA" <<'PY'
+          import json
+          import sys
+
+          path, head_sha = sys.argv[1:]
+          with open(path, encoding="utf-8") as handle:
+              runs = json.load(handle).get("workflow_runs", [])
+
+          if not runs:
+              raise SystemExit(0)
+
+          print(
+              f"A Product workflow_dispatch already exists for exact SHA {head_sha}; "
+              "refusing to create a second required-check suite with the same job names.",
+              file=sys.stderr,
+          )
+          for run in runs[:5]:
+              print(
+                  f"existing run {run.get('id')}: status={run.get('status')} "
+                  f"conclusion={run.get('conclusion')}",
+                  file=sys.stderr,
+              )
+          print(
+              "Re-run the existing failed/cancelled workflow when appropriate, or push a corrective commit "
+              "and request ready-for-full-ci for the new SHA.",
+              file=sys.stderr,
+          )
+          raise SystemExit(1)
+          PY
+
       - name: Dispatch Product quality gate for exact PR head
         shell: bash
         env:
