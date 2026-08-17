@@ -702,6 +702,73 @@ public static class ChangeRequestEndpoints
             catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
         });
 
+        // Reviewer comments are their own resource rather than a field on the change request, because who
+        // may read them is not who may read the package: a reviewer still deciding is deliberately shown
+        // less than the author is. Folding them into ChangeRequestDetail would make all eight of its callers
+        // responsible for a rule that belongs in one place.
+        app.MapGet("/api/change-requests/{id:guid}/review-comments", async (Guid id, HttpContext http,
+            IChangeRequestRepository repository, CancellationToken ct) =>
+        {
+            var scr = await repository.GetAsync(id, ct); if (scr is null) return Results.NotFound();
+            var viewer = http.UserAccount().UserName;
+            var cycles = scr.ReviewCycles.OrderByDescending(x => x.Sequence)
+                .Select(cycle => new
+                {
+                    cycle.Id,
+                    cycle.Sequence,
+                    state = cycle.State.ToString(),
+                    comments = cycle.CommentsVisibleTo(viewer)
+                        .OrderBy(x => x.CreatedAt)
+                        .Select(x => ApiMap.ReviewComment(x, viewer)),
+                });
+            return Results.Ok(new { cycles });
+        });
+
+        app.MapPost("/api/change-requests/{id:guid}/review-comments", async (Guid id, ReviewCommentRequest request,
+            HttpContext http, IChangeRequestRepository repository, CancellationToken ct) =>
+        {
+            var scr = await repository.GetAsync(id, ct); if (scr is null) return Results.NotFound();
+            if (!Enum.TryParse<ReviewCommentAnchor>(request.Anchor, ignoreCase: true, out var anchor))
+                return Results.BadRequest(new { error = "A comment must be anchored to the change case or a requirement revision." });
+            try
+            {
+                var actor = http.UserAccount().UserName;
+                var comment = scr.AddReviewComment(actor, anchor, request.RequirementChangeId, request.Body, DateTimeOffset.UtcNow);
+                await repository.SaveAsync(ct);
+                return Results.Created($"/api/change-requests/{id}/review-comments/{comment.Id}",
+                    ApiMap.ReviewComment(comment, actor));
+            }
+            catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
+        });
+
+        app.MapPut("/api/change-requests/{id:guid}/review-comments/{commentId:guid}", async (Guid id, Guid commentId,
+            ReviewCommentRequest request, HttpContext http, IChangeRequestRepository repository, CancellationToken ct) =>
+        {
+            var scr = await repository.GetAsync(id, ct); if (scr is null) return Results.NotFound();
+            try
+            {
+                var actor = http.UserAccount().UserName;
+                scr.ReviseReviewComment(actor, commentId, request.Body, DateTimeOffset.UtcNow);
+                await repository.SaveAsync(ct);
+                var comment = scr.ActiveReviewCycle!.Comments.Single(x => x.Id == commentId);
+                return Results.Ok(ApiMap.ReviewComment(comment, actor));
+            }
+            catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
+        });
+
+        app.MapDelete("/api/change-requests/{id:guid}/review-comments/{commentId:guid}", async (Guid id, Guid commentId,
+            HttpContext http, IChangeRequestRepository repository, CancellationToken ct) =>
+        {
+            var scr = await repository.GetAsync(id, ct); if (scr is null) return Results.NotFound();
+            try
+            {
+                scr.RemoveReviewComment(http.UserAccount().UserName, commentId);
+                await repository.SaveAsync(ct);
+                return Results.NoContent();
+            }
+            catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
+        });
+
         app.MapPost("/api/change-requests/{id:guid}/approve", async (Guid id, SignatureRequest request, HttpContext http, IChangeRequestRepository repository, AeroLinkDbContext db, IdentityService identity, VerificationImpactService verificationImpact, DownstreamImpactService downstreamImpact, ProblemReportLinkService problemReports, CancellationToken ct) =>
         {
             var scr = await repository.GetAsync(id, ct); if (scr is null) return Results.NotFound();

@@ -63,6 +63,10 @@ public sealed class ChangeRequestRepository(AeroLinkDbContext db) : IChangeReque
         db.SystemChangeRequests
             .Include(x => x.RequirementChanges)
             .Include(x => x.ReviewCycles).ThenInclude(x => x.Steps)
+            // Comments load with the cycle because closing one publishes whatever drafts are outstanding.
+            // Left out, that loop would iterate an empty collection and silently discard them — the write
+            // would succeed, nothing would error, and a reviewer's writing would simply never appear.
+            .Include(x => x.ReviewCycles).ThenInclude(x => x.Comments)
             .Include(x => x.AuditEvents)
             .SingleOrDefaultAsync(x => x.Id == id, cancellationToken);
 

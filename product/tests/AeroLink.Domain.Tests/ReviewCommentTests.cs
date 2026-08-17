@@ -155,6 +155,55 @@ public sealed class ReviewCommentTests
     }
 
     [Fact]
+    public void A_reviewer_still_deciding_cannot_read_what_a_colleague_already_signed()
+    {
+        var scr = InReview(ReviewMode.Parallel);
+        scr.AddReviewComment("systems", ReviewCommentAnchor.ChangeCase, null, "Signed with reservations.", Now);
+        scr.AddReviewComment("software", ReviewCommentAnchor.ChangeCase, null, "Still thinking.", Now);
+        scr.ApproveActiveStage("systems", Now.AddHours(1));
+        var cycle = scr.ActiveReviewCycle!;
+
+        // The author gets it the moment it publishes — that is the whole point of publishing on signature.
+        Assert.Single(cycle.CommentsVisibleTo("author"));
+
+        // The reviewer who has not decided sees only their own draft. Reading a colleague's objections
+        // before signing would make their own signature a weaker thing.
+        var software = cycle.CommentsVisibleTo("software");
+        Assert.Equal("Still thinking.", Assert.Single(software).Body);
+
+        // Having decided, they see it like anyone else.
+        scr.ApproveActiveStage("software", Now.AddHours(2));
+        Assert.Equal(2, cycle.CommentsVisibleTo("software").Count);
+    }
+
+    [Fact]
+    public void A_draft_is_visible_to_nobody_but_the_person_writing_it()
+    {
+        var scr = InReview();
+        scr.AddReviewComment("systems", ReviewCommentAnchor.ChangeCase, null, "Not sent yet.", Now);
+        var cycle = scr.ActiveReviewCycle!;
+
+        Assert.Single(cycle.CommentsVisibleTo("systems"));
+        Assert.Empty(cycle.CommentsVisibleTo("author"));
+        Assert.Empty(cycle.CommentsVisibleTo("software"));
+        Assert.Empty(cycle.CommentsVisibleTo("somebody.else"));
+    }
+
+    [Fact]
+    public void Once_the_cycle_closes_everyone_reads_the_same_set()
+    {
+        var scr = InReview(ReviewMode.Parallel);
+        scr.AddReviewComment("systems", ReviewCommentAnchor.ChangeCase, null, "Decided.", Now);
+        scr.AddReviewComment("software", ReviewCommentAnchor.ChangeCase, null, "Never decided.", Now);
+        var cycle = scr.ActiveReviewCycle!;
+
+        scr.RequestChanges("systems", "Rework it.", Now.AddHours(1));
+
+        foreach (var viewer in new[] { "author", "systems", "software", "verification", "somebody.else" })
+            Assert.Equal(2, cycle.CommentsVisibleTo(viewer).Count);
+    }
+
+    [Fact]
     public void Comments_do_not_move_the_snapshot_hash()
     {
         var withComments = InReview();
