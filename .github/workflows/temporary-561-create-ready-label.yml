@@ -1,0 +1,30 @@
+name: TEMP 561 create ready-for-full-ci label
+
+on:
+  push:
+    branches: [chatgpt/tmp-561-create-ready-label]
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  create-label:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Create repository readiness label if absent
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if gh api "repos/${GITHUB_REPOSITORY}/labels/ready-for-full-ci" --silent 2>/dev/null; then
+            echo 'ready-for-full-ci already exists.'
+            exit 0
+          fi
+          gh api --method POST "repos/${GITHUB_REPOSITORY}/labels" \
+            -f name='ready-for-full-ci' \
+            -f color='1D76DB' \
+            -f description='Request the complete protected Product quality gate for the current PR SHA.' \
+            --silent
+          echo 'Created ready-for-full-ci.'
