@@ -41,7 +41,91 @@ metrics_new = """          effective_event=\"${{ inputs.pull_request_number != '
 """
 require_once(text, metrics_old, "gate metrics browser dependency accounting")
 text = text.replace(metrics_old, metrics_new, 1)
+
+product_gate_old = "    name: Report what this run validated\n"
+product_gate_new = "    name: Full Product evidence aggregate\n"
+require_once(text, product_gate_old, "Product aggregate display name")
+text = text.replace(product_gate_old, product_gate_new, 1)
+
+product_metrics_name_old = "      METRICS_JOB_NAME: Report what this run validated\n"
+product_metrics_name_new = "      METRICS_JOB_NAME: Full Product evidence aggregate\n"
+require_once(text, product_metrics_name_old, "Product aggregate metrics name")
+text = text.replace(product_metrics_name_old, product_metrics_name_new, 1)
 ci.write_text(text, encoding="utf-8")
+
+workflow_jobs = Path("product/test-planner/lib/workflow-jobs.mjs")
+text = workflow_jobs.read_text(encoding="utf-8")
+operand_marker = "const OUTPUT = /^needs\\.changes\\.outputs\\.(docs_only|backend|client|browser|postgresql|post_merge_skip)$/\nconst EVENT = /^github\\.event_name$/\n"
+require_once(text, operand_marker, "planner workflow operand declarations")
+text = text.replace(
+    operand_marker,
+    operand_marker + "const INPUT = /^inputs\\.(pull_request_number|full_diagnostics)$/\n",
+    1,
+)
+resolve_marker = """  if (EVENT.test(token)) return context.event
+  const value = literal(token)
+"""
+require_once(text, resolve_marker, "planner event operand resolver")
+text = text.replace(
+    resolve_marker,
+    """  if (EVENT.test(token)) return context.event
+  if (INPUT.test(token)) {
+    const key = INPUT.exec(token)[1]
+    return String(context.inputs[key])
+  }
+  if (token === 'true' || token === 'false') return token
+  const value = literal(token)
+""",
+    1,
+)
+signature_old = "export function selectJobs(workflowText, classification, { event = 'pull_request', postMergeSkip = false } = {}) {\n"
+signature_new = "export function selectJobs(workflowText, classification, { event = 'pull_request', postMergeSkip = false, inputs = {} } = {}) {\n"
+require_once(text, signature_old, "planner selectJobs signature")
+text = text.replace(signature_old, signature_new, 1)
+context_old = """  const context = {
+    event,
+    outputs: {
+"""
+context_new = """  const context = {
+    event,
+    inputs: {
+      // The local planner normally models an ordinary PR, where workflow-dispatch inputs do not exist.
+      // Empty/false match GitHub's effective defaults for those branches of the workflow conditions.
+      pull_request_number: inputs.pull_request_number ?? '',
+      full_diagnostics: inputs.full_diagnostics ?? false,
+    },
+    outputs: {
+"""
+require_once(text, context_old, "planner selectJobs context")
+workflow_jobs.write_text(text.replace(context_old, context_new, 1), encoding="utf-8")
+
+workflow_jobs_test = Path("product/test-planner/tests/workflow-jobs.test.mjs")
+text = workflow_jobs_test.read_text(encoding="utf-8")
+input_test = r"""
+
+test('workflow-dispatch readiness inputs preserve PR browser selection while diagnostics stay separate', () => {
+  const ready = selectJobs(workflow, fullClassification, {
+    event: 'workflow_dispatch',
+    inputs: { pull_request_number: '652', full_diagnostics: false },
+  })
+  const readySelected = ids(ready.selected)
+  const readySkipped = ids(ready.skipped)
+  assert.ok(readySelected.has('browser-pr'), 'ready Full dispatch runs the ordinary PR browser shards')
+  assert.ok(readySkipped.has('browser-full'), 'ready Full dispatch does not run the diagnostic browser matrix')
+
+  const diagnostic = selectJobs(workflow, fullClassification, {
+    event: 'workflow_dispatch',
+    inputs: { pull_request_number: '', full_diagnostics: true },
+  })
+  const diagnosticSelected = ids(diagnostic.selected)
+  const diagnosticSkipped = ids(diagnostic.skipped)
+  assert.ok(diagnosticSelected.has('browser-full'), 'manual diagnostics retain the full browser matrix')
+  assert.ok(diagnosticSkipped.has('browser-pr'), 'manual diagnostics do not impersonate a pull request')
+})
+"""
+if "test('workflow-dispatch readiness inputs preserve PR browser selection while diagnostics stay separate'" not in text:
+    text += input_test
+workflow_jobs_test.write_text(text, encoding="utf-8")
 
 merging = Path("product/docs/MERGING.md")
 text = merging.read_text(encoding="utf-8")
@@ -65,9 +149,10 @@ the existing Full Product gate by applying the repository label:
 gh pr edit <number> --add-label ready-for-full-ci
 ```
 
-The trusted default-branch dispatcher authenticates the live pull request, exact head SHA, base SHA, head ref,
-same-repository origin and readiness label before dispatching Full validation. Branch protection still requires
-`Report what this run validated`, so the pull request remains blocked until that exact-head Full run succeeds.
+The trusted default-branch requester authenticates the live pull request, exact head SHA, base SHA, head ref,
+same-repository origin and readiness label before dispatching Full validation. Product's internal
+`Full Product evidence aggregate` must pass, including Product's own readiness-input authentication. Only then
+does the trusted requester complete the protected `Report what this run validated` context for that exact SHA.
 
 Only after readiness is requested for the final SHA, arm auto-merge:
 
@@ -98,11 +183,12 @@ Issue #561 changes **when** the existing Full evidence is purchased, not what it
 open/reopen/synchronize events run the separate advisory Fast workflow. The Product quality gate no longer
 starts automatically for each development push.
 
-When `ready-for-full-ci` is applied to the final SHA, a trusted `pull_request_target` dispatcher that never
-checks out PR code dispatches this unchanged Product gate against the exact same-repository head. The gate
-still selects the same API, browser, production-browser, backend/core, client, PostgreSQL and operator lanes,
-and branch protection still requires the same `Report what this run validated` aggregate. There is no
-always-green placeholder and Fast is not authoritative.
+When `ready-for-full-ci` is applied to the final SHA, a trusted `pull_request_target` requester that never checks
+out PR code dispatches the Product gate against the exact same-repository head. Product still selects the same
+API, browser, production-browser, backend/core, client, PostgreSQL and operator lanes; its internal
+`Full Product evidence aggregate` remains the evidence summary. The trusted requester independently proves
+Product's readiness authentication and aggregate success before completing branch protection's required
+`Report what this run validated` context. There is no always-green placeholder and Fast is not authoritative.
 
 A synchronize event removes stale readiness, so a later SHA must request Full again. Fast and Full use
 different concurrency groups; development feedback cannot cancel final Full evidence. The rolling metrics
@@ -123,7 +209,8 @@ section = """## Merge-ready Full CI
 GitHub pull requests receive the Fast workflow automatically; both local `-Mode Fast` and hosted Fast remain
 non-authoritative. Once the current PR SHA is final, apply `ready-for-full-ci`. The trusted default-branch
 requester binds PR number, base SHA and exact head SHA and dispatches the existing Full Product workflow.
-`Report what this run validated` remains the required branch-protection context.
+Product's `Full Product evidence aggregate` is the internal Full authority; after verifying Product's own
+readiness authentication, the requester publishes the required `Report what this run validated` context.
 
 Do not apply readiness early. A later push removes the label through the trusted synchronize guard and the new
 SHA must request Full again. Do not use Fast success, an older SHA's Full result, or a placeholder check as
@@ -165,7 +252,22 @@ test('trusted readiness dispatch preserves ordinary PR browser and gate semantic
   assert.ok(full.includes("effective_event=\"${{ inputs.pull_request_number != '' && 'pull_request' || github.event_name }}\""))
   assert.doesNotMatch(full, /if: \(github\.event_name == 'schedule' \|\| github\.event_name == 'workflow_dispatch'\) && needs\.changes\.outputs\.browser == 'true'/)
 })
+
+test('Product internal aggregate is distinct from the trusted protected PR binding', () => {
+  assert.match(full, /^    name: Full Product evidence aggregate$/m)
+  assert.doesNotMatch(full, /^    name: Report what this run validated$/m)
+  assert.match(requester, /accepted_names = \{"Report what this run validated", "Full Product evidence aggregate"\}/)
+})
 """
 if "test('Full runs only by trusted readiness while Fast stays on development PR updates'" not in text:
     text += test_block
+elif "test('Product internal aggregate is distinct from the trusted protected PR binding'" not in text:
+    text += r"""
+
+test('Product internal aggregate is distinct from the trusted protected PR binding', () => {
+  assert.match(full, /^    name: Full Product evidence aggregate$/m)
+  assert.doesNotMatch(full, /^    name: Report what this run validated$/m)
+  assert.match(requester, /accepted_names = \{"Report what this run validated", "Full Product evidence aggregate"\}/)
+})
+"""
 contract.write_text(text, encoding="utf-8")

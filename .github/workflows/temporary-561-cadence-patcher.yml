@@ -24,7 +24,7 @@ jobs:
       - name: Prepare bounded cadence branch
         shell: bash
         env:
-          TARGET_BRANCH: chatgpt/561-cadence-switch-v3
+          TARGET_BRANCH: chatgpt/561-cadence-switch-v4
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
@@ -45,12 +45,18 @@ jobs:
           grep -Fq "inputs.pull_request_number != ''" .github/workflows/ci.yml
           grep -Fq "inputs.pull_request_number == '' && inputs.full_diagnostics == true" .github/workflows/ci.yml
           grep -Fq 'effective_event=' .github/workflows/ci.yml
+          grep -q '^    name: Full Product evidence aggregate$' .github/workflows/ci.yml
+          if grep -q '^    name: Report what this run validated$' .github/workflows/ci.yml; then
+            echo "Product still exposes the protected context name directly." >&2
+            exit 1
+          fi
           grep -q '^  pull_request:$' .github/workflows/fast-pr-feedback.yml
           grep -q '^  pull_request_target:$' .github/workflows/reset-full-ci-readiness.yml
+          grep -q 'Authenticate label-dispatched pull-request context' .github/workflows/request-full-ci.yml
           grep -q 'ready-for-full-ci' product/docs/MERGING.md
           grep -q 'Merge-ready Full-CI cadence' product/docs/BROWSER_AND_BACKEND_FEEDBACK_TIME.md
           grep -q 'Merge-ready Full CI' product/test-planner/README.md
-          node --test product/test-planner/tests/full-ci-readiness-dispatch.test.mjs
+          node --test product/test-planner/tests/full-ci-readiness-dispatch.test.mjs product/test-planner/tests/workflow-jobs.test.mjs
 
           git rm .github/workflows/temporary-561-cadence-patcher.yml
           git rm .github/scripts/prepare-561-cadence.py
@@ -58,6 +64,6 @@ jobs:
 
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add .github/workflows/ci.yml product/docs/MERGING.md product/docs/BROWSER_AND_BACKEND_FEEDBACK_TIME.md product/test-planner/README.md product/test-planner/tests/full-ci-readiness-dispatch.test.mjs
+          git add .github/workflows/ci.yml product/docs/MERGING.md product/docs/BROWSER_AND_BACKEND_FEEDBACK_TIME.md product/test-planner/README.md product/test-planner/lib/workflow-jobs.mjs product/test-planner/tests/full-ci-readiness-dispatch.test.mjs product/test-planner/tests/workflow-jobs.test.mjs
           git commit -m "Gate Full CI on explicit merge readiness"
           git push origin "$TARGET_BRANCH"
