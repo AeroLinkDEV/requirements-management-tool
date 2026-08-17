@@ -3,6 +3,8 @@ name: Temporary #561 cadence patcher
 on:
   issue_comment:
     types: [created]
+  schedule:
+    - cron: '*/5 * * * *'
 
 permissions:
   contents: write
@@ -10,9 +12,10 @@ permissions:
 jobs:
   prepare-cadence-branch:
     if: >-
-      github.event.issue.number == 561 &&
+      github.event_name == 'schedule' ||
+      (github.event.issue.number == 561 &&
       github.event.comment.user.login == 'seanmccarthyns' &&
-      github.event.comment.body == '/prepare-561-cadence'
+      github.event.comment.body == '/prepare-561-cadence')
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -31,8 +34,8 @@ jobs:
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
 
           if git ls-remote --exit-code --heads origin "refs/heads/$TARGET_BRANCH" >/dev/null 2>&1; then
-            echo "Target branch already exists; refusing to overwrite it." >&2
-            exit 1
+            echo "Target branch already exists; nothing to do."
+            exit 0
           fi
 
           git checkout -b "$TARGET_BRANCH"
