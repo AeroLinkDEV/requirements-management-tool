@@ -36,6 +36,30 @@ public sealed class ProcedureSavedViewApiTests
   assert.equal(row.intent, 'http-boundary')
 })
 
+test('client-backed helper theories stay HTTP-boundary instead of becoming rule-matrix candidates', () => {
+  const source = `
+public sealed class RegisterTests
+{
+    [Theory]
+    [InlineData("search=Current")]
+    [InlineData("search=SRCR-00050")]
+    public async Task Search_uses_the_register_http_helper(string query)
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var client = factory.CreateClient();
+        var body = await RegisterAsync(client, query);
+        Assert.NotNull(body);
+    }
+
+    private static Task<object> RegisterAsync(HttpClient client, string query) =>
+        client.GetFromJsonAsync<object>($"/api/history/test-change-requests?{query}");
+}`
+  const [row] = classifyFile(source, 'RegisterTests')
+  assert.equal(row.cases, 2)
+  assert.equal(row.hosted, 'hosted')
+  assert.equal(row.intent, 'http-boundary')
+})
+
 test('combined xUnit attributes count InlineData arguments containing closing brackets', () => {
   const source = `
 public sealed class CombinedAttributeTests

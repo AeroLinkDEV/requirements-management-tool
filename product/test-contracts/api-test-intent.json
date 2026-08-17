@@ -10,8 +10,8 @@
     "nonHostedCases": 17,
     "unknownHostTests": 4,
     "unknownHostCases": 4,
-    "hostedCandidateTests": 5,
-    "hostedCandidateCases": 6,
+    "hostedCandidateTests": 4,
+    "hostedCandidateCases": 4,
     "unknownCandidateTests": 2,
     "unknownCandidateCases": 2,
     "unknownCaseTests": 0,
@@ -21,8 +21,8 @@
     "http-boundary": {
       "label": "HTTP boundary: route, status, JSON shape",
       "level": "API (must stay hosted)",
-      "tests": 297,
-      "cases": 331,
+      "tests": 298,
+      "cases": 333,
       "unknownCases": 0,
       "classes": 68
     },
@@ -69,10 +69,10 @@
     "rule-matrix": {
       "label": "Business-rule matrix over data variations",
       "level": "Domain (migration candidate)",
-      "tests": 2,
-      "cases": 12,
+      "tests": 1,
+      "cases": 10,
       "unknownCases": 0,
-      "classes": 2
+      "classes": 1
     }
   },
   "tests": [
@@ -6350,7 +6350,7 @@
       "cls": "TestChangeRequestRegisterApiTests",
       "test": "Search_matches_the_case_and_what_the_package_was_raised_from",
       "kind": "Theory",
-      "intent": "rule-matrix",
+      "intent": "http-boundary",
       "cases": 2,
       "caseEvidence": "InlineData",
       "hosted": "hosted",

@@ -709,8 +709,7 @@
       "reason": "Static reuse candidate, not an implementation-ready safety finding: shared-host conversion requires fresh per-test clients, unique per-test tagged logical data, and assertions scoped to that data.",
       "intents": [
         "auth-policy",
-        "http-boundary",
-        "rule-matrix"
+        "http-boundary"
       ]
     },
     {
