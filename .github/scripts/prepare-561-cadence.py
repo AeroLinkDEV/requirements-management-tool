@@ -11,7 +11,37 @@ ci = Path(".github/workflows/ci.yml")
 text = ci.read_text(encoding="utf-8")
 needle = "on:\n  pull_request:\n"
 require_once(text, needle, "automatic PR trigger header")
-ci.write_text(text.replace(needle, "on:\n", 1), encoding="utf-8")
+text = text.replace(needle, "on:\n", 1)
+
+browser_pr_old = "    if: (github.event_name == 'pull_request' || github.event_name == 'merge_group') && needs.changes.outputs.browser == 'true'\n"
+browser_pr_new = "    if: (github.event_name == 'pull_request' || github.event_name == 'merge_group' || (github.event_name == 'workflow_dispatch' && inputs.pull_request_number != '')) && needs.changes.outputs.browser == 'true'\n"
+require_once(text, browser_pr_old, "browser-pr event guard")
+text = text.replace(browser_pr_old, browser_pr_new, 1)
+
+browser_full_old = "    if: (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && needs.changes.outputs.browser == 'true'\n"
+browser_full_new = "    if: (github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.pull_request_number == '' && inputs.full_diagnostics == true)) && needs.changes.outputs.browser == 'true'\n"
+require_once(text, browser_full_old, "browser-full diagnostics guard")
+text = text.replace(browser_full_old, browser_full_new, 1)
+
+gate_event_old = "          EVENT_NAME: ${{ github.event_name }}\n"
+gate_event_new = "          EVENT_NAME: ${{ inputs.pull_request_number != '' && 'pull_request' || github.event_name }}\n"
+require_once(text, gate_event_old, "protected gate event normalization")
+text = text.replace(gate_event_old, gate_event_new, 1)
+
+metrics_old = """          if [ \"${{ needs.changes.outputs.browser }}\" = \"true\" ]; then
+            if [ \"${{ github.event_name }}\" = \"pull_request\" ] || [ \"${{ github.event_name }}\" = \"merge_group\" ]; then
+              needs=\"$needs,browser-pr\"
+            fi
+"""
+metrics_new = """          effective_event=\"${{ inputs.pull_request_number != '' && 'pull_request' || github.event_name }}\"
+          if [ \"${{ needs.changes.outputs.browser }}\" = \"true\" ]; then
+            if [ \"$effective_event\" = \"pull_request\" ] || [ \"$effective_event\" = \"merge_group\" ]; then
+              needs=\"$needs,browser-pr\"
+            fi
+"""
+require_once(text, metrics_old, "gate metrics browser dependency accounting")
+text = text.replace(metrics_old, metrics_new, 1)
+ci.write_text(text, encoding="utf-8")
 
 merging = Path("product/docs/MERGING.md")
 text = merging.read_text(encoding="utf-8")
@@ -126,6 +156,14 @@ test('Full runs only by trusted readiness while Fast stays on development PR upd
   }
   assert.match(fast, /^  pull_request:\n    types: \[opened, synchronize, reopened, ready_for_review\]$/m)
   assert.match(reset, /^  pull_request_target:\n    types: \[synchronize\]$/m)
+})
+
+test('trusted readiness dispatch preserves ordinary PR browser and gate semantics', () => {
+  assert.ok(full.includes("if: (github.event_name == 'pull_request' || github.event_name == 'merge_group' || (github.event_name == 'workflow_dispatch' && inputs.pull_request_number != '')) && needs.changes.outputs.browser == 'true'"))
+  assert.ok(full.includes("if: (github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.pull_request_number == '' && inputs.full_diagnostics == true)) && needs.changes.outputs.browser == 'true'"))
+  assert.ok(full.includes("EVENT_NAME: ${{ inputs.pull_request_number != '' && 'pull_request' || github.event_name }}"))
+  assert.ok(full.includes("effective_event=\"${{ inputs.pull_request_number != '' && 'pull_request' || github.event_name }}\""))
+  assert.doesNotMatch(full, /if: \(github\.event_name == 'schedule' \|\| github\.event_name == 'workflow_dispatch'\) && needs\.changes\.outputs\.browser == 'true'/)
 })
 """
 if "test('Full runs only by trusted readiness while Fast stays on development PR updates'" not in text:
