@@ -1,0 +1,31 @@
+name: Reset stale full-CI readiness
+
+on:
+  pull_request_target:
+    types: [synchronize]
+
+# This workflow intentionally runs from the trusted default-branch definition. It never checks out or executes
+# pull-request code; its only write is removing one repository-owned readiness label after the PR head changes.
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  reset-readiness:
+    name: Clear stale ready-for-full-ci label
+    if: contains(github.event.pull_request.labels.*.name, 'ready-for-full-ci')
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Remove readiness from the changed pull request
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          gh api \
+            --method DELETE \
+            "repos/${GITHUB_REPOSITORY}/issues/${PR_NUMBER}/labels/ready-for-full-ci" \
+            --silent
+          echo "Removed ready-for-full-ci from PR #${PR_NUMBER}; the new SHA must request Full validation again." >> "$GITHUB_STEP_SUMMARY"
