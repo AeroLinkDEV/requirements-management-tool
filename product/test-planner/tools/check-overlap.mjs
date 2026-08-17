@@ -45,7 +45,7 @@ export const OVERLAP_LIMITS = Object.freeze({
 const MAX_REPORT_ITEMS = OVERLAP_LIMITS.maxReportItems
 const MAX_REPORT_ERRORS = OVERLAP_LIMITS.maxReportErrors
 const SHA_PATTERN = /^[0-9a-f]{40,64}$/i
-const FILE_STATUSES = new Set(['added', 'modified', 'deleted', 'renamed', 'copied', 'changed'])
+const FILE_STATUSES = new Set(['added', 'modified', 'removed', 'deleted', 'renamed', 'copied', 'changed'])
 const CONTROL_CHARACTERS = /[\u0000-\u001f\u007f-\u009f\u2028\u2029]/g
 
 const env = (name) => process.env[name] ?? ''
