@@ -28,6 +28,20 @@ public sealed class NotificationOutboxTests
     }
 
     [Fact]
+    public void Test_change_request_notifications_resolve_to_the_package_rather_than_the_workspace_root()
+    {
+        var (links, _) = Support();
+        var id = "22222222-2222-2222-2222-222222222222";
+
+        Assert.Equal($"/open/test-change-request/{id}", NotificationLinkBuilder.PathFor($"test-change-request:{id}"));
+        Assert.Equal($"https://aerolink.example.test/open/test-change-request/{id}",
+            links.LinkFor($"test-change-request:{id}"));
+        // The route these notifications used to carry had no identifier at all, so it never reached the
+        // switch: PathFor found no colon and returned the root. That is the shape being guarded against.
+        Assert.Equal("/", NotificationLinkBuilder.PathFor("verification"));
+    }
+
+    [Fact]
     public void A_message_with_no_html_sends_exactly_as_it_always_did()
     {
         using var mail = SmtpEmailSender.BuildMail("aerolink@fms.test",
