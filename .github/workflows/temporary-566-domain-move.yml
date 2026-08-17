@@ -85,6 +85,27 @@ jobs:
           node product/test-contracts/tools/generate-host-classification.mjs
           if ($LASTEXITCODE -ne 0) { throw 'Host inventory generation failed.' }
 
+      - name: Update exact inventory-count contracts for the moved API test
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $path = 'product/test-contracts/tests/inventory.test.mjs'
+          $text = [IO.File]::ReadAllText($path)
+          $replacements = [ordered]@{
+            "'fresh-host'], { classes: 40, tests: 204, knownCases: 229, unknownCaseTests: 0 }" = "'fresh-host'], { classes: 40, tests: 203, knownCases: 228, unknownCaseTests: 0 }"
+            'reusable-host\s+30\s+186\s+211\s+0\s+42\.0%' = 'reusable-host\s+30\s+186\s+211\s+0\s+42\.1%'
+            'fresh-host\s+40\s+204\s+229\s+0\s+46\.0%' = 'fresh-host\s+40\s+203\s+228\s+0\s+45\.9%'
+            'assert.equal(intentArtifact.totals.tests, 443)' = 'assert.equal(intentArtifact.totals.tests, 442)'
+            'assert.equal(intentArtifact.totals.cases, 493)' = 'assert.equal(intentArtifact.totals.cases, 492)'
+            'assert.equal(hostArtifact.totals.knownCases, 493)' = 'assert.equal(hostArtifact.totals.knownCases, 492)'
+          }
+          foreach ($entry in $replacements.GetEnumerator()) {
+            $count = ([regex]::Matches($text, [regex]::Escape($entry.Key))).Count
+            if ($count -ne 1) { throw "Expected one inventory-count anchor '$($entry.Key)'; found $count." }
+            $text = $text.Replace($entry.Key, $entry.Value)
+          }
+          [IO.File]::WriteAllText($path, $text, [Text.UTF8Encoding]::new($false))
+
       - name: Prove moved Domain contract green
         shell: pwsh
         run: |
@@ -124,6 +145,7 @@ jobs:
           $allowed = @(
             'product/test-contracts/api-host-classification.json',
             'product/test-contracts/api-test-intent.json',
+            'product/test-contracts/tests/inventory.test.mjs',
             'product/tests/AeroLink.Api.Tests/ReleaseCampaignExactIntentApiTests.cs',
             'product/tests/AeroLink.Domain.Tests/ReleaseCampaignReviewTests.cs'
           )
@@ -137,6 +159,6 @@ jobs:
           $ErrorActionPreference = 'Stop'
           git config user.name 'seanmccarthyns'
           git config user.email 'seanmccarthyns@users.noreply.github.com'
-          git add -- product/test-contracts/api-host-classification.json product/test-contracts/api-test-intent.json product/tests/AeroLink.Api.Tests/ReleaseCampaignExactIntentApiTests.cs product/tests/AeroLink.Domain.Tests/ReleaseCampaignReviewTests.cs
+          git add -- product/test-contracts/api-host-classification.json product/test-contracts/api-test-intent.json product/test-contracts/tests/inventory.test.mjs product/tests/AeroLink.Api.Tests/ReleaseCampaignExactIntentApiTests.cs product/tests/AeroLink.Domain.Tests/ReleaseCampaignReviewTests.cs
           git commit -m 'Move release-review restart rule to Domain tests'
           git push origin HEAD:chatgpt/566-move-release-review-domain
