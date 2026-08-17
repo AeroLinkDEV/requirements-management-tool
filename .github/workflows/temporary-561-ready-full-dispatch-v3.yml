@@ -1,0 +1,260 @@
+name: Temporary #561 ready-full dispatcher validation v3
+
+on:
+  push:
+    branches:
+      - chatgpt/561-ready-full-dispatch
+    paths:
+      - .github/workflows/temporary-561-ready-full-dispatch-v3.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply-and-verify:
+    runs-on: windows-latest
+    steps:
+      - name: Check out stacked task branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+
+      - name: Install Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: 24
+
+      - name: Apply exact dispatcher slice
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $script = @'
+          from pathlib import Path
+          import re
+          import textwrap
+
+          OPEN = '$' + '{{'
+          CLOSE = '}}'
+          gh = lambda body: f'{OPEN} {body} {CLOSE}'
+
+          ci = Path('.github/workflows/ci.yml')
+          text = ci.read_text(encoding='utf-8')
+
+          anchor = "        type: boolean\n\npermissions:"
+          if text.count(anchor) != 1:
+              raise SystemExit(f'workflow-dispatch insertion anchor count={text.count(anchor)}')
+          extra_inputs = "\n".join([
+              "        type: boolean",
+              "      pull_request_number:",
+              "        description: Trusted ready-for-full-ci pull request number; leave blank for manual diagnostics",
+              "        required: false",
+              "        default: ''",
+              "        type: string",
+              "      pull_request_base_sha:",
+              "        description: Trusted ready-for-full-ci base SHA",
+              "        required: false",
+              "        default: ''",
+              "        type: string",
+              "      pull_request_head_sha:",
+              "        description: Trusted ready-for-full-ci exact head SHA",
+              "        required: false",
+              "        default: ''",
+              "        type: string",
+              "",
+              "permissions:",
+          ])
+          text = text.replace(anchor, extra_inputs)
+
+          permission_pattern = re.compile(r'(?m)^permissions:\n  actions: read\n  contents: read\n')
+          text, count = permission_pattern.subn('permissions:\n  actions: read\n  contents: read\n  pull-requests: read\n', text, count=1)
+          if count != 1:
+              raise SystemExit(f'permissions anchor count={count}')
+
+          concurrency_pattern = re.compile(r'(?m)^  group: quality-.*$')
+          concurrency = '  group: quality-' + gh('inputs.pull_request_number || github.event.pull_request.number || github.ref')
+          text, count = concurrency_pattern.subn(concurrency, text, count=1)
+          if count != 1:
+              raise SystemExit(f'concurrency anchor count={count}')
+
+          provenance = text.find('      - name: Resolve already-validated main tree')
+          if provenance < 0:
+              raise SystemExit('provenance step not found')
+          mark = text.find('      - name: Mark setup complete', provenance)
+          if mark < 0:
+              raise SystemExit('changes Mark setup complete step not found')
+          auth = "\n".join([
+              "      - name: Authenticate label-dispatched pull-request context",
+              "        if: github.event_name == 'workflow_dispatch' && inputs.pull_request_number != ''",
+              "        shell: pwsh",
+              "        env:",
+              "          GITHUB_TOKEN: " + gh('github.token'),
+              "          REQUESTED_PR_NUMBER: " + gh('inputs.pull_request_number'),
+              "          REQUESTED_BASE_SHA: " + gh('inputs.pull_request_base_sha'),
+              "          REQUESTED_HEAD_SHA: " + gh('inputs.pull_request_head_sha'),
+              "        run: |",
+              "          $ErrorActionPreference = 'Stop'",
+              "          if ($env:REQUESTED_PR_NUMBER -notmatch '^[1-9][0-9]*$') { throw 'Invalid pull-request number.' }",
+              "          if ($env:REQUESTED_BASE_SHA -notmatch '^[0-9a-f]{40}$') { throw 'Invalid requested base SHA.' }",
+              "          if ($env:REQUESTED_HEAD_SHA -notmatch '^[0-9a-f]{40}$') { throw 'Invalid requested head SHA.' }",
+              "          $headers = @{",
+              "            Authorization = \"Bearer $env:GITHUB_TOKEN\"",
+              "            Accept = 'application/vnd.github+json'",
+              "            'X-GitHub-Api-Version' = '2022-11-28'",
+              "          }",
+              "          $pr = Invoke-RestMethod -Headers $headers -Uri \"$env:GITHUB_API_URL/repos/$env:GITHUB_REPOSITORY/pulls/$env:REQUESTED_PR_NUMBER\"",
+              "          if ($pr.state -ne 'open') { throw 'The requested pull request is not open.' }",
+              "          if ($pr.head.repo.full_name -ne $env:GITHUB_REPOSITORY) { throw 'Fork pull requests cannot request privileged Full validation.' }",
+              "          if ($pr.head.sha -ne $env:REQUESTED_HEAD_SHA -or $env:GITHUB_SHA -ne $env:REQUESTED_HEAD_SHA) { throw 'The requested Full run is not attached to the exact current PR head.' }",
+              "          if ($pr.base.sha -ne $env:REQUESTED_BASE_SHA) { throw 'The requested Full run does not match the current PR base.' }",
+              "          if ($env:GITHUB_REF -ne \"refs/heads/$($pr.head.ref)\") { throw 'Workflow dispatch ref does not match the PR head branch.' }",
+              "          if (-not @($pr.labels | ForEach-Object { $_.name }).Contains('ready-for-full-ci')) { throw 'ready-for-full-ci is no longer present on this pull request.' }",
+              "",
+          ])
+          text = text[:mark] + auth + text[mark:]
+
+          classify = text.find('      - name: Classify paths')
+          if classify < 0:
+              raise SystemExit('Classify paths step not found')
+          env_start = text.find('        env:\n', classify)
+          run_start = text.find('        run:', env_start)
+          if env_start < 0 or run_start < 0:
+              raise SystemExit('classifier env block not found')
+          old_env = text[env_start:run_start]
+          if not all(key in old_env for key in ('EVENT_NAME:', 'BASE_SHA:', 'HEAD_SHA:')):
+              raise SystemExit('classifier env block did not contain expected keys')
+          new_env = "\n".join([
+              "        env:",
+              "          EVENT_NAME: " + gh("inputs.pull_request_number != '' && 'pull_request' || github.event_name"),
+              "          BASE_SHA: " + gh('inputs.pull_request_base_sha || github.event.pull_request.base.sha || github.event.before'),
+              "          HEAD_SHA: " + gh('inputs.pull_request_head_sha || github.sha'),
+              "",
+          ])
+          text = text[:env_start] + new_env + text[run_start:]
+          ci.write_text(text, encoding='utf-8', newline='')
+
+          requester = Path('.github/workflows/request-full-ci.yml')
+          requester_template = '''
+          name: Request full merge validation
+
+          on:
+            pull_request_target:
+              types: [labeled]
+
+          permissions:
+            actions: write
+            contents: read
+
+          jobs:
+            dispatch:
+              name: Dispatch exact ready-for-full-ci head
+              if: github.event.label.name == 'ready-for-full-ci' && github.event.pull_request.head.repo.full_name == github.repository
+              runs-on: ubuntu-latest
+              steps:
+                - name: Dispatch Product quality gate for exact PR head
+                  shell: bash
+                  env:
+                    GITHUB_TOKEN: __TOKEN__
+                    HEAD_REF: __HEAD_REF__
+                    HEAD_SHA: __HEAD_SHA__
+                    BASE_SHA: __BASE_SHA__
+                    PR_NUMBER: __PR_NUMBER__
+                  run: |
+                    python - <<'PY' > "$RUNNER_TEMP/full-ci-dispatch.json"
+                    import json, os
+                    print(json.dumps({
+                        "ref": os.environ["HEAD_REF"],
+                        "inputs": {
+                            "pull_request_number": os.environ["PR_NUMBER"],
+                            "pull_request_base_sha": os.environ["BASE_SHA"],
+                            "pull_request_head_sha": os.environ["HEAD_SHA"],
+                            "full_diagnostics": "false",
+                        },
+                    }))
+                    PY
+                    curl --fail-with-body --silent --show-error \\
+                      --request POST \\
+                      --header "Authorization: Bearer $GITHUB_TOKEN" \\
+                      --header "Accept: application/vnd.github+json" \\
+                      --header "X-GitHub-Api-Version: 2022-11-28" \\
+                      --header "Content-Type: application/json" \\
+                      --data-binary "@$RUNNER_TEMP/full-ci-dispatch.json" \\
+                      "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/dispatches"
+          '''
+          requester_text = textwrap.dedent(requester_template).lstrip()
+          requester_text = requester_text.replace('__TOKEN__', gh('github.token'))
+          requester_text = requester_text.replace('__HEAD_REF__', gh('github.event.pull_request.head.ref'))
+          requester_text = requester_text.replace('__HEAD_SHA__', gh('github.event.pull_request.head.sha'))
+          requester_text = requester_text.replace('__BASE_SHA__', gh('github.event.pull_request.base.sha'))
+          requester_text = requester_text.replace('__PR_NUMBER__', gh('github.event.pull_request.number'))
+          requester.write_text(requester_text, encoding='utf-8', newline='')
+
+          contract = Path('product/test-planner/tests/full-ci-readiness-dispatch.test.mjs')
+          contract.write_text('''import { test } from 'node:test'
+          import assert from 'node:assert/strict'
+          import { readFileSync } from 'node:fs'
+
+          const read = (relative) => readFileSync(new URL(`../../../${relative}`, import.meta.url), 'utf8')
+          const requester = read('.github/workflows/request-full-ci.yml')
+          const full = read('.github/workflows/ci.yml')
+
+          test('ready label requester is trusted-base, exact-label, same-repository, and dispatch-only', () => {
+            assert.match(requester, /pull_request_target:/)
+            assert.match(requester, /types: \[labeled\]/)
+            assert.match(requester, /actions: write/)
+            assert.match(requester, /contents: read/)
+            assert.doesNotMatch(requester, /actions\/checkout|git checkout|git clone/)
+            assert.match(requester, /github\.event\.label\.name == 'ready-for-full-ci'/)
+            assert.match(requester, /github\.event\.pull_request\.head\.repo\.full_name == github\.repository/)
+            assert.match(requester, /actions\/workflows\/ci\.yml\/dispatches/)
+          })
+
+          test('full workflow authenticates exact ready PR state before trusting dispatch inputs', () => {
+            for (const input of ['pull_request_number', 'pull_request_base_sha', 'pull_request_head_sha']) {
+              assert.match(full, new RegExp(`${input}:`))
+            }
+            assert.match(full, /pull-requests: read/)
+            assert.match(full, /      - name: Authenticate label-dispatched pull-request context\n        if:/)
+            assert.match(full, /        env:\n          GITHUB_TOKEN:/)
+            assert.match(full, /REQUESTED_HEAD_SHA/)
+            assert.match(full, /REQUESTED_BASE_SHA/)
+            assert.match(full, /ready-for-full-ci is no longer present/)
+          })
+
+          test('label-dispatched Full reuses PR classification and exact indentation', () => {
+            assert.match(full, /inputs\.pull_request_number \|\| github\.event\.pull_request\.number \|\| github\.ref/)
+            assert.match(full, /        env:\n          EVENT_NAME: .*inputs\.pull_request_number/)
+            assert.match(full, /          BASE_SHA: .*inputs\.pull_request_base_sha/)
+            assert.match(full, /          HEAD_SHA: .*inputs\.pull_request_head_sha/)
+          })
+          ''', encoding='utf-8', newline='')
+          '@
+          $script | python -
+          if ($LASTEXITCODE -ne 0) { throw 'Bounded #561 v3 source transformation failed.' }
+
+      - name: Validate YAML and planner contracts
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          ruby -e "require 'yaml'; YAML.load_file('.github/workflows/ci.yml', aliases: true); YAML.load_file('.github/workflows/request-full-ci.yml', aliases: true)"
+          if ($LASTEXITCODE -ne 0) { throw 'Generated workflow YAML did not parse.' }
+          $tests = @(Get-ChildItem -LiteralPath product/test-planner/tests -Filter '*.test.mjs' -File | Sort-Object FullName | ForEach-Object { $_.FullName })
+          & node --test $tests
+          if ($LASTEXITCODE -ne 0) { throw 'Planner/dispatcher contract suite failed.' }
+          git diff --check
+          if ($LASTEXITCODE -ne 0) { throw 'git diff --check failed.' }
+
+      - name: Build exact production commit object
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add .github/workflows/ci.yml .github/workflows/request-full-ci.yml product/test-planner/tests/full-ci-readiness-dispatch.test.mjs
+          git rm .github/workflows/temporary-561-ready-full-dispatch.yml .github/workflows/temporary-561-ready-full-dispatch-v2.yml .github/workflows/temporary-561-ready-full-dispatch-v3.yml
+          git diff --cached --check
+          if ($LASTEXITCODE -ne 0) { throw 'Staged diff check failed.' }
+          git diff --cached --stat
+          git commit -m 'Add trusted ready-for-full-ci dispatcher'
+          Write-Host ("PRODUCTION_COMMIT=" + (git rev-parse HEAD))
+          git push origin HEAD:chatgpt/561-ready-full-dispatch
+          if ($LASTEXITCODE -eq 0) { throw 'Expected workflow-file push to be blocked; connector publication is required.' }
