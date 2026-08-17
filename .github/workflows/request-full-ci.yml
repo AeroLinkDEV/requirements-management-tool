@@ -7,23 +7,104 @@ on:
 permissions:
   actions: write
   contents: read
+  pull-requests: read
+
+concurrency:
+  group: full-ci-request-${{ github.event.pull_request.number }}-${{ github.event.pull_request.head.sha }}
+  cancel-in-progress: false
 
 jobs:
-  dispatch:
-    name: Dispatch exact ready-for-full-ci head
+  dispatch-and-bind:
+    # This job is the trusted PR-associated branch-protection binding for final Full evidence. The required
+    # name exists only for the exact readiness label on a same-repository PR. The workflow runs from the
+    # default-branch definition, never checks out PR code, and cannot succeed until the real exact-head
+    # Product aggregate has succeeded and the live PR identity/readiness still match.
+    name: ${{ github.event.label.name == 'ready-for-full-ci' && github.event.pull_request.head.repo.full_name == github.repository && 'Report what this run validated' || 'Ignore non-readiness PR label for Full CI' }}
     if: github.event.label.name == 'ready-for-full-ci' && github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
+    timeout-minutes: 35
+    env:
+      GITHUB_TOKEN: ${{ github.token }}
+      HEAD_REF: ${{ github.event.pull_request.head.ref }}
+      HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+      BASE_SHA: ${{ github.event.pull_request.base.sha }}
+      PR_NUMBER: ${{ github.event.pull_request.number }}
     steps:
-      - name: Dispatch Product quality gate for exact PR head
+      - name: Authenticate live ready PR, dispatch once, and bind exact Product success
         shell: bash
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
-          HEAD_REF: ${{ github.event.pull_request.head.ref }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
-          python - <<'PY' > "$RUNNER_TEMP/full-ci-dispatch.json"
+          set -euo pipefail
+          api="$GITHUB_API_URL/repos/$GITHUB_REPOSITORY"
+          headers=(
+            --header "Authorization: Bearer $GITHUB_TOKEN"
+            --header "Accept: application/vnd.github+json"
+            --header "X-GitHub-Api-Version: 2022-11-28"
+          )
+
+          verify_live_pr() {
+            curl --fail-with-body --silent --show-error "${headers[@]}" \
+              "$api/pulls/$PR_NUMBER" --output "$RUNNER_TEMP/live-pr.json"
+            python - "$RUNNER_TEMP/live-pr.json" "$HEAD_SHA" "$BASE_SHA" "$HEAD_REF" "$GITHUB_REPOSITORY" <<'PY'
+          import json
+          import sys
+
+          path, head_sha, base_sha, head_ref, repository = sys.argv[1:]
+          with open(path, encoding="utf-8") as handle:
+              pr = json.load(handle)
+          labels = {label.get("name") for label in pr.get("labels", [])}
+          failures = []
+          if pr.get("state") != "open": failures.append("pull request is not open")
+          if pr.get("head", {}).get("sha") != head_sha: failures.append("head SHA moved")
+          if pr.get("base", {}).get("sha") != base_sha: failures.append("base SHA moved")
+          if pr.get("head", {}).get("ref") != head_ref: failures.append("head ref moved")
+          if pr.get("head", {}).get("repo", {}).get("full_name") != repository: failures.append("head repository changed")
+          if "ready-for-full-ci" not in labels: failures.append("ready-for-full-ci is no longer present")
+          if failures:
+              raise SystemExit("Exact Full request is stale: " + "; ".join(failures))
+          PY
+          }
+
+          find_product_run() {
+            curl --fail-with-body --silent --show-error "${headers[@]}" \
+              "$api/actions/workflows/ci.yml/runs?head_sha=$HEAD_SHA&event=workflow_dispatch&per_page=100" \
+              --output "$RUNNER_TEMP/product-runs.json"
+            python - "$RUNNER_TEMP/product-runs.json" "$HEAD_SHA" "$PR_NUMBER" "$HEAD_REF" <<'PY'
+          import json
+          import sys
+
+          path, head_sha, pr_number, head_ref = sys.argv[1:]
+          pr_number = int(pr_number)
+          with open(path, encoding="utf-8") as handle:
+              runs = json.load(handle).get("workflow_runs", [])
+          matches = []
+          for run in runs:
+              prs = {item.get("number") for item in run.get("pull_requests", [])}
+              if (
+                  run.get("head_sha") == head_sha
+                  and run.get("head_branch") == head_ref
+                  and run.get("event") == "workflow_dispatch"
+                  and run.get("actor", {}).get("login") == "github-actions[bot]"
+                  and run.get("triggering_actor", {}).get("login") == "github-actions[bot]"
+                  and pr_number in prs
+              ):
+                  matches.append(run)
+          if len(matches) > 1:
+              print("ERROR multiple trusted Product workflow_dispatch runs exist for this exact PR SHA")
+          elif len(matches) == 1:
+              run = matches[0]
+              print(f"FOUND {run['id']} {run.get('status')} {run.get('conclusion')}")
+          else:
+              print("NONE")
+          PY
+          }
+
+          verify_live_pr
+          match="$(find_product_run)"
+          case "$match" in
+            ERROR*) echo "::error::$match"; exit 1 ;;
+            FOUND*) read -r _ run_id _ _ <<< "$match" ;;
+            NONE)
+              python - <<'PY' > "$RUNNER_TEMP/full-ci-dispatch.json"
           import json, os
           print(json.dumps({
               "ref": os.environ["HEAD_REF"],
@@ -35,11 +116,66 @@ jobs:
               },
           }))
           PY
-          curl --fail-with-body --silent --show-error \
-            --request POST \
-            --header "Authorization: Bearer $GITHUB_TOKEN" \
-            --header "Accept: application/vnd.github+json" \
-            --header "X-GitHub-Api-Version: 2022-11-28" \
-            --header "Content-Type: application/json" \
-            --data-binary "@$RUNNER_TEMP/full-ci-dispatch.json" \
-            "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/dispatches"
+              curl --fail-with-body --silent --show-error \
+                --request POST "${headers[@]}" \
+                --header "Content-Type: application/json" \
+                --data-binary "@$RUNNER_TEMP/full-ci-dispatch.json" \
+                "$api/actions/workflows/ci.yml/dispatches"
+              run_id=""
+              ;;
+            *) echo "::error::Unexpected Product-run matcher output: $match"; exit 1 ;;
+          esac
+
+          authoritative="false"
+          for attempt in $(seq 1 210); do
+            verify_live_pr
+            match="$(find_product_run)"
+            case "$match" in
+              ERROR*) echo "::error::$match"; exit 1 ;;
+              NONE) sleep 10; continue ;;
+              FOUND*)
+                read -r _ run_id status conclusion <<< "$match"
+                if [ "$status" != "completed" ]; then
+                  sleep 10
+                  continue
+                fi
+                if [ "$conclusion" != "success" ]; then
+                  echo "::error::Exact-head Product run $run_id completed with conclusion=$conclusion."
+                  exit 1
+                fi
+                authoritative="true"
+                break
+                ;;
+              *) echo "::error::Unexpected Product-run matcher output: $match"; exit 1 ;;
+            esac
+          done
+
+          if [ "$authoritative" != "true" ] || [ -z "${run_id:-}" ]; then
+            echo "::error::No successful trusted Product workflow_dispatch completed for exact head $HEAD_SHA before timeout."
+            exit 1
+          fi
+
+          curl --fail-with-body --silent --show-error "${headers[@]}" \
+            "$api/actions/runs/$run_id/jobs?filter=latest&per_page=100" \
+            --output "$RUNNER_TEMP/product-jobs.json"
+          python - "$RUNNER_TEMP/product-jobs.json" <<'PY'
+          import json
+          import sys
+
+          with open(sys.argv[1], encoding="utf-8") as handle:
+              jobs = json.load(handle).get("jobs", [])
+          accepted_names = {"Report what this run validated", "Full Product evidence aggregate"}
+          gates = [job for job in jobs if job.get("name") in accepted_names]
+          if len(gates) != 1:
+              raise SystemExit(f"expected exactly one Product aggregate job, found {len(gates)}")
+          gate = gates[0]
+          if gate.get("status") != "completed" or gate.get("conclusion") != "success":
+              raise SystemExit(
+                  f"Product aggregate is not authoritative success: name={gate.get('name')} "
+                  f"status={gate.get('status')} conclusion={gate.get('conclusion')}"
+              )
+          print(f"Product aggregate {gate.get('name')} ({gate.get('id')}) completed successfully.")
+          PY
+
+          verify_live_pr
+          echo "Bound exact Product Full run $run_id to PR #$PR_NUMBER head $HEAD_SHA against base $BASE_SHA." >> "$GITHUB_STEP_SUMMARY"
