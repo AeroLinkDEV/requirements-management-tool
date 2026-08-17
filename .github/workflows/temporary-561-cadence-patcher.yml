@@ -28,11 +28,19 @@ jobs:
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
 
           if git ls-remote --exit-code --heads origin "refs/heads/$TARGET_BRANCH" >/dev/null 2>&1; then
-            echo "Target branch already exists; nothing to do."
-            exit 0
+            git fetch origin "$TARGET_BRANCH"
+            target_sha="$(git rev-parse "origin/$TARGET_BRANCH")"
+            if ! git merge-base --is-ancestor "$target_sha" main; then
+              echo "Target branch already contains work not present on trusted main; nothing to do."
+              exit 0
+            fi
+            echo "Target branch is only a stale trusted-main ancestor; fast-forwarding it before the bounded patch."
+            git checkout -B "$TARGET_BRANCH" "origin/$TARGET_BRANCH"
+            git merge --ff-only main
+          else
+            git checkout -b "$TARGET_BRANCH"
           fi
 
-          git checkout -b "$TARGET_BRANCH"
           python .github/scripts/prepare-561-cadence.py
 
           if grep -q '^  pull_request:$' .github/workflows/ci.yml; then
