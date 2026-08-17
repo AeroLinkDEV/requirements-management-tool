@@ -1,0 +1,124 @@
+name: Temporary #561 cadence bootstrap trigger
+
+on:
+  pull_request:
+    types: [opened]
+
+permissions:
+  contents: write
+
+jobs:
+  prepare-cadence-branch:
+    if: >-
+      github.event.pull_request.base.ref == 'main' &&
+      github.event.pull_request.head.ref == 'chatgpt/561-cadence-bootstrap-trigger' &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.event.pull_request.user.login == 'seanmccarthyns'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check out trusted default branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Patch exact cadence surface and remove merged helper
+        shell: bash
+        env:
+          TARGET_BRANCH: chatgpt/561-cadence-switch
+          EXPECTED_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_BASE_SHA"
+
+          if git ls-remote --exit-code --heads origin "refs/heads/$TARGET_BRANCH" >/dev/null 2>&1; then
+            echo "Target branch already exists; refusing to overwrite it." >&2
+            exit 1
+          fi
+
+          git checkout -b "$TARGET_BRANCH"
+
+          python - <<'PY'
+          from pathlib import Path
+
+          ci = Path('.github/workflows/ci.yml')
+          text = ci.read_text(encoding='utf-8')
+          needle = 'on:\n  pull_request:\n'
+          if text.count(needle) != 1:
+              raise SystemExit(f'expected exactly one automatic PR trigger header, found {text.count(needle)}')
+          ci.write_text(text.replace(needle, 'on:\n', 1), encoding='utf-8')
+
+          merging = Path('product/docs/MERGING.md')
+          text = merging.read_text(encoding='utf-8')
+          start = text.index('## Arm it and walk away\n')
+          end = text.index('## What auto-merge does not do\n')
+          replacement = '''## Request Full CI only when the current SHA is merge-ready\n\nEvery pull-request SHA receives **advisory Fast feedback automatically**. Fast is for development feedback; it\nis not merge authority and cannot satisfy branch protection.\n\nWhen implementation and review are finished and the **current SHA is the one you intend to merge**, request\nthe existing Full Product gate by applying the repository label:\n\n```bash\ngh pr edit <number> --add-label ready-for-full-ci\n```\n\nThe trusted default-branch dispatcher authenticates the live pull request, exact head SHA, base SHA, head ref,\nsame-repository origin and readiness label before dispatching Full validation. Branch protection still requires\n`Report what this run validated`, so the pull request remains blocked until that exact-head Full run succeeds.\n\nOnly after readiness is requested for the final SHA, arm auto-merge:\n\n```bash\ngh pr merge <number> --squash --auto\n```\n\nIf another commit is pushed, the trusted synchronize guard removes `ready-for-full-ci`. The old Full result\nbelongs to the old SHA and cannot authorize the new one; finish the fix, then request readiness again.\n\nTo disarm auto-merge:\n\n```bash\ngh pr merge <number> --disable-auto\n```\n\n'''
+          merging.write_text(text[:start] + replacement + text[end:], encoding='utf-8')
+
+          feedback = Path('product/docs/BROWSER_AND_BACKEND_FEEDBACK_TIME.md')
+          text = feedback.read_text(encoding='utf-8')
+          marker = '## Measured, 2026-08-13\n'
+          if marker not in text:
+              raise SystemExit('feedback-time insertion marker missing')
+          section = '''## Merge-ready Full-CI cadence, 2026-08-17\n\nIssue #561 changes **when** the existing Full evidence is purchased, not what it proves. Ordinary pull-request\nopen/reopen/synchronize events run the separate advisory Fast workflow. The Product quality gate no longer\nstarts automatically for each development push.\n\nWhen `ready-for-full-ci` is applied to the final SHA, a trusted `pull_request_target` dispatcher that never\nchecks out PR code dispatches this unchanged Product gate against the exact same-repository head. The gate\nstill selects the same API, browser, production-browser, backend/core, client, PostgreSQL and operator lanes,\nand branch protection still requires the same `Report what this run validated` aggregate. There is no\nalways-green placeholder and Fast is not authoritative.\n\nA synchronize event removes stale readiness, so a later SHA must request Full again. Fast and Full use\ndifferent concurrency groups; development feedback cannot cancel final Full evidence. Before the switch, the\nmeasured Full critical path was 10m14s and three consecutive hosted Fast observations were 178s, 192s and\n198s. The rolling metrics collector remains the source for post-switch full-gates-per-merge, cancellation waste,\nqueue/final-push-to-merge timing and regression data; re-measure the new cadence rather than assuming savings.\n\n'''
+          if '## Merge-ready Full-CI cadence, 2026-08-17\n' not in text:
+              feedback.write_text(text.replace(marker, section + marker, 1), encoding='utf-8')
+
+          planner = Path('product/test-planner/README.md')
+          text = planner.read_text(encoding='utf-8')
+          marker = '## Pull-request overlap advisory\n'
+          if marker not in text:
+              raise SystemExit('planner guidance insertion marker missing')
+          section = '''## Merge-ready Full CI\n\nGitHub pull requests receive the Fast workflow automatically; both local `-Mode Fast` and hosted Fast remain\nnon-authoritative. Once the current PR SHA is final, apply `ready-for-full-ci`. The trusted default-branch\nrequester binds PR number, base SHA and exact head SHA and dispatches the existing Full Product workflow.\n`Report what this run validated` remains the required branch-protection context.\n\nDo not apply readiness early. A later push removes the label through the trusted synchronize guard and the new\nSHA must request Full again. Do not use Fast success, an older SHA's Full result, or a placeholder check as\nmerge evidence.\n\n'''
+          if '## Merge-ready Full CI\n' not in text:
+              planner.write_text(text.replace(marker, section + marker, 1), encoding='utf-8')
+
+          contract = Path('product/test-planner/tests/full-ci-readiness-dispatch.test.mjs')
+          text = contract.read_text(encoding='utf-8')
+          const_marker = "const full = read('.github/workflows/ci.yml')\n"
+          if const_marker not in text:
+              raise SystemExit('full-CI contract constant marker missing')
+          if "const fast = read('.github/workflows/fast-pr-feedback.yml')" not in text:
+              text = text.replace(
+                  const_marker,
+                  const_marker + "const fast = read('.github/workflows/fast-pr-feedback.yml')\nconst reset = read('.github/workflows/reset-full-ci-readiness.yml')\n",
+                  1,
+              )
+          test_block = r'''
+
+test('Full runs only by trusted readiness while Fast stays on development PR updates', () => {
+  assert.doesNotMatch(full, /^  pull_request:\s*$/m)
+  for (const trigger of ['merge_group', 'push', 'schedule', 'workflow_dispatch']) {
+    assert.match(full, new RegExp(`^  ${trigger}:`, 'm'))
+  }
+  assert.match(fast, /^  pull_request:\n    types: \[opened, synchronize, reopened, ready_for_review\]$/m)
+  assert.match(reset, /^  pull_request_target:\n    types: \[synchronize\]$/m)
+})
+'''
+          if "test('Full runs only by trusted readiness while Fast stays on development PR updates'" not in text:
+              text += test_block
+          contract.write_text(text, encoding='utf-8')
+          PY
+
+          if grep -q '^  pull_request:$' .github/workflows/ci.yml; then
+            echo "Automatic pull_request trigger still present after bounded edit." >&2
+            exit 1
+          fi
+          grep -q '^  workflow_dispatch:$' .github/workflows/ci.yml
+          grep -q '^  pull_request:$' .github/workflows/fast-pr-feedback.yml
+          grep -q '^  pull_request_target:$' .github/workflows/reset-full-ci-readiness.yml
+          grep -q 'ready-for-full-ci' product/docs/MERGING.md
+          grep -q 'Merge-ready Full-CI cadence' product/docs/BROWSER_AND_BACKEND_FEEDBACK_TIME.md
+          grep -q 'Merge-ready Full CI' product/test-planner/README.md
+
+          node --test product/test-planner/tests/full-ci-readiness-dispatch.test.mjs
+
+          git rm .github/workflows/temporary-561-cadence-patcher.yml
+          git diff --check
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add .github/workflows/ci.yml product/docs/MERGING.md product/docs/BROWSER_AND_BACKEND_FEEDBACK_TIME.md product/test-planner/README.md product/test-planner/tests/full-ci-readiness-dispatch.test.mjs
+          git commit -m "Gate Full CI on explicit merge readiness"
+          git push origin "$TARGET_BRANCH"
