@@ -344,7 +344,7 @@ function Invoke-DockerText {
 function Get-DockerOwnedResource {
     param([Parameter(Mandatory)][string]$Docker, [Parameter(Mandatory)][ValidateSet('container', 'volume')][string]$Kind, [Parameter(Mandatory)][string]$Name)
     if ([string]::IsNullOrEmpty($Name) -or $Name -match '[\r\n]') { throw "Disposable Docker $Kind ownership could not be verified." }
-    $arguments = if ($Kind -eq 'container') { @('inspect', '--format', '{{ index .Config.Labels "com.aerolink.planner.run" }}', $Name) } else { @('volume', 'inspect', '--format', '{{ index .Labels "com.aerolink.planner.run" }}', $Name) }
+    $arguments = if ($Kind -eq 'container') { @('inspect', '--format', '{{ index .Config.Labels \"com.aerolink.planner.run\" }}', $Name) } else { @('volume', 'inspect', '--format', '{{ index .Labels \"com.aerolink.planner.run\" }}', $Name) }
     try {
         $output = @(& $Docker @arguments 2>&1)
         $exitCode = $LASTEXITCODE
@@ -490,7 +490,7 @@ function Invoke-DisposablePostgreSqlGate {
         if ((Get-DockerOwnedResource -Docker $docker -Kind volume -Name $volumeName) -ne $runId) { throw 'Disposable volume ownership was not verified.' }
         Invoke-CheckedDocker -Docker $docker -Operation 'start-container' -Arguments @('run', '--detach', '--name', $containerName, '--label', "$labelKey=$runId", '--env-file', $dockerEnvFile, '--publish', '127.0.0.1::5432', '--volume', ($volumeName + ':/var/lib/postgresql/data'), 'postgres:17')
         if ((Get-DockerOwnedResource -Docker $docker -Kind container -Name $containerName) -ne $runId) { throw 'Disposable container ownership was not verified.' }
-        $mappingJson = Invoke-DockerText -Docker $docker -Operation 'inspect-port-mapping' -Arguments @('inspect', '--format', '{{json (index .NetworkSettings.Ports "5432/tcp")}}', $containerName)
+        $mappingJson = Invoke-DockerText -Docker $docker -Operation 'inspect-port-mapping' -Arguments @('inspect', '--format', '{{json (index .NetworkSettings.Ports \"5432/tcp\")}}', $containerName)
         $mapping = @($mappingJson | ConvertFrom-Json)
         if ($mapping.Count -ne 1 -or $mapping[0].HostIp -ne '127.0.0.1' -or $mapping[0].HostPort -notmatch '^[1-9][0-9]{0,4}$') { throw 'Disposable PostgreSQL loopback mapping was not verified.' }
         $hostPostgreSqlPort = [int]$mapping[0].HostPort
