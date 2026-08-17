@@ -357,7 +357,7 @@ function Get-DockerOwnedResource {
         $diagnostic = $diagnostics[0]
         $escapedName = [regex]::Escape($Name)
         $absent = if ($Kind -eq 'container') {
-            $diagnostic -match "\Aerror: no such object: $escapedName\z"
+            $diagnostic -cmatch "\A(?:Error: No such object:|error: no such object:) $escapedName\z"
         }
         else {
             $diagnostic -cmatch "\AError response from daemon: (?:get ${escapedName}: no such volume|no such volume: $escapedName)\z"
