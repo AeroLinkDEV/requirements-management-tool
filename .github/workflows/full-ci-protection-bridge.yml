@@ -42,6 +42,7 @@ jobs:
           )
 
           run_id=""
+          authoritative="false"
           for attempt in $(seq 1 160); do
             curl --fail-with-body --silent --show-error "${headers[@]}" \
               "$api/actions/workflows/ci.yml/runs?head_sha=$HEAD_SHA&event=workflow_dispatch&per_page=100" \
@@ -99,6 +100,7 @@ jobs:
                   echo "::error::Exact-head Product run $run_id completed with conclusion=$conclusion."
                   exit 1
                 fi
+                authoritative="true"
                 break
                 ;;
               *)
@@ -108,8 +110,8 @@ jobs:
             esac
           done
 
-          if [ -z "$run_id" ]; then
-            echo "::error::No trusted Product workflow_dispatch appeared for exact head $HEAD_SHA before timeout."
+          if [ "$authoritative" != "true" ] || [ -z "$run_id" ]; then
+            echo "::error::No successful trusted Product workflow_dispatch completed for exact head $HEAD_SHA before timeout."
             exit 1
           fi
 
