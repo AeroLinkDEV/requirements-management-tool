@@ -65,6 +65,7 @@ public sealed class ApprovalStep
 public sealed class ReviewCycle
 {
     private readonly List<ApprovalStep> _steps = [];
+    private readonly List<ReviewComment> _comments = [];
     private ReviewCycle() { }
 
     /// <summary>A review of a change request.</summary>
@@ -146,7 +147,64 @@ public sealed class ReviewCycle
     public DateTimeOffset? CompletedAt { get; private set; }
     public string? ClosureReason { get; private set; }
     public IReadOnlyCollection<ApprovalStep> Steps => _steps.AsReadOnly();
+    public IReadOnlyCollection<ReviewComment> Comments => _comments.AsReadOnly();
     public int ActivePosition => _steps.Where(x => x.State == ApprovalStepState.Active).OrderBy(x => x.Position).FirstOrDefault()?.Position ?? -1;
+
+    /// <summary>
+    /// Adds a reviewer's remark about one part of the package, as a draft only its author can see.
+    ///
+    /// Anyone holding a step in this cycle may comment, not only whoever is active. In a sequential review a
+    /// later reviewer reads ahead, and refusing them a place to write it down only means the observation is
+    /// lost or arrives by some other route.
+    /// </summary>
+    internal ReviewComment AddComment(string authorId, ReviewCommentAnchor anchor, Guid? requirementChangeId,
+        string body, DateTimeOffset now)
+    {
+        EnsureActive();
+        if (!_steps.Any(x => string.Equals(x.ApproverId, authorId, StringComparison.OrdinalIgnoreCase)))
+            throw new DomainException("Only a reviewer on this cycle can comment on it.");
+        var comment = new ReviewComment(Id, authorId, anchor, requirementChangeId, body, now);
+        _comments.Add(comment);
+        return comment;
+    }
+
+    internal void ReviseComment(Guid commentId, string actorId, string body, DateTimeOffset now) =>
+        OwnDraft(commentId, actorId).Revise(body, now);
+
+    internal void RemoveComment(Guid commentId, string actorId) => _comments.Remove(OwnDraft(commentId, actorId));
+
+    private ReviewComment OwnDraft(Guid commentId, string actorId)
+    {
+        var comment = _comments.SingleOrDefault(x => x.Id == commentId)
+            ?? throw new DomainException("That comment is not on this review cycle.");
+        if (!string.Equals(comment.AuthorId, actorId, StringComparison.OrdinalIgnoreCase))
+            throw new DomainException("Only the author of a comment can change it.");
+        if (comment.State != ReviewCommentState.Draft)
+            throw new DomainException("A published comment cannot be changed.");
+        return comment;
+    }
+
+    /// <summary>
+    /// Publishes the drafts one reviewer wrote. Called by the act of that reviewer deciding, which is the
+    /// only thing that makes their remarks the author's to read.
+    /// </summary>
+    private void PublishOwn(string actorId, DateTimeOffset now)
+    {
+        foreach (var comment in _comments.Where(x => x.State == ReviewCommentState.Draft
+                     && string.Equals(x.AuthorId, actorId, StringComparison.OrdinalIgnoreCase)))
+            comment.Publish(decisionRecorded: true, now);
+    }
+
+    /// <summary>
+    /// Publishes whatever is still outstanding when the cycle ends under everyone. Discarding it instead
+    /// would lose a reviewer's written analysis because a colleague decided first, and send the author back
+    /// to revise the package without it. Each one is marked as carrying no decision.
+    /// </summary>
+    private void PublishOrphans(DateTimeOffset now)
+    {
+        foreach (var comment in _comments.Where(x => x.State == ReviewCommentState.Draft))
+            comment.Publish(decisionRecorded: false, now);
+    }
 
     internal bool Approve(string actorId, string? rationale, DateTimeOffset now)
     {
@@ -156,6 +214,9 @@ public sealed class ReviewCycle
             throw new DomainException("Only the active approver can approve this review stage.");
         var position = active.Position;
         active.Approve(now, rationale);
+        // Approving publishes this reviewer's remarks and nothing else. The cycle carries on, and the author
+        // can read them straight away rather than waiting for everyone.
+        PublishOwn(actorId, now);
         if (_steps.All(x => x.State == ApprovalStepState.Approved))
         {
             State = ReviewCycleState.Approved;
@@ -179,6 +240,10 @@ public sealed class ReviewCycle
         if (active is null)
             throw new DomainException("Only the active approver can return the review to the author.");
         active.Return(rationale, now);
+        // This closes the cycle for everyone, so the returning reviewer's remarks publish with their
+        // decision and everyone else's publish without one.
+        PublishOwn(actorId, now);
+        PublishOrphans(now);
         State = ReviewCycleState.ChangesRequested;
         ClosureReason = rationale.Trim();
         CompletedAt = now;
@@ -202,6 +267,9 @@ public sealed class ReviewCycle
     internal void Cancel(string reason, DateTimeOffset now)
     {
         EnsureActive();
+        // A cancelled review still produced reading. The author is about to rework the package and every
+        // observation written against it applies just as much as if the cycle had run its course.
+        PublishOrphans(now);
         State = ReviewCycleState.Cancelled;
         ClosureReason = reason.Trim();
         CompletedAt = now;
