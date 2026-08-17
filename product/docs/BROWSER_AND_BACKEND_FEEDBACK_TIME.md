@@ -22,6 +22,24 @@ merging. A merge queue would remove the rest and cannot be enabled here — see
 That makes elapsed time per run the number worth optimizing, and it makes it worth knowing which job actually
 governs it. Optimizing the wrong job costs runners and buys nothing.
 
+## Merge-ready Full-CI cadence, 2026-08-17
+
+Issue #561 changes **when** the existing Full evidence is purchased, not what it proves. Ordinary pull-request
+open/reopen/synchronize events run the separate advisory Fast workflow. The Product quality gate no longer
+starts automatically for each development push.
+
+When `ready-for-full-ci` is applied to the final SHA, a trusted `pull_request_target` requester that never checks
+out PR code dispatches the Product gate against the exact same-repository head. Product still selects the same
+API, browser, production-browser, backend/core, client, PostgreSQL and operator lanes; its internal
+`Full Product evidence aggregate` remains the evidence summary. The trusted requester independently proves
+Product's readiness authentication and aggregate success before completing branch protection's required
+`Report what this run validated` context. There is no always-green placeholder and Fast is not authoritative.
+
+A synchronize event removes stale readiness, so a later SHA must request Full again. Fast and Full use
+different concurrency groups; development feedback cannot cancel final Full evidence. The rolling metrics
+collector remains the source for post-switch full-gates-per-merge, cancellation waste, queue/final-push-to-merge
+timing and regression data; re-measure the new cadence rather than assuming savings.
+
 ## Measured, 2026-08-13
 
 Job durations across three consecutive runs of one pull request:

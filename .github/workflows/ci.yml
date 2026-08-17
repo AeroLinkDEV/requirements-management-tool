@@ -1,7 +1,6 @@
 name: Product quality gate
 
 on:
-  pull_request:
   # A merge queue validates each candidate against the exact tree it will land on, including whatever is
   # queued ahead of it. That is what strict branch protection reaches for and cannot deliver: "up to date at
   # some point" is not "tested against what it becomes". Without this trigger the queue enqueues, waits for
@@ -769,7 +768,7 @@ jobs:
     # merge queue — and a skipped job is not a failed one, so the queue would merge on a green tick having run
     # no browser journey at all. That is a quieter gate at the exact moment the commit lands, which is the
     # opposite of what the queue is for.
-    if: (github.event_name == 'pull_request' || github.event_name == 'merge_group') && needs.changes.outputs.browser == 'true'
+    if: (github.event_name == 'pull_request' || github.event_name == 'merge_group' || (github.event_name == 'workflow_dispatch' && inputs.pull_request_number != '')) && needs.changes.outputs.browser == 'true'
     runs-on: windows-latest
     # Thirty, because twenty is now inside the noise. A shard is roughly four minutes of setup — checkout,
     # .NET, Node, NuGet restore, the Release API build, Chromium — plus its half of the journeys, and that
@@ -1055,7 +1054,7 @@ jobs:
     # Schedule and manual dispatch only. A squash merge of a green pull request puts a tree on main that
     # is identical to the one browser-pr tested minutes earlier, so re-running the journeys on push buys
     # no information. validate and postgresql-smoke still run on every push as the safety net.
-    if: (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && needs.changes.outputs.browser == 'true'
+    if: (github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.pull_request_number == '' && inputs.full_diagnostics == true)) && needs.changes.outputs.browser == 'true'
     runs-on: windows-latest
     timeout-minutes: 20
     strategy:
@@ -1305,14 +1304,14 @@ jobs:
   # validated. It is the one check worth requiring for a merge: it cannot be skipped into a pass, and its
   # summary says in words what the tick is claiming.
   gate:
-    name: Report what this run validated
+    name: Full Product evidence aggregate
     if: always()
     needs: [changes, backend-api, backend-core, client, script-contracts, browser-pr, browser-production, postgresql-smoke, metrics-tooling]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     env:
       METRICS_JOB_ID: gate
-      METRICS_JOB_NAME: Report what this run validated
+      METRICS_JOB_NAME: Full Product evidence aggregate
     steps:
       - name: Capture job start
         continue-on-error: true
@@ -1333,7 +1332,7 @@ jobs:
           POSTGRESQL: ${{ needs.postgresql-smoke.result }}
           METRICS_TOOLING: ${{ needs.metrics-tooling.result }}
           DOCS_ONLY: ${{ needs.changes.outputs.docs_only }}
-          EVENT_NAME: ${{ github.event_name }}
+          EVENT_NAME: ${{ inputs.pull_request_number != '' && 'pull_request' || github.event_name }}
           PLANNER_VERSION: ${{ needs.changes.outputs.planner_version }}
           PLANNER_HASH: ${{ needs.changes.outputs.planner_hash }}
           PLANNER_UNKNOWN_PATHS: ${{ needs.changes.outputs.planner_unknown_paths }}
@@ -1454,8 +1453,9 @@ jobs:
             if [ "${{ needs.changes.outputs.client }}" = "true" ]; then needs="$needs,client"; fi
             if [ "${{ needs.changes.outputs.docs_only }}" != "true" ]; then needs="$needs,script-contracts"; fi
           fi
+          effective_event="${{ inputs.pull_request_number != '' && 'pull_request' || github.event_name }}"
           if [ "${{ needs.changes.outputs.browser }}" = "true" ]; then
-            if [ "${{ github.event_name }}" = "pull_request" ] || [ "${{ github.event_name }}" = "merge_group" ]; then
+            if [ "$effective_event" = "pull_request" ] || [ "$effective_event" = "merge_group" ]; then
               needs="$needs,browser-pr"
             fi
             if [ "${{ github.event_name }}" != "push" ]; then needs="$needs,browser-production"; fi

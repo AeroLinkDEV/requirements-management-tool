@@ -91,6 +91,18 @@ valid only when Docker is available and the result says the disposable gate pass
 failed cleanup is `not-proven`, never a green Full result. Remove the disposable worktree and any temporary
 logs after each case. This protocol measures the target; it does not claim the target was met.
 
+## Merge-ready Full CI
+
+GitHub pull requests receive the Fast workflow automatically; both local `-Mode Fast` and hosted Fast remain
+non-authoritative. Once the current PR SHA is final, apply `ready-for-full-ci`. The trusted default-branch
+requester binds PR number, base SHA and exact head SHA and dispatches the existing Full Product workflow.
+Product's `Full Product evidence aggregate` is the internal Full authority; after verifying Product's own
+readiness authentication, the requester publishes the required `Report what this run validated` context.
+
+Do not apply readiness early. A later push removes the label through the trusted synchronize guard and the new
+SHA must request Full again. Do not use Fast success, an older SHA's Full result, or a placeholder check as
+merge evidence.
+
 ## Pull-request overlap advisory
 
 `tools/check-overlap.mjs` is an API-only advisory checker for issue #569. The

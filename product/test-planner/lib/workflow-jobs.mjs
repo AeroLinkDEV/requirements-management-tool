@@ -38,6 +38,7 @@ export function parseJobConditions(workflowText) {
 
 const OUTPUT = /^needs\.changes\.outputs\.(docs_only|backend|client|browser|postgresql|post_merge_skip)$/
 const EVENT = /^github\.event_name$/
+const INPUT = /^inputs\.(pull_request_number|full_diagnostics)$/
 
 function literal(token) {
   const match = /^'([^']*)'$/.exec(token)
@@ -50,6 +51,11 @@ function resolve(token, context) {
     return String(context.outputs[key])
   }
   if (EVENT.test(token)) return context.event
+  if (INPUT.test(token)) {
+    const key = INPUT.exec(token)[1]
+    return String(context.inputs[key])
+  }
+  if (token === 'true' || token === 'false') return token
   const value = literal(token)
   if (value !== null) return value
   throw new Error(`Unsupported operand in workflow condition: ${token}`)
@@ -94,9 +100,15 @@ export function evaluateCondition(condition, context) {
 }
 
 /** Jobs that would run, derived from the workflow text. */
-export function selectJobs(workflowText, classification, { event = 'pull_request', postMergeSkip = false } = {}) {
+export function selectJobs(workflowText, classification, { event = 'pull_request', postMergeSkip = false, inputs = {} } = {}) {
   const context = {
     event,
+    inputs: {
+      // The local planner normally models an ordinary PR, where workflow-dispatch inputs do not exist.
+      // Empty/false match GitHub's effective defaults for those branches of the workflow conditions.
+      pull_request_number: inputs.pull_request_number ?? '',
+      full_diagnostics: inputs.full_diagnostics ?? false,
+    },
     outputs: {
       docs_only: classification.docsOnly,
       backend: classification.backend,
