@@ -60,9 +60,6 @@ else {
 
 Push-Location $repositoryRoot
 try {
-    # The planner intentionally writes actionable failures to stderr. Capture all of that output before
-    # restoring Stop semantics so a missing local origin/main ref is reported clearly instead of PowerShell
-    # terminating on the first native stderr record.
     $plannerErrorPreference = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
     try {
@@ -91,7 +88,6 @@ $wrapperSafety = [ordered]@{
     persistentEvidenceRootTouched = $false
     fetchOrRebasePerformed = $false
     networkAccessPerformed = $false
-    # JSON is a reporting mode and returns before optional execution, so it is intrinsically plan-only.
     dryRun = [bool]($DryRun -or $Json)
     remainingFullEvidence = 'GitHub Actions full gate remains authoritative; local Fast or Full output never satisfies merge evidence.'
 }
@@ -348,7 +344,7 @@ function Invoke-DockerText {
 function Get-DockerOwnedResource {
     param([Parameter(Mandatory)][string]$Docker, [Parameter(Mandatory)][ValidateSet('container', 'volume')][string]$Kind, [Parameter(Mandatory)][string]$Name)
     if ([string]::IsNullOrEmpty($Name) -or $Name -match '[\r\n]') { throw "Disposable Docker $Kind ownership could not be verified." }
-    $arguments = if ($Kind -eq 'container') { @('inspect', '--format', '{{ index .Config.Labels "com.aerolink.planner.run" }}', $Name) } else { @('volume', 'inspect', '--format', '{{ index .Labels "com.aerolink.planner.run" }}', $Name) }
+    $arguments = if ($Kind -eq 'container') { @('inspect', '--format', '{{ index .Config.Labels \"com.aerolink.planner.run\" }}', $Name) } else { @('volume', 'inspect', '--format', '{{ index .Labels \"com.aerolink.planner.run\" }}', $Name) }
     try {
         $output = @(& $Docker @arguments 2>&1)
         $exitCode = $LASTEXITCODE
@@ -361,7 +357,7 @@ function Get-DockerOwnedResource {
         $diagnostic = $diagnostics[0]
         $escapedName = [regex]::Escape($Name)
         $absent = if ($Kind -eq 'container') {
-            $diagnostic -cmatch "\AError: No such object: $escapedName\z"
+            $diagnostic -cmatch "\A(?:Error: No such object:|error: no such object:) $escapedName\z"
         }
         else {
             $diagnostic -cmatch "\AError response from daemon: (?:get ${escapedName}: no such volume|no such volume: $escapedName)\z"
@@ -494,7 +490,7 @@ function Invoke-DisposablePostgreSqlGate {
         if ((Get-DockerOwnedResource -Docker $docker -Kind volume -Name $volumeName) -ne $runId) { throw 'Disposable volume ownership was not verified.' }
         Invoke-CheckedDocker -Docker $docker -Operation 'start-container' -Arguments @('run', '--detach', '--name', $containerName, '--label', "$labelKey=$runId", '--env-file', $dockerEnvFile, '--publish', '127.0.0.1::5432', '--volume', ($volumeName + ':/var/lib/postgresql/data'), 'postgres:17')
         if ((Get-DockerOwnedResource -Docker $docker -Kind container -Name $containerName) -ne $runId) { throw 'Disposable container ownership was not verified.' }
-        $mappingJson = Invoke-DockerText -Docker $docker -Operation 'inspect-port-mapping' -Arguments @('inspect', '--format', '{{json (index .NetworkSettings.Ports "5432/tcp")}}', $containerName)
+        $mappingJson = Invoke-DockerText -Docker $docker -Operation 'inspect-port-mapping' -Arguments @('inspect', '--format', '{{json (index .NetworkSettings.Ports \"5432/tcp\")}}', $containerName)
         $mapping = @($mappingJson | ConvertFrom-Json)
         if ($mapping.Count -ne 1 -or $mapping[0].HostIp -ne '127.0.0.1' -or $mapping[0].HostPort -notmatch '^[1-9][0-9]{0,4}$') { throw 'Disposable PostgreSQL loopback mapping was not verified.' }
         $hostPostgreSqlPort = [int]$mapping[0].HostPort
@@ -665,8 +661,6 @@ function Invoke-FullPlan {
         Invoke-TimedAction -Label 'Infrastructure suite' -CiJobs @('backend-core') -Action { Invoke-CheckedProcess 'dotnet' @('test', 'product/tests/AeroLink.Infrastructure.Tests', '--configuration', 'Release', '--no-build') }
     }
     elseif ($classification.postgresql) {
-        # The CI PostgreSQL lane restores/builds the API even when a migration-only path did not match the
-        # backend area pattern. Keep Full's disposable lane able to run the same startup proof.
         Invoke-TimedAction -Label 'Build the solution for PostgreSQL gate' -CiJobs @('postgresql-smoke') -Action { Invoke-CheckedProcess 'dotnet' @('build', 'product/AeroLink.slnx', '--configuration', 'Release') }
     }
     if ($classification.client) {
@@ -675,7 +669,6 @@ function Invoke-FullPlan {
     }
     $browserSmokeJobs = @(Get-SelectedCiJobs @('browser-pr', 'browser-production', 'browser-full'))
     if ($classification.browser -and $browserSmokeJobs.Count -gt 0) {
-        # Both Playwright configs use unique temp SQLite files and loopback ports; neither targets product/.local.
         Invoke-TimedAction -Label 'Browser smoke journeys' -CiJobs $browserSmokeJobs -Action { Invoke-CheckedProcess 'npm.cmd' @('--prefix', 'product/client', 'run', 'test:smoke') }
         $browserProductionJobs = @(Get-SelectedCiJobs @('browser-production', 'browser-full'))
         if ($browserProductionJobs.Count -gt 0) { Invoke-TimedAction -Label 'Browser production journeys' -CiJobs $browserProductionJobs -Action { Invoke-CheckedProcess 'npm.cmd' @('--prefix', 'product/client', 'run', 'test:production') } }
