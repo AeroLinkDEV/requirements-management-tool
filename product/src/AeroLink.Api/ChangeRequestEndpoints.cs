@@ -725,7 +725,7 @@ public static class ChangeRequestEndpoints
         });
 
         app.MapPost("/api/change-requests/{id:guid}/review-comments", async (Guid id, ReviewCommentRequest request,
-            HttpContext http, IChangeRequestRepository repository, CancellationToken ct) =>
+            HttpContext http, IChangeRequestRepository repository, AeroLinkDbContext db, CancellationToken ct) =>
         {
             var scr = await repository.GetAsync(id, ct); if (scr is null) return Results.NotFound();
             if (!Enum.TryParse<ReviewCommentAnchor>(request.Anchor, ignoreCase: true, out var anchor))
@@ -734,6 +734,12 @@ public static class ChangeRequestEndpoints
             {
                 var actor = http.UserAccount().UserName;
                 var comment = scr.AddReviewComment(actor, anchor, request.RequirementChangeId, request.Body, DateTimeOffset.UtcNow);
+                // Said explicitly rather than left to change detection. Aggregate children carry
+                // application-assigned GUIDs, so EF reads a newly discovered one as a row that already
+                // exists and issues an UPDATE that matches nothing — the same hazard the append-only
+                // children in AeroLinkDbContext.SaveChangesAsync are corrected for. A comment is not
+                // append-only, so it cannot be corrected there without breaking revision.
+                db.ReviewComments.Add(comment);
                 await repository.SaveAsync(ct);
                 return Results.Created($"/api/change-requests/{id}/review-comments/{comment.Id}",
                     ApiMap.ReviewComment(comment, actor));
