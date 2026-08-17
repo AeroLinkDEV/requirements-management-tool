@@ -1,1 +1,2 @@
 Disposable #561 live dispatcher proof. This branch/PR must never merge.
+Second SHA exists only to prove stale readiness is cleared after synchronize.
