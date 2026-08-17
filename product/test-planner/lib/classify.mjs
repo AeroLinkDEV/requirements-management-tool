@@ -57,20 +57,6 @@ export function isBroadPath(path) {
   return BROAD_PATHS.some((pattern) => pattern.test(normalizePath(path)))
 }
 
-// The normal Fast lane defers six synthetic showcase seed/upgrade maintenance cases to authoritative
-// Full/CI. Direct edits to those tests, their shared fixture, or the seeder they prove must restore the
-// complete Infrastructure suite locally rather than filtering the most relevant coverage.
-const FAST_FULL_INFRASTRUCTURE_PATHS = [
-  /^product\/src\/AeroLink\.Infrastructure\/Persistence\/FmsShowcaseSeeder\.cs$/i,
-  /^product\/tests\/AeroLink\.Infrastructure\.Tests\/(?:FmsShowcaseSeederTests|ShowcaseUpgradeTests|ShowcaseDatabaseFixture)\.cs$/i,
-]
-
-export function needsFullFastInfrastructure(paths) {
-  return (Array.isArray(paths) ? paths : []).some((path) =>
-    FAST_FULL_INFRASTRUCTURE_PATHS.some((pattern) => pattern.test(normalizePath(path))),
-  )
-}
-
 function matchingBroadPath(paths) {
   return paths.find((path) => isBroadPath(path)) ?? null
 }
@@ -109,7 +95,6 @@ export function classify(changedPaths, { event = 'pull_request' } = {}) {
       reason: `The ${event} event classifies every area, because it has no single base to diff against and is the last gate before main.`,
       unclassified: false,
       broad: true,
-      fastFullInfrastructure: true,
     }
   }
 
@@ -129,7 +114,6 @@ export function classify(changedPaths, { event = 'pull_request' } = {}) {
       reason: `Broad validation forced by ${broadPath}; this path can change the planner, workflow, or shared product contract.`,
       unclassified: false,
       broad: true,
-      fastFullInfrastructure: true,
     }
   }
 
@@ -142,7 +126,6 @@ export function classify(changedPaths, { event = 'pull_request' } = {}) {
     reason: null,
     unclassified: false,
     broad: false,
-    fastFullInfrastructure: needsFullFastInfrastructure(paths),
   }
 
   // A change that is neither documentation nor recognised product code used to select nothing: the gate
@@ -158,7 +141,6 @@ export function classify(changedPaths, { event = 'pull_request' } = {}) {
     result.postgresql = true
     result.unclassified = true
     result.broad = true
-    result.fastFullInfrastructure = true
     result.reason = 'Unclassified product change; running broad backend, client, browser and PostgreSQL validation rather than reporting a skipped pass.'
   }
 
@@ -208,15 +190,10 @@ export function localPlan(classification) {
       command: 'dotnet test product/tests/AeroLink.Domain.Tests --configuration Release --no-build',
       why: 'Fast, no host construction, and covers most backend rule changes.',
     })
-    const fullFastInfrastructure = classification.fastFullInfrastructure === true
     steps.push({
       label: 'Infrastructure suite',
-      command: fullFastInfrastructure
-        ? 'dotnet test product/tests/AeroLink.Infrastructure.Tests --configuration Release --no-build'
-        : 'dotnet test product/tests/AeroLink.Infrastructure.Tests --configuration Release --no-build --filter=FullyQualifiedName!~AeroLink.Infrastructure.Tests.FmsShowcaseSeederTests&FullyQualifiedName!~AeroLink.Infrastructure.Tests.ShowcaseUpgradeTests',
-      why: fullFastInfrastructure
-        ? 'This change directly affects showcase seed/upgrade coverage or broad test-planner behavior, so Fast restores the complete Infrastructure suite locally.'
-        : 'Fast persistence/provider coverage excludes six synthetic showcase seed/upgrade maintenance cases; the authoritative GitHub backend-core lane still runs the complete infrastructure suite.',
+      command: 'dotnet test product/tests/AeroLink.Infrastructure.Tests --configuration Release --no-build',
+      why: 'Persistence and EF behaviour, still without building an API host.',
     })
   }
   if (classification.client) {
@@ -229,12 +206,8 @@ export function localPlan(classification) {
   if (classification.browser) {
     steps.push({
       label: 'Browser smoke journeys',
-      command: classification.client
-        ? 'npm --prefix product/client run test:smoke'
-        : 'npm --prefix product/client run test:smoke:core',
-      why: classification.client
-        ? 'Client changes keep the showcase usability smoke; the full journey set still belongs in CI.'
-        : 'Backend-only Fast uses the three first-install/application smoke checks without purchasing the unrelated full showcase seed; Full CI retains showcase usability coverage.',
+      command: 'npm --prefix product/client run test:smoke',
+      why: 'A bounded subset; the full journey set belongs in CI, not on a laptop.',
     })
   }
   // The hosted script-contract job is deliberately available to Full mode. Fast keeps it as a

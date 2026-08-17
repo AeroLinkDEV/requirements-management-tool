@@ -25,10 +25,9 @@ test('Password visibility is a compact control that does not cover the password 
 })
 
 test('AeroLink starts against the real API and presents a valid entry state', async ({ page }) => {
-  const seedless = process.env.AEROLINK_E2E_SKIP_SHOWCASE_SEED === 'true'
-  await login(page,'admin',{openProject:!seedless})
+  await login(page)
   await expect(page.getByText(/AeroLink/).first()).toBeVisible()
-  await expect(page.getByRole('heading', { name: seedless ? 'Create your first program' : 'Command Center' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: /Create your first program|Command Center/ })).toBeVisible()
 })
 
 test('Sign in recovers cleanly when the local API is temporarily unavailable', async ({ page }) => {

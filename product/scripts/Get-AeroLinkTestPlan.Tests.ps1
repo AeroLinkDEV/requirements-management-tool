@@ -121,22 +121,9 @@ foreach ($area in @('backend', 'client', 'browser', 'postgresql')) {
 }
 
 $plannerSource = Get-Content -Raw -LiteralPath $scriptPath
-$normalFastJsonRun = Invoke-Plan @('-Paths', 'product\src\AeroLink.Domain\Requirements\Requirement.cs', '-Json', '-DryRun')
-Assert-True ($normalFastJsonRun.ExitCode -eq 0) "Normal Fast dry-run should succeed: $($normalFastJsonRun.Output)"
-$normalFastJson = $normalFastJsonRun.Output | ConvertFrom-Json
-Assert-True ($normalFastJson.classification.fastFullInfrastructure -eq $false) 'An ordinary domain change should retain the bounded Fast Infrastructure profile.'
-$normalInfrastructure = @($normalFastJson.local | Where-Object { $_.label -eq 'Infrastructure suite' }) | Select-Object -First 1
-Assert-True ($normalInfrastructure.command -match '--filter=') 'An ordinary domain change should use the bounded six-case Fast exclusion.'
-
-$sensitiveFastJsonRun = Invoke-Plan @('-Paths', 'product\src\AeroLink.Infrastructure\Persistence\FmsShowcaseSeeder.cs', '-Json', '-DryRun')
-Assert-True ($sensitiveFastJsonRun.ExitCode -eq 0) "Showcase-sensitive Fast dry-run should succeed: $($sensitiveFastJsonRun.Output)"
-$sensitiveFastJson = $sensitiveFastJsonRun.Output | ConvertFrom-Json
-Assert-True ($sensitiveFastJson.classification.fastFullInfrastructure -eq $true) 'A showcase seeder change must restore the complete Infrastructure suite in Fast.'
-$sensitiveInfrastructure = @($sensitiveFastJson.local | Where-Object { $_.label -eq 'Infrastructure suite' }) | Select-Object -First 1
-Assert-True ($sensitiveInfrastructure.command -notmatch '--filter=') 'A showcase seeder change must not filter its directly relevant Infrastructure tests.'
-
-$fastInfrastructureFilter = 'FullyQualifiedName!~AeroLink.Infrastructure.Tests.FmsShowcaseSeederTests&FullyQualifiedName!~AeroLink.Infrastructure.Tests.ShowcaseUpgradeTests'
-Assert-True (([regex]::Matches($plannerSource, [regex]::Escape($fastInfrastructureFilter))).Count -eq 1) 'The six-case Fast infrastructure filter must appear exactly once so Full remains unfiltered.'
+Assert-True ($plannerSource.Contains("info --format '{{.OSType}}'")) 'Full PostgreSQL preflight must inspect the Docker server OS type before expensive gates.'
+Assert-True ($plannerSource.Contains("serverOsType -cne 'linux'")) 'Full PostgreSQL preflight must refuse a non-Linux Docker daemon.'
+Assert-True ($plannerSource.Contains('Switch Docker Desktop to Linux containers before Full mode')) 'Docker incompatibility must give the developer an actionable recovery message.'
 Assert-True (Test-Path -LiteralPath (Join-Path $root 'TEST_AEROLINK_CHANGED.bat') -PathType Leaf) 'Friendly root BAT entry point is missing.'
 
 if ($failures.Count -gt 0) {
