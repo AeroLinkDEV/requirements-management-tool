@@ -344,7 +344,7 @@ function Invoke-DockerText {
 function Get-DockerOwnedResource {
     param([Parameter(Mandatory)][string]$Docker, [Parameter(Mandatory)][ValidateSet('container', 'volume')][string]$Kind, [Parameter(Mandatory)][string]$Name)
     if ([string]::IsNullOrEmpty($Name) -or $Name -match '[\r\n]') { throw "Disposable Docker $Kind ownership could not be verified." }
-    $arguments = if ($Kind -eq 'container') { @('inspect', '--format', '{{ index .Config.Labels "com.aerolink.planner.run" }}', $Name) } else { @('volume', 'inspect', '--format', '{{ index .Labels "com.aerolink.planner.run" }}', $Name) }
+    $arguments = if ($Kind -eq 'container') { @('inspect', '--format', '{{ index .Config.Labels \"com.aerolink.planner.run\" }}', $Name) } else { @('volume', 'inspect', '--format', '{{ index .Labels \"com.aerolink.planner.run\" }}', $Name) }
     try {
         $output = @(& $Docker @arguments 2>&1)
         $exitCode = $LASTEXITCODE
