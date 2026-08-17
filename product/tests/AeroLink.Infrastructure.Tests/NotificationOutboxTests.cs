@@ -27,6 +27,51 @@ public sealed class NotificationOutboxTests
         Assert.Equal($"https://aerolink.example.test/open/managed-document/{id}", links.LinkFor($"managed-document:{id}"));
     }
 
+    [Fact]
+    public void A_message_with_no_html_sends_exactly_as_it_always_did()
+    {
+        using var mail = SmtpEmailSender.BuildMail("aerolink@fms.test",
+            new EmailMessage("approver@example.test", "AeroLink: Review SRCR-00031.00", "Open it here:\nhttps://x/y"));
+
+        Assert.False(mail.IsBodyHtml);
+        Assert.Equal("Open it here:\nhttps://x/y", mail.Body);
+        Assert.Empty(mail.AlternateViews);
+    }
+
+    [Fact]
+    public void An_html_message_carries_the_plain_text_first_so_a_text_only_client_is_not_left_empty()
+    {
+        using var mail = SmtpEmailSender.BuildMail("aerolink@fms.test",
+            new EmailMessage("approver@example.test", "SRCR-00039.00 is ready for your review — AeroLink",
+                "SRCR-00039.00 is ready for your review.", "<html><body><h1>SRCR-00039.00</h1></body></html>"));
+
+        // Order is the assertion. A client renders the last view it understands, so plain text must be
+        // offered before HTML or every recipient silently receives the fallback instead of the message.
+        Assert.Collection(mail.AlternateViews,
+            first => Assert.Equal("text/plain", first.ContentType.MediaType),
+            second => Assert.Equal("text/html", second.ContentType.MediaType));
+    }
+
+    [Fact]
+    public async Task Composing_a_notification_still_produces_a_text_body_that_says_everything()
+    {
+        var (links, tokens) = Support();
+        var seed = await SeedAsync();
+        try
+        {
+            await using var db = new AeroLinkDbContext(seed.Options);
+            var notification = Notification(seed.ProjectId);
+            var delivery = new NotificationDelivery(notification.Id, NotificationChannel.Email,
+                "approver.user", "approver@example.test", Now);
+
+            var message = NotificationOutbox.Compose(notification, delivery, links, tokens);
+
+            Assert.Contains("SRCR-00031.00", message.PlainTextBody);
+            Assert.Contains("https://aerolink.example.test/open/scr/", message.PlainTextBody);
+        }
+        finally { File.Delete(seed.Path); }
+    }
+
     private sealed class RecordingSender(bool configured = true) : IEmailSender
     {
         public List<EmailMessage> Sent { get; } = [];

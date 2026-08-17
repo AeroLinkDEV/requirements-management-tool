@@ -24,4 +24,10 @@
     <Nullable>enable</Nullable>
   </PropertyGroup>
 
+  <ItemGroup>
+    <!-- Composing a message and sending it are separate concerns, and only the first can be asserted without
+         a mail relay. Exposing internals to the test assembly is what lets the composed shape be checked. -->
+    <InternalsVisibleTo Include="AeroLink.Infrastructure.Tests" />
+  </ItemGroup>
+
 </Project>
