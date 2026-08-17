@@ -164,6 +164,28 @@ jobs:
 
           with open(sys.argv[1], encoding="utf-8") as handle:
               jobs = json.load(handle).get("jobs", [])
+
+          classifiers = [job for job in jobs if job.get("name") == "Classify changed product areas"]
+          if len(classifiers) != 1:
+              raise SystemExit(f"expected exactly one Product classifier job, found {len(classifiers)}")
+          authentication_steps = [
+              step
+              for step in classifiers[0].get("steps", [])
+              if step.get("name") == "Authenticate label-dispatched pull-request context"
+          ]
+          if len(authentication_steps) != 1:
+              raise SystemExit(
+                  "expected exactly one Product label-dispatch authentication step, "
+                  f"found {len(authentication_steps)}"
+              )
+          authentication = authentication_steps[0]
+          if authentication.get("status") != "completed" or authentication.get("conclusion") != "success":
+              raise SystemExit(
+                  "Product label-dispatch authentication is not authoritative success: "
+                  f"status={authentication.get('status')} conclusion={authentication.get('conclusion')}"
+              )
+          print("Product label-dispatch authentication completed successfully.")
+
           accepted_names = {"Report what this run validated", "Full Product evidence aggregate"}
           gates = [job for job in jobs if job.get("name") in accepted_names]
           if len(gates) != 1:

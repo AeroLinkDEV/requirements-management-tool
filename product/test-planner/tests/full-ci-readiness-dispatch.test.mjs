@@ -11,10 +11,21 @@ test('ready label requester is trusted-base, exact-label, same-repository, and d
   assert.match(requester, /types: \[labeled\]/)
   assert.match(requester, /actions: write/)
   assert.match(requester, /contents: read/)
+  assert.match(requester, /pull-requests: read/)
   assert.doesNotMatch(requester, /actions\/checkout|git checkout|git clone/)
   assert.match(requester, /github\.event\.label\.name == 'ready-for-full-ci'/)
   assert.match(requester, /github\.event\.pull_request\.head\.repo\.full_name == github\.repository/)
   assert.match(requester, /actions\/workflows\/ci\.yml\/dispatches/)
+})
+
+test('trusted binding requires Product own readiness authentication before accepting Full evidence', () => {
+  assert.match(requester, /Classify changed product areas/)
+  assert.match(requester, /Authenticate label-dispatched pull-request context/)
+  assert.match(requester, /expected exactly one Product classifier job/)
+  assert.match(requester, /expected exactly one Product label-dispatch authentication step/)
+  assert.match(requester, /Product label-dispatch authentication is not authoritative success/)
+  assert.match(requester, /authentication\.get\("status"\) != "completed"/)
+  assert.match(requester, /authentication\.get\("conclusion"\) != "success"/)
 })
 
 test('full workflow authenticates exact ready PR state before trusting dispatch inputs', () => {
