@@ -8,9 +8,11 @@ const repoRoot = fileURLToPath(new URL('../../../', import.meta.url))
 const manifestPath = join(repoRoot, 'product/test-planner/fast-ci-manifest.json')
 const workflowPath = join(repoRoot, '.github/workflows/fast-pr-feedback.yml')
 const fullWorkflowPath = join(repoRoot, '.github/workflows/ci.yml')
+const requesterWorkflowPath = join(repoRoot, '.github/workflows/request-full-ci.yml')
 const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'))
 const workflow = readFileSync(workflowPath, 'utf8')
 const fullWorkflow = readFileSync(fullWorkflowPath, 'utf8')
+const requesterWorkflow = readFileSync(requesterWorkflowPath, 'utf8')
 
 test('Fast phase 1 is explicitly advisory, versioned and bounded', () => {
   assert.equal(manifest.schemaVersion, 1)
@@ -29,7 +31,8 @@ test('Fast phase 1 is explicitly advisory, versioned and bounded', () => {
   assert.match(workflow, /fast-ci-manifest\.json/)
   assert.match(workflow, /Fast feedback is advisory/i)
   assert.doesNotMatch(workflow, /Report what this run validated/)
-  assert.match(fullWorkflow, /Report what this run validated/)
+  assert.match(fullWorkflow, /Full Product evidence aggregate/)
+  assert.match(requesterWorkflow, /Report what this run validated/)
 })
 
 test('Fast backend manifest names only reviewed source-controlled smoke classes', () => {
