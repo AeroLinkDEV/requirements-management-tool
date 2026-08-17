@@ -22,7 +22,7 @@ jobs:
       - name: Prepare bounded cadence branch
         shell: bash
         env:
-          TARGET_BRANCH: chatgpt/561-cadence-switch
+          TARGET_BRANCH: chatgpt/561-cadence-switch-v2
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
