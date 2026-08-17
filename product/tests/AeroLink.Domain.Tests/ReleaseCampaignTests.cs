@@ -27,4 +27,30 @@ public sealed class ReleaseCampaignTests
         impact.Disposition(ImpactDispositionState.NotApplicable, "No downstream allocation changes.", "engineer", DateTimeOffset.UtcNow);
         Assert.Equal(ImpactDispositionState.NotApplicable, impact.State);
     }
+
+    [Fact]
+    public void Review_can_restart_after_cancellation_with_history_retained()
+    {
+        var now = DateTimeOffset.UtcNow;
+        var campaign = new ReleaseCampaign(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), "Restart campaign", "cm", now);
+        var buildId = Guid.NewGuid();
+        campaign.StartVerification("cm", now.AddMinutes(1));
+        campaign.SelectVerificationBuild(buildId, "cm", now.AddMinutes(2));
+        campaign.BeginReleaseReview("cm", [("release.approver", "Release Approver")], new string('a', 64), now.AddMinutes(3));
+        campaign.Approve("release.approver", now.AddMinutes(4));
+        campaign.CancelReleaseReview("cm", "Package changed.", now.AddMinutes(5));
+        campaign.BeginReleaseReview("cm", [("release.approver", "Release Approver"), ("release.approver2", "Second Approver")], new string('b', 64), now.AddMinutes(6));
+
+        Assert.Equal(ReleaseCampaignState.InReview, campaign.State);
+        Assert.Equal(new string('b', 64), campaign.ReleaseHash);
+        Assert.Equal(3, campaign.Approvals.Count);
+        Assert.Equal(ReleaseApprovalState.Cancelled, campaign.Approvals.First().State);
+        Assert.Equal(1, campaign.Approvals.First().Cycle);
+        Assert.Equal(ReleaseApprovalState.Active, campaign.Approvals.Skip(1).First().State);
+        Assert.Equal(ReleaseApprovalState.Pending, campaign.Approvals.Last().State);
+        Assert.Equal(2, campaign.Approvals.Skip(1).First().Cycle);
+        Assert.Equal(2, campaign.Approvals.Last().Cycle);
+        Assert.True(campaign.Version > 1);
+    }
+
 }

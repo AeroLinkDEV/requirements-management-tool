@@ -1,19 +1,19 @@
 {
   "schemaVersion": "aerolink-api-test-intent/v2",
   "totals": {
-    "tests": 443,
-    "cases": 493,
-    "classes": 81,
-    "hostedTests": 431,
-    "hostedCases": 472,
-    "nonHostedTests": 8,
-    "nonHostedCases": 17,
-    "unknownHostTests": 4,
-    "unknownHostCases": 4,
-    "hostedCandidateTests": 5,
-    "hostedCandidateCases": 6,
-    "unknownCandidateTests": 2,
-    "unknownCandidateCases": 2,
+    "tests": 442,
+    "cases": 492,
+    "classes": 83,
+    "hostedTests": 430,
+    "hostedCases": 471,
+    "nonHostedTests": 10,
+    "nonHostedCases": 19,
+    "unknownHostTests": 2,
+    "unknownHostCases": 2,
+    "hostedCandidateTests": 4,
+    "hostedCandidateCases": 5,
+    "unknownCandidateTests": 0,
+    "unknownCandidateCases": 0,
     "unknownCaseTests": 0,
     "criterion7": "unresolved"
   },
@@ -53,8 +53,8 @@
     "in-process-logic": {
       "label": "In-process logic with no HTTP and no client",
       "level": "Domain or Infrastructure (migration candidate)",
-      "tests": 6,
-      "cases": 6,
+      "tests": 5,
+      "cases": 5,
       "unknownCases": 0,
       "classes": 5
     },
@@ -95,6 +95,20 @@
       }
     },
     {
+      "cls": "ApiTestTelemetryStateTests",
+      "test": "Reset_for_test_clears_telemetry_state",
+      "kind": "Fact",
+      "intent": "in-process-logic",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "not-hosted",
+      "hostEvidence": [],
+      "sourceLines": {
+        "start": 5,
+        "end": 10
+      }
+    },
+    {
       "cls": "ApiTestTelemetryTests",
       "test": "An_injected_telemetry_write_failure_never_fails_the_authoritative_test",
       "kind": "Fact",
@@ -126,20 +140,6 @@
       "sourceLines": {
         "start": 40,
         "end": 70
-      }
-    },
-    {
-      "cls": "ApiTestTelemetryTests",
-      "test": "Reset_for_test_clears_telemetry_state",
-      "kind": "Fact",
-      "intent": "in-process-logic",
-      "cases": 1,
-      "caseEvidence": "Fact",
-      "hosted": "unknown",
-      "hostEvidence": [],
-      "sourceLines": {
-        "start": 72,
-        "end": 77
       }
     },
     {
@@ -5184,8 +5184,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 200,
-        "end": 223
+        "start": 169,
+        "end": 192
       }
     },
     {
@@ -5201,25 +5201,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 225,
-        "end": 250
-      }
-    },
-    {
-      "cls": "ReleaseCampaignExactIntentApiTests",
-      "test": "Review_can_restart_after_cancellation_with_history_retained",
-      "kind": "Fact",
-      "intent": "in-process-logic",
-      "cases": 1,
-      "caseEvidence": "Fact",
-      "hosted": "hosted",
-      "hostEvidence": [
-        "factory-construction",
-        "factory-services"
-      ],
-      "sourceLines": {
-        "start": 169,
-        "end": 198
+        "start": 194,
+        "end": 219
       }
     },
     {
@@ -5988,20 +5971,6 @@
     },
     {
       "cls": "ServerAuthorityContractTests",
-      "test": "Authenticated_browser_contracts_expose_no_caller_selectable_identity",
-      "kind": "Fact",
-      "intent": "in-process-logic",
-      "cases": 1,
-      "caseEvidence": "Fact",
-      "hosted": "unknown",
-      "hostEvidence": [],
-      "sourceLines": {
-        "start": 37,
-        "end": 51
-      }
-    },
-    {
-      "cls": "ServerAuthorityContractTests",
       "test": "Legacy_identity_fields_are_ignored_and_cannot_spoof_change_author",
       "kind": "Fact",
       "intent": "http-boundary",
@@ -6014,8 +5983,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 53,
-        "end": 97
+        "start": 12,
+        "end": 56
       }
     },
     {
@@ -6028,8 +5997,22 @@
       "hosted": "unknown",
       "hostEvidence": [],
       "sourceLines": {
-        "start": 99,
-        "end": 111
+        "start": 58,
+        "end": 70
+      }
+    },
+    {
+      "cls": "ServerAuthorityIdentityShapeTests",
+      "test": "Authenticated_browser_contracts_expose_no_caller_selectable_identity",
+      "kind": "Fact",
+      "intent": "in-process-logic",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "not-hosted",
+      "hostEvidence": [],
+      "sourceLines": {
+        "start": 31,
+        "end": 45
       }
     },
     {

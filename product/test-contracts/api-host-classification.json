@@ -1,9 +1,9 @@
 {
   "schemaVersion": "aerolink-api-host-classification/v3",
   "totals": {
-    "classes": 81,
-    "tests": 443,
-    "knownCases": 493,
+    "classes": 83,
+    "tests": 442,
+    "knownCases": 492,
     "unknownCaseTests": 0
   },
   "summary": {
@@ -15,14 +15,14 @@
     },
     "fresh-host": {
       "classes": 40,
-      "tests": 204,
-      "knownCases": 229,
+      "tests": 201,
+      "knownCases": 226,
       "unknownCaseTests": 0
     },
     "migration-candidate": {
-      "classes": 1,
-      "tests": 1,
-      "knownCases": 1,
+      "classes": 3,
+      "tests": 3,
+      "knownCases": 3,
       "unknownCaseTests": 0
     },
     "reusable-host": {
@@ -260,19 +260,6 @@
       ]
     },
     {
-      "cls": "ReleaseCampaignExactIntentApiTests",
-      "tests": 6,
-      "knownCases": 6,
-      "unknownCaseTests": 0,
-      "classification": "fresh-host",
-      "reason": "Reviewed #563 hold: this class bootstraps an empty database or workspace. A class-scoped SharedApiHost would make first-install state and fixed bootstrap identities order-dependent. Keep fresh-host until a bootstrap-once fixture and per-test workspace tagging are proven.",
-      "intents": [
-        "ef-translation",
-        "http-boundary",
-        "in-process-logic"
-      ]
-    },
-    {
       "cls": "TestExecutionEffectivityApiTests",
       "tests": 6,
       "knownCases": 6,
@@ -304,6 +291,19 @@
       "reason": "Reviewed #563 hold: this class bootstraps an empty database or workspace. A class-scoped SharedApiHost would make first-install state and fixed bootstrap identities order-dependent. Keep fresh-host until a bootstrap-once fixture and per-test workspace tagging are proven.",
       "intents": [
         "http-boundary"
+      ]
+    },
+    {
+      "cls": "ReleaseCampaignExactIntentApiTests",
+      "tests": 5,
+      "knownCases": 5,
+      "unknownCaseTests": 0,
+      "classification": "fresh-host",
+      "reason": "Reviewed #563 hold: this class bootstraps an empty database or workspace. A class-scoped SharedApiHost would make first-install state and fixed bootstrap identities order-dependent. Keep fresh-host until a bootstrap-once fixture and per-test workspace tagging are proven.",
+      "intents": [
+        "ef-translation",
+        "http-boundary",
+        "in-process-logic"
       ]
     },
     {
@@ -376,19 +376,6 @@
       ]
     },
     {
-      "cls": "ApiTestTelemetryTests",
-      "tests": 3,
-      "knownCases": 3,
-      "unknownCaseTests": 0,
-      "classification": "fresh-host",
-      "reason": "Customizes host state (interceptor-or-fault-injection); sharing could change the subject or leak configuration.",
-      "intents": [
-        "http-boundary",
-        "in-process-logic",
-        "startup-config"
-      ]
-    },
-    {
       "cls": "CodeTraceabilityApiTests",
       "tests": 3,
       "knownCases": 3,
@@ -436,16 +423,15 @@
       ]
     },
     {
-      "cls": "ServerAuthorityContractTests",
-      "tests": 3,
-      "knownCases": 3,
+      "cls": "ApiTestTelemetryTests",
+      "tests": 2,
+      "knownCases": 2,
       "unknownCaseTests": 0,
       "classification": "fresh-host",
-      "reason": "Host use is unknown for one or more invocations; isolate it until method-level evidence is completed.",
+      "reason": "Customizes host state (interceptor-or-fault-injection); sharing could change the subject or leak configuration.",
       "intents": [
-        "filesystem",
         "http-boundary",
-        "in-process-logic"
+        "startup-config"
       ]
     },
     {
@@ -492,6 +478,18 @@
       "reason": "Customizes host state (service-replacement); sharing could change the subject or leak configuration.",
       "intents": [
         "ef-translation",
+        "http-boundary"
+      ]
+    },
+    {
+      "cls": "ServerAuthorityContractTests",
+      "tests": 2,
+      "knownCases": 2,
+      "unknownCaseTests": 0,
+      "classification": "fresh-host",
+      "reason": "Host use is unknown for one or more invocations; isolate it until method-level evidence is completed.",
+      "intents": [
+        "filesystem",
         "http-boundary"
       ]
     },
@@ -628,7 +626,29 @@
       ]
     },
     {
+      "cls": "ApiTestTelemetryStateTests",
+      "tests": 1,
+      "knownCases": 1,
+      "unknownCaseTests": 0,
+      "classification": "migration-candidate",
+      "reason": "Every test is in-process logic or a rule matrix; it needs a database or nothing, not a host.",
+      "intents": [
+        "in-process-logic"
+      ]
+    },
+    {
       "cls": "ControlledProcedureApprovalBasisApiTests",
+      "tests": 1,
+      "knownCases": 1,
+      "unknownCaseTests": 0,
+      "classification": "migration-candidate",
+      "reason": "Every test is in-process logic or a rule matrix; it needs a database or nothing, not a host.",
+      "intents": [
+        "in-process-logic"
+      ]
+    },
+    {
+      "cls": "ServerAuthorityIdentityShapeTests",
       "tests": 1,
       "knownCases": 1,
       "unknownCaseTests": 0,

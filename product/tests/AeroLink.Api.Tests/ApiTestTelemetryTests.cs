@@ -68,11 +68,4 @@ public sealed class ApiTestTelemetryTests
             ApiTestTelemetry.ResetForTest();
         }
     }
-
-    [Fact]
-    public void Reset_for_test_clears_telemetry_state()
-    {
-        ApiTestTelemetry.ResetForTest();
-        Assert.Null(ApiTestTelemetry.UnavailableReason);
-    }
 }
