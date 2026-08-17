@@ -1,0 +1,142 @@
+name: TEMP 566 move release-review rule to Domain
+
+on:
+  push:
+    branches: [chatgpt/tmp-566-domain-move]
+
+permissions:
+  contents: write
+
+jobs:
+  move-and-prove:
+    runs-on: windows-latest
+    steps:
+      - name: Check out target branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: chatgpt/566-move-release-review-domain
+          fetch-depth: 0
+
+      - name: Install .NET 10
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Move pure aggregate test out of the API project
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $apiPath = 'product/tests/AeroLink.Api.Tests/ReleaseCampaignExactIntentApiTests.cs'
+          $source = [IO.File]::ReadAllText($apiPath)
+          $pattern = '(?ms)^    \[Fact\]\r?\n    public void Review_can_restart_after_cancellation_with_history_retained\(\)\r?\n    \{.*?^    \}\r?\n\r?\n(?=    \[Fact\])'
+          $matches = [regex]::Matches($source, $pattern)
+          if ($matches.Count -ne 1) { throw "Expected one release-review API test to move; found $($matches.Count)." }
+          $updated = [regex]::Replace($source, $pattern, '', 1)
+          [IO.File]::WriteAllText($apiPath, $updated, [Text.UTF8Encoding]::new($false))
+
+          $domainPath = 'product/tests/AeroLink.Domain.Tests/ReleaseCampaignReviewTests.cs'
+          @'
+          using AeroLink.Domain.Baselines;
+          using AeroLink.Domain.Programs;
+          using AeroLink.Domain.Releases;
+
+          namespace AeroLink.Domain.Tests;
+
+          public sealed class ReleaseCampaignReviewTests
+          {
+              [Fact]
+              public void Review_can_restart_after_cancellation_with_history_retained()
+              {
+                  var now = DateTimeOffset.UtcNow;
+                  var program = new ProgramRecord("Restart Program", $"RP{Guid.NewGuid():N}"[..12]);
+                  var project = new ProjectRecord(program.Id, "Restart Product", "Restart System");
+                  var release = new SoftwareRelease(project.Id, "1.0", false);
+                  var baseline = new CandidateBaseline("SW-01.00", 0, project.Id, release.Id, null, "Restart baseline", "cm", now);
+                  var build = new SoftwareBuild(project.Id, release.Id, baseline.Id, "SW-01.00", "Restart build", "cm", now);
+                  var campaign = new ReleaseCampaign(project.Id, release.Id, baseline.Id, "Restart campaign", "cm", now);
+
+                  campaign.StartVerification("cm", now.AddMinutes(1));
+                  campaign.SelectVerificationBuild(build.Id, "cm", now.AddMinutes(2));
+                  campaign.BeginReleaseReview("cm", [("release.approver", "Release Approver")], new string('a', 64), now.AddMinutes(3));
+                  campaign.Approve("release.approver", now.AddMinutes(4));
+                  campaign.CancelReleaseReview("cm", "Package changed.", now.AddMinutes(5));
+                  campaign.BeginReleaseReview("cm", [("release.approver", "Release Approver"), ("release.approver2", "Second Approver")], new string('b', 64), now.AddMinutes(6));
+
+                  Assert.Equal(ReleaseCampaignState.InReview, campaign.State);
+                  Assert.Equal(new string('b', 64), campaign.ReleaseHash);
+                  Assert.Equal(3, campaign.Approvals.Count);
+                  Assert.Equal(ReleaseApprovalState.Cancelled, campaign.Approvals.First().State);
+                  Assert.Equal(1, campaign.Approvals.First().Cycle);
+                  Assert.Equal(ReleaseApprovalState.Active, campaign.Approvals.Skip(1).First().State);
+                  Assert.Equal(ReleaseApprovalState.Pending, campaign.Approvals.Last().State);
+                  Assert.Equal(2, campaign.Approvals.Skip(1).First().Cycle);
+                  Assert.Equal(2, campaign.Approvals.Last().Cycle);
+                  Assert.True(campaign.Version > 1);
+              }
+          }
+          '@ | Set-Content -LiteralPath $domainPath -Encoding utf8
+
+      - name: Regenerate API intent inventories
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          node product/test-contracts/tools/generate-test-intent.mjs
+          if ($LASTEXITCODE -ne 0) { throw 'Intent inventory generation failed.' }
+          node product/test-contracts/tools/generate-host-classification.mjs
+          if ($LASTEXITCODE -ne 0) { throw 'Host inventory generation failed.' }
+
+      - name: Prove moved Domain contract green
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          dotnet test product/tests/AeroLink.Domain.Tests/AeroLink.Domain.Tests.csproj --configuration Release --filter 'FullyQualifiedName~ReleaseCampaignReviewTests.Review_can_restart_after_cancellation_with_history_retained' --logger 'console;verbosity=minimal'
+          if ($LASTEXITCODE -ne 0) { throw 'Moved Domain contract failed.' }
+
+      - name: Prove deliberate cancellation-state mutation is killed
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $sourcePath = 'product/src/AeroLink.Domain/Releases/ReleaseCampaign.cs'
+          $original = [IO.File]::ReadAllText($sourcePath)
+          $needle = 'ReleaseHash = null; State = ReleaseCampaignState.Verification;'
+          if (([regex]::Matches($original, [regex]::Escape($needle))).Count -ne 1) { throw 'Mutation anchor was not unique.' }
+          try {
+            [IO.File]::WriteAllText($sourcePath, $original.Replace($needle, 'ReleaseHash = null; State = ReleaseCampaignState.InReview;'), [Text.UTF8Encoding]::new($false))
+            dotnet test product/tests/AeroLink.Domain.Tests/AeroLink.Domain.Tests.csproj --configuration Release --filter 'FullyQualifiedName~ReleaseCampaignReviewTests.Review_can_restart_after_cancellation_with_history_retained' --logger 'console;verbosity=minimal'
+            if ($LASTEXITCODE -eq 0) { throw 'Deliberate cancellation-state mutation survived the moved Domain contract.' }
+            Write-Host 'Deliberate cancellation-state mutation was killed as required.'
+          }
+          finally {
+            [IO.File]::WriteAllText($sourcePath, $original, [Text.UTF8Encoding]::new($false))
+          }
+          dotnet test product/tests/AeroLink.Domain.Tests/AeroLink.Domain.Tests.csproj --configuration Release --filter 'FullyQualifiedName~ReleaseCampaignReviewTests.Review_can_restart_after_cancellation_with_history_retained' --logger 'console;verbosity=minimal'
+          if ($LASTEXITCODE -ne 0) { throw 'Restored source did not return the Domain contract to green.' }
+
+      - name: Validate inventories and bounded production diff
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          node --test product/test-contracts/tests/inventory.test.mjs
+          if ($LASTEXITCODE -ne 0) { throw 'Inventory contract failed.' }
+          git diff --check
+          if ($LASTEXITCODE -ne 0) { throw 'git diff --check failed.' }
+          $changed = @(git diff --name-only)
+          $allowed = @(
+            'product/test-contracts/api-host-classification.json',
+            'product/test-contracts/api-test-intent.json',
+            'product/tests/AeroLink.Api.Tests/ReleaseCampaignExactIntentApiTests.cs',
+            'product/tests/AeroLink.Domain.Tests/ReleaseCampaignReviewTests.cs'
+          )
+          $unexpected = @($changed | Where-Object { $_ -notin $allowed })
+          if ($unexpected.Count -gt 0) { throw "Unexpected changed files after mutation restore: $($unexpected -join ', ')" }
+          if ((git diff -- product/src/AeroLink.Domain/Releases/ReleaseCampaign.cs) -join '') { throw 'Temporary product mutation leaked into the proposed diff.' }
+
+      - name: Commit validated migration
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          git config user.name 'seanmccarthyns'
+          git config user.email 'seanmccarthyns@users.noreply.github.com'
+          git add -- product/test-contracts/api-host-classification.json product/test-contracts/api-test-intent.json product/tests/AeroLink.Api.Tests/ReleaseCampaignExactIntentApiTests.cs product/tests/AeroLink.Domain.Tests/ReleaseCampaignReviewTests.cs
+          git commit -m 'Move release-review restart rule to Domain tests'
+          git push origin HEAD:chatgpt/566-move-release-review-domain
