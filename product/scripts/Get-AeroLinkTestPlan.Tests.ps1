@@ -121,6 +121,9 @@ foreach ($area in @('backend', 'client', 'browser', 'postgresql')) {
 }
 
 $plannerSource = Get-Content -Raw -LiteralPath $scriptPath
+Assert-True ($plannerSource.Contains("info --format '{{.OSType}}'")) 'Full PostgreSQL preflight must inspect the Docker server OS type before expensive gates.'
+Assert-True ($plannerSource.Contains("serverOsType -cne 'linux'")) 'Full PostgreSQL preflight must refuse a non-Linux Docker daemon.'
+Assert-True ($plannerSource.Contains('Switch Docker Desktop to Linux containers before Full mode')) 'Docker incompatibility must give the developer an actionable recovery message.'
 $normalFastJsonRun = Invoke-Plan @('-Paths', 'product\src\AeroLink.Domain\Requirements\Requirement.cs', '-Json', '-DryRun')
 Assert-True ($normalFastJsonRun.ExitCode -eq 0) "Normal Fast dry-run should succeed: $($normalFastJsonRun.Output)"
 $normalFastJson = $normalFastJsonRun.Output | ConvertFrom-Json
