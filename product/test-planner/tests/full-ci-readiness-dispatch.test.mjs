@@ -5,6 +5,8 @@ import { readFileSync } from 'node:fs'
 const read = (relative) => readFileSync(new URL(`../../../${relative}`, import.meta.url), 'utf8')
 const requester = read('.github/workflows/request-full-ci.yml')
 const full = read('.github/workflows/ci.yml')
+const fast = read('.github/workflows/fast-pr-feedback.yml')
+const reset = read('.github/workflows/reset-full-ci-readiness.yml')
 
 test('ready label requester is trusted-base, exact-label, same-repository, and dispatch-only', () => {
   assert.match(requester, /pull_request_target:/)
@@ -34,4 +36,14 @@ test('label-dispatched Full reuses PR classification and exact indentation', () 
   assert.match(full, /        env:\n          EVENT_NAME: .*inputs\.pull_request_number/)
   assert.match(full, /          BASE_SHA: .*inputs\.pull_request_base_sha/)
   assert.match(full, /          HEAD_SHA: .*inputs\.pull_request_head_sha/)
+})
+
+
+test('Full runs only by trusted readiness while Fast stays on development PR updates', () => {
+  assert.doesNotMatch(full, /^  pull_request:\s*$/m)
+  for (const trigger of ['merge_group', 'push', 'schedule', 'workflow_dispatch']) {
+    assert.match(full, new RegExp(`^  ${trigger}:`, 'm'))
+  }
+  assert.match(fast, /^  pull_request:\n    types: \[opened, synchronize, reopened, ready_for_review\]$/m)
+  assert.match(reset, /^  pull_request_target:\n    types: \[synchronize\]$/m)
 })

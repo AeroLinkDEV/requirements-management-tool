@@ -1,7 +1,6 @@
 name: Product quality gate
 
 on:
-  pull_request:
   # A merge queue validates each candidate against the exact tree it will land on, including whatever is
   # queued ahead of it. That is what strict branch protection reaches for and cannot deliver: "up to date at
   # some point" is not "tested against what it becomes". Without this trigger the queue enqueues, waits for
