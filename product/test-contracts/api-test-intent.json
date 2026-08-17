@@ -3,19 +3,19 @@
   "totals": {
     "tests": 442,
     "cases": 492,
-    "classes": 81,
+    "classes": 85,
     "hostedTests": 430,
     "hostedCases": 471,
-    "nonHostedTests": 8,
-    "nonHostedCases": 17,
-    "unknownHostTests": 4,
-    "unknownHostCases": 4,
+    "nonHostedTests": 12,
+    "nonHostedCases": 21,
+    "unknownHostTests": 0,
+    "unknownHostCases": 0,
     "hostedCandidateTests": 3,
     "hostedCandidateCases": 3,
-    "unknownCandidateTests": 2,
-    "unknownCandidateCases": 2,
+    "unknownCandidateTests": 0,
+    "unknownCandidateCases": 0,
     "unknownCaseTests": 0,
-    "criterion7": "unresolved"
+    "criterion7": "escape-clause-supported"
   },
   "intents": {
     "http-boundary": {
@@ -95,6 +95,20 @@
       }
     },
     {
+      "cls": "ApiTestTelemetryStateTests",
+      "test": "Reset_for_test_clears_telemetry_state",
+      "kind": "Fact",
+      "intent": "in-process-logic",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "not-hosted",
+      "hostEvidence": [],
+      "sourceLines": {
+        "start": 6,
+        "end": 11
+      }
+    },
+    {
       "cls": "ApiTestTelemetryTests",
       "test": "An_injected_telemetry_write_failure_never_fails_the_authoritative_test",
       "kind": "Fact",
@@ -107,8 +121,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 8,
-        "end": 38
+        "start": 9,
+        "end": 39
       }
     },
     {
@@ -124,22 +138,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 40,
-        "end": 70
-      }
-    },
-    {
-      "cls": "ApiTestTelemetryTests",
-      "test": "Reset_for_test_clears_telemetry_state",
-      "kind": "Fact",
-      "intent": "in-process-logic",
-      "cases": 1,
-      "caseEvidence": "Fact",
-      "hosted": "unknown",
-      "hostEvidence": [],
-      "sourceLines": {
-        "start": 72,
-        "end": 77
+        "start": 41,
+        "end": 71
       }
     },
     {
@@ -5725,8 +5725,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 278,
-        "end": 324
+        "start": 213,
+        "end": 259
       }
     },
     {
@@ -5742,8 +5742,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 250,
-        "end": 276
+        "start": 185,
+        "end": 211
       }
     },
     {
@@ -5759,22 +5759,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 169,
-        "end": 198
-      }
-    },
-    {
-      "cls": "SecurityBoundaryTests",
-      "test": "File_backed_sqlite_contention_uses_the_provider_lock_retry_budget_without_a_custom_busy_handler",
-      "kind": "Fact",
-      "intent": "filesystem",
-      "cases": 1,
-      "caseEvidence": "Fact",
-      "hosted": "unknown",
-      "hostEvidence": [],
-      "sourceLines": {
-        "start": 43,
-        "end": 106
+        "start": 104,
+        "end": 133
       }
     },
     {
@@ -5827,8 +5813,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 146,
-        "end": 167
+        "start": 81,
+        "end": 102
       }
     },
     {
@@ -5844,8 +5830,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 200,
-        "end": 206
+        "start": 135,
+        "end": 141
       }
     },
     {
@@ -5862,8 +5848,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 208,
-        "end": 248
+        "start": 143,
+        "end": 183
       }
     },
     {
@@ -5880,8 +5866,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 326,
-        "end": 397
+        "start": 261,
+        "end": 332
       }
     },
     {
@@ -5971,20 +5957,6 @@
     },
     {
       "cls": "ServerAuthorityContractTests",
-      "test": "Authenticated_browser_contracts_expose_no_caller_selectable_identity",
-      "kind": "Fact",
-      "intent": "in-process-logic",
-      "cases": 1,
-      "caseEvidence": "Fact",
-      "hosted": "unknown",
-      "hostEvidence": [],
-      "sourceLines": {
-        "start": 37,
-        "end": 51
-      }
-    },
-    {
-      "cls": "ServerAuthorityContractTests",
       "test": "Legacy_identity_fields_are_ignored_and_cannot_spoof_change_author",
       "kind": "Fact",
       "intent": "http-boundary",
@@ -5997,22 +5969,36 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 53,
-        "end": 97
+        "start": 12,
+        "end": 56
       }
     },
     {
-      "cls": "ServerAuthorityContractTests",
+      "cls": "ServerAuthorityDiagnosticsTests",
       "test": "Standard_diagnostics_contains_no_human_login_or_committed_password",
       "kind": "Fact",
       "intent": "filesystem",
       "cases": 1,
       "caseEvidence": "Fact",
-      "hosted": "unknown",
+      "hosted": "not-hosted",
       "hostEvidence": [],
       "sourceLines": {
-        "start": 99,
-        "end": 111
+        "start": 5,
+        "end": 17
+      }
+    },
+    {
+      "cls": "ServerAuthorityIdentityShapeTests",
+      "test": "Authenticated_browser_contracts_expose_no_caller_selectable_identity",
+      "kind": "Fact",
+      "intent": "in-process-logic",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "not-hosted",
+      "hostEvidence": [],
+      "sourceLines": {
+        "start": 31,
+        "end": 45
       }
     },
     {
@@ -6103,6 +6089,20 @@
       "sourceLines": {
         "start": 43,
         "end": 105
+      }
+    },
+    {
+      "cls": "SqliteContentionContractTests",
+      "test": "File_backed_sqlite_contention_uses_the_provider_lock_retry_budget_without_a_custom_busy_handler",
+      "kind": "Fact",
+      "intent": "filesystem",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "not-hosted",
+      "hostEvidence": [],
+      "sourceLines": {
+        "start": 8,
+        "end": 70
       }
     },
     {

@@ -1,6 +1,5 @@
 using System.Net;
 using System.Net.Http.Json;
-using System.Reflection;
 using System.Text.Json;
 using AeroLink.Domain.Programs;
 using AeroLink.Infrastructure.Persistence;
@@ -10,46 +9,6 @@ namespace AeroLink.Api.Tests;
 
 public sealed class ServerAuthorityContractTests
 {
-    private static readonly string[] AuthenticatedMutationContracts =
-    [
-        "CreateChangeRequestRequest",
-        "CreateChangeRequestDraftRequest",
-        "RequirementChangeRequest",
-        "SubmitReviewRequest",
-        "ActorRequest",
-        "RequestChangesRequest",
-        "CreateBaselineRequest",
-        "BaselineSelectionRequest",
-        "EmptyMutationRequest",
-        "CreateBuildRequest",
-        "RecordTestExecutionRequest",
-        "DispositionImpactRequest",
-        "BulkDispositionImpactRequest",
-        "SelectBuildRequest",
-        "StartReleaseReviewRequest"
-    ];
-
-    private static readonly string[] CallerSelectableIdentityProperties =
-    [
-        "ActorId", "AuthorId", "RecordedBy", "ExecutedBy", "OwnerId"
-    ];
-
-    [Fact]
-    public void Authenticated_browser_contracts_expose_no_caller_selectable_identity()
-    {
-        var contracts = typeof(Program).Assembly.GetTypes()
-            .Where(type => AuthenticatedMutationContracts.Contains(type.Name))
-            .ToDictionary(type => type.Name);
-
-        Assert.Equal(AuthenticatedMutationContracts.Length, contracts.Count);
-        foreach (var contractName in AuthenticatedMutationContracts)
-        {
-            var properties = contracts[contractName].GetProperties(BindingFlags.Instance | BindingFlags.Public);
-            Assert.DoesNotContain(properties, property =>
-                CallerSelectableIdentityProperties.Contains(property.Name, StringComparer.OrdinalIgnoreCase));
-        }
-    }
-
     [Fact]
     public async Task Legacy_identity_fields_are_ignored_and_cannot_spoof_change_author()
     {
@@ -96,25 +55,4 @@ public sealed class ServerAuthorityContractTests
         Assert.Equal("admin", stored.AuthorId);
     }
 
-    [Fact]
-    public void Standard_diagnostics_contains_no_human_login_or_committed_password()
-    {
-        var productRoot = FindProductRoot();
-        var script = File.ReadAllText(Path.Combine(productRoot, "scripts", "Get-AeroLinkDiagnostics.ps1"));
-
-        Assert.DoesNotContain("/api/auth/login", script, StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain("AeroLink!2026", script, StringComparison.Ordinal);
-        Assert.DoesNotContain("[string]$Password", script, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("/health/live", script, StringComparison.Ordinal);
-        Assert.Contains("/health/ready", script, StringComparison.Ordinal);
-        Assert.Contains("CreatesBrowserSession = $false", script, StringComparison.Ordinal);
-    }
-
-    private static string FindProductRoot()
-    {
-        var current = new DirectoryInfo(AppContext.BaseDirectory);
-        while (current is not null && !File.Exists(Path.Combine(current.FullName, "AeroLink.slnx")))
-            current = current.Parent;
-        return current?.FullName ?? throw new InvalidOperationException("Could not locate the product root.");
-    }
 }
