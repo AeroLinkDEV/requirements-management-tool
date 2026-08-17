@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs'
 
 const read = (relative) => readFileSync(new URL(`../../../${relative}`, import.meta.url), 'utf8')
 const requester = read('.github/workflows/request-full-ci.yml')
+const bridge = read('.github/workflows/full-ci-required-check.yml')
 const full = read('.github/workflows/ci.yml')
 const fast = read('.github/workflows/fast-pr-feedback.yml')
 const reset = read('.github/workflows/reset-full-ci-readiness.yml')
@@ -27,6 +28,23 @@ test('ready label requester creates at most one Product dispatch per exact SHA',
   assert.match(requester, /actions\/workflows\/ci\.yml\/runs\?head_sha=\$HEAD_SHA&event=workflow_dispatch&per_page=100/)
   assert.match(requester, /refusing to create a second required-check suite with the same job names/)
   assert.match(requester, /Re-run the existing failed\/cancelled workflow when appropriate, or push a corrective commit/)
+})
+
+test('native PR readiness bridge cannot become an always-green required placeholder', () => {
+  assert.match(bridge, /^  pull_request:\n    types: \[labeled\]$/m)
+  assert.match(bridge, /actions: read/)
+  assert.match(bridge, /contents: read/)
+  assert.match(bridge, /pull-requests: read/)
+  assert.doesNotMatch(bridge, /actions: write|contents: write|actions\/checkout|git checkout|git clone/)
+  assert.match(bridge, /github\.event\.label\.name == 'ready-for-full-ci'/)
+  assert.match(bridge, /github\.event\.pull_request\.head\.repo\.full_name == github\.repository/)
+  assert.match(bridge, /Report what this run validated/)
+  assert.match(bridge, /Readiness bridge not applicable/)
+  assert.match(bridge, /event=workflow_dispatch/)
+  assert.match(bridge, /expected exactly one Product workflow_dispatch/)
+  assert.match(bridge, /Product aggregate did not pass/)
+  assert.match(bridge, /Pull request head changed while Full validation was running/)
+  assert.match(bridge, /ready-for-full-ci is no longer present/)
 })
 
 test('full workflow authenticates exact ready PR state before trusting dispatch inputs', () => {
