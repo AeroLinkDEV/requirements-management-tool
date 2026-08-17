@@ -344,26 +344,34 @@ function Invoke-DockerText {
 function Get-DockerOwnedResource {
     param([Parameter(Mandatory)][string]$Docker, [Parameter(Mandatory)][ValidateSet('container', 'volume')][string]$Kind, [Parameter(Mandatory)][string]$Name)
     if ([string]::IsNullOrEmpty($Name) -or $Name -match '[\r\n]') { throw "Disposable Docker $Kind ownership could not be verified." }
-    $arguments = if ($Kind -eq 'container') { @('inspect', '--format', '{{ index .Config.Labels \"com.aerolink.planner.run\" }}', $Name) } else { @('volume', 'inspect', '--format', '{{ index .Labels \"com.aerolink.planner.run\" }}', $Name) }
     try {
-        $output = @(& $Docker @arguments 2>&1)
-        $exitCode = $LASTEXITCODE
-        if ($exitCode -eq 0) { return (($output -join [Environment]::NewLine).Trim()) }
-        if ($output.Count -lt 1 -or $output.Count -gt 2) { throw 'inspect returned an unexpected diagnostic count' }
-        $lines = @($output | ForEach-Object { [string]$_ })
-        if (@($lines | Where-Object { $_ -match '[\r\n]' }).Count -ne 0) { throw 'inspect returned a multiline diagnostic' }
-        $diagnostics = @($lines | Where-Object { $_ -ne '[]' })
-        if ($diagnostics.Count -ne 1 -or ($lines.Count - $diagnostics.Count) -gt 1) { throw 'inspect returned an unexpected companion record' }
-        $diagnostic = $diagnostics[0]
-        $escapedName = [regex]::Escape($Name)
-        $absent = if ($Kind -eq 'container') {
-            $diagnostic -cmatch "\A(?:Error: No such object:|error: no such object:) $escapedName\z"
+        $probeArguments = if ($Kind -eq 'container') { @('inspect', $Name) } else { @('volume', 'inspect', $Name) }
+        $probeOutput = @(& $Docker @probeArguments 2>&1)
+        $probeExitCode = $LASTEXITCODE
+        if ($probeExitCode -ne 0) {
+            if ($probeOutput.Count -lt 1 -or $probeOutput.Count -gt 2) { throw 'inspect returned an unexpected diagnostic count' }
+            $lines = @($probeOutput | ForEach-Object { [string]$_ })
+            if (@($lines | Where-Object { $_ -match '[\r\n]' }).Count -ne 0) { throw 'inspect returned a multiline diagnostic' }
+            $diagnostics = @($lines | Where-Object { $_ -ne '[]' })
+            if ($diagnostics.Count -ne 1 -or ($lines.Count - $diagnostics.Count) -gt 1) { throw 'inspect returned an unexpected companion record' }
+            $diagnostic = $diagnostics[0]
+            $escapedName = [regex]::Escape($Name)
+            $absent = if ($Kind -eq 'container') {
+                $diagnostic -cmatch "\A(?:Error: No such object:|error: no such object:) $escapedName\z"
+            }
+            else {
+                $diagnostic -cmatch "\AError response from daemon: (?:get ${escapedName}: no such volume|no such volume: $escapedName)\z"
+            }
+            if ($absent) { return $null }
+            throw 'inspect was not conclusive'
         }
-        else {
-            $diagnostic -cmatch "\AError response from daemon: (?:get ${escapedName}: no such volume|no such volume: $escapedName)\z"
-        }
-        if ($absent) { return $null }
-        throw 'inspect was not conclusive'
+
+        $ownerArguments = if ($Kind -eq 'container') { @('inspect', '--format', '{{ index .Config.Labels \"com.aerolink.planner.run\" }}', $Name) } else { @('volume', 'inspect', '--format', '{{ index .Labels \"com.aerolink.planner.run\" }}', $Name) }
+        $ownerOutput = @(& $Docker @ownerArguments 2>&1)
+        if ($LASTEXITCODE -ne 0 -or $ownerOutput.Count -ne 1) { throw 'ownership-label inspect failed' }
+        $owner = ([string]$ownerOutput[0]).Trim()
+        if ([string]::IsNullOrWhiteSpace($owner) -or $owner -match '[\r\n]' -or $owner.Length -gt 128) { throw 'ownership label was not a single bounded value' }
+        return $owner
     } catch { throw "Disposable Docker $Kind ownership could not be verified." }
 }
 function Remove-DockerOwnedResource {
