@@ -1,0 +1,222 @@
+name: Temporary #566 domain migration
+
+on:
+  push:
+    branches:
+      - chatgpt/566-release-domain-evidence
+    paths:
+      - .github/workflows/temporary-566-migrate-domain.yml
+
+permissions:
+  contents: write
+
+jobs:
+  migrate-and-verify:
+    runs-on: windows-latest
+    steps:
+      - name: Check out task branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+
+      - name: Install .NET 10
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Install Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: 24
+
+      - name: Apply exact source-audited #566 moves
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $script = @'
+          from pathlib import Path
+          import re
+
+          def replace_once(path, pattern, replacement, flags=0):
+              file = Path(path)
+              text = file.read_text(encoding='utf-8')
+              updated, count = re.subn(pattern, replacement, text, count=1, flags=flags)
+              if count != 1:
+                  raise SystemExit(f'{path}: expected exactly one replacement, got {count}')
+              file.write_text(updated, encoding='utf-8', newline='')
+
+          api_telemetry = Path('product/tests/AeroLink.Api.Tests/ApiTestTelemetryTests.cs')
+          text = api_telemetry.read_text(encoding='utf-8')
+          block = '''
+              [Fact]
+              public void Reset_for_test_clears_telemetry_state()
+              {
+                  ApiTestTelemetry.ResetForTest();
+                  Assert.Null(ApiTestTelemetry.UnavailableReason);
+              }
+          '''
+          if text.count(block) != 1:
+              raise SystemExit('ApiTestTelemetryTests.cs: reset block was not uniquely found')
+          api_telemetry.write_text(text.replace(block, ''), encoding='utf-8', newline='')
+
+          Path('product/tests/AeroLink.Api.Tests/ApiTestTelemetryStateTests.cs').write_text('''namespace AeroLink.Api.Tests;
+
+          public sealed class ApiTestTelemetryStateTests
+          {
+              [Fact]
+              public void Reset_for_test_clears_telemetry_state()
+              {
+                  ApiTestTelemetry.ResetForTest();
+                  Assert.Null(ApiTestTelemetry.UnavailableReason);
+              }
+          }
+          ''', encoding='utf-8', newline='')
+
+          server = Path('product/tests/AeroLink.Api.Tests/ServerAuthorityContractTests.cs')
+          server_text = server.read_text(encoding='utf-8')
+          server_text = server_text.replace('using System.Reflection;\n', '')
+          pattern = r'''\n    private static readonly string\[\] AuthenticatedMutationContracts =.*?\n    \[Fact\]\n    public async Task Legacy_identity_fields_are_ignored_and_cannot_spoof_change_author'''
+          replacement = '\n    [Fact]\n    public async Task Legacy_identity_fields_are_ignored_and_cannot_spoof_change_author'
+          updated, count = re.subn(pattern, replacement, server_text, count=1, flags=re.S)
+          if count != 1:
+              raise SystemExit(f'ServerAuthorityContractTests.cs: expected exact pure-contract split, got {count}')
+          server.write_text(updated, encoding='utf-8', newline='')
+
+          Path('product/tests/AeroLink.Api.Tests/ServerAuthorityIdentityShapeTests.cs').write_text('''using System.Reflection;
+
+          namespace AeroLink.Api.Tests;
+
+          public sealed class ServerAuthorityIdentityShapeTests
+          {
+              private static readonly string[] AuthenticatedMutationContracts =
+              [
+                  "CreateChangeRequestRequest",
+                  "CreateChangeRequestDraftRequest",
+                  "RequirementChangeRequest",
+                  "SubmitReviewRequest",
+                  "ActorRequest",
+                  "RequestChangesRequest",
+                  "CreateBaselineRequest",
+                  "BaselineSelectionRequest",
+                  "EmptyMutationRequest",
+                  "CreateBuildRequest",
+                  "RecordTestExecutionRequest",
+                  "DispositionImpactRequest",
+                  "BulkDispositionImpactRequest",
+                  "SelectBuildRequest",
+                  "StartReleaseReviewRequest"
+              ];
+
+              private static readonly string[] CallerSelectableIdentityProperties =
+              [
+                  "ActorId", "AuthorId", "RecordedBy", "ExecutedBy", "OwnerId"
+              ];
+
+              [Fact]
+              public void Authenticated_browser_contracts_expose_no_caller_selectable_identity()
+              {
+                  var contracts = typeof(Program).Assembly.GetTypes()
+                      .Where(type => AuthenticatedMutationContracts.Contains(type.Name))
+                      .ToDictionary(type => type.Name);
+
+                  Assert.Equal(AuthenticatedMutationContracts.Length, contracts.Count);
+                  foreach (var contractName in AuthenticatedMutationContracts)
+                  {
+                      var properties = contracts[contractName].GetProperties(BindingFlags.Instance | BindingFlags.Public);
+                      Assert.DoesNotContain(properties, property =>
+                          CallerSelectableIdentityProperties.Contains(property.Name, StringComparer.OrdinalIgnoreCase));
+                  }
+              }
+          }
+          ''', encoding='utf-8', newline='')
+
+          release_api = Path('product/tests/AeroLink.Api.Tests/ReleaseCampaignExactIntentApiTests.cs')
+          release_text = release_api.read_text(encoding='utf-8')
+          pattern = r'''\n    \[Fact\]\n    public void Review_can_restart_after_cancellation_with_history_retained\(\)\n    \{.*?\n    \}\n\n    \[Fact\]\n    public async Task Concurrent_stale_approval_writes_conflict_on_the_campaign_version'''
+          replacement = '\n    [Fact]\n    public async Task Concurrent_stale_approval_writes_conflict_on_the_campaign_version'
+          release_updated, count = re.subn(pattern, replacement, release_text, count=1, flags=re.S)
+          if count != 1:
+              raise SystemExit(f'ReleaseCampaignExactIntentApiTests.cs: expected one domain-method move, got {count}')
+          release_api.write_text(release_updated, encoding='utf-8', newline='')
+
+          domain = Path('product/tests/AeroLink.Domain.Tests/ReleaseCampaignTests.cs')
+          domain_text = domain.read_text(encoding='utf-8')
+          if 'Review_can_restart_after_cancellation_with_history_retained' in domain_text:
+              raise SystemExit('ReleaseCampaignTests.cs already contains moved rule')
+          addition = '''
+
+              [Fact]
+              public void Review_can_restart_after_cancellation_with_history_retained()
+              {
+                  var now = DateTimeOffset.UtcNow;
+                  var campaign = new ReleaseCampaign(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), "Restart campaign", "cm", now);
+                  var buildId = Guid.NewGuid();
+                  campaign.StartVerification("cm", now.AddMinutes(1));
+                  campaign.SelectVerificationBuild(buildId, "cm", now.AddMinutes(2));
+                  campaign.BeginReleaseReview("cm", [("release.approver", "Release Approver")], new string('a', 64), now.AddMinutes(3));
+                  campaign.Approve("release.approver", now.AddMinutes(4));
+                  campaign.CancelReleaseReview("cm", "Package changed.", now.AddMinutes(5));
+                  campaign.BeginReleaseReview("cm", [("release.approver", "Release Approver"), ("release.approver2", "Second Approver")], new string('b', 64), now.AddMinutes(6));
+
+                  Assert.Equal(ReleaseCampaignState.InReview, campaign.State);
+                  Assert.Equal(new string('b', 64), campaign.ReleaseHash);
+                  Assert.Equal(3, campaign.Approvals.Count);
+                  Assert.Equal(ReleaseApprovalState.Cancelled, campaign.Approvals.First().State);
+                  Assert.Equal(1, campaign.Approvals.First().Cycle);
+                  Assert.Equal(ReleaseApprovalState.Active, campaign.Approvals.Skip(1).First().State);
+                  Assert.Equal(ReleaseApprovalState.Pending, campaign.Approvals.Last().State);
+                  Assert.Equal(2, campaign.Approvals.Skip(1).First().Cycle);
+                  Assert.Equal(2, campaign.Approvals.Last().Cycle);
+                  Assert.True(campaign.Version > 1);
+              }
+          '''
+          close = domain_text.rfind('\n}')
+          if close < 0:
+              raise SystemExit('ReleaseCampaignTests.cs: class close not found')
+          domain.write_text(domain_text[:close] + addition + domain_text[close:], encoding='utf-8', newline='')
+          '@
+          $script | python -
+          if ($LASTEXITCODE -ne 0) { throw 'Source transformation failed.' }
+
+      - name: Regenerate source-derived test inventories
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          node product/test-contracts/tools/generate-test-intent.mjs
+          if ($LASTEXITCODE -ne 0) { throw 'Intent inventory generation failed.' }
+          node product/test-contracts/tools/generate-host-classification.mjs
+          if ($LASTEXITCODE -ne 0) { throw 'Host classification generation failed.' }
+
+      - name: Run inventory contracts
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $tests = @(Get-ChildItem -LiteralPath product/test-contracts/tests -Filter '*.test.mjs' -File | Sort-Object FullName | ForEach-Object { $_.FullName })
+          & node --test $tests
+          if ($LASTEXITCODE -ne 0) { throw 'Test-contract suite failed.' }
+
+      - name: Run moved domain rule and affected API tests
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          dotnet test product/tests/AeroLink.Domain.Tests/AeroLink.Domain.Tests.csproj --configuration Release --filter "FullyQualifiedName~ReleaseCampaignTests"
+          if ($LASTEXITCODE -ne 0) { throw 'ReleaseCampaign domain tests failed.' }
+          dotnet test product/tests/AeroLink.Api.Tests/AeroLink.Api.Tests.csproj --configuration Release --filter "FullyQualifiedName~ApiTestTelemetryTests|FullyQualifiedName~ApiTestTelemetryStateTests|FullyQualifiedName~ServerAuthorityContractTests|FullyQualifiedName~ServerAuthorityIdentityShapeTests|FullyQualifiedName~ReleaseCampaignExactIntentApiTests"
+          if ($LASTEXITCODE -ne 0) { throw 'Affected API tests failed.' }
+
+      - name: Verify exact move and commit generated result
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if (Select-String -LiteralPath product/tests/AeroLink.Api.Tests/ReleaseCampaignExactIntentApiTests.cs -Pattern 'Review_can_restart_after_cancellation_with_history_retained' -Quiet) { throw 'Domain rule still exists in API tests.' }
+          if (-not (Select-String -LiteralPath product/tests/AeroLink.Domain.Tests/ReleaseCampaignTests.cs -Pattern 'Review_can_restart_after_cancellation_with_history_retained' -Quiet)) { throw 'Domain rule was not moved.' }
+          if (Select-String -LiteralPath product/tests/AeroLink.Api.Tests/ApiTestTelemetryTests.cs -Pattern 'Reset_for_test_clears_telemetry_state' -Quiet) { throw 'Telemetry pure fact still exists in hosted class.' }
+          if (Select-String -LiteralPath product/tests/AeroLink.Api.Tests/ServerAuthorityContractTests.cs -Pattern 'Authenticated_browser_contracts_expose_no_caller_selectable_identity' -Quiet) { throw 'Identity shape fact still exists in hosted class.' }
+          git diff --check
+          if ($LASTEXITCODE -ne 0) { throw 'git diff --check failed.' }
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add product/tests/AeroLink.Api.Tests/ApiTestTelemetryTests.cs product/tests/AeroLink.Api.Tests/ApiTestTelemetryStateTests.cs product/tests/AeroLink.Api.Tests/ServerAuthorityContractTests.cs product/tests/AeroLink.Api.Tests/ServerAuthorityIdentityShapeTests.cs product/tests/AeroLink.Api.Tests/ReleaseCampaignExactIntentApiTests.cs product/tests/AeroLink.Domain.Tests/ReleaseCampaignTests.cs product/test-contracts/api-test-intent.json product/test-contracts/api-host-classification.json
+          git diff --cached --stat
+          git commit -m 'Move pure #566 checks below hosted boundary'
+          git push origin HEAD:chatgpt/566-release-domain-evidence
