@@ -392,7 +392,17 @@ function Get-DockerOwnedResource {
         if ($ownerRecords.Count -ne 1) { throw 'inspect returned an unexpected record count' }
         $ownerLabels = if ($Kind -eq 'container') { $ownerRecords[0].Config.Labels } else { $ownerRecords[0].Labels }
         $owner = if ($null -ne $ownerLabels) { ([string]$ownerLabels.'com.aerolink.planner.run').Trim() } else { '' }
-        if ([string]::IsNullOrWhiteSpace($owner) -or $owner -match '[\r\n]' -or $owner.Length -gt 128) { throw 'ownership label was not a single bounded value' }
+        # A record carrying none of our label is not a resource this run owns, which is a truthful answer
+        # rather than an error.
+        #
+        # It is also the post-delete window this gate exists to prove. `docker rm --force` returns before
+        # inspect stops answering for the name, and during that window inspect exits 0 with one record whose
+        # Labels are null — not the "no such object" diagnostic the absence path expects. Throwing there
+        # reported "cleanup was not proven" for a container that had in fact just been removed, which is
+        # exactly the failure #667 was chasing. Every caller wants absent here: the post-removal check reads
+        # it as gone, and the pre-use check reads the name as unclaimed by this run.
+        if ([string]::IsNullOrWhiteSpace($owner)) { return $null }
+        if ($owner -match '[\r\n]' -or $owner.Length -gt 128) { throw 'ownership label was not a single bounded value' }
         return $owner
     } catch { throw "Disposable Docker $Kind ownership could not be verified." }
 }
@@ -471,7 +481,16 @@ function Read-BoundedTextFile {
     param([Parameter(Mandatory)][string]$Path)
     try {
         if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { return '' }
-        if ((Get-Item -LiteralPath $Path -ErrorAction Stop).Length -gt 131072) { return '' }
+        # A file past the bound is read from its end rather than abandoned.
+        #
+        # The bound is right — these files are polled in a loop and must not be read whole. Returning an
+        # empty string for anything larger was not: the API's own startup logging runs to about 312KB of
+        # Entity Framework migration commands *before* it prints "Now listening on", so every read after
+        # that point returned nothing and the listener could never be proven. The gate then waited its full
+        # thirty seconds and reported the listener unowned, while the API was listening correctly. Every
+        # marker these files are polled for is written at the end, so the tail is the part worth reading.
+        $bound = 131072
+        $length = (Get-Item -LiteralPath $Path -ErrorAction Stop).Length
         # Opened with a shared read rather than [IO.File]::ReadAllText, which asks for exclusive access.
         #
         # This file is polled while the owned process is still writing to it. Every read taken while the
@@ -482,6 +501,9 @@ function Read-BoundedTextFile {
         # look like a process failure rather than a read failure.
         $stream = [IO.File]::Open($Path, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::ReadWrite)
         try {
+            # Seeking can land mid-character, which costs at most a mangled first line — never a marker,
+            # because every marker is a whole line written after this point.
+            if ($length -gt $bound) { $null = $stream.Seek(-$bound, [IO.SeekOrigin]::End) }
             $reader = New-Object IO.StreamReader($stream)
             try { return $reader.ReadToEnd() } finally { $reader.Dispose() }
         }
@@ -494,7 +516,23 @@ function Invoke-SafeApiRequest {
     if ($null -ne $Body) { $parameters.Body = $Body; $parameters.ContentType = 'application/json' }
     if ($null -ne $Headers) { $parameters.Headers = $Headers }
     if ($null -ne $WebSession) { $parameters.WebSession = $WebSession }
-    try { return Invoke-RestMethod @parameters } catch { throw "Disposable API request '$Label' failed." }
+    try { return Invoke-RestMethod @parameters }
+    catch {
+        # The response status is carried on the thrown exception rather than discarded.
+        #
+        # This used to `throw "…failed."`, a brand new exception with no Response on it. Callers that need
+        # the status — the duplicate trust-anchor check below expects a 409 — read
+        # $_.Exception.Response.StatusCode, which was therefore always null. That assertion could not pass
+        # on any shell, so the gate it belongs to had never passed since the check was written. The two
+        # editions also surface the original differently (HttpResponseException in 7, WebException in 5.1),
+        # which is why the status is normalised here once instead of at each call site.
+        $statusCode = $null
+        try { $statusCode = [int]$_.Exception.Response.StatusCode } catch { $statusCode = $null }
+        $detail = if ($null -ne $statusCode) { " (HTTP $statusCode)" } else { '' }
+        $failure = New-Object System.Exception("Disposable API request '$Label' failed.$detail")
+        $failure.Data['StatusCode'] = $statusCode
+        throw $failure
+    }
 }
 function Get-DisposableDockerCommand {
     $dockerCommand = Get-Command docker.exe -ErrorAction SilentlyContinue
@@ -622,7 +660,7 @@ function Invoke-DisposablePostgreSqlGate {
         try {
             $duplicateBody = @{ key = 'ci-entra-two'; displayName = 'CI Duplicate'; protocol = 'OpenIdConnect'; issuer = 'HTTPS://LOGIN.CI.EXAMPLE:443/tenant'; subjectClaim = 'sub'; groupClaim = 'groups' } | ConvertTo-Json -Compress
             Invoke-SafeApiRequest -Label 'external-identity-duplicate' -Uri "$baseUri/api/admin/external-identity/providers" -Method Post -Body $duplicateBody -WebSession $session | Out-Null
-        } catch { try { $duplicateStatus = [int]$_.Exception.Response.StatusCode } catch { $duplicateStatus = $null } }
+        } catch { $duplicateStatus = $_.Exception.Data['StatusCode'] }
         if ($duplicateStatus -ne 409) { throw 'Disposable PostgreSQL duplicate trust anchor did not return the expected conflict.' }
         $workspaceCode = "CIP$($runId.Substring(0, 8))"
         $workspaceBody = @{ programName = 'CI Program'; programCode = $workspaceCode; projectName = 'CI Project'; softwareProduct = 'CI Product'; initialRelease = '1.0'; initialReleaseIsReleased = $false } | ConvertTo-Json -Compress
