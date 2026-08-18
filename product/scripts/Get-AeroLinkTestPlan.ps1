@@ -379,10 +379,19 @@ function Get-DockerOwnedResource {
             throw 'inspect was not conclusive'
         }
 
-        $ownerArguments = if ($Kind -eq 'container') { @('inspect', '--format', '{{ index .Config.Labels \"com.aerolink.planner.run\" }}', $Name) } else { @('volume', 'inspect', '--format', '{{ index .Labels \"com.aerolink.planner.run\" }}', $Name) }
-        $ownerOutput = @(& $Docker @ownerArguments 2>&1)
-        if ($LASTEXITCODE -ne 0 -or $ownerOutput.Count -ne 1) { throw 'ownership-label inspect failed' }
-        $owner = ([string]$ownerOutput[0]).Trim()
+        # The ownership label is read out of the inspect JSON already in hand, rather than by a second call
+        # carrying a Go template.
+        #
+        # A template needs the label key as an embedded quoted string, and the two PowerShell editions
+        # require opposite spellings of it. Windows PowerShell 5.1 needs \" and rejects " with
+        # `function "com" not defined`; PowerShell 7 needs " and rejects \" with `unexpected "\\" in
+        # operand`. No single spelling satisfies both, which is why correcting the quoting for one edition
+        # kept leaving the other broken. JSON carries no quoting problem and parses identically on both.
+        $ownerJson = ($probeOutput | ForEach-Object { [string]$_ }) -join [Environment]::NewLine
+        $ownerRecords = @($ownerJson | ConvertFrom-Json)
+        if ($ownerRecords.Count -ne 1) { throw 'inspect returned an unexpected record count' }
+        $ownerLabels = if ($Kind -eq 'container') { $ownerRecords[0].Config.Labels } else { $ownerRecords[0].Labels }
+        $owner = if ($null -ne $ownerLabels) { ([string]$ownerLabels.'com.aerolink.planner.run').Trim() } else { '' }
         if ([string]::IsNullOrWhiteSpace($owner) -or $owner -match '[\r\n]' -or $owner.Length -gt 128) { throw 'ownership label was not a single bounded value' }
         return $owner
     } catch { throw "Disposable Docker $Kind ownership could not be verified." }
@@ -463,7 +472,20 @@ function Read-BoundedTextFile {
     try {
         if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { return '' }
         if ((Get-Item -LiteralPath $Path -ErrorAction Stop).Length -gt 131072) { return '' }
-        return [IO.File]::ReadAllText($Path)
+        # Opened with a shared read rather than [IO.File]::ReadAllText, which asks for exclusive access.
+        #
+        # This file is polled while the owned process is still writing to it. Every read taken while the
+        # writer held the handle threw a sharing violation, and the catch below turned that into an empty
+        # string, so the poll saw nothing for its full thirty seconds and reported that the process never
+        # claimed job ownership — while the process had in fact started and written exactly the line being
+        # waited for. A silent empty result is indistinguishable from an absent file, which is what made it
+        # look like a process failure rather than a read failure.
+        $stream = [IO.File]::Open($Path, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::ReadWrite)
+        try {
+            $reader = New-Object IO.StreamReader($stream)
+            try { return $reader.ReadToEnd() } finally { $reader.Dispose() }
+        }
+        finally { $stream.Dispose() }
     } catch { return '' }
 }
 function Invoke-SafeApiRequest {
@@ -516,8 +538,13 @@ function Invoke-DisposablePostgreSqlGate {
         if ((Get-DockerOwnedResource -Docker $docker -Kind volume -Name $volumeName) -ne $runId) { throw 'Disposable volume ownership was not verified.' }
         Invoke-CheckedDocker -Docker $docker -Operation 'start-container' -Arguments @('run', '--detach', '--name', $containerName, '--label', "$labelKey=$runId", '--env-file', $dockerEnvFile, '--publish', '127.0.0.1::5432', '--volume', ($volumeName + ':/var/lib/postgresql/data'), 'postgres:17')
         if ((Get-DockerOwnedResource -Docker $docker -Kind container -Name $containerName) -ne $runId) { throw 'Disposable container ownership was not verified.' }
-        $mappingJson = Invoke-DockerText -Docker $docker -Operation 'inspect-port-mapping' -Arguments @('inspect', '--format', '{{json (index .NetworkSettings.Ports \"5432/tcp\")}}', $containerName)
-        $mapping = @($mappingJson | ConvertFrom-Json)
+        # Read the published mapping out of the full inspect JSON rather than a Go template, for the same
+        # reason as the ownership label above: "5432/tcp" has to appear as a quoted key inside the template,
+        # and no spelling of those quotes works on both Windows PowerShell 5.1 and PowerShell 7.
+        $containerJson = Invoke-DockerText -Docker $docker -Operation 'inspect-port-mapping' -Arguments @('inspect', $containerName)
+        $containerRecords = @($containerJson | ConvertFrom-Json)
+        if ($containerRecords.Count -ne 1) { throw 'Disposable container inspect returned an unexpected record count.' }
+        $mapping = @($containerRecords[0].NetworkSettings.Ports.'5432/tcp')
         if ($mapping.Count -ne 1 -or $mapping[0].HostIp -ne '127.0.0.1' -or $mapping[0].HostPort -notmatch '^[1-9][0-9]{0,4}$') { throw 'Disposable PostgreSQL loopback mapping was not verified.' }
         $hostPostgreSqlPort = [int]$mapping[0].HostPort
         if ($hostPostgreSqlPort -lt 1024 -or $hostPostgreSqlPort -gt 65535) { throw 'Disposable PostgreSQL mapped port was outside the bounded range.' }
@@ -546,7 +573,7 @@ function Invoke-DisposablePostgreSqlGate {
         $started = $false
         for ($attempt = 0; $attempt -lt 120; $attempt++) {
             $statusText = Read-BoundedTextFile -Path $apiStatus
-            if ($statusText -match '(?m)^STARTED\|pid=(?<pid>[0-9]+)\|start=(?<start>[0-9]+)\|job=assigned$') { $apiPid = [int]$Matches['pid']; $apiStart = [Int64]$Matches['start']; $started = $true; break }
+            if ($statusText -match '(?m)^STARTED\|pid=(?<pid>[0-9]+)\|start=(?<start>[0-9]+)\|job=assigned\r?$') { $apiPid = [int]$Matches['pid']; $apiStart = [Int64]$Matches['start']; $started = $true; break }
             if ($statusText -match '(?m)^ERROR\|') { throw 'The owned disposable API process failed before job assignment.' }
             if ($helper.HasExited) { throw 'The owned disposable API process helper exited before job assignment.' }
             Start-Sleep -Milliseconds 250
@@ -625,7 +652,7 @@ function Invoke-DisposablePostgreSqlGate {
                     if (-not $helperExited) { try { $helper.Kill() } catch { }; [void]$cleanupErrors.Add('The owned API process helper did not exit within the bounded cleanup wait.') }
                     if ($helper.HasExited -and $helper.ExitCode -ne 0) { [void]$cleanupErrors.Add('The owned API process helper exited nonzero.') }
                     $statusAfter = Read-BoundedTextFile -Path $apiStatus
-                    if ($statusAfter -notmatch '(?m)^(STOPPED|EXITED)\|.*\|jobCount=0$' -or $statusAfter -notmatch '(?m)^CLEANUP\|handles=closed$') { [void]$cleanupErrors.Add('Owned API job cleanup was not proven.') }
+                    if ($statusAfter -notmatch '(?m)^(STOPPED|EXITED)\|.*\|jobCount=0\r?$' -or $statusAfter -notmatch '(?m)^CLEANUP\|handles=closed\r?$') { [void]$cleanupErrors.Add('Owned API job cleanup was not proven.') }
                     if ($null -ne $apiPid) { try { if ($null -ne (Get-Process -Id $apiPid -ErrorAction SilentlyContinue)) { [void]$cleanupErrors.Add('The owned API process remained after cleanup.') } } catch { [void]$cleanupErrors.Add('The owned API process exit could not be verified.') } }
                     if ($null -ne $apiPort) { try { if (@(Get-BoundedListenerConnections -Port $apiPort | Where-Object { [int]$_.OwningProcess -eq $apiPid }).Count -gt 0) { [void]$cleanupErrors.Add('The owned API listener remained after cleanup.') } } catch { [void]$cleanupErrors.Add('The owned API listener cleanup could not be verified.') } }
                 }
