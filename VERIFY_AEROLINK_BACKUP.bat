@@ -7,4 +7,11 @@ setlocal
 set "PSModulePath="
 cd /d "%~dp0"
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0product\scripts\Verify-AeroLinkBackup.ps1" %*
-if errorlevel 1 pause
+set "RESULT=%ERRORLEVEL%"
+
+if not "%RESULT%"=="0" (
+  echo.
+  echo AeroLink backup verification did not pass. Review the error above.
+  pause
+)
+exit /b %RESULT%
