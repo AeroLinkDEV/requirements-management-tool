@@ -26,12 +26,12 @@ jobs:
     timeout-minutes: 10
     steps:
       - name: Check out trusted default branch
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           ref: ${{ github.event.repository.default_branch }}
 
       - name: Install Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: 22
 
@@ -42,7 +42,7 @@ jobs:
         run: node product/ci-metrics/bin/cadence-collect.mjs
 
       - name: Upload cadence measurements
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ci-cadence-metrics-${{ github.run_id }}
           path: ${{ runner.temp }}/aerolink-cadence-metrics
