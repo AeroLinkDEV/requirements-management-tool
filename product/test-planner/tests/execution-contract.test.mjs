@@ -77,7 +77,10 @@ test('disposable PostgreSQL commands are uniquely labeled, loopback-bound, and o
   assert.ok(gate.indexOf('if (-not $listenerOwned)') < gate.indexOf('Invoke-SafeApiRequest'))
   assert.ok(gate.indexOf('$containerIntent = $true') < gate.indexOf("'start-container'"))
   assert.match(gate, /cleanupErrors/)
-  assert.match(wrapper, /Config\.Labels.*com\.aerolink\.planner\.run/)
+  // Ownership still comes from our label on the container's own config; it is now read out of the inspect
+  // JSON rather than through a Go template, so the two halves sit on separate lines.
+  assert.match(wrapper, /\$ownerRecords\[0\]\.Config\.Labels/)
+  assert.match(wrapper, /com\.aerolink\.planner\.run/)
   assert.match(gate, /Remove-DockerOwnedResource/)
   assert.match(gate, /secretFileIntent/)
   assert.match(wrapper, /Docker is unavailable.*not-proven/)
@@ -145,13 +148,22 @@ $stateFile = Join-Path $env:FAKE_DOCKER_STATE ($kind + '.state')
 if ($Arguments -contains 'rm') { Set-Content -LiteralPath $stateFile -Value 'absent'; exit 0 }
 if ($mode -eq 'daemon') { [Console]::Error.WriteLine('Cannot connect to the Docker daemon'); exit 1 }
 if ($mode -eq 'arbitrary') { [Console]::Error.WriteLine('object not found'); exit 1 }
-if ($mode -eq 'mismatch') { Write-Output 'other-run'; exit 0 }
+function Write-InspectJson {
+  param([string]$Kind, [string]$Owner)
+  # What real docker inspect returns with no --format: a one-element array of the full record. The
+  # ownership label lives under Config.Labels for a container and Labels for a volume.
+  $labels = if ($null -eq $Owner) { 'null' } else { '{"com.aerolink.planner.run":"' + $Owner + '"}' }
+  if ($Kind -eq 'volume') { Write-Output ('[{"Name":"fixture","Labels":' + $labels + '}]') }
+  else { Write-Output ('[{"Id":"fixture","Config":{"Labels":' + $labels + '}}]') }
+}
+if ($mode -eq 'mismatch') { Write-InspectJson -Kind $kind -Owner 'other-run'; exit 0 }
+if ($mode -eq 'torndown') { Write-InspectJson -Kind $kind -Owner $null; exit 0 }
 if (-not (Test-Path -LiteralPath $stateFile) -or (Get-Content -LiteralPath $stateFile -Raw).Trim() -eq 'absent') {
   if ($kind -eq 'volume') { [Console]::Error.WriteLine('Error response from daemon: no such volume: fixture') }
   else { [Console]::Error.WriteLine('Error: No such object: fixture') }
   exit 1
 }
-Write-Output 'run-id'
+Write-InspectJson -Kind $kind -Owner 'run-id'
 exit 0
 `
   const command = '@echo off\r\npwsh -NoProfile -File "%~dp0fake-docker.ps1" %*\r\nexit /b %ERRORLEVEL%\r\n'
@@ -450,7 +462,8 @@ test('wrapper failure and cleanup contracts are redacted and fail closed', () =>
   assert.doesNotMatch(wrapper, /\$executionError = \$_.Exception.Message/)
   assert.match(wrapper, /containerIntent/)
   assert.match(wrapper, /volumeIntent/)
-  assert.match(wrapper, /cleanup was not proven; Full mode is non-authoritative/)
+  // Still fails closed, and now names which cleanup step failed between the two halves of the sentence.
+  assert.match(wrapper, /cleanup was not proven \(\$cleanupDetail\); Full mode is non-authoritative/)
 })
 
 test('JSON dry-run reports execution as not-run without touching a service', () => {
