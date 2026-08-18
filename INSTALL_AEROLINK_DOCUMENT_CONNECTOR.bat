@@ -6,7 +6,7 @@ setlocal
 :: PowerShell rebuild its own default, so a launcher behaves the same from Explorer, cmd, or a pwsh prompt.
 set "PSModulePath="
 cd /d "%~dp0"
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File ".\product\scripts\Install-AeroLinkDocumentConnector.ps1"
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0product\scripts\Install-AeroLinkDocumentConnector.ps1"
 if errorlevel 1 (
   echo.
   echo The AeroLink desktop connector was not installed. Review the error above.

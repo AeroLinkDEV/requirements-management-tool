@@ -9,5 +9,17 @@ title AeroLink Remote Demo - Scheduled Recovery Configuration
 cd /d "%~dp0"
 set "CA=%~1"
 if "%CA%"=="" set "CA=Preview"
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0product\scripts\AeroLinkRemoteDemo.ps1" -Action Configure -ConfigureAction %CA% %2 %3 %4 %5
+:: Everything after the action is forwarded as given. Positional forwarding stopped at the fourth extra
+:: argument and dropped anything past it without saying so; %1 rather than %~1 keeps each one quoted
+:: exactly as it arrived.
+set "EXTRA="
+if not "%~1"=="" shift
+:collectExtraArguments
+if "%~1"=="" goto runConfigure
+set "EXTRA=%EXTRA% %1"
+shift
+goto collectExtraArguments
+
+:runConfigure
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0product\scripts\AeroLinkRemoteDemo.ps1" -Action Configure -ConfigureAction %CA% %EXTRA%
 exit /b %ERRORLEVEL%

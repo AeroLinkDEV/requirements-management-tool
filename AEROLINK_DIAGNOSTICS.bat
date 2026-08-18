@@ -7,4 +7,11 @@ setlocal
 set "PSModulePath="
 cd /d "%~dp0"
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0product\scripts\Get-AeroLinkDiagnostics.ps1"
+set "RESULT=%ERRORLEVEL%"
+
+if not "%RESULT%"=="0" (
+  echo.
+  echo AeroLink diagnostics did not complete. Review the error above.
+)
 pause
+exit /b %RESULT%
