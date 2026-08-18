@@ -69,5 +69,14 @@ for (const entry of files) {
   }
 }
 
+
+// Playwright matches a positional argument as a regular expression against the spec path, not as a file
+// name, so a bare basename also matches every longer name ending with it: handing a shard
+// review-comments.spec.ts silently drags in document-review-comments.spec.ts, which another shard was
+// given. That runs one test twice across the suite and leaves this shard one over the count it planned.
+// So each name is anchored between something that cannot be part of a file name -- a path separator of
+// either kind, or the start of the path -- and the end of the path, which names exactly one file.
+const anchored = (file) => '(^|[^A-Za-z0-9._-])' + file.split('.').join('[.]') + '$'
+
 console.log(expected)
-for (const file of mine) console.log(file)
+for (const file of mine) console.log(anchored(file))
