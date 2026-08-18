@@ -346,8 +346,21 @@ function Get-DockerOwnedResource {
     if ([string]::IsNullOrEmpty($Name) -or $Name -match '[\r\n]') { throw "Disposable Docker $Kind ownership could not be verified." }
     try {
         $probeArguments = if ($Kind -eq 'container') { @('inspect', $Name) } else { @('volume', 'inspect', $Name) }
-        $probeOutput = @(& $Docker @probeArguments 2>&1)
-        $probeExitCode = $LASTEXITCODE
+        # The preference is relaxed for exactly this call and restored immediately.
+        #
+        # Absence is the normal case here — this probe exists to confirm a disposable name is free — and
+        # Docker reports it on stderr with a nonzero exit. Under Windows PowerShell 5.1 a native command's
+        # redirected stderr becomes a *terminating* NativeCommandError when $ErrorActionPreference is 'Stop',
+        # which this script sets globally. That threw before any of the absence handling below could run, so
+        # the gate could never start on the one edition a stock Windows developer host actually has. It went
+        # unnoticed because CI runs pwsh, where the same redirection is not terminating.
+        $previousPreference = $ErrorActionPreference
+        $ErrorActionPreference = 'Continue'
+        try {
+            $probeOutput = @(& $Docker @probeArguments 2>&1)
+            $probeExitCode = $LASTEXITCODE
+        }
+        finally { $ErrorActionPreference = $previousPreference }
         if ($probeExitCode -ne 0) {
             if ($probeOutput.Count -lt 1 -or $probeOutput.Count -gt 2) { throw 'inspect returned an unexpected diagnostic count' }
             $lines = @($probeOutput | ForEach-Object { [string]$_ })
@@ -366,11 +379,30 @@ function Get-DockerOwnedResource {
             throw 'inspect was not conclusive'
         }
 
-        $ownerArguments = if ($Kind -eq 'container') { @('inspect', '--format', '{{ index .Config.Labels \"com.aerolink.planner.run\" }}', $Name) } else { @('volume', 'inspect', '--format', '{{ index .Labels \"com.aerolink.planner.run\" }}', $Name) }
-        $ownerOutput = @(& $Docker @ownerArguments 2>&1)
-        if ($LASTEXITCODE -ne 0 -or $ownerOutput.Count -ne 1) { throw 'ownership-label inspect failed' }
-        $owner = ([string]$ownerOutput[0]).Trim()
-        if ([string]::IsNullOrWhiteSpace($owner) -or $owner -match '[\r\n]' -or $owner.Length -gt 128) { throw 'ownership label was not a single bounded value' }
+        # The ownership label is read out of the inspect JSON already in hand, rather than by a second call
+        # carrying a Go template.
+        #
+        # A template needs the label key as an embedded quoted string, and the two PowerShell editions
+        # require opposite spellings of it. Windows PowerShell 5.1 needs \" and rejects " with
+        # `function "com" not defined`; PowerShell 7 needs " and rejects \" with `unexpected "\\" in
+        # operand`. No single spelling satisfies both, which is why correcting the quoting for one edition
+        # kept leaving the other broken. JSON carries no quoting problem and parses identically on both.
+        $ownerJson = ($probeOutput | ForEach-Object { [string]$_ }) -join [Environment]::NewLine
+        $ownerRecords = @($ownerJson | ConvertFrom-Json)
+        if ($ownerRecords.Count -ne 1) { throw 'inspect returned an unexpected record count' }
+        $ownerLabels = if ($Kind -eq 'container') { $ownerRecords[0].Config.Labels } else { $ownerRecords[0].Labels }
+        $owner = if ($null -ne $ownerLabels) { ([string]$ownerLabels.'com.aerolink.planner.run').Trim() } else { '' }
+        # A record carrying none of our label is not a resource this run owns, which is a truthful answer
+        # rather than an error.
+        #
+        # It is also the post-delete window this gate exists to prove. `docker rm --force` returns before
+        # inspect stops answering for the name, and during that window inspect exits 0 with one record whose
+        # Labels are null — not the "no such object" diagnostic the absence path expects. Throwing there
+        # reported "cleanup was not proven" for a container that had in fact just been removed, which is
+        # exactly the failure #667 was chasing. Every caller wants absent here: the post-removal check reads
+        # it as gone, and the pre-use check reads the name as unclaimed by this run.
+        if ([string]::IsNullOrWhiteSpace($owner)) { return $null }
+        if ($owner -match '[\r\n]' -or $owner.Length -gt 128) { throw 'ownership label was not a single bounded value' }
         return $owner
     } catch { throw "Disposable Docker $Kind ownership could not be verified." }
 }
@@ -449,8 +481,33 @@ function Read-BoundedTextFile {
     param([Parameter(Mandatory)][string]$Path)
     try {
         if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { return '' }
-        if ((Get-Item -LiteralPath $Path -ErrorAction Stop).Length -gt 131072) { return '' }
-        return [IO.File]::ReadAllText($Path)
+        # A file past the bound is read from its end rather than abandoned.
+        #
+        # The bound is right — these files are polled in a loop and must not be read whole. Returning an
+        # empty string for anything larger was not: the API's own startup logging runs to about 312KB of
+        # Entity Framework migration commands *before* it prints "Now listening on", so every read after
+        # that point returned nothing and the listener could never be proven. The gate then waited its full
+        # thirty seconds and reported the listener unowned, while the API was listening correctly. Every
+        # marker these files are polled for is written at the end, so the tail is the part worth reading.
+        $bound = 131072
+        $length = (Get-Item -LiteralPath $Path -ErrorAction Stop).Length
+        # Opened with a shared read rather than [IO.File]::ReadAllText, which asks for exclusive access.
+        #
+        # This file is polled while the owned process is still writing to it. Every read taken while the
+        # writer held the handle threw a sharing violation, and the catch below turned that into an empty
+        # string, so the poll saw nothing for its full thirty seconds and reported that the process never
+        # claimed job ownership — while the process had in fact started and written exactly the line being
+        # waited for. A silent empty result is indistinguishable from an absent file, which is what made it
+        # look like a process failure rather than a read failure.
+        $stream = [IO.File]::Open($Path, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::ReadWrite)
+        try {
+            # Seeking can land mid-character, which costs at most a mangled first line — never a marker,
+            # because every marker is a whole line written after this point.
+            if ($length -gt $bound) { $null = $stream.Seek(-$bound, [IO.SeekOrigin]::End) }
+            $reader = New-Object IO.StreamReader($stream)
+            try { return $reader.ReadToEnd() } finally { $reader.Dispose() }
+        }
+        finally { $stream.Dispose() }
     } catch { return '' }
 }
 function Invoke-SafeApiRequest {
@@ -459,7 +516,23 @@ function Invoke-SafeApiRequest {
     if ($null -ne $Body) { $parameters.Body = $Body; $parameters.ContentType = 'application/json' }
     if ($null -ne $Headers) { $parameters.Headers = $Headers }
     if ($null -ne $WebSession) { $parameters.WebSession = $WebSession }
-    try { return Invoke-RestMethod @parameters } catch { throw "Disposable API request '$Label' failed." }
+    try { return Invoke-RestMethod @parameters }
+    catch {
+        # The response status is carried on the thrown exception rather than discarded.
+        #
+        # This used to `throw "…failed."`, a brand new exception with no Response on it. Callers that need
+        # the status — the duplicate trust-anchor check below expects a 409 — read
+        # $_.Exception.Response.StatusCode, which was therefore always null. That assertion could not pass
+        # on any shell, so the gate it belongs to had never passed since the check was written. The two
+        # editions also surface the original differently (HttpResponseException in 7, WebException in 5.1),
+        # which is why the status is normalised here once instead of at each call site.
+        $statusCode = $null
+        try { $statusCode = [int]$_.Exception.Response.StatusCode } catch { $statusCode = $null }
+        $detail = if ($null -ne $statusCode) { " (HTTP $statusCode)" } else { '' }
+        $failure = New-Object System.Exception("Disposable API request '$Label' failed.$detail")
+        $failure.Data['StatusCode'] = $statusCode
+        throw $failure
+    }
 }
 function Get-DisposableDockerCommand {
     $dockerCommand = Get-Command docker.exe -ErrorAction SilentlyContinue
@@ -487,6 +560,11 @@ function Invoke-DisposablePostgreSqlGate {
     $containerIntent = $true; $volumeIntent = $true; $secretFileIntent = $true
     $apiOwnershipIntent = $false; $apiProcessStarted = $false; $helper = $null; $apiPid = $null; $apiStart = $null; $apiPort = $null
     $cleanupErrors = [System.Collections.Generic.List[string]]::new()
+    # The first real failure, kept so cleanup cannot overwrite it. The intents above are declared before the
+    # try, so an early failure sends the finally to remove resources that were never created; those removals
+    # record cleanup errors, and the cleanup throw then replaced the actual cause. Every distinct root cause
+    # reported the same sentence, and finding the real one meant instrumenting the script by hand.
+    $primaryFailure = $null
     $tempRoot = [IO.Path]::GetTempPath()
     $dockerEnvFile = Join-Path $tempRoot "aerolink-planner-$runId-docker.env"; $apiEnvFile = Join-Path $tempRoot "aerolink-planner-$runId-api.env"
     $apiStatus = Join-Path $tempRoot "aerolink-planner-$runId-api.status"; $apiOutput = Join-Path $tempRoot "aerolink-planner-$runId-api.out.log"; $apiError = Join-Path $tempRoot "aerolink-planner-$runId-api.err.log"
@@ -498,8 +576,13 @@ function Invoke-DisposablePostgreSqlGate {
         if ((Get-DockerOwnedResource -Docker $docker -Kind volume -Name $volumeName) -ne $runId) { throw 'Disposable volume ownership was not verified.' }
         Invoke-CheckedDocker -Docker $docker -Operation 'start-container' -Arguments @('run', '--detach', '--name', $containerName, '--label', "$labelKey=$runId", '--env-file', $dockerEnvFile, '--publish', '127.0.0.1::5432', '--volume', ($volumeName + ':/var/lib/postgresql/data'), 'postgres:17')
         if ((Get-DockerOwnedResource -Docker $docker -Kind container -Name $containerName) -ne $runId) { throw 'Disposable container ownership was not verified.' }
-        $mappingJson = Invoke-DockerText -Docker $docker -Operation 'inspect-port-mapping' -Arguments @('inspect', '--format', '{{json (index .NetworkSettings.Ports \"5432/tcp\")}}', $containerName)
-        $mapping = @($mappingJson | ConvertFrom-Json)
+        # Read the published mapping out of the full inspect JSON rather than a Go template, for the same
+        # reason as the ownership label above: "5432/tcp" has to appear as a quoted key inside the template,
+        # and no spelling of those quotes works on both Windows PowerShell 5.1 and PowerShell 7.
+        $containerJson = Invoke-DockerText -Docker $docker -Operation 'inspect-port-mapping' -Arguments @('inspect', $containerName)
+        $containerRecords = @($containerJson | ConvertFrom-Json)
+        if ($containerRecords.Count -ne 1) { throw 'Disposable container inspect returned an unexpected record count.' }
+        $mapping = @($containerRecords[0].NetworkSettings.Ports.'5432/tcp')
         if ($mapping.Count -ne 1 -or $mapping[0].HostIp -ne '127.0.0.1' -or $mapping[0].HostPort -notmatch '^[1-9][0-9]{0,4}$') { throw 'Disposable PostgreSQL loopback mapping was not verified.' }
         $hostPostgreSqlPort = [int]$mapping[0].HostPort
         if ($hostPostgreSqlPort -lt 1024 -or $hostPostgreSqlPort -gt 65535) { throw 'Disposable PostgreSQL mapped port was outside the bounded range.' }
@@ -528,7 +611,7 @@ function Invoke-DisposablePostgreSqlGate {
         $started = $false
         for ($attempt = 0; $attempt -lt 120; $attempt++) {
             $statusText = Read-BoundedTextFile -Path $apiStatus
-            if ($statusText -match '(?m)^STARTED\|pid=(?<pid>[0-9]+)\|start=(?<start>[0-9]+)\|job=assigned$') { $apiPid = [int]$Matches['pid']; $apiStart = [Int64]$Matches['start']; $started = $true; break }
+            if ($statusText -match '(?m)^STARTED\|pid=(?<pid>[0-9]+)\|start=(?<start>[0-9]+)\|job=assigned\r?$') { $apiPid = [int]$Matches['pid']; $apiStart = [Int64]$Matches['start']; $started = $true; break }
             if ($statusText -match '(?m)^ERROR\|') { throw 'The owned disposable API process failed before job assignment.' }
             if ($helper.HasExited) { throw 'The owned disposable API process helper exited before job assignment.' }
             Start-Sleep -Milliseconds 250
@@ -577,7 +660,7 @@ function Invoke-DisposablePostgreSqlGate {
         try {
             $duplicateBody = @{ key = 'ci-entra-two'; displayName = 'CI Duplicate'; protocol = 'OpenIdConnect'; issuer = 'HTTPS://LOGIN.CI.EXAMPLE:443/tenant'; subjectClaim = 'sub'; groupClaim = 'groups' } | ConvertTo-Json -Compress
             Invoke-SafeApiRequest -Label 'external-identity-duplicate' -Uri "$baseUri/api/admin/external-identity/providers" -Method Post -Body $duplicateBody -WebSession $session | Out-Null
-        } catch { try { $duplicateStatus = [int]$_.Exception.Response.StatusCode } catch { $duplicateStatus = $null } }
+        } catch { $duplicateStatus = $_.Exception.Data['StatusCode'] }
         if ($duplicateStatus -ne 409) { throw 'Disposable PostgreSQL duplicate trust anchor did not return the expected conflict.' }
         $workspaceCode = "CIP$($runId.Substring(0, 8))"
         $workspaceBody = @{ programName = 'CI Program'; programCode = $workspaceCode; projectName = 'CI Project'; softwareProduct = 'CI Product'; initialRelease = '1.0'; initialReleaseIsReleased = $false } | ConvertTo-Json -Compress
@@ -594,6 +677,10 @@ function Invoke-DisposablePostgreSqlGate {
         if (@($attackerResolved.roles).Count -ne 0) { throw 'Disposable PostgreSQL look-alike issuer unexpectedly resolved a role.' }
         Write-Host '  Disposable PostgreSQL gate passed after exact process/listener ownership proof.' -ForegroundColor Green
     }
+    catch {
+        $primaryFailure = $_
+        throw
+    }
     finally {
         if ($apiOwnershipIntent -and $null -ne $helper) {
             try {
@@ -603,7 +690,7 @@ function Invoke-DisposablePostgreSqlGate {
                     if (-not $helperExited) { try { $helper.Kill() } catch { }; [void]$cleanupErrors.Add('The owned API process helper did not exit within the bounded cleanup wait.') }
                     if ($helper.HasExited -and $helper.ExitCode -ne 0) { [void]$cleanupErrors.Add('The owned API process helper exited nonzero.') }
                     $statusAfter = Read-BoundedTextFile -Path $apiStatus
-                    if ($statusAfter -notmatch '(?m)^(STOPPED|EXITED)\|.*\|jobCount=0$' -or $statusAfter -notmatch '(?m)^CLEANUP\|handles=closed$') { [void]$cleanupErrors.Add('Owned API job cleanup was not proven.') }
+                    if ($statusAfter -notmatch '(?m)^(STOPPED|EXITED)\|.*\|jobCount=0\r?$' -or $statusAfter -notmatch '(?m)^CLEANUP\|handles=closed\r?$') { [void]$cleanupErrors.Add('Owned API job cleanup was not proven.') }
                     if ($null -ne $apiPid) { try { if ($null -ne (Get-Process -Id $apiPid -ErrorAction SilentlyContinue)) { [void]$cleanupErrors.Add('The owned API process remained after cleanup.') } } catch { [void]$cleanupErrors.Add('The owned API process exit could not be verified.') } }
                     if ($null -ne $apiPort) { try { if (@(Get-BoundedListenerConnections -Port $apiPort | Where-Object { [int]$_.OwningProcess -eq $apiPid }).Count -gt 0) { [void]$cleanupErrors.Add('The owned API listener remained after cleanup.') } } catch { [void]$cleanupErrors.Add('The owned API listener cleanup could not be verified.') } }
                 }
@@ -615,7 +702,17 @@ function Invoke-DisposablePostgreSqlGate {
         if ($containerIntent) { Remove-DockerOwnedResource -Docker $docker -Kind container -Name $containerName -RunId $runId -CleanupErrors $cleanupErrors }
         if ($volumeIntent) { Remove-DockerOwnedResource -Docker $docker -Kind volume -Name $volumeName -RunId $runId -CleanupErrors $cleanupErrors }
         if ($secretFileIntent) { foreach ($path in @($dockerEnvFile, $apiEnvFile, $apiStatus, $apiOutput, $apiError)) { Remove-ExactTemporaryFile -Path $path -CleanupErrors $cleanupErrors } }
-        if ($cleanupErrors.Count -gt 0) { throw 'Disposable PostgreSQL cleanup was not proven; Full mode is non-authoritative.' }
+        if ($cleanupErrors.Count -gt 0) {
+            $cleanupDetail = ($cleanupErrors -join ' | ')
+            if ($null -ne $primaryFailure) {
+                # Something already failed and is on its way up. Cleanup trouble here is a consequence of
+                # that, not the cause, so it is reported beside the real error rather than replacing it.
+                Write-Host "  Cleanup after failure also reported: $cleanupDetail" -ForegroundColor Yellow
+            }
+            else {
+                throw "Disposable PostgreSQL cleanup was not proven ($cleanupDetail); Full mode is non-authoritative."
+            }
+        }
     }
 }
 
