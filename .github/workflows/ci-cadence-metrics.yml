@@ -42,7 +42,7 @@ jobs:
         run: node product/ci-metrics/bin/cadence-collect.mjs
 
       - name: Upload cadence measurements
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ci-cadence-metrics-${{ github.run_id }}
           path: ${{ runner.temp }}/aerolink-cadence-metrics
