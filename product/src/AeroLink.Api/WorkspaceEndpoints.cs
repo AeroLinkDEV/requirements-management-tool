@@ -431,6 +431,7 @@ public static class WorkspaceEndpoints
 
             var normalized = kind.Trim().ToLowerInvariant();
             Guid? projectId = null, releaseId = null; var tail = ""; var projectWide = false;
+            Guid? reviewedDocumentId = null;
             switch (normalized)
             {
                 case "scr" or "swcr" or "change-request":
@@ -532,6 +533,11 @@ public static class WorkspaceEndpoints
                         }
                     }
                     if (projectId is not null) projectWide = true;
+                    // Both spellings of the identifier resolve to the same document, and the closed-review
+                    // check below needs that document rather than whichever id happened to be followed.
+                    if (projectId is not null)
+                        reviewedDocumentId = document?.Id ?? await db.ManagedDocumentRevisions.AsNoTracking()
+                            .Where(x => x.Id == id).Select(x => (Guid?)x.DocumentId).SingleOrDefaultAsync(ct);
                     break;
                 }
             }
@@ -553,6 +559,20 @@ public static class WorkspaceEndpoints
                 var states = await mySteps.ToListAsync(ct);
                 // An open cycle wins: they still have a live decision, so there is nothing to explain.
                 if (states.Count > 0 && states.All(x => x != ReviewCycleState.Active))
+                    tail += tail.Contains('?') ? "&reviewEnded=1" : "?reviewEnded=1";
+            }
+
+            // The same question for a document review, over a different aggregate. A managed document keeps
+            // its steps on the revision with an integer round rather than on a ReviewCycle, so "still open"
+            // is the revision's own state.
+            if (reviewedDocumentId is Guid documentId)
+            {
+                var myDocumentStates = from step in db.ManagedDocumentReviewSteps.AsNoTracking()
+                                       join revision in db.ManagedDocumentRevisions.AsNoTracking() on step.RevisionId equals revision.Id
+                                       where revision.DocumentId == documentId && step.ApproverId == user.UserName
+                                       select revision.State;
+                var documentStates = await myDocumentStates.ToListAsync(ct);
+                if (documentStates.Count > 0 && documentStates.All(x => x != ManagedDocumentState.InReview))
                     tail += tail.Contains('?') ? "&reviewEnded=1" : "?reviewEnded=1";
             }
 

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { PersonName } from "./People";
+import "./ReviewComments.css";
 
 /**
  * Reviewer comments on a change request under review.

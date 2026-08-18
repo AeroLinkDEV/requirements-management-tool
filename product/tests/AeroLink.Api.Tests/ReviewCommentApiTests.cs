@@ -119,6 +119,13 @@ public sealed class ReviewCommentApiTests(SharedApiHost host) : IClassFixture<Sh
             $"/api/change-requests/{fixture.ChangeRequestId}/review-comments/{commentId}",
             new { body = "Second thought." });
         Assert.Equal(HttpStatusCode.OK, revised.StatusCode);
+
+        // And the author withdrawing their own draft is an ordinary act, not a 500. Both owner keys became
+        // nullable when documents started sharing this table, which is exactly when this stopped working.
+        using var removed = await first.DeleteAsync(
+            $"/api/change-requests/{fixture.ChangeRequestId}/review-comments/{commentId}");
+        Assert.Equal(HttpStatusCode.NoContent, removed.StatusCode);
+        Assert.Empty(await CommentsFor(first, fixture.ChangeRequestId));
     }
 
     [Fact]

@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import "./ReviewComments.css";
 
 /**
  * Explains, once, that the review someone was summoned to has ended.

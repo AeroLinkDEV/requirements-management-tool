@@ -878,9 +878,9 @@ jobs:
 
           npx playwright test "${files[@]}" --reporter=list,json
 
-          # Playwright matches a positional argument as a path substring, so a spec whose name is contained in
-          # another would pull in a file this shard was not given, and a mistyped plan would quietly run fewer.
-          # Neither fails on its own. The report's own stats are compared against what the plan claimed.
+          # The plan anchors each name so a spec contained in a longer one cannot be pulled into a shard it was
+          # not given. This stays as the backstop: an anchor that stopped working, or a mistyped plan running
+          # fewer, fails silently otherwise. The report's own stats are compared against what the plan claimed.
           actual="$(node -e "const s=require('./journey-durations-${{ matrix.shard }}.json').stats; console.log(s.expected + s.unexpected + s.flaky + s.skipped)")"
           if [ "$actual" != "$expected" ]; then
             echo "::error::Shard ${{ matrix.shard }} planned $expected tests but ran $actual. The file list does not match the plan."

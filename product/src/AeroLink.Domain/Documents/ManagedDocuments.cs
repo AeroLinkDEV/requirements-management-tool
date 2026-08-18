@@ -64,6 +64,7 @@ public sealed class ManagedDocument
 public sealed class ManagedDocumentRevision
 {
     private readonly List<ManagedDocumentReviewStep> _reviewSteps = [];
+    private readonly List<ReviewComment> _comments = [];
     private ManagedDocumentRevision() { }
     public ManagedDocumentRevision(Guid documentId, int revision, string ownerId,
         string changeSummary, DateTimeOffset now, Guid? parentRevisionId = null,
@@ -122,7 +123,89 @@ public sealed class ManagedDocumentRevision
     public DateTimeOffset UpdatedAt { get; private set; }
     public long Version { get; private set; }
     public IReadOnlyCollection<ManagedDocumentReviewStep> ReviewSteps => _reviewSteps.AsReadOnly();
+    public IReadOnlyCollection<ReviewComment> Comments => _comments.AsReadOnly();
     public int CurrentReviewCycle => _reviewSteps.Count == 0 ? 0 : _reviewSteps.Max(x => x.Cycle);
+
+    /// <summary>
+    /// Records a reviewer's remark about this revision, as a draft only its author can see.
+    ///
+    /// The same grammar as a change request review, over a different subject. Anyone holding a step in the
+    /// current round may write, not only whoever is active: a later reviewer reads ahead, and refusing them
+    /// somewhere to record it only means the observation arrives by some other route.
+    /// </summary>
+    public ReviewComment AddComment(string authorId, string sectionLabel, string body, DateTimeOffset now)
+    {
+        EnsureInReview();
+        if (!_reviewSteps.Any(x => x.Cycle == CurrentReviewCycle
+                && string.Equals(x.ApproverId, authorId, StringComparison.OrdinalIgnoreCase)))
+            throw new DomainException("Only a reviewer on this document review can comment on it.");
+        var comment = new ReviewComment(Id, CurrentReviewCycle, authorId, sectionLabel, body, now);
+        _comments.Add(comment);
+        return comment;
+    }
+
+    public void ReviseComment(Guid commentId, string actorId, string body, DateTimeOffset now)
+    {
+        EnsureInReview();
+        OwnDraft(commentId, actorId).Revise(body, now);
+    }
+
+    public void RemoveComment(Guid commentId, string actorId)
+    {
+        EnsureInReview();
+        _comments.Remove(OwnDraft(commentId, actorId));
+    }
+
+    private ReviewComment OwnDraft(Guid commentId, string actorId)
+    {
+        var comment = _comments.SingleOrDefault(x => x.Id == commentId)
+            ?? throw new DomainException("That comment is not on this document review.");
+        if (!string.Equals(comment.AuthorId, actorId, StringComparison.OrdinalIgnoreCase))
+            throw new DomainException("Only the author of a comment can change it.");
+        if (comment.State != ReviewCommentState.Draft)
+            throw new DomainException("A published comment cannot be changed.");
+        return comment;
+    }
+
+    /// <summary>
+    /// The comments on this revision that one person is entitled to read.
+    ///
+    /// Three audiences, as on a change request. Your own drafts are yours; a published comment is readable by
+    /// anyone who can read the document, except a reviewer in the current round who has not yet decided, who
+    /// sees only their own until they do. Without that exception one reviewer signing would put their
+    /// objections in front of everyone still deciding, which makes the later signatures weaker things.
+    /// </summary>
+    public IReadOnlyList<ReviewComment> CommentsVisibleTo(string viewer)
+    {
+        bool Mine(ReviewComment comment) => string.Equals(comment.AuthorId, viewer, StringComparison.OrdinalIgnoreCase);
+
+        var step = _reviewSteps.SingleOrDefault(x => x.Cycle == CurrentReviewCycle
+            && string.Equals(x.ApproverId, viewer, StringComparison.OrdinalIgnoreCase));
+        var stillDeciding = State == ManagedDocumentState.InReview && step is not null
+            && step.State is ManagedDocumentReviewStepState.Pending or ManagedDocumentReviewStepState.Active;
+        if (stillDeciding) return _comments.Where(Mine).ToList();
+
+        return _comments.Where(x => x.State == ReviewCommentState.Published || Mine(x)).ToList();
+    }
+
+    /// <summary>Publishes the drafts one reviewer wrote, which their own decision is what makes readable.</summary>
+    private void PublishOwnComments(string actorId, DateTimeOffset now)
+    {
+        foreach (var comment in _comments.Where(x => x.State == ReviewCommentState.Draft
+                     && string.Equals(x.AuthorId, actorId, StringComparison.OrdinalIgnoreCase)))
+            comment.Publish(decisionRecorded: true, now);
+    }
+
+    /// <summary>
+    /// Publishes whatever is still outstanding when the round ends under everyone. Discarding it would lose a
+    /// reviewer's written analysis because a colleague decided first, and send the author back to revise the
+    /// document without it. Each one is marked as carrying no decision.
+    /// </summary>
+    private void PublishOrphanComments(DateTimeOffset now)
+    {
+        foreach (var comment in _comments.Where(x => x.State == ReviewCommentState.Draft))
+            comment.Publish(decisionRecorded: false, now);
+    }
 
     public void RecordCheckIn(Guid attachmentId, DateTimeOffset now)
     {
@@ -196,6 +279,9 @@ public sealed class ManagedDocumentRevision
             || !string.Equals(expectedCandidateManifestHash, ReleaseManifestHash, StringComparison.OrdinalIgnoreCase)))
             throw new DomainException("The release candidate changed after this page loaded. Refresh and review the exact candidate before signing.");
         step.Approve(Required(rationale, "An approval rationale is required."), now);
+        // Approving publishes this reviewer's remarks and nobody else's. The round carries on and the owner
+        // can read them straight away rather than waiting for the last signature.
+        PublishOwnComments(actor, now);
         if (!final) cycleSteps.Single(x => x.Position == step.Position + 1).Activate();
         else
         {
@@ -221,6 +307,10 @@ public sealed class ManagedDocumentRevision
         if (!string.Equals(step.ApproverId, actor, StringComparison.OrdinalIgnoreCase))
             throw new DomainException("Only the active document reviewer can return this revision.");
         var explanation = Required(reason, "A return rationale is required."); step.Return(explanation, now);
+        // This ends the round for everybody, so the returning reviewer's remarks publish with their decision
+        // and everyone else's publish without one rather than being lost.
+        PublishOwnComments(actor, now);
+        PublishOrphanComments(now);
         State = ManagedDocumentState.Returned; ReturnReason = explanation; ReleaseCandidateDocxAttachmentId = null;
         ReleaseCandidatePdfAttachmentId = null; ReleaseManifestHash = ""; UpdatedAt = now; Version++;
     }
