@@ -346,8 +346,21 @@ function Get-DockerOwnedResource {
     if ([string]::IsNullOrEmpty($Name) -or $Name -match '[\r\n]') { throw "Disposable Docker $Kind ownership could not be verified." }
     try {
         $probeArguments = if ($Kind -eq 'container') { @('inspect', $Name) } else { @('volume', 'inspect', $Name) }
-        $probeOutput = @(& $Docker @probeArguments 2>&1)
-        $probeExitCode = $LASTEXITCODE
+        # The preference is relaxed for exactly this call and restored immediately.
+        #
+        # Absence is the normal case here — this probe exists to confirm a disposable name is free — and
+        # Docker reports it on stderr with a nonzero exit. Under Windows PowerShell 5.1 a native command's
+        # redirected stderr becomes a *terminating* NativeCommandError when $ErrorActionPreference is 'Stop',
+        # which this script sets globally. That threw before any of the absence handling below could run, so
+        # the gate could never start on the one edition a stock Windows developer host actually has. It went
+        # unnoticed because CI runs pwsh, where the same redirection is not terminating.
+        $previousPreference = $ErrorActionPreference
+        $ErrorActionPreference = 'Continue'
+        try {
+            $probeOutput = @(& $Docker @probeArguments 2>&1)
+            $probeExitCode = $LASTEXITCODE
+        }
+        finally { $ErrorActionPreference = $previousPreference }
         if ($probeExitCode -ne 0) {
             if ($probeOutput.Count -lt 1 -or $probeOutput.Count -gt 2) { throw 'inspect returned an unexpected diagnostic count' }
             $lines = @($probeOutput | ForEach-Object { [string]$_ })
@@ -487,6 +500,11 @@ function Invoke-DisposablePostgreSqlGate {
     $containerIntent = $true; $volumeIntent = $true; $secretFileIntent = $true
     $apiOwnershipIntent = $false; $apiProcessStarted = $false; $helper = $null; $apiPid = $null; $apiStart = $null; $apiPort = $null
     $cleanupErrors = [System.Collections.Generic.List[string]]::new()
+    # The first real failure, kept so cleanup cannot overwrite it. The intents above are declared before the
+    # try, so an early failure sends the finally to remove resources that were never created; those removals
+    # record cleanup errors, and the cleanup throw then replaced the actual cause. Every distinct root cause
+    # reported the same sentence, and finding the real one meant instrumenting the script by hand.
+    $primaryFailure = $null
     $tempRoot = [IO.Path]::GetTempPath()
     $dockerEnvFile = Join-Path $tempRoot "aerolink-planner-$runId-docker.env"; $apiEnvFile = Join-Path $tempRoot "aerolink-planner-$runId-api.env"
     $apiStatus = Join-Path $tempRoot "aerolink-planner-$runId-api.status"; $apiOutput = Join-Path $tempRoot "aerolink-planner-$runId-api.out.log"; $apiError = Join-Path $tempRoot "aerolink-planner-$runId-api.err.log"
@@ -594,6 +612,10 @@ function Invoke-DisposablePostgreSqlGate {
         if (@($attackerResolved.roles).Count -ne 0) { throw 'Disposable PostgreSQL look-alike issuer unexpectedly resolved a role.' }
         Write-Host '  Disposable PostgreSQL gate passed after exact process/listener ownership proof.' -ForegroundColor Green
     }
+    catch {
+        $primaryFailure = $_
+        throw
+    }
     finally {
         if ($apiOwnershipIntent -and $null -ne $helper) {
             try {
@@ -615,7 +637,17 @@ function Invoke-DisposablePostgreSqlGate {
         if ($containerIntent) { Remove-DockerOwnedResource -Docker $docker -Kind container -Name $containerName -RunId $runId -CleanupErrors $cleanupErrors }
         if ($volumeIntent) { Remove-DockerOwnedResource -Docker $docker -Kind volume -Name $volumeName -RunId $runId -CleanupErrors $cleanupErrors }
         if ($secretFileIntent) { foreach ($path in @($dockerEnvFile, $apiEnvFile, $apiStatus, $apiOutput, $apiError)) { Remove-ExactTemporaryFile -Path $path -CleanupErrors $cleanupErrors } }
-        if ($cleanupErrors.Count -gt 0) { throw 'Disposable PostgreSQL cleanup was not proven; Full mode is non-authoritative.' }
+        if ($cleanupErrors.Count -gt 0) {
+            $cleanupDetail = ($cleanupErrors -join ' | ')
+            if ($null -ne $primaryFailure) {
+                # Something already failed and is on its way up. Cleanup trouble here is a consequence of
+                # that, not the cause, so it is reported beside the real error rather than replacing it.
+                Write-Host "  Cleanup after failure also reported: $cleanupDetail" -ForegroundColor Yellow
+            }
+            else {
+                throw "Disposable PostgreSQL cleanup was not proven ($cleanupDetail); Full mode is non-authoritative."
+            }
+        }
     }
 }
 
