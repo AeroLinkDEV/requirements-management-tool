@@ -1,11 +1,11 @@
 {
   "schemaVersion": "aerolink-api-test-intent/v2",
   "totals": {
-    "tests": 442,
-    "cases": 492,
-    "classes": 81,
-    "hostedTests": 430,
-    "hostedCases": 471,
+    "tests": 451,
+    "cases": 501,
+    "classes": 83,
+    "hostedTests": 439,
+    "hostedCases": 480,
     "nonHostedTests": 8,
     "nonHostedCases": 17,
     "unknownHostTests": 4,
@@ -21,18 +21,18 @@
     "http-boundary": {
       "label": "HTTP boundary: route, status, JSON shape",
       "level": "API (must stay hosted)",
-      "tests": 298,
-      "cases": 333,
+      "tests": 306,
+      "cases": 341,
       "unknownCases": 0,
-      "classes": 68
+      "classes": 70
     },
     "ef-translation": {
       "label": "EF translation / relational constraints",
       "level": "Infrastructure (needs a database, not a host)",
-      "tests": 71,
-      "cases": 74,
+      "tests": 72,
+      "cases": 75,
       "unknownCases": 0,
-      "classes": 31
+      "classes": 32
     },
     "auth-policy": {
       "label": "Authentication / authorization wiring",
@@ -5499,6 +5499,160 @@
       ],
       "sourceLines": {
         "start": 59,
+        "end": 87
+      }
+    },
+    {
+      "cls": "ReviewCommentApiTests",
+      "test": "A_comment_cannot_name_a_revision_from_a_different_package",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 163,
+        "end": 174
+      }
+    },
+    {
+      "cls": "ReviewCommentApiTests",
+      "test": "A_draft_comment_is_visible_to_its_author_and_to_nobody_else",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 28,
+        "end": 48
+      }
+    },
+    {
+      "cls": "ReviewCommentApiTests",
+      "test": "A_reviewer_who_has_not_decided_is_shown_less_than_the_author_is",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 71,
+        "end": 97
+      }
+    },
+    {
+      "cls": "ReviewCommentApiTests",
+      "test": "Deciding_hands_the_comment_to_the_author_without_waiting_for_the_cycle",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 50,
+        "end": 69
+      }
+    },
+    {
+      "cls": "ReviewCommentApiTests",
+      "test": "My_work_tells_the_author_there_are_comments_without_anything_being_sent",
+      "kind": "Fact",
+      "intent": "ef-translation",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 124,
+        "end": 151
+      }
+    },
+    {
+      "cls": "ReviewCommentApiTests",
+      "test": "Only_the_author_of_a_comment_can_change_it",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 99,
+        "end": 122
+      }
+    },
+    {
+      "cls": "ReviewLinkOutlivedCycleTests",
+      "test": "A_reviewer_whose_cycle_closed_is_told_so",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 27,
+        "end": 43
+      }
+    },
+    {
+      "cls": "ReviewLinkOutlivedCycleTests",
+      "test": "Somebody_who_never_reviewed_it_is_told_nothing",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 45,
+        "end": 66
+      }
+    },
+    {
+      "cls": "ReviewLinkOutlivedCycleTests",
+      "test": "Somebody_with_no_access_still_lands_at_the_workspace_root",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 68,
         "end": 87
       }
     },

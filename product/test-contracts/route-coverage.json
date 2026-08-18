@@ -25,6 +25,14 @@
     },
     {
       "method": "DELETE",
+      "path": "/api/change-requests/{id:guid}/review-comments/{commentId:guid}",
+      "file": "ChangeRequestEndpoints.cs",
+      "coveredBy": [
+        "ReviewCommentApiTests"
+      ]
+    },
+    {
+      "method": "DELETE",
       "path": "/api/delegations/{id:guid}",
       "file": "AdministrationEndpoints.cs",
       "coveredBy": [
@@ -249,6 +257,8 @@
         "ReleasedExecutionEvidenceApiTests",
         "RequirementFilterExactnessApiTests",
         "RestartReviewApiTests",
+        "ReviewCommentApiTests",
+        "ReviewLinkOutlivedCycleTests",
         "ReviseChangeRequestApiTests",
         "SavedViewLifecycleApiTests",
         "SearchableAuthoringPickerApiTests",
@@ -474,6 +484,7 @@
       "file": "ChangeRequestEndpoints.cs",
       "coveredBy": [
         "ChangeRequestReviewRationaleApiTests",
+        "ReviewCommentApiTests",
         "TestChangeRequestReviewWorkflowTests"
       ]
     },
@@ -526,6 +537,7 @@
       "file": "ChangeRequestEndpoints.cs",
       "coveredBy": [
         "ChangeRequestReviewRationaleApiTests",
+        "ReviewLinkOutlivedCycleTests",
         "TestChangeRequestReviewWorkflowTests"
       ]
     },
@@ -551,6 +563,14 @@
       "path": "/api/change-requests/{id:guid}/retarget",
       "file": "ChangeRequestEndpoints.cs",
       "coveredBy": []
+    },
+    {
+      "method": "POST",
+      "path": "/api/change-requests/{id:guid}/review-comments",
+      "file": "ChangeRequestEndpoints.cs",
+      "coveredBy": [
+        "ReviewCommentApiTests"
+      ]
     },
     {
       "method": "POST",
@@ -1930,6 +1950,14 @@
       "path": "/api/change-requests/{id:guid}/draft",
       "file": "ChangeRequestEndpoints.cs",
       "coveredBy": []
+    },
+    {
+      "method": "PUT",
+      "path": "/api/change-requests/{id:guid}/review-comments/{commentId:guid}",
+      "file": "ChangeRequestEndpoints.cs",
+      "coveredBy": [
+        "ReviewCommentApiTests"
+      ]
     },
     {
       "method": "PUT",

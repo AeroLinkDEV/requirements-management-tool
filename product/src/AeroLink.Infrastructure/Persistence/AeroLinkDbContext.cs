@@ -35,6 +35,7 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
     public DbSet<SourceHistoryEntry> SourceHistoryEntries => Set<SourceHistoryEntry>();
     public DbSet<ReviewCycle> ReviewCycles => Set<ReviewCycle>();
     public DbSet<ApprovalStep> ApprovalSteps => Set<ApprovalStep>();
+    public DbSet<ReviewComment> ReviewComments => Set<ReviewComment>();
     public DbSet<AuditEvent> AuditEvents => Set<AuditEvent>();
     public DbSet<CandidateBaseline> CandidateBaselines => Set<CandidateBaseline>();
     public DbSet<BaselineChangeRequestSelection> BaselineSelections => Set<BaselineChangeRequestSelection>();
@@ -399,6 +400,24 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
             b.ToTable(t => t.HasCheckConstraint("CK_review_cycles_one_owner",
                 "(\"ChangeRequestId\" IS NULL) <> (\"TestChangeReviewId\" IS NULL)"));
             b.HasMany(x => x.Steps).WithOne().HasForeignKey(x => x.ReviewCycleId).OnDelete(DeleteBehavior.Cascade);
+            b.HasMany(x => x.Comments).WithOne().HasForeignKey(x => x.ReviewCycleId).OnDelete(DeleteBehavior.Cascade);
+        });
+        modelBuilder.Entity<ReviewComment>(b =>
+        {
+            b.ToTable("review_comments"); b.HasKey(x => x.Id);
+            b.Property(x => x.AuthorId).HasMaxLength(100).IsRequired();
+            b.Property(x => x.Body).HasMaxLength(4000).IsRequired();
+            b.Property(x => x.Anchor).HasConversion<string>().HasMaxLength(30);
+            b.Property(x => x.State).HasConversion<string>().HasMaxLength(20);
+            // Reading a cycle's comments, and reading one reviewer's own drafts within it, are the only two
+            // access paths there are.
+            b.HasIndex(x => new { x.ReviewCycleId, x.State });
+            b.HasIndex(x => new { x.ReviewCycleId, x.AuthorId });
+            // The anchor and its identifier must agree in the database too, not only in the constructor.
+            // A row that says RequirementRevision with no revision is unreadable, and nothing downstream
+            // could tell whether it had been written that way or corrupted later.
+            b.ToTable(t => t.HasCheckConstraint("CK_review_comments_anchor",
+                "(\"Anchor\" = 'RequirementRevision') = (\"RequirementChangeId\" IS NOT NULL)"));
         });
         modelBuilder.Entity<ApprovalStep>(b =>
         {

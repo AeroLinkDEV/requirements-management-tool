@@ -197,6 +197,37 @@ public sealed class SystemChangeRequest
         return cycle;
     }
 
+    /// <summary>
+    /// Records a reviewer's remark about one part of the package under review, as a draft only they can see.
+    ///
+    /// Deliberately not audited. The audit trail records controlled events — who signed what, and why a
+    /// package was returned — and a reviewer typing a note is neither. Publishing one is not audited either:
+    /// the decision that published it already is.
+    /// </summary>
+    public ReviewComment AddReviewComment(string actorId, ReviewCommentAnchor anchor, Guid? requirementChangeId,
+        string body, DateTimeOffset now)
+    {
+        EnsureInReview();
+        // A comment must name a revision that is actually in the package being reviewed. Without this a
+        // reviewer could anchor to a revision from a different change request and the author would open a
+        // comment about something they never submitted.
+        if (requirementChangeId is not null && _requirementChanges.All(x => x.Id != requirementChangeId))
+            throw new DomainException("That requirement revision is not in this package.");
+        return ActiveReviewCycle!.AddComment(actorId, anchor, requirementChangeId, body, now);
+    }
+
+    public void ReviseReviewComment(string actorId, Guid commentId, string body, DateTimeOffset now)
+    {
+        EnsureInReview();
+        ActiveReviewCycle!.ReviseComment(commentId, actorId, body, now);
+    }
+
+    public void RemoveReviewComment(string actorId, Guid commentId)
+    {
+        EnsureInReview();
+        ActiveReviewCycle!.RemoveComment(commentId, actorId);
+    }
+
     public void ApproveActiveStage(string actorId, DateTimeOffset now, string? rationale = null)
     {
         EnsureInReview();
