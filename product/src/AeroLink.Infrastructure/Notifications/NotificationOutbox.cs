@@ -1,3 +1,4 @@
+using AeroLink.Domain.Documents;
 using AeroLink.Domain.ChangeControl;
 using AeroLink.Domain.Common;
 using AeroLink.Domain.Identity;
@@ -85,6 +86,7 @@ public sealed class NotificationOutbox(AeroLinkDbContext db)
                 .Where(x => notificationIds.Contains(x.Id)).ToListAsync(ct))
             .ToDictionary(x => x.Id);
         var facts = await ReviewFactsAsync(notifications.Values, ct);
+        var documentFacts = await DocumentReviewFactsAsync(notifications.Values, ct);
 
         var sent = 0; var failed = 0; var suppressed = 0;
         foreach (var delivery in pending)
@@ -100,7 +102,8 @@ public sealed class NotificationOutbox(AeroLinkDbContext db)
             try
             {
                 await sender.SendAsync(
-                    Compose(notification, delivery, links, tokens, facts.GetValueOrDefault(notification.Id)), ct);
+                    Compose(notification, delivery, links, tokens, facts.GetValueOrDefault(notification.Id),
+                        documentFacts.GetValueOrDefault(notification.Id)), ct);
                 delivery.MarkSent(now);
                 sent++;
             }
@@ -187,8 +190,67 @@ public sealed class NotificationOutbox(AeroLinkDbContext db)
         return resolved;
     }
 
+    /// <summary>
+    /// The same gathering for a document review. Kept separate from the change request one rather than
+    /// generalised, because the two hang off different aggregates: a change request review lives on a
+    /// ReviewCycle, and a document review lives on the revision itself with an integer round. Forcing one
+    /// query to serve both would obscure that rather than remove it.
+    /// </summary>
+    private async Task<Dictionary<Guid, DocumentReviewEmailFacts>> DocumentReviewFactsAsync(
+        IReadOnlyCollection<UserNotification> notifications, CancellationToken ct)
+    {
+        var candidates = notifications.Where(x => x.Type == "DocumentReviewActivated" && x.ArtifactId is not null).ToList();
+        if (candidates.Count == 0) return [];
+
+        var documentIds = candidates.Select(x => x.ArtifactId!.Value).Distinct().ToList();
+        var steps = await (from step in db.ManagedDocumentReviewSteps.AsNoTracking()
+                           join revision in db.ManagedDocumentRevisions.AsNoTracking() on step.RevisionId equals revision.Id
+                           join document in db.ManagedDocuments.AsNoTracking() on revision.DocumentId equals document.Id
+                           where documentIds.Contains(document.Id)
+                               && revision.State == ManagedDocumentState.InReview
+                           select new
+                           {
+                               DocumentId = document.Id, document.DocumentNumber, document.Title, document.StewardId,
+                               revision.Revision, revision.OwnerId, revision.SubmittedAt,
+                               step.ApproverId, step.StageName, step.GrantedAuthority, step.Position, step.Cycle,
+                           }).ToListAsync(ct);
+        if (steps.Count == 0) return [];
+
+        var people = steps.SelectMany(x => new[] { x.StewardId, x.OwnerId }).Distinct().ToList();
+        var names = (await db.UserAccounts.AsNoTracking().Where(x => people.Contains(x.UserName))
+                .Select(x => new { x.UserName, x.DisplayName }).ToListAsync(ct))
+            .ToDictionary(x => x.UserName, x => x.DisplayName, StringComparer.OrdinalIgnoreCase);
+
+        var resolved = new Dictionary<Guid, DocumentReviewEmailFacts>();
+        foreach (var notification in candidates)
+        {
+            var mine = steps.SingleOrDefault(x => x.DocumentId == notification.ArtifactId!.Value
+                && string.Equals(x.ApproverId, notification.Recipient, StringComparison.OrdinalIgnoreCase));
+            // The round closed or the reviewer changed between raising this and draining the queue. There is
+            // no stage left to describe, so the message falls back to its plain form.
+            if (mine is null) continue;
+
+            var round = steps.Count(x => x.DocumentId == mine.DocumentId && x.Cycle == mine.Cycle);
+            var submitted = mine.SubmittedAt ?? notification.CreatedAt;
+            var stage = string.IsNullOrWhiteSpace(mine.StageName) ? "Review" : mine.StageName;
+            resolved[notification.Id] = new DocumentReviewEmailFacts(
+                $"{mine.DocumentNumber}.{mine.Revision:D2}",
+                mine.Title,
+                $"{stage} · step {mine.Position + 1} of {round}",
+                string.IsNullOrWhiteSpace(mine.GrantedAuthority) ? "Reviewer" : mine.GrantedAuthority,
+                names.GetValueOrDefault(mine.OwnerId, mine.OwnerId),
+                names.GetValueOrDefault(mine.StewardId, mine.StewardId),
+                submitted,
+                // The same five-day convention the change request email and My Work already use, so nothing
+                // in the product disagrees about when a decision was wanted.
+                submitted.AddDays(5));
+        }
+        return resolved;
+    }
+
     internal static EmailMessage Compose(UserNotification notification, NotificationDelivery delivery,
-        NotificationLinkBuilder links, UnsubscribeTokenService tokens, ReviewEmailFacts? facts = null)
+        NotificationLinkBuilder links, UnsubscribeTokenService tokens, ReviewEmailFacts? facts = null,
+        DocumentReviewEmailFacts? documentFacts = null)
     {
         var link = links.LinkFor(notification.Route);
         var unsubscribeToken = tokens.Issue(delivery.Recipient);
@@ -200,6 +262,11 @@ public sealed class NotificationOutbox(AeroLinkDbContext db)
             return new EmailMessage(delivery.Address, ReviewEmailTemplate.Subject(facts),
                 ReviewEmailTemplate.PlainText(facts, link, unsubscribeLink),
                 ReviewEmailTemplate.Html(facts, link, unsubscribeLink));
+
+        if (documentFacts is not null)
+            return new EmailMessage(delivery.Address, DocumentReviewEmailTemplate.Subject(documentFacts),
+                DocumentReviewEmailTemplate.PlainText(documentFacts, link, unsubscribeLink),
+                DocumentReviewEmailTemplate.Html(documentFacts, link, unsubscribeLink));
 
         return ComposePlain(notification, delivery, link, unsubscribeLink);
     }

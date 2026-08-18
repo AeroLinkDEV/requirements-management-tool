@@ -409,15 +409,26 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
             b.Property(x => x.Body).HasMaxLength(4000).IsRequired();
             b.Property(x => x.Anchor).HasConversion<string>().HasMaxLength(30);
             b.Property(x => x.State).HasConversion<string>().HasMaxLength(20);
-            // Reading a cycle's comments, and reading one reviewer's own drafts within it, are the only two
-            // access paths there are.
+            b.Property(x => x.SectionLabel).HasMaxLength(200);
+            // Reading a review's comments, and reading one reviewer's own drafts within it, are the only two
+            // access paths there are — one index per owner kind.
             b.HasIndex(x => new { x.ReviewCycleId, x.State });
             b.HasIndex(x => new { x.ReviewCycleId, x.AuthorId });
+            b.HasIndex(x => new { x.ManagedDocumentRevisionId, x.DocumentCycle, x.State });
             // The anchor and its identifier must agree in the database too, not only in the constructor.
             // A row that says RequirementRevision with no revision is unreadable, and nothing downstream
             // could tell whether it had been written that way or corrupted later.
             b.ToTable(t => t.HasCheckConstraint("CK_review_comments_anchor",
                 "(\"Anchor\" = 'RequirementRevision') = (\"RequirementChangeId\" IS NOT NULL)"));
+            // Exactly one owner, enforced by the database rather than trusted from the constructors, for the
+            // same reason ReviewCycle enforces it: a comment that belongs to nothing would outlive anything
+            // that could explain it, and no reader could tell whether it was written that way or orphaned.
+            b.ToTable(t => t.HasCheckConstraint("CK_review_comments_one_owner",
+                "(\"ReviewCycleId\" IS NULL) <> (\"ManagedDocumentRevisionId\" IS NULL)"));
+            // A document comment is scoped to the round it was written in; a change request comment gets that
+            // from its cycle. Set exactly when the document owner is.
+            b.ToTable(t => t.HasCheckConstraint("CK_review_comments_document_cycle",
+                "(\"ManagedDocumentRevisionId\" IS NULL) = (\"DocumentCycle\" IS NULL)"));
         });
         modelBuilder.Entity<ApprovalStep>(b =>
         {
@@ -1174,6 +1185,7 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
         modelBuilder.Entity<ManagedDocumentRevision>(b =>
         {
             b.ToTable("managed_document_revisions"); b.HasKey(x => x.Id);
+            b.HasMany(x => x.Comments).WithOne().HasForeignKey(x => x.ManagedDocumentRevisionId).OnDelete(DeleteBehavior.Cascade);
             b.Property(x => x.State).HasConversion<string>().HasMaxLength(30); b.Property(x => x.OwnerId).HasMaxLength(100).IsRequired(); b.Property(x => x.ResponsibleOwnerId).HasMaxLength(100).IsRequired(); b.Property(x => x.InitiatedBy).HasMaxLength(100).IsRequired();
             b.Property(x => x.FormalChangeSummary).HasColumnName("ChangeSummary").HasMaxLength(4000).IsRequired(); b.Property(x => x.FormalSummaryHash).HasMaxLength(64).IsRequired(); b.Property(x => x.FormalSummaryProvenance).HasMaxLength(80).IsRequired();
             b.Property(x => x.SnapshotHash).HasMaxLength(64).IsRequired(); b.Property(x => x.SubmittedFormalSummaryHash).HasMaxLength(64).IsRequired();
@@ -1331,6 +1343,18 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
         {
             if (entry.State == EntityState.Added) entry.Property(x => x.Version).CurrentValue = 1;
             if (entry.State == EntityState.Modified) entry.Property(x => x.Version).CurrentValue = entry.Property(x => x.Version).OriginalValue + 1;
+        }
+        // A comment taken out of its review is a deleted comment, not an ownerless one. Both owner keys are
+        // nullable so that exactly one of them can be set, which leaves both relationships optional, and EF's
+        // answer to removing an optional child from its collection is to null the key rather than delete the
+        // row. The surviving row then fails CK_review_comments_one_owner, so "remove my draft" answers 500.
+        // The constraint already says a comment owned by nothing cannot exist; this makes that true instead
+        // of fatal, and it holds for both owners rather than for whichever endpoint remembered to say so.
+        foreach (var entry in ChangeTracker.Entries<ReviewComment>().Where(x => x.State == EntityState.Modified))
+        {
+            if (entry.Property(x => x.ReviewCycleId).CurrentValue is null
+                && entry.Property(x => x.ManagedDocumentRevisionId).CurrentValue is null)
+                entry.State = EntityState.Deleted;
         }
         await RefuseCrossLevelCoverageAsync(cancellationToken);
         await AddLifecycleEventsAsync(cancellationToken);

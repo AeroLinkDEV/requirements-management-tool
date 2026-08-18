@@ -44,6 +44,10 @@ public static class ManagedDocumentEndpoints
         group.MapPost("/revisions/{revisionId:guid}/release-preparation", PrepareReleaseAsync);
         group.MapPost("/revisions/{revisionId:guid}/force-unlock", ForceUnlockAsync);
         group.MapPost("/revisions/{revisionId:guid}/withdraw", WithdrawAsync);
+        group.MapGet("/revisions/{revisionId:guid}/review-comments", ListReviewCommentsAsync);
+        group.MapPost("/revisions/{revisionId:guid}/review-comments", AddReviewCommentAsync);
+        group.MapPut("/revisions/{revisionId:guid}/review-comments/{commentId:guid}", ReviseReviewCommentAsync);
+        group.MapDelete("/revisions/{revisionId:guid}/review-comments/{commentId:guid}", RemoveReviewCommentAsync);
 
         var connector = app.MapGroup("/api/document-connector");
         connector.MapPost("/redeem/{launchToken}", RedeemAsync);
@@ -1126,7 +1130,7 @@ public static class ManagedDocumentEndpoints
     { var now = DateTimeOffset.UtcNow; var sessions = await db.ArtifactEditSessions.Where(x => x.ArtifactType == "ManagedDocument" && documentIds.Contains(x.ArtifactId) && x.State == EditSessionState.Active).ToListAsync(ct); foreach (var expired in sessions.Where(x => x.ExpiresAt <= now)) expired.Expire(now); if (db.ChangeTracker.HasChanges()) await db.SaveChangesAsync(ct); return sessions.Where(x => x.State == EditSessionState.Active).ToList(); }
 
     private static async Task<RevisionData?> RevisionDataAsync(AeroLinkDbContext db, Guid revisionId, CancellationToken ct, bool includeReviews = false)
-    { var query = db.ManagedDocumentRevisions.AsQueryable(); if (includeReviews) query = query.Include(x => x.ReviewSteps); var revision = await query.SingleOrDefaultAsync(x => x.Id == revisionId, ct); if (revision is null) return null; var document = await db.ManagedDocuments.SingleAsync(x => x.Id == revision.DocumentId, ct); return new(document, revision); }
+    { var query = db.ManagedDocumentRevisions.AsQueryable(); if (includeReviews) query = query.Include(x => x.ReviewSteps).Include(x => x.Comments); var revision = await query.SingleOrDefaultAsync(x => x.Id == revisionId, ct); if (revision is null) return null; var document = await db.ManagedDocuments.SingleAsync(x => x.Id == revision.DocumentId, ct); return new(document, revision); }
 
     private static object Attachment(ControlledAttachment x) => new { x.Id, x.LogicalId, x.Version, x.Label, x.Description, x.OriginalFileName, x.ContentType, x.Size, x.Sha256, x.ValidationProfile, x.ValidationResult, state = x.State.ToString(), x.UploadedBy, x.UploadedAt, x.IntegrityVerifiedAt, downloadUrl = $"/api/managed-documents/attachments/{x.Id}" };
 
@@ -1288,6 +1292,72 @@ public static class ManagedDocumentEndpoints
     private sealed record LinkOptionRow(Guid Id, string DisplayNumber, string Title, string Secondary, string SortNumber, int Revision);
     private sealed record DashboardCounts(int Total, int Released, int InWork, int InReview, int Returned);
     private sealed record ManagedDocumentSummary(Guid Id, string DocumentNumber, string Acronym, string DocumentType, string Title, string StewardId, string? ResponsibleOwnerId, string ReleasedRevision, string ReleasedState, string? InWorkRevision, string InWorkState, string? CheckedOutBy, DateTimeOffset? CheckoutExpiresAt, bool ReconciliationRequired, DateTimeOffset UpdatedAt);
+
+    // Reviewer comments on a document revision. Deliberately much lighter than the decision routes above:
+    // a comment carries no signature, so there is no password to confirm, no operation key to make it
+    // idempotent and no release-candidate integrity to verify. It is working communication, and treating it
+    // like a controlled decision would be security theatre that also made it tedious to write.
+    private static async Task<IResult> ListReviewCommentsAsync(Guid revisionId, HttpContext http,
+        AeroLinkDbContext db, CancellationToken ct)
+    {
+        var data = await RevisionDataAsync(db, revisionId, ct, true); if (data is null) return Results.NotFound();
+        if (!await http.HasProjectAccessAsync(db, data.Document.ProjectId, ct)) return Results.Forbid();
+        var viewer = http.UserAccount().UserName;
+        return Results.Ok(new
+        {
+            cycle = data.Revision.CurrentReviewCycle,
+            comments = data.Revision.CommentsVisibleTo(viewer).OrderBy(x => x.CreatedAt)
+                .Select(x => ApiMap.ReviewComment(x, viewer)),
+        });
+    }
+
+    private static async Task<IResult> AddReviewCommentAsync(Guid revisionId, DocumentReviewCommentRequest request,
+        HttpContext http, AeroLinkDbContext db, CancellationToken ct)
+    {
+        var data = await RevisionDataAsync(db, revisionId, ct, true); if (data is null) return Results.NotFound();
+        if (!await http.HasProjectAccessAsync(db, data.Document.ProjectId, ct)) return Results.Forbid();
+        try
+        {
+            var actor = http.UserAccount().UserName;
+            var comment = data.Revision.AddComment(actor, request.SectionLabel ?? "", request.Body, DateTimeOffset.UtcNow);
+            // Said explicitly rather than left to change detection: aggregate children carry
+            // application-assigned GUIDs, so a newly discovered one is read as a row that already exists.
+            db.ReviewComments.Add(comment);
+            await db.SaveChangesAsync(ct);
+            return Results.Created($"/api/managed-documents/revisions/{revisionId}/review-comments/{comment.Id}",
+                ApiMap.ReviewComment(comment, actor));
+        }
+        catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
+    }
+
+    private static async Task<IResult> ReviseReviewCommentAsync(Guid revisionId, Guid commentId,
+        ReviseReviewCommentRequest request, HttpContext http, AeroLinkDbContext db, CancellationToken ct)
+    {
+        var data = await RevisionDataAsync(db, revisionId, ct, true); if (data is null) return Results.NotFound();
+        if (!await http.HasProjectAccessAsync(db, data.Document.ProjectId, ct)) return Results.Forbid();
+        try
+        {
+            var actor = http.UserAccount().UserName;
+            data.Revision.ReviseComment(commentId, actor, request.Body, DateTimeOffset.UtcNow);
+            await db.SaveChangesAsync(ct);
+            return Results.Ok(ApiMap.ReviewComment(data.Revision.Comments.Single(x => x.Id == commentId), actor));
+        }
+        catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
+    }
+
+    private static async Task<IResult> RemoveReviewCommentAsync(Guid revisionId, Guid commentId,
+        HttpContext http, AeroLinkDbContext db, CancellationToken ct)
+    {
+        var data = await RevisionDataAsync(db, revisionId, ct, true); if (data is null) return Results.NotFound();
+        if (!await http.HasProjectAccessAsync(db, data.Document.ProjectId, ct)) return Results.Forbid();
+        try
+        {
+            data.Revision.RemoveComment(commentId, http.UserAccount().UserName);
+            await db.SaveChangesAsync(ct);
+            return Results.NoContent();
+        }
+        catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
+    }
 }
 
 public sealed record CreateManagedDocumentRequest(Guid ProjectId, string Acronym, string DocumentType, string Title, string? OwnerId, string? FormalChangeSummary, string? ChangeSummary = null, string? OperationKey = null);
@@ -1310,3 +1380,10 @@ public sealed record SupersedeManagedDocumentLinkRequest(string Reason, long Exp
 public sealed record ConnectorVersionRequest(long ExpectedVersion);
 public sealed record ConnectorDiscardRequest(long ExpectedVersion, string? Reason);
 public sealed record RecoverDocumentConnectorRequest(Guid WorkspaceId);
+
+/// <summary>
+/// A reviewer's remark on a document revision. <paramref name="SectionLabel"/> is the reviewer's own words
+/// about where in the document they were reading; a managed document is a checked-in DOCX with no structure
+/// this system can address, so there is no section identifier to send instead.
+/// </summary>
+public sealed record DocumentReviewCommentRequest(string Body, string? SectionLabel = null);

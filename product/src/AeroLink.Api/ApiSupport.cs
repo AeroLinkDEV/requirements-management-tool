@@ -150,6 +150,9 @@ static class ApiMap
     public static object ReviewComment(ReviewComment x, string viewer) => new
     {
         x.Id, x.AuthorId, anchor = x.Anchor.ToString(), x.RequirementChangeId, x.Body,
+        // Empty for a change request comment, and the reviewer's own words about where they were reading
+        // for a document one — a DOCX has no structure this system can address.
+        x.SectionLabel,
         state = x.State.ToString(), x.DecisionRecorded, x.CreatedAt, x.UpdatedAt, x.PublishedAt,
         isMine = string.Equals(x.AuthorId, viewer, StringComparison.OrdinalIgnoreCase),
     };
