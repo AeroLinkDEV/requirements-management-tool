@@ -1344,6 +1344,18 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
             if (entry.State == EntityState.Added) entry.Property(x => x.Version).CurrentValue = 1;
             if (entry.State == EntityState.Modified) entry.Property(x => x.Version).CurrentValue = entry.Property(x => x.Version).OriginalValue + 1;
         }
+        // A comment taken out of its review is a deleted comment, not an ownerless one. Both owner keys are
+        // nullable so that exactly one of them can be set, which leaves both relationships optional, and EF's
+        // answer to removing an optional child from its collection is to null the key rather than delete the
+        // row. The surviving row then fails CK_review_comments_one_owner, so "remove my draft" answers 500.
+        // The constraint already says a comment owned by nothing cannot exist; this makes that true instead
+        // of fatal, and it holds for both owners rather than for whichever endpoint remembered to say so.
+        foreach (var entry in ChangeTracker.Entries<ReviewComment>().Where(x => x.State == EntityState.Modified))
+        {
+            if (entry.Property(x => x.ReviewCycleId).CurrentValue is null
+                && entry.Property(x => x.ManagedDocumentRevisionId).CurrentValue is null)
+                entry.State = EntityState.Deleted;
+        }
         await RefuseCrossLevelCoverageAsync(cancellationToken);
         await AddLifecycleEventsAsync(cancellationToken);
         await QueueNotificationDeliveriesAsync(cancellationToken);

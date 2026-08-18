@@ -1,17 +1,17 @@
 {
   "schemaVersion": "aerolink-api-test-intent/v2",
   "totals": {
-    "tests": 451,
-    "cases": 501,
-    "classes": 83,
-    "hostedTests": 439,
-    "hostedCases": 480,
+    "tests": 458,
+    "cases": 508,
+    "classes": 85,
+    "hostedTests": 446,
+    "hostedCases": 487,
     "nonHostedTests": 8,
     "nonHostedCases": 17,
     "unknownHostTests": 4,
     "unknownHostCases": 4,
-    "hostedCandidateTests": 3,
-    "hostedCandidateCases": 3,
+    "hostedCandidateTests": 6,
+    "hostedCandidateCases": 6,
     "unknownCandidateTests": 2,
     "unknownCandidateCases": 2,
     "unknownCaseTests": 0,
@@ -21,10 +21,10 @@
     "http-boundary": {
       "label": "HTTP boundary: route, status, JSON shape",
       "level": "API (must stay hosted)",
-      "tests": 306,
-      "cases": 341,
+      "tests": 310,
+      "cases": 345,
       "unknownCases": 0,
-      "classes": 70
+      "classes": 72
     },
     "ef-translation": {
       "label": "EF translation / relational constraints",
@@ -53,10 +53,10 @@
     "in-process-logic": {
       "label": "In-process logic with no HTTP and no client",
       "level": "Domain or Infrastructure (migration candidate)",
-      "tests": 5,
-      "cases": 5,
+      "tests": 8,
+      "cases": 8,
       "unknownCases": 0,
-      "classes": 5
+      "classes": 6
     },
     "startup-config": {
       "label": "Startup, hosting and configuration",
@@ -1883,6 +1883,123 @@
       "sourceLines": {
         "start": 128,
         "end": 144
+      }
+    },
+    {
+      "cls": "DocumentReviewCommentApiTests",
+      "test": "A_draft_reaches_nobody_and_deciding_hands_it_to_the_owner",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 22,
+        "end": 52
+      }
+    },
+    {
+      "cls": "DocumentReviewCommentApiTests",
+      "test": "Only_a_reviewer_on_the_document_can_comment",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 54,
+        "end": 65
+      }
+    },
+    {
+      "cls": "DocumentReviewCommentApiTests",
+      "test": "Only_the_author_can_revise_or_remove_their_own_draft",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 67,
+        "end": 102
+      }
+    },
+    {
+      "cls": "DocumentReviewLinkOutlivedTests",
+      "test": "A_document_reviewer_whose_review_closed_is_told_so",
+      "kind": "Fact",
+      "intent": "in-process-logic",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 26,
+        "end": 37
+      }
+    },
+    {
+      "cls": "DocumentReviewLinkOutlivedTests",
+      "test": "Following_the_revision_identifier_answers_the_same_way",
+      "kind": "Fact",
+      "intent": "in-process-logic",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 39,
+        "end": 47
+      }
+    },
+    {
+      "cls": "DocumentReviewLinkOutlivedTests",
+      "test": "Somebody_with_no_access_still_lands_at_the_workspace_root",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 65,
+        "end": 78
+      }
+    },
+    {
+      "cls": "DocumentReviewLinkOutlivedTests",
+      "test": "The_owner_and_a_bystander_are_told_nothing",
+      "kind": "Fact",
+      "intent": "in-process-logic",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 49,
+        "end": 63
       }
     },
     {
@@ -5515,8 +5632,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 163,
-        "end": 174
+        "start": 170,
+        "end": 181
       }
     },
     {
@@ -5583,8 +5700,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 124,
-        "end": 151
+        "start": 131,
+        "end": 158
       }
     },
     {
@@ -5601,7 +5718,7 @@
       ],
       "sourceLines": {
         "start": 99,
-        "end": 122
+        "end": 129
       }
     },
     {

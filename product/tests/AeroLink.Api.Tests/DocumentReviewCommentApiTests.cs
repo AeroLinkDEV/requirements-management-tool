@@ -64,6 +64,43 @@ public sealed class DocumentReviewCommentApiTests(SharedApiHost host) : IClassFi
         Assert.Equal(HttpStatusCode.BadRequest, refused.StatusCode);
     }
 
+    [Fact]
+    public async Task Only_the_author_can_revise_or_remove_their_own_draft()
+    {
+        var fixture = await SeedAsync(host.Factory);
+        using var first = host.CreateClient();
+        await LoginAsync(first, fixture.FirstReviewer);
+
+        using var created = await first.PostAsJsonAsync(
+            $"/api/managed-documents/revisions/{fixture.RevisionId}/review-comments",
+            new { body = "First thought.", sectionLabel = "3.2" });
+        Assert.Equal(HttpStatusCode.Created, created.StatusCode);
+        var commentId = (await created.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetGuid();
+
+        // The other reviewer is entitled to comment here, so this is not an access check failing early. It is
+        // authorship: a draft belongs to the person who wrote it, and nobody else may restate or withdraw it.
+        using var second = host.CreateClient();
+        await LoginAsync(second, fixture.SecondReviewer);
+        using var refusedEdit = await second.PutAsJsonAsync(
+            $"/api/managed-documents/revisions/{fixture.RevisionId}/review-comments/{commentId}",
+            new { body = "Not yours." });
+        Assert.Equal(HttpStatusCode.BadRequest, refusedEdit.StatusCode);
+        using var refusedDelete = await second.DeleteAsync(
+            $"/api/managed-documents/revisions/{fixture.RevisionId}/review-comments/{commentId}");
+        Assert.Equal(HttpStatusCode.BadRequest, refusedDelete.StatusCode);
+
+        using var revised = await first.PutAsJsonAsync(
+            $"/api/managed-documents/revisions/{fixture.RevisionId}/review-comments/{commentId}",
+            new { body = "Second thought." });
+        Assert.Equal(HttpStatusCode.OK, revised.StatusCode);
+        Assert.Equal("Second thought.", (await revised.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("body").GetString());
+
+        using var removed = await first.DeleteAsync(
+            $"/api/managed-documents/revisions/{fixture.RevisionId}/review-comments/{commentId}");
+        Assert.Equal(HttpStatusCode.NoContent, removed.StatusCode);
+        Assert.Empty(await CommentsFor(first, fixture.RevisionId));
+    }
+
     private static async Task ApproveAsync(AeroLinkApiFactory factory, Guid revisionId, string actor)
     {
         using var scope = factory.Services.CreateScope();

@@ -49,6 +49,14 @@
     },
     {
       "method": "DELETE",
+      "path": "/api/managed-documents/revisions/{revisionId:guid}/review-comments/{commentId:guid}",
+      "file": "ManagedDocumentEndpoints.cs",
+      "coveredBy": [
+        "DocumentReviewCommentApiTests"
+      ]
+    },
+    {
+      "method": "DELETE",
       "path": "/api/projects/{projectId:guid}/personnel/{userId:guid}/roles/{role}",
       "file": "PersonnelEndpoints.cs",
       "coveredBy": [
@@ -223,6 +231,8 @@
         "CoverageStateFilterApiTests",
         "DeferralAndRevisionListingTests",
         "DeferredCarryForwardApiTests",
+        "DocumentReviewCommentApiTests",
+        "DocumentReviewLinkOutlivedTests",
         "DownstreamAssessmentReopenApiTests",
         "DraftDocumentApiTests",
         "ExternalIdentityAdminApiTests",
@@ -1136,6 +1146,14 @@
     },
     {
       "method": "POST",
+      "path": "/api/managed-documents/revisions/{revisionId:guid}/review-comments",
+      "file": "ManagedDocumentEndpoints.cs",
+      "coveredBy": [
+        "DocumentReviewCommentApiTests"
+      ]
+    },
+    {
+      "method": "POST",
       "path": "/api/managed-documents/revisions/{revisionId:guid}/review/approve",
       "file": "ManagedDocumentEndpoints.cs",
       "coveredBy": [
@@ -2015,6 +2033,14 @@
       "path": "/api/jira/connection",
       "file": "JiraEndpoints.cs",
       "coveredBy": []
+    },
+    {
+      "method": "PUT",
+      "path": "/api/managed-documents/revisions/{revisionId:guid}/review-comments/{commentId:guid}",
+      "file": "ManagedDocumentEndpoints.cs",
+      "coveredBy": [
+        "DocumentReviewCommentApiTests"
+      ]
     },
     {
       "method": "PUT",
