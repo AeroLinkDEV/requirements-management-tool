@@ -1,16 +1,16 @@
 {
   "schemaVersion": "aerolink-api-host-classification/v3",
   "totals": {
-    "classes": 81,
-    "tests": 442,
-    "knownCases": 492,
+    "classes": 83,
+    "tests": 451,
+    "knownCases": 501,
     "unknownCaseTests": 0
   },
   "summary": {
     "converted": {
-      "classes": 10,
-      "tests": 52,
-      "knownCases": 52,
+      "classes": 12,
+      "tests": 61,
+      "knownCases": 61,
       "unknownCaseTests": 0
     },
     "fresh-host": {
@@ -84,6 +84,18 @@
       ]
     },
     {
+      "cls": "ReviewCommentApiTests",
+      "tests": 6,
+      "knownCases": 6,
+      "unknownCaseTests": 0,
+      "classification": "converted",
+      "reason": "Already sharing a host through the #563 pilot.",
+      "intents": [
+        "ef-translation",
+        "http-boundary"
+      ]
+    },
+    {
       "cls": "DownstreamAssessmentReopenApiTests",
       "tests": 5,
       "knownCases": 5,
@@ -128,6 +140,17 @@
       "reason": "Already sharing a host through the #563 pilot.",
       "intents": [
         "ef-translation",
+        "http-boundary"
+      ]
+    },
+    {
+      "cls": "ReviewLinkOutlivedCycleTests",
+      "tests": 3,
+      "knownCases": 3,
+      "unknownCaseTests": 0,
+      "classification": "converted",
+      "reason": "Already sharing a host through the #563 pilot.",
+      "intents": [
         "http-boundary"
       ]
     },
