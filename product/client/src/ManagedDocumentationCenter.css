@@ -876,3 +876,6 @@
     justify-self: start;
   }
 }
+
+/* Says what the comments beside the review route are, before anyone writes one. */
+.mdCommentsNote { margin: 0 0 10px; color: #6b7a8c; font-size: 12.5px; }
