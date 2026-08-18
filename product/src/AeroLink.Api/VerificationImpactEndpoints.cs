@@ -1594,7 +1594,7 @@ public static class VerificationImpactEndpoints
                 foreach (var step in cycle.Steps.Where(x => x.State == ApprovalStepState.Active))
                     db.UserNotifications.Add(new(review.ProjectId, step.ApproverId, "TestChangeRequestApprovalRequested",
                         $"Review {review.DisplayNumber}", $"{http.UserAccount().DisplayName} selected you to approve this test change request.",
-                        "verification", review.Id, now));
+                        $"test-change-request:{review.Id}", review.Id, now));
                 await db.SaveChangesAsync(ct);
                 return Results.Ok(new
                 {
@@ -1674,7 +1674,7 @@ public static class VerificationImpactEndpoints
                     db.UserNotifications.Add(new(review.ProjectId, step.ApproverId, "ReviewActivated",
                         $"Review {review.DisplayNumber}",
                         $"The prior stage is complete. You are now authorized to review {review.DisplayNumber}.",
-                        "verification", review.Id, now));
+                        $"test-change-request:{review.Id}", review.Id, now));
                 db.ElectronicSignatures.Add(new(actor.Id, actor.UserName, actor.DisplayName, programId,
                     "TestChangeRequest", review.Id, review.DisplayNumber, "Approve", request.Meaning.Trim(),
                     snapshotHash, http.Connection.RemoteIpAddress?.ToString() ?? "local", now,

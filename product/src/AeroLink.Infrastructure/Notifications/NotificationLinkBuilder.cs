@@ -46,6 +46,7 @@ public sealed class NotificationLinkBuilder(IConfiguration configuration)
             "document" => $"/open/document/{id}",
             "problem-report" => $"/open/problem-report/{id}",
             "managed-document" => $"/open/managed-document/{id}",
+            "test-change-request" => $"/open/test-change-request/{id}",
             _ => "/",
         };
     }

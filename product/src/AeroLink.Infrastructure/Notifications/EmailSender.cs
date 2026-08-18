@@ -6,7 +6,15 @@ using Microsoft.Extensions.Logging;
 
 namespace AeroLink.Infrastructure.Notifications;
 
-public sealed record EmailMessage(string To, string Subject, string PlainTextBody);
+/// <summary>
+/// One notification, in the forms a mail client might read it.
+///
+/// The plain text is not a courtesy copy: an approval notice has to survive a text-only client, a mail
+/// archive, and a relay that strips HTML, so it is always present and always says everything the reader
+/// needs. <paramref name="HtmlBody"/> is the presented form when the deployment has one, and its absence is
+/// a message that sends exactly as it always did rather than an error.
+/// </summary>
+public sealed record EmailMessage(string To, string Subject, string PlainTextBody, string? HtmlBody = null);
 
 /// <summary>
 /// Sending is behind an interface so the dispatcher can be tested without a mail server, and so a
@@ -42,11 +50,37 @@ public sealed class SmtpEmailSender(IConfiguration configuration, ILogger<SmtpEm
             client.UseDefaultCredentials = false;
             client.Credentials = new System.Net.NetworkCredential(user, password);
         }
-        using var mail = new MailMessage(From, message.To, message.Subject, message.PlainTextBody) { IsBodyHtml = false };
+        using var mail = BuildMail(From, message);
         // The address is logged; the body is not. A notification body names controlled artifacts, and the
         // mail log is not an access-controlled surface.
         logger.LogInformation("Sending AeroLink notification to {Address}", message.To);
         await client.SendMailAsync(mail, ct);
+    }
+
+    /// <summary>
+    /// Assembles the outgoing mail. Separated from sending so the shape of what leaves can be asserted
+    /// without a relay to send it through — the alternate-view ordering below is easy to get backwards and
+    /// impossible to notice once it is in a mailbox.
+    /// </summary>
+    internal static MailMessage BuildMail(string from, EmailMessage message)
+    {
+        var mail = new MailMessage { From = new MailAddress(from), Subject = message.Subject };
+        mail.To.Add(message.To);
+        if (message.HtmlBody is null)
+        {
+            mail.Body = message.PlainTextBody;
+            mail.IsBodyHtml = false;
+            return mail;
+        }
+
+        // Least capable form first. A client picks the last view it can render, so plain text ahead of HTML
+        // gives a text-only reader the fallback and everyone else the presented message. Reversing these two
+        // lines silently downgrades every recipient to plain text.
+        mail.AlternateViews.Add(AlternateView.CreateAlternateViewFromString(
+            message.PlainTextBody, Encoding.UTF8, "text/plain"));
+        mail.AlternateViews.Add(AlternateView.CreateAlternateViewFromString(
+            message.HtmlBody, Encoding.UTF8, "text/html"));
+        return mail;
     }
 
     private static string? Blank(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
