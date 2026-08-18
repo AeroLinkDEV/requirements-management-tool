@@ -562,6 +562,14 @@ internal sealed class AeroLinkApiFactory(bool seedDemoAccounts = false, bool all
                     new TimingConnectionInterceptor(_factoryId, _callerFile, _callerMember, _telemetryObserver));
                 if (commandInterceptor is not null) options.AddInterceptors(commandInterceptor);
             });
+            // Counting the queries one request makes is only meaningful when nothing else in the host is
+            // querying at the same time. Six background workers poll this database on their own timers -- the
+            // job worker, the webhook dispatcher, the document integrity sweep -- and every command they issue
+            // lands in the same interceptor as the request under measurement. An idle host was observed
+            // issuing fourteen commands in eight seconds with nothing in flight, so a poll falling inside a
+            // measured window raised the count above its bound and failed a test that had done nothing wrong.
+            // Measuring and background work cannot both be on: asking for an interceptor turns the workers off.
+            if (commandInterceptor is not null) services.RemoveAll<IHostedService>();
             if (storageFaultInjector is not null)
             {
                 services.RemoveAll<IManagedDocumentStorageFaultInjector>();
