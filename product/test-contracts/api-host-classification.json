@@ -1,9 +1,9 @@
 {
   "schemaVersion": "aerolink-api-host-classification/v3",
   "totals": {
-    "classes": 85,
-    "tests": 458,
-    "knownCases": 508,
+    "classes": 86,
+    "tests": 459,
+    "knownCases": 509,
     "unknownCaseTests": 0
   },
   "summary": {
@@ -14,9 +14,9 @@
       "unknownCaseTests": 0
     },
     "fresh-host": {
-      "classes": 40,
-      "tests": 203,
-      "knownCases": 228,
+      "classes": 41,
+      "tests": 204,
+      "knownCases": 229,
       "unknownCaseTests": 0
     },
     "migration-candidate": {
@@ -605,6 +605,17 @@
       "reason": "Reviewed #563 hold: this one-method class provides zero theoretical host-build savings under one host per class and exercises recovery/bootstrap state. Keep fresh-host until it is grouped or a separate measured benefit justifies changing the fixture.",
       "intents": [
         "auth-policy"
+      ]
+    },
+    {
+      "cls": "MeasuredHostIsQuietTests",
+      "tests": 1,
+      "knownCases": 1,
+      "unknownCaseTests": 0,
+      "classification": "fresh-host",
+      "reason": "Customizes host state (interceptor-or-fault-injection); sharing could change the subject or leak configuration.",
+      "intents": [
+        "http-boundary"
       ]
     },
     {
