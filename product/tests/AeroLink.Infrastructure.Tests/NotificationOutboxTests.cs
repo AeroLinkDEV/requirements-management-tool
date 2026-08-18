@@ -27,6 +27,130 @@ public sealed class NotificationOutboxTests
         Assert.Equal($"https://aerolink.example.test/open/managed-document/{id}", links.LinkFor($"managed-document:{id}"));
     }
 
+    private static ReviewEmailFacts Facts(string title = "Reduce flight-plan reload latency",
+        int introduced = 2, int modified = 5, int retired = 1) =>
+        new("SRCR-00039.00", title, "Independent assurance · stage 2 of 3", "Software Quality Analyst",
+            "Sequential · cycle 2", "Maya Patel", new DateTimeOffset(2026, 8, 12, 9, 0, 0, TimeSpan.Zero),
+            introduced, modified, retired, new DateTimeOffset(2026, 8, 19, 9, 0, 0, TimeSpan.Zero));
+
+    [Fact]
+    public void The_subject_leads_with_the_identifier_and_the_ask()
+    {
+        // "AeroLink: Review SRCR-00039.00" buried both in a list of subjects that all start the same way.
+        Assert.Equal("SRCR-00039.00 is ready for your review — AeroLink", ReviewEmailTemplate.Subject(Facts()));
+    }
+
+    [Fact]
+    public void A_requirement_title_cannot_break_out_of_the_html_it_is_rendered_into()
+    {
+        var html = ReviewEmailTemplate.Html(Facts(title: "Reload <script>alert(1)</script> & resync"), null, null);
+
+        Assert.DoesNotContain("<script>", html);
+        Assert.Contains("&lt;script&gt;", html);
+        Assert.Contains("&amp; resync", html);
+    }
+
+    [Fact]
+    public void A_package_with_no_requirement_changes_says_so_rather_than_reading_as_a_fault()
+    {
+        var empty = ReviewEmailTemplate.PlainText(Facts(introduced: 0, modified: 0, retired: 0), null, null);
+        var partial = ReviewEmailTemplate.PlainText(Facts(introduced: 0, modified: 3, retired: 0), null, null);
+
+        Assert.Contains("No requirement changes", empty);
+        Assert.DoesNotContain("0 introduced", empty);
+        Assert.Contains("3 modified", partial);
+        Assert.DoesNotContain("0 introduced", partial);
+    }
+
+    [Fact]
+    public void The_html_and_the_plain_text_carry_the_same_facts_and_the_same_link()
+    {
+        const string link = "https://aerolink.example.test/open/scr/9f31c2a4-77b0-4c1e-9a2e-3f61d0b8e512";
+        var facts = Facts();
+
+        var html = ReviewEmailTemplate.Html(facts, link, null);
+        var text = ReviewEmailTemplate.PlainText(facts, link, null);
+
+        foreach (var fact in new[] { "SRCR-00039.00", "Independent assurance", "Software Quality Analyst", "Maya Patel" })
+        {
+            Assert.Contains(fact, html);
+            Assert.Contains(fact, text);
+        }
+        // The text form is not a stub. A reader whose client strips HTML still gets the address.
+        Assert.Contains(link, html);
+        Assert.Contains(link, text);
+    }
+
+    [Fact]
+    public void With_no_public_address_neither_form_prints_a_broken_link()
+    {
+        var html = ReviewEmailTemplate.Html(Facts(), null, null);
+        var text = ReviewEmailTemplate.PlainText(Facts(), null, null);
+
+        Assert.DoesNotContain("<a href", html);
+        Assert.Contains("Sign in to AeroLink", html);
+        Assert.Contains("Sign in to AeroLink", text);
+    }
+
+    [Fact]
+    public void Test_change_request_notifications_resolve_to_the_package_rather_than_the_workspace_root()
+    {
+        var (links, _) = Support();
+        var id = "22222222-2222-2222-2222-222222222222";
+
+        Assert.Equal($"/open/test-change-request/{id}", NotificationLinkBuilder.PathFor($"test-change-request:{id}"));
+        Assert.Equal($"https://aerolink.example.test/open/test-change-request/{id}",
+            links.LinkFor($"test-change-request:{id}"));
+        // The route these notifications used to carry had no identifier at all, so it never reached the
+        // switch: PathFor found no colon and returned the root. That is the shape being guarded against.
+        Assert.Equal("/", NotificationLinkBuilder.PathFor("verification"));
+    }
+
+    [Fact]
+    public void A_message_with_no_html_sends_exactly_as_it_always_did()
+    {
+        using var mail = SmtpEmailSender.BuildMail("aerolink@fms.test",
+            new EmailMessage("approver@example.test", "AeroLink: Review SRCR-00031.00", "Open it here:\nhttps://x/y"));
+
+        Assert.False(mail.IsBodyHtml);
+        Assert.Equal("Open it here:\nhttps://x/y", mail.Body);
+        Assert.Empty(mail.AlternateViews);
+    }
+
+    [Fact]
+    public void An_html_message_carries_the_plain_text_first_so_a_text_only_client_is_not_left_empty()
+    {
+        using var mail = SmtpEmailSender.BuildMail("aerolink@fms.test",
+            new EmailMessage("approver@example.test", "SRCR-00039.00 is ready for your review — AeroLink",
+                "SRCR-00039.00 is ready for your review.", "<html><body><h1>SRCR-00039.00</h1></body></html>"));
+
+        // Order is the assertion. A client renders the last view it understands, so plain text must be
+        // offered before HTML or every recipient silently receives the fallback instead of the message.
+        Assert.Collection(mail.AlternateViews,
+            first => Assert.Equal("text/plain", first.ContentType.MediaType),
+            second => Assert.Equal("text/html", second.ContentType.MediaType));
+    }
+
+    [Fact]
+    public async Task Composing_a_notification_still_produces_a_text_body_that_says_everything()
+    {
+        var (links, tokens) = Support();
+        var seed = await SeedAsync();
+        try
+        {
+            await using var db = new AeroLinkDbContext(seed.Options);
+            var notification = Notification(seed.ProjectId);
+            var delivery = new NotificationDelivery(notification.Id, NotificationChannel.Email,
+                "approver.user", "approver@example.test", Now);
+
+            var message = NotificationOutbox.Compose(notification, delivery, links, tokens);
+
+            Assert.Contains("SRCR-00031.00", message.PlainTextBody);
+            Assert.Contains("https://aerolink.example.test/open/scr/", message.PlainTextBody);
+        }
+        finally { File.Delete(seed.Path); }
+    }
+
     private sealed class RecordingSender(bool configured = true) : IEmailSender
     {
         public List<EmailMessage> Sent { get; } = [];

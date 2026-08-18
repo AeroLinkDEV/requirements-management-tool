@@ -487,6 +487,26 @@ public static class WorkspaceEndpoints
                     if (record is not null) { projectId = record.ProjectId; tail = "/problem-reports"; }
                     break;
                 }
+                case "test-change-request":
+                {
+                    // Test change requests live under the verification branch that owns them, and the three
+                    // branches are separate pages rather than one page with a filter. Resolving to the wrong
+                    // branch would land the approver on a register that does not contain their package.
+                    var record = await db.TestChangeReviews.AsNoTracking().Where(x => x.Id == id)
+                        .Select(x => new { x.ProjectId, x.ReleaseId, x.Discipline }).SingleOrDefaultAsync(ct);
+                    if (record is not null)
+                    {
+                        projectId = record.ProjectId; releaseId = record.ReleaseId;
+                        var branch = record.Discipline switch
+                        {
+                            TestChangeReviewDiscipline.HighLevelSoftware => "software-verification/hlr",
+                            TestChangeReviewDiscipline.LowLevelSoftware => "software-verification/llr",
+                            _ => "system-verification",
+                        };
+                        tail = $"/{branch}/change-requests/{id}";
+                    }
+                    break;
+                }
                 case "managed-document":
                 {
                     // A managed document is Project-wide: the resolver must never fall back to guessing a
