@@ -56,6 +56,13 @@ function Get-AeroLinkRemoteDemoConfig {
     try {
         $values = Import-PowerShellDataFile -LiteralPath $ConfigPath
     }
+    catch [System.Management.Automation.CommandNotFoundException] {
+        # Not a configuration problem, and saying so would send the reader to a file that is fine.
+        # Windows PowerShell resolves its own cmdlets through PSModulePath, and a PowerShell 7 parent
+        # leaves the 7.x module directories in front, so 5.1 binds Microsoft.PowerShell.Utility out of
+        # the wrong tree and this cmdlet is simply absent. Name that, because the reader cannot guess it.
+        throw "Windows PowerShell could not find $($_.Exception.CommandName), so the remote-demo configuration at $ConfigPath was never read. The configuration is not implicated. This happens when PSModulePath puts the PowerShell 7 module directories ahead of Windows PowerShell's own: start this from Explorer or cmd, or use the repository .bat entry points, which clear PSModulePath first."
+    }
     catch {
         throw "Remote-demo configuration at $ConfigPath is malformed: $($_.Exception.Message)"
     }
