@@ -1589,6 +1589,16 @@ public static class VerificationImpactEndpoints
                     x.ProcedureId, x.SubjectDisplayNumber, x.Outcome, x.ProcedureChangeAction,
                     x.ResolutionRationale, x.ResolvedProcedureId, x.ResolvedProcedureRevisionId,
                     x.RetargetedRequirementRevisionId, x.PreReleaseEvidenceRequired)).ToList();
+                // Same rule as a change request: whoever submits first takes the procedure, and the second is
+                // told which test change request has it rather than discovering it at approval.
+                var contendedProcedures = review.ProcedureChanges
+                    .Where(x => x.Kind is TestProcedureChangeKind.Modify or TestProcedureChangeKind.Retire)
+                    .Select(x => x.BaseNumber).Distinct().ToList();
+                var blockingProcedures = (await ArtifactClaims.ProcedureContendersAsync(db, review.ProjectId,
+                    contendedProcedures, review.Id, ct)).Where(x => x.Holds).ToList();
+                if (blockingProcedures.Count > 0)
+                    return Results.BadRequest(new { error = ArtifactClaims.Refusal(blockingProcedures, "procedures"), code = "procedure_claimed" });
+
                 var cycle = review.SubmitForReview(http.UserAccount().UserName, selections, allResolved, now,
                     workflow?.Mode ?? ReviewMode.Sequential, workflow, problemReportIds, impactDecisions);
                 foreach (var step in cycle.Steps.Where(x => x.State == ApprovalStepState.Active))
