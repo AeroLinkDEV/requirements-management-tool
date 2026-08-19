@@ -573,6 +573,26 @@ public static class ChangeRequestEndpoints
             catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
         });
 
+        // The other half of adding one. Its absence is why a change request refused at submission for a
+        // contested requirement had no remedy but waiting.
+        app.MapDelete("/api/change-requests/{id:guid}/requirements/{requirementChangeId:guid}", async (Guid id,
+            Guid requirementChangeId, HttpContext http, IChangeRequestRepository repository, AeroLinkDbContext db,
+            CancellationToken ct) =>
+        {
+            var scr = await repository.GetAsync(id, ct); if (scr is null) return Results.NotFound();
+            if (!await http.HasProjectAccessAsync(db, scr.ProjectId, ct)) return Results.Forbid();
+            var actor = http.UserAccount();
+            if (!CanAdminister(scr, actor)) return Results.Forbid();
+            try
+            {
+                scr.RemoveRequirementChange(actor.UserName, requirementChangeId, DateTimeOffset.UtcNow,
+                    actor.IsAdministrator);
+                await repository.SaveAsync(ct);
+                return Results.Ok(ApiMap.ChangeRequestDetail(scr, await ArtifactClaims.NoticesAsync(db, scr, ct)));
+            }
+            catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
+        });
+
         app.MapPost("/api/change-requests/{id:guid}/submit", async (Guid id, SubmitReviewRequest request, HttpContext http, IChangeRequestRepository repository, AeroLinkDbContext db, IdentityService identity, CancellationToken ct) =>
         {
             var scr = await repository.GetAsync(id, ct); if (scr is null) return Results.NotFound();
