@@ -153,6 +153,35 @@ public sealed class SystemChangeRequest
         return change;
     }
 
+    /// <summary>
+    /// Takes a requirement change back off a draft.
+    ///
+    /// An author who added the wrong requirement, or whose analysis concluded a requirement should not change
+    /// after all, previously had to abandon the whole change request and start again — losing the problem
+    /// statement, the analysis, and any review comments already written against it. It is also the remedy for
+    /// a change request refused at submission because another one holds the requirement: drop the contested
+    /// one and send the rest.
+    ///
+    /// Draft only. A package in front of reviewers must not change under the people reading it, and a package
+    /// that has been approved says what was approved.
+    ///
+    /// Removing the last one is allowed. A change request with nothing in it is a legitimate intermediate
+    /// state while an author reconsiders; it is submission that requires at least one, and
+    /// <see cref="ValidateReadyForReview"/> already refuses that.
+    /// </summary>
+    public void RemoveRequirementChange(string actorId, Guid requirementChangeId, DateTimeOffset now,
+        bool administratorAuthority = false)
+    {
+        EnsureAuthor(actorId, administratorAuthority);
+        EnsureDraft();
+        var change = _requirementChanges.SingleOrDefault(x => x.Id == requirementChangeId)
+            ?? throw new DomainException("That requirement change is not part of this change request.");
+        _requirementChanges.Remove(change);
+        UpdatedAt = now;
+        Audit("RequirementChangeRemoved", actorId,
+            $"Removed {change.DisplayNumber} from {DisplayNumber}.", now);
+    }
+
     public void UpdateDraft(string actorId, string title, string problem, string analysis, string solution,
         IReadOnlyList<RequirementChangeDraft> changes, DateTimeOffset now,
         string? problemRich = null, string? analysisRich = null, string? solutionRich = null,

@@ -165,11 +165,11 @@ public static class ArtifactClaims
         var byRequest = blocking.GroupBy(x => (x.DisplayNumber, x.State))
             .Select(g => $"{g.Key.DisplayNumber} ({g.Key.State}) on {string.Join(", ", g.Select(x => x.BaseNumber).Order())}")
             .ToList();
-        // Deliberately does not offer to remove the contested requirement or to rebase onto the approved
-        // result. Neither exists yet -- there is no way to take a requirement change off a change request --
-        // and a refusal that names a remedy the reader cannot carry out is worse than one that does not.
+        // Offers removal because it exists. Rebasing onto the approved result is still not built, so it is
+        // still not named: a refusal that points somewhere the reader cannot go is worse than one that does
+        // not. See #686.
         return "This cannot go to review while another is being reviewed or approved for the same "
-            + $"{subject}: {string.Join("; ", byRequest)}. It can go to review once that one is returned to draft, "
-            + "deferred, or released with its build.";
+            + $"{subject}: {string.Join("; ", byRequest)}. Remove the contested {subject} and send the rest, or wait "
+            + "until that one is returned to draft, deferred, or released with its build.";
     }
 }

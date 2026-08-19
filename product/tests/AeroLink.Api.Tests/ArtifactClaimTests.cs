@@ -38,9 +38,9 @@ public sealed class ArtifactClaimTests(SharedApiHost host) : IClassFixture<Share
         var refusal = ArtifactClaims.Refusal(blocking);
         Assert.Contains(world.Requirement, refusal);
         Assert.Contains(only.DisplayNumber, refusal);
-        // The remedies this used to offer do not exist: a requirement change cannot be removed from a change
-        // request, and rebasing is not built. Naming a way out the reader cannot take is worse than none.
-        Assert.DoesNotContain("Remove the contested", refusal);
+        // Removal exists now (#685) so it is offered. Rebasing still does not, so it is still not named.
+        Assert.Contains("Remove the contested", refusal);
+        Assert.DoesNotContain("rebase", refusal, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]

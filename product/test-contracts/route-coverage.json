@@ -25,6 +25,14 @@
     },
     {
       "method": "DELETE",
+      "path": "/api/change-requests/{id:guid}/requirements/{requirementChangeId:guid}",
+      "file": "ChangeRequestEndpoints.cs",
+      "coveredBy": [
+        "RemoveRequirementChangeTests"
+      ]
+    },
+    {
+      "method": "DELETE",
       "path": "/api/change-requests/{id:guid}/review-comments/{commentId:guid}",
       "file": "ChangeRequestEndpoints.cs",
       "coveredBy": [
@@ -265,6 +273,7 @@
         "ProjectPersonnelApiTests",
         "ReleaseCampaignExactIntentApiTests",
         "ReleasedExecutionEvidenceApiTests",
+        "RemoveRequirementChangeTests",
         "RequirementFilterExactnessApiTests",
         "RestartReviewApiTests",
         "ReviewCommentApiTests",
