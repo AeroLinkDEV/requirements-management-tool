@@ -389,17 +389,29 @@ public sealed class SystemChangeRequestTests
         Assert.Equal(ChangeRequestState.Approved, approved.DeferredFromState);
     }
 
+    /// <summary>
+    /// It comes back as a Draft, whatever it was when it went away.
+    ///
+    /// This used to restore the prior state exactly, on the reasoning that a change request put away while
+    /// approved is still approved work. That is true of the work and false of the approval: reviewers approved
+    /// it into a particular build, against that build's baseline and the requirement revisions current then,
+    /// and a deferred change request is reinstated into whichever build is open now.
+    ///
+    /// DeferredFromState is still recorded and still shown — a reader planning a build wants to know a change
+    /// was written and reviewed, not only that it exists — but it informs rather than restores.
+    /// </summary>
     [Fact]
-    public void Reinstating_puts_a_change_request_back_where_it_was()
+    public void Reinstating_returns_a_draft_and_leaves_the_approvals_behind()
     {
         var approved = FullyApprove();
         approved.Defer("author", "Not shipping in 1.6.", Now);
 
         approved.Reinstate("author", Now.AddDays(30));
 
-        Assert.Equal(ChangeRequestState.Approved, approved.State);
+        Assert.Equal(ChangeRequestState.Draft, approved.State);
         Assert.Null(approved.DeferredFromState);
-        Assert.Contains(approved.AuditEvents, x => x.EventType == "ChangeRequestReinstated");
+        var entry = Assert.Single(approved.AuditEvents.Where(x => x.EventType == "ChangeRequestReinstated"));
+        Assert.Contains("do not carry into a new build", entry.Detail);
     }
 
     /// <summary>

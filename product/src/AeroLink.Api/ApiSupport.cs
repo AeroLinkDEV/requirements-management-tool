@@ -138,7 +138,7 @@ static class ApiMap
         // Null everywhere except the authoring responses that compute it: the reader of a record does not
         // need a contention query run for them, and the author adding a change does.
         contention,
-        x.Id, x.BaseNumber, x.Revision, x.DisplayNumber, x.ProjectId, x.TargetReleaseId, type = x.Type.ToString(), softwareLevel = x.SoftwareLevel?.ToString(), x.Title, x.Problem, x.Analysis, x.Solution, x.AuthorId, x.Version,
+        x.Id, x.BaseNumber, x.Revision, x.DisplayNumber, x.ProjectId, x.TargetReleaseId, x.OriginReleaseId, type = x.Type.ToString(), softwareLevel = x.SoftwareLevel?.ToString(), x.Title, x.Problem, x.Analysis, x.Solution, x.AuthorId, x.Version,
         x.ProblemRich, x.AnalysisRich, x.SolutionRich,
         state = x.State.ToString(), deferredFromState = x.DeferredFromState?.ToString(), x.CreatedAt, x.UpdatedAt,
         requirementChanges = x.RequirementChanges.Select(r => new { r.Id, r.BaseNumber, r.Revision, r.DisplayNumber, level = r.Level.ToString(), kind = r.Kind.ToString(), r.Statement, r.Rationale, r.VerificationMethod,r.RichText,r.AttributesJson,r.ImpactDispositionJson,r.TargetSectionId, upstreamRevisionIds = JsonSerializer.Deserialize<List<Guid>>(r.ProposedUpstreamRevisionIdsJson) ?? [] }),

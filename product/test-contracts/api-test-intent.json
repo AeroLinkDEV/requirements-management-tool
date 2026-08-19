@@ -1,11 +1,11 @@
 {
   "schemaVersion": "aerolink-api-test-intent/v2",
   "totals": {
-    "tests": 474,
-    "cases": 524,
-    "classes": 88,
-    "hostedTests": 462,
-    "hostedCases": 503,
+    "tests": 476,
+    "cases": 526,
+    "classes": 89,
+    "hostedTests": 464,
+    "hostedCases": 505,
     "nonHostedTests": 8,
     "nonHostedCases": 17,
     "unknownHostTests": 4,
@@ -21,18 +21,18 @@
     "http-boundary": {
       "label": "HTTP boundary: route, status, JSON shape",
       "level": "API (must stay hosted)",
-      "tests": 314,
-      "cases": 349,
+      "tests": 315,
+      "cases": 350,
       "unknownCases": 0,
-      "classes": 74
+      "classes": 75
     },
     "ef-translation": {
       "label": "EF translation / relational constraints",
       "level": "Infrastructure (needs a database, not a host)",
-      "tests": 75,
-      "cases": 78,
+      "tests": 76,
+      "cases": 79,
       "unknownCases": 0,
-      "classes": 34
+      "classes": 35
     },
     "auth-policy": {
       "label": "Authentication / authorization wiring",
@@ -827,6 +827,40 @@
       "sourceLines": {
         "start": 278,
         "end": 300
+      }
+    },
+    {
+      "cls": "BuildListingSpansOriginTests",
+      "test": "A_change_request_moved_to_a_later_build_stays_visible_in_the_one_that_raised_it",
+      "kind": "Fact",
+      "intent": "ef-translation",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 24,
+        "end": 59
+      }
+    },
+    {
+      "cls": "BuildListingSpansOriginTests",
+      "test": "A_change_request_that_never_moved_is_listed_once_by_its_own_build",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 61,
+        "end": 78
       }
     },
     {
