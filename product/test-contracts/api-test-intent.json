@@ -1,17 +1,17 @@
 {
   "schemaVersion": "aerolink-api-test-intent/v2",
   "totals": {
-    "tests": 459,
-    "cases": 509,
-    "classes": 86,
-    "hostedTests": 447,
-    "hostedCases": 488,
+    "tests": 465,
+    "cases": 515,
+    "classes": 87,
+    "hostedTests": 453,
+    "hostedCases": 494,
     "nonHostedTests": 8,
     "nonHostedCases": 17,
     "unknownHostTests": 4,
     "unknownHostCases": 4,
-    "hostedCandidateTests": 6,
-    "hostedCandidateCases": 6,
+    "hostedCandidateTests": 11,
+    "hostedCandidateCases": 11,
     "unknownCandidateTests": 2,
     "unknownCandidateCases": 2,
     "unknownCaseTests": 0,
@@ -29,10 +29,10 @@
     "ef-translation": {
       "label": "EF translation / relational constraints",
       "level": "Infrastructure (needs a database, not a host)",
-      "tests": 72,
-      "cases": 75,
+      "tests": 73,
+      "cases": 76,
       "unknownCases": 0,
-      "classes": 32
+      "classes": 33
     },
     "auth-policy": {
       "label": "Authentication / authorization wiring",
@@ -42,19 +42,19 @@
       "unknownCases": 0,
       "classes": 33
     },
+    "in-process-logic": {
+      "label": "In-process logic with no HTTP and no client",
+      "level": "Domain or Infrastructure (migration candidate)",
+      "tests": 13,
+      "cases": 13,
+      "unknownCases": 0,
+      "classes": 7
+    },
     "filesystem": {
       "label": "Filesystem / evidence-root behaviour",
       "level": "API or Infrastructure (must stay hosted)",
       "tests": 10,
       "cases": 10,
-      "unknownCases": 0,
-      "classes": 6
-    },
-    "in-process-logic": {
-      "label": "In-process logic with no HTTP and no client",
-      "level": "Domain or Infrastructure (migration candidate)",
-      "tests": 8,
-      "cases": 8,
       "unknownCases": 0,
       "classes": 6
     },
@@ -248,6 +248,102 @@
       "sourceLines": {
         "start": 192,
         "end": 203
+      }
+    },
+    {
+      "cls": "ArtifactClaimTests",
+      "test": "A_change_request_in_review_blocks_the_next_one_and_the_refusal_says_which",
+      "kind": "Fact",
+      "intent": "in-process-logic",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 25,
+        "end": 43
+      }
+    },
+    {
+      "cls": "ArtifactClaimTests",
+      "test": "A_holder_that_lets_go_stops_blocking",
+      "kind": "Fact",
+      "intent": "in-process-logic",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 71,
+        "end": 87
+      }
+    },
+    {
+      "cls": "ArtifactClaimTests",
+      "test": "An_approved_change_request_still_blocks_because_its_change_is_pending",
+      "kind": "Fact",
+      "intent": "in-process-logic",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 89,
+        "end": 100
+      }
+    },
+    {
+      "cls": "ArtifactClaimTests",
+      "test": "An_author_is_warned_differently_depending_on_what_the_other_change_request_is_doing",
+      "kind": "Fact",
+      "intent": "in-process-logic",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 45,
+        "end": 69
+      }
+    },
+    {
+      "cls": "ArtifactClaimTests",
+      "test": "Contention_is_over_a_requirement_not_over_a_change_request",
+      "kind": "Fact",
+      "intent": "in-process-logic",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 113,
+        "end": 125
+      }
+    },
+    {
+      "cls": "ArtifactClaimTests",
+      "test": "Introducing_a_requirement_contends_with_nobody",
+      "kind": "Fact",
+      "intent": "ef-translation",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 102,
+        "end": 111
       }
     },
     {
