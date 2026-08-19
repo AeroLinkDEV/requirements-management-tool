@@ -67,6 +67,6 @@ If the answer to #2 is no, or #3 is yes for the risk being asserted, the test st
 
 ## Evidence and measurement
 
-`product/test-contracts/api-test-intent.json` and `api-host-classification.json` are the source-derived placement inventories. `product/docs/API_TEST_INTENT_INVENTORY.md` explains how they are generated, and `product/docs/API_HOST_REUSE_MEASUREMENT.md` defines the authoritative Windows host-reuse measurement protocol.
+`product/test-contracts/api-test-intent.json` and `api-host-classification.json` are the source-derived placement inventories. `product/docs/API_TEST_INTENT_INVENTORY.md` explains how they are generated.
 
 Placement changes are not declared successful from counts alone. Closeout evidence must preserve route/security/persistence behavior and, where performance is claimed, measure Windows wall clock, CPU, and host-start behavior rather than extrapolating from theoretical factory counts.
