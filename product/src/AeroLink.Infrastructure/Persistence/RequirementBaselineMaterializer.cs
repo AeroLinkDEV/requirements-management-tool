@@ -106,12 +106,6 @@ public sealed class RequirementBaselineMaterializer(AeroLinkDbContext db, Verifi
         var manifest = string.Join(";", current.OrderBy(x => artifactById[x.Key].BaseNumber)
             .Select(x => $"{artifactById[x.Key].BaseNumber}.{x.Value.Revision:D2}:{x.Value.Id}"));
         var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(manifest))).ToLowerInvariant();
-        // Whatever these change requests were holding is settled: their changes are in the requirement now,
-        // so the next change request is entitled to it. Introduce, materialize, modify, materialize, retire is
-        // the ordinary life of a requirement, and a claim that outlived materialization would stop it after
-        // the first step.
-        var settled = await db.ArtifactClaims.Where(x => scrIds.Contains(x.ChangeRequestId)).ToListAsync(ct);
-        foreach (var claim in settled) db.ArtifactClaims.Remove(claim);
         baseline.MarkRequirementsMaterialized(actorId, hash, current.Count, now);
         await db.SaveChangesAsync(ct); await transaction.CommitAsync(ct);
         return new MaterializationResult(hash, current.Count, created);

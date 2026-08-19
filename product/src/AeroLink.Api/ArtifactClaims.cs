@@ -18,16 +18,17 @@ namespace AeroLink.Api;
 public static class ArtifactClaims
 {
     /// <summary>
-    /// What a change request contends on. Introduce is excluded: it creates a requirement that does not exist
-    /// yet, so there is nothing for a second change request to be holding.
+    /// The states in which a change request is holding a requirement.
+    ///
+    /// Draft holds nothing: an author may write against a requirement somebody else is having reviewed, and is
+    /// warned rather than stopped. Deferred holds nothing either -- shelved work must not block the build it
+    /// was shelved out of, and a reinstated change request comes back as a draft, behind whoever submitted
+    /// while it was away.
     /// </summary>
-    public static IReadOnlyList<string> KeysFor(SystemChangeRequest scr) => scr.RequirementChanges
-        .Where(x => x.Kind is RequirementChangeKind.Modify or RequirementChangeKind.Retire)
-        .Select(x => ArtifactClaimKey.ForRequirement(x.BaseNumber))
-        .Distinct(StringComparer.Ordinal)
-        .ToList();
+    public static bool Holds(ChangeRequestState state) => state
+        is ChangeRequestState.InReview or ChangeRequestState.Approved or ChangeRequestState.SelectedForBaseline;
 
-    public sealed record Contention(string ArtifactKey, string BaseNumber, Guid ChangeRequestId,
+    public sealed record Contention(string BaseNumber, Guid ChangeRequestId,
         string DisplayNumber, ChangeRequestState State, bool Holds);
 
     /// <summary>
@@ -55,10 +56,9 @@ public static class ArtifactClaims
 
         return rows
             .Where(x => upper.Contains(x.Requirement.Trim().ToUpperInvariant()))
-            .Select(x => new Contention(
-                ArtifactClaimKey.ForRequirement(x.Requirement), x.Requirement, x.Id,
-                $"{x.BaseNumber}.{x.Revision:D2}", x.State, ClaimHolding.Holds(x.State)))
-            .DistinctBy(x => (x.ChangeRequestId, x.ArtifactKey))
+            .Select(x => new Contention(x.Requirement, x.Id,
+                $"{x.BaseNumber}.{x.Revision:D2}", x.State, Holds(x.State)))
+            .DistinctBy(x => (x.ChangeRequestId, x.BaseNumber))
             .ToList();
     }
 

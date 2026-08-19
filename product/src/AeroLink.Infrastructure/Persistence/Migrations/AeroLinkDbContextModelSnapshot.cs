@@ -239,36 +239,6 @@ namespace AeroLink.Infrastructure.Persistence.Migrations
                     b.ToTable("approval_steps", (string)null);
                 });
 
-            modelBuilder.Entity("AeroLink.Domain.ChangeControl.ArtifactClaim", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid");
-
-                    b.Property<DateTimeOffset>("AcquiredAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<string>("ArtifactKey")
-                        .IsRequired()
-                        .HasMaxLength(200)
-                        .HasColumnType("character varying(200)");
-
-                    b.Property<Guid>("ChangeRequestId")
-                        .HasColumnType("uuid");
-
-                    b.Property<Guid>("ProjectId")
-                        .HasColumnType("uuid");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("ChangeRequestId");
-
-                    b.HasIndex("ProjectId", "ArtifactKey")
-                        .IsUnique();
-
-                    b.ToTable("artifact_claims", (string)null);
-                });
-
             modelBuilder.Entity("AeroLink.Domain.ChangeControl.DownstreamAssessmentChangeRequestLink", b =>
                 {
                     b.Property<Guid>("Id")
