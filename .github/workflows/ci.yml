@@ -712,6 +712,16 @@ jobs:
           $ErrorActionPreference = 'Stop'
           & ./product/scripts/AeroLinkRemoteDemoRecovery.Tests.ps1
           if ($LASTEXITCODE -ne 0) { throw 'Remote-demo recovery regression failed.' }
+      # The double-clickable launchers are the only part of AeroLink some people run directly, and the part
+      # with no compiler behind it. Both defects that shipped in them -- a launcher that could not find its
+      # own modules, and three that reported success after failing -- were invisible to every suite that
+      # compiles or executes product code.
+      - name: Validate the root launcher contract
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          & ./product/scripts/AeroLinkLauncherContract.Tests.ps1
+          if ($LASTEXITCODE -ne 0) { throw 'Root launcher contract failed.' }
       - name: Validate the changed-test planner Windows contract
         shell: powershell
         run: |
