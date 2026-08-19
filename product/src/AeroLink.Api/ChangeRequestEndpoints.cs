@@ -566,7 +566,9 @@ public static class ChangeRequestEndpoints
                     request.Statement, request.Rationale, request.VerificationMethod, DateTimeOffset.UtcNow,
                     impactDispositionJson: RequirementAuthoringJson.PendingImpactDispositions,
                     administratorAuthority: actor.IsAdministrator);
-                await repository.SaveAsync(ct); return Results.Ok(ApiMap.ChangeRequestDetail(scr));
+                await repository.SaveAsync(ct);
+                // The author is told who else is writing against this requirement, and never stopped by it.
+                return Results.Ok(ApiMap.ChangeRequestDetail(scr, await ArtifactClaims.NoticesAsync(db, scr, ct)));
             }
             catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
         });
@@ -633,6 +635,17 @@ public static class ChangeRequestEndpoints
                             workflow.Stages[index].RequiredRole, ct);
                     selections.Add(new ApproverSelection(account.UserName, account.DisplayName, role));
                 }
+                // Contention is settled here rather than while the author was writing, because until now
+                // nothing was in front of reviewers and there was nothing to be second to. Whoever submits
+                // first takes the requirement; the second is told which change request has it and on what.
+                var contendedNumbers = scr.RequirementChanges
+                    .Where(x => x.Kind is RequirementChangeKind.Modify or RequirementChangeKind.Retire)
+                    .Select(x => x.BaseNumber).Distinct().ToList();
+                var blocking = (await ArtifactClaims.ContendersAsync(db, scr.ProjectId, contendedNumbers, scr.Id, ct))
+                    .Where(x => x.Holds).ToList();
+                if (blocking.Count > 0)
+                    return Results.BadRequest(new { error = ArtifactClaims.Refusal(blocking), code = "requirement_claimed" });
+
                 var cycle = scr.SubmitForReview(actor.UserName, selections, now, request.Mode, workflow,
                     actor.IsAdministrator);
                 foreach (var step in cycle.Steps.Where(x => x.State == ApprovalStepState.Active))

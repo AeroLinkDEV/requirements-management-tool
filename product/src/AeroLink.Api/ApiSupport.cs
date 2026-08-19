@@ -133,8 +133,11 @@ static class ApiMap
     // baseNumber and revisionCount travel with each row so a collapsed listing can offer the history behind it,
     // and deferredFromState so a shelved change request can say how far it got rather than only that it is away.
     public static object ChangeRequestSummary(ScrListItem x) => new { x.Id, x.BaseNumber, x.Revision, displayNumber = $"{x.BaseNumber}.{x.Revision:D2}", x.Title, state = x.State.ToString(), type = x.Type.ToString(), x.AuthorId, x.TargetReleaseId, x.RequirementCount, x.UpdatedAt, deferredFromState = x.DeferredFromState?.ToString(), x.RevisionCount };
-    public static object ChangeRequestDetail(SystemChangeRequest x) => new
+    public static object ChangeRequestDetail(SystemChangeRequest x, IReadOnlyList<object>? contention = null) => new
     {
+        // Null everywhere except the authoring responses that compute it: the reader of a record does not
+        // need a contention query run for them, and the author adding a change does.
+        contention,
         x.Id, x.BaseNumber, x.Revision, x.DisplayNumber, x.ProjectId, x.TargetReleaseId, type = x.Type.ToString(), softwareLevel = x.SoftwareLevel?.ToString(), x.Title, x.Problem, x.Analysis, x.Solution, x.AuthorId, x.Version,
         x.ProblemRich, x.AnalysisRich, x.SolutionRich,
         state = x.State.ToString(), deferredFromState = x.DeferredFromState?.ToString(), x.CreatedAt, x.UpdatedAt,

@@ -36,6 +36,7 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
     public DbSet<ReviewCycle> ReviewCycles => Set<ReviewCycle>();
     public DbSet<ApprovalStep> ApprovalSteps => Set<ApprovalStep>();
     public DbSet<ReviewComment> ReviewComments => Set<ReviewComment>();
+    public DbSet<ArtifactClaim> ArtifactClaims => Set<ArtifactClaim>();
     public DbSet<AuditEvent> AuditEvents => Set<AuditEvent>();
     public DbSet<CandidateBaseline> CandidateBaselines => Set<CandidateBaseline>();
     public DbSet<BaselineChangeRequestSelection> BaselineSelections => Set<BaselineChangeRequestSelection>();
@@ -401,6 +402,17 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
                 "(\"ChangeRequestId\" IS NULL) <> (\"TestChangeReviewId\" IS NULL)"));
             b.HasMany(x => x.Steps).WithOne().HasForeignKey(x => x.ReviewCycleId).OnDelete(DeleteBehavior.Cascade);
             b.HasMany(x => x.Comments).WithOne().HasForeignKey(x => x.ReviewCycleId).OnDelete(DeleteBehavior.Cascade);
+        });
+        modelBuilder.Entity<ArtifactClaim>(b =>
+        {
+            b.ToTable("artifact_claims"); b.HasKey(x => x.Id);
+            b.Property(x => x.ArtifactKey).HasMaxLength(200).IsRequired();
+            // The reason this table exists. Two change requests submitted at the same instant both read no
+            // holder; only a constraint can decide which one actually took it, and it has to be decided in
+            // the transaction that moves the change request into review rather than after it.
+            b.HasIndex(x => new { x.ProjectId, x.ArtifactKey }).IsUnique();
+            // Releasing every claim a change request holds is one delete, on every path that lets go.
+            b.HasIndex(x => x.ChangeRequestId);
         });
         modelBuilder.Entity<ReviewComment>(b =>
         {
@@ -1356,10 +1368,74 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
                 && entry.Property(x => x.ManagedDocumentRevisionId).CurrentValue is null)
                 entry.State = EntityState.Deleted;
         }
+        await MaintainArtifactClaimsAsync(cancellationToken);
         await RefuseCrossLevelCoverageAsync(cancellationToken);
         await AddLifecycleEventsAsync(cancellationToken);
         await QueueNotificationDeliveriesAsync(cancellationToken);
         return await base.SaveChangesAsync(cancellationToken);
+    }
+
+    /// <summary>
+    /// Keeps the artifact claims in step with the change requests that hold them.
+    ///
+    /// This lives here rather than in the endpoint that submits, because a claim that only existed when one
+    /// particular route was taken would be a guard with a way around it. Every path that puts a change
+    /// request in front of reviewers goes through a save, so every path takes the claim.
+    ///
+    /// The endpoint still checks first, and it should: it can name the change request in the way and explain
+    /// the remedy, where a unique-constraint failure can only say that something collided. The check is for
+    /// the reader; this is for correctness.
+    /// </summary>
+    private async Task MaintainArtifactClaimsAsync(CancellationToken cancellationToken)
+    {
+        var changed = ChangeTracker.Entries<SystemChangeRequest>()
+            .Where(x => x.State is EntityState.Added or EntityState.Modified)
+            .Select(entry =>
+            {
+                var now = entry.Entity.State;
+                var before = entry.State == EntityState.Added
+                    ? (ChangeRequestState?)null
+                    : entry.Property(x => x.State).OriginalValue;
+                return (entry.Entity, Holds: ClaimHolding.Holds(now), Held: before is not null && ClaimHolding.Holds(before.Value));
+            })
+            .Where(x => x.Holds != x.Held)
+            .ToList();
+        if (changed.Count == 0) return;
+
+        foreach (var (scr, holds, _) in changed)
+        {
+            var held = await ArtifactClaims.Where(x => x.ChangeRequestId == scr.Id).ToListAsync(cancellationToken);
+            foreach (var claim in held) ArtifactClaims.Remove(claim);
+            if (!holds) continue;
+
+            var keys = scr.RequirementChanges
+                .Where(x => x.Kind is RequirementChangeKind.Modify or RequirementChangeKind.Retire)
+                .Select(x => ArtifactClaimKey.ForRequirement(x.BaseNumber))
+                .Distinct(StringComparer.Ordinal)
+                .ToList();
+            if (keys.Count == 0) continue;
+
+            // A claim outlives its change request whenever that record stopped holding one without passing
+            // through a release — most obviously when its build was released and it became history. Clearing
+            // those here, in the same transaction, means a stale row can never block live work and there is
+            // no sweep whose failure would be silent.
+            var occupying = await ArtifactClaims
+                .Where(x => x.ProjectId == scr.ProjectId && keys.Contains(x.ArtifactKey))
+                .ToListAsync(cancellationToken);
+            if (occupying.Count > 0)
+            {
+                var owners = occupying.Select(x => x.ChangeRequestId).Distinct().ToList();
+                var states = await SystemChangeRequests.AsNoTracking()
+                    .Where(x => owners.Contains(x.Id))
+                    .Select(x => new { x.Id, x.State })
+                    .ToListAsync(cancellationToken);
+                var living = states.Where(x => ClaimHolding.Holds(x.State)).Select(x => x.Id).ToHashSet();
+                foreach (var claim in occupying.Where(x => !living.Contains(x.ChangeRequestId)))
+                    ArtifactClaims.Remove(claim);
+            }
+
+            foreach (var key in keys) ArtifactClaims.Add(new ArtifactClaim(scr.ProjectId, key, scr.Id, DateTimeOffset.UtcNow));
+        }
     }
 
     /// <summary>

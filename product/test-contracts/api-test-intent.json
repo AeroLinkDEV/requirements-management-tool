@@ -1,17 +1,17 @@
 {
   "schemaVersion": "aerolink-api-test-intent/v2",
   "totals": {
-    "tests": 459,
-    "cases": 509,
-    "classes": 86,
-    "hostedTests": 447,
-    "hostedCases": 488,
+    "tests": 468,
+    "cases": 518,
+    "classes": 87,
+    "hostedTests": 456,
+    "hostedCases": 497,
     "nonHostedTests": 8,
     "nonHostedCases": 17,
     "unknownHostTests": 4,
     "unknownHostCases": 4,
-    "hostedCandidateTests": 6,
-    "hostedCandidateCases": 6,
+    "hostedCandidateTests": 9,
+    "hostedCandidateCases": 9,
     "unknownCandidateTests": 2,
     "unknownCandidateCases": 2,
     "unknownCaseTests": 0,
@@ -29,10 +29,10 @@
     "ef-translation": {
       "label": "EF translation / relational constraints",
       "level": "Infrastructure (needs a database, not a host)",
-      "tests": 72,
-      "cases": 75,
+      "tests": 78,
+      "cases": 81,
       "unknownCases": 0,
-      "classes": 32
+      "classes": 33
     },
     "auth-policy": {
       "label": "Authentication / authorization wiring",
@@ -42,19 +42,19 @@
       "unknownCases": 0,
       "classes": 33
     },
+    "in-process-logic": {
+      "label": "In-process logic with no HTTP and no client",
+      "level": "Domain or Infrastructure (migration candidate)",
+      "tests": 11,
+      "cases": 11,
+      "unknownCases": 0,
+      "classes": 7
+    },
     "filesystem": {
       "label": "Filesystem / evidence-root behaviour",
       "level": "API or Infrastructure (must stay hosted)",
       "tests": 10,
       "cases": 10,
-      "unknownCases": 0,
-      "classes": 6
-    },
-    "in-process-logic": {
-      "label": "In-process logic with no HTTP and no client",
-      "level": "Domain or Infrastructure (migration candidate)",
-      "tests": 8,
-      "cases": 8,
       "unknownCases": 0,
       "classes": 6
     },
@@ -248,6 +248,150 @@
       "sourceLines": {
         "start": 192,
         "end": 203
+      }
+    },
+    {
+      "cls": "ArtifactClaimTests",
+      "test": "A_claim_covers_only_the_requirement_it_is_over",
+      "kind": "Fact",
+      "intent": "in-process-logic",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 181,
+        "end": 206
+      }
+    },
+    {
+      "cls": "ArtifactClaimTests",
+      "test": "A_returned_review_releases_the_claim_so_the_other_change_request_can_go",
+      "kind": "Fact",
+      "intent": "ef-translation",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 47,
+        "end": 63
+      }
+    },
+    {
+      "cls": "ArtifactClaimTests",
+      "test": "An_approved_change_request_keeps_its_claim",
+      "kind": "Fact",
+      "intent": "ef-translation",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 84,
+        "end": 101
+      }
+    },
+    {
+      "cls": "ArtifactClaimTests",
+      "test": "An_author_writing_against_a_contended_requirement_is_warned_in_every_state",
+      "kind": "Fact",
+      "intent": "in-process-logic",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 156,
+        "end": 179
+      }
+    },
+    {
+      "cls": "ArtifactClaimTests",
+      "test": "Deferring_releases_the_claim_because_shelved_work_blocks_nobody",
+      "kind": "Fact",
+      "intent": "ef-translation",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 65,
+        "end": 82
+      }
+    },
+    {
+      "cls": "ArtifactClaimTests",
+      "test": "Introducing_a_requirement_claims_nothing_because_nobody_else_can_hold_it",
+      "kind": "Fact",
+      "intent": "ef-translation",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 139,
+        "end": 154
+      }
+    },
+    {
+      "cls": "ArtifactClaimTests",
+      "test": "Submitting_takes_the_claim_and_a_second_change_request_is_refused",
+      "kind": "Fact",
+      "intent": "in-process-logic",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 20,
+        "end": 45
+      }
+    },
+    {
+      "cls": "ArtifactClaimTests",
+      "test": "The_holder_letting_go_lets_the_waiting_change_request_take_the_requirement",
+      "kind": "Fact",
+      "intent": "ef-translation",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 208,
+        "end": 236
+      }
+    },
+    {
+      "cls": "ArtifactClaimTests",
+      "test": "Two_simultaneous_submissions_for_one_requirement_produce_exactly_one_winner",
+      "kind": "Fact",
+      "intent": "ef-translation",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 109,
+        "end": 137
       }
     },
     {
