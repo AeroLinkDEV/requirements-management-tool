@@ -1,4 +1,5 @@
 using AeroLink.Domain.ChangeControl;
+using AeroLink.Domain.Verification;
 using AeroLink.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 
@@ -99,10 +100,67 @@ public static class ArtifactClaims
     }
 
     /// <summary>
+    /// The same rule over procedures. A test change request contends for the procedures it modifies or
+    /// retires, and only one may be in front of reviewers at a time.
+    ///
+    /// Superseded holds nothing: a superseded review has been replaced by a later one, and the later one is
+    /// what holds. Deferred holds nothing for the same reason it does not for a change request.
+    /// </summary>
+    public static bool HoldsProcedure(TestChangeReviewState state) => state
+        is TestChangeReviewState.InReview or TestChangeReviewState.Approved;
+
+    public static async Task<IReadOnlyList<Contention>> ProcedureContendersAsync(AeroLinkDbContext db, Guid projectId,
+        IReadOnlyCollection<string> baseNumbers, Guid excluding, CancellationToken ct)
+    {
+        if (baseNumbers.Count == 0) return [];
+        var upper = baseNumbers.Select(x => x.Trim().ToUpperInvariant()).ToList();
+        // Joined rather than navigated, for the same reason as the requirement query: walking the collection
+        // translates to APPLY, which SQLite does not support.
+        var rows = await (from change in db.Set<TestProcedureChange>().AsNoTracking()
+                          join review in db.TestChangeReviews.AsNoTracking()
+                              on change.TestChangeReviewId equals review.Id
+                          where review.ProjectId == projectId && review.Id != excluding
+                                && (change.Kind == TestProcedureChangeKind.Modify || change.Kind == TestProcedureChangeKind.Retire)
+                          select new { review.Id, review.BaseNumber, review.Revision, review.State, Procedure = change.BaseNumber })
+            .ToListAsync(ct);
+
+        return rows
+            .Where(x => upper.Contains(x.Procedure.Trim().ToUpperInvariant()))
+            .Select(x => new Contention(x.Procedure, x.Id,
+                $"{x.BaseNumber}.{x.Revision:D2}", ToChangeRequestState(x.State), HoldsProcedure(x.State)))
+            .DistinctBy(x => (x.ChangeRequestId, x.BaseNumber))
+            .ToList();
+    }
+
+    /// <summary>
+    /// Test change reviews carry their own state enum with the same meanings. Mapped rather than duplicated so
+    /// the notices and the refusal read identically for a procedure and for a requirement.
+    /// </summary>
+    private static ChangeRequestState ToChangeRequestState(TestChangeReviewState state) => state switch
+    {
+        TestChangeReviewState.InReview => ChangeRequestState.InReview,
+        TestChangeReviewState.Approved => ChangeRequestState.Approved,
+        TestChangeReviewState.Deferred => ChangeRequestState.Deferred,
+        _ => ChangeRequestState.Draft,
+    };
+
+    /// <summary>Every notice for the procedures a test change request currently touches.</summary>
+    public static async Task<IReadOnlyList<object>> ProcedureNoticesAsync(AeroLinkDbContext db, TestChangeReview review,
+        CancellationToken ct)
+    {
+        var numbers = review.ProcedureChanges
+            .Where(x => x.Kind is TestProcedureChangeKind.Modify or TestProcedureChangeKind.Retire)
+            .Select(x => x.BaseNumber).Distinct().ToList();
+        if (numbers.Count == 0) return [];
+        var contenders = await ProcedureContendersAsync(db, review.ProjectId, numbers, review.Id, ct);
+        return contenders.Select(Notice).ToList();
+    }
+
+    /// <summary>
     /// The refusal a losing submission gets. Names the change request in the way and every requirement it is
     /// in the way of, because "somebody else has this" with no way to find out who is a dead end.
     /// </summary>
-    public static string Refusal(IReadOnlyList<Contention> blocking)
+    public static string Refusal(IReadOnlyList<Contention> blocking, string subject = "requirements")
     {
         var byRequest = blocking.GroupBy(x => (x.DisplayNumber, x.State))
             .Select(g => $"{g.Key.DisplayNumber} ({g.Key.State}) on {string.Join(", ", g.Select(x => x.BaseNumber).Order())}")
@@ -110,8 +168,8 @@ public static class ArtifactClaims
         // Deliberately does not offer to remove the contested requirement or to rebase onto the approved
         // result. Neither exists yet -- there is no way to take a requirement change off a change request --
         // and a refusal that names a remedy the reader cannot carry out is worse than one that does not.
-        return "This change request cannot go to review while another is being reviewed or approved for the same "
-            + $"requirements: {string.Join("; ", byRequest)}. It can go to review once that change request is "
-            + "returned to draft, deferred, or released with its build.";
+        return "This cannot go to review while another is being reviewed or approved for the same "
+            + $"{subject}: {string.Join("; ", byRequest)}. It can go to review once that one is returned to draft, "
+            + "deferred, or released with its build.";
     }
 }

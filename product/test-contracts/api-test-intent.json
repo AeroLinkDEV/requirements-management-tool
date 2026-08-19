@@ -1,17 +1,17 @@
 {
   "schemaVersion": "aerolink-api-test-intent/v2",
   "totals": {
-    "tests": 465,
-    "cases": 515,
+    "tests": 468,
+    "cases": 518,
     "classes": 87,
-    "hostedTests": 453,
-    "hostedCases": 494,
+    "hostedTests": 456,
+    "hostedCases": 497,
     "nonHostedTests": 8,
     "nonHostedCases": 17,
     "unknownHostTests": 4,
     "unknownHostCases": 4,
-    "hostedCandidateTests": 11,
-    "hostedCandidateCases": 11,
+    "hostedCandidateTests": 14,
+    "hostedCandidateCases": 14,
     "unknownCandidateTests": 2,
     "unknownCandidateCases": 2,
     "unknownCaseTests": 0,
@@ -45,8 +45,8 @@
     "in-process-logic": {
       "label": "In-process logic with no HTTP and no client",
       "level": "Domain or Infrastructure (migration candidate)",
-      "tests": 13,
-      "cases": 13,
+      "tests": 16,
+      "cases": 16,
       "unknownCases": 0,
       "classes": 7
     },
@@ -262,8 +262,24 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 25,
-        "end": 43
+        "start": 26,
+        "end": 44
+      }
+    },
+    {
+      "cls": "ArtifactClaimTests",
+      "test": "A_drafting_test_change_request_warns_without_blocking",
+      "kind": "Fact",
+      "intent": "in-process-logic",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 148,
+        "end": 161
       }
     },
     {
@@ -278,8 +294,24 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 71,
-        "end": 87
+        "start": 72,
+        "end": 88
+      }
+    },
+    {
+      "cls": "ArtifactClaimTests",
+      "test": "A_test_change_request_contends_for_the_procedures_it_changes",
+      "kind": "Fact",
+      "intent": "in-process-logic",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 128,
+        "end": 146
       }
     },
     {
@@ -294,8 +326,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 89,
-        "end": 100
+        "start": 90,
+        "end": 101
       }
     },
     {
@@ -310,8 +342,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 45,
-        "end": 69
+        "start": 46,
+        "end": 70
       }
     },
     {
@@ -326,8 +358,24 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 113,
-        "end": 125
+        "start": 114,
+        "end": 126
+      }
+    },
+    {
+      "cls": "ArtifactClaimTests",
+      "test": "Introducing_a_procedure_contends_with_nobody",
+      "kind": "Fact",
+      "intent": "in-process-logic",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 163,
+        "end": 177
       }
     },
     {
@@ -342,8 +390,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 102,
-        "end": 111
+        "start": 103,
+        "end": 112
       }
     },
     {

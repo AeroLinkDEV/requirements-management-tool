@@ -2,6 +2,7 @@ using AeroLink.Domain.ChangeControl;
 using AeroLink.Domain.Identity;
 using AeroLink.Domain.Programs;
 using AeroLink.Domain.Requirements;
+using AeroLink.Domain.Verification;
 using AeroLink.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
@@ -122,6 +123,82 @@ public sealed class ArtifactClaimTests(SharedApiHost host) : IClassFixture<Share
             RequirementChangeKind.Modify, "The system shall log the reload.", "Traceability", "Test", DateTimeOffset.UtcNow);
 
         Assert.Empty(await ArtifactClaims.NoticesAsync(db, unrelated, default));
+    }
+
+    [Fact]
+    public async Task A_test_change_request_contends_for_the_procedures_it_changes()
+    {
+        var world = await SeedAsync(host.Factory);
+        var holder = await AddTestChangeReviewAsync(host.Factory, world, "TCR-00001", submit: true);
+        var otherScr = await AddChangeRequestAsync(host.Factory, world, "SRCR-00910");
+        var second = await AddTestChangeReviewAsync(host.Factory, world, "TCR-00002", submit: false, sourceChangeRequestId: otherScr);
+
+        await using var scope = Scope(host.Factory, out var db);
+        var blocking = (await ArtifactClaims.ProcedureContendersAsync(db, world.ProjectId, [Procedure], second, default))
+            .Where(x => x.Holds).ToList();
+
+        var only = Assert.Single(blocking);
+        Assert.Equal(holder, only.ChangeRequestId);
+        Assert.Equal(ChangeRequestState.InReview, only.State);
+        var refusal = ArtifactClaims.Refusal(blocking, "procedures");
+        Assert.Contains(Procedure, refusal);
+        Assert.Contains("procedures", refusal);
+    }
+
+    [Fact]
+    public async Task A_drafting_test_change_request_warns_without_blocking()
+    {
+        var world = await SeedAsync(host.Factory);
+        await AddTestChangeReviewAsync(host.Factory, world, "TCR-00003", submit: false);
+        var otherScr = await AddChangeRequestAsync(host.Factory, world, "SRCR-00911");
+        var second = await AddTestChangeReviewAsync(host.Factory, world, "TCR-00004", submit: false, sourceChangeRequestId: otherScr);
+
+        await using var scope = Scope(host.Factory, out var db);
+        var contenders = await ArtifactClaims.ProcedureContendersAsync(db, world.ProjectId, [Procedure], second, default);
+        var only = Assert.Single(contenders);
+        Assert.False(only.Holds);
+        Assert.Contains("also drafting", System.Text.Json.JsonSerializer.Serialize(ArtifactClaims.Notice(only)));
+    }
+
+    [Fact]
+    public async Task Introducing_a_procedure_contends_with_nobody()
+    {
+        var world = await SeedAsync(host.Factory);
+        // Not submitted: an introduce must name the requirement revisions it verifies before review, and
+        // this is about what contends, not about what may be submitted.
+        await AddTestChangeReviewAsync(host.Factory, world, "TCR-00005", submit: false,
+            kind: TestProcedureChangeKind.Introduce);
+        var otherScr = await AddChangeRequestAsync(host.Factory, world, "SRCR-00912");
+        var second = await AddTestChangeReviewAsync(host.Factory, world, "TCR-00006", submit: false,
+            kind: TestProcedureChangeKind.Introduce, sourceChangeRequestId: otherScr);
+
+        await using var scope = Scope(host.Factory, out var db);
+        Assert.Empty(await ArtifactClaims.ProcedureContendersAsync(db, world.ProjectId, [Procedure], second, default));
+    }
+
+    private const string Procedure = "TP-00042";
+
+    private static async Task<Guid> AddTestChangeReviewAsync(AeroLinkApiFactory factory, World world, string number,
+        bool submit, TestProcedureChangeKind kind = TestProcedureChangeKind.Modify, Guid? sourceChangeRequestId = null)
+    {
+        await using var scope = factory.Services.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+        var now = DateTimeOffset.UtcNow;
+        var review = new TestChangeReview(world.ProjectId, world.ReleaseId, sourceChangeRequestId ?? world.FirstId,
+            TestChangeReviewDiscipline.HighLevelSoftware, "SRCR-00901.00", now, number, 0, authorId: world.Author);
+        // A procedure change is only proposable once the review has concluded test work is needed.
+        review.RecordTestChangeRequired(world.Author, now);
+        review.AddProcedureChange(world.Author, new TestProcedureChangeDraft(Procedure, 1,
+            TestProcedureLevel.HighLevel, kind, "Reload timing", "Verify the reload budget",
+            "FMS powered", "Trigger a reload", "Under 1.5 seconds", "Latency"), now);
+        if (submit)
+        {
+            review.WriteCase(world.Author, "Reload timing", "P", "A", "S", now);
+            review.SubmitForReview(world.Author, [new(world.Reviewer, "Reviewer")], true, now);
+        }
+        db.TestChangeReviews.Add(review);
+        await db.SaveChangesAsync();
+        return review.Id;
     }
 
     private sealed record World(Guid ProjectId, Guid ReleaseId, Guid FirstId, string Requirement, string Author, string Reviewer);
