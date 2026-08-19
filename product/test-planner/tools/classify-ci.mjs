@@ -100,6 +100,7 @@ appendFileSync(outputPath, [
   outputLine('client', result.client),
   outputLine('browser', result.browser),
   outputLine('postgresql', result.postgresql),
+  outputLine('launchers_only', result.launchersOnly === true),
   outputLine('planner_version', PLANNER_VERSION),
   outputLine('planner_hash', plannerHashValue),
   outputLine('planner_unknown_paths', unknownPaths.join(', ')),

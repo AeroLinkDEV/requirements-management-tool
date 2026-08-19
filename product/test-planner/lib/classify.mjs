@@ -57,6 +57,26 @@ export function isBroadPath(path) {
   return BROAD_PATHS.some((pattern) => pattern.test(normalizePath(path)))
 }
 
+/**
+ * The double-clickable launchers in the repository root, and the shared body the three START_* files
+ * delegate to. These are cmd shims: they clear PSModulePath, name a PowerShell script, and carry its exit
+ * code back out. They cannot change compiled product code, a browser journey, or a database migration.
+ *
+ * They were unclassified until now, which meant a change to one ran the full backend, client, browser and
+ * PostgreSQL validation -- about ninety minutes of compute for a file none of it can observe. The fallback
+ * was right to refuse a skipped pass while nothing vouched for these files. Something does now:
+ * AeroLinkLauncherContract.Tests.ps1 reads every launcher in the script-contracts job and asserts the
+ * properties that actually broke, so a launcher-only change has evidence without a product sweep.
+ *
+ * Only these exact shapes are recognised. A new top-level directory, a root configuration file, or tooling
+ * under product/ still falls through to the unclassified fallback, which is where it belongs.
+ */
+const LAUNCHER_PATHS = [/^[^/]+\.bat$/i, /^product\/scripts\/launch\.cmd$/i]
+
+export function isLauncherPath(path) {
+  return LAUNCHER_PATHS.some((pattern) => pattern.test(normalizePath(path)))
+}
+
 // The normal Fast lane defers six synthetic showcase seed/upgrade maintenance cases to authoritative
 // Full/CI. Direct edits to those tests, their shared fixture, or the seeder they prove must restore the
 // complete Infrastructure suite locally rather than filtering the most relevant coverage.
@@ -109,6 +129,7 @@ export function classify(changedPaths, { event = 'pull_request' } = {}) {
       reason: `The ${event} event classifies every area, because it has no single base to diff against and is the last gate before main.`,
       unclassified: false,
       broad: true,
+      launchersOnly: false,
       fastFullInfrastructure: true,
     }
   }
@@ -129,7 +150,26 @@ export function classify(changedPaths, { event = 'pull_request' } = {}) {
       reason: `Broad validation forced by ${broadPath}; this path can change the planner, workflow, or shared product contract.`,
       unclassified: false,
       broad: true,
+      launchersOnly: false,
       fastFullInfrastructure: true,
+    }
+  }
+
+  // A change confined to the launchers is validated by the launcher contract rather than by the product
+  // suites, which cannot observe these files at all. This is deliberately narrow: every path must be a
+  // launcher, so one launcher touched alongside product code still classifies on the product code.
+  if (!docsOnly && productFiles.every((path) => isLauncherPath(path))) {
+    return {
+      docsOnly: false,
+      backend: false,
+      client: false,
+      browser: false,
+      postgresql: false,
+      reason: 'Launcher-only change; the root launcher contract validates these files, and no product suite can observe them.',
+      unclassified: false,
+      broad: false,
+      launchersOnly: true,
+      fastFullInfrastructure: false,
     }
   }
 
@@ -142,6 +182,7 @@ export function classify(changedPaths, { event = 'pull_request' } = {}) {
     reason: null,
     unclassified: false,
     broad: false,
+    launchersOnly: false,
     fastFullInfrastructure: needsFullFastInfrastructure(paths),
   }
 
@@ -158,6 +199,7 @@ export function classify(changedPaths, { event = 'pull_request' } = {}) {
     result.postgresql = true
     result.unclassified = true
     result.broad = true
+    result.launchersOnly = false
     result.fastFullInfrastructure = true
     result.reason = 'Unclassified product change; running broad backend, client, browser and PostgreSQL validation rather than reporting a skipped pass.'
   }
