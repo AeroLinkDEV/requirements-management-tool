@@ -96,11 +96,16 @@ public sealed class DeferredCarryForwardApiTests
         Assert.Equal(ChangeRequestState.Draft, record.State);
         Assert.Null(record.DeferredFromState);
 
-        // One record, not a copy: the build that shelved it no longer lists it, because it moved.
+        // Still one record, not a copy — but the build that raised it keeps listing it, now as work that has
+        // moved on rather than as work in flight. #320 asserted the opposite, on the reasoning that the record
+        // had moved and belonged to the successor. It does belong there, and a reader planning 1.6 still needs
+        // to know the work existed and where it went; without this it simply vanished from their build.
         var origin = await client.GetFromJsonAsync<JsonElement>(
             $"/api/change-requests?projectId={seeded.ProjectId}&releaseId={seeded.CurrentId}");
-        Assert.DoesNotContain(origin.GetProperty("items").EnumerateArray(),
-            x => x.GetProperty("title").GetString() == "SHELVED-IN-ONE-SIX oceanic sequencing");
+        var listedByOrigin = origin.GetProperty("items").EnumerateArray()
+            .Where(x => x.GetProperty("title").GetString() == "SHELVED-IN-ONE-SIX oceanic sequencing").ToList();
+        Assert.Single(listedByOrigin);
+        Assert.Equal(seeded.SuccessorId, listedByOrigin[0].GetProperty("targetReleaseId").GetGuid());
     }
 
     [Fact]

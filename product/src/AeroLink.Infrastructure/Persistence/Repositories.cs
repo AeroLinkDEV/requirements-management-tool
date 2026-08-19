@@ -26,7 +26,12 @@ public sealed class ChangeRequestRepository(AeroLinkDbContext db) : IChangeReque
             // Only Deferred records travel. Anything else belongs to the build that owns it.
             var predecessors = db.Releases.Where(x => x.Id == query.TargetReleaseId)
                 .Select(x => x.PredecessorReleaseId);
+            // A build also keeps the work it raised. Once a change request deferred in 1.6 is reinstated
+            // into 1.7 it is neither deferred nor targeting 1.6, so the two conditions above both stop
+            // matching and it would disappear from 1.6 -- a reader planning that build would see work that
+            // simply vanished. The origin is the build it was raised in and never moves.
             source = source.Where(x => x.TargetReleaseId == query.TargetReleaseId
+                || x.OriginReleaseId == query.TargetReleaseId
                 || (x.State == ChangeRequestState.Deferred && predecessors.Contains(x.TargetReleaseId)));
         }
         if (!string.IsNullOrWhiteSpace(query.Search))
