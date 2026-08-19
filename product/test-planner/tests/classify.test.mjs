@@ -136,7 +136,7 @@ test('an unrecognised product path runs broad validation rather than nothing', (
   // The failure this prevents: a change that was neither documentation nor recognised product code
   // selected nothing, every step skipped on its condition, and the job reported success having executed
   // no test at all. A launcher script, a root config file, or a new top-level directory all landed here.
-  const result = of(['START_AEROLINK_PRODUCTION.bat'])
+  const result = of(['product/new-tooling/unknown-format.xyz'])
   assert.equal(result.docsOnly, false)
   assert.equal(result.backend, true)
   assert.equal(result.client, true)
@@ -165,12 +165,16 @@ test('scripts, docs, deletions and unknown paths have explicit conservative fixt
   const docs = of(['docs/OPERATIONS.md', 'design/mockup.png', 'README.md'])
   assert.equal(docs.docsOnly, true)
 
-  const script = of(['START_AEROLINK_PRODUCTION.bat'])
-  assert.equal(script.unclassified, true)
-  assert.equal(script.backend, true)
-  assert.equal(script.client, true)
-  assert.equal(script.browser, true)
-  assert.equal(script.postgresql, true)
+  // A launcher is no longer unknown: the launcher contract reads these files, so the product suites are not
+  // what vouches for them. Everything else that is neither documentation nor recognised product code still
+  // runs the full sweep.
+  const launcher = of(['START_AEROLINK_PRODUCTION.bat'])
+  assert.equal(launcher.unclassified, false)
+  assert.equal(launcher.launchersOnly, true)
+  assert.equal(launcher.backend, false)
+  assert.equal(launcher.client, false)
+  assert.equal(launcher.browser, false)
+  assert.equal(launcher.postgresql, false)
 
   // The classifier receives the old path from a deletion/rename diff. It must retain the sensitive area
   // even when the new tree no longer contains the file.
@@ -335,4 +339,37 @@ test('both backend suites are actually named, not merged into one target', () =>
   const commands = localPlan(of(['product/src/AeroLink.Domain/X.cs'])).map((s) => s.command).filter(Boolean).join(' ')
   assert.match(commands, /AeroLink\.Domain\.Tests/)
   assert.match(commands, /AeroLink\.Infrastructure\.Tests/)
+})
+
+test('a launcher-only change is validated by the launcher contract, not by the product suites', () => {
+  // Before this rule a .bat-only pull request classified as unknown and ran the full backend, client,
+  // browser and PostgreSQL validation: roughly ninety minutes of compute for files none of it can observe.
+  for (const paths of [['START_AEROLINK_PRODUCTION.bat'], ['STOP_AEROLINK.bat', 'BACKUP_AEROLINK.bat'], ['product/scripts/launch.cmd']]) {
+    const result = of(paths)
+    assert.equal(result.launchersOnly, true, paths.join(', '))
+    assert.equal(result.unclassified, false, paths.join(', '))
+    assert.equal(result.broad, false, paths.join(', '))
+    for (const area of ['backend', 'client', 'browser', 'postgresql']) {
+      assert.equal(result[area], false, `${area} for ${paths.join(', ')}`)
+    }
+  }
+
+  // Documentation alongside a launcher does not change the answer, because documentation selects nothing.
+  assert.equal(of(['START_AEROLINK.bat', 'README.md']).launchersOnly, true)
+
+  // One launcher touched alongside product code classifies on the product code. The rule is about changes
+  // confined to launchers, not about ignoring a launcher that happens to be in a larger change.
+  const mixed = of(['START_AEROLINK.bat', 'product/src/AeroLink.Domain/Rules/Rule.cs'])
+  assert.equal(mixed.launchersOnly, false)
+  assert.equal(mixed.backend, true)
+
+  // The fallback is unchanged for everything it was actually protecting.
+  for (const unknown of [['product/ci-metrics/lib/rolling.mjs'], ['newthing/config.xyz'], ['product/new-tooling/x.xyz']]) {
+    const result = of(unknown)
+    assert.equal(result.unclassified, true, unknown.join(', '))
+    assert.equal(result.backend, true, unknown.join(', '))
+  }
+
+  // A push still classifies every area regardless: it has no base to diff against.
+  assert.equal(of(['START_AEROLINK.bat'], 'push').launchersOnly, false)
 })

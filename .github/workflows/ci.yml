@@ -63,6 +63,7 @@ jobs:
       client: ${{ steps.classify.outputs.client }}
       browser: ${{ steps.classify.outputs.browser }}
       postgresql: ${{ steps.classify.outputs.postgresql }}
+      launchers_only: ${{ steps.classify.outputs.launchers_only }}
       planner_version: ${{ steps.classify.outputs.planner_version }}
       planner_hash: ${{ steps.classify.outputs.planner_hash }}
       planner_unknown_paths: ${{ steps.classify.outputs.planner_unknown_paths }}
@@ -1342,6 +1343,7 @@ jobs:
           POSTGRESQL: ${{ needs.postgresql-smoke.result }}
           METRICS_TOOLING: ${{ needs.metrics-tooling.result }}
           DOCS_ONLY: ${{ needs.changes.outputs.docs_only }}
+          LAUNCHERS_ONLY: ${{ needs.changes.outputs.launchers_only }}
           EVENT_NAME: ${{ inputs.pull_request_number != '' && 'pull_request' || github.event_name }}
           PLANNER_VERSION: ${{ needs.changes.outputs.planner_version }}
           PLANNER_HASH: ${{ needs.changes.outputs.planner_hash }}
@@ -1416,7 +1418,17 @@ jobs:
           # must have had its backend tested or its client validated; if neither ran, this tick is not evidence
           # about the product and must not be usable as one. The classifier already avoids selecting nothing —
           # this stays machine-checkable in case that ever regresses.
-          if [ "$POST_MERGE_SKIP" != "true" ] && [ "$DOCS_ONLY" != "true" ] && [ "$BACKEND_API" != "success" ] && [ "$CLIENT" != "success" ]; then
+          #
+          # A launcher-only change is the one case where neither is the right evidence. No product suite can
+          # observe a cmd shim, so running them would prove nothing about the change; the launcher contract in
+          # script-contracts reads every launcher and is what actually vouches for it. That job is required to
+          # have passed, so this is a different evidence requirement rather than an exemption from one.
+          if [ "$LAUNCHERS_ONLY" = "true" ]; then
+            if [ "$CONTRACTS" != "success" ]; then
+              echo "::error::A launcher-only change must be validated by the operator and recovery script contracts, and they did not pass."
+              exit 1
+            fi
+          elif [ "$POST_MERGE_SKIP" != "true" ] && [ "$DOCS_ONLY" != "true" ] && [ "$BACKEND_API" != "success" ] && [ "$CLIENT" != "success" ]; then
             echo "::error::This run tested no backend and validated no client, so its result is not evidence."
             echo "Classify the changed paths in the changes job, or mark the change as documentation-only."
             exit 1
