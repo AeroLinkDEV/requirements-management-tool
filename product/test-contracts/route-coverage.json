@@ -224,6 +224,7 @@
         "AuthoredSectionTests",
         "AuthoringTracedImpactTests",
         "BaselineImportApiTests",
+        "BuildListingSpansOriginTests",
         "BuildScopedWorkspaceApiTests",
         "BuildTestSetApiTests",
         "CancelReviewAuthorityTests",

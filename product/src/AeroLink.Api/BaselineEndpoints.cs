@@ -49,7 +49,11 @@ public static class BaselineEndpoints
             if (!string.IsNullOrWhiteSpace(search)) { var q = search.Trim().ToLower(); source = source.Where(x =>
                 x.BaseNumber.ToLower().Contains(q) || x.Title.ToLower().Contains(q) || x.Problem.ToLower().Contains(q) ||
                 x.Analysis.ToLower().Contains(q) || x.Solution.ToLower().Contains(q)); }
-            if (releaseId is not null) source = source.Where(x => x.TargetReleaseId == releaseId);
+            // A build shows the work it was raised in as well as the work it is taking. Without the origin
+            // side, a change request raised in 1.6 and reinstated into 1.7 is neither deferred nor targeting
+            // 1.6, so it would vanish from 1.6 and a reader there would see work that simply disappeared.
+            if (releaseId is not null)
+                source = source.Where(x => x.TargetReleaseId == releaseId || x.OriginReleaseId == releaseId);
             var selectedBaselineId = baselineId;
             if (buildId is not null) selectedBaselineId = await db.SoftwareBuilds.Where(x => x.Id == buildId && x.ProjectId == projectId).Select(x => (Guid?)x.BaselineId).SingleOrDefaultAsync(ct);
             if (selectedBaselineId is not null) source = source.Where(x => db.BaselineSelections.Any(s => s.BaselineId == selectedBaselineId && s.ChangeRequestId == x.Id));

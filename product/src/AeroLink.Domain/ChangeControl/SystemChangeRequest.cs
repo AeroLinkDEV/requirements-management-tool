@@ -53,6 +53,7 @@ public sealed class SystemChangeRequest
         Revision = revision;
         ProjectId = projectId;
         TargetReleaseId = targetReleaseId;
+        OriginReleaseId = targetReleaseId;
         Title = title.Trim();
         SetCase(problem, analysis, solution, problemRich, analysisRich, solutionRich);
         AuthorId = authorId;
@@ -78,6 +79,16 @@ public sealed class SystemChangeRequest
     public int Revision { get; private set; }
     public string DisplayNumber => ArtifactNumber.Display(BaseNumber, Revision);
     public Guid ProjectId { get; private set; }
+    /// <summary>
+    /// The build this change request was raised in, which never changes.
+    ///
+    /// TargetReleaseId is where the work is going and moves with it. Once a change request raised in 1.6 is
+    /// reinstated into 1.7, nothing on the record would otherwise say it began in 1.6, and it is no longer
+    /// Deferred, so it would vanish from 1.6 entirely — a reader there would see work that simply disappeared.
+    /// The move is in the audit trail, but a build listing cannot be driven off audit text.
+    /// </summary>
+    public Guid OriginReleaseId { get; private set; }
+
     public Guid TargetReleaseId { get; private set; }
     public string Title { get; private set; } = string.Empty;
     /// <summary>
@@ -430,29 +441,34 @@ public sealed class SystemChangeRequest
     }
 
     /// <summary>
-    /// Takes a deferred change request off the shelf, back to the state it was in when it went on.
+    /// Takes a deferred change request off the shelf.
     ///
-    /// The review cycle is not resumed. Deferring from InReview cancels the cycle, which is right — the
-    /// approvers were asked about work that has since been put away — so a change request that was In Review
-    /// comes back as a Draft and its author submits it again. Anything else would restore signatures against a
-    /// snapshot nobody has looked at since.
+    /// It comes back as a Draft, whatever it was when it went away, and its approvals do not come with it.
+    ///
+    /// This used to restore the prior state exactly, on the reasoning that a change request put away while
+    /// approved is still approved work. That is true of the work and false of the approval. Reviewers approved
+    /// a change into a particular build, against that build's baseline and the requirement revisions current
+    /// at the time; a deferred change request is reinstated into whichever build is open now, and carrying the
+    /// signature across asserts something nobody was asked. The requirement it modifies may have moved on, and
+    /// the build it lands in has different content.
+    ///
+    /// DeferredFromState is still recorded and still shown, because the shelf does need to say how far
+    /// something got — a reader planning a build wants to know a change was written and reviewed, not only
+    /// that it exists. It informs the reader rather than restoring the state.
     /// </summary>
     public void Reinstate(string actorId, DateTimeOffset now, bool administratorAuthority = false)
     {
         EnsureAuthor(actorId, administratorAuthority);
         if (State != ChangeRequestState.Deferred) throw new DomainException("Only a deferred change request can be reinstated.");
-        var restored = DeferredFromState switch
-        {
-            ChangeRequestState.InReview => ChangeRequestState.Draft,
-            // Deferred rows that predate the state being remembered come back as Drafts. That is the safe
-            // direction: an author can resubmit a Draft, where claiming approval nobody gave cannot be undone.
-            null => ChangeRequestState.Draft,
-            var value => value.Value,
-        };
-        State = restored;
+        var reached = DeferredFromState;
+        State = ChangeRequestState.Draft;
         DeferredFromState = null;
         UpdatedAt = now;
-        Audit("ChangeRequestReinstated", actorId, $"Reinstated {DisplayNumber} as {restored}.", now);
+        Audit("ChangeRequestReinstated", actorId,
+            reached is null or ChangeRequestState.Draft
+                ? $"Reinstated {DisplayNumber} as a Draft."
+                : $"Reinstated {DisplayNumber} as a Draft; it had reached {reached} before deferral, and those approvals do not carry into a new build.",
+            now);
     }
 
     public void Retarget(string actorId, Guid targetReleaseId, string reason, DateTimeOffset now,
@@ -466,8 +482,17 @@ public sealed class SystemChangeRequest
         if (string.IsNullOrWhiteSpace(reason)) throw new DomainException("A retarget rationale is required.");
         var prior = TargetReleaseId;
         TargetReleaseId = targetReleaseId;
+        // Approval does not travel between builds. Reviewers approved this into a particular build, against
+        // that build's baseline and the requirement revisions current at the time, and none of that is true
+        // of the build it is moving into. Deferring and reinstating already returns a change request to
+        // Draft; moving it directly must not be the privileged route that keeps a signature the other one
+        // drops, or the two ways to the same place would carry different evidence.
+        var wasApproved = State == ChangeRequestState.Approved;
+        if (wasApproved) State = ChangeRequestState.Draft;
         UpdatedAt = now;
-        Audit("TargetReleaseChanged", actorId, $"Moved {DisplayNumber} from release {prior} to {targetReleaseId}: {reason.Trim()}", now);
+        Audit("TargetReleaseChanged", actorId,
+            $"Moved {DisplayNumber} from release {prior} to {targetReleaseId}: {reason.Trim()}"
+            + (wasApproved ? " Returned to Draft; approvals do not carry into another build." : string.Empty), now);
     }
 
     private void ValidateReadyForReview()
