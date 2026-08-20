@@ -25,6 +25,9 @@ public static class ArtifactClaims
     /// warned rather than stopped. Deferred holds nothing either -- shelved work must not block the build it
     /// was shelved out of, and a reinstated change request comes back as a draft, behind whoever submitted
     /// while it was away.
+    ///
+    /// Withdrawn is not listed here and is not a contender at all: it is not competing for the requirement,
+    /// and telling an author that a change request nobody intends to pursue is racing them is noise.
     /// </summary>
     public static bool Holds(ChangeRequestState state) => state
         is ChangeRequestState.InReview or ChangeRequestState.Approved or ChangeRequestState.SelectedForBaseline;
@@ -51,6 +54,7 @@ public static class ArtifactClaims
                           join scr in db.SystemChangeRequests.AsNoTracking()
                               on change.ChangeRequestId equals scr.Id
                           where scr.ProjectId == projectId && scr.Id != excluding
+                                && scr.State != ChangeRequestState.Withdrawn
                                 && (change.Kind == RequirementChangeKind.Modify || change.Kind == RequirementChangeKind.Retire)
                           select new { scr.Id, scr.BaseNumber, scr.Revision, scr.State, Requirement = change.BaseNumber })
             .ToListAsync(ct);
@@ -165,9 +169,9 @@ public static class ArtifactClaims
         var byRequest = blocking.GroupBy(x => (x.DisplayNumber, x.State))
             .Select(g => $"{g.Key.DisplayNumber} ({g.Key.State}) on {string.Join(", ", g.Select(x => x.BaseNumber).Order())}")
             .ToList();
-        // Offers removal because it exists. Rebasing onto the approved result is still not built, so it is
-        // still not named: a refusal that points somewhere the reader cannot go is worse than one that does
-        // not. See #686.
+        // Offers removal rather than rebasing, though rebasing now exists (#686), because rebasing is offered
+        // per requirement change and only onto an approved result -- the endpoint that offers it says whether
+        // it is available and why not. Naming it unconditionally here would promise a route that may be shut.
         return "This cannot go to review while another is being reviewed or approved for the same "
             + $"{subject}: {string.Join("; ", byRequest)}. Remove the contested {subject} and send the rest, or wait "
             + "until that one is returned to draft, deferred, or released with its build.";

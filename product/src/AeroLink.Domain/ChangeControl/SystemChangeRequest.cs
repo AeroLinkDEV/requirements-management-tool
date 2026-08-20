@@ -5,7 +5,7 @@ using AeroLink.Domain.Common;
 
 namespace AeroLink.Domain.ChangeControl;
 
-public enum ChangeRequestState { Draft, InReview, Approved, Deferred, SelectedForBaseline }
+public enum ChangeRequestState { Draft, InReview, Approved, Deferred, SelectedForBaseline, Withdrawn }
 public enum ChangeRequestType { System, Software }
 
 /// <summary>
@@ -99,6 +99,9 @@ public sealed class SystemChangeRequest
     /// how far it got before it went there.
     /// </summary>
     public ChangeRequestState? DeferredFromState { get; private set; }
+
+    /// <summary>How far it had got when it was taken back, so the record says what was abandoned.</summary>
+    public ChangeRequestState? WithdrawnFromState { get; private set; }
     public string Problem { get; private set; } = string.Empty;
     public string Analysis { get; private set; } = string.Empty;
     public string Solution { get; private set; } = string.Empty;
@@ -200,6 +203,45 @@ public sealed class SystemChangeRequest
         Audit("RequirementChangeRebased", actorId,
             $"Rebased {change.DisplayNumber} from revision {from} onto revision {ontoRevision}, the result of {ontoDisplayNumber}."
             + (wasApproved ? " Returned to Draft; the approvals described the earlier wording." : string.Empty), now);
+    }
+
+    /// <summary>
+    /// Takes a change request back, keeping the record of it.
+    ///
+    /// Work is abandoned for ordinary reasons -- the problem turns out not to exist, the approach is wrong, it
+    /// is superseded. Until now the only options were to defer it, which says "later" rather than "never", or
+    /// to leave it in the register misrepresenting the plan.
+    ///
+    /// Withdrawn, not deleted. A change request that has been in front of reviewers has signatures against it,
+    /// and removing the evidence that an approval happened is worse than the problem it solves. Somebody
+    /// looking for SRCR-00110 should find that it was approved and then withdrawn, by whom and why, rather
+    /// than finding nothing. Deleting outright is reserved for a draft nobody has ever reviewed, where there
+    /// is no decision to be accountable for.
+    ///
+    /// Nothing is unwound here, and that is not an omission. Approving a change request does not move the
+    /// requirement: the revision is created when a baseline is frozen and materialized. So a change request
+    /// withdrawn before its baseline is frozen has produced no revision to take back, and one whose baseline
+    /// has been frozen cannot be withdrawn at all until that baseline is reopened -- which is a deliberate act
+    /// of its own rather than a silent consequence of somebody withdrawing their work.
+    /// </summary>
+    public void Withdraw(string actorId, string reason, DateTimeOffset now, bool administratorAuthority = false)
+    {
+        EnsureAuthor(actorId, administratorAuthority);
+        if (State == ChangeRequestState.Withdrawn) throw new DomainException("The change request is already withdrawn.");
+        if (State == ChangeRequestState.SelectedForBaseline)
+            throw new DomainException("Remove the change request from its candidate baseline before withdrawing it.");
+        if (string.IsNullOrWhiteSpace(reason)) throw new DomainException("A withdrawal reason is required.");
+
+        // The approvers were asked about work that is being taken away. Leaving the cycle open would leave
+        // signatures outstanding against a package nobody intends to ship.
+        if (State == ChangeRequestState.InReview) ActiveReviewCycle?.Cancel(reason.Trim(), now);
+
+        var from = State;
+        State = ChangeRequestState.Withdrawn;
+        WithdrawnFromState = from;
+        UpdatedAt = now;
+        Audit("ChangeRequestWithdrawn", actorId,
+            $"Withdrawn from {from}: {reason.Trim()}", now);
     }
 
     /// <summary>

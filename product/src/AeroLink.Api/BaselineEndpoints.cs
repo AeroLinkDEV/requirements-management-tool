@@ -436,6 +436,42 @@ public static class BaselineEndpoints
             catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
         });
 
+        // The way back through the freeze, for a build that has not been released.
+        //
+        // Held to the same authority as freezing it. Reopening is not an author correcting their own work --
+        // it unfixes what a build contains for everybody planning against it -- so the person who sealed it is
+        // the person who unseals it.
+        app.MapPost("/api/baselines/{id:guid}/reopen", async (Guid id, ReopenBaselineRequest request, HttpContext http,
+            IBaselineRepository repository, IdentityService identity, AeroLinkDbContext db, CancellationToken ct) =>
+        {
+            var baseline = await repository.GetAsync(id, ct); if (baseline is null) return Results.NotFound();
+            if (!await http.HasProjectRoleAsync(db, identity, baseline.ProjectId, ct, ProgramRole.ConfigurationManager)) return Results.Forbid();
+
+            // A build sealed on top of this one derives from what this one contains. Taking these revisions
+            // back would leave the successor sealed around requirement revisions that no longer exist, so the
+            // refusal names it and the order of unsealing is the reverse of the order of sealing.
+            var successor = await db.CandidateBaselines.AsNoTracking()
+                .Where(x => x.PredecessorBaselineId == baseline.Id && x.State != CandidateBaselineState.Draft)
+                .Select(x => new { x.DisplayNumber, x.State })
+                .FirstOrDefaultAsync(ct);
+            if (successor is not null)
+                return Results.BadRequest(new
+                {
+                    error = $"{successor.DisplayNumber} was {successor.State.ToString().ToLowerInvariant()} on top of this baseline and derives from what it contains. Deal with {successor.DisplayNumber} first.",
+                    code = "successor_baseline",
+                });
+            try
+            {
+                // The revisions come back before the record says the build is open, so there is no moment at
+                // which the baseline reads as open while the requirements still read as sealed.
+                var taken = await new RequirementBaselineDematerializer(db).DematerializeAsync(baseline.Id, ct);
+                baseline.Reopen(http.UserAccount().UserName, request.Reason ?? "", DateTimeOffset.UtcNow);
+                await repository.SaveAsync(ct);
+                return Results.Ok(new { baseline = ApiMap.Baseline(baseline), revisionsTakenBack = taken });
+            }
+            catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
+        });
+
         // Freezing is deliberately not gated on verification decisions. Freezing then materializing is what
         // creates the requirement revisions a test engineer needs in order to write a procedure at all, so
         // blocking the freeze would withhold the test team's own inputs and deadlock the release. The gate the
