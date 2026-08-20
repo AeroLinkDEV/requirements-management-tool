@@ -1555,10 +1555,10 @@ public static class VerificationImpactEndpoints
                 else
                 {
                     var requested = request.Approvers ?? [];
-                    if (requested.Count != workflow.Stages.Count)
+                    if (requested.Count < workflow.Stages.Count)
                         return Results.BadRequest(new
                         {
-                            error = $"{workflow.Name} v{workflow.Version} requires {workflow.Stages.Count} approver{(workflow.Stages.Count == 1 ? "" : "s")}, one for each stage: " +
+                            error = $"{workflow.Name} v{workflow.Version} requires {workflow.Stages.Count} approver{(workflow.Stages.Count == 1 ? "" : "s")} minimum (at least {workflow.Stages.Count}), one for each stage: " +
                                 string.Join(", ", workflow.Stages.Select(x => x.Name)) + "."
                         });
                     var ids = requested.Select(x => x.UserId.Trim().ToLowerInvariant()).ToList();
@@ -1568,13 +1568,24 @@ public static class VerificationImpactEndpoints
                     if (accounts.Count != ids.Count)
                         return Results.BadRequest(new { error = "Every stage approver must be an active AeroLink user." });
                     var directory = accounts.ToDictionary(x => x.UserName, StringComparer.OrdinalIgnoreCase);
+                    var programId = await db.Projects.AsNoTracking().Where(x => x.Id == review.ProjectId)
+                        .Select(x => x.ProgramId).SingleAsync(ct);
                     selections = new List<ApproverSelection>();
                     for (var index = 0; index < requested.Count; index++)
                     {
                         var chosen = requested[index];
                         var account = directory[chosen.UserId.Trim().ToLowerInvariant()];
-                        var role = await WorkflowEndpoints.StageAuthorityAsync(db, review.ProjectId, account.Id,
-                            workflow.Stages[index].RequiredRole, ct);
+                        var role = index < workflow.Stages.Count
+                            ? await WorkflowEndpoints.StageAuthorityAsync(db, review.ProjectId, account.Id,
+                                workflow.Stages[index].RequiredRole, ct)
+                            : (await WorkflowEndpoints.AuthoritiesAsync(db, review.ProjectId, [account.Id], ct))
+                                .GetValueOrDefault(account.Id);
+                        if (role is null && index < workflow.Stages.Count
+                            && await identity.HasRoleAsync(account.Id, programId, workflow.Stages[index].RequiredRole,
+                                DateTimeOffset.UtcNow, ct))
+                            role = workflow.Stages[index].RequiredRole;
+                        if (role is null)
+                            return Results.BadRequest(new { error = $"{account.DisplayName} does not hold authority to sign this review." });
                         selections.Add(new ApproverSelection(account.UserName, account.DisplayName, role));
                     }
                 }

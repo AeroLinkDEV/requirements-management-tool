@@ -112,10 +112,11 @@ public sealed class ReviewCycle
         StartedAt = now;
         for (var index = 0; index < approvers.Count; index++)
         {
+            var configuredStage = workflow?.Stages.ElementAtOrDefault(index);
             var step = new ApprovalStep(Id, index, approvers[index].UserId, approvers[index].Name,
                 Mode == ReviewMode.Parallel || index == 0,
-                workflow is null ? "" : workflow.Stages[index].Name,
-                workflow is null ? ReviewStageKind.Review : workflow.Stages[index].Kind);
+                workflow is null ? "" : configuredStage?.Name ?? $"Additional reviewer {index - workflow.Stages.Count + 1}",
+                workflow is null ? ReviewStageKind.Review : configuredStage?.Kind ?? ReviewStageKind.Review);
             step.Replace(approvers[index].UserId, approvers[index].Name, approvers[index].Role);
             _steps.Add(step);
         }

@@ -226,9 +226,10 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, re
     name?: string
     version?: number
     mode?: string
-    stages: { position: number; name: string; requiredRole: string; candidates: { userId: string; name: string; role: string }[] }[]
+    stages: { position: number; name: string; kind?: 'Review' | 'Approval'; requiredRole: string; candidates: { userId: string; name: string; role: string }[] }[]
   }>()
   const [stageApprovers, setStageApprovers] = useState<Record<number, string>>({})
+  const [extraStageApprovers, setExtraStageApprovers] = useState<{ userId: string; name: string }[]>([])
   const [workflowError, setWorkflowError] = useState<string | null>(null)
   const [workflowReload, setWorkflowReload] = useState(0)
   /// The assessment being concluded as needing no test work, which has to say why.
@@ -490,7 +491,7 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, re
     setSaved(action === 'submit' ? `${request.displayNumber} sent for approval.`
       : action === 'approve' ? `${request.displayNumber} approved.`
       : `${request.displayNumber} returned for more work.`)
-    if (action === 'submit') { setSubmitting(undefined); setReviewApprover({ userId: '', name: '' }) }
+    if (action === 'submit') { setSubmitting(undefined); setReviewApprover({ userId: '', name: '' }); setExtraStageApprovers([]) }
   }, 'The package could not be moved on.')
 
   const workflowSubject = discipline === 'System' ? 'SystemTest'
@@ -500,6 +501,7 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, re
     let active = true
     setReviewWorkflow(undefined)
     setStageApprovers({})
+    setExtraStageApprovers([])
     setWorkflowError(null)
     fetch(`${api}/api/review-workflows/applicable?projectId=${projectId}&type=${workflowSubject}`)
       .then(async response => {
@@ -1053,7 +1055,8 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, re
               const approvers = reviewWorkflow.stages
                 .map(stage => ({ userId: stageApprovers[stage.position] }))
                 .filter(entry => Boolean(entry.userId))
-              if (approvers.length === reviewWorkflow.stages.length) {
+                .concat(extraStageApprovers.map(person => ({ userId: person.userId })))
+              if (approvers.length >= reviewWorkflow.stages.length) {
                 void advance(submitting, 'submit', undefined, undefined, approvers)
               }
             } else if (reviewApprover.userId) {
@@ -1071,9 +1074,9 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, re
               ? <p>Loading the recorded review procedure…</p>
               : reviewWorkflow.required
                 ? <>
-                    <p>The recorded review procedure {reviewWorkflow.name} v{reviewWorkflow.version} ({reviewWorkflow.mode}) requires one approver for each stage.</p>
+                    <p>The recorded review procedure {reviewWorkflow.name} v{reviewWorkflow.version} ({reviewWorkflow.mode}) requires one signer for each configured stage. Additional distinct active Program participants are allowed.</p>
                     {reviewWorkflow.stages.map(stage => (
-                      <label key={stage.position}>{stage.name} · {stage.requiredRole}
+                      <label key={stage.position}>{stage.name} · {stage.kind ?? 'Review'} · {stage.requiredRole}
                         <select value={stageApprovers[stage.position] ?? ''}
                           onChange={event => setStageApprovers(current => ({ ...current, [stage.position]: event.target.value }))}>
                           <option value="">Choose the {stage.requiredRole} for this stage…</option>
@@ -1083,6 +1086,17 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, re
                         </select>
                       </label>
                     ))}
+                    <div className="testWorkflowExtras">
+                      <b>Additional signers (optional)</b>
+                      {extraStageApprovers.map((person, index) => <div className="testWorkflowExtra" key={index}>
+                        <PersonPicker api={api} projectId={projectId} value={person.userId} name={person.name}
+                          index={9200 + index} label={`Additional signer ${index + 1}`}
+                          excludeUserNames={[submitting.assignedEngineerId ?? user.userName, user.userName, ...reviewWorkflow.stages.map(stage => stageApprovers[stage.position] ?? ''), ...extraStageApprovers.filter((_, position) => position !== index).map(item => item.userId)]}
+                          onSelect={selected => setExtraStageApprovers(items => items.map((item, position) => position === index ? selected : item))} />
+                        <button type="button" className="quiet" onClick={() => setExtraStageApprovers(items => items.filter((_, position) => position !== index))}>Remove</button>
+                      </div>)}
+                      <button type="button" className="quiet" onClick={() => setExtraStageApprovers(items => [...items, { userId: '', name: '' }])}>+ Add extra signer</button>
+                    </div>
                   </>
                 : <>
                     <p>Select the person who will independently review this exact package of test-procedure decisions.</p>
@@ -1091,7 +1105,7 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, re
                   </>}
             <div className="decisionActions">
               <button type="submit" disabled={busy || (reviewWorkflow?.required
-                ? reviewWorkflow.stages.some(stage => !stageApprovers[stage.position])
+                ? reviewWorkflow.stages.some(stage => !stageApprovers[stage.position]) || extraStageApprovers.some(person => !person.userId)
                 : !reviewApprover.userId) || Boolean(workflowError)}>Send for approval</button>
               <button type="button" className="quiet" onClick={() => setSubmitting(undefined)}>Cancel</button>
             </div>

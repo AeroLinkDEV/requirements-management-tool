@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.Http.Json;
+using System.Text.Json;
 using AeroLink.Domain.ChangeControl;
 using AeroLink.Domain.Identity;
 using AeroLink.Domain.Programs;
@@ -202,9 +203,148 @@ public sealed class ApprovalConfigurationApiTests : IClassFixture<SharedApiHost>
             subjects);
     }
 
+    [Fact]
+    public async Task An_authorized_manager_can_save_and_revise_an_active_configuration()
+    {
+        var seeded = await SeedAsync(_host.Factory, [new("Initial review", ProgramRole.SystemEngineer)]);
+        using var client = _host.CreateClient();
+        await SignInAsync(client, seeded.ManagerName);
+
+        var first = await client.PutAsJsonAsync($"/api/projects/{seeded.ProjectId}/approval-configuration/System", new
+        {
+            stages = new[]
+            {
+                new { name = "System engineer review", requiredRole = ProgramRole.SystemEngineer.ToString(), kind = "Review" },
+                new { name = "Program approval", requiredRole = ProgramRole.ProgramManager.ToString(), kind = "Approval" },
+            },
+        });
+        Assert.Equal(HttpStatusCode.OK, first.StatusCode);
+        var firstBody = await first.Content.ReadFromJsonAsync<ConfiguredResponse>();
+        Assert.Equal(2, firstBody!.Version);
+        Assert.Equal(2, firstBody.Stages.Length);
+
+        var second = await client.PutAsJsonAsync($"/api/projects/{seeded.ProjectId}/approval-configuration/System", new
+        {
+            stages = new[]
+            {
+                new { name = "Lead review", requiredRole = ProgramRole.SystemEngineeringLead.ToString(), kind = "Review" },
+            },
+        });
+        Assert.Equal(HttpStatusCode.OK, second.StatusCode);
+        var secondBody = await second.Content.ReadFromJsonAsync<ConfiguredResponse>();
+        Assert.Equal(3, secondBody!.Version);
+        Assert.Single(secondBody.Stages);
+
+        using var scope = _host.Factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+        var history = await db.ReviewWorkflows.AsNoTracking().Where(x => x.ProjectId == seeded.ProjectId && x.AppliesTo == ReviewSubject.System).OrderBy(x => x.Version).ToListAsync();
+        Assert.Equal([ReviewWorkflowState.Retired, ReviewWorkflowState.Retired, ReviewWorkflowState.Active], history.Select(x => x.State).ToArray());
+    }
+
+    [Fact]
+    public async Task A_non_manager_cannot_mutate_approval_configuration()
+    {
+        var seeded = await SeedAsync(_host.Factory, [new("Initial review", ProgramRole.SystemEngineer)]);
+        using var client = _host.CreateClient();
+        await SignInAsync(client, seeded.LeadName);
+
+        var response = await client.PutAsJsonAsync($"/api/projects/{seeded.ProjectId}/approval-configuration/System", new
+        {
+            stages = new[] { new { name = "Unauthorized", requiredRole = ProgramRole.SystemEngineer.ToString(), kind = "Review" } },
+        });
+        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task Legacy_revision_version_collision_returns_conflict()
+    {
+        var seeded = await SeedAsync(_host.Factory, [new("Initial review", ProgramRole.SystemEngineer)]);
+        Guid currentId;
+        using (var scope = _host.Factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            var current = await db.ReviewWorkflows.Include(x => x.Stages)
+                .SingleAsync(x => x.ProjectId == seeded.ProjectId && x.AppliesTo == ReviewSubject.System
+                    && x.State == ReviewWorkflowState.Active);
+            var competing = current.Revise("Competing revision", ReviewMode.Sequential,
+                [new("Competing review", ProgramRole.SystemEngineer)], "test.setup", DateTimeOffset.UtcNow);
+            db.ReviewWorkflows.Add(competing);
+            await db.SaveChangesAsync();
+            currentId = current.Id;
+        }
+
+        using var client = _host.CreateClient();
+        await SignInAsync(client, seeded.ManagerName);
+        var response = await client.PostAsJsonAsync($"/api/review-workflows/{currentId}/revise", new
+        {
+            name = "Racing revision",
+            mode = ReviewMode.Sequential.ToString(),
+            stages = new[]
+            {
+                new { name = "Racing review", requiredRole = ProgramRole.SystemEngineer.ToString(), kind = "Review" },
+            },
+        });
+
+        Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task Applicable_workflow_lists_a_live_exact_role_delegate_as_a_required_stage_candidate()
+    {
+        var seeded = await SeedAsync(_host.Factory,
+        [
+            new("Lead approval", ProgramRole.SystemEngineeringLead, ReviewStageKind.Approval),
+        ]);
+        using var scope = _host.Factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+        var now = DateTimeOffset.UtcNow;
+        db.RoleDelegations.Add(new RoleDelegation(seeded.ProgramId, seeded.LeadId, seeded.DeputyId,
+            ProgramRole.SystemEngineeringLead, now.AddMinutes(-1), now.AddHours(1),
+            "Temporary lead coverage.", "test.setup", now));
+        await db.SaveChangesAsync();
+
+        using var client = _host.CreateClient();
+        await SignInAsync(client, seeded.ManagerName);
+        var body = await client.GetFromJsonAsync<JsonElement>(
+            $"/api/review-workflows/applicable?projectId={seeded.ProjectId}&type=System");
+        var candidate = body.GetProperty("stages")[0].GetProperty("candidates")
+            .EnumerateArray().Single(x => x.GetProperty("userId").GetString() == seeded.DeputyName);
+
+        Assert.Equal(nameof(ProgramRole.SystemEngineeringLead), candidate.GetProperty("role").GetString());
+    }
+
+    [Fact]
+    public async Task Applicable_workflow_does_not_offer_a_different_role_delegate_for_a_generic_stage()
+    {
+        var seeded = await SeedAsync(_host.Factory,
+        [
+            new("Generic review", ProgramRole.Reviewer),
+        ]);
+        using var scope = _host.Factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+        var now = DateTimeOffset.UtcNow;
+        db.RoleDelegations.Add(new RoleDelegation(seeded.ProgramId, seeded.LeadId, seeded.DeputyId,
+            ProgramRole.SystemEngineeringLead, now.AddMinutes(-1), now.AddHours(1),
+            "Temporary lead coverage.", "test.setup", now));
+        await db.SaveChangesAsync();
+
+        using var client = _host.CreateClient();
+        await SignInAsync(client, seeded.ManagerName);
+        var body = await client.GetFromJsonAsync<JsonElement>(
+            $"/api/review-workflows/applicable?projectId={seeded.ProjectId}&type=System");
+        var candidates = body.GetProperty("stages")[0].GetProperty("candidates").EnumerateArray();
+
+        // A delegation is exact-role authority. SystemEngineeringLead satisfies a generic Reviewer stage for
+        // direct holders, but it must not be inferred through a delegation that IdentityService would reject.
+        Assert.DoesNotContain(candidates, x => x.GetProperty("userId").GetString() == seeded.DeputyName);
+    }
+
     private sealed record ConfigurationResponse(Guid ProjectId, bool CanManage, ArtifactRow[] Artifacts);
     private sealed record ArtifactRow(string Subject, bool Configured, string? Name, int? Version, string? Mode,
         StageRow[]? Stages, int BlockingStages);
     private sealed record StageRow(int Position, string Name, string Kind, RequiredRow Required);
     private sealed record RequiredRow(string Role, bool Singular, string[] Holders, string[] Backups, bool Blocking);
+    private sealed record ConfiguredResponse(Guid ProjectId, string Subject, bool Configured, string Name, int Version,
+        string Mode, ConfiguredStage[] Stages);
+    private sealed record ConfiguredStage(int Position, string Name, string Kind, string RequiredRole);
 }

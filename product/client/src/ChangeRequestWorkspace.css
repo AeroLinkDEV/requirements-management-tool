@@ -980,6 +980,22 @@ html .reviseAction:disabled { cursor: not-allowed; opacity: .5; }
   margin: 22px 26px 18px;
 }
 
+.approverSetup .reviewModePolicy {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 22px 26px 18px;
+  padding: 13px 15px;
+  border: 1px solid #9fcfc5;
+  border-left: 3px solid #439b8c;
+  border-radius: 8px;
+  background: #eaf7f3;
+  color: #196d62;
+}
+
+.approverSetup .reviewModePolicy b { font-size: 13px; }
+.approverSetup .reviewModePolicy span { color: #47756f; font-size: 12px; }
+
 .approverSetup .reviewModePicker > button {
   display: flex;
   flex-direction: column;
@@ -1167,7 +1183,8 @@ html .reviseAction:disabled { cursor: not-allowed; opacity: .5; }
   .workspaceReadiness,
   .editFields,
   .reviewRail,
-  .approverSetup .reviewModePicker {
+  .approverSetup .reviewModePicker,
+  .approverSetup .reviewModePolicy {
     grid-template-columns: 1fr;
   }
 
@@ -1253,4 +1270,3 @@ html .deferAction:disabled { cursor: not-allowed; opacity: .5; }
   padding: 3px 9px;
   cursor: pointer;
 }
-

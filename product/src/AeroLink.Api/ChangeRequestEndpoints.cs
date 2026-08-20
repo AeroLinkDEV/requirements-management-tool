@@ -728,10 +728,10 @@ public static class ChangeRequestEndpoints
                 var workflow = await WorkflowEndpoints.ActiveSpecificationAsync(db, scr.ProjectId, scr.Type, ct);
                 var programId = await db.Projects.AsNoTracking().Where(x => x.Id == scr.ProjectId)
                     .Select(x => x.ProgramId).SingleAsync(ct);
-                if (workflow is not null && request.Approvers.Count != workflow.Stages.Count)
+                if (workflow is not null && request.Approvers.Count < workflow.Stages.Count)
                     return Results.BadRequest(new
                     {
-                        error = $"{workflow.Name} v{workflow.Version} requires {workflow.Stages.Count} approver{(workflow.Stages.Count == 1 ? "" : "s")}, one for each stage: " +
+                        error = $"{workflow.Name} v{workflow.Version} requires {workflow.Stages.Count} approver{(workflow.Stages.Count == 1 ? "" : "s")} minimum (at least {workflow.Stages.Count}), one for each stage: " +
                             string.Join(", ", workflow.Stages.Select(x => x.Name)) + "."
                     });
                 // The authority each approver actually uses for their stage is resolved here, where program
@@ -760,9 +760,21 @@ public static class ChangeRequestEndpoints
                         role = (await WorkflowEndpoints.AuthoritiesAsync(db, scr.ProjectId, [account.Id], ct))
                             .GetValueOrDefault(account.Id);
                     }
-                    else
+                    else if (index < workflow.Stages.Count)
                         role = await WorkflowEndpoints.StageAuthorityAsync(db, scr.ProjectId, account.Id,
                             workflow.Stages[index].RequiredRole, ct);
+                    else
+                        // Additional signers are allowed beyond the configured minimum, but they must still
+                        // be active participants in this Program. A role is resolved from the server roster;
+                        // the client cannot turn an unrelated account into an extra reviewer.
+                        role = (await WorkflowEndpoints.AuthoritiesAsync(db, scr.ProjectId, [account.Id], ct))
+                            .GetValueOrDefault(account.Id);
+                    if (workflow is not null && role is null && index < workflow.Stages.Count
+                        && await identity.HasRoleAsync(account.Id, programId, workflow.Stages[index].RequiredRole,
+                            DateTimeOffset.UtcNow, ct))
+                        role = workflow.Stages[index].RequiredRole;
+                    if (workflow is not null && role is null)
+                        return Results.BadRequest(new { error = $"{account.DisplayName} does not hold authority to sign this review." });
                     selections.Add(new ApproverSelection(account.UserName, account.DisplayName, role));
                 }
                 // Contention is settled here rather than while the author was writing, because until now
@@ -805,13 +817,17 @@ public static class ChangeRequestEndpoints
                 var known = await db.UserAccounts.AsNoTracking().Where(x => request.Approvers.Select(a => a.UserId.ToLower()).Contains(x.UserName) && x.State == AccountState.Active).Select(x => new { x.Id, x.UserName, x.DisplayName }).ToListAsync(ct);
                 if (known.Count != request.Approvers.Count) return Results.BadRequest(new { error = "Every corrected approver must be an active AeroLink user." });
                 var directory = known.ToDictionary(x => x.UserName, StringComparer.OrdinalIgnoreCase);
-                var workflow = await WorkflowEndpoints.ActiveSpecificationAsync(db, scr.ProjectId, scr.Type, ct);
+                // A correction within an already active cycle is still governed by that cycle's frozen
+                // workflow. A Draft returned/cancelled and normally submitted above resolves the latest
+                // active version, but restart must not reinterpret the review that already began.
+                var workflow = await WorkflowEndpoints.HistoricalSpecificationAsync(db, scr.ProjectId,
+                    scr.ActiveReviewCycle?.WorkflowId, ct);
                 var programId = await db.Projects.AsNoTracking().Where(x => x.Id == scr.ProjectId)
                     .Select(x => x.ProgramId).SingleAsync(ct);
-                if (workflow is not null && request.Approvers.Count != workflow.Stages.Count)
+                if (workflow is not null && request.Approvers.Count < workflow.Stages.Count)
                     return Results.BadRequest(new
                     {
-                        error = $"{workflow.Name} v{workflow.Version} requires {workflow.Stages.Count} approver{(workflow.Stages.Count == 1 ? "" : "s")}, one for each stage: " +
+                        error = $"{workflow.Name} v{workflow.Version} requires {workflow.Stages.Count} approver{(workflow.Stages.Count == 1 ? "" : "s")} minimum (at least {workflow.Stages.Count}), one for each stage: " +
                             string.Join(", ", workflow.Stages.Select(x => x.Name)) + "."
                     });
                 var corrected = new List<ApproverSelection>();
@@ -831,13 +847,22 @@ public static class ChangeRequestEndpoints
                         role = (await WorkflowEndpoints.AuthoritiesAsync(db, scr.ProjectId, [account.Id], ct))
                             .GetValueOrDefault(account.Id);
                     }
-                    else
+                    else if (index < workflow.Stages.Count)
                         role = await WorkflowEndpoints.StageAuthorityAsync(db, scr.ProjectId, account.Id,
                             workflow.Stages[index].RequiredRole, ct);
+                    else
+                        role = (await WorkflowEndpoints.AuthoritiesAsync(db, scr.ProjectId, [account.Id], ct))
+                            .GetValueOrDefault(account.Id);
+                    if (workflow is not null && role is null && index < workflow.Stages.Count
+                        && await identity.HasRoleAsync(account.Id, programId, workflow.Stages[index].RequiredRole,
+                            DateTimeOffset.UtcNow, ct))
+                        role = workflow.Stages[index].RequiredRole;
+                    if (workflow is not null && role is null)
+                        return Results.BadRequest(new { error = $"{account.DisplayName} does not hold authority to sign this review." });
                     corrected.Add(new ApproverSelection(account.UserName, account.DisplayName, role));
                 }
                 var cycle = scr.CancelAndRestartForWrongApprover(actor.UserName, request.Reason, corrected, now,
-                    administratorAuthority: actor.IsAdministrator);
+                    workflow: workflow, administratorAuthority: actor.IsAdministrator);
                 foreach (var step in cycle.Steps.Where(x => x.State == ApprovalStepState.Active))
                     db.UserNotifications.Add(new(scr.ProjectId, step.ApproverId, "ReviewActivated", $"Review {scr.DisplayNumber}", $"You are now authorized to review {scr.DisplayNumber}: {scr.Title}", $"{(scr.Type == ChangeRequestType.Software ? "swcr" : "scr")}:{scr.Id}", scr.Id, now));
                 await repository.SaveAsync(ct); return Results.Ok(ApiMap.ChangeRequestDetail(scr));

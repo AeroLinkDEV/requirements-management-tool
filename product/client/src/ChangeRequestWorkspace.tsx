@@ -140,6 +140,22 @@ type ProblemReportSummary = {
 };
 type DraftRequirement = ControlledRequirementDraft;
 type Approver = { userId: string; name: string };
+type ApplicableStage = {
+  position: number;
+  name: string;
+  kind?: "Review" | "Approval";
+  requiredRole: string;
+  candidates: { userId: string; name: string; role: string }[];
+};
+type ApplicableWorkflow = {
+  required?: boolean;
+  minimum?: number;
+  allowsAdditional?: boolean;
+  name?: string;
+  version?: number;
+  mode?: string;
+  stages?: ApplicableStage[];
+};
 type EditLock = {
   id: string;
   version: number;
@@ -408,6 +424,7 @@ export default function ChangeRequestWorkspace({
   // unfiltered and the server remains authoritative. True means no workflow is configured, so only users
   // holding Approver authority can legitimately be selected.
   const [fallbackApproverOnly, setFallbackApproverOnly] = useState<boolean | null>(null);
+  const [applicableWorkflow, setApplicableWorkflow] = useState<ApplicableWorkflow | null>(null);
   const lockRef = useRef<EditLock | undefined>(undefined);
   const draftRef = useRef("");
   const lastSavedRef = useRef("");
@@ -987,14 +1004,20 @@ export default function ChangeRequestWorkspace({
     setReviewMode("Sequential");
     setMode("approvers");
     setFallbackApproverOnly(null);
+    setApplicableWorkflow(null);
     void (async () => {
       try {
         const subject = scr.type === "Software" ? "Software" : "System";
         const response = await fetch(
           `${api}/api/review-workflows/applicable?projectId=${scr.projectId}&type=${subject}`);
         if (!response.ok) return;
-        const body = (await response.json()) as { required?: boolean };
+        const body = (await response.json()) as ApplicableWorkflow;
+        setApplicableWorkflow(body);
         setFallbackApproverOnly(body.required === false);
+        if (body.required) {
+          setApprovers((body.stages ?? []).map(() => ({ userId: "", name: "" })));
+          if (body.mode === "Parallel" || body.mode === "Sequential") setReviewMode(body.mode);
+        }
       } catch {
         // Unknown stays unfiltered; the server refuses ineligible selections with a clear message.
       }
@@ -1142,15 +1165,23 @@ export default function ChangeRequestWorkspace({
             <h2>Configure review authority</h2>
             <p>Select only the people who have decision authority for this exact controlled snapshot.</p>
             <div><b>{scr.displayNumber}</b><span>{requirements.length} requirement proposal{requirements.length === 1 ? "" : "s"} ready for review</span></div>
+            {applicableWorkflow?.required && <p><b>{applicableWorkflow.name} v{applicableWorkflow.version}</b> is the active policy for this submission. Its configured rows are the minimum; extra active Program participants may be added.</p>}
           </div>
-          <div className="reviewModePicker">
-            <button type="button" className={reviewMode === "Sequential" ? "active" : ""} onClick={() => setReviewMode("Sequential")}>
-              <b>Sequential</b><span>Activate one reviewer at a time in this order.</span>
-            </button>
-            <button type="button" className={reviewMode === "Parallel" ? "active" : ""} onClick={() => setReviewMode("Parallel")}>
-              <b>Parallel</b><span>Activate all reviewers when review begins.</span>
-            </button>
-          </div>
+          {applicableWorkflow?.required ? (
+            <div className="reviewModePolicy" role="status">
+              <b>{reviewMode} review mode</b>
+              <span>Set by {applicableWorkflow.name} v{applicableWorkflow.version}; authors cannot change the active policy.</span>
+            </div>
+          ) : (
+            <div className="reviewModePicker">
+              <button type="button" className={reviewMode === "Sequential" ? "active" : ""} onClick={() => setReviewMode("Sequential")}>
+                <b>Sequential</b><span>Activate one reviewer at a time in this order.</span>
+              </button>
+              <button type="button" className={reviewMode === "Parallel" ? "active" : ""} onClick={() => setReviewMode("Parallel")}>
+                <b>Parallel</b><span>Activate all reviewers when review begins.</span>
+              </button>
+            </div>
+          )}
 
           {!approvers.length && (
             <div className="reviewerEmpty">
@@ -1161,7 +1192,20 @@ export default function ChangeRequestWorkspace({
           {approvers.map((person, index) => (
             <div className="approverRow" key={index}>
               <span>{reviewMode === "Sequential" ? index + 1 : "•"}</span>
-              <PersonPicker
+              {applicableWorkflow?.required && index < (applicableWorkflow.stages ?? []).length ? (() => {
+                const stage = applicableWorkflow.stages![index];
+                return <label className="configuredApproverSelect">
+                  <span className="srOnly">{stage.name} · {stage.kind ?? 'Review'} · {stage.requiredRole}</span>
+                  <select value={person.userId} aria-label={`${stage.name} · ${stage.kind ?? 'Review'} · ${stage.requiredRole}`} onChange={event => {
+                    const selected = stage.candidates.find(candidate => candidate.userId === event.target.value);
+                    setApprovers(items => items.map((item, position) => position === index
+                      ? { userId: event.target.value, name: selected?.name ?? "" } : item));
+                  }}>
+                    <option value="">Choose {stage.requiredRole} for {stage.name} ({stage.kind ?? 'Review'})…</option>
+                    {stage.candidates.map(candidate => <option value={candidate.userId} key={candidate.userId}>{candidate.name} · {candidate.role}</option>)}
+                  </select>
+                </label>;
+              })() : <PersonPicker
                 api={api}
                 projectId={scr.projectId}
                 value={person.userId}
@@ -1173,13 +1217,15 @@ export default function ChangeRequestWorkspace({
                     items.map((item, position) => (position === index ? selected : item)),
                   )
                 }
-              />
-              <button type="button" aria-label={`Move approver ${index + 1} up`} disabled={reviewMode === "Parallel" || index === 0} onClick={() => move(index, -1)}>↑</button>
-              <button type="button" aria-label={`Move approver ${index + 1} down`} disabled={reviewMode === "Parallel" || index === approvers.length - 1} onClick={() => move(index, 1)}>↓</button>
-              <button type="button" className="remove" onClick={() => setApprovers((items) => items.filter((_, position) => position !== index))}>Remove</button>
+              />}
+              {!(applicableWorkflow?.required && index < (applicableWorkflow.stages ?? []).length) && <>
+                <button type="button" aria-label={`Move approver ${index + 1} up`} disabled={reviewMode === "Parallel" || index <= (applicableWorkflow?.minimum ?? 0)} onClick={() => move(index, -1)}>↑</button>
+                <button type="button" aria-label={`Move approver ${index + 1} down`} disabled={reviewMode === "Parallel" || index === approvers.length - 1} onClick={() => move(index, 1)}>↓</button>
+                <button type="button" className="remove" onClick={() => setApprovers((items) => items.filter((_, position) => position !== index))}>Remove</button>
+              </>}
             </div>
           ))}
-          <button type="button" className="outline addApprover" onClick={() => setApprovers((items) => [...items, { userId: "", name: "" }])}>+ Add approver</button>
+          <button type="button" className="outline addApprover" onClick={() => setApprovers((items) => [...items, { userId: "", name: "" }])}>+ Add {applicableWorkflow?.required ? "extra signer" : "approver"}</button>
           {uniqueApprovers.size !== approvers.filter((item) => item.userId).length && (
             <div className="reviewerWarning">Each reviewer may appear only once.</div>
           )}
@@ -1187,6 +1233,12 @@ export default function ChangeRequestWorkspace({
             <div className="reviewerWarning">
               No review workflow is configured for this discipline. Only users holding Approver authority can
               review; the picker is filtered to them.
+            </div>
+          )}
+          {applicableWorkflow?.required && (
+            <div className="reviewerWarning">
+              <b>{applicableWorkflow.name} v{applicableWorkflow.version}</b> requires the configured rows above in order.
+              Additional distinct active Program participants are allowed and remain part of this review cycle.
             </div>
           )}
           <div className="snapshotNote">

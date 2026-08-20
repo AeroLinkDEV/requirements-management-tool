@@ -1007,9 +1007,12 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
             b.Property(x => x.Mode).HasConversion<string>().HasMaxLength(20);
             b.Property(x => x.State).HasConversion<string>().HasMaxLength(20);
             b.Property(x => x.CreatedBy).HasMaxLength(100).IsRequired();
-            // One active procedure per change-request type per project. Two would mean the product silently
-            // choosing which rules a review was judged by.
-            b.HasIndex(x => new { x.ProjectId, x.AppliesTo, x.State });
+            // One active procedure per change-request type per project. The filtered unique index is the final
+            // guard against two first configurations racing after both observed no active workflow. It is
+            // supported by both PostgreSQL and SQLite, the two providers used by production and tests.
+            b.HasIndex(x => new { x.ProjectId, x.AppliesTo, x.State })
+                .IsUnique()
+                .HasFilter("\"State\" = 'Active'");
             b.HasIndex(x => new { x.LogicalId, x.Version }).IsUnique();
             b.HasMany(x => x.Stages).WithOne().HasForeignKey(x => x.WorkflowId).OnDelete(DeleteBehavior.Cascade);
         });
