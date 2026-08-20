@@ -49,7 +49,13 @@ test('Problem Report lifecycle controls expose canonical states, rationale gates
   await login(page)
   await page.getByRole('link', { name: 'Problem Reports' }).click()
   await page.getByLabel('Search').fill(source.title)
-  await page.locator('.prList').getByText(source.title).click()
+  // Search is debounced and refreshes the queue asynchronously. Select the unique queue row only after
+  // the filtered result has settled; otherwise a late refresh can restore the previously selected report.
+  const sourceRow = page.locator('.prList > button').filter({ hasText: source.title })
+  await expect(sourceRow).toHaveCount(1)
+  await expect(sourceRow).toBeVisible()
+  await sourceRow.click()
+  await expect(page.locator('.prDetail h2')).toHaveText(source.title)
   await expect(page.locator('.prState')).toHaveText('Open')
 
   // Open -> Draft is a backward transition and must be explained before the server accepts it.
