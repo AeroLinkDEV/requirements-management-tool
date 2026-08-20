@@ -1740,7 +1740,9 @@
       "method": "POST",
       "path": "/api/review-workflows/{id:guid}/revise",
       "file": "WorkflowEndpoints.cs",
-      "coveredBy": []
+      "coveredBy": [
+        "ApprovalConfigurationApiTests"
+      ]
     },
     {
       "method": "POST",
@@ -2061,6 +2063,14 @@
       "file": "ManagedDocumentEndpoints.cs",
       "coveredBy": [
         "DocumentReviewCommentApiTests"
+      ]
+    },
+    {
+      "method": "PUT",
+      "path": "/api/projects/{projectId:guid}/approval-configuration/{subject}",
+      "file": "ApprovalConfigurationEndpoints.cs",
+      "coveredBy": [
+        "ApprovalConfigurationApiTests"
       ]
     },
     {

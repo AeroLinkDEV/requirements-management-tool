@@ -209,8 +209,9 @@ public sealed class ApprovalConfigurationApiTests : IClassFixture<SharedApiHost>
         var seeded = await SeedAsync(_host.Factory, [new("Initial review", ProgramRole.SystemEngineer)]);
         using var client = _host.CreateClient();
         await SignInAsync(client, seeded.ManagerName);
+        const string subject = nameof(ReviewSubject.System);
 
-        var first = await client.PutAsJsonAsync($"/api/projects/{seeded.ProjectId}/approval-configuration/System", new
+        var first = await client.PutAsJsonAsync($"/api/projects/{seeded.ProjectId}/approval-configuration/{subject}", new
         {
             stages = new[]
             {
@@ -223,7 +224,7 @@ public sealed class ApprovalConfigurationApiTests : IClassFixture<SharedApiHost>
         Assert.Equal(2, firstBody!.Version);
         Assert.Equal(2, firstBody.Stages.Length);
 
-        var second = await client.PutAsJsonAsync($"/api/projects/{seeded.ProjectId}/approval-configuration/System", new
+        var second = await client.PutAsJsonAsync($"/api/projects/{seeded.ProjectId}/approval-configuration/{subject}", new
         {
             stages = new[]
             {

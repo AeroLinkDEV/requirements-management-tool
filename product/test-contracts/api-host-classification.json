@@ -2,21 +2,21 @@
   "schemaVersion": "aerolink-api-host-classification/v3",
   "totals": {
     "classes": 91,
-    "tests": 486,
-    "knownCases": 536,
+    "tests": 493,
+    "knownCases": 543,
     "unknownCaseTests": 0
   },
   "summary": {
     "converted": {
       "classes": 19,
-      "tests": 95,
-      "knownCases": 95,
+      "tests": 100,
+      "knownCases": 100,
       "unknownCaseTests": 0
     },
     "fresh-host": {
       "classes": 41,
-      "tests": 204,
-      "knownCases": 229,
+      "tests": 205,
+      "knownCases": 230,
       "unknownCaseTests": 0
     },
     "migration-candidate": {
@@ -27,8 +27,8 @@
     },
     "reusable-host": {
       "classes": 30,
-      "tests": 186,
-      "knownCases": 211,
+      "tests": 187,
+      "knownCases": 212,
       "unknownCaseTests": 0
     }
   },
@@ -37,6 +37,19 @@
       "cls": "ProjectPersonnelApiTests",
       "tests": 13,
       "knownCases": 13,
+      "unknownCaseTests": 0,
+      "classification": "converted",
+      "reason": "Already sharing a host through the #563 pilot.",
+      "intents": [
+        "auth-policy",
+        "ef-translation",
+        "http-boundary"
+      ]
+    },
+    {
+      "cls": "ApprovalConfigurationApiTests",
+      "tests": 11,
+      "knownCases": 11,
       "unknownCaseTests": 0,
       "classification": "converted",
       "reason": "Already sharing a host through the #563 pilot.",
@@ -56,17 +69,6 @@
       "intents": [
         "ef-translation",
         "in-process-logic"
-      ]
-    },
-    {
-      "cls": "ApprovalConfigurationApiTests",
-      "tests": 6,
-      "knownCases": 6,
-      "unknownCaseTests": 0,
-      "classification": "converted",
-      "reason": "Already sharing a host through the #563 pilot.",
-      "intents": [
-        "http-boundary"
       ]
     },
     {
@@ -261,8 +263,8 @@
     },
     {
       "cls": "TestChangeRequestReviewWorkflowTests",
-      "tests": 36,
-      "knownCases": 40,
+      "tests": 37,
+      "knownCases": 41,
       "unknownCaseTests": 0,
       "classification": "fresh-host",
       "reason": "Reviewed #563 hold: this class bootstraps an empty database or workspace. A class-scoped SharedApiHost would make first-install state and fixed bootstrap identities order-dependent. Keep fresh-host until a bootstrap-once fixture and per-test workspace tagging are proven.",
@@ -993,6 +995,19 @@
       ]
     },
     {
+      "cls": "RestartReviewApiTests",
+      "tests": 4,
+      "knownCases": 4,
+      "unknownCaseTests": 0,
+      "classification": "reusable-host",
+      "reason": "Static reuse candidate, not an implementation-ready safety finding: shared-host conversion requires fresh per-test clients, unique per-test tagged logical data, and assertions scoped to that data.",
+      "intents": [
+        "auth-policy",
+        "ef-translation",
+        "http-boundary"
+      ]
+    },
+    {
       "cls": "AuthoredSectionTests",
       "tests": 3,
       "knownCases": 3,
@@ -1034,19 +1049,6 @@
       "classification": "reusable-host",
       "reason": "Static reuse candidate, not an implementation-ready safety finding: shared-host conversion requires fresh per-test clients, unique per-test tagged logical data, and assertions scoped to that data.",
       "intents": [
-        "ef-translation",
-        "http-boundary"
-      ]
-    },
-    {
-      "cls": "RestartReviewApiTests",
-      "tests": 3,
-      "knownCases": 3,
-      "unknownCaseTests": 0,
-      "classification": "reusable-host",
-      "reason": "Static reuse candidate, not an implementation-ready safety finding: shared-host conversion requires fresh per-test clients, unique per-test tagged logical data, and assertions scoped to that data.",
-      "intents": [
-        "auth-policy",
         "ef-translation",
         "http-boundary"
       ]
