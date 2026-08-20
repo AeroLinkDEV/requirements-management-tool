@@ -248,6 +248,13 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
             b.Property(x => x.State).HasConversion<string>().HasMaxLength(40);
             // Nullable: only a deferred change request has one, and rows deferred before this existed have none.
             b.Property(x => x.DeferredFromState).HasConversion<string>().HasMaxLength(40);
+            // Stored the same way as its sibling above rather than as an ordinal. Both answer "how far had it
+            // got", both are read by anyone querying the table directly, and one of them saying `Approved`
+            // while the other says `2` is a difference with no reason behind it.
+            b.Property(x => x.WithdrawnFromState).HasConversion<string>().HasMaxLength(40);
+            // Set when a build is reopened underneath a change request numbered onto a revision it took back,
+            // and cleared once the author has dealt with it. Null is the ordinary case.
+            b.Property(x => x.RebaseRequiredReason).HasMaxLength(500);
             b.Property(x => x.Type).HasConversion<string>().HasMaxLength(30);
             b.Property(x => x.SoftwareLevel).HasConversion<string>().HasMaxLength(30);
             b.Property(x => x.Version).IsConcurrencyToken();

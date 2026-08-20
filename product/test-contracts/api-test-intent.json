@@ -1,11 +1,11 @@
 {
   "schemaVersion": "aerolink-api-test-intent/v2",
   "totals": {
-    "tests": 500,
-    "cases": 550,
-    "classes": 92,
-    "hostedTests": 488,
-    "hostedCases": 529,
+    "tests": 504,
+    "cases": 554,
+    "classes": 93,
+    "hostedTests": 492,
+    "hostedCases": 533,
     "nonHostedTests": 8,
     "nonHostedCases": 17,
     "unknownHostTests": 4,
@@ -21,18 +21,18 @@
     "http-boundary": {
       "label": "HTTP boundary: route, status, JSON shape",
       "level": "API (must stay hosted)",
-      "tests": 325,
-      "cases": 360,
+      "tests": 326,
+      "cases": 361,
       "unknownCases": 0,
-      "classes": 78
+      "classes": 79
     },
     "ef-translation": {
       "label": "EF translation / relational constraints",
       "level": "Infrastructure (needs a database, not a host)",
-      "tests": 89,
-      "cases": 92,
+      "tests": 92,
+      "cases": 95,
       "unknownCases": 0,
-      "classes": 38
+      "classes": 39
     },
     "auth-policy": {
       "label": "Authentication / authorization wiring",
@@ -6054,6 +6054,77 @@
       "sourceLines": {
         "start": 77,
         "end": 87
+      }
+    },
+    {
+      "cls": "ReopenBaselineConsequencesApiTests",
+      "test": "A_procedure_written_against_taken_back_wording_returns_to_the_earlier_revision_as_suspect",
+      "kind": "Fact",
+      "intent": "ef-translation",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 207,
+        "end": 239
+      }
+    },
+    {
+      "cls": "ReopenBaselineConsequencesApiTests",
+      "test": "Dependents_are_flagged_and_a_dependent_review_is_cancelled_back_to_draft",
+      "kind": "Fact",
+      "intent": "ef-translation",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 247,
+        "end": 284
+      }
+    },
+    {
+      "cls": "ReopenBaselineConsequencesApiTests",
+      "test": "Reopening_takes_back_the_profiles_and_coverage_that_materializing_created",
+      "kind": "Fact",
+      "intent": "ef-translation",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 170,
+        "end": 197
+      }
+    },
+    {
+      "cls": "ReopenBaselineConsequencesApiTests",
+      "test": "The_preview_says_exactly_what_the_reopen_then_does",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client"
+      ],
+      "sourceLines": {
+        "start": 291,
+        "end": 325
       }
     },
     {

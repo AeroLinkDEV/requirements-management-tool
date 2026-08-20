@@ -285,6 +285,7 @@
         "ReleaseCampaignExactIntentApiTests",
         "ReleasedExecutionEvidenceApiTests",
         "RemoveRequirementChangeTests",
+        "ReopenBaselineConsequencesApiTests",
         "RequirementFilterExactnessApiTests",
         "RestartReviewApiTests",
         "ReviewCommentApiTests",
@@ -423,6 +424,7 @@
       "file": "BaselineEndpoints.cs",
       "coveredBy": [
         "ChangeAuthoringInvariantApiTests",
+        "ReopenBaselineConsequencesApiTests",
         "VerificationImpactApiTests",
         "WithdrawChangeRequestApiTests"
       ]
@@ -452,6 +454,7 @@
         "ChangeAuthoringInvariantApiTests",
         "ControlledProcedureDocumentApiTests",
         "ProcedureBaselineApiTests",
+        "ReopenBaselineConsequencesApiTests",
         "VerificationImpactApiTests",
         "WithdrawChangeRequestApiTests"
       ]
@@ -470,6 +473,7 @@
       "path": "/api/baselines/{id:guid}/reopen",
       "file": "BaselineEndpoints.cs",
       "coveredBy": [
+        "ReopenBaselineConsequencesApiTests",
         "WithdrawChangeRequestApiTests"
       ]
     },

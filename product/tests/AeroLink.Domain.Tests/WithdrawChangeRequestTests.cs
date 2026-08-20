@@ -121,6 +121,64 @@ public sealed class WithdrawChangeRequestTests
         Assert.Throws<DomainException>(() => frozen.Reopen("cm", "Again.", Now));
     }
 
+    /// <summary>
+    /// A draft written against a revision the reopen took back is flagged, not re-pointed. Its author wrote
+    /// their words against text they read, and moving them onto different text would assert they read
+    /// something they never saw.
+    /// </summary>
+    [Fact]
+    public void A_draft_stranded_by_a_reopen_is_flagged_and_left_for_its_author()
+    {
+        var scr = Reached(ChangeRequestState.Draft);
+        scr.StrandByReopenedBaseline("cm", "SW-17.00", ["SYSR-00211"], Now);
+
+        Assert.Equal(ChangeRequestState.Draft, scr.State);
+        Assert.NotNull(scr.RebaseRequiredReason);
+        Assert.Contains("SW-17.00", scr.RebaseRequiredReason);
+        Assert.Contains("SYSR-00211", scr.RebaseRequiredReason);
+        // The statement it proposes is untouched, which is what "left for its author" means.
+        Assert.Equal(2, scr.RequirementChanges.Single().Revision);
+        Assert.Contains("SW-17.00 was reopened",
+            scr.AuditEvents.Single(x => x.EventType == "ChangeRequestStrandedByReopen").Detail);
+    }
+
+    /// <summary>
+    /// The approvers were asked about a change against a revision that no longer exists, so their signatures
+    /// would describe a comparison nobody can now make. The same reasoning `Reinstate` uses.
+    /// </summary>
+    [Fact]
+    public void A_review_stranded_by_a_reopen_is_cancelled_back_to_draft()
+    {
+        var scr = Reached(ChangeRequestState.InReview);
+        scr.StrandByReopenedBaseline("cm", "SW-17.00", ["SYSR-00211"], Now);
+
+        Assert.Equal(ChangeRequestState.Draft, scr.State);
+        Assert.Null(scr.ActiveReviewCycle);
+        Assert.Contains("The review was cancelled",
+            scr.AuditEvents.Single(x => x.EventType == "ChangeRequestStrandedByReopen").Detail);
+    }
+
+    /// <summary>
+    /// The flag comes off when the author has dealt with it, and the reopen has to say what it stranded
+    /// somebody on -- a flag with no subject is a nag rather than a message.
+    /// </summary>
+    [Fact]
+    public void The_flag_names_what_it_is_about_and_clears_when_the_author_answers_it()
+    {
+        Assert.Throws<DomainException>(() =>
+            Reached(ChangeRequestState.Draft).StrandByReopenedBaseline("cm", "SW-17.00", [], Now));
+        Assert.Throws<DomainException>(() =>
+            Reached(ChangeRequestState.Draft).StrandByReopenedBaseline("cm", "  ", ["SYSR-00211"], Now));
+        // Already withdrawn, already approved: neither is waiting on a rebase, so neither is stranded.
+        Assert.Throws<DomainException>(() =>
+            Reached(ChangeRequestState.Approved).StrandByReopenedBaseline("cm", "SW-17.00", ["SYSR-00211"], Now));
+
+        var scr = Reached(ChangeRequestState.Draft);
+        scr.StrandByReopenedBaseline("cm", "SW-17.00", ["SYSR-00211"], Now);
+        scr.SubmitForReview(Author, [new("reviewer", "Reviewer")], Now);
+        Assert.Null(scr.RebaseRequiredReason);
+    }
+
     private static DateTimeOffset Now => DateTimeOffset.UtcNow;
 
     private static SystemChangeRequest Reached(ChangeRequestState reach)

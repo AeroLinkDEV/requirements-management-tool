@@ -436,6 +436,31 @@ public static class BaselineEndpoints
             catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
         });
 
+        // What reopening this build would disturb, before anybody commits to it.
+        //
+        // One withdrawal can strand several other records, so the confirmation has to say what it is about to
+        // do rather than asking for a decision the reader cannot inform. Computed by the same pass that
+        // performs the reopen, which is what stops the two describing different things: a preview assembled by
+        // its own query drifts the first time either side is changed and nothing fails while it does.
+        app.MapGet("/api/baselines/{id:guid}/reopen-preview", async (Guid id, HttpContext http,
+            IBaselineRepository repository, IdentityService identity, AeroLinkDbContext db, CancellationToken ct) =>
+        {
+            var baseline = await repository.GetAsync(id, ct); if (baseline is null) return Results.NotFound();
+            if (!await http.HasProjectRoleAsync(db, identity, baseline.ProjectId, ct, ProgramRole.ConfigurationManager)) return Results.Forbid();
+
+            var refusal = await ReopenRefusalAsync(db, baseline, ct);
+            var consequences = refusal is not null
+                ? ReopenConsequences.None
+                : await new RequirementBaselineDematerializer(db).PreviewAsync(baseline.Id, baseline.DisplayNumber, ct);
+            return Results.Ok(new
+            {
+                available = refusal is null,
+                refusal?.Error,
+                refusal?.Code,
+                consequences = ApiMap.ReopenConsequences(consequences),
+            });
+        });
+
         // The way back through the freeze, for a build that has not been released.
         //
         // Held to the same authority as freezing it. Reopening is not an author correcting their own work --
@@ -447,27 +472,22 @@ public static class BaselineEndpoints
             var baseline = await repository.GetAsync(id, ct); if (baseline is null) return Results.NotFound();
             if (!await http.HasProjectRoleAsync(db, identity, baseline.ProjectId, ct, ProgramRole.ConfigurationManager)) return Results.Forbid();
 
-            // A build sealed on top of this one derives from what this one contains. Taking these revisions
-            // back would leave the successor sealed around requirement revisions that no longer exist, so the
-            // refusal names it and the order of unsealing is the reverse of the order of sealing.
-            var successor = await db.CandidateBaselines.AsNoTracking()
-                .Where(x => x.PredecessorBaselineId == baseline.Id && x.State != CandidateBaselineState.Draft)
-                .Select(x => new { x.DisplayNumber, x.State })
-                .FirstOrDefaultAsync(ct);
-            if (successor is not null)
-                return Results.BadRequest(new
-                {
-                    error = $"{successor.DisplayNumber} was {successor.State.ToString().ToLowerInvariant()} on top of this baseline and derives from what it contains. Deal with {successor.DisplayNumber} first.",
-                    code = "successor_baseline",
-                });
+            var refusal = await ReopenRefusalAsync(db, baseline, ct);
+            if (refusal is not null) return Results.BadRequest(new { error = refusal.Error, code = refusal.Code });
             try
             {
                 // The revisions come back before the record says the build is open, so there is no moment at
                 // which the baseline reads as open while the requirements still read as sealed.
-                var taken = await new RequirementBaselineDematerializer(db).DematerializeAsync(baseline.Id, ct);
+                var consequences = await new RequirementBaselineDematerializer(db).DematerializeAsync(
+                    baseline.Id, http.UserAccount().UserName, baseline.DisplayNumber, DateTimeOffset.UtcNow, ct);
                 baseline.Reopen(http.UserAccount().UserName, request.Reason ?? "", DateTimeOffset.UtcNow);
                 await repository.SaveAsync(ct);
-                return Results.Ok(new { baseline = ApiMap.Baseline(baseline), revisionsTakenBack = taken });
+                return Results.Ok(new
+                {
+                    baseline = ApiMap.Baseline(baseline),
+                    revisionsTakenBack = consequences.RevisionCount,
+                    consequences = ApiMap.ReopenConsequences(consequences),
+                });
             }
             catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
         });
@@ -601,4 +621,35 @@ public static class BaselineEndpoints
         });
     }
 
+    private sealed record ReopenRefusal(string Error, string Code);
+
+    /// <summary>
+    /// Why this baseline cannot be reopened, or null when it can.
+    ///
+    /// Shared by the preview and the act so a reader is never offered a reopen that is going to be refused,
+    /// and never refused one the preview said was available. The state rules are the aggregate's own and are
+    /// asked here in the same order it enforces them, because a preview that threw would have to be caught and
+    /// turned back into words -- and the words are the whole point.
+    /// </summary>
+    private static async Task<ReopenRefusal?> ReopenRefusalAsync(AeroLinkDbContext db, CandidateBaseline baseline,
+        CancellationToken ct)
+    {
+        if (baseline.State == CandidateBaselineState.Released)
+            return new("A released baseline cannot be reopened. It is what the world was told the build contains.",
+                "baseline_released");
+        if (baseline.State != CandidateBaselineState.Frozen)
+            return new("Only a frozen baseline can be reopened.", "not_frozen");
+
+        // A build sealed on top of this one derives from what this one contains. Taking these revisions back
+        // would leave the successor sealed around requirement revisions that no longer exist, so the refusal
+        // names it and the order of unsealing is the reverse of the order of sealing.
+        var successor = await db.CandidateBaselines.AsNoTracking()
+            .Where(x => x.PredecessorBaselineId == baseline.Id && x.State != CandidateBaselineState.Draft)
+            .Select(x => new { x.DisplayNumber, x.State })
+            .FirstOrDefaultAsync(ct);
+        return successor is null
+            ? null
+            : new($"{successor.DisplayNumber} was {successor.State.ToString().ToLowerInvariant()} on top of this baseline and derives from what it contains. Deal with {successor.DisplayNumber} first.",
+                "successor_baseline");
+    }
 }
