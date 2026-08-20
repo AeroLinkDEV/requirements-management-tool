@@ -30,7 +30,7 @@ public sealed class ProblemReportClosureCandidateService(AeroLinkDbContext db)
         TestExecution execution, ProblemReportLink resolutionLink, string actor, DateTimeOffset now,
         CancellationToken ct)
     {
-        if (report.State != ProblemReportState.AwaitingSqaClosure
+        if (report.State != ProblemReportState.WaitingForSqaToClose
             || report.ResolutionVerificationExecutionId != execution.Id)
             throw new InvalidOperationException("The Problem Report must first accept this verification execution.");
         if (await db.ProblemReportClosureCandidates.AnyAsync(item => item.ProblemReportId == report.Id
@@ -70,15 +70,22 @@ public sealed class ProblemReportClosureCandidateService(AeroLinkDbContext db)
     }
 
     public async Task<ProblemReportClosureCandidate?> InvalidatePendingAsync(ProblemReport report,
-        string actor, string reason, DateTimeOffset now, CancellationToken ct)
+        string actor, string reason, DateTimeOffset now, CancellationToken ct,
+        ProblemReportState? fromState = null, ProblemReportState? toState = null, string? rationale = null)
     {
         var candidate = await db.ProblemReportClosureCandidates.SingleOrDefaultAsync(item =>
             item.ProblemReportId == report.Id && item.State == ProblemReportClosureCandidateState.Pending, ct);
         if (candidate is null) return null;
         candidate.Invalidate(actor, reason, now);
+        var source = ProblemReportTransitionPolicy.Canonical(fromState ?? report.State);
+        var target = ProblemReportTransitionPolicy.Canonical(toState ?? report.State);
+        var transitionRationale = rationale?.Trim();
+        if (source != target && string.IsNullOrWhiteSpace(transitionRationale))
+            transitionRationale = reason;
         db.ProblemReportRevisions.Add(new ProblemReportRevision(report.Id, report.Revision,
             "ClosureVerificationInvalidatedByChange", actor, report.CanonicalHash(),
-            ProblemReportControlledEditingAdapter.EvidenceSnapshot(report), now));
+            ProblemReportControlledEditingAdapter.EvidenceSnapshot(report), now,
+            detail: reason, fromState: source.ToString(), toState: target.ToString(), rationale: transitionRationale));
         return candidate;
     }
 
@@ -93,7 +100,7 @@ public sealed class ProblemReportClosureCandidateService(AeroLinkDbContext db)
             return ProblemReportClosureCandidateDecision.Reject("pr_closure_candidate_missing",
                 "Select valid closure verification to create an exact SQA closure candidate.");
         if (candidate.State != ProblemReportClosureCandidateState.Pending
-            || report.State != ProblemReportState.AwaitingSqaClosure
+            || report.State != ProblemReportState.WaitingForSqaToClose
             || report.ResolutionVerificationExecutionId != candidate.VerificationExecutionId)
             return ProblemReportClosureCandidateDecision.Reject("pr_closure_candidate_stale",
                 "The SQA closure candidate was invalidated by a later change. Record new verification before closure.", candidate);

@@ -55,7 +55,7 @@ public sealed class ControlledArtifactEditingTests
     [Theory]
     [InlineData("SCR", "Draft", true)]
     [InlineData("SCR", "Approved", false)]
-    [InlineData("ProblemReport", "Investigating", true)]
+    [InlineData("ProblemReport", "WaitingForSqaToClose", true)]
     [InlineData("ConfigurationChangeSet", "Conflict", true)]
     public void Lifecycle_state_eligibility_is_explicit(
         string artifactType,

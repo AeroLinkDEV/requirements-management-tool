@@ -12,7 +12,7 @@ namespace AeroLink.Api.Tests;
 public sealed class ProblemReportDuplicateDispositionApiTests
 {
     [Fact]
-    public async Task Invalid_duplicate_targets_leave_the_controlled_record_unchanged()
+    public async Task Legacy_duplicate_decisions_are_read_only_and_leave_the_controlled_record_unchanged()
     {
         using var factory = new AeroLinkApiFactory();
         using var client = factory.CreateClient();
@@ -21,11 +21,11 @@ public sealed class ProblemReportDuplicateDispositionApiTests
         var source = await CreateAsync(client, projectId, "Source anomaly");
         var crossProject = await CreateAsync(client, otherProjectId, "Other Project anomaly");
 
-        foreach (var (targetId, expectedCode) in new[]
+        foreach (var targetId in new[]
         {
-            (Guid.NewGuid(), "pr_duplicate_target_not_in_project"),
-            (crossProject.Id, "pr_duplicate_target_not_in_project"),
-            (source.Id, "pr_duplicate_self_reference"),
+            Guid.NewGuid(),
+            crossProject.Id,
+            source.Id,
         })
         {
             using var response = await client.PostAsJsonAsync($"/api/problem-reports/{source.Id}/disposition", new
@@ -36,14 +36,14 @@ public sealed class ProblemReportDuplicateDispositionApiTests
                 duplicateOfId = targetId,
             });
             Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
-            Assert.Equal(expectedCode,
+            Assert.Equal("pr_legacy_disposition_read_only",
                 (await response.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("code").GetString());
         }
 
         using (var missingTarget = await DispositionAsync(client, source.Id, source.Version, "Duplicate", null))
         {
             Assert.Equal(HttpStatusCode.BadRequest, missingTarget.StatusCode);
-            Assert.Equal("pr_duplicate_target_required",
+            Assert.Equal("pr_legacy_disposition_read_only",
                 (await missingTarget.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("code").GetString());
         }
         var sameProject = await CreateAsync(client, projectId, "Valid target not used by another disposition");
@@ -51,7 +51,7 @@ public sealed class ProblemReportDuplicateDispositionApiTests
                    "CannotReproduce", sameProject.Id))
         {
             Assert.Equal(HttpStatusCode.BadRequest, unrelatedDisposition.StatusCode);
-            Assert.Equal("pr_duplicate_target_unexpected",
+            Assert.Equal("pr_legacy_disposition_read_only",
                 (await unrelatedDisposition.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("code").GetString());
         }
 
@@ -63,7 +63,7 @@ public sealed class ProblemReportDuplicateDispositionApiTests
     }
 
     [Fact]
-    public async Task Valid_duplicate_is_atomic_resolvable_and_retained_as_history_after_reopen()
+    public async Task New_duplicate_decisions_are_rejected_while_historical_links_remain_readable()
     {
         using var factory = new AeroLinkApiFactory();
         using var client = factory.CreateClient();
@@ -72,47 +72,28 @@ public sealed class ProblemReportDuplicateDispositionApiTests
         var source = await CreateAsync(client, projectId, "Repeated navigation anomaly");
         var canonical = await CreateAsync(client, projectId, "Canonical navigation anomaly");
 
-        using var accepted = await DispositionAsync(client, source.Id, source.Version, "Duplicate", canonical.Id);
-        Assert.Equal(HttpStatusCode.OK, accepted.StatusCode);
-        var acceptedBody = await accepted.Content.ReadFromJsonAsync<JsonElement>();
-        var duplicateVersion = acceptedBody.GetProperty("version").GetInt64();
-        Assert.Equal("Duplicate", acceptedBody.GetProperty("state").GetString());
+        using var refused = await DispositionAsync(client, source.Id, source.Version, "Duplicate", canonical.Id);
+        Assert.Equal(HttpStatusCode.BadRequest, refused.StatusCode);
+        Assert.Equal("pr_legacy_disposition_read_only",
+            (await refused.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("code").GetString());
 
-        var duplicate = await client.GetFromJsonAsync<JsonElement>($"/api/problem-reports/{source.Id}");
-        var link = Assert.Single(duplicate.GetProperty("links").EnumerateArray());
-        Assert.Equal(ProblemReportRelationshipPolicy.DuplicateOf, link.GetProperty("relationship").GetString());
-        Assert.Equal(canonical.Id, link.GetProperty("artifactId").GetGuid());
-        Assert.False(string.IsNullOrWhiteSpace(link.GetProperty("identifier").GetString()));
-        var diagnostic = duplicate.GetProperty("duplicateDiagnostic");
-        Assert.Equal(ProblemReportDuplicateDispositionPolicy.PolicyName, diagnostic.GetProperty("policy").GetString());
-        Assert.Equal("Valid", diagnostic.GetProperty("status").GetString());
-        Assert.Equal(canonical.Id, diagnostic.GetProperty("canonicalTargetId").GetGuid());
-        Assert.Equal(2, duplicate.GetProperty("revisions").GetArrayLength());
+        var unchanged = await client.GetFromJsonAsync<JsonElement>($"/api/problem-reports/{source.Id}");
+        Assert.Equal("Draft", unchanged.GetProperty("state").GetString());
+        Assert.Equal(source.Version, unchanged.GetProperty("version").GetInt64());
+        Assert.Empty(unchanged.GetProperty("links").EnumerateArray());
+        Assert.Equal("None", unchanged.GetProperty("duplicateDiagnostic").GetProperty("status").GetString());
 
-        using var reopened = await client.PostAsJsonAsync($"/api/problem-reports/{source.Id}/reopen", new
+        // The historical diagnostic surface remains available even though new duplicate mutations are closed.
+        using var reopenAttempt = await client.PostAsJsonAsync($"/api/problem-reports/{source.Id}/reopen", new
         {
-            expectedVersion = duplicateVersion,
+            expectedVersion = source.Version,
             rationale = "New observations require another controlled investigation.",
         });
-        Assert.Equal(HttpStatusCode.OK, reopened.StatusCode);
-        var reopenedVersion = (await reopened.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("version").GetInt64();
-        var reopenedDetail = await client.GetFromJsonAsync<JsonElement>($"/api/problem-reports/{source.Id}");
-        Assert.Equal("Open", reopenedDetail.GetProperty("state").GetString());
-        Assert.Single(reopenedDetail.GetProperty("links").EnumerateArray());
-        Assert.Equal("Historical", reopenedDetail.GetProperty("duplicateDiagnostic").GetProperty("status").GetString());
-
-        var competing = await CreateAsync(client, projectId, "Competing canonical anomaly");
-        using var refused = await DispositionAsync(client, source.Id, reopenedVersion, "Duplicate", competing.Id);
-        Assert.Equal(HttpStatusCode.BadRequest, refused.StatusCode);
-        Assert.Equal("pr_duplicate_history_already_exists",
-            (await refused.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("code").GetString());
-        var unchanged = await client.GetFromJsonAsync<JsonElement>($"/api/problem-reports/{source.Id}");
-        Assert.Equal(reopenedVersion, unchanged.GetProperty("version").GetInt64());
-        Assert.Single(unchanged.GetProperty("links").EnumerateArray());
+        Assert.Equal(HttpStatusCode.BadRequest, reopenAttempt.StatusCode);
     }
 
     [Fact]
-    public async Task Canonical_root_policy_refuses_direct_and_transitive_cycles_and_arbitrary_chains()
+    public async Task Canonical_duplicate_mutations_are_closed_while_new_records_remain_unchanged()
     {
         using var factory = new AeroLinkApiFactory();
         using var client = factory.CreateClient();
@@ -122,43 +103,21 @@ public sealed class ProblemReportDuplicateDispositionApiTests
         var b = await CreateAsync(client, projectId, "Anomaly B");
         var c = await CreateAsync(client, projectId, "Anomaly C");
 
-        using (var accepted = await DispositionAsync(client, a.Id, a.Version, "Duplicate", b.Id))
-            Assert.Equal(HttpStatusCode.OK, accepted.StatusCode);
-
-        using (var directCycle = await DispositionAsync(client, b.Id, b.Version, "Duplicate", a.Id))
+        foreach (var (source, target) in new[] { (a, b), (b, a), (b, c), (c, a) })
         {
-            Assert.Equal(HttpStatusCode.BadRequest, directCycle.StatusCode);
-            Assert.Equal("pr_duplicate_cycle",
-                (await directCycle.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("code").GetString());
-        }
-        using (var chain = await DispositionAsync(client, b.Id, b.Version, "Duplicate", c.Id))
-        {
-            Assert.Equal(HttpStatusCode.BadRequest, chain.StatusCode);
-            Assert.Equal("pr_duplicate_source_is_canonical",
-                (await chain.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("code").GetString());
+            using var refused = await DispositionAsync(client, source.Id, source.Version, "Duplicate", target.Id);
+            Assert.Equal(HttpStatusCode.BadRequest, refused.StatusCode);
+            Assert.Equal("pr_legacy_disposition_read_only",
+                (await refused.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("code").GetString());
         }
 
-        // Model a retained A -> B -> C chain from before the canonical-root policy. It stays readable but C -> A
-        // must still be refused because walking the legacy path reaches the source.
-        using (var scope = factory.Services.CreateScope())
+        foreach (var report in new[] { a, b, c })
         {
-            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
-            var storedB = await db.ProblemReports.SingleAsync(item => item.Id == b.Id);
-            storedB.ApplyDisposition("admin", ProblemReportDisposition.Duplicate,
-                "Legacy chain fixture.", c.Id, DateTimeOffset.UtcNow);
-            db.ProblemReportLinks.Add(new ProblemReportLink(b.Id, "ProblemReport", c.Id,
-                ProblemReportRelationshipPolicy.DuplicateOf, "legacy.fixture", DateTimeOffset.UtcNow));
-            await db.SaveChangesAsync();
+            var unchanged = await client.GetFromJsonAsync<JsonElement>($"/api/problem-reports/{report.Id}");
+            Assert.Equal("Draft", unchanged.GetProperty("state").GetString());
+            Assert.Equal(report.Version, unchanged.GetProperty("version").GetInt64());
+            Assert.Empty(unchanged.GetProperty("links").EnumerateArray());
         }
-
-        using var transitiveCycle = await DispositionAsync(client, c.Id, c.Version, "Duplicate", a.Id);
-        Assert.Equal(HttpStatusCode.BadRequest, transitiveCycle.StatusCode);
-        Assert.Equal("pr_duplicate_cycle",
-            (await transitiveCycle.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("code").GetString());
-        var unchangedC = await client.GetFromJsonAsync<JsonElement>($"/api/problem-reports/{c.Id}");
-        Assert.Equal("Draft", unchangedC.GetProperty("state").GetString());
-        Assert.Equal(c.Version, unchangedC.GetProperty("version").GetInt64());
-        Assert.Empty(unchangedC.GetProperty("links").EnumerateArray());
     }
 
     [Fact]
@@ -206,7 +165,7 @@ public sealed class ProblemReportDuplicateDispositionApiTests
     }
 
     [Fact]
-    public async Task Stale_and_simultaneous_dispositions_never_persist_competing_targets()
+    public async Task Stale_and_simultaneous_legacy_duplicate_requests_never_mutate_the_record()
     {
         using var factory = new AeroLinkApiFactory();
         using var client = factory.CreateClient();
@@ -224,8 +183,10 @@ public sealed class ProblemReportDuplicateDispositionApiTests
             DispositionAsync(client, source.Id, source.Version, "Duplicate", secondTarget.Id));
         try
         {
-            Assert.Single(responses, response => response.StatusCode == HttpStatusCode.OK);
-            Assert.Single(responses, response => response.StatusCode == HttpStatusCode.Conflict);
+            Assert.All(responses, response => Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode));
+            foreach (var response in responses)
+                Assert.Equal("pr_legacy_disposition_read_only",
+                    (await response.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("code").GetString());
         }
         finally
         {
@@ -233,10 +194,10 @@ public sealed class ProblemReportDuplicateDispositionApiTests
         }
 
         var detail = await client.GetFromJsonAsync<JsonElement>($"/api/problem-reports/{source.Id}");
-        Assert.Equal("Duplicate", detail.GetProperty("state").GetString());
-        Assert.Single(detail.GetProperty("links").EnumerateArray());
-        Assert.Equal(2, detail.GetProperty("revisions").GetArrayLength());
-        Assert.Equal("Valid", detail.GetProperty("duplicateDiagnostic").GetProperty("status").GetString());
+        Assert.Equal("Draft", detail.GetProperty("state").GetString());
+        Assert.Empty(detail.GetProperty("links").EnumerateArray());
+        Assert.Single(detail.GetProperty("revisions").EnumerateArray());
+        Assert.Equal("None", detail.GetProperty("duplicateDiagnostic").GetProperty("status").GetString());
     }
 
     private static async Task<(Guid ProjectId, Guid OtherProjectId)> SeedProjectsAsync(AeroLinkApiFactory factory)

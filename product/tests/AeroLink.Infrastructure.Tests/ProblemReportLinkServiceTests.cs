@@ -12,7 +12,7 @@ namespace AeroLink.Infrastructure.Tests;
 public sealed class ProblemReportLinkServiceTests
 {
     [Fact]
-    public async Task Removing_the_only_draft_correction_reverts_its_automatic_implementation_state()
+    public async Task Linking_or_removing_a_draft_correction_does_not_change_problem_report_state()
     {
         var path = Path.Combine(Path.GetTempPath(), $"aerolink-pr-link-reconcile-{Guid.NewGuid():N}.db");
         var options = new DbContextOptionsBuilder<AeroLinkDbContext>()
@@ -40,26 +40,14 @@ public sealed class ProblemReportLinkServiceTests
             var service = new ProblemReportLinkService(db);
             await service.ReplaceDraftChangeRequestLinksAsync(change, [report.Id], "engineer", now.AddMinutes(3), default);
             await db.SaveChangesAsync();
-            Assert.Equal(ProblemReportState.Implementing, report.State);
+            Assert.Equal(ProblemReportState.Open, report.State);
 
             await service.ReplaceDraftChangeRequestLinksAsync(change, [], "engineer", now.AddMinutes(4), default);
             await db.SaveChangesAsync();
 
             Assert.Equal(ProblemReportState.Open, report.State);
-            var revisions = (await db.ProblemReportRevisions.Where(item => item.ProblemReportId == report.Id)
-                .ToListAsync()).OrderBy(item => item.OccurredAt).ToList();
-            Assert.Equal(new[]
-            {
-                "ImplementationStartedByLinkedChangeRequest",
-                "ImplementationRevertedAfterDraftCorrectiveActionRemoved",
-            }, revisions.Select(item => item.EventType));
-            Assert.All(revisions, item =>
-            {
-                Assert.Equal(1, item.EventSchemaVersion);
-                Assert.Contains(change.Id.ToString(), item.Detail);
-                Assert.Contains(change.DisplayNumber, item.Detail);
-                Assert.False(string.IsNullOrWhiteSpace(item.EvidenceJson));
-            });
+            Assert.Empty(await db.ProblemReportRevisions.Where(item => item.ProblemReportId == report.Id)
+                .ToListAsync());
         }
         finally
         {
@@ -120,7 +108,7 @@ public sealed class ProblemReportLinkServiceTests
             await db.SaveChangesAsync();
             await service.ReplaceDraftChangeRequestLinksAsync(first, [], "engineer", now.AddMinutes(6), default);
             await db.SaveChangesAsync();
-            Assert.Equal(ProblemReportState.Implementing, multiple.State);
+            Assert.Equal(ProblemReportState.Open, multiple.State);
             var versionBeforeNoOp = multiple.Version;
             var historyBeforeNoOp = await db.ProblemReportRevisions.CountAsync(item => item.ProblemReportId == multiple.Id);
             await service.ReplaceDraftChangeRequestLinksAsync(second, [multiple.Id], "engineer", now.AddMinutes(7), default);
@@ -153,7 +141,7 @@ public sealed class ProblemReportLinkServiceTests
             await db.SaveChangesAsync();
             await service.ReplaceDraftChangeRequestLinksAsync(draftWithApproval, [], "engineer", now.AddMinutes(15), default);
             await db.SaveChangesAsync();
-            Assert.Equal(ProblemReportState.Implementing, approved.State);
+            Assert.Equal(ProblemReportState.Open, approved.State);
             Assert.Contains(await db.ProblemReportLinks.Where(item => item.ProblemReportId == approved.Id).ToListAsync(),
                 item => item.Relationship == ProblemReportRelationshipPolicy.ApprovedCorrectiveAction);
         }
@@ -254,7 +242,7 @@ public sealed class ProblemReportLinkServiceTests
     }
 
     [Fact]
-    public async Task A_controlled_corrective_link_change_invalidates_the_pending_closure_candidate_atomically()
+    public async Task A_controlled_corrective_link_change_invalidates_the_pending_closure_candidate_without_changing_lifecycle_state()
     {
         var path = Path.Combine(Path.GetTempPath(), $"aerolink-pr-closure-link-{Guid.NewGuid():N}.db");
         var options = new DbContextOptionsBuilder<AeroLinkDbContext>()
@@ -288,8 +276,8 @@ public sealed class ProblemReportLinkServiceTests
                 "change.engineer", now.AddMinutes(6), default);
             await db.SaveChangesAsync();
 
-            Assert.Equal(ProblemReportState.Verifying, report.State);
-            Assert.Null(report.ResolutionVerificationExecutionId);
+            Assert.Equal(ProblemReportState.WaitingForSqaToClose, report.State);
+            Assert.Equal(executionId, report.ResolutionVerificationExecutionId);
             Assert.Equal(ProblemReportClosureCandidateState.Invalidated, candidate.State);
             Assert.Equal("ProposedCorrectiveActionLinked", candidate.InvalidationReason);
             Assert.Single(await db.ProblemReportRevisions.Where(item => item.ProblemReportId == report.Id

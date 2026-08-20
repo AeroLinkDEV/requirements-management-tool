@@ -267,6 +267,7 @@
         "PreReleaseEvidenceVisibilityTests",
         "ProblemReportActiveMetricApiTests",
         "ProblemReportApiTests",
+        "ProblemReportCheckoutApiTests",
         "ProblemReportOwnerAuthorityApiTests",
         "ProblemReportPagingApiTests",
         "ProblemReportVerificationApiTests",
@@ -1324,7 +1325,7 @@
       "path": "/api/problem-reports/{id:guid}/implementation",
       "file": "ProblemReportEndpoints.cs",
       "coveredBy": [
-        "ProblemReportVerificationApiTests"
+        "ProblemReportApiTests"
       ]
     },
     {
@@ -1360,7 +1361,6 @@
         "BuildScopedWorkspaceApiTests",
         "ProblemReportApiTests",
         "ProblemReportCheckoutApiTests",
-        "ProblemReportDispositionApiTests",
         "ProblemReportOwnerAuthorityApiTests"
       ]
     },
@@ -1412,8 +1412,7 @@
       "file": "ProblemReportEndpoints.cs",
       "coveredBy": [
         "ProblemReportApiTests",
-        "ProblemReportCheckoutApiTests",
-        "ProblemReportDispositionApiTests"
+        "ProblemReportCheckoutApiTests"
       ]
     },
     {
@@ -1421,6 +1420,15 @@
       "path": "/api/problem-reports/{id:guid}/target-build",
       "file": "ProblemReportEndpoints.cs",
       "coveredBy": [
+        "ProblemReportVerificationApiTests"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/problem-reports/{id:guid}/transition",
+      "file": "ProblemReportEndpoints.cs",
+      "coveredBy": [
+        "ProblemReportApiTests",
         "ProblemReportVerificationApiTests"
       ]
     },

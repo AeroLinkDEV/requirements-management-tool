@@ -61,10 +61,24 @@ async function raiseReport(page: Page, projectId: string, releaseId: string, sco
     report.version = (await linked.json()).version;
   }
 
-  // Advance to the state whose call to action is the one under test.
+  // Ready -> Open is SCCB-gated. The browser starts this fixture as admin so that creation/linking and
+  // the ordinary investigation/resolution actions remain deterministic, but administrators deliberately
+  // do not satisfy the opening-authority list.
+  for (const [path, body] of [["ready-for-sccb", {}]] as const) {
+    const response = await page.request.post(`${apiBase}/api/problem-reports/${report.id}/${path}`, {
+      data: { expectedVersion: report.version, ...body },
+    });
+    expect(response.ok(), `${path} on the ${scope} report: ${response.status()}`).toBe(true);
+    report = await response.json();
+  }
+  await apiLogin(page.request, "systems.lead");
+  const opened = await page.request.post(`${apiBase}/api/problem-reports/${report.id}/sccb/open`, {
+    data: { expectedVersion: report.version },
+  });
+  expect(opened.ok(), `sccb/open on the ${scope} report: ${opened.status()}`).toBe(true);
+  report = await opened.json();
+  await apiLogin(page.request, "admin");
   for (const [path, body] of [
-    ["ready-for-sccb", {}],
-    ["sccb/open", {}],
     ["investigation", { analysis: "Root cause identified in the corrective routing fixture." }],
     ["resolution", { correctiveAction: "Re-run the procedure once the correction is in place." }],
   ] as const) {
@@ -176,7 +190,7 @@ test("a corrective action opens Test Results, names the report, and survives a r
   await expect(page.getByText(/selected as PR closure evidence/)).toBeVisible({ timeout: 30_000 })
 
   const detail = await (await page.request.get(`${apiBase}/api/problem-reports/${raised.report.id}`)).json()
-  expect(detail.state).toBe('AwaitingSqaClosure')
+  expect(detail.state).toBe('WaitingForSqaToClose')
   expect(detail.testEvidence).toHaveLength(1)
   expect(detail.testEvidence[0].artifactId).toBe(detail.resolutionVerificationExecutionId)
 
@@ -184,7 +198,7 @@ test("a corrective action opens Test Results, names the report, and survives a r
   // why, removes the SQA action, and retains the first selection only as history.
   const reportAddress = new URL(`${root}/problem-reports/${raised.report.id}`, page.url()).toString()
   await page.goto(reportAddress, { waitUntil: 'load' })
-  await expect(page.locator('.prState')).toHaveText('Awaiting SQA Closure', { timeout: 30_000 })
+  await expect(page.locator('.prState')).toHaveText('Waiting for SQA to Close', { timeout: 30_000 })
   await page.getByRole('button', { name: 'Check out & edit' }).click()
   const editor = page.getByRole('dialog', { name: /^Edit PR-/ })
   await editor.getByLabel('Corrective-action narrative').fill('The corrected scheduler and guard are both required before closure.')
@@ -194,7 +208,7 @@ test("a corrective action opens Test Results, names the report, and survives a r
   await expect(page.locator('.prState')).toHaveText('Verifying')
   await expect(page.getByRole('status')).toContainText('Closure verification invalidated')
   await expect(page.getByRole('status')).toContainText('Record a new passing successor result')
-  await expect(page.getByRole('button', { name: /Approve independent SQA closure/ })).toHaveCount(0)
+  await expect(page.getByRole('button', { name: /Close Problem Report/ })).toHaveCount(0)
   await page.getByRole('button', { name: /History/ }).click()
   await expect(page.locator('.prTimeline').getByText('Closure Verification Invalidated By Change')).toBeVisible()
 
@@ -228,8 +242,8 @@ test("a corrective action opens Test Results, names the report, and survives a r
     await login(page, userName, { openProject: false })
     await selectProgram(page, 'Flight Management System Live Program')
     await page.goto(reportAddress, { waitUntil: 'load' })
-    await expect(page.locator('.prState')).toHaveText('Awaiting SQA Closure', { timeout: 30_000 })
-    await expect(page.getByRole('button', { name: /Approve independent SQA closure/ })).toHaveCount(0)
+    await expect(page.locator('.prState')).toHaveText('Waiting for SQA to Close', { timeout: 30_000 })
+    await expect(page.getByRole('button', { name: /Close Problem Report/ })).toHaveCount(0)
     await expect(page.getByText('Approve independent release waiver')).toHaveCount(userName === 'systems.reviewer' ? 0 : 1)
   }
 
@@ -237,12 +251,12 @@ test("a corrective action opens Test Results, names the report, and survives a r
   await login(page, 'quality.analyst', { openProject: false })
   await selectProgram(page, 'Flight Management System Live Program')
   await page.goto(reportAddress, { waitUntil: 'load' })
-  await expect(page.locator('.prState')).toHaveText('Awaiting SQA Closure', { timeout: 30_000 })
-  await page.getByRole('button', { name: /Approve independent SQA closure/ }).click()
+  await expect(page.locator('.prState')).toHaveText('Waiting for SQA to Close', { timeout: 30_000 })
+  await page.getByRole('button', { name: /Close Problem Report/ }).click()
   await expect(page.locator('.prState')).toHaveText('Closed')
   await page.getByRole('button', { name: /History/ }).click()
   await expect(page.locator('.prTimeline').getByText('Closure Verification Invalidated By Change')).toBeVisible()
-  await expect(page.locator('.prTimeline').getByText('Closure Approved')).toBeVisible()
+  await expect(page.locator('.prTimeline').getByText('Problem Report Transitioned To Closed')).toBeVisible()
   const packageCard = page.locator('.prClosurePackages article').filter({ hasText: 'Closure revision 0' })
   await expect(packageCard).toContainText('Marcus Hale')
   await expect(packageCard).toContainText('Software Quality Analyst')
@@ -260,7 +274,8 @@ test("a corrective action opens Test Results, names the report, and survives a r
 
   // Reopening begins a new controlled revision without erasing or relabeling the prior package.
   await page.context().clearCookies()
-  await login(page, 'test.engineer', { openProject: false })
+  // Closed -> Verifying is a live SQA-only reopening edge in the canonical lifecycle.
+  await login(page, 'quality.analyst', { openProject: false })
   await selectProgram(page, 'Flight Management System Live Program')
   const closedDetail = await (await page.request.get(`${apiBase}/api/problem-reports/${raised.report.id}`)).json()
   const reopened = await page.request.post(`${apiBase}/api/problem-reports/${raised.report.id}/reopen`, {
@@ -268,7 +283,7 @@ test("a corrective action opens Test Results, names the report, and survives a r
   })
   expect(reopened.ok(), await reopened.text()).toBeTruthy()
   await page.goto(reportAddress, { waitUntil: 'load' })
-  await expect(page.locator('.prState')).toHaveText('Open', { timeout: 30_000 })
+  await expect(page.locator('.prState')).toHaveText('Verifying', { timeout: 30_000 })
   await page.getByRole('button', { name: /History/ }).click()
   await expect(page.locator('.prClosurePackages')).toContainText('Closure revision 0 · prior closure cycle')
   await expect(page.locator('.prClosurePackages')).toContainText(frozen.snapshot.closurePackageHash.slice(0, 12))

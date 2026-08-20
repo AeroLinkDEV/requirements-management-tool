@@ -1,7 +1,7 @@
 import { expect, test } from '@playwright/test'
 import { apiBase, apiLogin, login, selectProgram } from './auth'
 
-test('a PR drives a change request and can be added to a System TCR through the active center', async ({ page, request }) => {
+test('a PR links to change requests and System TCRs without changing its lifecycle state', async ({ page, request }) => {
   test.setTimeout(240_000)
   await apiLogin(request)
   await login(page, 'admin', { openProject: false })
@@ -22,10 +22,12 @@ test('a PR drives a change request and can be added to a System TCR through the 
     data: { expectedVersion: report.version },
   })
   expect(ready.ok(), await ready.text()).toBeTruthy()
-  const opened = await page.request.post(`${apiBase}/api/problem-reports/${report.id}/sccb/open`, {
-    data: { expectedVersion: (await ready.json()).version },
+  await apiLogin(request, 'systems.lead')
+  const opened = await request.post(`${apiBase}/api/problem-reports/${report.id}/transition`, {
+    data: { expectedVersion: (await ready.json()).version, targetState: 'Open' },
   })
   expect(opened.ok(), await opened.text()).toBeTruthy()
+  await apiLogin(request)
 
   await page.goto(new URL(`${root}/systems/change-requests/new`, page.url()).toString(), { waitUntil: 'load' })
   await expect(page.getByRole('heading', { name: 'Create System Change Request' })).toBeVisible({ timeout: 30_000 })
@@ -104,8 +106,8 @@ test('a PR drives a change request and can be added to a System TCR through the 
   await expect(page.getByText('Proposed Corrective Action')).toBeVisible()
   await expect(page.getByText('Verification For Problem')).toBeVisible()
 
-  const implementing = await (await page.request.get(`${apiBase}/api/problem-reports/${report.id}`)).json()
-  expect(implementing.state).toBe('Implementing')
+  const linkedState = await (await page.request.get(`${apiBase}/api/problem-reports/${report.id}`)).json()
+  expect(linkedState.state).toBe('Open')
   await page.goto(new URL(`${root}/systems/change-requests/${changeRequestId}`, page.url()).toString(), { waitUntil: 'load' })
   await page.getByRole('button', { name: 'Check out & edit' }).click()
   const drivingReport = page.getByRole('checkbox', { name: new RegExp(report.displayNumber.replace('.', '\\.')) })
@@ -120,8 +122,6 @@ test('a PR drives a change request and can be added to a System TCR through the 
   await expect(page.getByText('Proposed Corrective Action')).toHaveCount(0)
   await page.getByRole('button', { name: /History/ }).click()
   const history = page.locator('.prTimeline')
-  await expect(history.getByText('Implementation Started By Linked Change Request')).toBeVisible()
-  const reverted = history.locator('article').filter({ hasText: 'Implementation Reverted After Draft Corrective Action Removed' })
-  await expect(reverted).toContainText(change.displayNumber)
-  await expect(reverted).toContainText(changeRequestId)
+  await expect(history.getByText('Implementation Started By Linked Change Request')).toHaveCount(0)
+  await expect(history.getByText('Implementation Reverted After Draft Corrective Action Removed')).toHaveCount(0)
 })

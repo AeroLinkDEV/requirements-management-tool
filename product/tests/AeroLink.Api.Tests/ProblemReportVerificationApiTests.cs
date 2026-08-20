@@ -60,8 +60,8 @@ public sealed class ProblemReportVerificationApiTests
 
         var wrongProcedure = Execution(project.Id, otherRevision.Id, targetBuild.Id, originFailure.Id, TestOutcome.Pass, start.AddMinutes(10), targetRelease.Id);
         var noRetest = Execution(project.Id, targetRevision.Id, targetBuild.Id, null, TestOutcome.Pass, start.AddMinutes(10), targetRelease.Id);
-        // Simulates an Awaiting-SQA record produced by the historical weak endpoint. Closure must revalidate
-        // it instead of trusting state alone.
+        // Simulates a legacy waiting record with no valid candidate. The canonical lifecycle permits closure
+        // without fabricating a package when no current evidence candidate exists.
         manual.RecordResolutionVerification("admin", noRetest.Id, start.AddMinutes(11));
         var historical = Execution(project.Id, targetRevision.Id, targetBuild.Id, originFailure.Id, TestOutcome.Pass, start.AddMinutes(4), targetRelease.Id);
         var equalCorrectionTime = Execution(project.Id, targetRevision.Id, targetBuild.Id, originFailure.Id, TestOutcome.Pass, start.AddMinutes(5), targetRelease.Id);
@@ -134,9 +134,8 @@ public sealed class ProblemReportVerificationApiTests
             expectedVersion = fixture.ManualReportVersion
         }))
         {
-            Assert.Equal(HttpStatusCode.Conflict, closure.StatusCode);
-            Assert.Equal("pr_verification_scope_unknown",
-                (await closure.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("code").GetString());
+            Assert.Equal(HttpStatusCode.OK, closure.StatusCode);
+            Assert.Equal("Closed", (await closure.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("state").GetString());
         }
 
         var corrective = await client.GetFromJsonAsync<JsonElement>($"/api/problem-reports/{fixture.ReportId}/corrective-action");
@@ -203,7 +202,7 @@ public sealed class ProblemReportVerificationApiTests
             expectedVersion = fixture.ReportVersion, testExecutionId = executionId
         });
         Assert.Equal(HttpStatusCode.OK, accepted.StatusCode);
-        Assert.Equal("AwaitingSqaClosure", (await accepted.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("state").GetString());
+        Assert.Equal("WaitingForSqaToClose", (await accepted.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("state").GetString());
 
         using var scope = factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
@@ -230,7 +229,7 @@ public sealed class ProblemReportVerificationApiTests
             testExecutionId = fixture.EqualCorrectionTimeExecutionId,
         });
         Assert.Equal(HttpStatusCode.OK, equal.StatusCode);
-        Assert.Equal("AwaitingSqaClosure",
+        Assert.Equal("WaitingForSqaToClose",
             (await equal.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("state").GetString());
 
         // The gate compares server recording instants. A client-reported time earlier than the corrective
@@ -262,7 +261,7 @@ public sealed class ProblemReportVerificationApiTests
             testExecutionId = lateRecordedId,
         });
         Assert.Equal(HttpStatusCode.OK, lateVerify.StatusCode);
-        Assert.Equal("AwaitingSqaClosure",
+        Assert.Equal("WaitingForSqaToClose",
             (await lateVerify.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("state").GetString());
     }
 
@@ -324,14 +323,15 @@ public sealed class ProblemReportVerificationApiTests
             new { expectedVersion = first.ReportVersion }))
         {
             Assert.Equal(HttpStatusCode.Conflict, staleClosure.StatusCode);
-            Assert.Equal("pr_closure_candidate_stale",
+            Assert.Equal("stale_version",
                 (await staleClosure.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("code").GetString());
         }
 
         var second = await SelectCandidateAsync(engineer, fixture, fixture.TargetBuildId, targetReleaseId: null);
         using var closed = await quality.PostAsJsonAsync($"/api/problem-reports/{fixture.ReportId}/closure/approve",
             new { expectedVersion = second.ReportVersion });
-        Assert.Equal(HttpStatusCode.OK, closed.StatusCode);
+        var closedBody = await closed.Content.ReadAsStringAsync();
+        Assert.True(closed.StatusCode == HttpStatusCode.OK, $"{closed.StatusCode}: {closedBody}");
         var final = await engineer.GetFromJsonAsync<JsonElement>($"/api/problem-reports/{fixture.ReportId}");
         Assert.Equal("Closed", final.GetProperty("state").GetString());
         var cycles = final.GetProperty("closureCandidates").EnumerateArray().ToList();
@@ -382,12 +382,17 @@ public sealed class ProblemReportVerificationApiTests
         Assert.Equal(firstPackageHash, repeated.GetProperty("snapshot").GetProperty("closurePackageHash").GetString());
         Assert.Equal(frozenPackage, repeated.GetProperty("package").GetRawText());
 
-        using var reopened = await engineer.PostAsJsonAsync($"/api/problem-reports/{fixture.ReportId}/reopen",
+        using var reopened = await quality.PostAsJsonAsync($"/api/problem-reports/{fixture.ReportId}/reopen",
             new { expectedVersion = final.GetProperty("version").GetInt64(), rationale = "A field report requires a second controlled closure cycle." });
         Assert.Equal(HttpStatusCode.OK, reopened.StatusCode);
         var reopenVersion = (await reopened.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("version").GetInt64();
-        using var implementing = await engineer.PostAsJsonAsync($"/api/problem-reports/{fixture.ReportId}/implementation",
-            new { expectedVersion = reopenVersion });
+        using var implementing = await engineer.PostAsJsonAsync($"/api/problem-reports/{fixture.ReportId}/transition",
+            new
+            {
+                expectedVersion = reopenVersion,
+                targetState = "Implementing",
+                rationale = "The follow-on field report requires another implementation cycle."
+            });
         Assert.Equal(HttpStatusCode.OK, implementing.StatusCode);
         var implementingVersion = (await implementing.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("version").GetInt64();
         using var resolution = await engineer.PostAsJsonAsync($"/api/problem-reports/{fixture.ReportId}/resolution",
@@ -602,7 +607,7 @@ public sealed class ProblemReportVerificationApiTests
         Assert.False(detail.GetProperty("capabilities").GetProperty("canApproveSqaClosure").GetBoolean());
         using var response = await quality.PostAsJsonAsync($"/api/problem-reports/{fixture.ReportId}/closure/approve",
             new { expectedVersion = candidate.ReportVersion });
-        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
     }
 
     private static async Task<(Guid ExecutionId, long ReportVersion)> SelectCandidateAsync(HttpClient client,

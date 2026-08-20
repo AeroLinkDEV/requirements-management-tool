@@ -13,6 +13,13 @@ let cachedShowcase: ShowcaseSeed | undefined
 
 export async function login(page:Page,userName='admin',options:{openProject?:boolean}={}){
   await page.goto('/')
+  // A journey may change users without creating a new BrowserContext. The shell redirects an already
+  // authenticated session straight to Projects, so clear that session before looking for the login form.
+  const signOut=page.getByRole('button',{name:'Sign out'})
+  if(await signOut.isVisible().catch(()=>false)){
+    await signOut.click()
+    await expect(page.getByLabel('Username')).toBeVisible()
+  }
   await page.getByLabel('Username').fill(userName)
   await page.getByLabel('Password').fill('AeroLink!2026')
   await page.getByRole('button',{name:/Sign in securely/}).click()

@@ -113,7 +113,7 @@ public static class ProblemReportEvidenceContract
         WaiverRationale = report.WaiverRationale,
         WaivedBy = report.WaivedBy,
         WaivedAt = report.WaivedAt,
-        State = report.State.ToString(),
+        State = ProblemReportTransitionPolicy.Canonical(report.State).ToString(),
         CreatedAt = report.CreatedAt,
         UpdatedAt = report.UpdatedAt,
         Version = versionOverride ?? report.Version,

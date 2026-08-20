@@ -1,11 +1,11 @@
 {
   "schemaVersion": "aerolink-api-test-intent/v2",
   "totals": {
-    "tests": 506,
-    "cases": 556,
+    "tests": 508,
+    "cases": 558,
     "classes": 93,
-    "hostedTests": 494,
-    "hostedCases": 535,
+    "hostedTests": 496,
+    "hostedCases": 537,
     "nonHostedTests": 8,
     "nonHostedCases": 17,
     "unknownHostTests": 4,
@@ -22,7 +22,7 @@
       "label": "HTTP boundary: route, status, JSON shape",
       "level": "API (must stay hosted)",
       "tests": 326,
-      "cases": 361,
+      "cases": 360,
       "unknownCases": 0,
       "classes": 79
     },
@@ -37,8 +37,8 @@
     "auth-policy": {
       "label": "Authentication / authorization wiring",
       "level": "API (must stay hosted)",
-      "tests": 54,
-      "cases": 57,
+      "tests": 56,
+      "cases": 60,
       "unknownCases": 0,
       "classes": 35
     },
@@ -4079,8 +4079,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 14,
-        "end": 79
+        "start": 15,
+        "end": 94
       }
     },
     {
@@ -4097,8 +4097,26 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 291,
-        "end": 336
+        "start": 289,
+        "end": 334
+      }
+    },
+    {
+      "cls": "ProblemReportApiTests",
+      "test": "Automatic_waiting_invalidation_records_a_truthful_backward_rationale",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 427,
+        "end": 464
       }
     },
     {
@@ -4115,8 +4133,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 142,
-        "end": 169
+        "start": 143,
+        "end": 170
       }
     },
     {
@@ -4132,8 +4150,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 398,
-        "end": 411
+        "start": 496,
+        "end": 509
       }
     },
     {
@@ -4150,8 +4168,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 115,
-        "end": 140
+        "start": 116,
+        "end": 141
       }
     },
     {
@@ -4168,8 +4186,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 171,
-        "end": 289
+        "start": 172,
+        "end": 287
       }
     },
     {
@@ -4186,8 +4204,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 17,
-        "end": 113
+        "start": 18,
+        "end": 114
       }
     },
     {
@@ -4204,8 +4222,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 368,
-        "end": 396
+        "start": 466,
+        "end": 494
       }
     },
     {
@@ -4221,7 +4239,7 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 338,
+        "start": 336,
         "end": 366
       }
     },
@@ -4238,8 +4256,25 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 428,
-        "end": 447
+        "start": 526,
+        "end": 545
+      }
+    },
+    {
+      "cls": "ProblemReportApiTests",
+      "test": "Transition_endpoint_uses_live_SCCB_authority_and_persists_backward_rationale",
+      "kind": "Fact",
+      "intent": "auth-policy",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client"
+      ],
+      "sourceLines": {
+        "start": 368,
+        "end": 425
       }
     },
     {
@@ -4255,8 +4290,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 413,
-        "end": 426
+        "start": 511,
+        "end": 524
       }
     },
     {
@@ -4272,8 +4307,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 170,
-        "end": 199
+        "start": 185,
+        "end": 224
       }
     },
     {
@@ -4289,8 +4324,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 89,
-        "end": 131
+        "start": 104,
+        "end": 146
       }
     },
     {
@@ -4306,8 +4341,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 133,
-        "end": 168
+        "start": 148,
+        "end": 183
       }
     },
     {
@@ -4323,13 +4358,13 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 201,
-        "end": 240
+        "start": 226,
+        "end": 265
       }
     },
     {
       "cls": "ProblemReportDispositionApiTests",
-      "test": "Generic_disposition_rejects_blank_rationale_fixed_terminal_state_and_stale_version",
+      "test": "Legacy_disposition_route_accepts_only_rejected_with_rationale_and_respects_terminal_state",
       "kind": "Fact",
       "intent": "http-boundary",
       "cases": 1,
@@ -4340,31 +4375,13 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 12,
-        "end": 63
+        "start": 13,
+        "end": 64
       }
     },
     {
       "cls": "ProblemReportDuplicateDispositionApiTests",
-      "test": "Canonical_root_policy_refuses_direct_and_transitive_cycles_and_arbitrary_chains",
-      "kind": "Fact",
-      "intent": "http-boundary",
-      "cases": 1,
-      "caseEvidence": "Fact",
-      "hosted": "hosted",
-      "hostEvidence": [
-        "factory-construction",
-        "factory-client",
-        "factory-services"
-      ],
-      "sourceLines": {
-        "start": 114,
-        "end": 162
-      }
-    },
-    {
-      "cls": "ProblemReportDuplicateDispositionApiTests",
-      "test": "Invalid_duplicate_targets_leave_the_controlled_record_unchanged",
+      "test": "Canonical_duplicate_mutations_are_closed_while_new_records_remain_unchanged",
       "kind": "Fact",
       "intent": "http-boundary",
       "cases": 1,
@@ -4375,8 +4392,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 14,
-        "end": 63
+        "start": 95,
+        "end": 121
       }
     },
     {
@@ -4393,13 +4410,13 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 164,
-        "end": 206
+        "start": 123,
+        "end": 165
       }
     },
     {
       "cls": "ProblemReportDuplicateDispositionApiTests",
-      "test": "Stale_and_simultaneous_dispositions_never_persist_competing_targets",
+      "test": "Legacy_duplicate_decisions_are_read_only_and_leave_the_controlled_record_unchanged",
       "kind": "Fact",
       "intent": "http-boundary",
       "cases": 1,
@@ -4410,13 +4427,13 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 208,
-        "end": 240
+        "start": 14,
+        "end": 63
       }
     },
     {
       "cls": "ProblemReportDuplicateDispositionApiTests",
-      "test": "Valid_duplicate_is_atomic_resolvable_and_retained_as_history_after_reopen",
+      "test": "New_duplicate_decisions_are_rejected_while_historical_links_remain_readable",
       "kind": "Fact",
       "intent": "http-boundary",
       "cases": 1,
@@ -4428,7 +4445,24 @@
       ],
       "sourceLines": {
         "start": 65,
-        "end": 112
+        "end": 93
+      }
+    },
+    {
+      "cls": "ProblemReportDuplicateDispositionApiTests",
+      "test": "Stale_and_simultaneous_legacy_duplicate_requests_never_mutate_the_record",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client"
+      ],
+      "sourceLines": {
+        "start": 167,
+        "end": 201
       }
     },
     {
@@ -4496,8 +4530,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 269,
-        "end": 286
+        "start": 268,
+        "end": 285
       }
     },
     {
@@ -4514,8 +4548,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 514,
-        "end": 584
+        "start": 519,
+        "end": 589
       }
     },
     {
@@ -4531,8 +4565,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 485,
-        "end": 512
+        "start": 490,
+        "end": 517
       }
     },
     {
@@ -4548,8 +4582,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 439,
-        "end": 483
+        "start": 444,
+        "end": 488
       }
     },
     {
@@ -4566,8 +4600,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 288,
-        "end": 407
+        "start": 287,
+        "end": 412
       }
     },
     {
@@ -4583,8 +4617,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 217,
-        "end": 267
+        "start": 216,
+        "end": 266
       }
     },
     {
@@ -4600,15 +4634,15 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 409,
-        "end": 437
+        "start": 414,
+        "end": 442
       }
     },
     {
       "cls": "ProblemReportVerificationApiTests",
       "test": "Software_Quality_closure_remains_independent_from_reporter_and_responsible_engineer",
       "kind": "Theory",
-      "intent": "http-boundary",
+      "intent": "auth-policy",
       "cases": 2,
       "caseEvidence": "InlineData",
       "hosted": "hosted",
@@ -4617,8 +4651,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 586,
-        "end": 606
+        "start": 591,
+        "end": 611
       }
     },
     {
@@ -4636,7 +4670,7 @@
       ],
       "sourceLines": {
         "start": 114,
-        "end": 215
+        "end": 214
       }
     },
     {

@@ -68,13 +68,10 @@ public static class ControlledArtifactEditPolicies
         new(ControlledArtifactFamily.DocumentTemplate, "DocumentTemplate", true, 15, 2, 120,
             Set("Draft", "InWork"), Set("DocumentTemplate", "ControlledTemplate")),
         // A Problem Report is editable in every state except the ones that end it. It is the record most
-        // likely to need correcting while the work it describes is in flight, and the previous list named
-        // three states the MVP lifecycle no longer produces — so in practice only a Draft could be checked
-        // out. Closed and the terminal dispositions are read-only; reopening is the route back.
+        // likely to need correcting while the work it describes is in flight. Closed and Rejected are
+        // read-only; the lifecycle transition endpoints are the route back.
         new(ControlledArtifactFamily.ProblemReport, "ProblemReport", true, 15, 2, 120,
-            Set("Draft", "ReadyForSccb", "Open", "Implementing", "Verifying", "AwaitingSqaClosure", "Deferred",
-                // Retained so records written before the MVP lifecycle migration stay editable.
-                "Investigating", "ResolutionProposed", "AwaitingClosureApproval"),
+            Set("Draft", "ReadyForSccb", "Open", "Implementing", "Verifying", "WaitingForSqaToClose"),
             Set("ProblemReport", "PR")),
         new(ControlledArtifactFamily.ConfigurationChangeSet, "ConfigurationChangeSet", true, 15, 2, 120,
             Set("Draft", "InWork", "Conflict"), Set("ConfigurationChangeSet", "ChangeSet")),

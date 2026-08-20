@@ -726,18 +726,24 @@ public sealed class ProblemReportControlledEditingAdapter(AeroLinkDbContext db) 
             || !string.Equals(draft.ReportedBy?.Trim(), item.ReportedBy, StringComparison.OrdinalIgnoreCase)
             || !string.Equals(draft.ResponsibleEngineerId?.Trim() ?? item.ResponsibleEngineerId, item.ResponsibleEngineerId, StringComparison.OrdinalIgnoreCase))
             throw new DomainException("The controlled problem-report identity cannot change.");
-        var wasAwaitingClosure = item.State == ProblemReportState.AwaitingSqaClosure;
+        var fromState = ProblemReportTransitionPolicy.Canonical(item.State);
+        var wasAwaitingClosure = fromState == ProblemReportState.WaitingForSqaToClose;
         item.UpdateDetails(administratorAuthority ? item.ResponsibleEngineerId : actor,
             draft.Title ?? "", draft.Problem ?? "", draft.ProblemRich ?? "",
             draft.AdditionalInformation ?? "", draft.AdditionalInformationRich ?? "", draft.Analysis ?? "",
             draft.RootCause ?? "", draft.CorrectiveAction ?? "", draft.SystemAircraftImpact ?? "",
             draft.ImpactAssessmentJson ?? "", ParseEnum(draft.Severity, item.Severity), ParseEnum(draft.Priority, item.Priority), now,
             ParseEnum(draft.Type, item.Type), draft.Workaround);
+        var toState = ProblemReportTransitionPolicy.Canonical(item.State);
+        var lifecycleRationale = fromState != toState
+            ? "Controlled detail correction invalidated the prior closure evidence and returned the report to Verifying."
+            : null;
         db.ProblemReportRevisions.Add(new ProblemReportRevision(item.Id, item.Revision, "DetailsCheckedIn",
-            actor, item.CanonicalHash(), EvidenceSnapshot(item), now));
+            actor, item.CanonicalHash(), EvidenceSnapshot(item), now,
+            detail: lifecycleRationale, fromState: fromState.ToString(), toState: toState.ToString(), rationale: lifecycleRationale));
         if (wasAwaitingClosure)
             await new ProblemReportClosureCandidateService(db).InvalidatePendingAsync(item, actor,
-                "DetailsCheckedIn", now, ct);
+                "DetailsCheckedIn", now, ct, fromState, toState, lifecycleRationale);
     }
     private static T ParseEnum<T>(string? value, T fallback) where T : struct, Enum =>
         Enum.TryParse<T>(value, ignoreCase: true, out var parsed) ? parsed : fallback;

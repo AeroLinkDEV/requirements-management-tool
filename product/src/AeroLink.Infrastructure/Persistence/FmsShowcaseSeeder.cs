@@ -179,8 +179,7 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db)
 
         var active = activeReleases[0];
         var reports = await db.ProblemReports.Where(x => x.ProjectId == projectId && x.TargetReleaseId == null).ToListAsync(ct);
-        var terminal = new[] { ProblemReportState.Closed, ProblemReportState.Duplicate, ProblemReportState.CannotReproduce,
-            ProblemReportState.NoFaultFound, ProblemReportState.AcceptedRisk, ProblemReportState.Rejected };
+        var terminal = new[] { ProblemReportState.Closed, ProblemReportState.Rejected };
         var reconciled = 0;
         foreach (var report in reports.Where(x => !terminal.Contains(x.State)))
         {

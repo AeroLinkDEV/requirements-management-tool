@@ -38,7 +38,7 @@ public sealed class ProblemReportDuplicateDispositionPolicy(AeroLinkDbContext db
             return Refuse("pr_duplicate_source_is_canonical", "This Problem Report already represents another duplicate and must remain its canonical root.");
         if (links.Any(link => link.ProblemReportId == source.Id))
             return Refuse("pr_duplicate_history_already_exists", "This reopened Problem Report already retains a historical Duplicate decision and cannot append a competing target.");
-        if (target.State == ProblemReportState.Duplicate || links.Any(link => link.ProblemReportId == target.Id))
+        if (target.State == ProblemReportState.Rejected || links.Any(link => link.ProblemReportId == target.Id))
             return Refuse("pr_duplicate_target_not_canonical", "A Duplicate target must be a non-Duplicate canonical Problem Report root.");
 
         return new(true, null, null);
@@ -59,7 +59,7 @@ public sealed class ProblemReportDuplicateDispositionPolicy(AeroLinkDbContext db
 
         var nonCanonicalIds = links.Select(link => link.ProblemReportId).Distinct().ToList();
         var query = db.ProblemReports.AsNoTracking().Where(item => item.ProjectId == source.ProjectId
-            && item.Id != source.Id && item.State != ProblemReportState.Duplicate
+            && item.Id != source.Id && item.State != ProblemReportState.Rejected
             && !nonCanonicalIds.Contains(item.Id));
         if (!string.IsNullOrWhiteSpace(search))
         {
@@ -77,10 +77,7 @@ public sealed class ProblemReportDuplicateDispositionPolicy(AeroLinkDbContext db
         var outgoing = links.GroupBy(link => link.ProblemReportId)
             .ToDictionary(group => group.Key, group => group.ToList());
         if (!outgoing.TryGetValue(source.Id, out var firstLinks) || firstLinks.Count == 0)
-            return Diagnostic(source.State == ProblemReportState.Duplicate ? "MissingTarget" : "None",
-                source.State == ProblemReportState.Duplicate
-                    ? "The Duplicate state has no retained canonical target relationship."
-                    : "No Duplicate disposition relationship is recorded.", [source.Id]);
+            return Diagnostic("None", "No Duplicate disposition relationship is recorded.", [source.Id]);
         if (firstLinks.Count != 1)
             return Diagnostic("MultipleTargets", "More than one Duplicate target is recorded; reconciliation is required.", [source.Id]);
 
@@ -111,17 +108,14 @@ public sealed class ProblemReportDuplicateDispositionPolicy(AeroLinkDbContext db
         // The source has exactly one outgoing link and every traversed target was resolved above.
         if (canonical is null)
             throw new InvalidOperationException("A Duplicate relationship diagnostic must resolve a target.");
-        if (canonical.State == ProblemReportState.Duplicate)
+        if (canonical.State == ProblemReportState.Rejected)
             return Diagnostic("InvalidDuplicateTarget", "The retained target is marked Duplicate but does not resolve to another canonical record.",
                 path, canonical);
         if (path.Count > 2)
             return Diagnostic("NonCanonicalChain", "The retained relationship uses a legacy Duplicate chain instead of one direct canonical root.",
                 path, canonical);
-        return Diagnostic(source.State == ProblemReportState.Duplicate ? "Valid" : "Historical",
-            source.State == ProblemReportState.Duplicate
-                ? "The Duplicate disposition resolves directly to one same-Project canonical root."
-                : "A structurally valid historical Duplicate decision is retained from an earlier lifecycle.",
-            path, canonical);
+        return Diagnostic(path.Count > 2 ? "NonCanonicalChain" : "Valid",
+            "The retained Duplicate relationship resolves to one same-Project canonical root.", path, canonical);
     }
 
     private async Task<List<ProblemReportLink>> DuplicateLinksAsync(CancellationToken ct) =>

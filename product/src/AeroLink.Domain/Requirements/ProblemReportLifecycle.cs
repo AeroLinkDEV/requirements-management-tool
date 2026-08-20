@@ -3,11 +3,8 @@ using System.Linq.Expressions;
 namespace AeroLink.Domain.Requirements;
 
 /// <summary>
-/// The authoritative classification for Problem Report work that is still active.
-///
-/// The retained legacy states are active predecessor-lifecycle stages, not dispositions. Keeping them here
-/// makes old controlled records contribute consistently until they progress through an authorized transition.
-/// Terminal dispositions remain discoverable history but do not represent open engineering work.
+/// The authoritative classification for Problem Report work that is still active. Legacy database strings are
+/// normalized by migration before they can be exposed through this API.
 /// </summary>
 public static class ProblemReportLifecycle
 {
@@ -18,11 +15,7 @@ public static class ProblemReportLifecycle
         ProblemReportState.Open,
         ProblemReportState.Implementing,
         ProblemReportState.Verifying,
-        ProblemReportState.AwaitingSqaClosure,
-        ProblemReportState.Deferred,
-        ProblemReportState.Investigating,
-        ProblemReportState.ResolutionProposed,
-        ProblemReportState.AwaitingClosureApproval,
+        ProblemReportState.WaitingForSqaToClose,
     ];
 
     private static readonly Expression<Func<ProblemReport, bool>> ActiveWorkPredicateValue =
@@ -32,8 +25,7 @@ public static class ProblemReportLifecycle
         Array.AsReadOnly(ActiveWorkStateValues);
 
     public const string ActiveWorkDefinition =
-        "Problem reports in Draft, Ready for SCCB, Open, Implementing, Verifying, Awaiting SQA Closure, " +
-        "Deferred, or the retained active legacy stages Investigating, Resolution Proposed, and Awaiting Closure Approval.";
+        "Problem reports in Draft, Ready for SCCB, Open, Implementing, Verifying, or Waiting for SQA to Close.";
 
     public static bool IsActiveWork(ProblemReportState state) => ActiveWorkStateValues.Contains(state);
 

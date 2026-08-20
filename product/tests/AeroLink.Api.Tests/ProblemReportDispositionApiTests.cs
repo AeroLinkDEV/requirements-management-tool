@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
+using AeroLink.Domain.Identity;
 using AeroLink.Domain.Programs;
 using AeroLink.Infrastructure.Persistence;
 using Microsoft.Extensions.DependencyInjection;
@@ -10,28 +11,28 @@ namespace AeroLink.Api.Tests;
 public sealed class ProblemReportDispositionApiTests
 {
     [Fact]
-    public async Task Generic_disposition_rejects_blank_rationale_fixed_terminal_state_and_stale_version()
+    public async Task Legacy_disposition_route_accepts_only_rejected_with_rationale_and_respects_terminal_state()
     {
         using var factory = new AeroLinkApiFactory();
         using var client = factory.CreateClient();
         await ProblemReportApiTests.BootstrapAndLoginAsync(client);
         var (projectId, releaseId) = await SeedProjectAsync(factory);
 
-        var blank = await CreateOpenAsync(client, projectId, releaseId, "Blank rationale disposition");
-        using (var response = await DispositionAsync(client, blank, "CannotReproduce", "   "))
+        var blank = await CreateDraftAsync(client, projectId, releaseId, "Blank rationale disposition");
+        using (var response = await DispositionAsync(client, blank, "Rejected", "   "))
         {
             Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
             Assert.Contains("rationale", await ErrorAsync(response), StringComparison.OrdinalIgnoreCase);
         }
 
-        var fixedReport = await CreateOpenAsync(client, projectId, releaseId, "Generic Fixed disposition");
+        var fixedReport = await CreateDraftAsync(client, projectId, releaseId, "Generic Fixed disposition");
         using (var response = await DispositionAsync(client, fixedReport, "Fixed", "A generic fixed conclusion is forbidden."))
         {
             Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
-            Assert.Contains("verified closure", await ErrorAsync(response), StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("Rejected", await ErrorAsync(response), StringComparison.OrdinalIgnoreCase);
         }
 
-        var staleReport = await CreateOpenAsync(client, projectId, releaseId, "Stale disposition");
+        var staleReport = await CreateDraftAsync(client, projectId, releaseId, "Stale disposition");
         using (var response = await client.PostAsJsonAsync($"/api/problem-reports/{staleReport.Id}/disposition", new
         {
             expectedVersion = staleReport.Version - 1,
@@ -44,8 +45,8 @@ public sealed class ProblemReportDispositionApiTests
             Assert.Equal("stale_version", body.GetProperty("code").GetString());
         }
 
-        var terminal = await CreateOpenAsync(client, projectId, releaseId, "Terminal disposition");
-        using (var accepted = await DispositionAsync(client, terminal, "NoFaultFound", "Investigation established no product fault."))
+        var terminal = await CreateDraftAsync(client, projectId, releaseId, "Terminal disposition");
+        using (var accepted = await DispositionAsync(client, terminal, "Rejected", "Investigation established no product fault."))
         {
             accepted.EnsureSuccessStatusCode();
             terminal = terminal with { Version = (await accepted.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("version").GetInt64() };
@@ -56,13 +57,13 @@ public sealed class ProblemReportDispositionApiTests
             Assert.Contains("dispositioned", await ErrorAsync(response), StringComparison.OrdinalIgnoreCase);
         }
         var detail = await client.GetFromJsonAsync<JsonElement>($"/api/problem-reports/{terminal.Id}");
-        Assert.Equal("NoFaultFound", detail.GetProperty("state").GetString());
+        Assert.Equal("Rejected", detail.GetProperty("state").GetString());
         Assert.Equal("Investigation established no product fault.", detail.GetProperty("dispositionRationale").GetString());
         Assert.Single(detail.GetProperty("revisions").EnumerateArray(), revision =>
             revision.GetProperty("eventType").GetString() == "DispositionRecorded");
     }
 
-    private static async Task<ReportRef> CreateOpenAsync(HttpClient client, Guid projectId, Guid releaseId, string title)
+    private static async Task<ReportRef> CreateDraftAsync(HttpClient client, Guid projectId, Guid releaseId, string title)
     {
         using var created = await client.PostAsJsonAsync("/api/problem-reports", new
         {
@@ -72,12 +73,6 @@ public sealed class ProblemReportDispositionApiTests
         var body = await created.Content.ReadFromJsonAsync<JsonElement>();
         var id = body.GetProperty("id").GetGuid();
         var version = body.GetProperty("version").GetInt64();
-        using var ready = await client.PostAsJsonAsync($"/api/problem-reports/{id}/ready-for-sccb", new { expectedVersion = version });
-        ready.EnsureSuccessStatusCode();
-        version = (await ready.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("version").GetInt64();
-        using var opened = await client.PostAsJsonAsync($"/api/problem-reports/{id}/sccb/open", new { expectedVersion = version });
-        opened.EnsureSuccessStatusCode();
-        version = (await opened.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("version").GetInt64();
         return new(id, version);
     }
 
@@ -88,7 +83,9 @@ public sealed class ProblemReportDispositionApiTests
         var program = new ProgramRecord("Disposition workflow Program", $"DW{Guid.NewGuid():N}"[..12]);
         var project = new ProjectRecord(program.Id, "Flight Management Product", "Flight Management System");
         var release = new SoftwareRelease(project.Id, "1.6", false);
-        db.AddRange(program, project, release);
+        var admin = db.UserAccounts.Single(account => account.UserName == "admin");
+        db.AddRange(program, project, release,
+            new ProgramMembership(admin.Id, program.Id, ProgramRole.ProjectEngineer, "test.setup", DateTimeOffset.UtcNow));
         await db.SaveChangesAsync();
         return (project.Id, release.Id);
     }
