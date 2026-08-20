@@ -27,6 +27,8 @@ record CreateChangeRequestDraftRequest(string BaseNumber, Guid ProjectId, Guid T
 record CreateWorkspaceRequest(string ProgramName, string ProgramCode, string ProjectName, string SoftwareProduct, string InitialRelease, bool InitialReleaseIsReleased);
 record CreateReleaseRequest(Guid ProjectId, string Version, Guid? PredecessorReleaseId);
 record RetargetChangeRequestRequest(Guid TargetReleaseId, string Reason);
+// The author re-applies their intent against the new text; the tool does not merge on their behalf.
+record RebaseRequirementChangeRequest(string Statement);
 /// <summary>A reason is required by the domain: a shelf whose entries do not say why is a shelf nobody trusts.</summary>
 record DeferChangeRequestRequest(string? Reason);
 record CancelReviewRequest(string? Reason, long? ExpectedVersion);

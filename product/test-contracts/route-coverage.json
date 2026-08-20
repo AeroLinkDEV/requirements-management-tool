@@ -273,6 +273,7 @@
         "ProductionRoutingTests",
         "ProgramRoleAuthorityApiTests",
         "ProjectPersonnelApiTests",
+        "RebaseRequirementChangeTests",
         "ReleaseCampaignExactIntentApiTests",
         "ReleasedExecutionEvidenceApiTests",
         "RemoveRequirementChangeTests",
@@ -569,6 +570,14 @@
       "file": "ChangeRequestEndpoints.cs",
       "coveredBy": [
         "AdministratorChangeRequestApiTests"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/change-requests/{id:guid}/requirements/{requirementChangeId:guid}/rebase",
+      "file": "ChangeRequestEndpoints.cs",
+      "coveredBy": [
+        "RebaseRequirementChangeTests"
       ]
     },
     {
