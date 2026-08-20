@@ -80,6 +80,7 @@ test('deferred work waits in its own tab until a build takes it, and the build t
 
   // And it is off the shelf, because it is somebody's work now rather than nobody's.
   await tabs.getByRole('button', { name: /^Deferred/ }).click()
-  await expect(page.locator('.deferredBacklog')).toBeVisible({ timeout: 30_000 })
+  // Nothing is left on the shelf, so the tab says so rather than rendering an empty list.
+  await expect(page.getByText('Nothing is deferred')).toBeVisible({ timeout: 30_000 })
   await expect(page.locator('.deferredRow', { hasText: 'DEFERRED-BACKLOG oceanic sequencing' })).toHaveCount(0)
 })
