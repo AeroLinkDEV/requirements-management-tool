@@ -233,6 +233,46 @@ public sealed class CandidateBaseline
         Event("CandidateBaselineFrozen", actorId, $"Frozen {DisplayNumber} with {_selections.Count} exact change request revisions and hash {ContentHash}.", now);
     }
 
+    /// <summary>
+    /// Unseals a frozen baseline so its contents can change again.
+    ///
+    /// Freezing is a commitment: it fixes exactly which change request revisions the build contains, and
+    /// materializing then moves the requirements themselves. Until now that was a one-way door, so a change
+    /// request found to be wrong the morning after a freeze could not be taken out at all -- the build had to
+    /// be released containing work known to be wrong.
+    ///
+    /// Reopening is the way back, and it is deliberately a separate act rather than something that happens
+    /// quietly when somebody withdraws their change request. A frozen baseline is the strongest statement this
+    /// system makes about what a build is; if it stops being true, that should be somebody's decision, with
+    /// their name and their reason on it, rather than a side effect nobody announced.
+    ///
+    /// Released is the real one-way door. A released baseline is what the world was told, and this does not
+    /// touch it.
+    ///
+    /// The caller de-materializes: the revisions this baseline created are its to remove, and doing that needs
+    /// the requirement store rather than the baseline record. Reopening the record and leaving those revisions
+    /// in place would say the build is open while the requirements still read as though it were not.
+    /// </summary>
+    public void Reopen(string actorId, string reason, DateTimeOffset now)
+    {
+        if (State == CandidateBaselineState.Released)
+            throw new DomainException("A released baseline cannot be reopened. It is what the world was told the build contains.");
+        if (State != CandidateBaselineState.Frozen)
+            throw new DomainException("Only a frozen baseline can be reopened.");
+        if (string.IsNullOrWhiteSpace(reason)) throw new DomainException("A reason for reopening the baseline is required.");
+
+        var wasMaterialized = RequirementsMaterializedAt is not null;
+        State = CandidateBaselineState.Draft;
+        FrozenAt = null;
+        ContentHash = string.Empty;
+        RequirementsHash = string.Empty;
+        RequirementsMaterializedAt = null;
+        UpdatedAt = now;
+        Event("CandidateBaselineReopened", actorId,
+            $"Reopened {DisplayNumber}: {reason.Trim()}"
+            + (wasMaterialized ? " The requirement revisions it materialized were taken back with it." : string.Empty), now);
+    }
+
     public void MarkRequirementsMaterialized(string actorId, string requirementsHash, int activeCount, DateTimeOffset now)
     {
         if (State != CandidateBaselineState.Frozen) throw new DomainException("Only a frozen baseline can be materialized.");

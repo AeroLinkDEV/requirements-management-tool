@@ -37,3 +37,73 @@
   font-size: 12px;
   line-height: 1.4;
 }
+
+/* Unsealing a build. Deliberately not styled as a primary action beside Freeze and Materialize: it is a
+   legitimate thing to do and not the direction this page normally moves. */
+.reopenControl { display: grid; gap: 6px; }
+
+html .reopenAction {
+  min-height: 36px;
+  padding: 0 16px;
+  border: 1px solid #d9bcbc;
+  border-radius: 8px;
+  background: #fdf6f6;
+  color: #8a3f3f;
+  font: 700 13px Manrope, sans-serif;
+  cursor: pointer;
+}
+
+html .reopenAction:hover { border-color: #c39494; background: #faecec; }
+html .reopenAction:disabled { cursor: not-allowed; opacity: .5; }
+
+/* The consequence preview. Everything the reopen will disturb, before it disturbs any of it. */
+.reopenPanel {
+  display: grid;
+  gap: 12px;
+  padding: 16px;
+  border: 1px solid #d9bcbc;
+  border-radius: 10px;
+  background: #fffbfb;
+  color: #4a2f2f;
+  text-align: left;
+}
+
+.reopenPanel > header { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.reopenPanel > header b { font: 800 14px Manrope, sans-serif; }
+.reopenPanel section { display: grid; gap: 4px; }
+.reopenPanel section b { font: 700 12px Manrope, sans-serif; letter-spacing: .04em; text-transform: uppercase; }
+.reopenPanel ul { margin: 0; padding-left: 18px; display: grid; gap: 2px; }
+.reopenPanel li, .reopenPanel p { font: 500 13px/1.5 Manrope, sans-serif; margin: 0; }
+.reopenPanel label { display: grid; gap: 4px; }
+.reopenPanel label span { font: 700 12px Manrope, sans-serif; }
+.reopenPanel textarea {
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid #d9bcbc;
+  border-radius: 8px;
+  font: 500 13px/1.5 Manrope, sans-serif;
+  resize: vertical;
+}
+
+html .reopenDismiss {
+  border: 0;
+  background: none;
+  color: #7a5a5a;
+  font: 600 12px Manrope, sans-serif;
+  cursor: pointer;
+  text-decoration: underline;
+}
+
+html .reopenConfirm {
+  min-height: 38px;
+  border: 1px solid #a85454;
+  border-radius: 8px;
+  background: #a85454;
+  color: #fff;
+  font: 700 13px Manrope, sans-serif;
+  cursor: pointer;
+}
+
+html .reopenConfirm:disabled { cursor: not-allowed; opacity: .5; }
+.reopenRefusal, .reopenError { color: #8a3f3f; font: 600 13px/1.5 Manrope, sans-serif; margin: 0; }
+.reopenQuiet { color: #6b5555; font: 500 13px/1.5 Manrope, sans-serif; }

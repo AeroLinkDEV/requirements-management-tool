@@ -3,6 +3,7 @@ using System;
 using AeroLink.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 
@@ -11,9 +12,11 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace AeroLink.Infrastructure.Persistence.Migrations
 {
     [DbContext(typeof(AeroLinkDbContext))]
-    partial class AeroLinkDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260820110034_AddWithdrawnChangeRequestState")]
+    partial class AddWithdrawnChangeRequestState
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -701,9 +704,7 @@ namespace AeroLink.Infrastructure.Persistence.Migrations
                     b.HasIndex("LogicalId", "Version")
                         .IsUnique();
 
-                    b.HasIndex("ProjectId", "AppliesTo", "State")
-                        .IsUnique()
-                        .HasFilter("\"State\" = 'Active'");
+                    b.HasIndex("ProjectId", "AppliesTo", "State");
 
                     b.ToTable("review_workflows", (string)null);
                 });
@@ -794,10 +795,6 @@ namespace AeroLink.Infrastructure.Persistence.Migrations
                     b.Property<Guid>("ProjectId")
                         .HasColumnType("uuid");
 
-                    b.Property<string>("RebaseRequiredReason")
-                        .HasMaxLength(500)
-                        .HasColumnType("character varying(500)");
-
                     b.Property<int>("Revision")
                         .HasColumnType("integer");
 
@@ -840,9 +837,8 @@ namespace AeroLink.Infrastructure.Persistence.Migrations
                         .IsConcurrencyToken()
                         .HasColumnType("bigint");
 
-                    b.Property<string>("WithdrawnFromState")
-                        .HasMaxLength(40)
-                        .HasColumnType("character varying(40)");
+                    b.Property<int?>("WithdrawnFromState")
+                        .HasColumnType("integer");
 
                     b.HasKey("Id");
 

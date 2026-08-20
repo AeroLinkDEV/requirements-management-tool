@@ -1,3 +1,4 @@
+using AeroLink.Domain.Baselines;
 using AeroLink.Domain.ChangeControl;
 using AeroLink.Domain.Common;
 using AeroLink.Domain.Contracts;
@@ -681,6 +682,75 @@ public static class ChangeRequestEndpoints
                 return Results.Ok(ApiMap.ChangeRequestDetail(scr, await ArtifactClaims.NoticesAsync(db, scr, ct)));
             }
             catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
+        });
+
+        // Taking a change request back, and deleting one nobody ever reviewed.
+        //
+        // The refusal when its baseline is frozen names the way out rather than leaving the reader stuck: a
+        // frozen baseline is the strongest statement this system makes about what a build contains, and it
+        // stops being true by somebody deciding so, not as a side effect of an author withdrawing their work.
+        app.MapPost("/api/change-requests/{id:guid}/withdraw", async (Guid id, WithdrawChangeRequestRequest request,
+            HttpContext http, IChangeRequestRepository repository, AeroLinkDbContext db, CancellationToken ct) =>
+        {
+            var scr = await repository.GetAsync(id, ct); if (scr is null) return Results.NotFound();
+            if (!await http.HasProjectAccessAsync(db, scr.ProjectId, ct)) return Results.Forbid();
+            var actor = http.UserAccount();
+            if (!CanAdminister(scr, actor)) return Results.Forbid();
+
+            var frozen = await db.CandidateBaselines.AsNoTracking()
+                .Where(x => x.Selections.Any(s => s.ChangeRequestId == scr.Id) && x.State != CandidateBaselineState.Draft)
+                .Select(x => new { x.DisplayNumber, x.State })
+                .FirstOrDefaultAsync(ct);
+            if (frozen is not null)
+                return Results.BadRequest(new
+                {
+                    error = frozen.State == CandidateBaselineState.Released
+                        ? $"{frozen.DisplayNumber} has been released. What it contains is what the world was told, and cannot be taken back."
+                        : $"{frozen.DisplayNumber} is frozen. Reopen it before withdrawing work from it.",
+                    code = frozen.State == CandidateBaselineState.Released ? "baseline_released" : "baseline_frozen",
+                });
+
+            try
+            {
+                var now = DateTimeOffset.UtcNow;
+                // Selection into a still-open baseline is a plan, not a commitment, so taking the work back
+                // takes it out of the plan rather than making the author do that first. Both halves are
+                // recorded -- the baseline says it removed the change request, the change request says it was
+                // returned -- so nothing about this is silent. The frozen case is refused above precisely
+                // because there the selection is a commitment.
+                var open = await db.CandidateBaselines
+                    .Include(x => x.Selections)
+                    .Where(x => x.Selections.Any(s => s.ChangeRequestId == scr.Id))
+                    .ToListAsync(ct);
+                foreach (var baseline in open) baseline.Remove(scr, actor.UserName, now);
+
+                scr.Withdraw(actor.UserName, request.Reason ?? "", now, actor.IsAdministrator);
+                await repository.SaveAsync(ct);
+                return Results.Ok(ApiMap.ChangeRequestDetail(scr));
+            }
+            catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
+        });
+
+        // Deleting outright, which is only honest for a draft nobody has ever been asked about. Anything that
+        // reached a reviewer has signatures, and removing the evidence that an approval happened is worse than
+        // the problem it solves.
+        app.MapDelete("/api/change-requests/{id:guid}", async (Guid id, HttpContext http,
+            IChangeRequestRepository repository, AeroLinkDbContext db, CancellationToken ct) =>
+        {
+            var scr = await repository.GetAsync(id, ct); if (scr is null) return Results.NotFound();
+            if (!await http.HasProjectAccessAsync(db, scr.ProjectId, ct)) return Results.Forbid();
+            var actor = http.UserAccount();
+            if (!CanAdminister(scr, actor)) return Results.Forbid();
+            if (scr.State != ChangeRequestState.Draft || scr.ReviewCycles.Count > 0)
+                return Results.BadRequest(new
+                {
+                    error = "This has been in front of reviewers. Withdraw it instead, so the record of what was decided survives.",
+                    code = "withdraw_instead",
+                });
+
+            db.SystemChangeRequests.Remove(scr);
+            await repository.SaveAsync(ct);
+            return Results.NoContent();
         });
 
         // The other half of adding one. Its absence is why a change request refused at submission for a

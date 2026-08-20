@@ -4,6 +4,7 @@ import { AutosaveState, DraftRestore } from "./DraftNotice";
 import { useFormDraft } from "./autosave";
 import { stateLabel } from './presentation'
 import LegacyProcedureBootstrapPanel from './LegacyProcedureBootstrapPanel'
+import { ReopenBaselinePanel } from './ReopenBaselinePanel'
 import type { FormEvent } from "react";
 import "./BaselineCenter.css";
 import "./Swrd.css";
@@ -408,6 +409,17 @@ export default function BaselineCenter({
                       {busy ? "Materializing…" : "Materialize SWRD"}
                     </button>
                   ) : <div className="frozenMark">Released build · read-only</div>}
+                  {/* The way back through the freeze, for a build that has not shipped. Offered beside
+                      materializing rather than hidden behind a menu: a build found to be wrong the morning
+                      after it was frozen is an ordinary situation, and the alternative was releasing it. */}
+                  {!readOnly && detail.state === "Frozen" && (
+                    <ReopenBaselinePanel
+                      api={api}
+                      baselineId={detail.id}
+                      displayNumber={detail.displayNumber}
+                      onReopened={async () => { await loadList(); await loadDetail(); }}
+                    />
+                  )}
                   {/* The procedure manifest closes separately and later. Procedures are written against the
                       requirements this baseline fixes, so they are finished after it is frozen — which is why
                       this is a second act rather than part of materializing the SWRD. */}

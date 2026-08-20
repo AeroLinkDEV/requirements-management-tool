@@ -5,7 +5,7 @@ using AeroLink.Domain.Common;
 
 namespace AeroLink.Domain.ChangeControl;
 
-public enum ChangeRequestState { Draft, InReview, Approved, Deferred, SelectedForBaseline }
+public enum ChangeRequestState { Draft, InReview, Approved, Deferred, SelectedForBaseline, Withdrawn }
 public enum ChangeRequestType { System, Software }
 
 /// <summary>
@@ -99,6 +99,19 @@ public sealed class SystemChangeRequest
     /// how far it got before it went there.
     /// </summary>
     public ChangeRequestState? DeferredFromState { get; private set; }
+
+    /// <summary>How far it had got when it was taken back, so the record says what was abandoned.</summary>
+    public ChangeRequestState? WithdrawnFromState { get; private set; }
+
+    /// <summary>
+    /// Why this change request has to be re-pointed before it means anything, or null when nothing is owed.
+    ///
+    /// Set when a build is reopened underneath it: the revision its author wrote against was taken back, so
+    /// the wording they were changing no longer exists and the revision they numbered onto is not the next
+    /// one any more. The audit trail records the same fact, but a work list cannot be driven off audit text,
+    /// and a change request that silently means nothing is worse than one that says so.
+    /// </summary>
+    public string? RebaseRequiredReason { get; private set; }
     public string Problem { get; private set; } = string.Empty;
     public string Analysis { get; private set; } = string.Empty;
     public string Solution { get; private set; } = string.Empty;
@@ -190,6 +203,8 @@ public sealed class SystemChangeRequest
 
         var from = change.Revision;
         change.Rebase(ontoRevision, reappliedStatement);
+        // Re-pointing it is exactly what a reopen asked for, so the flag has been answered.
+        RebaseRequiredReason = null;
 
         // An approval describes wording. Once the wording moves, the signatures describe something that is no
         // longer proposed, so the change request goes back for review rather than carrying them forward. The
@@ -200,6 +215,86 @@ public sealed class SystemChangeRequest
         Audit("RequirementChangeRebased", actorId,
             $"Rebased {change.DisplayNumber} from revision {from} onto revision {ontoRevision}, the result of {ontoDisplayNumber}."
             + (wasApproved ? " Returned to Draft; the approvals described the earlier wording." : string.Empty), now);
+    }
+
+    /// <summary>
+    /// Takes a change request back, keeping the record of it.
+    ///
+    /// Work is abandoned for ordinary reasons -- the problem turns out not to exist, the approach is wrong, it
+    /// is superseded. Until now the only options were to defer it, which says "later" rather than "never", or
+    /// to leave it in the register misrepresenting the plan.
+    ///
+    /// Withdrawn, not deleted. A change request that has been in front of reviewers has signatures against it,
+    /// and removing the evidence that an approval happened is worse than the problem it solves. Somebody
+    /// looking for SRCR-00110 should find that it was approved and then withdrawn, by whom and why, rather
+    /// than finding nothing. Deleting outright is reserved for a draft nobody has ever reviewed, where there
+    /// is no decision to be accountable for.
+    ///
+    /// Nothing is unwound here, and that is not an omission. Approving a change request does not move the
+    /// requirement: the revision is created when a baseline is frozen and materialized. So a change request
+    /// withdrawn before its baseline is frozen has produced no revision to take back, and one whose baseline
+    /// has been frozen cannot be withdrawn at all until that baseline is reopened -- which is a deliberate act
+    /// of its own rather than a silent consequence of somebody withdrawing their work.
+    /// </summary>
+    public void Withdraw(string actorId, string reason, DateTimeOffset now, bool administratorAuthority = false)
+    {
+        EnsureAuthor(actorId, administratorAuthority);
+        if (State == ChangeRequestState.Withdrawn) throw new DomainException("The change request is already withdrawn.");
+        if (State == ChangeRequestState.SelectedForBaseline)
+            throw new DomainException("Remove the change request from its candidate baseline before withdrawing it.");
+        if (string.IsNullOrWhiteSpace(reason)) throw new DomainException("A withdrawal reason is required.");
+
+        // The approvers were asked about work that is being taken away. Leaving the cycle open would leave
+        // signatures outstanding against a package nobody intends to ship.
+        if (State == ChangeRequestState.InReview) ActiveReviewCycle?.Cancel(reason.Trim(), now);
+
+        var from = State;
+        State = ChangeRequestState.Withdrawn;
+        WithdrawnFromState = from;
+        UpdatedAt = now;
+        Audit("ChangeRequestWithdrawn", actorId,
+            $"Withdrawn from {from}: {reason.Trim()}", now);
+    }
+
+    /// <summary>
+    /// Tells a change request that the ground moved under it when a build was reopened.
+    ///
+    /// Reopening takes back the revisions a build materialized. Anything written against one of them is left
+    /// pointing at wording that no longer exists: a modification numbered onto revision 03 when the
+    /// requirement is back at revision 01, or a change to a requirement the reopen removed altogether. Neither
+    /// is wrong to have written, and neither is something this system should silently re-point -- the author
+    /// wrote their words against text they read, and moving them onto different text would assert they read
+    /// something they never saw. So it is flagged and left for them.
+    ///
+    /// A review in flight is cancelled rather than left standing. The approvers were asked about a change
+    /// against a revision that has since been taken back, so their signatures would describe a comparison
+    /// nobody can now make. This is the same reasoning `Reinstate` uses when it refuses to restore `InReview`.
+    /// </summary>
+    public void StrandByReopenedBaseline(string actorId, string baselineDisplayNumber,
+        IReadOnlyList<string> requirements, DateTimeOffset now)
+    {
+        if (State is not (ChangeRequestState.Draft or ChangeRequestState.InReview))
+            throw new DomainException("Only a draft or in-review change request is stranded by a reopened baseline.");
+        if (string.IsNullOrWhiteSpace(baselineDisplayNumber))
+            throw new DomainException("The baseline that was reopened must be named.");
+        if (requirements.Count == 0)
+            throw new DomainException("Stranding a change request must name what it was left pointing at.");
+
+        var subjects = string.Join(", ", requirements);
+        var wasInReview = State == ChangeRequestState.InReview;
+        if (wasInReview)
+        {
+            ActiveReviewCycle?.Cancel($"{baselineDisplayNumber} was reopened and the revisions this was written against were taken back.", now);
+            State = ChangeRequestState.Draft;
+        }
+
+        RebaseRequiredReason =
+            $"{baselineDisplayNumber} was reopened and took back the revision this was written against. "
+            + $"Re-point {subjects} onto what the requirement says now.";
+        UpdatedAt = now;
+        Audit("ChangeRequestStrandedByReopen", actorId,
+            $"{baselineDisplayNumber} was reopened, taking back the revisions {subjects} were written against."
+            + (wasInReview ? " The review was cancelled and it returned to Draft; the approvers were asked about wording that no longer exists." : string.Empty), now);
     }
 
     /// <summary>
@@ -267,6 +362,10 @@ public sealed class SystemChangeRequest
         ValidateReadyForReview();
         var cycle = new ReviewCycle(Id, _reviewCycles.Count + 1, ComputeSnapshotHash(), approvers, now, mode, workflow);
         _reviewCycles.Add(cycle);
+        // Offering it to approvers is the author saying they have dealt with whatever a reopen left them, so
+        // the flag comes off here rather than lingering into a review it no longer describes. What happened is
+        // still in the audit trail, which is where a reviewer asking "why was this returned" looks.
+        RebaseRequiredReason = null;
         State = ChangeRequestState.InReview;
         UpdatedAt = now;
         Audit("ReviewStarted", actorId,

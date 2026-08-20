@@ -51,7 +51,8 @@ public sealed class ChangeRequestRepository(AeroLinkDbContext db) : IChangeReque
             .Select(x => new ScrListItem(x.Id, x.BaseNumber, x.Revision, x.Title, x.State, x.Type, x.AuthorId,
                 x.TargetReleaseId, x.RequirementChanges.Count, x.UpdatedAt, x.DeferredFromState,
                 // Counted here so a collapsed row can say there is history behind it without a request per row.
-                db.SystemChangeRequests.Count(other => other.ProjectId == x.ProjectId && other.BaseNumber == x.BaseNumber)))
+                db.SystemChangeRequests.Count(other => other.ProjectId == x.ProjectId && other.BaseNumber == x.BaseNumber),
+                x.RebaseRequiredReason))
             .ToListAsync(cancellationToken);
         return new PagedResult<ScrListItem>(items, page, pageSize, total);
     }

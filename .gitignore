@@ -35,3 +35,8 @@ product/client/playwright-report-production/
 # 24 MB of frames and an MP4, is reported as untracked. Generated output should be ignored from wherever
 # you happen to be standing.
 docs/overview-video/build/
+
+# Session handoff notes, written for a human to read across a restart and then deleted. Never part of a
+# change, and an untracked file in the root reads as work in progress when it is the opposite.
+HANDOFF-*.md
+PR-BODY-*.md

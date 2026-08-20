@@ -126,6 +126,10 @@ type ChangeRequestDetail = {
   state: string;
   /** How far it had got when it was shelved. Present only while State is Deferred. */
   deferredFromState?: string | null;
+  /** How far it had got when it was taken back. Present only while State is Withdrawn. */
+  withdrawnFromState?: string | null;
+  /** Set when a build was reopened underneath this, taking back the revision it was written against. */
+  rebaseRequiredReason?: string | null;
   createdAt: string;
   updatedAt: string;
   requirementChanges: Requirement[];
@@ -798,6 +802,51 @@ export default function ChangeRequestWorkspace({
     }, "The review could not be cancelled.");
   };
 
+  /**
+   * Taking this change request back, and deleting one nobody ever reviewed.
+   *
+   * The reason is asked for and required, because a register entry that says only "withdrawn" tells the next
+   * person nothing they needed. Deleting asks for confirmation instead of a reason: nothing was decided about
+   * a draft nobody submitted, so there is nobody owed an explanation — but the record does go, and that is
+   * worth a click.
+   *
+   * A refusal is shown as it arrives from the server. When the build is frozen the server names reopening as
+   * the way through, and paraphrasing that here would give the reader a second, worse version of it.
+   */
+  const withdraw = async () => {
+    if (!scr) return;
+    const reason = window.prompt(`Why is ${scr.displayNumber} being taken back?`);
+    if (reason === null) return;
+    if (!reason.trim()) { setError("Say why this change request is being taken back."); return; }
+    await withBusy(async () => {
+      const response = await fetch(`${api}/api/change-requests/${scr.id}/withdraw`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ reason }),
+      });
+      if (!response.ok) {
+        setError(((await response.json()) as { error?: string }).error || "The change request could not be withdrawn.");
+        return;
+      }
+      await load();
+      await onChanged();
+      setSaved("Taken back. The record and its review history stay readable.");
+    }, "The change request could not be withdrawn.");
+  };
+
+  const remove = async () => {
+    if (!scr) return;
+    if (!window.confirm(`Delete ${scr.displayNumber}? Nobody has reviewed it, so the record goes entirely.`)) return;
+    await withBusy(async () => {
+      const response = await fetch(`${api}/api/change-requests/${scr.id}`, { method: "DELETE" });
+      if (!response.ok) {
+        setError(((await response.json()) as { error?: string }).error || "The change request could not be deleted.");
+        return;
+      }
+      await onChanged();
+    }, "The change request could not be deleted.");
+  };
+
   const reinstate = async () => {
     if (!scr) return;
     await withBusy(async () => {
@@ -981,6 +1030,13 @@ export default function ChangeRequestWorkspace({
   // of it first — an explicit, attributable act rather than a side effect of deferring. A released build's work is
   // history and cannot be shelved either.
   const deferrable = isAuthor && scr.state !== "Deferred" && scr.state !== "SelectedForBaseline"
+    && targetRelease?.isReleased === false;
+  // Two verbs, split on whether anybody was ever asked. Deleting is offered only for a draft with no review
+  // history, because removing the evidence that an approval happened is worse than the problem it solves.
+  // Everything else is withdrawn, and the server refuses either one for a frozen or released build — the
+  // refusal names the way out rather than this hiding a control the reader would have been right to want.
+  const deletable = isAuthor && scr.state === "Draft" && scr.reviewCycles.length === 0;
+  const withdrawable = isAuthor && !deletable && scr.state !== "Withdrawn"
     && targetRelease?.isReleased === false;
   const caseComplete = [draft.title, draft.problem, draft.analysis, draft.solution].every((value) =>
     value.trim(),
@@ -1256,6 +1312,14 @@ export default function ChangeRequestWorkspace({
       ) : (
         <ControlledChangeReadLayout>
           <div className="workspaceStack">
+            {/* Served by the server rather than worked out here: whether a revision still exists is not a
+                question the browser should be answering on its own. */}
+            {scr.rebaseRequiredReason && (
+              <div className="rebaseRequiredNotice" data-testid="rebase-required">
+                <b>The build this was written against was reopened</b>
+                <span>{scr.rebaseRequiredReason}</span>
+              </div>
+            )}
             <ControlledChangeCaseCard
               actions={<>
                 {scr.state === "Draft" && isAuthor && (
@@ -1281,6 +1345,18 @@ export default function ChangeRequestWorkspace({
                       ? "Comes back as a Draft: the review was cancelled when it was deferred."
                       : `Comes back as ${stateLabel(scr.deferredFromState ?? "Draft")}.`}>
                     {busy ? "Reinstating…" : "Reinstate"}
+                  </button>
+                )}
+                {withdrawable && (
+                  <button className="withdrawAction" type="button" disabled={busy} onClick={withdraw}
+                    title="Stops pursuing this change request. The record, its review history and its signatures stay readable.">
+                    {busy ? "Withdrawing…" : "Withdraw"}
+                  </button>
+                )}
+                {deletable && (
+                  <button className="withdrawAction" type="button" disabled={busy} onClick={remove}
+                    title="Nobody has reviewed this, so there is nothing to keep a record of. It goes entirely.">
+                    {busy ? "Deleting…" : "Delete"}
                   </button>
                 )}
               </>}
