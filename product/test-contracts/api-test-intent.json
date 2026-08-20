@@ -1,11 +1,11 @@
 {
   "schemaVersion": "aerolink-api-test-intent/v2",
   "totals": {
-    "tests": 476,
-    "cases": 526,
-    "classes": 89,
-    "hostedTests": 464,
-    "hostedCases": 505,
+    "tests": 482,
+    "cases": 532,
+    "classes": 90,
+    "hostedTests": 470,
+    "hostedCases": 511,
     "nonHostedTests": 8,
     "nonHostedCases": 17,
     "unknownHostTests": 4,
@@ -21,18 +21,18 @@
     "http-boundary": {
       "label": "HTTP boundary: route, status, JSON shape",
       "level": "API (must stay hosted)",
-      "tests": 315,
-      "cases": 350,
+      "tests": 317,
+      "cases": 352,
       "unknownCases": 0,
-      "classes": 75
+      "classes": 76
     },
     "ef-translation": {
       "label": "EF translation / relational constraints",
       "level": "Infrastructure (needs a database, not a host)",
-      "tests": 76,
-      "cases": 79,
+      "tests": 80,
+      "cases": 83,
       "unknownCases": 0,
-      "classes": 35
+      "classes": 36
     },
     "auth-policy": {
       "label": "Authentication / authorization wiring",
@@ -5429,6 +5429,108 @@
       "sourceLines": {
         "start": 260,
         "end": 271
+      }
+    },
+    {
+      "cls": "RebaseRequirementChangeTests",
+      "test": "A_rebased_change_request_can_then_go_to_review",
+      "kind": "Fact",
+      "intent": "ef-translation",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 53,
+        "end": 70
+      }
+    },
+    {
+      "cls": "RebaseRequirementChangeTests",
+      "test": "An_approved_result_is_offered_with_both_texts_and_the_rebase_carries_the_new_wording",
+      "kind": "Fact",
+      "intent": "ef-translation",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 26,
+        "end": 51
+      }
+    },
+    {
+      "cls": "RebaseRequirementChangeTests",
+      "test": "Nothing_is_offered_when_the_holder_retires_the_requirement",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 98,
+        "end": 116
+      }
+    },
+    {
+      "cls": "RebaseRequirementChangeTests",
+      "test": "Nothing_is_offered_while_the_holder_is_still_in_review",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 76,
+        "end": 92
+      }
+    },
+    {
+      "cls": "RebaseRequirementChangeTests",
+      "test": "Rebasing_an_approved_change_request_returns_it_to_draft",
+      "kind": "Fact",
+      "intent": "ef-translation",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 118,
+        "end": 134
+      }
+    },
+    {
+      "cls": "RebaseRequirementChangeTests",
+      "test": "The_rebase_is_recorded_naming_both_revisions_and_what_it_was_rebased_onto",
+      "kind": "Fact",
+      "intent": "ef-translation",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 136,
+        "end": 152
       }
     },
     {

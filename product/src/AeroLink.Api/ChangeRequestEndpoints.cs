@@ -573,6 +573,80 @@ public static class ChangeRequestEndpoints
             catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
         });
 
+        // What a rebase would be against, and whether one is offered at all.
+        //
+        // Two rules live here rather than in the aggregate, because both are facts about a different change
+        // request. Rebase is offered only onto an Approved result: a change still in review can be returned,
+        // deferred or withdrawn, and a change request baselined on a revision that never comes to exist is
+        // worse off than one that waited. And never onto a retirement, because a retired requirement cannot be
+        // modified -- there is nothing to re-apply a statement against.
+        app.MapGet("/api/change-requests/{id:guid}/requirements/{requirementChangeId:guid}/rebase",
+            async (Guid id, Guid requirementChangeId, HttpContext http, IChangeRequestRepository repository,
+                AeroLinkDbContext db, CancellationToken ct) =>
+        {
+            var scr = await repository.GetAsync(id, ct); if (scr is null) return Results.NotFound();
+            if (!await http.HasProjectAccessAsync(db, scr.ProjectId, ct)) return Results.Forbid();
+            var mine = scr.RequirementChanges.SingleOrDefault(x => x.Id == requirementChangeId);
+            if (mine is null) return Results.BadRequest(new { error = "That requirement change is not part of this change request." });
+
+            var holders = (await ArtifactClaims.ContendersAsync(db, scr.ProjectId, [mine.BaseNumber], scr.Id, ct))
+                .Where(x => x.Holds).ToList();
+            var approved = holders.FirstOrDefault(x => x.State == ChangeRequestState.Approved);
+            if (approved is null)
+                return Results.Ok(new { available = false, reason = holders.Count == 0
+                    ? "Nothing holds this requirement, so there is nothing to rebase onto."
+                    : "The change request holding this requirement is still in review. Rebasing onto a result that may still be returned would leave this baselined on a revision that never existed." });
+
+            var winner = await db.RequirementChanges.AsNoTracking()
+                .Where(x => x.ChangeRequestId == approved.ChangeRequestId && x.BaseNumber == mine.BaseNumber)
+                .OrderByDescending(x => x.Revision).FirstOrDefaultAsync(ct);
+            if (winner is null)
+                return Results.Ok(new { available = false, reason = "The holding change request no longer changes this requirement." });
+            if (winner.Kind == RequirementChangeKind.Retire)
+                return Results.Ok(new { available = false, reason = $"{approved.DisplayNumber} retires {mine.BaseNumber}. A retired requirement cannot be modified, so remove it from this change request or contest the retirement." });
+
+            return Results.Ok(new
+            {
+                available = true,
+                onto = new { changeRequestId = approved.ChangeRequestId, approved.DisplayNumber, revision = winner.Revision, statement = winner.Statement },
+                // Their own words, and the revision they were written against, so the panel can show both
+                // beside the difference rather than making the author remember what they proposed.
+                mine = new { mine.Id, mine.BaseNumber, mine.Revision, mine.Statement },
+            });
+        });
+
+        app.MapPost("/api/change-requests/{id:guid}/requirements/{requirementChangeId:guid}/rebase",
+            async (Guid id, Guid requirementChangeId, RebaseRequirementChangeRequest request, HttpContext http,
+                IChangeRequestRepository repository, AeroLinkDbContext db, CancellationToken ct) =>
+        {
+            var scr = await repository.GetAsync(id, ct); if (scr is null) return Results.NotFound();
+            if (!await http.HasProjectAccessAsync(db, scr.ProjectId, ct)) return Results.Forbid();
+            var actor = http.UserAccount();
+            if (!CanAdminister(scr, actor)) return Results.Forbid();
+            var mine = scr.RequirementChanges.SingleOrDefault(x => x.Id == requirementChangeId);
+            if (mine is null) return Results.BadRequest(new { error = "That requirement change is not part of this change request." });
+
+            var approved = (await ArtifactClaims.ContendersAsync(db, scr.ProjectId, [mine.BaseNumber], scr.Id, ct))
+                .Where(x => x.Holds).FirstOrDefault(x => x.State == ChangeRequestState.Approved);
+            if (approved is null)
+                return Results.BadRequest(new { error = "Rebasing is offered only onto an approved result.", code = "no_approved_result" });
+
+            var winner = await db.RequirementChanges.AsNoTracking()
+                .Where(x => x.ChangeRequestId == approved.ChangeRequestId && x.BaseNumber == mine.BaseNumber)
+                .OrderByDescending(x => x.Revision).FirstOrDefaultAsync(ct);
+            if (winner is null || winner.Kind == RequirementChangeKind.Retire)
+                return Results.BadRequest(new { error = "A retired requirement cannot be rebased onto.", code = "retired" });
+
+            try
+            {
+                scr.RebaseRequirementChange(actor.UserName, requirementChangeId, winner.Revision,
+                    request.Statement, approved.DisplayNumber, DateTimeOffset.UtcNow, actor.IsAdministrator);
+                await repository.SaveAsync(ct);
+                return Results.Ok(ApiMap.ChangeRequestDetail(scr, await ArtifactClaims.NoticesAsync(db, scr, ct)));
+            }
+            catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
+        });
+
         // The other half of adding one. Its absence is why a change request refused at submission for a
         // contested requirement had no remedy but waiting.
         app.MapDelete("/api/change-requests/{id:guid}/requirements/{requirementChangeId:guid}", async (Guid id,
