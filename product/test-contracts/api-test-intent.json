@@ -1,11 +1,11 @@
 {
   "schemaVersion": "aerolink-api-test-intent/v2",
   "totals": {
-    "tests": 493,
-    "cases": 543,
-    "classes": 91,
-    "hostedTests": 481,
-    "hostedCases": 522,
+    "tests": 500,
+    "cases": 550,
+    "classes": 92,
+    "hostedTests": 488,
+    "hostedCases": 529,
     "nonHostedTests": 8,
     "nonHostedCases": 17,
     "unknownHostTests": 4,
@@ -21,18 +21,18 @@
     "http-boundary": {
       "label": "HTTP boundary: route, status, JSON shape",
       "level": "API (must stay hosted)",
-      "tests": 322,
-      "cases": 357,
+      "tests": 325,
+      "cases": 360,
       "unknownCases": 0,
-      "classes": 77
+      "classes": 78
     },
     "ef-translation": {
       "label": "EF translation / relational constraints",
       "level": "Infrastructure (needs a database, not a host)",
-      "tests": 85,
-      "cases": 88,
+      "tests": 89,
+      "cases": 92,
       "unknownCases": 0,
-      "classes": 37
+      "classes": 38
     },
     "auth-policy": {
       "label": "Authentication / authorization wiring",
@@ -8620,6 +8620,131 @@
       "sourceLines": {
         "start": 127,
         "end": 157
+      }
+    },
+    {
+      "cls": "WithdrawChangeRequestApiTests",
+      "test": "A_build_with_a_later_build_sealed_on_top_of_it_cannot_be_reopened",
+      "kind": "Fact",
+      "intent": "ef-translation",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 245,
+        "end": 291
+      }
+    },
+    {
+      "cls": "WithdrawChangeRequestApiTests",
+      "test": "A_draft_nobody_ever_submitted_is_deleted_outright",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 80,
+        "end": 94
+      }
+    },
+    {
+      "cls": "WithdrawChangeRequestApiTests",
+      "test": "A_withdrawal_reason_is_mandatory",
+      "kind": "Fact",
+      "intent": "ef-translation",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 129,
+        "end": 151
+      }
+    },
+    {
+      "cls": "WithdrawChangeRequestApiTests",
+      "test": "A_withdrawn_change_request_stops_contending_for_its_requirements",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client"
+      ],
+      "sourceLines": {
+        "start": 298,
+        "end": 336
+      }
+    },
+    {
+      "cls": "WithdrawChangeRequestApiTests",
+      "test": "Released_work_cannot_be_withdrawn_and_a_released_build_cannot_be_reopened",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 206,
+        "end": 238
+      }
+    },
+    {
+      "cls": "WithdrawChangeRequestApiTests",
+      "test": "Withdrawing_from_a_frozen_build_is_refused_until_somebody_reopens_it",
+      "kind": "Fact",
+      "intent": "ef-translation",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 158,
+        "end": 200
+      }
+    },
+    {
+      "cls": "WithdrawChangeRequestApiTests",
+      "test": "Work_that_reached_a_reviewer_is_withdrawn_rather_than_deleted_and_stays_readable",
+      "kind": "Fact",
+      "intent": "ef-translation",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 100,
+        "end": 127
       }
     }
   ]

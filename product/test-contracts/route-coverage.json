@@ -25,6 +25,14 @@
     },
     {
       "method": "DELETE",
+      "path": "/api/change-requests/{id:guid}",
+      "file": "ChangeRequestEndpoints.cs",
+      "coveredBy": [
+        "WithdrawChangeRequestApiTests"
+      ]
+    },
+    {
+      "method": "DELETE",
       "path": "/api/change-requests/{id:guid}/requirements/{requirementChangeId:guid}",
       "file": "ChangeRequestEndpoints.cs",
       "coveredBy": [
@@ -297,7 +305,8 @@
         "TestProcedureDocumentApiTests",
         "TestProcedureRevisionHistoryApiTests",
         "VerificationImpactApiTests",
-        "VerificationProgramIsolationApiTests"
+        "VerificationProgramIsolationApiTests",
+        "WithdrawChangeRequestApiTests"
       ]
     },
     {
@@ -414,7 +423,8 @@
       "file": "BaselineEndpoints.cs",
       "coveredBy": [
         "ChangeAuthoringInvariantApiTests",
-        "VerificationImpactApiTests"
+        "VerificationImpactApiTests",
+        "WithdrawChangeRequestApiTests"
       ]
     },
     {
@@ -442,7 +452,8 @@
         "ChangeAuthoringInvariantApiTests",
         "ControlledProcedureDocumentApiTests",
         "ProcedureBaselineApiTests",
-        "VerificationImpactApiTests"
+        "VerificationImpactApiTests",
+        "WithdrawChangeRequestApiTests"
       ]
     },
     {
@@ -452,6 +463,14 @@
       "coveredBy": [
         "ControlledProcedureDocumentApiTests",
         "ProcedureBaselineApiTests"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/baselines/{id:guid}/reopen",
+      "file": "BaselineEndpoints.cs",
+      "coveredBy": [
+        "WithdrawChangeRequestApiTests"
       ]
     },
     {
@@ -497,7 +516,8 @@
       "coveredBy": [
         "ChangeRequestRenameApiTests",
         "ProblemReportApiTests",
-        "ServerAuthorityContractTests"
+        "ServerAuthorityContractTests",
+        "WithdrawChangeRequestApiTests"
       ]
     },
     {
@@ -569,7 +589,8 @@
       "path": "/api/change-requests/{id:guid}/requirements",
       "file": "ChangeRequestEndpoints.cs",
       "coveredBy": [
-        "AdministratorChangeRequestApiTests"
+        "AdministratorChangeRequestApiTests",
+        "WithdrawChangeRequestApiTests"
       ]
     },
     {
@@ -611,7 +632,16 @@
         "AdministratorChangeRequestApiTests",
         "AuthoredSectionTests",
         "ChangeRequestReviewRationaleApiTests",
-        "TestChangeRequestReviewWorkflowTests"
+        "TestChangeRequestReviewWorkflowTests",
+        "WithdrawChangeRequestApiTests"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/change-requests/{id:guid}/withdraw",
+      "file": "ChangeRequestEndpoints.cs",
+      "coveredBy": [
+        "WithdrawChangeRequestApiTests"
       ]
     },
     {
