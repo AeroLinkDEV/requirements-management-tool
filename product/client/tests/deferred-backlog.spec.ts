@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test'
-import { apiBase, apiLogin, login, showcaseSeed } from './auth'
+import { apiBase, apiLogin, login, openNavigationGroup, selectProgram, showcaseSeed } from './auth'
 
 /**
  * The shelf, and taking something off it.
@@ -46,11 +46,13 @@ test('deferred work waits in its own tab until a build takes it, and the build t
   })
   expect(deferred.ok(), `deferring should succeed: ${await deferred.text()}`).toBeTruthy()
 
+  // The register is reached by navigating, not by a route this test can guess.
   await login(page, 'admin', { openProject: false })
-  await page.goto(`/programs/${showcase.programId}/projects/${showcase.projectId}/history`, { waitUntil: 'networkidle' })
+  await selectProgram(page, 'Flight Management System Live Program')
+  await openNavigationGroup(page, 'SYSTEMS ENGINEERING')
+  await page.getByRole('link', { name: 'Change Requests' }).click()
 
-  const register = page.locator('.historyTable')
-  await expect(register).toBeVisible({ timeout: 30_000 })
+  await expect(page.locator('.historyTable')).toBeVisible({ timeout: 30_000 })
 
   // It is on the shelf, so the build's own register does not offer it as this build's work.
   const tabs = page.getByRole('navigation', { name: 'Register view' })
