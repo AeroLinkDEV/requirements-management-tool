@@ -39,3 +39,4 @@ docs/overview-video/build/
 # Session handoff notes, written for a human to read across a restart and then deleted. Never part of a
 # change, and an untracked file in the root reads as work in progress when it is the opposite.
 HANDOFF-*.md
+PR-BODY-*.md
