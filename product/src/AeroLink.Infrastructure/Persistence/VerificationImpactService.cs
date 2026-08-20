@@ -346,12 +346,39 @@ public sealed class VerificationImpactService(AeroLinkDbContext db, ProblemRepor
             .ToListAsync(ct);
         if (orphanedProcedures.Count == 0) return 0;
 
+        return await RaiseOrphanItemsAsync(projectId, releaseId, retired[0].ChangeRequestId, null,
+            orphanedProcedures.Select(x => new OrphanedProcedure(x.Id, x.BaseNumber, x.Level)).ToList(), now, ct);
+    }
+
+    /// <summary>A procedure that no longer covers any requirement, and enough about it to route the work.</summary>
+    public sealed record OrphanedProcedure(Guid ProcedureId, string DisplayNumber, TestProcedureLevel Level);
+
+    /// <summary>
+    /// Turns procedures that cover nothing into work somebody is assigned, whatever removed the requirement.
+    ///
+    /// Shared by the two things that can remove one. A retirement decides it, and the change request that
+    /// decided is the whole story. A reopened baseline un-materializes it, and then the change request named
+    /// here is the one whose work was taken back rather than the one that chose to take it -- so the baseline
+    /// travels with the item and says which act it was.
+    ///
+    /// Deduplicated against every orphan item still open, not merely the ones raised in this pass: reopening a
+    /// build twice, or retiring after a reopen, must not hand the same procedure to somebody twice.
+    /// </summary>
+    private async Task<int> RaiseOrphanItemsAsync(Guid projectId, Guid releaseId, Guid changeRequestId,
+        Guid? causingBaselineId, IReadOnlyList<OrphanedProcedure> orphanedProcedures, DateTimeOffset now,
+        CancellationToken ct)
+    {
+        if (orphanedProcedures.Count == 0) return 0;
         var alreadyRaised = await db.VerificationImpactItems
             .Where(x => x.Trigger == VerificationImpactTrigger.ProcedureOrphaned
                 && x.State != VerificationImpactState.Resolved && x.State != VerificationImpactState.Superseded)
             .Select(x => x.ProcedureId).ToListAsync(ct);
         var covered = alreadyRaised.Where(x => x is not null).Select(x => x!.Value).ToHashSet();
-        var changeRequestId = retired[0].ChangeRequestId;
+        // Items added earlier in this same unit of work are not in the query above, and one reopen can strand
+        // two revisions of the same procedure.
+        foreach (var pending in db.VerificationImpactItems.Local
+                     .Where(x => x.Trigger == VerificationImpactTrigger.ProcedureOrphaned && x.ProcedureId is not null))
+            covered.Add(pending.ProcedureId!.Value);
         var sourceNumber = await db.SystemChangeRequests.Where(x => x.Id == changeRequestId)
             .Select(x => x.BaseNumber + "." + (x.Revision < 10 ? "0" : "") + x.Revision)
             .SingleAsync(ct);
@@ -361,7 +388,7 @@ public sealed class VerificationImpactService(AeroLinkDbContext db, ProblemRepor
         var raised = 0;
         foreach (var procedure in orphanedProcedures)
         {
-            if (!covered.Add(procedure.Id)) continue;
+            if (!covered.Add(procedure.ProcedureId)) continue;
             var discipline = procedure.Level switch
             {
                 TestProcedureLevel.System => TestChangeReviewDiscipline.System,
@@ -380,11 +407,24 @@ public sealed class VerificationImpactService(AeroLinkDbContext db, ProblemRepor
                 reviews.Add(discipline, review);
             }
             db.VerificationImpactItems.Add(VerificationImpactItem.ForOrphanedProcedure(
-                projectId, releaseId, changeRequestId, review.Id, procedure.Id, procedure.BaseNumber, now));
+                projectId, releaseId, changeRequestId, review.Id, procedure.ProcedureId, procedure.DisplayNumber,
+                now, causingBaselineId));
             raised++;
         }
         return raised;
     }
+
+    /// <summary>
+    /// Raises work for the procedures a reopened baseline left covering nothing.
+    ///
+    /// The caller has already established which those are -- it is the thing taking the revisions back, so it
+    /// is the only thing that knows what survived -- and this does the routing and the recording rather than
+    /// the finding.
+    /// </summary>
+    public Task<int> RaiseProceduresOrphanedByReopenAsync(Guid projectId, Guid releaseId, Guid baselineId,
+        Guid changeRequestId, IReadOnlyList<OrphanedProcedure> orphanedProcedures, DateTimeOffset now,
+        CancellationToken ct)
+        => RaiseOrphanItemsAsync(projectId, releaseId, changeRequestId, baselineId, orphanedProcedures, now, ct);
 
     /// <summary>Unresolved items are what hold a baseline back from approval.</summary>
     public Task<List<VerificationImpactItem>> OutstandingForReleaseAsync(Guid releaseId, CancellationToken ct)

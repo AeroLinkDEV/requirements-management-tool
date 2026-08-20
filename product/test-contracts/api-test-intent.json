@@ -1,11 +1,11 @@
 {
   "schemaVersion": "aerolink-api-test-intent/v2",
   "totals": {
-    "tests": 504,
-    "cases": 554,
+    "tests": 506,
+    "cases": 556,
     "classes": 93,
-    "hostedTests": 492,
-    "hostedCases": 533,
+    "hostedTests": 494,
+    "hostedCases": 535,
     "nonHostedTests": 8,
     "nonHostedCases": 17,
     "unknownHostTests": 4,
@@ -29,8 +29,8 @@
     "ef-translation": {
       "label": "EF translation / relational constraints",
       "level": "Infrastructure (needs a database, not a host)",
-      "tests": 92,
-      "cases": 95,
+      "tests": 94,
+      "cases": 97,
       "unknownCases": 0,
       "classes": 39
     },
@@ -6054,6 +6054,42 @@
       "sourceLines": {
         "start": 77,
         "end": 87
+      }
+    },
+    {
+      "cls": "ReopenBaselineConsequencesApiTests",
+      "test": "A_procedure_already_waiting_on_somebody_is_not_raised_a_second_time",
+      "kind": "Fact",
+      "intent": "ef-translation",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 373,
+        "end": 407
+      }
+    },
+    {
+      "cls": "ReopenBaselineConsequencesApiTests",
+      "test": "A_procedure_left_covering_nothing_becomes_work_that_names_the_reopened_build",
+      "kind": "Fact",
+      "intent": "ef-translation",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 335,
+        "end": 367
       }
     },
     {
