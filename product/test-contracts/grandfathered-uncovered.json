@@ -98,7 +98,6 @@
     "POST /api/reqif/jobs/{}/process",
     "POST /api/reqif/jobs/{}/reject",
     "POST /api/review-workflows/{}/retire",
-    "POST /api/review-workflows/{}/revise",
     "POST /api/showcase/seed",
     "POST /api/showcase/upgrade",
     "POST /api/trace-links",

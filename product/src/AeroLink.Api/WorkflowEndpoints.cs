@@ -20,6 +20,8 @@ namespace AeroLink.Api;
 /// </summary>
 public static class WorkflowEndpoints
 {
+    private sealed record ApplicableCandidate(string UserName, string DisplayName, ProgramRole Role, bool IsDelegated);
+
     public static void MapWorkflowEndpoints(this WebApplication app)
     {
         app.MapGet("/api/review-workflows", async (Guid projectId, HttpContext http, AeroLinkDbContext db, CancellationToken ct) =>
@@ -48,6 +50,10 @@ public static class WorkflowEndpoints
                 await db.SaveChangesAsync(ct);
                 return Results.Created($"/api/review-workflows/{workflow.Id}", Map(workflow));
             }
+            catch (DbUpdateException ex) when (IsWorkflowUniquenessConflict(ex))
+            {
+                return Results.Conflict(new { error = "Another review workflow version or active configuration was saved concurrently. Refresh and try again." });
+            }
             catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
         });
 
@@ -74,6 +80,10 @@ public static class WorkflowEndpoints
                 await db.SaveChangesAsync(ct);
                 return Results.Ok(Map(workflow));
             }
+            catch (DbUpdateException ex) when (IsWorkflowUniquenessConflict(ex))
+            {
+                return Results.Conflict(new { error = "Another review workflow version or active configuration was saved concurrently. Refresh and try again." });
+            }
             catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
         });
 
@@ -94,6 +104,10 @@ public static class WorkflowEndpoints
                 db.ReviewWorkflows.Add(next);
                 await db.SaveChangesAsync(ct);
                 return Results.Created($"/api/review-workflows/{next.Id}", Map(next));
+            }
+            catch (DbUpdateException ex) when (IsWorkflowUniquenessConflict(ex))
+            {
+                return Results.Conflict(new { error = "Another review workflow version or active configuration was saved concurrently. Refresh and try again." });
             }
             catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
         });
@@ -128,14 +142,50 @@ public static class WorkflowEndpoints
             if (workflow is null) return Results.Ok(new { required = false });
 
             var programId = await db.Projects.Where(x => x.Id == projectId).Select(x => x.ProgramId).SingleAsync(ct);
-            var eligible = await (from membership in db.ProgramMemberships.AsNoTracking().Where(x => x.ProgramId == programId && x.EndedAt == null)
+            var directEligible = await (from membership in db.ProgramMemberships.AsNoTracking().Where(x => x.ProgramId == programId && x.EndedAt == null)
                                   join account in db.UserAccounts.AsNoTracking().Where(x => x.State == AccountState.Active)
                                       on membership.UserId equals account.Id
-                                  select new { account.UserName, account.DisplayName, membership.Role }).ToListAsync(ct);
+                                  select new ApplicableCandidate(account.UserName, account.DisplayName, membership.Role, false)).ToListAsync(ct);
+            // Standing backups are part of the same live authority policy as direct holders. Include only
+            // active Program members, so a stale backup account cannot be offered as a required signer.
+            var backupEligible = await (from backup in db.ProjectRoleBackups.AsNoTracking()
+                                        join membership in db.ProgramMemberships.AsNoTracking()
+                                            on new { UserId = backup.BackupUserId, backup.ProgramId }
+                                            equals new { UserId = membership.UserId, membership.ProgramId }
+                                        join account in db.UserAccounts.AsNoTracking().Where(x => x.State == AccountState.Active)
+                                            on backup.BackupUserId equals account.Id
+                                        where backup.ProgramId == programId && backup.RemovedAt == null && membership.EndedAt == null
+                                        select new ApplicableCandidate(account.UserName, account.DisplayName, backup.Role, false)).ToListAsync(ct);
+            // A delegation is a live exact-role grant, matching IdentityService.HasRoleAsync. The delegate
+            // must remain an active Program participant and account; ended memberships, revoked delegations,
+            // and expired/future intervals must never appear in an author-facing picker.
+            var now = DateTimeOffset.UtcNow;
+            var delegationRows = await db.RoleDelegations.AsNoTracking()
+                .Where(x => x.ProgramId == programId && x.RevokedAt == null)
+                .Select(x => new { x.DelegateUserId, x.Role, x.StartsAt, x.EndsAt }).ToListAsync(ct);
+            // SQLite does not translate DateTimeOffset comparisons. Filter the small live set in memory, then
+            // use ordinary ID membership queries so PostgreSQL and SQLite expose the same candidates.
+            var liveDelegations = delegationRows.Where(x => x.StartsAt <= now && x.EndsAt > now).ToList();
+            var delegateIds = liveDelegations.Select(x => x.DelegateUserId).Distinct().ToList();
+            var delegatedAccounts = await (from membership in db.ProgramMemberships.AsNoTracking()
+                                           join account in db.UserAccounts.AsNoTracking().Where(x => x.State == AccountState.Active)
+                                               on membership.UserId equals account.Id
+                                           where membership.ProgramId == programId && membership.EndedAt == null
+                                                 && delegateIds.Contains(membership.UserId)
+                                           select new { account.Id, account.UserName, account.DisplayName }).ToListAsync(ct);
+            var delegatedEligible = liveDelegations.Join(delegatedAccounts,
+                    delegation => delegation.DelegateUserId,
+                    account => account.Id,
+                    (delegation, account) => new ApplicableCandidate(account.UserName, account.DisplayName, delegation.Role, true))
+                .ToList();
+            var eligible = directEligible.Concat(backupEligible).Concat(delegatedEligible)
+                .DistinctBy(x => new { x.UserName, x.Role }).ToList();
 
             return Results.Ok(new
             {
                 required = true,
+                minimum = workflow.Stages.Count,
+                allowsAdditional = true,
                 workflow.Id,
                 workflow.Name,
                 workflow.Version,
@@ -144,11 +194,18 @@ public static class WorkflowEndpoints
                 {
                     stage.Position,
                     stage.Name,
+                    kind = stage.Kind.ToString(),
                     requiredRole = stage.RequiredRole.ToString(),
                     // Administrators are listed for every stage because they can stand in when the named
                     // authority is unavailable; a review that cannot proceed at all is not a control.
                     candidates = eligible
-                        .Where(x => x.Role == stage.RequiredRole || x.Role == ProgramRole.Administrator)
+                        // IdentityService applies role delegations as exact-role grants. Keep the
+                        // established satisfying-role/admin substitution for direct memberships and
+                        // standing backups, but never infer a broader authority from a delegation.
+                        .Where(x => x.IsDelegated
+                            ? x.Role == stage.RequiredRole
+                            : ProgramRoleAuthority.Satisfying(stage.RequiredRole).Contains(x.Role)
+                                || x.Role == ProgramRole.Administrator)
                         .Select(x => new { userId = x.UserName, name = x.DisplayName, role = x.Role.ToString() })
                         .DistinctBy(x => x.userId)
                         .OrderBy(x => x.name),
@@ -182,6 +239,19 @@ public static class WorkflowEndpoints
     public static async Task<ReviewWorkflowSpecification?> ActiveSpecificationAsync(AeroLinkDbContext db,
         Guid projectId, TestChangeReviewDiscipline discipline, CancellationToken ct) =>
         (await ActiveAsync(db, projectId, SubjectOf(discipline), ct))?.Specification();
+
+    /// <summary>
+    /// Loads the exact workflow recorded on an in-flight cycle. Revisions govern future Draft submissions;
+    /// correction/restart operations inside an existing cycle must not silently switch to today's active
+    /// policy.
+    /// </summary>
+    public static async Task<ReviewWorkflowSpecification?> HistoricalSpecificationAsync(AeroLinkDbContext db,
+        Guid projectId, Guid? workflowId, CancellationToken ct)
+    {
+        if (workflowId is null) return null;
+        return (await db.ReviewWorkflows.AsNoTracking().Include(x => x.Stages)
+            .SingleOrDefaultAsync(x => x.Id == workflowId && x.ProjectId == projectId, ct))?.Specification();
+    }
 
     /// <summary>
     /// The authority each user holds on the program owning this project.
@@ -222,7 +292,11 @@ public static class WorkflowEndpoints
             .Where(x => x.ProgramId == programId && x.UserId == userId && x.EndedAt == null)
             .Select(x => x.Role).ToListAsync(ct);
         if (roles.Contains(ProgramRole.Administrator)) return ProgramRole.Administrator;
-        return roles.Contains(requiredRole) ? requiredRole : null;
+        // Precise engineering and test titles satisfy their established generic authorities (and standing
+        // backups/delegations are handled by the live signing gates). Resolve the role the stage actually
+        // asks for, rather than the strongest unrelated role the member happens to hold.
+        return roles.Any(ProgramRoleAuthority.Satisfying(requiredRole).Contains) ?
+            (roles.Contains(requiredRole) ? requiredRole : ProgramRoleAuthority.Satisfying(requiredRole).First(roles.Contains)) : null;
     }
 
     private static int Rank(ProgramRole? role) => role switch
@@ -254,6 +328,19 @@ public static class WorkflowEndpoints
         stages = x.Stages.OrderBy(s => s.Position)
             .Select(s => new { s.Position, s.Name, requiredRole = s.RequiredRole.ToString(), kind = s.Kind.ToString() }),
     };
+
+    private static bool IsWorkflowUniquenessConflict(DbUpdateException exception)
+    {
+        var details = exception.ToString();
+        return details.Contains("IX_review_workflows_ProjectId_AppliesTo_State", StringComparison.OrdinalIgnoreCase)
+            || details.Contains("IX_review_workflows_LogicalId_Version", StringComparison.OrdinalIgnoreCase)
+            || (details.Contains("review_workflows", StringComparison.OrdinalIgnoreCase)
+                && ((details.Contains("ProjectId", StringComparison.OrdinalIgnoreCase)
+                     && details.Contains("AppliesTo", StringComparison.OrdinalIgnoreCase)
+                     && details.Contains("State", StringComparison.OrdinalIgnoreCase))
+                    || (details.Contains("LogicalId", StringComparison.OrdinalIgnoreCase)
+                        && details.Contains("Version", StringComparison.OrdinalIgnoreCase))));
+    }
 }
 
 public sealed record ReviewWorkflowStageRequest(string Name, ProgramRole RequiredRole,

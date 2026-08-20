@@ -63,3 +63,19 @@ test('Selecting an artifact shows either its stages or why it has none', async (
     }
   }
 })
+
+test('Editing an artifact locks navigation until the draft is saved or cancelled', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await openConfiguration(page)
+
+  const edit = page.getByRole('button', { name: /^(Edit configuration|Configure this artifact)$/ }).first()
+  await expect(edit).toBeVisible()
+  await edit.click()
+
+  const otherArtifact = page.locator('[data-artifact="Software"]')
+  await expect(otherArtifact).toBeDisabled()
+  await expect(page.getByText('Finish or cancel this artifact\'s edits before selecting another artifact type.')).toBeVisible()
+
+  await page.getByRole('button', { name: 'Cancel' }).last().click()
+  await expect(otherArtifact).toBeEnabled()
+})

@@ -1,12 +1,28 @@
 using AeroLink.Domain.ChangeControl;
+using AeroLink.Domain.Identity;
 using AeroLink.Domain.Programs;
 using AeroLink.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 
 namespace AeroLink.Infrastructure.Tests;
 
 public sealed class ReviewPersistenceTests
 {
+    [Fact]
+    public void Active_workflow_uniqueness_migration_is_discoverable()
+    {
+        var migration = typeof(AeroLinkDbContext).Assembly.GetType(
+            "AeroLink.Infrastructure.Persistence.Migrations.EnforceOneActiveReviewWorkflow");
+
+        Assert.NotNull(migration);
+        Assert.Equal("20260820142622_EnforceOneActiveReviewWorkflow",
+            migration!.GetCustomAttributes(typeof(MigrationAttribute), inherit: false)
+                .Cast<MigrationAttribute>().Single().Id);
+        Assert.NotEmpty(migration.GetCustomAttributes(typeof(DbContextAttribute), inherit: false));
+    }
+
     [Fact]
     public async Task Reloaded_review_advances_by_explicit_position_not_database_return_order()
     {
@@ -37,6 +53,40 @@ public sealed class ReviewPersistenceTests
                 Assert.Equal(1, scr.ActiveReviewCycle!.ActivePosition);
                 Assert.Equal("r2", scr.ActiveReviewCycle.Steps.Single(x => x.State == ApprovalStepState.Active).ApproverId);
             }
+        }
+        finally { File.Delete(path); }
+    }
+
+    [Fact]
+    public async Task Sqlite_allows_history_but_rejects_two_active_workflows_for_one_subject()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"aerolink-workflow-index-{Guid.NewGuid():N}.db");
+        var options = new DbContextOptionsBuilder<AeroLinkDbContext>().UseSqlite($"Data Source={path};Pooling=False").Options;
+        try
+        {
+            await using var db = new AeroLinkDbContext(options);
+            await db.Database.EnsureCreatedAsync();
+            var projectId = Guid.NewGuid();
+            var first = new ReviewWorkflow(projectId, "First", ReviewSubject.System, ReviewMode.Sequential,
+                [new("Review", ProgramRole.Reviewer)], "test", DateTimeOffset.UtcNow);
+            first.Activate("test", DateTimeOffset.UtcNow);
+            db.ReviewWorkflows.Add(first);
+            await db.SaveChangesAsync();
+
+            var retired = first.Revise("Retired", ReviewMode.Sequential,
+                [new("Review", ProgramRole.Reviewer)], "test", DateTimeOffset.UtcNow.AddMinutes(1));
+            // The aggregate revision is Draft by design; retiring it is not required for this assertion. The
+            // unique index must permit historical non-active rows while refusing a second active row.
+            db.ReviewWorkflows.Add(retired);
+            await db.SaveChangesAsync();
+
+            var competing = new ReviewWorkflow(projectId, "Competing", ReviewSubject.System, ReviewMode.Sequential,
+                [new("Review", ProgramRole.Reviewer)], "race", DateTimeOffset.UtcNow.AddMinutes(2));
+            competing.Activate("race", DateTimeOffset.UtcNow.AddMinutes(2));
+            db.ReviewWorkflows.Add(competing);
+
+            await Assert.ThrowsAsync<DbUpdateException>(() => db.SaveChangesAsync());
+            Assert.Equal(1, await db.ReviewWorkflows.CountAsync(x => x.ProjectId == projectId && x.State == ReviewWorkflowState.Active));
         }
         finally { File.Delete(path); }
     }

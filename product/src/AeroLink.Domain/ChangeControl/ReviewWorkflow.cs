@@ -189,12 +189,22 @@ public sealed record ReviewWorkflowSpecification(
     /// </summary>
     public void Validate(IReadOnlyList<ApproverSelection> approvers)
     {
-        if (approvers.Count != Stages.Count)
+        if (approvers.Count < Stages.Count)
             throw new DomainException(
-                $"{Name} v{Version} requires {Stages.Count} approver{(Stages.Count == 1 ? "" : "s")}, one for each stage: " +
+                $"{Name} v{Version} requires {Stages.Count} approver{(Stages.Count == 1 ? "" : "s")} minimum (at least {Stages.Count}), one for each stage: " +
                 string.Join(", ", Stages.Select(x => x.Name)) + ".");
 
         foreach (var stage in Stages) ValidateStage(stage, approvers[stage.Position]);
+
+        // Configured rows are the minimum accountable positions. Additional signers are permitted, but they
+        // still have to be active, attributable Program participants; the API resolves that authority and
+        // passes it here rather than allowing a browser-supplied role claim to create a free-floating step.
+        for (var index = Stages.Count; index < approvers.Count; index++)
+        {
+            if (approvers[index].Role is null)
+                throw new DomainException(
+                    $"{approvers[index].Name} has no active Program authority, so they cannot be added as an additional reviewer.");
+        }
     }
 
     /// <summary>Checks one chosen approver against one stage.</summary>
@@ -205,7 +215,8 @@ public sealed record ReviewWorkflowSpecification(
                 $"{chosen.Name} has no recorded authority on this program, so they cannot sign the {stage.Name} stage.");
         // An administrator can stand in for any stage. Somebody has to be able to unblock a review when the
         // named authority is unavailable, and the substitution is recorded on the step either way.
-        if (chosen.Role != stage.RequiredRole && chosen.Role != ProgramRole.Administrator)
+        if (!ProgramRoleAuthority.Satisfying(stage.RequiredRole).Contains(chosen.Role.Value)
+            && chosen.Role != ProgramRole.Administrator)
             throw new DomainException(
                 $"The {stage.Name} stage must be signed by a {Readable(stage.RequiredRole)}. " +
                 $"{chosen.Name} holds {Readable(chosen.Role.Value)} authority.");

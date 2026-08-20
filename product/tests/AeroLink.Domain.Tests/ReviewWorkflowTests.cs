@@ -65,6 +65,54 @@ public sealed class ReviewWorkflowTests
     }
 
     [Fact]
+    public void Additional_signers_are_allowed_and_frozen_as_named_cycle_steps()
+    {
+        var workflow = Workflow().Specification();
+        var cycle = ReadyScr().SubmitForReview("author",
+            [new("peer", "Peer Engineer", ProgramRole.Reviewer),
+             new("cm", "Configuration Manager", ProgramRole.ConfigurationManager),
+             new("extra", "Additional Engineer", ProgramRole.Engineer)],
+            Now, workflow: workflow);
+
+        Assert.Equal(3, cycle.Steps.Count);
+        var extra = cycle.Steps.Single(x => x.Position == 2);
+        Assert.Equal("Additional reviewer 1", extra.StageName);
+        Assert.Equal(ReviewStageKind.Review, extra.StageKind);
+        Assert.Equal(ProgramRole.Engineer.ToString(), extra.Authority);
+    }
+
+    [Fact]
+    public void An_additional_signer_without_program_authority_is_refused()
+    {
+        var error = Assert.Throws<DomainException>(() => ReadyScr().SubmitForReview("author",
+            [new("peer", "Peer Engineer", ProgramRole.Reviewer),
+             new("cm", "Configuration Manager", ProgramRole.ConfigurationManager),
+             new("outsider", "Unrelated Account")],
+            Now, workflow: Workflow().Specification()));
+
+        Assert.Contains("no active Program authority", error.Message);
+    }
+
+    [Fact]
+    public void A_cycle_keeps_its_original_workflow_specification_when_policy_is_revised()
+    {
+        var first = Workflow();
+        var scr = ReadyScr();
+        var cycle = scr.SubmitForReview("author",
+            [new("peer", "Peer Engineer", ProgramRole.Reviewer),
+             new("cm", "Configuration Manager", ProgramRole.ConfigurationManager)],
+            Now, workflow: first.Specification());
+
+        var revised = first.Revise("Changed board", ReviewMode.Parallel,
+            [new("Different authority", ProgramRole.TestLead)], "config.manager", Now.AddDays(1));
+
+        Assert.Equal(first.Id, cycle.WorkflowId);
+        Assert.Equal(first.Version, cycle.WorkflowVersion);
+        Assert.Equal("System change board", cycle.WorkflowName);
+        Assert.Equal(ReviewWorkflowState.Draft, revised.State);
+    }
+
+    [Fact]
     public void An_approver_without_the_stage_authority_cannot_be_chosen()
     {
         var error = Assert.Throws<DomainException>(() => ReadyScr().SubmitForReview("author",

@@ -372,6 +372,34 @@ public sealed class TestChangeRequestReviewWorkflowTests
     }
 
     [Fact]
+    public async Task Submission_accepts_and_persists_an_additional_active_program_signer()
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var client = factory.CreateClient();
+        var fixture = await SeedAsync(factory);
+        await CreateWorkflowAsync(client, fixture.ProjectId, "Sequential",
+            ("Required approval", nameof(ProgramRole.Approver)));
+        await PreparePackageAsync(client, fixture);
+
+        var submitted = await SubmitAsync(client, fixture.ReviewId, new
+        {
+            approvers = new[] { new { userId = "workflow.one" }, new { userId = "workflow.outsider" } }
+        });
+
+        Assert.Equal(2, submitted.GetProperty("stageCount").GetInt32());
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+        var cycle = await db.ReviewCycles.Include(x => x.Steps)
+            .SingleAsync(x => x.TestChangeReviewId == fixture.ReviewId);
+        Assert.Equal(2, cycle.Steps.Count);
+        var extra = cycle.Steps.Single(x => x.Position == 1);
+        Assert.Equal("Additional reviewer 1", extra.StageName);
+        Assert.Equal(ReviewStageKind.Review, extra.StageKind);
+        Assert.Equal(ProgramRole.Engineer.ToString(), extra.Authority);
+        Assert.Equal("workflow.outsider", extra.ApproverId);
+    }
+
+    [Fact]
     public async Task Parallel_review_activates_all_stages_and_approves_on_the_final_approval()
     {
         using var factory = new AeroLinkApiFactory();
@@ -425,7 +453,8 @@ public sealed class TestChangeRequestReviewWorkflowTests
             new { approvers = new[] { new { userId = "workflow.outsider" }, new { userId = "workflow.two" } } });
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
         var body = await response.Content.ReadAsStringAsync();
-        Assert.True(body.Contains("has no recorded authority") || body.Contains("must be signed by"), body);
+        Assert.True(body.Contains("has no recorded authority") || body.Contains("must be signed by")
+                    || body.Contains("does not hold authority"), body);
     }
 
     [Fact]
@@ -1212,7 +1241,7 @@ public sealed class TestChangeRequestReviewWorkflowTests
     }
 
     [Fact]
-    public async Task Too_few_or_too_many_system_approvers_are_refused_with_stage_guidance()
+    public async Task Too_few_system_approvers_are_refused_but_additional_signers_are_accepted()
     {
         using var factory = new AeroLinkApiFactory();
         using var client = factory.CreateClient();
@@ -1232,16 +1261,19 @@ public sealed class TestChangeRequestReviewWorkflowTests
 
         using var tooMany = await client.PostAsJsonAsync($"/api/change-requests/{draftId}/submit",
             new { approvers = new[] { new { userId = "workflow.one" }, new { userId = "workflow.two" }, new { userId = "workflow.lead" } }, mode = "Sequential" });
-        Assert.Equal(HttpStatusCode.BadRequest, tooMany.StatusCode);
+        Assert.True(tooMany.IsSuccessStatusCode, await tooMany.Content.ReadAsStringAsync());
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            var cycle = await db.ReviewCycles.Include(x => x.Steps).SingleAsync(x => x.ChangeRequestId == draftId);
+            Assert.Equal(3, cycle.Steps.Count);
+        }
 
-        // Restart-review enforces the same count before touching the cycle.
-        using var valid = await client.PostAsJsonAsync($"/api/change-requests/{draftId}/submit",
-            new { approvers = new[] { new { userId = "workflow.one" }, new { userId = "workflow.two" } }, mode = "Sequential" });
-        Assert.True(valid.IsSuccessStatusCode, await valid.Content.ReadAsStringAsync());
-        using var restartTooMany = await client.PostAsJsonAsync($"/api/change-requests/{draftId}/restart-review",
+        // Restart-review enforces the same minimum before touching the frozen cycle.
+        using var restartTooFew = await client.PostAsJsonAsync($"/api/change-requests/{draftId}/restart-review",
             new { approvers = new[] { new { userId = "workflow.one" } }, reason = "Wrong count." });
-        Assert.Equal(HttpStatusCode.BadRequest, restartTooMany.StatusCode);
-        Assert.Contains("requires 2 approvers", await restartTooMany.Content.ReadAsStringAsync());
+        Assert.Equal(HttpStatusCode.BadRequest, restartTooFew.StatusCode);
+        Assert.Contains("requires 2 approvers", await restartTooFew.Content.ReadAsStringAsync());
     }
 
     [Fact]

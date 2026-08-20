@@ -21,6 +21,7 @@
 
 .approvalConfigError, .approvalConfigAlarm { border-radius: var(--radius-sm); padding: 11px 14px; font-size: var(--text-control); margin: 0 0 18px; }
 .approvalConfigError { background: #fce9eb; border: 1px solid #eccfd3; color: #8f2f3d; }
+.approvalConfigSuccess { border-radius: var(--radius-sm); padding: 11px 14px; font-size: var(--text-control); margin: 0 0 18px; background: var(--teal-100); border: 1px solid #b8ded8; color: var(--teal-700); }
 .approvalConfigAlarm { background: #fce9eb; border: 1px solid #eccfd3; color: #8f2f3d; }
 .approvalConfigAlarm strong { font-weight: var(--weight-bold); }
 .approvalConfigLoading { color: var(--ink-500); font-size: var(--text-control); }
@@ -40,10 +41,13 @@
   padding: 11px 14px; display: flex; flex-direction: column; gap: 5px; font: inherit;
 }
 .artifactList button:hover { background: var(--surface-subtle); }
+.artifactList button:disabled { cursor: not-allowed; opacity: .78; }
+.artifactList button:disabled:hover { background: inherit; }
 .artifactList button.selected { background: var(--teal-100); box-shadow: inset 3px 0 0 var(--teal-700); }
 .artifactName { font-size: var(--text-control); font-weight: var(--weight-strong); color: var(--ink-900); }
 .artifactMeta { font-size: var(--text-xs); color: var(--ink-500); display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .artifactListNote { margin: 0; padding: 11px 14px; font-size: var(--text-xs); color: var(--ink-500); border-top: 1px solid var(--line); background: var(--surface-subtle); }
+.artifactNavigationNotice { margin: 0; padding: 10px 14px; font-size: var(--text-xs); line-height: 1.4; color: var(--teal-700); background: var(--teal-100); border-bottom: 1px solid var(--line); }
 
 .pill { display: inline-flex; align-items: center; border-radius: var(--radius-pill); padding: 2px 9px; font-size: var(--text-xs); font-weight: var(--weight-bold); }
 .pill.active { background: var(--teal-100); color: var(--teal-700); }
@@ -57,6 +61,10 @@
 .procedureHeader { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; padding-bottom: 14px; border-bottom: 1px solid var(--line); margin-bottom: 4px; }
 .procedureHeader h2, .procedureEmpty h2 { font-family: var(--font-display); font-size: var(--text-xl); font-weight: var(--weight-bold); margin: 0 0 3px; color: var(--ink-900); }
 .procedureHeader p { margin: 0; font-size: var(--text-sm); color: var(--ink-500); }
+.procedureHeaderActions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; justify-content: flex-end; }
+.primaryConfigAction { min-height: 36px; padding: 8px 14px; border: 1px solid var(--teal-700); border-radius: var(--radius-sm); background: var(--teal-700); color: white; font: var(--weight-strong) var(--text-control) var(--font-body); cursor: pointer; }
+.primaryConfigAction:hover { background: #0d665f; }
+.primaryConfigAction:disabled { opacity: .55; cursor: not-allowed; }
 .procedureEmpty p { margin: 8px 0 0; font-size: var(--text-control); color: var(--ink-500); max-width: 68ch; }
 
 .stageTable { width: 100%; border-collapse: collapse; font-size: var(--text-control); }
@@ -81,7 +89,24 @@
 .blockingNotice span { font-weight: var(--weight-bold); }
 .blockingNotice p { margin: 0; font-size: var(--text-control); }
 
+.configurationEditor { padding-top: 8px; }
+.configurationEditorIntro { margin: 0 0 14px; color: var(--ink-500); font-size: var(--text-control); line-height: 1.5; max-width: 78ch; }
+.configurationRows { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
+.configurationRow { display: grid; grid-template-columns: 30px minmax(150px, 1.2fr) minmax(110px, .7fr) minmax(170px, 1fr) auto; gap: 10px; align-items: end; padding: 12px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface-subtle); }
+.configurationRowNumber { align-self: center; color: var(--ink-500); font-weight: var(--weight-bold); }
+.configurationRow label { display: grid; gap: 5px; color: var(--ink-500); font-size: var(--text-xs); font-weight: var(--weight-strong); }
+.configurationRow input, .configurationRow select { width: 100%; min-height: 36px; padding: 7px 9px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface); color: var(--ink-900); font: var(--text-control) var(--font-body); }
+.configurationRemove { min-height: 36px; padding: 7px 10px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface); color: #8f2f3d; cursor: pointer; }
+.configurationRemove:disabled { color: var(--ink-400); cursor: not-allowed; }
+.configurationEditorActions { display: flex; align-items: center; gap: 12px; margin-top: 14px; flex-wrap: wrap; color: var(--ink-500); font-size: var(--text-xs); }
+.configurationEditorActions > button, .configurationEditorActions > div button { min-height: 36px; padding: 7px 12px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface); color: var(--teal-700); font: var(--weight-strong) var(--text-control) var(--font-body); cursor: pointer; }
+.configurationEditorActions > div { margin-left: auto; display: flex; gap: 8px; }
+.configurationEditorActions button:disabled { opacity: .55; cursor: not-allowed; }
+
 @media (max-width: 900px) {
   .approvalConfigLayout { grid-template-columns: 1fr; }
   .approvalConfigHeading { flex-direction: column; }
+  .configurationRow { grid-template-columns: 30px 1fr 1fr; }
+  .configurationRow label:first-of-type { grid-column: 2 / -1; }
+  .configurationRemove { grid-column: 2 / -1; justify-self: start; }
 }
