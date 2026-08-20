@@ -24,9 +24,9 @@ namespace AeroLink.Api.Tests;
 /// </summary>
 public sealed class ReopenBaselineConsequencesApiTests
 {
-    private sealed record Fixture(Guid ProjectId, Guid EarlierBaselineId, Guid BaselineId,
+    private sealed record Fixture(Guid ProjectId, Guid ReleaseId, Guid EarlierBaselineId, Guid BaselineId,
         Guid StrandedDraftId, Guid StrandedReviewId, Guid CarriedProcedureRevisionId,
-        Guid OrphanedProcedureRevisionId, Guid ReboundProcedureRevisionId);
+        Guid OrphanedProcedureRevisionId, Guid OrphanedProcedureId, Guid ReboundProcedureRevisionId);
 
     private const string Author = "reopen.author";
 
@@ -115,7 +115,7 @@ public sealed class ReopenBaselineConsequencesApiTests
         // of them there, so nothing takes them back: these are the two the reopen has to say something about,
         // and they are the two different somethings. SYSTP-00000802 covers a requirement the reopen removes
         // altogether and is left covering nothing; SYSTP-00000803 covers one that returns to earlier wording.
-        Guid orphanedRevisionId, reboundRevisionId, strandedDraftId, strandedReviewId;
+        Guid orphanedRevisionId, orphanedProcedureId, reboundRevisionId, strandedDraftId, strandedReviewId;
         using (var scope = factory.Services.CreateScope())
         {
             var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
@@ -154,12 +154,12 @@ public sealed class ReopenBaselineConsequencesApiTests
 
             db.AddRange(draft, review);
             await db.SaveChangesAsync();
-            orphanedRevisionId = orphanedRevision.Id; reboundRevisionId = reboundRevision.Id;
+            orphanedRevisionId = orphanedRevision.Id; orphanedProcedureId = orphaned.Id; reboundRevisionId = reboundRevision.Id;
             strandedDraftId = draft.Id; strandedReviewId = review.Id;
         }
 
-        return new Fixture(projectId, earlierId, baselineId, strandedDraftId, strandedReviewId,
-            carriedRevisionId, orphanedRevisionId, reboundRevisionId);
+        return new Fixture(projectId, releaseId, earlierId, baselineId, strandedDraftId, strandedReviewId,
+            carriedRevisionId, orphanedRevisionId, orphanedProcedureId, reboundRevisionId);
     }
 
     /// <summary>
@@ -322,6 +322,88 @@ public sealed class ReopenBaselineConsequencesApiTests
         var after = await client.GetFromJsonAsync<JsonElement>($"/api/baselines/{fixture.BaselineId}/reopen-preview");
         Assert.False(after.GetProperty("available").GetBoolean());
         Assert.Equal("not_frozen", after.GetProperty("code").GetString());
+    }
+
+    /// <summary>
+    /// The point of #694. A procedure the reopen leaves covering nothing becomes work in somebody's queue,
+    /// not a sentence in a dialog that closes.
+    ///
+    /// It is the same finding a retirement produces and it goes to the same queue by the same route, but it
+    /// carries the baseline that caused it: a reopen is somebody deciding about the build, not the change
+    /// request deciding anything, and the change request it names has itself been taken back.
+    /// </summary>
+    [Fact]
+    public async Task A_procedure_left_covering_nothing_becomes_work_that_names_the_reopened_build()
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var client = factory.CreateClient();
+        var fixture = await SeedAsync(factory, client);
+
+        using var reopened = await client.PostAsJsonAsync($"/api/baselines/{fixture.BaselineId}/reopen",
+            new { reason = "SRCR-00120 was wrong and 1.7 has not shipped." });
+        Assert.True(reopened.StatusCode == HttpStatusCode.OK, await reopened.Content.ReadAsStringAsync());
+
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+        var orphan = Assert.Single(await db.VerificationImpactItems.AsNoTracking()
+            .Where(x => x.Trigger == VerificationImpactTrigger.ProcedureOrphaned).ToListAsync());
+
+        // The procedure whose requirement ceased to exist, and only that one.
+        Assert.Equal("SYSTP-00000802", orphan.SubjectDisplayNumber);
+        Assert.Equal(fixture.OrphanedProcedureId, orphan.ProcedureId);
+        Assert.Equal(fixture.BaselineId, orphan.CausingBaselineId);
+        Assert.Equal(VerificationImpactState.Open, orphan.State);
+
+        // Routed to the discipline that answers for a System procedure.
+        var review = await db.TestChangeReviews.AsNoTracking().SingleAsync(x => x.Id == orphan.TestChangeReviewId);
+        Assert.Equal(TestChangeReviewDiscipline.System, review.Discipline);
+
+        // The two that still verify something are not in the queue. One kept its earlier link untouched; the
+        // other was moved back onto earlier wording and is suspect, which is a different finding.
+        Assert.DoesNotContain(await db.VerificationImpactItems.AsNoTracking()
+            .Where(x => x.Trigger == VerificationImpactTrigger.ProcedureOrphaned)
+            .Select(x => x.SubjectDisplayNumber).ToListAsync(),
+            x => x is "SYSTP-00000801" or "SYSTP-00000803");
+    }
+
+    /// <summary>
+    /// A procedure already waiting on somebody is not handed to them twice. Whatever raised the first item,
+    /// the second reopen has nothing new to say about it.
+    /// </summary>
+    [Fact]
+    public async Task A_procedure_already_waiting_on_somebody_is_not_raised_a_second_time()
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var client = factory.CreateClient();
+        var fixture = await SeedAsync(factory, client);
+
+        Guid existing;
+        using (var before = factory.Services.CreateScope())
+        {
+            var db = before.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            var now = DateTimeOffset.UtcNow;
+            var scr = await db.SystemChangeRequests.AsNoTracking().SingleAsync(x => x.BaseNumber == "SRCR-00120");
+            var review = new TestChangeReview(fixture.ProjectId, fixture.ReleaseId, scr.Id,
+                TestChangeReviewDiscipline.System, "SRCR-00120.00", now);
+            db.Add(review);
+            var item = VerificationImpactItem.ForOrphanedProcedure(fixture.ProjectId, fixture.ReleaseId, scr.Id,
+                review.Id, fixture.OrphanedProcedureId, "SYSTP-00000802", now);
+            db.Add(item);
+            await db.SaveChangesAsync();
+            existing = item.Id;
+        }
+
+        using var reopened = await client.PostAsJsonAsync($"/api/baselines/{fixture.BaselineId}/reopen",
+            new { reason = "SRCR-00120 was wrong and 1.7 has not shipped." });
+        Assert.True(reopened.StatusCode == HttpStatusCode.OK, await reopened.Content.ReadAsStringAsync());
+
+        using var scope = factory.Services.CreateScope();
+        var db2 = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+        var item2 = Assert.Single(await db2.VerificationImpactItems.AsNoTracking()
+            .Where(x => x.Trigger == VerificationImpactTrigger.ProcedureOrphaned).ToListAsync());
+        Assert.Equal(existing, item2.Id);
+        // Still the one that was already there, so it was left alone rather than replaced.
+        Assert.Null(item2.CausingBaselineId);
     }
 
     private static void Approve(SystemChangeRequest scr, DateTimeOffset now)

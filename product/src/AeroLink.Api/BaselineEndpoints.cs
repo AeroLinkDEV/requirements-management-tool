@@ -443,7 +443,8 @@ public static class BaselineEndpoints
         // performs the reopen, which is what stops the two describing different things: a preview assembled by
         // its own query drifts the first time either side is changed and nothing fails while it does.
         app.MapGet("/api/baselines/{id:guid}/reopen-preview", async (Guid id, HttpContext http,
-            IBaselineRepository repository, IdentityService identity, AeroLinkDbContext db, CancellationToken ct) =>
+            IBaselineRepository repository, IdentityService identity, AeroLinkDbContext db,
+            VerificationImpactService verificationImpact, CancellationToken ct) =>
         {
             var baseline = await repository.GetAsync(id, ct); if (baseline is null) return Results.NotFound();
             if (!await http.HasProjectRoleAsync(db, identity, baseline.ProjectId, ct, ProgramRole.ConfigurationManager)) return Results.Forbid();
@@ -451,7 +452,7 @@ public static class BaselineEndpoints
             var refusal = await ReopenRefusalAsync(db, baseline, ct);
             var consequences = refusal is not null
                 ? ReopenConsequences.None
-                : await new RequirementBaselineDematerializer(db).PreviewAsync(baseline.Id, baseline.DisplayNumber, ct);
+                : await new RequirementBaselineDematerializer(db, verificationImpact).PreviewAsync(baseline.Id, baseline.DisplayNumber, ct);
             return Results.Ok(new
             {
                 available = refusal is null,
@@ -467,7 +468,8 @@ public static class BaselineEndpoints
         // it unfixes what a build contains for everybody planning against it -- so the person who sealed it is
         // the person who unseals it.
         app.MapPost("/api/baselines/{id:guid}/reopen", async (Guid id, ReopenBaselineRequest request, HttpContext http,
-            IBaselineRepository repository, IdentityService identity, AeroLinkDbContext db, CancellationToken ct) =>
+            IBaselineRepository repository, IdentityService identity, AeroLinkDbContext db,
+            VerificationImpactService verificationImpact, CancellationToken ct) =>
         {
             var baseline = await repository.GetAsync(id, ct); if (baseline is null) return Results.NotFound();
             if (!await http.HasProjectRoleAsync(db, identity, baseline.ProjectId, ct, ProgramRole.ConfigurationManager)) return Results.Forbid();
@@ -478,7 +480,7 @@ public static class BaselineEndpoints
             {
                 // The revisions come back before the record says the build is open, so there is no moment at
                 // which the baseline reads as open while the requirements still read as sealed.
-                var consequences = await new RequirementBaselineDematerializer(db).DematerializeAsync(
+                var consequences = await new RequirementBaselineDematerializer(db, verificationImpact).DematerializeAsync(
                     baseline.Id, http.UserAccount().UserName, baseline.DisplayNumber, DateTimeOffset.UtcNow, ct);
                 baseline.Reopen(http.UserAccount().UserName, request.Reason ?? "", DateTimeOffset.UtcNow);
                 await repository.SaveAsync(ct);

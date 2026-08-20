@@ -708,6 +708,11 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
             b.Property(x => x.ResolutionRationale).HasMaxLength(4000).IsRequired();
             b.Property(x => x.ResolvedBy).HasMaxLength(100);
             b.Property(x => x.Version).IsConcurrencyToken();
+            // Null for the retirement case, which is the common one. Restrict rather than cascade: a
+            // baseline is never deleted, and an item losing its cause silently would be the opposite of
+            // what it is for.
+            b.HasIndex(x => x.CausingBaselineId);
+            b.HasOne<CandidateBaseline>().WithMany().HasForeignKey(x => x.CausingBaselineId).OnDelete(DeleteBehavior.Restrict);
             // The gate query is "unresolved items for this release", so it leads the index.
             b.HasIndex(x => new { x.ReleaseId, x.State });
             b.HasIndex(x => x.ChangeRequestId);

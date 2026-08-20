@@ -123,13 +123,25 @@ public sealed class VerificationImpactItem
         => ForRequirement(projectId, releaseId, changeRequestId, VerificationImpactTrigger.RequirementModified,
             testChangeReviewId, requirementChangeId, requirementDisplayNumber, declaredVerificationMethod, now);
 
+    /// <summary>
+    /// Work for a procedure left covering no requirement.
+    ///
+    /// <paramref name="causingBaselineId"/> is set only when a reopened baseline stranded it rather than a
+    /// retirement. Both name the change request whose work removed the requirement, because that is where a
+    /// reader following the trail has to end up either way -- but a retirement is a decision the change
+    /// request made, while a reopen is a decision somebody made about the build, and an item that could not
+    /// tell those apart would send the reader to a change request that was itself taken back with no
+    /// indication of why.
+    /// </summary>
     public static VerificationImpactItem ForOrphanedProcedure(Guid projectId, Guid releaseId, Guid changeRequestId, Guid testChangeReviewId,
-        Guid procedureId, string procedureDisplayNumber, DateTimeOffset now)
+        Guid procedureId, string procedureDisplayNumber, DateTimeOffset now, Guid? causingBaselineId = null)
     {
         if (procedureId == Guid.Empty) throw new DomainException("An orphaned-procedure item requires its procedure.");
+        if (causingBaselineId == Guid.Empty) throw new DomainException("A causing baseline must be a real baseline or absent.");
         return new VerificationImpactItem(projectId, releaseId, changeRequestId, testChangeReviewId, VerificationImpactTrigger.ProcedureOrphaned, now)
         {
             ProcedureId = procedureId,
+            CausingBaselineId = causingBaselineId,
             SubjectDisplayNumber = Required(procedureDisplayNumber, "procedure identifier")
         };
     }
@@ -168,6 +180,16 @@ public sealed class VerificationImpactItem
     public Guid? RequirementRevisionId { get; private set; }
     /// <summary>Set for orphaned-procedure items.</summary>
     public Guid? ProcedureId { get; private set; }
+    /// <summary>
+    /// The baseline whose reopening stranded this procedure, or null when a retirement did.
+    ///
+    /// Reopening un-materializes the revisions a build created, so a requirement that build introduced ceases
+    /// to exist and anything written against it is left covering nothing. That is the same state a retirement
+    /// produces and it is the same work, but it was not the change request that decided it -- so the act that
+    /// did is recorded here rather than left for somebody to infer from the fact that the change request it
+    /// names has been withdrawn.
+    /// </summary>
+    public Guid? CausingBaselineId { get; private set; }
     /// <summary>Human-readable identifier of whichever subject the item concerns.</summary>
     public string SubjectDisplayNumber { get; private set; } = "";
     /// <summary>What the requirement author declared. Context for the decision, never the decision itself.</summary>

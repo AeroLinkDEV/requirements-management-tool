@@ -50,7 +50,7 @@ public sealed record ReopenConsequences(
 /// are moved back to what survives and flagged, so the reopen leaves a record of what it disturbed rather than
 /// a set of rows pointing at revisions that are gone.
 /// </summary>
-public sealed class RequirementBaselineDematerializer(AeroLinkDbContext db)
+public sealed class RequirementBaselineDematerializer(AeroLinkDbContext db, VerificationImpactService verificationImpact)
 {
     /// <summary>What the reopen would do, computed without doing any of it.</summary>
     public async Task<ReopenConsequences> PreviewAsync(Guid baselineId, string baselineDisplayNumber, CancellationToken ct)
@@ -80,10 +80,30 @@ public sealed class RequirementBaselineDematerializer(AeroLinkDbContext db)
         db.RequirementRevisions.RemoveRange(plan.Revisions);
         db.SpecificationNodes.RemoveRange(plan.Placements);
         db.Requirements.RemoveRange(plan.OrphanedArtifacts);
+
+        // Raised last, once the removals are staged, so the work describes the build as it will be rather
+        // than as it was. A procedure covering nothing is the same finding a retirement produces, so it goes
+        // to the same queue by the same route -- carrying the baseline that caused it, because a reopen is
+        // somebody deciding about the build rather than the change request deciding anything.
+        foreach (var group in plan.OrphanedProcedures.GroupBy(x => x.SourceChangeRequestId))
+            await verificationImpact.RaiseProceduresOrphanedByReopenAsync(plan.ProjectId, plan.ReleaseId,
+                baselineId, group.Key,
+                group.Select(x => new VerificationImpactService.OrphanedProcedure(x.ProcedureId, x.DisplayNumber, x.Level)).ToList(),
+                now, ct);
         return plan.Consequences;
     }
 
     private sealed record StrandPlan(SystemChangeRequest ChangeRequest, IReadOnlyList<string> Requirements);
+
+    /// <summary>A procedure the reopen leaves covering nothing, and the change request whose work removed it.</summary>
+    private sealed record OrphanedProcedureRef(Guid ProcedureId, string DisplayNumber, TestProcedureLevel Level,
+        Guid SourceChangeRequestId);
+
+    private sealed record CoveragePlan(
+        List<TestRequirementCoverage> Coverage,
+        List<(TestRequirementCoverage Link, Guid OntoRevisionId, string Reason)> ToMove,
+        List<DisturbedCoverage> Disturbed,
+        List<OrphanedProcedureRef> Orphaned);
 
     private sealed record Plan(
         List<RequirementRevision> Revisions,
@@ -96,13 +116,16 @@ public sealed class RequirementBaselineDematerializer(AeroLinkDbContext db)
         List<SpecificationNode> Placements,
         List<RequirementArtifact> OrphanedArtifacts,
         List<StrandPlan> ChangeRequestsToStrand,
+        List<OrphanedProcedureRef> OrphanedProcedures,
+        Guid ProjectId,
+        Guid ReleaseId,
         ReopenConsequences Consequences);
 
     private async Task<Plan> PlanAsync(Guid baselineId, string baselineDisplayNumber, CancellationToken ct)
     {
         var revisions = await db.RequirementRevisions.Where(x => x.EffectiveBaselineId == baselineId).ToListAsync(ct);
         if (revisions.Count == 0)
-            return new Plan([], [], [], [], [], [], [], [], [], [], ReopenConsequences.None);
+            return new Plan([], [], [], [], [], [], [], [], [], [], [], Guid.Empty, Guid.Empty, ReopenConsequences.None);
 
         var revisionIds = revisions.Select(x => x.Id).ToList();
         var going = revisionIds.ToHashSet();
@@ -145,7 +168,7 @@ public sealed class RequirementBaselineDematerializer(AeroLinkDbContext db)
                 .Where(x => x.RequirementArtifactId != null && orphanedIds.Contains(x.RequirementArtifactId.Value))
                 .ToListAsync(ct);
 
-        var (coverage, toMove, disturbed) = await PlanCoverageAsync(baselineDisplayNumber, revisions, going, fallback, artifactById, ct);
+        var coveragePlan = await PlanCoverageAsync(baselineDisplayNumber, revisions, going, fallback, artifactById, ct);
         var stranded = await PlanStrandedAsync(revisions, artifactById, fallback, ct);
 
         var consequences = new ReopenConsequences(
@@ -155,11 +178,15 @@ public sealed class RequirementBaselineDematerializer(AeroLinkDbContext db)
             stranded.Select(x => new StrandedChangeRequest(x.ChangeRequest.Id, x.ChangeRequest.DisplayNumber,
                 x.ChangeRequest.State.ToString(), x.ChangeRequest.State == ChangeRequestState.InReview,
                 x.Requirements)).ToList(),
-            disturbed,
+            coveragePlan.Disturbed,
             codeRecords.Count);
 
-        return new Plan(revisions, profiles, traces, coverage, toMove, codeRecords, selections, placements,
-            orphanedArtifacts, stranded, consequences);
+        var projectId = artifactById.Values.Select(x => x.ProjectId).First();
+        var releaseId = await db.CandidateBaselines.AsNoTracking()
+            .Where(x => x.Id == baselineId).Select(x => x.ReleaseId).SingleAsync(ct);
+        return new Plan(revisions, profiles, traces, coveragePlan.Coverage, coveragePlan.ToMove, codeRecords,
+            selections, placements, orphanedArtifacts, stranded, coveragePlan.Orphaned, projectId, releaseId,
+            consequences);
     }
 
     /// <summary>
@@ -174,16 +201,15 @@ public sealed class RequirementBaselineDematerializer(AeroLinkDbContext db)
     /// where the requirement itself ceases to exist there is nothing left to cover, so the link goes and the
     /// procedure is named as covering nothing.
     /// </summary>
-    private async Task<(List<TestRequirementCoverage>, List<(TestRequirementCoverage, Guid, string)>, List<DisturbedCoverage>)>
-        PlanCoverageAsync(string baselineNumber, List<RequirementRevision> revisions, HashSet<Guid> going,
-            Dictionary<Guid, RequirementRevision> fallback, Dictionary<Guid, RequirementArtifact> artifactById,
-            CancellationToken ct)
+    private async Task<CoveragePlan> PlanCoverageAsync(string baselineNumber, List<RequirementRevision> revisions,
+        HashSet<Guid> going, Dictionary<Guid, RequirementRevision> fallback,
+        Dictionary<Guid, RequirementArtifact> artifactById, CancellationToken ct)
     {
         var revisionIds = going.ToList();
         var coverage = await db.TestCoverage.Where(x => revisionIds.Contains(x.RequirementRevisionId)).ToListAsync(ct);
-        if (coverage.Count == 0) return ([], [], []);
+        if (coverage.Count == 0) return new CoveragePlan([], [], [], []);
 
-        var artifactByRevision = revisions.ToDictionary(x => x.Id, x => x.ArtifactId);
+        var revisionById = revisions.ToDictionary(x => x.Id);
         var procedureRevisionIds = coverage.Select(x => x.ProcedureRevisionId).Distinct().ToList();
         // What each affected procedure will be linked to once this is done: what it already covers outside
         // the revisions going away, plus whatever gets moved back onto them below. A link that already has an
@@ -192,38 +218,60 @@ public sealed class RequirementBaselineDematerializer(AeroLinkDbContext db)
                 .Where(x => procedureRevisionIds.Contains(x.ProcedureRevisionId) && !revisionIds.Contains(x.RequirementRevisionId))
                 .Select(x => new { x.ProcedureRevisionId, x.RequirementRevisionId }).ToListAsync(ct))
             .Select(x => (x.ProcedureRevisionId, x.RequirementRevisionId)).ToHashSet();
-        var procedureNumbers = await (from revision in db.TestProcedureRevisions.AsNoTracking()
-                                      join procedure in db.TestProcedures.AsNoTracking() on revision.ProcedureId equals procedure.Id
-                                      where procedureRevisionIds.Contains(revision.Id)
-                                      select new { revision.Id, procedure.BaseNumber, revision.Revision })
-            .ToDictionaryAsync(x => x.Id, x => ArtifactNumber.Display(x.BaseNumber, x.Revision), ct);
+        // Which procedures still verify something once this is done. Seeded from what they cover outside this
+        // baseline and added to as coverage is moved back, because a procedure that ends up covering earlier
+        // wording is not orphaned -- it is suspect, which is a different finding with a different remedy.
+        var stillCovers = linked.Select(x => x.ProcedureRevisionId).ToHashSet();
+        var procedures = await (from revision in db.TestProcedureRevisions.AsNoTracking()
+                                join procedure in db.TestProcedures.AsNoTracking() on revision.ProcedureId equals procedure.Id
+                                where procedureRevisionIds.Contains(revision.Id)
+                                select new { RevisionId = revision.Id, procedure.Id, procedure.BaseNumber, procedure.Level, revision.Revision })
+            .ToDictionaryAsync(x => x.RevisionId, ct);
+        string Name(Guid procedureRevisionId) => procedures.TryGetValue(procedureRevisionId, out var row)
+            ? ArtifactNumber.Display(row.BaseNumber, row.Revision)
+            : "a test procedure";
 
         var toMove = new List<(TestRequirementCoverage, Guid, string)>();
         var disturbed = new List<DisturbedCoverage>();
-        foreach (var link in coverage.OrderBy(x => procedureNumbers.GetValueOrDefault(x.ProcedureRevisionId, "")))
+        var candidates = new List<TestRequirementCoverage>();
+        foreach (var link in coverage.OrderBy(x => Name(x.ProcedureRevisionId)))
         {
-            var artifactId = artifactByRevision[link.RequirementRevisionId];
-            var procedure = procedureNumbers.GetValueOrDefault(link.ProcedureRevisionId, "a test procedure");
-            if (!fallback.TryGetValue(artifactId, out var onto))
-            {
-                disturbed.Add(new DisturbedCoverage(procedure, artifactById[artifactId].BaseNumber,
-                    $"Left covering nothing: {artifactById[artifactId].BaseNumber} was introduced by {baselineNumber} and ceases to exist."));
-                continue;
-            }
+            var artifactId = revisionById[link.RequirementRevisionId].ArtifactId;
+            if (!fallback.TryGetValue(artifactId, out var onto)) { candidates.Add(link); continue; }
+
             // Once per destination, not once per link. Two change requests in one build can both modify the
             // same requirement, which materializes two revisions of it and can leave one procedure linked to
             // both; they fall back to the same surviving revision, and a second link to it would collide with
             // the uniqueness the coverage table keeps on (procedure revision, requirement revision).
             if (!linked.Add((link.ProcedureRevisionId, onto.Id))) continue;
+            stillCovers.Add(link.ProcedureRevisionId);
 
             var restored = ArtifactNumber.Display(artifactById[artifactId].BaseNumber, onto.Revision);
             toMove.Add((link, onto.Id,
                 $"{baselineNumber} was reopened and the revision this procedure was written against was taken back. "
                 + $"It covers {restored} again, which says something different."));
-            disturbed.Add(new DisturbedCoverage(procedure, restored,
+            disturbed.Add(new DisturbedCoverage(Name(link.ProcedureRevisionId), restored,
                 $"Returns to {restored} and is marked suspect until somebody confirms it still verifies it."));
         }
-        return (coverage, toMove, disturbed);
+
+        // Settled only after every move is known: a procedure linked to two of these revisions can lose one to
+        // a requirement that ceases to exist and keep the other, and asking mid-loop would have called it
+        // orphaned on the strength of whichever link happened to be read first.
+        var orphaned = new List<OrphanedProcedureRef>();
+        var named = new HashSet<Guid>();
+        foreach (var link in candidates)
+        {
+            var artifact = artifactById[revisionById[link.RequirementRevisionId].ArtifactId];
+            if (stillCovers.Contains(link.ProcedureRevisionId)) continue;
+            if (!procedures.TryGetValue(link.ProcedureRevisionId, out var row)) continue;
+            if (!named.Add(row.Id)) continue;
+            disturbed.Add(new DisturbedCoverage(Name(link.ProcedureRevisionId), artifact.BaseNumber,
+                $"Left covering nothing: {artifact.BaseNumber} was introduced by {baselineNumber} and ceases to exist. "
+                + "It becomes verification work rather than being left in the library covering no requirement."));
+            orphaned.Add(new OrphanedProcedureRef(row.Id, row.BaseNumber, row.Level,
+                revisionById[link.RequirementRevisionId].SourceChangeRequestId));
+        }
+        return new CoveragePlan(coverage, toMove, disturbed, orphaned);
     }
 
     /// <summary>
