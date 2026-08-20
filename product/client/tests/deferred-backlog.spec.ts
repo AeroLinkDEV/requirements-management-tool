@@ -22,7 +22,7 @@ test('deferred work waits in its own tab until a build takes it, and the build t
   const created = await request.post(`${apiBase}/api/change-requests`, {
     data: {
       projectId: showcase.projectId,
-      targetReleaseId: showcase.releaseId,
+      targetReleaseId: showcase.activeReleaseId,
       title: 'DEFERRED-BACKLOG oceanic sequencing',
       problem: 'Reload latency is asserted rather than derived.',
       analysis: 'The budget was never apportioned.',
