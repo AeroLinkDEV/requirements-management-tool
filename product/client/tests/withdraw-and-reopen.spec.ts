@@ -153,5 +153,8 @@ test('a frozen build refuses a withdrawal, says what reopening costs, and the wo
   page.once('dialog', (dialog) => dialog.accept('Superseded by a better approach.'))
   await page.getByRole('button', { name: 'Withdraw' }).click()
   await expect(page.locator('[data-state]').first()).toHaveAttribute('data-state', 'Withdrawn', { timeout: 30_000 })
-  await expect(page.getByText('Review cycle 1')).toBeVisible()
+  // The signatures are the point: withdrawing keeps the record of what was decided, so the cycle and the
+  // approval that closed it are both still on the page.
+  await expect(page.getByRole('heading', { name: 'Review cycle 1' })).toBeVisible()
+  await expect(page.getByText('Approved review cycle 1 stage.')).toBeVisible()
 })
