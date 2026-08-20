@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import ChangeRequestRegister, { type RegisterRow } from './ChangeRequestRegister'
+import DeferredBacklog from './DeferredBacklog'
 import type { HistoryStateIntent } from './routing'
 import type { AuthUser } from './IdentityCenter'
 import DownstreamAssessmentQueue from './DownstreamAssessmentQueue'
@@ -26,6 +27,7 @@ const registerStateOptions=(Object.keys(stateLabels) as HistoryStateIntent[]).ma
 const matchesStateIntent=(state:string,intent?:HistoryStateIntent)=>!intent||(intent==='ApprovedOrSelected'?(state==='Approved'||state==='SelectedForBaseline'):state===intent)
 
 export default function HistoryExplorer({api,projectId,releases,activeReleaseId,scope,initialSoftwareLevel,onSoftwareLevelChange,initialAssessmentId,onAssessmentSelected,initialStateIntent,onStateIntentChange,onBack,onOpenScr,onOpenRequirement,onCreateSystem,onCreateSoftware,user}:Props){
+ const [view,setView]=useState<'build'|'deferred'>('build')
  const [query,setQuery]=useState(''),[softwareLevel,setSoftwareLevel]=useState<SoftwareLevel>(initialSoftwareLevel),[stateIntent,setStateIntent]=useState<HistoryStateIntent|undefined>(initialStateIntent),[scrPage,setScrPage]=useState(1),[scrTotal,setScrTotal]=useState(0),[scrTotalPages,setScrTotalPages]=useState(1),[scrs,setScrs]=useState<Scr[]>([])
  const activeRelease=releases.find(x=>x.id===activeReleaseId)
  const load=useCallback(async()=>{const params=new URLSearchParams({projectId,page:String(scrPage),pageSize:'50',releaseId:activeReleaseId,type:scope});if(scope==='Software')params.set('level',softwareLevel);if(stateIntent)params.set('state',stateIntent);if(query)params.set('search',query)
@@ -63,7 +65,21 @@ export default function HistoryExplorer({api,projectId,releases,activeReleaseId,
   </header>
   {scope==='Software'&&<nav className="softwareLevelTabs" aria-label="Software requirement level"><button type="button" aria-current={softwareLevel==='HighLevel'?'page':undefined} onClick={()=>changeSoftwareLevel('HighLevel')}><b>HLR</b><span>High-level requirements</span></button><button type="button" aria-current={softwareLevel==='LowLevel'?'page':undefined} onClick={()=>changeSoftwareLevel('LowLevel')}><b>LLR</b><span>Low-level requirements</span></button></nav>}
   {scope==='Software'&&<DownstreamAssessmentQueue api={api} projectId={projectId} releaseId={activeReleaseId} targetLevel={softwareLevel} user={user} onOpenScr={onOpenScr} onOpenRequirement={onOpenRequirement} onCreateScr={onCreateSoftware} initialAssessmentId={initialAssessmentId} onAssessmentSelected={onAssessmentSelected}/>}
-  <ChangeRequestRegister
+  {/* The shelf sits beside the build, not inside it. A reader planning this build can see what is waiting
+      without it being counted as work this build already has. */}
+  <nav className="registerViewTabs" aria-label="Register view">
+   <button type="button" aria-current={view==='build'?'page':undefined} onClick={()=>setView('build')}>
+    {scope==='Software'?(softwareLevel==='HighLevel'?'HLRCRs':'LLRCRs'):'SRCRs'} in Build {activeRelease?.version}
+   </button>
+   <button type="button" aria-current={view==='deferred'?'page':undefined} onClick={()=>setView('deferred')} data-deferred-tab>
+    Deferred {scope==='Software'?(softwareLevel==='HighLevel'?'HLRCRs':'LLRCRs'):'SRCRs'}
+   </button>
+  </nav>
+  {view==='deferred'
+   ?<DeferredBacklog api={api} projectId={projectId} type={scope} softwareLevel={scope==='Software'?softwareLevel:undefined}
+     activeRelease={activeRelease} releases={releases} onOpen={onOpenScr}
+     onBroughtIn={()=>{setView('build');setScrPage(1);void load()}}/>
+   :<ChangeRequestRegister
    changeNoun="requirement changes"
    recordNoun={`${scope.toLowerCase()} change requests`}
    contextLabel={`${scope==='Software'?(softwareLevel==='HighLevel'?'HLR':'LLR'):'System'} area`}
@@ -74,6 +90,6 @@ export default function HistoryExplorer({api,projectId,releases,activeReleaseId,
    stateIntent={stateIntent??''}
    onStateIntentChange={value=>changeStateIntent(value?value as HistoryStateIntent:undefined)}
    stateOptions={registerStateOptions}
-   onOpen={onOpenScr} onLoadRevisions={loadRevisions}/>
+   onOpen={onOpenScr} onLoadRevisions={loadRevisions}/>}
  </main>
 }

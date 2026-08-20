@@ -1,11 +1,11 @@
 {
   "schemaVersion": "aerolink-api-test-intent/v2",
   "totals": {
-    "tests": 482,
-    "cases": 532,
-    "classes": 90,
-    "hostedTests": 470,
-    "hostedCases": 511,
+    "tests": 486,
+    "cases": 536,
+    "classes": 91,
+    "hostedTests": 474,
+    "hostedCases": 515,
     "nonHostedTests": 8,
     "nonHostedCases": 17,
     "unknownHostTests": 4,
@@ -21,10 +21,10 @@
     "http-boundary": {
       "label": "HTTP boundary: route, status, JSON shape",
       "level": "API (must stay hosted)",
-      "tests": 317,
-      "cases": 352,
+      "tests": 321,
+      "cases": 356,
       "unknownCases": 0,
-      "classes": 76
+      "classes": 77
     },
     "ef-translation": {
       "label": "EF translation / relational constraints",
@@ -1993,6 +1993,74 @@
       }
     },
     {
+      "cls": "DeferredBacklogTests",
+      "test": "Bringing_one_in_puts_it_in_that_build_as_a_draft_and_takes_it_off_the_backlog",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 74,
+        "end": 101
+      }
+    },
+    {
+      "cls": "DeferredBacklogTests",
+      "test": "Deferred_work_is_not_in_the_next_build_list_but_is_in_the_backlog",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 26,
+        "end": 53
+      }
+    },
+    {
+      "cls": "DeferredBacklogTests",
+      "test": "The_backlog_is_scoped_to_the_register_it_is_read_from",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 103,
+        "end": 119
+      }
+    },
+    {
+      "cls": "DeferredBacklogTests",
+      "test": "The_backlog_reaches_further_back_than_the_previous_build",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 59,
+        "end": 72
+      }
+    },
+    {
       "cls": "DeferredCarryForwardApiTests",
       "test": "A_change_request_deferred_in_one_build_is_offered_to_its_successor",
       "kind": "Fact",
@@ -2005,8 +2073,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 51,
-        "end": 77
+        "start": 59,
+        "end": 88
       }
     },
     {
@@ -2023,8 +2091,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 79,
-        "end": 104
+        "start": 90,
+        "end": 120
       }
     },
     {
@@ -2041,8 +2109,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 106,
-        "end": 125
+        "start": 122,
+        "end": 141
       }
     },
     {
@@ -2059,8 +2127,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 128,
-        "end": 144
+        "start": 144,
+        "end": 160
       }
     },
     {

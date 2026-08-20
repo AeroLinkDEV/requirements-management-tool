@@ -701,3 +701,58 @@ html .historyState.superseded[data-state="Superseded"] {
   background: #eceff3;
   color: #5c6a7c;
 }
+
+/* The register shows either the build or the shelf. Same tab shape as the software level tabs above it, so
+   the two rows of tabs read as the same control rather than two different ideas. */
+.registerViewTabs {
+  display: flex;
+  gap: 8px;
+  margin-top: 22px;
+  border-bottom: 1px solid #cfd9e3;
+}
+
+.registerViewTabs button {
+  border: 1px solid transparent;
+  border-bottom: 0;
+  border-radius: 8px 8px 0 0;
+  background: transparent;
+  color: var(--ink-500);
+  padding: 11px 18px 12px;
+  font-size: 14px;
+  text-align: left;
+}
+
+.registerViewTabs button[aria-current="page"] {
+  border-color: #cfd9e3;
+  background: white;
+  color: #176b62;
+  box-shadow: inset 0 3px #35ad9d;
+}
+
+.deferredBacklog { display: grid; gap: 10px; margin-top: 18px; }
+
+.deferredRow {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  border: 1px solid #dbe3ea;
+  /* Dashed on the left, because the shelf is not part of this build until somebody says so. */
+  border-left: 3px dashed #b6c2ce;
+  border-radius: 10px;
+  background: white;
+  padding: 12px 16px;
+}
+
+.deferredRow .deferredOpen {
+  flex: 1;
+  display: grid;
+  gap: 3px;
+  border: 0;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+
+.deferredRow .deferredOpen p { margin: 0; font-size: 14px; }
+.deferredRow .deferredOpen small { color: var(--ink-500); font-size: 12px; }
+.deferredRow .bringIn { white-space: nowrap; }

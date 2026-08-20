@@ -15,19 +15,16 @@ public sealed class ChangeRequestRepository(AeroLinkDbContext db) : IChangeReque
         var source = db.SystemChangeRequests.AsNoTracking().Where(x => x.ProjectId == query.ProjectId);
         if (query.TargetReleaseId is not null)
         {
-            // Work shelved by a predecessor build comes with the build that follows it.
+            // A build lists the work it is taking and the work it raised, and nothing else. Deferred work from
+            // an earlier build is deliberately absent: it is a backlog to be considered, not part of this build
+            // until somebody decides it is, and mixing it in makes the plan for this build read as though it
+            // already contained work nobody has committed to. It has its own listing, and bringing one in is
+            // the explicit act that puts it here.
             //
-            // Deferring means "put away for another day with the state it had reached remembered", and the
-            // next build is exactly the day it should come back and be considered. Listing strictly by target
-            // build meant a change request deferred in 1.6 vanished when 1.7 opened, and the only route to it
-            // was to navigate back to the build that shelved it — so the shelf was somewhere work went to be
-            // forgotten rather than to wait.
-            //
-            // Only Deferred records travel. Anything else belongs to the build that owns it.
-            var predecessors = db.Releases.Where(x => x.Id == query.TargetReleaseId)
-                .Select(x => x.PredecessorReleaseId);
+            // This reverses #320, which surfaced a predecessor's deferred work inline. That answered the right
+            // problem -- shelved work was unreachable from the build that followed -- with the wrong shape.
             source = source.Where(x => x.TargetReleaseId == query.TargetReleaseId
-                || (x.State == ChangeRequestState.Deferred && predecessors.Contains(x.TargetReleaseId)));
+                || x.OriginReleaseId == query.TargetReleaseId);
         }
         if (!string.IsNullOrWhiteSpace(query.Search))
         {

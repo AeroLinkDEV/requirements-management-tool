@@ -239,6 +239,7 @@
         "CorrectiveActionRoutingApiTests",
         "CoverageStateFilterApiTests",
         "DeferralAndRevisionListingTests",
+        "DeferredBacklogTests",
         "DeferredCarryForwardApiTests",
         "DocumentReviewCommentApiTests",
         "DocumentReviewLinkOutlivedTests",
@@ -549,6 +550,7 @@
       "coveredBy": [
         "AdministratorChangeRequestApiTests",
         "DeferralAndRevisionListingTests",
+        "DeferredBacklogTests",
         "DeferredCarryForwardApiTests"
       ]
     },
