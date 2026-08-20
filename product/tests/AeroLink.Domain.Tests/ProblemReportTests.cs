@@ -22,7 +22,7 @@ public sealed class ProblemReportTests
         report.ApproveClosure("configuration.manager", Guid.NewGuid(), Now.AddMinutes(4));
 
         Assert.Equal(ProblemReportState.Closed, report.State);
-        Assert.Equal(ProblemReportDisposition.Fixed, report.Disposition);
+        Assert.Null(report.Disposition);
         Assert.Equal(executionId, report.ResolutionVerificationExecutionId);
         Assert.Equal("configuration.manager", report.ClosureApprovedByName);
         Assert.Equal("PR-00001.00", report.DisplayNumber);
@@ -34,7 +34,7 @@ public sealed class ProblemReportTests
         var report = ReadyForClosure();
         var ex = Assert.Throws<DomainException>(() => report.ApproveClosure("verification.engineer", Guid.NewGuid(), Now));
         Assert.Contains("cannot independently approve", ex.Message);
-        Assert.Equal(ProblemReportState.AwaitingSqaClosure, report.State);
+        Assert.Equal(ProblemReportState.WaitingForSqaToClose, report.State);
     }
 
     [Fact]
@@ -80,7 +80,7 @@ public sealed class ProblemReportTests
 
         Assert.Equal(1, report.Revision);
         Assert.Equal("PR-00001.01", report.DisplayNumber);
-        Assert.Equal(ProblemReportState.Open, report.State);
+        Assert.Equal(ProblemReportState.Verifying, report.State);
         Assert.Null(report.Disposition);
         Assert.Null(report.ResolutionVerificationExecutionId);
     }
@@ -95,7 +95,7 @@ public sealed class ProblemReportTests
         Assert.Throws<DomainException>(() => report.ApplyDisposition("verification.engineer", ProblemReportDisposition.Fixed, "Generic fixed result", null, Now));
         Assert.Throws<DomainException>(() => report.ApplyDisposition("verification.engineer", ProblemReportDisposition.Duplicate, "Same failure", null, Now));
         report.ApplyDisposition("verification.engineer", ProblemReportDisposition.Duplicate, "Same failure", Guid.NewGuid(), Now);
-        Assert.Equal(ProblemReportState.Duplicate, report.State);
+        Assert.Equal(ProblemReportState.Rejected, report.State);
         Assert.Throws<DomainException>(() => report.BeginInvestigation("verification.engineer", "again", "", "", "", Now));
     }
 
@@ -143,7 +143,7 @@ public sealed class ProblemReportTests
         report.ReadyForSccb("verification.engineer", Now);
         report.OpenBySccb("change.board", Now);
         report.ApplyDisposition("verification.engineer", ProblemReportDisposition.Deferred, "Waiting for the supplier qualification build.", null, Now);
-        Assert.Equal(ProblemReportState.Deferred, report.State);
+        Assert.Equal(ProblemReportState.Open, report.State);
 
         report.ResumeDeferred("verification.engineer", Now.AddDays(1));
         Assert.Equal(ProblemReportState.Open, report.State);

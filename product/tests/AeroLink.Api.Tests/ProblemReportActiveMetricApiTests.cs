@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Http.Json;
 using System.Reflection;
 using System.Text.Json;
+using AeroLink.Domain.Identity;
 using AeroLink.Domain.Programs;
 using AeroLink.Domain.Requirements;
 using AeroLink.Infrastructure.Persistence;
@@ -19,6 +20,7 @@ public sealed class ProblemReportActiveMetricApiTests
         await BootstrapAsync(client);
         Guid projectId;
         Guid rejectedId;
+        string sqaUserName;
 
         using (var scope = factory.Services.CreateScope())
         {
@@ -26,7 +28,13 @@ public sealed class ProblemReportActiveMetricApiTests
             var now = DateTimeOffset.UtcNow;
             var program = new ProgramRecord("Problem Report metrics", "PRM");
             var project = new ProjectRecord(program.Id, "Metric Project", "FMS");
-            db.AddRange(program, project);
+            sqaUserName = $"prm.sqa.{Guid.NewGuid():N}";
+            var sqa = new UserAccount(sqaUserName, "Problem Report SQA",
+                $"{sqaUserName}@example.test",
+                IdentityService.HashPassword(AeroLinkApiFactory.MemberPassword), now);
+            db.AddRange(program, project, sqa,
+                new ProgramMembership(sqa.Id, program.Id, ProgramRole.SoftwareQualityAnalyst,
+                    "test.setup", now));
             projectId = project.Id;
 
             var stateProperty = typeof(ProblemReport).GetProperty(nameof(ProblemReport.State),
@@ -64,13 +72,20 @@ public sealed class ProblemReportActiveMetricApiTests
         var exportedPortfolio = JsonDocument.Parse(await download.Content.ReadAsStringAsync()).RootElement;
         Assert.Equal(expected, exportedPortfolio.GetProperty("summary").GetProperty("openProblemReports").GetInt32());
 
+        using var sqaLogin = await client.PostAsJsonAsync("/api/auth/login", new
+        {
+            userName = sqaUserName,
+            password = AeroLinkApiFactory.MemberPassword,
+        });
+        Assert.Equal(HttpStatusCode.OK, sqaLogin.StatusCode);
+        await SecurityBoundaryTests.AuthorizeMutationsAsync(client);
         using var reopen = await client.PostAsJsonAsync($"/api/problem-reports/{rejectedId}/reopen", new
         {
             expectedVersion = 1,
             rationale = "The rejected conclusion is withdrawn after new evidence.",
         });
         Assert.Equal(HttpStatusCode.OK, reopen.StatusCode);
-        Assert.Equal("Open", (await reopen.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("state").GetString());
+        Assert.Equal("Draft", (await reopen.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("state").GetString());
 
         var after = await ReadCountsAsync(client, projectId);
         Assert.Equal(expected + 1, after.Dashboard);

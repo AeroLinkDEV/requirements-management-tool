@@ -11,16 +11,8 @@ public sealed class ProblemReportLifecycleTests
         { ProblemReportState.Open, true },
         { ProblemReportState.Implementing, true },
         { ProblemReportState.Verifying, true },
-        { ProblemReportState.AwaitingSqaClosure, true },
-        { ProblemReportState.Deferred, true },
-        { ProblemReportState.Investigating, true },
-        { ProblemReportState.ResolutionProposed, true },
-        { ProblemReportState.AwaitingClosureApproval, true },
+        { ProblemReportState.WaitingForSqaToClose, true },
         { ProblemReportState.Closed, false },
-        { ProblemReportState.Duplicate, false },
-        { ProblemReportState.CannotReproduce, false },
-        { ProblemReportState.NoFaultFound, false },
-        { ProblemReportState.AcceptedRisk, false },
         { ProblemReportState.Rejected, false },
     };
 
@@ -36,9 +28,33 @@ public sealed class ProblemReportLifecycleTests
     public void Classification_covers_the_complete_enum_exactly_once()
     {
         var classified = EveryState.Select(row => (ProblemReportState)row[0]).ToArray();
-        Assert.Equal(Enum.GetValues<ProblemReportState>().Order(), classified.Order());
+        Assert.Equal(ProblemReportTransitionPolicy.CanonicalStates.Order(), classified.Order());
         Assert.Equal(classified.Length, classified.Distinct().Count());
         Assert.Equal(ProblemReportLifecycle.ActiveWorkStates.Order(),
             classified.Where(ProblemReportLifecycle.IsActiveWork).Order());
+    }
+
+    [Fact]
+    public void Rejection_and_backward_edges_require_rationale_but_forward_waiting_does_not()
+    {
+        Assert.True(ProblemReportTransitionPolicy.RequiresRationale(ProblemReportState.Open, ProblemReportState.Rejected));
+        Assert.True(ProblemReportTransitionPolicy.RequiresRationale(ProblemReportState.Verifying, ProblemReportState.Implementing));
+        Assert.False(ProblemReportTransitionPolicy.RequiresRationale(ProblemReportState.Verifying, ProblemReportState.WaitingForSqaToClose));
+        Assert.True(ProblemReportTransitionPolicy.IsSqaOnly(ProblemReportState.WaitingForSqaToClose, ProblemReportState.Closed));
+        Assert.True(ProblemReportTransitionPolicy.IsSccbOpening(ProblemReportState.ReadyForSccb, ProblemReportState.Open));
+    }
+
+    [Fact]
+    public void Canonical_graph_exposes_only_the_agreed_eight_states()
+    {
+        Assert.Equal(new[]
+        {
+            ProblemReportState.Draft, ProblemReportState.ReadyForSccb, ProblemReportState.Open,
+            ProblemReportState.Implementing, ProblemReportState.Verifying,
+            ProblemReportState.WaitingForSqaToClose, ProblemReportState.Closed, ProblemReportState.Rejected
+        }, ProblemReportTransitionPolicy.CanonicalStates);
+        Assert.DoesNotContain(ProblemReportState.Closed, ProblemReportTransitionPolicy.AllowedTargets(ProblemReportState.Draft));
+        Assert.Contains(ProblemReportState.Verifying, ProblemReportTransitionPolicy.AllowedTargets(ProblemReportState.Closed));
+        Assert.Contains(ProblemReportState.Draft, ProblemReportTransitionPolicy.AllowedTargets(ProblemReportState.Rejected));
     }
 }

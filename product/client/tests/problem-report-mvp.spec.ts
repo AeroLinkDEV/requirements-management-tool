@@ -29,11 +29,17 @@ test('an engineer creates a structured Draft PR and advances it through the SCCB
   await expect(page.locator('.prImpactGrid').getByText('System requirements')).toBeVisible()
   await expect(page.locator('.prImpactGrid').getByText('Yes', { exact: true })).toHaveCount(3)
 
-  await page.getByRole('button', { name: 'Ready for SCCB' }).click()
-  await expect(page.locator('.prState')).toHaveText('Ready For SCCB')
-  await page.reload({ waitUntil: 'load' })
+  await page.locator('.prFlow').getByRole('button', { name: 'Ready for SCCB →', exact: true }).click()
+  await expect(page.locator('.prState')).toHaveText('Ready for SCCB')
+  // SCCB opening is restricted to the explicit opening-authority roles; an administrator's Project access
+  // is not a substitute for that authority.
+  await login(page, 'systems.lead', { openProject: false })
+  await selectProgram(page, 'Flight Management System Live Program')
+  await page.goto(new URL(`${root}/problem-reports`, page.url()).toString(), { waitUntil: 'load' })
+  await page.getByLabel('Search').fill(title)
+  await page.locator('.prList').getByText(title).click()
   await expect(page.getByRole('heading', { name: title })).toBeVisible()
-  await page.getByRole('button', { name: 'Open after SCCB review' }).click()
+  await page.locator('.prFlow').getByRole('button', { name: 'Open →', exact: true }).click()
   await expect(page.locator('.prState')).toHaveText('Open')
   await page.getByRole('button', { name: 'Start implementing' }).click()
   await expect(page.locator('.prState')).toHaveText('Implementing')
@@ -41,9 +47,9 @@ test('an engineer creates a structured Draft PR and advances it through the SCCB
   await page.getByRole('button', { name: /History/ }).click()
   await expect(page.getByRole('heading', { name: 'Immutable lifecycle history' })).toBeVisible()
   const history = page.locator('.prTimeline')
-  await expect(history.getByText('Ready For SCCB')).toBeVisible()
-  await expect(history.getByText('Opened By SCCB')).toBeVisible()
-  await expect(history.getByText('Implementation Started')).toBeVisible()
+  await expect(history.locator('article').filter({ hasText: 'Draft → Ready for SCCB' })).toHaveCount(1)
+  await expect(history.locator('article').filter({ hasText: 'Ready for SCCB → Open' })).toHaveCount(1)
+  await expect(history.locator('article').filter({ hasText: 'Open → Implementing' })).toHaveCount(1)
 })
 
 /**
@@ -72,8 +78,21 @@ test('an Open Problem Report is checked out, corrected, and the correction survi
   await dialog.getByRole('button', { name: 'Save Draft PR' }).click()
   await expect(page.locator('.prState')).toHaveText('Draft')
 
-  await page.getByRole('button', { name: 'Ready for SCCB' }).click()
-  await page.getByRole('button', { name: 'Open after SCCB review' }).click()
+  await page.locator('.prFlow').getByRole('button', { name: 'Ready for SCCB →', exact: true }).click()
+  await login(page, 'systems.lead', { openProject: false })
+  await selectProgram(page, 'Flight Management System Live Program')
+  await page.goto(new URL(`${root}/problem-reports`, page.url()).toString(), { waitUntil: 'load' })
+  await page.getByLabel('Search').fill(`Autopilot disconnect tone lags ${stamp}`)
+  await page.locator('.prList').getByText(`Autopilot disconnect tone lags ${stamp}`).click()
+  await page.locator('.prFlow').getByRole('button', { name: 'Open →', exact: true }).click()
+  await expect(page.locator('.prState')).toHaveText('Open')
+
+  // SCCB authority opened the report; its assigned owner performs the controlled edit.
+  await login(page, 'admin', { openProject: false })
+  await selectProgram(page, 'Flight Management System Live Program')
+  await page.goto(new URL(`${root}/problem-reports`, page.url()).toString(), { waitUntil: 'load' })
+  await page.getByLabel('Search').fill(`Autopilot disconnect tone lags ${stamp}`)
+  await page.locator('.prList').getByText(`Autopilot disconnect tone lags ${stamp}`).click()
   await expect(page.locator('.prState')).toHaveText('Open')
 
   // The state that used to offer no controlled editing route at all.

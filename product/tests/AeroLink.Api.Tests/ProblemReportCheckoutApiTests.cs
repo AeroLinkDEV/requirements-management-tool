@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using AeroLink.Domain.Identity;
 using AeroLink.Domain.Programs;
 using AeroLink.Domain.Releases;
 using AeroLink.Infrastructure.Persistence;
@@ -49,16 +50,22 @@ public sealed class ProblemReportCheckoutApiTests
         return (await client.GetFromJsonAsync<JsonElement>($"/api/problem-reports/{reportId}")).GetProperty("version").GetInt64();
     }
 
-    private static async Task<(Guid ProjectId, Guid ReleaseId)> SeedAsync(AeroLinkApiFactory factory, string prefix)
+    private static async Task<(Guid ProjectId, Guid ReleaseId, string SccbUserName)> SeedAsync(AeroLinkApiFactory factory, string prefix)
     {
         using var scope = factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
         var program = new ProgramRecord($"{prefix} Program", $"{prefix}{Guid.NewGuid():N}"[..12]);
         var project = new ProjectRecord(program.Id, "Flight Management Product", "Flight Management System");
         var release = new SoftwareRelease(project.Id, "1.6", false);
-        db.AddRange(program, project, release);
+        var admin = db.UserAccounts.Single(account => account.UserName == "admin");
+        var sccbUserName = $"{prefix.ToLowerInvariant()}.sccb.{Guid.NewGuid():N}";
+        var sccb = new UserAccount(sccbUserName, "SCCB Project Engineer",
+            $"{sccbUserName}@example.test", IdentityService.HashPassword(AeroLinkApiFactory.MemberPassword), DateTimeOffset.UtcNow);
+        db.AddRange(program, project, release,
+            sccb, new ProgramMembership(sccb.Id, program.Id, ProgramRole.ProjectEngineer, "test.setup", DateTimeOffset.UtcNow),
+            new ProgramMembership(sccb.Id, program.Id, ProgramRole.SoftwareQualityAnalyst, "test.setup", DateTimeOffset.UtcNow));
         await db.SaveChangesAsync();
-        return (project.Id, release.Id);
+        return (project.Id, release.Id, sccbUserName);
     }
 
     private static async Task<Guid> RaiseAsync(HttpClient client, Guid projectId, Guid releaseId)
@@ -76,14 +83,22 @@ public sealed class ProblemReportCheckoutApiTests
     }
 
     /// <summary>Walks the report from Draft to Open so the checkout under test is not a Draft one.</summary>
-    private static async Task OpenAsync(HttpClient client, Guid id)
+    private static async Task OpenAsync(HttpClient client, Guid id, string sccbUserName)
     {
         var version = (await client.GetFromJsonAsync<JsonElement>($"/api/problem-reports/{id}")).GetProperty("version").GetInt64();
         using var ready = await client.PostAsJsonAsync($"/api/problem-reports/{id}/ready-for-sccb", new { expectedVersion = version });
         Assert.Equal(HttpStatusCode.OK, ready.StatusCode);
         version = (await ready.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("version").GetInt64();
+        using var login = await client.PostAsJsonAsync("/api/auth/login",
+            new { userName = sccbUserName, password = AeroLinkApiFactory.MemberPassword });
+        Assert.Equal(HttpStatusCode.OK, login.StatusCode);
+        await SecurityBoundaryTests.AuthorizeMutationsAsync(client);
         using var opened = await client.PostAsJsonAsync($"/api/problem-reports/{id}/sccb/open", new { expectedVersion = version });
         Assert.Equal(HttpStatusCode.OK, opened.StatusCode);
+        using var restore = await client.PostAsJsonAsync("/api/auth/login",
+            new { userName = "admin", password = AeroLinkApiFactory.AdministratorPassword });
+        Assert.Equal(HttpStatusCode.OK, restore.StatusCode);
+        await SecurityBoundaryTests.AuthorizeMutationsAsync(client);
     }
 
     [Fact]
@@ -92,9 +107,9 @@ public sealed class ProblemReportCheckoutApiTests
         using var factory = new AeroLinkApiFactory();
         using var client = factory.CreateClient();
         await ProblemReportApiTests.BootstrapAndLoginAsync(client);
-        var (projectId, releaseId) = await SeedAsync(factory, "PRCO");
+        var (projectId, releaseId, sccbUserName) = await SeedAsync(factory, "PRCO");
         var id = await RaiseAsync(client, projectId, releaseId);
-        await OpenAsync(client, id);
+        await OpenAsync(client, id, sccbUserName);
 
         var status = await client.GetFromJsonAsync<JsonElement>($"/api/controlled-editing/status?artifactType=ProblemReport&artifactId={id}");
         Assert.Equal("Open", status.GetProperty("state").GetString());
@@ -136,9 +151,9 @@ public sealed class ProblemReportCheckoutApiTests
         using var factory = new AeroLinkApiFactory();
         using var client = factory.CreateClient();
         await ProblemReportApiTests.BootstrapAndLoginAsync(client);
-        var (projectId, releaseId) = await SeedAsync(factory, "PRDI");
+        var (projectId, releaseId, sccbUserName) = await SeedAsync(factory, "PRDI");
         var id = await RaiseAsync(client, projectId, releaseId);
-        await OpenAsync(client, id);
+        await OpenAsync(client, id, sccbUserName);
         var before = await client.GetFromJsonAsync<JsonElement>($"/api/problem-reports/{id}");
 
         using var checkout = await client.PostAsJsonAsync("/api/controlled-editing/checkout",
@@ -173,9 +188,9 @@ public sealed class ProblemReportCheckoutApiTests
         using var factory = new AeroLinkApiFactory();
         using var client = factory.CreateClient();
         await ProblemReportApiTests.BootstrapAndLoginAsync(client);
-        var (projectId, releaseId) = await SeedAsync(factory, "PRCL");
+        var (projectId, releaseId, sccbUserName) = await SeedAsync(factory, "PRCL");
         var id = await RaiseAsync(client, projectId, releaseId);
-        await OpenAsync(client, id);
+        await OpenAsync(client, id, sccbUserName);
 
         var version = (await client.GetFromJsonAsync<JsonElement>($"/api/problem-reports/{id}")).GetProperty("version").GetInt64();
         using var dispositioned = await client.PostAsJsonAsync($"/api/problem-reports/{id}/disposition",
@@ -191,9 +206,19 @@ public sealed class ProblemReportCheckoutApiTests
 
         // Reopening is the route back to editable, and it keeps its own rationale requirement.
         version = (await client.GetFromJsonAsync<JsonElement>($"/api/problem-reports/{id}")).GetProperty("version").GetInt64();
+        using var qualityLogin = await client.PostAsJsonAsync("/api/auth/login",
+            new { userName = sccbUserName, password = AeroLinkApiFactory.MemberPassword });
+        Assert.Equal(HttpStatusCode.OK, qualityLogin.StatusCode);
+        await SecurityBoundaryTests.AuthorizeMutationsAsync(client);
         using var reopened = await client.PostAsJsonAsync($"/api/problem-reports/{id}/reopen",
             new { expectedVersion = version, rationale = "A second crew report shows the tone really is late." });
         Assert.Equal(HttpStatusCode.OK, reopened.StatusCode);
+        var reopenedDetail = await client.GetFromJsonAsync<JsonElement>($"/api/problem-reports/{id}");
+        Assert.Equal("Draft", reopenedDetail.GetProperty("state").GetString());
+        using var adminLogin = await client.PostAsJsonAsync("/api/auth/login",
+            new { userName = "admin", password = AeroLinkApiFactory.AdministratorPassword });
+        Assert.Equal(HttpStatusCode.OK, adminLogin.StatusCode);
+        await SecurityBoundaryTests.AuthorizeMutationsAsync(client);
         Assert.True((await client.GetFromJsonAsync<JsonElement>(
             $"/api/controlled-editing/status?artifactType=ProblemReport&artifactId={id}")).GetProperty("editable").GetBoolean());
     }
@@ -204,9 +229,9 @@ public sealed class ProblemReportCheckoutApiTests
         using var factory = new AeroLinkApiFactory();
         using var client = factory.CreateClient();
         await ProblemReportApiTests.BootstrapAndLoginAsync(client);
-        var (projectId, releaseId) = await SeedAsync(factory, "PRIM");
+        var (projectId, releaseId, sccbUserName) = await SeedAsync(factory, "PRIM");
         var id = await RaiseAsync(client, projectId, releaseId);
-        await OpenAsync(client, id);
+        await OpenAsync(client, id, sccbUserName);
         var before = await client.GetFromJsonAsync<JsonElement>($"/api/problem-reports/{id}");
 
         foreach (var (field, value) in new (string, string)[]

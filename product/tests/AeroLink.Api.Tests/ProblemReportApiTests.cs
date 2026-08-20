@@ -3,6 +3,7 @@ using System.Net.Http.Json;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using AeroLink.Domain.ChangeControl;
+using AeroLink.Domain.Identity;
 using AeroLink.Domain.Programs;
 using AeroLink.Domain.Releases;
 using AeroLink.Domain.Requirements;
@@ -204,8 +205,11 @@ public sealed class ProblemReportApiTests
 
         using var ready = await client.PostAsJsonAsync($"/api/problem-reports/{id}/ready-for-sccb", new { expectedVersion = version });
         version = (await ready.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("version").GetInt64();
-        using var opened = await client.PostAsJsonAsync($"/api/problem-reports/{id}/sccb/open", new { expectedVersion = version });
+        var sccbName = await SeedSccbAsync(factory, projectId);
+        using var sccb = factory.CreateClient(); await LoginExistingAsync(sccb, sccbName);
+        using var opened = await sccb.PostAsJsonAsync($"/api/problem-reports/{id}/sccb/open", new { expectedVersion = version });
         Assert.Equal(HttpStatusCode.OK, opened.StatusCode);
+        version = (await opened.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("version").GetInt64();
 
         using var change = await client.PostAsJsonAsync("/api/change-requests", new { projectId, targetReleaseId = releaseId, type = "Software", softwareLevel = "HighLevel", title = "Keep disagreement alert active", problem = "P", analysis = "A", solution = "S", problemReportIds = new[] { id } });
         Assert.True(change.StatusCode == HttpStatusCode.Created,
@@ -213,14 +217,14 @@ public sealed class ProblemReportApiTests
         var changeBody = await change.Content.ReadFromJsonAsync<JsonElement>();
         var changeRequestId = changeBody.GetProperty("id").GetGuid();
         var detail = await client.GetFromJsonAsync<JsonElement>($"/api/problem-reports/{id}");
-        Assert.Equal("Implementing", detail.GetProperty("state").GetString());
+        Assert.Equal("Open", detail.GetProperty("state").GetString());
         Assert.Equal("admin", detail.GetProperty("reportedBy").GetString());
         Assert.Equal("admin", detail.GetProperty("responsibleEngineerId").GetString());
         Assert.Equal(releaseId, detail.GetProperty("targetReleaseId").GetGuid());
         Assert.Contains("SystemRequirements", detail.GetProperty("impactAssessmentJson").GetString());
-        Assert.Contains(detail.GetProperty("revisions").EnumerateArray(), revision => revision.GetProperty("eventType").GetString() == "ImplementationStartedByLinkedChangeRequest");
+        Assert.DoesNotContain(detail.GetProperty("revisions").EnumerateArray(), revision => revision.GetProperty("eventType").GetString() == "ImplementationStartedByLinkedChangeRequest");
 
-        var filtered = await client.GetFromJsonAsync<JsonElement>($"/api/problem-reports?projectId={projectId}&releaseId={releaseId}&state=Implementing&severity=Major&priority=Normal&owner=admin&search=disagreement");
+        var filtered = await client.GetFromJsonAsync<JsonElement>($"/api/problem-reports?projectId={projectId}&releaseId={releaseId}&state=Open&severity=Major&priority=Normal&owner=admin&search=disagreement");
         Assert.Equal(id, Assert.Single(filtered.GetProperty("items").EnumerateArray()).GetProperty("id").GetGuid());
 
         using var checkout = await client.PostAsJsonAsync("/api/controlled-editing/checkout",
@@ -249,7 +253,7 @@ public sealed class ProblemReportApiTests
         Assert.Equal("stale_artifact_version",
             (await staleCheckIn.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("code").GetString());
         var afterConflict = await client.GetFromJsonAsync<JsonElement>($"/api/problem-reports/{id}");
-        Assert.Equal("Implementing", afterConflict.GetProperty("state").GetString());
+        Assert.Equal("Open", afterConflict.GetProperty("state").GetString());
         Assert.Contains(afterConflict.GetProperty("links").EnumerateArray(), link =>
             link.GetProperty("artifactId").GetGuid() == changeRequestId
             && link.GetProperty("relationship").GetString() == ProblemReportRelationshipPolicy.ProposedCorrectiveAction);
@@ -277,15 +281,9 @@ public sealed class ProblemReportApiTests
         Assert.DoesNotContain(reconciled.GetProperty("links").EnumerateArray(), link =>
             link.GetProperty("artifactId").GetGuid() == changeRequestId
             && link.GetProperty("relationship").GetString() == ProblemReportRelationshipPolicy.ProposedCorrectiveAction);
-        var routingHistory = reconciled.GetProperty("revisions").EnumerateArray().Where(revision =>
+        Assert.DoesNotContain(reconciled.GetProperty("revisions").EnumerateArray(), revision =>
             revision.GetProperty("eventType").GetString() is "ImplementationStartedByLinkedChangeRequest"
-                or "ImplementationRevertedAfterDraftCorrectiveActionRemoved").ToList();
-        Assert.Equal(2, routingHistory.Count);
-        Assert.All(routingHistory, revision =>
-        {
-            Assert.Contains(changeRequestId.ToString(), revision.GetProperty("detail").GetString());
-            Assert.Equal(1, revision.GetProperty("eventSchemaVersion").GetInt32());
-        });
+                or "ImplementationRevertedAfterDraftCorrectiveActionRemoved");
     }
 
     [Theory]
@@ -351,7 +349,9 @@ public sealed class ProblemReportApiTests
         var version = openedBody.GetProperty("version").GetInt64();
         using var ready = await client.PostAsJsonAsync($"/api/problem-reports/{id}/ready-for-sccb", new { expectedVersion = version });
         Assert.Equal(HttpStatusCode.OK, ready.StatusCode); version = (await ready.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("version").GetInt64();
-        using var sccbOpen = await client.PostAsJsonAsync($"/api/problem-reports/{id}/sccb/open", new { expectedVersion = version });
+        var sccbName = await SeedSccbAsync(factory, projectId);
+        using var sccb = factory.CreateClient(); await LoginExistingAsync(sccb, sccbName);
+        using var sccbOpen = await sccb.PostAsJsonAsync($"/api/problem-reports/{id}/sccb/open", new { expectedVersion = version });
         Assert.Equal(HttpStatusCode.OK, sccbOpen.StatusCode); version = (await sccbOpen.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("version").GetInt64();
         using var investigation = await client.PostAsJsonAsync($"/api/problem-reports/{id}/investigation", new { expectedVersion = version, analysis = "Reproduced during integration test.", rootCause = "Timeout race", effects = "Navigation reset", containment = "Disable retry" });
         Assert.Equal(HttpStatusCode.OK, investigation.StatusCode); version = (await investigation.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("version").GetInt64();
@@ -363,6 +363,104 @@ public sealed class ProblemReportApiTests
         var detail = await client.GetFromJsonAsync<JsonElement>($"/api/problem-reports/{id}");
         Assert.Equal("Verifying", detail.GetProperty("state").GetString());
         Assert.True(detail.GetProperty("revisions").GetArrayLength() >= 3);
+    }
+
+    [Fact]
+    public async Task Transition_endpoint_uses_live_SCCB_authority_and_persists_backward_rationale()
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var client = factory.CreateClient();
+        await BootstrapAndLoginAsync(client);
+        var projectId = await SeedProjectAsync(factory);
+        using var created = await client.PostAsJsonAsync("/api/problem-reports", new
+        {
+            projectId, title = "Transition policy", problem = "The lifecycle edge must be server-authorized."
+        });
+        var createdBody = await created.Content.ReadFromJsonAsync<JsonElement>();
+        var reportId = createdBody.GetProperty("id").GetGuid();
+        var version = createdBody.GetProperty("version").GetInt64();
+
+        using var ready = await client.PostAsJsonAsync($"/api/problem-reports/{reportId}/transition",
+            new { expectedVersion = version, targetState = "ReadyForSccb", rationale = "Forward-edge rationale is not part of the lifecycle record." });
+        Assert.Equal(HttpStatusCode.OK, ready.StatusCode);
+        version = (await ready.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("version").GetInt64();
+
+        using var adminOpen = await client.PostAsJsonAsync($"/api/problem-reports/{reportId}/transition",
+            new { expectedVersion = version, targetState = "Open" });
+        Assert.Equal(HttpStatusCode.Forbidden, adminOpen.StatusCode);
+
+        var sccbName = await SeedSccbAsync(factory, projectId);
+        using var sccb = factory.CreateClient();
+        await LoginExistingAsync(sccb, sccbName);
+        using var opened = await sccb.PostAsJsonAsync($"/api/problem-reports/{reportId}/transition",
+            new { expectedVersion = version, targetState = "Open" });
+        Assert.Equal(HttpStatusCode.OK, opened.StatusCode);
+        version = (await opened.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("version").GetInt64();
+
+        using var implementing = await client.PostAsJsonAsync($"/api/problem-reports/{reportId}/implementation",
+            new { expectedVersion = version });
+        Assert.Equal(HttpStatusCode.OK, implementing.StatusCode);
+        version = (await implementing.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("version").GetInt64();
+        using var backward = await client.PostAsJsonAsync($"/api/problem-reports/{reportId}/transition",
+            new { expectedVersion = version, targetState = "Open", rationale = "The implementation evidence was not ready." });
+        Assert.Equal(HttpStatusCode.OK, backward.StatusCode);
+        version = (await backward.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("version").GetInt64();
+        using var rejected = await client.PostAsJsonAsync($"/api/problem-reports/{reportId}/transition",
+            new { expectedVersion = version, targetState = "Rejected", rationale = "The reported behavior is not reproducible." });
+        Assert.Equal(HttpStatusCode.OK, rejected.StatusCode);
+
+        var detail = await client.GetFromJsonAsync<JsonElement>($"/api/problem-reports/{reportId}");
+        Assert.Equal("Rejected", detail.GetProperty("state").GetString());
+        Assert.Contains(detail.GetProperty("revisions").EnumerateArray(), revision =>
+            revision.GetProperty("fromState").GetString() == "Draft"
+            && revision.GetProperty("toState").GetString() == "ReadyForSccb"
+            && string.IsNullOrWhiteSpace(revision.GetProperty("rationale").GetString()));
+        Assert.Contains(detail.GetProperty("revisions").EnumerateArray(), revision =>
+            revision.GetProperty("fromState").GetString() == "Implementing"
+            && revision.GetProperty("toState").GetString() == "Open"
+            && revision.GetProperty("rationale").GetString() == "The implementation evidence was not ready.");
+        Assert.Contains(detail.GetProperty("revisions").EnumerateArray(), revision =>
+            revision.GetProperty("toState").GetString() == "Rejected"
+            && revision.GetProperty("rationale").GetString() == "The reported behavior is not reproducible.");
+    }
+
+    [Fact]
+    public async Task Automatic_waiting_invalidation_records_a_truthful_backward_rationale()
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var client = factory.CreateClient();
+        await BootstrapAndLoginAsync(client);
+        var projectId = await SeedProjectAsync(factory);
+        Guid reportId;
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            var now = DateTimeOffset.UtcNow;
+            var report = new ProblemReport(projectId, "PR-AUTO-0001", "Automatic invalidation",
+                "A closure basis must not silently disappear.", "", "admin", now,
+                responsibleEngineerId: "admin");
+            report.ReadyForSccb("admin", now.AddMinutes(1));
+            report.OpenBySccb("admin", now.AddMinutes(2));
+            report.BeginInvestigation("admin", "Analysis", "Cause", "Effect", "", now.AddMinutes(3));
+            report.ProposeResolution("admin", "Corrective action", now.AddMinutes(4));
+            report.RecordResolutionVerification("admin", Guid.NewGuid(), now.AddMinutes(5));
+            db.ProblemReports.Add(report);
+            await db.SaveChangesAsync();
+            reportId = report.Id;
+        }
+
+        var before = await client.GetFromJsonAsync<JsonElement>($"/api/problem-reports/{reportId}");
+        using var blocked = await client.PostAsJsonAsync($"/api/problem-reports/{reportId}/blocker",
+            new { expectedVersion = before.GetProperty("version").GetInt64(), isReleaseBlocker = true, waiverRationale = "" });
+        Assert.Equal(HttpStatusCode.OK, blocked.StatusCode);
+
+        var detail = await client.GetFromJsonAsync<JsonElement>($"/api/problem-reports/{reportId}");
+        Assert.Equal("Verifying", detail.GetProperty("state").GetString());
+        var revision = Assert.Single(detail.GetProperty("revisions").EnumerateArray(), item =>
+            item.GetProperty("eventType").GetString() == "ReleaseBlockerRaised");
+        Assert.Equal("WaitingForSqaToClose", revision.GetProperty("fromState").GetString());
+        Assert.Equal("Verifying", revision.GetProperty("toState").GetString());
+        Assert.False(string.IsNullOrWhiteSpace(revision.GetProperty("rationale").GetString()));
     }
 
     [Fact]
@@ -451,6 +549,27 @@ public sealed class ProblemReportApiTests
         using var scope = factory.Services.CreateScope(); var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
         var program = new ProgramRecord("Problem Report Program", $"PR{Guid.NewGuid():N}"[..12]); var project = new ProjectRecord(program.Id, "Flight Management Product", "Flight Management System");
         db.AddRange(program, project); await db.SaveChangesAsync(); return project.Id;
+    }
+
+    private static async Task<string> SeedSccbAsync(AeroLinkApiFactory factory, Guid projectId)
+    {
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+        var programId = await db.Projects.Where(item => item.Id == projectId).Select(item => item.ProgramId).SingleAsync();
+        var name = $"sccb.authority.{Guid.NewGuid():N}";
+        var now = DateTimeOffset.UtcNow;
+        var account = new UserAccount(name, "SCCB Authority", $"{name}@example.test",
+            IdentityService.HashPassword(AeroLinkApiFactory.MemberPassword), now);
+        db.AddRange(account, new ProgramMembership(account.Id, programId, ProgramRole.ProjectEngineer, "test.setup", now));
+        await db.SaveChangesAsync();
+        return name;
+    }
+
+    private static async Task LoginExistingAsync(HttpClient client, string userName)
+    {
+        using var login = await client.PostAsJsonAsync("/api/auth/login", new { userName, password = AeroLinkApiFactory.MemberPassword });
+        Assert.Equal(HttpStatusCode.OK, login.StatusCode);
+        await SecurityBoundaryTests.AuthorizeMutationsAsync(client);
     }
 
     internal static async Task BootstrapAndLoginAsync(HttpClient client)

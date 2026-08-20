@@ -4,10 +4,7 @@ namespace AeroLink.Domain.Requirements;
 
 public enum ProblemReportState
 {
-    Draft, ReadyForSccb, Open, Implementing, Verifying, AwaitingSqaClosure, Closed, Deferred,
-    // Retained so existing controlled records remain readable after the MVP lifecycle migration.
-    Investigating, ResolutionProposed, AwaitingClosureApproval,
-    Duplicate, CannotReproduce, NoFaultFound, AcceptedRisk, Rejected
+    Draft, ReadyForSccb, Open, Implementing, Verifying, WaitingForSqaToClose, Closed, Rejected,
 }
 
 public enum ProblemReportSeverity { Critical, High, Major, Minor, Trivial }
@@ -118,13 +115,15 @@ public sealed class ProblemReportRevision
     public ProblemReportRevision(Guid problemReportId, int revision, string eventType, string actor,
         string snapshotHash, string snapshotJson, DateTimeOffset occurredAt,
         int snapshotSchemaVersion = ProblemReportEvidenceContract.SchemaVersion,
-        string? detail = null, string? evidenceJson = null, int? eventSchemaVersion = null)
+        string? detail = null, string? evidenceJson = null, int? eventSchemaVersion = null,
+        string? fromState = null, string? toState = null, string? rationale = null)
     {
         Id = Guid.NewGuid(); ProblemReportId = problemReportId; Revision = revision; EventType = Required(eventType);
         if (snapshotSchemaVersion < 0) throw new DomainException("A Problem Report snapshot schema cannot be negative.");
         Actor = Required(actor); SnapshotHash = Required(snapshotHash); SnapshotJson = Required(snapshotJson);
         SnapshotSchemaVersion = snapshotSchemaVersion; OccurredAt = occurredAt;
         Detail = detail?.Trim() ?? ""; EvidenceJson = evidenceJson;
+        FromState = fromState?.Trim() ?? ""; ToState = toState?.Trim() ?? ""; Rationale = rationale?.Trim() ?? "";
         EventSchemaVersion = eventSchemaVersion ?? (evidenceJson is null ? 0 : 1);
         if (EventSchemaVersion < 0) throw new DomainException("A Problem Report event schema cannot be negative.");
     }
@@ -137,6 +136,9 @@ public sealed class ProblemReportRevision
     public string SnapshotJson { get; private set; } = "";
     public int SnapshotSchemaVersion { get; private set; }
     public string Detail { get; private set; } = "";
+    public string FromState { get; private set; } = "";
+    public string ToState { get; private set; } = "";
+    public string Rationale { get; private set; } = "";
     public string? EvidenceJson { get; private set; }
     public int EventSchemaVersion { get; private set; }
     public DateTimeOffset OccurredAt { get; private set; }
@@ -271,41 +273,33 @@ public sealed class ProblemReport
 
     public void RecordContextLink(string actor, DateTimeOffset now)
     {
-        EnsureResponsible(actor); EnsureNotTerminal(); InvalidateClosureVerificationForChange(); Touch(now);
+        EnsureResponsible(actor); EnsureNotTerminal(); Touch(now);
     }
 
     public void ReadyForSccb(string actor, DateTimeOffset now)
     {
-        EnsureResponsible(actor);
-        if (State != ProblemReportState.Draft) throw new DomainException("Only a Draft problem report can be made ready for SCCB.");
-        State = ProblemReportState.ReadyForSccb; Touch(now);
+        TransitionTo(ProblemReportState.ReadyForSccb, actor, null, now);
     }
 
     public void OpenBySccb(string actor, DateTimeOffset now)
     {
-        Required(actor, "An SCCB actor is required.");
-        if (State != ProblemReportState.ReadyForSccb) throw new DomainException("Only a problem report ready for SCCB can be opened.");
-        State = ProblemReportState.Open; Touch(now);
+        TransitionTo(ProblemReportState.Open, actor, null, now);
     }
 
     public void BeginImplementation(string actor, DateTimeOffset now, bool automatic = false)
     {
-        if (!automatic) EnsureResponsible(actor); else Required(actor, "An implementation actor is required.");
-        if (State != ProblemReportState.Open) throw new DomainException("Only an Open problem report can begin implementation.");
-        State = ProblemReportState.Implementing; Touch(now);
+        Required(actor, "An implementation actor is required.");
+        TransitionTo(ProblemReportState.Implementing, actor, null, now);
     }
 
     public void RevertAutomaticImplementation(string actor, DateTimeOffset now)
     {
-        Required(actor, "An implementation reconciliation actor is required.");
-        if (State != ProblemReportState.Implementing)
-            throw new DomainException("Only an automatically implementing problem report can be reconciled to Open.");
-        State = ProblemReportState.Open; Touch(now);
+        TransitionTo(ProblemReportState.Open, actor, "Implementation source was removed.", now);
     }
 
     public void BeginInvestigation(string actor, string analysis, string rootCause, string effects, string containment, DateTimeOffset now)
     {
-        EnsureResponsible(actor); EnsureNotTerminal();
+        EnsureNotTerminal();
         Analysis = Required(analysis, "Investigation analysis is required."); RootCause = rootCause?.Trim() ?? ""; Effects = effects?.Trim() ?? ""; Containment = containment?.Trim() ?? "";
         if (State == ProblemReportState.Open) State = ProblemReportState.Implementing;
         else if (State != ProblemReportState.Implementing) throw new DomainException("Only an Open or Implementing problem report can record investigation work.");
@@ -314,40 +308,48 @@ public sealed class ProblemReport
 
     public void ProposeResolution(string actor, string correctiveAction, DateTimeOffset now)
     {
-        EnsureResponsible(actor); if (State != ProblemReportState.Implementing) throw new DomainException("Only an Implementing problem report can enter verification.");
-        CorrectiveAction = Required(correctiveAction, "A corrective action is required."); Disposition = ProblemReportDisposition.Fixed; State = ProblemReportState.Verifying; Touch(now);
+        if (State != ProblemReportState.Implementing) throw new DomainException("Only an Implementing problem report can enter verification.");
+        CorrectiveAction = Required(correctiveAction, "A corrective action is required."); Disposition = null;
+        TransitionTo(ProblemReportState.Verifying, actor, null, now);
     }
 
     public void RecordResolutionVerification(string actor, Guid executionId, DateTimeOffset now)
     {
-        EnsureResponsible(actor); if (State != ProblemReportState.Verifying) throw new DomainException("Only a Verifying problem report can record closure-supporting evidence.");
+        if (State != ProblemReportState.Verifying) throw new DomainException("Only a Verifying problem report can record closure-supporting evidence.");
         if (executionId == Guid.Empty) throw new DomainException("A successor test execution is required for resolution verification.");
-        ResolutionVerificationExecutionId = executionId; State = ProblemReportState.AwaitingSqaClosure; Touch(now);
+        ResolutionVerificationExecutionId = executionId; TransitionTo(ProblemReportState.WaitingForSqaToClose, actor, null, now);
     }
 
     public void ApproveClosure(string actor, Guid actorAccountId, DateTimeOffset now)
     {
         if (string.Equals(actor, ReportedBy, StringComparison.OrdinalIgnoreCase) || string.Equals(actor, ResponsibleEngineerId, StringComparison.OrdinalIgnoreCase)) throw new DomainException("The problem-report author or responsible engineer cannot independently approve SQA closure.");
-        if (State != ProblemReportState.AwaitingSqaClosure) throw new DomainException("Verified closure evidence must be awaiting SQA closure.");
+        if (State != ProblemReportState.WaitingForSqaToClose) throw new DomainException("A Problem Report must be waiting for SQA to close.");
         ClosureApprovedBy = actorAccountId == Guid.Empty ? null : actorAccountId; ClosureApprovedByName = Required(actor, "A closure approver is required."); ClosureApprovedAt = now;
-        State = ProblemReportState.Closed; Touch(now);
+        TransitionTo(ProblemReportState.Closed, actor, null, now);
     }
 
     public void ApplyDisposition(string actor, ProblemReportDisposition disposition, string rationale, Guid? duplicateOfId, DateTimeOffset now)
     {
-        EnsureResponsible(actor); EnsureNotTerminal(); InvalidateClosureVerificationForChange(); DispositionRationale = Required(rationale, "A disposition rationale is required."); Disposition = disposition;
-        State = disposition switch
+        Required(actor, "A disposition actor is required."); EnsureNotTerminal();
+        var requiredRationale = Required(rationale, "A disposition rationale is required.");
+        var target = disposition switch
         {
             ProblemReportDisposition.Fixed => throw new DomainException("Use proposed resolution and verified closure for a fixed problem report."),
             ProblemReportDisposition.Duplicate when duplicateOfId is null || duplicateOfId.Value == Guid.Empty => throw new DomainException("A duplicate problem report must identify its original record."),
-            ProblemReportDisposition.Duplicate => ProblemReportState.Duplicate,
-            ProblemReportDisposition.CannotReproduce => ProblemReportState.CannotReproduce,
-            ProblemReportDisposition.NoFaultFound => ProblemReportState.NoFaultFound,
-            ProblemReportDisposition.Deferred => ProblemReportState.Deferred,
-            ProblemReportDisposition.AcceptedRisk => ProblemReportState.AcceptedRisk,
-            _ => ProblemReportState.Rejected
+            ProblemReportDisposition.Duplicate or ProblemReportDisposition.CannotReproduce
+                or ProblemReportDisposition.NoFaultFound or ProblemReportDisposition.AcceptedRisk or ProblemReportDisposition.Rejected => ProblemReportState.Rejected,
+            ProblemReportDisposition.Deferred => ProblemReportState.Open,
+            _ => ProblemReportState.Rejected,
         };
-        Touch(now);
+        Disposition = target == ProblemReportState.Rejected ? ProblemReportDisposition.Rejected : disposition;
+        DispositionRationale = requiredRationale;
+        if (ProblemReportTransitionPolicy.Canonical(State) == target)
+        {
+            InvalidateClosureVerificationForChange();
+            Touch(now);
+            return;
+        }
+        TransitionTo(target, actor, requiredRationale, now);
     }
 
     public void SetReleaseBlocker(string actor, bool isBlocker, DateTimeOffset now)
@@ -366,21 +368,61 @@ public sealed class ProblemReport
 
     public void Reopen(string actor, string rationale, DateTimeOffset now)
     {
-        EnsureResponsible(actor);
-        if (string.IsNullOrWhiteSpace(rationale)) throw new DomainException("A reopen rationale is required.");
-        if (State == ProblemReportState.Closed || IsTerminalDisposition())
-        {
-            Revision++; State = ProblemReportState.Open; Disposition = null; DispositionRationale = ""; ResolutionVerificationExecutionId = null;
-            ClosureApprovedBy = null; ClosureApprovedByName = ""; ClosureApprovedAt = null; Touch(now);
-            if (IsReleaseBlocker) ReleaseBlockerVersion = Version; return;
-        }
-        throw new DomainException("Only a closed or dispositioned problem report can be reopened.");
+        var target = State == ProblemReportState.Closed ? ProblemReportState.Verifying
+            : State == ProblemReportState.Rejected ? ProblemReportState.Draft
+            : throw new DomainException("Only a Closed or Rejected problem report can be reopened.");
+        TransitionTo(target, actor, rationale, now);
     }
 
     public void ResumeDeferred(string actor, DateTimeOffset now)
     {
-        EnsureResponsible(actor); if (State != ProblemReportState.Deferred) throw new DomainException("Only a Deferred problem report can be resumed.");
-        Disposition = null; DispositionRationale = ""; State = ProblemReportState.Open; Touch(now);
+        if (State != ProblemReportState.Open) throw new DomainException("Only an Open problem report can be resumed.");
+        Disposition = null; DispositionRationale = "";
+        Touch(now);
+    }
+
+    /// <summary>Applies one edge of the canonical eight-state graph. Live role checks belong to the API.</summary>
+    public void TransitionTo(ProblemReportState target, string actor, string? rationale, DateTimeOffset now)
+    {
+        Required(actor, "A Problem Report transition actor is required.");
+        var source = ProblemReportTransitionPolicy.Canonical(State);
+        target = ProblemReportTransitionPolicy.Canonical(target);
+        if (!ProblemReportTransitionPolicy.IsAllowed(source, target))
+            throw new DomainException($"A Problem Report cannot transition from {source} to {target}.");
+        if (ProblemReportTransitionPolicy.RequiresRationale(source, target))
+            rationale = Required(rationale, "A rationale is required for rejection and backward Problem Report transitions.");
+        else rationale = rationale?.Trim();
+
+        if (target == ProblemReportState.Rejected)
+        {
+            Disposition = ProblemReportDisposition.Rejected;
+            DispositionRationale = rationale!;
+            ResolutionVerificationExecutionId = null;
+            ClosureApprovedBy = null; ClosureApprovedByName = ""; ClosureApprovedAt = null;
+        }
+        else if (source == ProblemReportState.Rejected)
+        {
+            Revision++; Disposition = null; DispositionRationale = "";
+            ResolutionVerificationExecutionId = null;
+            ClosureApprovedBy = null; ClosureApprovedByName = ""; ClosureApprovedAt = null;
+        }
+        else if (source == ProblemReportState.Closed && target == ProblemReportState.Verifying)
+        {
+            Revision++; Disposition = null; DispositionRationale = "";
+            ResolutionVerificationExecutionId = null;
+            ClosureApprovedBy = null; ClosureApprovedByName = ""; ClosureApprovedAt = null;
+        }
+        else if (source == ProblemReportState.WaitingForSqaToClose && target != ProblemReportState.Closed)
+        {
+            ResolutionVerificationExecutionId = null;
+            ClosureApprovedBy = null; ClosureApprovedByName = ""; ClosureApprovedAt = null;
+        }
+        State = target;
+        Touch(now);
+        if ((source == ProblemReportState.Rejected
+                || source == ProblemReportState.Closed && target == ProblemReportState.Verifying)
+            && IsReleaseBlocker)
+            ReleaseBlockerVersion = Version;
     }
 
     public string CanonicalSnapshot() => ProblemReportEvidenceContract.Serialize(this);
@@ -388,7 +430,7 @@ public sealed class ProblemReport
     public bool InvalidateClosureVerification(string actor, DateTimeOffset now)
     {
         Required(actor, "An invalidation actor is required.");
-        if (State != ProblemReportState.AwaitingSqaClosure) return false;
+        if (State != ProblemReportState.WaitingForSqaToClose) return false;
         InvalidateClosureVerificationForChange(); Touch(now); return true;
     }
     public bool PrepareControlledRelationshipChange(string actor, DateTimeOffset now)
@@ -399,7 +441,7 @@ public sealed class ProblemReport
     private void Touch(DateTimeOffset now) { UpdatedAt = now; Version++; }
     private void InvalidateClosureVerificationForChange()
     {
-        if (State != ProblemReportState.AwaitingSqaClosure) return;
+        if (State != ProblemReportState.WaitingForSqaToClose) return;
         ResolutionVerificationExecutionId = null;
         State = ProblemReportState.Verifying;
     }
@@ -411,7 +453,7 @@ public sealed class ProblemReport
     /// </summary>
     private void EnsureEditable() { if (State == ProblemReportState.Closed || IsTerminalDisposition()) throw new DomainException("The problem report is closed or dispositioned and is no longer editable. Reopen it first."); }
     private void EnsureNotTerminal() { if (State == ProblemReportState.Closed || IsTerminalDisposition()) throw new DomainException("The problem report is closed or dispositioned. Reopen it before changing lifecycle data."); }
-    private bool IsTerminalDisposition() => State is ProblemReportState.Duplicate or ProblemReportState.CannotReproduce or ProblemReportState.NoFaultFound or ProblemReportState.AcceptedRisk or ProblemReportState.Rejected;
+    private bool IsTerminalDisposition() => ProblemReportTransitionPolicy.Canonical(State) == ProblemReportState.Rejected;
     private static string ValidImpactJson(string? value)
     {
         var candidate = string.IsNullOrWhiteSpace(value) ? "{}" : value.Trim();
