@@ -573,7 +573,6 @@ public static class ChangeRequestEndpoints
             catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
         });
 
-<<<<<<< HEAD
         // The deferred backlog, which is not a build's work and so is not in a build's list.
         //
         // Everything still on the shelf, however long ago it was put there — not only what the immediately
@@ -608,8 +607,9 @@ public static class ChangeRequestEndpoints
                 })
                 .ToListAsync(ct);
             return Results.Ok(new { items });
-=======
-        // What a rebase would be against, and whether one is offered at all.
+        });
+
+ // What a rebase would be against, and whether one is offered at all.
         //
         // Two rules live here rather than in the aggregate, because both are facts about a different change
         // request. Rebase is offered only onto an Approved result: a change still in review can be returned,
@@ -681,7 +681,6 @@ public static class ChangeRequestEndpoints
                 return Results.Ok(ApiMap.ChangeRequestDetail(scr, await ArtifactClaims.NoticesAsync(db, scr, ct)));
             }
             catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
->>>>>>> origin/main
         });
 
         // The other half of adding one. Its absence is why a change request refused at submission for a
