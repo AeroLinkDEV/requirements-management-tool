@@ -48,6 +48,14 @@ public sealed class DeferredCarryForwardApiTests
         return new(project.Id, released.Id, current.Id, successor.Id, deferred.Id, active.Id);
     }
 
+    /// <summary>
+    /// Shelved work is offered to the successor as a backlog, not as part of its plan.
+    ///
+    /// This test asserted the opposite: that a deferred change request appeared inline in the successor's own
+    /// list. That answered the right problem — shelved work was unreachable from the build that followed — with
+    /// the wrong shape, because a build's list is then read as though it already contained work nobody has
+    /// committed to. The backlog is its own listing, and bringing one in is the explicit act that moves it.
+    /// </summary>
     [Fact]
     public async Task A_change_request_deferred_in_one_build_is_offered_to_its_successor()
     {
@@ -60,14 +68,17 @@ public sealed class DeferredCarryForwardApiTests
             $"/api/change-requests?projectId={seeded.ProjectId}&releaseId={seeded.SuccessorId}");
         var listed = successor.GetProperty("items").EnumerateArray().ToList();
 
-        // The shelved one travels; work still live in the predecessor does not.
-        Assert.Contains(listed, x => x.GetProperty("title").GetString() == "SHELVED-IN-ONE-SIX oceanic sequencing");
+        // Neither the shelved work nor the live work of another build belongs to this one.
+        Assert.DoesNotContain(listed, x => x.GetProperty("title").GetString() == "SHELVED-IN-ONE-SIX oceanic sequencing");
         Assert.DoesNotContain(listed, x => x.GetProperty("title").GetString() == "STILL-IN-ONE-SIX active work");
 
-        // The row says it is shelved and how far it had got, so a reader is not guessing why it is here.
-        var carried = listed.Single(x => x.GetProperty("title").GetString() == "SHELVED-IN-ONE-SIX oceanic sequencing");
-        Assert.Equal("Deferred", carried.GetProperty("state").GetString());
-        Assert.Equal(seeded.CurrentId, carried.GetProperty("targetReleaseId").GetGuid());
+        // The backlog offers it, saying which build shelved it and how far it had got, so a reader deciding
+        // whether to take it on is not guessing.
+        var backlog = await client.GetFromJsonAsync<JsonElement>(
+            $"/api/change-requests/deferred?projectId={seeded.ProjectId}");
+        var offered = Assert.Single(backlog.GetProperty("items").EnumerateArray()
+            .Where(x => x.GetProperty("title").GetString() == "SHELVED-IN-ONE-SIX oceanic sequencing").ToList());
+        Assert.Equal(seeded.CurrentId, offered.GetProperty("shelvedFromReleaseId").GetGuid());
 
         // And the build that shelved it still lists it, unchanged.
         var origin = await client.GetFromJsonAsync<JsonElement>(

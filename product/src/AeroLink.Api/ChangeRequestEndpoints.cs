@@ -573,6 +573,42 @@ public static class ChangeRequestEndpoints
             catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
         });
 
+        // The deferred backlog, which is not a build's work and so is not in a build's list.
+        //
+        // Everything still on the shelf, however long ago it was put there — not only what the immediately
+        // preceding build deferred. Work shelved in 1.4 and never taken up is exactly what somebody planning
+        // 1.7 needs to see, and a chain that only looked one build back would have quietly lost it.
+        //
+        // Scoped to the register it is read from: a reader looking at SRCRs is offered deferred SRCRs, and
+        // mixing HLRCRs into that list would offer them work they cannot bring into the view they are in.
+        app.MapGet("/api/change-requests/deferred", async (Guid projectId, ChangeRequestType? type,
+            RequirementLevel? softwareLevel, HttpContext http, AeroLinkDbContext db, CancellationToken ct) =>
+        {
+            if (!await http.HasProjectAccessAsync(db, projectId, ct)) return Results.Forbid();
+            var source = db.SystemChangeRequests.AsNoTracking()
+                .Where(x => x.ProjectId == projectId && x.State == ChangeRequestState.Deferred);
+            if (type is not null) source = source.Where(x => x.Type == type);
+            if (softwareLevel is not null) source = source.Where(x => x.SoftwareLevel == softwareLevel);
+
+            var items = await source
+                .OrderBy(x => x.BaseNumber).ThenByDescending(x => x.Revision)
+                .Select(x => new
+                {
+                    x.Id, x.BaseNumber, x.Revision,
+                    displayNumber = x.BaseNumber + "." + (x.Revision < 10 ? "0" : "") + x.Revision,
+                    x.Title, x.AuthorId, x.UpdatedAt,
+                    type = x.Type.ToString(),
+                    softwareLevel = x.SoftwareLevel == null ? null : x.SoftwareLevel.ToString(),
+                    // Where it was shelved from, and how far it had got. A reader deciding whether to take work
+                    // on wants both: which build put it away, and whether it was written, reviewed or approved.
+                    x.OriginReleaseId, shelvedFromReleaseId = x.TargetReleaseId,
+                    deferredFromState = x.DeferredFromState == null ? null : x.DeferredFromState.ToString(),
+                    requirementCount = x.RequirementChanges.Count,
+                })
+                .ToListAsync(ct);
+            return Results.Ok(new { items });
+        });
+
         // The other half of adding one. Its absence is why a change request refused at submission for a
         // contested requirement had no remedy but waiting.
         app.MapDelete("/api/change-requests/{id:guid}/requirements/{requirementChangeId:guid}", async (Guid id,
