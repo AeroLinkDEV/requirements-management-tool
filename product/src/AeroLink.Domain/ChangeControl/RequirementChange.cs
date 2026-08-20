@@ -83,4 +83,22 @@ public sealed class RequirementChange
     /// before every field is settled.
     /// </summary>
     public Guid? TargetSectionId { get; private set; }
+
+    /// <summary>
+    /// Re-points this change at a later revision, carrying the wording its author re-applied by hand.
+    ///
+    /// The statement is supplied rather than kept, and that is the whole design. The author wrote their words
+    /// against the text of the earlier revision; the later one says something different. Keeping the old words
+    /// and moving the number would assert that they wrote them against wording they never saw, and the change
+    /// request would then claim to be a considered modification of something nobody read.
+    /// </summary>
+    internal void Rebase(int revision, string statement)
+    {
+        if (revision <= Revision)
+            throw new DomainException("A rebase moves a change onto a later revision.");
+        if (string.IsNullOrWhiteSpace(statement) && Kind != RequirementChangeKind.Retire)
+            throw new DomainException("Re-apply the statement against the revision being rebased onto.");
+        Revision = revision;
+        Statement = statement.Trim();
+    }
 }

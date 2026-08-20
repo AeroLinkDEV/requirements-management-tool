@@ -165,6 +165,44 @@ public sealed class SystemChangeRequest
     }
 
     /// <summary>
+    /// Moves one requirement change onto the result of another change request that reached the requirement
+    /// first, carrying wording the author has re-applied against the new text.
+    ///
+    /// The alternative to this is losing the work. A change request refused at submission can drop the
+    /// contested requirement or wait; neither keeps an analysis that is still valid and only disagrees with
+    /// the winner about text.
+    ///
+    /// The caller establishes that the winner is approved and that its change is a modification rather than a
+    /// retirement — both are facts about a different aggregate, and asking this one to know them would mean
+    /// handing it a repository. What this owns is what happens to the change request itself: the revision
+    /// moves, the author's re-applied statement replaces theirs, and an approval given against the earlier
+    /// text does not survive.
+    /// </summary>
+    public void RebaseRequirementChange(string actorId, Guid requirementChangeId, int ontoRevision,
+        string reappliedStatement, string ontoDisplayNumber, DateTimeOffset now,
+        bool administratorAuthority = false)
+    {
+        EnsureAuthor(actorId, administratorAuthority);
+        if (State is not (ChangeRequestState.Draft or ChangeRequestState.Approved))
+            throw new DomainException("Only a draft or approved change request can be rebased.");
+        var change = _requirementChanges.SingleOrDefault(x => x.Id == requirementChangeId)
+            ?? throw new DomainException("That requirement change is not part of this change request.");
+
+        var from = change.Revision;
+        change.Rebase(ontoRevision, reappliedStatement);
+
+        // An approval describes wording. Once the wording moves, the signatures describe something that is no
+        // longer proposed, so the change request goes back for review rather than carrying them forward. The
+        // same rule applies when a change request moves between builds.
+        var wasApproved = State == ChangeRequestState.Approved;
+        if (wasApproved) State = ChangeRequestState.Draft;
+        UpdatedAt = now;
+        Audit("RequirementChangeRebased", actorId,
+            $"Rebased {change.DisplayNumber} from revision {from} onto revision {ontoRevision}, the result of {ontoDisplayNumber}."
+            + (wasApproved ? " Returned to Draft; the approvals described the earlier wording." : string.Empty), now);
+    }
+
+    /// <summary>
     /// Takes a requirement change back off a draft.
     ///
     /// An author who added the wrong requirement, or whose analysis concluded a requirement should not change
