@@ -1308,7 +1308,22 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
         // Aggregate children use application-assigned GUIDs. EF interprets newly discovered
         // children with set keys as existing unless their append-only state is made explicit.
         foreach (var entry in ChangeTracker.Entries<AuditEvent>().Where(x => x.State == EntityState.Modified)) entry.State = EntityState.Added;
-        foreach (var entry in ChangeTracker.Entries<RequirementChange>().Where(x => x.State == EntityState.Modified)) entry.State = EntityState.Added;
+        // A requirement change asks the question the blanket rule was approximating: is this row actually new?
+        //
+        // The rule above exists because a child discovered with an application-assigned key looks Modified to
+        // EF whether it is new or not, and treating a new one as an update loses it. Flipping every modified
+        // requirement change to an insert answers that correctly for additions and wrongly for genuine edits,
+        // which is why rebasing one onto a later revision failed on its own primary key.
+        //
+        // Asking the database costs one round trip per modified requirement change, and a requirement change
+        // is written far more often than it is edited. The alternative -- replacing the row -- gives it a new
+        // identity, and both a reviewer's comment and a verification impact item anchor to the old one, so a
+        // rebase would quietly detach an objection from the requirement it was made about.
+        foreach (var entry in ChangeTracker.Entries<RequirementChange>().Where(x => x.State == EntityState.Modified))
+        {
+            var stored = await entry.GetDatabaseValuesAsync(cancellationToken);
+            if (stored is null) entry.State = EntityState.Added;
+        }
         foreach (var entry in ChangeTracker.Entries<ArtifactFieldDefinition>().Where(x => x.State == EntityState.Modified)) entry.State = EntityState.Added;
         foreach (var cycle in ChangeTracker.Entries<ReviewCycle>().Where(x => x.State == EntityState.Modified && x.Entity.CompletedAt is null && x.Entity.Steps.All(s => s.State != ApprovalStepState.Approved)))
         {
