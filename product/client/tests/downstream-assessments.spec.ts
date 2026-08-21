@@ -6,7 +6,9 @@ test('downstream assessment actions follow authority and submit without a form-n
   await apiLogin(request)
   const apiResponse=await request.get(`${process.env.AEROLINK_E2E_API_BASE}/api/downstream-assessments?projectId=${showcase.projectId}&releaseId=${showcase.activeReleaseId}`)
   expect(apiResponse.ok(),await apiResponse.text()).toBeTruthy()
-  expect((await apiResponse.json()).length).toBeGreaterThan(0)
+  const assessments=await apiResponse.json() as {sourceChangeRequestNumber:string;state:string;outcome:string}[]
+  const seededActionable=assessments.find(row=>row.sourceChangeRequestNumber==='SRCR-00031.00'&&row.state==='Open'&&row.outcome==='Pending')
+  expect(seededActionable,'The seeded SRCR-00031.00 assessment must remain actionable for this authority journey').toBeTruthy()
 
   const unauthorizedContext=await browser.newContext()
   const unauthorized=await unauthorizedContext.newPage()
@@ -16,11 +18,21 @@ test('downstream assessment actions follow authority and submit without a form-n
   const unauthorizedQueue=unauthorized.locator('.downstreamQueue')
   // Every row offers the same one control whoever is reading. What the reader may do is decided inside.
   await expect(unauthorizedQueue.getByRole('button',{name:'Change required'})).toHaveCount(0)
-  await unauthorizedQueue.locator('.downstreamAssessment').first().getByRole('button',{name:'Open assessment'}).click()
+  const unauthorizedAssessment=unauthorizedQueue.locator('.downstreamAssessment').filter({hasText:seededActionable!.sourceChangeRequestNumber}).first()
+  await expect(unauthorizedAssessment).toBeVisible()
+  await unauthorizedAssessment.getByRole('button',{name:'Open assessment'}).click()
   const unauthorizedDrawer=unauthorized.getByRole('dialog',{name:/downstream impact/})
   await expect(unauthorizedDrawer).toContainText('Software engineering authority is required')
   await expect(unauthorizedDrawer.getByRole('button',{name:'Change required'})).toHaveCount(0)
   await unauthorizedContext.close()
+
+  // Establish the approver's browser session and queue before the engineer makes the irreversible
+  // submission. If this login/setup fails, the assessment is still Open/Pending for a retry.
+  const approverContext=await browser.newContext()
+  const approverPage=await approverContext.newPage()
+  await login(approverPage,'software.lead')
+  await openNavigationGroup(approverPage,'SOFTWARE ENGINEERING')
+  await approverPage.getByRole('link',{name:'Software Change Requests'}).click()
 
   await login(page)
   await openNavigationGroup(page,'SOFTWARE ENGINEERING')
@@ -65,11 +77,9 @@ test('downstream assessment actions follow authority and submit without a form-n
   const persistedWorkbench=page.getByRole('dialog',{name:'SRCR-00031.00 downstream impact'})
   await expect(persistedWorkbench.locator('.personName[title="software.lead"]')).toBeVisible()
 
-  const approverContext=await browser.newContext()
-  const approverPage=await approverContext.newPage()
-  await login(approverPage,'software.lead')
-  await openNavigationGroup(approverPage,'SOFTWARE ENGINEERING')
-  await approverPage.getByRole('link',{name:'Software Change Requests'}).click()
+  // Refresh the already-authenticated approver queue after submission so its drawer reflects the
+  // persisted InReview state. The refresh is intentionally retained as a post-mutation durability check.
+  await approverPage.reload()
   const approvalAssessment=approverPage.locator('.downstreamAssessment').filter({hasText:'SRCR-00031.00'}).first()
   await approvalAssessment.getByRole('button',{name:'Open assessment'}).click()
   const approvalWorkbench=approverPage.getByRole('dialog',{name:'SRCR-00031.00 downstream impact'})
