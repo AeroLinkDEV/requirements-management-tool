@@ -36,7 +36,10 @@ test('Project configuration authors a disposable graph, records history, refuses
   await page.getByRole('button', { name: /Requirement ladder/ }).click()
   await page.getByPlaceholder('Why is this ladder changing?').fill('Attempt the named readiness gate')
   await page.getByRole('button', { name: 'Attempt activation' }).click()
-  await expect(page.getByRole('alert')).toContainText('change-request.authoring')
+  const activationAlert = page.getByRole('alert')
+  await expect(activationAlert).toContainText('approval.workflow-subject')
+  await expect(activationAlert).toContainText('release.reconciliation')
+  await expect(activationAlert).not.toContainText('change-request.authoring')
 
   // The old deep link remains readable, while the same approval surface is nested in Project configuration.
   await page.goto(`/projects/${slug}/approval-configuration`)
