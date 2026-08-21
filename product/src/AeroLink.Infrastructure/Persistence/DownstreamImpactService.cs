@@ -9,7 +9,8 @@ namespace AeroLink.Infrastructure.Persistence;
 /// This creates work, not an SWCR: the consuming engineer may conclude no change, create a one-to-one
 /// SWCR, or group several assessments into one downstream change request.
 /// </summary>
-public sealed class DownstreamImpactService(AeroLinkDbContext db, ILadderPolicy? policy = null)
+public sealed class DownstreamImpactService(AeroLinkDbContext db, ILadderPolicy? policy = null,
+    IProjectLadderPolicyResolver? policyResolver = null)
 {
     private readonly ILadderPolicy ladderPolicy = policy ?? LegacyLadderPolicy.Instance;
 
@@ -17,9 +18,12 @@ public sealed class DownstreamImpactService(AeroLinkDbContext db, ILadderPolicy?
         DateTimeOffset now, CancellationToken ct)
     {
         if (request.State is not (ChangeRequestState.Approved or ChangeRequestState.SelectedForBaseline)) return 0;
+        var effectivePolicy = policyResolver is null
+            ? ladderPolicy
+            : await policyResolver.ResolveAsync(request.ProjectId, ct);
         // Old showcase data predates the aggregate invariant. Refuse to turn a mismatched CR into more
         // controlled work; reconciliation remediates that source explicitly and preserves its history.
-        if (request.RequirementChanges.Any(x => !SystemChangeRequest.AcceptsRequirementLevel(request.Type, x.Level)))
+        if (request.RequirementChanges.Any(x => !effectivePolicy.AcceptsChangeRequest(request.Type, request.SoftwareLevel, x.Level)))
             return 0;
 
         var targets = new HashSet<RequirementLevel>();
@@ -27,8 +31,8 @@ public sealed class DownstreamImpactService(AeroLinkDbContext db, ILadderPolicy?
         {
             // Definition also makes a corrupt/unknown persisted level fail closed rather than silently
             // treating it as the bottom of the ladder.
-            _ = ladderPolicy.Definition(level);
-            targets.UnionWith(ladderPolicy.DownstreamLevels(level));
+            _ = effectivePolicy.Definition(level);
+            targets.UnionWith(effectivePolicy.DownstreamLevels(level));
         }
 
         var existing = await db.DownstreamChangeAssessments
@@ -46,19 +50,19 @@ public sealed class DownstreamImpactService(AeroLinkDbContext db, ILadderPolicy?
         {
             if (existing.ContainsKey(target)) continue;
             var assessment = new DownstreamChangeAssessment(request.ProjectId, request.TargetReleaseId,
-                request.Id, request.DisplayNumber, target, now);
+                request.Id, request.DisplayNumber, target, now, effectivePolicy);
             db.DownstreamChangeAssessments.Add(assessment);
             foreach (var historical in prior.Where(x => x.TargetLevel == target))
                 historical.Supersede(assessment.Id,
                     $"{request.DisplayNumber} supersedes the source revision. Reassess the downstream impact against the approved replacement.", now);
-            await SupersedeLegacyMisclassifiedAssessmentsAsync(request, assessment, now, ct);
+            await SupersedeLegacyMisclassifiedAssessmentsAsync(request, assessment, effectivePolicy, now, ct);
             raised++;
         }
         return raised;
     }
 
     private async Task SupersedeLegacyMisclassifiedAssessmentsAsync(SystemChangeRequest replacement,
-        DownstreamChangeAssessment successor, DateTimeOffset now, CancellationToken ct)
+        DownstreamChangeAssessment successor, ILadderPolicy effectivePolicy, DateTimeOffset now, CancellationToken ct)
     {
         var candidates = await db.DownstreamChangeAssessments
             .Where(x => x.ProjectId == replacement.ProjectId
@@ -76,18 +80,18 @@ public sealed class DownstreamImpactService(AeroLinkDbContext db, ILadderPolicy?
         foreach (var candidate in candidates)
         {
             if (!legacySources.TryGetValue(candidate.SourceChangeRequestId, out var legacy)
-                || legacy.RequirementChanges.All(x => SystemChangeRequest.AcceptsRequirementLevel(legacy.Type, x.Level))
-                || !SharesExactSourceWork(legacy, replacement, successor.TargetLevel)) continue;
+                || legacy.RequirementChanges.All(x => effectivePolicy.AcceptsChangeRequest(legacy.Type, legacy.SoftwareLevel, x.Level))
+                || !SharesExactSourceWork(legacy, replacement, successor.TargetLevel, effectivePolicy)) continue;
 
             candidate.Supersede(successor.Id,
                 $"{replacement.DisplayNumber} is the correctly classified replacement for the same requirement change. Reassess the downstream impact against that controlled source.", now);
         }
     }
 
-    private bool SharesExactSourceWork(SystemChangeRequest legacy, SystemChangeRequest replacement,
-        RequirementLevel downstreamTarget)
+    private static bool SharesExactSourceWork(SystemChangeRequest legacy, SystemChangeRequest replacement,
+        RequirementLevel downstreamTarget, ILadderPolicy policy)
     {
-        var sourceLevels = ladderPolicy.ParentLevels(downstreamTarget);
+        var sourceLevels = policy.ParentLevels(downstreamTarget);
         if (sourceLevels.Count != 1) return false;
         var sourceLevel = sourceLevels[0];
         return legacy.RequirementChanges.Where(x => x.Level == sourceLevel).Any(oldChange =>

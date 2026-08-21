@@ -76,8 +76,15 @@ public sealed class ReqIfExchangeService(AeroLinkDbContext db, EvidenceFileStore
         return new(job, stored);
     }
 
-    public async Task<ReqIfExchangeJob> PreviewImportAsync(Guid projectId, Stream source, string fileName, string contentType, string actor, DateTimeOffset now, CancellationToken ct)
+    public Task<ReqIfExchangeJob> PreviewImportAsync(Guid projectId, Stream source, string fileName, string contentType,
+        string actor, DateTimeOffset now, CancellationToken ct) =>
+        PreviewImportAsync(projectId, source, fileName, contentType, actor, now, ct, ladderPolicy);
+
+    /// <summary>Previews with an explicitly resolved project policy; the legacy overload remains the direct-call default.</summary>
+    public async Task<ReqIfExchangeJob> PreviewImportAsync(Guid projectId, Stream source, string fileName, string contentType,
+        string actor, DateTimeOffset now, CancellationToken ct, ILadderPolicy effectivePolicy)
     {
+        ArgumentNullException.ThrowIfNull(effectivePolicy);
         await using var input = new MemoryStream(); await source.CopyToAsync(input, ct);
         if (input.Length == 0 || input.Length > MaxPackageBytes) throw new InvalidOperationException("ReqIF packages must be non-empty and no larger than 50 MB.");
         input.Position = 0;
@@ -85,7 +92,7 @@ public sealed class ReqIfExchangeService(AeroLinkDbContext db, EvidenceFileStore
         input.Position = 0;
         try
         {
-            var parsed = ParsePackage(input, fileName, ladderPolicy);
+            var parsed = ParsePackage(input, fileName, effectivePolicy);
             var existing = (await db.Requirements.AsNoTracking().Where(x => x.ProjectId == projectId).Select(x => x.BaseNumber).ToListAsync(ct)).ToHashSet(StringComparer.OrdinalIgnoreCase);
             var duplicateIds = parsed.Items.GroupBy(x => x.Identifier, StringComparer.OrdinalIgnoreCase).Where(x => x.Key.Length > 0 && x.Count() > 1).Select(x => x.Key).ToHashSet(StringComparer.OrdinalIgnoreCase);
             var items = parsed.Items.Select(item =>

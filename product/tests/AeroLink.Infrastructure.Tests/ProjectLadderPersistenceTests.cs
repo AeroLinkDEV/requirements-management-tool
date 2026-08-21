@@ -72,6 +72,18 @@ public sealed class ProjectLadderPersistenceTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Effective_project_resolver_reads_the_stored_shape_but_keeps_legacy_runtime_authority()
+    {
+        await using var db = Context();
+        var resolver = new EffectiveProjectLadderPolicyResolver(db);
+
+        var policy = await resolver.ResolveAsync(_fmsProjectId);
+
+        Assert.Same(LegacyLadderPolicy.Instance, policy);
+        Assert.Equal([RequirementLevel.HighLevel], policy.DownstreamLevels(RequirementLevel.System));
+    }
+
+    [Fact]
     public async Task Database_rejects_duplicate_step_position_or_catalogue_entry()
     {
         await using var db = Context();

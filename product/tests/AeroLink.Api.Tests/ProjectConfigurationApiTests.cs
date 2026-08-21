@@ -116,9 +116,15 @@ public sealed class ProjectConfigurationApiTests : IClassFixture<SharedApiHost>
         var activation = await client.PostAsJsonAsync($"/api/projects/{seeded.ProjectId}/configuration/activate",
             new { expectedVersion = 2, reason = "Attempt activation" });
         Assert.Equal(HttpStatusCode.Conflict, activation.StatusCode);
-        var body = await activation.Content.ReadAsStringAsync();
-        Assert.Contains("release.readiness", body);
-        Assert.Contains("change-request.authoring", body);
+        using var activationJson = JsonDocument.Parse(await activation.Content.ReadAsStringAsync());
+        var activationBody = activationJson.RootElement;
+        var error = activationBody.GetProperty("error").GetString() ?? "";
+        Assert.Contains("release.readiness", error);
+        Assert.Contains("approval.workflow-subject", error);
+        Assert.DoesNotContain("change-request.authoring", error);
+        var authoringConsumer = activationBody.GetProperty("readiness").GetProperty("consumers")
+            .EnumerateArray().Single(x => x.GetProperty("id").GetString() == "change-request.authoring");
+        Assert.True(authoringConsumer.GetProperty("routed").GetBoolean());
 
         using var scope = _host.Factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();

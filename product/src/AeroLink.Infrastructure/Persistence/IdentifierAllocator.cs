@@ -27,9 +27,9 @@ public static class IdentifierAllocator
     /// disambiguates, and a reader of an HLRCR never has to wonder whether an LLR change is hiding in it.
     /// </summary>
     public static async Task<string> PreviewChangeRequestAsync(AeroLinkDbContext db, ChangeRequestType type,
-        RequirementLevel? softwareLevel, CancellationToken ct)
+        RequirementLevel? softwareLevel, CancellationToken ct, ILadderPolicy? policy = null)
     {
-        var prefix = LadderPolicy.ChangeRequestPrefix(type, softwareLevel);
+        var prefix = (policy ?? LadderPolicy).ChangeRequestPrefix(type, softwareLevel);
         return FormatChangeRequest(prefix, await PreviewAsync(db, prefix, ct));
     }
 
@@ -37,9 +37,9 @@ public static class IdentifierAllocator
         Format(prefix, await PreviewAsync(db, prefix, ct));
 
     public static async Task<string> NextChangeRequestAsync(AeroLinkDbContext db, ChangeRequestType type,
-        RequirementLevel? softwareLevel, CancellationToken ct)
+        RequirementLevel? softwareLevel, CancellationToken ct, ILadderPolicy? policy = null)
     {
-        var prefix = LadderPolicy.ChangeRequestPrefix(type, softwareLevel);
+        var prefix = (policy ?? LadderPolicy).ChangeRequestPrefix(type, softwareLevel);
         return FormatChangeRequest(prefix, await ClaimAsync(db, prefix, ct));
     }
 

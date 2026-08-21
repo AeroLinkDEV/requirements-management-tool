@@ -183,8 +183,11 @@ public interface ILadderPolicy
     bool HasCodeTraceability(RequirementLevel level);
 }
 
+/// <summary>Explicit marker for #702's characterized legacy ladder compatibility behavior.</summary>
+public interface ILegacyLadderCompatibilityPolicy { }
+
 /// <summary>The current legacy/default composition of the ladder policy.</summary>
-public sealed class LegacyLadderPolicy : ILadderPolicy
+public sealed class LegacyLadderPolicy : ILadderPolicy, ILegacyLadderCompatibilityPolicy
 {
     public static LegacyLadderPolicy Instance { get; } = new();
 
@@ -407,4 +410,140 @@ public sealed class LegacyLadderPolicy : ILadderPolicy
     public bool HasCodeTraceability(RequirementLevel level) => Definition(level).Has(LevelCapabilities.HasCodeTraceability);
 
     private static DomainException Unknown<T>(T value) => new($"Unknown ladder policy value: {value}.");
+}
+
+/// <summary>
+/// A policy compiled from a resolved project ladder.  The persisted ladder only supplies catalogue presence,
+/// capabilities, and direct parent/child edges; prefixes and the other product bindings remain code-owned.
+/// This type is deliberately an injected/test policy until activation is made authoritative by #706.
+/// </summary>
+public sealed class ResolvedProjectLadderPolicy : ILadderPolicy
+{
+    private readonly ILadderPolicy catalogue;
+    private readonly IReadOnlyList<RequirementLevel> levels;
+    private readonly IReadOnlyList<LevelDefinition> definitions;
+    private readonly IReadOnlyList<LevelRelationship> relationships;
+    private readonly IReadOnlyList<ControlledDocumentType> documents;
+
+    public ResolvedProjectLadderPolicy(ResolvedProjectLadder resolved, ILadderPolicy? catalogue = null)
+    {
+        ArgumentNullException.ThrowIfNull(resolved);
+        this.catalogue = catalogue ?? LegacyLadderPolicy.Instance;
+        levels = resolved.Steps.OrderBy(x => x.Position).Select(x => x.Level).ToArray();
+        definitions = resolved.Steps.OrderBy(x => x.Position).Select(x =>
+        {
+            var source = this.catalogue.Definition(x.Level);
+            var capabilities = x.Capabilities;
+            return new LevelDefinition(x.Level, source.RequirementPrefix, capabilities,
+                capabilities.HasFlag(LevelCapabilities.HasChangeControl) ? source.ChangeRequest : null,
+                capabilities.HasFlag(LevelCapabilities.HasVerification) ? source.Verification : null,
+                capabilities.HasFlag(LevelCapabilities.HasRequirementsDocument) ? source.RequirementsDocumentType : null,
+                capabilities.HasFlag(LevelCapabilities.HasRequirementsDocument) ? source.RequirementsCatalogue : null,
+                capabilities.HasFlag(LevelCapabilities.HasVerification) ? source.TestProcedureDocumentTitle : null);
+        }).ToArray();
+        relationships = resolved.AllowedUpstream.Select(x => new LevelRelationship(x.Parent, x.Child)).ToArray();
+        documents = definitions.Where(x => x.RequirementsDocumentType is not null).Select(x => x.RequirementsDocumentType!.Value)
+            .Concat(definitions.Where(x => x.Verification is not null).Select(x => x.Verification!.DocumentType))
+            .Distinct().ToArray();
+    }
+
+    public IReadOnlyList<RequirementLevel> OrderedLevels => levels;
+    public IReadOnlyList<LevelDefinition> Definitions => definitions;
+    public IReadOnlyList<LevelRelationship> ParentRelationships => relationships;
+    public IReadOnlyList<ControlledDocumentType> ControlledDocumentTypes => documents;
+    public LevelDefinition Definition(RequirementLevel level) => definitions.SingleOrDefault(x => x.Level == level)
+        ?? throw new DomainException($"The project ladder does not configure {level}.");
+    public IReadOnlyList<RequirementLevel> ParentLevels(RequirementLevel child)
+    {
+        _ = Definition(child);
+        return relationships.Where(x => x.Child == child).Select(x => x.Parent).ToArray();
+    }
+    public IReadOnlyList<RequirementLevel> DownstreamLevels(RequirementLevel source)
+    {
+        _ = Definition(source);
+        return relationships.Where(x => x.Parent == source).Select(x => x.Child).ToArray();
+    }
+    public TestProcedureLevel ProcedureLevel(RequirementLevel level) => Definition(level).Verification?.ProcedureLevel
+        ?? throw new DomainException($"The {level} definition has no verification binding.");
+    public RequirementLevel RequirementLevelFor(TestProcedureLevel level) => definitions.SingleOrDefault(x => x.Verification?.ProcedureLevel == level)?.Level
+        ?? throw new DomainException($"The project ladder does not configure procedure level {level}.");
+    public TestChangeReviewDiscipline Discipline(RequirementLevel level) => Definition(level).Verification?.Discipline
+        ?? throw new DomainException($"The {level} definition has no verification binding.");
+    public RequirementLevel RequirementLevelFor(TestChangeReviewDiscipline discipline) => definitions.SingleOrDefault(x => x.Verification?.Discipline == discipline)?.Level
+        ?? throw new DomainException($"The project ladder does not configure review discipline {discipline}.");
+    public ControlledDocumentType RequirementsDocument(RequirementLevel level) => Definition(level).RequirementsDocumentType
+        ?? throw new DomainException($"The {level} definition has no requirements document.");
+    public ControlledDocumentType TestProcedureDocument(RequirementLevel level) => Definition(level).Verification?.DocumentType
+        ?? throw new DomainException($"The {level} definition has no test-procedure document.");
+    public string TestProcedureDocumentTitle(RequirementLevel level) => Definition(level).TestProcedureDocumentTitle
+        ?? throw new DomainException($"The {level} definition has no test-procedure document title.");
+    public string ControlledDocumentPrefix(ControlledDocumentType type) => catalogue.ControlledDocumentPrefix(type);
+    public string ControlledDocumentTitle(ControlledDocumentType type) => catalogue.ControlledDocumentTitle(type);
+    public string RequirementPrefix(RequirementLevel level) => Definition(level).RequirementPrefix;
+    public string ChangeRequestPrefix(ChangeRequestType type, RequirementLevel? softwareLevel)
+    {
+        if (type == ChangeRequestType.System)
+            return Definition(RequirementLevel.System).ChangeRequest?.Prefix
+                ?? throw new DomainException("The project ladder does not configure System change control.");
+        if (type != ChangeRequestType.Software || softwareLevel is null)
+            throw new DomainException("A software change request must declare a configured requirement level before it can be numbered.");
+        return Definition(softwareLevel.Value).ChangeRequest?.Prefix
+            ?? throw new DomainException($"The project ladder does not configure {softwareLevel.Value} change control.");
+    }
+    public bool IsChangeRequestScopeValid(ChangeRequestType type, RequirementLevel? softwareLevel)
+    {
+        if (type == ChangeRequestType.System)
+            return softwareLevel is null && definitions.Any(x => x.Level == RequirementLevel.System
+                && x.ChangeRequest?.Type == ChangeRequestType.System && x.Has(LevelCapabilities.HasChangeControl));
+        if (type != ChangeRequestType.Software || softwareLevel is null) return false;
+        var binding = definitions.SingleOrDefault(x => x.Level == softwareLevel)?.ChangeRequest;
+        return binding?.Type == ChangeRequestType.Software && binding.SoftwareLevel == softwareLevel
+            && definitions.Any(x => x.Level == softwareLevel && x.Has(LevelCapabilities.HasChangeControl));
+    }
+    public bool AcceptsChangeRequest(ChangeRequestType type, RequirementLevel? softwareLevel, RequirementLevel level) =>
+        IsChangeRequestScopeValid(type, softwareLevel) && AcceptsChangeRequest(type, level)
+        && (type != ChangeRequestType.Software || softwareLevel == level);
+    public string TestProcedurePrefix(TestProcedureLevel level) => definitions.SingleOrDefault(x => x.Verification?.ProcedureLevel == level)?.Verification?.ProcedurePrefix
+        ?? throw new DomainException($"The project ladder does not configure procedure level {level}.");
+    public bool IsKnownTestProcedurePrefix(string baseNumber) => !string.IsNullOrWhiteSpace(baseNumber)
+        && definitions.Any(x => x.Verification is not null && baseNumber.StartsWith(x.Verification.ProcedurePrefix + "-", StringComparison.OrdinalIgnoreCase));
+    public string TestChangeReviewPrefix(TestChangeReviewDiscipline discipline) => catalogue.TestChangeReviewPrefix(discipline);
+    public ReviewSubject WorkflowSubject(ChangeRequestType type) => catalogue.WorkflowSubject(type);
+    public ReviewSubject WorkflowSubject(TestChangeReviewDiscipline discipline) => catalogue.WorkflowSubject(discipline);
+    public RequirementLevel ParseImportedRequirementLevel(string? value)
+    {
+        if (TryParseRequirementLevel(value, out var level)) return level;
+        // ReqIF's established import contract treats absent and unrecognised level text as System. Keep that
+        // compatibility fallback when System is present in the configured catalogue; a project that removes
+        // System must fail closed instead of manufacturing a level outside its policy.
+        if (definitions.Any(x => x.Level == RequirementLevel.System)) return RequirementLevel.System;
+        throw new DomainException("The imported requirement does not name a configured ladder level.");
+    }
+    public bool TryParseRequirementLevel(string? value, out RequirementLevel level)
+    {
+        if (!catalogue.TryParseRequirementLevel(value, out level) || !levels.Contains(level))
+        {
+            level = (RequirementLevel)(-1);
+            return false;
+        }
+        return true;
+    }
+    public bool AcceptsChangeRequest(ChangeRequestType type, RequirementLevel level)
+    {
+        var definition = Definition(level);
+        return type switch
+        {
+            ChangeRequestType.System => level == RequirementLevel.System && definition.Has(LevelCapabilities.HasChangeControl),
+            ChangeRequestType.Software => level != RequirementLevel.System && definition.Has(LevelCapabilities.HasChangeControl),
+            _ => false,
+        };
+    }
+    public bool IsDownstreamTarget(RequirementLevel level) => Definition(level) is not null && relationships.Any(x => x.Child == level);
+    public bool HasCodeTraceability(RequirementLevel level) => Definition(level).Has(LevelCapabilities.HasCodeTraceability);
+}
+
+/// <summary>One project-aware policy seam. Runtime resolution remains legacy-only until #706 activation.</summary>
+public interface IProjectLadderPolicyResolver
+{
+    Task<ILadderPolicy> ResolveAsync(Guid projectId, CancellationToken ct = default);
 }

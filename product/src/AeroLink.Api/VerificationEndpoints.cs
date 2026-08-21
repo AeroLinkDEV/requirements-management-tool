@@ -1,4 +1,5 @@
 using AeroLink.Domain.Common;
+using AeroLink.Domain.Hierarchy;
 using AeroLink.Domain.Identity;
 using AeroLink.Domain.Releases;
 using AeroLink.Domain.Traceability;
@@ -61,14 +62,22 @@ public static class VerificationEndpoints
                 enableRangeProcessing: true);
         });
 
-        app.MapPost("/api/trace-links", async (CreateTraceLinkRequest request, HttpContext http, AeroLinkDbContext db, IdentityService identity, CancellationToken ct) =>
+        app.MapPost("/api/trace-links", async (CreateTraceLinkRequest request, HttpContext http, AeroLinkDbContext db, IdentityService identity, IProjectLadderPolicyResolver policyResolver, CancellationToken ct) =>
         {
             if (!await http.HasProjectRoleAsync(db, identity, request.ProjectId, ct, ProgramRole.Engineer, ProgramRole.ConfigurationManager)) return Results.Forbid();
             var revisions = await (from revision in db.RequirementRevisions.AsNoTracking().Where(x => x.Id == request.SourceRevisionId || x.Id == request.TargetRevisionId)
                                    join artifact in db.Requirements.AsNoTracking() on revision.ArtifactId equals artifact.Id
-                                   select new { revision.Id, artifact.ProjectId }).ToListAsync(ct);
+                                   select new { revision.Id, artifact.ProjectId, artifact.Level }).ToListAsync(ct);
             if (revisions.Count != 2) return Results.BadRequest(new { error = "Both exact requirement revisions must exist." });
             if (revisions.Any(x => x.ProjectId != request.ProjectId)) return Results.BadRequest(new { error = "Both revisions must belong to the selected project." });
+            var effectivePolicy = await policyResolver.ResolveAsync(request.ProjectId, ct);
+            try
+            {
+                var sourceLevel = revisions.Single(x => x.Id == request.SourceRevisionId).Level;
+                var targetLevel = revisions.Single(x => x.Id == request.TargetRevisionId).Level;
+                RequirementTracePolicy.Validate(effectivePolicy, sourceLevel, targetLevel, request.Type);
+            }
+            catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
             var revisionIds = revisions.Select(x => x.Id).ToList();
             if (await (from member in db.BaselineRequirements.AsNoTracking().Where(x => revisionIds.Contains(x.RevisionId))
                        join campaign in db.ReleaseCampaigns.AsNoTracking().Where(x => x.ProjectId == request.ProjectId && x.State == ReleaseCampaignState.InReview) on member.BaselineId equals campaign.BaselineId

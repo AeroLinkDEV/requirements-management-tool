@@ -1,9 +1,37 @@
 using AeroLink.Domain.Common;
+using AeroLink.Domain.Hierarchy;
+using AeroLink.Domain.Requirements;
+using AeroLink.Domain.ChangeControl;
 
 namespace AeroLink.Domain.Traceability;
 
 public enum RequirementTraceType { DerivedFrom, AllocatedFrom }
 public enum ControlledDocumentType { Sysrd, SwrdHighLevel, SwrdLowLevel, SystemTestProcedures, HighLevelTestProcedures, LowLevelTestProcedures }
+
+/// <summary>Central validation for hierarchy-aware trace mutations.</summary>
+public static class RequirementTracePolicy
+{
+    public static void Validate(ILadderPolicy policy, RequirementLevel source, RequirementLevel target,
+        RequirementTraceType type)
+    {
+        ArgumentNullException.ThrowIfNull(policy);
+        _ = policy.Definition(source);
+        _ = policy.Definition(target);
+        // The legacy/default policy is intentionally permissive for generic trace creation (#702). Its
+        // characterization allows any two non-self same-project revisions. Configured policies, however,
+        // have explicit direct edges and must honor their stored orientation.
+        if (policy is ILegacyLadderCompatibilityPolicy) return;
+        var valid = type switch
+        {
+            RequirementTraceType.DerivedFrom or RequirementTraceType.AllocatedFrom =>
+                policy.ParentRelationships.Any(x => x.Child == source && x.Parent == target),
+            _ => false,
+        };
+        if (!valid)
+            throw new DomainException(
+                $"A {type} trace must point from configured child {source} to its direct parent {target}.");
+    }
+}
 
 public sealed class RequirementTraceLink
 {

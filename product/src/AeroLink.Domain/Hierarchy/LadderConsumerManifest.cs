@@ -7,9 +7,9 @@ namespace AeroLink.Domain.Hierarchy;
 /// The compiled consumer inventory that gates a project ladder activation.  The names are stable identifiers,
 /// rather than display labels, so a missing registration cannot silently turn into a passing boolean.
 ///
-/// Every entry is intentionally unrouted in #713.  #705 and #706 will attach the runtime consumers in later
-/// slices; keeping the complete inventory here makes that boundary explicit and gives an attempted activation a
-/// useful refusal instead of pretending that a draft is safe to run.
+/// #705 attaches only its complete runtime seams through infrastructure DI. The remaining entries stay absent
+/// from that registration set so an attempted activation names the precise #706 blockers instead of pretending
+/// that a draft is safe to run.
 /// </summary>
 public interface ILadderConsumerRegistration
 {
@@ -40,8 +40,9 @@ public static class LadderConsumerManifestCatalog
     public const string Version = "#702-legacy-consumers-v1";
 
     // This is the compiled/generated required inventory for the #702 matrix.  Implementations are deliberately
-    // supplied separately: later slices register a consumer from its routed adapter instead of flipping a
-    // readiness boolean in this catalogue.  #713 has no routed adapters, so Current is fail-closed by construction.
+    // supplied separately: slices register a consumer from its routed adapter instead of flipping a readiness
+    // boolean in this catalogue. Current is the empty/static contract used by domain-only callers; production
+    // infrastructure supplies the partial #705 set to ProjectLadderAuthoringService.
     private static readonly IReadOnlyList<LadderConsumerRegistration> RequiredConsumers =
     [
         new("change-request.authoring", "Change-request level/type acceptance and authoring"),

@@ -5,6 +5,7 @@ using System.Runtime.CompilerServices;
 using System.Runtime.ExceptionServices;
 using System.Text.Json;
 using AeroLink.Domain.Baselines;
+using AeroLink.Domain.Hierarchy;
 using AeroLink.Domain.Identity;
 using AeroLink.Domain.Programs;
 using AeroLink.Domain.Releases;
@@ -439,6 +440,7 @@ internal sealed class AeroLinkApiFactory(bool seedDemoAccounts = false, bool all
     string? showcaseTemplate = null, string? staticFilesRoot = null,
     DbCommandInterceptor? commandInterceptor = null,
     IManagedDocumentStorageFaultInjector? storageFaultInjector = null,
+    ILadderPolicy? testLadderPolicy = null,
     Action<object>? telemetryObserver = null,
     [CallerFilePath] string? callerFile = null,
     [CallerMemberName] string? callerMember = null) : WebApplicationFactory<Program>
@@ -574,6 +576,11 @@ internal sealed class AeroLinkApiFactory(bool seedDemoAccounts = false, bool all
             {
                 services.RemoveAll<IManagedDocumentStorageFaultInjector>();
                 services.AddSingleton(storageFaultInjector);
+            }
+            if (testLadderPolicy is not null)
+            {
+                services.RemoveAll<IProjectLadderPolicyResolver>();
+                services.AddSingleton<IProjectLadderPolicyResolver>(new FixedProjectLadderPolicyResolver(testLadderPolicy));
             }
         });
     }

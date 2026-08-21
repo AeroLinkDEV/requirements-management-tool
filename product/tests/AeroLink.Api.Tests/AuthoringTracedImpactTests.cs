@@ -6,6 +6,7 @@ using AeroLink.Domain.Identity;
 using AeroLink.Domain.Programs;
 using AeroLink.Domain.Requirements;
 using AeroLink.Domain.Baselines;
+using AeroLink.Domain.Hierarchy;
 using AeroLink.Domain.Releases;
 using AeroLink.Domain.Traceability;
 using AeroLink.Domain.Verification;
@@ -259,6 +260,47 @@ public sealed class AuthoringTracedImpactTests
 
         using var frozenDelete = await client.DeleteAsync($"/api/trace-links/{derivedLinkId}");
         Assert.Equal(HttpStatusCode.Conflict, frozenDelete.StatusCode);
+    }
+
+    [Fact]
+    public async Task Configured_trace_mutation_refuses_unrelated_revisions_with_direct_orientation_message()
+    {
+        using var factory = new AeroLinkApiFactory(testLadderPolicy: ConfiguredSystemLowPolicy());
+        using var client = factory.CreateClient();
+        var (projectId, parentNumber, _, _) = await SeedAsync(factory);
+        await SignInAsync(client);
+
+        Guid parentRevisionId;
+        Guid unrelatedRevisionId;
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            parentRevisionId = await (from revision in db.RequirementRevisions
+                                      join artifact in db.Requirements on revision.ArtifactId equals artifact.Id
+                                      where artifact.ProjectId == projectId && artifact.BaseNumber == parentNumber
+                                      select revision.Id).SingleAsync();
+            var originId = await db.SystemChangeRequests.Where(x => x.ProjectId == projectId).Select(x => x.Id).SingleAsync();
+            var baselineId = await db.CandidateBaselines.Where(x => x.ProjectId == projectId).Select(x => x.Id).SingleAsync();
+            var unrelated = new RequirementArtifact(projectId, "SYSR-009999", RequirementLevel.System, DateTimeOffset.UtcNow);
+            var extraRevision = new RequirementRevision(unrelated.Id, 0, "An unrelated system revision.", "Rationale", "Test",
+                RequirementRevisionState.Active, originId, baselineId, DateTimeOffset.UtcNow);
+            db.AddRange(unrelated, extraRevision);
+            await db.SaveChangesAsync();
+            unrelatedRevisionId = extraRevision.Id;
+        }
+
+        using var response = await client.PostAsJsonAsync("/api/trace-links", new
+        {
+            projectId,
+            sourceRevisionId = parentRevisionId,
+            targetRevisionId = unrelatedRevisionId,
+            type = "DerivedFrom",
+            rationale = "Configured unrelated revisions must be refused."
+        });
+        var body = await response.Content.ReadAsStringAsync();
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Contains("configured child", body, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("direct parent", body, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -680,6 +722,21 @@ public sealed class AuthoringTracedImpactTests
         using var scope = factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
         return await Task.FromResult(db.Releases.Single(x => x.ProjectId == projectId).Id);
+    }
+
+    private static ILadderPolicy ConfiguredSystemLowPolicy()
+    {
+        var configuration = ProjectLadderConfiguration.CreateDraft(Guid.NewGuid(), DateTimeOffset.UtcNow);
+        var now = DateTimeOffset.UtcNow;
+        var system = new ProjectLadderStep(configuration.Id, configuration.ProjectId, RequirementLevel.System, 1,
+            LegacyLadderPolicy.Instance.Definition(RequirementLevel.System).Capabilities, now);
+        var low = new ProjectLadderStep(configuration.Id, configuration.ProjectId, RequirementLevel.LowLevel, 2,
+            LegacyLadderPolicy.Instance.Definition(RequirementLevel.LowLevel).Capabilities, now);
+        configuration.Steps.Add(system);
+        configuration.Steps.Add(low);
+        configuration.AllowedUpstream.Add(new ProjectLadderAllowedUpstream(configuration.Id, configuration.ProjectId,
+            system.Id, low.Id, now));
+        return new ResolvedProjectLadderPolicy(ProjectLadderResolver.Resolve(configuration));
     }
 
     private static async Task<(Guid ReleaseId, Guid SystemRevisionId, Guid HighRevisionId, Guid LowRevisionId)>

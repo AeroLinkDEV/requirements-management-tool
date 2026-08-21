@@ -38,8 +38,9 @@ public sealed class SystemChangeRequest
         string title, string problem, string analysis, string solution, string authorId, DateTimeOffset now,
         ChangeRequestType type = ChangeRequestType.System,
         string? problemRich = null, string? analysisRich = null, string? solutionRich = null,
-        RequirementLevel? softwareLevel = null)
+        RequirementLevel? softwareLevel = null, ILadderPolicy? ladderPolicy = null)
     {
+        var policy = ladderPolicy ?? LegacyLadderPolicy.Instance;
         if (string.IsNullOrWhiteSpace(title)) throw new DomainException("A change request title is required.");
         Id = Guid.NewGuid();
         BaseNumber = ArtifactNumber.ValidateBase(baseNumber);
@@ -51,13 +52,13 @@ public sealed class SystemChangeRequest
         SetCase(problem, analysis, solution, problemRich, analysisRich, solutionRich);
         AuthorId = authorId;
         Type = type;
-        if (type == ChangeRequestType.System && !LegacyLadderPolicy.Instance.IsChangeRequestScopeValid(type, softwareLevel))
+        if (type == ChangeRequestType.System && !policy.IsChangeRequestScopeValid(type, softwareLevel))
             throw new DomainException("A System change request cannot declare a software requirement level.");
         // Required, not merely constrained: HLR and LLR change requests are numbered apart, so a software
         // change request without a level is a controlled record that cannot be named.
-        if (type == ChangeRequestType.Software && !LegacyLadderPolicy.Instance.IsChangeRequestScopeValid(type, softwareLevel))
+        if (type == ChangeRequestType.Software && !policy.IsChangeRequestScopeValid(type, softwareLevel))
             throw new DomainException("A software change request must declare HLR or LLR scope.");
-        if (ChangeRequestNumbering.Prefix(type, softwareLevel) is var expected
+        if (policy.ChangeRequestPrefix(type, softwareLevel) is var expected
             && !BaseNumber.StartsWith(expected + "-", StringComparison.Ordinal))
             throw new DomainException($"A {(type == ChangeRequestType.System ? "System" : expected == ChangeRequestNumbering.HighLevelPrefix ? "HLR" : "LLR")} change request must be numbered {expected}-.");
         SoftwareLevel = softwareLevel;
@@ -146,11 +147,11 @@ public sealed class SystemChangeRequest
         string verificationMethod, DateTimeOffset now, string richText = "", string attributesJson = "{}",
         string impactDispositionJson = RequirementAuthoringJson.CompleteImpactDispositions,
         Guid? targetSectionId = null, bool administratorAuthority = false,
-        string proposedUpstreamRevisionIdsJson = "[]", bool allowIncomplete = false)
+        string proposedUpstreamRevisionIdsJson = "[]", bool allowIncomplete = false, ILadderPolicy? ladderPolicy = null)
     {
         EnsureAuthor(actorId, administratorAuthority);
         EnsureDraft();
-        EnsureRequirementLevel(level);
+        EnsureRequirementLevel(level, ladderPolicy);
         // Complete by default, because every other caller is a request being submitted rather than work being
         // put down: seven API endpoints build a change request from a payload, and a payload that omits the
         // statement is malformed rather than unfinished.
@@ -322,12 +323,12 @@ public sealed class SystemChangeRequest
     public void UpdateDraft(string actorId, string title, string problem, string analysis, string solution,
         IReadOnlyList<RequirementChangeDraft> changes, DateTimeOffset now,
         string? problemRich = null, string? analysisRich = null, string? solutionRich = null,
-        bool administratorAuthority = false, bool allowIncomplete = false)
+        bool administratorAuthority = false, bool allowIncomplete = false, ILadderPolicy? ladderPolicy = null)
     {
         EnsureAuthor(actorId, administratorAuthority);
         EnsureDraft();
         if (string.IsNullOrWhiteSpace(title)) throw new DomainException("A change request title is required.");
-        foreach (var item in changes) EnsureRequirementLevel(item.Level);
+        foreach (var item in changes) EnsureRequirementLevel(item.Level, ladderPolicy);
         Title = title.Trim();
         SetCase(problem, analysis, solution, problemRich, analysisRich, solutionRich);
         _requirementChanges.Clear();
@@ -348,11 +349,11 @@ public sealed class SystemChangeRequest
 
     public ReviewCycle SubmitForReview(string actorId, IReadOnlyList<ApproverSelection> approvers,
         DateTimeOffset now, ReviewMode mode = ReviewMode.Sequential, ReviewWorkflowSpecification? workflow = null,
-        bool administratorAuthority = false)
+        bool administratorAuthority = false, ILadderPolicy? ladderPolicy = null)
     {
         EnsureAuthor(actorId, administratorAuthority);
         EnsureDraft();
-        ValidateReadyForReview();
+        ValidateReadyForReview(ladderPolicy);
         var cycle = new ReviewCycle(Id, _reviewCycles.Count + 1, ComputeSnapshotHash(), approvers, now, mode, workflow);
         _reviewCycles.Add(cycle);
         // Offering it to approvers is the author saying they have dealt with whatever a reopen left them, so
@@ -500,7 +501,7 @@ public sealed class SystemChangeRequest
     /// state in rather than the rule living outside the aggregate where a second caller could forget it.
     /// </summary>
     public SystemChangeRequest StartNextRevision(string actorId, DateTimeOffset now, bool targetReleaseIsReleased,
-        bool administratorAuthority = false)
+        bool administratorAuthority = false, ILadderPolicy? ladderPolicy = null)
     {
         EnsureAuthor(actorId, administratorAuthority);
         if (State is not (ChangeRequestState.Approved or ChangeRequestState.SelectedForBaseline))
@@ -509,11 +510,12 @@ public sealed class SystemChangeRequest
             throw new DomainException(
                 "This change request is incorporated in a released build and cannot be revised. Raise a new one against the in-work build.");
         var next = new SystemChangeRequest(BaseNumber, Revision + 1, ProjectId, TargetReleaseId,
-            Title, Problem, Analysis, Solution, AuthorId, now, Type, ProblemRich, AnalysisRich, SolutionRich, SoftwareLevel);
+            Title, Problem, Analysis, Solution, AuthorId, now, Type, ProblemRich, AnalysisRich, SolutionRich, SoftwareLevel, ladderPolicy);
         foreach (var item in _requirementChanges)
             next.AddRequirementChange(actorId, item.BaseNumber, item.Revision, item.Level, item.Kind,
                 item.Statement, item.Rationale, item.VerificationMethod, now, item.RichText, item.AttributesJson, item.ImpactDispositionJson,
-                item.TargetSectionId, administratorAuthority, item.ProposedUpstreamRevisionIdsJson);
+                item.TargetSectionId, administratorAuthority, item.ProposedUpstreamRevisionIdsJson,
+                ladderPolicy: ladderPolicy);
         return next;
     }
 
@@ -625,13 +627,13 @@ public sealed class SystemChangeRequest
             + (wasApproved ? " Returned to Draft; approvals do not carry into another build." : string.Empty), now);
     }
 
-    private void ValidateReadyForReview()
+    private void ValidateReadyForReview(ILadderPolicy? ladderPolicy = null)
     {
         if (string.IsNullOrWhiteSpace(Problem) || string.IsNullOrWhiteSpace(Analysis) || string.IsNullOrWhiteSpace(Solution))
             throw new DomainException("Problem, Analysis, and Solution are required before review.");
         if (_requirementChanges.Count == 0)
             throw new DomainException("At least one requirement change is required before review.");
-        foreach (var item in _requirementChanges) EnsureRequirementLevel(item.Level);
+        foreach (var item in _requirementChanges) EnsureRequirementLevel(item.Level, ladderPolicy);
         // Moved here from the Draft. A proposal may rest unfinished for as long as its author needs, but it
         // cannot be put in front of an approver that way, and it must never reach materialization — where a
         // requirement revision with no statement would flow into baselines, generated documents and traces.
@@ -648,14 +650,15 @@ public sealed class SystemChangeRequest
         }
     }
 
-    private void EnsureRequirementLevel(RequirementLevel level)
+    private void EnsureRequirementLevel(RequirementLevel level, ILadderPolicy? ladderPolicy = null)
     {
-        if (!AcceptsRequirementLevel(Type, level))
+        var policy = ladderPolicy ?? LegacyLadderPolicy.Instance;
+        if (!policy.AcceptsChangeRequest(Type, level))
             throw new DomainException(Type == ChangeRequestType.System
                 ? "A System change request can contain System requirements only. Use an HLRCR or LLRCR for software work."
                 : "A Software change request can contain HLR or LLR requirements only. Use an SRCR for System work.");
         if (Type == ChangeRequestType.Software && SoftwareLevel is not null
-            && !LegacyLadderPolicy.Instance.AcceptsChangeRequest(Type, SoftwareLevel, level))
+            && !policy.AcceptsChangeRequest(Type, SoftwareLevel, level))
             throw new DomainException($"This Software Draft belongs to the {(SoftwareLevel == RequirementLevel.HighLevel ? "HLR" : "LLR")} workspace and cannot contain {(level == RequirementLevel.HighLevel ? "HLR" : "LLR")} changes.");
     }
 

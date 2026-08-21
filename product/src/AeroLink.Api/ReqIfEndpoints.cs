@@ -42,9 +42,10 @@ public static class ReqIfEndpoints
         return Results.Created($"/api/reqif/jobs/{result.Job.Id}",new{job=Map(result.Job),downloadUrl=$"/api/reqif/jobs/{result.Job.Id}/download",binaryIntegrity=integrity});
     }
 
-    private static async Task<IResult> PreviewAsync(Guid projectId,HttpContext http,ReqIfExchangeService service,AeroLinkDbContext db,IdentityService identity,CancellationToken ct)
+    private static async Task<IResult> PreviewAsync(Guid projectId,HttpContext http,ReqIfExchangeService service,AeroLinkDbContext db,IdentityService identity,IProjectLadderPolicyResolver policyResolver,CancellationToken ct)
     {
         if(!await http.HasProjectRoleAsync(db,identity,projectId,ct,ProgramRole.Engineer,ProgramRole.ConfigurationManager))return Results.Forbid();
+        var ladderPolicy = await policyResolver.ResolveAsync(projectId, ct);
         if(!http.Request.HasFormContentType)return Results.BadRequest(new{error="Use multipart form data with a .reqif or .reqifz package."});
         var form=await http.Request.ReadFormAsync(ct);var file=form.Files.GetFile("file");
         if(file is null||file.Length==0)return Results.BadRequest(new{error="Select a non-empty ReqIF package."});
@@ -53,7 +54,7 @@ public static class ReqIfEndpoints
         {
             await using var input=new MemoryStream();await using(var source=file.OpenReadStream())await source.CopyToAsync(input,ct);input.Position=0;
             var integrity=ReqIfPackageIntegrity.Inspect(input,file.FileName);if(integrity.Warnings.Any(x=>x.Contains("does not match",StringComparison.OrdinalIgnoreCase)||x.Contains("is missing",StringComparison.OrdinalIgnoreCase)))return Results.BadRequest(new{error="The ReqIF package failed embedded-binary integrity validation.",binaryIntegrity=integrity});
-            input.Position=0;var job=await service.PreviewImportAsync(projectId,input,file.FileName,file.ContentType,http.UserAccount().UserName,DateTimeOffset.UtcNow,ct);
+            input.Position=0;var job=await service.PreviewImportAsync(projectId,input,file.FileName,file.ContentType,http.UserAccount().UserName,DateTimeOffset.UtcNow,ct,ladderPolicy);
             return Results.Ok(new{job=Map(job),preview=ReqIfExchangeService.ReadManifest(job),binaryIntegrity=integrity});
         }
         catch(InvalidDataException ex){return Results.BadRequest(new{error=$"The ReqIF package is not a valid archive: {ex.Message}"});}
@@ -80,10 +81,11 @@ public static class ReqIfEndpoints
         return Results.Ok(new{jobId=job.Id,job.AttachmentCount,integrity,provenance=new{job.Sha256,job.StorageKey,job.CreatedBy,job.CreatedAt}});
     }
 
-    private static async Task<IResult> CommitAsync(Guid id,CommitReqIfImportRequest request,HttpContext http,AeroLinkDbContext db,IdentityService identity,ILadderPolicy ladderPolicy,ReqIfExchangeService service,CancellationToken ct)
+    private static async Task<IResult> CommitAsync(Guid id,CommitReqIfImportRequest request,HttpContext http,AeroLinkDbContext db,IdentityService identity,ILadderPolicy ladderPolicy,IProjectLadderPolicyResolver policyResolver,ReqIfExchangeService service,CancellationToken ct)
     {
         var job=await db.ReqIfExchangeJobs.SingleOrDefaultAsync(x=>x.Id==id,ct);if(job is null)return Results.NotFound();
         if(!await http.HasProjectRoleAsync(db,identity,job.ProjectId,ct,ProgramRole.Engineer))return Results.Forbid();
+        ladderPolicy = await policyResolver.ResolveAsync(job.ProjectId, ct);
         if(job.Direction!=ReqIfExchangeDirection.Import||job.State!=ReqIfExchangeState.Ready||job.ErrorCount>0)return Results.BadRequest(new{error="This import has unresolved reconciliation errors or is no longer ready."});
         if(string.IsNullOrWhiteSpace(request.Title))return Results.BadRequest(new{error="A controlled change-package title is required."});
         if(!await db.Releases.AnyAsync(x=>x.Id==request.TargetReleaseId&&x.ProjectId==job.ProjectId,ct))return Results.BadRequest(new{error="The target release does not belong to this Project."});
@@ -91,8 +93,8 @@ public static class ReqIfEndpoints
         var manifest=ReqIfExchangeService.ReadManifest(job);var now=DateTimeOffset.UtcNow;var actor=http.UserAccount().UserName;
         try
         {
-            var number=await IdentifierAllocator.NextChangeRequestAsync(db,request.Type,request.SoftwareLevel,ct);var scr=new SystemChangeRequest(number,0,job.ProjectId,request.TargetReleaseId,request.Title,request.Problem,request.Analysis,request.Solution,actor,now,request.Type,softwareLevel:request.SoftwareLevel);
-            foreach(var item in manifest.Items){var level=ladderPolicy.ParseImportedRequirementLevel(item.Level);scr.AddRequirementChange(actor,item.Identifier,0,level,RequirementChangeKind.Introduce,item.Statement,item.Rationale,item.VerificationMethod,now,impactDispositionJson:RequirementAuthoringJson.PendingImpactDispositions);}
+            var number=await IdentifierAllocator.NextChangeRequestAsync(db,request.Type,request.SoftwareLevel,ct,ladderPolicy);var scr=new SystemChangeRequest(number,0,job.ProjectId,request.TargetReleaseId,request.Title,request.Problem,request.Analysis,request.Solution,actor,now,request.Type,softwareLevel:request.SoftwareLevel, ladderPolicy: ladderPolicy);
+            foreach(var item in manifest.Items){var level=ladderPolicy.ParseImportedRequirementLevel(item.Level);scr.AddRequirementChange(actor,item.Identifier,0,level,RequirementChangeKind.Introduce,item.Statement,item.Rationale,item.VerificationMethod,now,impactDispositionJson:RequirementAuthoringJson.PendingImpactDispositions, ladderPolicy: ladderPolicy);}
             db.SystemChangeRequests.Add(scr);job.Commit(scr.Id,now);db.IntegrationEvents.Add(new(job.ProjectId,"aerolink.reqif.import.committed","ReqIfExchange",job.Id,JsonSerializer.Serialize(new{jobId=job.Id,changeRequestId=scr.Id,job.Sha256,job.AttachmentCount,job.CheckpointJson,mappingProvenance=manifest.SourceTool}),actor,now,$"reqif-commit:{job.Id:N}"));await db.SaveChangesAsync(ct);
             return Results.Created($"/api/change-requests/{scr.Id}",new{scr.Id,scr.DisplayNumber,imported=manifest.Items.Count,attachments=job.AttachmentCount,packageHash=job.Sha256,governance="Draft change request created; approval and baseline selection remain required."});
         }
