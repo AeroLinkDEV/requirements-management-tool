@@ -26,6 +26,7 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
     public DbSet<ProjectLadderConfiguration> ProjectLadderConfigurations => Set<ProjectLadderConfiguration>();
     public DbSet<ProjectLadderStep> ProjectLadderSteps => Set<ProjectLadderStep>();
     public DbSet<ProjectLadderAllowedUpstream> ProjectLadderAllowedUpstreams => Set<ProjectLadderAllowedUpstream>();
+    public DbSet<ProjectLadderConfigurationHistory> ProjectLadderConfigurationHistories => Set<ProjectLadderConfigurationHistory>();
     public DbSet<SoftwareRelease> Releases => Set<SoftwareRelease>();
     public DbSet<SoftwareBuild> SoftwareBuilds => Set<SoftwareBuild>();
     public DbSet<SystemChangeRequest> SystemChangeRequests => Set<SystemChangeRequest>();
@@ -183,21 +184,38 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
         modelBuilder.Entity<ProjectLadderConfiguration>(b =>
         {
             b.ToTable("project_ladder_configurations", t => t.HasCheckConstraint("CK_project_ladder_configuration_state",
-                "((\"Classification\" = 'LegacyDefault' AND \"State\" = 'Stored' AND \"ActivatedAt\" IS NULL AND \"ActivatedBy\" IS NULL AND \"RetiredAt\" IS NULL AND \"RetiredBy\" IS NULL) OR "
-                + "(\"Classification\" = 'NonDefault' AND \"State\" = 'Draft' AND \"ActivatedAt\" IS NULL AND \"ActivatedBy\" IS NULL AND \"RetiredAt\" IS NULL AND \"RetiredBy\" IS NULL) OR "
-                + "(\"Classification\" = 'NonDefault' AND \"State\" = 'Active' AND \"ActivatedAt\" IS NOT NULL AND \"ActivatedBy\" IS NOT NULL AND length(trim(\"ActivatedBy\")) > 0 AND \"RetiredAt\" IS NULL AND \"RetiredBy\" IS NULL) OR "
-                + "(\"Classification\" = 'NonDefault' AND \"State\" = 'Retired' AND \"ActivatedAt\" IS NOT NULL AND \"ActivatedBy\" IS NOT NULL AND length(trim(\"ActivatedBy\")) > 0 AND \"RetiredAt\" IS NOT NULL AND \"RetiredBy\" IS NOT NULL AND length(trim(\"RetiredBy\")) > 0))"));
+                "((\"Classification\" = 'LegacyDefault' AND \"State\" = 'Stored' AND \"ActivatedAt\" IS NULL AND \"ActivatedBy\" IS NULL AND \"RetiredAt\" IS NULL AND \"RetiredBy\" IS NULL AND \"ActivationManifestVersion\" IS NULL AND \"ActivationManifestHash\" IS NULL) OR "
+                + "(\"Classification\" = 'NonDefault' AND \"State\" = 'Draft' AND \"ActivatedAt\" IS NULL AND \"ActivatedBy\" IS NULL AND \"RetiredAt\" IS NULL AND \"RetiredBy\" IS NULL AND \"ActivationManifestVersion\" IS NULL AND \"ActivationManifestHash\" IS NULL) OR "
+                + "(\"Classification\" = 'NonDefault' AND \"State\" = 'Active' AND \"ActivatedAt\" IS NOT NULL AND \"ActivatedBy\" IS NOT NULL AND length(trim(\"ActivatedBy\")) > 0 AND \"RetiredAt\" IS NULL AND \"RetiredBy\" IS NULL AND \"ActivationManifestVersion\" IS NOT NULL AND length(trim(\"ActivationManifestVersion\")) > 0 AND \"ActivationManifestHash\" IS NOT NULL AND length(trim(\"ActivationManifestHash\")) > 0) OR "
+                + "(\"Classification\" = 'NonDefault' AND \"State\" = 'Retired' AND \"ActivatedAt\" IS NOT NULL AND \"ActivatedBy\" IS NOT NULL AND length(trim(\"ActivatedBy\")) > 0 AND \"RetiredAt\" IS NOT NULL AND \"RetiredBy\" IS NOT NULL AND length(trim(\"RetiredBy\")) > 0 AND \"ActivationManifestVersion\" IS NOT NULL AND length(trim(\"ActivationManifestVersion\")) > 0 AND \"ActivationManifestHash\" IS NOT NULL AND length(trim(\"ActivationManifestHash\")) > 0))"));
             b.ToTable("project_ladder_configurations", t => t.HasCheckConstraint("CK_project_ladder_configuration_version", "\"Version\" > 0"));
             b.HasKey(x => x.Id); b.HasAlternateKey(x => new { x.Id, x.ProjectId });
             b.Property(x => x.Classification).HasConversion<string>().HasMaxLength(30).IsRequired();
             b.Property(x => x.State).HasConversion<string>().HasMaxLength(30).IsRequired();
             b.Property(x => x.ActivatedBy).HasMaxLength(100); b.Property(x => x.RetiredBy).HasMaxLength(100);
+            b.Property(x => x.ActivationManifestVersion).HasMaxLength(100); b.Property(x => x.ActivationManifestHash).HasMaxLength(128);
             b.Property(x => x.Version).IsConcurrencyToken(); b.HasIndex(x => x.ProjectId).IsUnique();
             b.HasOne<ProjectRecord>().WithMany().HasForeignKey(x => x.ProjectId).OnDelete(DeleteBehavior.Cascade);
             b.HasMany(x => x.Steps).WithOne().HasForeignKey(nameof(ProjectLadderStep.ConfigurationId), nameof(ProjectLadderStep.ProjectId))
                 .HasPrincipalKey(nameof(ProjectLadderConfiguration.Id), nameof(ProjectLadderConfiguration.ProjectId)).OnDelete(DeleteBehavior.Cascade);
             b.HasMany(x => x.AllowedUpstream).WithOne().HasForeignKey(nameof(ProjectLadderAllowedUpstream.ConfigurationId), nameof(ProjectLadderAllowedUpstream.ProjectId))
                 .HasPrincipalKey(nameof(ProjectLadderConfiguration.Id), nameof(ProjectLadderConfiguration.ProjectId)).OnDelete(DeleteBehavior.Cascade);
+        });
+        modelBuilder.Entity<ProjectLadderConfigurationHistory>(b =>
+        {
+            b.ToTable("project_ladder_configuration_history", t =>
+                t.HasCheckConstraint("CK_project_ladder_history_revision", "\"Revision\" > 0"));
+            b.ToTable("project_ladder_configuration_history", t =>
+                t.HasCheckConstraint("CK_project_ladder_history_evidence", "length(\"Actor\") > 0 AND length(\"Reason\") > 0 AND length(\"CanonicalSnapshot\") > 0 AND length(\"SnapshotHash\") > 0"));
+            b.HasKey(x => x.Id);
+            b.Property(x => x.Actor).HasMaxLength(100).IsRequired();
+            b.Property(x => x.Reason).HasMaxLength(4000).IsRequired();
+            b.Property(x => x.CanonicalSnapshot).HasMaxLength(200000).IsRequired();
+            b.Property(x => x.SnapshotHash).HasMaxLength(128).IsRequired();
+            b.HasIndex(x => new { x.ConfigurationId, x.Revision }).IsUnique();
+            b.HasIndex(x => new { x.ProjectId, x.OccurredAt });
+            b.HasOne<ProjectLadderConfiguration>().WithMany().HasForeignKey(x => new { x.ConfigurationId, x.ProjectId })
+                .HasPrincipalKey(x => new { x.Id, x.ProjectId }).OnDelete(DeleteBehavior.Cascade);
         });
         modelBuilder.Entity<ProjectLadderStep>(b =>
         {

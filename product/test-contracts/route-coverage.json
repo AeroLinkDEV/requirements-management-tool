@@ -283,6 +283,7 @@
         "ProductLineApiTests",
         "ProductionRoutingTests",
         "ProgramRoleAuthorityApiTests",
+        "ProjectConfigurationApiTests",
         "ProjectPersonnelApiTests",
         "RebaseRequirementChangeTests",
         "ReleaseCampaignExactIntentApiTests",
@@ -1554,6 +1555,14 @@
     },
     {
       "method": "POST",
+      "path": "/api/projects/{projectId:guid}/configuration/activate",
+      "file": "ProjectConfigurationEndpoints.cs",
+      "coveredBy": [
+        "ProjectConfigurationApiTests"
+      ]
+    },
+    {
+      "method": "POST",
       "path": "/api/projects/{projectId:guid}/personnel",
       "file": "PersonnelEndpoints.cs",
       "coveredBy": [
@@ -2121,6 +2130,14 @@
       "file": "ApprovalConfigurationEndpoints.cs",
       "coveredBy": [
         "ApprovalConfigurationApiTests"
+      ]
+    },
+    {
+      "method": "PUT",
+      "path": "/api/projects/{projectId:guid}/configuration",
+      "file": "ProjectConfigurationEndpoints.cs",
+      "coveredBy": [
+        "ProjectConfigurationApiTests"
       ]
     },
     {

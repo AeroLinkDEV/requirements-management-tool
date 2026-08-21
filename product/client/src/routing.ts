@@ -1,5 +1,5 @@
 export type View =
-  | "projects" | "builds" | "baselineImports" | "personnel" | "approvalConfiguration" | "dashboard" | "createSystemScr" | "createSoftwareChange" | "scr" | "baselines" | "history" | "requirements"
+  | "projects" | "builds" | "baselineImports" | "personnel" | "approvalConfiguration" | "projectConfiguration" | "dashboard" | "createSystemScr" | "createSoftwareChange" | "scr" | "baselines" | "history" | "requirements"
   | "verification" | "testingCoverage" | "testChangeRequests" | "testChangeRequest" | "createTestChangeRequest" | "procedureExplorer" | "testResults" | "documents" | "managedDocuments" | "code" | "problemReports" | "lifecycle" | "release" | "releaseImpact" | "releaseDecision" | "releaseOperations" | "planning" | "mywork" | "admin" | "enterprise" | "integrations" | "reviewWorkflows" | "artifact" | "notFound";
 
 export type Discipline = "system" | "software" | "systemTest" | "softwareTest";
@@ -53,6 +53,7 @@ export type AppRoute = {
   savedViewId?: string;
   historyStateIntent?: HistoryStateIntent;
   historyTypeIntent?: HistoryTypeIntent;
+  projectConfigurationSection?: "ladder" | "history" | "readiness" | "approvals";
 };
 
 const decoded = (value: string | undefined) => value ? decodeURIComponent(value) : undefined;
@@ -86,6 +87,10 @@ export function parseRoute(pathname: string, search = ""): AppRoute {
   // can sign it needs the roster — which is also above any one build.
   if (parts.length === 3 && parts[0] === "projects" && parts[2] === "approval-configuration")
     return { view: "approvalConfiguration", discipline: "system", projectSlug: decoded(parts[1]) };
+  if (parts.length === 4 && parts[0] === "projects" && parts[2] === "configuration" && parts[3] === "approvals")
+    return { view: "projectConfiguration", discipline: "system", projectSlug: decoded(parts[1]), projectConfigurationSection: "approvals" };
+  if (parts.length === 3 && parts[0] === "projects" && parts[2] === "configuration")
+    return { view: "projectConfiguration", discipline: "system", projectSlug: decoded(parts[1]) };
   if (parts[0] !== "programs" || parts[2] !== "projects" || parts[4] !== "releases")
     return { view: "notFound", discipline: "system" };
 
@@ -208,10 +213,14 @@ const projectAreaSegments = {
   baselineImports: "imported-baselines",
   personnel: "personnel",
   approvalConfiguration: "approval-configuration",
+  projectConfiguration: "configuration",
 } as const;
 
 export const projectAreaPath = (slug: string, area: keyof typeof projectAreaSegments) =>
   `/projects/${slug}/${projectAreaSegments[area]}`;
+
+export const projectConfigurationApprovalsPath = (slug: string) =>
+  `${projectAreaPath(slug, "projectConfiguration")}/approvals`;
 
 export function routePath(context: RouteContext, view: View, discipline: Discipline = "system", artifactId?: string, artifactKind?: string, stateIntent?: HistoryStateIntent, typeIntent?: HistoryTypeIntent) {
   const root = `/programs/${context.programId}/projects/${context.projectId}/releases/${context.releaseId}`;
@@ -232,6 +241,7 @@ export function routePath(context: RouteContext, view: View, discipline: Discipl
     case "baselineImports": return projectAreaPath("fms-product-development", "baselineImports");
     case "personnel": return projectAreaPath("fms-product-development", "personnel");
     case "approvalConfiguration": return projectAreaPath("fms-product-development", "approvalConfiguration");
+    case "projectConfiguration": return projectAreaPath("fms-product-development", "projectConfiguration");
     case "dashboard": return `${root}/command-center`;
     case "mywork": return `${root}/my-work`;
     case "createSystemScr": return `${root}/systems/change-requests/new${artifactId ? `?requirement=${encodeURIComponent(artifactId)}` : ""}`;

@@ -319,6 +319,7 @@ app.MapGet("/health/ready", async (AeroLinkDbContext db,CancellationToken ct) =>
 // sign in, find your work, propose a change, freeze it, verify it, release it, administer it.
 app.MapAuthEndpoints();
 app.MapWorkspaceEndpoints();
+app.MapProjectConfigurationEndpoints();
 app.MapChangeRequestEndpoints();
 app.MapDownstreamAssessmentEndpoints();
 app.MapBaselineImportEndpoints();

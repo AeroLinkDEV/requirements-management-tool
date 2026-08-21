@@ -147,6 +147,7 @@ export default function ApprovalConfigurationCenter({
   projectName,
   onBackToBuilds,
   onSignOut,
+  embedded = false,
 }: {
   user: AuthUser
   api: string
@@ -154,6 +155,7 @@ export default function ApprovalConfigurationCenter({
   projectName: string
   onBackToBuilds: () => void
   onSignOut: () => void
+  embedded?: boolean
 }) {
   const [data, setData] = useState<Configuration | null>(null)
   const [error, setError] = useState('')
@@ -231,15 +233,16 @@ export default function ApprovalConfigurationCenter({
     }
   }
 
+  const ApprovalMain = embedded ? 'div' : 'main'
   return (
-    <div className="approvalConfigPage">
-      <PortalHeader user={user} onSignOut={onSignOut}/>
-      <main className="approvalConfigMain">
-        <nav className="approvalConfigBreadcrumb" aria-label="Breadcrumb">
+    <div className={`approvalConfigPage${embedded ? ' approvalConfigEmbedded' : ''}`}>
+      {!embedded && <PortalHeader user={user} onSignOut={onSignOut}/>}
+      <ApprovalMain className="approvalConfigMain">
+        {!embedded && <nav className="approvalConfigBreadcrumb" aria-label="Breadcrumb">
           <button type="button" onClick={onBackToBuilds}>Software Builds</button>
           <span aria-hidden="true">/</span>
           <strong>Approval configuration</strong>
-        </nav>
+        </nav>}
 
         <header className="approvalConfigHeading">
           <div>
@@ -251,7 +254,7 @@ export default function ApprovalConfigurationCenter({
             </p>
           </div>
           <div className="approvalConfigActions">
-            <button type="button" onClick={onBackToBuilds}><span aria-hidden="true">←</span> Software Builds</button>
+            {!embedded && <button type="button" onClick={onBackToBuilds}><span aria-hidden="true">←</span> Software Builds</button>}
           </div>
         </header>
 
@@ -397,7 +400,7 @@ export default function ApprovalConfigurationCenter({
             </div>
           </>
         )}
-      </main>
+      </ApprovalMain>
     </div>
   )
 }
