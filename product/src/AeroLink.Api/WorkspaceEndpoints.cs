@@ -1,6 +1,7 @@
 using AeroLink.Domain.ChangeControl;
 using AeroLink.Domain.Documents;
 using AeroLink.Domain.Identity;
+using AeroLink.Domain.Hierarchy;
 using AeroLink.Domain.Notifications;
 using AeroLink.Domain.Programs;
 using AeroLink.Domain.Releases;
@@ -93,7 +94,8 @@ public static class WorkspaceEndpoints
                 var program = new ProgramRecord(request.ProgramName, request.ProgramCode);
                 var project = new ProjectRecord(program.Id, request.ProjectName, request.SoftwareProduct);
                 var release = new SoftwareRelease(project.Id, request.InitialRelease, request.InitialReleaseIsReleased);
-                db.AddRange(program, project, release);
+                var ladder = LegacyDefaultProjectLadderFactory.Create(project.Id, DateTimeOffset.UtcNow);
+                db.AddRange(program, project, release, ladder);
                 var actor = http.UserAccount(); db.ProgramMemberships.Add(new ProgramMembership(actor.Id, program.Id, ProgramRole.Administrator, actor.UserName, DateTimeOffset.UtcNow));
                 await db.SaveChangesAsync(ct);
                 // Every Project has its three test procedure documents from the moment it exists. The startup

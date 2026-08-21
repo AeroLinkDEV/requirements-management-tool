@@ -1,4 +1,5 @@
 using AeroLink.Domain.ChangeControl;
+using AeroLink.Domain.Hierarchy;
 using AeroLink.Domain.Verification;
 using AeroLink.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
@@ -22,6 +23,14 @@ public sealed class FmsShowcaseSeederTests
             var onlyProgram = Assert.Single(await db.Programs.AsNoTracking().ToListAsync());
             Assert.Equal(FmsShowcaseSeeder.ProgramCode, onlyProgram.Code);
             var project = Assert.Single(await db.Projects.AsNoTracking().Where(x => x.ProgramId == onlyProgram.Id).ToListAsync());
+            var ladder = await db.ProjectLadderConfigurations
+                .Include(x => x.Steps).Include(x => x.AllowedUpstream)
+                .SingleAsync(x => x.ProjectId == project.Id);
+            var resolvedLadder = ProjectLadderResolver.Resolve(ladder);
+            Assert.True(resolvedLadder.AgreesWithLegacyDefault());
+            Assert.Equal(ProjectLadderConfigurationClassification.LegacyDefault, ladder.Classification);
+            Assert.Equal(ProjectLadderConfigurationState.Stored, ladder.State);
+            Assert.Equal(2, ladder.AllowedUpstream.Count);
             Assert.Equal(["1.5", "1.6"], await db.Releases.AsNoTracking().Where(x => x.ProjectId == project.Id).OrderBy(x => x.Version).Select(x => x.Version).ToArrayAsync());
             Assert.Equal(1250, await db.BaselineRequirements.CountAsync(x => x.BaselineId == first.ReleasedBaselineId));
             Assert.Equal(1250, await db.TestCoverage.Select(x => x.RequirementRevisionId).Distinct().CountAsync());
