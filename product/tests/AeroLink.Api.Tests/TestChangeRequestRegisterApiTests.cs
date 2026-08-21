@@ -3,6 +3,7 @@ using System.Net.Http.Json;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using AeroLink.Domain.ChangeControl;
+using AeroLink.Domain.Hierarchy;
 using AeroLink.Domain.Identity;
 using AeroLink.Domain.Programs;
 using AeroLink.Domain.Requirements;
@@ -46,9 +47,21 @@ public sealed class TestChangeRequestRegisterApiTests
         var softwareChange = new SystemChangeRequest("HLRCR-00050", 0, project.Id, release.Id,
             "Software change", "P", "A", "S", "software.engineer", now, ChangeRequestType.Software,
             softwareLevel: RequirementLevel.HighLevel);
+        var legacySoftwareChange = new SystemChangeRequest("HLRCR-00051", 0, project.Id, release.Id,
+            "Legacy software change", "P", "A", "S", "software.engineer", now, ChangeRequestType.Software,
+            softwareLevel: RequirementLevel.HighLevel);
+        var lowLevelChange = new SystemChangeRequest("LLRCR-00050", 0, project.Id, release.Id,
+            "Low-level software change", "P", "A", "S", "software.engineer", now, ChangeRequestType.Software,
+            softwareLevel: RequirementLevel.LowLevel);
+        var mismatchedPrefixChange = new SystemChangeRequest("HLRCR-00052", 0, project.Id, release.Id,
+            "Mismatched historical prefix", "P", "A", "S", "software.engineer", now, ChangeRequestType.Software,
+            softwareLevel: RequirementLevel.HighLevel);
+        var openChange = new SystemChangeRequest("SRCR-00052", 0, project.Id, release.Id,
+            "Open controlled package", "P", "A", "S", "first.engineer", now);
         var legacyChange = new SystemChangeRequest("SRCR-00051", 0, project.Id, release.Id,
             "Legacy change", "P", "A", "S", "first.engineer", now);
-        db.AddRange(systemChange, softwareChange, legacyChange);
+        db.AddRange(systemChange, softwareChange, legacySoftwareChange, lowLevelChange, mismatchedPrefixChange,
+            openChange, legacyChange);
 
         // Two revisions of one controlled package: only the newer belongs on the register.
         var first = new TestChangeReview(project.Id, release.Id, systemChange.Id, TestChangeReviewDiscipline.System,
@@ -67,11 +80,30 @@ public sealed class TestChangeRequestRegisterApiTests
         software.RecordTestChangeRequired("software.engineer", now);
         software.WriteCase("software.engineer", "Software package", "P", "A", "S", now);
 
+        // This automatic assessment is deliberately unnumbered until somebody concludes it needs procedure
+        // work. It remains historical evidence and coverage-queue work, not a current HLRTCR register row.
+        var pendingSoftware = new TestChangeReview(project.Id, release.Id, legacySoftwareChange.Id,
+            TestChangeReviewDiscipline.HighLevelSoftware, "HLRCR-00051.00", now);
+        var lowLevel = new TestChangeReview(project.Id, release.Id, lowLevelChange.Id,
+            TestChangeReviewDiscipline.LowLevelSoftware, "LLRCR-00050.00", now,
+            baseNumber: "LLRTCR-000901", authorId: "software.engineer");
+        lowLevel.RecordTestChangeRequired("software.engineer", now);
+        var mismatchedPrefix = new TestChangeReview(project.Id, release.Id, mismatchedPrefixChange.Id,
+            TestChangeReviewDiscipline.HighLevelSoftware, "HLRCR-00052.00", now,
+            baseNumber: "LLRTCR-000902", authorId: "software.engineer");
+        mismatchedPrefix.RecordTestChangeRequired("software.engineer", now);
+
+        // A numbered, concluded Draft with no author is the current package the checkout test works on. The
+        // unnumbered legacy row below must no longer be selected from the current register.
+        var open = new TestChangeReview(project.Id, release.Id, openChange.Id, TestChangeReviewDiscipline.System,
+            "SRCR-00052.00", now, baseNumber: "SYSTCR-000901");
+        open.RecordTestChangeRequired("register.engineer", now);
+
         // A package from before controlled numbering: no BaseNumber at all.
         var legacy = new TestChangeReview(project.Id, release.Id, legacyChange.Id, TestChangeReviewDiscipline.System,
             "SRCR-00051.00", now);
 
-        db.AddRange(first, second, software, legacy);
+        db.AddRange(first, second, software, pendingSoftware, lowLevel, mismatchedPrefix, open, legacy);
         await db.SaveChangesAsync();
         return new(project.Id, release.Id);
     }
@@ -129,25 +161,63 @@ public sealed class TestChangeRequestRegisterApiTests
         Assert.Equal(2, behind.GetProperty("items").EnumerateArray().Count());
     }
 
-    /// <summary>
-    /// A package raised before controlled numbering carries an empty number. Grouping those the way numbered
-    /// packages are grouped would collapse every one of them into whichever held the highest revision, so
-    /// most of a Project's early packages would simply not be on its register.
-    /// </summary>
     [Fact]
-    public async Task A_package_with_no_controlled_number_is_still_listed()
+    public async Task An_unnumbered_pending_assessment_is_excluded_from_current_register_but_remains_explicit_history()
     {
         await using var factory = new AeroLinkApiFactory();
         var seeded = await SeedAsync(factory);
         using var client = await SignInAsync(factory);
 
         var body = await RegisterAsync(client, $"projectId={seeded.ProjectId}&discipline=System&page=1&pageSize=50");
-        var legacy = Assert.Single(body.GetProperty("items").EnumerateArray().ToList(),
+        Assert.DoesNotContain(body.GetProperty("items").EnumerateArray(),
             x => x.GetProperty("baseNumber").GetString() == "");
 
-        // It reads as what it was raised from, because that is the only name it has.
+        var historical = await RegisterAsync(client,
+            $"projectId={seeded.ProjectId}&discipline=System&historical=true&page=1&pageSize=50");
+        var legacy = Assert.Single(historical.GetProperty("items").EnumerateArray().ToList(),
+            x => x.GetProperty("baseNumber").GetString() == "");
         Assert.Equal("SRCR-00051.00", legacy.GetProperty("displayNumber").GetString());
         Assert.Equal(1, legacy.GetProperty("revisionCount").GetInt32());
+    }
+
+    [Fact]
+    public async Task The_current_register_uses_exact_HLR_and_LLR_controlled_prefixes()
+    {
+        await using var factory = new AeroLinkApiFactory();
+        var seeded = await SeedAsync(factory);
+        using var client = await SignInAsync(factory);
+
+        var highLevel = await RegisterAsync(client,
+            $"projectId={seeded.ProjectId}&discipline=HighLevelSoftware&page=1&pageSize=50");
+        var highLevelRows = highLevel.GetProperty("items").EnumerateArray().ToList();
+        Assert.Contains(highLevelRows, x => x.GetProperty("baseNumber").GetString() == "HLRTCR-000900");
+        Assert.DoesNotContain(highLevelRows, x => x.GetProperty("baseNumber").GetString() == "LLRTCR-000902");
+        Assert.DoesNotContain(highLevelRows, x => x.GetProperty("baseNumber").GetString() == "");
+
+        var lowLevel = await RegisterAsync(client,
+            $"projectId={seeded.ProjectId}&discipline=LowLevelSoftware&page=1&pageSize=50");
+        var lowLevelRows = lowLevel.GetProperty("items").EnumerateArray().ToList();
+        var low = Assert.Single(lowLevelRows);
+        Assert.Equal("LLRTCR-000901", low.GetProperty("baseNumber").GetString());
+        Assert.StartsWith("LLRTCR-", low.GetProperty("displayNumber").GetString());
+    }
+
+    [Fact]
+    public async Task The_current_register_refuses_an_absent_ladder_discipline_but_historical_read_remains_available()
+    {
+        await using var factory = new AeroLinkApiFactory(testLadderPolicy: SystemLowPolicy());
+        var seeded = await SeedAsync(factory);
+        using var client = await SignInAsync(factory);
+
+        using var refused = await client.GetAsync(
+            $"/api/history/test-change-requests?projectId={seeded.ProjectId}&discipline=HighLevelSoftware&page=1&pageSize=50");
+        Assert.Equal(HttpStatusCode.BadRequest, refused.StatusCode);
+        Assert.Contains("ladder_discipline_unavailable", await refused.Content.ReadAsStringAsync());
+
+        var historical = await RegisterAsync(client,
+            $"projectId={seeded.ProjectId}&discipline=HighLevelSoftware&historical=true&page=1&pageSize=50");
+        Assert.Contains(historical.GetProperty("items").EnumerateArray(),
+            x => x.GetProperty("baseNumber").GetString() == "LLRTCR-000902");
     }
 
     [Fact]
@@ -251,5 +321,20 @@ public sealed class TestChangeRequestRegisterApiTests
         using var verificationScope = factory.Services.CreateScope();
         var verificationDb = verificationScope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
         Assert.Equal("Checked-in verification package", (await verificationDb.TestChangeReviews.FindAsync(id))!.Title);
+    }
+
+    private static ILadderPolicy SystemLowPolicy()
+    {
+        var configuration = ProjectLadderConfiguration.CreateDraft(Guid.NewGuid(), DateTimeOffset.UtcNow);
+        var now = DateTimeOffset.UtcNow;
+        var system = new ProjectLadderStep(configuration.Id, configuration.ProjectId, RequirementLevel.System, 1,
+            LegacyLadderPolicy.Instance.Definition(RequirementLevel.System).Capabilities, now);
+        var low = new ProjectLadderStep(configuration.Id, configuration.ProjectId, RequirementLevel.LowLevel, 2,
+            LegacyLadderPolicy.Instance.Definition(RequirementLevel.LowLevel).Capabilities, now);
+        configuration.Steps.Add(system);
+        configuration.Steps.Add(low);
+        configuration.AllowedUpstream.Add(new ProjectLadderAllowedUpstream(configuration.Id, configuration.ProjectId,
+            system.Id, low.Id, now));
+        return new ResolvedProjectLadderPolicy(ProjectLadderResolver.Resolve(configuration));
     }
 }

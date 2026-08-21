@@ -1,11 +1,11 @@
 {
   "schemaVersion": "aerolink-api-test-intent/v2",
   "totals": {
-    "tests": 522,
-    "cases": 576,
+    "tests": 524,
+    "cases": 578,
     "classes": 94,
-    "hostedTests": 509,
-    "hostedCases": 554,
+    "hostedTests": 511,
+    "hostedCases": 556,
     "nonHostedTests": 8,
     "nonHostedCases": 17,
     "unknownHostTests": 5,
@@ -21,8 +21,8 @@
     "http-boundary": {
       "label": "HTTP boundary: route, status, JSON shape",
       "level": "API (must stay hosted)",
-      "tests": 331,
-      "cases": 365,
+      "tests": 333,
+      "cases": 367,
       "unknownCases": 0,
       "classes": 80
     },
@@ -91,7 +91,7 @@
       ],
       "sourceLines": {
         "start": 18,
-        "end": 158
+        "end": 160
       }
     },
     {
@@ -7464,24 +7464,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 212,
-        "end": 254
-      }
-    },
-    {
-      "cls": "TestChangeRequestRegisterApiTests",
-      "test": "A_package_with_no_controlled_number_is_still_listed",
-      "kind": "Fact",
-      "intent": "http-boundary",
-      "cases": 1,
-      "caseEvidence": "Fact",
-      "hosted": "hosted",
-      "hostEvidence": [
-        "factory-construction"
-      ],
-      "sourceLines": {
-        "start": 137,
-        "end": 151
+        "start": 282,
+        "end": 324
       }
     },
     {
@@ -7496,8 +7480,24 @@
         "factory-construction"
       ],
       "sourceLines": {
-        "start": 184,
-        "end": 196
+        "start": 254,
+        "end": 266
+      }
+    },
+    {
+      "cls": "TestChangeRequestRegisterApiTests",
+      "test": "An_unnumbered_pending_assessment_is_excluded_from_current_register_but_remains_explicit_history",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction"
+      ],
+      "sourceLines": {
+        "start": 164,
+        "end": 181
       }
     },
     {
@@ -7512,8 +7512,8 @@
         "factory-construction"
       ],
       "sourceLines": {
-        "start": 92,
-        "end": 112
+        "start": 124,
+        "end": 144
       }
     },
     {
@@ -7528,8 +7528,8 @@
         "factory-construction"
       ],
       "sourceLines": {
-        "start": 115,
-        "end": 130
+        "start": 147,
+        "end": 162
       }
     },
     {
@@ -7544,8 +7544,40 @@
         "factory-construction"
       ],
       "sourceLines": {
-        "start": 169,
-        "end": 182
+        "start": 239,
+        "end": 252
+      }
+    },
+    {
+      "cls": "TestChangeRequestRegisterApiTests",
+      "test": "The_current_register_refuses_an_absent_ladder_discipline_but_historical_read_remains_available",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction"
+      ],
+      "sourceLines": {
+        "start": 205,
+        "end": 221
+      }
+    },
+    {
+      "cls": "TestChangeRequestRegisterApiTests",
+      "test": "The_current_register_uses_exact_HLR_and_LLR_controlled_prefixes",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction"
+      ],
+      "sourceLines": {
+        "start": 183,
+        "end": 203
       }
     },
     {
@@ -7560,8 +7592,8 @@
         "factory-construction"
       ],
       "sourceLines": {
-        "start": 153,
-        "end": 167
+        "start": 223,
+        "end": 237
       }
     },
     {
@@ -7576,8 +7608,8 @@
         "factory-construction"
       ],
       "sourceLines": {
-        "start": 198,
-        "end": 209
+        "start": 268,
+        "end": 279
       }
     },
     {

@@ -9,7 +9,7 @@ test("FMS 1.5 released baseline supports active 1.6 work and full lifecycle expl
   await apiLogin(request);
   await login(page, 'admin', { openProject: false });
   await selectProgram(page,"Flight Management System Live Program");
-  await expect(page.getByText("FMS Product Development", { exact: true })).toBeVisible();
+  await expect(page.getByRole('complementary').getByText("FMS Product Development", { exact: true })).toBeVisible();
   await expect(page.getByLabel("Active build 1.6")).toContainText("In work");
   await expect(page.locator(".programInventory")).toHaveCount(0);
   await expect(page.getByRole("heading", { name: "System change control" })).toBeVisible();

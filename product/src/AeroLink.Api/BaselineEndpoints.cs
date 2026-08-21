@@ -84,8 +84,8 @@ public static class BaselineEndpoints
         // release a package has the build it belongs to, and where a change request counts requirement changes
         // a package counts procedure changes.
         app.MapGet("/api/history/test-change-requests", async (Guid projectId, string? search, Guid? releaseId,
-            TestChangeReviewDiscipline? discipline, string? state, string? baseNumber, int page, int pageSize,
-            HttpContext http, AeroLinkDbContext db, CancellationToken ct) =>
+            TestChangeReviewDiscipline? discipline, string? state, string? baseNumber, bool? historical, int page, int pageSize,
+            HttpContext http, AeroLinkDbContext db, IProjectLadderPolicyResolver policyResolver, CancellationToken ct) =>
         {
             if (!await http.HasProjectAccessAsync(db, projectId, ct)) return Results.Forbid();
             page = Math.Max(1, page == 0 ? 1 : page); pageSize = Math.Clamp(pageSize == 0 ? 50 : pageSize, 1, 200);
@@ -114,6 +114,42 @@ public static class BaselineEndpoints
                 source = source.Where(x => x.BaseNumber == "" || x.Revision == db.TestChangeReviews
                     .Where(other => other.ProjectId == projectId && other.BaseNumber == x.BaseNumber)
                     .Max(other => other.Revision));
+            if (historical != true)
+            {
+                // The current register is the controlled package inventory, not the downstream assessment
+                // queue. An automatic assessment has no controlled number until its engineer concludes that
+                // procedure work is required; showing it here made the source CR number look like an HLRTCR.
+                var ladderPolicy = await policyResolver.ResolveAsync(projectId, ct);
+                var configuredDisciplines = ladderPolicy.OrderedLevels
+                    .Where(level => ladderPolicy.Definition(level).Verification is not null)
+                    .Select(ladderPolicy.Discipline).Distinct().ToArray();
+                if (discipline is { } requested && !configuredDisciplines.Contains(requested))
+                    return Results.BadRequest(new
+                    {
+                        error = $"The {requested} test-change register is not present in the active project ladder.",
+                        code = "ladder_discipline_unavailable"
+                    });
+
+                source = source.Where(x => x.BaseNumber != "" && x.Outcome != TestChangeReviewOutcome.Pending);
+                if (discipline is { } requestedDiscipline)
+                {
+                    var prefix = ladderPolicy.TestChangeReviewPrefix(requestedDiscipline) + "-";
+                    source = source.Where(x => x.Discipline == requestedDiscipline && x.BaseNumber.StartsWith(prefix));
+                }
+                else
+                {
+                    var systemPrefix = configuredDisciplines.Contains(TestChangeReviewDiscipline.System)
+                        ? ladderPolicy.TestChangeReviewPrefix(TestChangeReviewDiscipline.System) + "-" : null;
+                    var highLevelPrefix = configuredDisciplines.Contains(TestChangeReviewDiscipline.HighLevelSoftware)
+                        ? ladderPolicy.TestChangeReviewPrefix(TestChangeReviewDiscipline.HighLevelSoftware) + "-" : null;
+                    var lowLevelPrefix = configuredDisciplines.Contains(TestChangeReviewDiscipline.LowLevelSoftware)
+                        ? ladderPolicy.TestChangeReviewPrefix(TestChangeReviewDiscipline.LowLevelSoftware) + "-" : null;
+                    source = source.Where(x =>
+                        (systemPrefix != null && x.Discipline == TestChangeReviewDiscipline.System && x.BaseNumber.StartsWith(systemPrefix))
+                        || (highLevelPrefix != null && x.Discipline == TestChangeReviewDiscipline.HighLevelSoftware && x.BaseNumber.StartsWith(highLevelPrefix))
+                        || (lowLevelPrefix != null && x.Discipline == TestChangeReviewDiscipline.LowLevelSoftware && x.BaseNumber.StartsWith(lowLevelPrefix)));
+                }
+            }
             var total = await source.CountAsync(ct);
             // SQLite can neither order nor aggregate a DateTimeOffset, so the newest-first ordering the
             // requirements register uses is available only on PostgreSQL. Same compromise, same reason.

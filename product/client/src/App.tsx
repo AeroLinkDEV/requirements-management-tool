@@ -197,7 +197,12 @@ function AppNavigation({ user, workspaces, activeId, selectedProjectId, selected
   const item = (label:string,target:View,icon:string,area:Discipline="system",accessibleLabel=label,kind?:string,topLevel=false) => {
     const groupedChangeView = target === "testChangeRequests"
       && ["testChangeRequests", "testingCoverage", "testChangeRequest", "createTestChangeRequest"].includes(view);
-    const activeItem = (view===target || groupedChangeView || (target==="history" && view==="scr") || (target==="release" && ["releaseImpact","releaseDecision","releaseOperations"].includes(view))) && discipline===area && (!kind || artifactKind===kind);
+    // A typed software change-request route carries its level in the record, not in the URL. Until the
+    // detail resolves, keep the software Change Requests entry active without guessing HLR or LLR; explicit
+    // level-bound routes still require their exact artifactKind below.
+    const levelMatches = !kind || artifactKind === kind
+      || (target === "history" && view === "scr" && area === "software" && !artifactKind);
+    const activeItem = (view===target || groupedChangeView || (target==="history" && view==="scr") || (target==="release" && ["releaseImpact","releaseDecision","releaseOperations"].includes(view))) && discipline===area && levelMatches;
     // Fetched on hover or keyboard focus, so the workspace's code is usually already here by the time the
     // click is. Both events, because a keyboard user never hovers anything.
     const warm = () => viewCode[target]?.warm();
@@ -619,6 +624,9 @@ function App() {
   const feedback=toast?<div className="experienceToast" role="status" aria-live="polite"><span>✓</span><b>{toast}</b></div>:null;
   const overlays=<>{palette}{experience}{feedback}</>;
   const inShell=(content:React.ReactNode)=><div className="shell">{navigation}<div className="workspaceStage">{contextBar}<div className="workspaceView" key={`${view}-${discipline}`}><Suspense fallback={<WorkspaceLoading/>}>{content}</Suspense></div></div>{overlays}</div>;
+  // Route recognition is independent of project policy. An invalid deep link must remain a
+  // not-found response while the selected project's stored ladder is loading (or unavailable).
+  if(view==="notFound")return inShell(<main className="artifactState"><div><span>?</span><h1>Page not found</h1><p>This AeroLink route is not recognized. Use quick navigation to find an authorized workspace or artifact.</p><button onClick={()=>navigate("dashboard")}>Return to Command Center</button></div></main>);
    const policyDependentView = !["projects", "builds", "baselineImports", "personnel", "approvalConfiguration", "projectConfiguration"].includes(view);
    if (project && policyDependentView && !ladder)
      return inShell(<main className="artifactState"><div><span>!</span><h1>Project ladder unavailable</h1><p>{ladderError || "Loading the stored project ladder before opening level-specific workspaces…"}</p>{ladderError && <button onClick={() => setLadderAttempt(value => value + 1)}>Retry</button>}</div></main>);
@@ -639,7 +647,6 @@ function App() {
    );
    if (!viewAllowed)
      return inShell(<main className="artifactState"><div><span>!</span><h1>Workspace unavailable</h1><p>This level or capability is not present in the active project ladder.</p><button onClick={()=>navigate("dashboard")}>Return to Command Center</button></div></main>);
-   if(view==="notFound")return inShell(<main className="artifactState"><div><span>?</span><h1>Page not found</h1><p>This AeroLink route is not recognized. Use quick navigation to find an authorized workspace or artifact.</p><button onClick={()=>navigate("dashboard")}>Return to Command Center</button></div></main>);
   if(view==="artifact"&&selectedArtifactId&&selectedArtifactKind)return inShell(<ArtifactRecordPage api={API} kind={selectedArtifactKind} id={selectedArtifactId} releaseId={release?.id??""} onBack={()=>navigate("dashboard")} onOpen={(kind,id)=>{if(kind==="change-request")navigate("scr","system",id);else if(kind==="requirement")navigate("requirements","system",id);else navigate("artifact","system",id,kind)}}/>);
   // A released build is closed, so this says so instead of opening an editor whose save the server will refuse.
   // The action stays visible on the navigation rather than disappearing: somebody looking for how to raise a

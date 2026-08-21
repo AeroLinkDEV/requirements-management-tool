@@ -114,7 +114,9 @@ public sealed class AdministratorChangeRequestApiTests
                 mode = "Sequential",
                 actorId = "change.author"
             });
-        Assert.Equal(HttpStatusCode.OK, submit.StatusCode);
+        var submitBody = await submit.Content.ReadAsStringAsync();
+        Assert.True(submit.StatusCode == HttpStatusCode.OK,
+            $"{(int)submit.StatusCode}: {submitBody}");
 
         using var immutableAttachment = new MultipartFormDataContent();
         immutableAttachment.Add(new StringContent(scenario.ProjectId.ToString()), "projectId");
@@ -192,7 +194,9 @@ public sealed class AdministratorChangeRequestApiTests
         var level = type == ChangeRequestType.System ? RequirementLevel.System : RequirementLevel.HighLevel;
         // A new requirement cannot be sent for review without a place in the document, so the scenario gives
         // its proposals one. Which section is not what this test is about.
-        var specification = new RequirementSpecification(project.Id, "SPEC-000001", "Requirements Document",
+        var specification = new RequirementSpecification(project.Id,
+            type == ChangeRequestType.System ? "SYSRD-000001" : "HLRD-000001",
+            "Requirements Document",
             level.ToString(), "Seeded specification.", "test.setup", now);
         var section = new SpecificationNode(specification.Id, null, 1000, SpecificationNodeType.Section,
             "Functional Behavior", null, "test.setup", now);

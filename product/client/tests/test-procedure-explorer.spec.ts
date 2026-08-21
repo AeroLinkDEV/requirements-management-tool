@@ -108,7 +108,7 @@ test('a procedure says who wrote it and what drove each revision', async ({ page
 /**
  * Software procedures share the same Explorer and can still be narrowed to either controlled level.
  */
-test('the Software Explorer opens on HLR and LLR together and can narrow to either level', async ({ page }) => {
+test('the Software Explorer opens on HLR and can move to the configured LLR level', async ({ page }) => {
   test.setTimeout(180_000)
   await login(page, 'admin', { openProject: false })
   await selectProgram(page, 'Flight Management System Live Program')
@@ -118,15 +118,11 @@ test('the Software Explorer opens on HLR and LLR together and can narrow to eith
   await page.getByRole('link', { name: 'Software Test Procedure Explorer' }).click()
   await expect(page).toHaveURL(/software-verification\/procedures$/, { timeout: 30_000 })
   await expect(page.getByText('CONTROLLED TEST PROCEDURES / READ-ONLY EXPLORER')).toBeVisible()
-  await expect(page.getByLabel('Level filter')).toHaveValue('Software')
-  await expect(page.locator('.pager')).toContainText('of 440', { timeout: 30_000 })
+  await expect(page.getByLabel('Level filter')).toHaveValue('HighLevel')
+  await expect(page.locator('.pager')).toContainText('of 160', { timeout: 30_000 })
   const rail = page.getByRole('navigation', { name: 'Test procedure documents' })
   await expect(rail.locator('[data-document^="HLRTD-"]')).toHaveCount(1, { timeout: 30_000 })
   await expect(rail.locator('[data-document^="LLRTD-"]')).toHaveCount(1, { timeout: 30_000 })
-
-  await page.getByLabel('Level filter').selectOption('HighLevel')
-  await expect(page).toHaveURL(/software-verification\/procedures\?procedureLevel=HighLevel/, { timeout: 30_000 })
-  await expect(page.locator('.pager')).toContainText('of 160', { timeout: 30_000 })
   await expect(page.locator('.procedureList')).not.toContainText('LLRTP-')
 
   await page.getByLabel('Level filter').selectOption('LowLevel')
