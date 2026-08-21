@@ -51,6 +51,21 @@ public sealed class ProjectLadderConfiguration
     public string? ActivatedBy { get; private set; }
     public DateTimeOffset? RetiredAt { get; private set; }
     public string? RetiredBy { get; private set; }
+    /// <summary>
+    /// Permanently closes normal structural authoring once controlled content depends on this graph. This is
+    /// intentionally independent from Stored/Draft/Active: a legacy Stored graph can be sealed without claiming
+    /// that it was activated by a user.
+    /// </summary>
+    public bool IsSealed { get; private set; }
+    public DateTimeOffset? SealedAt { get; private set; }
+    public string? SealedBy { get; private set; }
+    public string? SealedContentKind { get; private set; }
+    public string? SealedContentIdentity { get; private set; }
+    /// <summary>Evidence for the most recent governed platform representation upgrade, if any.</summary>
+    public DateTimeOffset? LastUpgradeAt { get; private set; }
+    public string? LastUpgradeBy { get; private set; }
+    public string? LastUpgradeVersion { get; private set; }
+    public string? LastUpgradeManifestHash { get; private set; }
     /// <summary>The manifest accepted by a successful activation; null until that act occurs.</summary>
     public string? ActivationManifestVersion { get; private set; }
     public string? ActivationManifestHash { get; private set; }
@@ -64,6 +79,8 @@ public sealed class ProjectLadderConfiguration
     /// </summary>
     public void BeginDraftEdit(DateTimeOffset now)
     {
+        if (IsSealed)
+            throw new DomainException($"The project ladder is sealed by {SealedContentKind} '{SealedContentIdentity}' and cannot be structurally edited.");
         if (Classification == ProjectLadderConfigurationClassification.LegacyDefault
             && State == ProjectLadderConfigurationState.Stored)
         {
@@ -100,6 +117,74 @@ public sealed class ProjectLadderConfiguration
         ActivationManifestHash = manifestHash.Trim().ToLowerInvariant();
         ValidateShape(Classification, State, ActivatedAt, ActivatedBy, RetiredAt, RetiredBy,
             ActivationManifestVersion, ActivationManifestHash);
+    }
+
+    /// <summary>
+    /// Permanently closes normal structural authoring because a controlled record now depends on this graph.
+    /// The internal persistence authority owns this operation; it is not a public aggregate setter.
+    /// </summary>
+    internal void Seal(string contentKind, string contentIdentity, string actor, DateTimeOffset now)
+    {
+        if (string.IsNullOrWhiteSpace(contentKind)) throw new DomainException("Ladder sealing requires a content kind.");
+        if (string.IsNullOrWhiteSpace(contentIdentity)) throw new DomainException("Ladder sealing requires a content identity.");
+        if (string.IsNullOrWhiteSpace(actor)) throw new DomainException("Ladder sealing requires an actor.");
+        if (IsSealed)
+            throw new DomainException($"The project ladder is already sealed by {SealedContentKind} '{SealedContentIdentity}'.");
+
+        IsSealed = true;
+        SealedAt = now;
+        SealedBy = actor.Trim();
+        SealedContentKind = contentKind.Trim();
+        SealedContentIdentity = contentIdentity.Trim();
+        UpdatedAt = now;
+        Version++;
+        ValidateSealingEvidence();
+    }
+
+    /// <summary>
+    /// Applies a governed, attributable platform representation upgrade while retaining the seal. Only the
+    /// internal upgrade authority may call this seam; ordinary project roles have no path to it.
+    /// </summary>
+    internal void RecordPlatformUpgrade(string version, string actor, string manifestHash, DateTimeOffset now)
+    {
+        if (!IsSealed) throw new DomainException("A platform upgrade requires an already sealed ladder.");
+        if (string.IsNullOrWhiteSpace(version) || string.IsNullOrWhiteSpace(actor) || string.IsNullOrWhiteSpace(manifestHash))
+            throw new DomainException("A platform upgrade requires version, actor, and readiness evidence.");
+        // A legacy Stored graph may be upgraded by the governed internal seam, but the resulting representation
+        // is an authored Draft until its ordinary activation authority accepts it. This keeps the runtime on the
+        // prior effective policy while making the structural transform attributable and reviewable.
+        if (Classification == ProjectLadderConfigurationClassification.LegacyDefault
+            && State == ProjectLadderConfigurationState.Stored)
+        {
+            Classification = ProjectLadderConfigurationClassification.NonDefault;
+            State = ProjectLadderConfigurationState.Draft;
+        }
+        LastUpgradeVersion = version.Trim();
+        LastUpgradeBy = actor.Trim();
+        LastUpgradeManifestHash = manifestHash.Trim().ToLowerInvariant();
+        LastUpgradeAt = now;
+        UpdatedAt = now;
+        Version++;
+        ValidateSealingEvidence();
+    }
+
+    internal void ValidateSealingEvidence()
+    {
+        if (!IsSealed)
+        {
+            if (SealedAt is not null || SealedBy is not null || SealedContentKind is not null || SealedContentIdentity is not null)
+                throw new DomainException("An unsealed ladder cannot carry seal evidence.");
+            if (LastUpgradeAt is not null || LastUpgradeBy is not null || LastUpgradeVersion is not null || LastUpgradeManifestHash is not null)
+                throw new DomainException("An unsealed ladder cannot carry platform-upgrade evidence.");
+            return;
+        }
+        if (SealedAt is null || string.IsNullOrWhiteSpace(SealedBy)
+            || string.IsNullOrWhiteSpace(SealedContentKind) || string.IsNullOrWhiteSpace(SealedContentIdentity))
+            throw new DomainException("A sealed ladder requires timestamp, actor, content kind, and content identity evidence.");
+        if ((LastUpgradeAt is null) != (LastUpgradeBy is null)
+            || (LastUpgradeAt is null) != (LastUpgradeVersion is null)
+            || (LastUpgradeAt is null) != (LastUpgradeManifestHash is null))
+            throw new DomainException("Platform upgrade evidence requires timestamp, actor, version, and readiness hash.");
     }
 
     internal static void ValidateShape(ProjectLadderConfigurationClassification classification,
@@ -270,6 +355,7 @@ public static class ProjectLadderResolver
         ProjectLadderConfiguration.ValidateShape(configuration.Classification, configuration.State,
             configuration.ActivatedAt, configuration.ActivatedBy, configuration.RetiredAt, configuration.RetiredBy,
             configuration.ActivationManifestVersion, configuration.ActivationManifestHash);
+        configuration.ValidateSealingEvidence();
         if (configuration.Version < 1) throw new DomainException("A project ladder version must be positive.");
 
         var steps = configuration.Steps.ToList();

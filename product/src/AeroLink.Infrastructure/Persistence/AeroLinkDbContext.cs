@@ -19,6 +19,13 @@ namespace AeroLink.Infrastructure.Persistence;
 
 public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> options) : DbContext(options)
 {
+    /// <summary>
+    /// A materializer can supply its governed actor while preparing a first controlled record. API paths normally
+    /// carry an actor on their aggregate; this fallback is reserved for explicitly trusted infrastructure seeds.
+    /// </summary>
+    internal string? LadderSealActor { get; set; }
+    internal (Guid ProjectId, string Kind, string Identity)? PendingLadderSeal { get; set; }
+
     public DbSet<ProgramRecord> Programs => Set<ProgramRecord>();
     public DbSet<IdentifierSequence> IdentifierSequences => Set<IdentifierSequence>();
     public DbSet<ShowcaseUpgradeStep> ShowcaseUpgradeSteps => Set<ShowcaseUpgradeStep>();
@@ -154,6 +161,175 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
     public DbSet<ManagedDocumentEvent> ManagedDocumentEvents => Set<ManagedDocumentEvent>();
     public DbSet<DocumentConnectorGrant> DocumentConnectorGrants => Set<DocumentConnectorGrant>();
 
+    public override int SaveChanges(bool acceptAllChangesOnSuccess)
+    {
+        PendingLadderSeal = null;
+        try
+        {
+            PrepareLadderSealsAsync(CancellationToken.None).GetAwaiter().GetResult();
+            var result = base.SaveChanges(acceptAllChangesOnSuccess);
+            PendingLadderSeal = null;
+            return result;
+        }
+        catch (DbUpdateConcurrencyException ex) when (PendingLadderSeal is not null)
+        {
+            var pending = PendingLadderSeal.Value;
+            PendingLadderSeal = null;
+            throw SealConflict(pending, ex);
+        }
+        catch (DbUpdateException ex) when (PendingLadderSeal is not null && IsSealWriteConflict(ex))
+        {
+            var pending = PendingLadderSeal.Value;
+            PendingLadderSeal = null;
+            throw SealConflict(pending, ex);
+        }
+        catch
+        {
+            PendingLadderSeal = null;
+            throw;
+        }
+    }
+
+    public override int SaveChanges()
+        => SaveChanges(acceptAllChangesOnSuccess: true);
+
+    public override async Task<int> SaveChangesAsync(bool acceptAllChangesOnSuccess,
+        CancellationToken cancellationToken = default)
+    {
+        PendingLadderSeal = null;
+        try
+        {
+            await PrepareLadderSealsAsync(cancellationToken);
+            var result = await base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken);
+            PendingLadderSeal = null;
+            return result;
+        }
+        catch (DbUpdateConcurrencyException ex) when (PendingLadderSeal is not null)
+        {
+            var pending = PendingLadderSeal.Value;
+            PendingLadderSeal = null;
+            throw SealConflict(pending, ex);
+        }
+        catch (DbUpdateException ex) when (PendingLadderSeal is not null && IsSealWriteConflict(ex))
+        {
+            var pending = PendingLadderSeal.Value;
+            PendingLadderSeal = null;
+            throw SealConflict(pending, ex);
+        }
+        catch
+        {
+            PendingLadderSeal = null;
+            throw;
+        }
+    }
+
+    private ProjectLadderSealConcurrencyException SealConflict(
+        (Guid ProjectId, string Kind, string Identity) pending, Exception cause)
+    {
+        ChangeTracker.Clear();
+        return new ProjectLadderSealConcurrencyException(
+            $"The project ladder seal race was lost for project '{pending.ProjectId:D}': "
+            + $"another first qualifying writer committed before candidate {pending.Kind} '{pending.Identity}'. "
+            + "No candidate content was committed; retry against the now-sealed project to see its winning dependency.");
+    }
+
+    private static bool IsSealWriteConflict(DbUpdateException exception) =>
+        exception.InnerException is Microsoft.Data.Sqlite.SqliteException { SqliteErrorCode: 19 } sqlite
+            && sqlite.Message.Contains("project_ladder_configuration_history", StringComparison.Ordinal)
+            && sqlite.Message.Contains("ConfigurationId", StringComparison.Ordinal)
+            && sqlite.Message.Contains("Revision", StringComparison.Ordinal)
+        || exception.InnerException is Microsoft.Data.Sqlite.SqliteException { SqliteErrorCode: 19 } ladder
+            && ladder.Message.Contains("project_ladder_configurations", StringComparison.Ordinal)
+            && ladder.Message.Contains("ProjectId", StringComparison.Ordinal)
+        || exception.InnerException is Microsoft.Data.Sqlite.SqliteException { SqliteErrorCode: 5 or 6 }
+        || exception.InnerException is Npgsql.PostgresException { SqlState: Npgsql.PostgresErrorCodes.UniqueViolation } postgres
+            && (postgres.ConstraintName?.Contains("project_ladder_configuration_history", StringComparison.Ordinal) == true
+                || postgres.ConstraintName?.Contains("project_ladder_configurations_ProjectId", StringComparison.Ordinal) == true)
+        || exception.InnerException is Npgsql.PostgresException { SqlState: "40001" or "40P01" };
+
+    private async Task PrepareLadderSealsAsync(CancellationToken ct)
+    {
+        // Route inventory is intentionally expressed in durable entity seams: ChangeRequestEndpoints and the
+        // RequirementsEndpoints action/interchange commits, ReqIfEndpoints, IntegrationEndpoints conditional/
+        // OSLC proposals, and FmsShowcaseSeeder all produce RequirementChange; baseline requirement materialization
+        // produces RequirementArtifact/RequirementRevision; procedure materialization produces TestProcedure;
+        // verification impact produces TestChangeReview; trace and code APIs/services produce RequirementTraceLink
+        // and CodeTraceabilityRecord. Import start/record rows, empty draft requests, schemas/specifications,
+        // procedure documents, and bulk metadata remain scaffolding and are deliberately absent below.
+        ChangeTracker.DetectChanges();
+        var candidates = new List<(Guid ProjectId, string Kind, string Identity, string Actor)>();
+
+        foreach (var entry in ChangeTracker.Entries<RequirementChange>().Where(x => x.State == EntityState.Added))
+        {
+            var request = SystemChangeRequests.Local.SingleOrDefault(x => x.Id == entry.Entity.ChangeRequestId);
+            var projectId = request?.ProjectId ?? await SystemChangeRequests.AsNoTracking()
+                .Where(x => x.Id == entry.Entity.ChangeRequestId).Select(x => x.ProjectId).SingleOrDefaultAsync(ct);
+            if (projectId == Guid.Empty) continue;
+            candidates.Add((projectId, "draft-requirement-change",
+                string.IsNullOrWhiteSpace(entry.Entity.DisplayNumber) ? entry.Entity.Id.ToString("D") : entry.Entity.DisplayNumber,
+                request?.AuthorId ?? LadderSealActor ?? "system.persistence"));
+        }
+
+        foreach (var entry in ChangeTracker.Entries<SystemChangeRequest>().Where(x => x.State == EntityState.Added))
+        {
+            var change = entry.Entity.RequirementChanges.FirstOrDefault();
+            if (change is not null)
+                candidates.Add((entry.Entity.ProjectId, "draft-requirement-change",
+                    string.IsNullOrWhiteSpace(change.DisplayNumber) ? change.Id.ToString("D") : change.DisplayNumber,
+                    entry.Entity.AuthorId));
+        }
+
+        foreach (var entry in ChangeTracker.Entries<RequirementArtifact>().Where(x => x.State == EntityState.Added))
+            candidates.Add((entry.Entity.ProjectId, "requirement-artifact", entry.Entity.BaseNumber,
+                LadderSealActor ?? "system.persistence"));
+        foreach (var entry in ChangeTracker.Entries<RequirementRevision>().Where(x => x.State == EntityState.Added))
+        {
+            var artifact = Requirements.Local.SingleOrDefault(x => x.Id == entry.Entity.ArtifactId);
+            var baseNumber = artifact?.BaseNumber ?? await Requirements.AsNoTracking()
+                .Where(x => x.Id == entry.Entity.ArtifactId).Select(x => x.BaseNumber).SingleOrDefaultAsync(ct);
+            var projectId = artifact?.ProjectId ?? await Requirements.AsNoTracking()
+                .Where(x => x.Id == entry.Entity.ArtifactId).Select(x => x.ProjectId).SingleOrDefaultAsync(ct);
+            if (projectId != Guid.Empty)
+                candidates.Add((projectId, "requirement-revision", $"{baseNumber}.{entry.Entity.Revision:D2}",
+                    LadderSealActor ?? "system.persistence"));
+        }
+        foreach (var entry in ChangeTracker.Entries<TestProcedure>().Where(x => x.State == EntityState.Added))
+            candidates.Add((entry.Entity.ProjectId, "test-procedure", entry.Entity.BaseNumber,
+                entry.Entity.OwnerId));
+        foreach (var entry in ChangeTracker.Entries<TestChangeReview>().Where(x => x.State == EntityState.Added))
+            candidates.Add((entry.Entity.ProjectId, "test-change-review",
+                string.IsNullOrWhiteSpace(entry.Entity.DisplayNumber) ? entry.Entity.Id.ToString("D") : entry.Entity.DisplayNumber,
+                LadderSealActor ?? "system.persistence"));
+        foreach (var entry in ChangeTracker.Entries<RequirementTraceLink>().Where(x => x.State == EntityState.Added))
+            candidates.Add((entry.Entity.ProjectId, "trace-link", entry.Entity.Id.ToString("D"),
+                LadderSealActor ?? "system.persistence"));
+        foreach (var entry in ChangeTracker.Entries<CodeTraceabilityRecord>().Where(x => x.State == EntityState.Added))
+            candidates.Add((entry.Entity.ProjectId, "code-traceability", entry.Entity.Id.ToString("D"),
+                LadderSealActor ?? "system.persistence"));
+
+        if (candidates.Count == 0) return;
+        var authority = new ProjectLadderSealAuthority(this);
+        foreach (var candidate in candidates.OrderBy(x => x.ProjectId).ThenBy(x => x.Kind, StringComparer.Ordinal)
+                     .ThenBy(x => x.Identity, StringComparer.Ordinal))
+        {
+            var result = await authority.SealAsync(candidate.ProjectId, candidate.Kind, candidate.Identity,
+                candidate.Actor, DateTimeOffset.UtcNow, ct);
+            if (result.Kind == ProjectLadderSealResultKind.NotFound)
+            {
+                // A pre-feature database may still represent the legacy policy implicitly. Materialize that
+                // exact default in this same unit of work before sealing; qualifying content must never commit
+                // while the project remains without a persisted, sealed configuration.
+                var legacy = LegacyDefaultProjectLadderFactory.Create(candidate.ProjectId, DateTimeOffset.UtcNow);
+                ProjectLadderConfigurations.Add(legacy);
+                result = await authority.SealAsync(candidate.ProjectId, candidate.Kind, candidate.Identity,
+                    candidate.Actor, DateTimeOffset.UtcNow, ct);
+                if (result.Kind == ProjectLadderSealResultKind.NotFound)
+                    throw new DomainException(result.Error
+                        ?? $"Project '{candidate.ProjectId:D}' has no ladder configuration for qualifying content.");
+            }
+        }
+    }
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         modelBuilder.Entity<ShowcaseUpgradeStep>(b =>
@@ -187,13 +363,20 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
                 "((\"Classification\" = 'LegacyDefault' AND \"State\" = 'Stored' AND \"ActivatedAt\" IS NULL AND \"ActivatedBy\" IS NULL AND \"RetiredAt\" IS NULL AND \"RetiredBy\" IS NULL AND \"ActivationManifestVersion\" IS NULL AND \"ActivationManifestHash\" IS NULL) OR "
                 + "(\"Classification\" = 'NonDefault' AND \"State\" = 'Draft' AND \"ActivatedAt\" IS NULL AND \"ActivatedBy\" IS NULL AND \"RetiredAt\" IS NULL AND \"RetiredBy\" IS NULL AND \"ActivationManifestVersion\" IS NULL AND \"ActivationManifestHash\" IS NULL) OR "
                 + "(\"Classification\" = 'NonDefault' AND \"State\" = 'Active' AND \"ActivatedAt\" IS NOT NULL AND \"ActivatedBy\" IS NOT NULL AND length(trim(\"ActivatedBy\")) > 0 AND \"RetiredAt\" IS NULL AND \"RetiredBy\" IS NULL AND \"ActivationManifestVersion\" IS NOT NULL AND length(trim(\"ActivationManifestVersion\")) > 0 AND \"ActivationManifestHash\" IS NOT NULL AND length(trim(\"ActivationManifestHash\")) > 0) OR "
-                + "(\"Classification\" = 'NonDefault' AND \"State\" = 'Retired' AND \"ActivatedAt\" IS NOT NULL AND \"ActivatedBy\" IS NOT NULL AND length(trim(\"ActivatedBy\")) > 0 AND \"RetiredAt\" IS NOT NULL AND \"RetiredBy\" IS NOT NULL AND length(trim(\"RetiredBy\")) > 0 AND \"ActivationManifestVersion\" IS NOT NULL AND length(trim(\"ActivationManifestVersion\")) > 0 AND \"ActivationManifestHash\" IS NOT NULL AND length(trim(\"ActivationManifestHash\")) > 0))"));
+                + "(\"Classification\" = 'NonDefault' AND \"State\" = 'Retired' AND \"ActivatedAt\" IS NOT NULL AND \"ActivatedBy\" IS NOT NULL AND length(trim(\"ActivatedBy\")) > 0 AND \"RetiredAt\" IS NOT NULL AND \"RetiredBy\" IS NOT NULL AND length(trim(\"RetiredBy\")) > 0 AND \"ActivationManifestVersion\" IS NOT NULL AND length(trim(\"ActivationManifestVersion\")) > 0 AND \"ActivationManifestHash\" IS NOT NULL AND length(trim(\"ActivationManifestHash\")) > 0)) AND "
+                + "((\"IsSealed\" = FALSE AND \"SealedAt\" IS NULL AND \"SealedBy\" IS NULL AND \"SealedContentKind\" IS NULL AND \"SealedContentIdentity\" IS NULL AND \"LastUpgradeAt\" IS NULL AND \"LastUpgradeBy\" IS NULL AND \"LastUpgradeVersion\" IS NULL AND \"LastUpgradeManifestHash\" IS NULL) OR "
+                + "(\"IsSealed\" = TRUE AND \"SealedAt\" IS NOT NULL AND \"SealedBy\" IS NOT NULL AND length(trim(\"SealedBy\")) > 0 AND \"SealedContentKind\" IS NOT NULL AND length(trim(\"SealedContentKind\")) > 0 AND \"SealedContentIdentity\" IS NOT NULL AND length(trim(\"SealedContentIdentity\")) > 0 AND ((\"LastUpgradeAt\" IS NULL AND \"LastUpgradeBy\" IS NULL AND \"LastUpgradeVersion\" IS NULL AND \"LastUpgradeManifestHash\" IS NULL) OR (\"LastUpgradeAt\" IS NOT NULL AND \"LastUpgradeBy\" IS NOT NULL AND length(trim(\"LastUpgradeBy\")) > 0 AND \"LastUpgradeVersion\" IS NOT NULL AND length(trim(\"LastUpgradeVersion\")) > 0 AND \"LastUpgradeManifestHash\" IS NOT NULL AND length(trim(\"LastUpgradeManifestHash\")) > 0))))"));
             b.ToTable("project_ladder_configurations", t => t.HasCheckConstraint("CK_project_ladder_configuration_version", "\"Version\" > 0"));
             b.HasKey(x => x.Id); b.HasAlternateKey(x => new { x.Id, x.ProjectId });
             b.Property(x => x.Classification).HasConversion<string>().HasMaxLength(30).IsRequired();
             b.Property(x => x.State).HasConversion<string>().HasMaxLength(30).IsRequired();
             b.Property(x => x.ActivatedBy).HasMaxLength(100); b.Property(x => x.RetiredBy).HasMaxLength(100);
             b.Property(x => x.ActivationManifestVersion).HasMaxLength(100); b.Property(x => x.ActivationManifestHash).HasMaxLength(128);
+            b.Property(x => x.IsSealed).IsRequired();
+            b.Property(x => x.SealedBy).HasMaxLength(100); b.Property(x => x.SealedContentKind).HasMaxLength(100);
+            b.Property(x => x.SealedContentIdentity).HasMaxLength(400);
+            b.Property(x => x.LastUpgradeBy).HasMaxLength(100); b.Property(x => x.LastUpgradeVersion).HasMaxLength(100);
+            b.Property(x => x.LastUpgradeManifestHash).HasMaxLength(128);
             b.Property(x => x.Version).IsConcurrencyToken(); b.HasIndex(x => x.ProjectId).IsUnique();
             b.HasOne<ProjectRecord>().WithMany().HasForeignKey(x => x.ProjectId).OnDelete(DeleteBehavior.Cascade);
             b.HasMany(x => x.Steps).WithOne().HasForeignKey(nameof(ProjectLadderStep.ConfigurationId), nameof(ProjectLadderStep.ProjectId))

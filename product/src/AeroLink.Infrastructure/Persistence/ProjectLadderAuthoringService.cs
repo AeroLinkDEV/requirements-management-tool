@@ -25,6 +25,15 @@ public sealed record ProjectLadderReadModel(
     Guid ConfigurationId,
     ProjectLadderConfigurationClassification Classification,
     ProjectLadderConfigurationState State,
+    bool IsSealed,
+    DateTimeOffset? SealedAt,
+    string? SealedBy,
+    string? SealedContentKind,
+    string? SealedContentIdentity,
+    DateTimeOffset? LastUpgradeAt,
+    string? LastUpgradeBy,
+    string? LastUpgradeVersion,
+    string? LastUpgradeManifestHash,
     long Version,
     string? ActivationManifestVersion,
     string? ActivationManifestHash,
@@ -85,6 +94,9 @@ public sealed class ProjectLadderAuthoringService(
             .Include(x => x.Steps).Include(x => x.AllowedUpstream)
             .SingleOrDefaultAsync(x => x.ProjectId == projectId, ct);
         if (configuration is null) return new(ProjectLadderEditResultKind.NotFound, Error: "The project has no ladder configuration.");
+        if (configuration.IsSealed)
+            return new(ProjectLadderEditResultKind.Conflict,
+                Error: ProjectLadderSealAuthority.ConflictExplanation(configuration));
         if (configuration.Version != command.ExpectedVersion)
             return new(ProjectLadderEditResultKind.Conflict, Error: "Another ladder edit was saved. Refresh before editing again.");
 
@@ -190,6 +202,9 @@ public sealed class ProjectLadderAuthoringService(
             .Include(x => x.Steps).Include(x => x.AllowedUpstream)
             .SingleOrDefaultAsync(x => x.ProjectId == projectId, ct);
         if (configuration is null) return new(ProjectLadderActivationResultKind.NotFound, Error: "The project has no ladder configuration.");
+        if (configuration.IsSealed)
+            return new(ProjectLadderActivationResultKind.Conflict,
+                Error: ProjectLadderSealAuthority.ConflictExplanation(configuration));
         if (configuration.Version != command.ExpectedVersion)
             return new(ProjectLadderActivationResultKind.Conflict, Error: "Another ladder edit was saved. Refresh before activating.");
         if (configuration.Classification != ProjectLadderConfigurationClassification.NonDefault
@@ -289,6 +304,10 @@ public sealed class ProjectLadderAuthoringService(
             .Select((level, index) => new LadderStepDraft(level.ToString(), index + 1, effectivePolicy.Definition(level).Capabilities))
             .ToArray();
         return new(configuration.ProjectId, configuration.Id, configuration.Classification, configuration.State,
+            configuration.IsSealed, configuration.SealedAt, configuration.SealedBy,
+            configuration.SealedContentKind, configuration.SealedContentIdentity,
+            configuration.LastUpgradeAt, configuration.LastUpgradeBy, configuration.LastUpgradeVersion,
+            configuration.LastUpgradeManifestHash,
             configuration.Version, configuration.ActivationManifestVersion, configuration.ActivationManifestHash,
             configuration.Steps.OrderBy(x => x.Position).Select(x => new LadderStepDraft(x.CatalogueEntry, x.Position, x.Capabilities)).ToArray(),
             configuration.AllowedUpstream.Select(x => new LadderRelationshipDraft(
