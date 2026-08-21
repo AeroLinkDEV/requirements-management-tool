@@ -20,12 +20,24 @@ test('Project configuration authors and activates a disposable graph, records hi
   await expect(page.getByRole('heading', { name: 'Project configuration', level: 1 })).toBeVisible()
   await expect(page.locator('.ladderRow')).toHaveCount(3)
 
+  // Re-add LowLevel from the catalogue. Its JsonStringEnumConverter response contains all four capability
+  // flags as names, so this proves the client masks the catalogue projection before rendering checkboxes.
+  await page.locator('.ladderRow').nth(2).getByRole('button', { name: 'Remove' }).click()
+  await page.getByRole('button', { name: 'Add level' }).click()
+  const addedLowLevel = page.locator('.ladderRow').nth(2)
+  await expect(addedLowLevel.locator('select')).toHaveValue('LowLevel')
+  await expect(addedLowLevel.locator('input[type="checkbox"]')).toHaveCount(4)
+  for (const checkbox of await addedLowLevel.locator('input[type="checkbox"]').all()) await expect(checkbox).toBeChecked()
+
   // Remove the middle level and use the server-provided selected-step relationship editor for System -> LowLevel.
   await page.locator('.ladderRow').nth(1).getByRole('button', { name: 'Remove' }).click()
   await page.getByRole('button', { name: 'Add relationship' }).click()
   await page.getByPlaceholder('Why is this ladder changing?').fill('Use the direct System to Low-Level pilot graph')
   await page.getByRole('button', { name: 'Save draft' }).click()
   await expect(page.getByText('Draft configuration saved with immutable history evidence.')).toBeVisible()
+  const savedLowLevel = page.locator('.ladderRow').nth(1)
+  await expect(savedLowLevel.locator('select')).toHaveValue('LowLevel')
+  for (const checkbox of await savedLowLevel.locator('input[type="checkbox"]').all()) await expect(checkbox).toBeChecked()
 
   await page.getByRole('button', { name: /History/ }).click()
   await expect(page.getByRole('columnheader', { name: 'When' })).toBeVisible()
@@ -38,6 +50,9 @@ test('Project configuration authors and activates a disposable graph, records hi
   await page.getByRole('button', { name: 'Attempt activation' }).click()
   await expect(page.getByRole('status')).toContainText('Ladder activated. Runtime surfaces now use the stored effective ladder.')
   await expect(page.locator('.ladderRow')).toHaveCount(2)
+  const activatedLowLevel = page.locator('.ladderRow').nth(1)
+  await expect(activatedLowLevel.locator('select')).toHaveValue('LowLevel')
+  for (const checkbox of await activatedLowLevel.locator('input[type="checkbox"]').all()) await expect(checkbox).toBeChecked()
   await expect(page.getByText(/active and immutable/i)).toBeVisible()
   await expect(page.getByRole('button', { name: 'Attempt activation' })).toHaveCount(0)
 

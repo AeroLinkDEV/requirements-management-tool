@@ -19,11 +19,32 @@ type Configuration = {
   readiness: { version: string; hash: string; consumers: Consumer[]; missingOrUnrouted: Consumer[]; isReady: boolean };
   catalogue: CatalogueEntry[]; canManage: boolean;
 };
+type ConfigurationResponse = Omit<Configuration, "steps" | "effectiveSteps" | "catalogue"> & {
+  steps: (Omit<Step, "capabilities"> & { capabilities: unknown })[];
+  effectiveSteps?: (Omit<Step, "capabilities"> & { capabilities: unknown })[];
+  catalogue: (Omit<CatalogueEntry, "supportedCapabilities"> & { supportedCapabilities: unknown })[];
+};
 
 const capabilityLabels = ["Change control", "Verification", "Requirements document", "Code traceability"];
 
 function displayLevel(level: Level) {
   return level === "HighLevel" ? "High-Level software" : level === "LowLevel" ? "Low-Level software" : "System";
+}
+
+function normalizeConfiguration(value: ConfigurationResponse): Configuration {
+  const normalizeStep = (step: ConfigurationResponse["steps"][number]): Step => ({
+    ...step,
+    capabilities: capabilityMask(step.capabilities),
+  });
+  return {
+    ...value,
+    steps: value.steps.map(normalizeStep),
+    effectiveSteps: (value.effectiveSteps ?? []).map(normalizeStep),
+    catalogue: value.catalogue.map(entry => ({
+      ...entry,
+      supportedCapabilities: capabilityMask(entry.supportedCapabilities),
+    })),
+  };
 }
 
 export default function ProjectConfigurationCenter({ user, api, projectId, projectName, initialSection = "ladder", onBackToBuilds, onOpenApprovalConfiguration, onActivated, onSignOut }: {
@@ -42,9 +63,8 @@ export default function ProjectConfigurationCenter({ user, api, projectId, proje
 
   const load = useCallback(async () => {
     try {
-      const value = await apiRequest<Configuration>(`${api}/api/projects/${projectId}/configuration`);
-      const normalized = { ...value, steps: value.steps.map(step => ({ ...step, capabilities: capabilityMask(step.capabilities) })) };
-      setConfiguration(normalized); setSteps(normalized.steps); setRelationships(value.relationships); setError("");
+      const normalized = normalizeConfiguration(await apiRequest<ConfigurationResponse>(`${api}/api/projects/${projectId}/configuration`));
+      setConfiguration(normalized); setSteps(normalized.steps); setRelationships(normalized.relationships); setError("");
     } catch (failure) { setError(operationError(failure, "The project configuration could not be loaded.")); }
   }, [api, projectId]);
   useEffect(() => { void load(); }, [load]);
@@ -85,11 +105,12 @@ export default function ProjectConfigurationCenter({ user, api, projectId, proje
     if (!configuration || !reason.trim()) { setError("A meaningful reason is required for every configuration edit."); return; }
     setSaving(true); setError(""); setNotice("");
     try {
-      const value = await apiRequest<Configuration>(`${api}/api/projects/${projectId}/configuration`, {
+      const value = await apiRequest<ConfigurationResponse>(`${api}/api/projects/${projectId}/configuration`, {
         method: "PUT", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ expectedVersion: configuration.version, reason, steps, relationships }),
       });
-      setConfiguration(value); setSteps(value.steps); setRelationships(value.relationships); setReason(""); setNotice("Draft configuration saved with immutable history evidence.");
+      const normalized = normalizeConfiguration(value);
+      setConfiguration(normalized); setSteps(normalized.steps); setRelationships(normalized.relationships); setReason(""); setNotice("Draft configuration saved with immutable history evidence.");
     } catch (failure) { setError(operationError(failure, "The configuration edit was refused.")); }
     finally { setSaving(false); }
   };
@@ -97,12 +118,13 @@ export default function ProjectConfigurationCenter({ user, api, projectId, proje
     if (!configuration || !reason.trim()) { setError("A meaningful reason is required for an activation attempt."); return; }
     setSaving(true); setError(""); setNotice("");
     try {
-      const value = await apiRequest<Configuration>(`${api}/api/projects/${projectId}/configuration/activate`, {
+      const value = await apiRequest<ConfigurationResponse>(`${api}/api/projects/${projectId}/configuration/activate`, {
         method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ expectedVersion: configuration.version, reason })
       });
-      setConfiguration(value); setSteps(value.steps); setRelationships(value.relationships); setReason("");
+      const normalized = normalizeConfiguration(value);
+      setConfiguration(normalized); setSteps(normalized.steps); setRelationships(normalized.relationships); setReason("");
       setNotice("Ladder activated. Runtime surfaces now use the stored effective ladder.");
-      onActivated(value);
+      onActivated(normalized);
     }
     catch (failure) { setError(operationError(failure, "Activation was refused.")); }
     finally { setSaving(false); }
