@@ -21,9 +21,11 @@ the code under test.
 - Prefer `git worktree add` to sharing this checkout for anything long-running.
 - Check `git rev-parse --abbrev-ref HEAD` immediately before *and after* any long test run, and
   treat a green result from a run that spanned a switch as void.
-- Compiled output is unaffected by a source-tree switch, so a `dotnet test --no-build` result stays
-  valid — and the test *count* is good evidence of which code actually ran.
-- Never leave untracked files loose in the tree; another agent's `git add -A` will sweep them up.
+- A `--no-build` run proves only what was in the output directory, which nothing ties to a commit.
+  Treat any run that spanned a branch switch as void unless the binaries were built from a known SHA
+  into an isolated output path. A changed test count is a hint, never provenance.
+- Never stage broadly. `git add -A` in a shared checkout sweeps up whatever another agent left
+  untracked — stage explicit paths.
 
 ## Local environment
 
@@ -43,10 +45,11 @@ the code under test.
   factory never falls back to the persistent database. Point it at a throwaway name, never
   `aerolink`. See `product/docs/OPERATIONS.md`.
 - `dotnet ef migrations list --no-connect` validates the chain without touching any database.
-- **Two branches cut from the same base that each add a migration** need care: the one that lands
-  second sorts earlier by timestamp while applying later, and its `Designer.cs` snapshot never saw
-  the other's model. Check whether the two touch overlapping tables. If they do, delete and
-  regenerate the second migration after rebasing. A clean *textual* merge of
+- **Two branches cut from the same base that each add a migration** need care. If the one landing
+  second has the earlier timestamp, it sorts before a migration already applied elsewhere while
+  running after it, and its `Designer.cs` snapshot never saw the other's model. Check whether the
+  two touch overlapping tables; where they do, regenerate the unmerged one after rebasing. Never
+  rewrite a migration that has already been merged or applied anywhere. A clean *textual* merge of
   `AeroLinkDbContextModelSnapshot.cs` proves nothing.
 - PostgreSQL has no assignment cast from `integer` to `varchar`; a scaffolded `AlterColumn` between
   them is refused outright. Write the conversion by hand with an explicit `USING`.
@@ -80,7 +83,8 @@ the code under test.
   `POST /api/change-request-drafts` with `requirementChanges`.
 - A build carries **one** candidate baseline; a second is refused.
 - A successor release cannot be created while the current one is in work.
-- A System `Introduce` needs a `targetSectionId` before it can be submitted for review.
+- An `Introduce` needs a `targetSectionId` before review at **any** level whose specification has
+  sections — not only System.
 - Test procedures are numbered for their level — `SYSTP-` / `HLRTP-` / `LLRTP-` — and
   `TestProcedure` defaults to `HighLevel`. `AeroLinkDbContext` refuses cross-level coverage at
   `SaveChanges`, but only for links whose procedure revision is already persisted.
@@ -89,6 +93,9 @@ the code under test.
   rolls back.
 - Requirement revisions are created when a baseline is **frozen and materialized**, not when a change
   request is approved. Much of the change-control design follows from this.
+- Approving a change request opens **downstream assessments one level down** — System to High-Level,
+  High-Level to Low-Level (`DownstreamImpactService`). That is real controlled work created from the
+  level hierarchy, not a label.
 
 ## Verifying claims
 
