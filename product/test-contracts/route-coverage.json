@@ -122,7 +122,9 @@
       "method": "DELETE",
       "path": "/api/trace-links/{id:guid}",
       "file": "VerificationEndpoints.cs",
-      "coveredBy": []
+      "coveredBy": [
+        "AuthoringTracedImpactTests"
+      ]
     },
     {
       "method": "PATCH",
@@ -1742,13 +1744,17 @@
       "method": "POST",
       "path": "/api/reqif/jobs/{id:guid}/commit",
       "file": "ReqIfEndpoints.cs",
-      "coveredBy": []
+      "coveredBy": [
+        "OpenDigitalThreadTests"
+      ]
     },
     {
       "method": "POST",
       "path": "/api/reqif/jobs/{id:guid}/process",
       "file": "ReqIfEndpoints.cs",
-      "coveredBy": []
+      "coveredBy": [
+        "OpenDigitalThreadTests"
+      ]
     },
     {
       "method": "POST",
@@ -1972,7 +1978,9 @@
       "method": "POST",
       "path": "/api/trace-links",
       "file": "VerificationEndpoints.cs",
-      "coveredBy": []
+      "coveredBy": [
+        "AuthoringTracedImpactTests"
+      ]
     },
     {
       "method": "POST",

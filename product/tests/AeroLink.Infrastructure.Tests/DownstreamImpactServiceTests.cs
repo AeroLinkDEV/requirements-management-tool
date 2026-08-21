@@ -24,11 +24,13 @@ public sealed class DownstreamImpactServiceTests
             var release = new SoftwareRelease(project.Id, "1.6", false);
             var system = Approved(project.Id, release.Id, "SRCR-00031", RequirementLevel.System, "SYSR-000151");
             var software = Approved(project.Id, release.Id, "HLRCR-00076", RequirementLevel.HighLevel, "HLR-000401", ChangeRequestType.Software);
-            db.AddRange(program, project, release, system, software); await db.SaveChangesAsync();
+            var low = Approved(project.Id, release.Id, "LLRCR-00077", RequirementLevel.LowLevel, "LLR-000402", ChangeRequestType.Software);
+            db.AddRange(program, project, release, system, software, low); await db.SaveChangesAsync();
 
             var service = new DownstreamImpactService(db);
             Assert.Equal(1, await service.RaiseForApprovedChangeRequestAsync(system, Now, default));
             Assert.Equal(1, await service.RaiseForApprovedChangeRequestAsync(software, Now, default));
+            Assert.Equal(0, await service.RaiseForApprovedChangeRequestAsync(low, Now, default));
             await db.SaveChangesAsync();
             Assert.Equal(0, await service.RaiseForApprovedChangeRequestAsync(system, Now, default));
 

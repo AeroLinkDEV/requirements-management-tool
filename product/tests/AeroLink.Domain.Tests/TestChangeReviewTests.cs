@@ -553,9 +553,11 @@ public sealed class TestChangeReviewTests
     {
         var system = Create(TestChangeReviewDiscipline.System);
         var hlr = Create(TestChangeReviewDiscipline.HighLevelSoftware);
+        var llr = Create(TestChangeReviewDiscipline.LowLevelSoftware);
 
         Assert.Equal(TestProcedureLevel.System, system.ProcedureLevel());
         Assert.Equal(TestProcedureLevel.HighLevel, hlr.ProcedureLevel());
+        Assert.Equal(TestProcedureLevel.LowLevel, llr.ProcedureLevel());
 
         // A System package holding an HLR procedure is the test-world twin of a System change request holding
         // an HLR requirement — which is exactly the legacy data that put a System change request in the HLR
