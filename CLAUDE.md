@@ -19,8 +19,10 @@ is on disk, so after a silent switch it tests the other branch and goes green, p
 the code under test.
 
 - Prefer `git worktree add` to sharing this checkout for anything long-running.
-- Check `git rev-parse --abbrev-ref HEAD` immediately before *and after* any long test run, and
-  treat a green result from a run that spanned a switch as void.
+- Capture `git rev-parse HEAD` before *and after* any long test run and compare them — the branch
+  *name* staying the same proves nothing, because a branch can be moved to a different commit
+  without being renamed. Capture the dirty status too. Treat a green result from a run that spanned
+  a change as void.
 - A `--no-build` run proves only what was in the output directory, which nothing ties to a commit.
   Treat any run that spanned a branch switch as void unless the binaries were built from a known SHA
   into an isolated output path. A changed test count is a hint, never provenance.
@@ -37,7 +39,9 @@ the code under test.
   (`MSB3027`, "file is locked by"), check for a process on port 5080.
 - The app runs on **5080** (API) and **5173** (client). Playwright uses **5082** and **5174**, so
   browser journeys and a running app coexist — but Playwright rebuilds the API by default and will
-  collide with a running instance. `AEROLINK_E2E_SKIP_BUILD=true` avoids the rebuild.
+  collide with a running instance. `AEROLINK_E2E_SKIP_BUILD=true` avoids the rebuild — but only use
+  it when the existing binaries are known to have been built from the SHA under test. Otherwise it
+  reproduces the stale-binary false pass described above, and hides it behind a green run.
 
 ## Migrations
 
