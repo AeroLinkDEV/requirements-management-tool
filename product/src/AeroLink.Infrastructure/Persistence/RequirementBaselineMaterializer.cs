@@ -6,13 +6,15 @@ using AeroLink.Domain.ChangeControl;
 using AeroLink.Domain.Common;
 using AeroLink.Domain.Requirements;
 using AeroLink.Domain.Traceability;
+using AeroLink.Domain.Hierarchy;
 using Microsoft.EntityFrameworkCore;
 
 namespace AeroLink.Infrastructure.Persistence;
 
 public sealed record MaterializationResult(string RequirementsHash, int ActiveRequirementCount, int CreatedRevisionCount);
 
-public sealed class RequirementBaselineMaterializer(AeroLinkDbContext db, VerificationImpactService verificationImpact)
+public sealed class RequirementBaselineMaterializer(AeroLinkDbContext db, VerificationImpactService verificationImpact,
+    ILadderPolicy? policy = null, IProjectLadderPolicyResolver? policyResolver = null)
 {
     public async Task<MaterializationResult> MaterializeAsync(Guid baselineId, string actorId, DateTimeOffset now, CancellationToken ct)
     {
@@ -21,6 +23,8 @@ public sealed class RequirementBaselineMaterializer(AeroLinkDbContext db, Verifi
             ?? throw new DomainException("Baseline not found.");
         if (baseline.State != CandidateBaselineState.Frozen) throw new DomainException("Freeze the baseline before materializing its requirements.");
         if (baseline.RequirementsMaterializedAt is not null) throw new DomainException("The requirement baseline is already materialized and immutable.");
+        var ladderPolicy = policyResolver is null ? (policy ?? LegacyLadderPolicy.Instance)
+            : await policyResolver.ResolveAsync(baseline.ProjectId, ct);
 
         var artifacts = await db.Requirements.Where(x => x.ProjectId == baseline.ProjectId).ToListAsync(ct);
         var schemas = await db.ArtifactSchemas.AsNoTracking().Where(x=>x.ProjectId==baseline.ProjectId&&x.IsActive).ToDictionaryAsync(x=>x.AppliesTo,ct);
@@ -87,10 +91,18 @@ public sealed class RequirementBaselineMaterializer(AeroLinkDbContext db, Verifi
         var existingTraceKeys = (await db.RequirementTraces.AsNoTracking()
                 .Where(x => x.ProjectId == baseline.ProjectId)
                 .Select(x => new { x.SourceRevisionId, x.TargetRevisionId, x.Type }).ToListAsync(ct))
-            .Select(x => (x.SourceRevisionId, x.TargetRevisionId, x.Type)).ToHashSet();
+                .Select(x => (x.SourceRevisionId, x.TargetRevisionId, x.Type)).ToHashSet();
+        var parentLevels = await (from revision in db.RequirementRevisions.AsNoTracking()
+                                  join artifact in db.Requirements.AsNoTracking() on revision.ArtifactId equals artifact.Id
+                                  where proposed.Select(x => x.Parent).Contains(revision.Id)
+                                      && artifact.ProjectId == baseline.ProjectId
+                                  select new { revision.Id, artifact.Level }).ToDictionaryAsync(x => x.Id, x => x.Level, ct);
         foreach (var allocation in proposed)
         {
             if (!revisionByChange.TryGetValue(allocation.Change.Id, out var source)) continue;
+            if (!parentLevels.TryGetValue(allocation.Parent, out var parentLevel))
+                throw new DomainException("An upstream allocation must reference an exact requirement revision.");
+            RequirementTracePolicy.Validate(ladderPolicy, allocation.Change.Level, parentLevel, RequirementTraceType.AllocatedFrom);
             var key = (source, allocation.Parent, RequirementTraceType.AllocatedFrom);
             if (!existingTraceKeys.Add(key)) continue;
             db.RequirementTraces.Add(new RequirementTraceLink(baseline.ProjectId, source, allocation.Parent,

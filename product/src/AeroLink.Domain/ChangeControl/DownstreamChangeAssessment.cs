@@ -20,12 +20,23 @@ public sealed class DownstreamChangeAssessment
 
     public DownstreamChangeAssessment(Guid projectId, Guid releaseId, Guid sourceChangeRequestId,
         string sourceChangeRequestNumber, RequirementLevel targetLevel, DateTimeOffset now)
+        : this(projectId, releaseId, sourceChangeRequestId, sourceChangeRequestNumber, targetLevel, now,
+            LegacyLadderPolicy.Instance)
+    {
+    }
+
+    /// <summary>Creates an assessment only for a target accepted by the effective project ladder policy.</summary>
+    public DownstreamChangeAssessment(Guid projectId, Guid releaseId, Guid sourceChangeRequestId,
+        string sourceChangeRequestNumber, RequirementLevel targetLevel, DateTimeOffset now, ILadderPolicy policy)
     {
         if (projectId == Guid.Empty) throw new DomainException("A downstream assessment requires its Project.");
         if (releaseId == Guid.Empty) throw new DomainException("A downstream assessment requires its software build.");
         if (sourceChangeRequestId == Guid.Empty) throw new DomainException("A downstream assessment requires its source change request.");
-        if (!LegacyLadderPolicy.Instance.IsDownstreamTarget(targetLevel))
-            throw new DomainException("A downstream assessment must target HLR or LLR engineering.");
+        ArgumentNullException.ThrowIfNull(policy);
+        if (!policy.IsDownstreamTarget(targetLevel))
+            throw new DomainException(policy is ILegacyLadderCompatibilityPolicy
+                ? "A downstream assessment must target HLR or LLR engineering."
+                : $"A downstream assessment must target a configured downstream level; {targetLevel} is not one.");
         Id = Guid.NewGuid();
         ProjectId = projectId;
         ReleaseId = releaseId;

@@ -4,6 +4,7 @@ using AeroLink.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using AeroLink.Domain.Hierarchy;
 
 namespace AeroLink.Infrastructure;
 
@@ -11,6 +12,21 @@ public static class DependencyInjection
 {
     public static IServiceCollection AddAeroLinkInfrastructure(this IServiceCollection services, IConfiguration configuration)
     {
+        services.AddScoped<IProjectLadderPolicyResolver, EffectiveProjectLadderPolicyResolver>();
+        // These are the complete #705 seams. Registration is intentionally explicit: the manifest is a
+        // readiness inventory, not a flag, and every remaining #706 consumer stays named as a blocker.
+        foreach (var registration in new[]
+        {
+            new LadderConsumerRegistration("change-request.authoring", "Change-request level/type acceptance and authoring"),
+            new LadderConsumerRegistration("change-request.identifier-allocation", "Requirement and change-request controlled prefixes"),
+            new LadderConsumerRegistration("change-request.upstream-allocation", "Upstream picker and exact parent validation"),
+            new LadderConsumerRegistration("change-request.downstream-impact", "Approved-change downstream assessment creation"),
+            new LadderConsumerRegistration("reqif.commit", "ReqIF imported-level parsing and commit allocation"),
+            new LadderConsumerRegistration("enterprise.import-aliases", "Enterprise level import aliases"),
+            new LadderConsumerRegistration("trace.generic-mutation", "Generic trace mutation acceptance/refusal"),
+            new LadderConsumerRegistration("controlled-editing.identity", "Controlled editing identity and check-in"),
+        })
+            services.AddSingleton<ILadderConsumerRegistration>(registration);
         var provider = configuration["Database:Provider"] ?? "Sqlite";
         var connection = configuration.GetConnectionString("AeroLink") ?? "Data Source=aerolink-dev.db";
         // An unrecognised provider used to fall through to SQLite, so an installer who wrote "Postgres"

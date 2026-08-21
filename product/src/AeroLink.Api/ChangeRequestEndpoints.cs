@@ -125,7 +125,7 @@ public static class ChangeRequestEndpoints
             catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
         });
 
-        app.MapPost("/api/change-requests/{id:guid}/next-revision", async (Guid id, ActorRequest request, HttpContext http, IChangeRequestRepository repository, AeroLinkDbContext db, CancellationToken ct) =>
+        app.MapPost("/api/change-requests/{id:guid}/next-revision", async (Guid id, ActorRequest request, HttpContext http, IChangeRequestRepository repository, AeroLinkDbContext db, IProjectLadderPolicyResolver policyResolver, CancellationToken ct) =>
         {
             var approved = await repository.GetAsync(id, ct); if (approved is null) return Results.NotFound();
             if (!await http.HasProjectAccessAsync(db, approved.ProjectId, ct)) return Results.Forbid();
@@ -139,7 +139,8 @@ public static class ChangeRequestEndpoints
                 var released = await db.Releases.AsNoTracking()
                     .Where(x => x.Id == approved.TargetReleaseId).Select(x => x.IsReleased).SingleOrDefaultAsync(ct);
                 var now = DateTimeOffset.UtcNow;
-                var next = approved.StartNextRevision(actor.UserName, now, released, actor.IsAdministrator);
+                var policy = await policyResolver.ResolveAsync(approved.ProjectId, ct);
+                var next = approved.StartNextRevision(actor.UserName, now, released, actor.IsAdministrator, policy);
                 var reportIds = await db.ProblemReportLinks.AsNoTracking().Where(link =>
                         link.ArtifactType == "ChangeRequest" && link.ArtifactId == approved.Id
                         && link.Relationship == ProblemReportRelationshipPolicy.ProposedCorrectiveAction)
@@ -170,9 +171,11 @@ public static class ChangeRequestEndpoints
         // asking. Without a level it can only answer for a System change request; the software authoring
         // surfaces always know their own level and send it.
         app.MapGet("/api/authoring/context", async (Guid projectId, ChangeRequestType type,
-            RequirementLevel? softwareLevel, HttpContext http, AeroLinkDbContext db, ILadderPolicy ladderPolicy, CancellationToken ct) =>
+            RequirementLevel? softwareLevel, HttpContext http, AeroLinkDbContext db, ILadderPolicy ladderPolicy,
+            IProjectLadderPolicyResolver policyResolver, CancellationToken ct) =>
         {
             if (!await http.HasProjectAccessAsync(db, projectId, ct)) return Results.Forbid();
+            ladderPolicy = await policyResolver.ResolveAsync(projectId, ct);
             if (type == ChangeRequestType.Software && !ladderPolicy.IsChangeRequestScopeValid(type, softwareLevel))
                 return Results.BadRequest(new { error = "Say whether this software change request is HLR or LLR before previewing its number." });
             var prefixes = type == ChangeRequestType.System
@@ -184,19 +187,23 @@ public static class ChangeRequestEndpoints
             return Results.Ok(new
             {
                 type = type.ToString(),
-                changeRequestNumber = await IdentifierAllocator.PreviewChangeRequestAsync(db, type, softwareLevel, ct),
+                changeRequestNumber = await IdentifierAllocator.PreviewChangeRequestAsync(db, type, softwareLevel, ct, ladderPolicy),
                 author = new { http.UserAccount().UserName, http.UserAccount().DisplayName },
                 requirementNumbers = numbers
             });
         });
 
-        app.MapGet("/api/authoring/requirements", async (Guid projectId, string scope, string? search, int? limit, HttpContext http, AeroLinkDbContext db, CancellationToken ct) =>
+        app.MapGet("/api/authoring/requirements", async (Guid projectId, string scope, string? search, int? limit, HttpContext http, AeroLinkDbContext db, IProjectLadderPolicyResolver policyResolver, CancellationToken ct) =>
         {
             if (!await http.HasProjectAccessAsync(db, projectId, ct)) return Results.Forbid();
+            var ladderPolicy = await policyResolver.ResolveAsync(projectId, ct);
             var artifacts = db.Requirements.AsNoTracking().Where(x => x.ProjectId == projectId);
-            artifacts = scope.Equals("System", StringComparison.OrdinalIgnoreCase)
-                ? artifacts.Where(x => x.Level == RequirementLevel.System)
-                : artifacts.Where(x => x.Level == RequirementLevel.HighLevel || x.Level == RequirementLevel.LowLevel);
+            var allowedLevels = scope.Equals("System", StringComparison.OrdinalIgnoreCase)
+                ? ladderPolicy.OrderedLevels.Where(x => x == RequirementLevel.System
+                    && ladderPolicy.Definition(x).Has(LevelCapabilities.HasChangeControl)).ToArray()
+                : ladderPolicy.OrderedLevels.Where(x => x != RequirementLevel.System
+                    && ladderPolicy.Definition(x).Has(LevelCapabilities.HasChangeControl)).ToArray();
+            artifacts = artifacts.Where(x => allowedLevels.Contains(x.Level));
             if (!string.IsNullOrWhiteSpace(search))
             {
                 var term = search.Trim().ToLower();
@@ -236,24 +243,28 @@ public static class ChangeRequestEndpoints
 
         app.MapGet("/api/authoring/upstream-requirements", async (Guid projectId, Guid releaseId,
             RequirementLevel childLevel, string? search, string? selected, int? limit, HttpContext http, AeroLinkDbContext db,
-            ILadderPolicy ladderPolicy, CancellationToken ct) =>
+            ILadderPolicy ladderPolicy, IProjectLadderPolicyResolver policyResolver, CancellationToken ct) =>
         {
             if (!await http.HasProjectAccessAsync(db, projectId, ct)) return Results.Forbid();
+            ladderPolicy = await policyResolver.ResolveAsync(projectId, ct);
             IReadOnlyList<RequirementLevel> parentLevels;
             try { parentLevels = ladderPolicy.ParentLevels(childLevel); }
             catch (DomainException)
             {
-                return Results.BadRequest(new { error = "Only HLR and LLR proposals have an upward allocation." });
+                return Results.BadRequest(new { error = ladderPolicy is ILegacyLadderCompatibilityPolicy
+                    ? "Only HLR and LLR proposals have an upward allocation."
+                    : $"The configured project ladder does not contain {childLevel}." });
             }
-            var parentLevel = parentLevels.Count == 1 ? parentLevels[0] : (RequirementLevel?)null;
-            if (parentLevel is null)
-                return Results.BadRequest(new { error = "Only HLR and LLR proposals have an upward allocation." });
+            if (parentLevels.Count == 0)
+                return Results.BadRequest(new { error = ladderPolicy is ILegacyLadderCompatibilityPolicy
+                    ? "Only HLR and LLR proposals have an upward allocation."
+                    : $"The configured {childLevel} level has no allowed upstream parent." });
             var baselineId = await BuildScope.EffectiveBaselineAsync(db, projectId, releaseId, ct);
             if (baselineId is null) return Results.Ok(Array.Empty<object>());
             var source = from member in db.BaselineRequirements.AsNoTracking().Where(x => x.BaselineId == baselineId)
-                         join artifact in db.Requirements.AsNoTracking().Where(x => x.ProjectId == projectId && x.Level == parentLevel) on member.ArtifactId equals artifact.Id
+                         join artifact in db.Requirements.AsNoTracking().Where(x => x.ProjectId == projectId && parentLevels.Contains(x.Level)) on member.ArtifactId equals artifact.Id
                          join revision in db.RequirementRevisions.AsNoTracking().Where(x => x.State == RequirementRevisionState.Active) on member.RevisionId equals revision.Id
-                         select new { revisionId = revision.Id, artifactId = artifact.Id, artifact.BaseNumber, revision.Revision, revision.Statement };
+                         select new { revisionId = revision.Id, artifactId = artifact.Id, artifact.BaseNumber, level = artifact.Level.ToString(), revision.Revision, revision.Statement };
             var selectedIds = (selected ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries)
                 .Select(x => Guid.TryParse(x, out var id) ? id : Guid.Empty).Where(x => x != Guid.Empty).ToList();
             if (!string.IsNullOrWhiteSpace(search))
@@ -269,12 +280,12 @@ public static class ChangeRequestEndpoints
             if (selectedIds.Count > 0)
             {
                 var selectedRows = await (from revision in db.RequirementRevisions.AsNoTracking().Where(x => selectedIds.Contains(x.Id))
-                                          join artifact in db.Requirements.AsNoTracking().Where(x => x.ProjectId == projectId && x.Level == parentLevel) on revision.ArtifactId equals artifact.Id
-                                          select new { revisionId = revision.Id, artifactId = artifact.Id, artifact.BaseNumber, revision.Revision, revision.Statement })
+                                          join artifact in db.Requirements.AsNoTracking().Where(x => x.ProjectId == projectId && parentLevels.Contains(x.Level)) on revision.ArtifactId equals artifact.Id
+                                          select new { revisionId = revision.Id, artifactId = artifact.Id, artifact.BaseNumber, level = artifact.Level.ToString(), revision.Revision, revision.Statement })
                     .ToListAsync(ct);
                 rows = rows.Concat(selectedRows).DistinctBy(x => x.revisionId).OrderBy(x => x.BaseNumber).ToList();
             }
-            return Results.Ok(rows.Select(x => new { x.revisionId, x.artifactId, displayNumber = $"{x.BaseNumber}.{x.Revision:D2}", level = parentLevel.ToString(), x.Statement }));
+            return Results.Ok(rows.Select(x => new { x.revisionId, x.artifactId, displayNumber = $"{x.BaseNumber}.{x.Revision:D2}", x.level, x.Statement }));
         });
 
         // What the traceability graph says a proposed change touches.
@@ -443,9 +454,10 @@ public static class ChangeRequestEndpoints
 
         // Historical discovery endpoints deliberately include every revision and lifecycle state.
 
-        app.MapPost("/api/change-requests", async (CreateChangeRequestRequest request, HttpContext http, IChangeRequestRepository repository, AeroLinkDbContext db, IdentityService identity, ILadderPolicy ladderPolicy, ProblemReportLinkService problemReports, CancellationToken ct) =>
+        app.MapPost("/api/change-requests", async (CreateChangeRequestRequest request, HttpContext http, IChangeRequestRepository repository, AeroLinkDbContext db, IdentityService identity, ILadderPolicy ladderPolicy, IProjectLadderPolicyResolver policyResolver, ProblemReportLinkService problemReports, CancellationToken ct) =>
         {
             if (!await http.HasProjectRoleAsync(db, identity, request.ProjectId, ct, ProgramRole.Engineer)) return Results.Forbid();
+            ladderPolicy = await policyResolver.ResolveAsync(request.ProjectId, ct);
             var closed = await ReleasedBuildRefusalAsync(db, request.TargetReleaseId, ct);
             if (closed is not null) return Results.BadRequest(new { error = closed, code = "release_is_closed" });
             if (string.IsNullOrWhiteSpace(request.Title))
@@ -457,10 +469,10 @@ public static class ChangeRequestEndpoints
             if (problemReportError is not null) return Results.BadRequest(new { error = problemReportError });
             try
             {
-                var baseNumber = await IdentifierAllocator.NextChangeRequestAsync(db, request.Type, request.SoftwareLevel, ct);
+                var baseNumber = await IdentifierAllocator.NextChangeRequestAsync(db, request.Type, request.SoftwareLevel, ct, ladderPolicy);
                 var scr = new SystemChangeRequest(baseNumber, 0, request.ProjectId, request.TargetReleaseId,
                     request.Title, request.Problem, request.Analysis, request.Solution, http.UserAccount().UserName, DateTimeOffset.UtcNow, request.Type,
-                    request.ProblemRich, request.AnalysisRich, request.SolutionRich, request.SoftwareLevel);
+                    request.ProblemRich, request.AnalysisRich, request.SolutionRich, request.SoftwareLevel, ladderPolicy);
                 await problemReports.LinkChangeRequestAsync(scr.Id, scr.DisplayNumber, request.ProblemReportIds,
                     http.UserAccount().UserName, DateTimeOffset.UtcNow, ct);
                 await repository.AddAsync(scr, ct); await repository.SaveAsync(ct);
@@ -469,9 +481,10 @@ public static class ChangeRequestEndpoints
             catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
         });
 
-        app.MapPost("/api/change-request-drafts", async (CreateChangeRequestDraftRequest request, HttpContext http, IChangeRequestRepository repository, AeroLinkDbContext db, IdentityService identity, ILadderPolicy ladderPolicy, EnterpriseRequirementsService enterpriseRequirements, ProblemReportLinkService problemReports, CancellationToken ct) =>
+        app.MapPost("/api/change-request-drafts", async (CreateChangeRequestDraftRequest request, HttpContext http, IChangeRequestRepository repository, AeroLinkDbContext db, IdentityService identity, ILadderPolicy ladderPolicy, IProjectLadderPolicyResolver policyResolver, EnterpriseRequirementsService enterpriseRequirements, ProblemReportLinkService problemReports, CancellationToken ct) =>
         {
             if (!await http.HasProjectRoleAsync(db, identity, request.ProjectId, ct, ProgramRole.Engineer)) return Results.Forbid();
+            ladderPolicy = await policyResolver.ResolveAsync(request.ProjectId, ct);
             var closed = await ReleasedBuildRefusalAsync(db, request.TargetReleaseId, ct);
             if (closed is not null) return Results.BadRequest(new { error = closed, code = "release_is_closed" });
             // Reject before synchronization, transaction creation, or identifier allocation: an untouched
@@ -505,13 +518,13 @@ public static class ChangeRequestEndpoints
                 // The resolved level, not the requested one: this path infers HLR or LLR from the authored
                 // changes when the caller did not state it, and the number has to name the same level the
                 // record will carry.
-                var baseNumber = await IdentifierAllocator.NextChangeRequestAsync(db, request.Type, softwareLevel, ct);
+                var baseNumber = await IdentifierAllocator.NextChangeRequestAsync(db, request.Type, softwareLevel, ct, ladderPolicy);
                 var schemas = await db.ArtifactSchemas.Include(x => x.Fields)
                     .Where(x => x.ProjectId == request.ProjectId && x.IsActive)
                     .ToDictionaryAsync(x => x.AppliesTo, StringComparer.OrdinalIgnoreCase, ct);
                 var scr = new SystemChangeRequest(baseNumber, 0, request.ProjectId, request.TargetReleaseId,
                     request.Title, request.Problem, request.Analysis, request.Solution, http.UserAccount().UserName, now, request.Type,
-                    request.ProblemRich, request.AnalysisRich, request.SolutionRich, softwareLevel);
+                    request.ProblemRich, request.AnalysisRich, request.SolutionRich, softwareLevel, ladderPolicy);
                 var nextNumbers = new Dictionary<string, int>();
                 foreach (var change in request.RequirementChanges)
                 {
@@ -555,7 +568,8 @@ public static class ChangeRequestEndpoints
                     if (sectionError is not null) return Results.BadRequest(new { error = sectionError });
                     scr.AddRequirementChange(actor, requirementNumber, revision, change.Level, change.Kind,
                         change.Statement, change.Rationale, change.VerificationMethod, now, change.RichText, attributes, change.ImpactDispositionJson,
-                        change.TargetSectionId, proposedUpstreamRevisionIdsJson: JsonSerializer.Serialize(change.UpstreamRevisionIds ?? []));
+                        change.TargetSectionId, proposedUpstreamRevisionIdsJson: JsonSerializer.Serialize(change.UpstreamRevisionIds ?? []),
+                        ladderPolicy: ladderPolicy);
                 }
                 await repository.AddAsync(scr, ct);
                 await problemReports.LinkChangeRequestAsync(scr.Id, scr.DisplayNumber, request.ProblemReportIds, actor, now, ct);
@@ -567,18 +581,19 @@ public static class ChangeRequestEndpoints
             catch (DbUpdateException) { return Results.Conflict(new { error = "Another author created an artifact at the same instant. No duplicate was saved; submit again to receive the next available numbers." }); }
         });
 
-        app.MapPost("/api/change-requests/{id:guid}/requirements", async (Guid id, RequirementChangeRequest request, HttpContext http, IChangeRequestRepository repository, AeroLinkDbContext db, CancellationToken ct) =>
+        app.MapPost("/api/change-requests/{id:guid}/requirements", async (Guid id, RequirementChangeRequest request, HttpContext http, IChangeRequestRepository repository, AeroLinkDbContext db, IProjectLadderPolicyResolver policyResolver, CancellationToken ct) =>
         {
             var scr = await repository.GetAsync(id, ct); if (scr is null) return Results.NotFound();
             if (!await http.HasProjectAccessAsync(db, scr.ProjectId, ct)) return Results.Forbid();
             var actor = http.UserAccount();
             if (!CanAdminister(scr, actor)) return Results.Forbid();
+            var ladderPolicy = await policyResolver.ResolveAsync(scr.ProjectId, ct);
             try
             {
                 scr.AddRequirementChange(actor.UserName, request.BaseNumber, request.Revision, request.Level, request.Kind,
                     request.Statement, request.Rationale, request.VerificationMethod, DateTimeOffset.UtcNow,
                     impactDispositionJson: RequirementAuthoringJson.PendingImpactDispositions,
-                    administratorAuthority: actor.IsAdministrator);
+                    administratorAuthority: actor.IsAdministrator, ladderPolicy: ladderPolicy);
                 await repository.SaveAsync(ct);
                 // The author is told who else is writing against this requirement, and never stopped by it.
                 return Results.Ok(ApiMap.ChangeRequestDetail(scr, await ArtifactClaims.NoticesAsync(db, scr, ct)));
@@ -785,7 +800,7 @@ public static class ChangeRequestEndpoints
             catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
         });
 
-        app.MapPost("/api/change-requests/{id:guid}/submit", async (Guid id, SubmitReviewRequest request, HttpContext http, IChangeRequestRepository repository, AeroLinkDbContext db, IdentityService identity, ILadderPolicy ladderPolicy, CancellationToken ct) =>
+        app.MapPost("/api/change-requests/{id:guid}/submit", async (Guid id, SubmitReviewRequest request, HttpContext http, IChangeRequestRepository repository, AeroLinkDbContext db, IdentityService identity, ILadderPolicy ladderPolicy, IProjectLadderPolicyResolver policyResolver, CancellationToken ct) =>
         {
             var scr = await repository.GetAsync(id, ct); if (scr is null) return Results.NotFound();
             if (request.ExpectedVersion is not null && scr.Version != request.ExpectedVersion) return Results.Conflict(new { error = "This change request changed after it was opened. Refresh it before submitting.", code = "stale_version" });
@@ -794,6 +809,7 @@ public static class ChangeRequestEndpoints
             {
                 var actor = http.UserAccount();
                 if (!CanAdminister(scr, actor)) return Results.Forbid();
+                ladderPolicy = await policyResolver.ResolveAsync(scr.ProjectId, ct);
                 foreach (var change in scr.RequirementChanges)
                 {
                     var sectionError = await TargetSectionRefusalAsync(db, scr.ProjectId, change.Level,
@@ -871,7 +887,7 @@ public static class ChangeRequestEndpoints
                     return Results.BadRequest(new { error = ArtifactClaims.Refusal(blocking), code = "requirement_claimed" });
 
                 var cycle = scr.SubmitForReview(actor.UserName, selections, now, request.Mode, workflow,
-                    actor.IsAdministrator);
+                    actor.IsAdministrator, ladderPolicy);
                 foreach (var step in cycle.Steps.Where(x => x.State == ApprovalStepState.Active))
                     db.UserNotifications.Add(new(scr.ProjectId, step.ApproverId, "ReviewActivated", $"Review {scr.DisplayNumber}", $"You are now authorized to review {scr.DisplayNumber}: {scr.Title}", $"{(scr.Type == ChangeRequestType.Software ? "swcr" : "scr")}:{scr.Id}", scr.Id, now));
                 await repository.SaveAsync(ct); return Results.Ok(ApiMap.ChangeRequestDetail(scr));
@@ -1169,9 +1185,16 @@ public static class ChangeRequestEndpoints
     {
         IReadOnlyList<RequirementLevel> parentLevels;
         try { parentLevels = ladderPolicy.ParentLevels(childLevel); }
-        catch (DomainException) { return "Only HLR and LLR proposals have an upward allocation."; }
+        catch (DomainException)
+        {
+            return ladderPolicy is ILegacyLadderCompatibilityPolicy
+                ? "Only HLR and LLR proposals have an upward allocation."
+                : $"The configured project ladder does not contain {childLevel}.";
+        }
         if (parentLevels.Count == 0)
-            return selected.Count == 0 ? null : "System requirements cannot carry a software upward allocation.";
+            return selected.Count == 0 ? null : ladderPolicy is ILegacyLadderCompatibilityPolicy
+                ? "System requirements cannot carry a software upward allocation."
+                : $"The configured {childLevel} level has no allowed upstream parent.";
         if (derived)
             return selected.Count == 0 ? null : "A derived requirement uses its documented rationale instead of an upstream allocation.";
         if (selected.Count == 0)
@@ -1182,15 +1205,14 @@ public static class ChangeRequestEndpoints
             return "The selected build does not belong to this Project.";
         var baselineId = await BuildScope.EffectiveBaselineAsync(db, projectId, releaseId, ct);
         if (baselineId is null) return "The selected build has no controlled baseline for upward allocation.";
-        if (parentLevels.Count != 1)
-            return "Only HLR and LLR proposals have an upward allocation.";
-        var expectedLevel = parentLevels[0];
         var valid = await (from member in db.BaselineRequirements.AsNoTracking().Where(x => x.BaselineId == baselineId && selected.Contains(x.RevisionId))
                            join revision in db.RequirementRevisions.AsNoTracking().Where(x => x.State == RequirementRevisionState.Active) on member.RevisionId equals revision.Id
-                           join artifact in db.Requirements.AsNoTracking().Where(x => x.ProjectId == projectId && x.Level == expectedLevel) on member.ArtifactId equals artifact.Id
+                           join artifact in db.Requirements.AsNoTracking().Where(x => x.ProjectId == projectId && parentLevels.Contains(x.Level)) on member.ArtifactId equals artifact.Id
                            select revision.Id).Distinct().ToListAsync(ct);
-        return valid.Count == selected.Count ? null :
-            $"Every proposed upstream allocation must be a current {expectedLevel} revision from this Project and build.";
+        if (valid.Count == selected.Count) return null;
+        if (ladderPolicy is ILegacyLadderCompatibilityPolicy && parentLevels.Count == 1)
+            return $"Every proposed upstream allocation must be a current {parentLevels[0]} revision from this Project and build.";
+        return "Every proposed upstream allocation must be a current configured parent revision from this Project and build.";
     }
 
     private static HashSet<string> AttributeKeys(string attributesJson)

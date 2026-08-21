@@ -4,6 +4,7 @@ using AeroLink.Domain.Programs;
 using AeroLink.Domain.Requirements;
 using AeroLink.Infrastructure.Persistence;
 using AeroLink.Domain.Traceability;
+using AeroLink.Domain.Hierarchy;
 using Microsoft.EntityFrameworkCore;
 using System.Text.Json;
 
@@ -96,6 +97,53 @@ public sealed class RequirementMaterializationTests
         finally { File.Delete(path); }
     }
 
+    [Fact]
+    public async Task Configured_child_to_parent_allocated_trace_materializes_successfully()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"aerolink-configured-materialization-{Guid.NewGuid():N}.db");
+        var options = new DbContextOptionsBuilder<AeroLinkDbContext>().UseSqlite($"Data Source={path};Pooling=False").Options;
+        try
+        {
+            await using var db = new AeroLinkDbContext(options); await db.Database.EnsureCreatedAsync(); var now = DateTimeOffset.UtcNow;
+            var program = new ProgramRecord("Configured", "CFG");
+            var projectRecord = new ProjectRecord(program.Id, "Configured Project", "Configured Software");
+            var release = new SoftwareRelease(projectRecord.Id, "1.0", false);
+            db.AddRange(program, projectRecord, release); await db.SaveChangesAsync();
+            var policy = ConfiguredSystemLowPolicy();
+
+            var system = new SystemChangeRequest("SRCR-00001", 0, projectRecord.Id, release.Id, "System", "P", "A", "S", "author", now,
+                ladderPolicy: policy);
+            system.AddRequirementChange("author", "SYSR-000001", 0, RequirementLevel.System, RequirementChangeKind.Introduce,
+                "The system shall navigate.", "Rationale", "Test", now, ladderPolicy: policy);
+            system.SubmitForReview("author", [new("reviewer", "Reviewer")], now); system.ApproveActiveStage("reviewer", now);
+            var first = FrozenBaseline("CFG-000001", projectRecord.Id, release.Id, null, system, now);
+            db.AddRange(system, first); await db.SaveChangesAsync();
+            await new RequirementBaselineMaterializer(db, new VerificationImpactService(db), policy: policy)
+                .MaterializeAsync(first.Id, "cm", now, default);
+            var parentRevision = await (from artifact in db.Requirements where artifact.ProjectId == projectRecord.Id && artifact.Level == RequirementLevel.System
+                                        join revision in db.RequirementRevisions on artifact.Id equals revision.ArtifactId
+                                        select revision.Id).SingleAsync();
+
+            var low = new SystemChangeRequest("LLRCR-00001", 0, projectRecord.Id, release.Id, "Low", "P", "A", "S", "author", now,
+                ChangeRequestType.Software, softwareLevel: RequirementLevel.LowLevel, ladderPolicy: policy);
+            low.AddRequirementChange("author", "LLR-000001", 0, RequirementLevel.LowLevel, RequirementChangeKind.Introduce,
+                "The implementation shall navigate.", "Rationale", "Test", now,
+                proposedUpstreamRevisionIdsJson: JsonSerializer.Serialize(new[] { parentRevision }), ladderPolicy: policy);
+            low.SubmitForReview("author", [new("reviewer", "Reviewer")], now); low.ApproveActiveStage("reviewer", now);
+            var second = FrozenBaseline("CFG-000002", projectRecord.Id, release.Id, first.Id, low, now);
+            db.AddRange(low, second); await db.SaveChangesAsync();
+            await new RequirementBaselineMaterializer(db, new VerificationImpactService(db), policy: policy)
+                .MaterializeAsync(second.Id, "cm", now, default);
+
+            var link = await db.RequirementTraces.SingleAsync(x => x.Type == RequirementTraceType.AllocatedFrom);
+            var childArtifact = await db.Requirements.SingleAsync(x => x.BaseNumber == "LLR-000001");
+            var childRevision = await db.RequirementRevisions.SingleAsync(x => x.ArtifactId == childArtifact.Id);
+            Assert.Equal(childRevision.Id, link.SourceRevisionId);
+            Assert.Equal(parentRevision, link.TargetRevisionId);
+        }
+        finally { File.Delete(path); }
+    }
+
     private static SystemChangeRequest ApprovedScr(string scrNumber, string requirementNumber, int revision, RequirementChangeKind kind, string statement, Guid projectId, Guid releaseId, DateTimeOffset now)
     {
         var scr = new SystemChangeRequest(scrNumber, 0, projectId, releaseId, kind.ToString(), "P", "A", "S", "author", now, ChangeRequestType.Software, softwareLevel: RequirementLevel.HighLevel);
@@ -105,5 +153,19 @@ public sealed class RequirementMaterializationTests
     private static CandidateBaseline FrozenBaseline(string number, Guid projectId, Guid releaseId, Guid? predecessor, SystemChangeRequest scr, DateTimeOffset now)
     {
         var baseline = new CandidateBaseline(number, 0, projectId, releaseId, predecessor, number, "cm", now); baseline.Select(scr, "cm", now); baseline.Freeze("cm", now); return baseline;
+    }
+
+    private static ILadderPolicy ConfiguredSystemLowPolicy()
+    {
+        var configuration = ProjectLadderConfiguration.CreateDraft(Guid.NewGuid(), DateTimeOffset.UtcNow);
+        var now = DateTimeOffset.UtcNow;
+        var system = new ProjectLadderStep(configuration.Id, configuration.ProjectId, RequirementLevel.System, 1,
+            LegacyLadderPolicy.Instance.Definition(RequirementLevel.System).Capabilities, now);
+        var low = new ProjectLadderStep(configuration.Id, configuration.ProjectId, RequirementLevel.LowLevel, 2,
+            LegacyLadderPolicy.Instance.Definition(RequirementLevel.LowLevel).Capabilities, now);
+        configuration.Steps.Add(system); configuration.Steps.Add(low);
+        configuration.AllowedUpstream.Add(new ProjectLadderAllowedUpstream(configuration.Id, configuration.ProjectId,
+            system.Id, low.Id, now));
+        return new ResolvedProjectLadderPolicy(ProjectLadderResolver.Resolve(configuration));
     }
 }

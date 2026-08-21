@@ -4,6 +4,7 @@ using AeroLink.Domain.ChangeControl;
 using AeroLink.Domain.Programs;
 using AeroLink.Domain.Requirements;
 using AeroLink.Domain.Traceability;
+using AeroLink.Domain.Hierarchy;
 using AeroLink.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 
@@ -11,6 +12,51 @@ namespace AeroLink.Infrastructure.Tests;
 
 public sealed class ReqIfExchangeTests
 {
+    [Fact]
+    public void Parser_uses_the_injected_configured_ladder_and_keeps_system_fallback()
+    {
+        const string xml = """
+            <REQ-IF xmlns="http://www.omg.org/spec/ReqIF/20110401/reqif.xsd">
+              <REQ-IF-CONTENT>
+                <SPEC-TYPES>
+                  <ATTRIBUTE-DEFINITION-STRING IDENTIFIER="AD-IDENTIFIER" LONG-NAME="AeroLink.Identifier" />
+                  <ATTRIBUTE-DEFINITION-STRING IDENTIFIER="AD-LEVEL" LONG-NAME="AeroLink.Level" />
+                  <ATTRIBUTE-DEFINITION-STRING IDENTIFIER="AD-STATEMENT" LONG-NAME="AeroLink.Statement" />
+                </SPEC-TYPES>
+                <SPEC-OBJECTS>
+                  <SPEC-OBJECT IDENTIFIER="OBJ-LOW"><VALUES>
+                    <ATTRIBUTE-VALUE-STRING THE-VALUE="LOW-1"><DEFINITION><ATTRIBUTE-DEFINITION-STRING-REF>AD-IDENTIFIER</ATTRIBUTE-DEFINITION-STRING-REF></DEFINITION></ATTRIBUTE-VALUE-STRING>
+                    <ATTRIBUTE-VALUE-STRING THE-VALUE="LowLevel"><DEFINITION><ATTRIBUTE-DEFINITION-STRING-REF>AD-LEVEL</ATTRIBUTE-DEFINITION-STRING-REF></DEFINITION></ATTRIBUTE-VALUE-STRING>
+                    <ATTRIBUTE-VALUE-STRING THE-VALUE="Low-level statement"><DEFINITION><ATTRIBUTE-DEFINITION-STRING-REF>AD-STATEMENT</ATTRIBUTE-DEFINITION-STRING-REF></DEFINITION></ATTRIBUTE-VALUE-STRING>
+                  </VALUES></SPEC-OBJECT>
+                  <SPEC-OBJECT IDENTIFIER="OBJ-HIGH"><VALUES>
+                    <ATTRIBUTE-VALUE-STRING THE-VALUE="HIGH-1"><DEFINITION><ATTRIBUTE-DEFINITION-STRING-REF>AD-IDENTIFIER</ATTRIBUTE-DEFINITION-STRING-REF></DEFINITION></ATTRIBUTE-VALUE-STRING>
+                    <ATTRIBUTE-VALUE-STRING THE-VALUE="HighLevelAlias"><DEFINITION><ATTRIBUTE-DEFINITION-STRING-REF>AD-LEVEL</ATTRIBUTE-DEFINITION-STRING-REF></DEFINITION></ATTRIBUTE-VALUE-STRING>
+                    <ATTRIBUTE-VALUE-STRING THE-VALUE="Fallback statement"><DEFINITION><ATTRIBUTE-DEFINITION-STRING-REF>AD-STATEMENT</ATTRIBUTE-DEFINITION-STRING-REF></DEFINITION></ATTRIBUTE-VALUE-STRING>
+                  </VALUES></SPEC-OBJECT>
+                  <SPEC-OBJECT IDENTIFIER="OBJ-MISSING"><VALUES>
+                    <ATTRIBUTE-VALUE-STRING THE-VALUE="MISSING-1"><DEFINITION><ATTRIBUTE-DEFINITION-STRING-REF>AD-IDENTIFIER</ATTRIBUTE-DEFINITION-STRING-REF></DEFINITION></ATTRIBUTE-VALUE-STRING>
+                    <ATTRIBUTE-VALUE-STRING THE-VALUE="Missing statement"><DEFINITION><ATTRIBUTE-DEFINITION-STRING-REF>AD-STATEMENT</ATTRIBUTE-DEFINITION-STRING-REF></DEFINITION></ATTRIBUTE-VALUE-STRING>
+                  </VALUES></SPEC-OBJECT>
+                </SPEC-OBJECTS>
+              </REQ-IF-CONTENT>
+            </REQ-IF>
+            """;
+        var configuration = ProjectLadderConfiguration.CreateDraft(Guid.NewGuid(), DateTimeOffset.UtcNow);
+        configuration.Steps.Add(new ProjectLadderStep(configuration.Id, configuration.ProjectId, RequirementLevel.System, 1,
+            LegacyLadderPolicy.Instance.Definition(RequirementLevel.System).Capabilities, DateTimeOffset.UtcNow));
+        configuration.Steps.Add(new ProjectLadderStep(configuration.Id, configuration.ProjectId, RequirementLevel.LowLevel, 2,
+            LegacyLadderPolicy.Instance.Definition(RequirementLevel.LowLevel).Capabilities, DateTimeOffset.UtcNow));
+        var policy = new ResolvedProjectLadderPolicy(ProjectLadderResolver.Resolve(configuration));
+        using var stream = new MemoryStream(Encoding.UTF8.GetBytes(xml));
+
+        var manifest = ReqIfExchangeService.ParsePackage(stream, "configured.reqif", policy);
+
+        Assert.Equal(["LowLevel", "System", "System"], manifest.Items.Select(x => x.Level).ToArray());
+        Assert.Contains(manifest.Warnings, x => x.Contains("HighLevelAlias", StringComparison.Ordinal));
+        Assert.DoesNotContain(manifest.Warnings, x => x.Contains("MISSING-1", StringComparison.Ordinal));
+    }
+
     [Fact]
     public void Parser_maps_explicit_levels_and_uses_the_legacy_system_fallback_for_unknown_or_missing_levels()
     {

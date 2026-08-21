@@ -2,8 +2,8 @@
   "schemaVersion": "aerolink-api-host-classification/v3",
   "totals": {
     "classes": 94,
-    "tests": 517,
-    "knownCases": 571,
+    "tests": 518,
+    "knownCases": 572,
     "unknownCaseTests": 0
   },
   "summary": {
@@ -15,8 +15,8 @@
     },
     "fresh-host": {
       "classes": 42,
-      "tests": 219,
-      "knownCases": 248,
+      "tests": 220,
+      "knownCases": 249,
       "unknownCaseTests": 0
     },
     "migration-candidate": {
@@ -331,8 +331,8 @@
     },
     {
       "cls": "AuthoringTracedImpactTests",
-      "tests": 10,
-      "knownCases": 10,
+      "tests": 11,
+      "knownCases": 11,
       "unknownCaseTests": 0,
       "classification": "fresh-host",
       "reason": "Owns host-scoped state (startup-config); sharing would leak it between tests.",
