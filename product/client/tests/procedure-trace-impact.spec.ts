@@ -153,7 +153,7 @@ test('a software HLR trace navigates to the exact software requirement revision'
   await page.getByRole('button', { name: 'Software' }).last().click()
   await page.getByRole('link', { name: 'Software Test Procedure Explorer' }).click()
   await expect(page).toHaveURL(/software-verification\/procedures$/, { timeout: 30_000 })
-  await expect(page.getByLabel('Level filter')).toHaveValue('Software')
+  await expect(page.getByLabel('Level filter')).toHaveValue('HighLevel')
 
   await page.getByLabel('Find a procedure').fill('HLRTP-000001')
   const row = page.locator('.procedureRow').filter({ hasText: 'HLRTP-000001' }).first()

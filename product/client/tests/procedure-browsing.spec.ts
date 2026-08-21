@@ -5,7 +5,8 @@ import { apiBase, apiLogin, login, selectProgram } from "./auth";
  * The verification workspace rendered every procedure it was given. The software side holds 440 of them, so
  * finding one meant scrolling past the rest, and the client received far more than it could show.
  *
- * Software is driven deliberately rather than the smaller System inventory, including both HLR and LLR.
+ * Software is driven deliberately rather than the smaller System inventory. The configured HLR level opens
+ * first while the broad API count still proves the showcase carries both software levels at useful volume.
  */
 test("the procedure workspace pages, filters and deep-links instead of rendering everything", async ({ page, request }) => {
   test.setTimeout(240_000);
@@ -20,6 +21,8 @@ test("the procedure workspace pages, filters and deep-links instead of rendering
   const all = await (await page.request.get(
     `${apiBase}/api/test-procedures?projectId=${projectId}&scope=Software&pageSize=1`)).json();
   expect(all.totalCount, "this only means something at showcase volume").toBeGreaterThanOrEqual(400);
+  const initial = await (await page.request.get(
+    `${apiBase}/api/test-procedures?projectId=${projectId}&scope=HighLevelSoftware&pageSize=1`)).json();
 
   // Asked of the Test Procedure Explorer. This browsing behaviour was built on the change request page, which
   // used to carry a procedure library; the library moved here, and the filters came with it rather than being
@@ -34,14 +37,14 @@ test("the procedure workspace pages, filters and deep-links instead of rendering
   const rows = page.locator(".procedureRow");
   await expect(rows.first()).toBeVisible({ timeout: 30_000 });
   const rendered = await rows.count();
-  expect(rendered, `${rendered} of ${all.totalCount} procedures rendered at once`).toBeLessThanOrEqual(25);
-  await expect(page.locator(".pager")).toContainText(`of ${all.totalCount.toLocaleString()}`, { timeout: 30_000 });
+  expect(rendered, `${rendered} of ${initial.totalCount} procedures rendered at once`).toBeLessThanOrEqual(25);
+  await expect(page.locator(".pager")).toContainText(`of ${initial.totalCount.toLocaleString()}`, { timeout: 30_000 });
 
   // Filtering narrows the set and the count, and is reflected in the address.
   await page.getByLabel("Procedure state").selectOption("Approved");
   await expect(page).toHaveURL(/procedureState=Approved/, { timeout: 30_000 });
   const approvedTotal = (await (await page.request.get(
-    `${apiBase}/api/test-procedures?projectId=${projectId}&scope=Software&state=Approved&pageSize=1`)).json()).totalCount;
+    `${apiBase}/api/test-procedures?projectId=${projectId}&scope=HighLevelSoftware&state=Approved&pageSize=1`)).json()).totalCount;
   await expect(page.locator(".pager")).toContainText(`of ${approvedTotal.toLocaleString()}`, { timeout: 30_000 });
 
   // A filtered worklist survives being reloaded, which is what makes it worth sharing.

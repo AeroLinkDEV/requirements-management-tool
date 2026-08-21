@@ -20,16 +20,49 @@ public sealed record ReadinessGate(
     string? PrerequisiteCode = null);
 public sealed record ReleaseReadiness(int Percent, bool ReadyForRelease, IReadOnlyList<ReadinessGate> Gates);
 
-public sealed class ReleaseReadinessService(AeroLinkDbContext db, ILadderPolicy? policy = null)
+public sealed class ReleaseReadinessService(AeroLinkDbContext db, ILadderPolicy? policy = null,
+    IProjectLadderPolicyResolver? policyResolver = null)
 {
-    private readonly ILadderPolicy ladderPolicy = policy ?? LegacyLadderPolicy.Instance;
+    private readonly ILadderPolicy fallbackPolicy = policy ?? LegacyLadderPolicy.Instance;
     public async Task<ReleaseReadiness> CalculateAsync(Guid campaignId, CancellationToken ct)
     {
         var campaign = await db.ReleaseCampaigns.AsNoTracking().Include(x => x.Approvals).SingleAsync(x => x.Id == campaignId, ct);
+        var ladderPolicy = policyResolver is null
+            ? fallbackPolicy
+            : await policyResolver.ResolveAsync(campaign.ProjectId, ct);
+        var configuredLevels = ladderPolicy.OrderedLevels.ToArray();
+        var configuredDisciplines = configuredLevels
+            .Where(level => ladderPolicy.Definition(level).Verification is not null)
+            .Select(ladderPolicy.Discipline).ToHashSet();
+        var configuredProcedureLevels = configuredLevels
+            .Where(level => ladderPolicy.Definition(level).Verification is not null)
+            .Select(ladderPolicy.ProcedureLevel).ToHashSet();
+        var configuredVerificationRequirementLevels = configuredLevels
+            .Where(level => ladderPolicy.Definition(level).Verification is not null).ToHashSet();
+        var configuredChangeControlLevels = configuredLevels
+            .Where(level => ladderPolicy.Definition(level).Has(LevelCapabilities.HasChangeControl)).ToHashSet();
+        var changeControlConfigured = configuredChangeControlLevels.Count > 0;
+        var systemChangeConfigured = ladderPolicy.IsChangeRequestScopeValid(ChangeRequestType.System, null);
+        var softwareChangeLevels = configuredLevels
+            .Where(level => ladderPolicy.IsChangeRequestScopeValid(ChangeRequestType.Software, level))
+            .ToArray();
         var baseline = await db.CandidateBaselines.AsNoTracking().SingleAsync(x => x.Id == campaign.BaselineId, ct);
-        var requests = await db.SystemChangeRequests.AsNoTracking().Where(x => x.TargetReleaseId == campaign.ReleaseId && x.State != ChangeRequestState.Deferred).ToListAsync(ct);
-        var impacts = await db.ImpactDispositions.AsNoTracking().Where(x => x.CampaignId == campaignId).ToListAsync(ct);
-        var members = await db.BaselineRequirements.AsNoTracking().Where(x => x.BaselineId == baseline.Id).ToListAsync(ct); var revisionIds = members.Select(x => x.RevisionId).ToList();
+        var requests = await db.SystemChangeRequests.AsNoTracking()
+            .Where(x => x.TargetReleaseId == campaign.ReleaseId && x.State != ChangeRequestState.Deferred
+                && (x.Type == ChangeRequestType.System
+                    ? systemChangeConfigured
+                    : x.SoftwareLevel != null && softwareChangeLevels.Contains(x.SoftwareLevel.Value)))
+            .ToListAsync(ct);
+        var eligibleRequestIds = requests.Select(x => x.Id).ToHashSet();
+        var impacts = await db.ImpactDispositions.AsNoTracking()
+            .Where(x => x.CampaignId == campaignId && eligibleRequestIds.Contains(x.ChangeRequestId)).ToListAsync(ct);
+        var members = await (from member in db.BaselineRequirements.AsNoTracking().Where(x => x.BaselineId == baseline.Id)
+                             join artifact in db.Requirements.AsNoTracking() on member.ArtifactId equals artifact.Id
+                             where configuredLevels.Contains(artifact.Level)
+                             select new { member.RevisionId, member.ArtifactId, Level = artifact.Level }).ToListAsync(ct);
+        var coverageMembers = members.Where(x => configuredVerificationRequirementLevels.Contains(x.Level)).ToList();
+        var revisionIds = members.Select(x => x.RevisionId).ToList();
+        var coverageRevisionIds = coverageMembers.Select(x => x.RevisionId).ToList();
         var derivedLevels = ladderPolicy.OrderedLevels.Where(level => ladderPolicy.ParentLevels(level).Count > 0).ToArray();
         var derivedIds = await (from member in db.BaselineRequirements.AsNoTracking().Where(x => x.BaselineId == baseline.Id) join artifact in db.Requirements.AsNoTracking() on member.ArtifactId equals artifact.Id where derivedLevels.Contains(artifact.Level) select member.RevisionId).ToListAsync(ct);
         var tracedDerivedIds = await db.RequirementTraces.AsNoTracking().Where(x => derivedIds.Contains(x.SourceRevisionId) && revisionIds.Contains(x.TargetRevisionId)).Select(x => x.SourceRevisionId).Distinct().ToListAsync(ct);
@@ -48,9 +81,26 @@ public sealed class ReleaseReadinessService(AeroLinkDbContext db, ILadderPolicy?
         // reads the same definition. Two implementations of "covered" is how a workspace comes to disagree
         // with the gate it is meant to be preparing for.
         var procedureEffectivity = await TestProcedureEffectivity.ForBaselineAsync(db, baseline.Id, ct);
-        var coveredIds = await VerificationCoverageProjection.SettledCoveredAsync(db, revisionIds, ct,
-            procedureEffectivity?.RevisionIds, buildScoped: false);
+        IReadOnlyCollection<Guid>? effectiveProcedureRevisionIds = null;
+        if (procedureEffectivity is not null)
+        {
+            // A retained procedure from an absent level must not satisfy current coverage merely because its
+            // revision still appears in the historical baseline manifest. Intersect the manifest with both
+            // the current project's procedures and the effective verification bindings before evaluating any
+            // settled link.
+            effectiveProcedureRevisionIds = await (from revision in db.TestProcedureRevisions.AsNoTracking()
+                                                   join procedure in db.TestProcedures.AsNoTracking()
+                                                       on revision.ProcedureId equals procedure.Id
+                                                   where procedure.ProjectId == campaign.ProjectId
+                                                       && procedureEffectivity.RevisionIds.Contains(revision.Id)
+                                                       && configuredProcedureLevels.Contains(procedure.Level)
+                                                   select revision.Id).ToListAsync(ct);
+        }
+        var coveredIds = await VerificationCoverageProjection.SettledCoveredAsync(db, coverageRevisionIds, ct,
+            effectiveProcedureRevisionIds, buildScoped: false);
         var docs = await db.ControlledDocuments.AsNoTracking().Where(x => x.BaselineId == baseline.Id).ToListAsync(ct);
+        var configuredDocumentTypes = ladderPolicy.ControlledDocumentTypes.ToHashSet();
+        var configuredDocs = docs.Where(x => configuredDocumentTypes.Contains(x.Type)).ToList();
         // A release cannot be declared ready while an unwaived controlled problem report remains a blocker.
         // This is deliberately project-scoped until product-line configuration provides exact release applicability.
         var allProblemBlockers = await db.ProblemReports.AsNoTracking()
@@ -64,11 +114,13 @@ public sealed class ReleaseReadinessService(AeroLinkDbContext db, ILadderPolicy?
         // change request was approved. Each one carries an owed decision: a procedure that covers it, or a
         // recorded confirmation that no test is required. A release with no requirement changes raises none,
         // and is complete by having nothing to decide.
-        var verificationImpacts = await db.VerificationImpactItems.AsNoTracking().Where(x => x.ReleaseId == campaign.ReleaseId).ToListAsync(ct);
+        var verificationImpacts = await db.VerificationImpactItems.AsNoTracking()
+            .Where(x => x.ReleaseId == campaign.ReleaseId && eligibleRequestIds.Contains(x.ChangeRequestId)).ToListAsync(ct);
         var currentImpacts = verificationImpacts.Where(x => x.State != VerificationImpactState.Superseded).ToList();
         var impactDecided = currentImpacts.Count(x => x.State == VerificationImpactState.Resolved);
         var undecided = currentImpacts.Where(x => x.State != VerificationImpactState.Resolved).ToList();
-        var testChangeReviews = await db.TestChangeReviews.AsNoTracking().Where(x => x.ReleaseId == campaign.ReleaseId).ToListAsync(ct);
+        var testChangeReviews = await db.TestChangeReviews.AsNoTracking()
+            .Where(x => x.ReleaseId == campaign.ReleaseId && configuredDisciplines.Contains(x.Discipline)).ToListAsync(ct);
         var approvedTestChangeReviews = testChangeReviews.Count(x => x.State == TestChangeReviewState.Approved);
         // What this build was planned to run, and whether it has run it.
         //
@@ -76,8 +128,15 @@ public sealed class ReleaseReadinessService(AeroLinkDbContext db, ILadderPolicy?
         // procedures that cover a changed requirement: exercising an area the change makes worth re-testing
         // is the other half of why a procedure is selected, and those procedures would be invisible here.
         var selectedRevisionIds = await db.BuildTestSetEntries.AsNoTracking()
-            .Where(x => db.BuildTestSets.Any(set => set.Id == x.BuildTestSetId && set.ReleaseId == campaign.ReleaseId))
+            .Where(x => db.BuildTestSets.Any(set => set.Id == x.BuildTestSetId
+                && set.ReleaseId == campaign.ReleaseId && configuredDisciplines.Contains(set.Discipline)))
             .Select(x => x.ProcedureRevisionId).Distinct().ToListAsync(ct);
+        if (selectedRevisionIds.Count != 0)
+            selectedRevisionIds = await (from revision in db.TestProcedureRevisions.AsNoTracking()
+                                         join procedure in db.TestProcedures.AsNoTracking() on revision.ProcedureId equals procedure.Id
+                                         where selectedRevisionIds.Contains(revision.Id)
+                                             && configuredProcedureLevels.Contains(procedure.Level)
+                                         select revision.Id).ToListAsync(ct);
         // Scoped through the one shared rule, not a local predicate.
         //
         // The previous condition relaxed to "any execution at all" whenever the campaign had no software
@@ -95,7 +154,7 @@ public sealed class ReleaseReadinessService(AeroLinkDbContext db, ILadderPolicy?
         // An empty set is only an answer when there was nothing to plan. A build that changed something and
         // has selected nothing has not been planned yet, and a gate that passed it would be reporting
         // "nothing left to run" about a decision nobody has made.
-        var nothingToTest = testChangeReviews.Count == 0;
+        var nothingToTest = configuredDisciplines.Count == 0 || testChangeReviews.Count == 0;
 
         IReadOnlyList<RequiredCodeTraceabilityRequirement> requiredCode = baseline.RequirementsMaterializedAt is null
             ? Array.Empty<RequiredCodeTraceabilityRequirement>()
@@ -110,14 +169,16 @@ public sealed class ReleaseReadinessService(AeroLinkDbContext db, ILadderPolicy?
         var baselineMaterialized = baseline.RequirementsMaterializedAt is not null;
         var gates = new List<ReadinessGate>
         {
-            new("change_control","Change requests integrated",requests.Count > 0 && integrated == requests.Count,integrated,requests.Count,$"{requests.Count-integrated} non-deferred change request records remain outside the candidate baseline.","Approve and select every included change, or formally defer it."),
-            new("impact_disposition","Impact analysis dispositioned",impacts.Count > 0 && disposed == impacts.Count,disposed,impacts.Count,$"{impacts.Count-disposed} impact findings remain pending.","Disposition requirement, trace, verification, and document impacts."),
+            new("change_control","Change requests integrated",!changeControlConfigured || (requests.Count > 0 && integrated == requests.Count),integrated,requests.Count,$"{requests.Count-integrated} non-deferred change request records remain outside the candidate baseline.","Approve and select every included change, or formally defer it."),
+            new("impact_disposition","Impact analysis dispositioned",!changeControlConfigured || (impacts.Count > 0 && disposed == impacts.Count),disposed,impacts.Count,$"{impacts.Count-disposed} impact findings remain pending.","Disposition requirement, trace, verification, and document impacts."),
             new("baseline","Requirement baseline materialized",baseline.State is CandidateBaselineState.Frozen or CandidateBaselineState.Released && baseline.RequirementsMaterializedAt is not null,baseline.RequirementsMaterializedAt is null?0:1,1,"The release needs an exact frozen and materialized requirement set.","Freeze the candidate and materialize its requirements."),
             new("verification_impact","Verification impact decided",impactDecided == verificationImpacts.Count,impactDecided,verificationImpacts.Count,undecided.Count==0?"Every new, modified, and orphaned requirement in this release has a recorded verification decision.":$"{undecided.Count} changed requirement(s) await a verification decision: {string.Join(", ",undecided.Take(3).Select(x=>x.SubjectDisplayNumber))}.","Assign each item to a test engineer, then record an approved procedure or a confirmation that no test is required."),
             new("test_change_reviews","Test change requests approved",
-                testChangeReviews.Count > 0 && approvedTestChangeReviews == testChangeReviews.Count,
+                configuredDisciplines.Count == 0 || (testChangeReviews.Count > 0 && approvedTestChangeReviews == testChangeReviews.Count),
                 approvedTestChangeReviews,testChangeReviews.Count,
-                testChangeReviews.Count == 0
+                configuredDisciplines.Count == 0
+                    ? "The effective ladder declares no verification disciplines, so no test change requests are owed."
+                    : testChangeReviews.Count == 0
                     ? "No controlled test change requests have been raised for this software build."
                     : $"{testChangeReviews.Count-approvedTestChangeReviews} System, HLR, or LLR test change request(s) still require approval.",
                 "Complete every procedure decision, submit each discipline review, and record test-lead approval."),
@@ -131,12 +192,12 @@ public sealed class ReleaseReadinessService(AeroLinkDbContext db, ILadderPolicy?
                         : "Resolve orphan and suspect trace links.")
                 : WaitingForMaterializedBaseline("traceability", "Trace network complete"),
             baselineMaterialized
-                ? new("coverage","Requirement coverage complete",members.Count > 0 && coveredIds.Count == members.Count,coveredIds.Count,members.Count,
-                    members.Count == 0
-                        ? "The materialized baseline contains no effective requirement revisions, so coverage cannot pass."
-                        : $"{members.Count-coveredIds.Count} effective requirement revisions have no settled coverage. A link counts only when it is not suspect, names an approved procedure revision, and that procedure has no revision still in draft or review.",
-                    members.Count == 0
-                        ? "Inspect the selected changes and materialized manifest; a releasable baseline must contain an effective requirement population."
+                ? new("coverage","Requirement coverage complete",coverageMembers.Count == 0 || coveredIds.Count == coverageMembers.Count,coveredIds.Count,coverageMembers.Count,
+                    coverageMembers.Count == 0
+                        ? "The effective ladder declares no verification-capable requirement levels, so no coverage is owed."
+                        : $"{coverageMembers.Count-coveredIds.Count} effective verification requirement revisions have no settled coverage. A link counts only when it is not suspect, names an approved procedure revision, and that procedure has no revision still in draft or review.",
+                    coverageMembers.Count == 0
+                        ? "No action is required: coverage is not applicable to the configured requirement levels."
                         : "Approve every procedure being changed, then confirm the coverage each changed requirement needs.")
                 : WaitingForMaterializedBaseline("coverage", "Requirement coverage complete"),
             baselineMaterialized
@@ -173,7 +234,12 @@ public sealed class ReleaseReadinessService(AeroLinkDbContext db, ILadderPolicy?
                     "Attach the evidence package for every result in the selected test set.")
                 : WaitingForMaterializedBaseline("evidence", "Selected test set results carry evidence"),
             new("problem_reports","Problem-report blockers resolved",problemBlockers.Count==0,0,problemBlockers.Count,problemBlockers.Count==0?"No unwaived controlled problem reports block this release.":$"{problemBlockers.Count} unwaived problem report blocker(s) remain: {string.Join(", ",problemBlockers.Take(3).Select(x=>x.DisplayNumber))}.","Resolve, formally disposition, or record an attributable waiver for every release-blocking problem report."),
-            new("documents","Controlled outputs generated",docs.Select(x=>x.Type).Distinct().Count()>=6,docs.Select(x=>x.Type).Distinct().Count(),6,"The release package requires six controlled document types.","Generate SYSRD, both SWRDs, and three test-procedure documents."),
+            new("documents","Controlled outputs generated",
+                configuredDocs.Select(x=>x.Type).Distinct().Count() == configuredDocumentTypes.Count
+                && configuredDocumentTypes.All(type => configuredDocs.Any(x => x.Type == type)),
+                configuredDocs.Select(x=>x.Type).Distinct().Count(), configuredDocumentTypes.Count,
+                $"The release package requires exactly {ladderPolicy.ControlledDocumentTypes.Count} configured controlled document type(s).",
+                "Generate every controlled document declared by the effective project ladder."),
             new("release_approval","Release approval complete",campaign.Approvals.Count>0 && campaign.Approvals.All(x=>x.State==ReleaseApprovalState.Approved),campaign.Approvals.Count(x=>x.State==ReleaseApprovalState.Approved),campaign.Approvals.Count==0?3:campaign.Approvals.Count,"Ordered release approval must be unanimous.","Start release review and collect every approval.")
         };
         var percent = (int)Math.Round(gates.Average(x => x.Total == 0 ? (x.Complete ? 100 : 0) : Math.Min(100, x.Completed * 100d / x.Total)));

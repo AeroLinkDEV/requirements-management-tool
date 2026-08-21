@@ -53,15 +53,17 @@ public static class IdentifierAllocator
     /// HLRTP is should not have to be told what an HLRTCR is. Software's two levels are numbered apart for
     /// the same reason the packages themselves are separate — they are finished by different people.
     /// </summary>
-    public static async Task<string> NextTestChangeRequestAsync(AeroLinkDbContext db, TestChangeReviewDiscipline discipline, CancellationToken ct)
+    public static async Task<string> NextTestChangeRequestAsync(AeroLinkDbContext db, TestChangeReviewDiscipline discipline,
+        CancellationToken ct, ILadderPolicy? policy = null)
     {
-        var prefix = LadderPolicy.TestChangeReviewPrefix(discipline);
+        var prefix = (policy ?? LadderPolicy).TestChangeReviewPrefix(discipline);
         return Format(prefix, await ClaimAsync(db, prefix, ct));
     }
 
-    public static async Task<string> NextTestProcedureAsync(AeroLinkDbContext db, TestProcedureLevel level, CancellationToken ct)
+    public static async Task<string> NextTestProcedureAsync(AeroLinkDbContext db, TestProcedureLevel level,
+        CancellationToken ct, ILadderPolicy? policy = null)
     {
-        var prefix = LadderPolicy.TestProcedurePrefix(level);
+        var prefix = (policy ?? LadderPolicy).TestProcedurePrefix(level);
         return Format(prefix, await ClaimAsync(db, prefix, ct));
     }
 

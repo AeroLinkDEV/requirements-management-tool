@@ -8,7 +8,7 @@ namespace AeroLink.Infrastructure.Tests;
 public sealed class LadderConsumerRegistrationTests
 {
     [Fact]
-    public void Infrastructure_registers_only_complete_705_seams_and_keeps_706_blockers_named()
+    public void Infrastructure_registers_the_complete_stable_consumer_manifest()
     {
         var services = new ServiceCollection();
         var configuration = new ConfigurationBuilder()
@@ -32,14 +32,21 @@ public sealed class LadderConsumerRegistrationTests
             "enterprise.import-aliases",
             "trace.generic-mutation",
             "controlled-editing.identity",
+            "approval.workflow-subject",
+            "verification.procedure-level",
+            "verification.test-change-workflow",
+            "verification.coverage",
+            "baseline.controlled-documents",
+            "build.test-sets",
+            "enterprise.schema-catalogue",
+            "release.readiness",
+            "release.reconciliation",
+            "navigation.primary",
         }, ids);
 
         var manifest = LadderConsumerManifestCatalog.BuildForRegistrations(registrations);
-        Assert.False(manifest.IsReady);
+        Assert.True(manifest.IsReady);
         Assert.DoesNotContain(manifest.MissingOrUnrouted, x => ids.Contains(x.Id, StringComparer.Ordinal));
-        Assert.Contains(manifest.MissingOrUnrouted, x => x.Id == "release.readiness");
-        Assert.Contains(manifest.MissingOrUnrouted, x => x.Id == "release.reconciliation");
-        Assert.Contains(manifest.MissingOrUnrouted, x => x.Id == "enterprise.schema-catalogue");
-        Assert.Contains(manifest.MissingOrUnrouted, x => x.Id == "navigation.primary");
+        Assert.Empty(manifest.MissingOrUnrouted);
     }
 }

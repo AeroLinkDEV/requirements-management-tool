@@ -13,8 +13,8 @@ public static class DependencyInjection
     public static IServiceCollection AddAeroLinkInfrastructure(this IServiceCollection services, IConfiguration configuration)
     {
         services.AddScoped<IProjectLadderPolicyResolver, EffectiveProjectLadderPolicyResolver>();
-        // These are the complete #705 seams. Registration is intentionally explicit: the manifest is a
-        // readiness inventory, not a flag, and every remaining #706 consumer stays named as a blocker.
+        // These are the complete stable ladder seams. Registration is intentionally explicit: the manifest is
+        // a readiness inventory, not a flag, and each entry is backed by a project-effective policy route.
         foreach (var registration in new[]
         {
             new LadderConsumerRegistration("change-request.authoring", "Change-request level/type acceptance and authoring"),
@@ -25,6 +25,16 @@ public static class DependencyInjection
             new LadderConsumerRegistration("enterprise.import-aliases", "Enterprise level import aliases"),
             new LadderConsumerRegistration("trace.generic-mutation", "Generic trace mutation acceptance/refusal"),
             new LadderConsumerRegistration("controlled-editing.identity", "Controlled editing identity and check-in"),
+            new LadderConsumerRegistration("approval.workflow-subject", "Approval workflow subject level and scope"),
+            new LadderConsumerRegistration("verification.procedure-level", "Verification procedure level mapping"),
+            new LadderConsumerRegistration("verification.test-change-workflow", "Test-change workflow disciplines and prefixes"),
+            new LadderConsumerRegistration("verification.coverage", "Same-level coverage mutation and persistence validation"),
+            new LadderConsumerRegistration("baseline.controlled-documents", "Baseline controlled-document derivation"),
+            new LadderConsumerRegistration("build.test-sets", "Build verification test-set derivation"),
+            new LadderConsumerRegistration("enterprise.schema-catalogue", "Enterprise schema/specification catalogue synchronization"),
+            new LadderConsumerRegistration("release.readiness", "Release readiness policy gates"),
+            new LadderConsumerRegistration("release.reconciliation", "Release trace reconciliation policy"),
+            new LadderConsumerRegistration("navigation.primary", "Project-ladder-aware primary navigation and surfaces"),
         })
             services.AddSingleton<ILadderConsumerRegistration>(registration);
         var provider = configuration["Database:Provider"] ?? "Sqlite";

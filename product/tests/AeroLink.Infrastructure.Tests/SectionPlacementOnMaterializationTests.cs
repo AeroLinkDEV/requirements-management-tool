@@ -158,7 +158,7 @@ public sealed class SectionPlacementOnMaterializationTests
 
     private static async Task<(Guid ProjectId, Guid ReleaseId, Guid Navigation, Guid Performance)> SeedAsync(
         AeroLinkDbContext db, DateTimeOffset now, string programName = "FMS", string programCode = "FMSR",
-        string specificationNumber = "SWRD-000001")
+        string specificationNumber = "HLRD-000001")
     {
         var program = new ProgramRecord(programName, programCode);
         var project = new ProjectRecord(program.Id, "Software", $"{programName} Software");

@@ -49,7 +49,7 @@ test('the Explorer groups procedures by the document they are written into', asy
 
   const rail = page.getByRole('navigation', { name: 'Test procedure documents' })
   await expect(rail).toBeVisible()
-  // The Software Explorer matches Requirements: both controlled levels are visible from the combined view.
+  // The rail remains the full software document catalogue while the worklist opens on its configured HLR level.
   await expect(rail.locator('[data-document]')).toHaveCount(2, { timeout: 30_000 })
   await expect(rail.locator('[data-document^="HLRTD-"]')).toHaveCount(1)
   await expect(rail.locator('[data-document^="LLRTD-"]')).toHaveCount(1)
@@ -114,12 +114,12 @@ test('the procedure document is offered where the procedures are read', async ({
   // procedures to go and find the procedure document is the gap this closes.
   const outputs = page.locator('.documentOutputs')
   await expect(outputs).toBeVisible({ timeout: 30_000 })
-  // The combined Software view offers both controlled procedure documents, exactly as Requirements does.
+  // The document action follows the exact configured level currently being browsed.
   await expect(outputs.getByText('HLR Test Procedure Document (HLRTD)')).toBeVisible()
-  await expect(outputs.getByText('LLR Test Procedure Document (LLRTD)')).toBeVisible()
-  await expect(outputs.locator('.documentOutput')).toHaveCount(2)
-  await expect(outputs.getByRole('link', { name: /DOCX$/ })).toHaveCount(2)
-  await expect(outputs.getByRole('link', { name: /PDF$/ })).toHaveCount(2)
+  await expect(outputs.getByText('LLR Test Procedure Document (LLRTD)')).toHaveCount(0)
+  await expect(outputs.locator('.documentOutput')).toHaveCount(1)
+  await expect(outputs.getByRole('link', { name: /DOCX$/ })).toHaveCount(1)
+  await expect(outputs.getByRole('link', { name: /PDF$/ })).toHaveCount(1)
 })
 
 test('a worklist can be saved, reopened and removed', async ({ page }) => {
@@ -164,7 +164,12 @@ test('Clear returns the whole library', async ({ page }) => {
   await openExplorer(page, 'software-verification')
 
   const count = page.locator('.resultCount')
+  const configuredLevel = await libraryCount(page)
+  await page.getByLabel('Level filter').selectOption('Software')
+  await expect.poll(() => libraryCount(page), { timeout: 30_000 }).toBeGreaterThan(configuredLevel)
   const whole = await libraryCount(page)
+  await page.getByLabel('Level filter').selectOption('HighLevel')
+  await expect.poll(() => libraryCount(page), { timeout: 30_000 }).toBe(configuredLevel)
   await page.getByLabel('Find a procedure').fill('HLRTP-000002')
   await expect.poll(async () => Number((await count.textContent())!.replace(/[^\d]/g, '')), { timeout: 30_000 })
     .toBeLessThan(whole)
@@ -182,15 +187,16 @@ test('Clear returns the whole library', async ({ page }) => {
  * carried none of that — the same title on all three disciplines, no position in the results, and a caption
  * stacked over every control.
  */
-test('the Explorer names the software workspace and opens on both levels', async ({ page }) => {
+test('the Explorer names the software workspace and opens on its first configured level', async ({ page }) => {
   test.setTimeout(180_000)
   await page.setViewportSize({ width: 1600, height: 900 })
   await login(page)
   await openExplorer(page, 'software-verification')
 
   await expect(page.getByRole('heading', { name: 'Software Test Procedure Explorer', level: 1 })).toBeVisible()
-  await expect(page.getByLabel('Level filter')).toHaveValue('Software')
+  await expect(page.getByLabel('Level filter')).toHaveValue('HighLevel')
   await expect(page.getByLabel('Level filter')).toContainText('All software test procedures')
+  await expect(page.getByLabel('Level filter')).toContainText('Software LLR')
 })
 
 test('the result summary says how many answer and where in them you are', async ({ page }) => {

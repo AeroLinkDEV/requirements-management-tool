@@ -84,8 +84,8 @@ public static class BaselineEndpoints
         // release a package has the build it belongs to, and where a change request counts requirement changes
         // a package counts procedure changes.
         app.MapGet("/api/history/test-change-requests", async (Guid projectId, string? search, Guid? releaseId,
-            TestChangeReviewDiscipline? discipline, string? state, string? baseNumber, int page, int pageSize,
-            HttpContext http, AeroLinkDbContext db, CancellationToken ct) =>
+            TestChangeReviewDiscipline? discipline, string? state, string? baseNumber, bool? historical, int page, int pageSize,
+            HttpContext http, AeroLinkDbContext db, IProjectLadderPolicyResolver policyResolver, CancellationToken ct) =>
         {
             if (!await http.HasProjectAccessAsync(db, projectId, ct)) return Results.Forbid();
             page = Math.Max(1, page == 0 ? 1 : page); pageSize = Math.Clamp(pageSize == 0 ? 50 : pageSize, 1, 200);
@@ -114,6 +114,42 @@ public static class BaselineEndpoints
                 source = source.Where(x => x.BaseNumber == "" || x.Revision == db.TestChangeReviews
                     .Where(other => other.ProjectId == projectId && other.BaseNumber == x.BaseNumber)
                     .Max(other => other.Revision));
+            if (historical != true)
+            {
+                // The current register is the controlled package inventory, not the downstream assessment
+                // queue. An automatic assessment has no controlled number until its engineer concludes that
+                // procedure work is required; showing it here made the source CR number look like an HLRTCR.
+                var ladderPolicy = await policyResolver.ResolveAsync(projectId, ct);
+                var configuredDisciplines = ladderPolicy.OrderedLevels
+                    .Where(level => ladderPolicy.Definition(level).Verification is not null)
+                    .Select(ladderPolicy.Discipline).Distinct().ToArray();
+                if (discipline is { } requested && !configuredDisciplines.Contains(requested))
+                    return Results.BadRequest(new
+                    {
+                        error = $"The {requested} test-change register is not present in the active project ladder.",
+                        code = "ladder_discipline_unavailable"
+                    });
+
+                source = source.Where(x => x.BaseNumber != "" && x.Outcome != TestChangeReviewOutcome.Pending);
+                if (discipline is { } requestedDiscipline)
+                {
+                    var prefix = ladderPolicy.TestChangeReviewPrefix(requestedDiscipline) + "-";
+                    source = source.Where(x => x.Discipline == requestedDiscipline && x.BaseNumber.StartsWith(prefix));
+                }
+                else
+                {
+                    var systemPrefix = configuredDisciplines.Contains(TestChangeReviewDiscipline.System)
+                        ? ladderPolicy.TestChangeReviewPrefix(TestChangeReviewDiscipline.System) + "-" : null;
+                    var highLevelPrefix = configuredDisciplines.Contains(TestChangeReviewDiscipline.HighLevelSoftware)
+                        ? ladderPolicy.TestChangeReviewPrefix(TestChangeReviewDiscipline.HighLevelSoftware) + "-" : null;
+                    var lowLevelPrefix = configuredDisciplines.Contains(TestChangeReviewDiscipline.LowLevelSoftware)
+                        ? ladderPolicy.TestChangeReviewPrefix(TestChangeReviewDiscipline.LowLevelSoftware) + "-" : null;
+                    source = source.Where(x =>
+                        (systemPrefix != null && x.Discipline == TestChangeReviewDiscipline.System && x.BaseNumber.StartsWith(systemPrefix))
+                        || (highLevelPrefix != null && x.Discipline == TestChangeReviewDiscipline.HighLevelSoftware && x.BaseNumber.StartsWith(highLevelPrefix))
+                        || (lowLevelPrefix != null && x.Discipline == TestChangeReviewDiscipline.LowLevelSoftware && x.BaseNumber.StartsWith(lowLevelPrefix)));
+                }
+            }
             var total = await source.CountAsync(ct);
             // SQLite can neither order nor aggregate a DateTimeOffset, so the newest-first ordering the
             // requirements register uses is available only on PostgreSQL. Same compromise, same reason.
@@ -536,13 +572,14 @@ public static class BaselineEndpoints
                 baseline = baseline.DisplayNumber, baseline.Name, baseline.RequirementsHash, baseline.RequirementsMaterializedAt, requirementCount = rows.Count, requirements = rows });
         });
 
-        app.MapPost("/api/baselines/{id:guid}/generate-documents", async (Guid id, EmptyMutationRequest request, HttpContext http, AeroLinkDbContext db, IdentityService identity, ILadderPolicy ladderPolicy, ControlledOutputGenerator generator, EvidenceFileStore store, CancellationToken ct) =>
+        app.MapPost("/api/baselines/{id:guid}/generate-documents", async (Guid id, EmptyMutationRequest request, HttpContext http, AeroLinkDbContext db, IdentityService identity, IProjectLadderPolicyResolver policyResolver, ControlledOutputGenerator generator, EvidenceFileStore store, CancellationToken ct) =>
         {
             var baseline = await db.CandidateBaselines.AsNoTracking().SingleOrDefaultAsync(x => x.Id == id, ct); if (baseline is null) return Results.NotFound(); if (baseline.RequirementsMaterializedAt is null) return Results.BadRequest(new { error = "Materialize the requirement baseline before generating controlled outputs." });
             if(!await http.HasProjectRoleAsync(db,identity,baseline.ProjectId,ct,ProgramRole.ConfigurationManager))return Results.Forbid();
             if (await db.ReleaseCampaigns.AsNoTracking().AnyAsync(x => x.BaselineId == id && x.State == ReleaseCampaignState.InReview, ct))
                 return Results.Conflict(new { error = "The release package is frozen while approval is in progress.", code = "release_package_frozen" });
             var release = await db.Releases.AsNoTracking().SingleAsync(x => x.Id == baseline.ReleaseId, ct); var project = await db.Projects.AsNoTracking().SingleAsync(x => x.Id == baseline.ProjectId, ct);
+            var ladderPolicy = await policyResolver.ResolveAsync(project.Id, ct);
             var requirementCounts = await (from member in db.BaselineRequirements.AsNoTracking().Where(x => x.BaselineId == id) join artifact in db.Requirements.AsNoTracking() on member.ArtifactId equals artifact.Id group artifact by artifact.Level into g select new { g.Key, Count = g.Count() }).ToDictionaryAsync(x => x.Key, x => x.Count, ct);
             var procedureEffectivity = await TestProcedureEffectivity.ForBaselineAsync(db, id, ct);
             var procedureRevisionIds = procedureEffectivity?.RevisionIds ?? [];
@@ -555,20 +592,22 @@ public static class BaselineEndpoints
             var specs = new List<(ControlledDocumentType Type, string Number, string Title, int Count)>();
             foreach (var level in ladderPolicy.OrderedLevels)
             {
-                var requirementDocument = ladderPolicy.RequirementsDocument(level);
-                specs.Add((requirementDocument, $"{ladderPolicy.ControlledDocumentPrefix(requirementDocument)}-{int.Parse(suffix):D6}",
-                    $"{project.SoftwareProduct} {ladderPolicy.ControlledDocumentTitle(requirementDocument)}", requirementCounts.GetValueOrDefault(level)));
-                var procedureDocument = ladderPolicy.TestProcedureDocument(level);
-                specs.Add((procedureDocument, $"{ladderPolicy.ControlledDocumentPrefix(procedureDocument)}-{int.Parse(suffix):D6}",
-                    $"{project.SoftwareProduct} {ladderPolicy.ControlledDocumentTitle(procedureDocument)}",
-                    testCounts.GetValueOrDefault(ladderPolicy.ProcedureLevel(level))));
+                var definition = ladderPolicy.Definition(level);
+                if (definition.RequirementsDocumentType is { } requirementDocument)
+                    specs.Add((requirementDocument, $"{ladderPolicy.ControlledDocumentPrefix(requirementDocument)}-{int.Parse(suffix):D6}",
+                        $"{project.SoftwareProduct} {ladderPolicy.ControlledDocumentTitle(requirementDocument)}", requirementCounts.GetValueOrDefault(level)));
+                if (definition.Verification is { } verification)
+                    specs.Add((verification.DocumentType, $"{ladderPolicy.ControlledDocumentPrefix(verification.DocumentType)}-{int.Parse(suffix):D6}",
+                        $"{project.SoftwareProduct} {ladderPolicy.ControlledDocumentTitle(verification.DocumentType)}",
+                        testCounts.GetValueOrDefault(verification.ProcedureLevel)));
             }
             // The approved layout for each document type, if the programme has recorded one. Bound to the document
             // at generation and never re-resolved: revising a template afterwards must not change a document that
             // has already been produced and possibly signed.
             var approvedTemplates = await ControlledLayouts.ApprovedAsync(db, project.Id, ct);
-            var procedureDocumentTypes = ladderPolicy.OrderedLevels
-                .Select(ladderPolicy.TestProcedureDocument).ToHashSet();
+            var procedureDocumentTypes = ladderPolicy.Definitions
+                .Where(x => x.Verification is not null)
+                .Select(x => x.Verification!.DocumentType).ToHashSet();
             // #419: a controlled test-procedure document is one exact, immutable procedure manifest. The
             // record must never be created against a compatibility projection that materialization later
             // changes, and its hash basis must never fall back to the requirement manifest.

@@ -54,10 +54,10 @@ public static class TestChangeReviewRequirementScope
 
     public static IQueryable<TestChangeReviewRequirementChoice> ChoicesQuery(
         AeroLinkDbContext db, Guid projectId, IReadOnlyCollection<Guid> carriedRevisionIds,
-        TestProcedureLevel procedureLevel)
+        TestProcedureLevel procedureLevel, ILadderPolicy? policy = null)
     {
         var ids = carriedRevisionIds.Distinct().ToList();
-        var wantedLevel = LegacyLadderPolicy.Instance.RequirementLevelFor(procedureLevel);
+        var wantedLevel = (policy ?? LegacyLadderPolicy.Instance).RequirementLevelFor(procedureLevel);
         return from revision in db.RequirementRevisions.AsNoTracking()
                    .Where(x => ids.Contains(x.Id))
                join artifact in db.Requirements.AsNoTracking()
@@ -73,20 +73,21 @@ public static class TestChangeReviewRequirementScope
     }
 
     public static async Task<IReadOnlyList<TestChangeReviewRequirementChoice>> ForReviewAsync(
-        AeroLinkDbContext db, TestChangeReview review, Guid? baselineId, CancellationToken ct) =>
+        AeroLinkDbContext db, TestChangeReview review, Guid? baselineId, CancellationToken ct,
+        ILadderPolicy? policy = null) =>
         await ChoicesQuery(db, review.ProjectId,
-            await CarriedImpactRevisionIdsAsync(db, review, baselineId, ct), review.ProcedureLevel())
+            await CarriedImpactRevisionIdsAsync(db, review, baselineId, ct), review.ProcedureLevel(policy), policy)
             .ToListAsync(ct);
 
     public static async Task<(int Total, IReadOnlyList<TestChangeReviewRequirementChoice> Items)> ForReviewPageAsync(
         AeroLinkDbContext db, TestChangeReview review, string? search, int page, int pageSize,
-        IReadOnlyCollection<Guid>? hydrateRevisionIds, CancellationToken ct)
+        IReadOnlyCollection<Guid>? hydrateRevisionIds, CancellationToken ct, ILadderPolicy? policy = null)
     {
         var carried = await CarriedImpactRevisionIdsAsync(db, review, null, ct);
         // The governed candidate set is the package's own scope, so materializing it is bounded by the
         // change's actual reach, never the whole Project. Filtering and paging then run in memory because
         // DisplayNumber is a computed projection property EF cannot translate into SQL.
-        var scoped = await ChoicesQuery(db, review.ProjectId, carried, review.ProcedureLevel()).ToListAsync(ct);
+        var scoped = await ChoicesQuery(db, review.ProjectId, carried, review.ProcedureLevel(policy), policy).ToListAsync(ct);
         var query = scoped.AsEnumerable();
         if (!string.IsNullOrWhiteSpace(search))
         {

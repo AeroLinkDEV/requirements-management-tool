@@ -99,7 +99,7 @@ public sealed class ProjectConfigurationApiTests : IClassFixture<SharedApiHost>
     }
 
     [Fact]
-    public async Task Non_default_activation_is_refused_with_named_unrouted_consumers()
+    public async Task Non_default_activation_succeeds_through_the_sole_gate_and_records_manifest_and_history()
     {
         var seeded = await SeedAsync(_host.Factory);
         using var client = _host.CreateClient();
@@ -113,24 +113,59 @@ public sealed class ProjectConfigurationApiTests : IClassFixture<SharedApiHost>
         });
         Assert.True(edit.IsSuccessStatusCode, await edit.Content.ReadAsStringAsync());
 
+        using var invalidActivation = await client.PostAsJsonAsync($"/api/projects/{seeded.ProjectId}/configuration/activate",
+            new { expectedVersion = 2, reason = "" });
+        Assert.Equal(HttpStatusCode.BadRequest, invalidActivation.StatusCode);
+        using (var failedScope = _host.Factory.Services.CreateScope())
+        {
+            var failedDb = failedScope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            var failedConfiguration = await failedDb.ProjectLadderConfigurations.AsNoTracking()
+                .SingleAsync(x => x.ProjectId == seeded.ProjectId);
+            Assert.Equal(ProjectLadderConfigurationState.Draft, failedConfiguration.State);
+            Assert.Null(failedConfiguration.ActivationManifestHash);
+            Assert.Single(await failedDb.ProjectLadderConfigurationHistories
+                .Where(x => x.ConfigurationId == failedConfiguration.Id).ToListAsync());
+        }
+
         var activation = await client.PostAsJsonAsync($"/api/projects/{seeded.ProjectId}/configuration/activate",
             new { expectedVersion = 2, reason = "Attempt activation" });
-        Assert.Equal(HttpStatusCode.Conflict, activation.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, activation.StatusCode);
         using var activationJson = JsonDocument.Parse(await activation.Content.ReadAsStringAsync());
         var activationBody = activationJson.RootElement;
-        var error = activationBody.GetProperty("error").GetString() ?? "";
-        Assert.Contains("release.readiness", error);
-        Assert.Contains("approval.workflow-subject", error);
-        Assert.DoesNotContain("change-request.authoring", error);
-        var authoringConsumer = activationBody.GetProperty("readiness").GetProperty("consumers")
-            .EnumerateArray().Single(x => x.GetProperty("id").GetString() == "change-request.authoring");
-        Assert.True(authoringConsumer.GetProperty("routed").GetBoolean());
+        Assert.Equal("Active", activationBody.GetProperty("state").GetString());
+        Assert.Equal(3, activationBody.GetProperty("version").GetInt64());
+        Assert.Equal(2, activationBody.GetProperty("effectiveSteps").GetArrayLength());
+        var readiness = activationBody.GetProperty("readiness");
+        Assert.True(readiness.GetProperty("isReady").GetBoolean());
+        Assert.Equal(18, readiness.GetProperty("consumers").GetArrayLength());
+        var manifestVersion = readiness.GetProperty("version").GetString();
+        var manifestHash = readiness.GetProperty("hash").GetString();
+        Assert.False(string.IsNullOrWhiteSpace(manifestVersion));
+        Assert.Matches("^[0-9a-f]{64}$", manifestHash ?? "");
+        Assert.Equal(manifestVersion, activationBody.GetProperty("activationManifestVersion").GetString());
+        Assert.Equal(manifestHash, activationBody.GetProperty("activationManifestHash").GetString());
+        Assert.Equal(2, activationBody.GetProperty("history").GetArrayLength());
+        Assert.Contains("Activated ladder: Attempt activation", activationBody.GetProperty("history")[0].GetProperty("reason").GetString());
 
         using var scope = _host.Factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
         var configuration = await db.ProjectLadderConfigurations.SingleAsync(x => x.ProjectId == seeded.ProjectId);
-        Assert.Equal(ProjectLadderConfigurationState.Draft, configuration.State);
-        Assert.Null(configuration.ActivationManifestHash);
+        Assert.Equal(ProjectLadderConfigurationState.Active, configuration.State);
+        Assert.Equal(manifestVersion, configuration.ActivationManifestVersion);
+        Assert.Equal(manifestHash, configuration.ActivationManifestHash);
+        var history = await db.ProjectLadderConfigurationHistories.AsNoTracking()
+            .Where(x => x.ConfigurationId == configuration.Id).OrderByDescending(x => x.Revision).ToListAsync();
+        Assert.Equal(2, history.Count);
+        Assert.Contains("Activated ladder: Attempt activation", history[0].Reason);
+
+        using var staleActivation = await client.PostAsJsonAsync($"/api/projects/{seeded.ProjectId}/configuration/activate",
+            new { expectedVersion = 2, reason = "Stale activation must not mutate the active row" });
+        Assert.Equal(HttpStatusCode.Conflict, staleActivation.StatusCode);
+        var unchanged = await db.ProjectLadderConfigurations.AsNoTracking()
+            .SingleAsync(x => x.ProjectId == seeded.ProjectId);
+        Assert.Equal(ProjectLadderConfigurationState.Active, unchanged.State);
+        Assert.Equal(3, unchanged.Version);
+        Assert.Equal(2, await db.ProjectLadderConfigurationHistories.CountAsync(x => x.ConfigurationId == unchanged.Id));
     }
 
     [Fact]
@@ -229,5 +264,78 @@ public sealed class ProjectConfigurationApiTests : IClassFixture<SharedApiHost>
             Assert.Equal("LowLevel", winnerChild);
             Assert.Contains("LowLevel", winnerSnapshot);
         }
+    }
+
+    [Fact]
+    public async Task Concurrent_same_version_activation_has_one_success_one_conflict_and_one_atomic_active_history()
+    {
+        var seeded = await SeedAsync(_host.Factory);
+        using var editor = _host.CreateClient();
+        await SignInAsync(editor, seeded.ManagerName);
+
+        var edit = await editor.PutAsJsonAsync($"/api/projects/{seeded.ProjectId}/configuration", new
+        {
+            expectedVersion = 1,
+            reason = "Prepare the concurrent activation race",
+            steps = new[]
+            {
+                new { catalogueEntry = "System", position = 1, capabilities = 7 },
+                new { catalogueEntry = "LowLevel", position = 2, capabilities = 7 },
+            },
+            relationships = new[] { new { parent = "System", child = "LowLevel" } },
+        });
+        Assert.True(edit.IsSuccessStatusCode, await edit.Content.ReadAsStringAsync());
+
+        using var first = _host.CreateClient();
+        using var second = _host.CreateClient();
+        await SignInAsync(first, seeded.ManagerName);
+        await SignInAsync(second, seeded.ManagerName);
+        using var gate = new SaveRaceGate(_host.Factory.ConnectionString);
+        try
+        {
+            // The interceptor holds both requests after they have loaded Version 2 and reached SaveChanges.
+            // Releasing the first proves the second loses on the EF concurrency token rather than merely
+            // observing a completed request during the service's optimistic pre-check.
+            var firstTask = first.PostAsJsonAsync($"/api/projects/{seeded.ProjectId}/configuration/activate",
+                new { expectedVersion = 2, reason = "Concurrent activation candidate one" });
+            Assert.True(await gate.FirstEnteredAsync(TimeSpan.FromSeconds(30)),
+                "The first activation request never reached SaveChanges.");
+            var secondTask = second.PostAsJsonAsync($"/api/projects/{seeded.ProjectId}/configuration/activate",
+                new { expectedVersion = 2, reason = "Concurrent activation candidate two" });
+            Assert.True(await gate.SecondEnteredAsync(TimeSpan.FromSeconds(30)),
+                "The second activation request never reached SaveChanges.");
+
+            gate.ReleaseFirst();
+            using var firstResponse = await firstTask;
+            gate.ReleaseSecond();
+            using var secondResponse = await secondTask;
+            var statuses = new[] { firstResponse.StatusCode, secondResponse.StatusCode };
+            Assert.Contains(HttpStatusCode.OK, statuses);
+            Assert.Contains(HttpStatusCode.Conflict, statuses);
+            var successfulResponse = firstResponse.IsSuccessStatusCode ? firstResponse : secondResponse;
+            using var successfulJson = JsonDocument.Parse(await successfulResponse.Content.ReadAsStringAsync());
+            Assert.Equal("Active", successfulJson.RootElement.GetProperty("state").GetString());
+            Assert.False(string.IsNullOrWhiteSpace(successfulJson.RootElement.GetProperty("activationManifestVersion").GetString()));
+            Assert.Matches("^[0-9a-f]{64}$", successfulJson.RootElement.GetProperty("activationManifestHash").GetString() ?? "");
+        }
+        finally
+        {
+            gate.Dispose();
+        }
+
+        using var scope = _host.Factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+        var configuration = await db.ProjectLadderConfigurations.AsNoTracking()
+            .SingleAsync(x => x.ProjectId == seeded.ProjectId);
+        Assert.Equal(ProjectLadderConfigurationState.Active, configuration.State);
+        Assert.Equal(3, configuration.Version);
+        Assert.False(string.IsNullOrWhiteSpace(configuration.ActivationManifestVersion));
+        Assert.Matches("^[0-9a-f]{64}$", configuration.ActivationManifestHash ?? "");
+        var history = await db.ProjectLadderConfigurationHistories.AsNoTracking()
+            .Where(x => x.ConfigurationId == configuration.Id)
+            .OrderBy(x => x.Revision)
+            .ToListAsync();
+        Assert.Equal(2, history.Count);
+        Assert.Single(history, x => x.Reason.StartsWith("Activated ladder:", StringComparison.Ordinal));
     }
 }

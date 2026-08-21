@@ -640,13 +640,20 @@ public static class VerificationEndpoints
         app.MapGet("/api/test-procedures", async (Guid projectId, Guid? releaseId, string? search, string? scope, string? state,
             string? owner, string? outcome, Guid? requirementRevisionId, string? sort, int? page, int? pageSize, string? ids,
             Guid? documentId, Guid? sectionId,
-            HttpContext http, AeroLinkDbContext db, CancellationToken ct) =>
+            HttpContext http, AeroLinkDbContext db, IProjectLadderPolicyResolver policyResolver, CancellationToken ct) =>
         {
             // This endpoint read a Project's controlled procedures without checking the caller was in it.
             if (!await http.HasProjectAccessAsync(db, projectId, ct)) return Results.Forbid();
+            var ladderPolicy = await policyResolver.ResolveAsync(projectId, ct);
+            var allowedProcedureLevels = ladderPolicy.OrderedLevels
+                .Where(level => ladderPolicy.Definition(level).Verification is not null)
+                .Select(level => ladderPolicy.ProcedureLevel(level)).ToArray();
             var currentPage = Math.Max(1, page ?? 1);
             var size = Math.Clamp(pageSize ?? 25, 1, 200);
             var source = db.TestProcedures.AsNoTracking().Where(x => x.ProjectId == projectId);
+            source = allowedProcedureLevels.Length == 0
+                ? source.Where(_ => false)
+                : source.Where(x => allowedProcedureLevels.Contains(x.Level));
             Dictionary<Guid, Guid>? scopedRevisions = null;
             if(releaseId is not null)
             {

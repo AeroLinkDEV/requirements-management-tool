@@ -1,5 +1,6 @@
 using AeroLink.Domain.Baselines;
 using AeroLink.Domain.ChangeControl;
+using AeroLink.Domain.Hierarchy;
 using AeroLink.Domain.Programs;
 using AeroLink.Domain.Requirements;
 using AeroLink.Infrastructure.Persistence;
@@ -18,6 +19,44 @@ public sealed class EnterpriseRequirementsWorkspaceTests
         var program=new ProgramRecord("Workspace Program","WSP");var project=new ProjectRecord(program.Id,"FMS","Flight Management System");var release=new SoftwareRelease(project.Id,"1.0",true);var scr=new SystemChangeRequest("SRCR-00001",0,project.Id,release.Id,"Initial","Problem","Analysis","Solution","author",now);var baseline=new CandidateBaseline("SW-00.10",0,project.Id,release.Id,null,"Initial baseline","cm",now);var artifact=new RequirementArtifact(project.Id,"SYSR-00000001",RequirementLevel.System,now);var revision=new RequirementRevision(artifact.Id,0,"The FMS shall compute an active flight plan.","Operational capability.","Test",RequirementRevisionState.Active,scr.Id,baseline.Id,now);
         db.AddRange(program,project,release,scr,baseline,artifact,revision);await db.SaveChangesAsync();await new EnterpriseRequirementsService(db).SynchronizeProjectAsync(project.Id,"system",default);
         Assert.Equal(3,await db.ArtifactSchemas.CountAsync());Assert.Equal(3,await db.RequirementSpecifications.CountAsync());Assert.Equal(21,await db.SpecificationNodes.CountAsync(x=>x.Type==SpecificationNodeType.Section));Assert.Equal(6,await db.SpecificationNodes.CountAsync(x=>x.Type==SpecificationNodeType.Section&&x.ParentId!=null));Assert.Single(await db.SpecificationNodes.Where(x=>x.Type==SpecificationNodeType.Requirement).ToListAsync());Assert.Single(await db.RequirementRevisionProfiles.ToListAsync());
+    }
+
+    [Fact]
+    public async Task Synchronization_uses_only_the_effective_configured_requirements_catalogue()
+    {
+        var options = new DbContextOptionsBuilder<AeroLinkDbContext>().UseSqlite("Data Source=:memory:").Options;
+        await using var db = new AeroLinkDbContext(options);
+        await db.Database.OpenConnectionAsync();
+        await db.Database.EnsureCreatedAsync();
+        var now = DateTimeOffset.UtcNow;
+        var program = new ProgramRecord("Subset workspace program", "SWP");
+        var project = new ProjectRecord(program.Id, "Subset workspace", "Subset software");
+        var release = new SoftwareRelease(project.Id, "1.0", true);
+        var scr = new SystemChangeRequest("SRCR-00002", 0, project.Id, release.Id, "Initial", "Problem", "Analysis", "Solution", "author", now);
+        var baseline = new CandidateBaseline("SW-00.20", 0, project.Id, release.Id, null, "Initial baseline", "cm", now);
+        var artifact = new RequirementArtifact(project.Id, "SYSR-00000002", RequirementLevel.System, now);
+        var revision = new RequirementRevision(artifact.Id, 0, "The subset requirement remains governed.", "Operational capability.", "Test", RequirementRevisionState.Active, scr.Id, baseline.Id, now);
+        db.AddRange(program, project, release, scr, baseline, artifact, revision);
+        await db.SaveChangesAsync();
+
+        await new EnterpriseRequirementsService(db).SynchronizeProjectAsync(project.Id, "legacy.full");
+        var configuration = ProjectLadderConfiguration.CreateDraft(project.Id, now);
+        configuration.Steps.Add(new ProjectLadderStep(configuration.Id, project.Id, RequirementLevel.System, 1,
+            LegacyLadderPolicy.Instance.Definition(RequirementLevel.System).Capabilities, now));
+        var policy = new ResolvedProjectLadderPolicy(ProjectLadderResolver.Resolve(configuration));
+
+        await new EnterpriseRequirementsService(db,
+            policyResolver: new FixedProjectLadderPolicyResolver(policy))
+            .SynchronizeProjectAsync(project.Id, "subset.test");
+
+        Assert.Equal(3, await db.ArtifactSchemas.CountAsync(x => x.ProjectId == project.Id));
+        Assert.Single(await db.ArtifactSchemas.Where(x => x.ProjectId == project.Id && x.IsActive).ToListAsync());
+        Assert.Equal(3, await db.RequirementSpecifications.CountAsync(x => x.ProjectId == project.Id));
+        Assert.Single(await db.RequirementSpecifications.Where(x => x.ProjectId == project.Id && x.IsActive).ToListAsync());
+        Assert.Equal(2, await db.ArtifactSchemas.CountAsync(x => x.ProjectId == project.Id && !x.IsActive));
+        Assert.Equal(2, await db.RequirementSpecifications.CountAsync(x => x.ProjectId == project.Id && !x.IsActive));
+        Assert.Single(await db.SpecificationNodes.Where(x => x.RequirementArtifactId == artifact.Id).ToListAsync());
+        Assert.True(await db.SpecificationNodes.CountAsync(x => x.Type == SpecificationNodeType.Section) > 7);
     }
 
     [Fact]

@@ -7,9 +7,8 @@ namespace AeroLink.Domain.Hierarchy;
 /// The compiled consumer inventory that gates a project ladder activation.  The names are stable identifiers,
 /// rather than display labels, so a missing registration cannot silently turn into a passing boolean.
 ///
-/// #705 attaches only its complete runtime seams through infrastructure DI. The remaining entries stay absent
-/// from that registration set so an attempted activation names the precise #706 blockers instead of pretending
-/// that a draft is safe to run.
+/// Every stable matrix consumer is registered through infrastructure DI. Activation compares this complete
+/// inventory with the routed seams so a project cannot become Active on a partial runtime graph.
 /// </summary>
 public interface ILadderConsumerRegistration
 {
@@ -34,15 +33,13 @@ public sealed record LadderConsumerManifest(string Version, string Hash,
 
 public sealed record LadderConsumerStatus(string Id, string Description, bool Routed);
 
-/// <summary>The exact #702 matrix consumer inventory for the current legacy/default ladder.</summary>
+/// <summary>The exact stable matrix consumer inventory carried forward from #702.</summary>
 public static class LadderConsumerManifestCatalog
 {
     public const string Version = "#702-legacy-consumers-v1";
 
-    // This is the compiled/generated required inventory for the #702 matrix.  Implementations are deliberately
-    // supplied separately: slices register a consumer from its routed adapter instead of flipping a readiness
-    // boolean in this catalogue. Current is the empty/static contract used by domain-only callers; production
-    // infrastructure supplies the partial #705 set to ProjectLadderAuthoringService.
+    // This is the compiled/generated required inventory for the #702 matrix. Implementations are supplied
+    // separately: each production seam registers its routed adapter instead of flipping a readiness boolean.
     private static readonly IReadOnlyList<LadderConsumerRegistration> RequiredConsumers =
     [
         new("change-request.authoring", "Change-request level/type acceptance and authoring"),

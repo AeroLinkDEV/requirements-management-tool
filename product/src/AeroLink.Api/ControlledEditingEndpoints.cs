@@ -4,6 +4,7 @@ using AeroLink.Domain.Baselines;
 using AeroLink.Domain.ChangeControl;
 using AeroLink.Domain.Common;
 using AeroLink.Domain.Identity;
+using AeroLink.Domain.Hierarchy;
 using AeroLink.Domain.Requirements;
 using AeroLink.Domain.Verification;
 using AeroLink.Infrastructure.Persistence;
@@ -64,12 +65,12 @@ public static class ControlledEditingEndpoints
     }
 
     private static async Task<IResult> GetStatusAsync(string artifactType, Guid artifactId, HttpContext http,
-        AeroLinkDbContext db, CancellationToken ct)
+        AeroLinkDbContext db, IProjectLadderPolicyResolver policyResolver, CancellationToken ct)
     {
         if (!ControlledArtifactEditPolicies.TryResolve(artifactType, out var policy))
             return Results.BadRequest(new { error = $"'{artifactType}' is not a supported controlled draft artifact type.", code = "unsupported_artifact_type" });
 
-        var artifact = await ResolveAsync(policy, artifactId, db, ct);
+        var artifact = await ResolveAsync(policy, artifactId, db, policyResolver, ct);
         if (artifact is null) return Results.NotFound();
         if (!await http.HasProjectAccessAsync(db, artifact.ProjectId, ct)) return Results.Forbid();
         var actor = http.UserAccount();
@@ -102,12 +103,12 @@ public static class ControlledEditingEndpoints
     }
 
     private static async Task<IResult> CheckoutAsync(UniversalCheckoutRequest request, HttpContext http,
-        AeroLinkDbContext db, IdentityService identity, CancellationToken ct)
+        AeroLinkDbContext db, IdentityService identity, IProjectLadderPolicyResolver policyResolver, CancellationToken ct)
     {
         if (!ControlledArtifactEditPolicies.TryResolve(request.ArtifactType, out var policy))
             return Results.BadRequest(new { error = $"'{request.ArtifactType}' is not a supported controlled draft artifact type.", code = "unsupported_artifact_type" });
 
-        var artifact = await ResolveAsync(policy, request.ArtifactId, db, ct);
+        var artifact = await ResolveAsync(policy, request.ArtifactId, db, policyResolver, ct);
         if (artifact is null) return Results.NotFound();
         if (!await http.HasProjectAccessAsync(db, artifact.ProjectId, ct)) return Results.Forbid();
         var actor = http.UserAccount();
@@ -317,7 +318,7 @@ public static class ControlledEditingEndpoints
     };
 
     private static async Task<ResolvedControlledArtifact?> ResolveAsync(ControlledArtifactEditPolicy policy, Guid artifactId,
-        AeroLinkDbContext db, CancellationToken ct)
+        AeroLinkDbContext db, IProjectLadderPolicyResolver policyResolver, CancellationToken ct)
     {
         switch (policy.Family)
         {
@@ -366,6 +367,10 @@ public static class ControlledEditingEndpoints
                 var specification = await db.RequirementSpecifications.AsNoTracking().SingleOrDefaultAsync(x => x.Id == artifactId, ct);
                 if (specification is not null)
                 {
+                    // A retained specification is historical evidence, not a current controlled-editing
+                    // target. Resolve the project's effective catalogue before creating a session so an
+                    // inactive document or a document from a removed ladder level cannot be checked out.
+                    if (!await IsCurrentSpecificationAsync(specification, policyResolver, ct)) return null;
                     var nodes = await db.SpecificationNodes.AsNoTracking().Where(x => x.SpecificationId == artifactId).ToListAsync(ct);
                     return new(specification.ProjectId, "InWork", null,
                         SpecificationStructureControlledEditingAdapter.Snapshot(specification, nodes),
@@ -374,6 +379,7 @@ public static class ControlledEditingEndpoints
                 var node = await db.SpecificationNodes.AsNoTracking().SingleOrDefaultAsync(x => x.Id == artifactId, ct);
                 if (node is null) return null;
                 var owner = await db.RequirementSpecifications.AsNoTracking().SingleAsync(x => x.Id == node.SpecificationId, ct);
+                if (!await IsCurrentSpecificationAsync(owner, policyResolver, ct)) return null;
                 var ownerNodes = await db.SpecificationNodes.AsNoTracking().Where(x => x.SpecificationId == owner.Id).ToListAsync(ct);
                 return new(owner.ProjectId, "InWork", null,
                     SpecificationStructureControlledEditingAdapter.Snapshot(owner, ownerNodes), "RequirementSpecification");
@@ -420,6 +426,27 @@ public static class ControlledEditingEndpoints
             }
             default:
                 return null;
+        }
+    }
+
+    private static async Task<bool> IsCurrentSpecificationAsync(RequirementSpecification specification,
+        IProjectLadderPolicyResolver policyResolver, CancellationToken ct)
+    {
+        if (!specification.IsActive) return false;
+        try
+        {
+            var policy = await policyResolver.ResolveAsync(specification.ProjectId, ct);
+            if (!EnterpriseRequirementsService.TryLevel(specification.Level, out var level, policy)) return false;
+            var definition = policy.Definition(level);
+            return definition.Has(LevelCapabilities.HasRequirementsDocument)
+                && definition.RequirementsCatalogue is not null
+                && string.Equals(specification.DocumentNumber,
+                    definition.RequirementsCatalogue.SpecificationNumber, StringComparison.OrdinalIgnoreCase);
+        }
+        catch (DomainException)
+        {
+            // Missing or malformed persisted authority fails closed at this current-mutation boundary.
+            return false;
         }
     }
 

@@ -7,12 +7,12 @@ namespace AeroLink.Domain.Hierarchy;
 public enum ProjectLadderConfigurationClassification { LegacyDefault, NonDefault }
 
 /// <summary>
-/// Storage lifecycle only. #713 owns the distinct authoring and activation authority; controlled-record runtime
-/// consumers remain on the code-owned policy until later routing slices.
+/// Storage lifecycle for authored project ladders. Stored LegacyDefault and Active NonDefault rows are runtime
+/// authority through the effective resolver; Draft remains on the prior effective behavior until activation.
 /// </summary>
 public enum ProjectLadderConfigurationState { Stored, Draft, Active, Retired }
 
-/// <summary>A project-owned persisted ladder envelope. Runtime policy consumers remain on the code-owned policy in this slice.</summary>
+/// <summary>A project-owned persisted ladder envelope whose Stored/Active graph is compiled into runtime policy.</summary>
 public sealed class ProjectLadderConfiguration
 {
     private ProjectLadderConfiguration() { }
@@ -75,6 +75,31 @@ public sealed class ProjectLadderConfiguration
             throw new DomainException("Only a non-default draft ladder can be edited.");
         UpdatedAt = now;
         Version++;
+    }
+
+    /// <summary>
+    /// Records the one controlled transition from an authored draft to runtime authority. The service that owns
+    /// this call has already validated the complete consumer manifest; keeping the mutation here ensures no
+    /// endpoint, seeder, or persistence helper can write Active without the required evidence pair.
+    /// </summary>
+    internal void Activate(string actor, DateTimeOffset now, string manifestVersion, string manifestHash)
+    {
+        if (string.IsNullOrWhiteSpace(actor)) throw new DomainException("Activation requires an actor.");
+        if (string.IsNullOrWhiteSpace(manifestVersion) || string.IsNullOrWhiteSpace(manifestHash))
+            throw new DomainException("Activation requires manifest version and hash evidence.");
+        if (Classification != ProjectLadderConfigurationClassification.NonDefault
+            || State != ProjectLadderConfigurationState.Draft)
+            throw new DomainException("Only a non-default draft ladder can be activated.");
+
+        State = ProjectLadderConfigurationState.Active;
+        UpdatedAt = now;
+        Version++;
+        ActivatedAt = now;
+        ActivatedBy = actor.Trim();
+        ActivationManifestVersion = manifestVersion.Trim();
+        ActivationManifestHash = manifestHash.Trim().ToLowerInvariant();
+        ValidateShape(Classification, State, ActivatedAt, ActivatedBy, RetiredAt, RetiredBy,
+            ActivationManifestVersion, ActivationManifestHash);
     }
 
     internal static void ValidateShape(ProjectLadderConfigurationClassification classification,
@@ -182,8 +207,8 @@ public sealed class ProjectLadderAllowedUpstream
 }
 
 /// <summary>
-/// Builds the fixed legacy ladder for a project at the same persistence seam as project creation. This is a
-/// storage bootstrap only: runtime policy consumers continue to use <see cref="LegacyLadderPolicy"/> directly.
+/// Builds the fixed legacy ladder for a project at the same persistence seam as project creation. The effective
+/// resolver compiles this stored graph while retaining the characterized legacy compatibility marker.
 /// </summary>
 public static class LegacyDefaultProjectLadderFactory
 {

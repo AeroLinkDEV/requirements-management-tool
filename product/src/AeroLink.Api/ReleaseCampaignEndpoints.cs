@@ -1,5 +1,6 @@
 using AeroLink.Domain.Common;
 using AeroLink.Domain.Identity;
+using AeroLink.Domain.Hierarchy;
 using AeroLink.Domain.Releases;
 using AeroLink.Domain.Traceability;
 using AeroLink.Infrastructure.Persistence;
@@ -17,9 +18,11 @@ public static class ReleaseCampaignEndpoints
 {
     public static void MapReleaseCampaignEndpoints(this WebApplication app)
     {
-        app.MapGet("/api/documents", async (Guid projectId, Guid? releaseId, AeroLinkDbContext db, CancellationToken ct) =>
+        app.MapGet("/api/documents", async (Guid projectId, Guid? releaseId, AeroLinkDbContext db, IProjectLadderPolicyResolver policyResolver, CancellationToken ct) =>
         {
-            var rows = await (from document in db.ControlledDocuments.AsNoTracking().Where(x => x.ProjectId == projectId && (releaseId == null || x.ReleaseId == releaseId))
+            var ladderPolicy = await policyResolver.ResolveAsync(projectId, ct);
+            var allowedDocumentTypes = ladderPolicy.ControlledDocumentTypes.ToArray();
+            var rows = await (from document in db.ControlledDocuments.AsNoTracking().Where(x => x.ProjectId == projectId && allowedDocumentTypes.Contains(x.Type) && (releaseId == null || x.ReleaseId == releaseId))
                               join release in db.Releases.AsNoTracking() on document.ReleaseId equals release.Id
                               join baseline in db.CandidateBaselines.AsNoTracking() on document.BaselineId equals baseline.Id
                               orderby document.Type select new { document.Id, type = document.Type.ToString(), document.DocumentNumber, document.Revision, document.Title,

@@ -24,6 +24,8 @@ public sealed class ArtifactSchemaDefinition
     public DateTimeOffset CreatedAt { get; private set; }
     private readonly List<ArtifactFieldDefinition> _fields=[];
     public IReadOnlyCollection<ArtifactFieldDefinition> Fields => _fields;
+    /// <summary>Removes a schema from the current project catalogue without deleting its controlled history.</summary>
+    public void SetActive(bool active) => IsActive = active;
     public void AddField(string key,string label,SchemaFieldType type,bool required,int order,string optionsJson,string actor,DateTimeOffset now)
     { if(_fields.Any(x=>x.Key.Equals(key,StringComparison.OrdinalIgnoreCase)))throw new DomainException($"Field '{key}' already exists in this schema."); _fields.Add(new(Id,key,label,type,required,order,optionsJson,actor,now)); Version++; }
     private static string Required(string value,string name)=>string.IsNullOrWhiteSpace(value)?throw new DomainException($"{name} is required."):value.Trim();
@@ -50,7 +52,7 @@ public sealed class RequirementSpecification
 {
     private RequirementSpecification() { }
     public RequirementSpecification(Guid projectId,string documentNumber,string title,string level,string description,string actor,DateTimeOffset now)
-    { Id=Guid.NewGuid();ProjectId=projectId;DocumentNumber=ArtifactNumber.ValidateBase(documentNumber);Title=Required(title, "A specification title is required.");Level=Required(level, "A specification level is required.");Description=description.Trim();CreatedBy=actor;CreatedAt=now;UpdatedAt=now; }
+    { Id=Guid.NewGuid();ProjectId=projectId;DocumentNumber=ArtifactNumber.ValidateBase(documentNumber);Title=Required(title, "A specification title is required.");Level=Required(level, "A specification level is required.");Description=description.Trim();CreatedBy=actor;CreatedAt=now;UpdatedAt=now;IsActive=true; }
     public Guid Id { get; private set; }
     public Guid ProjectId { get; private set; }
     public string DocumentNumber { get; private set; }="";
@@ -61,6 +63,15 @@ public sealed class RequirementSpecification
     public DateTimeOffset CreatedAt { get; private set; }
     public DateTimeOffset UpdatedAt { get; private set; }
     public long Version { get; private set; } = 1;
+    /// <summary>Current catalogue membership; inactive specifications remain available as historical records.</summary>
+    public bool IsActive { get; private set; }
+
+    public void SetActive(bool active, string actor, DateTimeOffset now)
+    {
+        if (string.IsNullOrWhiteSpace(actor)) throw new DomainException("A specification update actor is required.");
+        IsActive = active;
+        UpdatedAt = now;
+    }
 
     public void UpdateDraft(string title, string level, string description, string actor, DateTimeOffset now)
     {

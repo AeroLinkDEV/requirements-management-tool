@@ -1,11 +1,11 @@
 {
   "schemaVersion": "aerolink-api-test-intent/v2",
   "totals": {
-    "tests": 518,
-    "cases": 572,
+    "tests": 524,
+    "cases": 578,
     "classes": 94,
-    "hostedTests": 505,
-    "hostedCases": 550,
+    "hostedTests": 511,
+    "hostedCases": 556,
     "nonHostedTests": 8,
     "nonHostedCases": 17,
     "unknownHostTests": 5,
@@ -21,18 +21,18 @@
     "http-boundary": {
       "label": "HTTP boundary: route, status, JSON shape",
       "level": "API (must stay hosted)",
-      "tests": 330,
-      "cases": 364,
+      "tests": 333,
+      "cases": 367,
       "unknownCases": 0,
       "classes": 80
     },
     "ef-translation": {
       "label": "EF translation / relational constraints",
       "level": "Infrastructure (needs a database, not a host)",
-      "tests": 96,
-      "cases": 103,
+      "tests": 99,
+      "cases": 106,
       "unknownCases": 0,
-      "classes": 41
+      "classes": 43
     },
     "auth-policy": {
       "label": "Authentication / authorization wiring",
@@ -91,7 +91,7 @@
       ],
       "sourceLines": {
         "start": 18,
-        "end": 158
+        "end": 160
       }
     },
     {
@@ -497,8 +497,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 81,
-        "end": 93
+        "start": 83,
+        "end": 95
       }
     },
     {
@@ -514,8 +514,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 118,
-        "end": 136
+        "start": 120,
+        "end": 138
       }
     },
     {
@@ -531,8 +531,26 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 95,
-        "end": 116
+        "start": 97,
+        "end": 118
+      }
+    },
+    {
+      "cls": "AuthoredSectionTests",
+      "test": "Authoring_sections_do_not_offer_an_inactive_catalogue_specification",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 140,
+        "end": 163
       }
     },
     {
@@ -1728,8 +1746,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 37,
-        "end": 58
+        "start": 38,
+        "end": 59
       }
     },
     {
@@ -1746,8 +1764,26 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 60,
-        "end": 81
+        "start": 61,
+        "end": 82
+      }
+    },
+    {
+      "cls": "ControlledEditingCheckInApiTests",
+      "test": "Retired_or_removed_requirement_specification_cannot_be_checked_out_and_leaves_no_session",
+      "kind": "Fact",
+      "intent": "ef-translation",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 84,
+        "end": 112
       }
     },
     {
@@ -1763,8 +1799,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 16,
-        "end": 35
+        "start": 17,
+        "end": 36
       }
     },
     {
@@ -5475,8 +5511,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 160,
-        "end": 172
+        "start": 195,
+        "end": 207
       }
     },
     {
@@ -5493,8 +5529,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 136,
-        "end": 158
+        "start": 171,
+        "end": 193
       }
     },
     {
@@ -5517,6 +5553,24 @@
     },
     {
       "cls": "ProjectConfigurationApiTests",
+      "test": "Concurrent_same_version_activation_has_one_success_one_conflict_and_one_atomic_active_history",
+      "kind": "Fact",
+      "intent": "ef-translation",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "shared-host-fixture",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 269,
+        "end": 340
+      }
+    },
+    {
+      "cls": "ProjectConfigurationApiTests",
       "test": "Concurrent_same_version_edits_have_one_winner_and_preserve_the_winner_graph_and_history",
       "kind": "Fact",
       "intent": "http-boundary",
@@ -5529,15 +5583,15 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 174,
-        "end": 232
+        "start": 209,
+        "end": 267
       }
     },
     {
       "cls": "ProjectConfigurationApiTests",
-      "test": "Non_default_activation_is_refused_with_named_unrouted_consumers",
+      "test": "Non_default_activation_succeeds_through_the_sole_gate_and_records_manifest_and_history",
       "kind": "Fact",
-      "intent": "http-boundary",
+      "intent": "ef-translation",
       "cases": 1,
       "caseEvidence": "Fact",
       "hosted": "hosted",
@@ -5548,7 +5602,7 @@
       ],
       "sourceLines": {
         "start": 101,
-        "end": 134
+        "end": 169
       }
     },
     {
@@ -7410,24 +7464,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 212,
-        "end": 254
-      }
-    },
-    {
-      "cls": "TestChangeRequestRegisterApiTests",
-      "test": "A_package_with_no_controlled_number_is_still_listed",
-      "kind": "Fact",
-      "intent": "http-boundary",
-      "cases": 1,
-      "caseEvidence": "Fact",
-      "hosted": "hosted",
-      "hostEvidence": [
-        "factory-construction"
-      ],
-      "sourceLines": {
-        "start": 137,
-        "end": 151
+        "start": 282,
+        "end": 324
       }
     },
     {
@@ -7442,8 +7480,24 @@
         "factory-construction"
       ],
       "sourceLines": {
-        "start": 184,
-        "end": 196
+        "start": 254,
+        "end": 266
+      }
+    },
+    {
+      "cls": "TestChangeRequestRegisterApiTests",
+      "test": "An_unnumbered_pending_assessment_is_excluded_from_current_register_but_remains_explicit_history",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction"
+      ],
+      "sourceLines": {
+        "start": 164,
+        "end": 181
       }
     },
     {
@@ -7458,8 +7512,8 @@
         "factory-construction"
       ],
       "sourceLines": {
-        "start": 92,
-        "end": 112
+        "start": 124,
+        "end": 144
       }
     },
     {
@@ -7474,8 +7528,8 @@
         "factory-construction"
       ],
       "sourceLines": {
-        "start": 115,
-        "end": 130
+        "start": 147,
+        "end": 162
       }
     },
     {
@@ -7490,8 +7544,40 @@
         "factory-construction"
       ],
       "sourceLines": {
-        "start": 169,
-        "end": 182
+        "start": 239,
+        "end": 252
+      }
+    },
+    {
+      "cls": "TestChangeRequestRegisterApiTests",
+      "test": "The_current_register_refuses_an_absent_ladder_discipline_but_historical_read_remains_available",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction"
+      ],
+      "sourceLines": {
+        "start": 205,
+        "end": 221
+      }
+    },
+    {
+      "cls": "TestChangeRequestRegisterApiTests",
+      "test": "The_current_register_uses_exact_HLR_and_LLR_controlled_prefixes",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction"
+      ],
+      "sourceLines": {
+        "start": 183,
+        "end": 203
       }
     },
     {
@@ -7506,8 +7592,8 @@
         "factory-construction"
       ],
       "sourceLines": {
-        "start": 153,
-        "end": 167
+        "start": 223,
+        "end": 237
       }
     },
     {
@@ -7522,8 +7608,8 @@
         "factory-construction"
       ],
       "sourceLines": {
-        "start": 198,
-        "end": 209
+        "start": 268,
+        "end": 279
       }
     },
     {
@@ -7540,8 +7626,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 1058,
-        "end": 1086
+        "start": 1081,
+        "end": 1109
       }
     },
     {
@@ -7558,8 +7644,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 933,
-        "end": 963
+        "start": 956,
+        "end": 986
       }
     },
     {
@@ -7575,8 +7661,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 1377,
-        "end": 1398
+        "start": 1400,
+        "end": 1421
       }
     },
     {
@@ -7592,8 +7678,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 1424,
-        "end": 1439
+        "start": 1447,
+        "end": 1462
       }
     },
     {
@@ -7609,8 +7695,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 449,
-        "end": 468
+        "start": 450,
+        "end": 469
       }
     },
     {
@@ -7626,8 +7712,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 912,
-        "end": 931
+        "start": 935,
+        "end": 954
       }
     },
     {
@@ -7644,8 +7730,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 1026,
-        "end": 1056
+        "start": 1049,
+        "end": 1079
       }
     },
     {
@@ -7661,8 +7747,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 995,
-        "end": 1010
+        "start": 1018,
+        "end": 1033
       }
     },
     {
@@ -7678,8 +7764,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 1225,
-        "end": 1251
+        "start": 1248,
+        "end": 1274
       }
     },
     {
@@ -7695,8 +7781,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 470,
-        "end": 489
+        "start": 471,
+        "end": 490
       }
     },
     {
@@ -7712,8 +7798,25 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 1323,
-        "end": 1370
+        "start": 1346,
+        "end": 1393
+      }
+    },
+    {
+      "cls": "TestChangeRequestReviewWorkflowTests",
+      "test": "Configured_policy_refuses_a_workflow_for_a_removed_high_level_test_subject",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client"
+      ],
+      "sourceLines": {
+        "start": 623,
+        "end": 643
       }
     },
     {
@@ -7730,8 +7833,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 681,
-        "end": 714
+        "start": 704,
+        "end": 737
       }
     },
     {
@@ -7747,8 +7850,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 216,
-        "end": 234
+        "start": 217,
+        "end": 235
       }
     },
     {
@@ -7764,8 +7867,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 1400,
-        "end": 1417
+        "start": 1423,
+        "end": 1440
       }
     },
     {
@@ -7782,8 +7885,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 784,
-        "end": 818
+        "start": 807,
+        "end": 841
       }
     },
     {
@@ -7800,8 +7903,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 236,
-        "end": 273
+        "start": 237,
+        "end": 274
       }
     },
     {
@@ -7818,8 +7921,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 622,
-        "end": 656
+        "start": 645,
+        "end": 679
       }
     },
     {
@@ -7836,8 +7939,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 658,
-        "end": 679
+        "start": 681,
+        "end": 702
       }
     },
     {
@@ -7854,8 +7957,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 594,
-        "end": 620
+        "start": 595,
+        "end": 621
       }
     },
     {
@@ -7872,8 +7975,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 716,
-        "end": 741
+        "start": 739,
+        "end": 764
       }
     },
     {
@@ -7889,8 +7992,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 820,
-        "end": 835
+        "start": 843,
+        "end": 858
       }
     },
     {
@@ -7907,8 +8010,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 1186,
-        "end": 1223
+        "start": 1209,
+        "end": 1246
       }
     },
     {
@@ -7925,8 +8028,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 1118,
-        "end": 1157
+        "start": 1141,
+        "end": 1180
       }
     },
     {
@@ -7943,8 +8046,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 1088,
-        "end": 1116
+        "start": 1111,
+        "end": 1139
       }
     },
     {
@@ -7961,8 +8064,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 1159,
-        "end": 1184
+        "start": 1182,
+        "end": 1207
       }
     },
     {
@@ -7979,8 +8082,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 412,
-        "end": 447
+        "start": 413,
+        "end": 448
       }
     },
     {
@@ -7996,8 +8099,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 837,
-        "end": 886
+        "start": 860,
+        "end": 909
       }
     },
     {
@@ -8013,8 +8116,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 888,
-        "end": 910
+        "start": 911,
+        "end": 933
       }
     },
     {
@@ -8030,8 +8133,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 1289,
-        "end": 1321
+        "start": 1312,
+        "end": 1344
       }
     },
     {
@@ -8048,8 +8151,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 512,
-        "end": 592
+        "start": 513,
+        "end": 593
       }
     },
     {
@@ -8065,8 +8168,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 275,
-        "end": 299
+        "start": 276,
+        "end": 300
       }
     },
     {
@@ -8079,8 +8182,8 @@
       "hosted": "unknown",
       "hostEvidence": [],
       "sourceLines": {
-        "start": 23,
-        "end": 31
+        "start": 24,
+        "end": 32
       }
     },
     {
@@ -8097,8 +8200,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 743,
-        "end": 782
+        "start": 766,
+        "end": 805
       }
     },
     {
@@ -8114,8 +8217,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 491,
-        "end": 510
+        "start": 492,
+        "end": 511
       }
     },
     {
@@ -8132,8 +8235,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 384,
-        "end": 410
+        "start": 385,
+        "end": 411
       }
     },
     {
@@ -8150,8 +8253,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 965,
-        "end": 993
+        "start": 988,
+        "end": 1016
       }
     },
     {
@@ -8168,8 +8271,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 1253,
-        "end": 1287
+        "start": 1276,
+        "end": 1310
       }
     },
     {
@@ -8186,8 +8289,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 301,
-        "end": 382
+        "start": 302,
+        "end": 383
       }
     },
     {

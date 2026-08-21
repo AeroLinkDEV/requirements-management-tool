@@ -176,6 +176,10 @@ export default function ApprovalConfigurationCenter({
   }, [api, projectId])
 
   useEffect(() => { void load() }, [load])
+  useEffect(() => {
+    if (data && !data.artifacts.some(item => item.subject === selected))
+      setSelected(data.artifacts[0]?.subject ?? '')
+  }, [data, selected])
 
   const artifact = useMemo(
     () => data?.artifacts.find(item => item.subject === selected) ?? null,

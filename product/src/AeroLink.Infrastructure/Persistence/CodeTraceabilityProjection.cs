@@ -35,9 +35,13 @@ public static class CodeTraceabilityProjection
         ILadderPolicy ladderPolicy,
         CancellationToken ct)
     {
-        var requiredLevel = ladderPolicy.OrderedLevels.Single(level => ladderPolicy.HasCodeTraceability(level));
+        var requiredLevels = ladderPolicy.OrderedLevels.Where(ladderPolicy.HasCodeTraceability).ToArray();
+        // A project ladder may intentionally omit code traceability. That is a valid capability profile, not a
+        // malformed one, and it owes no implementation mappings. In particular, do not turn an empty configured
+        // capability set into a LINQ Single() 500 during release-readiness or the Code workspace query.
+        if (requiredLevels.Length == 0) return [];
         var candidates = await (from selection in db.BaselineRequirements.AsNoTracking().Where(x => x.BaselineId == baselineId)
-                                join artifact in db.Requirements.AsNoTracking().Where(x => x.ProjectId == projectId && x.Level == requiredLevel) on selection.ArtifactId equals artifact.Id
+                                join artifact in db.Requirements.AsNoTracking().Where(x => x.ProjectId == projectId && requiredLevels.Contains(x.Level)) on selection.ArtifactId equals artifact.Id
                                 join revision in db.RequirementRevisions.AsNoTracking() on selection.RevisionId equals revision.Id
                                 join change in db.SystemChangeRequests.AsNoTracking() on revision.SourceChangeRequestId equals change.Id into changes
                                 from change in changes.DefaultIfEmpty()

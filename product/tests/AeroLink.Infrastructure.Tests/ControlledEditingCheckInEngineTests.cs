@@ -343,6 +343,23 @@ public sealed class ControlledEditingCheckInEngineTests
     }
 
     [Fact]
+    public async Task Specification_structure_adapter_refuses_an_inactive_current_specification_but_keeps_it_stored()
+    {
+        await using var scenario = await Scenario.CreateAsync();
+        var specification = new RequirementSpecification(scenario.Project.Id, "HLRD-000001", "Historical HLR structure",
+            RequirementLevel.HighLevel.ToString(), "Retained historical description", scenario.Actor.UserName, scenario.Now);
+        var section = new SpecificationNode(specification.Id, null, 10, SpecificationNodeType.Section,
+            "Historical section", null, scenario.Actor.UserName, scenario.Now);
+        specification.SetActive(false, scenario.Actor.UserName, scenario.Now.AddMinutes(1));
+        scenario.Db.AddRange(specification, section);
+        await scenario.Db.SaveChangesAsync();
+
+        var adapter = new SpecificationStructureControlledEditingAdapter(scenario.Db);
+        Assert.Null(await adapter.ResolveAsync(specification.Id, default));
+        Assert.True(await scenario.Db.RequirementSpecifications.AnyAsync(x => x.Id == specification.Id && !x.IsActive));
+    }
+
+    [Fact]
     public async Task Trace_link_adapter_rejects_identity_changes_and_applies_an_authorized_proposal_update()
     {
         await using var scenario = await Scenario.CreateAsync();

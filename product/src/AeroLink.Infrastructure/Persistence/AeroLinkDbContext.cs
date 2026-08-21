@@ -955,7 +955,7 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
         });
         modelBuilder.Entity<RequirementSpecification>(b =>
         {
-            b.ToTable("requirement_specifications"); b.HasKey(x=>x.Id); b.Property(x=>x.DocumentNumber).HasMaxLength(40).IsRequired(); b.Property(x=>x.Title).HasMaxLength(300).IsRequired(); b.Property(x=>x.Level).HasMaxLength(40).IsRequired(); b.Property(x=>x.Description).HasMaxLength(4000); b.Property(x=>x.CreatedBy).HasMaxLength(100).IsRequired(); b.Property(x=>x.Version).IsConcurrencyToken(); b.HasIndex(x=>new{x.ProjectId,x.DocumentNumber}).IsUnique(); b.HasOne<ProjectRecord>().WithMany().HasForeignKey(x=>x.ProjectId).OnDelete(DeleteBehavior.Restrict);
+            b.ToTable("requirement_specifications"); b.HasKey(x=>x.Id); b.Property(x=>x.DocumentNumber).HasMaxLength(40).IsRequired(); b.Property(x=>x.Title).HasMaxLength(300).IsRequired(); b.Property(x=>x.Level).HasMaxLength(40).IsRequired(); b.Property(x=>x.Description).HasMaxLength(4000); b.Property(x=>x.CreatedBy).HasMaxLength(100).IsRequired(); b.Property(x=>x.Version).IsConcurrencyToken(); b.Property(x=>x.IsActive).HasDefaultValue(true).IsRequired(); b.HasIndex(x=>new{x.ProjectId,x.DocumentNumber}).IsUnique(); b.HasOne<ProjectRecord>().WithMany().HasForeignKey(x=>x.ProjectId).OnDelete(DeleteBehavior.Restrict);
         });
         modelBuilder.Entity<SpecificationNode>(b =>
         {
@@ -1485,14 +1485,22 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
                                      join procedure in TestProcedures.AsNoTracking()
                                          on revision.ProcedureId equals procedure.Id
                                      where procedureRevisionIds.Contains(revision.Id)
-                                     select new { revision.Id, procedure.Level, procedure.BaseNumber })
+                                     select new { revision.Id, procedure.ProjectId, procedure.Level, procedure.BaseNumber })
             .ToDictionaryAsync(x => x.Id, ct);
         var requirementLevels = await (from revision in RequirementRevisions.AsNoTracking()
                                        join artifact in Requirements.AsNoTracking()
                                            on revision.ArtifactId equals artifact.Id
                                        where requirementRevisionIds.Contains(revision.Id)
-                                       select new { revision.Id, artifact.Level, artifact.BaseNumber })
+                                       select new { revision.Id, artifact.ProjectId, artifact.Level, artifact.BaseNumber })
             .ToDictionaryAsync(x => x.Id, ct);
+
+        var projectIds = procedureLevels.Values.Select(x => x.ProjectId)
+            .Concat(requirementLevels.Values.Select(x => x.ProjectId)).Distinct().ToList();
+        var configurations = await ProjectLadderConfigurations
+            .Include(x => x.Steps).Include(x => x.AllowedUpstream)
+            .AsNoTracking().Where(x => projectIds.Contains(x.ProjectId)).ToListAsync(ct);
+        var policies = configurations.ToDictionary(x => x.ProjectId,
+            x => ProjectLadderPolicyStorage.ResolvePersisted(x, x.ProjectId));
 
         foreach (var link in added)
         {
@@ -1501,15 +1509,19 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
             // check before proposing.
             if (!procedureLevels.TryGetValue(link.ProcedureRevisionId, out var procedure)) continue;
             if (!requirementLevels.TryGetValue(link.RequirementRevisionId, out var requirement)) continue;
-            if (SameLevel(procedure.Level, requirement.Level)) continue;
+            if (procedure.ProjectId != requirement.ProjectId)
+                throw new DomainException("A verification coverage link cannot cross projects.");
+            if (!policies.TryGetValue(procedure.ProjectId, out var policyForProject))
+                throw new DomainException($"Project {procedure.ProjectId} has no persisted ladder configuration.");
+            if (SameLevel(policyForProject, procedure.Level, requirement.Level)) continue;
             throw new DomainException(
                 $"{procedure.BaseNumber} is a {procedure.Level} test procedure and cannot verify {requirement.BaseNumber}, which is a {requirement.Level} requirement. A test procedure covers requirements at its own level.");
         }
     }
 
     /// <summary>The one true correspondence between a procedure's level and a requirement's.</summary>
-    private static bool SameLevel(TestProcedureLevel procedure, RequirementLevel requirement) =>
-        LegacyLadderPolicy.Instance.RequirementLevelFor(procedure) == requirement;
+    private static bool SameLevel(ILadderPolicy policy, TestProcedureLevel procedure, RequirementLevel requirement) =>
+        policy.RequirementLevelFor(procedure) == requirement;
 
     /// <summary>
     /// Queues an outbound delivery for every notification being written, in the same unit of work.

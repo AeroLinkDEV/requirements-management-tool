@@ -9,6 +9,8 @@ import { apiRequest, operationError, recordClientOperationFailure } from './apiC
 import { pickerSummary } from './pickerText'
 import { isControlledTestChangeRequest, reviewsVisibleInCurrentRelease, successorReferenceFor, supersededHistoryFor } from './testChangeReviewPresentation'
 import type { TestDiscipline } from './TestResultsWorkspace'
+import { LadderCapability, ladderAllows } from './projectLadder'
+import type { ProjectLadderProjection } from './projectLadder'
 import './DownstreamAssessmentQueue.css'
 import './HistoryExplorer.css'
 import './TestingCoverageWorkspace.css'
@@ -163,7 +165,7 @@ function ExistingCoverage({ item, coverage }: { item: ImpactItem; coverage?: Cov
  * change request is approved, so nothing goes unnoticed; an engineer can also raise one deliberately when a
  * set of changes is best tested together.
  */
-export default function TestingCoverageWorkspace({ api, projectId, releaseId, releases, discipline, buildName, readOnly, programId, user, initialReviewId, onBack, onOpenRequirementRevision, onRaiseTestChangeRequest, onOpenTestChangeRequest, onLevelChange }: {
+export default function TestingCoverageWorkspace({ api, projectId, releaseId, releases, discipline, buildName, readOnly, programId, user, initialReviewId, onBack, onOpenRequirementRevision, onRaiseTestChangeRequest, onOpenTestChangeRequest, onLevelChange, ladder }: {
   api: string
   projectId: string
   releaseId: string
@@ -180,6 +182,7 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, re
   onRaiseTestChangeRequest: () => void
   onOpenTestChangeRequest: (id: string) => void
   onLevelChange?: (level: SoftwareVerificationLevel) => void
+  ladder: ProjectLadderProjection | null
 }) {
   // Authority is per Program, and it is the server that enforces it. Reflecting it here is about not offering
   // somebody a control that will refuse them — an approval they cannot give is worse than no button at all.
@@ -603,16 +606,16 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, re
       </header>
       {discipline !== 'System' && onLevelChange && (
         <nav className="softwareLevelTabs" role="tablist" aria-label="Software verification level">
-          <button type="button" role="tab" aria-selected={discipline === 'HighLevelSoftware'}
+          {ladderAllows(ladder, 'HighLevel', LadderCapability.Verification) && <button type="button" role="tab" aria-selected={discipline === 'HighLevelSoftware'}
             aria-current={discipline === 'HighLevelSoftware' ? 'page' : undefined}
             onClick={() => onLevelChange('HighLevel')}>
             <b>HLR</b><span>High-level test procedures</span>
-          </button>
-          <button type="button" role="tab" aria-selected={discipline === 'LowLevelSoftware'}
+          </button>}
+          {ladderAllows(ladder, 'LowLevel', LadderCapability.Verification) && <button type="button" role="tab" aria-selected={discipline === 'LowLevelSoftware'}
             aria-current={discipline === 'LowLevelSoftware' ? 'page' : undefined}
             onClick={() => onLevelChange('LowLevel')}>
             <b>LLR</b><span>Low-level test procedures</span>
-          </button>
+          </button>}
         </nav>
       )}
       {error && <div className="workspaceError" role="alert" aria-live="assertive">{error}</div>}

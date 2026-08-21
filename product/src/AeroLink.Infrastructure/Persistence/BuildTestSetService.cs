@@ -16,9 +16,10 @@ namespace AeroLink.Infrastructure.Persistence;
 /// procedure the build has to run — so those become the set's first entries. Without that, replacing the
 /// checkbox would silently discard every decision anybody had already recorded with it.
 /// </summary>
-public sealed class BuildTestSetService(AeroLinkDbContext db, ILadderPolicy? policy = null)
+public sealed class BuildTestSetService(AeroLinkDbContext db, ILadderPolicy? policy = null,
+    IProjectLadderPolicyResolver? policyResolver = null)
 {
-    private readonly ILadderPolicy ladderPolicy = policy ?? LegacyLadderPolicy.Instance;
+    private readonly ILadderPolicy fallbackPolicy = policy ?? LegacyLadderPolicy.Instance;
 
     /// <summary>
     /// Returns the build's sets, creating and seeding any that do not exist yet.
@@ -31,15 +32,21 @@ public sealed class BuildTestSetService(AeroLinkDbContext db, ILadderPolicy? pol
     {
         var existing = await db.BuildTestSets.Include(x => x.Entries)
             .Where(x => x.ReleaseId == releaseId).ToListAsync(ct);
+        var ladderPolicy = policyResolver is null
+            ? fallbackPolicy
+            : await policyResolver.ResolveAsync(projectId, ct);
         var disciplines = ladderPolicy.OrderedLevels
             .Where(level => ladderPolicy.Definition(level).Has(LevelCapabilities.HasVerification))
             .Select(ladderPolicy.Discipline)
             .ToArray();
+        var configuredDisciplines = disciplines.ToHashSet();
+        existing = existing.Where(x => configuredDisciplines.Contains(x.Discipline)).ToList();
         var missing = disciplines.Where(d => existing.All(x => x.Discipline != d)).ToList();
         if (missing.Count == 0) return existing;
 
         var now = DateTimeOffset.UtcNow;
-        var carried = await CarriedForwardAsync(releaseId, ct);
+        var carried = (await CarriedForwardAsync(releaseId, ct))
+            .Where(x => configuredDisciplines.Contains(x.Discipline)).ToList();
         foreach (var discipline in missing)
         {
             var set = new BuildTestSet(projectId, releaseId, discipline, now);
@@ -55,7 +62,8 @@ public sealed class BuildTestSetService(AeroLinkDbContext db, ILadderPolicy? pol
             // Another request created them between the read and the write. Theirs is as good as ours.
             db.ChangeTracker.Clear();
         }
-        return await db.BuildTestSets.Include(x => x.Entries).Where(x => x.ReleaseId == releaseId).ToListAsync(ct);
+        return await db.BuildTestSets.Include(x => x.Entries)
+            .Where(x => x.ReleaseId == releaseId && configuredDisciplines.Contains(x.Discipline)).ToListAsync(ct);
     }
 
     private sealed record CarriedEntry(TestChangeReviewDiscipline Discipline, Guid ProcedureRevisionId,

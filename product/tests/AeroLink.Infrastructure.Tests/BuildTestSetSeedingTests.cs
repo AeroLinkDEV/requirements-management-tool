@@ -1,5 +1,6 @@
 using AeroLink.Domain.ChangeControl;
 using AeroLink.Domain.Common;
+using AeroLink.Domain.Hierarchy;
 using AeroLink.Domain.Programs;
 using AeroLink.Domain.Verification;
 using AeroLink.Infrastructure.Persistence;
@@ -108,6 +109,32 @@ public sealed class BuildTestSetSeedingTests
         Assert.Equal(3, await db.BuildTestSets.CountAsync());
         // A second pass must not re-add what a lead may deliberately have removed.
         Assert.Single(system.Entries);
+    }
+
+    [Fact]
+    public async Task A_configured_subset_policy_hides_retained_sets_for_removed_verification_disciplines()
+    {
+        var fixture = await DatabaseAsync(flagPreReleaseEvidence: false);
+        await using var db = fixture.Db;
+        var now = DateTimeOffset.UtcNow;
+        db.AddRange(
+            new BuildTestSet(fixture.ProjectId, fixture.ReleaseId, TestChangeReviewDiscipline.System, now),
+            new BuildTestSet(fixture.ProjectId, fixture.ReleaseId, TestChangeReviewDiscipline.HighLevelSoftware, now),
+            new BuildTestSet(fixture.ProjectId, fixture.ReleaseId, TestChangeReviewDiscipline.LowLevelSoftware, now));
+        await db.SaveChangesAsync();
+
+        var configuration = ProjectLadderConfiguration.CreateDraft(fixture.ProjectId, now);
+        configuration.Steps.Add(new ProjectLadderStep(configuration.Id, fixture.ProjectId, RequirementLevel.System, 1,
+            LegacyLadderPolicy.Instance.Definition(RequirementLevel.System).Capabilities, now));
+        var policy = new ResolvedProjectLadderPolicy(ProjectLadderResolver.Resolve(configuration));
+        var service = new BuildTestSetService(db,
+            policyResolver: new FixedProjectLadderPolicyResolver(policy));
+
+        var visible = await service.EnsureForReleaseAsync(fixture.ProjectId, fixture.ReleaseId);
+
+        Assert.Single(visible);
+        Assert.Equal(TestChangeReviewDiscipline.System, visible[0].Discipline);
+        Assert.Equal(3, await db.BuildTestSets.CountAsync(x => x.ReleaseId == fixture.ReleaseId));
     }
 
     [Fact]

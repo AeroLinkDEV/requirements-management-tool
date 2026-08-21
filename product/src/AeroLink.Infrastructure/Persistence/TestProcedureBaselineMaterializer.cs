@@ -2,6 +2,7 @@ using System.Text.Json;
 using AeroLink.Domain.Baselines;
 using AeroLink.Domain.Common;
 using AeroLink.Domain.Verification;
+using AeroLink.Domain.Hierarchy;
 using Microsoft.EntityFrameworkCore;
 
 namespace AeroLink.Infrastructure.Persistence;
@@ -21,7 +22,8 @@ public sealed record TestProcedureMaterializationResult(string ProceduresHash, i
 /// Runs after the requirement baseline rather than with it. A procedure verifies a requirement, so the
 /// requirement revisions have to exist before a procedure revision can be bound to one.
 /// </summary>
-public sealed class TestProcedureBaselineMaterializer(AeroLinkDbContext db)
+public sealed class TestProcedureBaselineMaterializer(AeroLinkDbContext db,
+    ILadderPolicy? policy = null, IProjectLadderPolicyResolver? policyResolver = null)
 {
     private sealed record ProcedureSourceSnapshot(
         Guid ChangeRequestId, string ChangeRequestNumber, bool Originating);
@@ -32,6 +34,9 @@ public sealed class TestProcedureBaselineMaterializer(AeroLinkDbContext db)
         var baseline = await db.CandidateBaselines.Include(x => x.TestChangeSelections).Include(x => x.Events)
                            .SingleOrDefaultAsync(x => x.Id == baselineId, ct)
                        ?? throw new DomainException("Baseline not found.");
+        var ladderPolicy = policyResolver is null
+            ? (policy ?? LegacyLadderPolicy.Instance)
+            : await policyResolver.ResolveAsync(baseline.ProjectId, ct);
         if (baseline.State != CandidateBaselineState.Frozen)
             throw new DomainException("Freeze the baseline before materializing its test procedures.");
         if (baseline.RequirementsMaterializedAt is null)
@@ -66,7 +71,7 @@ public sealed class TestProcedureBaselineMaterializer(AeroLinkDbContext db)
                 if (procedureByBase.ContainsKey(change.BaseNumber))
                     throw new DomainException($"{change.DisplayNumber} cannot be introduced because its stable identity already exists.");
                 var procedure = new TestProcedure(baseline.ProjectId, change.BaseNumber, change.Title,
-                    actorId, now, change.Level);
+                    actorId, now, change.Level, ladderPolicy);
                 db.TestProcedures.Add(procedure);
                 procedureByBase.Add(procedure.BaseNumber, procedure);
                 var revision = CreateRevision(procedure.Id, change, pair.tcr, baseline.Id, now, TestProcedureState.Approved);
@@ -114,7 +119,7 @@ public sealed class TestProcedureBaselineMaterializer(AeroLinkDbContext db)
         // After the save above rather than before it, because the placement reads the procedures back from
         // the database — and still inside the transaction, so a procedure and its place in a document are
         // committed together or not at all.
-        await new TestProcedureDocumentBootstrap(db).EnsureForProjectAsync(baseline.ProjectId, ct);
+        await new TestProcedureDocumentBootstrap(db, ladderPolicy).EnsureForProjectAsync(baseline.ProjectId, ct);
         await db.SaveChangesAsync(ct);
         await transaction.CommitAsync(ct);
         return new TestProcedureMaterializationResult(hash, current.Count, created, coverageLinks, settled);

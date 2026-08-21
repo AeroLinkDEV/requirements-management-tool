@@ -28,21 +28,24 @@ namespace AeroLink.Infrastructure.Persistence;
 /// released document will carry. A reader comparing a draft to the eventual release sees the same number and
 /// the difference is the stamp, rather than two documents whose relationship they have to work out.
 /// </summary>
-public sealed class DraftDocumentGenerator(AeroLinkDbContext db, RichContentPublisher richContent, ILadderPolicy? policy = null)
+public sealed class DraftDocumentGenerator(AeroLinkDbContext db, RichContentPublisher richContent,
+    ILadderPolicy? policy = null, IProjectLadderPolicyResolver? policyResolver = null)
 {
-    private readonly ILadderPolicy ladderPolicy = policy ?? LegacyLadderPolicy.Instance;
     public async Task<GeneratedOutput?> GenerateAsync(Guid releaseId, ControlledDocumentType type, string format,
         string preparedBy, CancellationToken ct)
     {
         var release = await db.Releases.AsNoTracking().SingleOrDefaultAsync(x => x.Id == releaseId, ct);
         if (release is null) return null;
         var project = await db.Projects.AsNoTracking().SingleAsync(x => x.Id == release.ProjectId, ct);
+        var ladderPolicy = policyResolver is null
+            ? (policy ?? LegacyLadderPolicy.Instance)
+            : await policyResolver.ResolveAsync(project.Id, ct);
         var program = await db.Programs.AsNoTracking().SingleAsync(x => x.Id == project.ProgramId, ct);
 
-        if (ladderPolicy.OrderedLevels.Any(level => ladderPolicy.TestProcedureDocument(level) == type))
-            return await GenerateProcedureDraftAsync(release, project, program, type, format, preparedBy, ct);
+        if (ladderPolicy.Definitions.Any(level => level.Verification?.DocumentType == type))
+            return await GenerateProcedureDraftAsync(release, project, program, type, format, preparedBy, ladderPolicy, ct);
 
-        var level = RequirementLevelFor(type);
+        var level = RequirementLevelFor(type, ladderPolicy);
         if (level is null) return null;
 
         var predecessor = await ReleasedPredecessorBaselineAsync(release.ProjectId, release.PredecessorReleaseId, ct);
@@ -61,7 +64,7 @@ public sealed class DraftDocumentGenerator(AeroLinkDbContext db, RichContentPubl
             new[] { ("Rationale", x.Rationale), ("Verification method", x.VerificationMethod), ("Source change request", x.Source) },
             Supplementary(x))).ToList();
 
-        var documentNumber = DocumentNumber(type, release.Version);
+        var documentNumber = DocumentNumber(type, release.Version, ladderPolicy);
         var revision = await NextRevisionAsync(release.ProjectId, type, ct);
         var pending = effective.Count(x => x.Origin.Length > 0);
 
@@ -108,9 +111,10 @@ public sealed class DraftDocumentGenerator(AeroLinkDbContext db, RichContentPubl
     }
 
     private async Task<GeneratedOutput> GenerateProcedureDraftAsync(SoftwareRelease release, ProjectRecord project,
-        ProgramRecord program, ControlledDocumentType type, string format, string preparedBy, CancellationToken ct)
+        ProgramRecord program, ControlledDocumentType type, string format, string preparedBy, ILadderPolicy ladderPolicy,
+        CancellationToken ct)
     {
-        var level = ProcedureLevelFor(type);
+        var level = ProcedureLevelFor(type, ladderPolicy);
         var effectivity = await TestProcedureEffectivity.ForReleaseAsync(db, project.Id, release.Id, ct);
         var revisionIds = effectivity?.RevisionIds ?? [];
         var latest = await (from revision in db.TestProcedureRevisions.AsNoTracking()
@@ -133,7 +137,7 @@ public sealed class DraftDocumentGenerator(AeroLinkDbContext db, RichContentPubl
                 ("Owner", x.Procedure.OwnerId)
             })).ToList();
         var generatedAt = DateTimeOffset.UtcNow;
-        var documentNumber = DocumentNumber(type, release.Version);
+        var documentNumber = DocumentNumber(type, release.Version, ladderPolicy);
         var revisionNumber = await NextRevisionAsync(project.Id, type, ct);
         var publication = new ProfessionalPublication(
             project.SoftwareProduct, $"{program.Name} ({program.Code})", project.Name, DocumentTypeName(type),
@@ -257,7 +261,7 @@ public sealed class DraftDocumentGenerator(AeroLinkDbContext db, RichContentPubl
         return (highest ?? 0) + 1;
     }
 
-    private string DocumentNumber(ControlledDocumentType type, string version)
+    private static string DocumentNumber(ControlledDocumentType type, string version, ILadderPolicy ladderPolicy)
     {
         var digits = string.Concat(version.Where(char.IsDigit));
         var suffix = int.TryParse(digits, out var number) ? number.ToString("D6") : digits;
@@ -265,17 +269,17 @@ public sealed class DraftDocumentGenerator(AeroLinkDbContext db, RichContentPubl
         return $"{prefix}-{suffix}";
     }
 
-    private RequirementLevel? RequirementLevelFor(ControlledDocumentType type) =>
+    private static RequirementLevel? RequirementLevelFor(ControlledDocumentType type, ILadderPolicy ladderPolicy) =>
         ladderPolicy.OrderedLevels
-            .Where(level => ladderPolicy.RequirementsDocument(level) == type)
+            .Where(level => ladderPolicy.Definition(level).RequirementsDocumentType == type)
             .Select(level => (RequirementLevel?)level)
             .SingleOrDefault();
 
-    private TestProcedureLevel ProcedureLevelFor(ControlledDocumentType type)
+    private static TestProcedureLevel ProcedureLevelFor(ControlledDocumentType type, ILadderPolicy ladderPolicy)
     {
         var matches = ladderPolicy.OrderedLevels
-            .Where(level => ladderPolicy.TestProcedureDocument(level) == type)
-            .Select(ladderPolicy.ProcedureLevel)
+            .Where(level => ladderPolicy.Definition(level).Verification?.DocumentType == type)
+            .Select(level => ladderPolicy.Definition(level).Verification!.ProcedureLevel)
             .ToArray();
         return matches.Length == 1
             ? matches[0]

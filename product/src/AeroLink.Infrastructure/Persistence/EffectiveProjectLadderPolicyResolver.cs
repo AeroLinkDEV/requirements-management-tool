@@ -1,29 +1,45 @@
 using AeroLink.Domain.Hierarchy;
+using AeroLink.Domain.Common;
 using Microsoft.EntityFrameworkCore;
 
 namespace AeroLink.Infrastructure.Persistence;
 
 /// <summary>
-/// Resolves the effective project policy at one application seam.  #705 deliberately keeps authored
-/// NonDefault/Draft rows out of runtime authority; #706 will change this resolver when activation is eligible.
-/// The database dependency is retained here so that consumers do not each invent their own configuration lookup.
+/// Resolves the effective project policy at one application seam. Stored legacy rows and activated authored
+/// rows are runtime authority. An authored draft deliberately remains non-authoritative until the one activation
+/// service records its manifest evidence.
 /// </summary>
 public sealed class EffectiveProjectLadderPolicyResolver(
     AeroLinkDbContext db, ILadderPolicy? codePolicy = null) : IProjectLadderPolicyResolver
 {
-    private readonly ILadderPolicy fallback = codePolicy ?? LegacyLadderPolicy.Instance;
+    private readonly ILadderPolicy catalogue = codePolicy ?? LegacyLadderPolicy.Instance;
 
     public async Task<ILadderPolicy> ResolveAsync(Guid projectId, CancellationToken ct = default)
     {
-        // Read the row once at the seam so malformed project data fails closed consistently.  The authored
-        // graph itself is not runtime authority until #706; the policy returned here therefore remains the
-        // code-owned legacy policy for LegacyDefault/Stored and NonDefault/Draft alike.
         var configuration = await db.ProjectLadderConfigurations.AsNoTracking()
             .Include(x => x.Steps).Include(x => x.AllowedUpstream)
             .SingleOrDefaultAsync(x => x.ProjectId == projectId, ct);
-        if (configuration is not null)
-            _ = ProjectLadderResolver.Resolve(configuration, fallback);
-        return fallback;
+        return ProjectLadderPolicyStorage.ResolvePersisted(configuration, projectId, catalogue);
+    }
+}
+
+internal static class ProjectLadderPolicyStorage
+{
+    public static ILadderPolicy ResolvePersisted(ProjectLadderConfiguration? configuration, Guid projectId,
+        ILadderPolicy? catalogue = null)
+    {
+        catalogue ??= LegacyLadderPolicy.Instance;
+        if (configuration is null)
+            throw new DomainException($"Project {projectId} has no persisted ladder configuration.");
+        var resolved = ProjectLadderResolver.Resolve(configuration, catalogue);
+        if (configuration.Classification == ProjectLadderConfigurationClassification.LegacyDefault
+            && !resolved.AgreesWithLegacyDefault(catalogue))
+            throw new DomainException("A LegacyDefault project ladder does not match the stored legacy catalogue.");
+        return configuration.State == ProjectLadderConfigurationState.Draft
+            ? catalogue
+            : configuration.Classification == ProjectLadderConfigurationClassification.LegacyDefault
+                ? new StoredLegacyProjectLadderPolicy(resolved, catalogue)
+                : new ResolvedProjectLadderPolicy(resolved, catalogue);
     }
 }
 

@@ -3,6 +3,7 @@ using System.Net.Http.Json;
 using System.Text;
 using System.Text.Json;
 using AeroLink.Domain.ChangeControl;
+using AeroLink.Domain.Hierarchy;
 using AeroLink.Domain.Programs;
 using AeroLink.Domain.Requirements;
 using AeroLink.Infrastructure.Persistence;
@@ -80,12 +81,60 @@ public sealed class ControlledEditingCheckInApiTests
         Assert.Contains(await db.ControlledArtifactCheckInEvidence.ToListAsync(), x => x.ArtifactType == artifactType && x.ArtifactId == artifactId && x.Outcome == ControlledCheckInOutcome.Succeeded);
     }
 
+    [Fact]
+    public async Task Retired_or_removed_requirement_specification_cannot_be_checked_out_and_leaves_no_session()
+    {
+        using var factory = new AeroLinkApiFactory(testLadderPolicy: SystemLowPolicy());
+        using var client = factory.CreateClient();
+        await BootstrapAndLoginAsync(client);
+        var seeded = await SeedRetiredSpecificationsAsync(factory);
+
+        foreach (var specificationId in new[] { seeded.InactiveSpecificationId, seeded.RemovedLevelSpecificationId })
+        {
+            using var checkout = await client.PostAsJsonAsync("/api/controlled-editing/checkout", new
+            {
+                artifactType = "SpecificationStructure",
+                artifactId = specificationId
+            });
+            Assert.Equal(HttpStatusCode.NotFound, checkout.StatusCode);
+        }
+
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+        Assert.Empty(await db.ArtifactEditSessions.AsNoTracking()
+            .Where(x => x.ArtifactType == "SpecificationStructure"
+                && (x.ArtifactId == seeded.InactiveSpecificationId || x.ArtifactId == seeded.RemovedLevelSpecificationId))
+            .ToListAsync());
+        Assert.False((await db.RequirementSpecifications.AsNoTracking()
+            .SingleAsync(x => x.Id == seeded.InactiveSpecificationId)).IsActive);
+        Assert.True((await db.RequirementSpecifications.AsNoTracking()
+            .SingleAsync(x => x.Id == seeded.RemovedLevelSpecificationId)).IsActive);
+    }
+
     private static async Task<Guid> SeedProjectAsync(AeroLinkApiFactory factory)
     {
         using var scope = factory.Services.CreateScope(); var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
         var program = new ProgramRecord("Universal Family Program", $"UF{Guid.NewGuid():N}"[..12]);
         var project = new ProjectRecord(program.Id, "Universal Controlled Product", "Flight Management System");
         db.AddRange(program, project); await db.SaveChangesAsync(); return project.Id;
+    }
+
+    private static async Task<(Guid InactiveSpecificationId, Guid RemovedLevelSpecificationId)> SeedRetiredSpecificationsAsync(
+        AeroLinkApiFactory factory)
+    {
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+        var now = DateTimeOffset.UtcNow;
+        var program = new ProgramRecord("Retired Specification Program", $"RSP{Guid.NewGuid():N}"[..12]);
+        var project = new ProjectRecord(program.Id, "Retired Specification Product", "Flight Management System");
+        var inactive = new RequirementSpecification(project.Id, "SYSRD-000001", "Retired System Requirements",
+            RequirementLevel.System.ToString(), "Retained inactive specification.", "test.setup", now);
+        inactive.SetActive(false, "test.setup", now);
+        var removedLevel = new RequirementSpecification(project.Id, "HLRD-000001", "Retained HLR Requirements",
+            RequirementLevel.HighLevel.ToString(), "Retained specification from a removed ladder level.", "test.setup", now);
+        db.AddRange(program, project, inactive, removedLevel);
+        await db.SaveChangesAsync();
+        return (inactive.Id, removedLevel.Id);
     }
 
     private static async Task<(Guid SessionId, Guid ArtifactId)> SeedAsync(AeroLinkApiFactory factory, bool stale)
@@ -131,5 +180,19 @@ public sealed class ControlledEditingCheckInApiTests
             new { userName = "admin", password = AeroLinkApiFactory.AdministratorPassword });
         Assert.Equal(HttpStatusCode.OK, login.StatusCode);
         await SecurityBoundaryTests.AuthorizeMutationsAsync(client);
+    }
+
+    private static ILadderPolicy SystemLowPolicy()
+    {
+        var configuration = ProjectLadderConfiguration.CreateDraft(Guid.NewGuid(), DateTimeOffset.UtcNow);
+        var system = new ProjectLadderStep(configuration.Id, configuration.ProjectId, RequirementLevel.System, 1,
+            LegacyLadderPolicy.Instance.Definition(RequirementLevel.System).Capabilities, DateTimeOffset.UtcNow);
+        var low = new ProjectLadderStep(configuration.Id, configuration.ProjectId, RequirementLevel.LowLevel, 2,
+            LegacyLadderPolicy.Instance.Definition(RequirementLevel.LowLevel).Capabilities, DateTimeOffset.UtcNow);
+        configuration.Steps.Add(system);
+        configuration.Steps.Add(low);
+        configuration.AllowedUpstream.Add(new ProjectLadderAllowedUpstream(configuration.Id, configuration.ProjectId,
+            system.Id, low.Id, DateTimeOffset.UtcNow));
+        return new ResolvedProjectLadderPolicy(ProjectLadderResolver.Resolve(configuration));
     }
 }

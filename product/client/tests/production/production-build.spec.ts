@@ -365,7 +365,7 @@ test('every workspace chunk arrives and keeps the design contract in both densit
   await apiLogin(request)
   await login(page)
   await selectProgram(page, 'Flight Management System Live Program')
-  const routes = await navigationRoutes(page)
+  const routes = await navigationRoutes(page, /\/change-requests/)
   expect(routes.length, 'the navigation should offer the workspaces').toBeGreaterThan(4)
 
   const failures: string[] = []

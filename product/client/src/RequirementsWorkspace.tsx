@@ -12,6 +12,8 @@ import {
   ControlledArtifactInspector,
 } from "./ControlledArtifactExplorer";
 import { targetsFor } from "./presentation";
+import { LadderCapability, ladderAllows, ladderHasAny } from "./projectLadder";
+import type { ProjectLadderProjection } from "./projectLadder";
 import "./RequirementsWorkspace.css";
 
 type Field = {
@@ -168,6 +170,7 @@ type Props = {
   api: string;
   projectId: string;
   scope: "System" | "Software";
+  ladder: ProjectLadderProjection | null;
   /**
    * The build being read. It decides which document these requirements belong to — the approved one for a
    * released build, a stamped draft for an in-work one — so the reader does not have to leave the requirements
@@ -200,6 +203,7 @@ export default function RequirementsWorkspace({
   api,
   projectId,
   scope,
+  ladder,
   release,
   initialViewId,
   initialArtifactId,
@@ -492,11 +496,19 @@ export default function RequirementsWorkspace({
     if (!confirm(`Delete the saved view "${view.name}"? Anyone holding its link will no longer be able to open it.`)) return;
     await mutateView(view, "DELETE");
   };
-  const applyView = (view: SavedView) => {
+  const applyView = useCallback((view: SavedView) => {
     try {
       const q = JSON.parse(view.queryJson);
       setSearch(q.search || "");
-      setLevel(q.level || "");
+      const savedLevel = typeof q.level === "string" ? q.level : "";
+      const savedLevelAllowed = savedLevel === "System"
+        ? ladderAllows(ladder, "System")
+        : savedLevel === "Software"
+          ? ladderHasAny(ladder, ["HighLevel", "LowLevel"])
+          : savedLevel === "HighLevel" || savedLevel === "LowLevel"
+            ? ladderAllows(ladder, savedLevel)
+            : false;
+      setLevel(savedLevelAllowed ? savedLevel : scope === "System" ? "System" : "Software");
       setVerification(q.verification || "");
       setTag(q.tag || "");
       setStateFilter(q.state || "");
@@ -510,7 +522,7 @@ export default function RequirementsWorkspace({
     } catch {
       setError("Saved view configuration is invalid.");
     }
-  };
+  }, [ladder, scope]);
   useEffect(() => {
     if (!appliedInitialView.current && initialViewId && data?.views.length) {
       const view = data.views.find((x) => x.id === initialViewId);
@@ -519,7 +531,7 @@ export default function RequirementsWorkspace({
         applyView(view);
       }
     }
-  }, [data?.views, initialViewId]);
+  }, [applyView, data?.views, initialViewId]);
   const saveView = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     const f = new FormData(e.currentTarget);
@@ -685,6 +697,12 @@ export default function RequirementsWorkspace({
     item.clear();
     setPage(1);
   };
+  const documentTargets = scope === "System"
+    ? (ladderAllows(ladder, "System", LadderCapability.RequirementsDocument) ? targetsFor(scope, level) : [])
+    : targetsFor(scope, level).filter((target) =>
+        target.type === "SwrdHighLevel"
+          ? ladderAllows(ladder, "HighLevel", LadderCapability.RequirementsDocument)
+          : ladderAllows(ladder, "LowLevel", LadderCapability.RequirementsDocument));
   return (
     <main className="reqWorkspace">
       <ControlledArtifactExplorerHeader
@@ -696,12 +714,12 @@ export default function RequirementsWorkspace({
       {/* The document these requirements belong to, offered where they are read. Which one you get follows the
           build: approved for a released one, a stamped draft for an in-work one. Level-aware, so the Software
           explorer filtered to HLR offers the high-level document and nothing else. */}
-      {release && (
+      {release && documentTargets.length > 0 && (
         <DocumentActions
           api={api}
           projectId={projectId}
           release={release}
-          targets={targetsFor(scope, level)}
+          targets={documentTargets}
           heading={release.isReleased ? `Approved documents for ${release.version}` : `Draft documents for ${release.version}`}
         />
       )}
@@ -737,8 +755,8 @@ export default function RequirementsWorkspace({
           ) : (
             <>
               <option value="Software">All software requirements</option>
-              <option value="HighLevel">Software HLR</option>
-              <option value="LowLevel">Software LLR</option>
+              {ladderAllows(ladder, "HighLevel") && <option value="HighLevel">Software HLR</option>}
+              {ladderAllows(ladder, "LowLevel") && <option value="LowLevel">Software LLR</option>}
             </>
           )}
         </select>

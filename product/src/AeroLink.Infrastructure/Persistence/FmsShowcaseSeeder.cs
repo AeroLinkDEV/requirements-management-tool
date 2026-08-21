@@ -20,8 +20,9 @@ public sealed record FmsShowcaseSummary(Guid ProgramId, Guid ProjectId, Guid Rel
     int SystemRequirements, int HighLevelRequirements, int LowLevelRequirements, int HistoricalScrs,
     int HistoricalSwcrs, int TraceLinks, int TestProcedures, int TestExecutions, int Documents);
 
-public sealed class FmsShowcaseSeeder(AeroLinkDbContext db)
+public sealed class FmsShowcaseSeeder(AeroLinkDbContext db, IProjectLadderPolicyResolver? policyResolver = null)
 {
+    private readonly IProjectLadderPolicyResolver resolver = policyResolver ?? new EffectiveProjectLadderPolicyResolver(db);
     public const string ProgramCode = "FMSLIVE";
     private static readonly string[] Topics = ["flight plan", "lateral navigation", "vertical navigation", "performance prediction", "navigation database", "guidance", "radio navigation", "position estimation", "fuel management", "crew interface", "departure procedures", "arrival procedures", "approach management", "airspace constraints", "route sequencing"];
 
@@ -46,7 +47,7 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db)
         var baseline15 = new CandidateBaseline("SW-01.50", 0, project.Id, release15.Id, null, "FMS 1.5 Released Software Build", "cm.fms", start.AddDays(150));
         foreach (var request in historical) baseline15.Select(request, "cm.fms", start.AddDays(150));
         baseline15.Freeze("cm.fms", start.AddDays(151)); db.CandidateBaselines.Add(baseline15); await db.SaveChangesAsync(ct);
-        await new RequirementBaselineMaterializer(db, new VerificationImpactService(db)).MaterializeAsync(baseline15.Id, "cm.fms", start.AddDays(152), ct);
+        await new RequirementBaselineMaterializer(db, new VerificationImpactService(db, policyResolver: resolver)).MaterializeAsync(baseline15.Id, "cm.fms", start.AddDays(152), ct);
 
         var currentRows = await (from member in db.BaselineRequirements.Where(x => x.BaselineId == baseline15.Id)
                                  join artifact in db.Requirements on member.ArtifactId equals artifact.Id
@@ -114,8 +115,8 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db)
         // than through the endpoint that normally does it. Without this the showcase presents an empty change
         // impact queue while simultaneously showing approved changes that introduce and modify requirements —
         // the one state the product says is impossible.
-        var verificationImpact = new VerificationImpactService(db);
-        var downstreamImpact = new DownstreamImpactService(db);
+        var verificationImpact = new VerificationImpactService(db, policyResolver: resolver);
+        var downstreamImpact = new DownstreamImpactService(db, policyResolver: resolver);
         foreach (var request in activeRequests.Where(x => x.State is ChangeRequestState.Approved or ChangeRequestState.SelectedForBaseline))
         {
             await verificationImpact.RaiseForApprovedChangeRequestAsync(request, start.AddDays(305), ct);
@@ -200,6 +201,7 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db)
     private async Task<string?> ReconcileControlledTestChangeIdentityAsync(Guid programId, CancellationToken ct)
     {
         var projectId = await db.Projects.Where(x => x.ProgramId == programId).Select(x => x.Id).SingleAsync(ct);
+        var ladderPolicy = await resolver.ResolveAsync(projectId, ct);
         // SQLite cannot order DateTimeOffset server-side; this is one Project's bounded TCR collection.
         var reviews = (await db.TestChangeReviews.Where(x => x.ProjectId == projectId).ToListAsync(ct))
             .OrderBy(x => x.CreatedAt).ToList();
@@ -213,7 +215,7 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db)
         foreach (var review in reviews.Where(x => string.IsNullOrEmpty(x.BaseNumber)
             && x.Outcome == TestChangeReviewOutcome.ChangeRequired))
         {
-            review.AssignControlledNumber(await IdentifierAllocator.NextTestChangeRequestAsync(db, review.Discipline, ct), DateTimeOffset.UtcNow);
+            review.AssignControlledNumber(await IdentifierAllocator.NextTestChangeRequestAsync(db, review.Discipline, ct, ladderPolicy), DateTimeOffset.UtcNow, ladderPolicy);
             numbered++;
         }
 
@@ -337,6 +339,7 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db)
     private async Task<string?> EnsureTestChangeReviewsAsync(Guid programId, CancellationToken ct)
     {
         var projectId = await db.Projects.Where(x => x.ProgramId == programId).Select(x => x.Id).SingleAsync(ct);
+        var ladderPolicy = await resolver.ResolveAsync(projectId, ct);
         var releases = await db.Releases.Where(x => x.ProjectId == projectId).ToListAsync(ct);
         var released = releases.Single(x => x.Version == "1.5");
         var inWork = releases.Single(x => x.Version == "1.6");
@@ -379,7 +382,7 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db)
                     review = new TestChangeReview(projectId, request.TargetReleaseId, request.Id,
                         discipline, request.DisplayNumber, now, caseContractVersion: 0);
                     review.RecordTestChangeRequired("verification.engineer", now);
-                    review.AssignControlledNumber(await IdentifierAllocator.NextTestChangeRequestAsync(db, discipline, ct), now);
+                    review.AssignControlledNumber(await IdentifierAllocator.NextTestChangeRequestAsync(db, discipline, ct, ladderPolicy), now, ladderPolicy);
                     db.TestChangeReviews.Add(review);
                     reviewsByRequestAndDiscipline.Add((request.Id, discipline), review);
                 }
@@ -502,7 +505,7 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db)
             review.RecordTestChangeRequired("verification.engineer", now);
             if (string.IsNullOrEmpty(review.BaseNumber))
                 review.AssignControlledNumber(
-                    await IdentifierAllocator.NextTestChangeRequestAsync(db, review.Discipline, ct), now);
+                    await IdentifierAllocator.NextTestChangeRequestAsync(db, review.Discipline, ct, ladderPolicy), now, ladderPolicy);
         }
         await db.SaveChangesAsync(ct);
 
@@ -592,7 +595,7 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db)
         if (requests.Count == 0) return null;
 
         var before = await db.VerificationImpactItems.CountAsync(ct);
-        var service = new VerificationImpactService(db);
+        var service = new VerificationImpactService(db, policyResolver: resolver);
         foreach (var request in requests) await service.RaiseForApprovedChangeRequestAsync(request, DateTimeOffset.UtcNow, ct);
         await db.SaveChangesAsync(ct);
         var raised = await db.VerificationImpactItems.CountAsync(ct) - before;
@@ -607,7 +610,7 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db)
             .Where(x => x.ProjectId == projectId && (x.State == ChangeRequestState.Approved || x.State == ChangeRequestState.SelectedForBaseline))
             .ToListAsync(ct);
         var before = await db.DownstreamChangeAssessments.CountAsync(ct);
-        var service = new DownstreamImpactService(db);
+        var service = new DownstreamImpactService(db, policyResolver: resolver);
         foreach (var request in requests) await service.RaiseForApprovedChangeRequestAsync(request, DateTimeOffset.UtcNow, ct);
         await db.SaveChangesAsync(ct);
         var raised = await db.DownstreamChangeAssessments.CountAsync(ct) - before;

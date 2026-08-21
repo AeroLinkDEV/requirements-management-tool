@@ -355,9 +355,16 @@ public static class ChangeRequestEndpoints
 
         /// The sections a requirement of a given level can be placed in, for the picker on a proposal.
         app.MapGet("/api/authoring/sections", async (Guid projectId, RequirementLevel level, HttpContext http,
-            AeroLinkDbContext db, EnterpriseRequirementsService requirements, CancellationToken ct) =>
+            AeroLinkDbContext db, EnterpriseRequirementsService requirements,
+            IProjectLadderPolicyResolver policyResolver, CancellationToken ct) =>
         {
             if (!await http.HasProjectAccessAsync(db, projectId, ct)) return Results.Forbid();
+            var ladderPolicy = await policyResolver.ResolveAsync(projectId, ct);
+            LevelDefinition definition;
+            try { definition = ladderPolicy.Definition(level); }
+            catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
+            if (!definition.Has(LevelCapabilities.HasRequirementsDocument) || definition.RequirementsCatalogue is null)
+                return Results.Ok(Array.Empty<object>());
             // A Project's requirements documents are built the first time its requirements are synchronized,
             // which is whenever somebody first opens the explorer. An author who reached the change request
             // form before anyone had done that was offered no sections at all — and then refused at submission
@@ -369,7 +376,9 @@ public static class ChangeRequestEndpoints
             // document, which nothing downstream would accept and nothing here would have refused.
             var rows = await (from node in db.SpecificationNodes.AsNoTracking()
                               join spec in db.RequirementSpecifications.AsNoTracking() on node.SpecificationId equals spec.Id
-                              where spec.ProjectId == projectId && spec.Level == level.ToString()
+                              where spec.ProjectId == projectId && spec.IsActive
+                                 && spec.DocumentNumber == definition.RequirementsCatalogue.SpecificationNumber
+                                 && spec.Level == level.ToString()
                                  && node.Type == SpecificationNodeType.Section
                               select new { node.Id, node.ParentId, node.Heading, node.Position, specification = spec.DocumentNumber }).ToListAsync(ct);
             // Numbered and ordered here, depth first, so every caller meets the sections in the order the
@@ -563,7 +572,7 @@ public static class ChangeRequestEndpoints
                         return Results.BadRequest(new { error = $"No active requirement schema is configured for {change.Level}." });
                     var attributes = RequirementAuthoringJson.ValidateAndMergeAttributes(
                         change.AttributesJson, schema, ladderPolicy.IsDownstreamTarget(change.Level) && change.IsDerived);
-                    var sectionError = await TargetSectionRefusalAsync(db, request.ProjectId, change.Level,
+                    var sectionError = await TargetSectionRefusalAsync(db, request.ProjectId, ladderPolicy, change.Level,
                         change.TargetSectionId, ct);
                     if (sectionError is not null) return Results.BadRequest(new { error = sectionError });
                     scr.AddRequirementChange(actor, requirementNumber, revision, change.Level, change.Kind,
@@ -812,7 +821,7 @@ public static class ChangeRequestEndpoints
                 ladderPolicy = await policyResolver.ResolveAsync(scr.ProjectId, ct);
                 foreach (var change in scr.RequirementChanges)
                 {
-                    var sectionError = await TargetSectionRefusalAsync(db, scr.ProjectId, change.Level,
+                    var sectionError = await TargetSectionRefusalAsync(db, scr.ProjectId, ladderPolicy, change.Level,
                         change.TargetSectionId, ct, change.Kind);
                     if (sectionError is not null) return Results.BadRequest(new { error = sectionError });
                     var upstreamError = await UpstreamAllocationRefusalAsync(db, ladderPolicy, scr.ProjectId,
@@ -1134,7 +1143,7 @@ public static class ChangeRequestEndpoints
     }
 
     private static async Task<string?> TargetSectionRefusalAsync(AeroLinkDbContext db, Guid projectId,
-        RequirementLevel level, Guid? targetSectionId, CancellationToken ct,
+        ILadderPolicy ladderPolicy, RequirementLevel level, Guid? targetSectionId, CancellationToken ct,
         RequirementChangeKind? kind = null)
     {
         // A new requirement has to be given a section. The author could previously leave this alone and defer
@@ -1147,6 +1156,11 @@ public static class ChangeRequestEndpoints
         // unfinished work and refusing to save it because a later field is empty helps nobody; what must not
         // happen is a reviewer being asked to approve a requirement with no place in the document. `kind` is
         // supplied only by the submit path for that reason.
+        LevelDefinition definition;
+        try { definition = ladderPolicy.Definition(level); }
+        catch (DomainException) { return $"The configured project ladder does not contain {level}."; }
+        if (!definition.Has(LevelCapabilities.HasRequirementsDocument) || definition.RequirementsCatalogue is null)
+            return $"The configured project ladder has no active requirements document for {level}.";
         if (targetSectionId is null)
         {
             if (kind != RequirementChangeKind.Introduce) return null;
@@ -1157,7 +1171,9 @@ public static class ChangeRequestEndpoints
                                  join specification in db.RequirementSpecifications.AsNoTracking()
                                      on node.SpecificationId equals specification.Id
                                  where node.Type == SpecificationNodeType.Section &&
-                                       specification.ProjectId == projectId && specification.Level == level.ToString()
+                                       specification.ProjectId == projectId && specification.IsActive
+                                       && specification.DocumentNumber == definition.RequirementsCatalogue.SpecificationNumber
+                                       && specification.Level == level.ToString()
                                  select node.Id).AnyAsync(ct);
             return choices
                 ? $"Choose the {level} requirements document section this new requirement belongs in."
@@ -1167,7 +1183,9 @@ public static class ChangeRequestEndpoints
                             join specification in db.RequirementSpecifications.AsNoTracking()
                                 on node.SpecificationId equals specification.Id
                             where node.Id == targetSectionId && node.Type == SpecificationNodeType.Section &&
-                                  specification.ProjectId == projectId && specification.Level == level.ToString()
+                                  specification.ProjectId == projectId && specification.IsActive
+                                  && specification.DocumentNumber == definition.RequirementsCatalogue.SpecificationNumber
+                                  && specification.Level == level.ToString()
                             select node.Id).AnyAsync(ct);
         return exists ? null :
             $"The selected {level} specification section is no longer available. Reopen the Draft and choose another section.";

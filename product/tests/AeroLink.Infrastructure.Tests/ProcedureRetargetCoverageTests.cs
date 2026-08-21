@@ -1,5 +1,6 @@
 using AeroLink.Domain.Baselines;
 using AeroLink.Domain.ChangeControl;
+using AeroLink.Domain.Hierarchy;
 using AeroLink.Domain.Programs;
 using AeroLink.Domain.Requirements;
 using AeroLink.Domain.Verification;
@@ -39,7 +40,8 @@ public sealed class ProcedureRetargetCoverageTests
         var artifact = new RequirementArtifact(project.Id, "SYSR-00000151", RequirementLevel.System, now);
         var revision = new RequirementRevision(artifact.Id, 0, "The FMS shall sequence oceanic waypoints.",
             "Moved behaviour.", "Test", RequirementRevisionState.Active, scr.Id, baseline.Id, now);
-        db.AddRange(program, project, release, scr, baseline, artifact, revision);
+        db.AddRange(program, project, release, scr, baseline, artifact, revision,
+            LegacyDefaultProjectLadderFactory.Create(project.Id, now));
         await db.SaveChangesAsync();
         return new(db, project.Id, revision.Id);
     }

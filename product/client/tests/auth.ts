@@ -16,11 +16,13 @@ export async function login(page:Page,userName='admin',options:{openProject?:boo
   // A journey may change users without creating a new BrowserContext. The shell redirects an already
   // authenticated session straight to Projects, so clear that session before looking for the login form.
   const signOut=page.getByRole('button',{name:'Sign out'})
+  const username=page.getByLabel('Username')
+  await expect(signOut.or(username)).toBeVisible()
   if(await signOut.isVisible().catch(()=>false)){
     await signOut.click()
-    await expect(page.getByLabel('Username')).toBeVisible()
+    await expect(username).toBeVisible()
   }
-  await page.getByLabel('Username').fill(userName)
+  await username.fill(userName)
   await page.getByLabel('Password').fill('AeroLink!2026')
   await page.getByRole('button',{name:/Sign in securely/}).click()
   await expect(page.getByRole('heading',{name:/Create your first program|Projects/})).toBeVisible()
