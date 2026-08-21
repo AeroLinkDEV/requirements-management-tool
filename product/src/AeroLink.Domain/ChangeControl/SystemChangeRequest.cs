@@ -2,6 +2,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using AeroLink.Domain.Common;
+using AeroLink.Domain.Hierarchy;
 
 namespace AeroLink.Domain.ChangeControl;
 
@@ -22,16 +23,8 @@ public static class ChangeRequestNumbering
     public const string HighLevelPrefix = "HLRCR";
     public const string LowLevelPrefix = "LLRCR";
 
-    public static string Prefix(ChangeRequestType type, RequirementLevel? softwareLevel) => type switch
-    {
-        ChangeRequestType.System => SystemPrefix,
-        _ => softwareLevel switch
-        {
-            RequirementLevel.HighLevel => HighLevelPrefix,
-            RequirementLevel.LowLevel => LowLevelPrefix,
-            _ => throw new DomainException("A software change request must declare HLR or LLR scope before it can be numbered."),
-        },
-    };
+    public static string Prefix(ChangeRequestType type, RequirementLevel? softwareLevel) =>
+        LegacyLadderPolicy.Instance.ChangeRequestPrefix(type, softwareLevel);
 }
 
 public sealed class SystemChangeRequest
@@ -58,11 +51,11 @@ public sealed class SystemChangeRequest
         SetCase(problem, analysis, solution, problemRich, analysisRich, solutionRich);
         AuthorId = authorId;
         Type = type;
-        if (type == ChangeRequestType.System && softwareLevel is not null)
+        if (type == ChangeRequestType.System && !LegacyLadderPolicy.Instance.IsChangeRequestScopeValid(type, softwareLevel))
             throw new DomainException("A System change request cannot declare a software requirement level.");
         // Required, not merely constrained: HLR and LLR change requests are numbered apart, so a software
         // change request without a level is a controlled record that cannot be named.
-        if (type == ChangeRequestType.Software && softwareLevel is not (RequirementLevel.HighLevel or RequirementLevel.LowLevel))
+        if (type == ChangeRequestType.Software && !LegacyLadderPolicy.Instance.IsChangeRequestScopeValid(type, softwareLevel))
             throw new DomainException("A software change request must declare HLR or LLR scope.");
         if (ChangeRequestNumbering.Prefix(type, softwareLevel) is var expected
             && !BaseNumber.StartsWith(expected + "-", StringComparison.Ordinal))
@@ -146,7 +139,7 @@ public sealed class SystemChangeRequest
     /// endpoints from creating a request which looks valid until its downstream assessment is raised.
     /// </summary>
     public static bool AcceptsRequirementLevel(ChangeRequestType type, RequirementLevel level) =>
-        type == ChangeRequestType.System ? level == RequirementLevel.System : level != RequirementLevel.System;
+        LegacyLadderPolicy.Instance.AcceptsChangeRequest(type, level);
 
     public RequirementChange AddRequirementChange(string actorId, string baseNumber, int revision,
         RequirementLevel level, RequirementChangeKind kind, string statement, string rationale,
@@ -661,7 +654,8 @@ public sealed class SystemChangeRequest
             throw new DomainException(Type == ChangeRequestType.System
                 ? "A System change request can contain System requirements only. Use an HLRCR or LLRCR for software work."
                 : "A Software change request can contain HLR or LLR requirements only. Use an SRCR for System work.");
-        if (Type == ChangeRequestType.Software && SoftwareLevel is not null && level != SoftwareLevel)
+        if (Type == ChangeRequestType.Software && SoftwareLevel is not null
+            && !LegacyLadderPolicy.Instance.AcceptsChangeRequest(Type, SoftwareLevel, level))
             throw new DomainException($"This Software Draft belongs to the {(SoftwareLevel == RequirementLevel.HighLevel ? "HLR" : "LLR")} workspace and cannot contain {(level == RequirementLevel.HighLevel ? "HLR" : "LLR")} changes.");
     }
 

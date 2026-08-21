@@ -1,4 +1,5 @@
 using AeroLink.Domain.ChangeControl;
+using AeroLink.Domain.Hierarchy;
 using AeroLink.Domain.Requirements;
 using Microsoft.EntityFrameworkCore;
 
@@ -24,10 +25,19 @@ public static class CodeTraceabilityProjection
         Guid projectId,
         Guid releaseId,
         Guid baselineId,
+        CancellationToken ct) => await RequiredAsync(db, projectId, releaseId, baselineId, LegacyLadderPolicy.Instance, ct);
+
+    public static async Task<IReadOnlyList<RequiredCodeTraceabilityRequirement>> RequiredAsync(
+        AeroLinkDbContext db,
+        Guid projectId,
+        Guid releaseId,
+        Guid baselineId,
+        ILadderPolicy ladderPolicy,
         CancellationToken ct)
     {
+        var requiredLevel = ladderPolicy.OrderedLevels.Single(level => ladderPolicy.HasCodeTraceability(level));
         var candidates = await (from selection in db.BaselineRequirements.AsNoTracking().Where(x => x.BaselineId == baselineId)
-                                join artifact in db.Requirements.AsNoTracking().Where(x => x.ProjectId == projectId && x.Level == RequirementLevel.LowLevel) on selection.ArtifactId equals artifact.Id
+                                join artifact in db.Requirements.AsNoTracking().Where(x => x.ProjectId == projectId && x.Level == requiredLevel) on selection.ArtifactId equals artifact.Id
                                 join revision in db.RequirementRevisions.AsNoTracking() on selection.RevisionId equals revision.Id
                                 join change in db.SystemChangeRequests.AsNoTracking() on revision.SourceChangeRequestId equals change.Id into changes
                                 from change in changes.DefaultIfEmpty()

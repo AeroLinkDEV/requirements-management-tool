@@ -5,6 +5,7 @@ using AeroLink.Domain.ChangeControl;
 using AeroLink.Domain.Baselines;
 using AeroLink.Domain.Common;
 using AeroLink.Domain.Identity;
+using AeroLink.Domain.Hierarchy;
 using AeroLink.Domain.Requirements;
 using AeroLink.Domain.Traceability;
 using AeroLink.Domain.Verification;
@@ -37,8 +38,10 @@ public sealed record ControlledCheckInResult(ControlledCheckInStatus Status, str
 public sealed class ControlledEditingCheckInEngine(
     AeroLinkDbContext db,
     IdentityService identity,
-    IEnumerable<IControlledEditingAdapter> adapters)
+    IEnumerable<IControlledEditingAdapter> adapters,
+    ILadderPolicy? policy = null)
 {
+    private readonly ILadderPolicy ladderPolicy = policy ?? LegacyLadderPolicy.Instance;
     private readonly IReadOnlyDictionary<ControlledArtifactFamily, IControlledEditingAdapter> _adapters =
         adapters.ToDictionary(x => x.Family);
 
@@ -242,8 +245,9 @@ public sealed class ControlledEditingCheckInEngine(
     }
 }
 
-public sealed class SystemChangeRequestControlledEditingAdapter(AeroLinkDbContext db) : IControlledEditingAdapter
+public sealed class SystemChangeRequestControlledEditingAdapter(AeroLinkDbContext db, ILadderPolicy? policy = null) : IControlledEditingAdapter
 {
+    private readonly ILadderPolicy ladderPolicy = policy ?? LegacyLadderPolicy.Instance;
     private static readonly JsonSerializerOptions DraftOptions = new() { PropertyNameCaseInsensitive = true };
     public ControlledArtifactFamily Family => ControlledArtifactFamily.ChangeRequest;
     public string Name => "SystemChangeRequestControlledEditingAdapter";
@@ -306,7 +310,7 @@ public sealed class SystemChangeRequestControlledEditingAdapter(AeroLinkDbContex
     private async Task<IReadOnlyList<RequirementChangeDraft>> NormalizeAsync(SystemChangeRequest scr,
         IReadOnlyList<SystemChangeRequestRequirementDraft> requested, CancellationToken ct)
     {
-        await new EnterpriseRequirementsService(db).SynchronizeProjectAsync(scr.ProjectId, scr.AuthorId, ct);
+        await new EnterpriseRequirementsService(db, ladderPolicy).SynchronizeProjectAsync(scr.ProjectId, scr.AuthorId, ct);
         var existing = scr.RequirementChanges.ToDictionary(x => x.BaseNumber, StringComparer.OrdinalIgnoreCase);
         var nextNumbers = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
         var reserved = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -316,10 +320,10 @@ public sealed class SystemChangeRequestControlledEditingAdapter(AeroLinkDbContex
             if (!Enum.TryParse<RequirementLevel>(raw.Level, true, out var level) ||
                 !Enum.TryParse<RequirementChangeKind>(raw.Kind, true, out var kind))
                 throw new DomainException("Every requirement change needs a valid level and change kind.");
-            if (scr.Type == ChangeRequestType.System && level != RequirementLevel.System)
-                throw new DomainException("A System change request can contain only System requirement changes.");
-            if (scr.Type == ChangeRequestType.Software && level == RequirementLevel.System)
-                throw new DomainException("A Software change request can contain only HLR and LLR changes.");
+            if (!ladderPolicy.AcceptsChangeRequest(scr.Type, level))
+                throw new DomainException(scr.Type == ChangeRequestType.System
+                    ? "A System change request can contain only System requirement changes."
+                    : "A Software change request can contain only HLR and LLR changes.");
             var isDerived = raw.IsDerived ?? RequirementAuthoringJson.IsDerived(raw.AttributesJson);
             if (isDerived && string.IsNullOrWhiteSpace(raw.Rationale))
                 throw new DomainException("Every derived software requirement requires an explicit engineering rationale.");
@@ -334,7 +338,7 @@ public sealed class SystemChangeRequestControlledEditingAdapter(AeroLinkDbContex
             }
             else if (kind == RequirementChangeKind.Introduce)
             {
-                var prefix = level switch { RequirementLevel.System => "SYSR", RequirementLevel.HighLevel => "HLR", _ => "LLR" };
+                var prefix = ladderPolicy.RequirementPrefix(level);
                 if (!nextNumbers.TryGetValue(prefix, out var next)) next = await NextSequenceAsync(prefix, ct);
                 baseNumber = $"{prefix}-{next:D6}"; nextNumbers[prefix] = next + 1; revision = 0;
             }
@@ -356,7 +360,7 @@ public sealed class SystemChangeRequestControlledEditingAdapter(AeroLinkDbContex
                 x.ProjectId == scr.ProjectId && x.IsActive && x.AppliesTo == level.ToString(), ct)
                 ?? throw new DomainException($"No active requirement schema is configured for {level}.");
             var attributes = RequirementAuthoringJson.ValidateAndMergeAttributes(raw.AttributesJson, schema,
-                level != RequirementLevel.System && isDerived);
+                ladderPolicy.IsDownstreamTarget(level) && isDerived);
             normalized.Add(new(baseNumber, revision, level, kind, raw.Statement ?? "", raw.Rationale ?? "",
                 raw.VerificationMethod ?? "", raw.RichText ?? "", attributes,
                 raw.ImpactDispositionJson ?? "{}", raw.TargetSectionId,
@@ -392,8 +396,9 @@ public sealed class SystemChangeRequestControlledEditingAdapter(AeroLinkDbContex
     }
 }
 
-public sealed class RequirementProposalControlledEditingAdapter(AeroLinkDbContext db) : IControlledEditingAdapter
+public sealed class RequirementProposalControlledEditingAdapter(AeroLinkDbContext db, ILadderPolicy? policy = null) : IControlledEditingAdapter
 {
+    private readonly ILadderPolicy ladderPolicy = policy ?? LegacyLadderPolicy.Instance;
     private static readonly JsonSerializerOptions DraftOptions = new() { PropertyNameCaseInsensitive = true };
     public ControlledArtifactFamily Family => ControlledArtifactFamily.RequirementProposal;
     public string Name => "RequirementProposalControlledEditingAdapter";
@@ -436,12 +441,12 @@ public sealed class RequirementProposalControlledEditingAdapter(AeroLinkDbContex
             !Enum.TryParse<RequirementLevel>(draft.Level, true, out var level) || level != current.Level ||
             !Enum.TryParse<RequirementChangeKind>(draft.Kind, true, out var kind) || kind != current.Kind)
             throw new DomainException($"The controlled identity of {current.DisplayNumber} cannot change.");
-        await new EnterpriseRequirementsService(db).SynchronizeProjectAsync(parent.ProjectId, actor, ct);
+        await new EnterpriseRequirementsService(db, ladderPolicy).SynchronizeProjectAsync(parent.ProjectId, actor, ct);
         var schema = await db.ArtifactSchemas.Include(x => x.Fields).SingleOrDefaultAsync(x =>
             x.ProjectId == parent.ProjectId && x.IsActive && x.AppliesTo == current.Level.ToString(), ct)
             ?? throw new DomainException($"No active requirement schema is configured for {current.Level}.");
         var attributes = RequirementAuthoringJson.ValidateAndMergeAttributes(draft.AttributesJson, schema,
-            current.Level != RequirementLevel.System &&
+            ladderPolicy.IsDownstreamTarget(current.Level) &&
             (draft.IsDerived ?? RequirementAuthoringJson.IsDerived(current.AttributesJson)));
 
         // Every proposal is rewritten from these drafts, so anything not carried here is lost. The chosen section

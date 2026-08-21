@@ -6,6 +6,8 @@ using System.Text.Json;
 using System.Xml;
 using System.Xml.Linq;
 using AeroLink.Domain.ChangeControl;
+using AeroLink.Domain.Common;
+using AeroLink.Domain.Hierarchy;
 using AeroLink.Domain.Requirements;
 using Microsoft.EntityFrameworkCore;
 
@@ -14,14 +16,9 @@ namespace AeroLink.Infrastructure.Persistence;
 public sealed record InterchangeRequirementRow(int RowNumber,string Identifier,string Level,string Statement,string Rationale,string VerificationMethod,bool Valid,IReadOnlyList<string> Errors);
 public sealed record DiffSpan(string Kind,string Text);
 
-public sealed class EnterpriseRequirementsService(AeroLinkDbContext db)
+public sealed class EnterpriseRequirementsService(AeroLinkDbContext db, ILadderPolicy? policy = null)
 {
-    private static readonly (RequirementLevel Level,string SchemaKey,string SchemaName,string SpecNumber,string SpecTitle)[] Defaults=
-    [
-        (RequirementLevel.System,"SYSTEM-REQ","System Requirement","SYSRD-000001","System Requirements Document"),
-        (RequirementLevel.HighLevel,"HLR","High-Level Software Requirement","HLRD-000001","High-Level Software Requirements Document"),
-        (RequirementLevel.LowLevel,"LLR","Low-Level Software Requirement","LLRD-000001","Low-Level Software Requirements Document")
-    ];
+    private readonly ILadderPolicy ladderPolicy = policy ?? LegacyLadderPolicy.Instance;
 
     public async Task SynchronizeProjectAsync(Guid projectId,string actor,CancellationToken ct=default)
     {
@@ -40,33 +37,37 @@ public sealed class EnterpriseRequirementsService(AeroLinkDbContext db)
         var watermark=await db.ProjectWorkspaceSynchronizations.SingleOrDefaultAsync(x=>x.ProjectId==projectId,ct);
         if(watermark is not null&&watermark.IsCurrent(artifactCount))return;
         var schemas=await db.ArtifactSchemas.Include(x=>x.Fields).Where(x=>x.ProjectId==projectId).ToListAsync(ct);
-        foreach(var item in Defaults)
+        foreach(var definition in ladderPolicy.Definitions)
         {
-            var schema=schemas.SingleOrDefault(x=>x.Key==item.SchemaKey);
+            var catalogue = definition.RequirementsCatalogue
+                ?? throw new DomainException($"The {definition.Level} level has no enterprise requirements catalogue.");
+            var schema=schemas.SingleOrDefault(x=>x.Key==catalogue.SchemaKey);
             if(schema is null)
             {
-                schema=new(projectId,item.SchemaKey,item.SchemaName,item.Level.ToString(),$"Controlled {item.SchemaName.ToLowerInvariant()} schema.",actor,now);
+                schema=new(projectId,catalogue.SchemaKey,catalogue.SchemaName,definition.Level.ToString(),$"Controlled {catalogue.SchemaName.ToLowerInvariant()} schema.",actor,now);
                 schema.AddField("verification_method","Verification Method",SchemaFieldType.Enumeration,true,10,"[\"Test\",\"Analysis\",\"Inspection\",\"Demonstration\"]",actor,now);
                 schema.AddField("rationale","Rationale",SchemaFieldType.LongText,false,20,"[]",actor,now);
                 schema.AddField("criticality","Criticality",SchemaFieldType.Enumeration,false,30,"[\"Normal\",\"Safety Significant\",\"Mission Critical\"]",actor,now);
                 schema.AddField("owner","Owner",SchemaFieldType.User,false,40,"[]",actor,now);
-                if(item.Level!=RequirementLevel.System) schema.AddField("derived","Derived Requirement",SchemaFieldType.Boolean,false,50,"[]",actor,now);
+                if(ladderPolicy.IsDownstreamTarget(definition.Level)) schema.AddField("derived","Derived Requirement",SchemaFieldType.Boolean,false,50,"[]",actor,now);
                 db.ArtifactSchemas.Add(schema);schemas.Add(schema);
             }
-            else if(item.Level!=RequirementLevel.System&&schema.Fields.All(x=>x.Key!="derived"))
+            else if(ladderPolicy.IsDownstreamTarget(definition.Level)&&schema.Fields.All(x=>x.Key!="derived"))
                 schema.AddField("derived","Derived Requirement",SchemaFieldType.Boolean,false,50,"[]",actor,now);
         }
         await db.SaveChangesAsync(ct);
         var specs=await db.RequirementSpecifications.Where(x=>x.ProjectId==projectId).ToListAsync(ct);
-        foreach(var item in Defaults)
+        foreach(var definition in ladderPolicy.Definitions)
         {
-            var existing=specs.SingleOrDefault(x=>x.Level==item.Level.ToString());
-            if(existing is null){var spec=new RequirementSpecification(projectId,item.SpecNumber,item.SpecTitle,item.Level.ToString(),$"Authoritative structured {item.SpecTitle.ToLowerInvariant()}.",actor,now);db.RequirementSpecifications.Add(spec);specs.Add(spec);continue;}
+            var catalogue = definition.RequirementsCatalogue
+                ?? throw new DomainException($"The {definition.Level} level has no enterprise requirements catalogue.");
+            var existing=specs.SingleOrDefault(x=>x.Level==definition.Level.ToString());
+            if(existing is null){var spec=new RequirementSpecification(projectId,catalogue.SpecificationNumber,catalogue.SpecificationTitle,definition.Level.ToString(),$"Authoritative structured {catalogue.SpecificationTitle.ToLowerInvariant()}.",actor,now);db.RequirementSpecifications.Add(spec);specs.Add(spec);continue;}
             // The default title is authoritative and is applied to Projects that already exist. These were
             // "System Requirements Specification"; the product calls the artefact a document everywhere else,
             // and a library that names the same thing two ways makes a reader wonder whether they are two
             // things. Only the name moves — the number, the content and its history are untouched.
-            if(existing.Title!=item.SpecTitle)db.Entry(existing).Property(x=>x.Title).CurrentValue=item.SpecTitle;
+            if(existing.Title!=catalogue.SpecificationTitle)db.Entry(existing).Property(x=>x.Title).CurrentValue=catalogue.SpecificationTitle;
         }
         await db.SaveChangesAsync(ct);
         var sections=await db.SpecificationNodes.Where(x=>specs.Select(s=>s.Id).Contains(x.SpecificationId)&&x.Type==SpecificationNodeType.Section).ToListAsync(ct);
@@ -117,10 +118,10 @@ public sealed class EnterpriseRequirementsService(AeroLinkDbContext db)
         var placed=(await db.SpecificationNodes.AsNoTracking().Where(x=>x.RequirementArtifactId!=null&&artifactIds.Contains(x.RequirementArtifactId.Value)).Select(x=>x.RequirementArtifactId!.Value).ToListAsync(ct)).ToHashSet();
         foreach(var artifact in artifacts)
         {
-            if(!current.TryGetValue(artifact.Id,out var revision))continue;var definition=Defaults.Single(x=>x.Level==artifact.Level);var schema=schemas.Single(x=>x.Key==definition.SchemaKey);
+            if(!current.TryGetValue(artifact.Id,out var revision))continue;var definition=ladderPolicy.Definition(artifact.Level);var catalogue=definition.RequirementsCatalogue ?? throw new DomainException($"The {definition.Level} level has no enterprise requirements catalogue.");var schema=schemas.Single(x=>x.Key==catalogue.SchemaKey);
             if(!profiled.Contains(revision.Id))
             {
-                var attributes=JsonSerializer.Serialize(new{rationale=revision.Rationale,verification_method=revision.VerificationMethod,criticality=artifact.BaseNumber.EndsWith("5")?"Safety Significant":"Normal",owner=artifact.Level==RequirementLevel.System?"systems.author":"software.author",derived=artifact.Level!=RequirementLevel.System});
+                var attributes=JsonSerializer.Serialize(new{rationale=revision.Rationale,verification_method=revision.VerificationMethod,criticality=artifact.BaseNumber.EndsWith("5")?"Safety Significant":"Normal",owner=ladderPolicy.ParentLevels(artifact.Level).Count==0?"systems.author":"software.author",derived=ladderPolicy.IsDownstreamTarget(artifact.Level)});
                 // The canonical structured representation, not markup. This wrote an escaped <p> element,
                 // which the reader adopted verbatim — so every existing requirement opened in the controlled
                 // editor showing literal <p> and </p>, and checking it in published them. The product's own
@@ -133,7 +134,7 @@ public sealed class EnterpriseRequirementsService(AeroLinkDbContext db)
                 // Top level only. Positions are unique within a parent, not within the document, so once a
                 // section had sub-sections beneath it there were two nodes at position 1000 and this asked for
                 // the single one.
-                var spec=specs.Single(x=>x.Level==artifact.Level.ToString());var bucket=(StableNumber(artifact.BaseNumber)%5)+1;var parent=sections.Single(x=>x.SpecificationId==spec.Id&&x.ParentId==null&&x.Position==bucket*1000);
+                var spec=specs.Single(x=>x.Level==definition.Level.ToString());var bucket=(StableNumber(artifact.BaseNumber)%5)+1;var parent=sections.Single(x=>x.SpecificationId==spec.Id&&x.ParentId==null&&x.Position==bucket*1000);
                 db.SpecificationNodes.Add(new(spec.Id,parent.Id,StableNumber(artifact.BaseNumber),SpecificationNodeType.Requirement,"",artifact.Id,actor,now));
             }
         }
@@ -145,8 +146,9 @@ public sealed class EnterpriseRequirementsService(AeroLinkDbContext db)
         await db.SaveChangesAsync(ct);
     }
 
-    public static IReadOnlyList<InterchangeRequirementRow> ParseImport(Stream input,string fileName)
+    public static IReadOnlyList<InterchangeRequirementRow> ParseImport(Stream input,string fileName, ILadderPolicy? policy = null)
     {
+        var ladderPolicy = policy ?? LegacyLadderPolicy.Instance;
         using var memory=new MemoryStream();input.CopyTo(memory);memory.Position=0;
         var rows=fileName.EndsWith(".xlsx",StringComparison.OrdinalIgnoreCase)?ParseXlsx(memory):ParseCsv(Encoding.UTF8.GetString(memory.ToArray()));
         if(rows.Count>50_001)throw new InvalidOperationException("Imports are limited to 50,000 requirements plus one header row.");
@@ -158,13 +160,13 @@ public sealed class EnterpriseRequirementsService(AeroLinkDbContext db)
         {
             var row=rows[i];if(row.All(string.IsNullOrWhiteSpace))continue;var id=Cell(row,"identifier");var level=Cell(row,"level");var statement=Cell(row,"statement");var rationale=Cell(row,"rationale");var method=Cell(row,"verificationmethod");var errors=new List<string>();
             try{AeroLink.Domain.Common.ArtifactNumber.ValidateBase(id);}catch{errors.Add("Identifier must use PREFIX-######## format.");}
-            if(!TryLevel(level,out _))errors.Add("Level must be System, HighLevel/HLR, or LowLevel/LLR.");if(string.IsNullOrWhiteSpace(statement))errors.Add("Statement is required.");if(string.IsNullOrWhiteSpace(method))errors.Add("VerificationMethod is required.");
+            if(!TryLevel(level,out _, ladderPolicy))errors.Add("Level must be System, HighLevel/HLR, or LowLevel/LLR.");if(string.IsNullOrWhiteSpace(statement))errors.Add("Statement is required.");if(string.IsNullOrWhiteSpace(method))errors.Add("VerificationMethod is required.");
             output.Add(new(i+1,id,level,statement,rationale,method,errors.Count==0,errors));
         }
         return output;
     }
-    public static bool TryLevel(string text,out RequirementLevel level)
-    { var value=text.Replace(" ","").Replace("-","").ToLowerInvariant();level=value switch{"system" or "sysr"=>RequirementLevel.System,"highlevel" or "hlr"=>RequirementLevel.HighLevel,"lowlevel" or "llr"=>RequirementLevel.LowLevel,_=>(RequirementLevel)(-1)};return (int)level>=0; }
+    public static bool TryLevel(string? text,out RequirementLevel level, ILadderPolicy? policy = null) =>
+        (policy ?? LegacyLadderPolicy.Instance).TryParseRequirementLevel(text, out level);
     /// <summary>
     /// Keeps the queryable owner and tag index in step with the authored JSON.
     ///

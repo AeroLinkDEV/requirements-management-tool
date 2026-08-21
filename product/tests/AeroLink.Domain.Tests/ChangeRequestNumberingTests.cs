@@ -44,6 +44,12 @@ public sealed class ChangeRequestNumberingTests
     }
 
     [Fact]
+    public void The_legacy_system_prefix_helper_ignores_an_optional_software_level()
+    {
+        Assert.Equal("SRCR", ChangeRequestNumbering.Prefix(ChangeRequestType.System, RequirementLevel.HighLevel));
+    }
+
+    [Fact]
     public void The_identifier_and_the_declared_scope_cannot_disagree()
     {
         // An LLRCR that says it is HLR work, or a System change request numbered as software, would be a

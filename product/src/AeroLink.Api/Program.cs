@@ -7,6 +7,7 @@ using AeroLink.Domain.Verification;
 using AeroLink.Domain.Traceability;
 using AeroLink.Domain.Releases;
 using AeroLink.Domain.Identity;
+using AeroLink.Domain.Hierarchy;
 using AeroLink.Domain.Notifications;
 using AeroLink.Infrastructure.Notifications;
 using AeroLink.Domain.Requirements;
@@ -49,6 +50,7 @@ builder.Services.AddProblemDetails();
 builder.Services.AddExceptionHandler<ConcurrencyExceptionHandler>();
 builder.Services.ConfigureHttpJsonOptions(options => options.SerializerOptions.Converters.Add(new JsonStringEnumConverter()));
 builder.Services.AddAeroLinkInfrastructure(builder.Configuration);
+builder.Services.AddSingleton<ILadderPolicy, LegacyLadderPolicy>();
 if (restoreValidationReadOnly)
 {
     // The validation host exists only to exercise integrity-verifying reads. Suppress every

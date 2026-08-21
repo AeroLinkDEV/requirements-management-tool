@@ -35,11 +35,15 @@ public sealed class IdentifierAllocationTests
 
         var firstSystem = await Preview("System");
         var secondSystem = await Preview("System");
+        // The legacy preview helper ignores an optional software level on a System request. The aggregate
+        // constructor remains strict; this assertion protects the read-only preview compatibility seam.
+        var legacySystemWithSoftwareLevel = await Preview("System", "HighLevel");
         var firstSoftware = await Preview("Software", "HighLevel");
         var secondSoftware = await Preview("Software", "HighLevel");
 
         Assert.Equal("SRCR-00001", firstSystem.GetProperty("changeRequestNumber").GetString());
         Assert.Equal(firstSystem.GetRawText(), secondSystem.GetRawText());
+        Assert.Equal("SRCR-00001", legacySystemWithSoftwareLevel.GetProperty("changeRequestNumber").GetString());
         Assert.Equal("HLRCR-00001", firstSoftware.GetProperty("changeRequestNumber").GetString());
         Assert.Equal(firstSoftware.GetRawText(), secondSoftware.GetRawText());
 

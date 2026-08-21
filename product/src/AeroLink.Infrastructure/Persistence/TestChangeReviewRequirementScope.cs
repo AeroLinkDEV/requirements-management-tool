@@ -1,5 +1,6 @@
 using AeroLink.Domain.Baselines;
 using AeroLink.Domain.ChangeControl;
+using AeroLink.Domain.Hierarchy;
 using AeroLink.Domain.Requirements;
 using AeroLink.Domain.Verification;
 using Microsoft.EntityFrameworkCore;
@@ -56,12 +57,7 @@ public static class TestChangeReviewRequirementScope
         TestProcedureLevel procedureLevel)
     {
         var ids = carriedRevisionIds.Distinct().ToList();
-        var wantedLevel = procedureLevel switch
-        {
-            TestProcedureLevel.System => RequirementLevel.System,
-            TestProcedureLevel.HighLevel => RequirementLevel.HighLevel,
-            _ => RequirementLevel.LowLevel
-        };
+        var wantedLevel = LegacyLadderPolicy.Instance.RequirementLevelFor(procedureLevel);
         return from revision in db.RequirementRevisions.AsNoTracking()
                    .Where(x => ids.Contains(x.Id))
                join artifact in db.Requirements.AsNoTracking()

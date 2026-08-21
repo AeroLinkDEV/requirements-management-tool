@@ -1,5 +1,6 @@
 using AeroLink.Domain.Baselines;
 using AeroLink.Domain.ChangeControl;
+using AeroLink.Domain.Hierarchy;
 using AeroLink.Domain.Releases;
 using AeroLink.Domain.Requirements;
 using AeroLink.Domain.Verification;
@@ -19,8 +20,9 @@ public sealed record ReadinessGate(
     string? PrerequisiteCode = null);
 public sealed record ReleaseReadiness(int Percent, bool ReadyForRelease, IReadOnlyList<ReadinessGate> Gates);
 
-public sealed class ReleaseReadinessService(AeroLinkDbContext db)
+public sealed class ReleaseReadinessService(AeroLinkDbContext db, ILadderPolicy? policy = null)
 {
+    private readonly ILadderPolicy ladderPolicy = policy ?? LegacyLadderPolicy.Instance;
     public async Task<ReleaseReadiness> CalculateAsync(Guid campaignId, CancellationToken ct)
     {
         var campaign = await db.ReleaseCampaigns.AsNoTracking().Include(x => x.Approvals).SingleAsync(x => x.Id == campaignId, ct);
@@ -28,7 +30,8 @@ public sealed class ReleaseReadinessService(AeroLinkDbContext db)
         var requests = await db.SystemChangeRequests.AsNoTracking().Where(x => x.TargetReleaseId == campaign.ReleaseId && x.State != ChangeRequestState.Deferred).ToListAsync(ct);
         var impacts = await db.ImpactDispositions.AsNoTracking().Where(x => x.CampaignId == campaignId).ToListAsync(ct);
         var members = await db.BaselineRequirements.AsNoTracking().Where(x => x.BaselineId == baseline.Id).ToListAsync(ct); var revisionIds = members.Select(x => x.RevisionId).ToList();
-        var derivedIds = await (from member in db.BaselineRequirements.AsNoTracking().Where(x => x.BaselineId == baseline.Id) join artifact in db.Requirements.AsNoTracking() on member.ArtifactId equals artifact.Id where artifact.Level != RequirementLevel.System select member.RevisionId).ToListAsync(ct);
+        var derivedLevels = ladderPolicy.OrderedLevels.Where(level => ladderPolicy.ParentLevels(level).Count > 0).ToArray();
+        var derivedIds = await (from member in db.BaselineRequirements.AsNoTracking().Where(x => x.BaselineId == baseline.Id) join artifact in db.Requirements.AsNoTracking() on member.ArtifactId equals artifact.Id where derivedLevels.Contains(artifact.Level) select member.RevisionId).ToListAsync(ct);
         var tracedDerivedIds = await db.RequirementTraces.AsNoTracking().Where(x => derivedIds.Contains(x.SourceRevisionId) && revisionIds.Contains(x.TargetRevisionId)).Select(x => x.SourceRevisionId).Distinct().ToListAsync(ct);
         // Coverage counts only when it is settled, which takes three things.
         //
@@ -96,7 +99,7 @@ public sealed class ReleaseReadinessService(AeroLinkDbContext db)
 
         IReadOnlyList<RequiredCodeTraceabilityRequirement> requiredCode = baseline.RequirementsMaterializedAt is null
             ? Array.Empty<RequiredCodeTraceabilityRequirement>()
-            : await CodeTraceabilityProjection.RequiredAsync(db, campaign.ProjectId, campaign.ReleaseId, baseline.Id, ct);
+            : await CodeTraceabilityProjection.RequiredAsync(db, campaign.ProjectId, campaign.ReleaseId, baseline.Id, ladderPolicy, ct);
         var requiredCodeRevisionIds = requiredCode.Select(x => x.RevisionId).ToList();
         var mappedCode = requiredCodeRevisionIds.Count == 0 ? 0 : await db.CodeTraceabilityRecords.AsNoTracking()
             .Where(x => x.ProjectId == campaign.ProjectId && x.ReleaseId == campaign.ReleaseId

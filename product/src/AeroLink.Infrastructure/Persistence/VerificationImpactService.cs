@@ -1,4 +1,5 @@
 using AeroLink.Domain.ChangeControl;
+using AeroLink.Domain.Hierarchy;
 using AeroLink.Domain.Requirements;
 using AeroLink.Domain.Verification;
 using Microsoft.EntityFrameworkCore;
@@ -33,8 +34,9 @@ public sealed record ApprovedProcedureSelection(Guid ProcedureId, Guid RevisionI
 /// as soon as the engineering decision is settled, rather than discovering the work when the release is
 /// already being assembled.
 /// </summary>
-public sealed class VerificationImpactService(AeroLinkDbContext db, ProblemReportLinkService? problemReports = null)
+public sealed class VerificationImpactService(AeroLinkDbContext db, ProblemReportLinkService? problemReports = null, ILadderPolicy? policy = null)
 {
+    private readonly ILadderPolicy ladderPolicy = policy ?? LegacyLadderPolicy.Instance;
     /// <summary>
     /// Raises the items owed by a newly approved change request. Safe to call more than once for the same
     /// change request: existing items for the same requirement change are left alone, so a retried approval
@@ -74,7 +76,7 @@ public sealed class VerificationImpactService(AeroLinkDbContext db, ProblemRepor
         {
             if (covered.Contains(change.Id)) continue;
             if (change.Kind is not (RequirementChangeKind.Introduce or RequirementChangeKind.Modify)) continue;
-            var discipline = Discipline(change.Level);
+            var discipline = ladderPolicy.Discipline(change.Level);
             if (!reviews.TryGetValue(discipline, out var review))
             {
                 // Raised unnumbered: an approved change needs assessing, and only an assessment that finds
@@ -186,8 +188,7 @@ public sealed class VerificationImpactService(AeroLinkDbContext db, ProblemRepor
                             where revisionIds.Contains(revision.Id)
                             select new { revision.Id, procedure.Level }).ToListAsync(ct);
         var sets = await db.BuildTestSets.Include(x => x.Entries).Where(x => x.ReleaseId == releaseId).ToListAsync(ct);
-        foreach (var discipline in new[] { TestChangeReviewDiscipline.System,
-                     TestChangeReviewDiscipline.HighLevelSoftware, TestChangeReviewDiscipline.LowLevelSoftware })
+        foreach (var discipline in ladderPolicy.OrderedLevels.Select(ladderPolicy.Discipline))
         {
             if (sets.Any(x => x.Discipline == discipline)) continue;
             var pending = db.BuildTestSets.Local.FirstOrDefault(x => x.ReleaseId == releaseId && x.Discipline == discipline);
@@ -199,12 +200,7 @@ public sealed class VerificationImpactService(AeroLinkDbContext db, ProblemRepor
             x => changes.First(change => x.Any(link => link.RequirementRevisionId == change.RevisionId)).DisplayNumber);
         foreach (var row in levels)
         {
-            var discipline = row.Level switch
-            {
-                TestProcedureLevel.System => TestChangeReviewDiscipline.System,
-                TestProcedureLevel.HighLevel => TestChangeReviewDiscipline.HighLevelSoftware,
-                _ => TestChangeReviewDiscipline.LowLevelSoftware
-            };
+            var discipline = ladderPolicy.Discipline(ladderPolicy.RequirementLevelFor(row.Level));
             sets.Single(x => x.Discipline == discipline).Include(actorId, row.Id,
                 TestSelectionReason.ChangedRequirement,
                 $"Mandatory before release because {changedByRevision[row.Id]} changed.", now);
@@ -389,12 +385,7 @@ public sealed class VerificationImpactService(AeroLinkDbContext db, ProblemRepor
         foreach (var procedure in orphanedProcedures)
         {
             if (!covered.Add(procedure.ProcedureId)) continue;
-            var discipline = procedure.Level switch
-            {
-                TestProcedureLevel.System => TestChangeReviewDiscipline.System,
-                TestProcedureLevel.HighLevel => TestChangeReviewDiscipline.HighLevelSoftware,
-                _ => TestChangeReviewDiscipline.LowLevelSoftware
-            };
+            var discipline = ladderPolicy.Discipline(ladderPolicy.RequirementLevelFor(procedure.Level));
             if (!reviews.TryGetValue(discipline, out var review))
             {
                 // An orphaned procedure is itself the finding: the change left a procedure without a
@@ -571,10 +562,4 @@ public sealed class VerificationImpactService(AeroLinkDbContext db, ProblemRepor
     private static string ArtifactNumberDisplay(RequirementChange change) =>
         $"{change.BaseNumber}.{change.Revision:00}";
 
-    private static TestChangeReviewDiscipline Discipline(RequirementLevel level) => level switch
-    {
-        RequirementLevel.System => TestChangeReviewDiscipline.System,
-        RequirementLevel.HighLevel => TestChangeReviewDiscipline.HighLevelSoftware,
-        _ => TestChangeReviewDiscipline.LowLevelSoftware
-    };
 }

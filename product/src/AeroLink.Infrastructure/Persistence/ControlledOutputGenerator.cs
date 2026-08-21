@@ -2,6 +2,8 @@ using System.IO.Compression;
 using System.Security;
 using System.Text;
 using AeroLink.Domain.ChangeControl;
+using AeroLink.Domain.Common;
+using AeroLink.Domain.Hierarchy;
 using AeroLink.Domain.Traceability;
 using AeroLink.Domain.Verification;
 using Microsoft.EntityFrameworkCore;
@@ -11,8 +13,9 @@ namespace AeroLink.Infrastructure.Persistence;
 public sealed record GeneratedOutput(byte[] Content, string ContentType, string FileName);
 internal sealed record OutputRow(string Number, string Level, string Text, string Source);
 
-public sealed class ControlledOutputGenerator(AeroLinkDbContext db, RichContentPublisher richContent)
+public sealed class ControlledOutputGenerator(AeroLinkDbContext db, RichContentPublisher richContent, ILadderPolicy? policy = null)
 {
+    private readonly ILadderPolicy ladderPolicy = policy ?? LegacyLadderPolicy.Instance;
     public async Task<GeneratedOutput?> GenerateTraceabilityAsync(Guid baselineId,string format,CancellationToken ct)
     {
         var baseline=await db.CandidateBaselines.AsNoTracking().SingleOrDefaultAsync(x=>x.Id==baselineId,ct);if(baseline is null||baseline.RequirementsMaterializedAt is null)return null;
@@ -34,26 +37,17 @@ public sealed class ControlledOutputGenerator(AeroLinkDbContext db, RichContentP
     {
         var document = await db.ControlledDocuments.AsNoTracking().SingleOrDefaultAsync(x => x.Id == documentId, ct); if (document is null) return null;
         var project = await db.Projects.AsNoTracking().SingleAsync(x => x.Id == document.ProjectId, ct); var program = await db.Programs.AsNoTracking().SingleAsync(x => x.Id == project.ProgramId, ct); var release = await db.Releases.AsNoTracking().SingleAsync(x => x.Id == document.ReleaseId, ct); var baseline = await db.CandidateBaselines.AsNoTracking().SingleAsync(x => x.Id == document.BaselineId, ct);
-        var approvalProcedureLevel = document.Type switch
-        {
-            ControlledDocumentType.SystemTestProcedures => TestProcedureLevel.System,
-            ControlledDocumentType.HighLevelTestProcedures => TestProcedureLevel.HighLevel,
-            ControlledDocumentType.LowLevelTestProcedures => TestProcedureLevel.LowLevel,
-            _ => (TestProcedureLevel?)null,
-        };
+        var approvalProcedureLevel = ProcedureLevelFor(document.Type);
         var procedureSnapshot = approvalProcedureLevel is null
             ? null
             : await ControlledProcedureDocumentSnapshotProjection.ForDocumentAsync(db, document.BaselineId,
                 approvalProcedureLevel.Value, document.GeneratedAt, ct);
-        var records = document.Type switch
-        {
-            ControlledDocumentType.Sysrd => await RequirementPublicationRows(document.BaselineId, RequirementLevel.System, ct),
-            ControlledDocumentType.SwrdHighLevel => await RequirementPublicationRows(document.BaselineId, RequirementLevel.HighLevel, ct),
-            ControlledDocumentType.SwrdLowLevel => await RequirementPublicationRows(document.BaselineId, RequirementLevel.LowLevel, ct),
-            ControlledDocumentType.SystemTestProcedures => await ProcedurePublicationRows(procedureSnapshot!, TestProcedureLevel.System, ct),
-            ControlledDocumentType.HighLevelTestProcedures => await ProcedurePublicationRows(procedureSnapshot!, TestProcedureLevel.HighLevel, ct),
-            _ => await ProcedurePublicationRows(procedureSnapshot!, TestProcedureLevel.LowLevel, ct)
-        };
+        var requirementLevel = RequirementLevelFor(document.Type);
+        if (requirementLevel is null && approvalProcedureLevel is null)
+            throw new DomainException($"Unknown controlled document type: {document.Type}.");
+        var records = requirementLevel is not null
+            ? await RequirementPublicationRows(document.BaselineId, requirementLevel.Value, ct)
+            : await ProcedurePublicationRows(procedureSnapshot!, approvalProcedureLevel!.Value, ct);
         var isProcedureDocument = approvalProcedureLevel is not null;
         // A document reports the procedure-manifest state that existed when that document was generated, not
         // the baseline's current state. Exact procedure documents bind directly to their stored content hash;
@@ -82,10 +76,8 @@ public sealed class ControlledOutputGenerator(AeroLinkDbContext db, RichContentP
                 .Select(x => x.TemplateNumber + " " + x.Title).SingleOrDefaultAsync(ct);
         var layout = PublicationLayout.TryRead(templateRevision?.BodyJson);
 
-        var level = document.Type == ControlledDocumentType.Sysrd ? RequirementLevel.System
-            : document.Type == ControlledDocumentType.SwrdHighLevel ? RequirementLevel.HighLevel
-            : RequirementLevel.LowLevel;
-        var isRequirementDocument = document.Type is ControlledDocumentType.Sysrd or ControlledDocumentType.SwrdHighLevel or ControlledDocumentType.SwrdLowLevel;
+        var isRequirementDocument = requirementLevel is not null;
+        var level = requirementLevel;
 
         List<PublicationSection> sections;
         string title = document.Title;
@@ -94,7 +86,7 @@ public sealed class ControlledOutputGenerator(AeroLinkDbContext db, RichContentP
         {
             sections = [new("Controlled Records", $"This section contains {records.Count:N0} exact, revision-controlled records rendered from baseline {baseline.DisplayNumber}.", records)];
             if (isRequirementDocument)
-                sections.Add(new("Annex A - Upward Requirement Traceability", "This annex identifies the exact parent requirement revision(s) for every published requirement. Top-level System requirements are explicitly identified.", await TraceAnnexRows(document.BaselineId, level, document.GeneratedAt, ct)));
+                sections.Add(new("Annex A - Upward Requirement Traceability", "This annex identifies the exact parent requirement revision(s) for every published requirement. Top-level System requirements are explicitly identified.", await TraceAnnexRows(document.BaselineId, level!.Value, document.GeneratedAt, ct)));
         }
         else
         {
@@ -119,9 +111,9 @@ public sealed class ControlledOutputGenerator(AeroLinkDbContext db, RichContentP
                 {
                     PublicationSectionContent.ControlledRecords => new(heading, introduction, records),
                     PublicationSectionContent.UpwardTraceAnnex when isRequirementDocument =>
-                        new(heading, introduction, await TraceAnnexRows(document.BaselineId, level, document.GeneratedAt, ct)),
+                        new(heading, introduction, await TraceAnnexRows(document.BaselineId, level!.Value, document.GeneratedAt, ct)),
                     PublicationSectionContent.VerificationAnnex when isRequirementDocument =>
-                        new(heading, introduction, await VerificationAnnexRows(document.BaselineId, level, ct)),
+                        new(heading, introduction, await VerificationAnnexRows(document.BaselineId, level!.Value, ct)),
                     // A trace or verification annex has no meaning in a procedure document. The heading is
                     // still rendered, because the programme's layout said it belongs there; what would be
                     // wrong is a heading in a controlled document with nothing under it and no explanation.
@@ -151,6 +143,19 @@ public sealed class ControlledOutputGenerator(AeroLinkDbContext db, RichContentP
             new[] { (document.Revision.ToString("D2"), status, document.GeneratedAt.UtcDateTime.ToString("yyyy-MM-dd"), createdBy) }, sections);
         return ProfessionalPublicationRenderer.Render(publication, format, $"{document.DocumentNumber}.{document.Revision:D2}_{release.Version}");
     }
+
+    private RequirementLevel? RequirementLevelFor(ControlledDocumentType type) =>
+        ladderPolicy.OrderedLevels
+            .Where(level => ladderPolicy.RequirementsDocument(level) == type)
+            .Select(level => (RequirementLevel?)level)
+            .SingleOrDefault();
+
+    private TestProcedureLevel? ProcedureLevelFor(ControlledDocumentType type) =>
+        ladderPolicy.OrderedLevels
+            .Where(level => ladderPolicy.TestProcedureDocument(level) == type)
+            .Select(ladderPolicy.ProcedureLevel)
+            .Cast<TestProcedureLevel?>()
+            .SingleOrDefault();
 
     private async Task<List<PublicationRecord>> RequirementPublicationRows(Guid baselineId, RequirementLevel level, CancellationToken ct)
     {

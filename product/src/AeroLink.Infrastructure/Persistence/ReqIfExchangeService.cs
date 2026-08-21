@@ -4,6 +4,7 @@ using System.Text.Json;
 using System.Xml;
 using System.Xml.Linq;
 using AeroLink.Domain.Requirements;
+using AeroLink.Domain.Hierarchy;
 using Microsoft.EntityFrameworkCore;
 
 namespace AeroLink.Infrastructure.Persistence;
@@ -16,8 +17,9 @@ public sealed record ReqIfPreviewManifest(string ReqIfVersion, string SourceTool
 public sealed record ReqIfExportResult(ReqIfExchangeJob Job, StoredEvidence Package);
 
 /// <summary>Secure ReqIF 1.2 package builder/parser for AeroLink's governed interchange subset.</summary>
-public sealed class ReqIfExchangeService(AeroLinkDbContext db, EvidenceFileStore store)
+public sealed class ReqIfExchangeService(AeroLinkDbContext db, EvidenceFileStore store, ILadderPolicy? policy = null)
 {
+    private readonly ILadderPolicy ladderPolicy = policy ?? LegacyLadderPolicy.Instance;
     public const string ReqIfNamespace = "http://www.omg.org/spec/ReqIF/20110401/reqif.xsd";
     private const long MaxPackageBytes = 50L * 1024 * 1024;
     private const long MaxExpandedBytes = 150L * 1024 * 1024;
@@ -83,7 +85,7 @@ public sealed class ReqIfExchangeService(AeroLinkDbContext db, EvidenceFileStore
         input.Position = 0;
         try
         {
-            var parsed = ParsePackage(input, fileName);
+            var parsed = ParsePackage(input, fileName, ladderPolicy);
             var existing = (await db.Requirements.AsNoTracking().Where(x => x.ProjectId == projectId).Select(x => x.BaseNumber).ToListAsync(ct)).ToHashSet(StringComparer.OrdinalIgnoreCase);
             var duplicateIds = parsed.Items.GroupBy(x => x.Identifier, StringComparer.OrdinalIgnoreCase).Where(x => x.Key.Length > 0 && x.Count() > 1).Select(x => x.Key).ToHashSet(StringComparer.OrdinalIgnoreCase);
             var items = parsed.Items.Select(item =>
@@ -107,7 +109,10 @@ public sealed class ReqIfExchangeService(AeroLinkDbContext db, EvidenceFileStore
     public Stream OpenPackage(ReqIfExchangeJob job) => store.OpenRead(job.StorageKey);
     public static ReqIfPreviewManifest ReadManifest(ReqIfExchangeJob job) => JsonSerializer.Deserialize<ReqIfPreviewManifest>(job.ManifestJson, new JsonSerializerOptions(JsonSerializerDefaults.Web) { PropertyNameCaseInsensitive = true }) ?? throw new InvalidOperationException("The ReqIF preview manifest is invalid.");
 
-    public static ReqIfPreviewManifest ParsePackage(Stream package, string fileName)
+    public static ReqIfPreviewManifest ParsePackage(Stream package, string fileName) =>
+        ParsePackage(package, fileName, LegacyLadderPolicy.Instance);
+
+    public static ReqIfPreviewManifest ParsePackage(Stream package, string fileName, ILadderPolicy ladderPolicy)
     {
         if (fileName.EndsWith(".reqifz", StringComparison.OrdinalIgnoreCase) || IsZip(package))
         {
@@ -116,12 +121,12 @@ public sealed class ReqIfExchangeService(AeroLinkDbContext db, EvidenceFileStore
             long expanded = 0; foreach (var entry in zip.Entries) { expanded += entry.Length; ValidateEntry(entry.FullName); if (expanded > MaxExpandedBytes) throw new InvalidOperationException("The expanded ReqIF package is too large."); }
             var reqif = zip.Entries.FirstOrDefault(x => x.FullName.EndsWith(".reqif", StringComparison.OrdinalIgnoreCase)) ?? throw new InvalidOperationException("The ReqIFZ package does not contain a .reqif document.");
             using var xml = reqif.Open();
-            return ParseXml(xml, zip.Entries.Count(x => !x.FullName.EndsWith(".reqif", StringComparison.OrdinalIgnoreCase) && !x.FullName.EndsWith("aerolink-manifest.json", StringComparison.OrdinalIgnoreCase) && !x.FullName.EndsWith('/')));
+            return ParseXml(xml, zip.Entries.Count(x => !x.FullName.EndsWith(".reqif", StringComparison.OrdinalIgnoreCase) && !x.FullName.EndsWith("aerolink-manifest.json", StringComparison.OrdinalIgnoreCase) && !x.FullName.EndsWith('/')), ladderPolicy);
         }
-        package.Position = 0; return ParseXml(package, 0);
+        package.Position = 0; return ParseXml(package, 0, ladderPolicy);
     }
 
-    private static ReqIfPreviewManifest ParseXml(Stream stream, int attachmentCount)
+    private static ReqIfPreviewManifest ParseXml(Stream stream, int attachmentCount, ILadderPolicy ladderPolicy)
     {
         var settings = new XmlReaderSettings { DtdProcessing = DtdProcessing.Prohibit, XmlResolver = null, MaxCharactersInDocument = MaxExpandedBytes, MaxCharactersFromEntities = 0 };
         using var reader = XmlReader.Create(stream, settings); var doc = XDocument.Load(reader, LoadOptions.None);
@@ -148,7 +153,12 @@ public sealed class ReqIfExchangeService(AeroLinkDbContext db, EvidenceFileStore
             var identifier = Pick(values, "AeroLink.Identifier", "Identifier", "ReqIF.ForeignID", "ReqIF.ForeignId", "ID");
             var statement = Pick(values, "AeroLink.Statement", "Statement", "Text", "Description", "ReqIF.Text");
             var errors = new List<string>(); if (identifier.Length == 0) errors.Add("No requirement identifier could be mapped."); if (statement.Length == 0) errors.Add("No requirement statement could be mapped.");
-            var level = Pick(values, "AeroLink.Level", "Level"); if (level is not ("System" or "HighLevel" or "LowLevel")) { if (level.Length > 0) warnings.Add($"Requirement {identifier}: level '{level}' mapped to System."); level = "System"; }
+            var importedLevel = Pick(values, "AeroLink.Level", "Level");
+            var level = ladderPolicy.ParseImportedRequirementLevel(importedLevel).ToString();
+            if (importedLevel is not ("System" or "HighLevel" or "LowLevel"))
+            {
+                if (importedLevel.Length > 0) warnings.Add($"Requirement {identifier}: level '{importedLevel}' mapped to System.");
+            }
             items.Add(new(external, identifier, level, statement, Pick(values, "AeroLink.Rationale", "Rationale"), Pick(values, "AeroLink.VerificationMethod", "Verification Method"), Pick(values, "AeroLink.RichTextSource", "Rich Text"), JsonOr(values, "AeroLink.Attributes", "{}"), JsonOr(values, "AeroLink.Tags", "[]"), errors.Count == 0, errors));
         }
         return new(version, sourceTool, items, doc.Descendants().Count(x => x.Name.LocalName == "SPEC-HIERARCHY"), doc.Descendants().Count(x => x.Name.LocalName == "SPEC-RELATION"), attachmentCount, warnings.Distinct().ToList());

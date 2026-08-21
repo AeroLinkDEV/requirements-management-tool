@@ -56,6 +56,12 @@ public sealed class TestProcedureDocumentBootstrapTests
         Assert.Equal(["HLRTD-000001", "LLRTD-000001", "SYSTD-000001"], documents.Select(x => x.DocumentNumber));
         Assert.Equal([TestProcedureLevel.HighLevel, TestProcedureLevel.LowLevel, TestProcedureLevel.System],
             documents.Select(x => x.Level));
+        Assert.Equal("High-Level Software Test Procedures Document",
+            documents.Single(x => x.Level == TestProcedureLevel.HighLevel).Title);
+        Assert.Equal("Low-Level Software Test Procedures Document",
+            documents.Single(x => x.Level == TestProcedureLevel.LowLevel).Title);
+        Assert.Equal("System Test Procedures Document",
+            documents.Single(x => x.Level == TestProcedureLevel.System).Title);
     }
 
     [Fact]

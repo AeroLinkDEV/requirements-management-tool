@@ -1,4 +1,5 @@
 using AeroLink.Domain.Programs;
+using AeroLink.Domain.Hierarchy;
 using AeroLink.Domain.Verification;
 using Microsoft.EntityFrameworkCore;
 
@@ -19,17 +20,11 @@ namespace AeroLink.Infrastructure.Persistence;
 /// inventing a section structure nobody chose would be a worse answer than an obvious flat one somebody can
 /// restructure later.
 /// </summary>
-public sealed class TestProcedureDocumentBootstrap(AeroLinkDbContext db)
+public sealed class TestProcedureDocumentBootstrap(AeroLinkDbContext db, ILadderPolicy? policy = null)
 {
+    private readonly ILadderPolicy ladderPolicy = policy ?? LegacyLadderPolicy.Instance;
     /// <summary>The section every backfilled procedure lands in, named so its provenance is obvious.</summary>
     public const string DefaultSectionHeading = "Unsectioned procedures";
-
-    private static readonly (TestProcedureLevel Level, string Acronym, string Title)[] Documents =
-    [
-        (TestProcedureLevel.System, "SYSTD", "System Test Procedures Document"),
-        (TestProcedureLevel.HighLevel, "HLRTD", "High-Level Software Test Procedures Document"),
-        (TestProcedureLevel.LowLevel, "LLRTD", "Low-Level Software Test Procedures Document"),
-    ];
 
     public async Task EnsureAllAsync(CancellationToken ct = default)
     {
@@ -42,8 +37,14 @@ public sealed class TestProcedureDocumentBootstrap(AeroLinkDbContext db)
     {
         var now = DateTimeOffset.UtcNow;
         var existing = await db.TestProcedureDocuments.Where(x => x.ProjectId == projectId).ToListAsync(ct);
+        var documents = ladderPolicy.OrderedLevels.Select(level =>
+        {
+            var type = ladderPolicy.TestProcedureDocument(level);
+            return (Level: ladderPolicy.ProcedureLevel(level), Acronym: ladderPolicy.ControlledDocumentPrefix(type),
+                Title: ladderPolicy.TestProcedureDocumentTitle(level));
+        }).ToArray();
 
-        foreach (var (level, acronym, title) in Documents)
+        foreach (var (level, acronym, title) in documents)
         {
             var document = existing.FirstOrDefault(x => x.Level == level);
             if (document is null)
