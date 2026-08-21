@@ -155,6 +155,7 @@
       "classification": "converted",
       "reason": "Already sharing a host through the #563 pilot.",
       "intents": [
+        "ef-translation",
         "http-boundary"
       ]
     },

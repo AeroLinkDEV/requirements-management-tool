@@ -21,18 +21,18 @@
     "http-boundary": {
       "label": "HTTP boundary: route, status, JSON shape",
       "level": "API (must stay hosted)",
-      "tests": 326,
-      "cases": 360,
+      "tests": 325,
+      "cases": 359,
       "unknownCases": 0,
       "classes": 79
     },
     "ef-translation": {
       "label": "EF translation / relational constraints",
       "level": "Infrastructure (needs a database, not a host)",
-      "tests": 95,
-      "cases": 102,
+      "tests": 96,
+      "cases": 103,
       "unknownCases": 0,
-      "classes": 40
+      "classes": 41
     },
     "auth-policy": {
       "label": "Authentication / authorization wiring",
@@ -8530,25 +8530,26 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 74,
-        "end": 95
+        "start": 76,
+        "end": 97
       }
     },
     {
       "cls": "TestProcedureDocumentApiTests",
       "test": "A_project_created_through_the_api_has_its_documents_immediately",
       "kind": "Fact",
-      "intent": "http-boundary",
+      "intent": "ef-translation",
       "cases": 1,
       "caseEvidence": "Fact",
       "hosted": "hosted",
       "hostEvidence": [
         "factory-construction",
-        "factory-client"
+        "factory-client",
+        "factory-services"
       ],
       "sourceLines": {
-        "start": 139,
-        "end": 168
+        "start": 141,
+        "end": 191
       }
     },
     {
@@ -8565,8 +8566,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 174,
-        "end": 204
+        "start": 197,
+        "end": 227
       }
     },
     {
@@ -8583,8 +8584,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 97,
-        "end": 112
+        "start": 99,
+        "end": 114
       }
     },
     {
@@ -8601,8 +8602,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 115,
-        "end": 133
+        "start": 117,
+        "end": 135
       }
     },
     {

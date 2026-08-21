@@ -1,6 +1,8 @@
 using System.Net;
 using System.Net.Http.Json;
+using AeroLink.Domain.ChangeControl;
 using AeroLink.Domain.Identity;
+using AeroLink.Domain.Hierarchy;
 using AeroLink.Domain.Programs;
 using AeroLink.Domain.Verification;
 using AeroLink.Infrastructure.Persistence;
@@ -157,6 +159,27 @@ public sealed class TestProcedureDocumentApiTests : IClassFixture<SharedApiHost>
         });
         Assert.Equal(HttpStatusCode.Created, created.StatusCode);
         var workspace = await created.Content.ReadFromJsonAsync<CreatedWorkspace>();
+
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            var ladder = await db.ProjectLadderConfigurations
+                .Include(x => x.Steps).Include(x => x.AllowedUpstream)
+                .SingleAsync(x => x.ProjectId == workspace!.Project.Id);
+            var resolved = ProjectLadderResolver.Resolve(ladder);
+            Assert.True(resolved.AgreesWithLegacyDefault());
+            Assert.Equal(ProjectLadderConfigurationClassification.LegacyDefault, ladder.Classification);
+            Assert.Equal(ProjectLadderConfigurationState.Stored, ladder.State);
+            Assert.Equal([RequirementLevel.System, RequirementLevel.HighLevel, RequirementLevel.LowLevel],
+                resolved.Steps.Select(x => x.Level));
+            Assert.Equal([7, 7, 15], resolved.Steps.Select(x => (int)x.Capabilities));
+            Assert.Equal(2, ladder.AllowedUpstream.Count);
+            Assert.DoesNotContain(await db.ProjectLadderConfigurations.AsNoTracking()
+                .Where(x => x.ProjectId == workspace!.Project.Id)
+                .Select(x => new { x.Classification, x.State })
+                .ToListAsync(), x => x.Classification != ProjectLadderConfigurationClassification.LegacyDefault
+                    || x.State != ProjectLadderConfigurationState.Stored);
+        }
 
         var documents = (await (await client.GetAsync(
             $"/api/projects/{workspace!.Project.Id}/test-procedure-documents"))

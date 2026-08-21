@@ -1,0 +1,257 @@
+using AeroLink.Domain.ChangeControl;
+using AeroLink.Domain.Common;
+
+namespace AeroLink.Domain.Hierarchy;
+
+/// <summary>The persisted provenance class of a project ladder.</summary>
+public enum ProjectLadderConfigurationClassification { LegacyDefault, NonDefault }
+
+/// <summary>
+/// Storage lifecycle only. Activation is deliberately not an authoring capability in this slice; the state
+/// exists so #713 can add its distinct authority without changing the storage shape.
+/// </summary>
+public enum ProjectLadderConfigurationState { Stored, Draft, Active, Retired }
+
+/// <summary>A project-owned persisted ladder envelope, not yet consulted by runtime policy consumers.</summary>
+public sealed class ProjectLadderConfiguration
+{
+    private ProjectLadderConfiguration() { }
+
+    public ProjectLadderConfiguration(Guid projectId, DateTimeOffset now)
+        : this(projectId, ProjectLadderConfigurationClassification.LegacyDefault,
+            ProjectLadderConfigurationState.Stored, now, null, null, null, null) { }
+
+    /// <summary>Storage for a future authoring draft; activation remains owned exclusively by #713.</summary>
+    public static ProjectLadderConfiguration CreateDraft(Guid projectId, DateTimeOffset now) =>
+        new(projectId, ProjectLadderConfigurationClassification.NonDefault,
+            ProjectLadderConfigurationState.Draft, now, null, null, null, null);
+
+    private ProjectLadderConfiguration(Guid projectId, ProjectLadderConfigurationClassification classification,
+        ProjectLadderConfigurationState state, DateTimeOffset now, DateTimeOffset? activatedAt = null,
+        string? activatedBy = null, DateTimeOffset? retiredAt = null, string? retiredBy = null)
+    {
+        if (projectId == Guid.Empty) throw new DomainException("A project ladder requires a project.");
+        ValidateShape(classification, state, activatedAt, activatedBy, retiredAt, retiredBy);
+        Id = Guid.NewGuid(); ProjectId = projectId; Classification = classification; State = state;
+        CreatedAt = UpdatedAt = now; Version = 1; ActivatedAt = activatedAt; ActivatedBy = activatedBy?.Trim();
+        RetiredAt = retiredAt; RetiredBy = retiredBy?.Trim();
+    }
+
+    public Guid Id { get; private set; }
+    public Guid ProjectId { get; private set; }
+    public ProjectLadderConfigurationClassification Classification { get; private set; }
+    public ProjectLadderConfigurationState State { get; private set; }
+    public DateTimeOffset CreatedAt { get; private set; }
+    public DateTimeOffset UpdatedAt { get; private set; }
+    public DateTimeOffset? ActivatedAt { get; private set; }
+    public string? ActivatedBy { get; private set; }
+    public DateTimeOffset? RetiredAt { get; private set; }
+    public string? RetiredBy { get; private set; }
+    public long Version { get; private set; }
+    public ICollection<ProjectLadderStep> Steps { get; } = new List<ProjectLadderStep>();
+    public ICollection<ProjectLadderAllowedUpstream> AllowedUpstream { get; } = new List<ProjectLadderAllowedUpstream>();
+
+    internal static void ValidateShape(ProjectLadderConfigurationClassification classification,
+        ProjectLadderConfigurationState state, DateTimeOffset? activatedAt, string? activatedBy,
+        DateTimeOffset? retiredAt, string? retiredBy)
+    {
+        if (!Enum.IsDefined(classification)) throw new DomainException("Unknown project ladder classification.");
+        if (!Enum.IsDefined(state)) throw new DomainException("Unknown project ladder state.");
+        if (classification == ProjectLadderConfigurationClassification.LegacyDefault
+            && state != ProjectLadderConfigurationState.Stored)
+            throw new DomainException("A legacy-default ladder must remain in Stored state.");
+        if (classification == ProjectLadderConfigurationClassification.NonDefault
+            && state == ProjectLadderConfigurationState.Stored)
+            throw new DomainException("A non-default ladder cannot use Stored state.");
+        if (activatedBy is not null && string.IsNullOrWhiteSpace(activatedBy))
+            throw new DomainException("Activation actor evidence cannot be blank.");
+        if (retiredBy is not null && string.IsNullOrWhiteSpace(retiredBy))
+            throw new DomainException("Retirement actor evidence cannot be blank.");
+        var activationAtPresent = activatedAt is not null;
+        var activationByPresent = !string.IsNullOrWhiteSpace(activatedBy);
+        var retirementAtPresent = retiredAt is not null;
+        var retirementByPresent = !string.IsNullOrWhiteSpace(retiredBy);
+        if (activationAtPresent != activationByPresent)
+            throw new DomainException("Activation evidence requires both timestamp and actor.");
+        if (retirementAtPresent != retirementByPresent)
+            throw new DomainException("Retirement evidence requires both timestamp and actor.");
+        var hasActivation = activationAtPresent && activationByPresent;
+        var hasRetirement = retirementAtPresent && retirementByPresent;
+        if (state == ProjectLadderConfigurationState.Active && (!hasActivation || hasRetirement))
+            throw new DomainException("An active project ladder requires activation evidence and cannot be retired.");
+        if (state == ProjectLadderConfigurationState.Retired && (!hasActivation || !hasRetirement))
+            throw new DomainException("A retired project ladder requires activation and retirement evidence.");
+        if (state is ProjectLadderConfigurationState.Stored or ProjectLadderConfigurationState.Draft
+            && (hasActivation || hasRetirement))
+            throw new DomainException("A stored or draft project ladder cannot carry activation or retirement evidence.");
+    }
+}
+
+/// <summary>One ordered, capability-bearing catalogue entry in a project ladder.</summary>
+public sealed class ProjectLadderStep
+{
+    private ProjectLadderStep() { }
+
+    public ProjectLadderStep(Guid configurationId, Guid projectId, RequirementLevel level, int position,
+        LevelCapabilities capabilities, DateTimeOffset now)
+    {
+        if (configurationId == Guid.Empty || projectId == Guid.Empty)
+            throw new DomainException("A ladder step requires a project configuration and project.");
+        if (position < 1) throw new DomainException("A ladder step position must be positive.");
+        if ((capabilities & ~AllCapabilities) != 0)
+            throw new DomainException("A ladder step contains an unknown capability flag.");
+        _ = LegacyLadderPolicy.Instance.Definition(level);
+        Id = Guid.NewGuid(); ConfigurationId = configurationId; ProjectId = projectId;
+        CatalogueEntry = level.ToString(); Position = position; Capabilities = capabilities;
+        CreatedAt = UpdatedAt = now; Version = 1;
+    }
+
+    private const LevelCapabilities AllCapabilities = LevelCapabilities.HasChangeControl
+        | LevelCapabilities.HasVerification | LevelCapabilities.HasRequirementsDocument
+        | LevelCapabilities.HasCodeTraceability;
+
+    public Guid Id { get; private set; }
+    public Guid ConfigurationId { get; private set; }
+    public Guid ProjectId { get; private set; }
+    public string CatalogueEntry { get; private set; } = string.Empty;
+    public int Position { get; private set; }
+    public LevelCapabilities Capabilities { get; private set; }
+    public DateTimeOffset CreatedAt { get; private set; }
+    public DateTimeOffset UpdatedAt { get; private set; }
+    public long Version { get; private set; }
+}
+
+/// <summary>An allowed parent/child edge in one persisted project ladder.</summary>
+public sealed class ProjectLadderAllowedUpstream
+{
+    private ProjectLadderAllowedUpstream() { }
+
+    public ProjectLadderAllowedUpstream(Guid configurationId, Guid projectId, Guid parentStepId, Guid childStepId,
+        DateTimeOffset now)
+    {
+        if (configurationId == Guid.Empty || projectId == Guid.Empty || parentStepId == Guid.Empty || childStepId == Guid.Empty)
+            throw new DomainException("A ladder relationship requires configuration, project, and step endpoints.");
+        if (parentStepId == childStepId) throw new DomainException("A ladder relationship cannot point a step to itself.");
+        Id = Guid.NewGuid(); ConfigurationId = configurationId; ProjectId = projectId;
+        ParentStepId = parentStepId; ChildStepId = childStepId; CreatedAt = UpdatedAt = now; Version = 1;
+    }
+
+    public Guid Id { get; private set; }
+    public Guid ConfigurationId { get; private set; }
+    public Guid ProjectId { get; private set; }
+    public Guid ParentStepId { get; private set; }
+    public Guid ChildStepId { get; private set; }
+    public DateTimeOffset CreatedAt { get; private set; }
+    public DateTimeOffset UpdatedAt { get; private set; }
+    public long Version { get; private set; }
+}
+
+/// <summary>
+/// Builds the fixed legacy ladder for a project at the same persistence seam as project creation. This is a
+/// storage bootstrap only: runtime policy consumers continue to use <see cref="LegacyLadderPolicy"/> directly.
+/// </summary>
+public static class LegacyDefaultProjectLadderFactory
+{
+    public static ProjectLadderConfiguration Create(Guid projectId, DateTimeOffset now)
+    {
+        var configuration = new ProjectLadderConfiguration(projectId, now);
+        var steps = new List<ProjectLadderStep>();
+        foreach (var (level, position) in LegacyLadderPolicy.Instance.OrderedLevels.Select((x, i) => (x, i + 1)))
+        {
+            var step = new ProjectLadderStep(configuration.Id, projectId, level, position,
+                LegacyLadderPolicy.Instance.Definition(level).Capabilities, now);
+            configuration.Steps.Add(step);
+            steps.Add(step);
+        }
+
+        configuration.AllowedUpstream.Add(new ProjectLadderAllowedUpstream(
+            configuration.Id, projectId, steps[0].Id, steps[1].Id, now));
+        configuration.AllowedUpstream.Add(new ProjectLadderAllowedUpstream(
+            configuration.Id, projectId, steps[1].Id, steps[2].Id, now));
+        return configuration;
+    }
+}
+
+public sealed record ResolvedProjectLadderStep(RequirementLevel Level, int Position, LevelCapabilities Capabilities);
+public sealed record ResolvedProjectLadderRelationship(RequirementLevel Parent, RequirementLevel Child);
+
+/// <summary>
+/// A read-only comparison of persisted data with the code-owned ladder. It is intentionally a resolver, not a
+/// policy implementation: no runtime consumer calls it to decide authoring, verification, or release behavior.
+/// </summary>
+public sealed record ResolvedProjectLadder(
+    Guid ProjectId,
+    ProjectLadderConfigurationClassification Classification,
+    ProjectLadderConfigurationState State,
+    IReadOnlyList<ResolvedProjectLadderStep> Steps,
+    IReadOnlyList<ResolvedProjectLadderRelationship> AllowedUpstream)
+{
+    public bool AgreesWithLegacyDefault(ILadderPolicy? policy = null)
+    {
+        policy ??= LegacyLadderPolicy.Instance;
+        if (Classification != ProjectLadderConfigurationClassification.LegacyDefault
+            || State != ProjectLadderConfigurationState.Stored
+            || Steps.Count != policy.OrderedLevels.Count)
+            return false;
+        return Steps.OrderBy(x => x.Position).Select(x => x.Level).SequenceEqual(policy.OrderedLevels)
+            && Steps.All(x => x.Capabilities == policy.Definition(x.Level).Capabilities)
+            && AllowedUpstream.OrderBy(x => x.Parent).ThenBy(x => x.Child)
+                .SequenceEqual(policy.ParentRelationships.Select(x => new ResolvedProjectLadderRelationship(x.Parent, x.Child))
+                    .OrderBy(x => x.Parent).ThenBy(x => x.Child));
+    }
+}
+
+public static class ProjectLadderResolver
+{
+    public static ResolvedProjectLadder Resolve(ProjectLadderConfiguration configuration, ILadderPolicy? policy = null)
+    {
+        ArgumentNullException.ThrowIfNull(configuration);
+        policy ??= LegacyLadderPolicy.Instance;
+        ProjectLadderConfiguration.ValidateShape(configuration.Classification, configuration.State,
+            configuration.ActivatedAt, configuration.ActivatedBy, configuration.RetiredAt, configuration.RetiredBy);
+        if (configuration.Version < 1) throw new DomainException("A project ladder version must be positive.");
+
+        var steps = configuration.Steps.ToList();
+        if (steps.Count == 0)
+            throw new DomainException("A project ladder must contain at least one catalogue step.");
+        if (steps.Any(x => x.ProjectId != configuration.ProjectId || x.ConfigurationId != configuration.Id
+                           || x.Id == Guid.Empty || x.Position < 1 || x.Version < 1))
+            throw new DomainException("A project ladder contains a step from another configuration or an invalid step.");
+        if (steps.Select(x => x.Position).Distinct().Count() != steps.Count)
+            throw new DomainException("A project ladder contains duplicate positions.");
+        if (!steps.Select(x => x.Position).OrderBy(x => x).SequenceEqual(Enumerable.Range(1, steps.Count)))
+            throw new DomainException("A project ladder step positions must be contiguous starting at one.");
+        if (steps.Select(x => x.CatalogueEntry).Distinct(StringComparer.Ordinal).Count() != steps.Count)
+            throw new DomainException("A project ladder contains duplicate catalogue entries.");
+        if (steps.Select(x => x.Id).Distinct().Count() != steps.Count)
+            throw new DomainException("A project ladder contains duplicate step identities.");
+
+        var resolvedSteps = new List<ResolvedProjectLadderStep>();
+        var byId = new Dictionary<Guid, RequirementLevel>();
+        foreach (var step in steps)
+        {
+            if (!Enum.TryParse<RequirementLevel>(step.CatalogueEntry, ignoreCase: false, out var level)
+                || !Enum.IsDefined(level))
+                throw new DomainException($"Unknown persisted ladder catalogue entry '{step.CatalogueEntry}'.");
+            var definition = policy.Definition(level);
+            if ((step.Capabilities & ~definition.Capabilities) != 0)
+                throw new DomainException($"Persisted capabilities for {level} exceed the code-owned catalogue.");
+            byId.Add(step.Id, level);
+            resolvedSteps.Add(new(level, step.Position, step.Capabilities));
+        }
+
+        var edges = configuration.AllowedUpstream.ToList();
+        if (edges.Any(x => x.Id == Guid.Empty || x.ProjectId != configuration.ProjectId || x.ConfigurationId != configuration.Id
+                           || x.ParentStepId == x.ChildStepId || x.Version < 1
+                           || !byId.ContainsKey(x.ParentStepId) || !byId.ContainsKey(x.ChildStepId)))
+            throw new DomainException("A persisted ladder relationship has an invalid endpoint.");
+        if (edges.Select(x => (x.ParentStepId, x.ChildStepId)).Distinct().Count() != edges.Count)
+            throw new DomainException("A project ladder contains duplicate relationship edges.");
+
+        var resolvedEdges = edges.Select(x => new ResolvedProjectLadderRelationship(byId[x.ParentStepId], byId[x.ChildStepId])).ToList();
+        if (resolvedEdges.Distinct().Count() != resolvedEdges.Count)
+            throw new DomainException("A project ladder contains duplicate catalogue relationships.");
+        return new(configuration.ProjectId, configuration.Classification, configuration.State,
+            resolvedSteps.OrderBy(x => x.Position).ToArray(), resolvedEdges);
+    }
+}

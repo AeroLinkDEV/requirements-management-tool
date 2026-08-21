@@ -3,6 +3,7 @@ using System.Text;
 using System.Text.Json;
 using AeroLink.Domain.Baselines;
 using AeroLink.Domain.ChangeControl;
+using AeroLink.Domain.Hierarchy;
 using AeroLink.Domain.Programs;
 using AeroLink.Domain.Requirements;
 using AeroLink.Domain.Traceability;
@@ -33,7 +34,8 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db)
         var program = new ProgramRecord("Flight Management System Live Program", ProgramCode);
         var project = new ProjectRecord(program.Id, "FMS Product Development", "Flight Management System");
         var release15 = new SoftwareRelease(project.Id, "1.5", true); var release16 = new SoftwareRelease(project.Id, "1.6", false, release15.Id);
-        db.AddRange(program, project, release15, release16); await db.SaveChangesAsync(ct);
+        var ladder = LegacyDefaultProjectLadderFactory.Create(project.Id, start);
+        db.AddRange(program, project, release15, release16, ladder); await db.SaveChangesAsync(ct);
 
         var historical = new List<SystemChangeRequest>();
         for (var i = 1; i <= 30; i++) historical.Add(BuildHistoricalRequest($"SRCR-{i:D5}", ChangeRequestType.System, RequirementLevel.System, 5, (i - 1) * 5, project.Id, release15.Id, start.AddDays(i), "system"));
