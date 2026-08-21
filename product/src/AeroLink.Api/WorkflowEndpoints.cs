@@ -25,18 +25,21 @@ public static class WorkflowEndpoints
 
     public static void MapWorkflowEndpoints(this WebApplication app)
     {
-        app.MapGet("/api/review-workflows", async (Guid projectId, HttpContext http, AeroLinkDbContext db, CancellationToken ct) =>
+        app.MapGet("/api/review-workflows", async (Guid projectId, HttpContext http, AeroLinkDbContext db,
+            IProjectLadderPolicyResolver policyResolver, CancellationToken ct) =>
         {
             if (!await http.HasProjectAccessAsync(db, projectId, ct)) return Results.Forbid();
+            var ladderPolicy = await policyResolver.ResolveAsync(projectId, ct);
             var rows = await db.ReviewWorkflows.AsNoTracking().Include(x => x.Stages)
                 .Where(x => x.ProjectId == projectId).ToListAsync(ct);
             return Results.Ok(rows
+                .Where(x => SupportsSubject(ladderPolicy, x.AppliesTo))
                 .OrderBy(x => x.AppliesTo).ThenBy(x => x.Name).ThenByDescending(x => x.Version)
                 .Select(Map));
         });
 
         app.MapPost("/api/review-workflows", async (CreateReviewWorkflowRequest request, HttpContext http,
-            AeroLinkDbContext db, IdentityService identity, CancellationToken ct) =>
+            AeroLinkDbContext db, IdentityService identity, IProjectLadderPolicyResolver policyResolver, CancellationToken ct) =>
         {
             // Deciding how a team reviews is a configuration-management act, not an authoring one.
             if (!await http.HasProjectRoleAsync(db, identity, request.ProjectId, ct,
@@ -44,6 +47,8 @@ public static class WorkflowEndpoints
                 return Results.Forbid();
             try
             {
+                var ladderPolicy = await policyResolver.ResolveAsync(request.ProjectId, ct);
+                ValidateSubject(ladderPolicy, request.AppliesTo);
                 var stages = request.Stages.Select(x => new ReviewWorkflowStageDraft(x.Name, x.RequiredRole, x.Kind)).ToList();
                 var workflow = new ReviewWorkflow(request.ProjectId, request.Name, request.AppliesTo, request.Mode,
                     stages, http.UserAccount().UserName, DateTimeOffset.UtcNow);
@@ -59,7 +64,7 @@ public static class WorkflowEndpoints
         });
 
         app.MapPost("/api/review-workflows/{id:guid}/activate", async (Guid id, HttpContext http,
-            AeroLinkDbContext db, IdentityService identity, CancellationToken ct) =>
+            AeroLinkDbContext db, IdentityService identity, IProjectLadderPolicyResolver policyResolver, CancellationToken ct) =>
         {
             var workflow = await db.ReviewWorkflows.Include(x => x.Stages).SingleOrDefaultAsync(x => x.Id == id, ct);
             if (workflow is null) return Results.NotFound();
@@ -68,6 +73,8 @@ public static class WorkflowEndpoints
                 return Results.Forbid();
             try
             {
+                var ladderPolicy = await policyResolver.ResolveAsync(workflow.ProjectId, ct);
+                ValidateSubject(ladderPolicy, workflow.AppliesTo);
                 var now = DateTimeOffset.UtcNow;
                 var actor = http.UserAccount().UserName;
                 // Two active procedures for the same kind of change request would mean the product silently
@@ -89,7 +96,7 @@ public static class WorkflowEndpoints
         });
 
         app.MapPost("/api/review-workflows/{id:guid}/revise", async (Guid id, ReviseReviewWorkflowRequest request,
-            HttpContext http, AeroLinkDbContext db, IdentityService identity, CancellationToken ct) =>
+            HttpContext http, AeroLinkDbContext db, IdentityService identity, IProjectLadderPolicyResolver policyResolver, CancellationToken ct) =>
         {
             var current = await db.ReviewWorkflows.Include(x => x.Stages).SingleOrDefaultAsync(x => x.Id == id, ct);
             if (current is null) return Results.NotFound();
@@ -98,6 +105,8 @@ public static class WorkflowEndpoints
                 return Results.Forbid();
             try
             {
+                var ladderPolicy = await policyResolver.ResolveAsync(current.ProjectId, ct);
+                ValidateSubject(ladderPolicy, current.AppliesTo);
                 // The prior version stays exactly as it was. A completed review has to remain explainable by
                 // the procedure it was actually judged against.
                 var stages = request.Stages.Select(x => new ReviewWorkflowStageDraft(x.Name, x.RequiredRole, x.Kind)).ToList();
@@ -136,9 +145,12 @@ public static class WorkflowEndpoints
         // exactly as before, because those values kept their names when the subject widened to cover test
         // change requests, so no existing client has to change to keep working.
         app.MapGet("/api/review-workflows/applicable", async (Guid projectId, ReviewSubject type,
-            HttpContext http, AeroLinkDbContext db, CancellationToken ct) =>
+            HttpContext http, AeroLinkDbContext db, IProjectLadderPolicyResolver policyResolver, CancellationToken ct) =>
         {
             if (!await http.HasProjectAccessAsync(db, projectId, ct)) return Results.Forbid();
+            var ladderPolicy = await policyResolver.ResolveAsync(projectId, ct);
+            try { ValidateSubject(ladderPolicy, type); }
+            catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
             var workflow = await ActiveAsync(db, projectId, type, ct);
             if (workflow is null) return Results.Ok(new { required = false });
 
@@ -307,6 +319,25 @@ public static class WorkflowEndpoints
         ProgramRole.TestEngineer => 1,
         _ => 0,
     };
+
+    private static void ValidateSubject(ILadderPolicy policy, ReviewSubject subject)
+    {
+        _ = subject switch
+        {
+            ReviewSubject.System => policy.WorkflowSubject(ChangeRequestType.System),
+            ReviewSubject.Software => policy.WorkflowSubject(ChangeRequestType.Software),
+            ReviewSubject.SystemTest => policy.WorkflowSubject(TestChangeReviewDiscipline.System),
+            ReviewSubject.HighLevelSoftwareTest => policy.WorkflowSubject(TestChangeReviewDiscipline.HighLevelSoftware),
+            ReviewSubject.LowLevelSoftwareTest => policy.WorkflowSubject(TestChangeReviewDiscipline.LowLevelSoftware),
+            _ => throw new DomainException("The review workflow subject is not supported by the project ladder."),
+        };
+    }
+
+    private static bool SupportsSubject(ILadderPolicy policy, ReviewSubject subject)
+    {
+        try { ValidateSubject(policy, subject); return true; }
+        catch (DomainException) { return false; }
+    }
 
     private static object Map(ReviewWorkflow x) => new
     {

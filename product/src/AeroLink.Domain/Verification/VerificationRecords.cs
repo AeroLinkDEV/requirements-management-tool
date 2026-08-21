@@ -11,11 +11,11 @@ public sealed class TestProcedure
 {
     private TestProcedure() { }
     public TestProcedure(Guid projectId, string baseNumber, string title, string ownerId, DateTimeOffset now,
-        TestProcedureLevel level = TestProcedureLevel.HighLevel)
+        TestProcedureLevel level = TestProcedureLevel.HighLevel, ILadderPolicy? policy = null)
     {
         if (string.IsNullOrWhiteSpace(title)) throw new DomainException("A test procedure title is required.");
         Id = Guid.NewGuid(); ProjectId = projectId; BaseNumber = ArtifactNumber.ValidateBase(baseNumber);
-        EnsurePrefixMatchesLevel(BaseNumber, level);
+        EnsurePrefixMatchesLevel(BaseNumber, level, policy);
         Title = title.Trim(); OwnerId = ownerId.Trim(); CreatedAt = now; UpdatedAt = now; Level = level;
     }
 
@@ -28,9 +28,9 @@ public sealed class TestProcedure
     /// which discipline answers for it when a retirement strands it, so a wrong one puts real work in the wrong
     /// team's queue. Checked here because this is the only place a procedure comes into existence.
     /// </summary>
-    private static void EnsurePrefixMatchesLevel(string baseNumber, TestProcedureLevel level)
+    private static void EnsurePrefixMatchesLevel(string baseNumber, TestProcedureLevel level, ILadderPolicy? policy = null)
     {
-        var ladderPolicy = LegacyLadderPolicy.Instance;
+        var ladderPolicy = policy ?? LegacyLadderPolicy.Instance;
         var expected = ladderPolicy.TestProcedurePrefix(level) + "-";
         if (baseNumber.StartsWith(expected, StringComparison.OrdinalIgnoreCase)) return;
         // Only a number claiming to be a test procedure is judged. A project numbering its procedures some

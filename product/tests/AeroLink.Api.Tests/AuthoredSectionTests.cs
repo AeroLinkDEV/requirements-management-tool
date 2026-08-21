@@ -3,8 +3,10 @@ using System.Net.Http.Json;
 using AeroLink.Domain.Identity;
 using AeroLink.Domain.Programs;
 using AeroLink.Domain.ChangeControl;
+using AeroLink.Domain.Hierarchy;
 using AeroLink.Domain.Requirements;
 using AeroLink.Infrastructure.Persistence;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace AeroLink.Api.Tests;
@@ -135,6 +137,31 @@ public sealed class AuthoredSectionTests
         Assert.True(response.IsSuccessStatusCode, $"{(int)response.StatusCode}: {body}");
     }
 
+    [Fact]
+    public async Task Authoring_sections_do_not_offer_an_inactive_catalogue_specification()
+    {
+        using var factory = new AeroLinkApiFactory(testLadderPolicy: SystemLowPolicy());
+        using var client = factory.CreateClient();
+        var (projectId, _, _) = await SeedAsync(factory);
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            var specification = new RequirementSpecification(projectId, "HLRD-000001", "Historical HLR Requirements",
+                RequirementLevel.HighLevel.ToString(), "Retained historical specification.", "test.setup", DateTimeOffset.UtcNow);
+            var section = new SpecificationNode(specification.Id, null, 1000, SpecificationNodeType.Section,
+                "Historical HLR section", null, "test.setup", DateTimeOffset.UtcNow);
+            specification.SetActive(false, "test.setup", DateTimeOffset.UtcNow);
+            db.AddRange(specification, section);
+            await db.SaveChangesAsync();
+        }
+        await SignInAsync(client);
+
+        using var response = await client.GetAsync(
+            $"/api/authoring/sections?projectId={projectId}&level=HighLevel");
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Contains("project ladder", await response.Content.ReadAsStringAsync(), StringComparison.OrdinalIgnoreCase);
+    }
+
     private static async Task<DraftResponse> CreateDraftAsync(HttpClient client, object body)
     {
         using var created = await client.PostAsJsonAsync("/api/change-request-drafts", body);
@@ -155,5 +182,19 @@ public sealed class AuthoredSectionTests
             new { userName = "section.author", password = AeroLinkApiFactory.MemberPassword });
         Assert.Equal(HttpStatusCode.OK, login.StatusCode);
         await SecurityBoundaryTests.AuthorizeMutationsAsync(client);
+    }
+
+    private static ILadderPolicy SystemLowPolicy()
+    {
+        var configuration = ProjectLadderConfiguration.CreateDraft(Guid.NewGuid(), DateTimeOffset.UtcNow);
+        var system = new ProjectLadderStep(configuration.Id, configuration.ProjectId, RequirementLevel.System, 1,
+            LegacyLadderPolicy.Instance.Definition(RequirementLevel.System).Capabilities, DateTimeOffset.UtcNow);
+        var low = new ProjectLadderStep(configuration.Id, configuration.ProjectId, RequirementLevel.LowLevel, 2,
+            LegacyLadderPolicy.Instance.Definition(RequirementLevel.LowLevel).Capabilities, DateTimeOffset.UtcNow);
+        configuration.Steps.Add(system);
+        configuration.Steps.Add(low);
+        configuration.AllowedUpstream.Add(new ProjectLadderAllowedUpstream(configuration.Id, configuration.ProjectId,
+            system.Id, low.Id, DateTimeOffset.UtcNow));
+        return new ResolvedProjectLadderPolicy(ProjectLadderResolver.Resolve(configuration));
     }
 }

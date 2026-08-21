@@ -1,4 +1,6 @@
 using System.Collections.Concurrent;
+using AeroLink.Domain.Hierarchy;
+using AeroLink.Domain.Programs;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 
@@ -33,6 +35,48 @@ public sealed class SaveRaceInterceptor : ISaveChangesInterceptor
         if (connection is null || !ActiveGates.TryGetValue(connection, out var gate)) return result;
         await gate.EnterAsync(cancellationToken);
         return result;
+    }
+}
+
+/// <summary>
+/// Keeps API fixtures honest with the product's persisted-ladder contract. Most API tests create a project
+/// directly because their scenario predates project-owned ladders; the production resolver must still fail
+/// closed when a real database is malformed, so the compatibility backfill belongs only in this throwaway test
+/// host. Tests which explicitly add a ladder are left unchanged.
+/// </summary>
+public sealed class TestProjectLadderInterceptor : SaveChangesInterceptor
+{
+    public override InterceptionResult<int> SavingChanges(
+        DbContextEventData eventData,
+        InterceptionResult<int> result)
+    {
+        EnsureLadders(eventData.Context);
+        return result;
+    }
+
+    public override ValueTask<InterceptionResult<int>> SavingChangesAsync(
+        DbContextEventData eventData,
+        InterceptionResult<int> result,
+        CancellationToken cancellationToken = default)
+    {
+        EnsureLadders(eventData.Context);
+        return ValueTask.FromResult(result);
+    }
+
+    private static void EnsureLadders(DbContext? context)
+    {
+        if (context is null) return;
+
+        var projects = context.ChangeTracker.Entries<ProjectRecord>()
+            .Where(entry => entry.State == EntityState.Added)
+            .Select(entry => entry.Entity)
+            .ToArray();
+        foreach (var project in projects)
+        {
+            if (context.Set<ProjectLadderConfiguration>().Local.Any(x => x.ProjectId == project.Id)) continue;
+            context.Set<ProjectLadderConfiguration>().Add(
+                LegacyDefaultProjectLadderFactory.Create(project.Id, DateTimeOffset.UtcNow));
+        }
     }
 }
 

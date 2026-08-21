@@ -3,6 +3,7 @@ import type { AuthUser } from "./IdentityCenter";
 import PortalHeader from "./PortalHeader";
 import ApprovalConfigurationCenter from "./ApprovalConfigurationCenter";
 import { apiRequest, operationError } from "./apiClient";
+import { capabilityMask } from "./projectLadder";
 import "./ProjectConfigurationCenter.css";
 
 type Level = string;
@@ -14,7 +15,7 @@ type CatalogueEntry = { catalogueEntry: Level; supportedCapabilities: number };
 type Configuration = {
   projectId: string; configurationId: string; classification: string; state: string; version: number;
   activationManifestVersion?: string; activationManifestHash?: string;
-  steps: Step[]; relationships: Relationship[]; history: HistoryItem[];
+  steps: Step[]; effectiveSteps: Step[]; relationships: Relationship[]; history: HistoryItem[];
   readiness: { version: string; hash: string; consumers: Consumer[]; missingOrUnrouted: Consumer[]; isReady: boolean };
   catalogue: CatalogueEntry[]; canManage: boolean;
 };
@@ -25,10 +26,10 @@ function displayLevel(level: Level) {
   return level === "HighLevel" ? "High-Level software" : level === "LowLevel" ? "Low-Level software" : "System";
 }
 
-export default function ProjectConfigurationCenter({ user, api, projectId, projectName, initialSection = "ladder", onBackToBuilds, onOpenApprovalConfiguration, onSignOut }: {
+export default function ProjectConfigurationCenter({ user, api, projectId, projectName, initialSection = "ladder", onBackToBuilds, onOpenApprovalConfiguration, onActivated, onSignOut }: {
   user: AuthUser; api: string; projectId: string; projectName: string; onBackToBuilds: () => void;
   initialSection?: "ladder" | "history" | "readiness" | "approvals";
-  onOpenApprovalConfiguration: () => void; onSignOut: () => void;
+  onOpenApprovalConfiguration: () => void; onActivated: (configuration: Configuration) => void; onSignOut: () => void;
 }) {
   const [configuration, setConfiguration] = useState<Configuration>();
   const [steps, setSteps] = useState<Step[]>([]);
@@ -42,7 +43,8 @@ export default function ProjectConfigurationCenter({ user, api, projectId, proje
   const load = useCallback(async () => {
     try {
       const value = await apiRequest<Configuration>(`${api}/api/projects/${projectId}/configuration`);
-      setConfiguration(value); setSteps(value.steps); setRelationships(value.relationships); setError("");
+      const normalized = { ...value, steps: value.steps.map(step => ({ ...step, capabilities: capabilityMask(step.capabilities) })) };
+      setConfiguration(normalized); setSteps(normalized.steps); setRelationships(value.relationships); setError("");
     } catch (failure) { setError(operationError(failure, "The project configuration could not be loaded.")); }
   }, [api, projectId]);
   useEffect(() => { void load(); }, [load]);
@@ -50,6 +52,7 @@ export default function ProjectConfigurationCenter({ user, api, projectId, proje
 
   const dirty = useMemo(() => configuration && (JSON.stringify(steps) !== JSON.stringify(configuration.steps)
     || JSON.stringify(relationships) !== JSON.stringify(configuration.relationships)), [configuration, steps, relationships]);
+  const canAuthor = !!configuration?.canManage && configuration.state !== "Active";
 
   const updateStep = (index: number, patch: Partial<Step>) => setSteps(current => current.map((step, i) => i === index ? { ...step, ...patch } : step));
   const reorder = (index: number, delta: number) => {
@@ -93,7 +96,14 @@ export default function ProjectConfigurationCenter({ user, api, projectId, proje
   const activate = async () => {
     if (!configuration || !reason.trim()) { setError("A meaningful reason is required for an activation attempt."); return; }
     setSaving(true); setError(""); setNotice("");
-    try { await apiRequest(`${api}/api/projects/${projectId}/configuration/activate`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ expectedVersion: configuration.version, reason }) }); }
+    try {
+      const value = await apiRequest<Configuration>(`${api}/api/projects/${projectId}/configuration/activate`, {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ expectedVersion: configuration.version, reason })
+      });
+      setConfiguration(value); setSteps(value.steps); setRelationships(value.relationships); setReason("");
+      setNotice("Ladder activated. Runtime surfaces now use the stored effective ladder.");
+      onActivated(value);
+    }
     catch (failure) { setError(operationError(failure, "Activation was refused.")); }
     finally { setSaving(false); }
   };
@@ -115,13 +125,13 @@ export default function ProjectConfigurationCenter({ user, api, projectId, proje
         <section className="projectConfigurationPanel">
           {section === "approvals" && <ApprovalConfigurationCenter embedded user={user} api={api} projectId={projectId} projectName={projectName} onBackToBuilds={onBackToBuilds} onSignOut={onSignOut} />}
           {section === "ladder" && <>
-            <div className="projectConfigurationPanelHeader"><div><h2>Requirement ladder</h2><p>Version {configuration.version} · {configuration.classification} · {configuration.state}. Edits are drafts until a later slice routes every consumer.</p></div><span className="projectConfigurationPill">{dirty ? "Unsaved changes" : "Saved"}</span></div>
-            <ol className="ladderRows">{steps.map((step, index) => <li key={`${step.catalogueEntry}-${index}`} className="ladderRow"><span className="ladderPosition">{index + 1}</span><label>Level<select value={step.catalogueEntry} disabled={!configuration.canManage} onChange={event => updateStep(index, { catalogueEntry: event.target.value as Level })}>{configuration.catalogue.map(entry => <option key={entry.catalogueEntry} value={entry.catalogueEntry}>{displayLevel(entry.catalogueEntry)}</option>)}</select></label><fieldset disabled={!configuration.canManage}><legend>Capabilities</legend>{capabilityLabels.map((label, capabilityIndex) => <label key={label}><input type="checkbox" checked={(step.capabilities & (1 << capabilityIndex)) !== 0} onChange={event => updateStep(index, { capabilities: event.target.checked ? step.capabilities | (1 << capabilityIndex) : step.capabilities & ~(1 << capabilityIndex) })}/>{label}</label>)}</fieldset><div className="ladderRowActions">{configuration.canManage && <><button type="button" onClick={() => reorder(index, -1)} disabled={index === 0}>↑</button><button type="button" onClick={() => reorder(index, 1)} disabled={index === steps.length - 1}>↓</button><button type="button" onClick={() => removeStep(index)}>Remove</button></>}</div></li>)}</ol>
-            {configuration.canManage ? <div className="ladderActions"><button type="button" onClick={addStep} disabled={steps.length >= configuration.catalogue.length}>Add level</button><label>Reason<input value={reason} onChange={event => setReason(event.target.value)} placeholder="Why is this ladder changing?" /></label><button type="button" className="primaryProjectConfigurationAction" disabled={saving || !dirty} onClick={() => void save()}>Save draft</button><button type="button" disabled={saving} onClick={() => void activate()}>Attempt activation</button></div> : <p className="projectConfigurationNotice">You have read access to this project configuration. A Configuration Manager, Program Manager, or Administrator must author changes.</p>}
-            <div className="relationshipEditor"><h3>Allowed upstream relationships</h3>{relationships.map((edge, index) => <div className="relationshipRow" key={`${edge.parent}-${edge.child}-${index}`}><select value={edge.parent} disabled={!configuration.canManage} onChange={event => setRelationships(relationships.map((current, i) => i === index ? { ...current, parent: event.target.value as Level } : current))}>{steps.map(step => <option key={step.catalogueEntry} value={step.catalogueEntry}>{displayLevel(step.catalogueEntry)}</option>)}</select><span>→</span><select value={edge.child} disabled={!configuration.canManage} onChange={event => setRelationships(relationships.map((current, i) => i === index ? { ...current, child: event.target.value as Level } : current))}>{steps.map(step => <option key={step.catalogueEntry} value={step.catalogueEntry}>{displayLevel(step.catalogueEntry)}</option>)}</select>{configuration.canManage && <button type="button" onClick={() => setRelationships(relationships.filter((_, i) => i !== index))}>Remove</button>}</div>)}{configuration.canManage && <button type="button" onClick={addRelationship}>Add relationship</button>}</div>
+            <div className="projectConfigurationPanelHeader"><div><h2>Requirement ladder</h2><p>Version {configuration.version} · {configuration.classification} · {configuration.state}. Authored edits remain drafts until the sole activation gate succeeds.</p></div><span className="projectConfigurationPill">{dirty ? "Unsaved changes" : "Saved"}</span></div>
+            <ol className="ladderRows">{steps.map((step, index) => <li key={`${step.catalogueEntry}-${index}`} className="ladderRow"><span className="ladderPosition">{index + 1}</span><label>Level<select value={step.catalogueEntry} disabled={!canAuthor} onChange={event => updateStep(index, { catalogueEntry: event.target.value as Level })}>{configuration.catalogue.map(entry => <option key={entry.catalogueEntry} value={entry.catalogueEntry}>{displayLevel(entry.catalogueEntry)}</option>)}</select></label><fieldset disabled={!canAuthor}><legend>Capabilities</legend>{capabilityLabels.map((label, capabilityIndex) => <label key={label}><input type="checkbox" checked={(step.capabilities & (1 << capabilityIndex)) !== 0} onChange={event => updateStep(index, { capabilities: event.target.checked ? step.capabilities | (1 << capabilityIndex) : step.capabilities & ~(1 << capabilityIndex) })}/>{label}</label>)}</fieldset><div className="ladderRowActions">{canAuthor && <><button type="button" onClick={() => reorder(index, -1)} disabled={index === 0}>↑</button><button type="button" onClick={() => reorder(index, 1)} disabled={index === steps.length - 1}>↓</button><button type="button" onClick={() => removeStep(index)}>Remove</button></>}</div></li>)}</ol>
+            {canAuthor ? <div className="ladderActions"><button type="button" onClick={addStep} disabled={steps.length >= configuration.catalogue.length}>Add level</button><label>Reason<input value={reason} onChange={event => setReason(event.target.value)} placeholder="Why is this ladder changing?" /></label><button type="button" className="primaryProjectConfigurationAction" disabled={saving || !dirty} onClick={() => void save()}>Save draft</button><button type="button" disabled={saving} onClick={() => void activate()}>Attempt activation</button></div> : <p className="projectConfigurationNotice">{configuration.state === "Active" ? "This ladder is active and immutable. Its stored manifest is now the runtime authority; author a new configuration revision through the project configuration workflow." : "You have read access to this project configuration. A Configuration Manager, Program Manager, or Administrator must author changes."}</p>}
+            <div className="relationshipEditor"><h3>Allowed upstream relationships</h3>{relationships.map((edge, index) => <div className="relationshipRow" key={`${edge.parent}-${edge.child}-${index}`}><select value={edge.parent} disabled={!canAuthor} onChange={event => setRelationships(relationships.map((current, i) => i === index ? { ...current, parent: event.target.value as Level } : current))}>{steps.map(step => <option key={step.catalogueEntry} value={step.catalogueEntry}>{displayLevel(step.catalogueEntry)}</option>)}</select><span>→</span><select value={edge.child} disabled={!canAuthor} onChange={event => setRelationships(relationships.map((current, i) => i === index ? { ...current, child: event.target.value as Level } : current))}>{steps.map(step => <option key={step.catalogueEntry} value={step.catalogueEntry}>{displayLevel(step.catalogueEntry)}</option>)}</select>{canAuthor && <button type="button" onClick={() => setRelationships(relationships.filter((_, i) => i !== index))}>Remove</button>}</div>)}{canAuthor && <button type="button" onClick={addRelationship}>Add relationship</button>}</div>
           </>}
           {section === "history" && <><h2>Immutable edit history</h2><p>Each successful edit records its actor, reason, exact canonical snapshot and hash.</p><table className="configurationHistory"><thead><tr><th>Revision</th><th>Actor</th><th>When</th><th>Reason</th><th>Snapshot</th></tr></thead><tbody>{configuration.history.map(item => <tr key={item.revision}><td>{item.revision}</td><td>{item.actor}</td><td>{new Date(item.occurredAt).toLocaleString()}</td><td>{item.reason}</td><td><details><summary><code>{item.snapshotHash.slice(0, 16)}…</code></summary><code>{item.canonicalSnapshot}</code></details></td></tr>)}</tbody></table></>}
-          {section === "readiness" && <><h2>Activation readiness</h2><p>Manifest <code>{configuration.readiness.version}</code> · <code>{configuration.readiness.hash.slice(0, 16)}…</code></p><p className="projectConfigurationError">Non-default activation is refused in this slice while routing remains incomplete.</p><ul className="readinessList">{configuration.readiness.consumers.map(consumer => <li key={consumer.id}><strong>{consumer.id}</strong><span>{consumer.routed ? "Routed" : "Unrouted"}</span><small>{consumer.description}</small></li>)}</ul></>}
+          {section === "readiness" && <><h2>Activation readiness</h2><p>Manifest <code>{configuration.readiness.version}</code> · <code>{configuration.readiness.hash.slice(0, 16)}…</code></p><p className={configuration.readiness.isReady ? "projectConfigurationNotice" : "projectConfigurationError"}>{configuration.readiness.isReady ? "All stable ladder consumers are routed. Activation records the effective manifest atomically." : "Activation remains blocked until every stable consumer is routed."}</p><ul className="readinessList">{configuration.readiness.consumers.map(consumer => <li key={consumer.id}><strong>{consumer.id}</strong><span>{consumer.routed ? "Routed" : "Unrouted"}</span><small>{consumer.description}</small></li>)}</ul></>}
         </section>
       </div>}
     </main>

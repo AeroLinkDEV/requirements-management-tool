@@ -64,10 +64,9 @@ public static class ProjectLadderDraftValidator
             throw new DomainException("Every ladder relationship endpoint must belong to this ladder.");
         if (edgeList.Any(x => positions[x.Parent] >= positions[x.Child]))
             throw new DomainException("A ladder relationship must point from an earlier position to a later position.");
-        // The project graph is authored data, not a copy of the legacy policy adjacency.  A later
-        // configuration may connect any two selected catalogue entries (for example System -> LowLevel),
-        // while still remaining a valid hierarchy.  Keep only graph invariants here; runtime consumers
-        // continue to ask the code-owned policy until a later slice routes them to this graph.
+        // The project graph is authored data, not a copy of the legacy policy adjacency. A configured
+        // Active graph may connect any two selected catalogue entries (for example System -> LowLevel),
+        // while Draft runtime behavior remains on the prior effective policy until the activation gate.
         var childrenByParent = edgeList.GroupBy(x => x.Parent, StringComparer.Ordinal)
             .ToDictionary(x => x.Key, x => x.Select(edge => edge.Child).ToArray(), StringComparer.Ordinal);
         var visiting = new HashSet<string>(StringComparer.Ordinal);

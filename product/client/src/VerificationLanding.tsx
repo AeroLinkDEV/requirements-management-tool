@@ -1,4 +1,6 @@
 import './VerificationLanding.css'
+import { LadderCapability, ladderAllows } from './projectLadder'
+import type { ProjectLadderProjection } from './projectLadder'
 
 /**
  * The two questions a build's verification work splits into.
@@ -11,17 +13,24 @@ import './VerificationLanding.css'
  * has one pair. Nothing is computed here on purpose: a chooser that waited on counts would make the reader
  * wait to be shown two links they were always going to be shown.
  */
-export default function VerificationLanding({ scope, buildName, onOpen }: {
+export default function VerificationLanding({ scope, buildName, ladder, onOpen }: {
   scope: 'System' | 'Software'
   buildName: string
+  ladder: ProjectLadderProjection | null
   onOpen: (view: 'testChangeRequests' | 'testingCoverage' | 'testResults', level?: 'HighLevel' | 'LowLevel') => void
 }) {
   const pairs: { level?: 'HighLevel' | 'LowLevel'; title: string; note: string }[] = scope === 'System'
-    ? [{ title: 'System', note: 'Verification of the system requirements this build carries.' }]
+    ? (ladderAllows(ladder, 'System', LadderCapability.Verification)
+      ? [{ title: 'System', note: 'Verification of the system requirements this build carries.' }]
+      : [])
     : [
-        { level: 'HighLevel', title: 'Software HLR', note: 'Verification of the high-level software requirements.' },
-        { level: 'LowLevel', title: 'Software LLR', note: 'Verification of the low-level software requirements.' },
-      ]
+        ladderAllows(ladder, 'HighLevel', LadderCapability.Verification)
+          ? { level: 'HighLevel' as const, title: 'Software HLR', note: 'Verification of the high-level software requirements.' }
+          : null,
+        ladderAllows(ladder, 'LowLevel', LadderCapability.Verification)
+          ? { level: 'LowLevel' as const, title: 'Software LLR', note: 'Verification of the low-level software requirements.' }
+          : null,
+      ].filter((pair): pair is { level: 'HighLevel' | 'LowLevel'; title: string; note: string } => pair !== null)
 
   return (
     <main className="verificationLanding">

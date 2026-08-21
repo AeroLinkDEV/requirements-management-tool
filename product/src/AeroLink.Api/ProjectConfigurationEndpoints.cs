@@ -62,6 +62,7 @@ public static class ProjectConfigurationEndpoints
             if (result.Kind == ProjectLadderActivationResultKind.NotFound) return Results.NotFound(new { error = result.Error });
             if (result.Kind == ProjectLadderActivationResultKind.Conflict) return Results.Conflict(new { error = result.Error });
             if (result.Kind == ProjectLadderActivationResultKind.Invalid) return Results.BadRequest(new { error = result.Error });
+            if (result.Kind == ProjectLadderActivationResultKind.Success) return Results.Ok(result.Configuration);
             return Results.Conflict(new
             {
                 error = result.Error,

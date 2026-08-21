@@ -592,13 +592,24 @@ public static class WorkspaceEndpoints
 
         // Bounded, Program-scoped universal search. Results are identifiers plus stable IDs;
         // the client owns the durable URL so every result can be opened in a new tab.
-        app.MapGet("/api/search",async(Guid projectId,Guid? releaseId,string query,int? limit,HttpContext http,AeroLinkDbContext db,CancellationToken ct)=>
+         app.MapGet("/api/search",async(Guid projectId,Guid? releaseId,string query,int? limit,HttpContext http,AeroLinkDbContext db,IProjectLadderPolicyResolver policyResolver,CancellationToken ct)=>
         {
             if(!await http.HasProjectAccessAsync(db,projectId,ct))return Results.Forbid();
-            var q=(query??string.Empty).Trim().ToLowerInvariant();if(q.Length<2)return Results.Ok(new{query,items=Array.Empty<SearchResultDto>()});var identifierQ=q.Length>3&&q[^3]=='.'&&char.IsDigit(q[^2])&&char.IsDigit(q[^1])?q[..^3]:q;var take=Math.Clamp(limit??30,1,50);var items=new List<SearchResultDto>();
+             var q=(query??string.Empty).Trim().ToLowerInvariant();if(q.Length<2)return Results.Ok(new{query,items=Array.Empty<SearchResultDto>()});var identifierQ=q.Length>3&&q[^3]=='.'&&char.IsDigit(q[^2])&&char.IsDigit(q[^1])?q[..^3]:q;var take=Math.Clamp(limit??30,1,50);var items=new List<SearchResultDto>();
+             var ladderPolicy=await policyResolver.ResolveAsync(projectId,ct);
+             var allowedRequirementLevels=ladderPolicy.OrderedLevels.ToArray();
+             var allowedChangeControlLevels=ladderPolicy.OrderedLevels.Where(level=>ladderPolicy.Definition(level).Has(LevelCapabilities.HasChangeControl)).ToArray();
+             var allowedProcedureLevels=ladderPolicy.OrderedLevels.Where(level=>ladderPolicy.Definition(level).Verification is not null).Select(level=>ladderPolicy.ProcedureLevel(level)).ToArray();
+             var allowedDocumentTypes=ladderPolicy.ControlledDocumentTypes.ToArray();
+             var documentLevels=ladderPolicy.OrderedLevels
+                 .SelectMany(level=>new[]{ladderPolicy.Definition(level).RequirementsDocumentType,ladderPolicy.Definition(level).Verification?.DocumentType}
+                     .Where(type=>type.HasValue).Select(type=>new{Type=type!.Value,Level=level}))
+                 .ToDictionary(x=>x.Type,x=>x.Level);
             var effectiveBaselineId=releaseId is null?null:await BuildScope.EffectiveBaselineAsync(db,projectId,releaseId.Value,ct);
             var procedureEffectivity=releaseId is null?null:await TestProcedureEffectivity.ForReleaseAsync(db,projectId,releaseId.Value,ct);
-            items.AddRange(await db.SystemChangeRequests.AsNoTracking().Where(x=>x.ProjectId==projectId&&(releaseId==null||x.TargetReleaseId==releaseId)&&(x.BaseNumber.ToLower().Contains(identifierQ)||x.Title.ToLower().Contains(q)||x.Problem.ToLower().Contains(q))).Take(take).Select(x=>new SearchResultDto(x.Id,"change-request",x.BaseNumber+"."+(x.Revision<10?"0":"")+x.Revision,x.Title,x.State.ToString(),x.Type==ChangeRequestType.Software?"software":"system",x.UpdatedAt)).ToListAsync(ct));
+             items.AddRange(await db.SystemChangeRequests.AsNoTracking().Where(x=>x.ProjectId==projectId&&(releaseId==null||x.TargetReleaseId==releaseId)
+                 &&(x.Type==ChangeRequestType.System ? allowedChangeControlLevels.Contains(RequirementLevel.System) : x.SoftwareLevel!=null&&allowedChangeControlLevels.Contains(x.SoftwareLevel.Value))
+                 &&(x.BaseNumber.ToLower().Contains(identifierQ)||x.Title.ToLower().Contains(q)||x.Problem.ToLower().Contains(q))).Take(take).Select(x=>new SearchResultDto(x.Id,"change-request",x.BaseNumber+"."+(x.Revision<10?"0":"")+x.Revision,x.Title,x.State.ToString(),x.Type==ChangeRequestType.Software?"software":"system",x.UpdatedAt,x.Type==ChangeRequestType.System?RequirementLevel.System.ToString():x.SoftwareLevel!.Value.ToString())).ToListAsync(ct));
             items.AddRange(await db.ProblemReports.AsNoTracking().Where(x=>x.ProjectId==projectId&&(releaseId==null||db.ProblemReportLinks.Any(link=>link.ProblemReportId==x.Id&&link.ArtifactType=="Release"&&link.ArtifactId==releaseId))&&(x.ReportNumber.ToLower().Contains(identifierQ)||x.Title.ToLower().Contains(q)||x.Problem.ToLower().Contains(q)||x.RootCause.ToLower().Contains(q))).Take(take).Select(x=>new SearchResultDto(x.Id,"problem-report",x.ReportNumber+"."+(x.Revision<10?"0":"")+x.Revision,x.Title,x.State.ToString(),"assurance",x.UpdatedAt)).ToListAsync(ct));
             var managedStateQuery = Enum.TryParse<ManagedDocumentState>(q, ignoreCase: true, out var parsedManagedState)
                 ? parsedManagedState : (ManagedDocumentState?)null;
@@ -625,16 +636,16 @@ public static class WorkspaceEndpoints
             items.AddRange(exactManagedRevision is null
                 ? managedCandidates.GroupBy(item => item.Id).Select(group => group.OrderByDescending(item => item.Identifier).First()).Take(take)
                 : managedCandidates.Take(take));
-            var requirementRows=effectiveBaselineId is not null
-                ? await(from artifact in db.Requirements.AsNoTracking().Where(x=>x.ProjectId==projectId) join member in db.BaselineRequirements.AsNoTracking().Where(x=>x.BaselineId==effectiveBaselineId) on artifact.Id equals member.ArtifactId join revision in db.RequirementRevisions.AsNoTracking() on member.RevisionId equals revision.Id where artifact.BaseNumber.ToLower().Contains(identifierQ)||revision.Statement.ToLower().Contains(q)||revision.Rationale.ToLower().Contains(q) select new{artifact.Id,artifact.BaseNumber,artifact.Level,revision.Revision,revision.Statement,revision.State,revision.CreatedAt}).Take(take).ToListAsync(ct)
-                : await(from artifact in db.Requirements.AsNoTracking().Where(x=>x.ProjectId==projectId) join revision in db.RequirementRevisions.AsNoTracking() on artifact.Id equals revision.ArtifactId where revision.Revision==db.RequirementRevisions.Where(r=>r.ArtifactId==artifact.Id).Max(r=>r.Revision)&&(artifact.BaseNumber.ToLower().Contains(identifierQ)||revision.Statement.ToLower().Contains(q)||revision.Rationale.ToLower().Contains(q)) select new{artifact.Id,artifact.BaseNumber,artifact.Level,revision.Revision,revision.Statement,revision.State,revision.CreatedAt}).Take(take).ToListAsync(ct);
-            items.AddRange(requirementRows.Select(x=>new SearchResultDto(x.Id,"requirement",$"{x.BaseNumber}.{x.Revision:D2}",x.Statement,x.State.ToString(),x.Level==RequirementLevel.System?"system":"software",x.CreatedAt)));
+             var requirementRows=effectiveBaselineId is not null
+                 ? await(from artifact in db.Requirements.AsNoTracking().Where(x=>x.ProjectId==projectId&&allowedRequirementLevels.Contains(x.Level)) join member in db.BaselineRequirements.AsNoTracking().Where(x=>x.BaselineId==effectiveBaselineId) on artifact.Id equals member.ArtifactId join revision in db.RequirementRevisions.AsNoTracking() on member.RevisionId equals revision.Id where artifact.BaseNumber.ToLower().Contains(identifierQ)||revision.Statement.ToLower().Contains(q)||revision.Rationale.ToLower().Contains(q) select new{artifact.Id,artifact.BaseNumber,artifact.Level,revision.Revision,revision.Statement,revision.State,revision.CreatedAt}).Take(take).ToListAsync(ct)
+                 : await(from artifact in db.Requirements.AsNoTracking().Where(x=>x.ProjectId==projectId&&allowedRequirementLevels.Contains(x.Level)) join revision in db.RequirementRevisions.AsNoTracking() on artifact.Id equals revision.ArtifactId where revision.Revision==db.RequirementRevisions.Where(r=>r.ArtifactId==artifact.Id).Max(r=>r.Revision)&&(artifact.BaseNumber.ToLower().Contains(identifierQ)||revision.Statement.ToLower().Contains(q)||revision.Rationale.ToLower().Contains(q)) select new{artifact.Id,artifact.BaseNumber,artifact.Level,revision.Revision,revision.Statement,revision.State,revision.CreatedAt}).Take(take).ToListAsync(ct);
+            items.AddRange(requirementRows.Select(x=>new SearchResultDto(x.Id,"requirement",$"{x.BaseNumber}.{x.Revision:D2}",x.Statement,x.State.ToString(),x.Level==RequirementLevel.System?"system":"software",x.CreatedAt,x.Level.ToString())));
             items.AddRange(await db.CandidateBaselines.AsNoTracking().Where(x=>x.ProjectId==projectId&&(releaseId==null||x.ReleaseId==releaseId)&&(x.BaseNumber.ToLower().Contains(q)||x.Name.ToLower().Contains(q))).Take(take).Select(x=>new SearchResultDto(x.Id,"baseline",x.BaseNumber+"."+(x.Revision<10?"0":"")+x.Revision,x.Name,x.State.ToString(),"configuration",x.CreatedAt)).ToListAsync(ct));
             items.AddRange(await db.SoftwareBuilds.AsNoTracking().Where(x=>x.ProjectId==projectId&&(releaseId==null||x.ReleaseId==releaseId)&&(x.BuildNumber.ToLower().Contains(q)||x.Description.ToLower().Contains(q))).Take(take).Select(x=>new SearchResultDto(x.Id,"build",x.BuildNumber,x.Description,x.State.ToString(),"software",x.RecordedAt)).ToListAsync(ct));
             var effectiveProcedureRevisionIds=procedureEffectivity?.RevisionIds.ToList();
             var procedureSearchRevisionIds=releaseId is null
                 ? await(from revision in db.TestProcedureRevisions.AsNoTracking()
-                        join procedure in db.TestProcedures.AsNoTracking().Where(x=>x.ProjectId==projectId)
+                         join procedure in db.TestProcedures.AsNoTracking().Where(x=>x.ProjectId==projectId&&allowedProcedureLevels.Contains(x.Level))
                             on revision.ProcedureId equals procedure.Id
                         where revision.Revision==db.TestProcedureRevisions
                             .Where(other=>other.ProcedureId==procedure.Id).Max(other=>other.Revision)
@@ -643,7 +654,7 @@ public static class WorkspaceEndpoints
             var matchingProcedureTitleRevisionIds=await TestProcedureRevisionTitleProjection.MatchingRevisionIdsAsync(
                 db,procedureSearchRevisionIds,q,ct);
             var procedureCandidates=await(from revision in db.TestProcedureRevisions.AsNoTracking()
-                join procedure in db.TestProcedures.AsNoTracking().Where(x=>x.ProjectId==projectId)
+                 join procedure in db.TestProcedures.AsNoTracking().Where(x=>x.ProjectId==projectId&&allowedProcedureLevels.Contains(x.Level))
                     on revision.ProcedureId equals procedure.Id
                 where (releaseId==null
                     ? revision.Revision==db.TestProcedureRevisions
@@ -654,14 +665,17 @@ public static class WorkspaceEndpoints
                 select new{procedure.Id,procedure.BaseNumber,procedure.Level,revisionId=revision.Id,
                     revision.Revision,revision.State,revision.CreatedAt}).Take(take).ToListAsync(ct);
             var procedureTitles=await TestProcedureRevisionTitleProjection.ForRevisionsAsync(db,procedureCandidates.Select(x=>x.revisionId).Distinct().ToList(),ct);
-            items.AddRange(procedureCandidates.Select(x=>new SearchResultDto(x.Id,"test-procedure",$"{x.BaseNumber}.{x.Revision:D2}",procedureTitles[x.revisionId].Title,x.State.ToString(),x.Level==TestProcedureLevel.System?"system":"software",x.CreatedAt)));
-            items.AddRange(await db.ControlledDocuments.AsNoTracking().Where(x=>x.ProjectId==projectId&&(releaseId==null||x.ReleaseId==releaseId)&&(x.DocumentNumber.ToLower().Contains(identifierQ)||x.Title.ToLower().Contains(q))).Take(take).Select(x=>new SearchResultDto(x.Id,"document",x.DocumentNumber+"."+(x.Revision<10?"0":"")+x.Revision,x.Title,"Generated",x.Type==ControlledDocumentType.Sysrd?"system":"software",x.GeneratedAt)).ToListAsync(ct));
+            items.AddRange(procedureCandidates.Select(x=>new SearchResultDto(x.Id,"test-procedure",$"{x.BaseNumber}.{x.Revision:D2}",procedureTitles[x.revisionId].Title,x.State.ToString(),x.Level==TestProcedureLevel.System?"system":"software",x.CreatedAt,ladderPolicy.RequirementLevelFor(x.Level).ToString())));
+            var documentCandidates=await db.ControlledDocuments.AsNoTracking().Where(x=>x.ProjectId==projectId&&allowedDocumentTypes.Contains(x.Type)&&(releaseId==null||x.ReleaseId==releaseId)&&(x.DocumentNumber.ToLower().Contains(identifierQ)||x.Title.ToLower().Contains(q))).Take(take).Select(x=>new{x.Id,x.DocumentNumber,x.Revision,x.Title,x.Type,x.GeneratedAt}).ToListAsync(ct);
+            items.AddRange(documentCandidates.Select(x=>new SearchResultDto(x.Id,"document",x.DocumentNumber+"."+(x.Revision<10?"0":"")+x.Revision,x.Title,"Generated",x.Type==ControlledDocumentType.Sysrd?"system":"software",x.GeneratedAt,documentLevels[x.Type].ToString())));
             items.AddRange(await db.ReleaseCampaigns.AsNoTracking().Where(x=>x.ProjectId==projectId&&(releaseId==null||x.ReleaseId==releaseId)&&x.Name.ToLower().Contains(q)).Take(take).Select(x=>new SearchResultDto(x.Id,"release-campaign",x.Name,x.Name,x.State.ToString(),"configuration",x.CreatedAt)).ToListAsync(ct));
             items.AddRange(await db.Releases.AsNoTracking().Where(x=>x.ProjectId==projectId&&(releaseId==null||x.Id==releaseId)&&x.Version.ToLower().Contains(q)).Take(take).Select(x=>new SearchResultDto(x.Id,"release",x.Version,"Software release "+x.Version,x.IsReleased?"Released":"InWork","configuration",x.ReleasedAt)).ToListAsync(ct));
             var executionSearchRevisionIds=await(from execution in db.TestExecutions.AsNoTracking()
                     .Where(x=>x.ProjectId==projectId)
                 join revision in db.TestProcedureRevisions.AsNoTracking()
                     on execution.ProcedureRevisionId equals revision.Id
+                join procedure in db.TestProcedures.AsNoTracking().Where(x=>x.ProjectId==projectId&&allowedProcedureLevels.Contains(x.Level))
+                    on revision.ProcedureId equals procedure.Id
                 where releaseId==null
                     ||(effectiveProcedureRevisionIds!=null&&effectiveProcedureRevisionIds.Contains(revision.Id))
                 select revision.Id).Distinct().ToListAsync(ct);
@@ -670,7 +684,7 @@ public static class WorkspaceEndpoints
             var executionRows=await(from execution in db.TestExecutions.AsNoTracking().Where(x=>x.ProjectId==projectId)
                 join revision in db.TestProcedureRevisions.AsNoTracking()
                     on execution.ProcedureRevisionId equals revision.Id
-                join procedure in db.TestProcedures.AsNoTracking()
+                join procedure in db.TestProcedures.AsNoTracking().Where(x=>x.ProjectId==projectId&&allowedProcedureLevels.Contains(x.Level))
                     on revision.ProcedureId equals procedure.Id
                 where (releaseId==null
                     ||(effectiveProcedureRevisionIds!=null&&effectiveProcedureRevisionIds.Contains(revision.Id)))
@@ -683,7 +697,7 @@ public static class WorkspaceEndpoints
                     procedure.BaseNumber,execution.Determination,execution.EvidenceReference,
                     execution.Outcome,execution.RecordedAt,procedure.Level}).Take(take).ToListAsync(ct);
             var executionTitles=await TestProcedureRevisionTitleProjection.ForRevisionsAsync(db,executionRows.Select(x=>x.revisionId).Distinct().ToList(),ct);
-            items.AddRange(executionRows.Select(x=>new SearchResultDto(x.Id,"test-execution",x.identifier,$"{executionTitles[x.revisionId].Title} result",x.Outcome.ToString(),x.Level==TestProcedureLevel.System?"system":"software",x.RecordedAt)));
+            items.AddRange(executionRows.Select(x=>new SearchResultDto(x.Id,"test-execution",x.identifier,$"{executionTitles[x.revisionId].Title} result",x.Outcome.ToString(),x.Level==TestProcedureLevel.System?"system":"software",x.RecordedAt,ladderPolicy.RequirementLevelFor(x.Level).ToString())));
             items.AddRange(await db.EvidenceRecords.AsNoTracking().Where(x=>x.ProjectId==projectId&&(x.OriginalFileName.ToLower().Contains(q)||x.Sha256.ToLower().Contains(q))).Take(take).Select(x=>new SearchResultDto(x.Id,"evidence",x.OriginalFileName,x.Sha256,"Immutable","verification",x.UploadedAt)).ToListAsync(ct));
             var ordered=items.OrderByDescending(x=>x.Identifier.ToLowerInvariant().Contains(q)).ThenByDescending(x=>x.UpdatedAt).ThenBy(x=>x.Identifier).Take(take).ToList();return Results.Ok(new{query,items=ordered});
         });

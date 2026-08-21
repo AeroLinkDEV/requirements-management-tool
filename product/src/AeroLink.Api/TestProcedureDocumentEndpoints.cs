@@ -1,4 +1,5 @@
 using AeroLink.Domain.Verification;
+using AeroLink.Domain.Hierarchy;
 using AeroLink.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 
@@ -16,9 +17,13 @@ public static class TestProcedureDocumentEndpoints
     public static void MapTestProcedureDocumentEndpoints(this WebApplication app)
     {
         app.MapGet("/api/projects/{projectId:guid}/test-procedure-documents", async (Guid projectId,
-            string? scope, HttpContext http, AeroLinkDbContext db, CancellationToken ct) =>
+            string? scope, HttpContext http, AeroLinkDbContext db, IProjectLadderPolicyResolver policyResolver, CancellationToken ct) =>
         {
             if (!await http.HasProjectAccessAsync(db, projectId, ct)) return Results.Forbid();
+            var ladderPolicy = await policyResolver.ResolveAsync(projectId, ct);
+            var configuredLevels = ladderPolicy.OrderedLevels
+                .Where(level => ladderPolicy.Definition(level).Verification is not null)
+                .Select(ladderPolicy.ProcedureLevel).ToArray();
 
             var documents = await db.TestProcedureDocuments.AsNoTracking()
                 .Where(x => x.ProjectId == projectId)
@@ -26,7 +31,7 @@ public static class TestProcedureDocumentEndpoints
                 .ToListAsync(ct);
             // Software mirrors the Requirements Explorer and carries both levels; an exact level remains
             // available for compatible deep links and other focused readers.
-            var levels = ScopeLevels(scope);
+            var levels = ScopeLevels(scope)?.Intersect(configuredLevels).ToArray() ?? configuredLevels;
             if (levels is not null) documents = documents.Where(x => levels.Contains(x.Level)).ToList();
 
             var documentIds = documents.Select(x => x.Id).ToList();

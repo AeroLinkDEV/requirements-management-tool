@@ -25,9 +25,21 @@ public sealed class RequirementBaselineMaterializer(AeroLinkDbContext db, Verifi
         if (baseline.RequirementsMaterializedAt is not null) throw new DomainException("The requirement baseline is already materialized and immutable.");
         var ladderPolicy = policyResolver is null ? (policy ?? LegacyLadderPolicy.Instance)
             : await policyResolver.ResolveAsync(baseline.ProjectId, ct);
+        // Materialization is a current mutation seam, so ensure the active schema/specification projection
+        // exists for this effective policy before creating profiles or placements. Historical inactive rows are
+        // retained by the synchronizer but are never selected below.
+        await new EnterpriseRequirementsService(db, ladderPolicy, policyResolver)
+            .SynchronizeProjectAsync(baseline.ProjectId, actorId, ct);
 
         var artifacts = await db.Requirements.Where(x => x.ProjectId == baseline.ProjectId).ToListAsync(ct);
-        var schemas = await db.ArtifactSchemas.AsNoTracking().Where(x=>x.ProjectId==baseline.ProjectId&&x.IsActive).ToDictionaryAsync(x=>x.AppliesTo,ct);
+        var configuredDefinitions = ladderPolicy.Definitions
+            .Where(x => x.Has(LevelCapabilities.HasRequirementsDocument) && x.RequirementsCatalogue is not null)
+            .ToArray();
+        var configuredSchemaKeys = configuredDefinitions.Select(x => x.RequirementsCatalogue!.SchemaKey)
+            .ToHashSet(StringComparer.Ordinal);
+        var schemas = await db.ArtifactSchemas.AsNoTracking()
+            .Where(x => x.ProjectId == baseline.ProjectId && x.IsActive && configuredSchemaKeys.Contains(x.Key))
+            .ToDictionaryAsync(x => x.AppliesTo, ct);
         var artifactByBase = artifacts.ToDictionary(x => x.BaseNumber, StringComparer.OrdinalIgnoreCase);
         var revisions = await db.RequirementRevisions.Where(x => artifacts.Select(a => a.Id).Contains(x.ArtifactId)).ToListAsync(ct);
         var current = new Dictionary<Guid, RequirementRevision>();
@@ -57,6 +69,11 @@ public sealed class RequirementBaselineMaterializer(AeroLinkDbContext db, Verifi
                      .OrderBy(x => x.scr.DisplayNumber).ThenBy(x => x.change.BaseNumber).ThenBy(x => x.change.Revision))
         {
             var change = pair.change;
+            LevelDefinition definition;
+            try { definition = ladderPolicy.Definition(change.Level); }
+            catch (DomainException) { throw new DomainException($"The configured project ladder does not contain {change.Level}."); }
+            if (!definition.Has(LevelCapabilities.HasRequirementsDocument) || definition.RequirementsCatalogue is null)
+                throw new DomainException($"The configured project ladder has no active requirements document for {change.Level}.");
             if (change.Kind == RequirementChangeKind.Introduce)
             {
                 if (artifactByBase.ContainsKey(change.BaseNumber)) throw new DomainException($"{change.DisplayNumber} cannot be introduced because its stable identity already exists.");
@@ -110,7 +127,7 @@ public sealed class RequirementBaselineMaterializer(AeroLinkDbContext db, Verifi
                 $"Prospective upward allocation approved in {allocation.Scr.DisplayNumber}: {allocation.Change.Rationale}", now));
         }
 
-        await PlaceInChosenSectionsAsync(baseline.ProjectId, scrs, artifactByBase, actorId, now, ct);
+        await PlaceInChosenSectionsAsync(baseline.ProjectId, scrs, artifactByBase, ladderPolicy, actorId, now, ct);
 
         var artifactById = artifactByBase.Values.ToDictionary(x => x.Id);
         foreach (var item in current.OrderBy(x => artifactById[x.Key].BaseNumber))
@@ -140,7 +157,8 @@ public sealed class RequirementBaselineMaterializer(AeroLinkDbContext db, Verifi
     /// would otherwise place a requirement into a document it has nothing to do with.
     /// </summary>
     private async Task PlaceInChosenSectionsAsync(Guid projectId, IReadOnlyList<SystemChangeRequest> scrs,
-        IReadOnlyDictionary<string, RequirementArtifact> artifactByBase, string actorId, DateTimeOffset now,
+        IReadOnlyDictionary<string, RequirementArtifact> artifactByBase, ILadderPolicy ladderPolicy,
+        string actorId, DateTimeOffset now,
         CancellationToken ct)
     {
         var chosen = scrs.SelectMany(scr => scr.RequirementChanges)
@@ -149,11 +167,20 @@ public sealed class RequirementBaselineMaterializer(AeroLinkDbContext db, Verifi
         if (chosen.Count == 0) return;
 
         var sectionIds = chosen.Select(x => x.TargetSectionId!.Value).Distinct().ToList();
+        var activeSpecifications = await db.RequirementSpecifications.AsNoTracking()
+            .Where(x => x.ProjectId == projectId && x.IsActive).ToListAsync(ct);
+        var effectiveSpecificationIds = activeSpecifications
+            .Where(specification => ladderPolicy.Definitions.Any(definition =>
+                definition.Has(LevelCapabilities.HasRequirementsDocument)
+                && definition.RequirementsCatalogue is not null
+                && definition.Level.ToString() == specification.Level
+                && definition.RequirementsCatalogue.SpecificationNumber == specification.DocumentNumber))
+            .Select(x => x.Id).ToHashSet();
         var sections = await (from node in db.SpecificationNodes.AsNoTracking()
                               join spec in db.RequirementSpecifications.AsNoTracking() on node.SpecificationId equals spec.Id
-                              where sectionIds.Contains(node.Id) && spec.ProjectId == projectId
+                              where sectionIds.Contains(node.Id) && effectiveSpecificationIds.Contains(spec.Id)
                                  && node.Type == SpecificationNodeType.Section
-                              select new { node.Id, node.SpecificationId }).ToListAsync(ct);
+                              select new { node.Id, node.SpecificationId, Level = spec.Level }).ToListAsync(ct);
 
         var artifactIds = chosen.Select(x => artifactByBase.TryGetValue(x.BaseNumber, out var a) ? a.Id : Guid.Empty)
             .Where(x => x != Guid.Empty).ToList();
@@ -168,6 +195,8 @@ public sealed class RequirementBaselineMaterializer(AeroLinkDbContext db, Verifi
             var section = sections.SingleOrDefault(x => x.Id == change.TargetSectionId!.Value);
             if (section is null)
                 throw new DomainException($"{change.DisplayNumber} names a section that is no longer available in this project.");
+            if (!string.Equals(section.Level, change.Level.ToString(), StringComparison.Ordinal))
+                throw new DomainException($"{change.DisplayNumber} names a section from an inactive or different effective specification.");
             if (!artifactByBase.TryGetValue(change.BaseNumber, out var artifact)) continue;
             var placement = existing.SingleOrDefault(x => x.RequirementArtifactId == artifact.Id);
             if (placement is null)
@@ -205,6 +234,8 @@ public sealed class RequirementBaselineMaterializer(AeroLinkDbContext db, Verifi
 
     private void AddProfile(RequirementRevision revision,RequirementChange change,IReadOnlyDictionary<string,ArtifactSchemaDefinition> schemas,string actor,DateTimeOffset now)
     {
-        if(schemas.TryGetValue(change.Level.ToString(),out var schema))db.RequirementRevisionProfiles.Add(new(revision.Id,schema.Id,string.IsNullOrWhiteSpace(change.RichText)?change.Statement:change.RichText,change.AttributesJson,"[]",actor,now));
+        if (!schemas.TryGetValue(change.Level.ToString(), out var schema))
+            throw new DomainException($"No active requirement schema is configured for {change.Level}.");
+        db.RequirementRevisionProfiles.Add(new(revision.Id,schema.Id,string.IsNullOrWhiteSpace(change.RichText)?change.Statement:change.RichText,change.AttributesJson,"[]",actor,now));
     }
 }

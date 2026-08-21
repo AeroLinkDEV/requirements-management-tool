@@ -1,6 +1,7 @@
 using AeroLink.Domain.ChangeControl;
 using AeroLink.Domain.Hierarchy;
 using AeroLink.Domain.Programs;
+using AeroLink.Domain.Traceability;
 using AeroLink.Infrastructure.Persistence;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
@@ -72,15 +73,76 @@ public sealed class ProjectLadderPersistenceTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task Effective_project_resolver_reads_the_stored_shape_but_keeps_legacy_runtime_authority()
+    public async Task Effective_project_resolver_reads_the_stored_shape_and_preserves_legacy_trace_compatibility()
     {
         await using var db = Context();
         var resolver = new EffectiveProjectLadderPolicyResolver(db);
 
         var policy = await resolver.ResolveAsync(_fmsProjectId);
 
-        Assert.Same(LegacyLadderPolicy.Instance, policy);
+        Assert.IsAssignableFrom<ILegacyLadderCompatibilityPolicy>(policy);
         Assert.Equal([RequirementLevel.HighLevel], policy.DownstreamLevels(RequirementLevel.System));
+        RequirementTracePolicy.Validate(policy, RequirementLevel.System, RequirementLevel.System,
+            RequirementTraceType.AllocatedFrom);
+    }
+
+    [Fact]
+    public async Task Draft_uses_prior_legacy_runtime_and_active_uses_the_persisted_subset()
+    {
+        var projectId = Guid.Empty;
+        await using (var db = Context())
+        {
+            var program = new ProgramRecord("Draft authority program", $"DRA{Guid.NewGuid():N}"[..12]);
+            var project = new ProjectRecord(program.Id, "Draft authority", "Draft authority software");
+            projectId = project.Id;
+            db.AddRange(program, project);
+            await db.SaveChangesAsync();
+
+            var now = DateTimeOffset.UtcNow;
+            var configuration = ProjectLadderConfiguration.CreateDraft(project.Id, now);
+            var system = new ProjectLadderStep(configuration.Id, project.Id, RequirementLevel.System, 1,
+                LegacyLadderPolicy.Instance.Definition(RequirementLevel.System).Capabilities, now);
+            var low = new ProjectLadderStep(configuration.Id, project.Id, RequirementLevel.LowLevel, 2,
+                LegacyLadderPolicy.Instance.Definition(RequirementLevel.LowLevel).Capabilities, now);
+            configuration.Steps.Add(system);
+            configuration.Steps.Add(low);
+            configuration.AllowedUpstream.Add(new(configuration.Id, project.Id, system.Id, low.Id, now));
+            db.ProjectLadderConfigurations.Add(configuration);
+            await db.SaveChangesAsync();
+        }
+
+        await using (var draft = Context())
+        {
+            var policy = await new EffectiveProjectLadderPolicyResolver(draft).ResolveAsync(projectId);
+            Assert.Same(LegacyLadderPolicy.Instance, policy);
+            Assert.Equal([RequirementLevel.System, RequirementLevel.HighLevel, RequirementLevel.LowLevel], policy.OrderedLevels);
+        }
+
+        await using (var activate = Context())
+        {
+            var configuration = await activate.ProjectLadderConfigurations
+                .SingleAsync(x => x.ProjectId == projectId);
+            await activate.Database.ExecuteSqlInterpolatedAsync($"""
+                UPDATE project_ladder_configurations
+                SET Classification = 'NonDefault', State = 'Active', Version = 2,
+                    ActivatedAt = CURRENT_TIMESTAMP, ActivatedBy = 'test.manager',
+                    ActivationManifestVersion = 'test-manifest-v1',
+                    ActivationManifestHash = {'a'.ToString().PadLeft(64, 'a')}
+                WHERE Id = {configuration.Id}
+                """);
+        }
+
+        await using (var active = Context())
+        {
+            var policy = await new EffectiveProjectLadderPolicyResolver(active).ResolveAsync(projectId);
+            Assert.IsType<ResolvedProjectLadderPolicy>(policy);
+            Assert.Equal([RequirementLevel.System, RequirementLevel.LowLevel], policy.OrderedLevels);
+            Assert.Equal([RequirementLevel.LowLevel], policy.DownstreamLevels(RequirementLevel.System));
+            RequirementTracePolicy.Validate(policy, RequirementLevel.LowLevel, RequirementLevel.System,
+                RequirementTraceType.DerivedFrom);
+            Assert.Throws<Domain.Common.DomainException>(() => RequirementTracePolicy.Validate(policy,
+                RequirementLevel.System, RequirementLevel.LowLevel, RequirementTraceType.DerivedFrom));
+        }
     }
 
     [Fact]

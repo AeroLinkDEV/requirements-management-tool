@@ -4,6 +4,7 @@ using System.Text.Json;
 using AeroLink.Api;
 using AeroLink.Domain.Baselines;
 using AeroLink.Domain.ChangeControl;
+using AeroLink.Domain.Hierarchy;
 using AeroLink.Domain.Identity;
 using AeroLink.Domain.Programs;
 using AeroLink.Domain.Requirements;
@@ -617,6 +618,28 @@ public sealed class TestChangeRequestReviewWorkflowTests
             Assert.Single(cycle.Steps);
             Assert.Single(await db.ElectronicSignatures.Where(x => x.ArtifactId == fixture.ReviewId).ToListAsync());
         }
+    }
+
+    [Fact]
+    public async Task Configured_policy_refuses_a_workflow_for_a_removed_high_level_test_subject()
+    {
+        using var factory = new AeroLinkApiFactory(testLadderPolicy: ConfiguredSystemLowPolicy());
+        using var client = factory.CreateClient();
+        var fixture = await SeedAsync(factory);
+
+        await LoginAsync(client, "workflow.config");
+        using var refused = await client.PostAsJsonAsync("/api/review-workflows", new
+        {
+            projectId = fixture.ProjectId,
+            name = "Removed high-level test workflow",
+            appliesTo = nameof(ReviewSubject.HighLevelSoftwareTest),
+            mode = nameof(ReviewMode.Sequential),
+            stages = new[] { new { name = "High-level review", requiredRole = nameof(ProgramRole.TestLead) } },
+        });
+
+        var body = await refused.Content.ReadAsStringAsync();
+        Assert.Equal(HttpStatusCode.BadRequest, refused.StatusCode);
+        Assert.Contains("does not configure", body, StringComparison.OrdinalIgnoreCase);
     }
 
     [Theory]
@@ -1436,6 +1459,21 @@ public sealed class TestChangeRequestReviewWorkflowTests
         using var pdf = await client.GetAsync($"/api/test-change-reviews/{fixture.ReviewId}/download?format=pdf");
         Assert.Equal(HttpStatusCode.OK, pdf.StatusCode);
         Assert.NotEmpty(await pdf.Content.ReadAsByteArrayAsync());
+    }
+
+    private static ILadderPolicy ConfiguredSystemLowPolicy()
+    {
+        var configuration = ProjectLadderConfiguration.CreateDraft(Guid.NewGuid(), DateTimeOffset.UtcNow);
+        var now = DateTimeOffset.UtcNow;
+        var system = new ProjectLadderStep(configuration.Id, configuration.ProjectId, RequirementLevel.System, 1,
+            LegacyLadderPolicy.Instance.Definition(RequirementLevel.System).Capabilities, now);
+        var low = new ProjectLadderStep(configuration.Id, configuration.ProjectId, RequirementLevel.LowLevel, 2,
+            LegacyLadderPolicy.Instance.Definition(RequirementLevel.LowLevel).Capabilities, now);
+        configuration.Steps.Add(system);
+        configuration.Steps.Add(low);
+        configuration.AllowedUpstream.Add(new ProjectLadderAllowedUpstream(configuration.Id, configuration.ProjectId,
+            system.Id, low.Id, now));
+        return new ResolvedProjectLadderPolicy(ProjectLadderResolver.Resolve(configuration));
     }
 
 }

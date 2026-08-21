@@ -1,6 +1,7 @@
 using AeroLink.Domain.ChangeControl;
 using AeroLink.Domain.Common;
 using AeroLink.Domain.Baselines;
+using AeroLink.Domain.Hierarchy;
 using AeroLink.Domain.Identity;
 using AeroLink.Domain.Programs;
 using AeroLink.Domain.Requirements;
@@ -126,12 +127,12 @@ public sealed class CoverageLevelDisciplineTests
         var program = new ProgramRecord("Level Program", prefix);
         var project = new ProjectRecord(program.Id, "Software", "Level Software");
         var release = new SoftwareRelease(project.Id, "1.6", false);
-        db.AddRange(program, project, release);
+        var now = DateTimeOffset.UtcNow;
+        db.AddRange(program, project, release, LegacyDefaultProjectLadderFactory.Create(project.Id, now));
         await db.SaveChangesAsync();
 
         // A revision names the change request that produced it and the baseline it became effective in, and
         // both are real foreign keys — so the fixture supplies real ones rather than plausible-looking GUIDs.
-        var now = DateTimeOffset.UtcNow;
         var scr = new SystemChangeRequest("SRCR-00001", 0, project.Id, release.Id, "Levels", "P", "A", "S", "author", now);
         scr.AddRequirementChange("author", "SYSR-000999", 0, RequirementLevel.System,
             RequirementChangeKind.Introduce, "The FMS shall hold a level.", "Needed.", "Test", now);

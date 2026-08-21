@@ -15,6 +15,8 @@ import {
 import './RequirementsWorkspace.css'
 import './TestingCoverageWorkspace.css'
 import './TestProcedureExplorer.css'
+import { LadderCapability, ladderAllows } from './projectLadder'
+import type { ProjectLadderProjection } from './projectLadder'
 
 type Procedure = {
   id: string
@@ -120,8 +122,11 @@ const scopeOf = (discipline: ProcedureScope, level: ProcedureLevel) => {
 const disciplineLabel = (discipline: ProcedureScope) => discipline === 'System' ? 'System' : 'Software'
 const procedureLevelLabel = (level: Procedure['level']) =>
   level === 'HighLevel' ? 'HLR' : level === 'LowLevel' ? 'LLR' : 'System'
-const validLevel = (value: string | null, discipline: ProcedureScope): ProcedureLevel => {
-  if (discipline === 'Software' && (value === 'HighLevel' || value === 'LowLevel')) return value
+const validLevel = (value: string | null, discipline: ProcedureScope, ladder: ProjectLadderProjection | null): ProcedureLevel => {
+  if (discipline === 'Software' && value === 'HighLevel' && ladderAllows(ladder, 'HighLevel', LadderCapability.Verification)) return value
+  if (discipline === 'Software' && value === 'LowLevel' && ladderAllows(ladder, 'LowLevel', LadderCapability.Verification)) return value
+  if (discipline === 'Software' && ladderAllows(ladder, 'HighLevel', LadderCapability.Verification)) return 'HighLevel'
+  if (discipline === 'Software' && ladderAllows(ladder, 'LowLevel', LadderCapability.Verification)) return 'LowLevel'
   return discipline
 }
 
@@ -137,7 +142,7 @@ const validLevel = (value: string | null, discipline: ProcedureScope): Procedure
  * to be verified.
  */
 export default function TestProcedureExplorer({ api, projectId, releaseId, discipline, buildName, releaseVersion,
-  released, onBack, onOpenRequirementRevision, initialLevel }: {
+  released, onBack, onOpenRequirementRevision, initialLevel, ladder }: {
   api: string; projectId: string; releaseId: string; discipline: ProcedureScope; buildName: string
   /** The build's own version, which the document actions name. `buildName` is the display label, not this. */
   releaseVersion: string
@@ -145,6 +150,7 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
   onBack?: () => void
   onOpenRequirementRevision: (requirement: { id: string; revisionId: string; level: string }) => void
   initialLevel?: 'HighLevel' | 'LowLevel'
+  ladder: ProjectLadderProjection | null
 }) {
   const [data, setData] = useState<Page>()
   // Seeded from the address, so a link to one procedure opens on that procedure rather than on page one of
@@ -153,7 +159,7 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
   // — and the requirement trace's "Open test procedure" — keep working.
   const opening = useRef(typeof location !== 'undefined' ? new URLSearchParams(location.search) : new URLSearchParams()).current
   const [level, setLevel] = useState<ProcedureLevel>(() =>
-    validLevel(opening.get('procedureLevel') ?? initialLevel ?? null, discipline))
+    validLevel(opening.get('procedureLevel') ?? initialLevel ?? null, discipline, ladder))
   const [query, setQuery] = useState(opening.get('procedure') ?? '')
   const [procedureState, setProcedureState] = useState(opening.get('procedureState') ?? '')
   const [procedureOutcome, setProcedureOutcome] = useState(opening.get('procedureOutcome') ?? '')
@@ -261,7 +267,7 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
       setQuery(saved.search || '')
       setProcedureState(saved.state || '')
       setProcedureOutcome(saved.outcome || '')
-      setLevel(validLevel(saved.level || null, discipline))
+      setLevel(validLevel(saved.level || null, discipline, ladder))
       setDocumentId(saved.documentId || '')
       setSectionId(saved.sectionId || '')
       setViewId(view.id)
@@ -269,7 +275,7 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
     } catch {
       setError('Saved view configuration is invalid.')
     }
-  }, [discipline])
+  }, [discipline, ladder])
   // A link to a saved view opens that worklist, once. Re-applying it on every list refresh would undo the
   // reader's own filtering the moment they changed anything.
   useEffect(() => {
@@ -347,7 +353,7 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
       setQuery(params.get('procedure') ?? '')
       setProcedureState(params.get('procedureState') ?? '')
       setProcedureOutcome(params.get('procedureOutcome') ?? '')
-      setLevel(validLevel(params.get('procedureLevel'), discipline))
+      setLevel(validLevel(params.get('procedureLevel'), discipline, ladder))
       setPage(Number(params.get('procedurePage') ?? '1') || 1)
       setPageSize(Number(params.get('procedureRows') ?? '25') || 25)
       setDocumentId(params.get('procedureDocument') ?? '')
@@ -358,7 +364,7 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
     }
     addEventListener('popstate', restore)
     return () => removeEventListener('popstate', restore)
-  }, [discipline])
+  }, [discipline, ladder])
 
   const procedures = data?.items ?? []
   // Read once, defensively. A build with no effective procedures answers with a deliberately empty page, and
@@ -546,8 +552,8 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
             setDocumentId(''); setSectionId(''); setPage(1)
           }}>
           <option value="Software">All software test procedures</option>
-          <option value="HighLevel">Software HLR</option>
-          <option value="LowLevel">Software LLR</option>
+           {ladderAllows(ladder, 'HighLevel', LadderCapability.Verification) && <option value="HighLevel">Software HLR</option>}
+           {ladderAllows(ladder, 'LowLevel', LadderCapability.Verification) && <option value="LowLevel">Software LLR</option>}
         </select>
       )}
       <select aria-label="Procedure state" value={procedureState}

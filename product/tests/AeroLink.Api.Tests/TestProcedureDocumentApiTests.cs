@@ -143,7 +143,7 @@ public sealed class TestProcedureDocumentApiTests : IClassFixture<SharedApiHost>
     {
         // First-install bootstrap requires a database with no user accounts yet, so this test keeps its own
         // fresh factory: the shared host's database already contains the other tests' seeded users.
-        await using var factory = new AeroLinkApiFactory();
+        await using var factory = new AeroLinkApiFactory(attachProjectLadders: false);
         using var client = factory.CreateClient();
         await SecurityBoundaryTests.BootstrapAndLoginAdministratorAsync(client);
         await SecurityBoundaryTests.AuthorizeMutationsAsync(client);

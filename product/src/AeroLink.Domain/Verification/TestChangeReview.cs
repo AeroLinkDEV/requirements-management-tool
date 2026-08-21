@@ -263,7 +263,7 @@ public sealed class TestChangeReview
     /// grow underneath the person approving it. Both rules are the requirement side's, unchanged.
     /// </summary>
     public TestProcedureChange AddProcedureChange(string actorId, TestProcedureChangeDraft draft, DateTimeOffset now,
-        bool allowIncomplete = false)
+        bool allowIncomplete = false, ILadderPolicy? policy = null)
     {
         EnsureOpen();
         Required(actorId, "authoring verification engineer");
@@ -285,8 +285,8 @@ public sealed class TestChangeReview
         }
         if (Outcome != TestChangeReviewOutcome.ChangeRequired)
             throw new DomainException("Record that test-procedure work is required before proposing changes to procedures.");
-        if (draft.Level != ProcedureLevel())
-            throw new DomainException($"A {Discipline} test change request can contain {ProcedureLevel()} procedures only.");
+        if (draft.Level != ProcedureLevel(policy))
+            throw new DomainException($"A {Discipline} test change request can contain {ProcedureLevel(policy)} procedures only.");
         // One proposal per procedure, but an unnamed proposal is not yet a procedure. Two proposals an author
         // has started and not yet pointed at anything both carry an empty base number, and comparing those
         // for equality would refuse the second with "already has a proposed change" — naming a procedure
@@ -600,16 +600,16 @@ public sealed class TestChangeReview
     }
 
     /// <summary>The procedure level this discipline governs. The discipline and the level are one fact.</summary>
-    public TestProcedureLevel ProcedureLevel() =>
-        LegacyLadderPolicy.Instance.ProcedureLevel(LegacyLadderPolicy.Instance.RequirementLevelFor(Discipline));
+    public TestProcedureLevel ProcedureLevel(ILadderPolicy? policy = null) =>
+        (policy ?? LegacyLadderPolicy.Instance).ProcedureLevel((policy ?? LegacyLadderPolicy.Instance).RequirementLevelFor(Discipline));
 
-    public void AssignControlledNumber(string baseNumber, DateTimeOffset now)
+    public void AssignControlledNumber(string baseNumber, DateTimeOffset now, ILadderPolicy? policy = null)
     {
         if (!string.IsNullOrEmpty(BaseNumber)) return;
         if (Outcome != TestChangeReviewOutcome.ChangeRequired)
             throw new DomainException("Record that test-procedure work is required before raising the test change request that carries it.");
         var number = Required(baseNumber, "controlled test change request number");
-        var expectedPrefix = LegacyLadderPolicy.Instance.TestChangeReviewPrefix(Discipline) + "-";
+        var expectedPrefix = (policy ?? LegacyLadderPolicy.Instance).TestChangeReviewPrefix(Discipline) + "-";
         if (!number.StartsWith(expectedPrefix, StringComparison.OrdinalIgnoreCase))
             throw new DomainException($"A {Discipline} test change request requires a {expectedPrefix.TrimEnd('-')} number.");
         BaseNumber = number;
@@ -749,7 +749,8 @@ public sealed class TestChangeReview
     /// The predecessor is left for the caller to supersede, exactly as the requirements side leaves the
     /// predecessor for its caller to persist: this method builds the successor and nothing else.
     /// </summary>
-    public TestChangeReview StartNextRevision(string actorId, DateTimeOffset now, bool targetReleaseIsReleased)
+    public TestChangeReview StartNextRevision(string actorId, DateTimeOffset now, bool targetReleaseIsReleased,
+        ILadderPolicy? policy = null)
     {
         Required(actorId, "engineer revising the test change request");
         if (State != TestChangeReviewState.Approved)
@@ -776,7 +777,7 @@ public sealed class TestChangeReview
             next.AddProcedureChange(actorId, new TestProcedureChangeDraft(change.BaseNumber, change.Revision,
                 change.Level, change.Kind, change.Title, change.Objective, change.Preconditions, change.Steps,
                 change.ExpectedResult, change.Rationale, change.DrivingRequirementRevisionIdsJson,
-                change.RemovedRequirementRevisionIdsJson, change.CoverageChangeRationale), now);
+                change.RemovedRequirementRevisionIdsJson, change.CoverageChangeRationale), now, policy: policy);
 
         // Folded-in claims move to the successor rather than staying behind or being dropped. A change
         // request is claimed by at most one package, enforced by a unique index, so the two revisions cannot

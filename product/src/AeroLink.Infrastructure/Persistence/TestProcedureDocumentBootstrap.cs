@@ -20,9 +20,10 @@ namespace AeroLink.Infrastructure.Persistence;
 /// inventing a section structure nobody chose would be a worse answer than an obvious flat one somebody can
 /// restructure later.
 /// </summary>
-public sealed class TestProcedureDocumentBootstrap(AeroLinkDbContext db, ILadderPolicy? policy = null)
+public sealed class TestProcedureDocumentBootstrap(AeroLinkDbContext db, ILadderPolicy? policy = null,
+    IProjectLadderPolicyResolver? policyResolver = null)
 {
-    private readonly ILadderPolicy ladderPolicy = policy ?? LegacyLadderPolicy.Instance;
+    private readonly ILadderPolicy fallbackPolicy = policy ?? LegacyLadderPolicy.Instance;
     /// <summary>The section every backfilled procedure lands in, named so its provenance is obvious.</summary>
     public const string DefaultSectionHeading = "Unsectioned procedures";
 
@@ -36,12 +37,16 @@ public sealed class TestProcedureDocumentBootstrap(AeroLinkDbContext db, ILadder
     public async Task EnsureForProjectAsync(Guid projectId, CancellationToken ct = default)
     {
         var now = DateTimeOffset.UtcNow;
+        var ladderPolicy = policyResolver is null
+            ? fallbackPolicy
+            : await policyResolver.ResolveAsync(projectId, ct);
         var existing = await db.TestProcedureDocuments.Where(x => x.ProjectId == projectId).ToListAsync(ct);
-        var documents = ladderPolicy.OrderedLevels.Select(level =>
+        var documents = ladderPolicy.Definitions.Where(definition => definition.Verification is not null).Select(definition =>
         {
-            var type = ladderPolicy.TestProcedureDocument(level);
-            return (Level: ladderPolicy.ProcedureLevel(level), Acronym: ladderPolicy.ControlledDocumentPrefix(type),
-                Title: ladderPolicy.TestProcedureDocumentTitle(level));
+            var level = definition.Level;
+            var verification = definition.Verification!;
+            return (Level: verification.ProcedureLevel, Acronym: ladderPolicy.ControlledDocumentPrefix(verification.DocumentType),
+                Title: definition.TestProcedureDocumentTitle!);
         }).ToArray();
 
         foreach (var (level, acronym, title) in documents)

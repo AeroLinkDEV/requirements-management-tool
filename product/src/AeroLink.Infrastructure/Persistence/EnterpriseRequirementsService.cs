@@ -16,13 +16,17 @@ namespace AeroLink.Infrastructure.Persistence;
 public sealed record InterchangeRequirementRow(int RowNumber,string Identifier,string Level,string Statement,string Rationale,string VerificationMethod,bool Valid,IReadOnlyList<string> Errors);
 public sealed record DiffSpan(string Kind,string Text);
 
-public sealed class EnterpriseRequirementsService(AeroLinkDbContext db, ILadderPolicy? policy = null)
+public sealed class EnterpriseRequirementsService(AeroLinkDbContext db, ILadderPolicy? policy = null,
+    IProjectLadderPolicyResolver? policyResolver = null)
 {
-    private readonly ILadderPolicy ladderPolicy = policy ?? LegacyLadderPolicy.Instance;
+    private readonly ILadderPolicy fallbackPolicy = policy ?? LegacyLadderPolicy.Instance;
 
     public async Task SynchronizeProjectAsync(Guid projectId,string actor,CancellationToken ct=default)
     {
         if(!await db.Projects.AnyAsync(x=>x.Id==projectId,ct))return;var now=DateTimeOffset.UtcNow;
+        var ladderPolicy = policyResolver is null
+            ? fallbackPolicy
+            : await policyResolver.ResolveAsync(projectId, ct);
         // Two indexed counts, rather than loading the project to discover there is nothing to do. This is
         // the whole difference between a requirements page that answers in a tenth of a second and one that
         // takes nine, because this method runs on every read of the explorer.
@@ -35,9 +39,40 @@ public sealed class EnterpriseRequirementsService(AeroLinkDbContext db, ILadderP
         // page it was guarding.
         var artifactCount=await db.Requirements.CountAsync(x=>x.ProjectId==projectId,ct);
         var watermark=await db.ProjectWorkspaceSynchronizations.SingleOrDefaultAsync(x=>x.ProjectId==projectId,ct);
-        if(watermark is not null&&watermark.IsCurrent(artifactCount))return;
         var schemas=await db.ArtifactSchemas.Include(x=>x.Fields).Where(x=>x.ProjectId==projectId).ToListAsync(ct);
-        foreach(var definition in ladderPolicy.Definitions)
+        var expectedDefinitions = ladderPolicy.Definitions
+            .Where(x => x.RequirementsDocumentType is not null && x.RequirementsCatalogue is not null)
+            .ToArray();
+        var expectedSchemaKeys = expectedDefinitions.Select(x => x.RequirementsCatalogue!.SchemaKey)
+            .ToHashSet(StringComparer.Ordinal);
+        var catalogueSchemaKeys = LegacyLadderPolicy.Instance.Definitions
+            .Where(x => x.RequirementsCatalogue is not null)
+            .Select(x => x.RequirementsCatalogue!.SchemaKey)
+            .ToHashSet(StringComparer.Ordinal);
+        var catalogueSpecificationNumbers = LegacyLadderPolicy.Instance.Definitions
+            .Where(x => x.RequirementsCatalogue is not null)
+            .Select(x => x.RequirementsCatalogue!.SpecificationNumber)
+            .ToHashSet(StringComparer.Ordinal);
+        var expectedSpecificationLevels = expectedDefinitions.Select(x => x.Level.ToString())
+            .ToHashSet(StringComparer.Ordinal);
+        var configuredSchemasMatch = schemas.Where(x => x.IsActive && catalogueSchemaKeys.Contains(x.Key)).Select(x => x.Key)
+            .ToHashSet(StringComparer.Ordinal).SetEquals(expectedSchemaKeys);
+        var configuredSpecifications = await db.RequirementSpecifications.AsNoTracking()
+            .Where(x => x.ProjectId == projectId && x.IsActive && catalogueSpecificationNumbers.Contains(x.DocumentNumber))
+            .Select(x => x.Level).ToListAsync(ct);
+        var configuredSpecificationsMatch = configuredSpecifications.ToHashSet(StringComparer.Ordinal)
+            .SetEquals(expectedSpecificationLevels);
+        // The watermark is only valid for the effective catalogue that produced it. A ladder activation can
+        // change steps without changing artifact count; comparing the stored schema/spec key sets catches that
+        // policy change without making the read path rescan every requirement.
+        if(watermark is not null&&watermark.IsCurrent(artifactCount)&&configuredSchemasMatch&&configuredSpecificationsMatch)return;
+        // A policy activation changes the current catalogue, but never erases a schema or specification that
+        // was used by a prior controlled record. Retire the old projection first; the historical rows remain
+        // queryable by identity and their nodes/profiles are untouched.
+        foreach (var schema in schemas.Where(x => x.IsActive
+            && catalogueSchemaKeys.Contains(x.Key) && !expectedSchemaKeys.Contains(x.Key)))
+            schema.SetActive(false);
+        foreach(var definition in expectedDefinitions)
         {
             var catalogue = definition.RequirementsCatalogue
                 ?? throw new DomainException($"The {definition.Level} level has no enterprise requirements catalogue.");
@@ -52,17 +87,27 @@ public sealed class EnterpriseRequirementsService(AeroLinkDbContext db, ILadderP
                 if(ladderPolicy.IsDownstreamTarget(definition.Level)) schema.AddField("derived","Derived Requirement",SchemaFieldType.Boolean,false,50,"[]",actor,now);
                 db.ArtifactSchemas.Add(schema);schemas.Add(schema);
             }
-            else if(ladderPolicy.IsDownstreamTarget(definition.Level)&&schema.Fields.All(x=>x.Key!="derived"))
+            else
+            {
+                if (!schema.IsActive) schema.SetActive(true);
+                if(ladderPolicy.IsDownstreamTarget(definition.Level)&&schema.Fields.All(x=>x.Key!="derived"))
                 schema.AddField("derived","Derived Requirement",SchemaFieldType.Boolean,false,50,"[]",actor,now);
+            }
         }
         await db.SaveChangesAsync(ct);
         var specs=await db.RequirementSpecifications.Where(x=>x.ProjectId==projectId).ToListAsync(ct);
-        foreach(var definition in ladderPolicy.Definitions)
+        foreach (var spec in specs.Where(x => x.IsActive
+            && catalogueSpecificationNumbers.Contains(x.DocumentNumber)
+            && !expectedSpecificationLevels.Contains(x.Level)))
+            spec.SetActive(false, actor, now);
+        foreach(var definition in expectedDefinitions)
         {
             var catalogue = definition.RequirementsCatalogue
                 ?? throw new DomainException($"The {definition.Level} level has no enterprise requirements catalogue.");
-            var existing=specs.SingleOrDefault(x=>x.Level==definition.Level.ToString());
+            var existing=specs.SingleOrDefault(x=>x.DocumentNumber==catalogue.SpecificationNumber
+                && x.Level==definition.Level.ToString());
             if(existing is null){var spec=new RequirementSpecification(projectId,catalogue.SpecificationNumber,catalogue.SpecificationTitle,definition.Level.ToString(),$"Authoritative structured {catalogue.SpecificationTitle.ToLowerInvariant()}.",actor,now);db.RequirementSpecifications.Add(spec);specs.Add(spec);continue;}
+            if (!existing.IsActive) existing.SetActive(true, actor, now);
             // The default title is authoritative and is applied to Projects that already exist. These were
             // "System Requirements Specification"; the product calls the artefact a document everywhere else,
             // and a library that names the same thing two ways makes a reader wonder whether they are two
@@ -70,8 +115,11 @@ public sealed class EnterpriseRequirementsService(AeroLinkDbContext db, ILadderP
             if(existing.Title!=catalogue.SpecificationTitle)db.Entry(existing).Property(x=>x.Title).CurrentValue=catalogue.SpecificationTitle;
         }
         await db.SaveChangesAsync(ct);
-        var sections=await db.SpecificationNodes.Where(x=>specs.Select(s=>s.Id).Contains(x.SpecificationId)&&x.Type==SpecificationNodeType.Section).ToListAsync(ct);
-        foreach(var spec in specs)
+        var activeSpecs = specs.Where(x => x.IsActive
+            && catalogueSpecificationNumbers.Contains(x.DocumentNumber)
+            && expectedSpecificationLevels.Contains(x.Level)).ToArray();
+        var sections=await db.SpecificationNodes.Where(x=>activeSpecs.Select(s=>s.Id).Contains(x.SpecificationId)&&x.Type==SpecificationNodeType.Section).ToListAsync(ct);
+        foreach(var spec in activeSpecs)
             for(var i=1;i<=5;i++)if(sections.All(x=>x.SpecificationId!=spec.Id||x.ParentId!=null||x.Position!=i*1000)){var section=new SpecificationNode(spec.Id,null,i*1000,SpecificationNodeType.Section,SectionName(i),null,actor,now);db.SpecificationNodes.Add(section);sections.Add(section);}
         // Headings used to carry their own number — "1. Functional Behavior". A stored number is wrong the
         // moment a section is inserted above it, and it cannot express 4.1.1 at all without every heading
@@ -89,7 +137,7 @@ public sealed class EnterpriseRequirementsService(AeroLinkDbContext db, ILadderP
         //
         // Their numbers — 4.1 and 4.2 — are not written anywhere. They are read off their position beneath
         // their parent, so inserting a section above them renumbers them and this code never learns of it.
-        foreach(var spec in specs)
+        foreach(var spec in activeSpecs)
         {
             var parent=sections.Where(x=>x.SpecificationId==spec.Id&&x.ParentId is null).OrderBy(x=>x.Position).Skip(3).FirstOrDefault();
             if(parent is null)continue;
@@ -103,7 +151,8 @@ public sealed class EnterpriseRequirementsService(AeroLinkDbContext db, ILadderP
         }
         await db.SaveChangesAsync(ct);
 
-        var artifacts=await db.Requirements.AsNoTracking().Where(x=>x.ProjectId==projectId).OrderBy(x=>x.BaseNumber).ToListAsync(ct);
+        var allowedLevels = ladderPolicy.OrderedLevels.ToArray();
+        var artifacts=await db.Requirements.AsNoTracking().Where(x=>x.ProjectId==projectId&&allowedLevels.Contains(x.Level)).OrderBy(x=>x.BaseNumber).ToListAsync(ct);
         if(artifacts.Count==0)
         {
             if(watermark is null)db.ProjectWorkspaceSynchronizations.Add(new ProjectWorkspaceSynchronization(projectId,0,now));
@@ -134,7 +183,7 @@ public sealed class EnterpriseRequirementsService(AeroLinkDbContext db, ILadderP
                 // Top level only. Positions are unique within a parent, not within the document, so once a
                 // section had sub-sections beneath it there were two nodes at position 1000 and this asked for
                 // the single one.
-                var spec=specs.Single(x=>x.Level==definition.Level.ToString());var bucket=(StableNumber(artifact.BaseNumber)%5)+1;var parent=sections.Single(x=>x.SpecificationId==spec.Id&&x.ParentId==null&&x.Position==bucket*1000);
+                var spec=specs.Single(x=>x.DocumentNumber==catalogue.SpecificationNumber&&x.Level==definition.Level.ToString());var bucket=(StableNumber(artifact.BaseNumber)%5)+1;var parent=sections.Single(x=>x.SpecificationId==spec.Id&&x.ParentId==null&&x.Position==bucket*1000);
                 db.SpecificationNodes.Add(new(spec.Id,parent.Id,StableNumber(artifact.BaseNumber),SpecificationNodeType.Requirement,"",artifact.Id,actor,now));
             }
         }
@@ -295,7 +344,7 @@ file static class DiffGrouping
     public static IEnumerable<Group> GroupAdjacent(this IEnumerable<DiffSpan> spans){Group? current=null;foreach(var span in spans){if(current is null||current.Kind!=span.Kind){if(current is not null)yield return current;current=new(span.Kind,[span.Text]);}else current.Text.Add(span.Text);}if(current is not null)yield return current;}
 }
 
-public sealed class EnterpriseWorkspaceSeeder(AeroLinkDbContext db)
+public sealed class EnterpriseWorkspaceSeeder(AeroLinkDbContext db, IProjectLadderPolicyResolver? policyResolver = null)
 {
-    public async Task EnsureAllAsync(CancellationToken ct=default){var projects=await db.Projects.AsNoTracking().Select(x=>x.Id).ToListAsync(ct);foreach(var id in projects)await new EnterpriseRequirementsService(db).SynchronizeProjectAsync(id,"system.workspace",ct);}
+    public async Task EnsureAllAsync(CancellationToken ct=default){var projects=await db.Projects.AsNoTracking().Select(x=>x.Id).ToListAsync(ct);foreach(var id in projects)await new EnterpriseRequirementsService(db, policyResolver: policyResolver).SynchronizeProjectAsync(id,"system.workspace",ct);}
 }

@@ -6,6 +6,8 @@ import type { AuthUser } from './IdentityCenter'
 import DownstreamAssessmentQueue from './DownstreamAssessmentQueue'
 import './HistoryExplorer.css'
 import './Swrd.css'
+import { LadderCapability, ladderAllows } from './projectLadder'
+import type { ProjectLadderProjection } from './projectLadder'
 
 type Release={id:string;version:string;isReleased:boolean}
 type Scope='System'|'Software'
@@ -18,7 +20,7 @@ type Props={
  initialStateIntent?:HistoryStateIntent;onStateIntentChange:(intent?:HistoryStateIntent)=>void;
  onBack:()=>void;onOpenScr:(id:string)=>void;onOpenRequirement:(id:string,level:string)=>void;onCreateSystem:()=>void;
  onCreateSoftware:(level:'HighLevel'|'LowLevel',assessmentId?:string,sourceNumber?:string)=>void
- user:AuthUser
+ user:AuthUser;ladder:ProjectLadderProjection|null
 }
 
 const stateLabels:Record<HistoryStateIntent,string>={Draft:'Draft',InReview:'In review',Approved:'Approved',SelectedForBaseline:'Allocated to a build',Deferred:'Deferred',ApprovedOrSelected:'Approved or allocated'}
@@ -26,9 +28,10 @@ const stateLabels:Record<HistoryStateIntent,string>={Draft:'Draft',InReview:'In 
 const registerStateOptions=(Object.keys(stateLabels) as HistoryStateIntent[]).map(value=>({value,label:stateLabels[value]}))
 const matchesStateIntent=(state:string,intent?:HistoryStateIntent)=>!intent||(intent==='ApprovedOrSelected'?(state==='Approved'||state==='SelectedForBaseline'):state===intent)
 
-export default function HistoryExplorer({api,projectId,releases,activeReleaseId,scope,initialSoftwareLevel,onSoftwareLevelChange,initialAssessmentId,onAssessmentSelected,initialStateIntent,onStateIntentChange,onBack,onOpenScr,onOpenRequirement,onCreateSystem,onCreateSoftware,user}:Props){
+export default function HistoryExplorer({api,projectId,releases,activeReleaseId,scope,initialSoftwareLevel,onSoftwareLevelChange,initialAssessmentId,onAssessmentSelected,initialStateIntent,onStateIntentChange,onBack,onOpenScr,onOpenRequirement,onCreateSystem,onCreateSoftware,user,ladder}:Props){
  const [view,setView]=useState<'build'|'deferred'>('build')
- const [query,setQuery]=useState(''),[softwareLevel,setSoftwareLevel]=useState<SoftwareLevel>(initialSoftwareLevel),[stateIntent,setStateIntent]=useState<HistoryStateIntent|undefined>(initialStateIntent),[scrPage,setScrPage]=useState(1),[scrTotal,setScrTotal]=useState(0),[scrTotalPages,setScrTotalPages]=useState(1),[scrs,setScrs]=useState<Scr[]>([])
+ const defaultSoftwareLevel:SoftwareLevel=ladderAllows(ladder,'HighLevel',LadderCapability.ChangeControl)?'HighLevel':'LowLevel'
+ const [query,setQuery]=useState(''),[softwareLevel,setSoftwareLevel]=useState<SoftwareLevel>(ladderAllows(ladder,initialSoftwareLevel,LadderCapability.ChangeControl)?initialSoftwareLevel:defaultSoftwareLevel),[stateIntent,setStateIntent]=useState<HistoryStateIntent|undefined>(initialStateIntent),[scrPage,setScrPage]=useState(1),[scrTotal,setScrTotal]=useState(0),[scrTotalPages,setScrTotalPages]=useState(1),[scrs,setScrs]=useState<Scr[]>([])
  const activeRelease=releases.find(x=>x.id===activeReleaseId)
  const load=useCallback(async()=>{const params=new URLSearchParams({projectId,page:String(scrPage),pageSize:'50',releaseId:activeReleaseId,type:scope});if(scope==='Software')params.set('level',softwareLevel);if(stateIntent)params.set('state',stateIntent);if(query)params.set('search',query)
   const response=await fetch(`${api}/api/history/change-requests?${params}`)
@@ -36,7 +39,7 @@ export default function HistoryExplorer({api,projectId,releases,activeReleaseId,
  },[activeReleaseId,api,projectId,query,scope,scrPage,softwareLevel,stateIntent])
  useEffect(()=>{const timer=setTimeout(load,180);return()=>clearTimeout(timer)},[load])
  useEffect(()=>{setScrPage(1)},[activeReleaseId,scope])
- useEffect(()=>{setSoftwareLevel(initialSoftwareLevel);setScrPage(1)},[initialSoftwareLevel])
+ useEffect(()=>{setSoftwareLevel(ladderAllows(ladder,initialSoftwareLevel,LadderCapability.ChangeControl)?initialSoftwareLevel:defaultSoftwareLevel);setScrPage(1)},[initialSoftwareLevel,ladder,defaultSoftwareLevel])
  useEffect(()=>{setStateIntent(initialStateIntent);setScrPage(1)},[initialStateIntent])
  const changeStateIntent=(intent?:HistoryStateIntent)=>{setStateIntent(intent);setScrPage(1);onStateIntentChange(intent)}
  const visibleScrs=scrs.filter(x=>matchesStateIntent(x.state,stateIntent))
@@ -63,7 +66,7 @@ export default function HistoryExplorer({api,projectId,releases,activeReleaseId,
     ?<button className="recordBuild" onClick={onCreateSystem}>+ New System Change Request</button>
     :<button className="recordBuild" onClick={()=>onCreateSoftware(softwareLevel)}>+ New {softwareLevel==='HighLevel'?'HLR':'LLR'} Change Request</button>)}
   </header>
-  {scope==='Software'&&<nav className="softwareLevelTabs" aria-label="Software requirement level"><button type="button" aria-current={softwareLevel==='HighLevel'?'page':undefined} onClick={()=>changeSoftwareLevel('HighLevel')}><b>HLR</b><span>High-level requirements</span></button><button type="button" aria-current={softwareLevel==='LowLevel'?'page':undefined} onClick={()=>changeSoftwareLevel('LowLevel')}><b>LLR</b><span>Low-level requirements</span></button></nav>}
+  {scope==='Software'&&<nav className="softwareLevelTabs" aria-label="Software requirement level">{ladderAllows(ladder,'HighLevel',LadderCapability.ChangeControl)&&<button type="button" aria-current={softwareLevel==='HighLevel'?'page':undefined} onClick={()=>changeSoftwareLevel('HighLevel')}><b>HLR</b><span>High-level requirements</span></button>}{ladderAllows(ladder,'LowLevel',LadderCapability.ChangeControl)&&<button type="button" aria-current={softwareLevel==='LowLevel'?'page':undefined} onClick={()=>changeSoftwareLevel('LowLevel')}><b>LLR</b><span>Low-level requirements</span></button>}</nav>}
   {scope==='Software'&&<DownstreamAssessmentQueue api={api} projectId={projectId} releaseId={activeReleaseId} targetLevel={softwareLevel} user={user} onOpenScr={onOpenScr} onOpenRequirement={onOpenRequirement} onCreateScr={onCreateSoftware} initialAssessmentId={initialAssessmentId} onAssessmentSelected={onAssessmentSelected}/>}
   {/* The shelf sits beside the build, not inside it. A reader planning this build can see what is waiting
       without it being counted as work this build already has. */}

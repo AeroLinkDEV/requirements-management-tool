@@ -1,6 +1,7 @@
 using AeroLink.Domain.ChangeControl;
 using AeroLink.Domain.Common;
 using AeroLink.Domain.Identity;
+using AeroLink.Domain.Hierarchy;
 using AeroLink.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 
@@ -29,9 +30,10 @@ public static class ApprovalConfigurationEndpoints
     public static void MapApprovalConfigurationEndpoints(this WebApplication app)
     {
         app.MapGet("/api/projects/{projectId:guid}/approval-configuration", async (Guid projectId, HttpContext http,
-            AeroLinkDbContext db, IdentityService identity, CancellationToken ct) =>
+            AeroLinkDbContext db, IdentityService identity, IProjectLadderPolicyResolver policyResolver, CancellationToken ct) =>
         {
             if (!await http.HasProjectAccessAsync(db, projectId, ct)) return Results.Forbid();
+            var ladderPolicy = await policyResolver.ResolveAsync(projectId, ct);
             var programId = await db.Projects.AsNoTracking().Where(x => x.Id == projectId)
                 .Select(x => (Guid?)x.ProgramId).SingleOrDefaultAsync(ct);
             if (programId is null) return Results.NotFound();
@@ -91,7 +93,7 @@ public static class ApprovalConfigurationEndpoints
                     holders, standing, delegated, holders.Count == 0 && standing.Count == 0 && delegated.Count == 0);
             }
 
-            var configured = Subjects.Select(subject =>
+            var configured = Subjects.Where(subject => IsSubjectSupported(ladderPolicy, subject)).Select(subject =>
             {
                 var workflow = workflows
                     .Where(x => x.AppliesTo == subject)
@@ -147,12 +149,15 @@ public static class ApprovalConfigurationEndpoints
 
     private static async Task<IResult> SaveConfigurationAsync(Guid projectId, ReviewSubject subject,
         ConfigureApprovalRequest request, HttpContext http, AeroLinkDbContext db, IdentityService identity,
-        CancellationToken ct)
+        IProjectLadderPolicyResolver policyResolver, CancellationToken ct)
     {
         if (!await db.Projects.AsNoTracking().AnyAsync(x => x.Id == projectId, ct)) return Results.NotFound();
         if (!await http.HasProjectRoleAsync(db, identity, projectId, ct,
                 ProgramRole.ConfigurationManager, ProgramRole.ProgramManager, ProgramRole.Administrator))
             return Results.Forbid();
+        var ladderPolicy = await policyResolver.ResolveAsync(projectId, ct);
+        if (!IsSubjectSupported(ladderPolicy, subject))
+            return Results.BadRequest(new { error = $"The {subject} approval subject is not present in the active project ladder.", code = "ladder_subject_unavailable" });
         if (request.Stages is null || request.Stages.Count == 0)
             return Results.BadRequest(new { error = "At least one required sign-off stage must be configured." });
         if (request.Stages.Count > 50)
@@ -224,6 +229,21 @@ public static class ApprovalConfigurationEndpoints
                     || (details.Contains("LogicalId", StringComparison.OrdinalIgnoreCase)
                         && details.Contains("Version", StringComparison.OrdinalIgnoreCase))));
     }
+
+    private static bool IsSubjectSupported(ILadderPolicy policy, ReviewSubject subject) => subject switch
+    {
+        ReviewSubject.System => policy.OrderedLevels.Contains(RequirementLevel.System)
+            && policy.Definition(RequirementLevel.System).Has(LevelCapabilities.HasChangeControl),
+        ReviewSubject.Software => policy.OrderedLevels.Any(level => level is (RequirementLevel.HighLevel or RequirementLevel.LowLevel)
+            && policy.Definition(level).Has(LevelCapabilities.HasChangeControl)),
+        ReviewSubject.SystemTest => policy.OrderedLevels.Contains(RequirementLevel.System)
+            && policy.Definition(RequirementLevel.System).Verification is not null,
+        ReviewSubject.HighLevelSoftwareTest => policy.OrderedLevels.Contains(RequirementLevel.HighLevel)
+            && policy.Definition(RequirementLevel.HighLevel).Verification is not null,
+        ReviewSubject.LowLevelSoftwareTest => policy.OrderedLevels.Contains(RequirementLevel.LowLevel)
+            && policy.Definition(RequirementLevel.LowLevel).Verification is not null,
+        _ => false,
+    };
 
     private static string ReadableRole(ProgramRole role) => role switch
     {

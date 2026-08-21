@@ -536,13 +536,14 @@ public static class BaselineEndpoints
                 baseline = baseline.DisplayNumber, baseline.Name, baseline.RequirementsHash, baseline.RequirementsMaterializedAt, requirementCount = rows.Count, requirements = rows });
         });
 
-        app.MapPost("/api/baselines/{id:guid}/generate-documents", async (Guid id, EmptyMutationRequest request, HttpContext http, AeroLinkDbContext db, IdentityService identity, ILadderPolicy ladderPolicy, ControlledOutputGenerator generator, EvidenceFileStore store, CancellationToken ct) =>
+        app.MapPost("/api/baselines/{id:guid}/generate-documents", async (Guid id, EmptyMutationRequest request, HttpContext http, AeroLinkDbContext db, IdentityService identity, IProjectLadderPolicyResolver policyResolver, ControlledOutputGenerator generator, EvidenceFileStore store, CancellationToken ct) =>
         {
             var baseline = await db.CandidateBaselines.AsNoTracking().SingleOrDefaultAsync(x => x.Id == id, ct); if (baseline is null) return Results.NotFound(); if (baseline.RequirementsMaterializedAt is null) return Results.BadRequest(new { error = "Materialize the requirement baseline before generating controlled outputs." });
             if(!await http.HasProjectRoleAsync(db,identity,baseline.ProjectId,ct,ProgramRole.ConfigurationManager))return Results.Forbid();
             if (await db.ReleaseCampaigns.AsNoTracking().AnyAsync(x => x.BaselineId == id && x.State == ReleaseCampaignState.InReview, ct))
                 return Results.Conflict(new { error = "The release package is frozen while approval is in progress.", code = "release_package_frozen" });
             var release = await db.Releases.AsNoTracking().SingleAsync(x => x.Id == baseline.ReleaseId, ct); var project = await db.Projects.AsNoTracking().SingleAsync(x => x.Id == baseline.ProjectId, ct);
+            var ladderPolicy = await policyResolver.ResolveAsync(project.Id, ct);
             var requirementCounts = await (from member in db.BaselineRequirements.AsNoTracking().Where(x => x.BaselineId == id) join artifact in db.Requirements.AsNoTracking() on member.ArtifactId equals artifact.Id group artifact by artifact.Level into g select new { g.Key, Count = g.Count() }).ToDictionaryAsync(x => x.Key, x => x.Count, ct);
             var procedureEffectivity = await TestProcedureEffectivity.ForBaselineAsync(db, id, ct);
             var procedureRevisionIds = procedureEffectivity?.RevisionIds ?? [];
@@ -555,20 +556,22 @@ public static class BaselineEndpoints
             var specs = new List<(ControlledDocumentType Type, string Number, string Title, int Count)>();
             foreach (var level in ladderPolicy.OrderedLevels)
             {
-                var requirementDocument = ladderPolicy.RequirementsDocument(level);
-                specs.Add((requirementDocument, $"{ladderPolicy.ControlledDocumentPrefix(requirementDocument)}-{int.Parse(suffix):D6}",
-                    $"{project.SoftwareProduct} {ladderPolicy.ControlledDocumentTitle(requirementDocument)}", requirementCounts.GetValueOrDefault(level)));
-                var procedureDocument = ladderPolicy.TestProcedureDocument(level);
-                specs.Add((procedureDocument, $"{ladderPolicy.ControlledDocumentPrefix(procedureDocument)}-{int.Parse(suffix):D6}",
-                    $"{project.SoftwareProduct} {ladderPolicy.ControlledDocumentTitle(procedureDocument)}",
-                    testCounts.GetValueOrDefault(ladderPolicy.ProcedureLevel(level))));
+                var definition = ladderPolicy.Definition(level);
+                if (definition.RequirementsDocumentType is { } requirementDocument)
+                    specs.Add((requirementDocument, $"{ladderPolicy.ControlledDocumentPrefix(requirementDocument)}-{int.Parse(suffix):D6}",
+                        $"{project.SoftwareProduct} {ladderPolicy.ControlledDocumentTitle(requirementDocument)}", requirementCounts.GetValueOrDefault(level)));
+                if (definition.Verification is { } verification)
+                    specs.Add((verification.DocumentType, $"{ladderPolicy.ControlledDocumentPrefix(verification.DocumentType)}-{int.Parse(suffix):D6}",
+                        $"{project.SoftwareProduct} {ladderPolicy.ControlledDocumentTitle(verification.DocumentType)}",
+                        testCounts.GetValueOrDefault(verification.ProcedureLevel)));
             }
             // The approved layout for each document type, if the programme has recorded one. Bound to the document
             // at generation and never re-resolved: revising a template afterwards must not change a document that
             // has already been produced and possibly signed.
             var approvedTemplates = await ControlledLayouts.ApprovedAsync(db, project.Id, ct);
-            var procedureDocumentTypes = ladderPolicy.OrderedLevels
-                .Select(ladderPolicy.TestProcedureDocument).ToHashSet();
+            var procedureDocumentTypes = ladderPolicy.Definitions
+                .Where(x => x.Verification is not null)
+                .Select(x => x.Verification!.DocumentType).ToHashSet();
             // #419: a controlled test-procedure document is one exact, immutable procedure manifest. The
             // record must never be created against a compatibility projection that materialization later
             // changes, and its hash basis must never fall back to the requirement manifest.

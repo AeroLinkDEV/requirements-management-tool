@@ -441,6 +441,7 @@ internal sealed class AeroLinkApiFactory(bool seedDemoAccounts = false, bool all
     DbCommandInterceptor? commandInterceptor = null,
     IManagedDocumentStorageFaultInjector? storageFaultInjector = null,
     ILadderPolicy? testLadderPolicy = null,
+    bool attachProjectLadders = true,
     Action<object>? telemetryObserver = null,
     [CallerFilePath] string? callerFile = null,
     [CallerMemberName] string? callerMember = null) : WebApplicationFactory<Program>
@@ -562,6 +563,7 @@ internal sealed class AeroLinkApiFactory(bool seedDemoAccounts = false, bool all
                     ConnectionString,
                     new SaveRaceInterceptor(),
                     new TimingConnectionInterceptor(_factoryId, _callerFile, _callerMember, _telemetryObserver));
+                if (attachProjectLadders) options.AddInterceptors(new TestProjectLadderInterceptor());
                 if (commandInterceptor is not null) options.AddInterceptors(commandInterceptor);
             });
             // Counting the queries one request makes is only meaningful when nothing else in the host is

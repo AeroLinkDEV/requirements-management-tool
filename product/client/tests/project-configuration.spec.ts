@@ -1,7 +1,7 @@
 import { expect, test } from '@playwright/test'
 import { apiBase, login } from './auth'
 
-test('Project configuration authors a disposable graph, records history, refuses activation, and nests approvals', async ({ page }) => {
+test('Project configuration authors and activates a disposable graph, records history, and nests approvals', async ({ page }) => {
   await login(page, 'admin', { openProject: false })
   const suffix = Date.now().toString(36)
   const created = await page.request.post(`${apiBase}/api/workspaces`, { data: {
@@ -13,7 +13,7 @@ test('Project configuration authors a disposable graph, records history, refuses
     initialReleaseIsReleased: false,
   } })
   expect(created.ok(), await created.text()).toBeTruthy()
-  const workspace = await created.json() as { project: { name: string } }
+  const workspace = await created.json() as { program: { id: string }; project: { id: string; name: string }; release: { id: string } }
   const slug = workspace.project.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '')
 
   await page.goto(`/projects/${slug}/configuration`)
@@ -36,10 +36,39 @@ test('Project configuration authors a disposable graph, records history, refuses
   await page.getByRole('button', { name: /Requirement ladder/ }).click()
   await page.getByPlaceholder('Why is this ladder changing?').fill('Attempt the named readiness gate')
   await page.getByRole('button', { name: 'Attempt activation' }).click()
-  const activationAlert = page.getByRole('alert')
-  await expect(activationAlert).toContainText('approval.workflow-subject')
-  await expect(activationAlert).toContainText('release.reconciliation')
-  await expect(activationAlert).not.toContainText('change-request.authoring')
+  await expect(page.getByRole('status')).toContainText('Ladder activated. Runtime surfaces now use the stored effective ladder.')
+  await expect(page.locator('.ladderRow')).toHaveCount(2)
+  await expect(page.getByText(/active and immutable/i)).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Attempt activation' })).toHaveCount(0)
+
+  await page.goto(`/programs/${workspace.program.id}/projects/${workspace.project.id}/releases/${workspace.release.id}/command-center`)
+  const nav = page.getByRole('navigation', { name: 'Primary navigation' })
+  await expect(nav).toBeVisible()
+  const requirements = nav.locator('.navGroup').filter({ has: page.locator('summary').filter({ hasText: 'REQUIREMENTS' }) })
+  await requirements.locator('summary').click()
+  await expect(requirements.getByRole('button', { name: 'System' })).toBeVisible()
+  await expect(requirements.getByRole('button', { name: 'Software' })).toBeVisible()
+  await requirements.getByRole('button', { name: 'Software' }).click()
+  await expect(requirements.getByRole('link', { name: 'Software Requirements Explorer' })).toBeVisible()
+  await expect(requirements.getByRole('link', { name: 'Generated Software Requirements Documents' })).toBeVisible()
+  await requirements.getByRole('link', { name: 'Software Requirements Explorer' }).click()
+  await expect(page.getByRole('combobox', { name: 'Level filter' })).toBeVisible()
+  await expect(page.getByRole('option', { name: 'Software HLR' })).toHaveCount(0)
+  await expect(page.getByRole('option', { name: 'Software LLR' })).toHaveCount(1)
+  const verification = nav.locator('.navGroup').filter({ has: page.locator('summary').filter({ hasText: 'VERIFICATION' }) })
+  await verification.locator('summary').click()
+  await verification.getByRole('button', { name: 'Software' }).click()
+  await expect(verification.getByRole('link', { name: 'Software LLR Test Results' })).toBeVisible()
+  await expect(verification.getByRole('link', { name: 'Software HLR Test Results' })).toHaveCount(0)
+  await expect(verification.getByRole('link', { name: 'Software Test Procedure Explorer' })).toBeVisible()
+
+  let removedLevelProcedureRequests = 0
+  page.on('request', request => {
+    if (request.url().includes('/api/test-procedures')) removedLevelProcedureRequests++
+  })
+  await page.goto(`/programs/${workspace.program.id}/projects/${workspace.project.id}/releases/${workspace.release.id}/software-verification/hlr/procedures`)
+  await expect(page.getByRole('heading', { name: 'Workspace unavailable' })).toBeVisible()
+  expect(removedLevelProcedureRequests).toBe(0)
 
   // The old deep link remains readable, while the same approval surface is nested in Project configuration.
   await page.goto(`/projects/${slug}/approval-configuration`)

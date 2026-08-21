@@ -13,20 +13,29 @@ namespace AeroLink.Infrastructure.Persistence;
 public sealed record GeneratedOutput(byte[] Content, string ContentType, string FileName);
 internal sealed record OutputRow(string Number, string Level, string Text, string Source);
 
-public sealed class ControlledOutputGenerator(AeroLinkDbContext db, RichContentPublisher richContent, ILadderPolicy? policy = null)
+public sealed class ControlledOutputGenerator(AeroLinkDbContext db, RichContentPublisher richContent,
+    ILadderPolicy? policy = null, IProjectLadderPolicyResolver? policyResolver = null)
 {
-    private readonly ILadderPolicy ladderPolicy = policy ?? LegacyLadderPolicy.Instance;
+    private readonly ILadderPolicy fallbackPolicy = policy ?? LegacyLadderPolicy.Instance;
     public async Task<GeneratedOutput?> GenerateTraceabilityAsync(Guid baselineId,string format,CancellationToken ct)
     {
         var baseline=await db.CandidateBaselines.AsNoTracking().SingleOrDefaultAsync(x=>x.Id==baselineId,ct);if(baseline is null||baseline.RequirementsMaterializedAt is null)return null;
-        var project=await db.Projects.AsNoTracking().SingleAsync(x=>x.Id==baseline.ProjectId,ct);var program=await db.Programs.AsNoTracking().SingleAsync(x=>x.Id==project.ProgramId,ct);var release=await db.Releases.AsNoTracking().SingleAsync(x=>x.Id==baseline.ReleaseId,ct);
-        var requirements=await(from member in db.BaselineRequirements.AsNoTracking().Where(x=>x.BaselineId==baselineId) join artifact in db.Requirements.AsNoTracking() on member.ArtifactId equals artifact.Id join revision in db.RequirementRevisions.AsNoTracking() on member.RevisionId equals revision.Id orderby artifact.Level,artifact.BaseNumber select new{revision.Id,display=artifact.BaseNumber+"."+revision.Revision.ToString("D2"),level=artifact.Level.ToString(),revision.Statement}).ToListAsync(ct);
+        var project=await db.Projects.AsNoTracking().SingleAsync(x=>x.Id==baseline.ProjectId,ct);
+        var ladderPolicy = policyResolver is null ? fallbackPolicy : await policyResolver.ResolveAsync(project.Id, ct);
+        var allowedLevels = ladderPolicy.OrderedLevels.ToArray();
+        var program=await db.Programs.AsNoTracking().SingleAsync(x=>x.Id==project.ProgramId,ct);var release=await db.Releases.AsNoTracking().SingleAsync(x=>x.Id==baseline.ReleaseId,ct);
+        var requirements=await(from member in db.BaselineRequirements.AsNoTracking().Where(x=>x.BaselineId==baselineId) join artifact in db.Requirements.AsNoTracking().Where(x=>allowedLevels.Contains(x.Level)) on member.ArtifactId equals artifact.Id join revision in db.RequirementRevisions.AsNoTracking() on member.RevisionId equals revision.Id orderby artifact.Level,artifact.BaseNumber select new{revision.Id,display=artifact.BaseNumber+"."+revision.Revision.ToString("D2"),level=artifact.Level,revision.Statement}).ToListAsync(ct);
         var ids=requirements.Select(x=>x.Id).ToList();var links=await db.RequirementTraces.AsNoTracking().Where(x=>ids.Contains(x.SourceRevisionId)||ids.Contains(x.TargetRevisionId)).ToListAsync(ct);var byId=requirements.ToDictionary(x=>x.Id);
+        if (ladderPolicy is not ILegacyLadderCompatibilityPolicy)
+            links = links.Where(link => byId.TryGetValue(link.SourceRevisionId, out var source)
+                && byId.TryGetValue(link.TargetRevisionId, out var target)
+                && IsConfiguredTrace(ladderPolicy, source.level, target.level, link.Type)).ToList();
         var procedureEffectivity = await TestProcedureEffectivity.ForBaselineAsync(db, baselineId, ct);
         var effectiveProcedureRevisionIds = procedureEffectivity?.RevisionIds ?? [];
-        var coverage=await(from link in db.TestCoverage.AsNoTracking().Where(x=>ids.Contains(x.RequirementRevisionId)&&effectiveProcedureRevisionIds.Contains(x.ProcedureRevisionId)) join revision in db.TestProcedureRevisions.AsNoTracking() on link.ProcedureRevisionId equals revision.Id join procedure in db.TestProcedures.AsNoTracking() on revision.ProcedureId equals procedure.Id select new{link.RequirementRevisionId,ProcedureRevisionId=revision.Id,display=procedure.BaseNumber+"."+revision.Revision.ToString("D2")}).ToListAsync(ct);
+        var allowedProcedureLevels = ladderPolicy.Definitions.Where(x => x.Verification is not null).Select(x => x.Verification!.ProcedureLevel).ToArray();
+        var coverage=await(from link in db.TestCoverage.AsNoTracking().Where(x=>ids.Contains(x.RequirementRevisionId)&&effectiveProcedureRevisionIds.Contains(x.ProcedureRevisionId)) join revision in db.TestProcedureRevisions.AsNoTracking() on link.ProcedureRevisionId equals revision.Id join procedure in db.TestProcedures.AsNoTracking().Where(x=>allowedProcedureLevels.Contains(x.Level)) on revision.ProcedureId equals procedure.Id select new{link.RequirementRevisionId,ProcedureRevisionId=revision.Id,display=procedure.BaseNumber+"."+revision.Revision.ToString("D2")}).ToListAsync(ct);
         var procedureTitles=await TestProcedureRevisionTitleProjection.ForRevisionsAsync(db,coverage.Select(x=>x.ProcedureRevisionId).Distinct().ToList(),ct);
-        var records=requirements.Select(req=>{var parents=links.Where(x=>x.SourceRevisionId==req.Id&&byId.ContainsKey(x.TargetRevisionId)).Select(x=>byId[x.TargetRevisionId].display).ToList();var children=links.Where(x=>x.TargetRevisionId==req.Id&&byId.ContainsKey(x.SourceRevisionId)).Select(x=>byId[x.SourceRevisionId].display).ToList();var tests=coverage.Where(x=>x.RequirementRevisionId==req.Id).Select(x=>$"{x.display} - {procedureTitles[x.ProcedureRevisionId].Title}").ToList();return new PublicationRecord(req.display,req.level,"Full lifecycle linkage",req.Statement,new[]{("Parent requirement revisions",parents.Count==0?"Top-level / none":string.Join("; ",parents)),("Child requirement revisions",children.Count==0?"Leaf-level / none":string.Join("; ",children)),("Verification procedure revisions",tests.Count==0?"Coverage gap - none recorded":string.Join("; ",tests))});}).ToList();
+        var records=requirements.Select(req=>{var parents=links.Where(x=>x.SourceRevisionId==req.Id&&byId.ContainsKey(x.TargetRevisionId)).Select(x=>byId[x.TargetRevisionId].display).ToList();var children=links.Where(x=>x.TargetRevisionId==req.Id&&byId.ContainsKey(x.SourceRevisionId)).Select(x=>byId[x.SourceRevisionId].display).ToList();var tests=coverage.Where(x=>x.RequirementRevisionId==req.Id).Select(x=>$"{x.display} - {procedureTitles[x.ProcedureRevisionId].Title}").ToList();return new PublicationRecord(req.display,req.level.ToString(),"Full lifecycle linkage",req.Statement,new[]{("Parent requirement revisions",parents.Count==0?"Top-level / none":string.Join("; ",parents)),("Child requirement revisions",children.Count==0?"Leaf-level / none":string.Join("; ",children)),("Verification procedure revisions",tests.Count==0?"Coverage gap - none recorded":string.Join("; ",tests))});}).ToList();
         var generatedAt=DateTimeOffset.UtcNow;var approvals=await ApprovalBasis(baselineId,release.Id,generatedAt,ct);var hash=baseline.RequirementsHash??baseline.ContentHash??new string('0',64);var status=release.IsReleased?"Approved and Released":"Controlled Draft";
         var createdBy=(await db.BaselineEvents.AsNoTracking().Where(x=>x.BaselineId==baseline.Id&&x.EventType=="CandidateBaselineCreated").ToListAsync(ct)).OrderBy(x=>x.OccurredAt).Select(x=>x.ActorId).FirstOrDefault()??"system";
         var publication=new ProfessionalPublication(project.SoftwareProduct,program.Name+" ("+program.Code+")",project.Name,"Lifecycle Traceability Report",$"{project.SoftwareProduct} Full Traceability Evidence",$"Readable upward, downward, change-authority, and verification linkage for baseline {baseline.DisplayNumber}","TRACE-"+release.Version.Replace(".",""),"00",status,release.Version,baseline.DisplayNumber,createdBy,generatedAt,hash,new[]{("Requirements",records.Count.ToString("N0")),("Trace links",links.Count.ToString("N0")),("Verification links",coverage.Count.ToString("N0")),("Requirement manifest hash",hash)},approvals,new[]{("00",status,generatedAt.UtcDateTime.ToString("yyyy-MM-dd"),createdBy)},new[]{new PublicationSection("Complete Requirement Linkage","Each row identifies one exact baseline requirement revision and all of its upward, downward, and verification relationships.",records)});
@@ -37,14 +46,27 @@ public sealed class ControlledOutputGenerator(AeroLinkDbContext db, RichContentP
     {
         var document = await db.ControlledDocuments.AsNoTracking().SingleOrDefaultAsync(x => x.Id == documentId, ct); if (document is null) return null;
         var project = await db.Projects.AsNoTracking().SingleAsync(x => x.Id == document.ProjectId, ct); var program = await db.Programs.AsNoTracking().SingleAsync(x => x.Id == project.ProgramId, ct); var release = await db.Releases.AsNoTracking().SingleAsync(x => x.Id == document.ReleaseId, ct); var baseline = await db.CandidateBaselines.AsNoTracking().SingleAsync(x => x.Id == document.BaselineId, ct);
-        var approvalProcedureLevel = ProcedureLevelFor(document.Type);
+        var ladderPolicy = policyResolver is null
+            ? fallbackPolicy
+            : await policyResolver.ResolveAsync(document.ProjectId, ct);
+        // A retained document is historical evidence even when its level was removed from the current
+        // ladder. Interpret its stored enum with the characterized catalogue for regeneration; current
+        // policy still governs creation/listing, while a download must not turn into an "unknown" record.
+        var interpretationPolicy = ladderPolicy;
+        var approvalProcedureLevel = ProcedureLevelFor(document.Type, interpretationPolicy);
+        var requirementLevel = RequirementLevelFor(document.Type, interpretationPolicy);
+        if (requirementLevel is null && approvalProcedureLevel is null)
+        {
+            interpretationPolicy = LegacyLadderPolicy.Instance;
+            approvalProcedureLevel = ProcedureLevelFor(document.Type, interpretationPolicy);
+            requirementLevel = RequirementLevelFor(document.Type, interpretationPolicy);
+        }
+        if (requirementLevel is null && approvalProcedureLevel is null)
+            throw new DomainException($"Unknown controlled document type: {document.Type}.");
         var procedureSnapshot = approvalProcedureLevel is null
             ? null
             : await ControlledProcedureDocumentSnapshotProjection.ForDocumentAsync(db, document.BaselineId,
                 approvalProcedureLevel.Value, document.GeneratedAt, ct);
-        var requirementLevel = RequirementLevelFor(document.Type);
-        if (requirementLevel is null && approvalProcedureLevel is null)
-            throw new DomainException($"Unknown controlled document type: {document.Type}.");
         var records = requirementLevel is not null
             ? await RequirementPublicationRows(document.BaselineId, requirementLevel.Value, ct)
             : await ProcedurePublicationRows(procedureSnapshot!, approvalProcedureLevel!.Value, ct);
@@ -86,7 +108,7 @@ public sealed class ControlledOutputGenerator(AeroLinkDbContext db, RichContentP
         {
             sections = [new("Controlled Records", $"This section contains {records.Count:N0} exact, revision-controlled records rendered from baseline {baseline.DisplayNumber}.", records)];
             if (isRequirementDocument)
-                sections.Add(new("Annex A - Upward Requirement Traceability", "This annex identifies the exact parent requirement revision(s) for every published requirement. Top-level System requirements are explicitly identified.", await TraceAnnexRows(document.BaselineId, level!.Value, document.GeneratedAt, ct)));
+                sections.Add(new("Annex A - Upward Requirement Traceability", "This annex identifies the exact parent requirement revision(s) for every published requirement. Top-level System requirements are explicitly identified.", await TraceAnnexRows(document.BaselineId, level!.Value, document.GeneratedAt, interpretationPolicy, ct)));
         }
         else
         {
@@ -111,7 +133,7 @@ public sealed class ControlledOutputGenerator(AeroLinkDbContext db, RichContentP
                 {
                     PublicationSectionContent.ControlledRecords => new(heading, introduction, records),
                     PublicationSectionContent.UpwardTraceAnnex when isRequirementDocument =>
-                        new(heading, introduction, await TraceAnnexRows(document.BaselineId, level!.Value, document.GeneratedAt, ct)),
+                        new(heading, introduction, await TraceAnnexRows(document.BaselineId, level!.Value, document.GeneratedAt, interpretationPolicy, ct)),
                     PublicationSectionContent.VerificationAnnex when isRequirementDocument =>
                         new(heading, introduction, await VerificationAnnexRows(document.BaselineId, level!.Value, ct)),
                     // A trace or verification annex has no meaning in a procedure document. The heading is
@@ -144,16 +166,16 @@ public sealed class ControlledOutputGenerator(AeroLinkDbContext db, RichContentP
         return ProfessionalPublicationRenderer.Render(publication, format, $"{document.DocumentNumber}.{document.Revision:D2}_{release.Version}");
     }
 
-    private RequirementLevel? RequirementLevelFor(ControlledDocumentType type) =>
+    private static RequirementLevel? RequirementLevelFor(ControlledDocumentType type, ILadderPolicy ladderPolicy) =>
         ladderPolicy.OrderedLevels
-            .Where(level => ladderPolicy.RequirementsDocument(level) == type)
+            .Where(level => ladderPolicy.Definition(level).RequirementsDocumentType == type)
             .Select(level => (RequirementLevel?)level)
             .SingleOrDefault();
 
-    private TestProcedureLevel? ProcedureLevelFor(ControlledDocumentType type) =>
+    private static TestProcedureLevel? ProcedureLevelFor(ControlledDocumentType type, ILadderPolicy ladderPolicy) =>
         ladderPolicy.OrderedLevels
-            .Where(level => ladderPolicy.TestProcedureDocument(level) == type)
-            .Select(ladderPolicy.ProcedureLevel)
+            .Where(level => ladderPolicy.Definition(level).Verification?.DocumentType == type)
+            .Select(level => ladderPolicy.Definition(level).Verification!.ProcedureLevel)
             .Cast<TestProcedureLevel?>()
             .SingleOrDefault();
 
@@ -185,12 +207,23 @@ public sealed class ControlledOutputGenerator(AeroLinkDbContext db, RichContentP
             return adds ? RichContentPublisher.ForPublication(content, images) : "";
         }
     }
-    private async Task<List<PublicationRecord>> TraceAnnexRows(Guid baselineId, RequirementLevel level, DateTimeOffset generatedAt, CancellationToken ct)
+    private async Task<List<PublicationRecord>> TraceAnnexRows(Guid baselineId, RequirementLevel level,
+        DateTimeOffset generatedAt, ILadderPolicy ladderPolicy, CancellationToken ct)
     {
         var sources=await(from member in db.BaselineRequirements.AsNoTracking().Where(x=>x.BaselineId==baselineId) join artifact in db.Requirements.AsNoTracking().Where(x=>x.Level==level) on member.ArtifactId equals artifact.Id join revision in db.RequirementRevisions.AsNoTracking() on member.RevisionId equals revision.Id orderby artifact.BaseNumber select new{revision.Id,display=artifact.BaseNumber+"."+revision.Revision.ToString("D2")}).ToListAsync(ct);
         var sourceIds=sources.Select(x=>x.Id).ToList();var links=(await db.RequirementTraces.AsNoTracking().Where(x=>sourceIds.Contains(x.SourceRevisionId)).ToListAsync(ct)).Where(x=>x.CreatedAt<=generatedAt).ToList();var targetIds=links.Select(x=>x.TargetRevisionId).Distinct().ToList();
-        var targets=await(from revision in db.RequirementRevisions.AsNoTracking().Where(x=>targetIds.Contains(x.Id)) join artifact in db.Requirements.AsNoTracking() on revision.ArtifactId equals artifact.Id select new{revision.Id,display=artifact.BaseNumber+"."+revision.Revision.ToString("D2"),level=artifact.Level.ToString()}).ToDictionaryAsync(x=>x.Id,ct);
+        var targets=await(from revision in db.RequirementRevisions.AsNoTracking().Where(x=>targetIds.Contains(x.Id)) join artifact in db.Requirements.AsNoTracking() on revision.ArtifactId equals artifact.Id select new{revision.Id,display=artifact.BaseNumber+"."+revision.Revision.ToString("D2"),level=artifact.Level}).ToDictionaryAsync(x=>x.Id,ct);
+        if (ladderPolicy is not ILegacyLadderCompatibilityPolicy)
+            links = links.Where(link => targets.TryGetValue(link.TargetRevisionId, out var target)
+                && IsConfiguredTrace(ladderPolicy, level, target.level, link.Type)).ToList();
         return sources.Select(source=>{var parents=links.Where(x=>x.SourceRevisionId==source.Id).Select(x=>targets.TryGetValue(x.TargetRevisionId,out var target)?$"{target.display} ({target.level}, {x.Type})":x.TargetRevisionId.ToString()).ToList();return new PublicationRecord(source.display,level.ToString(),"Parent trace",parents.Count==0?(level==RequirementLevel.System?"Top-level System requirement - no upward requirement parent applies.":"No parent trace recorded."):string.Join("; ",parents),new[]{("Parent count",parents.Count.ToString())});}).ToList();
+    }
+
+    private static bool IsConfiguredTrace(ILadderPolicy policy, RequirementLevel source, RequirementLevel target,
+        RequirementTraceType type)
+    {
+        try { RequirementTracePolicy.Validate(policy, source, target, type); return true; }
+        catch (DomainException) { return false; }
     }
     /// <summary>
     /// Verification coverage for every published requirement, for programmes whose standard puts that annex

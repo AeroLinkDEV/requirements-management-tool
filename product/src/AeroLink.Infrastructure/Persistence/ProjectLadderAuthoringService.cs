@@ -3,6 +3,7 @@ using AeroLink.Domain.ChangeControl;
 using AeroLink.Domain.Hierarchy;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Npgsql;
 
 namespace AeroLink.Infrastructure.Persistence;
 
@@ -32,7 +33,15 @@ public sealed record ProjectLadderReadModel(
     IReadOnlyList<ProjectLadderHistoryReadModel> History,
     LadderConsumerManifest Readiness,
     IReadOnlyList<LadderCatalogueReadModel> Catalogue,
-    bool CanManage);
+    bool CanManage)
+{
+    /// <summary>
+    /// The runtime projection is separate from authored Steps so a non-default Draft never becomes client
+    /// authority before activation. Drafts intentionally project the prior effective legacy/default catalogue;
+    /// Stored legacy and Active non-default configurations project their persisted effective graph.
+    /// </summary>
+    public IReadOnlyList<LadderStepDraft> EffectiveSteps { get; init; } = [];
+}
 
 public sealed record ProjectLadderEditResult(
     ProjectLadderEditResultKind Kind, ProjectLadderReadModel? Configuration = null, string? Error = null);
@@ -43,12 +52,13 @@ public sealed record ProjectLadderActivationResult(
     ProjectLadderActivationResultKind Kind, ProjectLadderReadModel? Configuration = null,
     string? Error = null, LadderConsumerManifest? Readiness = null);
 
-public enum ProjectLadderActivationResultKind { NotFound, Refused, Conflict, Invalid }
+public enum ProjectLadderActivationResultKind { NotFound, Success, Refused, Conflict, Invalid }
 
 /// <summary>
-/// The one application authority for project-ladder edits and activation attempts.  The edit operation never
-/// accepts lifecycle fields, and activation is deliberately refused until every #702 consumer is routed by a later
-/// slice.  No seeder, migration, or aggregate operation can create an Active row through another public path.
+/// The one application authority for project-ladder edits and activation attempts. The edit operation never
+/// accepts lifecycle fields, and activation succeeds only after every stable matrix consumer is registered and
+/// the persisted graph passes readiness/concurrency checks. No seeder, migration, or aggregate operation can
+/// create an Active row through another public path.
 /// </summary>
 public sealed class ProjectLadderAuthoringService(
     AeroLinkDbContext db, ILadderPolicy policy, IEnumerable<ILadderConsumerRegistration> consumerRegistrations)
@@ -158,7 +168,7 @@ public sealed class ProjectLadderAuthoringService(
         {
             return Conflict();
         }
-        catch (DbUpdateException ex) when (IsSqliteLock(ex))
+        catch (DbUpdateException ex) when (IsSqliteLock(ex) || IsHistoryRevisionConflict(ex))
         {
             return Conflict();
         }
@@ -166,7 +176,10 @@ public sealed class ProjectLadderAuthoringService(
         return new(ProjectLadderEditResultKind.Success, result);
     }
 
-    /// <summary>The sole activation authority. #713 intentionally returns named unrouted blockers.</summary>
+    /// <summary>
+    /// The sole activation authority. Readiness, persisted graph validation, version checking, and the Active
+    /// lifecycle mutation all occur in the same transaction so a failed or stale attempt leaves no partial state.
+    /// </summary>
     public async Task<ProjectLadderActivationResult> ActivateAsync(Guid projectId,
         ProjectLadderActivationCommand command, string actor, DateTimeOffset now, CancellationToken ct)
     {
@@ -187,8 +200,59 @@ public sealed class ProjectLadderAuthoringService(
         var readiness = LadderConsumerManifestCatalog.BuildForRegistrations(_consumerRegistrations);
         var blockers = string.Join(", ", readiness.MissingOrUnrouted.Select(x => x.Id)
             .Concat(readiness.UnknownRegistrations.Select(x => $"unknown:{x.Id}")));
-        return new(ProjectLadderActivationResultKind.Refused, Error:
-            $"Activation is refused until routing is complete. Unrouted consumers: {blockers}.", Readiness: readiness);
+        if (!readiness.IsReady)
+            return new(ProjectLadderActivationResultKind.Refused, Error:
+                $"Activation is refused until routing is complete. Unrouted consumers: {blockers}.", Readiness: readiness);
+
+        // Re-read and mutate in one SaveChanges unit. EF wraps the activation row and immutable history insert
+        // in one transaction, while leaving no open transaction across the test race gate or the second read.
+        // The first read provides a quick, user-friendly stale response; this second read is the authority that
+        // closes the race with an edit or another activation request.
+        db.ChangeTracker.Clear();
+        configuration = await db.ProjectLadderConfigurations
+            .Include(x => x.Steps).Include(x => x.AllowedUpstream)
+            .SingleOrDefaultAsync(x => x.ProjectId == projectId, ct);
+        if (configuration is null)
+            return new(ProjectLadderActivationResultKind.NotFound, Error: "The project has no ladder configuration.");
+        if (configuration.Version != command.ExpectedVersion)
+            return new(ProjectLadderActivationResultKind.Conflict, Error: "Another ladder edit was saved. Refresh before activating.");
+        if (configuration.Classification != ProjectLadderConfigurationClassification.NonDefault
+            || configuration.State != ProjectLadderConfigurationState.Draft)
+            return ActivationInvalid("Only a non-default draft ladder can be activated.");
+        try { _ = ProjectLadderResolver.Resolve(configuration, policy); }
+        catch (DomainException ex) { return ActivationInvalid(ex.Message); }
+
+        var steps = configuration.Steps
+            .OrderBy(x => x.Position)
+            .Select(x => new LadderStepDraft(x.CatalogueEntry, x.Position, x.Capabilities))
+            .ToArray();
+        var byId = configuration.Steps.ToDictionary(x => x.Id);
+        var relationships = configuration.AllowedUpstream
+            .Select(x => new LadderRelationshipDraft(byId[x.ParentStepId].CatalogueEntry, byId[x.ChildStepId].CatalogueEntry))
+            .ToArray();
+        var canonical = ProjectLadderSnapshot.Canonicalize(steps, relationships);
+        var snapshotHash = ProjectLadderSnapshot.Hash(canonical);
+        try
+        {
+            configuration.Activate(actor, now, readiness.Version, readiness.Hash);
+            db.ProjectLadderConfigurationHistories.Add(new ProjectLadderConfigurationHistory(
+                configuration.Id, projectId, configuration.Version, actor, now,
+                $"Activated ladder: {command.Reason.Trim()}", canonical, snapshotHash));
+            await db.SaveChangesAsync(ct);
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            return new(ProjectLadderActivationResultKind.Conflict,
+                Error: "Another ladder edit or activation was saved. Refresh before activating.");
+        }
+        catch (DbUpdateException ex) when (IsSqliteLock(ex) || IsHistoryRevisionConflict(ex))
+        {
+            return new(ProjectLadderActivationResultKind.Conflict,
+                Error: "Another ladder edit or activation was saved. Refresh before activating.");
+        }
+
+        var result = await ReadAsync(projectId, ct, canManage: true);
+        return new(ProjectLadderActivationResultKind.Success, result, Readiness: readiness);
     }
 
     private static ProjectLadderEditResult Conflict() =>
@@ -200,13 +264,30 @@ public sealed class ProjectLadderAuthoringService(
     private static bool IsSqliteLock(DbUpdateException exception) =>
         exception.InnerException is SqliteException { SqliteErrorCode: 5 or 6 };
 
+    // EF may issue the history INSERT before the versioned configuration UPDATE. The losing writer can
+    // therefore collide on the immutable (ConfigurationId, Revision) evidence key before the concurrency-token
+    // UPDATE reports zero rows. Only that exact constraint is a controlled stale-writer conflict; unrelated
+    // integrity failures must still surface instead of being mislabeled as concurrency.
+    private static bool IsHistoryRevisionConflict(DbUpdateException exception) =>
+        exception.InnerException is SqliteException { SqliteErrorCode: 19 } sqlite
+            && sqlite.Message.Contains("project_ladder_configuration_history.ConfigurationId", StringComparison.Ordinal)
+            && sqlite.Message.Contains("project_ladder_configuration_history.Revision", StringComparison.Ordinal)
+        || exception.InnerException is PostgresException
+        {
+            SqlState: PostgresErrorCodes.UniqueViolation,
+            ConstraintName: "IX_project_ladder_configuration_history_ConfigurationId_Revisi~"
+        };
+
     private async Task<ProjectLadderReadModel> ToReadModelAsync(ProjectLadderConfiguration configuration, CancellationToken ct, bool canManage = false)
     {
-        _ = ProjectLadderResolver.Resolve(configuration, policy);
+        var effectivePolicy = ProjectLadderPolicyStorage.ResolvePersisted(configuration, configuration.ProjectId, policy);
         var history = await db.ProjectLadderConfigurationHistories.AsNoTracking()
             .Where(x => x.ConfigurationId == configuration.Id).OrderByDescending(x => x.Revision)
             .Select(x => new ProjectLadderHistoryReadModel(x.Revision, x.Actor, x.OccurredAt, x.Reason, x.CanonicalSnapshot, x.SnapshotHash))
             .ToListAsync(ct);
+        var effectiveSteps = effectivePolicy.OrderedLevels
+            .Select((level, index) => new LadderStepDraft(level.ToString(), index + 1, effectivePolicy.Definition(level).Capabilities))
+            .ToArray();
         return new(configuration.ProjectId, configuration.Id, configuration.Classification, configuration.State,
             configuration.Version, configuration.ActivationManifestVersion, configuration.ActivationManifestHash,
             configuration.Steps.OrderBy(x => x.Position).Select(x => new LadderStepDraft(x.CatalogueEntry, x.Position, x.Capabilities)).ToArray(),
@@ -215,6 +296,6 @@ public sealed class ProjectLadderAuthoringService(
                 configuration.Steps.Single(s => s.Id == x.ChildStepId).CatalogueEntry)).ToArray(), history,
             LadderConsumerManifestCatalog.BuildForRegistrations(_consumerRegistrations),
             policy.OrderedLevels.Select(level => new LadderCatalogueReadModel(level.ToString(), policy.Definition(level).Capabilities)).ToArray(),
-            canManage);
+            canManage) { EffectiveSteps = effectiveSteps };
     }
 }

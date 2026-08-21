@@ -415,9 +415,10 @@ public sealed class LegacyLadderPolicy : ILadderPolicy, ILegacyLadderCompatibili
 /// <summary>
 /// A policy compiled from a resolved project ladder.  The persisted ladder only supplies catalogue presence,
 /// capabilities, and direct parent/child edges; prefixes and the other product bindings remain code-owned.
-/// This type is deliberately an injected/test policy until activation is made authoritative by #706.
+/// Stored and Active project configurations use this compiled policy as their effective runtime authority;
+/// injected instances remain useful for isolated domain tests and compatibility overloads.
 /// </summary>
-public sealed class ResolvedProjectLadderPolicy : ILadderPolicy
+public class ResolvedProjectLadderPolicy : ILadderPolicy
 {
     private readonly ILadderPolicy catalogue;
     private readonly IReadOnlyList<RequirementLevel> levels;
@@ -486,7 +487,7 @@ public sealed class ResolvedProjectLadderPolicy : ILadderPolicy
             return Definition(RequirementLevel.System).ChangeRequest?.Prefix
                 ?? throw new DomainException("The project ladder does not configure System change control.");
         if (type != ChangeRequestType.Software || softwareLevel is null)
-            throw new DomainException("A software change request must declare a configured requirement level before it can be numbered.");
+            throw new DomainException("A software change request must declare HLR or LLR scope before it can be numbered.");
         return Definition(softwareLevel.Value).ChangeRequest?.Prefix
             ?? throw new DomainException($"The project ladder does not configure {softwareLevel.Value} change control.");
     }
@@ -507,9 +508,30 @@ public sealed class ResolvedProjectLadderPolicy : ILadderPolicy
         ?? throw new DomainException($"The project ladder does not configure procedure level {level}.");
     public bool IsKnownTestProcedurePrefix(string baseNumber) => !string.IsNullOrWhiteSpace(baseNumber)
         && definitions.Any(x => x.Verification is not null && baseNumber.StartsWith(x.Verification.ProcedurePrefix + "-", StringComparison.OrdinalIgnoreCase));
-    public string TestChangeReviewPrefix(TestChangeReviewDiscipline discipline) => catalogue.TestChangeReviewPrefix(discipline);
-    public ReviewSubject WorkflowSubject(ChangeRequestType type) => catalogue.WorkflowSubject(type);
-    public ReviewSubject WorkflowSubject(TestChangeReviewDiscipline discipline) => catalogue.WorkflowSubject(discipline);
+    public string TestChangeReviewPrefix(TestChangeReviewDiscipline discipline)
+    {
+        _ = RequirementLevelFor(discipline);
+        return catalogue.TestChangeReviewPrefix(discipline);
+    }
+    public ReviewSubject WorkflowSubject(ChangeRequestType type)
+    {
+        if (type == ChangeRequestType.System)
+        {
+            var definition = definitions.SingleOrDefault(x => x.Level == RequirementLevel.System);
+            if (definition is null || !definition.Has(LevelCapabilities.HasChangeControl))
+                throw new DomainException("The project ladder does not configure System change-control workflow.");
+        }
+        else if (type == ChangeRequestType.Software
+                 && definitions.All(x => !x.Has(LevelCapabilities.HasChangeControl)
+                                         || x.ChangeRequest?.Type != ChangeRequestType.Software))
+            throw new DomainException("The project ladder does not configure a software change-control workflow.");
+        return catalogue.WorkflowSubject(type);
+    }
+    public ReviewSubject WorkflowSubject(TestChangeReviewDiscipline discipline)
+    {
+        _ = RequirementLevelFor(discipline);
+        return catalogue.WorkflowSubject(discipline);
+    }
     public RequirementLevel ParseImportedRequirementLevel(string? value)
     {
         if (TryParseRequirementLevel(value, out var level)) return level;
@@ -542,7 +564,18 @@ public sealed class ResolvedProjectLadderPolicy : ILadderPolicy
     public bool HasCodeTraceability(RequirementLevel level) => Definition(level).Has(LevelCapabilities.HasCodeTraceability);
 }
 
-/// <summary>One project-aware policy seam. Runtime resolution remains legacy-only until #706 activation.</summary>
+/// <summary>
+/// Stored legacy projects compile their actual persisted graph while retaining the #702 compatibility contract
+/// for generic trace mutation. A graph classified LegacyDefault but not equal to the legacy catalogue is rejected
+/// by the infrastructure resolver rather than receiving this marker accidentally.
+/// </summary>
+public sealed class StoredLegacyProjectLadderPolicy : ResolvedProjectLadderPolicy, ILegacyLadderCompatibilityPolicy
+{
+    public StoredLegacyProjectLadderPolicy(ResolvedProjectLadder resolved, ILadderPolicy? catalogue = null)
+        : base(resolved, catalogue) { }
+}
+
+/// <summary>One project-aware policy seam for stored/default, draft, and active project configurations.</summary>
 public interface IProjectLadderPolicyResolver
 {
     Task<ILadderPolicy> ResolveAsync(Guid projectId, CancellationToken ct = default);

@@ -15,9 +15,11 @@ public static class CodeTraceabilityEndpoints
         return app;
     }
 
-    private static async Task<IResult> ListAsync(Guid projectId, Guid releaseId, HttpContext http, AeroLinkDbContext db, ILadderPolicy ladderPolicy, CancellationToken ct)
+    private static async Task<IResult> ListAsync(Guid projectId, Guid releaseId, HttpContext http, AeroLinkDbContext db,
+        IProjectLadderPolicyResolver policyResolver, CancellationToken ct)
     {
         if (!await http.HasProjectAccessAsync(db, projectId, ct)) return Results.Forbid();
+        var ladderPolicy = await policyResolver.ResolveAsync(projectId, ct);
         var release = await db.Releases.AsNoTracking().SingleOrDefaultAsync(x => x.Id == releaseId && x.ProjectId == projectId, ct);
         if (release is null) return Results.NotFound();
 
@@ -52,11 +54,13 @@ public static class CodeTraceabilityEndpoints
         await db.ReleaseCampaigns.AsNoTracking().Where(x => x.ProjectId == projectId && x.ReleaseId == releaseId)
             .Select(x => (Guid?)x.BaselineId).SingleOrDefaultAsync(ct);
 
-    private static async Task<IResult> CreateAsync(CreateCodeTraceabilityRequest request, HttpContext http, AeroLinkDbContext db, IdentityService identity, ILadderPolicy ladderPolicy, CancellationToken ct)
+    private static async Task<IResult> CreateAsync(CreateCodeTraceabilityRequest request, HttpContext http, AeroLinkDbContext db,
+        IdentityService identity, IProjectLadderPolicyResolver policyResolver, CancellationToken ct)
     {
         if (!await http.HasProjectRoleAsync(db, identity, request.ProjectId, ct, ProgramRole.Engineer, ProgramRole.ConfigurationManager, ProgramRole.ProgramManager)) return Results.Forbid();
         var release = await db.Releases.AsNoTracking().SingleOrDefaultAsync(x => x.Id == request.ReleaseId && x.ProjectId == request.ProjectId, ct);
         if (release is null) return Results.BadRequest(new { error = "The selected build does not belong to this Project." });
+        var ladderPolicy = await policyResolver.ResolveAsync(request.ProjectId, ct);
         if (release.IsReleased) return Results.Conflict(new { error = $"Build {release.Version} is released and read-only." });
         // Mapped against the population the release decision will actually read. Recording against an
         // inherited predecessor revision produced an attributable record that the gate could never count.
@@ -68,9 +72,11 @@ public static class CodeTraceabilityEndpoints
                 error = "This build has no materialized requirement population yet, so implementation evidence cannot be recorded against it. Freeze the candidate baseline and materialize its requirements first.",
                 code = "waiting_for_materialized_baseline"
             });
-        var requiredLevel = ladderPolicy.OrderedLevels.Single(level => ladderPolicy.HasCodeTraceability(level));
+        var requiredLevels = ladderPolicy.OrderedLevels.Where(ladderPolicy.HasCodeTraceability).ToArray();
+        if (requiredLevels.Length == 0)
+            return Results.BadRequest(new { error = "The effective project ladder declares no code-traceability capability." });
         var exactLlr = await (from selection in db.BaselineRequirements.AsNoTracking().Where(x => x.BaselineId == baselineId && x.RevisionId == request.RequirementRevisionId)
-                                                       join artifact in db.Requirements.AsNoTracking().Where(x => x.Id == request.RequirementArtifactId && x.ProjectId == request.ProjectId && x.Level == requiredLevel) on selection.ArtifactId equals artifact.Id
+                                                       join artifact in db.Requirements.AsNoTracking().Where(x => x.Id == request.RequirementArtifactId && x.ProjectId == request.ProjectId && requiredLevels.Contains(x.Level)) on selection.ArtifactId equals artifact.Id
                                                        select artifact.Id).AnyAsync(ct);
         if (!exactLlr) return Results.BadRequest(new { error = "Code traceability must map an exact LLR revision in the selected build baseline." });
         try

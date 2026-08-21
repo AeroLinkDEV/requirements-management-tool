@@ -312,9 +312,9 @@ public sealed class SystemChangeRequestControlledEditingAdapter(AeroLinkDbContex
     private async Task<IReadOnlyList<RequirementChangeDraft>> NormalizeAsync(SystemChangeRequest scr,
         IReadOnlyList<SystemChangeRequestRequirementDraft> requested, ILadderPolicy policy, CancellationToken ct)
     {
-        // Schema/specification catalogue synchronization remains the legacy-owned #706 seam. The effective
-        // policy still governs this adapter's CR identity, level, prefix, and authored constraints below.
-        await new EnterpriseRequirementsService(db, LegacyLadderPolicy.Instance).SynchronizeProjectAsync(scr.ProjectId, scr.AuthorId, ct);
+        // Schema/specification catalogue synchronization and authored identity resolve the same effective
+        // project policy, so a check-in cannot silently restore an absent level.
+        await new EnterpriseRequirementsService(db, ladderPolicy, policyResolver).SynchronizeProjectAsync(scr.ProjectId, scr.AuthorId, ct);
         var existing = scr.RequirementChanges.ToDictionary(x => x.BaseNumber, StringComparer.OrdinalIgnoreCase);
         var nextNumbers = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
         var reserved = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -328,6 +328,9 @@ public sealed class SystemChangeRequestControlledEditingAdapter(AeroLinkDbContex
                 throw new DomainException(scr.Type == ChangeRequestType.System
                     ? "A System change request can contain only System requirement changes."
                     : "A Software change request can contain only HLR and LLR changes.");
+            var definition = policy.Definition(level);
+            if (!definition.Has(LevelCapabilities.HasRequirementsDocument) || definition.RequirementsCatalogue is null)
+                throw new DomainException($"The configured project ladder has no active requirements document for {level}.");
             var isDerived = raw.IsDerived ?? RequirementAuthoringJson.IsDerived(raw.AttributesJson);
             if (isDerived && string.IsNullOrWhiteSpace(raw.Rationale))
                 throw new DomainException("Every derived software requirement requires an explicit engineering rationale.");
@@ -447,9 +450,12 @@ public sealed class RequirementProposalControlledEditingAdapter(AeroLinkDbContex
             !Enum.TryParse<RequirementLevel>(draft.Level, true, out var level) || level != current.Level ||
             !Enum.TryParse<RequirementChangeKind>(draft.Kind, true, out var kind) || kind != current.Kind)
             throw new DomainException($"The controlled identity of {current.DisplayNumber} cannot change.");
-        // Keep enterprise schema/specification catalogue synchronization on its legacy authority until #706;
-        // this adapter uses the effective policy only for proposal identity and authored constraints.
-        await new EnterpriseRequirementsService(db, LegacyLadderPolicy.Instance).SynchronizeProjectAsync(parent.ProjectId, actor, ct);
+        var definition = effectivePolicy.Definition(current.Level);
+        if (!definition.Has(LevelCapabilities.HasRequirementsDocument) || definition.RequirementsCatalogue is null)
+            throw new DomainException($"The configured project ladder has no active requirements document for {current.Level}.");
+        // Synchronize the catalogue from the effective project policy before validating the proposal's
+        // structured attributes; the draft cannot author against an absent or capability-disabled level.
+        await new EnterpriseRequirementsService(db, ladderPolicy, policyResolver).SynchronizeProjectAsync(parent.ProjectId, actor, ct);
         var schema = await db.ArtifactSchemas.Include(x => x.Fields).SingleOrDefaultAsync(x =>
             x.ProjectId == parent.ProjectId && x.IsActive && x.AppliesTo == current.Level.ToString(), ct)
             ?? throw new DomainException($"No active requirement schema is configured for {current.Level}.");
@@ -496,8 +502,10 @@ public sealed class RequirementProposalControlledEditingAdapter(AeroLinkDbContex
     }
 }
 
-public sealed class SpecificationStructureControlledEditingAdapter(AeroLinkDbContext db) : IControlledEditingAdapter
+public sealed class SpecificationStructureControlledEditingAdapter(AeroLinkDbContext db,
+    IProjectLadderPolicyResolver? policyResolver = null, ILadderPolicy? policy = null) : IControlledEditingAdapter
 {
+    private readonly ILadderPolicy fallbackPolicy = policy ?? LegacyLadderPolicy.Instance;
     private static readonly JsonSerializerOptions DraftOptions = new() { PropertyNameCaseInsensitive = true };
     public ControlledArtifactFamily Family => ControlledArtifactFamily.SpecificationStructure;
     public string Name => "SpecificationStructureControlledEditingAdapter";
@@ -512,6 +520,15 @@ public sealed class SpecificationStructureControlledEditingAdapter(AeroLinkDbCon
             specification = await db.RequirementSpecifications.SingleOrDefaultAsync(x => x.Id == node.SpecificationId, ct);
         }
         if (specification is null) return null;
+        var effectivePolicy = policyResolver is null
+            ? fallbackPolicy
+            : await policyResolver.ResolveAsync(specification.ProjectId, ct);
+        var isCurrent = specification.IsActive && effectivePolicy.Definitions.Any(definition =>
+            definition.Has(LevelCapabilities.HasRequirementsDocument)
+            && definition.RequirementsCatalogue is not null
+            && definition.Level.ToString() == specification.Level
+            && definition.RequirementsCatalogue.SpecificationNumber == specification.DocumentNumber);
+        if (!isCurrent) return null;
         var nodes = await db.SpecificationNodes.Where(x => x.SpecificationId == specification.Id).ToListAsync(ct);
         return new(specification.ProjectId, "InWork", new State(specification, nodes), specification.Version, null, null);
     }
@@ -809,7 +826,8 @@ public sealed class ConfigurationChangeSetControlledEditingAdapter(AeroLinkDbCon
 /// draft carries its case and its requirement changes: an engineer correcting a package is usually correcting
 /// both, and a check-in that applied only half of what they wrote would silently discard the other half.
 /// </summary>
-public sealed class TestChangeRequestControlledEditingAdapter(AeroLinkDbContext db) : IControlledEditingAdapter
+public sealed class TestChangeRequestControlledEditingAdapter(AeroLinkDbContext db,
+    IProjectLadderPolicyResolver? policyResolver = null) : IControlledEditingAdapter
 {
     private static readonly JsonSerializerOptions DraftOptions = new() { PropertyNameCaseInsensitive = true };
     public ControlledArtifactFamily Family => ControlledArtifactFamily.TestChangeRequest;
@@ -852,10 +870,13 @@ public sealed class TestChangeRequestControlledEditingAdapter(AeroLinkDbContext 
                 }),
         });
 
-    public Task ApplyDraftAsync(ControlledEditingArtifact artifact, string draftJson, string actor,
+    public async Task ApplyDraftAsync(ControlledEditingArtifact artifact, string draftJson, string actor,
         bool administratorAuthority, DateTimeOffset now, CancellationToken ct)
     {
         var item = (TestChangeReview)artifact.Aggregate;
+        var ladderPolicy = policyResolver is null
+            ? LegacyLadderPolicy.Instance
+            : await policyResolver.ResolveAsync(item.ProjectId, ct);
         var draft = JsonSerializer.Deserialize<TestChangeRequestDraft>(draftJson, DraftOptions)
             ?? throw new JsonException("The latest autosaved test change request draft is empty.");
         if (draft.ProcedureChanges is null)
@@ -877,8 +898,7 @@ public sealed class TestChangeRequestControlledEditingAdapter(AeroLinkDbContext 
                 change.DrivingRequirementRevisionIdsJson ?? "[]", change.RemovedRequirementRevisionIdsJson ?? "[]",
                 // As above: a half-written proposal is checked in as it stands, and SubmitForReview is what
                 // refuses to show it to an approver.
-                change.CoverageChangeRationale ?? ""), now, allowIncomplete: true);
-        return Task.CompletedTask;
+                 change.CoverageChangeRationale ?? ""), now, allowIncomplete: true, policy: ladderPolicy);
     }
 
     private sealed record TestChangeRequestDraft(string? Title, string? Problem, string? Analysis, string? Solution,

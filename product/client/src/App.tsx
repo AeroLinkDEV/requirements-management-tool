@@ -15,6 +15,8 @@ import {
 } from "./IdentityCenter";
 import type { AuthUser } from "./IdentityCenter";
 import { PersonAvatar } from "./People";
+import { LadderCapability, ladderAllows, ladderHasAny } from "./projectLadder";
+import type { LadderLevel, ProjectLadderProjection } from "./projectLadder";
 import ProjectsLanding from "./ProjectsLanding";
 import SoftwareBuildsLanding from "./SoftwareBuildsLanding";
 import BaselineImportCenter from "./BaselineImportCenter";
@@ -169,14 +171,27 @@ type Workspace = {
  */
 const API = import.meta.env.VITE_API_URL ?? (import.meta.env.DEV ? "http://127.0.0.1:5080" : "");
 
-function AppNavigation({ user, workspaces, activeId, selectedProjectId, selectedReleaseId, view, discipline, artifactKind, context, projectWide, density, onNavigate, onSearch, onDisplay, onExitBuild, onSignOut }:{
+function AppNavigation({ user, workspaces, activeId, selectedProjectId, selectedReleaseId, view, discipline, artifactKind, context, projectWide, density, ladder, onNavigate, onSearch, onDisplay, onExitBuild, onSignOut }:{
   user:AuthUser;workspaces:Workspace[];activeId:string;selectedProjectId:string;selectedReleaseId:string;view:View;discipline:Discipline;context?:RouteContext;
-  artifactKind:string;projectWide:boolean;density:WorkspaceDensity;onNavigate:(view:View,discipline?:Discipline,artifactId?:string,artifactKind?:string)=>void;onSearch:()=>void;onDisplay:()=>void;onExitBuild:()=>void;onSignOut:()=>void;
+  artifactKind:string;projectWide:boolean;density:WorkspaceDensity;ladder:ProjectLadderProjection|null;onNavigate:(view:View,discipline?:Discipline,artifactId?:string,artifactKind?:string)=>void;onSearch:()=>void;onDisplay:()=>void;onExitBuild:()=>void;onSignOut:()=>void;
 }) {
   const active = workspaces.find(x => x.program.id === activeId) ?? workspaces[0];
   const project = active?.projects.find(x => x.project.id === selectedProjectId) ?? active?.projects[0];
   const release = project?.releases.find(x => x.id === selectedReleaseId) ?? project?.releases.at(-1);
   const officialBuild = release ? officialBuildName(release.version) : "";
+  const hasSystem = ladderAllows(ladder, "System");
+  const hasSoftware = ladderHasAny(ladder, ["HighLevel", "LowLevel"]);
+  const hasSystemChange = ladderAllows(ladder, "System", LadderCapability.ChangeControl);
+  const hasSoftwareChange = ladderHasAny(ladder, ["HighLevel", "LowLevel"], LadderCapability.ChangeControl);
+  const hasSystemVerification = ladderAllows(ladder, "System", LadderCapability.Verification);
+  const hasSoftwareVerification = ladderHasAny(ladder, ["HighLevel", "LowLevel"], LadderCapability.Verification);
+  const hasRequirements = hasSystem || hasSoftware;
+  const hasSystemRequirementsDocument = ladderAllows(ladder, "System", LadderCapability.RequirementsDocument);
+  const hasSoftwareRequirementsDocument = ladderHasAny(ladder, ["HighLevel", "LowLevel"], LadderCapability.RequirementsDocument);
+  const hasCodeTraceability = ladderHasAny(ladder, ["System", "HighLevel", "LowLevel"], LadderCapability.CodeTraceability);
+  const defaultSoftwareChangeLevel = ladderAllows(ladder, "HighLevel", LadderCapability.ChangeControl)
+    ? "HighLevel"
+    : ladderAllows(ladder, "LowLevel", LadderCapability.ChangeControl) ? "LowLevel" : undefined;
   // `kind` carries the software level for the verification pages, which split into HLR and LLR. It is the
   // same field the change-request routes use for it, so no new axis had to be threaded through the shell.
   const item = (label:string,target:View,icon:string,area:Discipline="system",accessibleLabel=label,kind?:string,topLevel=false) => {
@@ -193,9 +208,11 @@ function AppNavigation({ user, workspaces, activeId, selectedProjectId, selected
   };
   const engineeringView = ["createSystemScr","createSoftwareChange","history","requirements","scr","lifecycle"].includes(view)
     || (view === "documents" && (discipline === "system" || discipline === "software"));
+  const engineeringTargetView: View = view === "history" || view === "requirements" || view === "documents" ? view : "history";
   const releaseView = ["release","releaseImpact","releaseDecision","releaseOperations","enterprise","baselines"].includes(view);
-  const engineeringScope:Discipline = discipline==="software" ? "software" : "system";
-  const verificationScope:Discipline = discipline==="softwareTest"||discipline==="software" ? "softwareTest" : "systemTest";
+  const engineeringScope:Discipline = discipline==="software" && hasSoftware ? "software" : hasSystem ? "system" : "software";
+  const verificationScope:Discipline = (discipline==="softwareTest"||discipline==="software") && hasSoftwareVerification
+    ? "softwareTest" : hasSystemVerification ? "systemTest" : "softwareTest";
   return (
     <aside className="appNavigation">
       <div className="brand"><span aria-hidden="true">▲</span><b>AeroLink</b></div>
@@ -219,19 +236,19 @@ function AppNavigation({ user, workspaces, activeId, selectedProjectId, selected
       </div>
       <nav className="primaryNavigation" aria-label="Primary navigation">
         <div className="navHome">{item("Command Center","dashboard","⌂")}{item("My Work","mywork","◎")}</div>
-        <details className="navGroup" open={engineeringView}><summary>REQUIREMENTS</summary><div className="navScopeSwitch" role="group" aria-label="Requirements scope"><button type="button" aria-pressed={engineeringScope==="system"} onClick={()=>onNavigate(view==="history"||view==="requirements"||view==="documents"?view:"history","system")}>System</button><button type="button" aria-pressed={engineeringScope==="software"} onClick={()=>onNavigate(view==="history"||view==="requirements"||view==="documents"?view:"history","software")}>Software</button></div>{item("Change Requests","history","◇",engineeringScope,engineeringScope==="software"?"Software Change Requests":"System Change Requests")}{item("Requirements Explorer","requirements","≡",engineeringScope,engineeringScope==="software"?"Software Requirements Explorer":"System Requirements Explorer")}{item("Generated Documents","documents","▤",engineeringScope,engineeringScope==="software"?"Generated Software Requirements Documents":"Generated System Requirements Documents")}{item("Digital Thread","lifecycle","↗","system","Digital Thread")}</details>
-        <details className="navGroup" open={view==="verification"||view==="testingCoverage"||view==="testChangeRequests"||view==="testChangeRequest"||view==="createTestChangeRequest"||view==="procedureExplorer"||view==="testResults"||(view==="documents"&&(discipline==="systemTest"||discipline==="softwareTest"))}>
+         {hasRequirements && <details className="navGroup" open={engineeringView}><summary>REQUIREMENTS</summary><div className="navScopeSwitch" role="group" aria-label="Requirements scope">{hasSystem && <button type="button" aria-pressed={engineeringScope==="system"} onClick={()=>onNavigate(engineeringTargetView,"system")}>System</button>}{hasSoftware && <button type="button" aria-pressed={engineeringScope==="software"} onClick={()=>onNavigate(engineeringTargetView,"software",undefined,engineeringTargetView==="history"?defaultSoftwareChangeLevel:undefined)}>Software</button>}</div>{(engineeringScope==="system" ? hasSystemChange : hasSoftwareChange) && item("Change Requests","history","◇",engineeringScope,engineeringScope==="software"?"Software Change Requests":"System Change Requests",engineeringScope==="software"?defaultSoftwareChangeLevel:undefined)}{(engineeringScope==="system" ? hasSystem : hasSoftware) && item("Requirements Explorer","requirements","≡",engineeringScope,engineeringScope==="software"?"Software Requirements Explorer":"System Requirements Explorer")}{(engineeringScope==="system" ? hasSystemRequirementsDocument : hasSoftwareRequirementsDocument) && item("Generated Documents","documents","▤",engineeringScope,engineeringScope==="software"?"Generated Software Requirements Documents":"Generated System Requirements Documents")}{hasRequirements && item("Digital Thread","lifecycle","↗","system","Digital Thread")}</details>}
+         {(hasSystemVerification || hasSoftwareVerification) && <details className="navGroup" open={view==="verification"||view==="testingCoverage"||view==="testChangeRequests"||view==="testChangeRequest"||view==="createTestChangeRequest"||view==="procedureExplorer"||view==="testResults"||(view==="documents"&&(discipline==="systemTest"||discipline==="softwareTest"))}>
           <summary>VERIFICATION</summary>
           <div className="navScopeSwitch" role="group" aria-label="Verification scope">
-            <button type="button" aria-pressed={verificationScope==="systemTest"} onClick={()=>onNavigate("verification","systemTest")}>System</button>
-            <button type="button" aria-pressed={verificationScope==="softwareTest"} onClick={()=>onNavigate("verification","softwareTest")}>Software</button>
+             {hasSystemVerification && <button type="button" aria-pressed={verificationScope==="systemTest"} onClick={()=>onNavigate("verification","systemTest")}>System</button>}
+             {hasSoftwareVerification && <button type="button" aria-pressed={verificationScope==="softwareTest"} onClick={()=>onNavigate("verification","softwareTest")}>Software</button>}
           </div>
           {verificationScope==="softwareTest"
             ? <>
                 {item("Change Requests","testChangeRequests","◫","softwareTest","Software Test Change Requests")}
                 {item("Test Procedure Explorer","procedureExplorer","≡","softwareTest","Software Test Procedure Explorer")}
-                {item("HLR Test Results","testResults","▦","softwareTest","Software HLR Test Results","HighLevel")}
-                {item("LLR Test Results","testResults","▦","softwareTest","Software LLR Test Results","LowLevel")}
+                 {ladderAllows(ladder, "HighLevel", LadderCapability.Verification) && item("HLR Test Results","testResults","▦","softwareTest","Software HLR Test Results","HighLevel")}
+                 {ladderAllows(ladder, "LowLevel", LadderCapability.Verification) && item("LLR Test Results","testResults","▦","softwareTest","Software LLR Test Results","LowLevel")}
               </>
             : <>
                 {item("Change Requests","testChangeRequests","◫","systemTest","System Test Change Requests")}
@@ -239,8 +256,8 @@ function AppNavigation({ user, workspaces, activeId, selectedProjectId, selected
                 {item("Test Results","testResults","▦","systemTest","System Test Results")}
               </>}
           {item("Generated Documents","documents","▤",verificationScope,verificationScope==="softwareTest"?"Generated Software Verification Documents":"Generated System Verification Documents")}
-        </details>
-        <div className="navStandalone">{item("Code","code","{ }","software","Code traceability",undefined,true)}</div>
+         </details>}
+         {hasCodeTraceability && <div className="navStandalone">{item("Code","code","{ }","software","Code traceability",undefined,true)}</div>}
         <div className="navStandalone">{item("Documentation Center","managedDocuments","▤","system","Documentation Center",undefined,true)}</div>
         <div className="navStandalone">{item("Problem Reports","problemReports","!","system","Problem Reports",undefined,true)}</div>
         <details className="navGroup" open={releaseView}><summary>RELEASE</summary>{item("Lifecycle Decision Room","release","◆","system","Lifecycle Decision Room / Release Readiness")}{item("Configuration Baselines","baselines","▦","system","Configuration Baselines / Legacy Procedure Bootstrap")}</details>
@@ -264,7 +281,10 @@ function App() {
         llr:{totalChangeRequests:0,triagedChangeRequests:0,openDecisions:0,resolvedDecisions:0},
       },
     }),
-    [workspaces, setWorkspaces] = useState<Workspace[]>([]),
+     [workspaces, setWorkspaces] = useState<Workspace[]>([]),
+     [ladder, setLadder] = useState<ProjectLadderProjection|null>(null),
+     [ladderError, setLadderError] = useState(""),
+     [ladderAttempt, setLadderAttempt] = useState(0),
     [activeId, setActiveId] = useState(initialRoute.programId ?? ""),
     [selectedProjectId, setSelectedProjectId] = useState(initialRoute.projectId ?? ""),
     [selectedReleaseId, setSelectedReleaseId] = useState(initialRoute.releaseId ?? ""),
@@ -329,6 +349,33 @@ function App() {
       project?.releases.find((x) => x.id === selectedReleaseId) ??
       [...(project?.releases ?? [])].reverse().find((x) => !x.isReleased) ??
       project?.releases.at(-1);
+  const projectId = project?.project.id ?? "";
+  useEffect(() => {
+    let current = true;
+    setLadder(null); setLadderError("");
+    if (!projectId) return () => { current = false; };
+    fetch(`${API}/api/projects/${projectId}/configuration`)
+      .then(async response => { if (!response.ok) throw new Error("The stored project ladder could not be loaded."); return await response.json() as ProjectLadderProjection; })
+      .then(next => { if (current) setLadder(next); })
+      .catch(() => { if (current) { setLadder(null); setLadderError("The stored project ladder could not be loaded, so level-specific surfaces are unavailable."); } });
+    return () => { current = false; };
+  }, [projectId, ladderAttempt]);
+  useEffect(() => {
+    if (!ladder) return;
+    const system = ladderAllows(ladder, "System");
+    const software = ladderHasAny(ladder, ["HighLevel", "LowLevel"]);
+    if (discipline === "system" && !system && software) setDiscipline("software");
+    if (discipline === "software" && !software && system) setDiscipline("system");
+    if (discipline === "systemTest" && !ladderAllows(ladder, "System", LadderCapability.Verification)
+      && ladderHasAny(ladder, ["HighLevel", "LowLevel"], LadderCapability.Verification)) setDiscipline("softwareTest");
+    if (discipline === "softwareTest" && !ladderHasAny(ladder, ["HighLevel", "LowLevel"], LadderCapability.Verification)
+      && ladderAllows(ladder, "System", LadderCapability.Verification)) setDiscipline("systemTest");
+    const absentExplicitRoute = (view === "createSystemScr" && !ladderAllows(ladder, "System", LadderCapability.ChangeControl))
+      || (view === "createSoftwareChange" && !ladderHasAny(ladder, ["HighLevel", "LowLevel"], LadderCapability.ChangeControl))
+      || (view === "verification" && ((discipline === "systemTest" && !ladderAllows(ladder, "System", LadderCapability.Verification))
+        || (discipline === "softwareTest" && !ladderHasAny(ladder, ["HighLevel", "LowLevel"], LadderCapability.Verification))));
+    if (absentExplicitRoute) setView("notFound");
+  }, [ladder, discipline, view]);
   useEffect(() => {
     if (release && release.id !== selectedReleaseId)
       setSelectedReleaseId(release.id);
@@ -561,18 +608,38 @@ function App() {
   // Reading a procedure against the roster answers whether anybody can sign it, which needs both and so
   // belongs beside them rather than inside a build.
   if(view==="approvalConfiguration"&&project)return <ApprovalConfigurationCenter user={user} api={API} projectId={project.project.id} projectName={project.project.name} onBackToBuilds={()=>{setView("builds");history.pushState({},"",openProjectBuildsPath)}} onSignOut={signOut}/>;
-  if(view==="projectConfiguration"&&project)return <ProjectConfigurationCenter user={user} api={API} projectId={project.project.id} projectName={project.project.name} initialSection={projectConfigurationSection} onBackToBuilds={()=>{setView("builds");history.pushState({},"",openProjectBuildsPath)}} onOpenApprovalConfiguration={()=>showProjectConfiguration("approvals")} onSignOut={signOut}/>;
-  const navigation=<AppNavigation user={user} workspaces={workspaces} activeId={activeId} selectedProjectId={project?.project.id??selectedProjectId} selectedReleaseId={release?.id??selectedReleaseId} view={view} discipline={discipline} artifactKind={selectedArtifactKind} context={context} projectWide={view==="managedDocuments"} density={density} onNavigate={navigate} onSearch={()=>setPaletteOpen(true)} onDisplay={()=>setDisplayOpen(true)} onExitBuild={exitBuild} onSignOut={signOut}/>;
+   if(view==="projectConfiguration"&&project)return <ProjectConfigurationCenter user={user} api={API} projectId={project.project.id} projectName={project.project.name} initialSection={projectConfigurationSection} onBackToBuilds={()=>{setView("builds");history.pushState({},"",openProjectBuildsPath)}} onOpenApprovalConfiguration={()=>showProjectConfiguration("approvals")} onActivated={value=>{setLadder({effectiveSteps:value.effectiveSteps.map(step=>({...step,catalogueEntry:step.catalogueEntry as LadderLevel}))});setLadderError("");}} onSignOut={signOut}/>;
+   const navigation=<AppNavigation user={user} workspaces={workspaces} activeId={activeId} selectedProjectId={project?.project.id??selectedProjectId} selectedReleaseId={release?.id??selectedReleaseId} view={view} discipline={discipline} artifactKind={selectedArtifactKind} context={context} projectWide={view==="managedDocuments"} density={density} ladder={ladder} onNavigate={navigate} onSearch={()=>setPaletteOpen(true)} onDisplay={()=>setDisplayOpen(true)} onExitBuild={exitBuild} onSignOut={signOut}/>;
   const labels:Record<View,string>={projects:"Projects",builds:"Software Builds",baselineImports:"Imported Baselines",personnel:"Personnel",approvalConfiguration:"Approval Configuration",projectConfiguration:"Project Configuration",dashboard:"Command Center",createSystemScr:"New System SRCR",createSoftwareChange:"New Software Change Request",scr:"Change Request",baselines:"Baselines",history:"Change Requests",requirements:"Requirements Explorer",verification:"Verification",testingCoverage:"Test Coverage",testChangeRequests:"Change Requests",testChangeRequest:"Test Change Request",createTestChangeRequest:"New Test Change Request",procedureExplorer:"Test Procedure Explorer",testResults:"Test Results",documents:"Generated Documents",managedDocuments:"Documentation Center",code:"Code",problemReports:"Problem Reports",lifecycle:"Digital Thread",release:"Release Readiness",releaseImpact:"Change Impact Review",releaseDecision:"Release Evidence & Decision",releaseOperations:"Release Operations",planning:"Product Versions",mywork:"My Work",admin:"Administration",enterprise:"System Operations",integrations:"Integration Command Center",reviewWorkflows:"Review Workflows",artifact:"Artifact",notFound:"Not Found"};
   const scopedLabel=view==="history"?`${discipline==="software"?"Software":"System"} ${labels[view]}`:view==="scr"?`${discipline==="software"?"Software":"System"} ${labels[view]}`:view==="requirements"?`${discipline==="software"?"Software":"System"} ${labels[view]}`:view==="verification"?`${discipline==="softwareTest"?"Software":"System"} Verification`:labels[view];
   const copyLink=async()=>{try{await navigator.clipboard.writeText(location.href);setToast('Link copied to clipboard')}catch{setToast('This browser blocked clipboard access')}};
   const contextBar=<div className="contextBar"><nav aria-label="Breadcrumb"><span title={active?.program.name}>{active?.program.name}</span><b aria-hidden="true">›</b><span title={project?.project.name}>{project?.project.name}</span><b aria-hidden="true">›</b>{view!=="managedDocuments"&&<><span>Build {release?.version}</span><b aria-hidden="true">›</b></>}<strong>{scopedLabel}</strong></nav><div className="contextActions"><span className="contextReleaseState">{view==="managedDocuments"?"Project-wide":release?.isReleased?"Released · read-only":"In work"}</span><button aria-label="Copy link to this page" onClick={copyLink}>Copy link</button></div></div>;
-  const palette=context?<CommandPalette api={API} context={context} open={paletteOpen} onClose={()=>setPaletteOpen(false)} onNavigate={navigate}/>:null;
+   const palette=context?<CommandPalette api={API} context={context} ladder={ladder} open={paletteOpen} onClose={()=>setPaletteOpen(false)} onNavigate={navigate}/>:null;
   const experience=<ExperienceControls open={displayOpen} density={density} motion={motion} onDensityChange={next=>{setDensity(next);setToast(`${next==='compact'?'Compact':'Comfortable'} density applied`)}} onMotionChange={next=>{setMotion(next);setToast(`${next==='reduced'?'Reduced':'Purposeful'} motion applied`)}} onClose={()=>setDisplayOpen(false)}/>;
   const feedback=toast?<div className="experienceToast" role="status" aria-live="polite"><span>✓</span><b>{toast}</b></div>:null;
   const overlays=<>{palette}{experience}{feedback}</>;
   const inShell=(content:React.ReactNode)=><div className="shell">{navigation}<div className="workspaceStage">{contextBar}<div className="workspaceView" key={`${view}-${discipline}`}><Suspense fallback={<WorkspaceLoading/>}>{content}</Suspense></div></div>{overlays}</div>;
-  if(view==="notFound")return inShell(<main className="artifactState"><div><span>?</span><h1>Page not found</h1><p>This AeroLink route is not recognized. Use quick navigation to find an authorized workspace or artifact.</p><button onClick={()=>navigate("dashboard")}>Return to Command Center</button></div></main>);
+   const policyDependentView = !["projects", "builds", "baselineImports", "personnel", "approvalConfiguration", "projectConfiguration"].includes(view);
+   if (project && policyDependentView && !ladder)
+     return inShell(<main className="artifactState"><div><span>!</span><h1>Project ladder unavailable</h1><p>{ladderError || "Loading the stored project ladder before opening level-specific workspaces…"}</p>{ladderError && <button onClick={() => setLadderAttempt(value => value + 1)}>Retry</button>}</div></main>);
+   const selectedLevel = selectedArtifactKind === "HighLevel" || selectedArtifactKind === "LowLevel" ? selectedArtifactKind : undefined;
+   const scopedLevelAllowed = (scope: "system" | "software" | "systemTest" | "softwareTest", capability?: number) => {
+     if (scope === "system" || scope === "systemTest") return ladderAllows(ladder, "System", capability);
+     return selectedLevel ? ladderAllows(ladder, selectedLevel, capability) : ladderHasAny(ladder, ["HighLevel", "LowLevel"], capability);
+   };
+   const viewAllowed = !ladder || (
+     view === "history" || view === "scr" ? scopedLevelAllowed(discipline, LadderCapability.ChangeControl) :
+     view === "requirements" ? scopedLevelAllowed(discipline) :
+     view === "createSystemScr" ? ladderAllows(ladder, "System", LadderCapability.ChangeControl) :
+     view === "createSoftwareChange" ? scopedLevelAllowed("software", LadderCapability.ChangeControl) :
+     ["verification", "testingCoverage", "testChangeRequests", "testChangeRequest", "createTestChangeRequest", "procedureExplorer", "testResults"].includes(view)
+       ? scopedLevelAllowed(discipline, LadderCapability.Verification) :
+     view === "documents" ? scopedLevelAllowed(discipline, discipline === "systemTest" || discipline === "softwareTest" ? LadderCapability.Verification : LadderCapability.RequirementsDocument) :
+     view === "code" ? ladderHasAny(ladder, ["System", "HighLevel", "LowLevel"], LadderCapability.CodeTraceability) : true
+   );
+   if (!viewAllowed)
+     return inShell(<main className="artifactState"><div><span>!</span><h1>Workspace unavailable</h1><p>This level or capability is not present in the active project ladder.</p><button onClick={()=>navigate("dashboard")}>Return to Command Center</button></div></main>);
+   if(view==="notFound")return inShell(<main className="artifactState"><div><span>?</span><h1>Page not found</h1><p>This AeroLink route is not recognized. Use quick navigation to find an authorized workspace or artifact.</p><button onClick={()=>navigate("dashboard")}>Return to Command Center</button></div></main>);
   if(view==="artifact"&&selectedArtifactId&&selectedArtifactKind)return inShell(<ArtifactRecordPage api={API} kind={selectedArtifactKind} id={selectedArtifactId} releaseId={release?.id??""} onBack={()=>navigate("dashboard")} onOpen={(kind,id)=>{if(kind==="change-request")navigate("scr","system",id);else if(kind==="requirement")navigate("requirements","system",id);else navigate("artifact","system",id,kind)}}/>);
   // A released build is closed, so this says so instead of opening an editor whose save the server will refuse.
   // The action stays visible on the navigation rather than disappearing: somebody looking for how to raise a
@@ -610,8 +677,9 @@ function App() {
         projectId={project.project.id}
         releaseId={release.id}
         releaseVersion={release.version}
-        scope={view === "createSystemScr" ? "System" : "Software"}
-        softwareLevel={view === "createSoftwareChange" && (selectedArtifactKind === "HighLevel" || selectedArtifactKind === "LowLevel") ? selectedArtifactKind : undefined}
+         scope={view === "createSystemScr" ? "System" : "Software"}
+         softwareLevel={view === "createSoftwareChange" && (selectedArtifactKind === "HighLevel" || selectedArtifactKind === "LowLevel") ? selectedArtifactKind : undefined}
+         ladder={ladder}
         user={user}
         sourceRequirementId={selectedArtifactId || undefined}
         onCancel={() => navigate("dashboard")}
@@ -662,9 +730,10 @@ function App() {
         api={API}
         projectId={project.project.id}
         releases={release ? [release] : []}
-        activeReleaseId={release?.id??""}
-        scope={discipline === "software" ? "Software" : "System"}
-        initialSoftwareLevel={selectedArtifactKind === "LowLevel" ? "LowLevel" : "HighLevel"}
+         activeReleaseId={release?.id??""}
+         scope={discipline === "software" ? "Software" : "System"}
+         ladder={ladder}
+         initialSoftwareLevel={selectedArtifactKind === "LowLevel" ? "LowLevel" : "HighLevel"}
         initialAssessmentId={selectedArtifactId||undefined}
         initialStateIntent={historyStateIntent}
         onSoftwareLevelChange={(level)=>{
@@ -689,9 +758,10 @@ function App() {
     return inShell(
       <RequirementsWorkspace
         api={API}
-        projectId={project.project.id}
-        scope={discipline === "software" ? "Software" : "System"}
-        release={release}
+         projectId={project.project.id}
+         scope={discipline === "software" ? "Software" : "System"}
+         ladder={ladder}
+         release={release}
         initialViewId={initialRoute.savedViewId}
         initialArtifactId={view === "requirements" ? selectedArtifactId || undefined : undefined}
         initialRevisionId={view === "requirements" ? requirementRevisionId || undefined : undefined}
@@ -717,9 +787,10 @@ function App() {
           ? selectedArtifactKind
           : undefined}
         buildName={`Build ${release.version}`}
-        releaseVersion={release.version}
-        released={release.isReleased}
-        onBack={() => navigate("dashboard")}
+         releaseVersion={release.version}
+         released={release.isReleased}
+         ladder={ladder}
+         onBack={() => navigate("dashboard")}
         onOpenRequirementRevision={openRequirementRevision}
       />
     );
@@ -739,8 +810,9 @@ function App() {
         buildName={`Build ${release.version}`}
         readOnly={release.isReleased}
         programId={active?.program.id ?? ""}
-        user={user}
-        initialReviewId={selectedArtifactId}
+         user={user}
+         ladder={ladder}
+         initialReviewId={selectedArtifactId}
         onBack={() => navigate("dashboard")}
         onOpenRequirementRevision={openRequirementRevision}
         onRaiseTestChangeRequest={() => navigate("createTestChangeRequest", discipline, undefined, selectedArtifactKind)}
@@ -811,6 +883,7 @@ function App() {
       <VerificationLanding
         scope={discipline === "softwareTest" ? "Software" : "System"}
         buildName={`Build ${release.version}`}
+        ladder={ladder}
         onOpen={(target, level) => navigate(target, discipline, undefined, level)}
       />
     );

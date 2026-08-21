@@ -346,7 +346,8 @@ public static class VerificationImpactEndpoints
         /// produces nothing, and so is the conclusion that goes for approval.
         /// </summary>
         app.MapPost("/api/test-change-reviews/{id:guid}/conclusion", async (Guid id, TestAssessmentConclusionRequest request,
-            HttpContext http, AeroLinkDbContext db, IdentityService identity, CancellationToken ct) =>
+            HttpContext http, AeroLinkDbContext db, IdentityService identity,
+            IProjectLadderPolicyResolver policyResolver, CancellationToken ct) =>
         {
             var review = await db.TestChangeReviews.SingleOrDefaultAsync(x => x.Id == id, ct);
             if (review is null) return Results.NotFound();
@@ -367,6 +368,7 @@ public static class VerificationImpactEndpoints
                 });
             try
             {
+                var ladderPolicy = await policyResolver.ResolveAsync(review.ProjectId, ct);
                 var now = DateTimeOffset.UtcNow;
                 // Answering an unheld package is what takes it on. The claim is no longer a step of its own,
                 // but the record of who holds it still has to be true — the next reader needs to see that
@@ -376,7 +378,8 @@ public static class VerificationImpactEndpoints
                 {
                     review.RecordTestChangeRequired(actor, now);
                     review.AssignControlledNumber(
-                        await IdentifierAllocator.NextTestChangeRequestAsync(db, review.Discipline, ct), now);
+                        await IdentifierAllocator.NextTestChangeRequestAsync(db, review.Discipline, ct, ladderPolicy), now,
+                        ladderPolicy);
                 }
                 else review.RecordNoTestChangeRequired(actor, request.Rationale ?? "", now);
                 await db.SaveChangesAsync(ct);
@@ -400,11 +403,13 @@ public static class VerificationImpactEndpoints
         // The procedure decisions a test change request carries — what the workspace reads and writes, and the
         // test-side counterpart of the requirement changes a change request carries.
         app.MapGet("/api/test-change-reviews/{id:guid}/procedure-changes", async (Guid id,
-            HttpContext http, AeroLinkDbContext db, IdentityService identity, CancellationToken ct) =>
+            HttpContext http, AeroLinkDbContext db, IdentityService identity,
+            IProjectLadderPolicyResolver policyResolver, CancellationToken ct) =>
         {
             var review = await db.TestChangeReviews.AsNoTracking().Include(x => x.ProcedureChanges)
                 .SingleOrDefaultAsync(x => x.Id == id, ct);
             if (review is null) return Results.NotFound();
+            var ladderPolicy = await policyResolver.ResolveAsync(review.ProjectId, ct);
             if (!await http.HasProjectAccessAsync(db, review.ProjectId, ct)) return Results.Forbid();
             // Derived here rather than inferred by the client from a broad role. The workspace was offering
             // authoring controls to anyone with test authority while these same rules refused them, which is
@@ -419,7 +424,7 @@ public static class VerificationImpactEndpoints
             var mayAuthor = isTester && holdsIt;
             // The picker and both server enforcement points use the same package/build-scoped set. Project and
             // discipline alone do not authorize a TCR to govern an unrelated requirement.
-            var candidates = await TestChangeReviewRequirementScope.ForReviewAsync(db, review, null, ct);
+            var candidates = await TestChangeReviewRequirementScope.ForReviewAsync(db, review, null, ct, ladderPolicy);
             // Modify and Retire act on what this target build carries, not on the newest procedure revision
             // anywhere in the Project. Coverage is not membership and a later build is not an authoring menu.
             var effectivity = await TestProcedureEffectivity.ForReleaseAsync(
@@ -441,7 +446,7 @@ public static class VerificationImpactEndpoints
                 : await (from revision in db.TestProcedureRevisions.AsNoTracking()
                              .Where(x => targetRevisionIds.Contains(x.Id))
                          join procedure in db.TestProcedures.AsNoTracking()
-                             .Where(x => x.ProjectId == review.ProjectId && x.Level == review.ProcedureLevel()
+                             .Where(x => x.ProjectId == review.ProjectId && x.Level == review.ProcedureLevel(ladderPolicy)
                                  && referencedBaseNumbers.Contains(x.BaseNumber))
                              on revision.ProcedureId equals procedure.Id
                          orderby procedure.BaseNumber
@@ -495,7 +500,7 @@ public static class VerificationImpactEndpoints
                 }),
                 review.Id, review.DisplayNumber, review.BaseNumber, review.Revision,
                 discipline = review.Discipline.ToString(), state = review.State.ToString(),
-                outcome = review.Outcome.ToString(), procedureLevel = review.ProcedureLevel().ToString(),
+                outcome = review.Outcome.ToString(), procedureLevel = review.ProcedureLevel(ladderPolicy).ToString(),
                 review.SourceChangeRequestNumber, review.AssignedEngineerId,
                 version = review.Version,
                 review.Title, review.Problem, review.Analysis, review.Solution,
@@ -522,11 +527,12 @@ public static class VerificationImpactEndpoints
         // nothing because the scoped source is the only thing ever queried.
         app.MapGet("/api/test-change-reviews/{id:guid}/procedure-targets", async (Guid id, string? search,
             string? ids, string? baseNumbers, int? page, int? pageSize,
-            HttpContext http, AeroLinkDbContext db, CancellationToken ct) =>
+            HttpContext http, AeroLinkDbContext db, IProjectLadderPolicyResolver policyResolver, CancellationToken ct) =>
         {
             var review = await db.TestChangeReviews.AsNoTracking()
                 .SingleOrDefaultAsync(x => x.Id == id, ct);
             if (review is null) return Results.NotFound();
+            var ladderPolicy = await policyResolver.ResolveAsync(review.ProjectId, ct);
             if (!await http.HasProjectAccessAsync(db, review.ProjectId, ct)) return Results.Forbid();
             var currentPage = Math.Max(1, page ?? 1);
             var size = Math.Clamp(pageSize ?? 25, 1, 200);
@@ -545,7 +551,7 @@ public static class VerificationImpactEndpoints
             var eligibility = from revision in db.TestProcedureRevisions.AsNoTracking()
                                   .Where(x => targetRevisionIds.Contains(x.Id))
                               join procedure in db.TestProcedures.AsNoTracking()
-                                  .Where(x => x.ProjectId == review.ProjectId && x.Level == review.ProcedureLevel())
+                                  .Where(x => x.ProjectId == review.ProjectId && x.Level == review.ProcedureLevel(ladderPolicy))
                                   on revision.ProcedureId equals procedure.Id
                               select new
                               {
@@ -627,19 +633,20 @@ public static class VerificationImpactEndpoints
         // displayNumber, statement and level.
         app.MapGet("/api/test-change-reviews/{id:guid}/requirement-candidates", async (Guid id, string? search,
             string? ids, int? page, int? pageSize,
-            HttpContext http, AeroLinkDbContext db, CancellationToken ct) =>
+            HttpContext http, AeroLinkDbContext db, IProjectLadderPolicyResolver policyResolver, CancellationToken ct) =>
         {
             var review = await db.TestChangeReviews.AsNoTracking()
                 .SingleOrDefaultAsync(x => x.Id == id, ct);
             if (review is null) return Results.NotFound();
             if (!await http.HasProjectAccessAsync(db, review.ProjectId, ct)) return Results.Forbid();
+            var ladderPolicy = await policyResolver.ResolveAsync(review.ProjectId, ct);
             var currentPage = Math.Max(1, page ?? 1);
             var size = Math.Clamp(pageSize ?? 25, 1, 200);
             var requestedIds = (ids ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
                 .Select(x => Guid.TryParse(x, out var value) ? value : Guid.Empty)
                 .Where(x => x != Guid.Empty).Distinct().ToList();
             var (total, items) = await TestChangeReviewRequirementScope.ForReviewPageAsync(
-                db, review, search, currentPage, size, requestedIds, ct);
+                db, review, search, currentPage, size, requestedIds, ct, ladderPolicy);
             return Results.Ok(new
             {
                 page = currentPage,
@@ -652,11 +659,12 @@ public static class VerificationImpactEndpoints
 
         app.MapPost("/api/test-change-reviews/{id:guid}/procedure-changes", async (Guid id,
             ProposeProcedureChangeRequest request, HttpContext http, AeroLinkDbContext db,
-            IdentityService identity, ILadderPolicy ladderPolicy, CancellationToken ct) =>
+            IdentityService identity, IProjectLadderPolicyResolver policyResolver, CancellationToken ct) =>
         {
             var review = await db.TestChangeReviews.Include(x => x.ProcedureChanges).Include(x => x.ReviewCycles)
                 .SingleOrDefaultAsync(x => x.Id == id, ct);
             if (review is null) return Results.NotFound();
+            var ladderPolicy = await policyResolver.ResolveAsync(review.ProjectId, ct);
             var refusal = await RefuseUnlessAuthoredBy(review, http, db, identity, ct);
             if (refusal is not null) return refusal;
             if (request.ExpectedVersion is not null && review.Version != request.ExpectedVersion)
@@ -696,7 +704,7 @@ public static class VerificationImpactEndpoints
                                        where scopedRequirementIds.Contains(revision.Id)
                                        select new { revision.Id, artifact.ProjectId, artifact.Level })
                         .ToDictionaryAsync(x => x.Id, ct);
-                    var wanted = ApiMap.RequirementLevelFor(review.ProcedureLevel(), ladderPolicy);
+                    var wanted = ApiMap.RequirementLevelFor(review.ProcedureLevel(ladderPolicy), ladderPolicy);
                     foreach (var drivingId in scopedRequirementIds)
                     {
                         if (!known.TryGetValue(drivingId, out var requirement))
@@ -706,7 +714,7 @@ public static class VerificationImpactEndpoints
                         if (requirement.Level != wanted)
                             return Results.BadRequest(new { error = $"Requirement revision {drivingId} is a {requirement.Level} requirement, which a {review.Discipline} procedure does not verify.", code = "requirement_revision_level_mismatch" });
                     }
-                    var governed = await TestChangeReviewRequirementScope.ForReviewAsync(db, review, null, ct);
+                    var governed = await TestChangeReviewRequirementScope.ForReviewAsync(db, review, null, ct, ladderPolicy);
                     var governedIds = governed.Select(x => x.RevisionId).ToHashSet();
                     var outside = scopedRequirementIds.FirstOrDefault(x => !governedIds.Contains(x));
                     if (outside != Guid.Empty)
@@ -719,7 +727,7 @@ public static class VerificationImpactEndpoints
                 // Introducing allocates; modifying or retiring names what already exists. Letting the caller
                 // choose a number for a new procedure would let two engineers pick the same one.
                 var baseNumber = request.Kind == TestProcedureChangeKind.Introduce
-                    ? await IdentifierAllocator.NextTestProcedureAsync(db, review.ProcedureLevel(), ct)
+                    ? await IdentifierAllocator.NextTestProcedureAsync(db, review.ProcedureLevel(ladderPolicy), ct, ladderPolicy)
                     : (request.BaseNumber ?? "").Trim();
                 if (request.Kind != TestProcedureChangeKind.Introduce && baseNumber.Length == 0)
                     return Results.BadRequest(new { error = "A modification or retirement must name the procedure it acts on." });
@@ -742,7 +750,7 @@ public static class VerificationImpactEndpoints
                         return Results.BadRequest(new { error = $"{baseNumber} is not a controlled test procedure." });
                     if (target.ProjectId != review.ProjectId)
                         return Results.BadRequest(new { error = $"{baseNumber} belongs to another project." });
-                    if (target.Level != review.ProcedureLevel())
+                    if (target.Level != review.ProcedureLevel(ladderPolicy))
                         return Results.BadRequest(new { error = $"{baseNumber} is a {target.Level} procedure and cannot be changed by a {review.Discipline} test change request." });
                     var effectivity = await TestProcedureEffectivity.ForReleaseAsync(
                         db, review.ProjectId, review.ReleaseId, ct);
@@ -799,11 +807,11 @@ public static class VerificationImpactEndpoints
                 }
 
                 var change = review.AddProcedureChange(http.UserAccount().UserName, new TestProcedureChangeDraft(
-                    baseNumber, request.Revision, review.ProcedureLevel(), request.Kind, request.Title ?? "",
+                    baseNumber, request.Revision, review.ProcedureLevel(ladderPolicy), request.Kind, request.Title ?? "",
                     request.Objective ?? "", request.Preconditions ?? "", request.Steps ?? "",
                     request.ExpectedResult ?? "", request.Rationale ?? "",
                     JsonSerializer.Serialize(driving.Distinct()), JsonSerializer.Serialize(removed.Distinct()),
-                    request.CoverageChangeRationale ?? ""), now);
+                    request.CoverageChangeRationale ?? ""), now, policy: ladderPolicy);
                 await db.SaveChangesAsync(ct);
                 return Results.Ok(new
                 {
@@ -856,7 +864,7 @@ public static class VerificationImpactEndpoints
 
         // Reopening approved test work to correct it, exactly as a change request advances to its next revision.
         app.MapPost("/api/test-change-reviews/{id:guid}/revise", async (Guid id, HttpContext http,
-            AeroLinkDbContext db, IdentityService identity, CancellationToken ct) =>
+            AeroLinkDbContext db, IdentityService identity, IProjectLadderPolicyResolver policyResolver, CancellationToken ct) =>
         {
             // AdditionalSources as well as ProcedureChanges: the successor takes the folded-in claims with it,
             // and an unloaded collection is an empty one. The claims would stay on the predecessor and the new
@@ -871,9 +879,10 @@ public static class VerificationImpactEndpoints
             if (reviseRefusal is not null) return reviseRefusal;
             try
             {
+                var ladderPolicy = await policyResolver.ResolveAsync(review.ProjectId, ct);
                 var released = await db.Releases.AnyAsync(x => x.Id == review.ReleaseId && x.IsReleased, ct);
                 var now = DateTimeOffset.UtcNow;
-                var next = review.StartNextRevision(http.UserAccount().UserName, now, released);
+                var next = review.StartNextRevision(http.UserAccount().UserName, now, released, ladderPolicy);
                 db.TestChangeReviews.Add(next);
                 // Superseded in the same unit of work as its successor is created. Two revisions both reading
                 // as current is worse than either state on its own: configuration management could carry the
@@ -1083,11 +1092,12 @@ public static class VerificationImpactEndpoints
         /// nothing to decide and would sit in the queue looking like work.
         app.MapPost("/api/releases/{releaseId:guid}/test-change-requests", async (Guid releaseId,
             CreateTestChangeRequestRequest request, HttpContext http, AeroLinkDbContext db,
-            IdentityService identity, ILadderPolicy ladderPolicy, ProblemReportLinkService problemReports, CancellationToken ct) =>
+            IdentityService identity, IProjectLadderPolicyResolver policyResolver, ProblemReportLinkService problemReports, CancellationToken ct) =>
         {
             var release = await db.Releases.AsNoTracking().Where(x => x.Id == releaseId)
                 .Select(x => new { x.ProjectId, x.IsReleased }).SingleOrDefaultAsync(ct);
             if (release is null) return Results.NotFound();
+            var ladderPolicy = await policyResolver.ResolveAsync(release.ProjectId, ct);
             if (release.IsReleased) return Results.Conflict(new { error = "A released build takes no new test change requests." });
             if (!await http.HasProjectRoleAsync(db, identity, release.ProjectId, ct, ProgramRole.TestEngineer, ProgramRole.TestLead))
                 return Results.Forbid();
@@ -1206,7 +1216,9 @@ public static class VerificationImpactEndpoints
                     }
                 }
                 review.RecordTestChangeRequired(actor, now);
-                review.AssignControlledNumber(await IdentifierAllocator.NextTestChangeRequestAsync(db, request.Discipline, ct), now);
+                review.AssignControlledNumber(
+                    await IdentifierAllocator.NextTestChangeRequestAsync(db, request.Discipline, ct, ladderPolicy), now,
+                    ladderPolicy);
                 foreach (var extra in changes.Skip(1))
                     review.IncludeChangeRequest(actor, extra.Id, extra.DisplayNumber, now);
                 review.WriteCase(actor, request.Title, request.Problem, request.Analysis, request.Solution, now,
@@ -1218,7 +1230,7 @@ public static class VerificationImpactEndpoints
                     review.AddProcedureChange(actor, new TestProcedureChangeDraft(change.BaseNumber, change.Revision,
                         change.Level, change.Kind, change.Title, change.Objective, change.Preconditions,
                         change.Steps, change.ExpectedResult, change.Rationale,
-                        JsonSerializer.Serialize(change.DrivingRequirementRevisionIds ?? [])), now);
+                        JsonSerializer.Serialize(change.DrivingRequirementRevisionIds ?? [])), now, policy: ladderPolicy);
                 // DEC-102: raising the package is itself taking it on. The engineer who built it holds it,
                 // so it appears in My Work and can be worked without a meaningless "Take it on" step.
                 review.Assign(actor, actor, now);
@@ -1307,11 +1319,12 @@ public static class VerificationImpactEndpoints
         /// not eligible for this build. No cross-project information is exposed.
         app.MapGet("/api/releases/{releaseId:guid}/test-change-request-sources", async (Guid releaseId,
             TestChangeReviewDiscipline discipline, HttpContext http, AeroLinkDbContext db,
-            ILadderPolicy ladderPolicy, CancellationToken ct) =>
+            IProjectLadderPolicyResolver policyResolver, CancellationToken ct) =>
         {
             var release = await db.Releases.AsNoTracking().Where(x => x.Id == releaseId)
                 .Select(x => new { x.ProjectId, x.IsReleased }).SingleOrDefaultAsync(ct);
             if (release is null) return Results.NotFound();
+            var ladderPolicy = await policyResolver.ResolveAsync(release.ProjectId, ct);
             if (!await http.HasProjectAccessAsync(db, release.ProjectId, ct)) return Results.Forbid();
             try { _ = ladderPolicy.RequirementLevelFor(discipline); }
             catch (DomainException) { return Results.BadRequest(new { error = "The test-change discipline is not supported." }); }
@@ -1504,11 +1517,12 @@ public static class VerificationImpactEndpoints
         });
 
         app.MapPost("/api/test-change-reviews/{id:guid}/submit", async (Guid id, SubmitTestChangeReviewRequest request,
-            HttpContext http, AeroLinkDbContext db, IdentityService identity, ILadderPolicy ladderPolicy, CancellationToken ct) =>
+            HttpContext http, AeroLinkDbContext db, IdentityService identity, IProjectLadderPolicyResolver policyResolver, CancellationToken ct) =>
         {
             var review = await db.TestChangeReviews.Include(x => x.ProcedureChanges).Include(x => x.ReviewCycles)
                 .SingleOrDefaultAsync(x => x.Id == id, ct);
             if (review is null) return Results.NotFound();
+            var ladderPolicy = await policyResolver.ResolveAsync(review.ProjectId, ct);
             if (await db.Releases.AnyAsync(x => x.Id == review.ReleaseId && x.IsReleased, ct))
                 return Results.Conflict(new { error = "Released software-build test change reviews are read-only." });
             var submitRefusal = await RefuseUnlessAuthoredBy(review, http, db, identity, ct);
@@ -1746,11 +1760,12 @@ public static class VerificationImpactEndpoints
         /// </summary>
         app.MapGet("/api/releases/{releaseId:guid}/test-change-request-coverage", async (Guid releaseId,
             TestChangeReviewDiscipline discipline, string? changeRequestIds,
-            HttpContext http, AeroLinkDbContext db, CancellationToken ct) =>
+            HttpContext http, AeroLinkDbContext db, IProjectLadderPolicyResolver policyResolver, CancellationToken ct) =>
         {
             var release = await db.Releases.AsNoTracking().Where(x => x.Id == releaseId)
                 .Select(x => new { x.ProjectId }).SingleOrDefaultAsync(ct);
             if (release is null) return Results.NotFound();
+            var ladderPolicy = await policyResolver.ResolveAsync(release.ProjectId, ct);
             if (!await http.HasProjectAccessAsync(db, release.ProjectId, ct)) return Results.Forbid();
 
             var ids = (changeRequestIds ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries)
@@ -1771,8 +1786,15 @@ public static class VerificationImpactEndpoints
                     select revision.Id).ToListAsync(ct);
             if (requirementRevisionIds.Count == 0) return Results.Ok(Array.Empty<object>());
 
-            var level = LegacyLadderPolicy.Instance.ProcedureLevel(
-                LegacyLadderPolicy.Instance.RequirementLevelFor(discipline));
+            TestProcedureLevel level;
+            try
+            {
+                level = ladderPolicy.ProcedureLevel(ladderPolicy.RequirementLevelFor(discipline));
+            }
+            catch (DomainException)
+            {
+                return Results.BadRequest(new { error = "The test-change discipline is not supported." });
+            }
             var covering = await (from coverage in db.TestCoverage.AsNoTracking()
                     where requirementRevisionIds.Contains(coverage.RequirementRevisionId)
                     join procedureRevision in db.TestProcedureRevisions.AsNoTracking()

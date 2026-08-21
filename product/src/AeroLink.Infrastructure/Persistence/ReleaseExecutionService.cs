@@ -3,8 +3,11 @@ using System.Security.Cryptography;
 using System.Text;
 using AeroLink.Domain.Baselines;
 using AeroLink.Domain.Common;
+using AeroLink.Domain.ChangeControl;
 using AeroLink.Domain.Releases;
+using AeroLink.Domain.Requirements;
 using AeroLink.Domain.Traceability;
+using AeroLink.Domain.Hierarchy;
 using AeroLink.Domain.Verification;
 using Microsoft.EntityFrameworkCore;
 
@@ -16,20 +19,31 @@ public sealed record ReleaseReconciliationResult(int TraceLinksCreated, int Susp
 public sealed record VerificationManifestRow(Guid ProcedureRevisionId, string DisplayNumber, string Outcome, DateTimeOffset? ExecutedAt, string ExecutedBy, string Configuration, string Determination);
 public sealed record VerificationImportResult(int ExecutionsRecorded, int Passed, int Failed, int Blocked, Guid EvidenceId, string EvidenceSha256);
 
-public sealed class ReleaseExecutionService(AeroLinkDbContext db, EvidenceFileStore evidenceStore)
+public sealed class ReleaseExecutionService(AeroLinkDbContext db, EvidenceFileStore evidenceStore,
+    IProjectLadderPolicyResolver? policyResolver = null)
 {
     public async Task<ReleaseReconciliationResult> ReconcileAsync(Guid campaignId, string actorId, DateTimeOffset now, CancellationToken ct)
     {
         await using var transaction = await db.Database.BeginTransactionAsync(ct);
         var campaign = await db.ReleaseCampaigns.Include(x => x.Events).SingleOrDefaultAsync(x => x.Id == campaignId, ct) ?? throw new DomainException("Release campaign not found.");
+        var ladderPolicy = policyResolver is null
+            ? LegacyLadderPolicy.Instance
+            : await policyResolver.ResolveAsync(campaign.ProjectId, ct);
         if (campaign.State == ReleaseCampaignState.InReview) throw new DomainException("The release package is frozen while approval is in progress.");
         if (campaign.State == ReleaseCampaignState.Released) throw new DomainException("A released campaign is immutable.");
         var baseline = await db.CandidateBaselines.AsNoTracking().SingleAsync(x => x.Id == campaign.BaselineId, ct);
         if (baseline.RequirementsMaterializedAt is null) throw new DomainException("Materialize the release baseline before reconciling lifecycle links.");
         if (baseline.PredecessorBaselineId is null) throw new DomainException("A predecessor baseline is required for controlled link carry-forward.");
 
-        var current = await db.BaselineRequirements.AsNoTracking().Where(x => x.BaselineId == baseline.Id).ToListAsync(ct);
-        var prior = await db.BaselineRequirements.AsNoTracking().Where(x => x.BaselineId == baseline.PredecessorBaselineId).ToListAsync(ct);
+        var configuredLevels = ladderPolicy.OrderedLevels.ToHashSet();
+        var current = await (from member in db.BaselineRequirements.AsNoTracking()
+                             join artifact in db.Requirements.AsNoTracking() on member.ArtifactId equals artifact.Id
+                             where member.BaselineId == baseline.Id && configuredLevels.Contains(artifact.Level)
+                             select member).ToListAsync(ct);
+        var prior = await (from member in db.BaselineRequirements.AsNoTracking()
+                           join artifact in db.Requirements.AsNoTracking() on member.ArtifactId equals artifact.Id
+                           where member.BaselineId == baseline.PredecessorBaselineId && configuredLevels.Contains(artifact.Level)
+                           select member).ToListAsync(ct);
         var currentByArtifact = current.ToDictionary(x => x.ArtifactId, x => x.RevisionId);
         var priorRevisionToArtifact = prior.ToDictionary(x => x.RevisionId, x => x.ArtifactId);
         var priorRevisionIds = prior.Select(x => x.RevisionId).ToList();
@@ -38,6 +52,17 @@ public sealed class ReleaseExecutionService(AeroLinkDbContext db, EvidenceFileSt
             .Select(x => new { x.SourceRevisionId, x.TargetRevisionId, x.Type }).ToListAsync(ct))
             .Select(x => (x.SourceRevisionId, x.TargetRevisionId, x.Type)).ToHashSet();
         var priorTraces = await db.RequirementTraces.AsNoTracking().Where(x => priorRevisionIds.Contains(x.SourceRevisionId) && priorRevisionIds.Contains(x.TargetRevisionId)).ToListAsync(ct);
+        if (ladderPolicy is not ILegacyLadderCompatibilityPolicy)
+        {
+            var endpointIds = priorTraces.SelectMany(x => new[] { x.SourceRevisionId, x.TargetRevisionId }).Distinct().ToList();
+            var endpointLevels = await (from revision in db.RequirementRevisions.AsNoTracking()
+                                        join artifact in db.Requirements.AsNoTracking() on revision.ArtifactId equals artifact.Id
+                                        where endpointIds.Contains(revision.Id)
+                                        select new { revision.Id, artifact.Level }).ToDictionaryAsync(x => x.Id, x => x.Level, ct);
+            priorTraces = priorTraces.Where(trace => endpointLevels.TryGetValue(trace.SourceRevisionId, out var source)
+                && endpointLevels.TryGetValue(trace.TargetRevisionId, out var target)
+                && IsConfiguredTrace(ladderPolicy, source, target, trace.Type)).ToList();
+        }
         var traceCreated = 0;
         foreach (var priorTrace in priorTraces)
         {
@@ -52,22 +77,64 @@ public sealed class ReleaseExecutionService(AeroLinkDbContext db, EvidenceFileSt
         // unmarked, which asserted that a procedure written against the previous wording still verified the
         // new one — the precise claim nobody had made. Reconciliation now reports that state instead of
         // manufacturing it.
-        var currentRevisionIds = current.Select(x => x.RevisionId).ToList();
+        var verificationLevels = ladderPolicy.Definitions
+            .Where(x => x.Verification is not null)
+            .Select(x => x.Level)
+            .ToHashSet();
+        var coverageRevisionIds = await (from member in db.BaselineRequirements.AsNoTracking()
+                                         join artifact in db.Requirements.AsNoTracking() on member.ArtifactId equals artifact.Id
+                                         where member.BaselineId == baseline.Id && verificationLevels.Contains(artifact.Level)
+                                         select member.RevisionId).ToListAsync(ct);
         var currentCoverage = await db.TestCoverage.AsNoTracking()
-            .Where(x => currentRevisionIds.Contains(x.RequirementRevisionId)).ToListAsync(ct);
+            .Where(x => coverageRevisionIds.Contains(x.RequirementRevisionId)).ToListAsync(ct);
+        if (ladderPolicy is not ILegacyLadderCompatibilityPolicy && currentCoverage.Count != 0)
+        {
+            var allowedProcedureLevels = ladderPolicy.Definitions.Where(x => x.Verification is not null)
+                .Select(x => x.Verification!.ProcedureLevel).ToHashSet();
+            var candidateProcedureIds = currentCoverage.Select(x => x.ProcedureRevisionId).Distinct().ToList();
+            var allowedProcedureIds = await (from revision in db.TestProcedureRevisions.AsNoTracking()
+                                             join procedure in db.TestProcedures.AsNoTracking() on revision.ProcedureId equals procedure.Id
+                                             where candidateProcedureIds.Contains(revision.Id)
+                                                 && procedure.ProjectId == campaign.ProjectId
+                                                 && allowedProcedureLevels.Contains(procedure.Level)
+                                             select revision.Id).ToListAsync(ct);
+            currentCoverage = currentCoverage.Where(x => allowedProcedureIds.Contains(x.ProcedureRevisionId)).ToList();
+        }
         var suspect = currentCoverage.Where(x => x.IsSuspect).Select(x => x.RequirementRevisionId).Distinct().Count();
         var covered = currentCoverage.Where(x => !x.IsSuspect).Select(x => x.RequirementRevisionId).Distinct().Count();
-        var uncovered = current.Count - covered;
+        var uncovered = coverageRevisionIds.Count - covered;
         campaign.RecordExecutionProgress("LifecycleLinksReconciled", $"Created {traceCreated} baseline-valid trace links; {suspect} requirement revisions carry suspect coverage awaiting verification confirmation and {uncovered} still need confirmed coverage.", actorId, now);
         await db.SaveChangesAsync(ct); await transaction.CommitAsync(ct);
         return new(traceCreated, suspect, uncovered);
+    }
+
+    private static bool IsConfiguredTrace(ILadderPolicy policy, RequirementLevel source, RequirementLevel target,
+        RequirementTraceType type)
+    {
+        try { RequirementTracePolicy.Validate(policy, source, target, type); return true; }
+        catch (DomainException) { return false; }
+    }
+
+    private static bool IsConfiguredChangeRequest(ILadderPolicy policy, SystemChangeRequest request)
+    {
+        try
+        {
+            return request.Type == ChangeRequestType.System
+                ? policy.IsChangeRequestScopeValid(ChangeRequestType.System, null)
+                : request.SoftwareLevel is not null
+                    && policy.IsChangeRequestScopeValid(ChangeRequestType.Software, request.SoftwareLevel);
+        }
+        catch (DomainException) { return false; }
     }
 
     public async Task<byte[]> CreateVerificationTemplateAsync(Guid campaignId, CancellationToken ct)
     {
         var campaign = await db.ReleaseCampaigns.AsNoTracking().SingleOrDefaultAsync(x => x.Id == campaignId, ct) ?? throw new DomainException("Release campaign not found.");
         if (campaign.SoftwareBuildId is null) throw new DomainException("Select the exact verification build before exporting the manifest.");
-        var rows = await RequiredProceduresAsync(campaign.BaselineId, ct);
+        var ladderPolicy = policyResolver is null
+            ? LegacyLadderPolicy.Instance
+            : await policyResolver.ResolveAsync(campaign.ProjectId, ct);
+        var rows = await RequiredProceduresAsync(campaign.ProjectId, campaign.BaselineId, ladderPolicy, ct);
         var template = rows.Select(x => new VerificationManifestRow(x.Id, x.DisplayNumber, "REQUIRED: Pass, Fail, or Blocked", null, "", "", "")).ToList();
         return JsonSerializer.SerializeToUtf8Bytes(template, new JsonSerializerOptions { WriteIndented = true });
     }
@@ -82,7 +149,10 @@ public sealed class ReleaseExecutionService(AeroLinkDbContext db, EvidenceFileSt
         List<VerificationManifestRow> manifest;
         try { manifest = await JsonSerializer.DeserializeAsync<List<VerificationManifestRow>>(manifestStream, new JsonSerializerOptions { PropertyNameCaseInsensitive = true }, ct) ?? []; }
         catch (JsonException) { throw new DomainException("The verification manifest is not valid JSON."); }
-        var required = await RequiredProceduresAsync(campaign.BaselineId, ct); var requiredIds = required.Select(x => x.Id).ToHashSet();
+        var ladderPolicy = policyResolver is null
+            ? LegacyLadderPolicy.Instance
+            : await policyResolver.ResolveAsync(campaign.ProjectId, ct);
+        var required = await RequiredProceduresAsync(campaign.ProjectId, campaign.BaselineId, ladderPolicy, ct); var requiredIds = required.Select(x => x.Id).ToHashSet();
         if (requiredIds.Count == 0) throw new DomainException("The baseline has no required covered procedures to import.");
         if (manifest.Count != requiredIds.Count || manifest.Select(x => x.ProcedureRevisionId).Distinct().Count() != manifest.Count || manifest.Any(x => !requiredIds.Contains(x.ProcedureRevisionId)))
             throw new DomainException($"The manifest must contain exactly one result for each of the {requiredIds.Count} required procedure revisions.");
@@ -119,15 +189,64 @@ public sealed class ReleaseExecutionService(AeroLinkDbContext db, EvidenceFileSt
         var baseline = await db.CandidateBaselines.AsNoTracking().SingleAsync(x => x.Id == campaign.BaselineId, ct);
         var release = await db.Releases.AsNoTracking().SingleAsync(x => x.Id == campaign.ReleaseId, ct);
         var build = await db.SoftwareBuilds.AsNoTracking().SingleAsync(x => x.Id == campaign.SoftwareBuildId, ct);
-        var members = await db.BaselineRequirements.AsNoTracking().Where(x => x.BaselineId == baseline.Id).ToListAsync(ct);
+        var ladderPolicy = policyResolver is null
+            ? LegacyLadderPolicy.Instance
+            : await policyResolver.ResolveAsync(campaign.ProjectId, ct);
+        var configuredLevels = ladderPolicy.OrderedLevels.ToHashSet();
+        var verificationLevels = ladderPolicy.Definitions.Where(x => x.Verification is not null)
+            .Select(x => x.Level).ToHashSet();
+        var configuredProcedureLevels = ladderPolicy.Definitions.Where(x => x.Verification is not null)
+            .Select(x => x.Verification!.ProcedureLevel).ToHashSet();
+        var configuredDisciplines = ladderPolicy.Definitions.Where(x => x.Verification is not null)
+            .Select(x => x.Verification!.Discipline).ToHashSet();
+        var configuredDocumentTypes = ladderPolicy.ControlledDocumentTypes.ToHashSet();
+        var members = await (from member in db.BaselineRequirements.AsNoTracking()
+                             join artifact in db.Requirements.AsNoTracking() on member.ArtifactId equals artifact.Id
+                             where member.BaselineId == baseline.Id && configuredLevels.Contains(artifact.Level)
+                             select member).ToListAsync(ct);
         var revisionIds = members.Select(x => x.RevisionId).ToHashSet();
+        var revisionLevels = await (from member in db.BaselineRequirements.AsNoTracking()
+                                    join artifact in db.Requirements.AsNoTracking() on member.ArtifactId equals artifact.Id
+                                    where member.BaselineId == baseline.Id && configuredLevels.Contains(artifact.Level)
+                                    select new { member.RevisionId, artifact.Level }).ToDictionaryAsync(x => x.RevisionId, x => x.Level, ct);
         var selections = await db.BaselineSelections.AsNoTracking().Where(x => x.BaselineId == baseline.Id).ToListAsync(ct);
         var selectedScrIds = selections.Select(x => x.ChangeRequestId).ToList();
-        var changes = await db.SystemChangeRequests.AsNoTracking().Where(x => selectedScrIds.Contains(x.Id)).ToListAsync(ct);
-        var impacts = await db.ImpactDispositions.AsNoTracking().Where(x => x.CampaignId == campaign.Id).ToListAsync(ct);
-        var traces = await db.RequirementTraces.AsNoTracking().Where(x => x.ProjectId == campaign.ProjectId && (revisionIds.Contains(x.SourceRevisionId) || revisionIds.Contains(x.TargetRevisionId))).ToListAsync(ct);
-        var coverage = await db.TestCoverage.AsNoTracking().Where(x => revisionIds.Contains(x.RequirementRevisionId)).ToListAsync(ct);
+        var changes = await db.SystemChangeRequests.AsNoTracking()
+            .Where(x => selectedScrIds.Contains(x.Id)).ToListAsync(ct);
+        var impacts = await db.ImpactDispositions.AsNoTracking()
+            .Where(x => x.CampaignId == campaign.Id).ToListAsync(ct);
+        var traces = await db.RequirementTraces.AsNoTracking()
+            .Where(x => x.ProjectId == campaign.ProjectId
+                && (revisionIds.Contains(x.SourceRevisionId) || revisionIds.Contains(x.TargetRevisionId)))
+            .ToListAsync(ct);
+        if (ladderPolicy is not ILegacyLadderCompatibilityPolicy)
+        {
+            changes = changes.Where(x => IsConfiguredChangeRequest(ladderPolicy, x)).ToList();
+            var selectedChangeIds = changes.Select(x => x.Id).ToHashSet();
+            impacts = impacts.Where(x => selectedChangeIds.Contains(x.ChangeRequestId)).ToList();
+            var endpointIds = traces.SelectMany(x => new[] { x.SourceRevisionId, x.TargetRevisionId }).Distinct().ToList();
+            var endpointLevels = await (from revision in db.RequirementRevisions.AsNoTracking()
+                                        join artifact in db.Requirements.AsNoTracking() on revision.ArtifactId equals artifact.Id
+                                        where endpointIds.Contains(revision.Id)
+                                        select new { revision.Id, artifact.Level }).ToDictionaryAsync(x => x.Id, x => x.Level, ct);
+            traces = traces.Where(x => endpointLevels.TryGetValue(x.SourceRevisionId, out var source)
+                && endpointLevels.TryGetValue(x.TargetRevisionId, out var target)
+                && IsConfiguredTrace(ladderPolicy, source, target, x.Type)).ToList();
+        }
+        var coverageRevisionIds = revisionLevels.Where(x => verificationLevels.Contains(x.Value)).Select(x => x.Key).ToHashSet();
+        var coverage = await db.TestCoverage.AsNoTracking().Where(x => coverageRevisionIds.Contains(x.RequirementRevisionId)).ToListAsync(ct);
         var procedureRevisionIds = coverage.Select(x => x.ProcedureRevisionId).Distinct().ToList();
+        if (ladderPolicy is not ILegacyLadderCompatibilityPolicy && procedureRevisionIds.Count != 0)
+        {
+            var allowedProcedureRevisionIds = await (from revision in db.TestProcedureRevisions.AsNoTracking()
+                                                     join procedure in db.TestProcedures.AsNoTracking() on revision.ProcedureId equals procedure.Id
+                                                     where procedureRevisionIds.Contains(revision.Id)
+                                                         && procedure.ProjectId == campaign.ProjectId
+                                                         && configuredProcedureLevels.Contains(procedure.Level)
+                                                     select revision.Id).ToListAsync(ct);
+            coverage = coverage.Where(x => allowedProcedureRevisionIds.Contains(x.ProcedureRevisionId)).ToList();
+            procedureRevisionIds = allowedProcedureRevisionIds;
+        }
         var procedureRevisions = await db.TestProcedureRevisions.AsNoTracking().Where(x => procedureRevisionIds.Contains(x.Id)).ToListAsync(ct);
         var procedureTitles = await TestProcedureRevisionTitleProjection.ForRevisionsAsync(db,
             procedureRevisionIds, ct);
@@ -138,17 +257,30 @@ public sealed class ReleaseExecutionService(AeroLinkDbContext db, EvidenceFileSt
         var evidenceLinks = await db.TestExecutionEvidence.AsNoTracking().Where(x => executionIds.Contains(x.TestExecutionId)).ToListAsync(ct);
         var evidenceIds = evidenceLinks.Select(x => x.EvidenceId).Distinct().ToList();
         var evidence = await db.EvidenceRecords.AsNoTracking().Where(x => evidenceIds.Contains(x.Id)).ToListAsync(ct);
-        var documents = await db.ControlledDocuments.AsNoTracking().Where(x => x.BaselineId == baseline.Id).ToListAsync(ct);
+        var documents = await db.ControlledDocuments.AsNoTracking()
+            .Where(x => x.BaselineId == baseline.Id && configuredDocumentTypes.Contains(x.Type)).ToListAsync(ct);
         var codeTraceability = await db.CodeTraceabilityRecords.AsNoTracking()
             .Where(x => x.ProjectId == campaign.ProjectId && x.ReleaseId == campaign.ReleaseId && revisionIds.Contains(x.RequirementRevisionId))
             .ToListAsync(ct);
+        if (ladderPolicy is not ILegacyLadderCompatibilityPolicy)
+            codeTraceability = codeTraceability.Where(x => revisionLevels.TryGetValue(x.RequirementRevisionId, out var level)
+                && ladderPolicy.HasCodeTraceability(level)).ToList();
         var testSet = await (from entry in db.BuildTestSetEntries.AsNoTracking()
                              join set in db.BuildTestSets.AsNoTracking() on entry.BuildTestSetId equals set.Id
-                             where set.ReleaseId == campaign.ReleaseId
+                             where set.ReleaseId == campaign.ReleaseId && configuredDisciplines.Contains(set.Discipline)
                              orderby entry.BuildTestSetId, entry.ProcedureRevisionId
                              select new { entry.BuildTestSetId, entry.ProcedureRevisionId }).ToListAsync(ct);
+        if (testSet.Count != 0)
+        {
+            var testSetProcedureIds = testSet.Select(x => x.ProcedureRevisionId).ToHashSet();
+            var allowedTestSetProcedureIds = await (from revision in db.TestProcedureRevisions.AsNoTracking()
+                                                    join procedure in db.TestProcedures.AsNoTracking() on revision.ProcedureId equals procedure.Id
+                                                    where testSetProcedureIds.Contains(revision.Id) && configuredProcedureLevels.Contains(procedure.Level)
+                                                    select revision.Id).ToListAsync(ct);
+            testSet = testSet.Where(x => allowedTestSetProcedureIds.Contains(x.ProcedureRevisionId)).ToList();
+        }
         var testChangeReviews = (await db.TestChangeReviews.AsNoTracking()
-                .Where(x => x.ReleaseId == campaign.ReleaseId)
+                .Where(x => x.ReleaseId == campaign.ReleaseId && configuredDisciplines.Contains(x.Discipline))
                 .Select(x => new { x.Id, x.BaseNumber, x.Revision, state = x.State.ToString(), x.AssignedEngineerId, x.UpdatedAt })
                 .ToListAsync(ct))
             .OrderBy(x => x.BaseNumber).ThenBy(x => x.Revision)
@@ -194,10 +326,34 @@ public sealed class ReleaseExecutionService(AeroLinkDbContext db, EvidenceFileSt
         return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(canonical))).ToLowerInvariant();
     }
 
-    private async Task<List<(Guid Id, string DisplayNumber)>> RequiredProceduresAsync(Guid baselineId, CancellationToken ct)
+    private async Task<List<(Guid Id, string DisplayNumber)>> RequiredProceduresAsync(Guid projectId, Guid baselineId,
+        ILadderPolicy ladderPolicy, CancellationToken ct)
     {
-        var revisionIds = await db.BaselineRequirements.AsNoTracking().Where(x => x.BaselineId == baselineId).Select(x => x.RevisionId).ToListAsync(ct);
-        var procedureRevisionIds = await db.TestCoverage.AsNoTracking().Where(x => revisionIds.Contains(x.RequirementRevisionId)).Select(x => x.ProcedureRevisionId).Distinct().ToListAsync(ct);
-        return await (from revision in db.TestProcedureRevisions.AsNoTracking().Where(x => procedureRevisionIds.Contains(x.Id)) join procedure in db.TestProcedures.AsNoTracking() on revision.ProcedureId equals procedure.Id orderby procedure.BaseNumber select new ValueTuple<Guid, string>(revision.Id, procedure.BaseNumber + "." + revision.Revision.ToString("D2"))).ToListAsync(ct);
+        if (ladderPolicy is ILegacyLadderCompatibilityPolicy)
+        {
+            var revisionIds = await db.BaselineRequirements.AsNoTracking()
+                .Where(x => x.BaselineId == baselineId).Select(x => x.RevisionId).ToListAsync(ct);
+            var legacyProcedureRevisionIds = await db.TestCoverage.AsNoTracking()
+                .Where(x => revisionIds.Contains(x.RequirementRevisionId))
+                .Select(x => x.ProcedureRevisionId).Distinct().ToListAsync(ct);
+            return await (from revision in db.TestProcedureRevisions.AsNoTracking().Where(x => legacyProcedureRevisionIds.Contains(x.Id))
+                          join procedure in db.TestProcedures.AsNoTracking() on revision.ProcedureId equals procedure.Id
+                          orderby procedure.BaseNumber
+                          select new ValueTuple<Guid, string>(revision.Id, procedure.BaseNumber + "." + revision.Revision.ToString("D2"))).ToListAsync(ct);
+        }
+        var configuredRequirementLevels = ladderPolicy.Definitions.Where(x => x.Verification is not null)
+            .Select(x => x.Level).ToHashSet();
+        var procedureRevisionIds = await (from coverage in db.TestCoverage.AsNoTracking()
+                                          join member in db.BaselineRequirements.AsNoTracking() on coverage.RequirementRevisionId equals member.RevisionId
+                                          join artifact in db.Requirements.AsNoTracking() on member.ArtifactId equals artifact.Id
+                                          where member.BaselineId == baselineId && configuredRequirementLevels.Contains(artifact.Level)
+                                          select coverage.ProcedureRevisionId).Distinct().ToListAsync(ct);
+        var allowedProcedureLevels = ladderPolicy.Definitions.Where(x => x.Verification is not null)
+            .Select(x => x.Verification!.ProcedureLevel).ToHashSet();
+        return await (from revision in db.TestProcedureRevisions.AsNoTracking().Where(x => procedureRevisionIds.Contains(x.Id))
+                      join procedure in db.TestProcedures.AsNoTracking() on revision.ProcedureId equals procedure.Id
+                      where procedure.ProjectId == projectId && allowedProcedureLevels.Contains(procedure.Level)
+                      orderby procedure.BaseNumber
+                      select new ValueTuple<Guid, string>(revision.Id, procedure.BaseNumber + "." + revision.Revision.ToString("D2"))).ToListAsync(ct);
     }
 }

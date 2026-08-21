@@ -34,9 +34,10 @@ public sealed record ApprovedProcedureSelection(Guid ProcedureId, Guid RevisionI
 /// as soon as the engineering decision is settled, rather than discovering the work when the release is
 /// already being assembled.
 /// </summary>
-public sealed class VerificationImpactService(AeroLinkDbContext db, ProblemReportLinkService? problemReports = null, ILadderPolicy? policy = null)
+public sealed class VerificationImpactService(AeroLinkDbContext db, ProblemReportLinkService? problemReports = null,
+    ILadderPolicy? policy = null, IProjectLadderPolicyResolver? policyResolver = null)
 {
-    private readonly ILadderPolicy ladderPolicy = policy ?? LegacyLadderPolicy.Instance;
+    private readonly ILadderPolicy fallbackPolicy = policy ?? LegacyLadderPolicy.Instance;
     /// <summary>
     /// Raises the items owed by a newly approved change request. Safe to call more than once for the same
     /// change request: existing items for the same requirement change are left alone, so a retried approval
@@ -45,6 +46,9 @@ public sealed class VerificationImpactService(AeroLinkDbContext db, ProblemRepor
     public async Task<int> RaiseForApprovedChangeRequestAsync(SystemChangeRequest request, DateTimeOffset now,
         CancellationToken ct, string? actionActor = null)
     {
+        var ladderPolicy = policyResolver is null
+            ? fallbackPolicy
+            : await policyResolver.ResolveAsync(request.ProjectId, ct);
         // Selecting an approved change into a candidate baseline moves it to SelectedForBaseline, so both
         // states mean "approved". Testing only for Approved would make a retried raise silently do nothing
         // once the change had been selected.
@@ -76,6 +80,10 @@ public sealed class VerificationImpactService(AeroLinkDbContext db, ProblemRepor
         {
             if (covered.Contains(change.Id)) continue;
             if (change.Kind is not (RequirementChangeKind.Introduce or RequirementChangeKind.Modify)) continue;
+            // A present requirement level may deliberately omit verification. Such a change has no
+            // procedure discipline to route and must not manufacture a review for an absent capability.
+            if (!ladderPolicy.OrderedLevels.Contains(change.Level)) continue;
+            if (ladderPolicy.Definition(change.Level).Verification is null) continue;
             var discipline = ladderPolicy.Discipline(change.Level);
             if (!reviews.TryGetValue(discipline, out var review))
             {
@@ -140,6 +148,9 @@ public sealed class VerificationImpactService(AeroLinkDbContext db, ProblemRepor
     public async Task<MaterializationImpactResult> ApplyMaterializationAsync(Guid projectId, Guid releaseId,
         IReadOnlyList<MaterializedRequirementChange> changes, string actorId, DateTimeOffset now, CancellationToken ct)
     {
+        var ladderPolicy = policyResolver is null
+            ? fallbackPolicy
+            : await policyResolver.ResolveAsync(projectId, ct);
         if (changes.Count == 0) return new MaterializationImpactResult(0, 0, 0, 0);
 
         var changeIds = changes.Select(x => x.RequirementChangeId).ToList();
@@ -167,7 +178,7 @@ public sealed class VerificationImpactService(AeroLinkDbContext db, ProblemRepor
             .DistinctBy(link => link.ProcedureRevisionId)
             .ToList();
         await IncludeChangedCoverageInTestSetsAsync(projectId, releaseId, changes, changedCoverage,
-            actorId, now, ct);
+            actorId, now, ct, ladderPolicy);
         var orphaned = await RaiseOrphanedProceduresAsync(projectId, releaseId, changes, carried, now, ct);
         return new MaterializationImpactResult(bound, carried.Count, confirmed, orphaned);
     }
@@ -179,7 +190,7 @@ public sealed class VerificationImpactService(AeroLinkDbContext db, ProblemRepor
     /// </summary>
     private async Task IncludeChangedCoverageInTestSetsAsync(Guid projectId, Guid releaseId,
         IReadOnlyList<MaterializedRequirementChange> changes, IReadOnlyList<TestRequirementCoverage> coverage,
-        string actorId, DateTimeOffset now, CancellationToken ct)
+        string actorId, DateTimeOffset now, CancellationToken ct, ILadderPolicy ladderPolicy)
     {
         if (coverage.Count == 0) return;
         var revisionIds = coverage.Select(x => x.ProcedureRevisionId).Distinct().ToList();
@@ -187,8 +198,14 @@ public sealed class VerificationImpactService(AeroLinkDbContext db, ProblemRepor
                             join procedure in db.TestProcedures.AsNoTracking() on revision.ProcedureId equals procedure.Id
                             where revisionIds.Contains(revision.Id)
                             select new { revision.Id, procedure.Level }).ToListAsync(ct);
+        var configuredProcedureLevels = ladderPolicy.OrderedLevels
+            .Where(level => ladderPolicy.Definition(level).Verification is not null)
+            .ToDictionary(ladderPolicy.ProcedureLevel, level => level);
+        levels = levels.Where(row => configuredProcedureLevels.ContainsKey(row.Level)).ToList();
         var sets = await db.BuildTestSets.Include(x => x.Entries).Where(x => x.ReleaseId == releaseId).ToListAsync(ct);
-        foreach (var discipline in ladderPolicy.OrderedLevels.Select(ladderPolicy.Discipline))
+        foreach (var discipline in ladderPolicy.OrderedLevels
+                     .Where(level => ladderPolicy.Definition(level).Verification is not null)
+                     .Select(ladderPolicy.Discipline))
         {
             if (sets.Any(x => x.Discipline == discipline)) continue;
             var pending = db.BuildTestSets.Local.FirstOrDefault(x => x.ReleaseId == releaseId && x.Discipline == discipline);
@@ -200,7 +217,7 @@ public sealed class VerificationImpactService(AeroLinkDbContext db, ProblemRepor
             x => changes.First(change => x.Any(link => link.RequirementRevisionId == change.RevisionId)).DisplayNumber);
         foreach (var row in levels)
         {
-            var discipline = ladderPolicy.Discipline(ladderPolicy.RequirementLevelFor(row.Level));
+            var discipline = ladderPolicy.Discipline(configuredProcedureLevels[row.Level]);
             sets.Single(x => x.Discipline == discipline).Include(actorId, row.Id,
                 TestSelectionReason.ChangedRequirement,
                 $"Mandatory before release because {changedByRevision[row.Id]} changed.", now);
@@ -364,6 +381,9 @@ public sealed class VerificationImpactService(AeroLinkDbContext db, ProblemRepor
         Guid? causingBaselineId, IReadOnlyList<OrphanedProcedure> orphanedProcedures, DateTimeOffset now,
         CancellationToken ct)
     {
+        var ladderPolicy = policyResolver is null
+            ? fallbackPolicy
+            : await policyResolver.ResolveAsync(projectId, ct);
         if (orphanedProcedures.Count == 0) return 0;
         var alreadyRaised = await db.VerificationImpactItems
             .Where(x => x.Trigger == VerificationImpactTrigger.ProcedureOrphaned
@@ -380,12 +400,16 @@ public sealed class VerificationImpactService(AeroLinkDbContext db, ProblemRepor
             .SingleAsync(ct);
         var reviews = await db.TestChangeReviews.Where(x => x.ChangeRequestId == changeRequestId)
             .ToDictionaryAsync(x => x.Discipline, ct);
+        var configuredProcedureLevels = ladderPolicy.OrderedLevels
+            .Where(level => ladderPolicy.Definition(level).Verification is not null)
+            .ToDictionary(ladderPolicy.ProcedureLevel, level => level);
 
         var raised = 0;
         foreach (var procedure in orphanedProcedures)
         {
             if (!covered.Add(procedure.ProcedureId)) continue;
-            var discipline = ladderPolicy.Discipline(ladderPolicy.RequirementLevelFor(procedure.Level));
+            if (!configuredProcedureLevels.TryGetValue(procedure.Level, out var procedureLevel)) continue;
+            var discipline = ladderPolicy.Discipline(procedureLevel);
             if (!reviews.TryGetValue(discipline, out var review))
             {
                 // An orphaned procedure is itself the finding: the change left a procedure without a
@@ -393,7 +417,7 @@ public sealed class VerificationImpactService(AeroLinkDbContext db, ProblemRepor
                 // the moment it exists.
                 review = new TestChangeReview(projectId, releaseId, changeRequestId, discipline, sourceNumber, now);
                 review.RecordTestChangeRequired("system.verification", now);
-                review.AssignControlledNumber(await IdentifierAllocator.NextTestChangeRequestAsync(db, discipline, ct), now);
+                review.AssignControlledNumber(await IdentifierAllocator.NextTestChangeRequestAsync(db, discipline, ct, ladderPolicy), now, ladderPolicy);
                 db.TestChangeReviews.Add(review);
                 reviews.Add(discipline, review);
             }
