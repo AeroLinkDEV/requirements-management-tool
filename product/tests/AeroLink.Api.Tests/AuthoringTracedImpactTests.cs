@@ -6,6 +6,7 @@ using AeroLink.Domain.Identity;
 using AeroLink.Domain.Programs;
 using AeroLink.Domain.Requirements;
 using AeroLink.Domain.Baselines;
+using AeroLink.Domain.Releases;
 using AeroLink.Domain.Traceability;
 using AeroLink.Domain.Verification;
 using AeroLink.Infrastructure.Persistence;
@@ -50,8 +51,13 @@ public sealed class AuthoringTracedImpactTests
 
         var account = new UserAccount("traced.author", "traced.author", "traced.author@example.test",
             IdentityService.HashPassword(AeroLinkApiFactory.MemberPassword), now);
-        db.Add(account);
-        db.Add(new ProgramMembership(account.Id, program.Id, ProgramRole.Engineer, "test.setup", now));
+        var approver = new UserAccount("traced.approver", "traced.approver", "traced.approver@example.test",
+            IdentityService.HashPassword(AeroLinkApiFactory.MemberPassword), now);
+        db.AddRange(account, approver);
+        db.AddRange(
+            new ProgramMembership(account.Id, program.Id, ProgramRole.Engineer, "test.setup", now),
+            new ProgramMembership(account.Id, program.Id, ProgramRole.Approver, "test.setup", now),
+            new ProgramMembership(approver.Id, program.Id, ProgramRole.Approver, "test.setup", now));
 
         // A revision records the change request and baseline it came from, so those exist rather than being
         // faked with empty identifiers the foreign keys would reject.
@@ -61,12 +67,15 @@ public sealed class AuthoringTracedImpactTests
 
         var parent = new RequirementArtifact(project.Id, "SYSR-000501", RequirementLevel.System, now);
         var child = new RequirementArtifact(project.Id, "HLR-000502", RequirementLevel.HighLevel, now);
-        db.AddRange(parent, child);
+        var low = new RequirementArtifact(project.Id, "LLR-000503", RequirementLevel.LowLevel, now);
+        db.AddRange(parent, child, low);
         var parentRevision = new RequirementRevision(parent.Id, 0, "The FMS shall sequence oceanic waypoints.",
             "Rationale", "Test", RequirementRevisionState.Active, origin.Id, baseline.Id, now);
         var childRevision = new RequirementRevision(child.Id, 0, "The software shall compute the sequence.",
             "Rationale", "Test", RequirementRevisionState.Active, origin.Id, baseline.Id, now);
-        db.AddRange(parentRevision, childRevision);
+        var lowRevision = new RequirementRevision(low.Id, 0, "The implementation shall compute the sequence.",
+            "Rationale", "Test", RequirementRevisionState.Active, origin.Id, baseline.Id, now);
+        db.AddRange(parentRevision, childRevision, lowRevision);
 
         // The child traces up to the parent: source derives from target. A change to the parent therefore
         // propagates down to the child, which is the direction the endpoint has to read.
@@ -118,6 +127,138 @@ public sealed class AuthoringTracedImpactTests
         Assert.False(traced.CoveringProcedures[0].IsSuspect);
         Assert.NotEqual(Guid.Empty, traced.CoveringProcedures[0].RevisionId);
         Assert.NotNull(traced.RequirementRevisionId);
+    }
+
+    [Fact]
+    public async Task Trace_mutation_accepts_both_relation_types_and_refuses_invalid_duplicate_self_project_and_frozen_history_operations()
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var client = factory.CreateClient();
+        var (projectId, parentNumber, _, _) = await SeedAsync(factory);
+        await SignInAsync(client);
+
+        Guid parentRevisionId, childRevisionId, lowRevisionId, baselineId, releaseId, originId;
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            parentRevisionId = await (from revision in db.RequirementRevisions
+                                      join artifact in db.Requirements on revision.ArtifactId equals artifact.Id
+                                      where artifact.ProjectId == projectId && artifact.BaseNumber == parentNumber
+                                      select revision.Id).SingleAsync();
+            lowRevisionId = await (from revision in db.RequirementRevisions
+                                   join artifact in db.Requirements on revision.ArtifactId equals artifact.Id
+                                   where artifact.ProjectId == projectId && artifact.BaseNumber == "LLR-000503"
+                                   select revision.Id).SingleAsync();
+            childRevisionId = await (from revision in db.RequirementRevisions
+                                     join artifact in db.Requirements on revision.ArtifactId equals artifact.Id
+                                     where artifact.ProjectId == projectId && artifact.BaseNumber == "HLR-000502"
+                                     select revision.Id).SingleAsync();
+            baselineId = await db.CandidateBaselines.Where(x => x.ProjectId == projectId).Select(x => x.Id).SingleAsync();
+            releaseId = await db.Releases.Where(x => x.ProjectId == projectId).Select(x => x.Id).SingleAsync();
+            originId = await db.SystemChangeRequests.Where(x => x.ProjectId == projectId).Select(x => x.Id).SingleAsync();
+        }
+
+        using var created = await client.PostAsJsonAsync("/api/trace-links", new
+        {
+            projectId,
+            sourceRevisionId = parentRevisionId,
+            targetRevisionId = lowRevisionId,
+            type = "AllocatedFrom",
+            rationale = "The low-level implementation is allocated from the system requirement.",
+        });
+        Assert.Equal(HttpStatusCode.Created, created.StatusCode);
+        var allocatedLinkId = (await created.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetGuid();
+
+        using var derived = await client.PostAsJsonAsync("/api/trace-links", new
+        {
+            projectId,
+            sourceRevisionId = lowRevisionId,
+            targetRevisionId = parentRevisionId,
+            type = "DerivedFrom",
+            rationale = "The low-level implementation derives from the system requirement.",
+        });
+        Assert.Equal(HttpStatusCode.Created, derived.StatusCode);
+        var derivedLinkId = (await derived.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetGuid();
+
+        using var duplicate = await client.PostAsJsonAsync("/api/trace-links", new
+        {
+            projectId,
+            sourceRevisionId = parentRevisionId,
+            targetRevisionId = lowRevisionId,
+            type = "AllocatedFrom",
+            rationale = "A duplicate controlled link must not be created.",
+        });
+        Assert.Equal(HttpStatusCode.BadRequest, duplicate.StatusCode);
+
+        using var invalidType = await client.PostAsJsonAsync("/api/trace-links", new
+        {
+            projectId,
+            sourceRevisionId = childRevisionId,
+            targetRevisionId = lowRevisionId,
+            type = "NotARequirementTraceType",
+            rationale = "An unknown relation type is not controlled.",
+        });
+        Assert.Equal(HttpStatusCode.BadRequest, invalidType.StatusCode);
+
+        using var self = await client.PostAsJsonAsync("/api/trace-links", new
+        {
+            projectId,
+            sourceRevisionId = parentRevisionId,
+            targetRevisionId = parentRevisionId,
+            type = "DerivedFrom",
+            rationale = "A requirement cannot trace to itself.",
+        });
+        Assert.Equal(HttpStatusCode.BadRequest, self.StatusCode);
+
+        using var foreignProject = factory.Services.CreateScope();
+        var foreignDb = foreignProject.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+        var foreignProgram = new ProgramRecord("Foreign Trace Program", "FTP");
+        var foreign = new ProjectRecord(foreignProgram.Id, "Foreign Trace Software", "Foreign Trace Software");
+        var foreignArtifact = new RequirementArtifact(foreign.Id, "SYSR-009901", RequirementLevel.System, DateTimeOffset.UtcNow);
+        var foreignRevision = new RequirementRevision(foreignArtifact.Id, 0, "Foreign revision", "R", "Test",
+            RequirementRevisionState.Active, originId, baselineId, DateTimeOffset.UtcNow);
+        foreignDb.AddRange(foreignProgram, foreign, foreignArtifact, foreignRevision);
+        await foreignDb.SaveChangesAsync();
+        using var wrongProject = await client.PostAsJsonAsync("/api/trace-links", new
+        {
+            projectId,
+            sourceRevisionId = foreignRevision.Id,
+            targetRevisionId = parentRevisionId,
+            type = "AllocatedFrom",
+            rationale = "A foreign-project revision cannot enter this project graph.",
+        });
+        Assert.Equal(HttpStatusCode.BadRequest, wrongProject.StatusCode);
+
+        using var deleted = await client.DeleteAsync($"/api/trace-links/{allocatedLinkId}");
+        Assert.Equal(HttpStatusCode.NoContent, deleted.StatusCode);
+
+        using (var freezeScope = factory.Services.CreateScope())
+        {
+            var db = freezeScope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            db.BaselineRequirements.AddRange(
+                new BaselineRequirementSelection(baselineId,
+                    await db.Requirements.Where(x => x.ProjectId == projectId && x.BaseNumber == parentNumber).Select(x => x.Id).SingleAsync(), parentRevisionId),
+                new BaselineRequirementSelection(baselineId,
+                    await db.Requirements.Where(x => x.ProjectId == projectId && x.BaseNumber == "LLR-000503").Select(x => x.Id).SingleAsync(), lowRevisionId));
+            var campaign = new ReleaseCampaign(projectId, releaseId, baselineId, "Trace freeze", "traced.author", DateTimeOffset.UtcNow);
+            campaign.StartVerification("traced.author", DateTimeOffset.UtcNow);
+            campaign.BeginReleaseReview("traced.author", [("traced.author", "Trace approver")], new string('a', 64), DateTimeOffset.UtcNow);
+            db.ReleaseCampaigns.Add(campaign);
+            await db.SaveChangesAsync();
+        }
+
+        using var frozenCreate = await client.PostAsJsonAsync("/api/trace-links", new
+        {
+            projectId,
+            sourceRevisionId = childRevisionId,
+            targetRevisionId = lowRevisionId,
+            type = "AllocatedFrom",
+            rationale = "The release package is now frozen.",
+        });
+        Assert.Equal(HttpStatusCode.Conflict, frozenCreate.StatusCode);
+
+        using var frozenDelete = await client.DeleteAsync($"/api/trace-links/{derivedLinkId}");
+        Assert.Equal(HttpStatusCode.Conflict, frozenDelete.StatusCode);
     }
 
     [Fact]
@@ -194,6 +335,231 @@ public sealed class AuthoringTracedImpactTests
         var selected = Assert.Single(rows.EnumerateArray());
         Assert.Equal(parentRevisionId, selected.GetProperty("revisionId").GetGuid());
         Assert.Equal($"{parentNumber}.00", selected.GetProperty("displayNumber").GetString());
+    }
+
+    [Fact]
+    public async Task Upstream_picker_and_submission_validation_enforce_level_project_build_and_review_rules()
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var client = factory.CreateClient();
+        var (projectId, parentNumber, childNumber, _) = await SeedAsync(factory);
+        await SignInAsync(client);
+        var ladder = await MaterializeLadderAsync(factory, projectId, parentNumber, childNumber);
+
+        using var systemPicker = await client.GetAsync(
+            $"/api/authoring/upstream-requirements?projectId={projectId}&releaseId={ladder.ReleaseId}&childLevel=System");
+        Assert.Equal(HttpStatusCode.BadRequest, systemPicker.StatusCode);
+        Assert.Contains("Only HLR and LLR proposals", await systemPicker.Content.ReadAsStringAsync());
+
+        using (var systemDraftWithParent = await client.PostAsJsonAsync("/api/change-request-drafts", new
+        {
+            projectId,
+            targetReleaseId = ladder.ReleaseId,
+            type = "System",
+            title = "Reject System upstream allocation",
+            problem = "P", analysis = "A", solution = "S",
+            requirementChanges = new[]
+            {
+                new
+                {
+                    baseNumber = parentNumber, revision = 1, level = "System", kind = "Modify",
+                    statement = "The System requirement remains controlled.",
+                    rationale = "Characterization", verificationMethod = "Test",
+                    upstreamRevisionIds = new[] { ladder.SystemRevisionId }
+                }
+            }
+        }))
+        {
+            Assert.Equal(HttpStatusCode.BadRequest, systemDraftWithParent.StatusCode);
+            Assert.Contains("System requirements cannot carry", await systemDraftWithParent.Content.ReadAsStringAsync());
+        }
+
+        using var hlrPicker = await client.GetAsync(
+            $"/api/authoring/upstream-requirements?projectId={projectId}&releaseId={ladder.ReleaseId}&childLevel=HighLevel");
+        Assert.Equal(HttpStatusCode.OK, hlrPicker.StatusCode);
+        var hlrRows = JsonSerializer.Deserialize<JsonElement>(await hlrPicker.Content.ReadAsStringAsync());
+        var hlrParent = Assert.Single(hlrRows.EnumerateArray());
+        Assert.Equal(ladder.SystemRevisionId, hlrParent.GetProperty("revisionId").GetGuid());
+        Assert.Equal($"{parentNumber}.00", hlrParent.GetProperty("displayNumber").GetString());
+        Assert.Equal("System", hlrParent.GetProperty("level").GetString());
+
+        using var llrPicker = await client.GetAsync(
+            $"/api/authoring/upstream-requirements?projectId={projectId}&releaseId={ladder.ReleaseId}&childLevel=LowLevel");
+        Assert.Equal(HttpStatusCode.OK, llrPicker.StatusCode);
+        var llrRows = JsonSerializer.Deserialize<JsonElement>(await llrPicker.Content.ReadAsStringAsync());
+        var llrParent = Assert.Single(llrRows.EnumerateArray());
+        Assert.Equal(ladder.HighRevisionId, llrParent.GetProperty("revisionId").GetGuid());
+        Assert.Equal($"{childNumber}.00", llrParent.GetProperty("displayNumber").GetString());
+        Assert.Equal("HighLevel", llrParent.GetProperty("level").GetString());
+
+        async Task<JsonElement> CreateDraftAsync(string level, string baseNumber, IReadOnlyList<Guid> upstream,
+            bool derived = false, string impact = "{}")
+        {
+            using var response = await client.PostAsJsonAsync("/api/change-request-drafts", new
+            {
+                projectId,
+                targetReleaseId = ladder.ReleaseId,
+                type = "Software",
+                softwareLevel = level,
+                title = $"Characterize {level} upstream {Guid.NewGuid():N}",
+                problem = "P", analysis = "A", solution = "S",
+                requirementChanges = new[]
+                {
+                    new
+                    {
+                        baseNumber, revision = 1, level, kind = "Modify",
+                        statement = $"The {level} requirement shall remain controlled.",
+                        rationale = "Characterization", verificationMethod = "Test",
+                        attributesJson = derived ? "{\"owner\":\"traced.author\",\"criticality\":\"Safety Significant\"}" : "{}",
+                        impactDispositionJson = impact, isDerived = derived,
+                        upstreamRevisionIds = upstream
+                    }
+                }
+            });
+            var body = await response.Content.ReadAsStringAsync();
+            Assert.True(response.StatusCode == HttpStatusCode.Created,
+                $"{(int)response.StatusCode}: {body}");
+            return JsonSerializer.Deserialize<JsonElement>(body);
+        }
+
+        async Task<HttpResponseMessage> TryCreateDraftAsync(string level, string baseNumber,
+            IReadOnlyList<Guid> upstream, bool derived = false)
+        {
+            return await client.PostAsJsonAsync("/api/change-request-drafts", new
+            {
+                projectId,
+                targetReleaseId = ladder.ReleaseId,
+                type = "Software",
+                softwareLevel = level,
+                title = $"Reject {level} upstream {Guid.NewGuid():N}",
+                problem = "P", analysis = "A", solution = "S",
+                requirementChanges = new[]
+                {
+                    new
+                    {
+                        baseNumber, revision = 1, level, kind = "Modify",
+                        statement = "The requirement shall remain controlled.",
+                        rationale = "Characterization", verificationMethod = "Test",
+                        attributesJson = derived ? "{\"owner\":\"traced.author\",\"criticality\":\"Safety Significant\"}" : "{}",
+                        impactDispositionJson = "{}", isDerived = derived,
+                        upstreamRevisionIds = upstream
+                    }
+                }
+            });
+        }
+
+        // A normal HLR and LLR draft may be saved while its engineering decisions are incomplete.
+        using (var incompleteHlr = await TryCreateDraftAsync("HighLevel", childNumber, []))
+            Assert.Equal(HttpStatusCode.Created, incompleteHlr.StatusCode);
+        using (var incompleteLlr = await TryCreateDraftAsync("LowLevel", "LLR-000503", []))
+            Assert.Equal(HttpStatusCode.Created, incompleteLlr.StatusCode);
+
+        // Derived software uses its explicit rationale and cannot also carry an authored parent allocation.
+        using (var derivedWithParent = await TryCreateDraftAsync("HighLevel", childNumber,
+                   [ladder.SystemRevisionId], derived: true))
+        {
+            Assert.Equal(HttpStatusCode.BadRequest, derivedWithParent.StatusCode);
+            Assert.Contains("derived requirement", await derivedWithParent.Content.ReadAsStringAsync());
+        }
+
+        Guid foreignRevisionId, sameProjectOutOfBaselineRevisionId;
+        using (var foreignScope = factory.Services.CreateScope())
+        {
+            var foreignDb = foreignScope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            var now = DateTimeOffset.UtcNow;
+            var foreignProgram = new ProgramRecord("Foreign Upstream Program", "FUP");
+            var foreignProject = new ProjectRecord(foreignProgram.Id, "Foreign Upstream Software", "Foreign Upstream Software");
+            var foreignRelease = new SoftwareRelease(foreignProject.Id, "1.6", false);
+            var foreignBaseline = new CandidateBaseline("BL-09901", 0, foreignProject.Id, foreignRelease.Id, null,
+                "Foreign baseline", "traced.author", now);
+            var foreignRequest = new SystemChangeRequest("SRCR-09901", 0, foreignProject.Id, foreignRelease.Id,
+                "Foreign upstream", "P", "A", "S", "traced.author", now);
+            var foreignArtifact = new RequirementArtifact(foreignProject.Id, "SYSR-09901", RequirementLevel.System, now);
+            var foreignRevision = new RequirementRevision(foreignArtifact.Id, 0, "The foreign parent is not in this build.",
+                "R", "Test", RequirementRevisionState.Active, foreignRequest.Id, foreignBaseline.Id, now);
+            foreignDb.AddRange(foreignProgram, foreignProject, foreignRelease, foreignBaseline, foreignRequest,
+                foreignArtifact, foreignRevision);
+            await foreignDb.SaveChangesAsync();
+            foreignRevisionId = foreignRevision.Id;
+        }
+
+        using (var outOfBaselineScope = factory.Services.CreateScope())
+        {
+            var outOfBaselineDb = outOfBaselineScope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            var now = DateTimeOffset.UtcNow;
+            var baselineId = await outOfBaselineDb.CandidateBaselines.Where(x => x.ProjectId == projectId)
+                .Select(x => x.Id).SingleAsync();
+            var originId = await outOfBaselineDb.SystemChangeRequests.Where(x => x.ProjectId == projectId && x.BaseNumber == "SRCR-00500")
+                .Select(x => x.Id).SingleAsync();
+            var artifact = new RequirementArtifact(projectId, "SYSR-000504", RequirementLevel.System, now);
+            var revision = new RequirementRevision(artifact.Id, 0, "The same-project parent is outside the effective build.",
+                "R", "Test", RequirementRevisionState.Active, originId, baselineId, now);
+            outOfBaselineDb.AddRange(artifact, revision);
+            await outOfBaselineDb.SaveChangesAsync();
+            sameProjectOutOfBaselineRevisionId = revision.Id;
+        }
+
+        // A non-derived proposal accepts only distinct, exact same-project expected-level revisions.
+        using (var wrongLevel = await TryCreateDraftAsync("HighLevel", childNumber, [ladder.LowRevisionId]))
+        {
+            Assert.Equal(HttpStatusCode.BadRequest, wrongLevel.StatusCode);
+            Assert.Contains("current System", await wrongLevel.Content.ReadAsStringAsync());
+        }
+        using (var wrongProject = await TryCreateDraftAsync("HighLevel", childNumber, [foreignRevisionId]))
+        {
+            Assert.Equal(HttpStatusCode.BadRequest, wrongProject.StatusCode);
+            Assert.Contains("current System", await wrongProject.Content.ReadAsStringAsync());
+        }
+        using (var outOfBaseline = await TryCreateDraftAsync("HighLevel", childNumber,
+                   [sameProjectOutOfBaselineRevisionId]))
+        {
+            Assert.Equal(HttpStatusCode.BadRequest, outOfBaseline.StatusCode);
+            Assert.Contains("current System", await outOfBaseline.Content.ReadAsStringAsync());
+        }
+        using (var duplicate = await TryCreateDraftAsync("HighLevel", childNumber,
+                   [ladder.SystemRevisionId, ladder.SystemRevisionId]))
+        {
+            Assert.Equal(HttpStatusCode.BadRequest, duplicate.StatusCode);
+            Assert.Contains("distinct controlled revision", await duplicate.Content.ReadAsStringAsync());
+        }
+
+        // Review-ready validation requires an exact current parent from the same project/build.
+        var incompleteForReview = await CreateDraftAsync("HighLevel", childNumber, [], impact: RequirementAuthoringJson.CompleteImpactDispositions);
+        using (var noParent = await client.PostAsJsonAsync(
+                   $"/api/change-requests/{incompleteForReview.GetProperty("id").GetGuid()}/submit",
+                   new { expectedVersion = incompleteForReview.GetProperty("version").GetInt64(), mode = "Sequential",
+                       approvers = new[] { new { userId = "traced.approver", name = "Traced Approver" } } }))
+        {
+            Assert.Equal(HttpStatusCode.BadRequest, noParent.StatusCode);
+            Assert.Contains("Allocate the proposed HLR", await noParent.Content.ReadAsStringAsync());
+        }
+
+        var validHlr = await CreateDraftAsync("HighLevel", childNumber, [ladder.SystemRevisionId], impact: RequirementAuthoringJson.CompleteImpactDispositions);
+        using (var submitHlr = await client.PostAsJsonAsync(
+                   $"/api/change-requests/{validHlr.GetProperty("id").GetGuid()}/submit",
+                   new { expectedVersion = validHlr.GetProperty("version").GetInt64(), mode = "Sequential",
+                       approvers = new[] { new { userId = "traced.approver", name = "Traced Approver" } } }))
+        {
+            var body = await submitHlr.Content.ReadAsStringAsync();
+            Assert.True(submitHlr.StatusCode == HttpStatusCode.OK, $"{(int)submitHlr.StatusCode}: {body}");
+        }
+
+        var validLlr = await CreateDraftAsync("LowLevel", "LLR-000503", [ladder.HighRevisionId], impact: RequirementAuthoringJson.CompleteImpactDispositions);
+        using (var submitLlr = await client.PostAsJsonAsync(
+                   $"/api/change-requests/{validLlr.GetProperty("id").GetGuid()}/submit",
+                   new { expectedVersion = validLlr.GetProperty("version").GetInt64(), mode = "Sequential",
+                       approvers = new[] { new { userId = "traced.approver", name = "Traced Approver" } } }))
+        {
+            var body = await submitLlr.Content.ReadAsStringAsync();
+            Assert.True(submitLlr.StatusCode == HttpStatusCode.OK, $"{(int)submitLlr.StatusCode}: {body}");
+        }
+
+        using var assertScope = factory.Services.CreateScope();
+        var assertDb = assertScope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+        var hlrChange = await assertDb.RequirementChanges.SingleAsync(x => x.ChangeRequestId == validHlr.GetProperty("id").GetGuid());
+        var llrChange = await assertDb.RequirementChanges.SingleAsync(x => x.ChangeRequestId == validLlr.GetProperty("id").GetGuid());
+        Assert.Equal([ladder.SystemRevisionId], JsonSerializer.Deserialize<Guid[]>(hlrChange.ProposedUpstreamRevisionIdsJson)!);
+        Assert.Equal([ladder.HighRevisionId], JsonSerializer.Deserialize<Guid[]>(llrChange.ProposedUpstreamRevisionIdsJson)!);
     }
 
     [Fact]
@@ -309,5 +675,30 @@ public sealed class AuthoringTracedImpactTests
         using var scope = factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
         return await Task.FromResult(db.Releases.Single(x => x.ProjectId == projectId).Id);
+    }
+
+    private static async Task<(Guid ReleaseId, Guid SystemRevisionId, Guid HighRevisionId, Guid LowRevisionId)>
+        MaterializeLadderAsync(AeroLinkApiFactory factory, Guid projectId, string parentNumber, string childNumber)
+    {
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+        var baseline = await db.CandidateBaselines.SingleAsync(x => x.ProjectId == projectId);
+        var releaseId = await db.Releases.Where(x => x.ProjectId == projectId).Select(x => x.Id).SingleAsync();
+        var artifacts = await db.Requirements.Where(x => x.ProjectId == projectId &&
+                (x.BaseNumber == parentNumber || x.BaseNumber == childNumber || x.BaseNumber == "LLR-000503"))
+            .ToDictionaryAsync(x => x.BaseNumber);
+        var revisions = await db.RequirementRevisions
+            .Where(x => artifacts.Values.Select(a => a.Id).Contains(x.ArtifactId))
+            .ToDictionaryAsync(x => x.ArtifactId);
+        db.BaselineRequirements.AddRange(
+            new BaselineRequirementSelection(baseline.Id, artifacts[parentNumber].Id, revisions[artifacts[parentNumber].Id].Id),
+            new BaselineRequirementSelection(baseline.Id, artifacts[childNumber].Id, revisions[artifacts[childNumber].Id].Id),
+            new BaselineRequirementSelection(baseline.Id, artifacts["LLR-000503"].Id, revisions[artifacts["LLR-000503"].Id].Id));
+        await db.SaveChangesAsync();
+        await db.CandidateBaselines.Where(x => x.Id == baseline.Id).ExecuteUpdateAsync(update => update
+            .SetProperty(x => x.State, CandidateBaselineState.Frozen)
+            .SetProperty(x => x.RequirementsMaterializedAt, DateTimeOffset.UtcNow));
+        return (releaseId, revisions[artifacts[parentNumber].Id].Id, revisions[artifacts[childNumber].Id].Id,
+            revisions[artifacts["LLR-000503"].Id].Id);
     }
 }

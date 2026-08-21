@@ -3,6 +3,7 @@ using AeroLink.Domain.ChangeControl;
 using AeroLink.Domain.Programs;
 using AeroLink.Domain.Requirements;
 using AeroLink.Domain.Releases;
+using AeroLink.Domain.Traceability;
 using AeroLink.Domain.Verification;
 using AeroLink.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
@@ -96,6 +97,72 @@ public sealed class VerificationImpactReadinessGateTests
             var gate = await GateAsync(seed.Options, seed.CampaignId);
             Assert.True(gate.Complete);
             Assert.Equal(0, gate.Total);
+        }
+        finally { File.Delete(seed.Path); }
+    }
+
+    [Fact]
+    public async Task Release_readiness_counts_only_hlr_and_llr_trace_obligations_but_all_baseline_revisions_for_coverage()
+    {
+        var seed = await SeedAsync();
+        try
+        {
+            await using (var arrange = new AeroLinkDbContext(seed.Options))
+            {
+                var system = new RequirementArtifact(seed.ProjectId, "SYSR-00000101", RequirementLevel.System, Now);
+                var high = new RequirementArtifact(seed.ProjectId, "HLR-00000102", RequirementLevel.HighLevel, Now);
+                var low = new RequirementArtifact(seed.ProjectId, "LLR-00000103", RequirementLevel.LowLevel, Now);
+                var systemRevision = new RequirementRevision(system.Id, 0, "The system shall route safely.", "R", "Test",
+                    RequirementRevisionState.Active, seed.ChangeRequestId, (await arrange.CandidateBaselines.SingleAsync()).Id, Now);
+                var highRevision = new RequirementRevision(high.Id, 0, "The software shall route safely.", "R", "Test",
+                    RequirementRevisionState.Active, seed.ChangeRequestId, (await arrange.CandidateBaselines.SingleAsync()).Id, Now);
+                var lowRevision = new RequirementRevision(low.Id, 0, "The implementation shall route safely.", "R", "Test",
+                    RequirementRevisionState.Active, seed.ChangeRequestId, (await arrange.CandidateBaselines.SingleAsync()).Id, Now);
+                var systemProcedure = new TestProcedure(seed.ProjectId, "SYSTP-00000101", "Verify system routing", "test.engineer", Now,
+                    TestProcedureLevel.System);
+                var highProcedure = new TestProcedure(seed.ProjectId, "HLRTP-00000102", "Verify HLR routing", "test.engineer", Now,
+                    TestProcedureLevel.HighLevel);
+                var lowProcedure = new TestProcedure(seed.ProjectId, "LLRTP-00000103", "Verify LLR routing", "test.engineer", Now,
+                    TestProcedureLevel.LowLevel);
+                var systemProcedureRevision = new TestProcedureRevision(systemProcedure.Id, 0, "Purpose", "Configuration",
+                    "Steps", "Expected", TestProcedureState.Approved, "test.engineer", Now);
+                var highProcedureRevision = new TestProcedureRevision(highProcedure.Id, 0, "Purpose", "Configuration",
+                    "Steps", "Expected", TestProcedureState.Approved, "test.engineer", Now);
+                var lowProcedureRevision = new TestProcedureRevision(lowProcedure.Id, 0, "Purpose", "Configuration",
+                    "Steps", "Expected", TestProcedureState.Approved, "test.engineer", Now);
+                var baseline = await arrange.CandidateBaselines.SingleAsync();
+                arrange.AddRange(system, high, low, systemRevision, highRevision, lowRevision,
+                    systemProcedure, highProcedure, lowProcedure,
+                    systemProcedureRevision, highProcedureRevision, lowProcedureRevision);
+                arrange.BaselineRequirements.AddRange(
+                    new BaselineRequirementSelection(baseline.Id, system.Id, systemRevision.Id),
+                    new BaselineRequirementSelection(baseline.Id, high.Id, highRevision.Id),
+                    new BaselineRequirementSelection(baseline.Id, low.Id, lowRevision.Id));
+                arrange.RequirementTraces.AddRange(
+                    new RequirementTraceLink(seed.ProjectId, highRevision.Id, systemRevision.Id,
+                        RequirementTraceType.DerivedFrom, "HLR derives from System.", Now),
+                    new RequirementTraceLink(seed.ProjectId, lowRevision.Id, highRevision.Id,
+                        RequirementTraceType.AllocatedFrom, "LLR is allocated from HLR.", Now));
+                arrange.TestCoverage.AddRange(
+                    new TestRequirementCoverage(systemProcedureRevision.Id, systemRevision.Id),
+                    new TestRequirementCoverage(highProcedureRevision.Id, highRevision.Id),
+                    new TestRequirementCoverage(lowProcedureRevision.Id, lowRevision.Id));
+                await arrange.SaveChangesAsync();
+                await arrange.CandidateBaselines.Where(x => x.Id == baseline.Id).ExecuteUpdateAsync(update => update
+                    .SetProperty(x => x.State, CandidateBaselineState.Frozen)
+                    .SetProperty(x => x.RequirementsMaterializedAt, Now));
+            }
+
+            await using var assertDb = new AeroLinkDbContext(seed.Options);
+            var readiness = await new ReleaseReadinessService(assertDb).CalculateAsync(seed.CampaignId, default);
+            var traceability = readiness.Gates.Single(x => x.Code == "traceability");
+            var coverage = readiness.Gates.Single(x => x.Code == "coverage");
+            Assert.True(traceability.Complete);
+            Assert.Equal(2, traceability.Completed);
+            Assert.Equal(2, traceability.Total);
+            Assert.True(coverage.Complete);
+            Assert.Equal(3, coverage.Completed);
+            Assert.Equal(3, coverage.Total);
         }
         finally { File.Delete(seed.Path); }
     }

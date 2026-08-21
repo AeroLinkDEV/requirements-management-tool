@@ -30,15 +30,21 @@ public sealed class IdentifierAllocationPersistenceTests
     {
         Assert.Equal("SYSR-000001", await IdentifierAllocator.NextRequirementAsync(db, "SYSR", default));
         Assert.Equal("HLR-000001", await IdentifierAllocator.NextRequirementAsync(db, "HLR", default));
+        Assert.Equal("LLR-000001", await IdentifierAllocator.NextRequirementAsync(db, "LLR", default));
         Assert.Equal("SYSR-000002", await IdentifierAllocator.NextRequirementAsync(db, "SYSR", default));
         Assert.Equal("SRCR-00001", await IdentifierAllocator.NextChangeRequestAsync(db, ChangeRequestType.System, null, default));
         Assert.Equal("HLRCR-00001", await IdentifierAllocator.NextChangeRequestAsync(db, ChangeRequestType.Software, RequirementLevel.HighLevel, default));
+        Assert.Equal("LLRCR-00001", await IdentifierAllocator.NextChangeRequestAsync(db, ChangeRequestType.Software, RequirementLevel.LowLevel, default));
         Assert.Equal("SRCR-00002", await IdentifierAllocator.NextChangeRequestAsync(db, ChangeRequestType.System, null, default));
         Assert.Equal("SYSTP-000001", await IdentifierAllocator.NextTestProcedureAsync(db, TestProcedureLevel.System, default));
         Assert.Equal("HLRTP-000001", await IdentifierAllocator.NextTestProcedureAsync(db, TestProcedureLevel.HighLevel, default));
+        Assert.Equal("LLRTP-000001", await IdentifierAllocator.NextTestProcedureAsync(db, TestProcedureLevel.LowLevel, default));
+        Assert.Equal("SYSTCR-000001", await IdentifierAllocator.NextTestChangeRequestAsync(db, TestChangeReviewDiscipline.System, default));
+        Assert.Equal("HLRTCR-000001", await IdentifierAllocator.NextTestChangeRequestAsync(db, TestChangeReviewDiscipline.HighLevelSoftware, default));
+        Assert.Equal("LLRTCR-000001", await IdentifierAllocator.NextTestChangeRequestAsync(db, TestChangeReviewDiscipline.LowLevelSoftware, default));
 
         var sequences = await db.IdentifierSequences.AsNoTracking().OrderBy(x => x.Scope).ToListAsync();
-        Assert.Equal(new[] { "HLR", "HLRCR", "HLRTP", "SRCR", "SYSR", "SYSTP" }, sequences.Select(x => x.Scope));
+        Assert.Equal(new[] { "HLR", "HLRCR", "HLRTCR", "HLRTP", "LLR", "LLRCR", "LLRTCR", "LLRTP", "SRCR", "SYSR", "SYSTCR", "SYSTP" }, sequences.Select(x => x.Scope));
     });
 
     [Fact]

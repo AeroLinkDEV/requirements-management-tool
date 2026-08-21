@@ -20,6 +20,16 @@ namespace AeroLink.Api.Tests;
 /// </summary>
 public sealed class TestChangeRequestReviewWorkflowTests
 {
+    [Fact]
+    public void Review_subject_mapping_keeps_change_requests_and_test_disciplines_on_their_current_workflows()
+    {
+        Assert.Equal(ReviewSubject.System, WorkflowEndpoints.SubjectOf(ChangeRequestType.System));
+        Assert.Equal(ReviewSubject.Software, WorkflowEndpoints.SubjectOf(ChangeRequestType.Software));
+        Assert.Equal(ReviewSubject.SystemTest, WorkflowEndpoints.SubjectOf(TestChangeReviewDiscipline.System));
+        Assert.Equal(ReviewSubject.HighLevelSoftwareTest, WorkflowEndpoints.SubjectOf(TestChangeReviewDiscipline.HighLevelSoftware));
+        Assert.Equal(ReviewSubject.LowLevelSoftwareTest, WorkflowEndpoints.SubjectOf(TestChangeReviewDiscipline.LowLevelSoftware));
+    }
+
     private sealed record Fixture(Guid ProjectId, Guid ReleaseId, Guid ChangeId, Guid ReviewId, Guid ItemId,
         Guid RequirementRevisionId, Guid BaselineId);
 

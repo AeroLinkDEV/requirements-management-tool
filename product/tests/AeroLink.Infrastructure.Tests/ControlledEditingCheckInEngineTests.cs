@@ -286,6 +286,33 @@ public sealed class ControlledEditingCheckInEngineTests
     }
 
     [Fact]
+    public async Task Requirement_proposal_check_in_refuses_base_revision_level_and_kind_identity_changes()
+    {
+        await using var scenario = await Scenario.CreateAsync();
+        var proposal = scenario.Scr.AddRequirementChange(scenario.Actor.UserName, "SYSR-000778", 0,
+            RequirementLevel.System, RequirementChangeKind.Introduce, "Original proposal", "Rationale",
+            "Test", scenario.Now.AddSeconds(1));
+        await scenario.Db.SaveChangesAsync();
+        var adapter = new RequirementProposalControlledEditingAdapter(scenario.Db);
+        var artifact = await adapter.ResolveAsync(proposal.Id, default) ?? throw new InvalidOperationException();
+
+        var drafts = new[]
+        {
+            JsonSerializer.Serialize(new { baseNumber = "SYSR-000779", revision = 0, level = "System", kind = "Introduce", statement = "Changed identity", rationale = "Rationale", verificationMethod = "Test", attributesJson = "{}", impactDispositionJson = "{}" }),
+            JsonSerializer.Serialize(new { baseNumber = "SYSR-000778", revision = 1, level = "System", kind = "Introduce", statement = "Changed identity", rationale = "Rationale", verificationMethod = "Test", attributesJson = "{}", impactDispositionJson = "{}" }),
+            JsonSerializer.Serialize(new { baseNumber = "SYSR-000778", revision = 0, level = "HighLevel", kind = "Introduce", statement = "Changed identity", rationale = "Rationale", verificationMethod = "Test", attributesJson = "{}", impactDispositionJson = "{}" }),
+            JsonSerializer.Serialize(new { baseNumber = "SYSR-000778", revision = 0, level = "System", kind = "Modify", statement = "Changed identity", rationale = "Rationale", verificationMethod = "Test", attributesJson = "{}", impactDispositionJson = "{}" }),
+        };
+
+        foreach (var draft in drafts)
+        {
+            var error = await Assert.ThrowsAsync<DomainException>(() => adapter.ApplyDraftAsync(
+                artifact, draft, scenario.Actor.UserName, false, scenario.Now.AddMinutes(1), default));
+            Assert.Contains("controlled identity", error.Message);
+        }
+    }
+
+    [Fact]
     public async Task Specification_structure_adapter_updates_controlled_metadata_and_preserves_node_identity()
     {
         await using var scenario = await Scenario.CreateAsync();

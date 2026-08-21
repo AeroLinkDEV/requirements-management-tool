@@ -1,7 +1,9 @@
 using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
+using System.Text;
 using System.Text.Json;
+using AeroLink.Domain.ChangeControl;
 using AeroLink.Domain.Programs;
 using AeroLink.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
@@ -56,6 +58,45 @@ public sealed class OpenDigitalThreadTests
         using var exported=await client.PostAsJsonAsync("/api/reqif/exports",new{projectId,releaseId});Assert.Equal(HttpStatusCode.Created,exported.StatusCode);var exportBody=await exported.Content.ReadFromJsonAsync<JsonElement>();var downloadUrl=exportBody.GetProperty("downloadUrl").GetString();
         var package=await client.GetByteArrayAsync(downloadUrl);Assert.True(package.Length>100);
         using var form=new MultipartFormDataContent();form.Add(new ByteArrayContent(package),"file","round-trip.reqifz");using var preview=await client.PostAsync($"/api/reqif/imports/preview?projectId={projectId}",form);Assert.Equal(HttpStatusCode.OK,preview.StatusCode);var body=await preview.Content.ReadFromJsonAsync<JsonElement>();Assert.Equal("1.0",body.GetProperty("preview").GetProperty("reqIfVersion").GetString());Assert.Equal("Preview",body.GetProperty("job").GetProperty("state").GetString());Assert.Contains("No requirements",body.GetProperty("preview").GetProperty("warnings")[0].GetString());
+    }
+
+    [Theory]
+    [InlineData("System", "System", "", "SRCR-00001.00", "System")]
+    [InlineData("HighLevel", "Software", "HighLevel", "HLRCR-00001.00", "HighLevel")]
+    [InlineData("LowLevel", "Software", "LowLevel", "LLRCR-00001.00", "LowLevel")]
+    [InlineData("SubSystem", "System", "", "SRCR-00001.00", "System")]
+    [InlineData("", "System", "", "SRCR-00001.00", "System")]
+    public async Task ReqIf_commit_allocates_scope_prefix_and_requirement_level_for_each_imported_level(
+        string importedLevel, string type, string softwareLevel, string expectedDisplayNumber, string expectedLevel)
+    {
+        using var factory=new AeroLinkApiFactory();using var client=factory.CreateClient();await BootstrapAndLoginAsync(client);await SecurityBoundaryTests.AuthorizeMutationsAsync(client);var projectId=await CreateProjectAsync(factory);
+        using var scope=factory.Services.CreateScope();var releaseId=await scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>().Releases.Where(x=>x.ProjectId==projectId).Select(x=>x.Id).SingleAsync();
+        var xml=ReqIfXml(importedLevel);
+        using var form=new MultipartFormDataContent();form.Add(new StringContent(xml,Encoding.UTF8,"application/xml"),"file","levels.reqif");
+        using var preview=await client.PostAsync($"/api/reqif/imports/preview?projectId={projectId}",form);Assert.Equal(HttpStatusCode.OK,preview.StatusCode);var previewBody=await preview.Content.ReadFromJsonAsync<JsonElement>();var jobId=previewBody.GetProperty("job").GetProperty("id").GetGuid();
+        using var processed=await client.PostAsJsonAsync($"/api/reqif/jobs/{jobId}/process",new{batchSize=100});Assert.Equal(HttpStatusCode.OK,processed.StatusCode);Assert.True((await processed.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("complete").GetBoolean());
+        using var committed=await client.PostAsJsonAsync($"/api/reqif/jobs/{jobId}/commit",new{targetReleaseId=releaseId,title="Imported requirement",problem="Imported problem",analysis="Imported analysis",solution="Imported solution",type,softwareLevel=string.IsNullOrEmpty(softwareLevel)?null:softwareLevel});
+        Assert.Equal(HttpStatusCode.Created,committed.StatusCode);var committedBody=await committed.Content.ReadFromJsonAsync<JsonElement>();Assert.Equal(expectedDisplayNumber,committedBody.GetProperty("displayNumber").GetString());Assert.Equal(1,committedBody.GetProperty("imported").GetInt32());
+        var changeRequestId=committedBody.GetProperty("id").GetGuid();using var verify=factory.Services.CreateScope();var db=verify.ServiceProvider.GetRequiredService<AeroLinkDbContext>();var change=await db.SystemChangeRequests.Include(x=>x.RequirementChanges).SingleAsync(x=>x.Id==changeRequestId);Assert.Equal(expectedDisplayNumber,change.DisplayNumber);Assert.Equal(Enum.Parse<RequirementLevel>(expectedLevel),change.RequirementChanges.Single().Level);
+    }
+
+    private static string ReqIfXml(string level)
+    {
+        var identifier=level is "HighLevel"?"HLR-000001":level is "LowLevel"?"LLR-000001":"SYSR-000001";
+        var levelValue=string.IsNullOrEmpty(level)?"":$"<ATTRIBUTE-VALUE-STRING THE-VALUE=\"{level}\"><DEFINITION><ATTRIBUTE-DEFINITION-STRING-REF>AD-LEVEL</ATTRIBUTE-DEFINITION-STRING-REF></DEFINITION></ATTRIBUTE-VALUE-STRING>";
+        return $"""
+            <REQ-IF xmlns="http://www.omg.org/spec/ReqIF/20110401/reqif.xsd">
+              <REQ-IF-CONTENT><SPEC-TYPES>
+                <ATTRIBUTE-DEFINITION-STRING IDENTIFIER="AD-IDENTIFIER" LONG-NAME="AeroLink.Identifier" />
+                <ATTRIBUTE-DEFINITION-STRING IDENTIFIER="AD-LEVEL" LONG-NAME="AeroLink.Level" />
+                <ATTRIBUTE-DEFINITION-STRING IDENTIFIER="AD-STATEMENT" LONG-NAME="AeroLink.Statement" />
+              </SPEC-TYPES><SPEC-OBJECTS><SPEC-OBJECT IDENTIFIER="OBJ-1"><VALUES>
+                <ATTRIBUTE-VALUE-STRING THE-VALUE="{identifier}"><DEFINITION><ATTRIBUTE-DEFINITION-STRING-REF>AD-IDENTIFIER</ATTRIBUTE-DEFINITION-STRING-REF></DEFINITION></ATTRIBUTE-VALUE-STRING>
+                {levelValue}
+                <ATTRIBUTE-VALUE-STRING THE-VALUE="The imported requirement shall be controlled."><DEFINITION><ATTRIBUTE-DEFINITION-STRING-REF>AD-STATEMENT</ATTRIBUTE-DEFINITION-STRING-REF></DEFINITION></ATTRIBUTE-VALUE-STRING>
+              </VALUES></SPEC-OBJECT></SPEC-OBJECTS></REQ-IF-CONTENT>
+            </REQ-IF>
+            """;
     }
 
     private static async Task BootstrapAndLoginAsync(HttpClient client)
