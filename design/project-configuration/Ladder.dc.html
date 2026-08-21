@@ -1,0 +1,114 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Manrope:wght@500;600;700&family=DM+Sans:wght@400;500;600;700&display=swap">
+  <style>
+    body { margin: 0; background: #f3f6f9; font-family: 'DM Sans', system-ui, sans-serif; color: #172033; -webkit-font-smoothing: antialiased; }
+    a { color: #176f68; } a:hover { color: #0f4f4a; }
+    * { box-sizing: border-box; }
+  </style>
+</helmet>
+
+<div style="min-height: 100%; background: #f3f6f9; padding: 26px 28px 48px;">
+  <div style="max-width: 1000px; margin: 0 auto;">
+
+    <div style="display: flex; align-items: flex-start; justify-content: space-between; gap: 24px; margin-bottom: 18px;">
+      <div>
+        <h1 style="font-family: 'Manrope', sans-serif; font-size: 26px; font-weight: 700; letter-spacing: -.02em; margin: 0 0 6px; color: #142139;">Requirement ladder</h1>
+        <p style="margin: 0; color: #606c7e; font-size: 14px; max-width: 72ch;">The chain requirements flow down, and what each step carries. A step traces up to the one above it.</p>
+      </div>
+      <span style="display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 13px; border-radius: 999px; background: #eef1f5; border: 1px solid #d9e2ec; font: 600 12px 'Manrope', sans-serif; color: #52647a; white-space: nowrap;">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#52647a" stroke-width="2.4" stroke-linecap="round"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7.5a4 4 0 0 1 8 0V11"/></svg>
+        Fixed at inception
+      </span>
+    </div>
+
+    <div style="display: flex; gap: 12px; padding: 14px 16px; border-radius: 8px; background: #eef4f9; border: 1px solid #ccd7e0; margin-bottom: 18px;">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#3a5a7a" stroke-width="2" stroke-linecap="round" style="flex-shrink: 0; margin-top: 1px;"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 7.6v.6"/></svg>
+      <div style="font-size: 13px; line-height: 1.55; color: #43516a;">
+        <strong style="font-family: 'Manrope', sans-serif; font-weight: 700; color: #1c3044;">Why this cannot be changed.</strong>
+        Every requirement, procedure, document and baseline in this project was created against this ladder. Removing a step would orphan what sits at it; adding one would leave existing requirements with nothing above them. A ladder is editable only while a project holds no controlled artifacts.
+      </div>
+    </div>
+
+    <div style="display: flex; flex-direction: column;">
+      <sc-for list="{{steps}}" as="step" hint-placeholder-count="3">
+        <div>
+          <div style="background: #ffffff; border: 1px solid #dce3eb; border-radius: 12px; overflow: hidden;">
+            <div style="display: flex; align-items: center; gap: 12px; padding: 14px 18px; border-bottom: 1px solid #edf1f4; background: #fbfcfd;">
+              <span style="display: inline-flex; align-items: center; justify-content: center; width: 26px; height: 26px; border-radius: 999px; background: #142139; color: #ffffff; font: 700 12px 'Manrope', sans-serif;">{{step.n}}</span>
+              <div style="flex-grow: 1;">
+                <div style="font: 700 16px 'Manrope', sans-serif; color: #142139;">{{step.name}}</div>
+                <div style="font-size: 12px; color: #7f8d9c; margin-top: 2px;">{{step.trace}}</div>
+              </div>
+              <div style="font: 500 12px ui-monospace, 'Cascadia Mono', Menlo, monospace; color: #7f8d9c; text-align: right;">{{step.prefix}}</div>
+            </div>
+            <div style="padding: 6px 18px 12px;">
+              <sc-for list="{{step.rows}}" as="r" hint-placeholder-count="5">
+                <div style="display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 11px 0; border-bottom: 1px solid #f2f5f8;">
+                  <div>
+                    <div style="font-size: 14px; font-weight: 500; color: #1c3044;">{{r.name}}</div>
+                    <div style="font-size: 12px; color: #7f8d9c; margin-top: 1px;">{{r.detail}}</div>
+                  </div>
+                  <span style="{{r.style}}">{{r.state}}</span>
+                </div>
+              </sc-for>
+            </div>
+          </div>
+          <sc-if value="{{step.hasNext}}" hint-placeholder-val="{{true}}">
+            <div style="display: flex; align-items: center; gap: 9px; padding: 9px 0 9px 30px;">
+              <svg width="14" height="20" viewBox="0 0 14 20" fill="none" stroke="#a9b6c6" stroke-width="1.8" stroke-linecap="round"><path d="M7 1v15"/><path d="M3 13l4 4 4-4"/></svg>
+              <span style="font-size: 12px; color: #7f8d9c;">flows down to</span>
+            </div>
+          </sc-if>
+        </div>
+      </sc-for>
+    </div>
+  </div>
+</div>
+</x-dc>
+
+<script data-dc-script data-props='{"$preview":{"width":1060,"height":1420}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const pill = (state) => {
+      const on = state === 'Enabled';
+      return 'display: inline-flex; align-items: center; height: 26px; padding: 0 11px; border-radius: 999px; white-space: nowrap; ' +
+        "font: 600 12px 'Manrope', sans-serif; " + (on
+          ? 'background: #dff3ee; border: 1px solid #b8ded8; color: #176f68;'
+          : 'background: #f6f8fb; border: 1px solid #e5eaf0; color: #8f9aab;');
+    };
+    const row = (name, detail, state) => ({ name, detail, state, style: pill(state) });
+    const full = (name) => [
+      row('Requirements', 'Controlled requirement artifacts exist at this step', 'Enabled'),
+      row('Change control', 'Changes are made through change requests raised here', 'Enabled'),
+      row('Verification', 'Test procedures, a discipline queue and coverage obligations', 'Enabled'),
+      row('Specification document', name + ' requirements document is generated', 'Enabled'),
+      row('Upward allocation', 'Every requirement must trace up unless it is derived', 'Enabled'),
+    ];
+    return {
+      steps: [
+        { n: '1', name: 'System', trace: 'Topmost step — nothing above it', prefix: 'SYSR<br>SRCR &middot; SYSTP', hasNext: true,
+          rows: [
+            row('Requirements', 'Controlled requirement artifacts exist at this step', 'Enabled'),
+            row('Change control', 'Changes are made through change requests raised here', 'Enabled'),
+            row('Verification', 'Test procedures, a discipline queue and coverage obligations', 'Enabled'),
+            row('Specification document', 'SYSRD is generated for this step', 'Enabled'),
+            row('Upward allocation', 'Nothing sits above this step, so nothing is required', 'Not applicable'),
+          ] },
+        { n: '2', name: 'High-Level Software', trace: 'Traces up to System', prefix: 'HLR<br>HLRCR &middot; HLRTP', hasNext: true, rows: full('HLRD') },
+        { n: '3', name: 'Low-Level Software', trace: 'Traces up to High-Level Software', prefix: 'LLR<br>LLRCR &middot; LLRTP', hasNext: false,
+          rows: full('LLRD').concat([row('Code traceability', 'Merge requests and commits are recorded against revisions', 'Enabled')]) },
+      ],
+    };
+  }
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,134 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Manrope:wght@500;600;700&family=DM+Sans:wght@400;500;600;700&display=swap">
+  <style>
+    body { margin: 0; background: #f3f6f9; font-family: 'DM Sans', system-ui, sans-serif; color: #172033; -webkit-font-smoothing: antialiased; }
+    a { color: #176f68; } a:hover { color: #0f4f4a; }
+    * { box-sizing: border-box; }
+  </style>
+</helmet>
+
+<div style="min-height: 100%; background: #f3f6f9; padding: 26px 28px 48px;">
+  <div style="max-width: 1060px; margin: 0 auto;">
+
+    <div style="margin-bottom: 18px;">
+      <h1 style="font-family: 'Manrope', sans-serif; font-size: 26px; font-weight: 700; letter-spacing: -.02em; margin: 0 0 6px; color: #142139;">Choose the ladder</h1>
+      <p style="margin: 0; color: #606c7e; font-size: 14px; max-width: 78ch;">This is the one moment it can be chosen. Once a requirement, procedure or baseline exists in this project, the ladder is fixed &mdash; everything created afterwards depends on it.</p>
+    </div>
+
+    <div style="display: grid; grid-template-columns: 1fr 320px; gap: 16px; align-items: start;">
+
+      <div style="background: #ffffff; border: 1px solid #dce3eb; border-radius: 12px; overflow: hidden;">
+        <div style="padding: 15px 18px 13px; border-bottom: 1px solid #dce3eb;">
+          <h2 style="font-family: 'Manrope', sans-serif; font-size: 17px; font-weight: 700; margin: 0 0 3px; color: #142139;">Steps, top to bottom</h2>
+          <p style="margin: 0; font-size: 13px; color: #606c7e;">Drag to reorder. Each step traces up to the one above it.</p>
+        </div>
+
+        <div style="padding: 14px 18px;">
+          <sc-for list="{{chosen}}" as="s" hint-placeholder-count="4">
+            <div style="{{s.wrapStyle}}">
+              <div style="display: flex; align-items: center; gap: 11px; margin-bottom: 11px;">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#a9b6c6" stroke-width="2" stroke-linecap="round" style="cursor: grab;"><path d="M9 6h.01M9 12h.01M9 18h.01M15 6h.01M15 12h.01M15 18h.01"/></svg>
+                <div style="flex-grow: 1;">
+                  <div style="font: 700 15px 'Manrope', sans-serif; color: #142139;">{{s.name}}</div>
+                  <div style="font-size: 12px; color: #7f8d9c; margin-top: 1px;">{{s.trace}}</div>
+                </div>
+                <button style="height: 30px; padding: 0 11px; border: 1px solid #dce3eb; border-radius: 8px; background: #ffffff; color: #8f2f3d; font: 600 12px 'Manrope', sans-serif; cursor: pointer;">Remove</button>
+              </div>
+              <div style="display: flex; flex-wrap: wrap; gap: 8px; padding-left: 26px;">
+                <sc-for list="{{s.toggles}}" as="t" hint-placeholder-count="4">
+                  <label style="{{t.style}}">
+                    <span style="{{t.boxStyle}}">
+                      <sc-if value="{{t.on}}" hint-placeholder-val="{{true}}">
+                        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#ffffff" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
+                      </sc-if>
+                    </span>
+                    {{t.label}}
+                  </label>
+                </sc-for>
+              </div>
+            </div>
+          </sc-for>
+
+          <button style="width: 100%; height: 42px; margin-top: 4px; border: 1px dashed #c4cedb; border-radius: 8px; background: #fbfcfd; color: #42526a; font: 600 14px 'Manrope', sans-serif; cursor: pointer;">+ Add a step</button>
+        </div>
+      </div>
+
+      <div style="display: flex; flex-direction: column; gap: 16px;">
+        <div style="background: #ffffff; border: 1px solid #dce3eb; border-radius: 12px; padding: 16px 18px;">
+          <div style="font: 700 12px 'Manrope', sans-serif; letter-spacing: .06em; text-transform: uppercase; color: #7f8d9c; margin-bottom: 10px;">Available steps</div>
+          <div style="display: flex; flex-direction: column; gap: 7px;">
+            <sc-for list="{{available}}" as="a" hint-placeholder-count="3">
+              <div style="display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 9px 11px; border: 1px solid #e5eaf0; border-radius: 8px; background: #fbfcfd;">
+                <div>
+                  <div style="font: 600 13px 'Manrope', sans-serif; color: #1c3044;">{{a.name}}</div>
+                  <div style="font: 500 11px ui-monospace, 'Cascadia Mono', Menlo, monospace; color: #8a94a4; margin-top: 1px;">{{a.prefix}}</div>
+                </div>
+                <button style="height: 28px; padding: 0 10px; border: 1px solid #dce3eb; border-radius: 8px; background: #ffffff; color: #176f68; font: 600 12px 'Manrope', sans-serif; cursor: pointer;">Add</button>
+              </div>
+            </sc-for>
+          </div>
+          <p style="margin: 11px 0 0; font-size: 12px; line-height: 1.55; color: #7f8d9c;">Steps come from a fixed catalogue. Each one carries its own identifiers, documents and queues, so new steps are added to the product deliberately rather than typed in here.</p>
+        </div>
+
+        <div style="background: #fffaf2; border: 1px solid #e8d9bd; border-radius: 12px; padding: 15px 17px;">
+          <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 7px;">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#8a6a24" stroke-width="2" stroke-linecap="round"><path d="M12 3.5 2.5 20h19L12 3.5Z"/><path d="M12 10v4M12 17.2v.4"/></svg>
+            <div style="font: 700 13px 'Manrope', sans-serif; color: #7c5f1f;">This is permanent</div>
+          </div>
+          <p style="margin: 0; font-size: 13px; line-height: 1.55; color: #6b5628;">Create the first requirement and this ladder is fixed for the life of the project. Nothing here can be changed afterwards.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+</x-dc>
+
+<script data-dc-script data-props='{"$preview":{"width":1120,"height":880}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const toggle = (label, on) => ({
+      label, on,
+      style: 'display: inline-flex; align-items: center; gap: 7px; height: 30px; padding: 0 11px 0 9px; border-radius: 8px; cursor: pointer; ' +
+        "font: 500 13px 'DM Sans', sans-serif; " + (on
+          ? 'background: #eef4f2; border: 1px solid #cfe3de; color: #1c3044;'
+          : 'background: #ffffff; border: 1px solid #e5eaf0; color: #8f9aab;'),
+      boxStyle: 'display: inline-flex; align-items: center; justify-content: center; width: 15px; height: 15px; border-radius: 4px; ' + (on
+        ? 'background: #176f68; border: 1px solid #176f68;'
+        : 'background: #ffffff; border: 1px solid #ccd7e0;')
+    });
+    const step = (name, trace, toggles, external) => ({
+      name, trace, toggles,
+      wrapStyle: 'padding: 13px 14px; margin-bottom: 10px; border-radius: 8px; border: 1px ' +
+        (external ? 'dashed #c4cedb; background: #fafbfd;' : 'solid #dce3eb; background: #ffffff;')
+    });
+    return {
+      chosen: [
+        step('Customer', 'Topmost step — nothing above it', [
+          toggle('Requirements', true), toggle('Change control', false), toggle('Verification', false), toggle('Specification document', false),
+        ], true),
+        step('System', 'Traces up to Customer', [
+          toggle('Requirements', true), toggle('Change control', true), toggle('Verification', true), toggle('Specification document', true),
+        ], false),
+        step('Low-Level Software', 'Traces up to System', [
+          toggle('Requirements', true), toggle('Change control', true), toggle('Verification', true), toggle('Code traceability', true),
+        ], false),
+      ],
+      available: [
+        { name: 'Interface Control Document', prefix: 'ICD' },
+        { name: 'High-Level Software', prefix: 'HLR' },
+        { name: 'Subsystem', prefix: 'SUBR' },
+      ],
+    };
+  }
+}
+</script>
+</body>
+</html>

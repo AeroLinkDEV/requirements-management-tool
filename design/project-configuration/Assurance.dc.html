@@ -1,0 +1,122 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Manrope:wght@500;600;700&family=DM+Sans:wght@400;500;600;700&display=swap">
+  <style>
+    body { margin: 0; background: #f3f6f9; font-family: 'DM Sans', system-ui, sans-serif; color: #172033; -webkit-font-smoothing: antialiased; }
+    a { color: #176f68; } a:hover { color: #0f4f4a; }
+    * { box-sizing: border-box; }
+  </style>
+</helmet>
+
+<div style="min-height: 100%; background: #f3f6f9; padding: 26px 28px 48px;">
+  <div style="max-width: 1060px; margin: 0 auto;">
+
+    <div style="margin-bottom: 18px;">
+      <h1 style="font-family: 'Manrope', sans-serif; font-size: 26px; font-weight: 700; letter-spacing: -.02em; margin: 0 0 6px; color: #142139;">Assurance posture</h1>
+      <p style="margin: 0; color: #606c7e; font-size: 14px; max-width: 78ch;">The design assurance level sets what this project is held to. The tool recommends a posture and states its reasoning; you may be stricter or more relaxed, and either way the difference is recorded.</p>
+    </div>
+
+    <div style="background: #ffffff; border: 1px solid #dce3eb; border-radius: 12px; padding: 16px 18px; margin-bottom: 16px;">
+      <div style="font: 700 12px 'Manrope', sans-serif; letter-spacing: .06em; text-transform: uppercase; color: #7f8d9c; margin-bottom: 11px;">Design assurance level</div>
+      <div style="display: flex; gap: 8px;">
+        <sc-for list="{{levels}}" as="l" hint-placeholder-count="5">
+          <div style="{{l.style}}">
+            <div style="font: 700 17px 'Manrope', sans-serif;">{{l.letter}}</div>
+            <div style="font-size: 11px; margin-top: 2px;">{{l.effect}}</div>
+          </div>
+        </sc-for>
+      </div>
+      <p style="margin: 12px 0 0; font-size: 13px; color: #606c7e;">Engine Control Unit is <strong style="color: #142139;">DAL C</strong> — failure would be major, but not severe. Fewer objectives apply than at DAL A, and independence of review is not mandated.</p>
+    </div>
+
+    <div style="background: #ffffff; border: 1px solid #dce3eb; border-radius: 12px; overflow: hidden; margin-bottom: 16px;">
+      <div style="padding: 15px 18px 13px; border-bottom: 1px solid #dce3eb;">
+        <h2 style="font-family: 'Manrope', sans-serif; font-size: 17px; font-weight: 700; margin: 0 0 3px; color: #142139;">What DAL C asks for</h2>
+        <p style="margin: 0; font-size: 13px; color: #606c7e;">Each lever below is something the product already enforces. The recommendation is derived, not asserted &mdash; open one to read the reasoning behind it.</p>
+      </div>
+      <div style="padding: 4px 18px 12px;">
+        <div style="display: grid; grid-template-columns: 1fr 148px 148px; gap: 14px; padding: 11px 0 9px; border-bottom: 1px solid #dce3eb;">
+          <div style="font: 700 11px 'Manrope', sans-serif; letter-spacing: .06em; text-transform: uppercase; color: #7f8d9c;">Lever</div>
+          <div style="font: 700 11px 'Manrope', sans-serif; letter-spacing: .06em; text-transform: uppercase; color: #7f8d9c;">Recommended</div>
+          <div style="font: 700 11px 'Manrope', sans-serif; letter-spacing: .06em; text-transform: uppercase; color: #7f8d9c;">This project</div>
+        </div>
+        <sc-for list="{{levers}}" as="v" hint-placeholder-count="5">
+          <div style="display: grid; grid-template-columns: 1fr 148px 148px; gap: 14px; align-items: center; padding: 13px 0; border-bottom: 1px solid #f2f5f8;">
+            <div>
+              <div style="font-size: 14px; font-weight: 500; color: #1c3044;">{{v.name}}</div>
+              <div style="font-size: 12px; color: #7f8d9c; margin-top: 2px;">{{v.why}}</div>
+            </div>
+            <div style="font-size: 13px; color: #606c7e;">{{v.recommended}}</div>
+            <div><span style="{{v.style}}">{{v.actual}}</span></div>
+          </div>
+        </sc-for>
+      </div>
+    </div>
+
+    <div style="background: #ffffff; border: 1px solid #eccfd3; border-radius: 12px; overflow: hidden;">
+      <div style="display: flex; align-items: center; gap: 9px; padding: 14px 18px; background: #fce9eb; border-bottom: 1px solid #eccfd3;">
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#8f2f3d" stroke-width="2" stroke-linecap="round"><path d="M12 3.5 2.5 20h19L12 3.5Z"/><path d="M12 10v4M12 17.2v.4"/></svg>
+        <div style="font: 700 14px 'Manrope', sans-serif; color: #8f2f3d;">One deviation below the recommended posture</div>
+      </div>
+      <div style="padding: 16px 18px;">
+        <div style="font-size: 14px; font-weight: 600; color: #1c3044; margin-bottom: 4px;">Coverage must be same-level &mdash; relaxed</div>
+        <div style="font-size: 13px; line-height: 1.6; color: #43516a; margin-bottom: 13px;">DAL C recommends that a procedure verify requirements at its own level. This project permits a system procedure to cover a low-level requirement.</div>
+        <div style="padding: 13px 15px; border-radius: 8px; background: #f6f8fb; border: 1px solid #e5eaf0;">
+          <div style="font: 700 11px 'Manrope', sans-serif; letter-spacing: .06em; text-transform: uppercase; color: #7f8d9c; margin-bottom: 6px;">Recorded rationale</div>
+          <div style="font-size: 13px; line-height: 1.6; color: #1c3044; margin-bottom: 10px;">&ldquo;The control loop is verified end to end on the rig; splitting coverage by level would assert a separation the test article does not have. Agreed with the certification liaison on 4 June.&rdquo;</div>
+          <div style="font-size: 12px; color: #7f8d9c;">c.hendricks &middot; Configuration Manager &middot; 4 June 2026, 14:22</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+</x-dc>
+
+<script data-dc-script data-props='{"$preview":{"width":1120,"height":1080}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const level = (letter, effect, active) => ({
+      letter, effect,
+      style: 'flex-grow: 1; text-align: center; padding: 11px 8px; border-radius: 8px; ' + (active
+        ? 'background: #142139; color: #ffffff; border: 1px solid #142139;'
+        : 'background: #f6f8fb; color: #7f8d9c; border: 1px solid #e5eaf0;')
+    });
+    const cell = (actual, kind) => {
+      const style = {
+        same: 'background: #f6f8fb; border: 1px solid #e5eaf0; color: #52647a;',
+        stricter: 'background: #dff3ee; border: 1px solid #b8ded8; color: #176f68;',
+        relaxed: 'background: #fce9eb; border: 1px solid #eccfd3; color: #8f2f3d;',
+      }[kind];
+      return { actual, style: 'display: inline-flex; align-items: center; height: 26px; padding: 0 11px; border-radius: 999px; ' +
+        "font: 600 12px 'Manrope', sans-serif; white-space: nowrap; " + style };
+    };
+    const lever = (name, why, recommended, actual, kind) =>
+      Object.assign({ name, why, recommended }, cell(actual, kind));
+    return {
+      levels: [
+        level('A', 'Catastrophic', false),
+        level('B', 'Hazardous', false),
+        level('C', 'Major', true),
+        level('D', 'Minor', false),
+        level('E', 'No effect', false),
+      ],
+      levers: [
+        lever('Review independence', 'Whether an approver may be the author of what they approve', 'Not required', 'Required', 'stricter'),
+        lever('Verification at every step', 'Whether each ladder step carries test procedures', 'Required', 'Required', 'same'),
+        lever('Coverage before release', 'Whether every requirement needs a passing result to ship', 'Required', 'Required', 'same'),
+        lever('Derived rationale', 'Whether a derived requirement must document why it exists', 'Required', 'Required', 'same'),
+        lever('Coverage must be same-level', 'Whether a procedure verifies requirements at its own level only', 'Required', 'Relaxed', 'relaxed'),
+      ],
+    };
+  }
+}
+</script>
+</body>
+</html>

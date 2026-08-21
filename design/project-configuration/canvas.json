@@ -1,0 +1,16 @@
+{
+  "artboards": [
+    { "file": "Main.dc.html", "title": "1 · Overview (FMS)", "x": 0, "y": 0, "w": 1320, "h": 1000 },
+    { "file": "Ladder.dc.html", "title": "2 · Ladder, fixed", "x": 1420, "y": 0, "w": 1060, "h": 1420 },
+    { "file": "Variants.dc.html", "title": "3 · Two other projects", "x": 0, "y": 1120, "w": 1320, "h": 860 },
+    { "file": "Inception.dc.html", "title": "4 · Ladder, at inception", "x": 0, "y": 2100, "w": 1120, "h": 880 },
+    { "file": "Assurance.dc.html", "title": "5 · Assurance posture", "x": 1420, "y": 1540, "w": 1120, "h": 1080 },
+    { "file": "Approvals.dc.html", "title": "6 · Approvals, nested", "x": 1420, "y": 2740, "w": 1320, "h": 780 }
+  ],
+  "annotations": [
+    { "id": "note-fms", "x": 0, "y": -150, "w": 460, "text": "FMS: the configuration is real and stored, and set to exactly what FMS already does.\n\nIt has no impact because it describes the project accurately — not because it is disconnected. Nothing on screen is faked." },
+    { "id": "note-demo", "x": 0, "y": 2020, "w": 420, "text": "The demo payoff is artboard 3, not a toggle that does nothing: two projects with genuinely different ladders, where the difference is visible in navigation, documents and trace rules." },
+    { "id": "note-dal", "x": 2600, "y": 1540, "w": 400, "text": "DAL recommends; the project may go stricter or more relaxed. A deviation below the recommendation is recorded with a rationale and an actor, and shown — that is the part an auditor asks about." }
+  ],
+  "launch": { "view": "canvas" }
+}

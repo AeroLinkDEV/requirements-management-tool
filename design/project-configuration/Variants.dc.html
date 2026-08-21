@@ -1,0 +1,125 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Manrope:wght@500;600;700&family=DM+Sans:wght@400;500;600;700&display=swap">
+  <style>
+    body { margin: 0; background: #f3f6f9; font-family: 'DM Sans', system-ui, sans-serif; color: #172033; -webkit-font-smoothing: antialiased; }
+    a { color: #176f68; } a:hover { color: #0f4f4a; }
+    * { box-sizing: border-box; }
+  </style>
+</helmet>
+
+<div style="min-height: 100%; background: #f3f6f9; padding: 26px 28px 48px;">
+  <div style="max-width: 1240px; margin: 0 auto;">
+
+    <div style="margin-bottom: 20px;">
+      <h1 style="font-family: 'Manrope', sans-serif; font-size: 26px; font-weight: 700; letter-spacing: -.02em; margin: 0 0 6px; color: #142139;">Two other projects, same product</h1>
+      <p style="margin: 0; color: #606c7e; font-size: 14px; max-width: 78ch;">Neither is a mode or a special case. Both are ordinary ladders, and every rule falls out of them — what the navigation shows, which documents exist, and what a requirement is allowed to trace up to.</p>
+    </div>
+
+    <div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; align-items: start;">
+      <sc-for list="{{projects}}" as="p" hint-placeholder-count="2">
+        <div style="background: #ffffff; border: 1px solid #dce3eb; border-radius: 12px; overflow: hidden;">
+
+          <div style="padding: 16px 18px 14px; border-bottom: 1px solid #dce3eb;">
+            <div style="display: flex; align-items: center; gap: 9px; margin-bottom: 5px;">
+              <h2 style="font-family: 'Manrope', sans-serif; font-size: 17px; font-weight: 700; margin: 0; color: #142139;">{{p.name}}</h2>
+              <span style="display: inline-flex; align-items: center; height: 22px; padding: 0 9px; border-radius: 999px; background: #142139; color: #ffffff; font: 700 11px 'Manrope', sans-serif;">{{p.dal}}</span>
+            </div>
+            <p style="margin: 0; font-size: 13px; color: #606c7e;">{{p.note}}</p>
+          </div>
+
+          <div style="padding: 16px 18px;">
+            <sc-for list="{{p.steps}}" as="s" hint-placeholder-count="3">
+              <div>
+                <div style="{{s.cardStyle}}">
+                  <div style="display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 8px;">
+                    <div style="font: 700 14px 'Manrope', sans-serif; color: {{s.ink}};">{{s.name}}</div>
+                    <div style="font: 500 11px ui-monospace, 'Cascadia Mono', Menlo, monospace; color: #8a94a4;">{{s.prefix}}</div>
+                  </div>
+                  <div style="display: flex; flex-wrap: wrap; gap: 6px;">
+                    <sc-for list="{{s.chips}}" as="c" hint-placeholder-count="3">
+                      <span style="{{c.style}}">{{c.label}}</span>
+                    </sc-for>
+                  </div>
+                </div>
+                <sc-if value="{{s.hasNext}}" hint-placeholder-val="{{true}}">
+                  <div style="display: flex; justify-content: center; padding: 5px 0;">
+                    <svg width="13" height="16" viewBox="0 0 14 18" fill="none" stroke="#a9b6c6" stroke-width="1.8" stroke-linecap="round"><path d="M7 1v13"/><path d="M3 11l4 4 4-4"/></svg>
+                  </div>
+                </sc-if>
+              </div>
+            </sc-for>
+
+            <div style="margin-top: 14px; padding: 12px 14px; border-radius: 8px; background: #f6f8fb; border: 1px solid #e5eaf0;">
+              <div style="font: 700 12px 'Manrope', sans-serif; letter-spacing: .06em; text-transform: uppercase; color: #7f8d9c; margin-bottom: 7px;">What this means</div>
+              <sc-for list="{{p.effects}}" as="e" hint-placeholder-count="3">
+                <div style="display: flex; gap: 8px; font-size: 13px; line-height: 1.5; color: #43516a; margin-bottom: 5px;">
+                  <span style="color: #8a94a4;">&middot;</span><span>{{e}}</span>
+                </div>
+              </sc-for>
+            </div>
+          </div>
+        </div>
+      </sc-for>
+    </div>
+  </div>
+</div>
+</x-dc>
+
+<script data-dc-script data-props='{"$preview":{"width":1320,"height":860}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const chip = (label, on) => ({
+      label,
+      style: 'display: inline-flex; align-items: center; height: 23px; padding: 0 9px; border-radius: 999px; ' +
+        "font: 600 11px 'Manrope', sans-serif; " + (on
+          ? 'background: #dff3ee; border: 1px solid #b8ded8; color: #176f68;'
+          : 'background: #f6f8fb; border: 1px solid #e5eaf0; color: #9aa5b4; text-decoration: line-through;')
+    });
+    const card = (external) => 'padding: 12px 14px; border-radius: 8px; border: 1px ' +
+      (external ? 'dashed #c4cedb; background: #fafbfd;' : 'solid #dce3eb; background: #ffffff;');
+    const step = (name, prefix, chips, hasNext, external) => ({
+      name, prefix, chips, hasNext, cardStyle: card(external), ink: external ? '#52647a' : '#142139'
+    });
+    return {
+      projects: [
+        {
+          name: 'Engine Control Unit', dal: 'DAL C', note: 'No high-level software layer. System requirements flow straight to low-level.',
+          steps: [
+            step('System', 'SYSR', [chip('Requirements', true), chip('Change control', true), chip('Verification', true)], true, false),
+            step('Low-Level Software', 'LLR', [chip('Requirements', true), chip('Change control', true), chip('Verification', true), chip('Code trace', true)], false, false),
+          ],
+          effects: [
+            'An LLR traces up to a System requirement directly — there is no missing middle.',
+            'No HLR section in navigation, no HLRD, no HLRTP procedures, no high-level test queue.',
+            'HLR identifiers are never issued for this project.',
+          ],
+        },
+        {
+          name: 'Avionics Gateway', dal: 'DAL B', note: 'Customer requirements arrive from the airframer and sit above System.',
+          steps: [
+            step('Customer', 'CUST', [chip('Requirements', true), chip('Change control', false), chip('Verification', false)], true, true),
+            step('System', 'SYSR', [chip('Requirements', true), chip('Change control', true), chip('Verification', true)], true, false),
+            step('High-Level Software', 'HLR', [chip('Requirements', true), chip('Change control', true), chip('Verification', true)], true, false),
+            step('Low-Level Software', 'LLR', [chip('Requirements', true), chip('Change control', true), chip('Verification', true)], false, false),
+          ],
+          effects: [
+            'Customer requirements are imported, not authored — no change requests are raised against them here.',
+            'Nothing is tested at the customer step. The real verification work starts at System.',
+            'When a customer requirement changes, the System requirements beneath it are marked suspect.',
+          ],
+        },
+      ],
+    };
+  }
+}
+</script>
+</body>
+</html>

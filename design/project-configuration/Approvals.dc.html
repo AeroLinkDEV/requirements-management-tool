@@ -1,0 +1,152 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Manrope:wght@500;600;700&family=DM+Sans:wght@400;500;600;700&display=swap">
+  <style>
+    body { margin: 0; background: #f3f6f9; font-family: 'DM Sans', system-ui, sans-serif; color: #172033; -webkit-font-smoothing: antialiased; }
+    a { color: #176f68; } a:hover { color: #0f4f4a; }
+    * { box-sizing: border-box; }
+  </style>
+</helmet>
+
+<div style="min-height: 100%; background: #f3f6f9; padding: 26px 28px 48px;">
+  <div style="max-width: 1240px; margin: 0 auto;">
+
+    <div style="display: flex; align-items: center; gap: 8px; font-size: 13px; color: #606c7e; margin-bottom: 16px;">
+      <span style="color: #176f68; font-weight: 600;">Flight Management System</span>
+      <span>/</span>
+      <span style="color: #176f68; font-weight: 600;">Project Configuration</span>
+      <span>/</span>
+      <span style="color: #142139; font-weight: 600;">Approvals</span>
+    </div>
+
+    <div style="margin-bottom: 20px;">
+      <h1 style="font-family: 'Manrope', sans-serif; font-size: 32px; font-weight: 700; letter-spacing: -.02em; margin: 0 0 6px; color: #142139;">Approvals</h1>
+      <p style="margin: 0; color: #606c7e; font-size: 14px; max-width: 72ch;">Who signs what, and in which order. Policy, so it can change &mdash; a change takes effect on the next review cycle, never on one already running.</p>
+    </div>
+
+    <div style="display: grid; grid-template-columns: 288px 1fr; gap: 16px; align-items: start;">
+
+      <nav style="background: #ffffff; border: 1px solid #dce3eb; border-radius: 12px; overflow: hidden;">
+        <div style="padding: 14px 16px 10px; border-bottom: 1px solid #dce3eb;">
+          <div style="font: 700 12px 'Manrope', sans-serif; letter-spacing: .08em; text-transform: uppercase; color: #606c7e;">Sections</div>
+        </div>
+        <div style="display: flex; flex-direction: column; padding: 6px;">
+          <sc-for list="{{sections}}" as="s" hint-placeholder-count="7">
+            <div style="{{s.style}}">
+              <span>{{s.name}}</span>
+              <sc-if value="{{s.locked}}" hint-placeholder-val="{{true}}">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#8a94a4" stroke-width="2.1" stroke-linecap="round"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7.5a4 4 0 0 1 8 0V11"/></svg>
+              </sc-if>
+            </div>
+          </sc-for>
+        </div>
+      </nav>
+
+      <div style="display: grid; grid-template-columns: 268px 1fr; gap: 16px; align-items: start;">
+
+        <div style="background: #ffffff; border: 1px solid #dce3eb; border-radius: 12px; overflow: hidden;">
+          <div style="padding: 13px 16px 11px; border-bottom: 1px solid #dce3eb;">
+            <div style="font: 700 12px 'Manrope', sans-serif; letter-spacing: .08em; text-transform: uppercase; color: #606c7e;">What is reviewed</div>
+          </div>
+          <div style="display: flex; flex-direction: column;">
+            <sc-for list="{{subjects}}" as="s" hint-placeholder-count="5">
+              <div style="{{s.style}}">
+                <div>
+                  <div style="font: 600 14px 'Manrope', sans-serif; color: #142139;">{{s.name}}</div>
+                  <div style="font-size: 12px; color: #7f8d9c; margin-top: 2px;">{{s.detail}}</div>
+                </div>
+              </div>
+            </sc-for>
+          </div>
+        </div>
+
+        <div style="background: #ffffff; border: 1px solid #dce3eb; border-radius: 12px; overflow: hidden;">
+          <div style="display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; padding: 16px 18px 14px; border-bottom: 1px solid #dce3eb;">
+            <div>
+              <h2 style="font-family: 'Manrope', sans-serif; font-size: 17px; font-weight: 700; margin: 0 0 3px; color: #142139;">System change request</h2>
+              <p style="margin: 0; font-size: 13px; color: #606c7e;">Sequential &middot; three stages &middot; version 4, active since 12 August 2026</p>
+            </div>
+            <button style="height: 36px; padding: 0 14px; border: 1px solid #dce3eb; border-radius: 8px; background: #ffffff; color: #42526a; font: 600 13px 'Manrope', sans-serif; cursor: pointer; white-space: nowrap;">New version</button>
+          </div>
+
+          <div style="padding: 16px 18px;">
+            <sc-for list="{{stages}}" as="st" hint-placeholder-count="3">
+              <div style="display: flex; align-items: center; gap: 13px; padding: 13px 14px; margin-bottom: 9px; border: 1px solid #dce3eb; border-radius: 8px;">
+                <span style="display: inline-flex; align-items: center; justify-content: center; width: 26px; height: 26px; border-radius: 999px; background: #eef4f2; color: #176f68; font: 700 12px 'Manrope', sans-serif;">{{st.n}}</span>
+                <div style="flex-grow: 1;">
+                  <div style="font: 600 14px 'Manrope', sans-serif; color: #142139;">{{st.name}}</div>
+                  <div style="font-size: 12px; color: #7f8d9c; margin-top: 2px;">{{st.role}}</div>
+                </div>
+                <span style="{{st.kindStyle}}">{{st.kind}}</span>
+              </div>
+            </sc-for>
+
+            <div style="margin-top: 14px; padding: 13px 15px; border-radius: 8px; background: #f6f8fb; border: 1px solid #e5eaf0;">
+              <div style="display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 9px;">
+                <div style="font-size: 13px; color: #43516a;">Approver may be the author</div>
+                <span style="display: inline-flex; align-items: center; height: 26px; padding: 0 11px; border-radius: 999px; background: #fce9eb; border: 1px solid #eccfd3; font: 600 12px 'Manrope', sans-serif; color: #8f2f3d;">Refused</span>
+              </div>
+              <div style="font-size: 12px; line-height: 1.55; color: #7f8d9c;">Set by the assurance posture for DAL A, not chosen here. Change it under Assurance posture, where the deviation would be recorded.</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+</x-dc>
+
+<script data-dc-script data-props='{"$preview":{"width":1320,"height":780}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const nav = (name, active, locked) => ({
+      name, locked,
+      style: 'display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 9px 12px; border-radius: 8px; font: ' +
+        (active ? '600' : '500') + " 14px 'Manrope', sans-serif; color: " + (active ? '#142139' : '#42526a') +
+        '; background: ' + (active ? '#eef4f2' : 'transparent') + '; cursor: pointer;'
+    });
+    const subject = (name, detail, active) => ({
+      name, detail,
+      style: 'padding: 12px 16px; border-bottom: 1px solid #f2f5f8; cursor: pointer; ' +
+        (active ? 'background: #eef4f2; box-shadow: inset 3px 0 0 #176f68;' : '')
+    });
+    const kindStyle = (kind) => 'display: inline-flex; align-items: center; height: 24px; padding: 0 10px; border-radius: 999px; ' +
+      "font: 600 11px 'Manrope', sans-serif; " + (kind === 'Approval'
+        ? 'background: #dff3ee; border: 1px solid #b8ded8; color: #176f68;'
+        : 'background: #eef1f5; border: 1px solid #d9e2ec; color: #52647a;');
+    const stage = (n, name, role, kind) => ({ n, name, role, kind, kindStyle: kindStyle(kind) });
+    return {
+      sections: [
+        nav('Overview', false, false),
+        nav('Requirement ladder', false, true),
+        nav('Assurance posture', false, false),
+        nav('Approvals', true, false),
+        nav('Verification', false, false),
+        nav('Documents', false, true),
+        nav('Identifiers', false, true),
+      ],
+      subjects: [
+        subject('System change request', '3 stages · sequential', true),
+        subject('Software change request', '2 stages · sequential', false),
+        subject('Test change request', '2 stages · parallel', false),
+        subject('Controlled document', '3 stages · sequential', false),
+        subject('Problem report', 'No workflow configured', false),
+      ],
+      stages: [
+        stage('1', 'Engineering review', 'System Engineer', 'Review'),
+        stage('2', 'Airworthiness concurrence', 'Airworthiness', 'Review'),
+        stage('3', 'Configuration approval', 'Configuration Manager', 'Approval'),
+      ],
+    };
+  }
+}
+</script>
+</body>
+</html>
