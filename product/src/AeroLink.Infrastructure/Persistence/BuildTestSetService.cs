@@ -1,4 +1,5 @@
 using AeroLink.Domain.Verification;
+using AeroLink.Domain.Hierarchy;
 using Microsoft.EntityFrameworkCore;
 
 namespace AeroLink.Infrastructure.Persistence;
@@ -15,10 +16,9 @@ namespace AeroLink.Infrastructure.Persistence;
 /// procedure the build has to run — so those become the set's first entries. Without that, replacing the
 /// checkbox would silently discard every decision anybody had already recorded with it.
 /// </summary>
-public sealed class BuildTestSetService(AeroLinkDbContext db)
+public sealed class BuildTestSetService(AeroLinkDbContext db, ILadderPolicy? policy = null)
 {
-    private static readonly TestChangeReviewDiscipline[] Disciplines =
-        [TestChangeReviewDiscipline.System, TestChangeReviewDiscipline.HighLevelSoftware, TestChangeReviewDiscipline.LowLevelSoftware];
+    private readonly ILadderPolicy ladderPolicy = policy ?? LegacyLadderPolicy.Instance;
 
     /// <summary>
     /// Returns the build's sets, creating and seeding any that do not exist yet.
@@ -31,7 +31,11 @@ public sealed class BuildTestSetService(AeroLinkDbContext db)
     {
         var existing = await db.BuildTestSets.Include(x => x.Entries)
             .Where(x => x.ReleaseId == releaseId).ToListAsync(ct);
-        var missing = Disciplines.Where(d => existing.All(x => x.Discipline != d)).ToList();
+        var disciplines = ladderPolicy.OrderedLevels
+            .Where(level => ladderPolicy.Definition(level).Has(LevelCapabilities.HasVerification))
+            .Select(ladderPolicy.Discipline)
+            .ToArray();
+        var missing = disciplines.Where(d => existing.All(x => x.Discipline != d)).ToList();
         if (missing.Count == 0) return existing;
 
         var now = DateTimeOffset.UtcNow;

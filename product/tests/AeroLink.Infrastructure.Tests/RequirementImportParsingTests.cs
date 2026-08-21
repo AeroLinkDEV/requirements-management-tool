@@ -1,5 +1,7 @@
 using System.IO.Compression;
 using System.Text;
+using AeroLink.Domain.ChangeControl;
+using AeroLink.Domain.Hierarchy;
 using AeroLink.Infrastructure.Persistence;
 
 namespace AeroLink.Infrastructure.Tests;
@@ -69,6 +71,27 @@ public sealed class RequirementImportParsingTests
 
         Assert.True(row.Valid, string.Join("; ", row.Errors));
         Assert.Equal("A statement, with a comma.", row.Statement);
+    }
+
+    [Fact]
+    public void Import_level_aliases_follow_the_legacy_ladder_policy_and_unknown_levels_remain_invalid()
+    {
+        var csv = "Identifier,Level,Statement,VerificationMethod\n"
+            + "SYSR-00004300,sys-r,System statement,Test\n"
+            + "HLR-00004300,High-Level,HLR statement,Analysis\n"
+            + "LLR-00004300,LLR,LLR statement,Inspection\n"
+            + "SYSR-00004301,Unknown,Unknown statement,Test\n";
+        using var stream = new MemoryStream(Encoding.UTF8.GetBytes(csv));
+
+        var rows = EnterpriseRequirementsService.ParseImport(stream, "requirements.csv");
+
+        Assert.Equal(4, rows.Count);
+        Assert.All(rows.Take(3), row => Assert.True(row.Valid, string.Join("; ", row.Errors)));
+        var invalid = rows[3];
+        Assert.False(invalid.Valid);
+        Assert.Contains("Level must be System, HighLevel/HLR, or LowLevel/LLR.", invalid.Errors);
+        Assert.True(LegacyLadderPolicy.Instance.TryParseRequirementLevel("sys-r", out var system));
+        Assert.Equal(RequirementLevel.System, system);
     }
 
     private static string Sheet(string rows) =>

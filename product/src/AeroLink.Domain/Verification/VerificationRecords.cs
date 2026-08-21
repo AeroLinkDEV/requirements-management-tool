@@ -1,4 +1,5 @@
 using AeroLink.Domain.Common;
+using AeroLink.Domain.Hierarchy;
 
 namespace AeroLink.Domain.Verification;
 
@@ -29,17 +30,12 @@ public sealed class TestProcedure
     /// </summary>
     private static void EnsurePrefixMatchesLevel(string baseNumber, TestProcedureLevel level)
     {
-        var expected = level switch
-        {
-            TestProcedureLevel.System => "SYSTP-",
-            TestProcedureLevel.HighLevel => "HLRTP-",
-            _ => "LLRTP-",
-        };
+        var ladderPolicy = LegacyLadderPolicy.Instance;
+        var expected = ladderPolicy.TestProcedurePrefix(level) + "-";
         if (baseNumber.StartsWith(expected, StringComparison.OrdinalIgnoreCase)) return;
         // Only a number claiming to be a test procedure is judged. A project numbering its procedures some
         // other way is not making this mistake, and is not this rule's business.
-        var known = new[] { "SYSTP-", "HLRTP-", "LLRTP-" };
-        if (!known.Any(x => baseNumber.StartsWith(x, StringComparison.OrdinalIgnoreCase))) return;
+        if (!ladderPolicy.IsKnownTestProcedurePrefix(baseNumber)) return;
         throw new DomainException(
             $"{baseNumber} is numbered for a different level than {level}. A test procedure's number and its level have to agree.");
     }

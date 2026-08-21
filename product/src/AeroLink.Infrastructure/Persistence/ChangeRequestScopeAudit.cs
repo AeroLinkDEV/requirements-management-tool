@@ -1,4 +1,5 @@
 using AeroLink.Domain.ChangeControl;
+using AeroLink.Domain.Hierarchy;
 using Microsoft.EntityFrameworkCore;
 
 namespace AeroLink.Infrastructure.Persistence;
@@ -24,18 +25,25 @@ public sealed record CrossLevelRequirementChange(
 public static class ChangeRequestScopeAudit
 {
     public static async Task<IReadOnlyList<CrossLevelRequirementChange>> ViolationsAsync(
-        AeroLinkDbContext db, CancellationToken ct = default) =>
-        await (from change in db.RequirementChanges.AsNoTracking()
-               join request in db.SystemChangeRequests.AsNoTracking() on change.ChangeRequestId equals request.Id
-               where request.Type == ChangeRequestType.System
-                   ? change.Level != RequirementLevel.System
-                   : change.Level == RequirementLevel.System
-               orderby request.BaseNumber, change.BaseNumber
-               select new CrossLevelRequirementChange(
-                   request.Id,
-                   request.BaseNumber,
-                   request.Type.ToString(),
-                   change.BaseNumber,
-                   change.Level.ToString()))
+        AeroLinkDbContext db, ILadderPolicy? policy = null, CancellationToken ct = default)
+    {
+        var ladderPolicy = policy ?? LegacyLadderPolicy.Instance;
+        var systemLevel = ladderPolicy.Definition(RequirementLevel.System).Level;
+        var softwareLevels = ladderPolicy.OrderedLevels
+            .Where(level => ladderPolicy.AcceptsChangeRequest(ChangeRequestType.Software, level))
+            .ToArray();
+        return await (from change in db.RequirementChanges.AsNoTracking()
+                      join request in db.SystemChangeRequests.AsNoTracking() on change.ChangeRequestId equals request.Id
+                      where request.Type == ChangeRequestType.System
+                          ? change.Level != systemLevel
+                          : !softwareLevels.Contains(change.Level)
+                      orderby request.BaseNumber, change.BaseNumber
+                      select new CrossLevelRequirementChange(
+                          request.Id,
+                          request.BaseNumber,
+                          request.Type.ToString(),
+                          change.BaseNumber,
+                          change.Level.ToString()))
             .ToListAsync(ct);
+    }
 }

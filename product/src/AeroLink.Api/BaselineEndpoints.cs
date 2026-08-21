@@ -3,6 +3,7 @@ using AeroLink.Domain.ChangeControl;
 using AeroLink.Domain.Common;
 using AeroLink.Domain.Contracts;
 using AeroLink.Domain.Identity;
+using AeroLink.Domain.Hierarchy;
 using AeroLink.Domain.Programs;
 using AeroLink.Domain.Releases;
 using AeroLink.Domain.Traceability;
@@ -535,7 +536,7 @@ public static class BaselineEndpoints
                 baseline = baseline.DisplayNumber, baseline.Name, baseline.RequirementsHash, baseline.RequirementsMaterializedAt, requirementCount = rows.Count, requirements = rows });
         });
 
-        app.MapPost("/api/baselines/{id:guid}/generate-documents", async (Guid id, EmptyMutationRequest request, HttpContext http, AeroLinkDbContext db, IdentityService identity, ControlledOutputGenerator generator, EvidenceFileStore store, CancellationToken ct) =>
+        app.MapPost("/api/baselines/{id:guid}/generate-documents", async (Guid id, EmptyMutationRequest request, HttpContext http, AeroLinkDbContext db, IdentityService identity, ILadderPolicy ladderPolicy, ControlledOutputGenerator generator, EvidenceFileStore store, CancellationToken ct) =>
         {
             var baseline = await db.CandidateBaselines.AsNoTracking().SingleOrDefaultAsync(x => x.Id == id, ct); if (baseline is null) return Results.NotFound(); if (baseline.RequirementsMaterializedAt is null) return Results.BadRequest(new { error = "Materialize the requirement baseline before generating controlled outputs." });
             if(!await http.HasProjectRoleAsync(db,identity,baseline.ProjectId,ct,ProgramRole.ConfigurationManager))return Results.Forbid();
@@ -550,17 +551,24 @@ public static class BaselineEndpoints
                                     group procedure by procedure.Level into grouped
                                     select new { Key = grouped.Key, Count = grouped.Count() })
                 .ToDictionaryAsync(x => x.Key, x => x.Count, ct);
-            var suffix = release.Version.Replace(".", ""); var specs = new[] {
-                (ControlledDocumentType.Sysrd,$"SYSRD-{int.Parse(suffix):D6}",$"{project.SoftwareProduct} System Requirements Document",requirementCounts.GetValueOrDefault(RequirementLevel.System)),
-                (ControlledDocumentType.SwrdHighLevel,$"HLRD-{int.Parse(suffix):D6}",$"{project.SoftwareProduct} High-Level Software Requirements Document",requirementCounts.GetValueOrDefault(RequirementLevel.HighLevel)),
-                (ControlledDocumentType.SwrdLowLevel,$"LLRD-{int.Parse(suffix):D6}",$"{project.SoftwareProduct} Low-Level Software Requirements Document",requirementCounts.GetValueOrDefault(RequirementLevel.LowLevel)),
-                (ControlledDocumentType.SystemTestProcedures,$"SYSTD-{int.Parse(suffix):D6}",$"{project.SoftwareProduct} System Test Procedures",testCounts.GetValueOrDefault(TestProcedureLevel.System)),
-                (ControlledDocumentType.HighLevelTestProcedures,$"HLRTD-{int.Parse(suffix):D6}",$"{project.SoftwareProduct} HLR Test Procedures",testCounts.GetValueOrDefault(TestProcedureLevel.HighLevel)),
-                (ControlledDocumentType.LowLevelTestProcedures,$"LLRTD-{int.Parse(suffix):D6}",$"{project.SoftwareProduct} LLR Test Procedures",testCounts.GetValueOrDefault(TestProcedureLevel.LowLevel)) };
+            var suffix = release.Version.Replace(".", "");
+            var specs = new List<(ControlledDocumentType Type, string Number, string Title, int Count)>();
+            foreach (var level in ladderPolicy.OrderedLevels)
+            {
+                var requirementDocument = ladderPolicy.RequirementsDocument(level);
+                specs.Add((requirementDocument, $"{ladderPolicy.ControlledDocumentPrefix(requirementDocument)}-{int.Parse(suffix):D6}",
+                    $"{project.SoftwareProduct} {ladderPolicy.ControlledDocumentTitle(requirementDocument)}", requirementCounts.GetValueOrDefault(level)));
+                var procedureDocument = ladderPolicy.TestProcedureDocument(level);
+                specs.Add((procedureDocument, $"{ladderPolicy.ControlledDocumentPrefix(procedureDocument)}-{int.Parse(suffix):D6}",
+                    $"{project.SoftwareProduct} {ladderPolicy.ControlledDocumentTitle(procedureDocument)}",
+                    testCounts.GetValueOrDefault(ladderPolicy.ProcedureLevel(level))));
+            }
             // The approved layout for each document type, if the programme has recorded one. Bound to the document
             // at generation and never re-resolved: revising a template afterwards must not change a document that
             // has already been produced and possibly signed.
             var approvedTemplates = await ControlledLayouts.ApprovedAsync(db, project.Id, ct);
+            var procedureDocumentTypes = ladderPolicy.OrderedLevels
+                .Select(ladderPolicy.TestProcedureDocument).ToHashSet();
             // #419: a controlled test-procedure document is one exact, immutable procedure manifest. The
             // record must never be created against a compatibility projection that materialization later
             // changes, and its hash basis must never fall back to the requirement manifest.
@@ -571,7 +579,7 @@ public static class BaselineEndpoints
             await using var transaction = await db.Database.BeginTransactionAsync(ct);
             foreach (var spec in specs.Where(s => existing.All(x => x.Type != s.Item1)))
             {
-                var procedureDocument = spec.Item1 is ControlledDocumentType.SystemTestProcedures or ControlledDocumentType.HighLevelTestProcedures or ControlledDocumentType.LowLevelTestProcedures;
+                var procedureDocument = procedureDocumentTypes.Contains(spec.Item1);
                 if (procedureDocument && !procedureManifestReady)
                 {
                     skipped.Add(spec.Item1);

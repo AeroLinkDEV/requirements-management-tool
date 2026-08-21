@@ -1,6 +1,7 @@
 using AeroLink.Domain.ChangeControl;
 using AeroLink.Domain.Common;
 using AeroLink.Domain.Identity;
+using AeroLink.Domain.Hierarchy;
 using AeroLink.Domain.Requirements;
 using AeroLink.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
@@ -14,7 +15,7 @@ public static class CodeTraceabilityEndpoints
         return app;
     }
 
-    private static async Task<IResult> ListAsync(Guid projectId, Guid releaseId, HttpContext http, AeroLinkDbContext db, CancellationToken ct)
+    private static async Task<IResult> ListAsync(Guid projectId, Guid releaseId, HttpContext http, AeroLinkDbContext db, ILadderPolicy ladderPolicy, CancellationToken ct)
     {
         if (!await http.HasProjectAccessAsync(db, projectId, ct)) return Results.Forbid();
         var release = await db.Releases.AsNoTracking().SingleOrDefaultAsync(x => x.Id == releaseId && x.ProjectId == projectId, ct);
@@ -40,7 +41,7 @@ public static class CodeTraceabilityEndpoints
         if (!materialized)
             return Results.Ok(Waiting(release.Version, release.IsReleased, recorded));
 
-        var required = await CodeTraceabilityProjection.RequiredAsync(db, projectId, releaseId, campaignBaselineId!.Value, ct);
+        var required = await CodeTraceabilityProjection.RequiredAsync(db, projectId, releaseId, campaignBaselineId!.Value, ladderPolicy, ct);
         var revisionIds = required.Select(x => x.RevisionId).ToHashSet();
         var mappings = recorded.Where(x => revisionIds.Contains(x.RequirementRevisionId)).ToList();
         return Results.Ok(Response(release.Version, release.IsReleased, required, mappings));
@@ -51,7 +52,7 @@ public static class CodeTraceabilityEndpoints
         await db.ReleaseCampaigns.AsNoTracking().Where(x => x.ProjectId == projectId && x.ReleaseId == releaseId)
             .Select(x => (Guid?)x.BaselineId).SingleOrDefaultAsync(ct);
 
-    private static async Task<IResult> CreateAsync(CreateCodeTraceabilityRequest request, HttpContext http, AeroLinkDbContext db, IdentityService identity, CancellationToken ct)
+    private static async Task<IResult> CreateAsync(CreateCodeTraceabilityRequest request, HttpContext http, AeroLinkDbContext db, IdentityService identity, ILadderPolicy ladderPolicy, CancellationToken ct)
     {
         if (!await http.HasProjectRoleAsync(db, identity, request.ProjectId, ct, ProgramRole.Engineer, ProgramRole.ConfigurationManager, ProgramRole.ProgramManager)) return Results.Forbid();
         var release = await db.Releases.AsNoTracking().SingleOrDefaultAsync(x => x.Id == request.ReleaseId && x.ProjectId == request.ProjectId, ct);
@@ -67,8 +68,9 @@ public static class CodeTraceabilityEndpoints
                 error = "This build has no materialized requirement population yet, so implementation evidence cannot be recorded against it. Freeze the candidate baseline and materialize its requirements first.",
                 code = "waiting_for_materialized_baseline"
             });
+        var requiredLevel = ladderPolicy.OrderedLevels.Single(level => ladderPolicy.HasCodeTraceability(level));
         var exactLlr = await (from selection in db.BaselineRequirements.AsNoTracking().Where(x => x.BaselineId == baselineId && x.RevisionId == request.RequirementRevisionId)
-                                                       join artifact in db.Requirements.AsNoTracking().Where(x => x.Id == request.RequirementArtifactId && x.ProjectId == request.ProjectId && x.Level == RequirementLevel.LowLevel) on selection.ArtifactId equals artifact.Id
+                                                       join artifact in db.Requirements.AsNoTracking().Where(x => x.Id == request.RequirementArtifactId && x.ProjectId == request.ProjectId && x.Level == requiredLevel) on selection.ArtifactId equals artifact.Id
                                                        select artifact.Id).AnyAsync(ct);
         if (!exactLlr) return Results.BadRequest(new { error = "Code traceability must map an exact LLR revision in the selected build baseline." });
         try

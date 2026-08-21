@@ -351,6 +351,11 @@ public sealed class AuthoringTracedImpactTests
         Assert.Equal(HttpStatusCode.BadRequest, systemPicker.StatusCode);
         Assert.Contains("Only HLR and LLR proposals", await systemPicker.Content.ReadAsStringAsync());
 
+        using var unknownLevelPicker = await client.GetAsync(
+            $"/api/authoring/upstream-requirements?projectId={projectId}&releaseId={ladder.ReleaseId}&childLevel=99");
+        Assert.Equal(HttpStatusCode.BadRequest, unknownLevelPicker.StatusCode);
+        Assert.Contains("Only HLR and LLR proposals", await unknownLevelPicker.Content.ReadAsStringAsync());
+
         using (var systemDraftWithParent = await client.PostAsJsonAsync("/api/change-request-drafts", new
         {
             projectId,

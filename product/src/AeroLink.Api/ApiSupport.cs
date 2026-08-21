@@ -5,6 +5,7 @@ using AeroLink.Domain.Baselines;
 using AeroLink.Domain.ChangeControl;
 using AeroLink.Domain.Contracts;
 using AeroLink.Domain.Identity;
+using AeroLink.Domain.Hierarchy;
 using AeroLink.Domain.Programs;
 using AeroLink.Domain.Traceability;
 using AeroLink.Domain.Verification;
@@ -104,12 +105,11 @@ static class ApiMap
     /// requirements at its own level — expressed here so the authoring path can refuse a wrong-level
     /// requirement before it is stored rather than at materialization.
     /// </summary>
-    public static RequirementLevel RequirementLevelFor(TestProcedureLevel level) => level switch
-    {
-        TestProcedureLevel.System => RequirementLevel.System,
-        TestProcedureLevel.HighLevel => RequirementLevel.HighLevel,
-        _ => RequirementLevel.LowLevel,
-    };
+    public static RequirementLevel RequirementLevelFor(TestProcedureLevel level) =>
+        LegacyLadderPolicy.Instance.RequirementLevelFor(level);
+
+    public static RequirementLevel RequirementLevelFor(TestProcedureLevel level, ILadderPolicy ladderPolicy) =>
+        ladderPolicy.RequirementLevelFor(level);
 
     public static string ControlledDocumentTypeLabel(ControlledDocumentType type) => type switch
     {

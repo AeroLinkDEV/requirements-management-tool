@@ -1,6 +1,7 @@
 using AeroLink.Domain.Baselines;
 using AeroLink.Domain.ChangeControl;
 using AeroLink.Domain.Common;
+using AeroLink.Domain.Hierarchy;
 using AeroLink.Domain.Programs;
 using AeroLink.Domain.Releases;
 using AeroLink.Domain.Requirements;
@@ -27,8 +28,9 @@ namespace AeroLink.Infrastructure.Persistence;
 /// released document will carry. A reader comparing a draft to the eventual release sees the same number and
 /// the difference is the stamp, rather than two documents whose relationship they have to work out.
 /// </summary>
-public sealed class DraftDocumentGenerator(AeroLinkDbContext db, RichContentPublisher richContent)
+public sealed class DraftDocumentGenerator(AeroLinkDbContext db, RichContentPublisher richContent, ILadderPolicy? policy = null)
 {
+    private readonly ILadderPolicy ladderPolicy = policy ?? LegacyLadderPolicy.Instance;
     public async Task<GeneratedOutput?> GenerateAsync(Guid releaseId, ControlledDocumentType type, string format,
         string preparedBy, CancellationToken ct)
     {
@@ -37,20 +39,10 @@ public sealed class DraftDocumentGenerator(AeroLinkDbContext db, RichContentPubl
         var project = await db.Projects.AsNoTracking().SingleAsync(x => x.Id == release.ProjectId, ct);
         var program = await db.Programs.AsNoTracking().SingleAsync(x => x.Id == project.ProgramId, ct);
 
-        if (type is ControlledDocumentType.SystemTestProcedures
-            or ControlledDocumentType.HighLevelTestProcedures
-            or ControlledDocumentType.LowLevelTestProcedures)
+        if (ladderPolicy.OrderedLevels.Any(level => ladderPolicy.TestProcedureDocument(level) == type))
             return await GenerateProcedureDraftAsync(release, project, program, type, format, preparedBy, ct);
 
-        var level = type switch
-        {
-            ControlledDocumentType.Sysrd => RequirementLevel.System,
-            ControlledDocumentType.SwrdHighLevel => RequirementLevel.HighLevel,
-            ControlledDocumentType.SwrdLowLevel => RequirementLevel.LowLevel,
-            // Test procedure documents are not built from a baseline of requirements, so a draft of one would
-            // be the approved generator with a stamp on it. Refused rather than half-answered.
-            _ => (RequirementLevel?)null
-        };
+        var level = RequirementLevelFor(type);
         if (level is null) return null;
 
         var predecessor = await ReleasedPredecessorBaselineAsync(release.ProjectId, release.PredecessorReleaseId, ct);
@@ -118,12 +110,7 @@ public sealed class DraftDocumentGenerator(AeroLinkDbContext db, RichContentPubl
     private async Task<GeneratedOutput> GenerateProcedureDraftAsync(SoftwareRelease release, ProjectRecord project,
         ProgramRecord program, ControlledDocumentType type, string format, string preparedBy, CancellationToken ct)
     {
-        var level = type switch
-        {
-            ControlledDocumentType.SystemTestProcedures => TestProcedureLevel.System,
-            ControlledDocumentType.HighLevelTestProcedures => TestProcedureLevel.HighLevel,
-            _ => TestProcedureLevel.LowLevel
-        };
+        var level = ProcedureLevelFor(type);
         var effectivity = await TestProcedureEffectivity.ForReleaseAsync(db, project.Id, release.Id, ct);
         var revisionIds = effectivity?.RevisionIds ?? [];
         var latest = await (from revision in db.TestProcedureRevisions.AsNoTracking()
@@ -270,20 +257,29 @@ public sealed class DraftDocumentGenerator(AeroLinkDbContext db, RichContentPubl
         return (highest ?? 0) + 1;
     }
 
-    private static string DocumentNumber(ControlledDocumentType type, string version)
+    private string DocumentNumber(ControlledDocumentType type, string version)
     {
         var digits = string.Concat(version.Where(char.IsDigit));
         var suffix = int.TryParse(digits, out var number) ? number.ToString("D6") : digits;
-        var prefix = type switch
-        {
-            ControlledDocumentType.Sysrd => "SYSRD",
-            ControlledDocumentType.SwrdHighLevel => "HLRD",
-            ControlledDocumentType.SwrdLowLevel => "LLRD",
-            ControlledDocumentType.SystemTestProcedures => "SYSTD",
-            ControlledDocumentType.HighLevelTestProcedures => "HLRTD",
-            _ => "LLRTD",
-        };
+        var prefix = ladderPolicy.ControlledDocumentPrefix(type);
         return $"{prefix}-{suffix}";
+    }
+
+    private RequirementLevel? RequirementLevelFor(ControlledDocumentType type) =>
+        ladderPolicy.OrderedLevels
+            .Where(level => ladderPolicy.RequirementsDocument(level) == type)
+            .Select(level => (RequirementLevel?)level)
+            .SingleOrDefault();
+
+    private TestProcedureLevel ProcedureLevelFor(ControlledDocumentType type)
+    {
+        var matches = ladderPolicy.OrderedLevels
+            .Where(level => ladderPolicy.TestProcedureDocument(level) == type)
+            .Select(ladderPolicy.ProcedureLevel)
+            .ToArray();
+        return matches.Length == 1
+            ? matches[0]
+            : throw new DomainException($"Unknown controlled document type: {type}.");
     }
 
     private static string DocumentTypeName(ControlledDocumentType type) => type switch

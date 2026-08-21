@@ -1,5 +1,6 @@
 using AeroLink.Domain.Common;
 using AeroLink.Domain.Content;
+using AeroLink.Domain.Hierarchy;
 
 namespace AeroLink.Domain.Verification;
 
@@ -599,12 +600,8 @@ public sealed class TestChangeReview
     }
 
     /// <summary>The procedure level this discipline governs. The discipline and the level are one fact.</summary>
-    public TestProcedureLevel ProcedureLevel() => Discipline switch
-    {
-        TestChangeReviewDiscipline.System => TestProcedureLevel.System,
-        TestChangeReviewDiscipline.HighLevelSoftware => TestProcedureLevel.HighLevel,
-        _ => TestProcedureLevel.LowLevel,
-    };
+    public TestProcedureLevel ProcedureLevel() =>
+        LegacyLadderPolicy.Instance.ProcedureLevel(LegacyLadderPolicy.Instance.RequirementLevelFor(Discipline));
 
     public void AssignControlledNumber(string baseNumber, DateTimeOffset now)
     {
@@ -612,12 +609,7 @@ public sealed class TestChangeReview
         if (Outcome != TestChangeReviewOutcome.ChangeRequired)
             throw new DomainException("Record that test-procedure work is required before raising the test change request that carries it.");
         var number = Required(baseNumber, "controlled test change request number");
-        var expectedPrefix = Discipline switch
-        {
-            TestChangeReviewDiscipline.System => "SYSTCR-",
-            TestChangeReviewDiscipline.HighLevelSoftware => "HLRTCR-",
-            _ => "LLRTCR-",
-        };
+        var expectedPrefix = LegacyLadderPolicy.Instance.TestChangeReviewPrefix(Discipline) + "-";
         if (!number.StartsWith(expectedPrefix, StringComparison.OrdinalIgnoreCase))
             throw new DomainException($"A {Discipline} test change request requires a {expectedPrefix.TrimEnd('-')} number.");
         BaseNumber = number;

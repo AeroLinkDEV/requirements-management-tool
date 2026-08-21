@@ -1,4 +1,5 @@
 using AeroLink.Domain.ChangeControl;
+using AeroLink.Domain.Hierarchy;
 using Microsoft.EntityFrameworkCore;
 
 namespace AeroLink.Infrastructure.Persistence;
@@ -8,8 +9,10 @@ namespace AeroLink.Infrastructure.Persistence;
 /// This creates work, not an SWCR: the consuming engineer may conclude no change, create a one-to-one
 /// SWCR, or group several assessments into one downstream change request.
 /// </summary>
-public sealed class DownstreamImpactService(AeroLinkDbContext db)
+public sealed class DownstreamImpactService(AeroLinkDbContext db, ILadderPolicy? policy = null)
 {
+    private readonly ILadderPolicy ladderPolicy = policy ?? LegacyLadderPolicy.Instance;
+
     public async Task<int> RaiseForApprovedChangeRequestAsync(SystemChangeRequest request,
         DateTimeOffset now, CancellationToken ct)
     {
@@ -20,10 +23,13 @@ public sealed class DownstreamImpactService(AeroLinkDbContext db)
             return 0;
 
         var targets = new HashSet<RequirementLevel>();
-        if (request.RequirementChanges.Any(x => x.Level == RequirementLevel.System))
-            targets.Add(RequirementLevel.HighLevel);
-        if (request.RequirementChanges.Any(x => x.Level == RequirementLevel.HighLevel))
-            targets.Add(RequirementLevel.LowLevel);
+        foreach (var level in request.RequirementChanges.Select(x => x.Level).Distinct())
+        {
+            // Definition also makes a corrupt/unknown persisted level fail closed rather than silently
+            // treating it as the bottom of the ladder.
+            _ = ladderPolicy.Definition(level);
+            targets.UnionWith(ladderPolicy.DownstreamLevels(level));
+        }
 
         var existing = await db.DownstreamChangeAssessments
             .Where(x => x.SourceChangeRequestId == request.Id)
@@ -78,12 +84,12 @@ public sealed class DownstreamImpactService(AeroLinkDbContext db)
         }
     }
 
-    private static bool SharesExactSourceWork(SystemChangeRequest legacy, SystemChangeRequest replacement,
+    private bool SharesExactSourceWork(SystemChangeRequest legacy, SystemChangeRequest replacement,
         RequirementLevel downstreamTarget)
     {
-        var sourceLevel = downstreamTarget == RequirementLevel.HighLevel
-            ? RequirementLevel.System
-            : RequirementLevel.HighLevel;
+        var sourceLevels = ladderPolicy.ParentLevels(downstreamTarget);
+        if (sourceLevels.Count != 1) return false;
+        var sourceLevel = sourceLevels[0];
         return legacy.RequirementChanges.Where(x => x.Level == sourceLevel).Any(oldChange =>
             replacement.RequirementChanges.Any(newChange =>
                 newChange.Level == oldChange.Level

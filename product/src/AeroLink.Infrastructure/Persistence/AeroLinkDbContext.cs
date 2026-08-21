@@ -1,6 +1,7 @@
 using AeroLink.Domain.Baselines;
 using AeroLink.Domain.ChangeControl;
 using AeroLink.Domain.Common;
+using AeroLink.Domain.Hierarchy;
 using AeroLink.Domain.Programs;
 using AeroLink.Domain.Imports;
 using AeroLink.Domain.Requirements;
@@ -1444,13 +1445,8 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
     }
 
     /// <summary>The one true correspondence between a procedure's level and a requirement's.</summary>
-    private static bool SameLevel(TestProcedureLevel procedure, RequirementLevel requirement) => (procedure, requirement) switch
-    {
-        (TestProcedureLevel.System, RequirementLevel.System) => true,
-        (TestProcedureLevel.HighLevel, RequirementLevel.HighLevel) => true,
-        (TestProcedureLevel.LowLevel, RequirementLevel.LowLevel) => true,
-        _ => false,
-    };
+    private static bool SameLevel(TestProcedureLevel procedure, RequirementLevel requirement) =>
+        LegacyLadderPolicy.Instance.RequirementLevelFor(procedure) == requirement;
 
     /// <summary>
     /// Queues an outbound delivery for every notification being written, in the same unit of work.

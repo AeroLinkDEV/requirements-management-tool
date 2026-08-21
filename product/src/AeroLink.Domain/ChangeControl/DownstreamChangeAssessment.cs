@@ -1,4 +1,5 @@
 using AeroLink.Domain.Common;
+using AeroLink.Domain.Hierarchy;
 
 namespace AeroLink.Domain.ChangeControl;
 
@@ -23,7 +24,7 @@ public sealed class DownstreamChangeAssessment
         if (projectId == Guid.Empty) throw new DomainException("A downstream assessment requires its Project.");
         if (releaseId == Guid.Empty) throw new DomainException("A downstream assessment requires its software build.");
         if (sourceChangeRequestId == Guid.Empty) throw new DomainException("A downstream assessment requires its source change request.");
-        if (targetLevel is not (RequirementLevel.HighLevel or RequirementLevel.LowLevel))
+        if (!LegacyLadderPolicy.Instance.IsDownstreamTarget(targetLevel))
             throw new DomainException("A downstream assessment must target HLR or LLR engineering.");
         Id = Guid.NewGuid();
         ProjectId = projectId;

@@ -1,6 +1,7 @@
 using System.Data.Common;
 using AeroLink.Domain.ChangeControl;
 using AeroLink.Domain.Common;
+using AeroLink.Domain.Hierarchy;
 using AeroLink.Domain.Requirements;
 using AeroLink.Domain.Verification;
 using AeroLink.Infrastructure.Persistence;
@@ -19,6 +20,7 @@ using Microsoft.EntityFrameworkCore.Storage;
 // create leaves a permanent gap rather than returning its number to the pool.
 public static class IdentifierAllocator
 {
+    private static ILadderPolicy LadderPolicy => LegacyLadderPolicy.Instance;
     /// <summary>
     /// Software change requests are numbered per level, so HLRCR and LLRCR each count on their own — the
     /// same choice already made for SYSTCR/HLRTCR/LLRTCR and the procedures they govern. The prefix
@@ -27,7 +29,7 @@ public static class IdentifierAllocator
     public static async Task<string> PreviewChangeRequestAsync(AeroLinkDbContext db, ChangeRequestType type,
         RequirementLevel? softwareLevel, CancellationToken ct)
     {
-        var prefix = ChangeRequestNumbering.Prefix(type, softwareLevel);
+        var prefix = LadderPolicy.ChangeRequestPrefix(type, softwareLevel);
         return FormatChangeRequest(prefix, await PreviewAsync(db, prefix, ct));
     }
 
@@ -37,7 +39,7 @@ public static class IdentifierAllocator
     public static async Task<string> NextChangeRequestAsync(AeroLinkDbContext db, ChangeRequestType type,
         RequirementLevel? softwareLevel, CancellationToken ct)
     {
-        var prefix = ChangeRequestNumbering.Prefix(type, softwareLevel);
+        var prefix = LadderPolicy.ChangeRequestPrefix(type, softwareLevel);
         return FormatChangeRequest(prefix, await ClaimAsync(db, prefix, ct));
     }
 
@@ -53,18 +55,13 @@ public static class IdentifierAllocator
     /// </summary>
     public static async Task<string> NextTestChangeRequestAsync(AeroLinkDbContext db, TestChangeReviewDiscipline discipline, CancellationToken ct)
     {
-        var prefix = discipline switch
-        {
-            TestChangeReviewDiscipline.System => "SYSTCR",
-            TestChangeReviewDiscipline.HighLevelSoftware => "HLRTCR",
-            _ => "LLRTCR",
-        };
+        var prefix = LadderPolicy.TestChangeReviewPrefix(discipline);
         return Format(prefix, await ClaimAsync(db, prefix, ct));
     }
 
     public static async Task<string> NextTestProcedureAsync(AeroLinkDbContext db, TestProcedureLevel level, CancellationToken ct)
     {
-        var prefix = level switch { TestProcedureLevel.System => "SYSTP", TestProcedureLevel.HighLevel => "HLRTP", _ => "LLRTP" };
+        var prefix = LadderPolicy.TestProcedurePrefix(level);
         return Format(prefix, await ClaimAsync(db, prefix, ct));
     }
 

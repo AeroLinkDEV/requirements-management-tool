@@ -1,6 +1,7 @@
 using AeroLink.Domain.ChangeControl;
 using AeroLink.Domain.Common;
 using AeroLink.Domain.Identity;
+using AeroLink.Domain.Hierarchy;
 using AeroLink.Domain.Requirements;
 using AeroLink.Domain.Verification;
 using AeroLink.Infrastructure.Persistence;
@@ -84,27 +85,25 @@ internal static class TestChangeRequestSourceEligibility
     /// package that claimed to answer for work it cannot verify.
     /// </summary>
     internal static bool MatchesDiscipline(TestChangeReviewDiscipline discipline, ChangeRequestType type,
-        RequirementLevel? softwareLevel) => discipline switch
+        RequirementLevel? softwareLevel, ILadderPolicy? policy = null)
     {
-        TestChangeReviewDiscipline.System => type == ChangeRequestType.System,
-        TestChangeReviewDiscipline.HighLevelSoftware =>
-            type == ChangeRequestType.Software && softwareLevel == RequirementLevel.HighLevel,
-        TestChangeReviewDiscipline.LowLevelSoftware =>
-            type == ChangeRequestType.Software && softwareLevel == RequirementLevel.LowLevel,
-        _ => false,
-    };
+        var ladderPolicy = policy ?? LegacyLadderPolicy.Instance;
+        var level = ladderPolicy.RequirementLevelFor(discipline);
+        return ladderPolicy.ParentLevels(level).Count == 0
+            ? type == ChangeRequestType.System
+            : type == ChangeRequestType.Software && softwareLevel == level;
+    }
 
     /// <summary>The same rule as a database predicate, so the picker and the server cannot disagree.</summary>
     internal static IQueryable<SystemChangeRequest> AtLevelOf(IQueryable<SystemChangeRequest> changes,
-        TestChangeReviewDiscipline discipline) => discipline switch
+        TestChangeReviewDiscipline discipline, ILadderPolicy? policy = null)
     {
-        TestChangeReviewDiscipline.System => changes.Where(x => x.Type == ChangeRequestType.System),
-        TestChangeReviewDiscipline.HighLevelSoftware => changes.Where(x =>
-            x.Type == ChangeRequestType.Software && x.SoftwareLevel == RequirementLevel.HighLevel),
-        TestChangeReviewDiscipline.LowLevelSoftware => changes.Where(x =>
-            x.Type == ChangeRequestType.Software && x.SoftwareLevel == RequirementLevel.LowLevel),
-        _ => changes.Where(_ => false),
-    };
+        var ladderPolicy = policy ?? LegacyLadderPolicy.Instance;
+        var level = ladderPolicy.RequirementLevelFor(discipline);
+        return ladderPolicy.ParentLevels(level).Count == 0
+            ? changes.Where(x => x.Type == ChangeRequestType.System)
+            : changes.Where(x => x.Type == ChangeRequestType.Software && x.SoftwareLevel == level);
+    }
 
     internal static string LevelName(TestChangeReviewDiscipline discipline) => discipline switch
     {
@@ -653,7 +652,7 @@ public static class VerificationImpactEndpoints
 
         app.MapPost("/api/test-change-reviews/{id:guid}/procedure-changes", async (Guid id,
             ProposeProcedureChangeRequest request, HttpContext http, AeroLinkDbContext db,
-            IdentityService identity, CancellationToken ct) =>
+            IdentityService identity, ILadderPolicy ladderPolicy, CancellationToken ct) =>
         {
             var review = await db.TestChangeReviews.Include(x => x.ProcedureChanges).Include(x => x.ReviewCycles)
                 .SingleOrDefaultAsync(x => x.Id == id, ct);
@@ -697,7 +696,7 @@ public static class VerificationImpactEndpoints
                                        where scopedRequirementIds.Contains(revision.Id)
                                        select new { revision.Id, artifact.ProjectId, artifact.Level })
                         .ToDictionaryAsync(x => x.Id, ct);
-                    var wanted = ApiMap.RequirementLevelFor(review.ProcedureLevel());
+                    var wanted = ApiMap.RequirementLevelFor(review.ProcedureLevel(), ladderPolicy);
                     foreach (var drivingId in scopedRequirementIds)
                     {
                         if (!known.TryGetValue(drivingId, out var requirement))
@@ -1084,7 +1083,7 @@ public static class VerificationImpactEndpoints
         /// nothing to decide and would sit in the queue looking like work.
         app.MapPost("/api/releases/{releaseId:guid}/test-change-requests", async (Guid releaseId,
             CreateTestChangeRequestRequest request, HttpContext http, AeroLinkDbContext db,
-            IdentityService identity, ProblemReportLinkService problemReports, CancellationToken ct) =>
+            IdentityService identity, ILadderPolicy ladderPolicy, ProblemReportLinkService problemReports, CancellationToken ct) =>
         {
             var release = await db.Releases.AsNoTracking().Where(x => x.Id == releaseId)
                 .Select(x => new { x.ProjectId, x.IsReleased }).SingleOrDefaultAsync(ct);
@@ -1092,6 +1091,8 @@ public static class VerificationImpactEndpoints
             if (release.IsReleased) return Results.Conflict(new { error = "A released build takes no new test change requests." });
             if (!await http.HasProjectRoleAsync(db, identity, release.ProjectId, ct, ProgramRole.TestEngineer, ProgramRole.TestLead))
                 return Results.Forbid();
+            try { _ = ladderPolicy.RequirementLevelFor(request.Discipline); }
+            catch (DomainException) { return Results.BadRequest(new { error = "The test-change discipline is not supported." }); }
             // Test work is not only ever caused by a requirement change: an anomaly found in the field is a
             // legitimate reason to write, correct or withdraw a procedure, and a build may carry no approved
             // change at this package's own level to hang it on. What a package cannot be is raised from
@@ -1123,7 +1124,7 @@ public static class VerificationImpactEndpoints
             // Enforced here as well as in the picker. A filtered browser list is a convenience; the refusal is
             // the rule, and a request that never opened the picker must meet it too.
             var wrongLevel = changes.FirstOrDefault(x =>
-                !TestChangeRequestSourceEligibility.MatchesDiscipline(request.Discipline, x.Type, x.SoftwareLevel));
+                !TestChangeRequestSourceEligibility.MatchesDiscipline(request.Discipline, x.Type, x.SoftwareLevel, ladderPolicy));
             if (wrongLevel is not null)
                 return TestChangeRequestSourceEligibility.LevelRefusal(wrongLevel.DisplayNumber, request.Discipline);
             // The first change the caller names is the package's base; the rest are folded in. The database
@@ -1306,17 +1307,19 @@ public static class VerificationImpactEndpoints
         /// not eligible for this build. No cross-project information is exposed.
         app.MapGet("/api/releases/{releaseId:guid}/test-change-request-sources", async (Guid releaseId,
             TestChangeReviewDiscipline discipline, HttpContext http, AeroLinkDbContext db,
-            CancellationToken ct) =>
+            ILadderPolicy ladderPolicy, CancellationToken ct) =>
         {
             var release = await db.Releases.AsNoTracking().Where(x => x.Id == releaseId)
                 .Select(x => new { x.ProjectId, x.IsReleased }).SingleOrDefaultAsync(ct);
             if (release is null) return Results.NotFound();
             if (!await http.HasProjectAccessAsync(db, release.ProjectId, ct)) return Results.Forbid();
+            try { _ = ladderPolicy.RequirementLevelFor(discipline); }
+            catch (DomainException) { return Results.BadRequest(new { error = "The test-change discipline is not supported." }); }
 
             // Level-filtered before anything else: offering a change the package could never answer for is
             // not a selectable option that happens to be wrong, it is a wrong answer presented as a choice.
             var changes = await TestChangeRequestSourceEligibility.AtLevelOf(
-                    TestChangeRequestSourceEligibility.Apply(db.SystemChangeRequests.AsNoTracking()), discipline)
+                    TestChangeRequestSourceEligibility.Apply(db.SystemChangeRequests.AsNoTracking()), discipline, ladderPolicy)
                 .Where(x => x.ProjectId == release.ProjectId && x.TargetReleaseId == releaseId)
                 .Select(x => new { x.Id, x.DisplayNumber, x.Title, x.State }).ToListAsync(ct);
             var ids = changes.Select(x => x.Id).ToList();
@@ -1501,7 +1504,7 @@ public static class VerificationImpactEndpoints
         });
 
         app.MapPost("/api/test-change-reviews/{id:guid}/submit", async (Guid id, SubmitTestChangeReviewRequest request,
-            HttpContext http, AeroLinkDbContext db, IdentityService identity, CancellationToken ct) =>
+            HttpContext http, AeroLinkDbContext db, IdentityService identity, ILadderPolicy ladderPolicy, CancellationToken ct) =>
         {
             var review = await db.TestChangeReviews.Include(x => x.ProcedureChanges).Include(x => x.ReviewCycles)
                 .SingleOrDefaultAsync(x => x.Id == id, ct);
@@ -1536,7 +1539,7 @@ public static class VerificationImpactEndpoints
                 // The project's recorded procedure for this discipline decides the stages. Where none is
                 // recorded the chosen approver stands alone, exactly as before — a rule nobody has written
                 // down must not become a rule that blocks work.
-                var workflow = await WorkflowEndpoints.ActiveSpecificationAsync(db, review.ProjectId, review.Discipline, ct);
+                var workflow = await WorkflowEndpoints.ActiveSpecificationAsync(db, review.ProjectId, review.Discipline, ct, ladderPolicy);
                 List<ApproverSelection> selections;
                 if (workflow is null)
                 {
@@ -1768,12 +1771,8 @@ public static class VerificationImpactEndpoints
                     select revision.Id).ToListAsync(ct);
             if (requirementRevisionIds.Count == 0) return Results.Ok(Array.Empty<object>());
 
-            var level = discipline switch
-            {
-                TestChangeReviewDiscipline.System => TestProcedureLevel.System,
-                TestChangeReviewDiscipline.HighLevelSoftware => TestProcedureLevel.HighLevel,
-                _ => TestProcedureLevel.LowLevel,
-            };
+            var level = LegacyLadderPolicy.Instance.ProcedureLevel(
+                LegacyLadderPolicy.Instance.RequirementLevelFor(discipline));
             var covering = await (from coverage in db.TestCoverage.AsNoTracking()
                     where requirementRevisionIds.Contains(coverage.RequirementRevisionId)
                     join procedureRevision in db.TestProcedureRevisions.AsNoTracking()
