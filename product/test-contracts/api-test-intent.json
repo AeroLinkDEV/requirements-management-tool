@@ -1,11 +1,11 @@
 {
   "schemaVersion": "aerolink-api-test-intent/v2",
   "totals": {
-    "tests": 512,
-    "cases": 566,
-    "classes": 93,
-    "hostedTests": 499,
-    "hostedCases": 544,
+    "tests": 517,
+    "cases": 571,
+    "classes": 94,
+    "hostedTests": 504,
+    "hostedCases": 549,
     "nonHostedTests": 8,
     "nonHostedCases": 17,
     "unknownHostTests": 5,
@@ -21,10 +21,10 @@
     "http-boundary": {
       "label": "HTTP boundary: route, status, JSON shape",
       "level": "API (must stay hosted)",
-      "tests": 325,
-      "cases": 359,
+      "tests": 329,
+      "cases": 363,
       "unknownCases": 0,
-      "classes": 79
+      "classes": 80
     },
     "ef-translation": {
       "label": "EF translation / relational constraints",
@@ -37,10 +37,10 @@
     "auth-policy": {
       "label": "Authentication / authorization wiring",
       "level": "API (must stay hosted)",
-      "tests": 56,
-      "cases": 60,
+      "tests": 57,
+      "cases": 61,
       "unknownCases": 0,
-      "classes": 35
+      "classes": 36
     },
     "in-process-logic": {
       "label": "In-process logic with no HTTP and no client",
@@ -5441,6 +5441,96 @@
       "sourceLines": {
         "start": 101,
         "end": 118
+      }
+    },
+    {
+      "cls": "ProjectConfigurationApiTests",
+      "test": "An_engineer_can_read_but_cannot_edit_project_configuration",
+      "kind": "Fact",
+      "intent": "auth-policy",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "shared-host-fixture",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 154,
+        "end": 166
+      }
+    },
+    {
+      "cls": "ProjectConfigurationApiTests",
+      "test": "Authorized_edit_accepts_a_non_adjacent_forward_relationship_from_selected_catalogue_steps",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "shared-host-fixture",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 130,
+        "end": 152
+      }
+    },
+    {
+      "cls": "ProjectConfigurationApiTests",
+      "test": "Authorized_edit_records_reason_history_and_rejects_stale_or_lifecycle_mutations",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "shared-host-fixture",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 50,
+        "end": 99
+      }
+    },
+    {
+      "cls": "ProjectConfigurationApiTests",
+      "test": "Concurrent_same_version_edits_have_one_winner_and_preserve_the_winner_graph_and_history",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "shared-host-fixture",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 168,
+        "end": 226
+      }
+    },
+    {
+      "cls": "ProjectConfigurationApiTests",
+      "test": "Non_default_activation_is_refused_with_named_unrouted_consumers",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "shared-host-fixture",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 101,
+        "end": 128
       }
     },
     {

@@ -7,12 +7,12 @@ namespace AeroLink.Domain.Hierarchy;
 public enum ProjectLadderConfigurationClassification { LegacyDefault, NonDefault }
 
 /// <summary>
-/// Storage lifecycle only. Activation is deliberately not an authoring capability in this slice; the state
-/// exists so #713 can add its distinct authority without changing the storage shape.
+/// Storage lifecycle only. #713 owns the distinct authoring and activation authority; controlled-record runtime
+/// consumers remain on the code-owned policy until later routing slices.
 /// </summary>
 public enum ProjectLadderConfigurationState { Stored, Draft, Active, Retired }
 
-/// <summary>A project-owned persisted ladder envelope, not yet consulted by runtime policy consumers.</summary>
+/// <summary>A project-owned persisted ladder envelope. Runtime policy consumers remain on the code-owned policy in this slice.</summary>
 public sealed class ProjectLadderConfiguration
 {
     private ProjectLadderConfiguration() { }
@@ -21,20 +21,24 @@ public sealed class ProjectLadderConfiguration
         : this(projectId, ProjectLadderConfigurationClassification.LegacyDefault,
             ProjectLadderConfigurationState.Stored, now, null, null, null, null) { }
 
-    /// <summary>Storage for a future authoring draft; activation remains owned exclusively by #713.</summary>
+    /// <summary>Creates the authoring draft owned by #713; activation remains owned exclusively by this slice's service.</summary>
     public static ProjectLadderConfiguration CreateDraft(Guid projectId, DateTimeOffset now) =>
         new(projectId, ProjectLadderConfigurationClassification.NonDefault,
             ProjectLadderConfigurationState.Draft, now, null, null, null, null);
 
     private ProjectLadderConfiguration(Guid projectId, ProjectLadderConfigurationClassification classification,
         ProjectLadderConfigurationState state, DateTimeOffset now, DateTimeOffset? activatedAt = null,
-        string? activatedBy = null, DateTimeOffset? retiredAt = null, string? retiredBy = null)
+        string? activatedBy = null, DateTimeOffset? retiredAt = null, string? retiredBy = null,
+        string? activationManifestVersion = null, string? activationManifestHash = null)
     {
         if (projectId == Guid.Empty) throw new DomainException("A project ladder requires a project.");
-        ValidateShape(classification, state, activatedAt, activatedBy, retiredAt, retiredBy);
+        ValidateShape(classification, state, activatedAt, activatedBy, retiredAt, retiredBy,
+            activationManifestVersion, activationManifestHash);
         Id = Guid.NewGuid(); ProjectId = projectId; Classification = classification; State = state;
         CreatedAt = UpdatedAt = now; Version = 1; ActivatedAt = activatedAt; ActivatedBy = activatedBy?.Trim();
         RetiredAt = retiredAt; RetiredBy = retiredBy?.Trim();
+        ActivationManifestVersion = activationManifestVersion?.Trim();
+        ActivationManifestHash = activationManifestHash?.Trim();
     }
 
     public Guid Id { get; private set; }
@@ -47,13 +51,36 @@ public sealed class ProjectLadderConfiguration
     public string? ActivatedBy { get; private set; }
     public DateTimeOffset? RetiredAt { get; private set; }
     public string? RetiredBy { get; private set; }
+    /// <summary>The manifest accepted by a successful activation; null until that act occurs.</summary>
+    public string? ActivationManifestVersion { get; private set; }
+    public string? ActivationManifestHash { get; private set; }
     public long Version { get; private set; }
     public ICollection<ProjectLadderStep> Steps { get; } = new List<ProjectLadderStep>();
     public ICollection<ProjectLadderAllowedUpstream> AllowedUpstream { get; } = new List<ProjectLadderAllowedUpstream>();
 
+    /// <summary>
+    /// Converts the legacy stored inventory into the one editable draft owned by this project.  This is the only
+    /// lifecycle transition exposed to the authoring service; no public operation can produce Active.
+    /// </summary>
+    public void BeginDraftEdit(DateTimeOffset now)
+    {
+        if (Classification == ProjectLadderConfigurationClassification.LegacyDefault
+            && State == ProjectLadderConfigurationState.Stored)
+        {
+            Classification = ProjectLadderConfigurationClassification.NonDefault;
+            State = ProjectLadderConfigurationState.Draft;
+        }
+        if (Classification != ProjectLadderConfigurationClassification.NonDefault
+            || State != ProjectLadderConfigurationState.Draft)
+            throw new DomainException("Only a non-default draft ladder can be edited.");
+        UpdatedAt = now;
+        Version++;
+    }
+
     internal static void ValidateShape(ProjectLadderConfigurationClassification classification,
         ProjectLadderConfigurationState state, DateTimeOffset? activatedAt, string? activatedBy,
-        DateTimeOffset? retiredAt, string? retiredBy)
+        DateTimeOffset? retiredAt, string? retiredBy,
+        string? activationManifestVersion = null, string? activationManifestHash = null)
     {
         if (!Enum.IsDefined(classification)) throw new DomainException("Unknown project ladder classification.");
         if (!Enum.IsDefined(state)) throw new DomainException("Unknown project ladder state.");
@@ -67,6 +94,12 @@ public sealed class ProjectLadderConfiguration
             throw new DomainException("Activation actor evidence cannot be blank.");
         if (retiredBy is not null && string.IsNullOrWhiteSpace(retiredBy))
             throw new DomainException("Retirement actor evidence cannot be blank.");
+        if (activationManifestVersion is not null && string.IsNullOrWhiteSpace(activationManifestVersion))
+            throw new DomainException("Activation manifest version evidence cannot be blank.");
+        if (activationManifestHash is not null && string.IsNullOrWhiteSpace(activationManifestHash))
+            throw new DomainException("Activation manifest hash evidence cannot be blank.");
+        if ((activationManifestVersion is null) != (activationManifestHash is null))
+            throw new DomainException("Activation manifest evidence requires both version and hash.");
         var activationAtPresent = activatedAt is not null;
         var activationByPresent = !string.IsNullOrWhiteSpace(activatedBy);
         var retirementAtPresent = retiredAt is not null;
@@ -77,12 +110,14 @@ public sealed class ProjectLadderConfiguration
             throw new DomainException("Retirement evidence requires both timestamp and actor.");
         var hasActivation = activationAtPresent && activationByPresent;
         var hasRetirement = retirementAtPresent && retirementByPresent;
-        if (state == ProjectLadderConfigurationState.Active && (!hasActivation || hasRetirement))
+        if (state == ProjectLadderConfigurationState.Active && (!hasActivation || hasRetirement
+            || activationManifestVersion is null || activationManifestHash is null))
             throw new DomainException("An active project ladder requires activation evidence and cannot be retired.");
-        if (state == ProjectLadderConfigurationState.Retired && (!hasActivation || !hasRetirement))
-            throw new DomainException("A retired project ladder requires activation and retirement evidence.");
+        if (state == ProjectLadderConfigurationState.Retired && (!hasActivation || !hasRetirement
+            || activationManifestVersion is null || activationManifestHash is null))
+            throw new DomainException("A retired project ladder requires activation, manifest, and retirement evidence.");
         if (state is ProjectLadderConfigurationState.Stored or ProjectLadderConfigurationState.Draft
-            && (hasActivation || hasRetirement))
+            && (hasActivation || hasRetirement || activationManifestVersion is not null || activationManifestHash is not null))
             throw new DomainException("A stored or draft project ladder cannot carry activation or retirement evidence.");
     }
 }
@@ -208,7 +243,8 @@ public static class ProjectLadderResolver
         ArgumentNullException.ThrowIfNull(configuration);
         policy ??= LegacyLadderPolicy.Instance;
         ProjectLadderConfiguration.ValidateShape(configuration.Classification, configuration.State,
-            configuration.ActivatedAt, configuration.ActivatedBy, configuration.RetiredAt, configuration.RetiredBy);
+            configuration.ActivatedAt, configuration.ActivatedBy, configuration.RetiredAt, configuration.RetiredBy,
+            configuration.ActivationManifestVersion, configuration.ActivationManifestHash);
         if (configuration.Version < 1) throw new DomainException("A project ladder version must be positive.");
 
         var steps = configuration.Steps.ToList();
@@ -251,6 +287,23 @@ public static class ProjectLadderResolver
         var resolvedEdges = edges.Select(x => new ResolvedProjectLadderRelationship(byId[x.ParentStepId], byId[x.ChildStepId])).ToList();
         if (resolvedEdges.Distinct().Count() != resolvedEdges.Count)
             throw new DomainException("A project ladder contains duplicate catalogue relationships.");
+        var positionByLevel = resolvedSteps.ToDictionary(x => x.Level, x => x.Position);
+        if (resolvedEdges.Any(edge => positionByLevel[edge.Parent] >= positionByLevel[edge.Child]))
+            throw new DomainException("A project ladder relationship parent must have an earlier position than its child.");
+        var childrenByParent = resolvedEdges.GroupBy(x => x.Parent)
+            .ToDictionary(x => x.Key, x => x.Select(edge => edge.Child).ToArray());
+        var visiting = new HashSet<RequirementLevel>();
+        var visited = new HashSet<RequirementLevel>();
+        bool HasCycle(RequirementLevel level)
+        {
+            if (!visiting.Add(level)) return true;
+            if (visited.Contains(level)) { visiting.Remove(level); return false; }
+            if (childrenByParent.TryGetValue(level, out var children) && children.Any(HasCycle)) return true;
+            visiting.Remove(level); visited.Add(level); return false;
+        }
+
+        if (resolvedSteps.Select(x => x.Level).Any(HasCycle))
+            throw new DomainException("A project ladder relationship graph cannot contain a cycle.");
         return new(configuration.ProjectId, configuration.Classification, configuration.State,
             resolvedSteps.OrderBy(x => x.Position).ToArray(), resolvedEdges);
     }

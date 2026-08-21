@@ -95,6 +95,95 @@ public sealed class ProjectLadderConfigurationTests
         Assert.Contains("itself", error.Message);
     }
 
+    [Fact]
+    public void Canonical_snapshot_hash_is_stable_and_manifest_names_every_unrouted_consumer()
+    {
+        var steps = new[]
+        {
+            new LadderStepDraft("LowLevel", 2, LevelCapabilities.HasChangeControl),
+            new LadderStepDraft("System", 1, LevelCapabilities.HasChangeControl),
+        };
+        var edges = new[] { new LadderRelationshipDraft("System", "LowLevel") };
+
+        var first = ProjectLadderSnapshot.Canonicalize(steps, edges);
+        var second = ProjectLadderSnapshot.Canonicalize(steps.Reverse(), edges);
+
+        Assert.Equal(first, second);
+        Assert.Equal(ProjectLadderSnapshot.Hash(first), ProjectLadderSnapshot.Hash(second));
+        Assert.False(LadderConsumerManifestCatalog.Current.IsReady);
+        Assert.Contains(LadderConsumerManifestCatalog.Current.MissingOrUnrouted,
+            x => x.Id == "release.readiness");
+        Assert.NotEmpty(LadderConsumerManifestCatalog.Current.Hash);
+    }
+
+    [Fact]
+    public void Authored_graph_allows_non_adjacent_upstream_but_refuses_authored_or_persisted_backward_edges()
+    {
+        var projectId = Guid.NewGuid();
+        var policy = LegacyLadderPolicy.Instance;
+        var valid = ProjectLadderDraftValidator.Validate(
+            [new("System", 1, policy.Definition(RequirementLevel.System).Capabilities), new("LowLevel", 2, policy.Definition(RequirementLevel.LowLevel).Capabilities)],
+            [new("System", "LowLevel")], policy);
+        Assert.Single(valid.Relationships);
+        var reverseError = Assert.Throws<DomainException>(() => ProjectLadderDraftValidator.Validate(
+            [new("System", 1, policy.Definition(RequirementLevel.System).Capabilities), new("LowLevel", 2, policy.Definition(RequirementLevel.LowLevel).Capabilities)],
+            [new("LowLevel", "System")], policy));
+        Assert.Contains("earlier position", reverseError.Message);
+
+        var persistedReverse = ProjectLadderConfiguration.CreateDraft(projectId, DateTimeOffset.UtcNow);
+        var persistedSteps = AddSteps(persistedReverse, [RequirementLevel.System, RequirementLevel.LowLevel]);
+        persistedReverse.AllowedUpstream.Add(new ProjectLadderAllowedUpstream(persistedReverse.Id, projectId,
+            persistedSteps[1].Id, persistedSteps[0].Id, DateTimeOffset.UtcNow));
+        var persistedReverseError = Assert.Throws<DomainException>(() => ProjectLadderResolver.Resolve(persistedReverse));
+        Assert.Contains("earlier position", persistedReverseError.Message);
+
+    }
+
+    [Fact]
+    public void Manifest_inventory_is_exactly_tied_to_the_matrix_and_unknown_routes_fail_closed()
+    {
+        var matrix = FindMatrix();
+        Assert.Contains($"`{LadderConsumerManifestCatalog.Version}`", matrix);
+        var ids = LadderConsumerManifestCatalog.Current.Consumers.Select(x => x.Id).ToArray();
+        Assert.Equal(ids.Length, ids.Distinct(StringComparer.Ordinal).Count());
+        const string startMarker = "<!-- ladder-consumer-ids:start -->";
+        const string endMarker = "<!-- ladder-consumer-ids:end -->";
+        var start = matrix.IndexOf(startMarker, StringComparison.Ordinal);
+        var end = matrix.IndexOf(endMarker, StringComparison.Ordinal);
+        Assert.True(start >= 0 && end > start, "The matrix must contain the machine-readable manifest ID block.");
+        var matrixIds = matrix[(start + startMarker.Length)..end].Split('\n', StringSplitOptions.RemoveEmptyEntries)
+            .Select(x => x.Trim()).Where(x => !x.StartsWith("<!--", StringComparison.Ordinal)).ToArray();
+        Assert.Equal(ids.OrderBy(x => x, StringComparer.Ordinal), matrixIds.OrderBy(x => x, StringComparer.Ordinal));
+        Assert.Equal(matrixIds.Length, matrixIds.Distinct(StringComparer.Ordinal).Count());
+
+        var unknown = LadderConsumerManifestCatalog.BuildForTests(
+            [new LadderConsumerRegistration("future.unregistered", "Not a current consumer")]);
+        Assert.False(unknown.IsReady);
+        Assert.Contains(unknown.UnknownRegistrations, x => x.Id == "future.unregistered");
+    }
+
+    [Fact]
+    public void Ladder_history_rejects_a_snapshot_hash_that_does_not_match_its_evidence()
+    {
+        var snapshot = "steps[1:System:7]|edges[]";
+        var error = Assert.Throws<DomainException>(() => new ProjectLadderConfigurationHistory(
+            Guid.NewGuid(), Guid.NewGuid(), 1, "manager", DateTimeOffset.UtcNow, "reason", snapshot, "not-the-hash"));
+        Assert.Contains("does not match", error.Message);
+    }
+
+    private static string FindMatrix()
+    {
+        for (var directory = new DirectoryInfo(AppContext.BaseDirectory); directory is not null; directory = directory.Parent)
+        {
+            var direct = Path.Combine(directory.FullName, "docs", "REQUIREMENT_HIERARCHY_POLICY_MATRIX.md");
+            var nested = Path.Combine(directory.FullName, "product", "docs", "REQUIREMENT_HIERARCHY_POLICY_MATRIX.md");
+            if (File.Exists(direct)) return File.ReadAllText(direct);
+            if (File.Exists(nested)) return File.ReadAllText(nested);
+        }
+
+        throw new FileNotFoundException("The policy matrix is required for the activation-manifest source contract.");
+    }
+
     private static List<ProjectLadderStep> AddSteps(ProjectLadderConfiguration configuration,
         IReadOnlyList<RequirementLevel> levels)
     {

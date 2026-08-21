@@ -49,7 +49,7 @@ export default function SoftwareBuildsLanding({
   onProjectOverview,
   onImportedBaselines,
   onPersonnel,
-  onApprovalConfiguration,
+  onProjectConfiguration,
   onSignOut,
 }: {
   user: AuthUser;
@@ -58,7 +58,7 @@ export default function SoftwareBuildsLanding({
   onProjectOverview: () => void;
   onImportedBaselines: () => void;
   onPersonnel: () => void;
-  onApprovalConfiguration: () => void;
+  onProjectConfiguration: () => void;
   onSignOut: () => void;
 }) {
   const releaseByVersion = new Map(releases.map((release) => [release.version, release]));
@@ -86,8 +86,8 @@ export default function SoftwareBuildsLanding({
             </button>
             {/* Beside Personnel because it is read against it: whether a stage can be signed is a question
                 about the procedure and the roster together. */}
-            <button type="button" className="approvalConfigurationButton" onClick={onApprovalConfiguration}>
-              Approval configuration
+            <button type="button" className="approvalConfigurationButton" onClick={onProjectConfiguration}>
+              Project configuration
             </button>
             {/* Sits here rather than in a build's navigation because an import does not belong to a build —
                 it creates one. Somebody porting a program in has no build to have entered yet. */}

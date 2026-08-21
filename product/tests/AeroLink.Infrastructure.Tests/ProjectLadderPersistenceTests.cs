@@ -113,6 +113,18 @@ public sealed class ProjectLadderPersistenceTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Database_rejects_manifest_evidence_on_stored_and_incomplete_active_or_retired_rows()
+    {
+        await using var read = Context();
+        var configuration = await read.ProjectLadderConfigurations.AsNoTracking()
+            .SingleAsync(x => x.ProjectId == _fmsProjectId);
+
+        await AssertInvalidUpdateAsync($"UPDATE project_ladder_configurations SET ActivationManifestVersion = 'v1' WHERE Id = {configuration.Id}");
+        await AssertInvalidUpdateAsync($"UPDATE project_ladder_configurations SET Classification = 'NonDefault', State = 'Active', ActivatedAt = CURRENT_TIMESTAMP, ActivatedBy = 'manager', ActivationManifestVersion = 'v1', ActivationManifestHash = NULL WHERE Id = {configuration.Id}");
+        await AssertInvalidUpdateAsync($"UPDATE project_ladder_configurations SET Classification = 'NonDefault', State = 'Retired', ActivatedAt = CURRENT_TIMESTAMP, ActivatedBy = 'manager', RetiredAt = CURRENT_TIMESTAMP, RetiredBy = 'manager', ActivationManifestVersion = NULL, ActivationManifestHash = NULL WHERE Id = {configuration.Id}");
+    }
+
+    [Fact]
     public async Task Resolver_fails_closed_when_persisted_catalogue_data_is_unknown()
     {
         await using (var db = Context())
@@ -157,5 +169,11 @@ public sealed class ProjectLadderPersistenceTests : IAsyncLifetime
         var configuration = LegacyDefaultProjectLadderFactory.Create(projectId, now);
         db.ProjectLadderConfigurations.Add(configuration);
         await db.SaveChangesAsync();
+    }
+
+    private async Task AssertInvalidUpdateAsync(FormattableString sql)
+    {
+        await using var db = Context();
+        Assert.Throws<SqliteException>(() => db.Database.ExecuteSqlInterpolated(sql));
     }
 }

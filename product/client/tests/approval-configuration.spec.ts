@@ -13,11 +13,12 @@ const openConfiguration = async (page: import('@playwright/test').Page) => {
   await login(page, 'admin', { openProject: false })
   await page.getByRole('link', { name: 'Open FMS Product Development' }).click()
   await expect(page.getByRole('heading', { name: 'Software Builds', level: 1 })).toBeVisible()
-  await page.getByRole('button', { name: 'Approval configuration' }).click()
+  // The legacy deep link remains compatible; Project Configuration is now the primary entry point from Builds.
+  await page.goto('/projects/fms-product-development/approval-configuration')
   await expect(page.getByRole('heading', { name: 'Approval configuration', level: 1 })).toBeVisible()
 }
 
-test('Approval configuration is reached beside Software Builds and survives a reload', async ({ page }) => {
+test('The legacy approval configuration deep link survives a reload', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 })
   await openConfiguration(page)
 

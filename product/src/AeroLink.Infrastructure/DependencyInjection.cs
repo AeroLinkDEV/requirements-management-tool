@@ -71,6 +71,7 @@ public static class DependencyInjection
         services.AddScoped<DownstreamImpactService>();
         services.AddScoped<BuildTestSetService>();
         services.AddScoped<IdentityService>();
+        services.AddScoped<ProjectLadderAuthoringService>();
         services.AddScoped<IdentitySeeder>();
         services.AddScoped<ExternalIdentityAdministrationService>();
         services.AddScoped<EnterpriseRequirementsService>();
