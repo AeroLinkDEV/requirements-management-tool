@@ -326,6 +326,7 @@ public static class WorkflowEndpoints
         {
             ReviewSubject.System => policy.WorkflowSubject(ChangeRequestType.System),
             ReviewSubject.Software => policy.WorkflowSubject(ChangeRequestType.Software),
+            ReviewSubject.Interface => policy.WorkflowSubject(ChangeRequestType.Interface),
             ReviewSubject.SystemTest => policy.WorkflowSubject(TestChangeReviewDiscipline.System),
             ReviewSubject.HighLevelSoftwareTest => policy.WorkflowSubject(TestChangeReviewDiscipline.HighLevelSoftware),
             ReviewSubject.LowLevelSoftwareTest => policy.WorkflowSubject(TestChangeReviewDiscipline.LowLevelSoftware),

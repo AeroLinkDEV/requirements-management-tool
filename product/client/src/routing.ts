@@ -1,5 +1,5 @@
 export type View =
-  | "projects" | "builds" | "baselineImports" | "personnel" | "approvalConfiguration" | "projectConfiguration" | "dashboard" | "createSystemScr" | "createSoftwareChange" | "scr" | "baselines" | "history" | "requirements"
+  | "projects" | "builds" | "baselineImports" | "personnel" | "approvalConfiguration" | "projectConfiguration" | "dashboard" | "createSystemScr" | "createSoftwareChange" | "createInterfaceChange" | "scr" | "baselines" | "history" | "requirements"
   | "verification" | "testingCoverage" | "testChangeRequests" | "testChangeRequest" | "createTestChangeRequest" | "procedureExplorer" | "testResults" | "documents" | "managedDocuments" | "code" | "problemReports" | "lifecycle" | "release" | "releaseImpact" | "releaseDecision" | "releaseOperations" | "planning" | "mywork" | "admin" | "enterprise" | "integrations" | "reviewWorkflows" | "artifact" | "notFound";
 
 export type Discipline = "system" | "software" | "systemTest" | "softwareTest";
@@ -21,7 +21,7 @@ export type HistoryStateIntent =
   | "Deferred"
   | "ApprovedOrSelected";
 
-export type HistoryTypeIntent = "System" | "Software" | "All";
+export type HistoryTypeIntent = "System" | "Software" | "Interface" | "All";
 
 const historyStateIntents: readonly HistoryStateIntent[] = [
   "Draft",
@@ -101,8 +101,11 @@ export function parseRoute(pathname: string, search = ""): AppRoute {
   if (path === "my-work") return { ...base, view: "mywork", discipline: "system" };
   if (path === "systems/change-requests") return { ...base, view: "history", discipline: "system", historyStateIntent: historyStateIntent(query.get("state")), historyTypeIntent: query.get("type") === "All" ? "All" : "System" };
   if (path === "software/change-requests") return { ...base, view: "history", discipline: "software", artifactId: query.get("assessment") || undefined, artifactKind: query.get("level") === "LLR" ? "LowLevel" : "HighLevel", historyStateIntent: historyStateIntent(query.get("state")), historyTypeIntent: query.get("type") === "All" ? "All" : "Software" };
+  if (path === "interfaces/change-requests") return { ...base, view: "history", discipline: "system", historyStateIntent: historyStateIntent(query.get("state")), historyTypeIntent: "Interface" };
   if (path === "systems/change-requests/new") return { ...base, view: "createSystemScr", discipline: "system", artifactId: query.get("requirement") || undefined };
   if (path === "software/change-requests/new") return { ...base, view: "createSoftwareChange", discipline: "software", artifactId: query.get("requirement") || undefined, artifactKind: query.get("level") === "HLR" ? "HighLevel" : query.get("level") === "LLR" ? "LowLevel" : undefined };
+  if (path === "interfaces/change-requests/new") return { ...base, view: "createInterfaceChange", discipline: "system", artifactId: query.get("requirement") || undefined, artifactKind: "Interface" };
+  if (tail[0] === "interfaces" && tail[1] === "change-requests" && tail[2]) return { ...base, view: "scr", discipline: "system", artifactId: decoded(tail[2]), artifactKind: "Interface" };
   if (tail[0] === "systems" && tail[1] === "change-requests" && tail[2]) return { ...base, view: "scr", discipline: "system", artifactId: decoded(tail[2]) };
   if (tail[0] === "software" && tail[1] === "change-requests" && tail[2]) return { ...base, view: "scr", discipline: "software", artifactId: decoded(tail[2]) };
   // Compatibility for links created before typed change-request routes existed. The detail view replaces this
@@ -224,7 +227,7 @@ export const projectConfigurationApprovalsPath = (slug: string) =>
 
 export function routePath(context: RouteContext, view: View, discipline: Discipline = "system", artifactId?: string, artifactKind?: string, stateIntent?: HistoryStateIntent, typeIntent?: HistoryTypeIntent) {
   const root = `/programs/${context.programId}/projects/${context.projectId}/releases/${context.releaseId}`;
-  const historyPath = (scope: "systems" | "software") => {
+  const historyPath = (scope: "systems" | "software" | "interfaces") => {
     const path = `${root}/${scope}/change-requests`;
     const query = new URLSearchParams();
     if (stateIntent) query.set("state", stateIntent);
@@ -252,8 +255,11 @@ export function routePath(context: RouteContext, view: View, discipline: Discipl
       if (artifactKind === "LowLevel") query.set("level", "LLR");
       return `${root}/software/change-requests/new${query.size ? `?${query}` : ""}`;
     }
-    case "scr": return `${root}/${discipline === "software" ? "software" : "systems"}/change-requests/${artifactId}`;
-    case "history": return historyPath(discipline === "software" ? "software" : "systems");
+    case "createInterfaceChange": return `${root}/interfaces/change-requests/new${artifactId ? `?requirement=${encodeURIComponent(artifactId)}` : ""}`;
+    case "scr": return artifactKind === "Interface"
+      ? `${root}/interfaces/change-requests/${artifactId}`
+      : `${root}/${discipline === "software" ? "software" : "systems"}/change-requests/${artifactId}`;
+    case "history": return historyPath(typeIntent === "Interface" ? "interfaces" : discipline === "software" ? "software" : "systems");
     case "requirements": return artifactId ? `${root}/requirements/${artifactId}?discipline=${discipline === "software" ? "software" : "system"}` : `${root}/${discipline === "software" ? "software" : "systems"}/requirements`;
     case "verification": return `${root}/${discipline === "softwareTest" ? "software" : "system"}-verification`;
     case "testingCoverage": return `${root}/${verificationBranch(discipline, artifactKind)}/coverage${artifactId ? `/${encodeURIComponent(artifactId)}` : ""}`;
@@ -288,8 +294,8 @@ export function routePath(context: RouteContext, view: View, discipline: Discipl
   }
 }
 
-export function artifactPath(context: RouteContext, kind: string, id: string, discipline = "system") {
-  if (kind === "change-request") return routePath(context, "scr", discipline === "software" ? "software" : "system", id);
+export function artifactPath(context: RouteContext, kind: string, id: string, discipline = "system", level?: string) {
+  if (kind === "change-request") return routePath(context, "scr", discipline === "software" ? "software" : "system", id, level === "Interface" ? "Interface" : undefined);
   if (kind === "requirement") return routePath(context, "requirements", discipline === "software" ? "software" : "system", id);
   if (kind === "managed-document") return `/programs/${context.programId}/projects/${context.projectId}/documentation-center/${encodeURIComponent(id)}`;
   return routePath(context, "artifact", "system", id, kind);

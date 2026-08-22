@@ -540,6 +540,7 @@
         "BuildScopedWorkspaceApiTests",
         "ChangeAuthoringInvariantApiTests",
         "ProgramRoleAuthorityApiTests",
+        "ProjectConfigurationApiTests",
         "SoftwareChangeRequestLevelHistoryTests"
       ]
     },
@@ -821,7 +822,8 @@
       "path": "/api/downstream-assessments/{id:guid}/change-requests",
       "file": "DownstreamAssessmentEndpoints.cs",
       "coveredBy": [
-        "DownstreamAssessmentReopenApiTests"
+        "DownstreamAssessmentReopenApiTests",
+        "ProjectConfigurationApiTests"
       ]
     },
     {

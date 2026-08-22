@@ -10,7 +10,7 @@ import { LadderCapability, ladderAllows } from './projectLadder'
 import type { ProjectLadderProjection } from './projectLadder'
 
 type Release={id:string;version:string;isReleased:boolean}
-type Scope='System'|'Software'
+type Scope='System'|'Software'|'Interface'
 type SoftwareLevel='HighLevel'|'LowLevel'
 type Scr={id:string;baseNumber:string;revision:number;displayNumber:string;title:string;state:string;deferredFromState?:string|null;authorId:string;targetReleaseId:string;requirementCount:number;hasHighLevelChanges:boolean;hasLowLevelChanges:boolean;updatedAt:string;revisionCount:number}
 type Props={
@@ -18,7 +18,7 @@ type Props={
  initialSoftwareLevel:SoftwareLevel;onSoftwareLevelChange:(level:SoftwareLevel)=>void;
  initialAssessmentId?:string;onAssessmentSelected:(id?:string)=>void;
  initialStateIntent?:HistoryStateIntent;onStateIntentChange:(intent?:HistoryStateIntent)=>void;
- onBack:()=>void;onOpenScr:(id:string)=>void;onOpenRequirement:(id:string,level:string)=>void;onCreateSystem:()=>void;
+ onBack:()=>void;onOpenScr:(id:string)=>void;onOpenRequirement:(id:string,level:string)=>void;onCreateSystem:(assessmentId?:string,sourceNumber?:string)=>void;onCreateInterface:()=>void;
  onCreateSoftware:(level:'HighLevel'|'LowLevel',assessmentId?:string,sourceNumber?:string)=>void
  user:AuthUser;ladder:ProjectLadderProjection|null
 }
@@ -28,7 +28,7 @@ const stateLabels:Record<HistoryStateIntent,string>={Draft:'Draft',InReview:'In 
 const registerStateOptions=(Object.keys(stateLabels) as HistoryStateIntent[]).map(value=>({value,label:stateLabels[value]}))
 const matchesStateIntent=(state:string,intent?:HistoryStateIntent)=>!intent||(intent==='ApprovedOrSelected'?(state==='Approved'||state==='SelectedForBaseline'):state===intent)
 
-export default function HistoryExplorer({api,projectId,releases,activeReleaseId,scope,initialSoftwareLevel,onSoftwareLevelChange,initialAssessmentId,onAssessmentSelected,initialStateIntent,onStateIntentChange,onBack,onOpenScr,onOpenRequirement,onCreateSystem,onCreateSoftware,user,ladder}:Props){
+export default function HistoryExplorer({api,projectId,releases,activeReleaseId,scope,initialSoftwareLevel,onSoftwareLevelChange,initialAssessmentId,onAssessmentSelected,initialStateIntent,onStateIntentChange,onBack,onOpenScr,onOpenRequirement,onCreateSystem,onCreateInterface,onCreateSoftware,user,ladder}:Props){
  const [view,setView]=useState<'build'|'deferred'>('build')
  const defaultSoftwareLevel:SoftwareLevel=ladderAllows(ladder,'HighLevel',LadderCapability.ChangeControl)?'HighLevel':'LowLevel'
  const [query,setQuery]=useState(''),[softwareLevel,setSoftwareLevel]=useState<SoftwareLevel>(ladderAllows(ladder,initialSoftwareLevel,LadderCapability.ChangeControl)?initialSoftwareLevel:defaultSoftwareLevel),[stateIntent,setStateIntent]=useState<HistoryStateIntent|undefined>(initialStateIntent),[scrPage,setScrPage]=useState(1),[scrTotal,setScrTotal]=useState(0),[scrTotalPages,setScrTotalPages]=useState(1),[scrs,setScrs]=useState<Scr[]>([])
@@ -59,23 +59,27 @@ export default function HistoryExplorer({api,projectId,releases,activeReleaseId,
   return body.items.map(toRegisterRow)
  }
  const changeSoftwareLevel=(level:SoftwareLevel)=>{setSoftwareLevel(level);setScrPage(1);onAssessmentSelected(undefined);onSoftwareLevelChange(level)}
+ const scopeNoun=scope==='Interface'?'Interface / ICD':scope
+ const scopeAbbreviation=scope==='Interface'?'ICDCR':scope==='Software'?(softwareLevel==='HighLevel'?'HLRCR':'LLRCR'):'SRCR'
  return <main className="historyPage">
   <header className="historyHeader">
-   <div><button className="back" onClick={onBack}>← Command Center</button><p className="eyebrow">{scope.toUpperCase()} CHANGE CONTROL / BUILD {activeRelease?.version}</p><h1>{scope} Change Requests</h1><p>{activeRelease?.isReleased?`Released ${scope.toLowerCase()} change history owned by Build ${activeRelease.version}.`:`Active and deferred ${scope.toLowerCase()} change requests owned by Build ${activeRelease?.version}.`}</p></div>
+   <div><button className="back" onClick={onBack}>← Command Center</button><p className="eyebrow">{scope.toUpperCase()} CHANGE CONTROL / BUILD {activeRelease?.version}</p><h1>{scopeNoun} Change Requests</h1><p>{activeRelease?.isReleased?`Released ${scope.toLowerCase()} change history owned by Build ${activeRelease.version}.`:`Active and deferred ${scope.toLowerCase()} change requests owned by Build ${activeRelease?.version}.`}</p></div>
    {!activeRelease?.isReleased&&(scope==='System'
-    ?<button className="recordBuild" onClick={onCreateSystem}>+ New System Change Request</button>
-    :<button className="recordBuild" onClick={()=>onCreateSoftware(softwareLevel)}>+ New {softwareLevel==='HighLevel'?'HLR':'LLR'} Change Request</button>)}
+    ?<button className="recordBuild" onClick={()=>onCreateSystem()}>+ New System Change Request</button>
+    :scope==='Interface'
+      ?<button className="recordBuild" onClick={onCreateInterface}>+ New Interface / ICD Change Request</button>
+      :<button className="recordBuild" onClick={()=>onCreateSoftware(softwareLevel)}>+ New {softwareLevel==='HighLevel'?'HLR':'LLR'} Change Request</button>)}
   </header>
   {scope==='Software'&&<nav className="softwareLevelTabs" aria-label="Software requirement level">{ladderAllows(ladder,'HighLevel',LadderCapability.ChangeControl)&&<button type="button" aria-current={softwareLevel==='HighLevel'?'page':undefined} onClick={()=>changeSoftwareLevel('HighLevel')}><b>HLR</b><span>High-level requirements</span></button>}{ladderAllows(ladder,'LowLevel',LadderCapability.ChangeControl)&&<button type="button" aria-current={softwareLevel==='LowLevel'?'page':undefined} onClick={()=>changeSoftwareLevel('LowLevel')}><b>LLR</b><span>Low-level requirements</span></button>}</nav>}
-  {scope==='Software'&&<DownstreamAssessmentQueue api={api} projectId={projectId} releaseId={activeReleaseId} targetLevel={softwareLevel} user={user} onOpenScr={onOpenScr} onOpenRequirement={onOpenRequirement} onCreateScr={onCreateSoftware} initialAssessmentId={initialAssessmentId} onAssessmentSelected={onAssessmentSelected}/>}
+  {(scope==='Software'||scope==='System')&&<DownstreamAssessmentQueue api={api} projectId={projectId} releaseId={activeReleaseId} targetLevel={scope==='System'?'System':softwareLevel} user={user} onOpenScr={onOpenScr} onOpenRequirement={onOpenRequirement} onCreateScr={(level,assessmentId,sourceNumber)=>level==='System'?onCreateSystem(assessmentId,sourceNumber):onCreateSoftware(level,assessmentId,sourceNumber)} initialAssessmentId={initialAssessmentId} onAssessmentSelected={onAssessmentSelected}/>}
   {/* The shelf sits beside the build, not inside it. A reader planning this build can see what is waiting
       without it being counted as work this build already has. */}
   <nav className="registerViewTabs" aria-label="Register view">
    <button type="button" aria-current={view==='build'?'page':undefined} onClick={()=>setView('build')}>
-    {scope==='Software'?(softwareLevel==='HighLevel'?'HLRCRs':'LLRCRs'):'SRCRs'} in Build {activeRelease?.version}
+    {scopeAbbreviation}s in Build {activeRelease?.version}
    </button>
    <button type="button" aria-current={view==='deferred'?'page':undefined} onClick={()=>setView('deferred')} data-deferred-tab>
-    Deferred {scope==='Software'?(softwareLevel==='HighLevel'?'HLRCRs':'LLRCRs'):'SRCRs'}
+    Deferred {scopeAbbreviation}s
    </button>
   </nav>
   {view==='deferred'
@@ -85,7 +89,7 @@ export default function HistoryExplorer({api,projectId,releases,activeReleaseId,
    :<ChangeRequestRegister
    changeNoun="requirement changes"
    recordNoun={`${scope.toLowerCase()} change requests`}
-   contextLabel={`${scope==='Software'?(softwareLevel==='HighLevel'?'HLR':'LLR'):'System'} area`}
+   contextLabel={`${scope==='Interface'?'ICD':scope==='Software'?(softwareLevel==='HighLevel'?'HLR':'LLR'):'System'} area`}
    activeRelease={activeRelease} releases={releases}
    rows={visibleScrs.map(toRegisterRow)} totalCount={scrTotal}
    page={scrPage} totalPages={scrTotalPages} onPageChange={setScrPage}

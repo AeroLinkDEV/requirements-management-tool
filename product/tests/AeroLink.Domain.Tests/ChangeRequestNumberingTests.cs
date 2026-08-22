@@ -72,6 +72,7 @@ public sealed class ChangeRequestNumberingTests
     public void The_new_prefixes_keep_the_padded_form_and_still_allow_growth_past_five_digits()
     {
         Assert.Equal("SRCR-00032", ArtifactNumber.ValidateBase("srcr-00032"));
+        Assert.Equal("ICDCR-00042", ArtifactNumber.ValidateBase("icdcr-00042"));
         Assert.Equal("HLRCR-00077.02", ArtifactNumber.Display("HLRCR-00077", 2));
         // Five digits is the padded form, not a ceiling — the allocator counts without a bound.
         Assert.Equal("LLRCR-100000", ArtifactNumber.ValidateBase("LLRCR-100000"));

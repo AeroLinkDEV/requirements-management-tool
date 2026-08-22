@@ -44,6 +44,7 @@ public sealed class ReleaseReadinessService(AeroLinkDbContext db, ILadderPolicy?
             .Where(level => ladderPolicy.Definition(level).Has(LevelCapabilities.HasChangeControl)).ToHashSet();
         var changeControlConfigured = configuredChangeControlLevels.Count > 0;
         var systemChangeConfigured = ladderPolicy.IsChangeRequestScopeValid(ChangeRequestType.System, null);
+        var interfaceChangeConfigured = ladderPolicy.IsChangeRequestScopeValid(ChangeRequestType.Interface, null);
         var softwareChangeLevels = configuredLevels
             .Where(level => ladderPolicy.IsChangeRequestScopeValid(ChangeRequestType.Software, level))
             .ToArray();
@@ -52,7 +53,9 @@ public sealed class ReleaseReadinessService(AeroLinkDbContext db, ILadderPolicy?
             .Where(x => x.TargetReleaseId == campaign.ReleaseId && x.State != ChangeRequestState.Deferred
                 && (x.Type == ChangeRequestType.System
                     ? systemChangeConfigured
-                    : x.SoftwareLevel != null && softwareChangeLevels.Contains(x.SoftwareLevel.Value)))
+                    : x.Type == ChangeRequestType.Interface
+                        ? interfaceChangeConfigured
+                        : x.SoftwareLevel != null && softwareChangeLevels.Contains(x.SoftwareLevel.Value)))
             .ToListAsync(ct);
         var eligibleRequestIds = requests.Select(x => x.Id).ToHashSet();
         var impacts = await db.ImpactDispositions.AsNoTracking()

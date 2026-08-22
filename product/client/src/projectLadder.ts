@@ -1,4 +1,4 @@
-export type LadderLevel = 'System' | 'HighLevel' | 'LowLevel'
+export type LadderLevel = 'System' | 'HighLevel' | 'LowLevel' | 'Interface'
 
 export type ProjectLadderProjection = {
   /** Authored steps are intentionally not used by runtime surfaces; the server supplies this effective view. */

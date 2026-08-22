@@ -1,9 +1,13 @@
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
+using AeroLink.Domain.Baselines;
+using AeroLink.Domain.ChangeControl;
 using AeroLink.Domain.Identity;
 using AeroLink.Domain.Programs;
 using AeroLink.Domain.Hierarchy;
+using AeroLink.Domain.Requirements;
+using AeroLink.Domain.Releases;
 using AeroLink.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
@@ -16,7 +20,7 @@ public sealed class ProjectConfigurationApiTests : IClassFixture<SharedApiHost>
 
     public ProjectConfigurationApiTests(SharedApiHost host) => _host = host;
 
-    private sealed record Seeded(Guid ProjectId, string ManagerName, string MemberName);
+    private sealed record Seeded(Guid ProjectId, Guid ReleaseId, string ManagerName, string MemberName);
 
     private static async Task<Seeded> SeedAsync(AeroLinkApiFactory factory)
     {
@@ -26,17 +30,19 @@ public sealed class ProjectConfigurationApiTests : IClassFixture<SharedApiHost>
         var now = DateTimeOffset.UtcNow;
         var program = new ProgramRecord($"Ladder API {tag}", $"LAD{tag}");
         var project = new ProjectRecord(program.Id, "Configurable Ladder", "Configurable Ladder Software");
+        var release = new SoftwareRelease(project.Id, "1.0", false);
         var managerName = $"ladder.manager.{tag}";
         var memberName = $"ladder.member.{tag}";
         UserAccount Account(string name) => new(name, name, $"{name}@example.test",
             IdentityService.HashPassword(AeroLinkApiFactory.MemberPassword), now);
         var manager = Account(managerName); var member = Account(memberName);
-        db.AddRange(program, project, manager, member,
+        db.AddRange(program, project, release, manager, member,
             new ProgramMembership(manager.Id, program.Id, ProgramRole.ConfigurationManager, "test.setup", now),
+            new ProgramMembership(manager.Id, program.Id, ProgramRole.Engineer, "test.setup", now),
             new ProgramMembership(member.Id, program.Id, ProgramRole.Engineer, "test.setup", now),
             LegacyDefaultProjectLadderFactory.Create(project.Id, now));
         await db.SaveChangesAsync();
-        return new(project.Id, managerName, memberName);
+        return new(project.Id, release.Id, managerName, memberName);
     }
 
     private static async Task SignInAsync(HttpClient client, string userName)
@@ -59,7 +65,7 @@ public sealed class ProjectConfigurationApiTests : IClassFixture<SharedApiHost>
         using var readJson = JsonDocument.Parse(await read.Content.ReadAsStringAsync());
         Assert.Equal(1, readJson.RootElement.GetProperty("version").GetInt64());
         Assert.True(readJson.RootElement.GetProperty("canManage").GetBoolean());
-        Assert.Equal(new[] { "System", "HighLevel", "LowLevel", "Customer" },
+        Assert.Equal(new[] { "System", "HighLevel", "LowLevel", "Customer", "Interface" },
             readJson.RootElement.GetProperty("catalogue").EnumerateArray().Select(x => x.GetProperty("catalogueEntry").GetString()).ToArray());
 
         var edit = await client.PutAsJsonAsync($"/api/projects/{seeded.ProjectId}/configuration", new
@@ -96,6 +102,158 @@ public sealed class ProjectConfigurationApiTests : IClassFixture<SharedApiHost>
             expectedVersion = 2, reason = "malicious", state = "Active", steps = new[] { new { catalogueEntry = "System", position = 1, capabilities = 7 } }, relationships = Array.Empty<object>(),
         });
         Assert.Equal(HttpStatusCode.BadRequest, lifecycle.StatusCode);
+    }
+
+    [Fact]
+    public async Task Authorized_edit_can_select_interface_above_system_and_persist_its_change_control_capability()
+    {
+        var seeded = await SeedAsync(_host.Factory);
+        using var client = _host.CreateClient();
+        await SignInAsync(client, seeded.ManagerName);
+
+        var response = await client.PutAsJsonAsync($"/api/projects/{seeded.ProjectId}/configuration", new
+        {
+            expectedVersion = 1,
+            reason = "Configure Interface Control Documents above System",
+            steps = new[]
+            {
+                new { catalogueEntry = "Interface", position = 1, capabilities = 1 },
+                new { catalogueEntry = "System", position = 2, capabilities = 7 },
+            },
+            relationships = new[] { new { parent = "Interface", child = "System" } },
+        });
+
+        Assert.True(response.IsSuccessStatusCode, await response.Content.ReadAsStringAsync());
+        using var body = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        Assert.Equal(["Interface", "System"], body.RootElement.GetProperty("steps").EnumerateArray()
+            .Select(x => x.GetProperty("catalogueEntry").GetString()!).ToArray());
+        Assert.Equal("Interface", body.RootElement.GetProperty("relationships")[0].GetProperty("parent").GetString());
+        Assert.Equal("System", body.RootElement.GetProperty("relationships")[0].GetProperty("child").GetString());
+
+        using var activation = await client.PostAsJsonAsync($"/api/projects/{seeded.ProjectId}/configuration/activate",
+            new { expectedVersion = 2, reason = "Activate Interface Control Document ladder" });
+        Assert.True(activation.IsSuccessStatusCode, await activation.Content.ReadAsStringAsync());
+
+        using var workflow = await client.PutAsJsonAsync($"/api/projects/{seeded.ProjectId}/approval-configuration/Interface", new
+        {
+            stages = new[] { new { name = "ICD approval", requiredRole = "ConfigurationManager", kind = "Approval" } },
+        });
+        Assert.True(workflow.IsSuccessStatusCode, await workflow.Content.ReadAsStringAsync());
+        using var applicable = await client.GetAsync($"/api/review-workflows/applicable?projectId={seeded.ProjectId}&type=Interface");
+        Assert.Equal(HttpStatusCode.OK, applicable.StatusCode);
+        using var applicableBody = JsonDocument.Parse(await applicable.Content.ReadAsStringAsync());
+        Assert.True(applicableBody.RootElement.GetProperty("required").GetBoolean());
+
+        using var draft = await client.PostAsJsonAsync("/api/change-request-drafts", new
+        {
+            projectId = seeded.ProjectId,
+            targetReleaseId = seeded.ReleaseId,
+            type = "Interface",
+            title = "Author ICD change",
+            problem = "P", analysis = "A", solution = "S",
+            requirementChanges = new[]
+            {
+                new { level = "Interface", kind = "Introduce", statement = "The interface shall preserve its contract.",
+                    rationale = "Traceable interface ownership", verificationMethod = "Not applicable" },
+            },
+        });
+        Assert.True(draft.StatusCode == HttpStatusCode.Created, $"{draft.StatusCode}: {await draft.Content.ReadAsStringAsync()}");
+        using var draftBody = JsonDocument.Parse(await draft.Content.ReadAsStringAsync());
+        Assert.StartsWith("ICDCR-", draftBody.RootElement.GetProperty("displayNumber").GetString());
+        Assert.StartsWith("ICDR-", draftBody.RootElement.GetProperty("requirementChanges")[0].GetProperty("displayNumber").GetString());
+
+        using var mismatch = await client.PostAsJsonAsync("/api/change-request-drafts", new
+        {
+            projectId = seeded.ProjectId,
+            targetReleaseId = seeded.ReleaseId,
+            type = "Interface",
+            title = "Reject mismatched ICD change",
+            problem = "P", analysis = "A", solution = "S",
+            requirementChanges = new[]
+            {
+                new { level = "System", kind = "Introduce", statement = "Wrong scope.", rationale = "Mismatch", verificationMethod = "Test" },
+            },
+        });
+        Assert.Equal(HttpStatusCode.BadRequest, mismatch.StatusCode);
+
+        Guid interfaceRevisionId;
+        Guid systemAssessmentId;
+        using (var scope = _host.Factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            var now = DateTimeOffset.UtcNow;
+            var origin = new SystemChangeRequest("ICDCR-09001", 0, seeded.ProjectId, seeded.ReleaseId,
+                "Approved ICD baseline origin", "P", "A", "S", seeded.ManagerName, now,
+                ChangeRequestType.Interface);
+            origin.AddRequirementChange(seeded.ManagerName, "ICDR-090001", 0, RequirementLevel.Interface,
+                RequirementChangeKind.Introduce, "The interface baseline contract shall remain compatible.", "Baseline trace", "Not applicable", now);
+            origin.SubmitForReview(seeded.ManagerName, [new ApproverSelection(seeded.ManagerName, "Configuration Manager")], now);
+            origin.ApproveActiveStage(seeded.ManagerName, now);
+            var baseline = new CandidateBaseline("SW-01.00", 0, seeded.ProjectId, seeded.ReleaseId, null,
+                "ICD parent baseline", seeded.ManagerName, now);
+            baseline.Select(origin, seeded.ManagerName, now);
+            baseline.Freeze(seeded.ManagerName, now);
+            baseline.MarkRequirementsMaterialized(seeded.ManagerName, new string('a', 64), 1, now);
+            var artifact = new RequirementArtifact(seeded.ProjectId, "ICDR-090001", RequirementLevel.Interface, now);
+            var revision = new RequirementRevision(artifact.Id, 0, "The interface baseline contract shall remain compatible.",
+                "Baseline trace", "Not applicable", RequirementRevisionState.Active, origin.Id, baseline.Id, now);
+            var configured = ProjectLadderConfiguration.CreateDraft(seeded.ProjectId, now);
+            var interfaceStep = new ProjectLadderStep(configured.Id, seeded.ProjectId, RequirementLevel.Interface, 1,
+                LegacyLadderPolicy.Instance.Definition(RequirementLevel.Interface).Capabilities, now);
+            var systemStep = new ProjectLadderStep(configured.Id, seeded.ProjectId, RequirementLevel.System, 2,
+                LegacyLadderPolicy.Instance.Definition(RequirementLevel.System).Capabilities, now);
+            configured.Steps.Add(interfaceStep);
+            configured.Steps.Add(systemStep);
+            configured.AllowedUpstream.Add(new ProjectLadderAllowedUpstream(configured.Id, seeded.ProjectId,
+                interfaceStep.Id, systemStep.Id, now));
+            var resolvedPolicy = new ResolvedProjectLadderPolicy(ProjectLadderResolver.Resolve(configured));
+            var assessment = new DownstreamChangeAssessment(seeded.ProjectId, seeded.ReleaseId, origin.Id,
+                origin.DisplayNumber, RequirementLevel.System, now, resolvedPolicy);
+            assessment.Assign(seeded.ManagerName, seeded.ManagerName, now);
+            assessment.RecordChangeRequired(seeded.ManagerName, now);
+            db.AddRange(origin, baseline, artifact, revision);
+            db.BaselineRequirements.Add(new BaselineRequirementSelection(baseline.Id, artifact.Id, revision.Id));
+            db.Add(assessment);
+            await db.SaveChangesAsync();
+            interfaceRevisionId = revision.Id;
+            systemAssessmentId = assessment.Id;
+        }
+
+        using var upstreamPicker = await client.GetAsync(
+            $"/api/authoring/upstream-requirements?projectId={seeded.ProjectId}&releaseId={seeded.ReleaseId}&childLevel=System");
+        Assert.Equal(HttpStatusCode.OK, upstreamPicker.StatusCode);
+        using var upstreamBody = JsonDocument.Parse(await upstreamPicker.Content.ReadAsStringAsync());
+        var upstream = Assert.Single(upstreamBody.RootElement.EnumerateArray());
+        Assert.Equal(interfaceRevisionId, upstream.GetProperty("revisionId").GetGuid());
+        Assert.Equal("Interface", upstream.GetProperty("level").GetString());
+
+        using var systemDraft = await client.PostAsJsonAsync("/api/change-request-drafts", new
+        {
+            projectId = seeded.ProjectId,
+            targetReleaseId = seeded.ReleaseId,
+            type = "System",
+            title = "System allocation to ICD",
+            problem = "P", analysis = "A", solution = "S",
+            requirementChanges = new[]
+            {
+                new { level = "System", kind = "Introduce", statement = "The system shall honor the interface contract.",
+                    rationale = "Configured ICD allocation", verificationMethod = "Test",
+                    upstreamRevisionIds = new[] { interfaceRevisionId } },
+            },
+        });
+        Assert.True(systemDraft.StatusCode == HttpStatusCode.Created,
+            $"{systemDraft.StatusCode}: {await systemDraft.Content.ReadAsStringAsync()}");
+
+        using var assessmentLink = await client.PostAsJsonAsync($"/api/downstream-assessments/{systemAssessmentId}/change-requests",
+            new { changeRequestId = JsonDocument.Parse(await systemDraft.Content.ReadAsStringAsync()).RootElement.GetProperty("id").GetGuid() });
+        Assert.Equal(HttpStatusCode.OK, assessmentLink.StatusCode);
+
+        using var search = await client.GetAsync($"/api/search?projectId={seeded.ProjectId}&releaseId={seeded.ReleaseId}&query=Author%20ICD%20change");
+        Assert.Equal(HttpStatusCode.OK, search.StatusCode);
+        using var searchBody = JsonDocument.Parse(await search.Content.ReadAsStringAsync());
+        var searchHit = Assert.Single(searchBody.RootElement.GetProperty("items").EnumerateArray(),
+            item => item.GetProperty("id").GetGuid() == draftBody.RootElement.GetProperty("id").GetGuid());
+        Assert.Equal("Interface", searchHit.GetProperty("level").GetString());
     }
 
     [Fact]

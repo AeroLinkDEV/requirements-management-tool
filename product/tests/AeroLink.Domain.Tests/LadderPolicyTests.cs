@@ -82,6 +82,50 @@ public sealed class LadderPolicyTests
     }
 
     [Fact]
+    public void Interface_catalogue_entry_is_controlled_without_requirements_document_or_verification()
+    {
+        Assert.DoesNotContain(RequirementLevel.Interface, policy.OrderedLevels);
+
+        var definition = policy.Definition(RequirementLevel.Interface);
+
+        Assert.Equal("ICDR", definition.RequirementPrefix);
+        Assert.Equal(LevelCapabilities.HasChangeControl, definition.Capabilities);
+        Assert.Equal(ChangeRequestType.Interface, definition.ChangeRequest!.Type);
+        Assert.Null(definition.ChangeRequest.SoftwareLevel);
+        Assert.Equal("ICDCR", definition.ChangeRequest.Prefix);
+        Assert.Null(definition.RequirementsDocumentType);
+        Assert.Null(definition.RequirementsCatalogue);
+        Assert.Null(definition.Verification);
+        Assert.Equal(ReviewSubject.Interface, policy.WorkflowSubject(ChangeRequestType.Interface));
+        Assert.True(policy.IsChangeRequestScopeValid(ChangeRequestType.Interface, null));
+        Assert.True(policy.AcceptsChangeRequest(ChangeRequestType.Interface, RequirementLevel.Interface));
+        Assert.False(policy.AcceptsChangeRequest(ChangeRequestType.System, RequirementLevel.Interface));
+        Assert.True(policy.TryParseRequirementLevel("ICD", out var parsed) && parsed == RequirementLevel.Interface);
+    }
+
+    [Fact]
+    public void Interface_change_requests_use_their_own_prefix_and_reject_mismatched_levels()
+    {
+        var project = Guid.NewGuid();
+        var release = Guid.NewGuid();
+        var now = DateTimeOffset.UtcNow;
+
+        var request = new SystemChangeRequest("ICDCR-00001", 0, project, release, "Interface contract",
+            "Problem", "Analysis", "Solution", "author", now, ChangeRequestType.Interface);
+        request.AddRequirementChange("author", "ICDR-00001", 0, RequirementLevel.Interface,
+            RequirementChangeKind.Introduce, "The interface shall remain compatible.", "Rationale", "Not applicable", now);
+        request.SubmitForReview("author", [new("reviewer", "Reviewer")], now);
+        request.ApproveActiveStage("reviewer", now);
+
+        Assert.Equal(ChangeRequestState.Approved, request.State);
+        Assert.Throws<DomainException>(() => new SystemChangeRequest("ICDCR-00002", 0, project, release,
+            "Wrong scope", "Problem", "Analysis", "Solution", "author", now, ChangeRequestType.Interface,
+            softwareLevel: RequirementLevel.HighLevel));
+        Assert.Throws<DomainException>(() => request.AddRequirementChange("author", "SYSR-000002", 0,
+            RequirementLevel.System, RequirementChangeKind.Introduce, "Wrong level", "Rationale", "N/A", now));
+    }
+
+    [Fact]
     public void Test_procedure_prefix_validation_uses_catalogue_prefixes_but_preserves_custom_numbering()
     {
         var now = DateTimeOffset.UtcNow;

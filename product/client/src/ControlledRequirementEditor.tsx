@@ -4,7 +4,7 @@ import { RichContentEditor, RichContentView } from "./RichContent";
 import { emptyRichContent } from "./richContentModel";
 import "./ControlledRequirementEditor.css";
 
-export type RequirementLevel = "System" | "HighLevel" | "LowLevel";
+export type RequirementLevel = "System" | "HighLevel" | "LowLevel" | "Interface";
 export type RequirementKind = "Introduce" | "Modify" | "Retire";
 
 export type ControlledRequirementDraft = {
@@ -74,7 +74,7 @@ type Props = {
   api: string;
   projectId: string;
   releaseId: string;
-  scope: "System" | "Software";
+  scope: "System" | "Software" | "Interface";
   item: ControlledRequirementDraft;
   index: number;
   identityLocked: boolean;
@@ -110,7 +110,9 @@ const levelLabel = (level: RequirementLevel) =>
     ? "System"
     : level === "HighLevel"
       ? "Software HLR"
-      : "Software LLR";
+      : level === "LowLevel"
+        ? "Software LLR"
+        : "Interface / ICD";
 
 export default function ControlledRequirementEditor({
   api,
@@ -134,6 +136,7 @@ export default function ControlledRequirementEditor({
   const [upstreamQuery, setUpstreamQuery] = useState("");
   const [upstreamResults, setUpstreamResults] = useState<UpstreamRequirement[]>([]);
   const [knownUpstreams, setKnownUpstreams] = useState<Record<string, UpstreamRequirement>>({});
+  const [upstreamAvailable, setUpstreamAvailable] = useState(false);
 
   const setAttribute = (key: string, value: unknown) =>
     onChange("attributesJson", JSON.stringify({ ...attributes, [key]: value }));
@@ -280,25 +283,34 @@ export default function ControlledRequirementEditor({
     [item.upstreamRevisionIds],
   );
   useEffect(() => {
-    if (scope !== "Software" || derived) {
+    const canHaveConfiguredUpstream = scope === "Software" || scope === "System";
+    if (!canHaveConfiguredUpstream || derived) {
       setUpstreamResults([]);
+      setUpstreamAvailable(false);
       return;
     }
     const term = upstreamQuery.trim();
-    if (term.length < 2 && selectedUpstreams.length === 0) {
+    // Software keeps its established search-before-fetch behavior. System only reaches this branch for a
+    // configured ladder that may have an Interface parent; the empty probe lets the server adjacency policy
+    // decide whether that picker exists, while the default System-only ladder returns its existing 400.
+    if (scope === "Software" && term.length < 2 && selectedUpstreams.length === 0) {
       setUpstreamResults([]);
       return;
     }
     let cancelled = false;
     const timer = window.setTimeout(() => {
       fetch(`${api}/api/authoring/upstream-requirements?projectId=${projectId}&releaseId=${releaseId}&childLevel=${item.level}&search=${encodeURIComponent(term)}&selected=${encodeURIComponent(selectedUpstreams.join(","))}&limit=12`)
-        .then((response) => response.ok ? response.json() as Promise<UpstreamRequirement[]> : [])
-        .then((rows) => {
+        .then(async (response) => ({
+          ok: response.ok,
+          rows: response.ok ? await response.json() as UpstreamRequirement[] : [],
+        }))
+        .then(({ ok, rows }) => {
           if (cancelled) return;
+          setUpstreamAvailable(scope === "System" && ok);
           setUpstreamResults(term.length >= 2 ? rows : []);
           setKnownUpstreams((current) => ({ ...current, ...Object.fromEntries(rows.map((row) => [row.revisionId, row])) }));
         })
-        .catch(() => { if (!cancelled) setUpstreamResults([]); });
+        .catch(() => { if (!cancelled) { setUpstreamAvailable(false); setUpstreamResults([]); } });
     }, 180);
     return () => { cancelled = true; window.clearTimeout(timer); };
   }, [api, derived, item.level, projectId, releaseId, scope, selectedUpstreams, upstreamQuery]);
@@ -517,19 +529,26 @@ export default function ControlledRequirementEditor({
                 placeholder="Why is this change necessary?"
               />
             </label>
-            <label>
-              Verification method
-              <select
-                value={item.verificationMethod}
-                onChange={(event) => onChange("verificationMethod", event.target.value)}
-                disabled={!identityLocked}
-              >
-                <option>Test</option>
-                <option>Analysis</option>
-                <option>Inspection</option>
-                <option>Demonstration</option>
-              </select>
-            </label>
+            {item.level === "Interface" ? (
+              <label>
+                Verification
+                <input value="Not applicable — ICD has no verification artifact" readOnly aria-readonly="true" />
+              </label>
+            ) : (
+              <label>
+                Verification method
+                <select
+                  value={item.verificationMethod}
+                  onChange={(event) => onChange("verificationMethod", event.target.value)}
+                  disabled={!identityLocked}
+                >
+                  <option>Test</option>
+                  <option>Analysis</option>
+                  <option>Inspection</option>
+                  <option>Demonstration</option>
+                </select>
+              </label>
+            )}
           </div>
 
           <details className="supportingDetails" open>
@@ -599,12 +618,16 @@ export default function ControlledRequirementEditor({
                   </label>
                 )}
               </div>
-              {scope === "Software" && !derived && (
+              {(scope === "Software" || (scope === "System" && upstreamAvailable)) && !derived && (
                 <section className="proposalLookup" aria-label={`Upstream allocation for proposal ${index + 1}`}>
                   <div>
                     <b>Prospective upward allocation</b>
                     <span>
-                      {item.level === "HighLevel" ? "Select one or more current System requirement revisions." : "Select one or more current HLR revisions."}
+                      {item.level === "HighLevel"
+                        ? "Select one or more current System requirement revisions."
+                        : item.level === "System"
+                          ? "Select one or more current Interface requirement revisions when configured."
+                          : "Select one or more current HLR revisions."}
                     </span>
                   </div>
                   {!!selectedUpstreams.length && (

@@ -35,6 +35,19 @@ test('software authoring routes preserve the selected HLR or LLR level', () => {
   expect(parseRoute(llr)).toMatchObject({ view: 'createSoftwareChange', artifactKind: 'LowLevel' })
 })
 
+test('configured Interface ladders have a dedicated ICD change authoring route', () => {
+  const address = routePath(context, 'createInterfaceChange', 'system')
+  expect(address).toBe('/programs/program-a/projects/project-a/releases/release-a/interfaces/change-requests/new')
+  expect(parseRoute(address)).toMatchObject({ view: 'createInterfaceChange', discipline: 'system', artifactKind: 'Interface' })
+  const history = routePath(context, 'history', 'system', undefined, 'Interface', undefined, 'Interface')
+  expect(history).toBe('/programs/program-a/projects/project-a/releases/release-a/interfaces/change-requests')
+  expect(parseRoute(history)).toMatchObject({ view: 'history', discipline: 'system', historyTypeIntent: 'Interface' })
+  const detail = routePath(context, 'scr', 'system', 'icdcr-a', 'Interface')
+  expect(detail).toBe('/programs/program-a/projects/project-a/releases/release-a/interfaces/change-requests/icdcr-a')
+  expect(parseRoute(detail)).toMatchObject({ view: 'scr', discipline: 'system', artifactId: 'icdcr-a', artifactKind: 'Interface' })
+  expect(artifactPath(context, 'change-request', 'icdcr-a', 'system', 'Interface')).toBe(detail)
+})
+
 test('software change history routes preserve the selected HLR or LLR level', () => {
   const hlr = routePath(context, 'history', 'software', undefined, 'HighLevel')
   const llr = routePath(context, 'history', 'software', undefined, 'LowLevel')

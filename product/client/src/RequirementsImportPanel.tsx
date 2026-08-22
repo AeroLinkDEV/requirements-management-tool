@@ -26,7 +26,7 @@ type Props = {
   api: string;
   projectId: string;
   releaseId: string;
-  scope: "System" | "Software";
+  scope: "System" | "Software" | "Interface";
   /** Which software workspace is importing. A software import creates an HLRCR or an LLRCR, so the
    * level is part of the request rather than something the server could infer afterwards. */
   softwareLevel?: "HighLevel" | "LowLevel";
@@ -38,7 +38,7 @@ export default function RequirementsImportPanel({ api, projectId, releaseId, sco
   const [preview, setPreview] = useState<ImportPreview>();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  const level = scope === "System" ? "System" : softwareLevel ?? "HighLevel";
+  const level = scope === "System" ? "System" : scope === "Interface" ? "Interface" : softwareLevel ?? "HighLevel";
   const abbreviation = changeRequestAcronym(level);
 
   const close = () => {
@@ -76,7 +76,7 @@ export default function RequirementsImportPanel({ api, projectId, releaseId, sco
       body: JSON.stringify({
         targetReleaseId: releaseId,
         type: scope,
-        softwareLevel: scope === "System" ? null : level,
+        softwareLevel: scope === "System" || scope === "Interface" ? null : level,
         title: form.get("title"),
         problem: form.get("problem"),
         analysis: form.get("analysis"),

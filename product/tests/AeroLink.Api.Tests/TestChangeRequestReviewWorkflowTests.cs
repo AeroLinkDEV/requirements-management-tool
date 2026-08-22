@@ -26,6 +26,7 @@ public sealed class TestChangeRequestReviewWorkflowTests
     {
         Assert.Equal(ReviewSubject.System, WorkflowEndpoints.SubjectOf(ChangeRequestType.System));
         Assert.Equal(ReviewSubject.Software, WorkflowEndpoints.SubjectOf(ChangeRequestType.Software));
+        Assert.Equal(ReviewSubject.Interface, WorkflowEndpoints.SubjectOf(ChangeRequestType.Interface));
         Assert.Equal(ReviewSubject.SystemTest, WorkflowEndpoints.SubjectOf(TestChangeReviewDiscipline.System));
         Assert.Equal(ReviewSubject.HighLevelSoftwareTest, WorkflowEndpoints.SubjectOf(TestChangeReviewDiscipline.HighLevelSoftware));
         Assert.Equal(ReviewSubject.LowLevelSoftwareTest, WorkflowEndpoints.SubjectOf(TestChangeReviewDiscipline.LowLevelSoftware));

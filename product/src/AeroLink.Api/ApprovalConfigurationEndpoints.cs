@@ -23,7 +23,7 @@ public static class ApprovalConfigurationEndpoints
     /// <summary>The artifact types a project configures a procedure for, in the order the page lists them.</summary>
     private static readonly ReviewSubject[] Subjects =
     [
-        ReviewSubject.System, ReviewSubject.Software,
+        ReviewSubject.System, ReviewSubject.Software, ReviewSubject.Interface,
         ReviewSubject.SystemTest, ReviewSubject.HighLevelSoftwareTest, ReviewSubject.LowLevelSoftwareTest,
     ];
 
@@ -236,6 +236,8 @@ public static class ApprovalConfigurationEndpoints
             && policy.Definition(RequirementLevel.System).Has(LevelCapabilities.HasChangeControl),
         ReviewSubject.Software => policy.OrderedLevels.Any(level => level is (RequirementLevel.HighLevel or RequirementLevel.LowLevel)
             && policy.Definition(level).Has(LevelCapabilities.HasChangeControl)),
+        ReviewSubject.Interface => policy.OrderedLevels.Contains(RequirementLevel.Interface)
+            && policy.Definition(RequirementLevel.Interface).Has(LevelCapabilities.HasChangeControl),
         ReviewSubject.SystemTest => policy.OrderedLevels.Contains(RequirementLevel.System)
             && policy.Definition(RequirementLevel.System).Verification is not null,
         ReviewSubject.HighLevelSoftwareTest => policy.OrderedLevels.Contains(RequirementLevel.HighLevel)

@@ -20,12 +20,12 @@ import ProblemReportPicker from "./ProblemReportPicker";
 import "./ChangeRequestEditor.css";
 import "./ChangeRequestEditorEnhancements.css";
 
-type ChangeScope = "System" | "Software";
+type ChangeScope = "System" | "Software" | "Interface";
 type AuthoringContext = {
   type: ChangeScope;
   changeRequestNumber: string;
   author: { userName: string; displayName: string };
-  requirementNumbers: Partial<Record<"SYSR" | "HLR" | "LLR", string>>;
+  requirementNumbers: Partial<Record<"SYSR" | "HLR" | "LLR" | "ICDR", string>>;
 };
 type Props = {
   api: string;
@@ -63,7 +63,7 @@ const pendingImpact = JSON.stringify({
   collaboration: "Pending",
 });
 const prefixFor = (level: RequirementLevel) =>
-  level === "System" ? "SYSR" : level === "HighLevel" ? "HLR" : "LLR";
+  level === "System" ? "SYSR" : level === "HighLevel" ? "HLR" : level === "LowLevel" ? "LLR" : "ICDR";
 const addToIdentifier = (identifier: string | undefined, offset: number) => {
   if (!identifier) return "";
   const match = identifier.match(/^([A-Z]+)-(\d+)$/);
@@ -88,7 +88,7 @@ const createProposal = (
   kind,
   statement: "",
   rationale: "",
-  verificationMethod: "Test",
+  verificationMethod: level === "Interface" ? "Not applicable" : "Test",
   richText: "",
   attributesJson: JSON.stringify({ criticality: "Normal", owner: "" }),
   impactDispositionJson: pendingImpact,
@@ -128,10 +128,10 @@ export default function ChangeRequestEditor({
   onSaved,
 }: Props) {
   const configuredSoftwareLevel: RequirementLevel = ladderAllows(ladder, "HighLevel", LadderCapability.ChangeControl) ? "HighLevel" : "LowLevel";
-  const defaultLevel: RequirementLevel = scope === "System" ? "System" : (softwareLevel && ladderAllows(ladder, softwareLevel, LadderCapability.ChangeControl) ? softwareLevel : configuredSoftwareLevel);
-  const abbreviation = changeRequestAcronym(scope === "System" ? "System" : defaultLevel);
+  const defaultLevel: RequirementLevel = scope === "System" ? "System" : scope === "Interface" ? "Interface" : (softwareLevel && ladderAllows(ladder, softwareLevel, LadderCapability.ChangeControl) ? softwareLevel : configuredSoftwareLevel);
+  const abbreviation = changeRequestAcronym(defaultLevel);
   const softwareLevelLabel = defaultLevel === "LowLevel" ? "LLR" : "HLR";
-  const storageKey = `aerolink:new-${scope.toLowerCase()}-${scope === "Software" ? softwareLevelLabel.toLowerCase() : "system"}-change:${projectId}:${releaseId}`;
+  const storageKey = `aerolink:new-${scope.toLowerCase()}-${scope === "Software" ? softwareLevelLabel.toLowerCase() : scope === "Interface" ? "icd" : "system"}-change:${projectId}:${releaseId}`;
   const seededSource = useRef("");
   const [context, setContext] = useState<AuthoringContext>();
   // Nothing is seeded from a stored draft. It is offered below, and applied only if the author says so.
@@ -177,7 +177,7 @@ export default function ChangeRequestEditor({
     let cancelled = false;
     // The number preview depends on the level: a software change request is an HLRCR or an LLRCR, and the
     // two are numbered apart, so the server cannot answer without being told which workspace is asking.
-    fetch(`${api}/api/authoring/context?projectId=${projectId}&type=${scope}${scope === "System" ? "" : `&softwareLevel=${defaultLevel}`}`)
+    fetch(`${api}/api/authoring/context?projectId=${projectId}&type=${scope}${scope === "Software" ? `&softwareLevel=${defaultLevel}` : ""}`)
       .then(async (response) => {
         if (!response.ok) {
           const body = (await response.json()) as { error?: string };
@@ -313,7 +313,7 @@ export default function ChangeRequestEditor({
         (item.kind === "Retire" || item.statement.trim()) &&
         (!(item.isDerived ?? parseObject(item.attributesJson).derived === true) ||
           item.rationale.trim()) &&
-        (item.level === "System" ||
+        (item.level === "System" || item.level === "Interface" ||
           (item.isDerived ?? parseObject(item.attributesJson).derived === true) ||
           Boolean(item.upstreamRevisionIds?.length)),
     );
@@ -383,7 +383,7 @@ export default function ChangeRequestEditor({
             ← Command Center
           </button>
           <p className="eyebrow">{scope.toUpperCase()} CHANGE CONTROL / NEW {abbreviation}</p>
-          <h1>Create {scope === "System" ? "System" : softwareLevelLabel} Change Request</h1>
+          <h1>Create {scope === "System" ? "System" : scope === "Interface" ? "Interface / ICD" : softwareLevelLabel} Change Request</h1>
           <p>
             Build the engineering case and define the requirement changes for Build {releaseVersion}.
           </p>
@@ -409,17 +409,17 @@ export default function ChangeRequestEditor({
         />
       )}
 
-      <RequirementsImportPanel
-        api={api}
-        projectId={projectId}
-        releaseId={releaseId}
-        scope={scope}
-        softwareLevel={softwareLevel}
-        onCreated={(id) => {
-          draft.clear();
-          onSaved(id, "The change request");
-        }}
-      />
+      {scope !== "Interface" && <RequirementsImportPanel
+          api={api}
+          projectId={projectId}
+          releaseId={releaseId}
+          scope={scope}
+          softwareLevel={softwareLevel}
+          onCreated={(id) => {
+            draft.clear();
+            onSaved(id, "The change request");
+          }}
+        />}
 
       <nav className="authoringStages twoStages" aria-label="Change authoring progress">
         <a href="#change-case" className={caseComplete ? "complete" : "active"}>
@@ -505,11 +505,11 @@ export default function ChangeRequestEditor({
                 <button type="button" onClick={() => addProposal("Modify", "System")}>Modify existing</button>
                 <button type="button" onClick={() => addProposal("Retire", "System")}>Retire existing</button>
               </>
-            ) : scope === "Software" && ladderAllows(ladder, defaultLevel, LadderCapability.ChangeControl) ? (
+            ) : (scope === "Software" || scope === "Interface") && ladderAllows(ladder, defaultLevel, LadderCapability.ChangeControl) ? (
               <>
-                <button type="button" onClick={() => addProposal("Introduce", defaultLevel)}>+ Introduce {softwareLevelLabel}</button>
-                <button type="button" onClick={() => addProposal("Modify", defaultLevel)}>Modify existing {softwareLevelLabel}</button>
-                <button type="button" onClick={() => addProposal("Retire", defaultLevel)}>Retire existing {softwareLevelLabel}</button>
+                <button type="button" onClick={() => addProposal("Introduce", defaultLevel)}>+ Introduce {scope === "Interface" ? "Interface / ICD" : softwareLevelLabel} requirement</button>
+                <button type="button" onClick={() => addProposal("Modify", defaultLevel)}>Modify existing {scope === "Interface" ? "Interface / ICD" : softwareLevelLabel}</button>
+                <button type="button" onClick={() => addProposal("Retire", defaultLevel)}>Retire existing {scope === "Interface" ? "Interface / ICD" : softwareLevelLabel}</button>
               </>
             ) : <span className="proposalUnavailable">No configured change-control level is available.</span>}
           </div>

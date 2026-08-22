@@ -178,10 +178,15 @@ public static class ChangeRequestEndpoints
             ladderPolicy = await policyResolver.ResolveAsync(projectId, ct);
             if (type == ChangeRequestType.Software && !ladderPolicy.IsChangeRequestScopeValid(type, softwareLevel))
                 return Results.BadRequest(new { error = "Say whether this software change request is HLR or LLR before previewing its number." });
-            var prefixes = type == ChangeRequestType.System
-                ? new[] { ladderPolicy.RequirementPrefix(RequirementLevel.System) }
-                : ladderPolicy.OrderedLevels.Where(level => level != RequirementLevel.System)
-                    .Select(ladderPolicy.RequirementPrefix).ToArray();
+            if (type == ChangeRequestType.Interface && !ladderPolicy.IsChangeRequestScopeValid(type, softwareLevel))
+                return Results.BadRequest(new { error = "The active project ladder does not configure Interface change control." });
+            var prefixes = type switch
+            {
+                ChangeRequestType.System => new[] { ladderPolicy.RequirementPrefix(RequirementLevel.System) },
+                ChangeRequestType.Interface => new[] { ladderPolicy.RequirementPrefix(RequirementLevel.Interface) },
+                _ => ladderPolicy.OrderedLevels.Where(level => level is RequirementLevel.HighLevel or RequirementLevel.LowLevel)
+                    .Select(ladderPolicy.RequirementPrefix).ToArray(),
+            };
             var numbers = new Dictionary<string, string>();
             foreach (var prefix in prefixes) numbers[prefix] = await IdentifierAllocator.PreviewRequirementAsync(db, prefix, ct);
             return Results.Ok(new
@@ -568,10 +573,14 @@ public static class ChangeRequestEndpoints
                         requirementNumber = artifact.BaseNumber;
                         revision = await db.RequirementRevisions.Where(x => x.ArtifactId == artifact.Id).MaxAsync(x => x.Revision, ct) + 1;
                     }
-                    if (!schemas.TryGetValue(change.Level.ToString(), out var schema))
-                        return Results.BadRequest(new { error = $"No active requirement schema is configured for {change.Level}." });
-                    var attributes = RequirementAuthoringJson.ValidateAndMergeAttributes(
-                        change.AttributesJson, schema, ladderPolicy.IsDownstreamTarget(change.Level) && change.IsDerived);
+                    var definition = ladderPolicy.Definition(change.Level);
+                    var attributes = definition.Has(LevelCapabilities.HasRequirementsDocument)
+                        && definition.RequirementsCatalogue is not null
+                        ? schemas.TryGetValue(change.Level.ToString(), out var schema)
+                            ? RequirementAuthoringJson.ValidateAndMergeAttributes(
+                                change.AttributesJson, schema, ladderPolicy.IsDownstreamTarget(change.Level) && change.IsDerived)
+                            : throw new DomainException($"No active requirement schema is configured for {change.Level}.")
+                        : "{}";
                     var sectionError = await TargetSectionRefusalAsync(db, request.ProjectId, ladderPolicy, change.Level,
                         change.TargetSectionId, ct);
                     if (sectionError is not null) return Results.BadRequest(new { error = sectionError });
@@ -1160,7 +1169,9 @@ public static class ChangeRequestEndpoints
         try { definition = ladderPolicy.Definition(level); }
         catch (DomainException) { return $"The configured project ladder does not contain {level}."; }
         if (!definition.Has(LevelCapabilities.HasRequirementsDocument) || definition.RequirementsCatalogue is null)
-            return $"The configured project ladder has no active requirements document for {level}.";
+            return targetSectionId is null
+                ? null
+                : $"The configured {level} level has no requirements document section to receive a change.";
         if (targetSectionId is null)
         {
             if (kind != RequirementChangeKind.Introduce) return null;
