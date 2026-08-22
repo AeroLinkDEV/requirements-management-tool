@@ -362,6 +362,53 @@ public sealed class VerificationImpactReadinessGateTests
         finally { File.Delete(seed.Path); }
     }
 
+    [Fact]
+    public async Task Latest_same_release_no_build_execution_controls_readiness_over_an_older_pass()
+    {
+        var seed = await SeedAsync();
+        try
+        {
+            Guid procedureRevisionId;
+            await using (var arrange = new AeroLinkDbContext(seed.Options))
+            {
+                var baseline = await arrange.CandidateBaselines.SingleAsync();
+                var procedure = new TestProcedure(seed.ProjectId, "SYSTP-00000101", "Verify oceanic routing",
+                    "test.engineer", Now, TestProcedureLevel.System);
+                var revision = new TestProcedureRevision(procedure.Id, 0, "Verify routing", "On ground",
+                    "Run the routing sequence", "The sequence is accepted", TestProcedureState.Approved,
+                    "test.engineer", Now);
+                var set = new BuildTestSet(seed.ProjectId, seed.ReleaseId, TestChangeReviewDiscipline.System, Now);
+                set.Include("test.lead", revision.Id, TestSelectionReason.ChangedRequirement,
+                    "The selected release must exercise oceanic routing.", Now);
+                arrange.AddRange(procedure, revision, set);
+                arrange.TestExecutions.AddRange(
+                    new TestExecution(seed.ProjectId, revision.Id, null, null, TestOutcome.Pass, "test.engineer",
+                        "rig", "Older same-release result.", "evidence/older-pass.json", Now.AddMinutes(-5), Now.AddMinutes(-5), seed.ReleaseId),
+                    new TestExecution(seed.ProjectId, revision.Id, null, null, TestOutcome.Fail, "test.engineer",
+                        "rig", "Newer same-release result.", "evidence/newer-fail.json", Now.AddMinutes(-1), Now.AddMinutes(-1), seed.ReleaseId));
+                await arrange.SaveChangesAsync();
+                await arrange.CandidateBaselines.Where(x => x.Id == baseline.Id).ExecuteUpdateAsync(update => update
+                    .SetProperty(x => x.State, CandidateBaselineState.Frozen)
+                    .SetProperty(x => x.RequirementsMaterializedAt, Now));
+                procedureRevisionId = revision.Id;
+            }
+
+            await using var assertDb = new AeroLinkDbContext(seed.Options);
+            var latest = await ExecutionScope.LatestByProcedureAsync(assertDb, [procedureRevisionId], seed.ReleaseId,
+                null, default);
+            var selected = Assert.Single(latest).Value;
+            Assert.Equal(TestOutcome.Fail, selected.Outcome);
+            Assert.Equal("Newer same-release result.", selected.Determination);
+
+            var readiness = await new ReleaseReadinessService(assertDb).CalculateAsync(seed.CampaignId, default);
+            var verification = readiness.Gates.Single(x => x.Code == "verification");
+            Assert.False(verification.Complete);
+            Assert.Equal(0, verification.Completed);
+            Assert.Equal(1, verification.Total);
+        }
+        finally { File.Delete(seed.Path); }
+    }
+
     private static async Task<ReadinessGate> CoverageGateAsync(DbContextOptions<AeroLinkDbContext> options, Guid campaignId)
     {
         await using var db = new AeroLinkDbContext(options);
