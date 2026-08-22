@@ -33,6 +33,18 @@ public sealed class ConcurrencyExceptionHandler(ILogger<ConcurrencyExceptionHand
             }, cancellationToken);
             return true;
         }
+        if (exception is ProjectLadderSealConcurrencyException seal)
+        {
+            logger.LogWarning(seal, "A first ladder-bound content write lost the seal race for {Method} {Path}",
+                context.Request.Method, context.Request.Path);
+            context.Response.StatusCode = StatusCodes.Status409Conflict;
+            await context.Response.WriteAsJsonAsync(new
+            {
+                error = seal.Message,
+                code = "ladder_seal_conflict"
+            }, cancellationToken);
+            return true;
+        }
         if (exception is not DbUpdateConcurrencyException)
         {
             logger.LogError(exception, "Unhandled API failure for {Method} {Path}", context.Request.Method, context.Request.Path);

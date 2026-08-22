@@ -13,6 +13,8 @@ public static class DependencyInjection
     public static IServiceCollection AddAeroLinkInfrastructure(this IServiceCollection services, IConfiguration configuration)
     {
         services.AddScoped<IProjectLadderPolicyResolver, EffectiveProjectLadderPolicyResolver>();
+        services.AddScoped<ProjectLadderSealAuthority>();
+        services.AddScoped<ProjectLadderUpgradeAuthority>();
         // These are the complete stable ladder seams. Registration is intentionally explicit: the manifest is
         // a readiness inventory, not a flag, and each entry is backed by a project-effective policy route.
         foreach (var registration in new[]
