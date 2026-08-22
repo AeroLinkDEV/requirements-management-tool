@@ -220,6 +220,50 @@ public sealed class SecondShowcaseSeederTests
     }
 
     [Fact]
+    public async Task Refuses_a_former_reserved_workspace_before_any_low_id_seed_mutation()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"aerolink-second-showcase-former-seed-{Guid.NewGuid():N}.db");
+        var options = new DbContextOptionsBuilder<AeroLinkDbContext>()
+            .UseSqlite($"Data Source={path};Pooling=False;Foreign Keys=True")
+            .Options;
+        try
+        {
+            await using var db = new AeroLinkDbContext(options);
+            await db.Database.EnsureCreatedAsync();
+            var program = new ProgramRecord(SecondShowcaseSeeder.ProjectName, SecondShowcaseSeeder.ProgramCode);
+            var project = new ProjectRecord(program.Id, SecondShowcaseSeeder.ProjectName, "Configured Ladder Software");
+            var release = new SoftwareRelease(project.Id, "2.0", false);
+            var request = new SystemChangeRequest("SRCR-71201", 0, project.Id, release.Id,
+                "Former reserved request", "Former seed case", "Former seed analysis", "Former seed solution",
+                "systems.author", DateTimeOffset.UtcNow, ChangeRequestType.System);
+            request.AddRequirementChange("systems.author", "SYSR-71201", 0, RequirementLevel.System,
+                RequirementChangeKind.Introduce, "The former reserved System requirement shall remain identifiable.",
+                "Former seed case.", "Test", DateTimeOffset.UtcNow);
+            db.AddRange(program, project, release, request);
+            await db.SaveChangesAsync();
+            var before = await SnapshotWorkspaceCountsAsync(db, project.Id);
+            var consumers = LadderConsumerManifestCatalog.RequiredConsumerIds
+                .Select(id => (ILadderConsumerRegistration)new LadderConsumerRegistration(id, id)).ToArray();
+            var seeder = new SecondShowcaseSeeder(db,
+                new ProjectLadderAuthoringService(db, LegacyLadderPolicy.Instance, consumers));
+
+            var exception = await Assert.ThrowsAsync<InvalidOperationException>(() => seeder.EnsureSeededAsync());
+
+            Assert.Contains("earlier incompatible seed", exception.Message, StringComparison.Ordinal);
+            Assert.Equal(before, await SnapshotWorkspaceCountsAsync(db, project.Id));
+            Assert.Equal("SRCR-71201", await db.SystemChangeRequests.Where(x => x.Id == request.Id)
+                .Select(x => x.BaseNumber).SingleAsync());
+            Assert.Equal(ChangeRequestState.Draft, await db.SystemChangeRequests.Where(x => x.Id == request.Id)
+                .Select(x => x.State).SingleAsync());
+        }
+        finally
+        {
+            SqliteConnection.ClearAllPools();
+            try { if (File.Exists(path)) File.Delete(path); } catch (IOException) { }
+        }
+    }
+
+    [Fact]
     public async Task Seeding_the_second_workspace_does_not_change_an_existing_fms_workspace()
     {
         var path = Path.Combine(Path.GetTempPath(), $"aerolink-second-showcase-fms-{Guid.NewGuid():N}.db");
@@ -293,6 +337,42 @@ public sealed class SecondShowcaseSeederTests
             ladder.Steps.OrderBy(x => x.Position).Select(x => $"{x.CatalogueEntry}:{x.Position}:{x.Capabilities}").ToArray(),
             ladder.AllowedUpstream.OrderBy(x => x.ParentStepId).Select(x => $"{x.ParentStepId}:{x.ChildStepId}").ToArray());
     }
+
+    private static async Task<WorkspaceCounts> SnapshotWorkspaceCountsAsync(AeroLinkDbContext db, Guid projectId) =>
+        new(
+            await db.Projects.CountAsync(x => x.Id == projectId),
+            await db.Releases.CountAsync(x => x.ProjectId == projectId),
+            await db.ProjectLadderConfigurations.CountAsync(x => x.ProjectId == projectId),
+            await db.ProjectLadderConfigurationHistories.CountAsync(x => x.ProjectId == projectId),
+            await db.SystemChangeRequests.CountAsync(x => x.ProjectId == projectId),
+            await db.RequirementChanges.CountAsync(x => x.ChangeRequestId != Guid.Empty &&
+                db.SystemChangeRequests.Where(r => r.ProjectId == projectId).Select(r => r.Id).Contains(x.ChangeRequestId)),
+            await db.ReviewCycles.CountAsync(x => x.ChangeRequestId != null &&
+                db.SystemChangeRequests.Where(r => r.ProjectId == projectId).Select(r => r.Id).Contains(x.ChangeRequestId.Value)),
+            await db.ApprovalSteps.CountAsync(x => db.ReviewCycles.Where(c => c.ChangeRequestId != null &&
+                db.SystemChangeRequests.Where(r => r.ProjectId == projectId).Select(r => r.Id).Contains(c.ChangeRequestId.Value))
+                .Select(c => c.Id).Contains(x.ReviewCycleId)),
+            await db.DownstreamChangeAssessments.CountAsync(x => x.ProjectId == projectId),
+            await db.DownstreamAssessmentChangeRequestLinks.CountAsync(x => db.DownstreamChangeAssessments
+                .Where(a => a.ProjectId == projectId).Select(a => a.Id).Contains(x.AssessmentId)),
+            await db.CandidateBaselines.CountAsync(x => x.ProjectId == projectId),
+            await db.BaselineSelections.CountAsync(x => db.CandidateBaselines.Where(b => b.ProjectId == projectId)
+                .Select(b => b.Id).Contains(x.BaselineId)),
+            await db.Requirements.CountAsync(x => x.ProjectId == projectId),
+            await db.RequirementRevisions.CountAsync(x => db.Requirements.Where(r => r.ProjectId == projectId)
+                .Select(r => r.Id).Contains(x.ArtifactId)),
+            await db.BaselineRequirements.CountAsync(x => db.CandidateBaselines.Where(b => b.ProjectId == projectId)
+                .Select(b => b.Id).Contains(x.BaselineId)),
+            await db.RequirementTraces.CountAsync(x => x.ProjectId == projectId),
+            await db.ControlledDocuments.CountAsync(x => x.ProjectId == projectId),
+            await db.TestProcedureDocuments.CountAsync(x => x.ProjectId == projectId),
+            await db.VerificationImpactItems.CountAsync(x => x.ProjectId == projectId));
+
+    private sealed record WorkspaceCounts(
+        int Projects, int Releases, int Ladders, int LadderHistories, int Requests, int Changes,
+        int ReviewCycles, int ApprovalSteps, int Assessments, int AssessmentLinks, int Baselines,
+        int BaselineSelections, int Requirements, int RequirementRevisions, int BaselineRequirements,
+        int Traces, int ControlledDocuments, int TestProcedureDocuments, int VerificationImpactItems);
 
     private sealed record FmsSnapshot(
         string[] Releases,

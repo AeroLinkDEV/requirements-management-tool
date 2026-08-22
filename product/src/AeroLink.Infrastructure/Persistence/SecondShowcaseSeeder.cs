@@ -39,6 +39,10 @@ public sealed class SecondShowcaseSeeder(
     private const string ProjectProduct = "Configured Ladder Software";
     private const string ReleaseVersion = "2.0";
     private const string BaselineNumber = "SW-71.20";
+    private const string LegacySystemChangeRequestNumber = "SRCR-71201";
+    private const string LegacyLowLevelChangeRequestNumber = "LLRCR-71202";
+    private const string LegacySystemRequirementNumber = "SYSR-71201";
+    private const string LegacyLowLevelRequirementNumber = "LLR-71202";
     private const string Actor = "showcase.second";
     private const string SystemsAuthor = "systems.author";
     private const string SoftwareAuthor = "software.author";
@@ -48,6 +52,7 @@ public sealed class SecondShowcaseSeeder(
 
     public async Task<SecondShowcaseSummary> EnsureSeededAsync(CancellationToken ct = default)
     {
+        await EnsureNoFormerReservedWorkspaceAsync(ct);
         var start = new DateTimeOffset(2026, 1, 12, 13, 0, 0, TimeSpan.Zero);
         var workspace = await EnsureWorkspaceAsync(start, ct);
         await EnsureLadderAsync(workspace.ProjectId, start, ct);
@@ -72,6 +77,42 @@ public sealed class SecondShowcaseSeeder(
         await db.SaveChangesAsync(ct);
 
         return await SummarizeAsync(workspace.ProgramId, ct);
+    }
+
+    private async Task EnsureNoFormerReservedWorkspaceAsync(CancellationToken ct)
+    {
+        var programId = await db.Programs.AsNoTracking()
+            .Where(x => x.Code == ProgramCode).Select(x => (Guid?)x.Id).SingleOrDefaultAsync(ct);
+        if (programId is null) return;
+        var projectIds = await db.Projects.AsNoTracking()
+            .Where(x => x.ProgramId == programId.Value).Select(x => x.Id).ToListAsync(ct);
+        if (projectIds.Count == 0) return;
+
+        var formerRequest = await db.SystemChangeRequests.AsNoTracking()
+            .Where(x => projectIds.Contains(x.ProjectId)
+                && (x.BaseNumber == LegacySystemChangeRequestNumber || x.BaseNumber == LegacyLowLevelChangeRequestNumber))
+            .Select(x => x.DisplayNumber).FirstOrDefaultAsync(ct);
+        var formerRequirement = await db.Requirements.AsNoTracking()
+            .Where(x => projectIds.Contains(x.ProjectId)
+                && (x.BaseNumber == LegacySystemRequirementNumber || x.BaseNumber == LegacyLowLevelRequirementNumber))
+            .Select(x => x.BaseNumber).FirstOrDefaultAsync(ct);
+        if (formerRequest is null && formerRequirement is null)
+        {
+            formerRequirement = await (from change in db.RequirementChanges.AsNoTracking()
+                                       join request in db.SystemChangeRequests.AsNoTracking()
+                                           on change.ChangeRequestId equals request.Id
+                                       where projectIds.Contains(request.ProjectId)
+                                           && (change.BaseNumber == LegacySystemRequirementNumber
+                                               || change.BaseNumber == LegacyLowLevelRequirementNumber)
+                                       select change.BaseNumber).FirstOrDefaultAsync(ct);
+        }
+        if (formerRequest is null && formerRequirement is null) return;
+
+        throw new InvalidOperationException(
+            "The LADDERLAB showcase contains reserved identifiers from an earlier incompatible seed "
+            + $"({LegacySystemChangeRequestNumber}/{LegacyLowLevelChangeRequestNumber} or "
+            + $"{LegacySystemRequirementNumber}/{LegacyLowLevelRequirementNumber}). "
+            + "It was not changed; remove or rebuild this dedicated showcase before retrying.");
     }
 
     private async Task<(Guid ProgramId, Guid ProjectId, Guid ReleaseId)> EnsureWorkspaceAsync(
