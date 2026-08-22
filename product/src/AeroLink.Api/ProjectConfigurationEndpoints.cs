@@ -2,6 +2,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using AeroLink.Domain.Identity;
 using AeroLink.Domain.Hierarchy;
+using AeroLink.Domain.Verification;
 using AeroLink.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 
@@ -33,7 +34,8 @@ public static class ProjectConfigurationEndpoints
                 return Results.BadRequest(new { error = "Ladder edits cannot set lifecycle, activation, or manifest fields." });
             try
             {
-                var steps = (request.Steps ?? []).Select(x => new LadderStepDraft(x.CatalogueEntry ?? "", x.Position, x.Capabilities)).ToArray();
+                var steps = (request.Steps ?? []).Select(x => new LadderStepDraft(x.CatalogueEntry ?? "", x.Position,
+                    x.Capabilities, x.EnabledArtifactKinds)).ToArray();
                 var relationships = (request.Relationships ?? []).Select(x => new LadderRelationshipDraft(x.Parent ?? "", x.Child ?? "")).ToArray();
                 var result = await service.EditAsync(projectId,
                     new(request.ExpectedVersion, request.Reason ?? "", steps, relationships),
@@ -97,6 +99,7 @@ public sealed class ProjectConfigurationStepRequest
     public string? CatalogueEntry { get; set; }
     public int Position { get; set; }
     public LevelCapabilities Capabilities { get; set; }
+    public List<VerificationArtifactKind>? EnabledArtifactKinds { get; set; }
 }
 
 public sealed class ProjectConfigurationRelationshipRequest

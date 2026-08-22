@@ -411,6 +411,9 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
             b.Property(x => x.LastUpgradeBy).HasMaxLength(100); b.Property(x => x.LastUpgradeVersion).HasMaxLength(100);
             b.Property(x => x.LastUpgradeManifestHash).HasMaxLength(128);
             b.Property(x => x.Version).IsConcurrencyToken(); b.HasIndex(x => x.ProjectId).IsUnique();
+            b.Property(x => x.VerificationProfileSchemaVersion).IsRequired();
+            b.ToTable("project_ladder_configurations", t => t.HasCheckConstraint("CK_project_ladder_profile_schema_version",
+                "\"VerificationProfileSchemaVersion\" = 2"));
             b.HasOne<ProjectRecord>().WithMany().HasForeignKey(x => x.ProjectId).OnDelete(DeleteBehavior.Cascade);
             b.HasMany(x => x.Steps).WithOne().HasForeignKey(nameof(ProjectLadderStep.ConfigurationId), nameof(ProjectLadderStep.ProjectId))
                 .HasPrincipalKey(nameof(ProjectLadderConfiguration.Id), nameof(ProjectLadderConfiguration.ProjectId)).OnDelete(DeleteBehavior.Cascade);
@@ -428,6 +431,9 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
             b.Property(x => x.Reason).HasMaxLength(4000).IsRequired();
             b.Property(x => x.CanonicalSnapshot).HasMaxLength(200000).IsRequired();
             b.Property(x => x.SnapshotHash).HasMaxLength(128).IsRequired();
+            b.Property(x => x.SnapshotSchemaVersion).IsRequired();
+            b.ToTable("project_ladder_configuration_history", t => t.HasCheckConstraint("CK_project_ladder_history_schema_version",
+                "\"SnapshotSchemaVersion\" IN (1,2)"));
             b.HasIndex(x => new { x.ConfigurationId, x.Revision }).IsUnique();
             b.HasIndex(x => new { x.ProjectId, x.OccurredAt });
             b.HasOne<ProjectLadderConfiguration>().WithMany().HasForeignKey(x => new { x.ConfigurationId, x.ProjectId })
@@ -438,8 +444,11 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
             b.ToTable("project_ladder_steps", t => t.HasCheckConstraint("CK_project_ladder_step_position", "\"Position\" > 0"));
             b.ToTable("project_ladder_steps", t => t.HasCheckConstraint("CK_project_ladder_step_capabilities", "\"Capabilities\" >= 0 AND \"Capabilities\" <= 15"));
             b.ToTable("project_ladder_steps", t => t.HasCheckConstraint("CK_project_ladder_step_version", "\"Version\" > 0"));
+            b.ToTable("project_ladder_steps", t => t.HasCheckConstraint("CK_project_ladder_step_profile_shape",
+                "((\"Capabilities\" & 2) = 0 AND \"EnabledArtifactKindsValue\" = '') OR ((\"Capabilities\" & 2) = 2 AND ((\"CatalogueEntry\" = 'System' AND \"EnabledArtifactKindsValue\" = 'Procedure') OR (\"CatalogueEntry\" IN ('HighLevel','LowLevel') AND \"EnabledArtifactKindsValue\" IN ('Case','Case,Procedure')) OR (\"CatalogueEntry\" NOT IN ('System','HighLevel','LowLevel') AND \"EnabledArtifactKindsValue\" IN ('Case','Procedure','Case,Procedure',''))))"));
             b.HasKey(x => x.Id); b.HasAlternateKey(x => new { x.ConfigurationId, x.ProjectId, x.Id });
             b.Property(x => x.CatalogueEntry).HasMaxLength(40).IsRequired();
+            b.Property(x => x.EnabledArtifactKindsValue).HasMaxLength(100).IsRequired();
             b.Property(x => x.Capabilities).HasConversion<int>().IsRequired(); b.Property(x => x.Version).IsConcurrencyToken();
             b.HasIndex(x => new { x.ConfigurationId, x.CatalogueEntry }).IsUnique();
             b.HasIndex(x => new { x.ConfigurationId, x.Position }).IsUnique();

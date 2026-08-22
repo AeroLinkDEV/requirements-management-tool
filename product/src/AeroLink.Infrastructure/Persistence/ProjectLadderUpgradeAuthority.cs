@@ -1,6 +1,7 @@
 using AeroLink.Domain.Common;
 using AeroLink.Domain.ChangeControl;
 using AeroLink.Domain.Hierarchy;
+using AeroLink.Domain.Verification;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Npgsql;
@@ -13,7 +14,8 @@ internal sealed record ProjectLadderUpgradeCommand(long ExpectedVersion, string 
 internal enum ProjectLadderUpgradeResultKind { NotFound, Success, Refused, Conflict, Invalid }
 
 internal sealed record ProjectLadderUpgradeResult(ProjectLadderUpgradeResultKind Kind,
-    ProjectLadderReadModel? Configuration = null, string? Error = null, LadderConsumerManifest? Readiness = null);
+    ProjectLadderReadModel? Configuration = null, string? Error = null, LadderConsumerManifest? Readiness = null,
+    LadderConsumerManifestV2? ArtifactReadiness = null);
 
 /// <summary>
 /// Internal seam for future product-owned representation upgrades. There is intentionally no
@@ -21,10 +23,13 @@ internal sealed record ProjectLadderUpgradeResult(ProjectLadderUpgradeResultKind
 /// version token, and immutable history evidence as normal activation while retaining the existing seal.
 /// </summary>
 internal sealed class ProjectLadderUpgradeAuthority(
-    AeroLinkDbContext db, ILadderPolicy policy, IEnumerable<ILadderConsumerRegistration> consumerRegistrations)
+    AeroLinkDbContext db, ILadderPolicy policy, IEnumerable<ILadderConsumerRegistration> consumerRegistrations,
+    IEnumerable<IVerificationArtifactConsumerRegistration>? artifactConsumerRegistrations = null)
 {
     private readonly IReadOnlyList<ILadderConsumerRegistration> registrations =
         consumerRegistrations?.ToArray() ?? throw new ArgumentNullException(nameof(consumerRegistrations));
+    private readonly IReadOnlyList<IVerificationArtifactConsumerRegistration> artifactRegistrations =
+        artifactConsumerRegistrations?.ToArray() ?? [];
 
     public async Task<ProjectLadderUpgradeResult> UpgradeAsync(Guid projectId, ProjectLadderUpgradeCommand command,
         string actor, DateTimeOffset now, CancellationToken ct = default)
@@ -34,10 +39,19 @@ internal sealed class ProjectLadderUpgradeAuthority(
         if (string.IsNullOrWhiteSpace(command.Reason)) return Invalid("A platform upgrade requires a meaningful reason.");
         if (string.IsNullOrWhiteSpace(actor)) return Invalid("A platform upgrade requires an attributable actor.");
         LadderConsumerManifest readiness = LadderConsumerManifestCatalog.BuildForRegistrations(registrations);
-        if (!readiness.IsReady)
+        LadderConsumerManifestV2 artifactReadiness;
+        try
+        {
+            artifactReadiness = LadderConsumerManifestCatalog.BuildV2(registrations, artifactRegistrations,
+                EffectiveArtifactProfile(command.Steps));
+        }
+        catch (DomainException ex) { return Invalid(ex.Message); }
+        if (!readiness.IsReady || !artifactReadiness.IsReady)
             return new(ProjectLadderUpgradeResultKind.Refused,
-                Error: $"The platform upgrade is refused until routing is complete: {string.Join(", ", readiness.MissingOrUnrouted.Select(x => x.Id))}.",
-                Readiness: readiness);
+                Error: $"The platform upgrade is refused until routing is complete: {string.Join(", ",
+                    readiness.MissingOrUnrouted.Select(x => x.Id)
+                        .Concat(artifactReadiness.MissingArtifactCoverage.Select(x => $"artifact:{x.ConsumerId}:{x.ArtifactKey}")))}.",
+                Readiness: readiness, ArtifactReadiness: artifactReadiness);
 
         var initial = await LoadAsync(projectId, ct);
         if (initial is null) return new(ProjectLadderUpgradeResultKind.NotFound, Error: "The project has no ladder configuration.");
@@ -59,9 +73,9 @@ internal sealed class ProjectLadderUpgradeAuthority(
         if (configuration.Version != command.ExpectedVersion)
             return Conflict("Another ladder edit, seal, or platform upgrade was saved. Refresh before upgrading.");
 
-        var canonical = ProjectLadderSnapshot.Canonicalize(command.Steps, command.Relationships);
+        var canonical = ProjectLadderSnapshot.CanonicalizeV2(command.Steps, command.Relationships, policy);
         var snapshotHash = ProjectLadderSnapshot.Hash(canonical);
-        configuration.RecordPlatformUpgrade(command.Version, actor, readiness.Hash, now);
+        configuration.RecordPlatformUpgrade(command.Version, actor, artifactReadiness.Hash, now);
         try
         {
             // Claim the optimistic version while the transaction holds the configuration row. A competing
@@ -86,7 +100,8 @@ internal sealed class ProjectLadderUpgradeAuthority(
         foreach (var step in command.Steps.OrderBy(x => x.Position))
         {
             var level = Enum.Parse<RequirementLevel>(step.CatalogueEntry, false);
-            var entity = new ProjectLadderStep(configuration.Id, projectId, level, step.Position, step.Capabilities, now);
+            var entity = new ProjectLadderStep(configuration.Id, projectId, level, step.Position, step.Capabilities, now,
+                step.EnabledArtifactKinds);
             configuration.Steps.Add(entity); persistedByName.Add(step.CatalogueEntry, entity);
         }
         foreach (var edge in command.Relationships)
@@ -96,8 +111,8 @@ internal sealed class ProjectLadderUpgradeAuthority(
         db.ProjectLadderAllowedUpstreams.AddRange(configuration.AllowedUpstream);
         db.ProjectLadderConfigurationHistories.Add(new ProjectLadderConfigurationHistory(configuration.Id, projectId,
             configuration.Version, actor, now,
-            $"Platform upgrade {command.Version}: {command.Reason.Trim()} (readiness {readiness.Version}/{readiness.Hash}).",
-            canonical, snapshotHash));
+            $"Platform upgrade {command.Version}: {command.Reason.Trim()} (readiness {artifactReadiness.Version}/{artifactReadiness.Hash}; legacy {readiness.Version}/{readiness.Hash}).",
+            canonical, snapshotHash, ProjectLadderSnapshot.CurrentSchemaVersion));
         try
         {
             await db.SaveChangesAsync(ct);
@@ -113,7 +128,7 @@ internal sealed class ProjectLadderUpgradeAuthority(
         }
 
         var read = await new ProjectLadderAuthoringService(db, policy, registrations).ReadAsync(projectId, ct, true);
-        return new(ProjectLadderUpgradeResultKind.Success, read, Readiness: readiness);
+        return new(ProjectLadderUpgradeResultKind.Success, read, Readiness: readiness, ArtifactReadiness: artifactReadiness);
     }
 
     private async Task<ProjectLadderConfiguration?> LoadAsync(Guid projectId, CancellationToken ct) =>
@@ -129,13 +144,32 @@ internal sealed class ProjectLadderUpgradeAuthority(
         foreach (var step in validated.Steps)
         {
             var level = Enum.Parse<RequirementLevel>(step.CatalogueEntry, false);
-            var entity = new ProjectLadderStep(draft.Id, projectId, level, step.Position, step.Capabilities, draft.CreatedAt);
+            var entity = new ProjectLadderStep(draft.Id, projectId, level, step.Position, step.Capabilities, draft.CreatedAt,
+                step.EnabledArtifactKinds);
             draft.Steps.Add(entity); byName.Add(step.CatalogueEntry, entity);
         }
         foreach (var edge in validated.Relationships)
             draft.AllowedUpstream.Add(new ProjectLadderAllowedUpstream(draft.Id, projectId,
                 byName[edge.Parent].Id, byName[edge.Child].Id, draft.CreatedAt));
         _ = ProjectLadderResolver.Resolve(draft, policy);
+    }
+
+    private IReadOnlyList<VerificationArtifactDefinition> EffectiveArtifactProfile(
+        IReadOnlyList<LadderStepDraft> steps)
+    {
+        var definitions = new List<VerificationArtifactDefinition>();
+        foreach (var step in steps)
+        {
+            var level = Enum.Parse<RequirementLevel>(step.CatalogueEntry, false);
+            var definition = policy.Definition(level);
+            if (!definition.Has(LevelCapabilities.HasVerification)) continue;
+            var profile = definition.VerificationProfile
+                ?? throw new DomainException($"The {level} definition has no verification profile.");
+            var kinds = step.EnabledArtifactKinds ?? profile.EnabledKinds;
+            foreach (var kind in kinds)
+                definitions.Add(profile.Definitions.Single(x => x.Kind == kind));
+        }
+        return definitions;
     }
 
     private static ProjectLadderUpgradeResult Invalid(string error) => new(ProjectLadderUpgradeResultKind.Invalid, Error: error);

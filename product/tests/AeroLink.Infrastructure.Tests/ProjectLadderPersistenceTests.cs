@@ -223,6 +223,18 @@ public sealed class ProjectLadderPersistenceTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Database_rejects_a_software_procedure_without_case_or_a_kind_without_capability()
+    {
+        await using var db = Context();
+        var configuration = await db.ProjectLadderConfigurations.SingleAsync(x => x.ProjectId == _fmsProjectId);
+
+        await Assert.ThrowsAsync<SqliteException>(() => db.Database.ExecuteSqlInterpolatedAsync(
+            $"UPDATE project_ladder_steps SET EnabledArtifactKindsValue = 'Procedure' WHERE ConfigurationId = {configuration.Id} AND CatalogueEntry = 'HighLevel'"));
+        await Assert.ThrowsAsync<SqliteException>(() => db.Database.ExecuteSqlInterpolatedAsync(
+            $"UPDATE project_ladder_steps SET Capabilities = 1, EnabledArtifactKindsValue = 'Case' WHERE ConfigurationId = {configuration.Id} AND CatalogueEntry = 'System'"));
+    }
+
+    [Fact]
     public async Task Version_is_optimistic_concurrency_protection_for_a_persisted_ladder()
     {
         await using var first = Context();
@@ -488,7 +500,10 @@ public sealed class ProjectLadderPersistenceTests : IAsyncLifetime
         {
             new LadderRelationshipDraft(nameof(RequirementLevel.System), nameof(RequirementLevel.LowLevel))
         };
-        var authority = new ProjectLadderUpgradeAuthority(db, LegacyLadderPolicy.Instance, consumers);
+        var typedConsumers = consumers.Select(registration =>
+            (IVerificationArtifactConsumerRegistration)LadderConsumerManifestCatalog.TypedRegistration(registration))
+            .ToArray();
+        var authority = new ProjectLadderUpgradeAuthority(db, LegacyLadderPolicy.Instance, consumers, typedConsumers);
         var result = await authority.UpgradeAsync(_fmsProjectId,
             new ProjectLadderUpgradeCommand(configuration.Version, "platform-v2", "Replace governed graph", steps, relationships),
             "platform.owner", now.AddMinutes(1));
@@ -501,6 +516,36 @@ public sealed class ProjectLadderPersistenceTests : IAsyncLifetime
         Assert.Equal("platform.owner", upgraded.LastUpgradeBy);
         Assert.Equal(2, upgraded.Steps.Count);
         Assert.Equal(2, await db.ProjectLadderConfigurationHistories.CountAsync());
+    }
+
+    [Fact]
+    public async Task Internal_upgrade_refuses_when_typed_artifact_readiness_is_incomplete()
+    {
+        await using var db = Context();
+        var consumers = LadderConsumerManifestCatalog.RequiredConsumerIds
+            .Select(id => (ILadderConsumerRegistration)new LadderConsumerRegistration(id, id)).ToArray();
+        var typedConsumers = consumers.Select(registration =>
+        {
+            var typed = LadderConsumerManifestCatalog.TypedRegistration(registration);
+            return (IVerificationArtifactConsumerRegistration)(typed.Id == "verification.test-change-workflow"
+                ? typed with { SupportedCapabilities = VerificationArtifactCapability.None }
+                : typed);
+        }).ToArray();
+        var authority = new ProjectLadderUpgradeAuthority(db, LegacyLadderPolicy.Instance, consumers, typedConsumers);
+        var configuration = await db.ProjectLadderConfigurations.SingleAsync(x => x.ProjectId == _fmsProjectId);
+        var result = await authority.UpgradeAsync(_fmsProjectId,
+            new ProjectLadderUpgradeCommand(configuration.Version, "platform-v2", "Refuse incomplete typed graph",
+                [new LadderStepDraft(nameof(RequirementLevel.System), 1,
+                    LegacyLadderPolicy.Instance.Definition(RequirementLevel.System).Capabilities)], []),
+            "platform.owner", DateTimeOffset.UtcNow);
+
+        Assert.Equal(ProjectLadderUpgradeResultKind.Refused, result.Kind);
+        Assert.NotNull(result.ArtifactReadiness);
+        Assert.False(result.ArtifactReadiness!.IsReady);
+        Assert.Contains(result.ArtifactReadiness.MissingArtifactCoverage,
+            x => x.ConsumerId == "verification.test-change-workflow"
+                && x.ArtifactKey.Kind == VerificationArtifactKind.Procedure
+                && !x.SupportsCapabilities);
     }
 
     private AeroLinkDbContext Context() => new(_options);

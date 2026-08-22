@@ -2,15 +2,27 @@ using System.Security.Cryptography;
 using System.Text;
 using AeroLink.Domain.ChangeControl;
 using AeroLink.Domain.Common;
+using AeroLink.Domain.Verification;
 
 namespace AeroLink.Domain.Hierarchy;
 
-public sealed record LadderStepDraft(string CatalogueEntry, int Position, LevelCapabilities Capabilities);
+public sealed record LadderStepDraft(string CatalogueEntry, int Position, LevelCapabilities Capabilities,
+    IReadOnlyList<VerificationArtifactKind>? EnabledArtifactKinds = null)
+{
+    public IReadOnlyList<VerificationArtifactKind>? EnabledKinds => EnabledArtifactKinds;
+}
 public sealed record LadderRelationshipDraft(string Parent, string Child);
 
 /// <summary>Canonicalizes and hashes an edited ladder without including database-generated identities.</summary>
 public static class ProjectLadderSnapshot
 {
+    public const int LegacySchemaVersion = VerificationArtifactProfileSchema.Legacy;
+    public const int CurrentSchemaVersion = VerificationArtifactProfileSchema.Current;
+
+    /// <summary>
+    /// The original canonical form.  Keep this method byte-for-byte stable: stored v1 histories and hashes are
+    /// evidence and must remain verifiable without being recomputed in the v2 shape.
+    /// </summary>
     public static string Canonicalize(IEnumerable<LadderStepDraft> steps, IEnumerable<LadderRelationshipDraft> relationships)
     {
         var canonicalSteps = steps.OrderBy(x => x.Position).ThenBy(x => x.CatalogueEntry, StringComparer.Ordinal)
@@ -23,6 +35,50 @@ public static class ProjectLadderSnapshot
 
     public static string Hash(string canonicalSnapshot) =>
         Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(canonicalSnapshot))).ToLowerInvariant();
+
+    /// <summary>Canonical v2 adds the profile shape while retaining the same deterministic ordering rules.</summary>
+    public static string CanonicalizeV2(IEnumerable<LadderStepDraft> steps,
+        IEnumerable<LadderRelationshipDraft> relationships, ILadderPolicy? policy = null)
+    {
+        policy ??= LegacyLadderPolicy.Instance;
+        var canonicalSteps = steps.OrderBy(x => x.Position).ThenBy(x => x.CatalogueEntry, StringComparer.Ordinal)
+            .Select(x =>
+            {
+                var level = Enum.Parse<RequirementLevel>(x.CatalogueEntry, false);
+                var definition = policy.Definition(level);
+                var kinds = (x.EnabledArtifactKinds ?? (definition.Has(LevelCapabilities.HasVerification)
+                    ? definition.VerificationProfile?.EnabledKinds
+                    : null) ?? []).ToArray();
+                var profile = definition.VerificationProfile;
+                if (!definition.Has(LevelCapabilities.HasVerification))
+                {
+                    if (kinds.Length != 0)
+                        throw new DomainException($"A level without verification capability cannot enable verification artifacts.");
+                }
+                else
+                    VerificationArtifactProfile.ValidateEnabledKinds(profile?.Discipline
+                        ?? throw new DomainException($"The {level} definition has no verification profile."), kinds);
+                return $"{x.Position}:{x.CatalogueEntry}:{(int)x.Capabilities}:{VerificationArtifactProfile.SerializeKinds(kinds)}";
+            });
+        var canonicalEdges = relationships.OrderBy(x => x.Parent, StringComparer.Ordinal)
+            .ThenBy(x => x.Child, StringComparer.Ordinal)
+            .Select(x => $"{x.Parent}>{x.Child}");
+        return $"schema[{CurrentSchemaVersion}]|steps[{string.Join(';', canonicalSteps)}]|edges[{string.Join(';', canonicalEdges)}]";
+    }
+
+    public static string HashV2(IEnumerable<LadderStepDraft> steps, IEnumerable<LadderRelationshipDraft> relationships,
+        ILadderPolicy? policy = null) => Hash(CanonicalizeV2(steps, relationships, policy));
+
+    public static bool Verify(string canonicalSnapshot, string snapshotHash, int schemaVersion = LegacySchemaVersion)
+    {
+        if (string.IsNullOrWhiteSpace(canonicalSnapshot) || string.IsNullOrWhiteSpace(snapshotHash)) return false;
+        if (schemaVersion is not (LegacySchemaVersion or CurrentSchemaVersion)) return false;
+        if (schemaVersion == CurrentSchemaVersion
+            && !canonicalSnapshot.StartsWith($"schema[{CurrentSchemaVersion}]|", StringComparison.Ordinal)) return false;
+        if (schemaVersion == LegacySchemaVersion
+            && canonicalSnapshot.StartsWith("schema[", StringComparison.Ordinal)) return false;
+        return string.Equals(Hash(canonicalSnapshot), snapshotHash.Trim(), StringComparison.OrdinalIgnoreCase);
+    }
 }
 
 /// <summary>Shared domain validation for an authoring payload before it reaches persistence.</summary>
@@ -49,6 +105,17 @@ public static class ProjectLadderDraftValidator
             var definition = policy.Definition(level);
             if ((step.Capabilities & ~definition.Capabilities) != 0)
                 throw new DomainException($"Capabilities for {level} exceed the supported catalogue bindings.");
+            var kinds = step.EnabledArtifactKinds ?? (definition.Has(LevelCapabilities.HasVerification)
+                ? definition.VerificationProfile?.EnabledKinds
+                : null) ?? [];
+            if (!definition.Has(LevelCapabilities.HasVerification))
+            {
+                if (kinds.Count != 0)
+                    throw new DomainException($"A level without verification capability cannot enable verification artifacts.");
+            }
+            else
+                VerificationArtifactProfile.ValidateEnabledKinds(definition.VerificationProfile?.Discipline
+                    ?? throw new DomainException($"The {level} definition has no verification profile."), kinds);
         }
 
         var edgeList = relationships?.ToList() ?? [];

@@ -1,6 +1,7 @@
 using AeroLink.Domain.Common;
 using AeroLink.Domain.ChangeControl;
 using AeroLink.Domain.Hierarchy;
+using AeroLink.Domain.Verification;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Npgsql;
@@ -16,7 +17,8 @@ public sealed record ProjectLadderEditCommand(
 public sealed record ProjectLadderActivationCommand(long ExpectedVersion, string Reason);
 
 public sealed record ProjectLadderHistoryReadModel(
-    long Revision, string Actor, DateTimeOffset OccurredAt, string Reason, string CanonicalSnapshot, string SnapshotHash);
+    long Revision, string Actor, DateTimeOffset OccurredAt, string Reason, string CanonicalSnapshot, string SnapshotHash,
+    int SnapshotSchemaVersion = ProjectLadderSnapshot.LegacySchemaVersion);
 
 public sealed record LadderCatalogueReadModel(string CatalogueEntry, LevelCapabilities SupportedCapabilities);
 
@@ -42,7 +44,8 @@ public sealed record ProjectLadderReadModel(
     IReadOnlyList<ProjectLadderHistoryReadModel> History,
     LadderConsumerManifest Readiness,
     IReadOnlyList<LadderCatalogueReadModel> Catalogue,
-    bool CanManage)
+    bool CanManage,
+    int VerificationProfileSchemaVersion = VerificationArtifactProfileSchema.Current)
 {
     /// <summary>
     /// The runtime projection is separate from authored Steps so a non-default Draft never becomes client
@@ -115,7 +118,8 @@ public sealed class ProjectLadderAuthoringService(
         foreach (var step in steps)
         {
             var level = Enum.Parse<RequirementLevel>(step.CatalogueEntry, false);
-            var entity = new ProjectLadderStep(checkedDraft.Id, projectId, level, step.Position, step.Capabilities, now);
+            var entity = new ProjectLadderStep(checkedDraft.Id, projectId, level, step.Position, step.Capabilities, now,
+                step.EnabledArtifactKinds);
             checkedDraft.Steps.Add(entity); byName.Add(step.CatalogueEntry, entity);
         }
         foreach (var edge in relationships)
@@ -161,7 +165,8 @@ public sealed class ProjectLadderAuthoringService(
         foreach (var step in steps)
         {
             var level = Enum.Parse<RequirementLevel>(step.CatalogueEntry, false);
-            var entity = new ProjectLadderStep(configuration.Id, projectId, level, step.Position, step.Capabilities, now);
+            var entity = new ProjectLadderStep(configuration.Id, projectId, level, step.Position, step.Capabilities, now,
+                step.EnabledArtifactKinds);
             configuration.Steps.Add(entity); persistedByName.Add(step.CatalogueEntry, entity);
         }
         foreach (var edge in relationships)
@@ -212,6 +217,9 @@ public sealed class ProjectLadderAuthoringService(
             return ActivationInvalid("Only a non-default draft ladder can be activated.");
         try { _ = ProjectLadderResolver.Resolve(configuration, policy); }
         catch (DomainException ex) { return ActivationInvalid(ex.Message); }
+        if (configuration.Steps.Any(step => (step.CatalogueEntry is nameof(RequirementLevel.HighLevel) or nameof(RequirementLevel.LowLevel))
+            && step.EnabledArtifactKinds.Contains(VerificationArtifactKind.Procedure)))
+            return ActivationInvalid("The software Procedure tier is dormant until its governed product upgrade slice.");
         var readiness = LadderConsumerManifestCatalog.BuildForRegistrations(_consumerRegistrations);
         var blockers = string.Join(", ", readiness.MissingOrUnrouted.Select(x => x.Id)
             .Concat(readiness.UnknownRegistrations.Select(x => $"unknown:{x.Id}")));
@@ -236,10 +244,13 @@ public sealed class ProjectLadderAuthoringService(
             return ActivationInvalid("Only a non-default draft ladder can be activated.");
         try { _ = ProjectLadderResolver.Resolve(configuration, policy); }
         catch (DomainException ex) { return ActivationInvalid(ex.Message); }
+        if (configuration.Steps.Any(step => (step.CatalogueEntry is nameof(RequirementLevel.HighLevel) or nameof(RequirementLevel.LowLevel))
+            && step.EnabledArtifactKinds.Contains(VerificationArtifactKind.Procedure)))
+            return ActivationInvalid("The software Procedure tier is dormant until its governed product upgrade slice.");
 
         var steps = configuration.Steps
             .OrderBy(x => x.Position)
-            .Select(x => new LadderStepDraft(x.CatalogueEntry, x.Position, x.Capabilities))
+            .Select(x => new LadderStepDraft(x.CatalogueEntry, x.Position, x.Capabilities, x.EnabledArtifactKinds))
             .ToArray();
         var byId = configuration.Steps.ToDictionary(x => x.Id);
         var relationships = configuration.AllowedUpstream
@@ -298,10 +309,12 @@ public sealed class ProjectLadderAuthoringService(
         var effectivePolicy = ProjectLadderPolicyStorage.ResolvePersisted(configuration, configuration.ProjectId, policy);
         var history = await db.ProjectLadderConfigurationHistories.AsNoTracking()
             .Where(x => x.ConfigurationId == configuration.Id).OrderByDescending(x => x.Revision)
-            .Select(x => new ProjectLadderHistoryReadModel(x.Revision, x.Actor, x.OccurredAt, x.Reason, x.CanonicalSnapshot, x.SnapshotHash))
+            .Select(x => new ProjectLadderHistoryReadModel(x.Revision, x.Actor, x.OccurredAt, x.Reason, x.CanonicalSnapshot,
+                x.SnapshotHash, x.SnapshotSchemaVersion))
             .ToListAsync(ct);
         var effectiveSteps = effectivePolicy.OrderedLevels
-            .Select((level, index) => new LadderStepDraft(level.ToString(), index + 1, effectivePolicy.Definition(level).Capabilities))
+            .Select((level, index) => new LadderStepDraft(level.ToString(), index + 1, effectivePolicy.Definition(level).Capabilities,
+                effectivePolicy.Definition(level).VerificationProfile?.EnabledKinds))
             .ToArray();
         return new(configuration.ProjectId, configuration.Id, configuration.Classification, configuration.State,
             configuration.IsSealed, configuration.SealedAt, configuration.SealedBy,
@@ -309,7 +322,8 @@ public sealed class ProjectLadderAuthoringService(
             configuration.LastUpgradeAt, configuration.LastUpgradeBy, configuration.LastUpgradeVersion,
             configuration.LastUpgradeManifestHash,
             configuration.Version, configuration.ActivationManifestVersion, configuration.ActivationManifestHash,
-            configuration.Steps.OrderBy(x => x.Position).Select(x => new LadderStepDraft(x.CatalogueEntry, x.Position, x.Capabilities)).ToArray(),
+            configuration.Steps.OrderBy(x => x.Position).Select(x => new LadderStepDraft(x.CatalogueEntry, x.Position, x.Capabilities,
+                x.EnabledArtifactKinds)).ToArray(),
             configuration.AllowedUpstream.Select(x => new LadderRelationshipDraft(
                 configuration.Steps.Single(s => s.Id == x.ParentStepId).CatalogueEntry,
                 configuration.Steps.Single(s => s.Id == x.ChildStepId).CatalogueEntry)).ToArray(), history,
@@ -321,6 +335,6 @@ public sealed class ProjectLadderAuthoringService(
                 })
                 .DistinctBy(level => level.Level)
                 .Select(level => new LadderCatalogueReadModel(level.Level.ToString(), level.Capabilities)).ToArray(),
-            canManage) { EffectiveSteps = effectiveSteps };
+            canManage, configuration.VerificationProfileSchemaVersion) { EffectiveSteps = effectiveSteps };
     }
 }

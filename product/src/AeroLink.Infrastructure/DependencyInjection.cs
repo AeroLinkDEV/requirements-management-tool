@@ -17,7 +17,7 @@ public static class DependencyInjection
         services.AddScoped<ProjectLadderUpgradeAuthority>();
         // These are the complete stable ladder seams. Registration is intentionally explicit: the manifest is
         // a readiness inventory, not a flag, and each entry is backed by a project-effective policy route.
-        foreach (var registration in new[]
+        var legacyRegistrations = new[]
         {
             new LadderConsumerRegistration("change-request.authoring", "Change-request level/type acceptance and authoring"),
             new LadderConsumerRegistration("change-request.identifier-allocation", "Requirement and change-request controlled prefixes"),
@@ -37,8 +37,12 @@ public static class DependencyInjection
             new LadderConsumerRegistration("release.readiness", "Release readiness policy gates"),
             new LadderConsumerRegistration("release.reconciliation", "Release trace reconciliation policy"),
             new LadderConsumerRegistration("navigation.primary", "Project-ladder-aware primary navigation and surfaces"),
-        })
+        };
+        foreach (var registration in legacyRegistrations)
             services.AddSingleton<ILadderConsumerRegistration>(registration);
+        foreach (var registration in legacyRegistrations)
+            services.AddSingleton<IVerificationArtifactConsumerRegistration>(
+                LadderConsumerManifestCatalog.TypedRegistration(registration));
         var provider = configuration["Database:Provider"] ?? "Sqlite";
         var connection = configuration.GetConnectionString("AeroLink") ?? "Data Source=aerolink-dev.db";
         // An unrecognised provider used to fall through to SQLite, so an installer who wrote "Postgres"

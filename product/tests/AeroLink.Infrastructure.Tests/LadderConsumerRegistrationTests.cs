@@ -1,4 +1,5 @@
 using AeroLink.Domain.Hierarchy;
+using AeroLink.Domain.Verification;
 using AeroLink.Infrastructure;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -48,5 +49,15 @@ public sealed class LadderConsumerRegistrationTests
         Assert.True(manifest.IsReady);
         Assert.DoesNotContain(manifest.MissingOrUnrouted, x => ids.Contains(x.Id, StringComparer.Ordinal));
         Assert.Empty(manifest.MissingOrUnrouted);
+
+        var typed = services
+            .Where(x => x.ServiceType == typeof(IVerificationArtifactConsumerRegistration))
+            .Select(x => Assert.IsAssignableFrom<IVerificationArtifactConsumerRegistration>(x.ImplementationInstance))
+            .ToArray();
+        Assert.Equal(ids.Length, typed.Length);
+        var typedManifest = LadderConsumerManifestCatalog.BuildV2(
+            registrations.Cast<ILadderConsumerRegistration>().Concat(typed), typed,
+            VerificationArtifactVocabulary.Definitions);
+        Assert.True(typedManifest.IsReady);
     }
 }
