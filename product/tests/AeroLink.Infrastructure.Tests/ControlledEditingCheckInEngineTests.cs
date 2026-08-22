@@ -4,6 +4,7 @@ using System.Text;
 using AeroLink.Domain.Baselines;
 using AeroLink.Domain.ChangeControl;
 using AeroLink.Domain.Identity;
+using AeroLink.Domain.Hierarchy;
 using AeroLink.Domain.Programs;
 using AeroLink.Domain.Requirements;
 using AeroLink.Domain.Traceability;
@@ -283,6 +284,90 @@ public sealed class ControlledEditingCheckInEngineTests
         Assert.Equal("Updated proposal through the universal adapter", updated.Statement);
         Assert.Equal(EditSessionState.Committed,
             (await scenario.Db.ArtifactEditSessions.SingleAsync(x => x.Id == session.Id)).State);
+    }
+
+    [Fact]
+    public async Task Interface_requirement_proposal_check_in_uses_the_normal_controlled_path_without_schema_or_section()
+    {
+        var options = new DbContextOptionsBuilder<AeroLinkDbContext>().UseSqlite("Data Source=:memory:").Options;
+        await using var db = new AeroLinkDbContext(options);
+        await db.Database.OpenConnectionAsync();
+        await db.Database.EnsureCreatedAsync();
+        var now = DateTimeOffset.UtcNow;
+        var program = new ProgramRecord("Controlled ICD Program", $"IC{Guid.NewGuid():N}"[..12]);
+        var project = new ProjectRecord(program.Id, "Controlled ICD Product", "Interface Control");
+        var release = new SoftwareRelease(project.Id, "1.0", false);
+        var configuration = ProjectLadderConfiguration.CreateDraft(project.Id, now);
+        configuration.Steps.Add(new ProjectLadderStep(configuration.Id, project.Id, RequirementLevel.Interface, 1,
+            LegacyLadderPolicy.Instance.Definition(RequirementLevel.Interface).Capabilities, now));
+        var policy = new ResolvedProjectLadderPolicy(ProjectLadderResolver.Resolve(configuration));
+        var scr = new SystemChangeRequest("ICDCR-00001", 0, project.Id, release.Id, "Interface contract",
+            "Problem", "Analysis", "Solution", "engineer", now, ChangeRequestType.Interface,
+            ladderPolicy: policy);
+        var proposal = scr.AddRequirementChange("engineer", "ICDR-000001", 0, RequirementLevel.Interface,
+            RequirementChangeKind.Introduce, "Original interface contract", "Rationale", "Not applicable", now,
+            ladderPolicy: policy);
+        db.AddRange(program, project, release, scr);
+        await db.SaveChangesAsync();
+
+        var adapter = new RequirementProposalControlledEditingAdapter(db, policy);
+        var artifact = await adapter.ResolveAsync(proposal.Id, default) ?? throw new InvalidOperationException();
+        var canonical = adapter.CanonicalSnapshot(artifact);
+        var hash = EnterpriseRequirementsService.Hash(Encoding.UTF8.GetBytes(canonical));
+        var session = new ArtifactEditSession(project.Id, "RequirementProposal", proposal.Id, null, hash,
+            canonical, "engineer", now, true, 15);
+        db.AddRange(session, new ArtifactDraftSnapshot(project.Id, session.Id, "RequirementProposal", proposal.Id,
+            1, canonical, hash, "engineer", now));
+        await db.SaveChangesAsync();
+
+        var latest = JsonSerializer.Serialize(new
+        {
+            proposal.BaseNumber,
+            proposal.Revision,
+            level = proposal.Level.ToString(),
+            kind = proposal.Kind.ToString(),
+            statement = "Updated interface contract",
+            proposal.Rationale,
+            proposal.VerificationMethod,
+            attributesJson = "{\"ignored\":true}",
+            proposal.ImpactDispositionJson,
+            targetSectionId = (Guid?)null,
+        });
+        session.Save(latest, session.Version, now.AddMinutes(1), 15);
+        var latestHash = EnterpriseRequirementsService.Hash(Encoding.UTF8.GetBytes(latest));
+        db.ArtifactDraftSnapshots.Add(new(project.Id, session.Id, "RequirementProposal", proposal.Id,
+            session.Version, latest, latestHash, "engineer", now.AddMinutes(1)));
+        await db.SaveChangesAsync();
+
+        var actor = new AuthenticatedUser(Guid.NewGuid(), "engineer", "Engineer", "engineer@example.test",
+            false, [new UserProgramAccess(program.Id, [ProgramRole.Engineer.ToString()])]);
+        var engine = new ControlledEditingCheckInEngine(db, new IdentityService(db), [adapter]);
+        var result = await engine.CheckInAsync(session.Id, session.Version, actor, now.AddMinutes(2), default);
+
+        Assert.True(result.Success, result.Error);
+        db.ChangeTracker.Clear();
+        var parent = await db.SystemChangeRequests.Include(x => x.RequirementChanges).SingleAsync(x => x.Id == scr.Id);
+        var updated = Assert.Single(parent.RequirementChanges);
+        Assert.Equal("Updated interface contract", updated.Statement);
+        Assert.Equal("{}", updated.AttributesJson);
+        Assert.Null(updated.TargetSectionId);
+
+        var refreshed = await adapter.ResolveAsync(updated.Id, default) ?? throw new InvalidOperationException();
+        var sectionDraft = JsonSerializer.Serialize(new
+        {
+            updated.BaseNumber,
+            updated.Revision,
+            level = updated.Level.ToString(),
+            kind = updated.Kind.ToString(),
+            statement = updated.Statement,
+            rationale = updated.Rationale,
+            verificationMethod = updated.VerificationMethod,
+            attributesJson = "{}",
+            targetSectionId = Guid.NewGuid(),
+        });
+        var error = await Assert.ThrowsAsync<DomainException>(() => adapter.ApplyDraftAsync(refreshed, sectionDraft,
+            actor.UserName, false, now.AddMinutes(3), default));
+        Assert.Contains("no requirements document section", error.Message);
     }
 
     [Fact]

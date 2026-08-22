@@ -1,9 +1,12 @@
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
+using AeroLink.Domain.Baselines;
+using AeroLink.Domain.ChangeControl;
 using AeroLink.Domain.Identity;
 using AeroLink.Domain.Programs;
 using AeroLink.Domain.Hierarchy;
+using AeroLink.Domain.Requirements;
 using AeroLink.Domain.Releases;
 using AeroLink.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
@@ -172,6 +175,85 @@ public sealed class ProjectConfigurationApiTests : IClassFixture<SharedApiHost>
             },
         });
         Assert.Equal(HttpStatusCode.BadRequest, mismatch.StatusCode);
+
+        Guid interfaceRevisionId;
+        Guid systemAssessmentId;
+        using (var scope = _host.Factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            var now = DateTimeOffset.UtcNow;
+            var origin = new SystemChangeRequest("ICDCR-09001", 0, seeded.ProjectId, seeded.ReleaseId,
+                "Approved ICD baseline origin", "P", "A", "S", seeded.ManagerName, now,
+                ChangeRequestType.Interface);
+            origin.AddRequirementChange(seeded.ManagerName, "ICDR-090001", 0, RequirementLevel.Interface,
+                RequirementChangeKind.Introduce, "The interface baseline contract shall remain compatible.", "Baseline trace", "Not applicable", now);
+            origin.SubmitForReview(seeded.ManagerName, [new ApproverSelection(seeded.ManagerName, "Configuration Manager")], now);
+            origin.ApproveActiveStage(seeded.ManagerName, now);
+            var baseline = new CandidateBaseline("SW-01.00", 0, seeded.ProjectId, seeded.ReleaseId, null,
+                "ICD parent baseline", seeded.ManagerName, now);
+            baseline.Select(origin, seeded.ManagerName, now);
+            baseline.Freeze(seeded.ManagerName, now);
+            baseline.MarkRequirementsMaterialized(seeded.ManagerName, new string('a', 64), 1, now);
+            var artifact = new RequirementArtifact(seeded.ProjectId, "ICDR-090001", RequirementLevel.Interface, now);
+            var revision = new RequirementRevision(artifact.Id, 0, "The interface baseline contract shall remain compatible.",
+                "Baseline trace", "Not applicable", RequirementRevisionState.Active, origin.Id, baseline.Id, now);
+            var configured = ProjectLadderConfiguration.CreateDraft(seeded.ProjectId, now);
+            var interfaceStep = new ProjectLadderStep(configured.Id, seeded.ProjectId, RequirementLevel.Interface, 1,
+                LegacyLadderPolicy.Instance.Definition(RequirementLevel.Interface).Capabilities, now);
+            var systemStep = new ProjectLadderStep(configured.Id, seeded.ProjectId, RequirementLevel.System, 2,
+                LegacyLadderPolicy.Instance.Definition(RequirementLevel.System).Capabilities, now);
+            configured.Steps.Add(interfaceStep);
+            configured.Steps.Add(systemStep);
+            configured.AllowedUpstream.Add(new ProjectLadderAllowedUpstream(configured.Id, seeded.ProjectId,
+                interfaceStep.Id, systemStep.Id, now));
+            var resolvedPolicy = new ResolvedProjectLadderPolicy(ProjectLadderResolver.Resolve(configured));
+            var assessment = new DownstreamChangeAssessment(seeded.ProjectId, seeded.ReleaseId, origin.Id,
+                origin.DisplayNumber, RequirementLevel.System, now, resolvedPolicy);
+            assessment.Assign(seeded.ManagerName, seeded.ManagerName, now);
+            assessment.RecordChangeRequired(seeded.ManagerName, now);
+            db.AddRange(origin, baseline, artifact, revision);
+            db.BaselineRequirements.Add(new BaselineRequirementSelection(baseline.Id, artifact.Id, revision.Id));
+            db.Add(assessment);
+            await db.SaveChangesAsync();
+            interfaceRevisionId = revision.Id;
+            systemAssessmentId = assessment.Id;
+        }
+
+        using var upstreamPicker = await client.GetAsync(
+            $"/api/authoring/upstream-requirements?projectId={seeded.ProjectId}&releaseId={seeded.ReleaseId}&childLevel=System");
+        Assert.Equal(HttpStatusCode.OK, upstreamPicker.StatusCode);
+        using var upstreamBody = JsonDocument.Parse(await upstreamPicker.Content.ReadAsStringAsync());
+        var upstream = Assert.Single(upstreamBody.RootElement.EnumerateArray());
+        Assert.Equal(interfaceRevisionId, upstream.GetProperty("revisionId").GetGuid());
+        Assert.Equal("Interface", upstream.GetProperty("level").GetString());
+
+        using var systemDraft = await client.PostAsJsonAsync("/api/change-request-drafts", new
+        {
+            projectId = seeded.ProjectId,
+            targetReleaseId = seeded.ReleaseId,
+            type = "System",
+            title = "System allocation to ICD",
+            problem = "P", analysis = "A", solution = "S",
+            requirementChanges = new[]
+            {
+                new { level = "System", kind = "Introduce", statement = "The system shall honor the interface contract.",
+                    rationale = "Configured ICD allocation", verificationMethod = "Test",
+                    upstreamRevisionIds = new[] { interfaceRevisionId } },
+            },
+        });
+        Assert.True(systemDraft.StatusCode == HttpStatusCode.Created,
+            $"{systemDraft.StatusCode}: {await systemDraft.Content.ReadAsStringAsync()}");
+
+        using var assessmentLink = await client.PostAsJsonAsync($"/api/downstream-assessments/{systemAssessmentId}/change-requests",
+            new { changeRequestId = JsonDocument.Parse(await systemDraft.Content.ReadAsStringAsync()).RootElement.GetProperty("id").GetGuid() });
+        Assert.Equal(HttpStatusCode.OK, assessmentLink.StatusCode);
+
+        using var search = await client.GetAsync($"/api/search?projectId={seeded.ProjectId}&releaseId={seeded.ReleaseId}&query=Author%20ICD%20change");
+        Assert.Equal(HttpStatusCode.OK, search.StatusCode);
+        using var searchBody = JsonDocument.Parse(await search.Content.ReadAsStringAsync());
+        var searchHit = Assert.Single(searchBody.RootElement.GetProperty("items").EnumerateArray(),
+            item => item.GetProperty("id").GetGuid() == draftBody.RootElement.GetProperty("id").GetGuid());
+        Assert.Equal("Interface", searchHit.GetProperty("level").GetString());
     }
 
     [Fact]

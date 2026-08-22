@@ -243,7 +243,7 @@ function AppNavigation({ user, workspaces, activeId, selectedProjectId, selected
       </div>
       <nav className="primaryNavigation" aria-label="Primary navigation">
         <div className="navHome">{item("Command Center","dashboard","⌂")}{item("My Work","mywork","◎")}</div>
-         {hasRequirements && <details className="navGroup" open={engineeringView}><summary>REQUIREMENTS</summary><div className="navScopeSwitch" role="group" aria-label="Requirements scope">{hasSystem && <button type="button" aria-pressed={engineeringScope==="system"} onClick={()=>onNavigate(engineeringTargetView,"system")}>System</button>}{hasSoftware && <button type="button" aria-pressed={engineeringScope==="software"} onClick={()=>onNavigate(engineeringTargetView,"software",undefined,engineeringTargetView==="history"?defaultSoftwareChangeLevel:undefined)}>Software</button>}</div>{(engineeringScope==="system" ? hasSystemChange : hasSoftwareChange) && item("Change Requests","history","◇",engineeringScope,engineeringScope==="software"?"Software Change Requests":"System Change Requests",engineeringScope==="software"?defaultSoftwareChangeLevel:undefined)}{hasInterfaceChange && item("New Interface / ICD Change Request","createInterfaceChange","◇","system","New Interface / ICD Change Request","Interface")}{(engineeringScope==="system" ? hasSystem : hasSoftware) && item("Requirements Explorer","requirements","≡",engineeringScope,engineeringScope==="software"?"Software Requirements Explorer":"System Requirements Explorer")}{(engineeringScope==="system" ? hasSystemRequirementsDocument : hasSoftwareRequirementsDocument) && item("Generated Documents","documents","▤",engineeringScope,engineeringScope==="software"?"Generated Software Requirements Documents":"Generated System Requirements Documents")}{hasRequirements && item("Digital Thread","lifecycle","↗","system","Digital Thread")}</details>}
+         {hasRequirements && <details className="navGroup" open={engineeringView}><summary>REQUIREMENTS</summary><div className="navScopeSwitch" role="group" aria-label="Requirements scope">{hasSystem && <button type="button" aria-pressed={engineeringScope==="system"} onClick={()=>onNavigate(engineeringTargetView,"system")}>System</button>}{hasSoftware && <button type="button" aria-pressed={engineeringScope==="software"} onClick={()=>onNavigate(engineeringTargetView,"software",undefined,engineeringTargetView==="history"?defaultSoftwareChangeLevel:undefined)}>Software</button>}</div>{(engineeringScope==="system" ? hasSystemChange : hasSoftwareChange) && item("Change Requests","history","◇",engineeringScope,engineeringScope==="software"?"Software Change Requests":"System Change Requests",engineeringScope==="software"?defaultSoftwareChangeLevel:undefined)}{hasInterfaceChange && item("Interface / ICD Change Requests","history","◇","system","Interface / ICD Change Requests","Interface")}{hasInterfaceChange && item("New Interface / ICD Change Request","createInterfaceChange","◇","system","New Interface / ICD Change Request","Interface")}{(engineeringScope==="system" ? hasSystem : hasSoftware) && item("Requirements Explorer","requirements","≡",engineeringScope,engineeringScope==="software"?"Software Requirements Explorer":"System Requirements Explorer")}{(engineeringScope==="system" ? hasSystemRequirementsDocument : hasSoftwareRequirementsDocument) && item("Generated Documents","documents","▤",engineeringScope,engineeringScope==="software"?"Generated Software Requirements Documents":"Generated System Requirements Documents")}{hasRequirements && item("Digital Thread","lifecycle","↗","system","Digital Thread")}</details>}
          {(hasSystemVerification || hasSoftwareVerification) && <details className="navGroup" open={view==="verification"||view==="testingCoverage"||view==="testChangeRequests"||view==="testChangeRequest"||view==="createTestChangeRequest"||view==="procedureExplorer"||view==="testResults"||(view==="documents"&&(discipline==="systemTest"||discipline==="softwareTest"))}>
           <summary>VERIFICATION</summary>
           <div className="navScopeSwitch" role="group" aria-label="Verification scope">
@@ -307,7 +307,7 @@ function App() {
     [density,setDensity]=useState<WorkspaceDensity>(()=>(localStorage.getItem('aerolink-density')==='compact'?'compact':'comfortable')),
     [motion,setMotion]=useState<MotionPreference>(()=>(localStorage.getItem('aerolink-motion')==='reduced'?'reduced':'full')),
     [toast,setToast]=useState(''),
-    [pendingAssessmentLink,setPendingAssessmentLink]=useState<{assessmentId:string;targetLevel:'HighLevel'|'LowLevel';sourceNumber:string;changeRequestId?:string}>(),
+    [pendingAssessmentLink,setPendingAssessmentLink]=useState<{assessmentId:string;targetLevel:'System'|'HighLevel'|'LowLevel';sourceNumber:string;changeRequestId?:string}>(),
     [dashboardLoading,setDashboardLoading]=useState(true),
     [historyStateIntent,setHistoryStateIntent]=useState<HistoryStateIntent|undefined>(initialRoute.historyStateIntent),
     [historyTypeIntent,setHistoryTypeIntent]=useState<HistoryTypeIntent|undefined>(initialRoute.historyTypeIntent),
@@ -357,6 +357,7 @@ function App() {
       [...(project?.releases ?? [])].reverse().find((x) => !x.isReleased) ??
       project?.releases.at(-1);
   const projectId = project?.project.id ?? "";
+  const context:RouteContext|undefined=active&&project&&release?{programId:active.program.id,projectId:project.project.id,releaseId:release.id}:undefined;
   useEffect(() => {
     let current = true;
     setLadder(null); setLadderError("");
@@ -511,7 +512,6 @@ function App() {
         </div>
       </div>
     );
-  const context:RouteContext|undefined=active&&project&&release?{programId:active.program.id,projectId:project.project.id,releaseId:release.id}:undefined;
   // These two render nothing without an artifact to render, so a navigation that omits one used to change the
   // address bar and then fall through to whichever view matched next — Command Center. The reader saw a
   // populated dashboard, the URL still claimed to be on the artifact, and nothing was reported. A link built
@@ -526,7 +526,7 @@ function App() {
       setToast("That link is missing its destination, so nothing was opened. This is a defect — please report it.");
       return;
     }
-    const nextStateIntent=target==="history"?stateIntent:undefined,nextTypeIntent=target==="history"?(typeIntent??(area==="software"?"Software":"System")):undefined;setView(target);setDiscipline(area);setHistoryStateIntent(nextStateIntent);setHistoryTypeIntent(nextTypeIntent);setSelectedArtifactId(artifactId??"");setSelectedArtifactKind(artifactKind??"");setRequirementRevisionId("");setSelectedScrId(target==="scr"?artifactId??"":["scr"].includes(target)?selectedScrId:"");const navigationContext=context??(target==="managedDocuments"&&active&&project?{programId:active.program.id,projectId:project.project.id,releaseId:""}:undefined);if(navigationContext){const path=routePath(navigationContext,target,area,artifactId,artifactKind,nextStateIntent,nextTypeIntent);history[replace?"replaceState":"pushState"]({},"",path)}};
+    const nextStateIntent=target==="history"?stateIntent:undefined,nextTypeIntent=target==="history"?(typeIntent??(artifactKind==="Interface"?"Interface":area==="software"?"Software":"System")):undefined;setView(target);setDiscipline(area);setHistoryStateIntent(nextStateIntent);setHistoryTypeIntent(nextTypeIntent);setSelectedArtifactId(artifactId??"");setSelectedArtifactKind(artifactKind??"");setRequirementRevisionId("");setSelectedScrId(target==="scr"?artifactId??"":["scr"].includes(target)?selectedScrId:"");const navigationContext=context??(target==="managedDocuments"&&active&&project?{programId:active.program.id,projectId:project.project.id,releaseId:""}:undefined);if(navigationContext){const path=routePath(navigationContext,target,area,artifactId,artifactKind,nextStateIntent,nextTypeIntent);history[replace?"replaceState":"pushState"]({},"",path)}};
   // Opens a change request in the build that owns it rather than the one that happens to be selected. A
   // historical revision's source change request belongs to an earlier build by definition, so routing it into
   // the in-work build would present a released, frozen record inside a context that says it can be edited.
@@ -701,7 +701,7 @@ function App() {
           const linked=await linkPendingAssessment(changeRequestId)
           if(linked)setToast(pendingAssessmentLink?`${displayNumber} saved and linked to the ${pendingAssessmentLink.sourceNumber} downstream assessment.`:`${displayNumber} saved as a Draft.`)
           else{setPendingAssessmentLink(current=>current?{...current,changeRequestId:changeRequestId}:current);setToast(`${displayNumber} saved, but its downstream assessment link needs attention.`)}
-          navigate("scr",view === "createSoftwareChange" ? "software" : "system",changeRequestId);
+          navigate("scr",view === "createSoftwareChange" ? "software" : "system",changeRequestId,view === "createInterfaceChange" ? "Interface" : undefined);
         }}
       />
     );
@@ -711,14 +711,15 @@ function App() {
         api={API}
         changeRequestId={selectedScrId}
         user={user}
-        onBack={() => navigate("history", discipline)}
+        onBack={() => navigate("history", discipline, undefined, undefined, false, undefined, historyTypeIntent)}
         onChanged={loadData}
-        onOpenScr={(id) => navigate("scr", discipline, id)}
+        onOpenScr={(id) => navigate("scr", discipline, id, historyTypeIntent === "Interface" ? "Interface" : undefined)}
         onOpenRequirement={(id,level)=>navigate("requirements",level==="System"?"system":"software",id)}
         onOpenProblemReport={(id)=>navigate("problemReports","system",id)}
-        onDisciplineResolved={(resolved) => {
+        onDisciplineResolved={(resolved,changeRequestType) => {
           if (resolved !== discipline) setDiscipline(resolved);
-          if (context) history.replaceState({}, "", routePath(context, "scr", resolved, selectedScrId));
+          if (changeRequestType === "Interface") setHistoryTypeIntent("Interface");
+          if (context) history.replaceState({}, "", routePath(context, "scr", resolved, selectedScrId, changeRequestType));
         }}
         releases={release ? [release] : []}
       /></>
@@ -742,7 +743,7 @@ function App() {
         projectId={project.project.id}
         releases={release ? [release] : []}
          activeReleaseId={release?.id??""}
-         scope={discipline === "software" ? "Software" : "System"}
+         scope={historyTypeIntent === "Interface" ? "Interface" : discipline === "software" ? "Software" : "System"}
          ladder={ladder}
          initialSoftwareLevel={selectedArtifactKind === "LowLevel" ? "LowLevel" : "HighLevel"}
         initialAssessmentId={selectedArtifactId||undefined}
@@ -752,15 +753,16 @@ function App() {
           setSelectedArtifactKind(level);
           if(context)history.pushState({},"",routePath(context,"history","software",undefined,level,historyStateIntent,historyTypeIntent));
         }}
-        onAssessmentSelected={(id)=>{setSelectedArtifactId(id??"");if(context)history.pushState({},"",routePath(context,"history","software",id,selectedArtifactKind,historyStateIntent,historyTypeIntent))}}
+        onAssessmentSelected={(id)=>{setSelectedArtifactId(id??"");if(context)history.pushState({},"",routePath(context,"history",discipline === "software" ? "software" : "system",id,selectedArtifactKind,historyStateIntent,historyTypeIntent))}}
         onStateIntentChange={(stateIntent)=>{
           setHistoryStateIntent(stateIntent);
           if(context)history.replaceState({},"",routePath(context,"history",discipline,undefined,selectedArtifactKind,stateIntent,historyTypeIntent));
         }}
         onBack={() => navigate("dashboard")}
-        onOpenScr={(id) => navigate("scr",discipline,id)}
+        onOpenScr={(id) => navigate("scr",discipline,id,historyTypeIntent === "Interface" ? "Interface" : undefined)}
         onOpenRequirement={(id,level)=>navigate("requirements",level==="System"?"system":"software",id)}
-        onCreateSystem={() => navigate("createSystemScr","system")}
+        onCreateSystem={(assessmentId,sourceNumber) => {if(assessmentId&&sourceNumber)setPendingAssessmentLink({assessmentId,targetLevel:"System",sourceNumber});navigate("createSystemScr","system")}}
+        onCreateInterface={() => navigate("createInterfaceChange","system",undefined,"Interface")}
         onCreateSoftware={(level,assessmentId,sourceNumber) => {if(assessmentId&&sourceNumber)setPendingAssessmentLink({assessmentId,targetLevel:level,sourceNumber});navigate("createSoftwareChange","software",undefined,level)}}
         user={user}
       />

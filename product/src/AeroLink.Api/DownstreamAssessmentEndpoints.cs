@@ -1,6 +1,7 @@
 using AeroLink.Domain.ChangeControl;
 using AeroLink.Domain.Common;
 using AeroLink.Domain.Identity;
+using AeroLink.Domain.Hierarchy;
 using AeroLink.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 
@@ -179,7 +180,8 @@ public static class DownstreamAssessmentEndpoints
         });
 
         app.MapPost("/api/downstream-assessments/{id:guid}/change-requests", async (Guid id,
-            DownstreamLinkRequest request, HttpContext http, AeroLinkDbContext db, IdentityService identity, CancellationToken ct) =>
+            DownstreamLinkRequest request, HttpContext http, AeroLinkDbContext db, IdentityService identity,
+            IProjectLadderPolicyResolver policyResolver, CancellationToken ct) =>
         {
             var assessment = await db.DownstreamChangeAssessments.Include(x => x.ChangeRequestLinks)
                 .SingleOrDefaultAsync(x => x.Id == id, ct);
@@ -191,11 +193,20 @@ public static class DownstreamAssessmentEndpoints
             var changeRequest = await db.SystemChangeRequests.Include(x => x.RequirementChanges)
                 .SingleOrDefaultAsync(x => x.Id == request.ChangeRequestId, ct);
             if (changeRequest is null) return Results.NotFound();
+            ILadderPolicy policy;
+            try { policy = await policyResolver.ResolveAsync(assessment.ProjectId, ct); }
+            catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
+            LevelDefinition targetDefinition;
+            try { targetDefinition = policy.Definition(assessment.TargetLevel); }
+            catch (DomainException) { return Results.BadRequest(new { error = $"The configured project ladder does not contain {assessment.TargetLevel}." }); }
+            var binding = targetDefinition.ChangeRequest;
+            if (binding is null || !targetDefinition.Has(LevelCapabilities.HasChangeControl))
+                return Results.BadRequest(new { error = $"The configured {assessment.TargetLevel} level has no change-request binding." });
             if (changeRequest.ProjectId != assessment.ProjectId || changeRequest.TargetReleaseId != assessment.ReleaseId
-                || changeRequest.Type != ChangeRequestType.Software)
-                return Results.BadRequest(new { error = "Choose a Software change request from this Project and build." });
+                || changeRequest.Type != binding.Type || changeRequest.SoftwareLevel != binding.SoftwareLevel)
+                return Results.BadRequest(new { error = $"Choose a {binding.Type} change request for {assessment.TargetLevel} from this Project and build." });
             if (changeRequest.State != ChangeRequestState.Draft)
-                return Results.BadRequest(new { error = "Only a Draft software change request can accept another upstream assessment." });
+                return Results.BadRequest(new { error = $"Only a Draft {binding.Type} change request can accept another upstream assessment." });
             if (changeRequest.RequirementChanges.Count != 0 && changeRequest.RequirementChanges.All(x => x.Level != assessment.TargetLevel))
                 return Results.BadRequest(new { error = $"That change request does not contain {assessment.TargetLevel} requirement work." });
             try

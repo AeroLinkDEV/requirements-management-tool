@@ -200,7 +200,7 @@ type Props = {
   onOpenScr: (id: string) => void;
   onOpenRequirement: (id: string, level: RequirementLevel) => void;
   onOpenProblemReport: (id: string) => void;
-  onDisciplineResolved: (discipline: "system" | "software") => void;
+  onDisciplineResolved: (discipline: "system" | "software", changeRequestType?: "Interface") => void;
   /**
    * The project's builds, so this record's own target can be resolved once it loads. Without them the rail
    * can only report the stored state, and "Selected for baseline" is the one wording nobody wants to read.
@@ -458,7 +458,7 @@ export default function ChangeRequestWorkspace({
       }
       {
       const detail = (await response.json()) as ChangeRequestDetail;
-      onDisciplineResolved(detail.type === "Software" ? "software" : "system");
+      onDisciplineResolved(detail.type === "Software" ? "software" : "system", detail.type === "Interface" ? "Interface" : undefined);
       setScr(detail);
       let reports: ProblemReportSummary[] = [];
       try {

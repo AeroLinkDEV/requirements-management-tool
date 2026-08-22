@@ -327,10 +327,14 @@ public sealed class SystemChangeRequestControlledEditingAdapter(AeroLinkDbContex
             if (!policy.AcceptsChangeRequest(scr.Type, level))
                 throw new DomainException(scr.Type == ChangeRequestType.System
                     ? "A System change request can contain only System requirement changes."
+                    : scr.Type == ChangeRequestType.Interface
+                        ? "An Interface change request can contain only Interface requirement changes."
                     : "A Software change request can contain only HLR and LLR changes.");
             var definition = policy.Definition(level);
-            if (!definition.Has(LevelCapabilities.HasRequirementsDocument) || definition.RequirementsCatalogue is null)
-                throw new DomainException($"The configured project ladder has no active requirements document for {level}.");
+            var hasRequirementsDocument = definition.Has(LevelCapabilities.HasRequirementsDocument)
+                && definition.RequirementsCatalogue is not null;
+            if (!hasRequirementsDocument && raw.TargetSectionId is not null)
+                throw new DomainException($"The configured {level} level has no requirements document section to receive a change.");
             var isDerived = raw.IsDerived ?? RequirementAuthoringJson.IsDerived(raw.AttributesJson);
             if (isDerived && string.IsNullOrWhiteSpace(raw.Rationale))
                 throw new DomainException("Every derived software requirement requires an explicit engineering rationale.");
@@ -363,11 +367,15 @@ public sealed class SystemChangeRequestControlledEditingAdapter(AeroLinkDbContex
             }
             if (!reserved.Add(baseNumber))
                 throw new DomainException($"{baseNumber} appears more than once in this Draft.");
-            var schema = await db.ArtifactSchemas.Include(x => x.Fields).SingleOrDefaultAsync(x =>
-                x.ProjectId == scr.ProjectId && x.IsActive && x.AppliesTo == level.ToString(), ct)
-                ?? throw new DomainException($"No active requirement schema is configured for {level}.");
-            var attributes = RequirementAuthoringJson.ValidateAndMergeAttributes(raw.AttributesJson, schema,
-                policy.IsDownstreamTarget(level) && isDerived);
+            var attributes = "{}";
+            if (hasRequirementsDocument)
+            {
+                var schema = await db.ArtifactSchemas.Include(x => x.Fields).SingleOrDefaultAsync(x =>
+                    x.ProjectId == scr.ProjectId && x.IsActive && x.AppliesTo == level.ToString(), ct)
+                    ?? throw new DomainException($"No active requirement schema is configured for {level}.");
+                attributes = RequirementAuthoringJson.ValidateAndMergeAttributes(raw.AttributesJson, schema,
+                    policy.IsDownstreamTarget(level) && isDerived);
+            }
             normalized.Add(new(baseNumber, revision, level, kind, raw.Statement ?? "", raw.Rationale ?? "",
                 raw.VerificationMethod ?? "", raw.RichText ?? "", attributes,
                 raw.ImpactDispositionJson ?? "{}", raw.TargetSectionId,
@@ -451,17 +459,23 @@ public sealed class RequirementProposalControlledEditingAdapter(AeroLinkDbContex
             !Enum.TryParse<RequirementChangeKind>(draft.Kind, true, out var kind) || kind != current.Kind)
             throw new DomainException($"The controlled identity of {current.DisplayNumber} cannot change.");
         var definition = effectivePolicy.Definition(current.Level);
-        if (!definition.Has(LevelCapabilities.HasRequirementsDocument) || definition.RequirementsCatalogue is null)
-            throw new DomainException($"The configured project ladder has no active requirements document for {current.Level}.");
-        // Synchronize the catalogue from the effective project policy before validating the proposal's
-        // structured attributes; the draft cannot author against an absent or capability-disabled level.
-        await new EnterpriseRequirementsService(db, ladderPolicy, policyResolver).SynchronizeProjectAsync(parent.ProjectId, actor, ct);
-        var schema = await db.ArtifactSchemas.Include(x => x.Fields).SingleOrDefaultAsync(x =>
-            x.ProjectId == parent.ProjectId && x.IsActive && x.AppliesTo == current.Level.ToString(), ct)
-            ?? throw new DomainException($"No active requirement schema is configured for {current.Level}.");
-        var attributes = RequirementAuthoringJson.ValidateAndMergeAttributes(draft.AttributesJson, schema,
-            effectivePolicy.IsDownstreamTarget(current.Level) &&
-            (draft.IsDerived ?? RequirementAuthoringJson.IsDerived(current.AttributesJson)));
+        var hasRequirementsDocument = definition.Has(LevelCapabilities.HasRequirementsDocument)
+            && definition.RequirementsCatalogue is not null;
+        if (!hasRequirementsDocument && (draft.TargetSectionId ?? current.TargetSectionId) is not null)
+            throw new DomainException($"The configured {current.Level} level has no requirements document section to receive a change.");
+        var attributes = "{}";
+        if (hasRequirementsDocument)
+        {
+            // Synchronize the catalogue from the effective project policy before validating the proposal's
+            // structured attributes; the draft cannot author against an absent or capability-disabled level.
+            await new EnterpriseRequirementsService(db, ladderPolicy, policyResolver).SynchronizeProjectAsync(parent.ProjectId, actor, ct);
+            var schema = await db.ArtifactSchemas.Include(x => x.Fields).SingleOrDefaultAsync(x =>
+                x.ProjectId == parent.ProjectId && x.IsActive && x.AppliesTo == current.Level.ToString(), ct)
+                ?? throw new DomainException($"No active requirement schema is configured for {current.Level}.");
+            attributes = RequirementAuthoringJson.ValidateAndMergeAttributes(draft.AttributesJson, schema,
+                effectivePolicy.IsDownstreamTarget(current.Level) &&
+                (draft.IsDerived ?? RequirementAuthoringJson.IsDerived(current.AttributesJson)));
+        }
 
         // Every proposal is rewritten from these drafts, so anything not carried here is lost. The chosen section
         // of the untouched proposals comes from the stored change, and of the edited one from the draft — falling

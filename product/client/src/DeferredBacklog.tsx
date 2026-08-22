@@ -28,7 +28,7 @@ type Release = { id: string; version: string; isReleased?: boolean }
 export default function DeferredBacklog({ api, projectId, type, softwareLevel, activeRelease, releases, onOpen, onBroughtIn }: {
   api: string
   projectId: string
-  type: 'System' | 'Software'
+  type: 'System' | 'Software' | 'Interface'
   softwareLevel?: 'HighLevel' | 'LowLevel'
   activeRelease?: Release
   releases: Release[]

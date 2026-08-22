@@ -5,7 +5,7 @@ import { PersonName } from './People'
 import { apiRequest, operationError } from './apiClient'
 import './DownstreamAssessmentQueue.css'
 
-type Level='HighLevel'|'LowLevel'
+type Level='System'|'HighLevel'|'LowLevel'
 type SourceChange={id:string;displayNumber:string;level:string;kind:string;statement:string}
 type Reopening={id:string;previousState:string;previousOutcome:string;previousRationale:string;previousDecidedBy?:string;previousDecidedAt?:string;previousApprovedBy?:string;previousApprovedAt?:string;detachedChangeRequestNumbers:string;reason:string;actorId:string;occurredAt:string}
 type Assessment={id:string;sourceChangeRequestId:string;sourceChangeRequestNumber:string;sourceTitle:string;sourceProblem:string;sourceAnalysis:string;sourceSolution:string;sourceChanges:SourceChange[];targetLevel:Level;state:'Open'|'InReview'|'Approved'|'Superseded';outcome:'Pending'|'ChangeRequired'|'NoChangeRequired'|'ChangeRequestsLinked';assignedEngineerId?:string;selectedApproverId?:string;rationale:string;decidedBy?:string;decidedAt?:string;approvedBy?:string;approvedAt?:string;supersededByAssessmentId?:string;supersededReason:string;buildReleased:boolean;linkedChangeRequests:{changeRequestId:string;changeRequestNumber:string;title:string;state:string}[];reopenings:Reopening[];capabilities:{canAssign:boolean;canEdit:boolean;canSubmit:boolean;canApprove:boolean;canReturn:boolean;canReopen:boolean}}
@@ -13,7 +13,7 @@ type Draft={id:string;displayNumber:string;title:string;requirementCount:number}
 type RationaleDecision={assessmentId:string;sourceNumber:string;kind:'no-change'|'return'|'reopen'}
 type Impact={baseNumber:string;known:boolean;derivedRequirements:{id:string;displayNumber:string;level:string;statement:string;linkType:string}[]}
 
-const levelName=(level:Level)=>level==='HighLevel'?'HLR':'LLR'
+const levelName=(level:Level)=>level==='System'?'System':level==='HighLevel'?'HLR':'LLR'
 /**
  * The one question the drawer asks before it offers anything.
  *
@@ -68,7 +68,7 @@ export default function DownstreamAssessmentQueue({api,projectId,releaseId,targe
   const [approvers,setApprovers]=useState<Record<string,{userId:string;name:string}>>({})
   const [decision,setDecision]=useState<RationaleDecision>(),[rationale,setRationale]=useState('')
   const [selectedId,setSelectedId]=useState(initialAssessmentId??''),[impacts,setImpacts]=useState<Impact[]>([]),[impactBusy,setImpactBusy]=useState(false)
-  const load=useCallback(async()=>{const [assessments,requests]=await Promise.all([fetch(`${api}/api/downstream-assessments?projectId=${projectId}&releaseId=${releaseId}&targetLevel=${targetLevel}`),fetch(`${api}/api/history/change-requests?projectId=${projectId}&releaseId=${releaseId}&type=Software&level=${targetLevel}&state=Draft&page=1&pageSize=100`)]);if(assessments.ok)setRows(await assessments.json());if(requests.ok)setDrafts((await requests.json()).items)},[api,projectId,releaseId,targetLevel])
+  const load=useCallback(async()=>{const changeRequestType=targetLevel==='System'?'System':'Software';const [assessments,requests]=await Promise.all([fetch(`${api}/api/downstream-assessments?projectId=${projectId}&releaseId=${releaseId}&targetLevel=${targetLevel}`),fetch(`${api}/api/history/change-requests?projectId=${projectId}&releaseId=${releaseId}&type=${changeRequestType}${changeRequestType==='Software'?`&level=${targetLevel}`:''}&state=Draft&page=1&pageSize=100`)]);if(assessments.ok)setRows(await assessments.json());if(requests.ok)setDrafts((await requests.json()).items)},[api,projectId,releaseId,targetLevel])
   useEffect(()=>{void load()},[load,revision])
   useEffect(()=>{setSelectedId(initialAssessmentId??'')},[initialAssessmentId])
   // A deep link restored through Back can be re-derived only once the queue's data has arrived. The
