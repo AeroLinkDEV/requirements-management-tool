@@ -210,7 +210,7 @@ public sealed class SecondShowcaseSeeder(
         ILadderPolicy policy, RequirementLevel level, DateTimeOffset now, CancellationToken ct)
     {
         var software = level == RequirementLevel.LowLevel;
-        var baseNumber = software ? "LLRCR-71202" : "SRCR-71201";
+        var baseNumber = software ? "LLRCR-00001" : "SRCR-00001";
         var request = await db.SystemChangeRequests
             .Include(x => x.RequirementChanges).Include(x => x.ReviewCycles).ThenInclude(x => x.Steps)
             .SingleOrDefaultAsync(x => x.ProjectId == projectId && x.BaseNumber == baseNumber && x.Revision == 0, ct);
@@ -229,7 +229,7 @@ public sealed class SecondShowcaseSeeder(
             || request.RequirementChanges.Count != 1)
             throw new InvalidOperationException($"The second showcase request {request.DisplayNumber} has unexpected scope or content.");
         var change = request.RequirementChanges.Single();
-        var expectedNumber = software ? "LLR-71202" : "SYSR-71201";
+        var expectedNumber = software ? "LLR-00001" : "SYSR-00001";
         if (change.BaseNumber != expectedNumber || change.Level != level || change.Kind != RequirementChangeKind.Introduce)
             throw new InvalidOperationException($"The second showcase request {request.DisplayNumber} has unexpected requirement content.");
 
@@ -378,12 +378,12 @@ public sealed class SecondShowcaseSeeder(
     private static SystemChangeRequest BuildSystemRequest(Guid projectId, Guid releaseId, ILadderPolicy policy,
         DateTimeOffset now)
     {
-        var request = new SystemChangeRequest("SRCR-71201", 0, projectId, releaseId,
+        var request = new SystemChangeRequest("SRCR-00001", 0, projectId, releaseId,
             "Add configured system scheduling behavior", "The configured workspace needs one system behavior.",
             "The system impact was assessed against the authored two-level ladder.",
             "Introduce the system behavior and its verification basis.", SystemsAuthor, now,
             ChangeRequestType.System, ladderPolicy: policy);
-        request.AddRequirementChange(SystemsAuthor, "SYSR-71201", 0, RequirementLevel.System,
+        request.AddRequirementChange(SystemsAuthor, "SYSR-00001", 0, RequirementLevel.System,
             RequirementChangeKind.Introduce,
             "The configured system shall schedule approved navigation work.",
             "The second showcase demonstrates a System source change.", "Test", now, ladderPolicy: policy);
@@ -393,12 +393,12 @@ public sealed class SecondShowcaseSeeder(
     private static SystemChangeRequest BuildLowLevelRequest(Guid projectId, Guid releaseId, ILadderPolicy policy,
         DateTimeOffset now)
     {
-        var request = new SystemChangeRequest("LLRCR-71202", 0, projectId, releaseId,
+        var request = new SystemChangeRequest("LLRCR-00001", 0, projectId, releaseId,
             "Implement configured scheduling behavior", "The implementation needs one low-level requirement.",
             "The implementation is directly allocated to the system behavior.",
             "Introduce the low-level implementation behavior.", SoftwareAuthor, now,
             ChangeRequestType.Software, softwareLevel: RequirementLevel.LowLevel, ladderPolicy: policy);
-        request.AddRequirementChange(SoftwareAuthor, "LLR-71202", 0, RequirementLevel.LowLevel,
+        request.AddRequirementChange(SoftwareAuthor, "LLR-00001", 0, RequirementLevel.LowLevel,
             RequirementChangeKind.Introduce,
             "The configured low-level component shall implement deterministic scheduling.",
             "The second showcase demonstrates a LowLevel child with a direct System trace.", "Test", now,

@@ -51,10 +51,10 @@ public sealed class SecondShowcaseSeederTests
             Assert.Equal("showcase.second", activationHistory.Actor);
             var systemRequest = await db.SystemChangeRequests
                 .Include(x => x.ReviewCycles).ThenInclude(x => x.Steps)
-                .SingleAsync(x => x.ProjectId == first.ProjectId && x.BaseNumber == "SRCR-71201");
+                .SingleAsync(x => x.ProjectId == first.ProjectId && x.BaseNumber == "SRCR-00001");
             var lowLevelRequest = await db.SystemChangeRequests
                 .Include(x => x.ReviewCycles).ThenInclude(x => x.Steps)
-                .SingleAsync(x => x.ProjectId == first.ProjectId && x.BaseNumber == "LLRCR-71202");
+                .SingleAsync(x => x.ProjectId == first.ProjectId && x.BaseNumber == "LLRCR-00001");
             Assert.Single(systemRequest.ReviewCycles.SelectMany(x => x.Steps),
                 x => x.ApproverId == "systems.reviewer" && x.State == ApprovalStepState.Approved);
             Assert.Single(lowLevelRequest.ReviewCycles.SelectMany(x => x.Steps),
@@ -197,7 +197,7 @@ public sealed class SecondShowcaseSeederTests
                     (step, cycle) => new { step.Id, cycle.ChangeRequestId })
                 .Join(db.SystemChangeRequests, x => x.ChangeRequestId, request => request.Id,
                     (x, request) => new { x.Id, request.ProjectId, request.BaseNumber })
-                .Where(x => x.ProjectId == summary.ProjectId && x.BaseNumber == "SRCR-71201")
+                .Where(x => x.ProjectId == summary.ProjectId && x.BaseNumber == "SRCR-00001")
                 .Select(x => x.Id).SingleAsync();
             await db.Database.ExecuteSqlInterpolatedAsync($"UPDATE approval_steps SET ApproverId = {"wrong.approver"} WHERE Id = {stepId}");
             db.ChangeTracker.Clear();
@@ -250,6 +250,9 @@ public sealed class SecondShowcaseSeederTests
             Assert.Equal(before.State, after.State);
             Assert.Equal(before.Steps, after.Steps);
             Assert.Equal(before.Relationships, after.Relationships);
+            Assert.Equal("SYSR-000152", await IdentifierAllocator.NextRequirementAsync(db, "SYSR", CancellationToken.None));
+            Assert.Equal("SRCR-00033", await IdentifierAllocator.NextChangeRequestAsync(
+                db, ChangeRequestType.System, null, CancellationToken.None));
         }
         finally
         {
