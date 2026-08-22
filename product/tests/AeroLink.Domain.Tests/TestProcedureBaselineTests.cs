@@ -173,6 +173,8 @@ public sealed class TestProcedureBaselineTests
         Assert.Equal("Revised title", procedure.Title);
         Assert.Equal("revised.owner", procedure.OwnerId);
 
+        Assert.Throws<DomainException>(() => new TestProcedureRevision(Guid.NewGuid(), 0, "Objective",
+            "Preconditions", "Steps", "", TestProcedureState.Approved, "verification.engineer", Now));
         Assert.Throws<DomainException>(() => new TestProcedureRevision(Guid.NewGuid(), 0, "Objective", "", "Steps",
             "Expected", TestProcedureState.Approved, "verification.engineer", Now,
             sourceChangeRequestsJson: "{not-json"));
