@@ -1,5 +1,7 @@
 using AeroLink.Domain.ChangeControl;
 using AeroLink.Domain.Common;
+using AeroLink.Domain.Verification;
+using System.ComponentModel.DataAnnotations.Schema;
 
 namespace AeroLink.Domain.Hierarchy;
 
@@ -70,6 +72,9 @@ public sealed class ProjectLadderConfiguration
     public string? ActivationManifestVersion { get; private set; }
     public string? ActivationManifestHash { get; private set; }
     public long Version { get; private set; }
+    /// <summary>Schema marker for the dormant neutral verification profile representation.</summary>
+    public int VerificationProfileSchemaVersion { get; private set; } = VerificationArtifactProfileSchema.Current;
+    public int ProfileSchemaVersion => VerificationProfileSchemaVersion;
     public ICollection<ProjectLadderStep> Steps { get; } = new List<ProjectLadderStep>();
     public ICollection<ProjectLadderAllowedUpstream> AllowedUpstream { get; } = new List<ProjectLadderAllowedUpstream>();
 
@@ -238,16 +243,31 @@ public sealed class ProjectLadderStep
     private ProjectLadderStep() { }
 
     public ProjectLadderStep(Guid configurationId, Guid projectId, RequirementLevel level, int position,
-        LevelCapabilities capabilities, DateTimeOffset now)
+        LevelCapabilities capabilities, DateTimeOffset now,
+        IEnumerable<VerificationArtifactKind>? enabledArtifactKinds = null)
     {
         if (configurationId == Guid.Empty || projectId == Guid.Empty)
             throw new DomainException("A ladder step requires a project configuration and project.");
         if (position < 1) throw new DomainException("A ladder step position must be positive.");
         if ((capabilities & ~AllCapabilities) != 0)
             throw new DomainException("A ladder step contains an unknown capability flag.");
-        _ = LegacyLadderPolicy.Instance.Definition(level);
+        var definition = LegacyLadderPolicy.Instance.Definition(level);
+        var kinds = enabledArtifactKinds?.ToArray()
+            ?? (capabilities.HasFlag(LevelCapabilities.HasVerification)
+                ? definition.VerificationProfile?.EnabledKinds.ToArray() ?? []
+                : []);
+        if (capabilities.HasFlag(LevelCapabilities.HasVerification))
+        {
+            if (definition.VerificationProfile is null)
+                throw new DomainException($"The {level} definition has no verification profile.");
+            VerificationArtifactProfile.ValidateEnabledKinds(
+                definition.VerificationProfile.Discipline, kinds);
+        }
+        else if (kinds.Length != 0)
+            throw new DomainException($"A level without verification capability cannot enable verification artifacts.");
         Id = Guid.NewGuid(); ConfigurationId = configurationId; ProjectId = projectId;
         CatalogueEntry = level.ToString(); Position = position; Capabilities = capabilities;
+        EnabledArtifactKindsValue = VerificationArtifactProfile.SerializeKinds(kinds);
         CreatedAt = UpdatedAt = now; Version = 1;
     }
 
@@ -261,6 +281,15 @@ public sealed class ProjectLadderStep
     public string CatalogueEntry { get; private set; } = string.Empty;
     public int Position { get; private set; }
     public LevelCapabilities Capabilities { get; private set; }
+    /// <summary>The normalized persisted profile shape; the list is derived and cannot be independently edited.</summary>
+    public string EnabledArtifactKindsValue { get; private set; } = string.Empty;
+    [NotMapped]
+    public string EnabledArtifactKindsJson => EnabledArtifactKindsValue;
+    [NotMapped]
+    public IReadOnlyList<VerificationArtifactKind> EnabledArtifactKinds =>
+        VerificationArtifactProfile.ParseKinds(EnabledArtifactKindsValue);
+    [NotMapped]
+    public IReadOnlyList<VerificationArtifactKind> EnabledKinds => EnabledArtifactKinds;
     public DateTimeOffset CreatedAt { get; private set; }
     public DateTimeOffset UpdatedAt { get; private set; }
     public long Version { get; private set; }
@@ -317,7 +346,11 @@ public static class LegacyDefaultProjectLadderFactory
     }
 }
 
-public sealed record ResolvedProjectLadderStep(RequirementLevel Level, int Position, LevelCapabilities Capabilities);
+public sealed record ResolvedProjectLadderStep(RequirementLevel Level, int Position, LevelCapabilities Capabilities,
+    IReadOnlyList<VerificationArtifactKind>? EnabledArtifactKinds = null)
+{
+    public IReadOnlyList<VerificationArtifactKind>? EnabledKinds => EnabledArtifactKinds;
+}
 public sealed record ResolvedProjectLadderRelationship(RequirementLevel Parent, RequirementLevel Child);
 
 /// <summary>
@@ -340,6 +373,8 @@ public sealed record ResolvedProjectLadder(
             return false;
         return Steps.OrderBy(x => x.Position).Select(x => x.Level).SequenceEqual(policy.OrderedLevels)
             && Steps.All(x => x.Capabilities == policy.Definition(x.Level).Capabilities)
+            && Steps.All(x => x.EnabledArtifactKinds is not null
+                && x.EnabledArtifactKinds.SequenceEqual(policy.Definition(x.Level).VerificationProfile?.EnabledKinds ?? []))
             && AllowedUpstream.OrderBy(x => x.Parent).ThenBy(x => x.Child)
                 .SequenceEqual(policy.ParentRelationships.Select(x => new ResolvedProjectLadderRelationship(x.Parent, x.Child))
                     .OrderBy(x => x.Parent).ThenBy(x => x.Child));
@@ -384,7 +419,16 @@ public static class ProjectLadderResolver
             if ((step.Capabilities & ~definition.Capabilities) != 0)
                 throw new DomainException($"Persisted capabilities for {level} exceed the code-owned catalogue.");
             byId.Add(step.Id, level);
-            resolvedSteps.Add(new(level, step.Position, step.Capabilities));
+            var kinds = step.EnabledArtifactKinds;
+            if (step.Capabilities.HasFlag(LevelCapabilities.HasVerification))
+            {
+                var profile = definition.VerificationProfile
+                    ?? throw new DomainException($"The {level} definition has no verification profile.");
+                VerificationArtifactProfile.ValidateEnabledKinds(profile.Discipline, kinds);
+            }
+            else if (kinds.Count != 0)
+                throw new DomainException($"A level without verification capability cannot enable verification artifacts.");
+            resolvedSteps.Add(new(level, step.Position, step.Capabilities, kinds));
         }
 
         var edges = configuration.AllowedUpstream.ToList();

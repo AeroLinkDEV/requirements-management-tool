@@ -206,20 +206,37 @@ public sealed class ProjectLadderPersistenceTests : IAsyncLifetime
     [Fact]
     public async Task Resolver_fails_closed_when_persisted_catalogue_data_is_unknown()
     {
-        await using (var db = Context())
-        {
-            var configuration = await db.ProjectLadderConfigurations
-                .SingleAsync(x => x.ProjectId == _fmsProjectId);
-            await db.Database.ExecuteSqlInterpolatedAsync(
-                $"UPDATE project_ladder_steps SET CatalogueEntry = 'Unknown' WHERE ConfigurationId = {configuration.Id} AND Position = 1");
-        }
-
-        await using var check = Context();
-        var malformed = await check.ProjectLadderConfigurations
-            .Include(x => x.Steps).Include(x => x.AllowedUpstream)
+        await using var db = Context();
+        var configuration = await db.ProjectLadderConfigurations
             .SingleAsync(x => x.ProjectId == _fmsProjectId);
-        var error = Assert.Throws<AeroLink.Domain.Common.DomainException>(() => ProjectLadderResolver.Resolve(malformed));
-        Assert.Contains("Unknown persisted", error.Message);
+        await Assert.ThrowsAsync<SqliteException>(() => db.Database.ExecuteSqlInterpolatedAsync(
+            $"UPDATE project_ladder_steps SET CatalogueEntry = 'Unknown' WHERE ConfigurationId = {configuration.Id} AND Position = 1"));
+    }
+
+    [Fact]
+    public async Task Database_rejects_unknown_catalogue_even_when_verification_is_disabled()
+    {
+        await using var db = Context();
+        var configuration = await db.ProjectLadderConfigurations.SingleAsync(x => x.ProjectId == _fmsProjectId);
+        await Assert.ThrowsAsync<SqliteException>(() => db.Database.ExecuteSqlInterpolatedAsync(
+            $"UPDATE project_ladder_steps SET CatalogueEntry = 'Unknown', Capabilities = 1, EnabledArtifactKindsValue = '' WHERE ConfigurationId = {configuration.Id} AND Position = 1"));
+    }
+
+    [Fact]
+    public async Task Database_rejects_a_software_procedure_without_case_or_a_kind_without_capability()
+    {
+        await using var db = Context();
+        var configuration = await db.ProjectLadderConfigurations.SingleAsync(x => x.ProjectId == _fmsProjectId);
+
+        // A configured step may deliberately disable verification, but the authored capability then owns the
+        // shape and no dormant catalogue default may reintroduce Case/Procedure kinds.
+        await db.Database.ExecuteSqlInterpolatedAsync(
+            $"UPDATE project_ladder_steps SET Capabilities = 1, EnabledArtifactKindsValue = '' WHERE ConfigurationId = {configuration.Id} AND CatalogueEntry = 'HighLevel'");
+
+        await Assert.ThrowsAsync<SqliteException>(() => db.Database.ExecuteSqlInterpolatedAsync(
+            $"UPDATE project_ladder_steps SET EnabledArtifactKindsValue = 'Procedure' WHERE ConfigurationId = {configuration.Id} AND CatalogueEntry = 'HighLevel'"));
+        await Assert.ThrowsAsync<SqliteException>(() => db.Database.ExecuteSqlInterpolatedAsync(
+            $"UPDATE project_ladder_steps SET Capabilities = 1, EnabledArtifactKindsValue = 'Case' WHERE ConfigurationId = {configuration.Id} AND CatalogueEntry = 'System'"));
     }
 
     [Fact]
@@ -488,7 +505,8 @@ public sealed class ProjectLadderPersistenceTests : IAsyncLifetime
         {
             new LadderRelationshipDraft(nameof(RequirementLevel.System), nameof(RequirementLevel.LowLevel))
         };
-        var authority = new ProjectLadderUpgradeAuthority(db, LegacyLadderPolicy.Instance, consumers);
+        var typedConsumers = VerificationConsumerTestData.Typed(consumers);
+        var authority = new ProjectLadderUpgradeAuthority(db, LegacyLadderPolicy.Instance, consumers, typedConsumers);
         var result = await authority.UpgradeAsync(_fmsProjectId,
             new ProjectLadderUpgradeCommand(configuration.Version, "platform-v2", "Replace governed graph", steps, relationships),
             "platform.owner", now.AddMinutes(1));
@@ -501,6 +519,80 @@ public sealed class ProjectLadderPersistenceTests : IAsyncLifetime
         Assert.Equal("platform.owner", upgraded.LastUpgradeBy);
         Assert.Equal(2, upgraded.Steps.Count);
         Assert.Equal(2, await db.ProjectLadderConfigurationHistories.CountAsync());
+        Assert.NotNull(result.ArtifactReadiness);
+        Assert.True(result.ArtifactReadiness!.IsReady);
+        Assert.Equal(LadderConsumerManifestCatalog.VersionV2, result.ArtifactReadiness.Version);
+        Assert.NotNull(result.Configuration);
+        Assert.True(result.Configuration!.Readiness.IsReady);
+    }
+
+    [Fact]
+    public async Task Internal_upgrade_refuses_when_typed_artifact_readiness_is_incomplete()
+    {
+        await using var db = Context();
+        var consumers = LadderConsumerManifestCatalog.RequiredConsumerIds
+            .Select(id => (ILadderConsumerRegistration)new LadderConsumerRegistration(id, id)).ToArray();
+        var typedConsumers = consumers.Select(registration =>
+        {
+            var typed = VerificationConsumerTestData.Typed(registration);
+            return (IVerificationArtifactConsumerRegistration)(typed.Id == "verification.test-change-workflow"
+                ? typed with { SupportedCapabilities = VerificationArtifactCapability.None }
+                : typed);
+        }).ToArray();
+        var authority = new ProjectLadderUpgradeAuthority(db, LegacyLadderPolicy.Instance, consumers, typedConsumers);
+        var configuration = await db.ProjectLadderConfigurations.SingleAsync(x => x.ProjectId == _fmsProjectId);
+        var result = await authority.UpgradeAsync(_fmsProjectId,
+            new ProjectLadderUpgradeCommand(configuration.Version, "platform-v2", "Refuse incomplete typed graph",
+                [new LadderStepDraft(nameof(RequirementLevel.System), 1,
+                    LegacyLadderPolicy.Instance.Definition(RequirementLevel.System).Capabilities)], []),
+            "platform.owner", DateTimeOffset.UtcNow);
+
+        Assert.Equal(ProjectLadderUpgradeResultKind.Refused, result.Kind);
+        Assert.NotNull(result.ArtifactReadiness);
+        Assert.False(result.ArtifactReadiness!.IsReady);
+        Assert.Contains(result.ArtifactReadiness.MissingArtifactCoverage,
+            x => x.ConsumerId == "verification.test-change-workflow"
+                && x.ArtifactKey.Kind == VerificationArtifactKind.Procedure
+                && !x.SupportsCapabilities);
+    }
+
+    [Fact]
+    public async Task Public_activation_refuses_a_missing_typed_artifact_lane_and_writes_no_evidence()
+    {
+        await using var db = Context();
+        var program = new ProgramRecord("Typed activation program", $"TYP{Guid.NewGuid():N}"[..12]);
+        var project = new ProjectRecord(program.Id, "Typed activation", "Typed activation project");
+        db.AddRange(program, project);
+        await db.SaveChangesAsync();
+        var now = DateTimeOffset.UtcNow;
+        var configuration = ProjectLadderConfiguration.CreateDraft(project.Id, now);
+        configuration.Steps.Add(new ProjectLadderStep(configuration.Id, project.Id, RequirementLevel.System, 1,
+            LegacyLadderPolicy.Instance.Definition(RequirementLevel.System).Capabilities, now));
+        db.ProjectLadderConfigurations.Add(configuration);
+        await db.SaveChangesAsync();
+
+        var consumers = LadderConsumerManifestCatalog.RequiredConsumerIds
+            .Select(id => (ILadderConsumerRegistration)new LadderConsumerRegistration(id, id)).ToArray();
+        var typedConsumers = consumers.Select(registration =>
+        {
+            var typed = VerificationConsumerTestData.Typed(registration);
+            return (IVerificationArtifactConsumerRegistration)(typed.Id == "verification.coverage"
+                ? typed with { SupportedCapabilities = VerificationArtifactCapability.None }
+                : typed);
+        }).ToArray();
+        var service = new ProjectLadderAuthoringService(db, LegacyLadderPolicy.Instance, consumers, typedConsumers);
+        var result = await service.ActivateAsync(project.Id,
+            new ProjectLadderActivationCommand(configuration.Version, "Missing coverage lane"),
+            "manager", now.AddMinutes(1), CancellationToken.None);
+
+        Assert.Equal(ProjectLadderActivationResultKind.Refused, result.Kind);
+        Assert.NotNull(result.ArtifactReadiness);
+        Assert.False(result.ArtifactReadiness!.IsReady);
+        Assert.Contains(result.ArtifactReadiness.MissingArtifactCoverage,
+            x => x.ConsumerId == "verification.coverage" && !x.SupportsCapabilities);
+        var persisted = await db.ProjectLadderConfigurations.AsNoTracking().SingleAsync(x => x.ProjectId == project.Id);
+        Assert.Equal(ProjectLadderConfigurationState.Draft, persisted.State);
+        Assert.Null(persisted.ActivationManifestHash);
     }
 
     private AeroLinkDbContext Context() => new(_options);

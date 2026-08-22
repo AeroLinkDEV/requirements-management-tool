@@ -86,10 +86,11 @@ public sealed class ProjectConfigurationApiTests : IClassFixture<SharedApiHost>
         Assert.Equal(2, edited.RootElement.GetProperty("version").GetInt64());
         Assert.Equal(1, edited.RootElement.GetProperty("history").GetArrayLength());
         Assert.Equal("Use a two-level draft for the pilot", edited.RootElement.GetProperty("history")[0].GetProperty("reason").GetString());
-        Assert.Equal("steps[1:System:7;2:HighLevel:7]|edges[System>HighLevel]",
-            edited.RootElement.GetProperty("history")[0].GetProperty("canonicalSnapshot").GetString());
-        Assert.Equal(ProjectLadderSnapshot.Hash("steps[1:System:7;2:HighLevel:7]|edges[System>HighLevel]"),
+        var editedSnapshot = edited.RootElement.GetProperty("history")[0].GetProperty("canonicalSnapshot").GetString();
+        Assert.Equal("schema[2]|steps[1:System:7:Procedure;2:HighLevel:7:Case]|edges[System>HighLevel]", editedSnapshot);
+        Assert.Equal(ProjectLadderSnapshot.Hash(editedSnapshot!),
             edited.RootElement.GetProperty("history")[0].GetProperty("snapshotHash").GetString());
+        Assert.Equal(2, edited.RootElement.GetProperty("history")[0].GetProperty("snapshotSchemaVersion").GetInt32());
 
         var stale = await client.PutAsJsonAsync($"/api/projects/{seeded.ProjectId}/configuration", new
         {
@@ -298,6 +299,7 @@ public sealed class ProjectConfigurationApiTests : IClassFixture<SharedApiHost>
         Assert.Equal(18, readiness.GetProperty("consumers").GetArrayLength());
         var manifestVersion = readiness.GetProperty("version").GetString();
         var manifestHash = readiness.GetProperty("hash").GetString();
+        Assert.Equal(LadderConsumerManifestCatalog.VersionV2, manifestVersion);
         Assert.False(string.IsNullOrWhiteSpace(manifestVersion));
         Assert.Matches("^[0-9a-f]{64}$", manifestHash ?? "");
         Assert.Equal(manifestVersion, activationBody.GetProperty("activationManifestVersion").GetString());
@@ -315,6 +317,7 @@ public sealed class ProjectConfigurationApiTests : IClassFixture<SharedApiHost>
             .Where(x => x.ConfigurationId == configuration.Id).OrderByDescending(x => x.Revision).ToListAsync();
         Assert.Equal(2, history.Count);
         Assert.Contains("Activated ladder: Attempt activation", history[0].Reason);
+        Assert.Equal(2, history[0].SnapshotSchemaVersion);
 
         using var staleActivation = await client.PostAsJsonAsync($"/api/projects/{seeded.ProjectId}/configuration/activate",
             new { expectedVersion = 2, reason = "Stale activation must not mutate the active row" });

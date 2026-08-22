@@ -10,6 +10,43 @@ namespace AeroLink.Infrastructure.Tests;
 public sealed class VerificationPersistenceTests
 {
     [Fact]
+    public async Task Neutral_artifact_identity_is_persisted_and_database_rejects_drift()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"aerolink-neutral-verification-{Guid.NewGuid():N}.db");
+        var options = new DbContextOptionsBuilder<AeroLinkDbContext>().UseSqlite($"Data Source={path};Pooling=False;Foreign Keys=True").Options;
+        try
+        {
+            await using var db = new AeroLinkDbContext(options);
+            await db.Database.EnsureCreatedAsync();
+            var now = DateTimeOffset.UtcNow;
+            var program = new ProgramRecord("Neutral verification", "NEUT");
+            var project = new ProjectRecord(program.Id, "Neutral", "Neutral verification project");
+            db.AddRange(program, project);
+            var system = new TestProcedure(project.Id, "SYSTP-000001", "System", "tester", now, TestProcedureLevel.System);
+            var high = new TestProcedure(project.Id, "HLRTP-000001", "High-level case", "tester", now, TestProcedureLevel.HighLevel);
+            db.AddRange(system, high);
+            await db.SaveChangesAsync();
+
+            var persisted = await db.TestProcedures.AsNoTracking().ToListAsync();
+            var persistedSystem = persisted.Single(x => x.Level == TestProcedureLevel.System);
+            var persistedHigh = persisted.Single(x => x.Level == TestProcedureLevel.HighLevel);
+            Assert.Equal(VerificationDiscipline.System, persistedSystem.ArtifactDiscipline);
+            Assert.Equal(VerificationArtifactKind.Procedure, persistedSystem.ArtifactKind);
+            Assert.Equal(VerificationDiscipline.HighLevelSoftware, persistedHigh.ArtifactDiscipline);
+            Assert.Equal(VerificationArtifactKind.Case, persistedHigh.ArtifactKind);
+            await Assert.ThrowsAsync<Microsoft.Data.Sqlite.SqliteException>(() => db.Database.ExecuteSqlInterpolatedAsync(
+                $"UPDATE test_procedures SET ArtifactKind = 'Procedure' WHERE Id = {high.Id}"));
+            await Assert.ThrowsAsync<Microsoft.Data.Sqlite.SqliteException>(() => db.Database.ExecuteSqlInterpolatedAsync(
+                $"UPDATE test_procedures SET ArtifactDiscipline = 'System' WHERE Id = {high.Id}"));
+        }
+        finally
+        {
+            Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
+            try { File.Delete(path); } catch (IOException) { }
+        }
+    }
+
+    [Fact]
     public async Task One_procedure_covers_multiple_exact_requirements_and_retest_preserves_failed_run()
     {
         var path = Path.Combine(Path.GetTempPath(), $"aerolink-verification-{Guid.NewGuid():N}.db");

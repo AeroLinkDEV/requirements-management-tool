@@ -1,4 +1,5 @@
 using AeroLink.Domain.Hierarchy;
+using AeroLink.Domain.Verification;
 using AeroLink.Infrastructure;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -48,5 +49,39 @@ public sealed class LadderConsumerRegistrationTests
         Assert.True(manifest.IsReady);
         Assert.DoesNotContain(manifest.MissingOrUnrouted, x => ids.Contains(x.Id, StringComparer.Ordinal));
         Assert.Empty(manifest.MissingOrUnrouted);
+
+        var typed = services
+            .Where(x => x.ServiceType == typeof(IVerificationArtifactConsumerRegistration))
+            .Select(x => Assert.IsAssignableFrom<IVerificationArtifactConsumerRegistration>(x.ImplementationInstance))
+            .ToArray();
+        Assert.Equal(new[]
+        {
+            "verification.procedure-level",
+            "verification.test-change-workflow",
+            "verification.coverage",
+            "baseline.controlled-documents",
+            "release.readiness",
+        }, typed.Select(x => x.Id).ToArray());
+        Assert.All(typed, registration =>
+            Assert.DoesNotContain(registration.SupportedArtifactKeys,
+                x => x.Kind == VerificationArtifactKind.Procedure
+                    && x.Discipline != VerificationDiscipline.System));
+        Assert.Equal(VerificationArtifactCapability.Coverage,
+            typed.Single(x => x.Id == "verification.coverage").SupportedCapabilities);
+        Assert.DoesNotContain(typed, x => x.Id == "navigation.primary");
+        var currentProfile = new[]
+        {
+            VerificationArtifactVocabulary.Definition(new(VerificationDiscipline.System, VerificationArtifactKind.Procedure)),
+            VerificationArtifactVocabulary.Definition(new(VerificationDiscipline.HighLevelSoftware, VerificationArtifactKind.Case)),
+            VerificationArtifactVocabulary.Definition(new(VerificationDiscipline.LowLevelSoftware, VerificationArtifactKind.Case)),
+        };
+        var typedManifest = LadderConsumerManifestCatalog.BuildV2(
+            registrations.Cast<ILadderConsumerRegistration>().Concat(typed), typed,
+            currentProfile);
+        Assert.True(typedManifest.IsReady);
+
+        var untypedManifest = LadderConsumerManifestCatalog.BuildV2(registrations, [], currentProfile);
+        Assert.False(untypedManifest.IsReady);
+        Assert.NotEmpty(untypedManifest.MissingArtifactCoverage);
     }
 }

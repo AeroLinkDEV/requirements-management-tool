@@ -1,6 +1,7 @@
 using AeroLink.Domain.ChangeControl;
 using AeroLink.Domain.Hierarchy;
 using AeroLink.Domain.Programs;
+using AeroLink.Domain.Verification;
 using AeroLink.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
@@ -44,6 +45,33 @@ public sealed class ProjectLadderPostgresQualificationTests
         Assert.True(configuration.IsSealed);
         Assert.Equal("draft-requirement-change", configuration.SealedContentKind);
         Assert.Single(await db.ProjectLadderConfigurationHistories.Where(x => x.ProjectId == project.Id).ToListAsync());
+        var history = await db.ProjectLadderConfigurationHistories.AsNoTracking()
+            .SingleAsync(x => x.ProjectId == project.Id);
+        const string expectedCanonical =
+            "schema[2]|steps[1:System:7:Procedure;2:HighLevel:7:Case;3:LowLevel:15:Case]|edges[HighLevel>LowLevel;System>HighLevel]";
+        Assert.Equal(expectedCanonical, history.CanonicalSnapshot);
+        Assert.Equal(ProjectLadderSnapshot.Hash(expectedCanonical), history.SnapshotHash);
+        Assert.Equal(2, history.SnapshotSchemaVersion);
+    }
+
+    [DisposablePostgresFact]
+    public async Task Issue729_clean_install_has_dormant_profile_and_neutral_identity_schema_without_evidence()
+    {
+        var connection = QualificationConnectionOrSkip();
+        await using var db = await ResetAtLatestAsync(connection);
+        await using var command = db.Database.GetDbConnection().CreateCommand();
+        command.CommandText = "SELECT table_name, column_name FROM information_schema.columns WHERE table_schema = 'public' AND table_name IN ('project_ladder_steps','project_ladder_configurations','project_ladder_configuration_history','test_procedures')";
+        await db.Database.OpenConnectionAsync();
+        var columns = new HashSet<string>(StringComparer.Ordinal);
+        await using (var reader = await command.ExecuteReaderAsync())
+            while (await reader.ReadAsync()) columns.Add($"{reader.GetString(0)}.{reader.GetString(1)}");
+        Assert.Contains("project_ladder_steps.EnabledArtifactKindsValue", columns);
+        Assert.Contains("project_ladder_configurations.VerificationProfileSchemaVersion", columns);
+        Assert.Contains("project_ladder_configuration_history.SnapshotSchemaVersion", columns);
+        Assert.Contains("test_procedures.ArtifactDiscipline", columns);
+        Assert.Contains("test_procedures.ArtifactKind", columns);
+        Assert.Empty(await db.ProjectLadderConfigurations.ToListAsync());
+        Assert.Empty(await db.ProjectLadderConfigurationHistories.ToListAsync());
     }
 
     [DisposablePostgresFact]
@@ -93,7 +121,82 @@ public sealed class ProjectLadderPostgresQualificationTests
         Assert.Equal("migration-backfill", configuration.SealedContentKind);
         Assert.Equal(LegacySnapshot, history.CanonicalSnapshot);
         Assert.Equal(LegacySnapshotHash, history.SnapshotHash);
+        Assert.Equal(2, configuration.VerificationProfileSchemaVersion);
+        Assert.Equal(1, history.SnapshotSchemaVersion);
+        Assert.Equal(["Procedure", "Case", "Case"], await db.ProjectLadderSteps.AsNoTracking()
+            .Where(x => x.ConfigurationId == configurationId).OrderBy(x => x.Position)
+            .Select(x => x.EnabledArtifactKindsValue).ToListAsync());
+        Assert.Null(configuration.ActivationManifestVersion);
+        Assert.Null(configuration.ActivationManifestHash);
         Assert.Contains("historical first content is not inferred", history.Reason, StringComparison.Ordinal);
+    }
+
+    [DisposablePostgresFact]
+    public async Task Issue729_pre_feature_migration_leaves_no_verification_step_empty_and_is_idempotent()
+    {
+        var connection = QualificationConnectionOrSkip();
+        await using var db = await MigrateToPreFeatureAsync(connection);
+        var now = DateTimeOffset.UtcNow;
+        var programId = Guid.NewGuid(); var projectId = Guid.NewGuid(); var configurationId = Guid.NewGuid(); var stepId = Guid.NewGuid();
+        var systemProcedureId = Guid.NewGuid(); var highLevelProcedureId = Guid.NewGuid();
+        await db.Database.ExecuteSqlInterpolatedAsync($"""
+            INSERT INTO "programs" ("Id", "Name", "Code") VALUES ({programId}, {"PG no-verification program"}, {"PGN"});
+            INSERT INTO "projects" ("Id", "ProgramId", "Name", "SoftwareProduct") VALUES ({projectId}, {programId}, {"PG no-verification project"}, {"PG no-verification software"});
+            INSERT INTO "project_ladder_configurations" ("Id", "ProjectId", "Classification", "State", "CreatedAt", "UpdatedAt", "Version")
+                VALUES ({configurationId}, {projectId}, {"LegacyDefault"}, {"Stored"}, {now}, {now}, {1L});
+            INSERT INTO "project_ladder_steps" ("Id", "ConfigurationId", "ProjectId", "CatalogueEntry", "Position", "Capabilities", "CreatedAt", "UpdatedAt", "Version")
+                VALUES ({stepId}, {configurationId}, {projectId}, {"HighLevel"}, {1}, {1}, {now}, {now}, {1L});
+            INSERT INTO "test_procedures" ("Id", "ProjectId", "BaseNumber", "Title", "OwnerId", "Level", "CreatedAt", "UpdatedAt", "Version")
+                VALUES ({systemProcedureId}, {projectId}, {"SYSTP-72901"}, {"Legacy system procedure"}, {"migration.test"}, {"System"}, {now}, {now}, {1L}),
+                       ({highLevelProcedureId}, {projectId}, {"HLRTP-72901"}, {"Legacy high-level case"}, {"migration.test"}, {"HighLevel"}, {now}, {now}, {1L});
+            """);
+        await db.Database.GetService<IMigrator>().MigrateAsync();
+        var step = await db.ProjectLadderSteps.AsNoTracking().SingleAsync(x => x.Id == stepId);
+        Assert.Equal(string.Empty, step.EnabledArtifactKindsValue);
+        var migratedArtifacts = await db.TestProcedures.AsNoTracking().OrderBy(x => x.Level).ToListAsync();
+        Assert.Equal(VerificationDiscipline.System, migratedArtifacts.Single(x => x.Level == TestProcedureLevel.System).ArtifactDiscipline);
+        Assert.Equal(VerificationArtifactKind.Procedure, migratedArtifacts.Single(x => x.Level == TestProcedureLevel.System).ArtifactKind);
+        Assert.Equal(VerificationDiscipline.HighLevelSoftware, migratedArtifacts.Single(x => x.Level == TestProcedureLevel.HighLevel).ArtifactDiscipline);
+        Assert.Equal(VerificationArtifactKind.Case, migratedArtifacts.Single(x => x.Level == TestProcedureLevel.HighLevel).ArtifactKind);
+        var before = await db.ProjectLadderConfigurations.AsNoTracking().SingleAsync(x => x.Id == configurationId);
+        Assert.Null(before.ActivationManifestVersion);
+        var beforeHistory = await db.ProjectLadderConfigurationHistories.AsNoTracking()
+            .Where(x => x.ConfigurationId == configurationId).OrderBy(x => x.Revision).ToListAsync();
+        await db.Database.GetService<IMigrator>().MigrateAsync();
+        var after = await db.ProjectLadderSteps.AsNoTracking().SingleAsync(x => x.Id == stepId);
+        Assert.Equal(string.Empty, after.EnabledArtifactKindsValue);
+        Assert.Equal(before.VerificationProfileSchemaVersion, (await db.ProjectLadderConfigurations.AsNoTracking().SingleAsync(x => x.Id == configurationId)).VerificationProfileSchemaVersion);
+
+        // Exercise the neutral migration's Down and reapply path as well as an idempotent latest-Migrate call.
+        await db.Database.GetService<IMigrator>().MigrateAsync("20260822045540_ExactLinkSuspectLifecycle");
+        await db.Database.GetService<IMigrator>().MigrateAsync();
+        var reapplied = await db.ProjectLadderSteps.AsNoTracking().SingleAsync(x => x.Id == stepId);
+        Assert.Equal(string.Empty, reapplied.EnabledArtifactKindsValue);
+        var reappliedArtifacts = await db.TestProcedures.AsNoTracking().ToListAsync();
+        Assert.Equal(VerificationArtifactKind.Procedure,
+            reappliedArtifacts.Single(x => x.Level == TestProcedureLevel.System).ArtifactKind);
+        Assert.Equal(VerificationArtifactKind.Case,
+            reappliedArtifacts.Single(x => x.Level == TestProcedureLevel.HighLevel).ArtifactKind);
+        var reappliedHistory = await db.ProjectLadderConfigurationHistories.AsNoTracking()
+            .Where(x => x.ConfigurationId == configurationId).OrderBy(x => x.Revision).ToListAsync();
+        Assert.Equal(beforeHistory.Count, reappliedHistory.Count);
+        Assert.Equal(beforeHistory.Select(x => (x.Revision, x.CanonicalSnapshot, x.SnapshotHash, x.SnapshotSchemaVersion)),
+            reappliedHistory.Select(x => (x.Revision, x.CanonicalSnapshot, x.SnapshotHash, x.SnapshotSchemaVersion)));
+    }
+
+    [DisposablePostgresFact]
+    public async Task Issue729_postgresql_profile_constraint_rejects_customer_interface_and_unknown_shapes()
+    {
+        var connection = QualificationConnectionOrSkip();
+        await using var db = await ResetAtLatestAsync(connection);
+        var now = DateTimeOffset.UtcNow;
+        var program = new ProgramRecord("PG invalid profile program", "PGI"); var project = new ProjectRecord(program.Id, "PG invalid profile", "PG invalid profile software");
+        db.AddRange(program, project); await db.SaveChangesAsync();
+        var configuration = LegacyDefaultProjectLadderFactory.Create(project.Id, now); db.Add(configuration); await db.SaveChangesAsync();
+        var stored = await db.ProjectLadderConfigurations.AsNoTracking().SingleAsync(x => x.ProjectId == project.Id);
+        await Assert.ThrowsAsync<PostgresException>(() => db.Database.ExecuteSqlInterpolatedAsync($"UPDATE \"project_ladder_steps\" SET \"CatalogueEntry\" = 'Customer', \"Capabilities\" = 2, \"EnabledArtifactKindsValue\" = 'Case' WHERE \"ConfigurationId\" = {stored.Id} AND \"Position\" = 1"));
+        await Assert.ThrowsAsync<PostgresException>(() => db.Database.ExecuteSqlInterpolatedAsync($"UPDATE \"project_ladder_steps\" SET \"CatalogueEntry\" = 'Interface', \"Capabilities\" = 2, \"EnabledArtifactKindsValue\" = 'Case' WHERE \"ConfigurationId\" = {stored.Id} AND \"Position\" = 1"));
+        await Assert.ThrowsAsync<PostgresException>(() => db.Database.ExecuteSqlInterpolatedAsync($"UPDATE \"project_ladder_steps\" SET \"CatalogueEntry\" = 'Unknown', \"Capabilities\" = 1, \"EnabledArtifactKindsValue\" = '' WHERE \"ConfigurationId\" = {stored.Id} AND \"Position\" = 1"));
     }
 
     [DisposablePostgresFact]

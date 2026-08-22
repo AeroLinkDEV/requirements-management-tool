@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using System.Text;
+using AeroLink.Domain.Verification;
 
 namespace AeroLink.Domain.Hierarchy;
 
@@ -33,10 +34,100 @@ public sealed record LadderConsumerManifest(string Version, string Hash,
 
 public sealed record LadderConsumerStatus(string Id, string Description, bool Routed);
 
+/// <summary>A v2 registration proves the consumer understands concrete artifact keys and required capabilities.</summary>
+public interface IVerificationArtifactConsumerRegistration : ILadderConsumerRegistration
+{
+    IReadOnlySet<VerificationArtifactKey> SupportedArtifactKeys { get; }
+    VerificationArtifactCapability SupportedCapabilities { get; }
+}
+
+public sealed record VerificationArtifactConsumerRegistration(
+    string Id,
+    string Description,
+    IReadOnlySet<VerificationArtifactKey> SupportedArtifactKeys,
+    VerificationArtifactCapability SupportedCapabilities) : IVerificationArtifactConsumerRegistration
+{
+    public VerificationArtifactConsumerRegistration(string id, string description,
+        IEnumerable<VerificationArtifactKey> supportedArtifactKeys,
+        VerificationArtifactCapability supportedCapabilities)
+        : this(id, description, supportedArtifactKeys.ToHashSet(), supportedCapabilities) { }
+}
+
+public sealed record LadderConsumerArtifactCoverage(
+    string ConsumerId,
+    VerificationArtifactKey ArtifactKey,
+    VerificationArtifactCapability RequiredCapabilities,
+    bool SupportsKey,
+    bool SupportsCapabilities)
+{
+    /// <summary>The capabilities declared by this consumer for the concrete key.</summary>
+    public VerificationArtifactCapability DeclaredCapabilities { get; init; }
+    public bool IsCovered => SupportsKey && SupportsCapabilities;
+}
+
+/// <summary>
+/// Typed v2 readiness evidence. A routed string ID is insufficient: every effective artifact obligation must be
+/// covered by the relevant registrations that name the key and collectively declare the required capabilities.
+/// </summary>
+public sealed record LadderConsumerManifestV2(
+    string Version,
+    string Hash,
+    IReadOnlyList<LadderConsumerStatus> Consumers,
+    IReadOnlyList<LadderConsumerRegistration> UnknownRegistrations,
+    IReadOnlyList<LadderConsumerArtifactCoverage> ArtifactCoverage)
+{
+    public IReadOnlySet<VerificationArtifactKey> RequiredArtifactKeys { get; init; } = new HashSet<VerificationArtifactKey>();
+    public IReadOnlyList<LadderConsumerRegistration> MissingOrUnrouted =>
+        Consumers.Where(x => !x.Routed).Select(x => new LadderConsumerRegistration(x.Id, x.Description)).ToArray();
+    public IReadOnlyList<LadderConsumerArtifactCoverage> MissingArtifactCoverage => MissingCoverage();
+    public bool IsReady => Consumers.Count > 0 && MissingOrUnrouted.Count == 0
+        && UnknownRegistrations.Count == 0 && MissingArtifactCoverage.Count == 0;
+
+    private IReadOnlyList<LadderConsumerArtifactCoverage> MissingCoverage()
+    {
+        var missing = new List<LadderConsumerArtifactCoverage>();
+        foreach (var key in RequiredArtifactKeys)
+        {
+            var coverage = ArtifactCoverage.Where(x => x.ArtifactKey == key).ToArray();
+            if (coverage.Length == 0)
+            {
+                missing.Add(new LadderConsumerArtifactCoverage("", key,
+                    VerificationArtifactCapability.None, false, false));
+                continue;
+            }
+
+            var required = coverage[0].RequiredCapabilities;
+            var relevant = coverage.Where(x => x.SupportsKey).ToArray();
+            var aggregate = relevant.Aggregate(VerificationArtifactCapability.None,
+                (capabilities, row) => capabilities | row.DeclaredCapabilities);
+            var uncovered = required & ~aggregate;
+            if (uncovered == VerificationArtifactCapability.None) continue;
+            if (relevant.Length == 0)
+            {
+                missing.Add(coverage[0] with
+                {
+                    RequiredCapabilities = uncovered,
+                    SupportsKey = false,
+                    SupportsCapabilities = false
+                });
+                continue;
+            }
+
+            missing.AddRange(relevant.Select(row => row with
+            {
+                RequiredCapabilities = uncovered,
+                SupportsCapabilities = false
+            }));
+        }
+        return missing;
+    }
+}
+
 /// <summary>The exact stable matrix consumer inventory carried forward from #702.</summary>
 public static class LadderConsumerManifestCatalog
 {
     public const string Version = "#702-legacy-consumers-v1";
+    public const string VersionV2 = "#729-verification-consumers-v2";
 
     // This is the compiled/generated required inventory for the #702 matrix. Implementations are supplied
     // separately: each production seam registers its routed adapter instead of flipping a readiness boolean.
@@ -72,6 +163,65 @@ public static class LadderConsumerManifestCatalog
 
     public static LadderConsumerManifest BuildForRegistrations(IEnumerable<ILadderConsumerRegistration> routedConsumers) =>
         Build(routedConsumers.ToArray());
+
+    public static LadderConsumerManifestV2 BuildForRegistrationsV2(
+        IEnumerable<ILadderConsumerRegistration> routedConsumers,
+        IEnumerable<VerificationArtifactDefinition> effectiveProfile) =>
+        BuildV2(routedConsumers, effectiveProfile);
+
+    public static LadderConsumerManifestV2 BuildForTestsV2(
+        IEnumerable<IVerificationArtifactConsumerRegistration> routedConsumers,
+        IEnumerable<VerificationArtifactDefinition> effectiveProfile) =>
+        BuildV2(routedConsumers.Cast<ILadderConsumerRegistration>(), effectiveProfile);
+
+    public static LadderConsumerManifestV2 BuildV2(
+        IEnumerable<ILadderConsumerRegistration> routedConsumers,
+        IEnumerable<VerificationArtifactDefinition> effectiveProfile)
+    {
+        ArgumentNullException.ThrowIfNull(routedConsumers);
+        ArgumentNullException.ThrowIfNull(effectiveProfile);
+        var consumers = routedConsumers.ToArray();
+        var typed = consumers.OfType<IVerificationArtifactConsumerRegistration>().ToArray();
+        var legacy = Build(consumers);
+        var required = effectiveProfile.ToArray();
+        var coverage = required.SelectMany(definition =>
+            typed.Select(consumer => new LadderConsumerArtifactCoverage(consumer.Id, definition.Key,
+                definition.RequiredCapabilities,
+                consumer.SupportedArtifactKeys.Contains(definition.Key),
+                (consumer.SupportedCapabilities & definition.RequiredCapabilities) == definition.RequiredCapabilities)
+            {
+                DeclaredCapabilities = consumer.SupportedCapabilities
+            }))
+            .ToArray();
+        // Keep the hash independent of registration enumeration order, making readiness evidence reproducible.
+        var canonical = string.Join("\n", legacy.Consumers.OrderBy(x => x.Id, StringComparer.Ordinal)
+                .Select(x => $"consumer|{x.Id}|{x.Description}|{(x.Routed ? "registered" : "unrouted")}"))
+            + "\n" + string.Join("\n", coverage.OrderBy(x => x.ArtifactKey.ToString(), StringComparer.Ordinal)
+                .ThenBy(x => x.ConsumerId, StringComparer.Ordinal)
+                .Select(x => $"artifact|{x.ConsumerId}|{x.ArtifactKey}|{x.RequiredCapabilities}|{x.DeclaredCapabilities}|{x.SupportsKey}|{x.SupportsCapabilities}"));
+        var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes($"{VersionV2}\n{canonical}")))
+            .ToLowerInvariant();
+        return new(VersionV2, hash, legacy.Consumers, legacy.UnknownRegistrations, coverage)
+        {
+            RequiredArtifactKeys = required.Select(x => x.Key).ToHashSet()
+        };
+    }
+
+    public static LadderConsumerManifestV2 BuildV2(
+        IEnumerable<ILadderConsumerRegistration> routedConsumers,
+        IEnumerable<IVerificationArtifactConsumerRegistration> typedConsumers,
+        IEnumerable<VerificationArtifactDefinition> effectiveProfile)
+    {
+        ArgumentNullException.ThrowIfNull(routedConsumers);
+        ArgumentNullException.ThrowIfNull(typedConsumers);
+        var typed = typedConsumers.ToArray();
+        var typedIds = typed.Select(x => x.Id).ToHashSet(StringComparer.Ordinal);
+        // A typed registration is the v2 replacement for its legacy ID. Keep one row per stable consumer so
+        // the v1 inventory remains exact while v2 readiness evaluates the typed declaration.
+        var merged = routedConsumers.Where(x => !typedIds.Contains(x.Id))
+            .Concat(typed.Cast<ILadderConsumerRegistration>());
+        return BuildV2(merged, effectiveProfile);
+    }
 
     private static LadderConsumerManifest Build(IReadOnlyList<ILadderConsumerRegistration> routedConsumers)
     {

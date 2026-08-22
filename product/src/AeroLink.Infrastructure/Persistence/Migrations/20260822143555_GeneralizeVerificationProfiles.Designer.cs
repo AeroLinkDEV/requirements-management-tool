@@ -3,6 +3,7 @@ using System;
 using AeroLink.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 
@@ -11,9 +12,11 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace AeroLink.Infrastructure.Persistence.Migrations
 {
     [DbContext(typeof(AeroLinkDbContext))]
-    partial class AeroLinkDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260822143555_GeneralizeVerificationProfiles")]
+    partial class GeneralizeVerificationProfiles
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -7723,16 +7726,6 @@ namespace AeroLink.Infrastructure.Persistence.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
 
-                    b.Property<string>("ArtifactDiscipline")
-                        .IsRequired()
-                        .HasMaxLength(40)
-                        .HasColumnType("character varying(40)");
-
-                    b.Property<string>("ArtifactKind")
-                        .IsRequired()
-                        .HasMaxLength(30)
-                        .HasColumnType("character varying(30)");
-
                     b.Property<string>("BaseNumber")
                         .IsRequired()
                         .HasMaxLength(30)
@@ -7771,10 +7764,7 @@ namespace AeroLink.Infrastructure.Persistence.Migrations
                     b.HasIndex("ProjectId", "BaseNumber")
                         .IsUnique();
 
-                    b.ToTable("test_procedures", (string)null, t =>
-                        {
-                            t.HasCheckConstraint("CK_test_procedure_neutral_artifact_identity", "((\"Level\" = 'System' AND \"ArtifactDiscipline\" = 'System' AND \"ArtifactKind\" = 'Procedure') OR (\"Level\" = 'HighLevel' AND \"ArtifactDiscipline\" = 'HighLevelSoftware' AND \"ArtifactKind\" = 'Case') OR (\"Level\" = 'LowLevel' AND \"ArtifactDiscipline\" = 'LowLevelSoftware' AND \"ArtifactKind\" = 'Case'))");
-                        });
+                    b.ToTable("test_procedures", (string)null);
                 });
 
             modelBuilder.Entity("AeroLink.Domain.Verification.TestProcedureChange", b =>
