@@ -75,6 +75,10 @@ public sealed class SoftwareCaseRenamePostgresQualificationTests
             const string oldManifestHash = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
             var structuredOnlyHighIdentifier = new ArtifactEditSession(project.Id, "TestProcedure", high.Id,
                 highRevision.Id, oldManifestHash, "{\"artifactIdentity\":\"HLRTP-000123\"}", "migration.test", now);
+            const string signatureOnlyHighHash = "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc";
+            var signatureOnlyHighIdentifier = new ElectronicSignature(Guid.NewGuid(), "historic.reviewer", "Historic Reviewer",
+                program.Id, "LegacyHistoricalEvidence", Guid.NewGuid(), "HLRTP-000321.00", "Approve",
+                "Historical identity evidence", signatureOnlyHighHash, "127.0.0.1", now);
             var files = new EvidenceFileStore(evidenceRoot);
             var legacyBytes = Encoding.UTF8.GetBytes("legacy frozen software document bytes");
             await using var legacySource = new MemoryStream(legacyBytes, writable: false);
@@ -118,7 +122,7 @@ public sealed class SoftwareCaseRenamePostgresQualificationTests
 
             db.AddRange(program, project, release, baseline, high, low, system, highRevision, lowRevision, systemRevision,
                 oldDocument, oldArtifact, legacyCaseDocument, legacyCaseSection, customDescriptionDocument,
-                structuredOnlyHighIdentifier, sourceChange, review, signature,
+                structuredOnlyHighIdentifier, signatureOnlyHighIdentifier, sourceChange, review, signature,
                 artifactSignature, documentSignature, legacyCaseComment,
                 unreadCaseNotification,
                 new BaselineTestProcedureSelection(baseline.Id, high.Id, highRevision.Id),
@@ -170,6 +174,10 @@ public sealed class SoftwareCaseRenamePostgresQualificationTests
                 .SingleAsync(x => x.Id == structuredOnlyHighIdentifier.Id);
             using (var structuredDraft = JsonDocument.Parse(migratedStructuredSession.DraftJson))
                 Assert.Equal("HLRTC-000123", structuredDraft.RootElement.GetProperty("artifactIdentity").GetString());
+            var preservedSignatureOnly = await db.ElectronicSignatures.AsNoTracking()
+                .SingleAsync(x => x.Id == signatureOnlyHighIdentifier.Id);
+            Assert.Equal("HLRTP-000321.00", preservedSignatureOnly.ArtifactRevision);
+            Assert.Equal(signatureOnlyHighHash, preservedSignatureOnly.ContentHash);
             Assert.Equal("TestCase", (await db.ArtifactComments.AsNoTracking()
                 .SingleAsync(x => x.Id == legacyCaseComment.Id)).ArtifactType);
             var migratedNotification = await db.UserNotifications.AsNoTracking()
@@ -186,7 +194,7 @@ public sealed class SoftwareCaseRenamePostgresQualificationTests
                 .Where(x => x.Scope == "HLRTC" || x.Scope == "HLRTP" || x.Scope == "LLRTC" || x.Scope == "LLRTP")
                 .OrderBy(x => x.Scope).ToListAsync();
             Assert.Equal(["HLRTC", "HLRTP", "LLRTC", "LLRTP"], watermarks.Select(x => x.Scope));
-            Assert.Equal([124L, 124L, 20L, 20L], watermarks.Select(x => x.NextValue));
+            Assert.Equal([322L, 322L, 20L, 20L], watermarks.Select(x => x.NextValue));
             Assert.Equal(3, await db.TestProcedureRevisions.CountAsync());
             Assert.Equal(3, await db.BaselineTestProcedures.CountAsync(x => x.BaselineId == baseline.Id));
 
@@ -243,6 +251,8 @@ public sealed class SoftwareCaseRenamePostgresQualificationTests
             Assert.Contains(allSecurityEvents, x => x.EventType == "VerificationIdentityMigration.DocumentRenditionRewritten"
                 && x.Target.StartsWith("ControlledDocumentArtifact:", StringComparison.Ordinal));
             Assert.Contains(migrationEvents, x => x.EventType == "VerificationIdentityMigration.SoftwareCases.v1.Completed");
+            Assert.DoesNotContain(allSecurityEvents, x => x.Target == $"ElectronicSignature:{signatureOnlyHighIdentifier.Id}"
+                && x.EventType == "VerificationIdentityMigration.SignatureSuperseded");
 
             // The human signature remains exactly what was recorded over the old snapshot. The latest
             // reconstructible cycle receives the new canonical hash, and append-only migration evidence names
@@ -298,7 +308,7 @@ public sealed class SoftwareCaseRenamePostgresQualificationTests
             var pendingCount = await db.SecurityAuditEvents.CountAsync(x => x.Target == "software-verification-identities");
             await db.Database.GetService<IMigrator>().MigrateAsync();
             Assert.Equal(pendingCount, await db.SecurityAuditEvents.CountAsync(x => x.Target == "software-verification-identities"));
-            Assert.Equal([124L, 124L, 20L, 20L], await db.IdentifierSequences.AsNoTracking()
+            Assert.Equal([322L, 322L, 20L, 20L], await db.IdentifierSequences.AsNoTracking()
                 .Where(x => x.Scope == "HLRTC" || x.Scope == "HLRTP" || x.Scope == "LLRTC" || x.Scope == "LLRTP")
                 .OrderBy(x => x.Scope).Select(x => x.NextValue).ToListAsync());
         }

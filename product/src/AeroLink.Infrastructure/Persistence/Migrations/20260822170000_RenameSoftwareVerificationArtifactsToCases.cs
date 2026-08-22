@@ -72,6 +72,8 @@ public partial class RenameSoftwareVerificationArtifactsToCases : Migration
                         FROM "test_procedure_changes" WHERE "BaseNumber" ~ '^(?:HLRTP)-[0-9]+'), 1),
                     COALESCE((SELECT MAX((regexp_match("SubjectDisplayNumber", '^(?:HLRTP)-([0-9]+)'))[1]::bigint) + 1
                         FROM "verification_impact_items" WHERE "SubjectDisplayNumber" ~ '^(?:HLRTP)-[0-9]+'), 1),
+                    COALESCE((SELECT MAX((regexp_match("ArtifactRevision", 'HLRTP-([0-9]+)'))[1]::bigint) + 1
+                        FROM "electronic_signatures" WHERE "ArtifactRevision" ~ 'HLRTP-[0-9]+'), 1),
                     COALESCE((SELECT MAX((matches.capture[1])::bigint) + 1
                         FROM (SELECT regexp_matches(COALESCE("SourceChangeRequestsJson", ''), 'HLRTP-([0-9]+)', 'g') AS capture
                             FROM "test_procedure_revisions") matches), 1),
@@ -96,6 +98,8 @@ public partial class RenameSoftwareVerificationArtifactsToCases : Migration
                         FROM "test_procedure_changes" WHERE "BaseNumber" ~ '^(?:LLRTP)-[0-9]+'), 1),
                     COALESCE((SELECT MAX((regexp_match("SubjectDisplayNumber", '^(?:LLRTP)-([0-9]+)'))[1]::bigint) + 1
                         FROM "verification_impact_items" WHERE "SubjectDisplayNumber" ~ '^(?:LLRTP)-[0-9]+'), 1),
+                    COALESCE((SELECT MAX((regexp_match("ArtifactRevision", 'LLRTP-([0-9]+)'))[1]::bigint) + 1
+                        FROM "electronic_signatures" WHERE "ArtifactRevision" ~ 'LLRTP-[0-9]+'), 1),
                     COALESCE((SELECT MAX((matches.capture[1])::bigint) + 1
                         FROM (SELECT regexp_matches(COALESCE("SourceChangeRequestsJson", ''), 'LLRTP-([0-9]+)', 'g') AS capture
                             FROM "test_procedure_revisions") matches), 1),

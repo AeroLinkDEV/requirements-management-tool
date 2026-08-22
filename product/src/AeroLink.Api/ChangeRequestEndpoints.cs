@@ -1124,9 +1124,22 @@ public static class ChangeRequestEndpoints
             var actor=http.UserAccount();var query = db.ElectronicSignatures.AsNoTracking().AsQueryable();
             if(!actor.IsAdministrator){var allowed=actor.Programs.Select(x=>x.ProgramId).ToList();query=query.Where(x=>allowed.Contains(x.ProgramId));}
             if (artifactId is not null) query = query.Where(x => x.ArtifactId == artifactId);
-            var projected=query.Select(x => new { x.Id, x.ArtifactType, x.ArtifactId, x.ArtifactRevision, x.Action, x.Authority, x.Meaning, x.ContentHash, x.UserName, x.DisplayName, x.SignedAt });
-            if(db.Database.IsSqlite()){var rows=await projected.ToListAsync(ct);return Results.Ok(rows.OrderByDescending(x=>x.SignedAt).Take(500));}
-            return Results.Ok(await projected.OrderByDescending(x => x.SignedAt).Take(500).ToListAsync(ct));
+            var signatures = db.Database.IsSqlite()
+                ? (await query.ToListAsync(ct)).OrderByDescending(x => x.SignedAt).Take(500).ToList()
+                : await query.OrderByDescending(x => x.SignedAt).Take(500).ToListAsync(ct);
+            var migration = await SignatureMigrationProjector.ForAsync(db, signatures.Select(x => x.Id), ct);
+            return Results.Ok(signatures.Select(x =>
+            {
+                var status = migration.GetValueOrDefault(x.Id) ?? SignatureMigrationProjection.Current;
+                return new
+                {
+                    x.Id, x.ArtifactType, x.ArtifactId, x.ArtifactRevision, x.Action, x.Authority,
+                    x.Meaning, x.ContentHash, x.UserName, x.DisplayName, x.SignedAt,
+                    signatureStatus = status.Status,
+                    isSuperseded = status.IsSuperseded,
+                    supersession = status.Supersession
+                };
+            }));
         });
     }
 

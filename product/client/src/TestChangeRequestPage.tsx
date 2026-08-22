@@ -82,6 +82,19 @@ type Package = {
   coveredChangeRequests: { id: string; number: string; title: string; originating: boolean }[]
 }
 
+type SignatureEvidence = {
+  id: string
+  displayName: string
+  action: string
+  meaning: string
+  artifactRevision: string
+  contentHash: string
+  signedAt: string
+  signatureStatus?: string
+  isSuperseded?: boolean
+  supersession?: { migration?: string; reason?: string; oldArtifactIdentity?: string; oldSignatureHash?: string; newArtifactIdentity?: string; newContentHash?: string }
+}
+
 type EditLock = {
   id: string
   version: number
@@ -194,6 +207,8 @@ export default function TestChangeRequestPage({
   onOpenTestChangeRequest: (id: string) => void
 }) {
   const [item, setItem] = useState<Package>()
+  const [signatures, setSignatures] = useState<SignatureEvidence[]>([])
+  const [signatureError, setSignatureError] = useState('')
   const [error, setError] = useState('')
   const [saved, setSaved] = useState('')
   const [busy, setBusy] = useState(false)
@@ -212,10 +227,20 @@ export default function TestChangeRequestPage({
 
   const load = useCallback(async () => {
     setError('')
+    setSignatureError('')
     try {
-      const detail = await apiRequest<Package>(`${api}/api/test-change-reviews/${packageId}/${verificationArtifactChangeSegment(discipline)}`)
-      const list = await apiRequest<{ items: Package[] }>(`${api}/api/releases/${releaseId}/test-change-reviews`)
+      const [detail, list] = await Promise.all([
+        apiRequest<Package>(`${api}/api/test-change-reviews/${packageId}/${verificationArtifactChangeSegment(discipline)}`),
+        apiRequest<{ items: Package[] }>(`${api}/api/releases/${releaseId}/test-change-reviews`),
+      ])
+      let signatureRows: SignatureEvidence[] = []
+      try {
+        signatureRows = await apiRequest<SignatureEvidence[]>(`${api}/api/signatures?artifactId=${packageId}`)
+      } catch (reason) {
+        setSignatureError(operationError(reason, 'Signature evidence could not be loaded.'))
+      }
       const row = list.items.find(x => x.id === packageId)
+      setSignatures(signatureRows)
       setItem({
         ...detail,
         ...(row ?? {}),
@@ -573,6 +598,20 @@ export default function TestChangeRequestPage({
         <section className="workspaceCard">
           <div className="workspaceTitle"><div><h2>Audit history</h2></div></div>
           <p className="workspaceEmpty">Controlled checkout, check-in, review, and approval evidence is retained with this record.</p>
+        </section>
+
+        <section className="workspaceCard" data-signature-evidence>
+          <div className="workspaceTitle"><div><h2>Signature evidence</h2><p>Original signatures remain immutable; migration status is shown from append-only provenance.</p></div></div>
+          {signatureError
+            ? <p className="workspaceEmpty">{signatureError}</p>
+            : signatures.length
+            ? <div className="workspaceStack">{signatures.map(signature => <article className="requirementView" key={signature.id}>
+              <div><b>{signature.isSuperseded ? 'Superseded signature' : signature.action}</b><span>{signature.displayName}</span></div>
+              <p>{signature.isSuperseded ? signature.supersession?.reason ?? 'Identity migration superseded this signature.' : signature.meaning}</p>
+              {signature.isSuperseded && signature.supersession?.migration && <small>Migration: {signature.supersession.migration}{signature.supersession.newArtifactIdentity ? ` · replacement identity ${signature.supersession.newArtifactIdentity}` : ''}{signature.supersession.newContentHash ? ` · replacement hash ${signature.supersession.newContentHash.slice(0, 12)}…` : ''}</small>}
+              <code>{signature.contentHash}</code>
+            </article>)}</div>
+            : <p className="workspaceEmpty">No signatures are recorded for this test change request.</p>}
         </section>
       </div>
 

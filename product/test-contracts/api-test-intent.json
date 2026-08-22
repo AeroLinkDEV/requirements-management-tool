@@ -1,11 +1,11 @@
 {
   "schemaVersion": "aerolink-api-test-intent/v2",
   "totals": {
-    "tests": 534,
-    "cases": 588,
+    "tests": 535,
+    "cases": 589,
     "classes": 94,
-    "hostedTests": 521,
-    "hostedCases": 566,
+    "hostedTests": 522,
+    "hostedCases": 567,
     "nonHostedTests": 8,
     "nonHostedCases": 17,
     "unknownHostTests": 5,
@@ -21,8 +21,8 @@
     "http-boundary": {
       "label": "HTTP boundary: route, status, JSON shape",
       "level": "API (must stay hosted)",
-      "tests": 339,
-      "cases": 373,
+      "tests": 340,
+      "cases": 374,
       "unknownCases": 0,
       "classes": 80
     },
@@ -5186,6 +5186,24 @@
     },
     {
       "cls": "ProcedureBrowsingApiTests",
+      "test": "Signature_api_projects_migration_supersession_without_mutating_original_evidence",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "shared-host-fixture",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 236,
+        "end": 294
+      }
+    },
+    {
+      "cls": "ProcedureBrowsingApiTests",
       "test": "Software_scopes_return_Cases_and_System_remains_a_Procedure",
       "kind": "Fact",
       "intent": "http-boundary",
@@ -5234,8 +5252,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 236,
-        "end": 255
+        "start": 296,
+        "end": 315
       }
     },
     {
