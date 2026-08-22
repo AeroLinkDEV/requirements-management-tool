@@ -280,7 +280,7 @@ public sealed class CandidateBaseline
         var manifest = string.Join("|", DisplayNumber, ProjectId, ReleaseId,
             string.Join(";", _selections.OrderBy(x => x.ChangeRequestDisplayNumber).Select(x => $"scr:{x.ChangeRequestId}:{x.ChangeRequestDisplayNumber}")),
             string.Join(";", _externalPackageSelections.OrderBy(x => x.BaselineImportId)
-            .Select(x => $"external:{x.BaselineImportId}:{x.Id}:{x.PackageContentHash}")));
+            .Select(x => $"external:{x.BaselineImportId}:{x.PackageContentHash}")));
         ContentHash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(manifest))).ToLowerInvariant();
         State = CandidateBaselineState.Frozen;
         FrozenAt = now;

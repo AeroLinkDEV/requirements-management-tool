@@ -617,11 +617,14 @@ public static class BaselineEndpoints
             var rows = await (from member in db.BaselineRequirements.AsNoTracking().Where(x => x.BaselineId == id)
                               join artifact in db.Requirements.AsNoTracking() on member.ArtifactId equals artifact.Id
                               join revision in db.RequirementRevisions.AsNoTracking() on member.RevisionId equals revision.Id
-                              join scr in db.SystemChangeRequests.AsNoTracking() on revision.SourceChangeRequestId equals scr.Id
+                              join scr in db.SystemChangeRequests.AsNoTracking() on revision.SourceChangeRequestId equals scr.Id into sourceRequests
+                              from scr in sourceRequests.DefaultIfEmpty()
                               orderby artifact.BaseNumber
                               select new { artifact.Id, artifact.BaseNumber, revisionId = revision.Id, revision.Revision, displayNumber = artifact.BaseNumber + "." + (revision.Revision < 10 ? "0" : "") + revision.Revision,
-                                  level = artifact.Level.ToString(), revision.Statement, revision.Rationale, revision.VerificationMethod, sourceChangeRequestId = scr.Id,
-                                  sourceScr = scr.BaseNumber + "." + (scr.Revision < 10 ? "0" : "") + scr.Revision }).ToListAsync(ct);
+                                  level = artifact.Level.ToString(), revision.Statement, revision.Rationale, revision.VerificationMethod,
+                                  originKind = revision.OriginKind.ToString(), revision.SourceBaselineImportId,
+                                  sourceChangeRequestId = scr == null ? (Guid?)null : scr.Id,
+                                  sourceScr = scr == null ? null : scr.BaseNumber + "." + (scr.Revision < 10 ? "0" : "") + scr.Revision }).ToListAsync(ct);
             return Results.Ok(new { documentType = "SWRD", title = $"{project.SoftwareProduct} Software Requirements Document", release = release.Version,
                 baseline = baseline.DisplayNumber, baseline.Name, baseline.RequirementsHash, baseline.RequirementsMaterializedAt, requirementCount = rows.Count, requirements = rows });
         });

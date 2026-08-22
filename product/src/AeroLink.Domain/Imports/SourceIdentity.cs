@@ -91,6 +91,18 @@ public sealed class SourceIdentity
         return new SourceIdentityLink(ProjectId, requirementRevisionId, Id, packageId, now);
     }
 
+    /// <summary>
+    /// Creates a provenance link when the current import membership, rather than the first-seen identity row,
+    /// proves that this source object was present in the package being materialized.
+    /// </summary>
+    public SourceIdentityLink LinkToFromImport(Guid requirementRevisionId, Guid committingBaselineImportId,
+        DateTimeOffset now)
+    {
+        if (committingBaselineImportId == Guid.Empty)
+            throw new DomainException("A provenance link requires the package that committed the revision.");
+        return new SourceIdentityLink(ProjectId, requirementRevisionId, Id, committingBaselineImportId, now);
+    }
+
     private static string Required(string value, string name) =>
         string.IsNullOrWhiteSpace(value) ? throw new DomainException($"A {name} is required.") : value.Trim();
 }

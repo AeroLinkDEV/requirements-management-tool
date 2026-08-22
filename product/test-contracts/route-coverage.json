@@ -451,6 +451,7 @@
       "path": "/api/baselines/{id:guid}/freeze",
       "file": "BaselineEndpoints.cs",
       "coveredBy": [
+        "BaselineImportApiTests",
         "ChangeAuthoringInvariantApiTests",
         "ReopenBaselineConsequencesApiTests",
         "VerificationImpactApiTests",
@@ -479,6 +480,7 @@
       "path": "/api/baselines/{id:guid}/materialize-requirements",
       "file": "BaselineEndpoints.cs",
       "coveredBy": [
+        "BaselineImportApiTests",
         "ChangeAuthoringInvariantApiTests",
         "ControlledProcedureDocumentApiTests",
         "ProcedureBaselineApiTests",

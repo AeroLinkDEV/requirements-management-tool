@@ -87,14 +87,18 @@ public sealed class RequirementBaselineMaterializer(AeroLinkDbContext db, Verifi
         var sourceIdentities = await db.SourceIdentities.AsNoTracking().Where(x => sourceIdentityIds.Contains(x.Id)).ToDictionaryAsync(x => x.Id, ct);
         if (sourceIdentities.Count != sourceIdentityIds.Count)
             throw new DomainException("An external package item references a missing source identity.");
+        var sourceMemberships = await db.BaselineImportSourceIdentityMemberships.AsNoTracking()
+            .Where(x => packageIds.Contains(x.BaselineImportId) && sourceIdentityIds.Contains(x.SourceIdentityId))
+            .ToListAsync(ct);
         foreach (var item in packageItems)
         {
             if (!packages.TryGetValue(item.BaselineImportId, out var package)
                 || item.ProjectId != baseline.ProjectId || package.ProjectId != baseline.ProjectId)
                 throw new DomainException("An external package item does not belong to this project.");
             var identity = sourceIdentities[item.SourceIdentityId];
-            if (identity.ProjectId != baseline.ProjectId || identity.BaselineImportId != item.BaselineImportId
-                || !identity.InImportedBaseline)
+            var membership = sourceMemberships.SingleOrDefault(x => x.BaselineImportId == item.BaselineImportId
+                && x.SourceIdentityId == item.SourceIdentityId);
+            if (identity.ProjectId != baseline.ProjectId || membership is null || !membership.InImportedBaseline)
                 throw new DomainException("An external package item has an inconsistent source identity.");
             if (!string.Equals(identity.SourceIdentifier, item.SourceIdentifier, StringComparison.Ordinal))
                 throw new DomainException("An external package item does not preserve its source identifier.");
@@ -157,7 +161,7 @@ public sealed class RequirementBaselineMaterializer(AeroLinkDbContext db, Verifi
                 var revision = RequirementRevision.FromExternalSourcePackage(artifact.Id, item.Revision, item.Statement,
                     item.Rationale, RequirementRevisionState.Active, item.BaselineImportId, baseline.Id, now);
                 db.RequirementRevisions.Add(revision); revisions.Add(revision); current[artifact.Id] = revision; created++;
-                db.SourceIdentityLinks.Add(sourceIdentities[item.SourceIdentityId].LinkTo(revision.Id, now, item.BaselineImportId));
+                db.SourceIdentityLinks.Add(sourceIdentities[item.SourceIdentityId].LinkToFromImport(revision.Id, item.BaselineImportId, now));
                 continue;
             }
 
@@ -168,7 +172,7 @@ public sealed class RequirementBaselineMaterializer(AeroLinkDbContext db, Verifi
             var next = RequirementRevision.FromExternalSourcePackage(artifact.Id, item.Revision, item.Statement,
                 item.Rationale, RequirementRevisionState.Active, item.BaselineImportId, baseline.Id, now);
             db.RequirementRevisions.Add(next); revisions.Add(next); current[artifact.Id] = next; created++;
-            db.SourceIdentityLinks.Add(sourceIdentities[item.SourceIdentityId].LinkTo(next.Id, now, item.BaselineImportId));
+            db.SourceIdentityLinks.Add(sourceIdentities[item.SourceIdentityId].LinkToFromImport(next.Id, item.BaselineImportId, now));
         }
 
         // Requirement revisions exist for the first time here, so this is the earliest point at which

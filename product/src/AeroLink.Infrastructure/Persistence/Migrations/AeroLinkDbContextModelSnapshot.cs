@@ -2762,8 +2762,7 @@ namespace AeroLink.Infrastructure.Persistence.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("BoundCandidateBaselineId")
-                        .IsUnique();
+                    b.HasIndex("BoundCandidateBaselineId");
 
                     b.HasIndex("ReleaseId");
 
@@ -2823,6 +2822,33 @@ namespace AeroLink.Infrastructure.Persistence.Migrations
                         .IsUnique();
 
                     b.ToTable("baseline_import_package_items", (string)null);
+                });
+
+            modelBuilder.Entity("AeroLink.Domain.Imports.BaselineImportSourceIdentityMembership", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("BaselineImportId")
+                        .HasColumnType("uuid");
+
+                    b.Property<bool>("InImportedBaseline")
+                        .HasColumnType("boolean");
+
+                    b.Property<DateTimeOffset>("RecordedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("SourceIdentityId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("SourceIdentityId");
+
+                    b.HasIndex("BaselineImportId", "SourceIdentityId")
+                        .IsUnique();
+
+                    b.ToTable("baseline_import_source_identity_memberships", (string)null);
                 });
 
             modelBuilder.Entity("AeroLink.Domain.Imports.SourceHistoryEntry", b =>
@@ -8511,6 +8537,21 @@ namespace AeroLink.Infrastructure.Persistence.Migrations
                         .WithMany()
                         .HasForeignKey("SourceIdentityId")
                         .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("AeroLink.Domain.Imports.BaselineImportSourceIdentityMembership", b =>
+                {
+                    b.HasOne("AeroLink.Domain.Imports.BaselineImport", null)
+                        .WithMany()
+                        .HasForeignKey("BaselineImportId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("AeroLink.Domain.Imports.SourceIdentity", null)
+                        .WithMany()
+                        .HasForeignKey("SourceIdentityId")
+                        .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
                 });
 

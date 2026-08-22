@@ -1,11 +1,11 @@
 {
   "schemaVersion": "aerolink-api-test-intent/v2",
   "totals": {
-    "tests": 527,
-    "cases": 581,
+    "tests": 531,
+    "cases": 585,
     "classes": 94,
-    "hostedTests": 514,
-    "hostedCases": 559,
+    "hostedTests": 518,
+    "hostedCases": 563,
     "nonHostedTests": 8,
     "nonHostedCases": 17,
     "unknownHostTests": 5,
@@ -21,16 +21,16 @@
     "http-boundary": {
       "label": "HTTP boundary: route, status, JSON shape",
       "level": "API (must stay hosted)",
-      "tests": 334,
-      "cases": 368,
+      "tests": 336,
+      "cases": 370,
       "unknownCases": 0,
       "classes": 80
     },
     "ef-translation": {
       "label": "EF translation / relational constraints",
       "level": "Infrastructure (needs a database, not a host)",
-      "tests": 101,
-      "cases": 108,
+      "tests": 103,
+      "cases": 110,
       "unknownCases": 0,
       "classes": 43
     },
@@ -759,8 +759,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 565,
-        "end": 598
+        "start": 762,
+        "end": 795
       }
     },
     {
@@ -777,8 +777,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 656,
-        "end": 698
+        "start": 853,
+        "end": 895
       }
     },
     {
@@ -795,8 +795,26 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 516,
-        "end": 563
+        "start": 679,
+        "end": 726
+      }
+    },
+    {
+      "cls": "BaselineImportApiTests",
+      "test": "Abandoning_first_import_does_not_delete_identity_observed_by_later_import",
+      "kind": "Fact",
+      "intent": "ef-translation",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 728,
+        "end": 760
       }
     },
     {
@@ -812,8 +830,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 362,
-        "end": 385
+        "start": 525,
+        "end": 548
       }
     },
     {
@@ -829,8 +847,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 346,
-        "end": 360
+        "start": 509,
+        "end": 523
       }
     },
     {
@@ -846,8 +864,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 387,
-        "end": 422
+        "start": 550,
+        "end": 585
       }
     },
     {
@@ -864,8 +882,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 226,
-        "end": 265
+        "start": 389,
+        "end": 428
       }
     },
     {
@@ -881,8 +899,26 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 300,
-        "end": 320
+        "start": 463,
+        "end": 483
+      }
+    },
+    {
+      "cls": "BaselineImportApiTests",
+      "test": "Customer_package_rejects_source_identifier_mismatch_without_staging_a_row",
+      "kind": "Fact",
+      "intent": "ef-translation",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 311,
+        "end": 335
       }
     },
     {
@@ -899,8 +935,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 157,
-        "end": 213
+        "start": 160,
+        "end": 217
       }
     },
     {
@@ -916,8 +952,26 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 71,
-        "end": 84
+        "start": 73,
+        "end": 86
+      }
+    },
+    {
+      "cls": "BaselineImportApiTests",
+      "test": "Materialized_external_customer_is_visible_in_requirement_baseline_and_history_reads",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 219,
+        "end": 309
       }
     },
     {
@@ -934,8 +988,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 267,
-        "end": 298
+        "start": 430,
+        "end": 461
       }
     },
     {
@@ -952,8 +1006,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 600,
-        "end": 646
+        "start": 797,
+        "end": 843
       }
     },
     {
@@ -969,8 +1023,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 322,
-        "end": 344
+        "start": 485,
+        "end": 507
       }
     },
     {
@@ -987,8 +1041,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 86,
-        "end": 155
+        "start": 88,
+        "end": 158
       }
     },
     {
@@ -1004,8 +1058,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 495,
-        "end": 514
+        "start": 658,
+        "end": 677
       }
     },
     {
@@ -1022,8 +1076,26 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 448,
-        "end": 493
+        "start": 611,
+        "end": 656
+      }
+    },
+    {
+      "cls": "BaselineImportApiTests",
+      "test": "Source_identity_read_uses_latest_link_and_retains_later_package_provenance",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 337,
+        "end": 376
       }
     },
     {
@@ -1040,8 +1112,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 424,
-        "end": 446
+        "start": 587,
+        "end": 609
       }
     },
     {

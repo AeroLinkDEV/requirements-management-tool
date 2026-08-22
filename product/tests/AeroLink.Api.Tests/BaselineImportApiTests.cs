@@ -2,10 +2,12 @@ using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
 using AeroLink.Domain.Baselines;
+using AeroLink.Domain.ChangeControl;
 using AeroLink.Domain.Hierarchy;
 using AeroLink.Domain.Identity;
 using AeroLink.Domain.Imports;
 using AeroLink.Domain.Programs;
+using AeroLink.Domain.Requirements;
 using AeroLink.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
@@ -122,11 +124,12 @@ public sealed class BaselineImportApiTests
             import.RecordAnalysis(now); import.RecordMapping("{}", now);
             import.NoteSourceRecordsAccountedFor(1, now); import.RecordReconciliation("{}", now);
             var identity = new SourceIdentity(projectId, import.Id, "DOORS", "Requirements", "42", "REQ-42", now);
+            var membership = new BaselineImportSourceIdentityMembership(import.Id, identity.Id, true, now);
             var item = new BaselineImportPackageItem(projectId, import.Id, identity.Id, "CUSR-000001", 0,
                 "The customer system shall provide navigation.", "Customer rationale", "REQ-42", now);
             var baseline = new CandidateBaseline("SW-09.90", 0, projectId, release.Id, null,
                 "Customer candidate", "cm", now);
-            db.AddRange(release, import, identity, item, baseline);
+            db.AddRange(release, import, identity, membership, item, baseline);
             await db.SaveChangesAsync();
             baselineId = baseline.Id; importId = import.Id; releaseId = release.Id; identityId = identity.Id;
         }
@@ -191,11 +194,12 @@ public sealed class BaselineImportApiTests
             import.RecordAnalysis(now); import.RecordMapping("{}", now);
             import.NoteSourceRecordsAccountedFor(1, now); import.RecordReconciliation("{}", now);
             var identity = new SourceIdentity(projectId, import.Id, "DOORS", "Requirements", "43", "REQ-43", now);
+            var membership = new BaselineImportSourceIdentityMembership(import.Id, identity.Id, true, now);
             var item = new BaselineImportPackageItem(projectId, import.Id, identity.Id, "CUSR-000003", 0,
                 "The customer system shall refuse an unconfigured ladder.", "Customer rationale", "REQ-43", now);
             var baseline = new CandidateBaseline("SW-08.80", 0, projectId, release.Id, null,
                 "Refused customer candidate", "cm", now);
-            db.AddRange(release, import, identity, item, baseline);
+            db.AddRange(release, import, identity, membership, item, baseline);
             await db.SaveChangesAsync();
             baselineId = baseline.Id; importId = import.Id;
         }
@@ -210,6 +214,165 @@ public sealed class BaselineImportApiTests
         Assert.Null(importAfter.BoundCandidateBaselineId);
         Assert.Empty(await verify.BaselineExternalPackageSelections.AsNoTracking()
             .Where(x => x.BaselineId == baselineId).ToListAsync());
+    }
+
+    [Fact]
+    public async Task Materialized_external_customer_is_visible_in_requirement_baseline_and_history_reads()
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var client = factory.CreateClient();
+        await ProblemReportApiTests.BootstrapAndLoginAsync(client);
+        var projectId = await SeedProjectAsync(factory, "RDO");
+        using (var configure = await client.PutAsJsonAsync($"/api/projects/{projectId}/configuration", new
+        {
+            expectedVersion = 1, reason = "Enable external Customer requirements",
+            steps = new[]
+            {
+                new { catalogueEntry = "Customer", position = 1, capabilities = 0 },
+                new { catalogueEntry = "System", position = 2, capabilities = 7 },
+                new { catalogueEntry = "HighLevel", position = 3, capabilities = 7 },
+                new { catalogueEntry = "LowLevel", position = 4, capabilities = 15 },
+            },
+            relationships = new[]
+            {
+                new { parent = "Customer", child = "System" },
+                new { parent = "System", child = "HighLevel" },
+                new { parent = "HighLevel", child = "LowLevel" },
+            },
+        })) { Assert.True(configure.IsSuccessStatusCode, await configure.Content.ReadAsStringAsync()); }
+        using (var activate = await client.PostAsJsonAsync($"/api/projects/{projectId}/configuration/activate",
+            new { expectedVersion = 2, reason = "Activate external Customer requirements" }))
+            Assert.True(activate.IsSuccessStatusCode, await activate.Content.ReadAsStringAsync());
+
+        Guid baselineId, importId;
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            var now = DateTimeOffset.UtcNow;
+            var release = new SoftwareRelease(projectId, "10.0", isReleased: false);
+            var import = new BaselineImport(projectId, "DOORS", "1", "Customer v1", now,
+                "customer.reqif", Digest, 1, ImportedArtifactKinds.Requirements, "source", now, "cm", now);
+            import.RecordAnalysis(now); import.RecordMapping("{}", now); import.NoteSourceRecordsAccountedFor(1, now);
+            import.RecordReconciliation("{}", now);
+            var identity = new SourceIdentity(projectId, import.Id, "DOORS", "Requirements", "44", "REQ-44", now);
+            var membership = new BaselineImportSourceIdentityMembership(import.Id, identity.Id, true, now);
+            var item = new BaselineImportPackageItem(projectId, import.Id, identity.Id, "CUSR-000004", 0,
+                "The customer system shall remain visible.", "Customer rationale", "REQ-44", now);
+            var baseline = new CandidateBaseline("SW-10.00", 0, projectId, release.Id, null,
+                "Customer read surface", "cm", now);
+            db.AddRange(release, import, identity, membership, item, baseline);
+            await db.SaveChangesAsync();
+            baselineId = baseline.Id; importId = import.Id;
+        }
+
+        using var selected = await client.PostAsJsonAsync($"/api/baselines/{baselineId}/external-packages",
+            new { baselineImportId = importId });
+        Assert.Equal(HttpStatusCode.OK, selected.StatusCode);
+        using var frozen = await client.PostAsJsonAsync($"/api/baselines/{baselineId}/freeze", new { });
+        Assert.True(frozen.IsSuccessStatusCode, await frozen.Content.ReadAsStringAsync());
+        using var materialized = await client.PostAsJsonAsync($"/api/baselines/{baselineId}/materialize-requirements", new { });
+        Assert.Equal(HttpStatusCode.OK, materialized.StatusCode);
+
+        Guid artifactId;
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            artifactId = await db.Requirements.Where(x => x.BaseNumber == "CUSR-000004").Select(x => x.Id).SingleAsync();
+        }
+
+        var listed = await client.GetFromJsonAsync<JsonElement>(
+            $"/api/requirements?projectId={projectId}&baselineId={baselineId}&page=1&pageSize=50");
+        var listedRow = Assert.Single(listed.GetProperty("items").EnumerateArray());
+        Assert.Equal("CUSR-000004", listedRow.GetProperty("baseNumber").GetString());
+        Assert.Equal("ExternalSourcePackage", listedRow.GetProperty("originKind").GetString());
+        Assert.Equal(importId, listedRow.GetProperty("sourceBaselineImportId").GetGuid());
+        Assert.Equal(JsonValueKind.Null, listedRow.GetProperty("sourceChangeRequestId").ValueKind);
+
+        var history = await client.GetFromJsonAsync<JsonElement>($"/api/requirements/{artifactId}/history");
+        var historyRow = Assert.Single(history.GetProperty("revisions").EnumerateArray());
+        Assert.Equal("ExternalSourcePackage", historyRow.GetProperty("originKind").GetString());
+        Assert.Equal(importId, historyRow.GetProperty("sourceBaselineImportId").GetGuid());
+        Assert.Equal(JsonValueKind.Null, historyRow.GetProperty("sourceChangeRequestId").ValueKind);
+
+        var detail = await client.GetFromJsonAsync<JsonElement>($"/api/enterprise-requirements/{artifactId}");
+        var detailRow = Assert.Single(detail.GetProperty("history").EnumerateArray());
+        Assert.Equal("ExternalSourcePackage", detailRow.GetProperty("originKind").GetString());
+        Assert.Equal(importId, detailRow.GetProperty("sourceBaselineImportId").GetGuid());
+        Assert.Equal(JsonValueKind.Null, detailRow.GetProperty("sourceChangeRequestId").ValueKind);
+
+        var swrd = await client.GetFromJsonAsync<JsonElement>($"/api/baselines/{baselineId}/swrd");
+        var swrdRow = Assert.Single(swrd.GetProperty("requirements").EnumerateArray());
+        Assert.Equal("CUSR-000004", swrdRow.GetProperty("baseNumber").GetString());
+        Assert.Equal("ExternalSourcePackage", swrdRow.GetProperty("originKind").GetString());
+        Assert.Equal(importId, swrdRow.GetProperty("sourceBaselineImportId").GetGuid());
+        Assert.Equal(JsonValueKind.Null, swrdRow.GetProperty("sourceChangeRequestId").ValueKind);
+    }
+
+    [Fact]
+    public async Task Customer_package_rejects_source_identifier_mismatch_without_staging_a_row()
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var client = factory.CreateClient();
+        await ProblemReportApiTests.BootstrapAndLoginAsync(client);
+        var projectId = await SeedProjectAsync(factory, "BAD");
+        var importId = await StartAsync(client, projectId);
+        await client.PostAsync($"/api/baseline-imports/{importId}/analysis", null);
+        await client.PostAsJsonAsync($"/api/baseline-imports/{importId}/mapping", new { mappingJson = "{}" });
+        Assert.Equal(HttpStatusCode.OK, (await RecordSourceRecordsAsync(client, importId, SourceRecord(451))).StatusCode);
+        await client.PostAsJsonAsync($"/api/baseline-imports/{importId}/reconciliation", new { reconciliationJson = "{\"objectsIn\":1}" });
+        var sourceRecords = await client.GetFromJsonAsync<JsonElement>($"/api/baseline-imports/{importId}/source-records");
+        var identityId = sourceRecords.GetProperty("records").EnumerateArray().Single().GetProperty("id").GetGuid();
+
+        using var refused = await client.PostAsJsonAsync($"/api/baseline-imports/{importId}/customer-items", new
+        {
+            items = new[] { new { sourceIdentityId = identityId, baseNumber = "CUSR-000005", revision = 0,
+                statement = "Malformed identifier must not stage.", rationale = "", sourceIdentifier = "REQ-WRONG" } }
+        });
+        Assert.Equal(HttpStatusCode.BadRequest, refused.StatusCode);
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+        Assert.Empty(await db.BaselineImportPackageItems.AsNoTracking().Where(x => x.BaselineImportId == importId).ToListAsync());
+    }
+
+    [Fact]
+    public async Task Source_identity_read_uses_latest_link_and_retains_later_package_provenance()
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var client = factory.CreateClient();
+        await ProblemReportApiTests.BootstrapAndLoginAsync(client);
+        var projectId = await SeedProjectAsync(factory, "LIN");
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            var now = DateTimeOffset.UtcNow;
+            var firstImport = new BaselineImport(projectId, "DOORS", "1", "v1", now, "v1.reqif", Digest, 1,
+                ImportedArtifactKinds.Requirements, "source", now, "cm", now);
+            var secondImport = new BaselineImport(projectId, "DOORS", "1", "v2", now.AddMinutes(1), "v2.reqif",
+                "8f2c4b1e7a0d3c5589ab41e2f7c60d9b8e35a1470c2df6b849e0d17ac3d07a38", 1,
+                ImportedArtifactKinds.Requirements, "source", now.AddMinutes(1), "cm", now.AddMinutes(1));
+            var identity = new SourceIdentity(projectId, firstImport.Id, "DOORS", "Requirements", "88", "REQ-88", now);
+            var firstBaseline = new CandidateBaseline("SW-03.00", 0, projectId, Guid.NewGuid(), null, "v1", "cm", now);
+            var secondBaseline = new CandidateBaseline("SW-03.01", 0, projectId, Guid.NewGuid(), firstBaseline.Id, "v2", "cm", now.AddMinutes(1));
+            var artifact = new RequirementArtifact(projectId, "CUSR-000011", RequirementLevel.Customer, now);
+            var firstRevision = RequirementRevision.FromExternalSourcePackage(artifact.Id, 0, "First", "", RequirementRevisionState.Active,
+                firstImport.Id, firstBaseline.Id, now);
+            var secondRevision = RequirementRevision.FromExternalSourcePackage(artifact.Id, 1, "Second", "", RequirementRevisionState.Active,
+                secondImport.Id, secondBaseline.Id, now.AddMinutes(1));
+            db.AddRange(firstImport, secondImport, identity, firstBaseline, secondBaseline, artifact, firstRevision, secondRevision,
+                new SourceIdentityLink(projectId, firstRevision.Id, identity.Id, firstImport.Id, now),
+                new SourceIdentityLink(projectId, secondRevision.Id, identity.Id, secondImport.Id, now.AddMinutes(1)));
+            await db.SaveChangesAsync();
+        }
+
+        var response = await client.GetFromJsonAsync<JsonElement>($"/api/source-identities?projectId={projectId}&search=REQ-88");
+        var match = Assert.Single(response.GetProperty("matches").EnumerateArray());
+        using var verifyScope = factory.Services.CreateScope();
+        var verify = verifyScope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+        var secondRevisionId = await verify.RequirementRevisions.Where(x => x.Revision == 1).Select(x => x.Id).SingleAsync();
+        Assert.Equal(secondRevisionId, match.GetProperty("requirementRevisionId").GetGuid());
+        var provenance = match.GetProperty("provenance").EnumerateArray().ToList();
+        Assert.Equal(2, provenance.Count);
+        Assert.Equal(secondRevisionId, provenance[0].GetProperty("requirementRevisionId").GetGuid());
     }
 
     /// <summary>Walks an import to Reconciled, which now means it has really been told what the extract held.</summary>
@@ -560,6 +723,40 @@ public sealed class BaselineImportApiTests
         // The abandoned attempt's history went with it. It described an extract nobody accepted.
         Assert.Empty(await db.SourceIdentities.AsNoTracking().Where(x => x.BaselineImportId == first).ToListAsync());
         Assert.Empty(await db.SourceHistoryEntries.AsNoTracking().Where(x => x.BaselineImportId == first).ToListAsync());
+    }
+
+    [Fact]
+    public async Task Abandoning_first_import_does_not_delete_identity_observed_by_later_import()
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var client = factory.CreateClient();
+        await ProblemReportApiTests.BootstrapAndLoginAsync(client);
+        var projectId = await SeedProjectAsync(factory, "MEM");
+        var first = await StartAsync(client, projectId);
+        await client.PostAsync($"/api/baseline-imports/{first}/analysis", null);
+        await client.PostAsJsonAsync($"/api/baseline-imports/{first}/mapping", new { mappingJson = "{}" });
+        Assert.Equal(HttpStatusCode.OK, (await RecordSourceRecordsAsync(client, first, SourceRecord(7890))).StatusCode);
+
+        var second = await StartAsync(client, projectId);
+        await client.PostAsync($"/api/baseline-imports/{second}/analysis", null);
+        await client.PostAsJsonAsync($"/api/baseline-imports/{second}/mapping", new { mappingJson = "{}" });
+        var secondRecords = await RecordSourceRecordsAsync(client, second, SourceRecord(7890));
+        var secondBody = await secondRecords.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal(HttpStatusCode.OK, secondRecords.StatusCode);
+        Assert.Equal(1, secondBody.GetProperty("seenAgain").GetInt32());
+        await client.PostAsJsonAsync($"/api/baseline-imports/{second}/reconciliation", new { reconciliationJson = "{\"objectsIn\":1}" });
+        Assert.Equal(HttpStatusCode.OK,
+            (await client.PostAsJsonAsync($"/api/baseline-imports/{second}/accept", new { version = "2.0" })).StatusCode);
+
+        Assert.Equal(HttpStatusCode.OK, (await client.PostAsync($"/api/baseline-imports/{first}/abandon", null)).StatusCode);
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+        var identity = await db.SourceIdentities.AsNoTracking().SingleAsync(x => x.SourceObjectKey == "7890");
+        Assert.Equal(first, identity.BaselineImportId);
+        Assert.Empty(await db.BaselineImportSourceIdentityMemberships.AsNoTracking()
+            .Where(x => x.BaselineImportId == first).ToListAsync());
+        Assert.True(await db.BaselineImportSourceIdentityMemberships.AsNoTracking()
+            .AnyAsync(x => x.BaselineImportId == second && x.SourceIdentityId == identity.Id));
     }
 
     [Fact]

@@ -47,6 +47,7 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
     public DbSet<DownstreamAssessmentReopening> DownstreamAssessmentReopenings => Set<DownstreamAssessmentReopening>();
     public DbSet<BaselineImport> BaselineImports => Set<BaselineImport>();
     public DbSet<SourceIdentity> SourceIdentities => Set<SourceIdentity>();
+    public DbSet<BaselineImportSourceIdentityMembership> BaselineImportSourceIdentityMemberships => Set<BaselineImportSourceIdentityMembership>();
     public DbSet<SourceIdentityLink> SourceIdentityLinks => Set<SourceIdentityLink>();
     public DbSet<SourceHistoryEntry> SourceHistoryEntries => Set<SourceHistoryEntry>();
     public DbSet<BaselineImportPackageItem> BaselineImportPackageItems => Set<BaselineImportPackageItem>();
@@ -610,7 +611,9 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
             b.Property(x => x.PackageManifestHash).HasMaxLength(64);
             b.Property(x => x.Version).IsConcurrencyToken();
             b.HasIndex(x => new { x.ProjectId, x.State });
-            b.HasIndex(x => x.BoundCandidateBaselineId).IsUnique();
+            // One Draft candidate may contain several independently accepted external packages. Each import
+            // still has only one BoundCandidateBaselineId through the aggregate state and package selection key.
+            b.HasIndex(x => x.BoundCandidateBaselineId);
             b.HasOne<ProjectRecord>().WithMany().HasForeignKey(x => x.ProjectId).OnDelete(DeleteBehavior.Restrict);
             b.HasOne<SoftwareRelease>().WithMany().HasForeignKey(x => x.ReleaseId).OnDelete(DeleteBehavior.Restrict);
         });
@@ -628,6 +631,15 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
             // Somebody holding a drawing quotes the identifier, not the key, so that is what they search on.
             b.HasIndex(x => new { x.ProjectId, x.SourceIdentifier });
             b.HasOne<BaselineImport>().WithMany().HasForeignKey(x => x.BaselineImportId).OnDelete(DeleteBehavior.Restrict);
+        });
+        modelBuilder.Entity<BaselineImportSourceIdentityMembership>(b =>
+        {
+            b.ToTable("baseline_import_source_identity_memberships"); b.HasKey(x => x.Id);
+            b.Property(x => x.Id).ValueGeneratedNever();
+            b.HasIndex(x => new { x.BaselineImportId, x.SourceIdentityId }).IsUnique();
+            b.HasIndex(x => x.SourceIdentityId);
+            b.HasOne<BaselineImport>().WithMany().HasForeignKey(x => x.BaselineImportId).OnDelete(DeleteBehavior.Restrict);
+            b.HasOne<SourceIdentity>().WithMany().HasForeignKey(x => x.SourceIdentityId).OnDelete(DeleteBehavior.Cascade);
         });
         modelBuilder.Entity<SourceIdentityLink>(b =>
         {
@@ -1822,7 +1834,7 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
         {
             var projectId=ChangeTracker.Entries<RequirementArtifact>().FirstOrDefault(x=>x.Entity.Id==entry.Entity.ArtifactId)?.Entity.ProjectId;
             projectId??=await Requirements.AsNoTracking().Where(x=>x.Id==entry.Entity.ArtifactId).Select(x=>(Guid?)x.ProjectId).SingleOrDefaultAsync(ct);
-            if(projectId is Guid id)pending.Add((id,"aerolink.requirement.revision-created","RequirementRevision",entry.Entity.Id,new{entry.Entity.ArtifactId,entry.Entity.Revision,state=entry.Entity.State.ToString(),entry.Entity.SourceChangeRequestId,entry.Entity.EffectiveBaselineId},"aerolink.lifecycle"));
+            if(projectId is Guid id)pending.Add((id,"aerolink.requirement.revision-created","RequirementRevision",entry.Entity.Id,new{entry.Entity.ArtifactId,entry.Entity.Revision,state=entry.Entity.State.ToString(),originKind=entry.Entity.OriginKind.ToString(),entry.Entity.SourceChangeRequestId,entry.Entity.SourceBaselineImportId,entry.Entity.EffectiveBaselineId},"aerolink.lifecycle"));
         }
         foreach(var entry in ChangeTracker.Entries<ReleaseCampaign>().Where(x=>x.State is EntityState.Added or EntityState.Modified))
             pending.Add((entry.Entity.ProjectId,"aerolink.release-campaign.changed","ReleaseCampaign",entry.Entity.Id,new{state=entry.Entity.State.ToString(),entry.Entity.ReleaseId,entry.Entity.BaselineId,entry.Entity.SoftwareBuildId,entry.Entity.ReleaseHash},entry.Entity.Events.OrderByDescending(x=>x.OccurredAt).FirstOrDefault()?.ActorId??entry.Entity.OwnerId));

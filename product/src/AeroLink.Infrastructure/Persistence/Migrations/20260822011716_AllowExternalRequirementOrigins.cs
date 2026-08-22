@@ -123,6 +123,37 @@ namespace AeroLink.Infrastructure.Persistence.Migrations
                         onDelete: ReferentialAction.Restrict);
                 });
 
+            migrationBuilder.CreateTable(
+                name: "baseline_import_source_identity_memberships",
+                columns: table => new
+                {
+                    Id = table.Column<Guid>(type: "uuid", nullable: false),
+                    BaselineImportId = table.Column<Guid>(type: "uuid", nullable: false),
+                    SourceIdentityId = table.Column<Guid>(type: "uuid", nullable: false),
+                    InImportedBaseline = table.Column<bool>(type: "boolean", nullable: false),
+                    RecordedAt = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: false)
+                },
+                constraints: table =>
+                {
+                    table.PrimaryKey("PK_baseline_import_source_identity_memberships", x => x.Id);
+                    table.ForeignKey(
+                        name: "FK_baseline_import_source_identity_memberships_baseline_import~",
+                        column: x => x.BaselineImportId,
+                        principalTable: "baseline_imports",
+                        principalColumn: "Id",
+                        onDelete: ReferentialAction.Restrict);
+                    table.ForeignKey(
+                        name: "FK_baseline_import_source_identity_memberships_source_identiti~",
+                        column: x => x.SourceIdentityId,
+                        principalTable: "source_identities",
+                        principalColumn: "Id",
+                        onDelete: ReferentialAction.Cascade);
+                });
+
+            // Preserve the per-import observation for every identity that existed before this feature. The
+            // identity's BaselineImportId remains first-seen provenance; this row is current-import membership.
+            migrationBuilder.Sql("INSERT INTO \"baseline_import_source_identity_memberships\" (\"Id\", \"BaselineImportId\", \"SourceIdentityId\", \"InImportedBaseline\", \"RecordedAt\") SELECT gen_random_uuid(), \"BaselineImportId\", \"Id\", \"InImportedBaseline\", \"FirstSeenAt\" FROM \"source_identities\"");
+
             migrationBuilder.CreateIndex(
                 name: "IX_requirement_revisions_SourceBaselineImportId",
                 table: "requirement_revisions",
@@ -136,8 +167,18 @@ namespace AeroLink.Infrastructure.Persistence.Migrations
             migrationBuilder.CreateIndex(
                 name: "IX_baseline_imports_BoundCandidateBaselineId",
                 table: "baseline_imports",
-                column: "BoundCandidateBaselineId",
+                column: "BoundCandidateBaselineId");
+
+            migrationBuilder.CreateIndex(
+                name: "IX_baseline_import_source_identity_memberships_BaselineImportI~",
+                table: "baseline_import_source_identity_memberships",
+                columns: new[] { "BaselineImportId", "SourceIdentityId" },
                 unique: true);
+
+            migrationBuilder.CreateIndex(
+                name: "IX_baseline_import_source_identity_memberships_SourceIdentityId",
+                table: "baseline_import_source_identity_memberships",
+                column: "SourceIdentityId");
 
             migrationBuilder.CreateIndex(
                 name: "IX_baseline_external_package_selections_BaselineId_BaselineImp~",
@@ -179,6 +220,9 @@ namespace AeroLink.Infrastructure.Persistence.Migrations
         /// <inheritdoc />
         protected override void Down(MigrationBuilder migrationBuilder)
         {
+            migrationBuilder.DropTable(
+                name: "baseline_import_source_identity_memberships");
+
             migrationBuilder.DropForeignKey(
                 name: "FK_requirement_revisions_baseline_imports_SourceBaselineImport~",
                 table: "requirement_revisions");

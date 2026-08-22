@@ -151,7 +151,11 @@ public sealed class EnterpriseRequirementsService(AeroLinkDbContext db, ILadderP
         }
         await db.SaveChangesAsync(ct);
 
-        var allowedLevels = ladderPolicy.OrderedLevels.ToArray();
+        // External-origin levels are controlled by package provenance, not by AeroLink's authored catalogue.
+        // Keep them out of schema/specification/profile synchronization so a later package revision can
+        // materialize against a predecessor without inventing a Customer requirements document.
+        var allowedLevels = ladderPolicy.OrderedLevels
+            .Where(level => !ladderPolicy.Definition(level).UsesExternalOrigin).ToArray();
         var artifacts=await db.Requirements.AsNoTracking().Where(x=>x.ProjectId==projectId&&allowedLevels.Contains(x.Level)).OrderBy(x=>x.BaseNumber).ToListAsync(ct);
         if(artifacts.Count==0)
         {
