@@ -1,11 +1,11 @@
 {
   "schemaVersion": "aerolink-api-test-intent/v2",
   "totals": {
-    "tests": 531,
-    "cases": 585,
+    "tests": 532,
+    "cases": 586,
     "classes": 94,
-    "hostedTests": 518,
-    "hostedCases": 563,
+    "hostedTests": 519,
+    "hostedCases": 564,
     "nonHostedTests": 8,
     "nonHostedCases": 17,
     "unknownHostTests": 5,
@@ -37,10 +37,10 @@
     "auth-policy": {
       "label": "Authentication / authorization wiring",
       "level": "API (must stay hosted)",
-      "tests": 57,
-      "cases": 61,
+      "tests": 58,
+      "cases": 62,
       "unknownCases": 0,
-      "classes": 36
+      "classes": 37
     },
     "in-process-logic": {
       "label": "In-process logic with no HTTP and no client",
@@ -583,8 +583,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 655,
-        "end": 669
+        "start": 763,
+        "end": 777
       }
     },
     {
@@ -600,8 +600,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 612,
-        "end": 627
+        "start": 720,
+        "end": 735
       }
     },
     {
@@ -618,8 +618,26 @@
         "factory-services"
       ],
       "sourceLines": {
+        "start": 373,
+        "end": 412
+      }
+    },
+    {
+      "cls": "AuthoringTracedImpactTests",
+      "test": "Exact_trace_lifecycle_read_action_and_frozen_mutation_refusal_are_project_authorized",
+      "kind": "Fact",
+      "intent": "auth-policy",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
         "start": 265,
-        "end": 304
+        "end": 371
       }
     },
     {
@@ -636,8 +654,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 322,
-        "end": 341
+        "start": 430,
+        "end": 449
       }
     },
     {
@@ -653,8 +671,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 306,
-        "end": 320
+        "start": 414,
+        "end": 428
       }
     },
     {
@@ -670,8 +688,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 634,
-        "end": 648
+        "start": 742,
+        "end": 756
       }
     },
     {
@@ -687,8 +705,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 678,
-        "end": 718
+        "start": 786,
+        "end": 826
       }
     },
     {
@@ -723,8 +741,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 382,
-        "end": 610
+        "start": 490,
+        "end": 718
       }
     },
     {
@@ -741,8 +759,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 343,
-        "end": 380
+        "start": 451,
+        "end": 488
       }
     },
     {

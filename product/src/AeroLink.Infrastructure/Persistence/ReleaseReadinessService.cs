@@ -4,6 +4,7 @@ using AeroLink.Domain.Hierarchy;
 using AeroLink.Domain.Releases;
 using AeroLink.Domain.Requirements;
 using AeroLink.Domain.Verification;
+using AeroLink.Domain.Traceability;
 using Microsoft.EntityFrameworkCore;
 
 namespace AeroLink.Infrastructure.Persistence;
@@ -66,6 +67,15 @@ public sealed class ReleaseReadinessService(AeroLinkDbContext db, ILadderPolicy?
         var derivedLevels = ladderPolicy.OrderedLevels.Where(level => ladderPolicy.ParentLevels(level).Count > 0).ToArray();
         var derivedIds = await (from member in db.BaselineRequirements.AsNoTracking().Where(x => x.BaselineId == baseline.Id) join artifact in db.Requirements.AsNoTracking() on member.ArtifactId equals artifact.Id where derivedLevels.Contains(artifact.Level) select member.RevisionId).ToListAsync(ct);
         var tracedDerivedIds = await db.RequirementTraces.AsNoTracking().Where(x => derivedIds.Contains(x.SourceRevisionId) && revisionIds.Contains(x.TargetRevisionId)).Select(x => x.SourceRevisionId).Distinct().ToListAsync(ct);
+        var suspectTraceCount = await (from link in db.RequirementTraces.AsNoTracking()
+                                       join lifecycle in db.ExactLinkSuspectLifecycles.AsNoTracking()
+                                           on new { LinkKind = ExactLinkKind.RequirementTrace, LinkId = link.Id }
+                                           equals new { lifecycle.LinkKind, LinkId = lifecycle.LinkId }
+                                       where link.ProjectId == campaign.ProjectId
+                                           && revisionIds.Contains(link.SourceRevisionId)
+                                           && revisionIds.Contains(link.TargetRevisionId)
+                                           && lifecycle.State != ExactLinkLifecycleState.Closed
+                                       select link.Id).Distinct().CountAsync(ct);
         // Coverage counts only when it is settled, which takes three things.
         //
         // It must not be suspect: a link carried across a requirement change that nobody has reconfirmed
@@ -183,10 +193,11 @@ public sealed class ReleaseReadinessService(AeroLinkDbContext db, ILadderPolicy?
                     : $"{testChangeReviews.Count-approvedTestChangeReviews} System, HLR, or LLR test change request(s) still require approval.",
                 "Complete every procedure decision, submit each discipline review, and record test-lead approval."),
             baselineMaterialized
-                ? new("traceability","Trace network complete",members.Count > 0 && tracedDerivedIds.Count == derivedIds.Count,tracedDerivedIds.Count,derivedIds.Count,
+                ? new("traceability","Trace network complete",members.Count > 0 && tracedDerivedIds.Count == derivedIds.Count && suspectTraceCount == 0,tracedDerivedIds.Count,derivedIds.Count + suspectTraceCount,
                     members.Count == 0
                         ? "The materialized baseline contains no effective requirement revisions, so traceability cannot pass."
-                        : "Every derived HLR/LLR must retain an exact parent link.",
+                        : suspectTraceCount == 0 ? "Every derived HLR/LLR must retain an exact parent link."
+                            : $"{suspectTraceCount} exact trace link(s) are suspect, acknowledged, or still require downstream change.",
                     members.Count == 0
                         ? "Inspect the selected changes and materialized manifest; a releasable baseline must contain an effective requirement population."
                         : "Resolve orphan and suspect trace links.")

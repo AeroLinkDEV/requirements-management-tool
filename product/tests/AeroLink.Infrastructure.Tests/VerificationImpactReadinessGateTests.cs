@@ -49,6 +49,13 @@ public sealed class VerificationImpactReadinessGateTests
         return readiness.Gates.Single(x => x.Code == "verification_impact");
     }
 
+    private static async Task<ReadinessGate> TraceGateAsync(DbContextOptions<AeroLinkDbContext> options, Guid campaignId)
+    {
+        await using var db = new AeroLinkDbContext(options);
+        var readiness = await new ReleaseReadinessService(db).CalculateAsync(campaignId, default);
+        return readiness.Gates.Single(x => x.Code == "traceability");
+    }
+
     private static VerificationImpactItem AddIntroduced(
         AeroLinkDbContext db,
         (DbContextOptions<AeroLinkDbContext> Options, Guid CampaignId, Guid ReleaseId, Guid ProjectId, Guid ChangeRequestId, string Path) seed,
@@ -163,6 +170,91 @@ public sealed class VerificationImpactReadinessGateTests
             Assert.True(coverage.Complete);
             Assert.Equal(3, coverage.Completed);
             Assert.Equal(3, coverage.Total);
+        }
+        finally { File.Delete(seed.Path); }
+    }
+
+    [Fact]
+    public async Task Suspect_trace_blocks_its_exact_baseline_until_discharged_and_does_not_backpatch_another_baseline()
+    {
+        var seed = await SeedAsync();
+        try
+        {
+            Guid secondCampaignId, traceId;
+            await using (var arrange = new AeroLinkDbContext(seed.Options))
+            {
+                var baseline = await arrange.CandidateBaselines.SingleAsync();
+                var source = new RequirementArtifact(seed.ProjectId, "HLR-00000101", RequirementLevel.HighLevel, Now);
+                var target = new RequirementArtifact(seed.ProjectId, "SYSR-00000101", RequirementLevel.System, Now);
+                var sourceRevision = new RequirementRevision(source.Id, 0, "The software shall navigate.", "R", "Test",
+                    RequirementRevisionState.Active, seed.ChangeRequestId, baseline.Id, Now);
+                var targetRevision = new RequirementRevision(target.Id, 0, "The system shall navigate.", "R", "Test",
+                    RequirementRevisionState.Active, seed.ChangeRequestId, baseline.Id, Now);
+                var link = new RequirementTraceLink(seed.ProjectId, sourceRevision.Id, targetRevision.Id,
+                    RequirementTraceType.DerivedFrom, "The software derives from the system.", Now);
+                var lifecycle = ExactLinkSuspectLifecycle.Raise(seed.ProjectId, ExactLinkKind.RequirementTrace, link.Id,
+                    ExactLinkLifecycleCauseKind.InternalRequirementRevision, targetRevision.Id, null,
+                    "author", "The exact upstream revision changed.", Now);
+                link.AttachExactLinkLifecycle(lifecycle.Id);
+                traceId = link.Id;
+                arrange.AddRange(source, target, sourceRevision, targetRevision, link);
+                arrange.BaselineRequirements.AddRange(
+                    new BaselineRequirementSelection(baseline.Id, source.Id, sourceRevision.Id),
+                    new BaselineRequirementSelection(baseline.Id, target.Id, targetRevision.Id));
+                arrange.ExactLinkSuspectLifecycles.Add(lifecycle);
+                arrange.ExactLinkSuspectEvents.AddRange(lifecycle.Events);
+
+                // Campaigns are unique per project/release; a second release gives the isolation check a
+                // genuinely separate candidate while retaining the same project-level trace history.
+                var isolatedRelease = new SoftwareRelease(seed.ProjectId, "1.7", false);
+                var isolated = new CandidateBaseline("BL-00000002", 0, seed.ProjectId, isolatedRelease.Id, null,
+                    "Isolated baseline", "cm", Now);
+                var isolatedCampaign = new ReleaseCampaign(seed.ProjectId, isolatedRelease.Id, isolated.Id,
+                    "1.6 isolated", "program.manager", Now);
+                arrange.AddRange(isolatedRelease, isolated, isolatedCampaign);
+                arrange.BaselineRequirements.Add(new BaselineRequirementSelection(isolated.Id, target.Id, targetRevision.Id));
+                await arrange.SaveChangesAsync();
+                await arrange.CandidateBaselines.Where(x => x.Id == baseline.Id || x.Id == isolated.Id)
+                    .ExecuteUpdateAsync(update => update
+                        .SetProperty(x => x.State, CandidateBaselineState.Frozen)
+                        .SetProperty(x => x.RequirementsMaterializedAt, Now)
+                        .SetProperty(x => x.RequirementsHash, "test"));
+                Assert.Equal(ExactLinkLifecycleState.Suspect,
+                    await arrange.ExactLinkSuspectLifecycles.Select(x => x.State).SingleAsync());
+                secondCampaignId = isolatedCampaign.Id;
+            }
+
+            var blocked = await TraceGateAsync(seed.Options, seed.CampaignId);
+            Assert.False(blocked.Complete);
+            Assert.Equal(1, blocked.Completed);
+            Assert.Equal(2, blocked.Total);
+            Assert.Contains("suspect", blocked.Detail, StringComparison.OrdinalIgnoreCase);
+
+            await using (var acknowledge = new AeroLinkDbContext(seed.Options))
+                await new ExactLinkLifecycleService(acknowledge).AcknowledgeAsync(traceId, "reviewer",
+                    "The downstream impact assessment is in progress.", Now.AddSeconds(1), default);
+            var acknowledged = await TraceGateAsync(seed.Options, seed.CampaignId);
+            Assert.False(acknowledged.Complete);
+            Assert.Equal(2, acknowledged.Total);
+            Assert.Contains("acknowledged", acknowledged.Detail, StringComparison.OrdinalIgnoreCase);
+
+            var isolatedGate = await TraceGateAsync(seed.Options, secondCampaignId);
+            Assert.True(isolatedGate.Complete);
+            Assert.Equal(0, isolatedGate.Total);
+
+            await using (var resolve = new AeroLinkDbContext(seed.Options))
+            {
+                var lifecycle = await resolve.ExactLinkSuspectLifecycles.Include(x => x.Events).SingleAsync();
+                lifecycle.RecordResolution(ExactLinkResolutionOutcome.ExistingDownstreamRevisionRemainsValid,
+                    "reviewer", "The existing downstream revision remains valid.", Now.AddMinutes(1));
+                resolve.ExactLinkSuspectEvents.Add(lifecycle.Events.Last());
+                await resolve.SaveChangesAsync();
+            }
+
+            var discharged = await TraceGateAsync(seed.Options, seed.CampaignId);
+            Assert.True(discharged.Complete);
+            Assert.Equal(1, discharged.Completed);
+            Assert.Equal(1, discharged.Total);
         }
         finally { File.Delete(seed.Path); }
     }

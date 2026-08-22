@@ -87,6 +87,71 @@ public static class VerificationEndpoints
             catch (Exception ex) when (ex is DomainException or DbUpdateException) { return Results.BadRequest(new { error = ex.Message }); }
         });
 
+        app.MapGet("/api/trace-links/{id:guid}/lifecycle", async (Guid id, HttpContext http, AeroLinkDbContext db, CancellationToken ct) =>
+        {
+            var link = await db.RequirementTraces.AsNoTracking().SingleOrDefaultAsync(x => x.Id == id, ct);
+            if (link is null) return Results.NotFound();
+            if (!await http.HasProjectAccessAsync(db, link.ProjectId, ct)) return Results.Forbid();
+            var lifecycle = await db.ExactLinkSuspectLifecycles.AsNoTracking()
+                .SingleOrDefaultAsync(x => x.LinkKind == ExactLinkKind.RequirementTrace && x.LinkId == id, ct);
+            if (lifecycle is null) return Results.Ok(new
+            {
+                linkId = id, linkKind = ExactLinkKind.RequirementTrace.ToString(), state = (string?)null,
+                causeKind = (string?)null, causeRequirementRevisionId = (Guid?)null, causeBaselineImportId = (Guid?)null,
+                raisedBy = (string?)null, raisedAt = (DateTimeOffset?)null, raisedRationale = (string?)null,
+                acknowledgedBy = (string?)null, acknowledgedAt = (DateTimeOffset?)null, acknowledgementRationale = (string?)null,
+                outcome = (string?)null, resolvedBy = (string?)null, resolvedAt = (DateTimeOffset?)null,
+                resolutionRationale = (string?)null, events = Array.Empty<object>()
+            });
+            var events = (await db.ExactLinkSuspectEvents.AsNoTracking().Where(x => x.LifecycleId == lifecycle.Id)
+                .ToListAsync(ct)).OrderBy(x => x.OccurredAt).ThenBy(x => x.Id).Select(x => new
+                {
+                    id = x.Id, type = x.EventType.ToString(), x.ActorId, x.OccurredAt, x.Rationale,
+                    causeKind = x.CauseKind.ToString(), x.CauseRequirementRevisionId, x.CauseBaselineImportId,
+                    outcome = x.Outcome == null ? null : x.Outcome.ToString()
+                }).ToList();
+            return Results.Ok(new
+            {
+                linkId = id, linkKind = lifecycle.LinkKind.ToString(), state = lifecycle.State.ToString(),
+                causeKind = lifecycle.CauseKind.ToString(), lifecycle.CauseRequirementRevisionId,
+                lifecycle.CauseBaselineImportId, raisedBy = lifecycle.RaisedBy, raisedAt = lifecycle.RaisedAt,
+                raisedRationale = lifecycle.RaisedRationale, acknowledgedBy = lifecycle.AcknowledgedBy,
+                acknowledgedAt = lifecycle.AcknowledgedAt, acknowledgementRationale = lifecycle.AcknowledgementRationale,
+                outcome = lifecycle.Outcome?.ToString(), resolvedBy = lifecycle.ResolvedBy, resolvedAt = lifecycle.ResolvedAt,
+                resolutionRationale = lifecycle.ResolutionRationale, events
+            });
+        });
+
+        app.MapPost("/api/trace-links/{id:guid}/lifecycle/acknowledge", async (Guid id, AcknowledgeExactLinkRequest request,
+            HttpContext http, AeroLinkDbContext db, IdentityService identity, ExactLinkLifecycleService service, CancellationToken ct) =>
+        {
+            var projectId = await db.RequirementTraces.AsNoTracking().Where(x => x.Id == id).Select(x => (Guid?)x.ProjectId).SingleOrDefaultAsync(ct);
+            if (projectId is null) return Results.NotFound();
+            if (!await http.HasProjectRoleAsync(db, identity, projectId.Value, ct, ProgramRole.Engineer, ProgramRole.ConfigurationManager)) return Results.Forbid();
+            try
+            {
+                var lifecycle = await service.AcknowledgeAsync(id, http.UserAccount().UserName, request.Rationale, DateTimeOffset.UtcNow, ct);
+                return Results.Ok(new { linkId = id, state = lifecycle.State.ToString(), acknowledgedBy = lifecycle.AcknowledgedBy, acknowledgedAt = lifecycle.AcknowledgedAt });
+            }
+            catch (DbUpdateConcurrencyException) { return Results.Conflict(new { error = "The exact trace lifecycle changed; reload its immutable event history and retry.", code = "trace_lifecycle_concurrency" }); }
+            catch (DomainException ex) { return Results.Conflict(new { error = ex.Message, code = "trace_lifecycle_mutation_refused" }); }
+        });
+
+        app.MapPost("/api/trace-links/{id:guid}/lifecycle/resolve", async (Guid id, ResolveExactLinkRequest request,
+            HttpContext http, AeroLinkDbContext db, IdentityService identity, ExactLinkLifecycleService service, CancellationToken ct) =>
+        {
+            var projectId = await db.RequirementTraces.AsNoTracking().Where(x => x.Id == id).Select(x => (Guid?)x.ProjectId).SingleOrDefaultAsync(ct);
+            if (projectId is null) return Results.NotFound();
+            if (!await http.HasProjectRoleAsync(db, identity, projectId.Value, ct, ProgramRole.Engineer, ProgramRole.ConfigurationManager)) return Results.Forbid();
+            try
+            {
+                var lifecycle = await service.ResolveAsync(id, request.Outcome, http.UserAccount().UserName, request.Rationale, DateTimeOffset.UtcNow, ct);
+                return Results.Ok(new { linkId = id, state = lifecycle.State.ToString(), outcome = lifecycle.Outcome?.ToString(), resolvedBy = lifecycle.ResolvedBy, resolvedAt = lifecycle.ResolvedAt });
+            }
+            catch (DbUpdateConcurrencyException) { return Results.Conflict(new { error = "The exact trace lifecycle changed; reload its immutable event history and retry.", code = "trace_lifecycle_concurrency" }); }
+            catch (DomainException ex) { return Results.Conflict(new { error = ex.Message, code = "trace_lifecycle_mutation_refused" }); }
+        });
+
         app.MapDelete("/api/trace-links/{id:guid}", async (Guid id, HttpContext http, AeroLinkDbContext db, IdentityService identity, CancellationToken ct) =>
         {
             var link = await db.RequirementTraces.SingleOrDefaultAsync(x => x.Id == id, ct); if (link is null) return Results.NotFound();
@@ -116,6 +181,13 @@ public static class VerificationEndpoints
             var selectedIds = selected.Select(x => x.revision.Id).ToList(); var links = await db.RequirementTraces.AsNoTracking().Where(x => selectedIds.Contains(x.SourceRevisionId) || selectedIds.Contains(x.TargetRevisionId)).ToListAsync(ct);
             var relatedIds = links.SelectMany(x => new[] { x.SourceRevisionId, x.TargetRevisionId }).Distinct().ToList();
             var related = await (from revision in db.RequirementRevisions.AsNoTracking().Where(x => relatedIds.Contains(x.Id)) join artifact in db.Requirements.AsNoTracking() on revision.ArtifactId equals artifact.Id select new { revision.Id, artifact.BaseNumber, revision.Revision, level = artifact.Level.ToString() }).ToDictionaryAsync(x => x.Id, ct);
+            var linkIds = links.Select(x => x.Id).ToList();
+            var lifecycles = await db.ExactLinkSuspectLifecycles.AsNoTracking()
+                .Where(x => x.LinkKind == ExactLinkKind.RequirementTrace && linkIds.Contains(x.LinkId)).ToDictionaryAsync(x => x.LinkId, ct);
+            var lifecycleIds = lifecycles.Values.Select(x => x.Id).ToList();
+            var lifecycleEvents = (await db.ExactLinkSuspectEvents.AsNoTracking()
+                .Where(x => lifecycleIds.Contains(x.LifecycleId)).ToListAsync(ct))
+                .OrderBy(x => x.OccurredAt).ThenBy(x => x.Id).ToList();
             var coverage = await VerificationCoverageProjection.ForRequirementRevisionsAsync(db, selectedIds, ct,
                 buildScoped: true, effectiveProcedureRevisionIds: effectiveProcedureRevisionIds);
             var procedureRevisionIds=coverage.Select(x=>x.ProcedureRevisionId).Distinct().ToList();
@@ -124,8 +196,8 @@ public static class VerificationEndpoints
             var executionIds=executions.Select(x=>x.Id).ToList();
             var evidence=await(from link in db.TestExecutionEvidence.AsNoTracking().Where(x=>executionIds.Contains(x.TestExecutionId)) join item in db.EvidenceRecords.AsNoTracking() on link.EvidenceId equals item.Id select new{link.TestExecutionId,item.Id,item.OriginalFileName,item.Sha256,item.Size,item.UploadedAt}).ToListAsync(ct);
             var items = selected.Select(x => new { x.artifact.Id, revisionId = x.revision.Id, displayNumber = x.artifact.BaseNumber + "." + x.revision.Revision.ToString("D2"), level = x.artifact.Level.ToString(), x.revision.Statement,
-                parents = links.Where(l => l.SourceRevisionId == x.revision.Id).Select(l => new { id = l.TargetRevisionId, displayNumber = related[l.TargetRevisionId].BaseNumber + "." + related[l.TargetRevisionId].Revision.ToString("D2"), related[l.TargetRevisionId].level, type = l.Type.ToString() }),
-                children = links.Where(l => l.TargetRevisionId == x.revision.Id).Select(l => new { id = l.SourceRevisionId, displayNumber = related[l.SourceRevisionId].BaseNumber + "." + related[l.SourceRevisionId].Revision.ToString("D2"), related[l.SourceRevisionId].level, type = l.Type.ToString() }),
+                parents = links.Where(l => l.SourceRevisionId == x.revision.Id).Select(l => new { id = l.TargetRevisionId, linkId = l.Id, displayNumber = related[l.TargetRevisionId].BaseNumber + "." + related[l.TargetRevisionId].Revision.ToString("D2"), related[l.TargetRevisionId].level, type = l.Type.ToString(), lifecycle = lifecycles.TryGetValue(l.Id, out var life) ? new { state = life.State.ToString(), causeKind = life.CauseKind.ToString(), life.CauseRequirementRevisionId, life.CauseBaselineImportId, outcome = life.Outcome?.ToString(), events = lifecycleEvents.Where(e => e.LifecycleId == life.Id).Select(e => new { type = e.EventType.ToString(), e.ActorId, e.OccurredAt, e.Rationale, outcome = e.Outcome?.ToString() }) } : null }),
+                children = links.Where(l => l.TargetRevisionId == x.revision.Id).Select(l => new { id = l.SourceRevisionId, linkId = l.Id, displayNumber = related[l.SourceRevisionId].BaseNumber + "." + related[l.SourceRevisionId].Revision.ToString("D2"), related[l.SourceRevisionId].level, type = l.Type.ToString(), lifecycle = lifecycles.TryGetValue(l.Id, out var life) ? new { state = life.State.ToString(), causeKind = life.CauseKind.ToString(), life.CauseRequirementRevisionId, life.CauseBaselineImportId, outcome = life.Outcome?.ToString(), events = lifecycleEvents.Where(e => e.LifecycleId == life.Id).Select(e => new { type = e.EventType.ToString(), e.ActorId, e.OccurredAt, e.Rationale, outcome = e.Outcome?.ToString() }) } : null }),
                 testCount = coverage.Count(c => c.RequirementRevisionId == x.revision.Id && !c.IsSuspect),
                 suspectTestCount = coverage.Count(c => c.RequirementRevisionId == x.revision.Id && c.IsSuspect),
                 tests=coverage.Where(c=>c.RequirementRevisionId==x.revision.Id).Select(c=>new{procedureId=c.ProcedureId,revisionId=c.ProcedureRevisionId,c.DisplayNumber,c.Title,c.Level,state=c.ProcedureState,c.IsSuspect,c.CoverageState,executions=executions.Where(e=>e.ProcedureRevisionId==c.ProcedureRevisionId).Select(e=>new{e.Id,outcome=e.Outcome.ToString(),e.ExecutedBy,e.ExecutedAt,e.RecordedAt,e.SoftwareBuildId,e.RetestOfExecutionId,e.Determination,e.EvidenceReference,evidence=evidence.Where(a=>a.TestExecutionId==e.Id).Select(a=>new{a.Id,a.OriginalFileName,a.Sha256,a.Size,a.UploadedAt})})}) });

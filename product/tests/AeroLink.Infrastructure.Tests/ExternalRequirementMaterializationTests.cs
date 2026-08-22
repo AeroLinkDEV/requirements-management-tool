@@ -4,8 +4,10 @@ using AeroLink.Domain.Hierarchy;
 using AeroLink.Domain.Imports;
 using AeroLink.Domain.Programs;
 using AeroLink.Domain.Requirements;
+using AeroLink.Domain.Traceability;
 using AeroLink.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
+using System.Text.Json;
 
 namespace AeroLink.Infrastructure.Tests;
 
@@ -120,6 +122,104 @@ public sealed class ExternalRequirementMaterializationTests
                 .OrderBy(x => x.CreatedAt).ThenBy(x => x.Id).ToList();
             Assert.Equal(new[] { firstImport.Id, secondImport.Id }, links.Select(x => x.BaselineImportId));
             Assert.Equal(revisions[1].Id, links[1].RequirementRevisionId);
+        }
+        finally { File.Delete(path); }
+    }
+
+    [Fact]
+    public async Task External_target_revision_carries_direct_trace_with_selected_package_cause()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"aerolink-external-trace-{Guid.NewGuid():N}.db");
+        var options = new DbContextOptionsBuilder<AeroLinkDbContext>().UseSqlite($"Data Source={path};Pooling=False").Options;
+        try
+        {
+            await using var db = new AeroLinkDbContext(options);
+            await db.Database.EnsureCreatedAsync();
+            var now = DateTimeOffset.UtcNow;
+            var program = new ProgramRecord("External Trace Program", "EXTT");
+            var project = new ProjectRecord(program.Id, "External Trace Product", "External Trace Product");
+            var release = new SoftwareRelease(project.Id, "1.0", false);
+            db.AddRange(program, project, release); await db.SaveChangesAsync();
+            var policy = CustomerPolicy(project.Id, now);
+            SourceIdentity? sharedIdentity = null;
+
+            (BaselineImport Import, BaselineImportPackageItem Item, SourceIdentity Identity,
+                BaselineImportSourceIdentityMembership Membership) Package(int version, DateTimeOffset at)
+            {
+                var import = new BaselineImport(project.Id, "DOORS", "1", $"Customer v{version}", at,
+                    $"customer-v{version}.reqif", $"{version}f2c4b1e7a0d3c5589ab41e2f7c60d9b8e35a1470c2df6b849e0d17ac3d07a38", 1,
+                    ImportedArtifactKinds.Requirements, "source", at, "cm", at);
+                import.RecordAnalysis(at); import.RecordMapping("{}", at);
+                import.NoteSourceRecordsAccountedFor(1, at); import.RecordReconciliation("{}", at);
+                var identity = sharedIdentity ??= new SourceIdentity(project.Id, import.Id, "DOORS", "Requirements", "trace-42", "REQ-42", at);
+                var membership = new BaselineImportSourceIdentityMembership(import.Id, identity.Id, true, at);
+                var item = new BaselineImportPackageItem(project.Id, import.Id, identity.Id, "CUSR-000042", version - 1,
+                    $"Customer behavior v{version}.", $"v{version}", "REQ-42", at);
+                return (import, item, identity, membership);
+            }
+
+            var firstPackage = Package(1, now);
+            var first = new CandidateBaseline("EXTT-000001", 0, project.Id, release.Id, null, "Customer v1", "cm", now);
+            first.SelectExternalPackage(firstPackage.Import, [firstPackage.Item], "cm", now); first.Freeze("cm", now);
+            db.AddRange(firstPackage.Import, firstPackage.Identity, firstPackage.Membership, firstPackage.Item, first);
+            await db.SaveChangesAsync();
+            await new RequirementBaselineMaterializer(db, new VerificationImpactService(db), policy: policy)
+                .MaterializeAsync(first.Id, "cm", now, default);
+
+            var secondPackage = Package(2, now.AddMinutes(1));
+            var second = new CandidateBaseline("EXTT-000002", 0, project.Id, release.Id, first.Id, "Customer v2", "cm", now.AddMinutes(1));
+            second.SelectExternalPackage(secondPackage.Import, [secondPackage.Item], "cm", now.AddMinutes(1)); second.Freeze("cm", now.AddMinutes(1));
+            db.AddRange(secondPackage.Import, secondPackage.Membership, secondPackage.Item, second);
+            await db.SaveChangesAsync();
+            await new RequirementBaselineMaterializer(db, new VerificationImpactService(db), policy: policy)
+                .MaterializeAsync(second.Id, "cm", now.AddMinutes(1), default);
+            var customerV2 = await (from artifact in db.Requirements
+                                    where artifact.BaseNumber == "CUSR-000042"
+                                    join revision in db.RequirementRevisions on artifact.Id equals revision.ArtifactId
+                                    where revision.Revision == 1
+                                    select revision).SingleAsync();
+
+            var sourceRequest = new SystemChangeRequest("SRCR-00001", 0, project.Id, release.Id,
+                "Trace customer behavior", "P", "A", "S", "author", now.AddMinutes(2));
+            sourceRequest.AddRequirementChange("author", "SYSR-000042", 0, RequirementLevel.System,
+                RequirementChangeKind.Introduce, "The system shall implement customer behavior.", "Trace source", "Test",
+                now.AddMinutes(2), proposedUpstreamRevisionIdsJson: JsonSerializer.Serialize(new[] { customerV2.Id }));
+            sourceRequest.SubmitForReview("author", [new("reviewer", "Reviewer")], now.AddMinutes(2));
+            sourceRequest.ApproveActiveStage("reviewer", now.AddMinutes(2));
+            var third = new CandidateBaseline("EXTT-000003", 0, project.Id, release.Id, second.Id, "System trace", "cm", now.AddMinutes(2));
+            third.Select(sourceRequest, "cm", now.AddMinutes(2)); third.Freeze("cm", now.AddMinutes(2));
+            db.AddRange(sourceRequest, third); await db.SaveChangesAsync();
+            await new RequirementBaselineMaterializer(db, new VerificationImpactService(db), policy: policy)
+                .MaterializeAsync(third.Id, "cm", now.AddMinutes(2), default);
+            var source = await (from artifact in db.Requirements
+                                where artifact.BaseNumber == "SYSR-000042"
+                                join revision in db.RequirementRevisions on artifact.Id equals revision.ArtifactId
+                                select revision).SingleAsync();
+            Assert.Contains(await db.RequirementTraces.AsNoTracking().ToListAsync(),
+                x => x.SourceRevisionId == source.Id && x.TargetRevisionId == customerV2.Id && x.ExactLinkSuspectLifecycleId == null);
+
+            var thirdPackage = Package(3, now.AddMinutes(3));
+            var fourth = new CandidateBaseline("EXTT-000004", 0, project.Id, release.Id, third.Id, "Customer v3", "cm", now.AddMinutes(3));
+            fourth.SelectExternalPackage(thirdPackage.Import, [thirdPackage.Item], "cm", now.AddMinutes(3)); fourth.Freeze("cm", now.AddMinutes(3));
+            db.AddRange(thirdPackage.Import, thirdPackage.Membership, thirdPackage.Item, fourth);
+            await db.SaveChangesAsync();
+            await new RequirementBaselineMaterializer(db, new VerificationImpactService(db), policy: policy)
+                .MaterializeAsync(fourth.Id, "cm", now.AddMinutes(3), default);
+
+            var customerV3 = await (from artifact in db.Requirements
+                                    where artifact.BaseNumber == "CUSR-000042"
+                                    join revision in db.RequirementRevisions on artifact.Id equals revision.ArtifactId
+                                    where revision.Revision == 2
+                                    select revision).SingleAsync();
+            var carried = await db.RequirementTraces.AsNoTracking()
+                .SingleAsync(x => x.SourceRevisionId == source.Id && x.TargetRevisionId == customerV3.Id);
+            Assert.NotEqual(Guid.Empty, carried.ExactLinkSuspectLifecycleId);
+            var lifecycle = await db.ExactLinkSuspectLifecycles.AsNoTracking().SingleAsync();
+            Assert.Equal(ExactLinkLifecycleCauseKind.ExternalBaselineImport, lifecycle.CauseKind);
+            Assert.Null(lifecycle.CauseRequirementRevisionId);
+            Assert.Equal(thirdPackage.Import.Id, lifecycle.CauseBaselineImportId);
+            Assert.Contains(await db.RequirementTraces.AsNoTracking().ToListAsync(),
+                x => x.SourceRevisionId == source.Id && x.TargetRevisionId == customerV2.Id && x.ExactLinkSuspectLifecycleId == null);
         }
         finally { File.Delete(path); }
     }

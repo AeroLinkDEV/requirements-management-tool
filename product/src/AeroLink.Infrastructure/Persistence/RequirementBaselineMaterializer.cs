@@ -44,6 +44,8 @@ public sealed class RequirementBaselineMaterializer(AeroLinkDbContext db, Verifi
         var artifactByBase = artifacts.ToDictionary(x => x.BaseNumber, StringComparer.OrdinalIgnoreCase);
         var revisions = await db.RequirementRevisions.Where(x => artifacts.Select(a => a.Id).Contains(x.ArtifactId)).ToListAsync(ct);
         var current = new Dictionary<Guid, RequirementRevision>();
+        var predecessorCurrent = new Dictionary<Guid, RequirementRevision>();
+        Guid? predecessorBaselineId = baseline.PredecessorBaselineId;
         if (baseline.PredecessorBaselineId is not null)
         {
             var predecessor = await db.CandidateBaselines.AsNoTracking().SingleOrDefaultAsync(x => x.Id == baseline.PredecessorBaselineId, ct)
@@ -53,7 +55,12 @@ public sealed class RequirementBaselineMaterializer(AeroLinkDbContext db, Verifi
             var predecessorItems = await db.BaselineRequirements.AsNoTracking().Where(x => x.BaselineId == predecessor.Id).ToListAsync(ct);
             var predecessorRevisionIds = predecessorItems.Select(x => x.RevisionId).ToList();
             var predecessorRevisions = await db.RequirementRevisions.AsNoTracking().Where(x => predecessorRevisionIds.Contains(x.Id)).ToDictionaryAsync(x => x.Id, ct);
-            foreach (var item in predecessorItems) current[item.ArtifactId] = predecessorRevisions[item.RevisionId];
+            foreach (var item in predecessorItems)
+            {
+                var revision = predecessorRevisions[item.RevisionId];
+                current[item.ArtifactId] = revision;
+                predecessorCurrent[item.ArtifactId] = revision;
+            }
         }
 
         var scrIds = baseline.Selections.Select(x => x.ChangeRequestId).ToList();
@@ -205,6 +212,64 @@ public sealed class RequirementBaselineMaterializer(AeroLinkDbContext db, Verifi
                 $"Prospective upward allocation approved in {allocation.Scr.DisplayNumber}: {allocation.Change.Rationale}", now));
         }
 
+        // Exact requirement traces belong to the baseline that contains both endpoints. Carrying them here,
+        // before the baseline membership and revision rows are committed, keeps the link and its suspect
+        // evidence in the same transaction. Reconciliation is intentionally reporting-only; it must never
+        // manufacture relationship history after a candidate has already been frozen.
+        if (predecessorBaselineId is not null && predecessorCurrent.Count > 0)
+        {
+            var predecessorRevisionIds = predecessorCurrent.Values.Select(x => x.Id).ToList();
+            var predecessorTraces = await db.RequirementTraces.AsNoTracking()
+                .Where(x => x.ProjectId == baseline.ProjectId
+                    && predecessorRevisionIds.Contains(x.SourceRevisionId)
+                    && predecessorRevisionIds.Contains(x.TargetRevisionId))
+                .ToListAsync(ct);
+            if (ladderPolicy is not ILegacyLadderCompatibilityPolicy)
+            {
+                var endpointIds = predecessorTraces.SelectMany(x => new[] { x.SourceRevisionId, x.TargetRevisionId }).Distinct().ToList();
+                var endpointLevels = await (from revision in db.RequirementRevisions.AsNoTracking()
+                                            join artifact in db.Requirements.AsNoTracking() on revision.ArtifactId equals artifact.Id
+                                            where endpointIds.Contains(revision.Id)
+                                            select new { revision.Id, artifact.Level }).ToDictionaryAsync(x => x.Id, x => x.Level, ct);
+                predecessorTraces = predecessorTraces.Where(trace => endpointLevels.TryGetValue(trace.SourceRevisionId, out var source)
+                    && endpointLevels.TryGetValue(trace.TargetRevisionId, out var target)
+                    && IsConfiguredTrace(ladderPolicy, source, target, trace.Type)).ToList();
+            }
+            var predecessorArtifactByRevision = predecessorCurrent.Values.ToDictionary(x => x.Id, x => x.ArtifactId);
+            var currentTraceKeys = existingTraceKeys;
+            foreach (var predecessorTrace in predecessorTraces)
+            {
+                if (!predecessorArtifactByRevision.TryGetValue(predecessorTrace.SourceRevisionId, out var sourceArtifact)
+                    || !predecessorArtifactByRevision.TryGetValue(predecessorTrace.TargetRevisionId, out var targetArtifact)) continue;
+                var source = current.TryGetValue(sourceArtifact, out var sourceRevision) ? sourceRevision : null;
+                var target = current.TryGetValue(targetArtifact, out var targetRevision) ? targetRevision : null;
+                if (source is null || target is null) continue;
+                var key = (source.Id, target.Id, predecessorTrace.Type);
+                if (!currentTraceKeys.Add(key)) continue;
+
+                var carried = new RequirementTraceLink(baseline.ProjectId, source.Id, target.Id, predecessorTrace.Type,
+                    $"Carried forward from exact {predecessorTrace.SourceRevisionId} → {predecessorTrace.TargetRevisionId} in baseline {baseline.DisplayNumber}.", now);
+                db.RequirementTraces.Add(carried);
+                if (target.Id != predecessorTrace.TargetRevisionId)
+                {
+                    var causeKind = target.OriginKind == RequirementRevisionOriginKind.ExternalSourcePackage
+                        ? ExactLinkLifecycleCauseKind.ExternalBaselineImport
+                        : ExactLinkLifecycleCauseKind.InternalRequirementRevision;
+                    var causeImport = target.SourceBaselineImportId;
+                    Guid? causeRevision = causeKind == ExactLinkLifecycleCauseKind.InternalRequirementRevision ? target.Id : null;
+                    if (causeKind == ExactLinkLifecycleCauseKind.ExternalBaselineImport
+                        && (causeImport is null || !packageIds.Contains(causeImport.Value)))
+                        throw new DomainException("An external suspect trace cause must be the selected package that created the exact target revision.");
+                    var lifecycle = ExactLinkSuspectLifecycle.Raise(baseline.ProjectId, ExactLinkKind.RequirementTrace, carried.Id, causeKind,
+                        causeRevision, causeImport, actorId,
+                        $"The exact upstream target changed from {predecessorTrace.TargetRevisionId} to {target.Id}; direct downstream trace requires reassessment.", now);
+                    carried.AttachExactLinkLifecycle(lifecycle.Id);
+                    db.ExactLinkSuspectLifecycles.Add(lifecycle);
+                    db.ExactLinkSuspectEvents.AddRange(lifecycle.Events);
+                }
+            }
+        }
+
         await PlaceInChosenSectionsAsync(baseline.ProjectId, scrs, artifactByBase, ladderPolicy, actorId, now, ct);
 
         var artifactById = artifactByBase.Values.ToDictionary(x => x.Id);
@@ -314,6 +379,13 @@ public sealed class RequirementBaselineMaterializer(AeroLinkDbContext db, Verifi
     {
         try { return JsonSerializer.Deserialize<List<Guid>>(change.ProposedUpstreamRevisionIdsJson) ?? []; }
         catch (JsonException) { return []; }
+    }
+
+    private static bool IsConfiguredTrace(ILadderPolicy policy, RequirementLevel source, RequirementLevel target,
+        RequirementTraceType type)
+    {
+        try { RequirementTracePolicy.Validate(policy, source, target, type); return true; }
+        catch (DomainException) { return false; }
     }
 
     private void AddProfile(RequirementRevision revision,RequirementChange change,IReadOnlyDictionary<string,ArtifactSchemaDefinition> schemas,string actor,DateTimeOffset now)

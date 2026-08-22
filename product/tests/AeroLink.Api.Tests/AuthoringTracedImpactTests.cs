@@ -263,6 +263,114 @@ public sealed class AuthoringTracedImpactTests
     }
 
     [Fact]
+    public async Task Exact_trace_lifecycle_read_action_and_frozen_mutation_refusal_are_project_authorized()
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var client = factory.CreateClient();
+        var (projectId, parentNumber, childNumber, _) = await SeedAsync(factory);
+        Guid linkId, parentRevisionId, childRevisionId, lowRevisionId, baselineId, releaseId;
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            parentRevisionId = await (from revision in db.RequirementRevisions
+                                      join artifact in db.Requirements on revision.ArtifactId equals artifact.Id
+                                      where artifact.ProjectId == projectId && artifact.BaseNumber == parentNumber
+                                      select revision.Id).SingleAsync();
+            childRevisionId = await (from revision in db.RequirementRevisions
+                                     join artifact in db.Requirements on revision.ArtifactId equals artifact.Id
+                                     where artifact.ProjectId == projectId && artifact.BaseNumber == childNumber
+                                     select revision.Id).SingleAsync();
+            lowRevisionId = await (from revision in db.RequirementRevisions
+                                   join artifact in db.Requirements on revision.ArtifactId equals artifact.Id
+                                   where artifact.ProjectId == projectId && artifact.BaseNumber == "LLR-000503"
+                                   select revision.Id).SingleAsync();
+            baselineId = await db.CandidateBaselines.Where(x => x.ProjectId == projectId).Select(x => x.Id).SingleAsync();
+            releaseId = await db.Releases.Where(x => x.ProjectId == projectId).Select(x => x.Id).SingleAsync();
+            var link = await db.RequirementTraces.SingleAsync(x => x.SourceRevisionId == childRevisionId && x.TargetRevisionId == parentRevisionId);
+            var lifecycle = ExactLinkSuspectLifecycle.Raise(projectId, ExactLinkKind.RequirementTrace, link.Id,
+                ExactLinkLifecycleCauseKind.InternalRequirementRevision, parentRevisionId, null,
+                "traced.author", "The exact upstream revision changed.", DateTimeOffset.UtcNow);
+            db.Entry(link).Property<Guid?>("ExactLinkSuspectLifecycleId").CurrentValue = lifecycle.Id;
+            db.ExactLinkSuspectLifecycles.Add(lifecycle); db.ExactLinkSuspectEvents.AddRange(lifecycle.Events);
+            await db.SaveChangesAsync();
+            linkId = link.Id;
+        }
+
+        using (var unauthenticated = factory.CreateClient())
+        {
+            using var refused = await unauthenticated.GetAsync($"/api/trace-links/{linkId}/lifecycle");
+            Assert.Equal(HttpStatusCode.Unauthorized, refused.StatusCode);
+        }
+        using (var projectMember = factory.CreateClient())
+        {
+            using var login = await projectMember.PostAsJsonAsync("/api/auth/login",
+                new { userName = "traced.approver", password = AeroLinkApiFactory.MemberPassword });
+            Assert.Equal(HttpStatusCode.OK, login.StatusCode);
+            await SecurityBoundaryTests.AuthorizeMutationsAsync(projectMember);
+            using var refused = await projectMember.PostAsJsonAsync($"/api/trace-links/{linkId}/lifecycle/acknowledge",
+                new { rationale = "An approver without engineering authority cannot assess this link." });
+            Assert.Equal(HttpStatusCode.Forbidden, refused.StatusCode);
+        }
+        await SignInAsync(client);
+
+        using var read = await client.GetAsync($"/api/trace-links/{linkId}/lifecycle");
+        Assert.Equal(HttpStatusCode.OK, read.StatusCode);
+        var initial = await read.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal("Suspect", initial.GetProperty("state").GetString());
+        Assert.Equal("InternalRequirementRevision", initial.GetProperty("causeKind").GetString());
+        Assert.Single(initial.GetProperty("events").EnumerateArray());
+
+        using var acknowledged = await client.PostAsJsonAsync($"/api/trace-links/{linkId}/lifecycle/acknowledge",
+            new { rationale = "The downstream assessment is underway." });
+        Assert.Equal(HttpStatusCode.OK, acknowledged.StatusCode);
+        Assert.Equal("Acknowledged", (await acknowledged.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("state").GetString());
+        using var resolved = await client.PostAsJsonAsync($"/api/trace-links/{linkId}/lifecycle/resolve",
+            new { outcome = "ExistingDownstreamRevisionRemainsValid", rationale = "The existing downstream revision remains valid." });
+        Assert.Equal(HttpStatusCode.OK, resolved.StatusCode);
+        var final = await (await client.GetAsync($"/api/trace-links/{linkId}/lifecycle")).Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal("Closed", final.GetProperty("state").GetString());
+        Assert.Equal(3, final.GetProperty("events").GetArrayLength());
+        Assert.Equal("traced.author", final.GetProperty("acknowledgedBy").GetString());
+
+        using var ordinaryCreate = await client.PostAsJsonAsync("/api/trace-links", new
+        {
+            projectId, sourceRevisionId = parentRevisionId, targetRevisionId = lowRevisionId,
+            type = "DerivedFrom", rationale = "An ordinary exact trace has no lifecycle yet."
+        });
+        Assert.Equal(HttpStatusCode.Created, ordinaryCreate.StatusCode);
+        var ordinaryId = (await ordinaryCreate.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetGuid();
+        using var ordinaryRead = await client.GetAsync($"/api/trace-links/{ordinaryId}/lifecycle");
+        var ordinary = await ordinaryRead.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal(HttpStatusCode.OK, ordinaryRead.StatusCode);
+        Assert.Equal(JsonValueKind.Null, ordinary.GetProperty("state").ValueKind);
+        Assert.Equal(JsonValueKind.Null, ordinary.GetProperty("causeKind").ValueKind);
+        Assert.Empty(ordinary.GetProperty("events").EnumerateArray());
+
+        using (var freeze = factory.Services.CreateScope())
+        {
+            var db = freeze.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            var sourceArtifactId = await db.RequirementRevisions.Where(x => x.Id == parentRevisionId).Select(x => x.ArtifactId).SingleAsync();
+            var targetArtifactId = await db.RequirementRevisions.Where(x => x.Id == lowRevisionId).Select(x => x.ArtifactId).SingleAsync();
+            db.BaselineRequirements.AddRange(new BaselineRequirementSelection(baselineId, sourceArtifactId, parentRevisionId),
+                new BaselineRequirementSelection(baselineId, targetArtifactId, lowRevisionId));
+            var lifecycle = ExactLinkSuspectLifecycle.Raise(projectId, ExactLinkKind.RequirementTrace, ordinaryId,
+                ExactLinkLifecycleCauseKind.InternalRequirementRevision, lowRevisionId, null,
+                "traced.author", "The exact upstream revision changed.", DateTimeOffset.UtcNow);
+            var ordinaryLink = await db.RequirementTraces.SingleAsync(x => x.Id == ordinaryId);
+            db.Entry(ordinaryLink).Property<Guid?>("ExactLinkSuspectLifecycleId").CurrentValue = lifecycle.Id;
+            db.ExactLinkSuspectLifecycles.Add(lifecycle); db.ExactLinkSuspectEvents.AddRange(lifecycle.Events);
+            var campaign = new ReleaseCampaign(projectId, releaseId, baselineId, "Frozen trace lifecycle", "traced.author", DateTimeOffset.UtcNow);
+            campaign.StartVerification("traced.author", DateTimeOffset.UtcNow);
+            campaign.BeginReleaseReview("traced.author", [("traced.author", "Trace approver")], new string('a', 64), DateTimeOffset.UtcNow);
+            db.ReleaseCampaigns.Add(campaign);
+            await db.SaveChangesAsync();
+        }
+        using var frozen = await client.PostAsJsonAsync($"/api/trace-links/{ordinaryId}/lifecycle/acknowledge",
+            new { rationale = "A frozen package must refuse lifecycle mutation." });
+        Assert.Equal(HttpStatusCode.Conflict, frozen.StatusCode);
+    }
+
+    [Fact]
     public async Task Configured_trace_mutation_refuses_unrelated_revisions_with_direct_orientation_message()
     {
         using var factory = new AeroLinkApiFactory(testLadderPolicy: ConfiguredSystemLowPolicy());

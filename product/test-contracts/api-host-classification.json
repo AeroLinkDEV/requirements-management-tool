@@ -2,8 +2,8 @@
   "schemaVersion": "aerolink-api-host-classification/v3",
   "totals": {
     "classes": 94,
-    "tests": 531,
-    "knownCases": 585,
+    "tests": 532,
+    "knownCases": 586,
     "unknownCaseTests": 0
   },
   "summary": {
@@ -15,8 +15,8 @@
     },
     "fresh-host": {
       "classes": 42,
-      "tests": 229,
-      "knownCases": 258,
+      "tests": 230,
+      "knownCases": 259,
       "unknownCaseTests": 0
     },
     "migration-candidate": {
@@ -318,6 +318,20 @@
       ]
     },
     {
+      "cls": "AuthoringTracedImpactTests",
+      "tests": 12,
+      "knownCases": 12,
+      "unknownCaseTests": 0,
+      "classification": "fresh-host",
+      "reason": "Owns host-scoped state (startup-config); sharing would leak it between tests.",
+      "intents": [
+        "auth-policy",
+        "ef-translation",
+        "http-boundary",
+        "startup-config"
+      ]
+    },
+    {
       "cls": "ProblemReportApiTests",
       "tests": 12,
       "knownCases": 13,
@@ -328,19 +342,6 @@
         "auth-policy",
         "ef-translation",
         "http-boundary"
-      ]
-    },
-    {
-      "cls": "AuthoringTracedImpactTests",
-      "tests": 11,
-      "knownCases": 11,
-      "unknownCaseTests": 0,
-      "classification": "fresh-host",
-      "reason": "Owns host-scoped state (startup-config); sharing would leak it between tests.",
-      "intents": [
-        "ef-translation",
-        "http-boundary",
-        "startup-config"
       ]
     },
     {

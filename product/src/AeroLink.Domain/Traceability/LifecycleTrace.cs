@@ -51,6 +51,16 @@ public sealed class RequirementTraceLink
     public DateTimeOffset CreatedAt { get; private set; }
     public DateTimeOffset UpdatedAt { get; private set; }
     public long Version { get; private set; } = 1;
+    /// <summary>Requirement-trace-specific association to the reusable exact-link lifecycle projection.</summary>
+    public Guid? ExactLinkSuspectLifecycleId { get; private set; }
+
+    internal void AttachExactLinkLifecycle(Guid lifecycleId)
+    {
+        if (lifecycleId == Guid.Empty) throw new DomainException("A trace lifecycle association requires an id.");
+        if (ExactLinkSuspectLifecycleId is not null && ExactLinkSuspectLifecycleId != lifecycleId)
+            throw new DomainException("An exact trace link cannot be associated with two lifecycle projections.");
+        ExactLinkSuspectLifecycleId = lifecycleId;
+    }
 
     public void UpdateProposal(RequirementTraceType type, string rationale, DateTimeOffset now)
     {
