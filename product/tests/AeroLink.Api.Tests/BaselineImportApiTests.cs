@@ -244,7 +244,7 @@ public sealed class BaselineImportApiTests
             new { expectedVersion = 2, reason = "Activate external Customer requirements" }))
             Assert.True(activate.IsSuccessStatusCode, await activate.Content.ReadAsStringAsync());
 
-        Guid baselineId, importId;
+        Guid baselineId, importId, releaseId;
         using (var scope = factory.Services.CreateScope())
         {
             var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
@@ -262,7 +262,7 @@ public sealed class BaselineImportApiTests
                 "Customer read surface", "cm", now);
             db.AddRange(release, import, identity, membership, item, baseline);
             await db.SaveChangesAsync();
-            baselineId = baseline.Id; importId = import.Id;
+            baselineId = baseline.Id; importId = import.Id; releaseId = release.Id;
         }
 
         using var selected = await client.PostAsJsonAsync($"/api/baselines/{baselineId}/external-packages",
@@ -273,6 +273,11 @@ public sealed class BaselineImportApiTests
         var packageSelection = Assert.Single(baselineDetail.GetProperty("externalPackageSelections").EnumerateArray());
         Assert.NotEqual(Guid.Empty, packageSelection.GetProperty("id").GetGuid());
         Assert.Equal(importId, packageSelection.GetProperty("baselineImportId").GetGuid());
+        var baselineList = await client.GetFromJsonAsync<JsonElement>($"/api/baselines?projectId={projectId}&releaseId={releaseId}");
+        var baselineSummary = Assert.Single(baselineList.EnumerateArray());
+        Assert.Equal(0, baselineSummary.GetProperty("scrSelectionCount").GetInt32());
+        Assert.Equal(1, baselineSummary.GetProperty("externalPackageSelectionCount").GetInt32());
+        Assert.Equal(1, baselineSummary.GetProperty("selectionCount").GetInt32());
         var importDetail = await client.GetFromJsonAsync<JsonElement>($"/api/baseline-imports/{importId}");
         Assert.Equal(baselineId, importDetail.GetProperty("boundCandidateBaselineId").GetGuid());
         Assert.Equal(packageSelection.GetProperty("packageContentHash").GetString(),

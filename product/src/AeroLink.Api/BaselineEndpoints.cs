@@ -249,8 +249,20 @@ public static class BaselineEndpoints
         app.MapGet("/api/baselines", async (Guid projectId, Guid releaseId, AeroLinkDbContext db, CancellationToken ct) =>
         {
             var items = await db.CandidateBaselines.AsNoTracking().Where(x => x.ProjectId == projectId && x.ReleaseId == releaseId)
-                .OrderBy(x => x.BaseNumber).ThenByDescending(x => x.Revision).Select(x => new { x.Id, x.BaseNumber, x.Revision, x.Name, state = x.State.ToString(), x.ContentHash, x.RequirementsHash, x.RequirementsMaterializedAt, x.CreatedAt, x.FrozenAt, selectionCount = x.Selections.Count }).ToListAsync(ct);
-            return Results.Ok(items.Select(x => new { x.Id, displayNumber = ArtifactNumber.Display(x.BaseNumber, x.Revision), x.Name, x.state, x.ContentHash, x.RequirementsHash, x.RequirementsMaterializedAt, x.CreatedAt, x.FrozenAt, x.selectionCount }));
+                .OrderBy(x => x.BaseNumber).ThenByDescending(x => x.Revision).Select(x => new
+                {
+                    x.Id, x.BaseNumber, x.Revision, x.Name, state = x.State.ToString(), x.ContentHash,
+                    x.RequirementsHash, x.RequirementsMaterializedAt, x.CreatedAt, x.FrozenAt,
+                    scrSelectionCount = x.Selections.Count,
+                    externalPackageSelectionCount = x.ExternalPackageSelections.Count,
+                    selectionCount = x.Selections.Count + x.ExternalPackageSelections.Count
+                }).ToListAsync(ct);
+            return Results.Ok(items.Select(x => new
+            {
+                x.Id, displayNumber = ArtifactNumber.Display(x.BaseNumber, x.Revision), x.Name, x.state,
+                x.ContentHash, x.RequirementsHash, x.RequirementsMaterializedAt, x.CreatedAt, x.FrozenAt,
+                x.scrSelectionCount, x.externalPackageSelectionCount, x.selectionCount
+            }));
         });
 
         app.MapGet("/api/baselines/predecessors", async (Guid projectId, Guid releaseId, AeroLinkDbContext db, CancellationToken ct) =>
