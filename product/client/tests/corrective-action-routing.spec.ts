@@ -20,16 +20,17 @@ import { apiBase, apiLogin, login, selectProgram } from "./auth";
  * isolated fixture. This reads what is there instead of adding to it.
  */
 async function raiseReport(page: Page, projectId: string, releaseId: string, scope: "System" | "Software") {
+  const artifactRoot = scope === "System" ? "test-procedures" : "test-cases";
   const procedures = (await (await page.request.get(
-    `${apiBase}/api/test-procedures?projectId=${projectId}&scope=${scope}&pageSize=200`)).json()).items;
-  const revisionIds = new Set(procedures.map((x: { revisionId: string }) => x.revisionId));
+    `${apiBase}/api/${artifactRoot}?projectId=${projectId}&scope=${scope}&pageSize=200`)).json()).items;
+  const revisionIds = new Set(procedures.map((x: { artifactRevisionId?: string; revisionId: string }) => x.artifactRevisionId ?? x.revisionId));
 
   const executions = await (await page.request.get(`${apiBase}/api/test-executions?projectId=${projectId}`)).json();
   const execution = executions.find((x: { outcome: string; procedureRevisionId: string }) =>
     x.outcome === "Fail" && revisionIds.has(x.procedureRevisionId));
 
   let report: { id: string; displayNumber: string; version: number };
-  let procedureNumber: string | undefined;
+  let artifactNumber: string | undefined;
 
   if (execution) {
     // Raised from a failure: the discipline and the procedure both come from the execution.
@@ -38,8 +39,9 @@ async function raiseReport(page: Page, projectId: string, releaseId: string, sco
     });
     expect(created.ok(), `raising the ${scope} report: ${created.status()}`).toBe(true);
     report = await created.json();
-    const procedure = procedures.find((x: { revisionId: string }) => x.revisionId === execution.procedureRevisionId);
-    procedureNumber = (procedure.displayNumber as string).replace(/\.\d{2}$/, "");
+    const procedure = procedures.find((x: { artifactRevisionId?: string; revisionId: string; artifactNumber?: string; displayNumber: string }) =>
+      (x.artifactRevisionId ?? x.revisionId) === execution.procedureRevisionId);
+    artifactNumber = (procedure?.artifactNumber ?? procedure?.displayNumber ?? '').replace(/\.\d{2}$/, "");
   } else {
     // The showcase holds no failed System execution, so this exercises the other resolution path the fix
     // added: a report raised by hand takes its discipline from the requirement it is linked to.
@@ -88,7 +90,7 @@ async function raiseReport(page: Page, projectId: string, releaseId: string, sco
     expect(response.ok(), `${path} on the ${scope} report: ${response.status()}`).toBe(true);
     report = await response.json();
   }
-  return { report, procedureNumber };
+  return { report, artifactNumber };
 }
 
 test("a corrective action opens the discipline, report and procedure it belongs to", async ({ page, request }) => {
@@ -113,7 +115,7 @@ test("a corrective action opens the discipline, report and procedure it belongs 
     expect(corrective.ok(), await corrective.text()).toBeTruthy()
     const target = await corrective.json()
     expect(target.problemReportId).toBe(raised.report.id)
-    if (raised.procedureNumber) expect(target).toEqual(expect.objectContaining({ available: true, discipline: scope.toLowerCase() }))
+    if (raised.artifactNumber) expect(target).toEqual(expect.objectContaining({ available: true, discipline: scope.toLowerCase(), artifactKind: scope === 'System' ? 'Procedure' : 'Case' }))
     else expect(target).toEqual(expect.objectContaining({ available: false, verificationCode: 'pr_verification_scope_unknown' }))
   }
   await page.goto(new URL(root + "/problem-reports", page.url()).toString(), { waitUntil: "load" })
@@ -173,10 +175,14 @@ test("a corrective action opens Test Results, names the report, and survives a r
   expect(page.url()).toContain(raised.report.id);
 
   const corrective = await (await page.request.get(`${apiBase}/api/problem-reports/${raised.report.id}/corrective-action`)).json()
-  const setDiscipline = corrective.procedureNumber.startsWith('HLRTP-') ? 'HighLevelSoftware'
-    : corrective.procedureNumber.startsWith('LLRTP-') ? 'LowLevelSoftware' : 'System'
-  const included = await page.request.post(`${apiBase}/api/releases/${releaseId}/test-sets/${setDiscipline}/procedures`, {
-    data: { procedureRevisionIds: [corrective.procedureRevisionId], reason: 'CorrectiveAction', note: `Closure retest for ${raised.report.displayNumber}` },
+  expect(corrective.artifactNumber).toBeTruthy()
+  expect(corrective.artifactRevisionId).toBeTruthy()
+  const artifactNumber = corrective.artifactNumber as string;
+  const setDiscipline = artifactNumber.startsWith('HLRTC-') ? 'HighLevelSoftware'
+    : artifactNumber.startsWith('LLRTC-') ? 'LowLevelSoftware' : 'System'
+  const artifactSegment = setDiscipline === 'System' ? 'procedures' : 'cases';
+  const included = await page.request.post(`${apiBase}/api/releases/${releaseId}/test-sets/${setDiscipline}/${artifactSegment}`, {
+    data: { artifactRevisionIds: [corrective.artifactRevisionId], reason: 'CorrectiveAction', note: `Closure retest for ${raised.report.displayNumber}` },
   })
   expect(included.ok(), await included.text()).toBeTruthy()
   await page.reload({ waitUntil: 'load' })

@@ -140,6 +140,8 @@ test('each verification page round-trips, and a results route may carry a proble
     .toMatchObject({ view: 'procedureExplorer', discipline: 'softwareTest', artifactKind: 'HighLevel' })
   expect(parseRoute('/programs/program-a/projects/project-a/releases/release-a/software-verification/llr/procedures'))
     .toMatchObject({ view: 'procedureExplorer', discipline: 'softwareTest', artifactKind: 'LowLevel' })
+  expect(parseRoute('/programs/program-a/projects/project-a/releases/release-a/software-verification/cases'))
+    .toMatchObject({ view: 'procedureExplorer', discipline: 'softwareTest' })
   expect(parseRoute('/programs/program-a/projects/project-a/releases/release-a/software-verification/procedures'))
     .toMatchObject({ view: 'procedureExplorer', discipline: 'softwareTest' })
 

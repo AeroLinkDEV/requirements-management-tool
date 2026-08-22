@@ -154,6 +154,11 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
   ladder: ProjectLadderProjection | null
 }) {
   const currentArtifactWord = verificationArtifactWord(discipline === 'System' ? 'System' : 'HighLevel')
+  // The explorer has two copy contracts: its compact filters/counts retain the historic short noun,
+  // while document and table landmarks name the full controlled artifact. Keeping both explicit avoids
+  // changing System's established "Procedure state" copy when software moves from Procedure to Case.
+  const currentArtifactShortWord = verificationArtifactNoun(discipline === 'System' ? 'System' : 'HighLevel').toLowerCase()
+  const currentArtifactShortPlural = `${currentArtifactShortWord}s`
   const currentArtifactPlural = `${currentArtifactWord}s`
   const currentArtifactNoun = (level?: string) => verificationArtifactNoun(level === 'System' ? 'System' : 'HighLevel')
   const artifactApiRoot = verificationArtifactApiRoot(discipline)
@@ -555,7 +560,7 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
           are carried by `aria-label`, so nothing is lost to a screen reader or to a test. */}
       <div className="reqSearch procedureFind">
         <span>⌕</span>
-        <input aria-label={`Find a ${currentArtifactWord}`} value={query}
+        <input aria-label={`Find a ${currentArtifactShortWord}`} value={query}
           onChange={event => { setQuery(event.target.value); setPage(1) }}
           placeholder="Search any identifier fragment or title…" />
         {/* The count belongs on the search, where the requirements Explorer puts it: a filtered list whose
@@ -574,7 +579,7 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
            {ladderAllows(ladder, 'LowLevel', LadderCapability.Verification) && <option value="LowLevel">Software LLR</option>}
         </select>
       )}
-      <select aria-label={`${currentArtifactWord} state`} value={procedureState}
+      <select aria-label={`${currentArtifactShortWord} state`} value={procedureState}
         onChange={event => { setProcedureState(event.target.value); setPage(1) }}>
         <option value="">All states</option>
         <option value="Draft">Draft</option>
@@ -613,10 +618,10 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
       </label>
     </section>
 
-    {showAdvanced && <div className="explorerCoverage" aria-label={`Advanced ${currentArtifactWord} coverage`}>
+    {showAdvanced && <div className="explorerCoverage" aria-label={`Advanced ${currentArtifactShortWord} coverage`}>
       <section className="coverageSummary" aria-label="Coverage summary">
         <article><b>{coverage?.total ?? 0}</b><span>Requirements</span></article>
-        <article><b>{coverage?.covered ?? 0}</b><span>With a {currentArtifactWord}</span></article>
+        <article><b>{coverage?.covered ?? 0}</b><span>With a {currentArtifactShortWord}</span></article>
         <article className={uncovered.length ? 'attention' : ''}><b>{uncovered.length}</b><span>With none</span></article>
         <article className={suspect.length ? 'attention' : ''}><b>{suspect.length}</b><span>Suspect coverage</span></article>
       </section>
@@ -624,10 +629,10 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
       {(uncovered.length > 0 || suspect.length > 0) && <section className="coverageCard">
         <div className="cardTitle">
           <h2>Requirements needing attention</h2>
-          <p>A requirement with no {currentArtifactWord} cannot be verified, and coverage carried across a change nobody reconfirmed does not count.</p>
+          <p>A requirement with no {currentArtifactShortWord} cannot be verified, and coverage carried across a change nobody reconfirmed does not count.</p>
         </div>
         {uncovered.slice(0, 25).map(item => <article className="coverageRow attention" key={item.revisionId}>
-          <div><b>{item.displayNumber}</b><i>No {currentArtifactWord}</i></div>
+          <div><b>{item.displayNumber}</b><i>No {currentArtifactShortWord}</i></div>
           <p>{item.statement}</p>
         </article>)}
         {suspect.slice(0, 25).map(item => <article className="coverageRow attention" key={`suspect-${item.revisionId}`}>
@@ -640,7 +645,7 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
       <section className="coverageCard">
         <div className="cardTitle">
           <h2>Requirement coverage</h2>
-          <p>Every effective requirement in this build and the {currentArtifactWord}s that verify it.</p>
+          <p>Every effective requirement in this build and the {currentArtifactShortPlural} that verify it.</p>
         </div>
         <button type="button" className="quiet" onClick={() => setShowAllCoverage(current => !current)}>
           {showAllCoverage ? 'Show only what needs attention' : `Show all ${coverage?.total ?? 0} requirements`}
@@ -653,7 +658,7 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
               <i>{item.verified ? 'Verified'
                 : item.coveredBy.some(procedure => procedure.coverageState === 'Suspect') ? 'Suspect'
                 : item.covered ? 'Covered'
-                : `No ${currentArtifactWord}`}</i>
+                : `No ${currentArtifactShortWord}`}</i>
             </div>
             <p>{item.statement}</p>
             {item.coveredBy.length > 0 && <small>
@@ -678,7 +683,7 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
         <button type="button" className={!documentId && !sectionId ? 'railEntry selected' : 'railEntry'}
           aria-pressed={!documentId && !sectionId}
           onClick={() => { setDocumentId(''); setSectionId(''); setPage(1) }}>
-          <b>All {currentArtifactPlural}</b>
+          <b>All {currentArtifactShortPlural}</b>
           <small>{(data?.totalCount ?? 0).toLocaleString()} in this build</small>
         </button>
         {documents.map(document => (
@@ -700,7 +705,7 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
           </div>
         ))}
         {documents.length === 0 && (
-          <p className="railEmpty">No {currentArtifactWord} document for this discipline yet.</p>
+          <p className="railEmpty">No {currentArtifactShortWord} document for this discipline yet.</p>
         )}
       </nav>
 
@@ -770,7 +775,7 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
             nowhere. */}
         <div className="resultSummary">
           <div>
-            <b>{(data?.totalCount ?? 0).toLocaleString()} {currentArtifactPlural}</b>
+            <b>{(data?.totalCount ?? 0).toLocaleString()} {currentArtifactShortPlural}</b>
             <span>
               {!data
                 ? 'Refreshing controlled index…'
@@ -783,7 +788,7 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
         </div>
         {procedures.length === 0
           ? <p className="procedureEmpty">{query || procedureState || procedureOutcome || documentId || sectionId
-            ? `No ${currentArtifactWord} matches that. Clear the search or the filters to see the rest.`
+            ? `No ${currentArtifactShortWord} matches that. Clear the search or the filters to see the rest.`
             : `This build has no controlled ${disciplineLabel(discipline).toLowerCase()} ${currentArtifactPlural} yet.`}</p>
           : (
             <div className="reqTable procedureList" role="table" aria-label={`Controlled ${currentArtifactPlural}`}>
@@ -826,7 +831,7 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
               ? `${((data?.page ?? 1) - 1) * (data?.pageSize ?? 25) + 1}–` +
                 `${Math.min((data?.page ?? 1) * (data?.pageSize ?? 25), data?.totalCount ?? 0)} ` +
                 `of ${(data?.totalCount ?? 0).toLocaleString()}`
-              : `0 ${currentArtifactPlural}`}
+              : `0 ${currentArtifactShortPlural}`}
           </span>
           <button disabled={(data?.page ?? 1) >= (data?.totalPages ?? 1)}
             onClick={() => setPage(x => x + 1)}>Next →</button>
@@ -836,7 +841,7 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
       {selected ? <ControlledArtifactInspector
         artifactType={`${procedureLevelLabel(selected.level).toUpperCase()} ${currentArtifactWord.toUpperCase()}`}
         displayNumber={selected.displayNumber}
-        closeLabel={`Close ${currentArtifactWord} detail`}
+        closeLabel={`Close ${currentArtifactShortWord} detail`}
         onClose={close}
         tabs={[
           { id: 'details', label: 'Overview' },
@@ -890,7 +895,7 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
                   )}
                   {trace.provenanceNote && <p className="inspectorNote warn">{trace.provenanceNote}</p>}
                   <p className="inspectorNote">
-                    This {currentArtifactWord} verifies {trace.requirements.length} requirement{trace.requirements.length === 1 ? '' : 's'}.
+                    This {currentArtifactShortWord} verifies {trace.requirements.length} requirement{trace.requirements.length === 1 ? '' : 's'}.
                   </p>
                   {trace.requirements.length === 0 ? (
                     <p className="inspectorNote warn">
@@ -921,7 +926,7 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
                   )}
                 </>
               ) : traceError ? (
-                <p className="inspectorNote warn">The trace for this {currentArtifactWord} revision could not be loaded.</p>
+                <p className="inspectorNote warn">The trace for this {currentArtifactShortWord} revision could not be loaded.</p>
               ) : (
                 <p className="inspectorNote">Loading trace…</p>
               )}

@@ -88,23 +88,23 @@ test('a Modify target beyond the former 200-row limit is searchable, selectable 
   await assessment.getByRole('button', { name: 'LLRTCR required', exact: true }).click()
   await expect(assessment).toContainText('LLRTCR Created', { timeout: 30_000 })
   await assessment.getByRole('button', { name: /^LLRTCR-\d{6}\.\d{2}$/ }).click()
-  const workspace = page.getByRole('dialog', { name: /procedure decisions/ })
+  const workspace = page.getByRole('dialog', { name: /test case decisions/ })
   await expect(workspace).toBeVisible()
 
-  await workspace.getByRole('button', { name: 'Propose a procedure change' }).click()
-  const dialog = page.getByRole('dialog', { name: 'Propose a procedure change' })
+  await workspace.getByRole('button', { name: 'Propose a test case change' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Propose a test case change' })
   await dialog.getByLabel('What is being done').selectOption('Modify')
   // The universe total is stated, so a bounded page is never presented as the complete candidate set.
-  await expect(dialog).toContainText('280 carried procedures in this build', { timeout: 30_000 })
-  await dialog.getByRole('textbox', { name: 'Search procedures' }).fill('LLRTP-000250')
-  const targetOption = dialog.locator('select[aria-label="Procedure"] option').filter({ hasText: 'LLRTP-000250' })
+  await expect(dialog).toContainText('280 carried test cases in this build', { timeout: 30_000 })
+  await dialog.getByRole('textbox', { name: 'Search test cases' }).fill('LLRTC-000250')
+  const targetOption = dialog.locator('select[aria-label="Case"] option').filter({ hasText: 'LLRTC-000250' })
   await expect(targetOption).toHaveCount(1, { timeout: 30_000 })
-  await dialog.getByRole('combobox', { name: 'Procedure' }).selectOption('LLRTP-000250')
+  await dialog.getByRole('combobox', { name: 'Case' }).selectOption('LLRTC-000250')
   await dialog.getByLabel('Title').fill(`LLR picker modify ${suffix}`)
   await dialog.getByLabel('Objective').fill('Verify the carried LLR procedure behavior.')
   await dialog.getByLabel('Steps').fill('Execute the controlled steps.')
   await dialog.getByLabel('Expected result').fill('The expected behavior is observed.')
-  await dialog.getByLabel('Why this procedure work is required').fill('The approved change requires an exact procedure update.')
+  await dialog.getByLabel('Why this test case work is required').fill('The approved change requires an exact test case update.')
   await dialog.getByRole('button', { name: 'Propose decision' }).click()
   await expect(dialog).toHaveCount(0, { timeout: 30_000 })
 
@@ -113,8 +113,8 @@ test('a Modify target beyond the former 200-row limit is searchable, selectable 
   const reopenedRow = page.locator('.downstreamAssessment').filter({ hasText: displayNumber }).first()
   await expect(reopenedRow).toBeVisible({ timeout: 30_000 })
   await reopenedRow.getByRole('button', { name: /^LLRTCR-\d{6}\.\d{2}/ }).click()
-  const reopened = page.getByRole('dialog', { name: /procedure decisions/ })
-  await expect(reopened).toContainText('LLRTP-000250.01', { timeout: 30_000 })
+  const reopened = page.getByRole('dialog', { name: /test case decisions/ })
+  await expect(reopened).toContainText('LLRTC-000250.01', { timeout: 30_000 })
 })
 
 test('a requirement beyond the former 200-row limit is hydrated, searchable and selectable for authoring', async ({ page, request }) => {
@@ -214,7 +214,7 @@ test('a requirement beyond the former 200-row limit is hydrated, searchable and 
   await decide.getByRole('button', { name: 'Record decision' }).click()
   await expect(decide).toHaveCount(0, { timeout: 30_000 })
 
-  await decided.getByRole('button', { name: 'Author the procedure' }).click()
+  await decided.getByRole('button', { name: 'Author the test procedure' }).click()
   const authoring = page.getByRole('dialog', { name: 'Propose a test procedure' })
   await expect(authoring.getByRole('textbox', { name: 'Search requirements' })).toBeVisible()
   // The total is stated, so a bounded page is never presented as the complete universe.
@@ -232,7 +232,7 @@ test('a requirement beyond the former 200-row limit is hydrated, searchable and 
   await authoring.getByLabel('Steps').fill('1. Load the configuration. 2. Exercise the behavior.')
   await authoring.getByLabel('Expected result').fill('The expected behavior is observed.')
   await authoring.getByLabel('Why it is needed').fill('Nothing covers the picker volume requirement yet.')
-  await authoring.getByRole('button', { name: 'Propose procedure' }).click()
+  await authoring.getByRole('button', { name: 'Propose test procedure' }).click()
   await expect(authoring).toHaveCount(0, { timeout: 30_000 })
 
   // The proposal is a controlled record: it survives a reload.
@@ -244,7 +244,7 @@ test('a requirement beyond the former 200-row limit is hydrated, searchable and 
   await expect(reopened.getByText(/SYSTP-\d{6}\.00/)).toBeVisible({ timeout: 30_000 })
 })
 
-test('an approved procedure beyond the former 200-row limit is searchable in the coverage-confirmed picker and survives reload', async ({ page, request, playwright }) => {
+test('an approved Case beyond the former 200-row limit is searchable in the coverage-confirmed picker and survives reload', async ({ page, request, playwright }) => {
   test.setTimeout(240_000)
   const showcase = await showcaseSeed(request)
   await apiLogin(request)
@@ -264,55 +264,55 @@ test('an approved procedure beyond the former 200-row limit is searchable in the
   const decided = assessment.locator('.decisionList li').filter({ hasText: /LLR-000651\./ }).first()
   await decided.getByRole('button', { name: 'Decide' }).click()
   const decide = page.getByRole('dialog', { name: /Decide / })
-  const searchProcedures = decide.getByRole('textbox', { name: 'Search approved procedures' })
+  const searchProcedures = decide.getByRole('textbox', { name: 'Search approved test cases' })
 
   // With no active search the metadata truthfully states the full eligible candidate count.
-  await expect(decide).toContainText('280 approved procedures in this build.', { timeout: 30_000 })
+  await expect(decide).toContainText('280 approved test cases in this build.', { timeout: 30_000 })
 
-  await searchProcedures.fill('LLRTP-000250')
-  await expect(decide).toContainText('1 matching approved procedure.', { timeout: 30_000 })
-  const option = decide.locator('select[name="procedureId"] option').filter({ hasText: 'LLRTP-000250' })
+  await searchProcedures.fill('LLRTC-000250')
+  await expect(decide).toContainText('1 matching approved test case.', { timeout: 30_000 })
+  const option = decide.locator('select[name="artifactId"] option').filter({ hasText: 'LLRTC-000250' })
   await expect(option).toHaveCount(1, { timeout: 30_000 })
   const optionValue = await option.getAttribute('value')
   expect(optionValue).toMatch(/[0-9a-f-]{36}/)
-  await decide.getByRole('combobox', { name: 'Covering procedure' }).selectOption(optionValue!)
+  await decide.getByRole('combobox', { name: 'Covering test case' }).selectOption(optionValue!)
 
   // The current unsaved choice is hydrated alongside the search result: changing the search to something
-  // that would normally exclude procedure A must not remove A from the DOM, because the resolve mutation
-  // reads procedureId from the select. This controlled-number search matches more than one page
-  // (LLRTP-000100 through LLRTP-000199) while excluding procedure A (LLRTP-000250), so the metadata
+  // that would normally exclude Case A must not remove A from the DOM, because the resolve mutation
+  // reads artifactId from the select. This controlled-number search matches more than one page
+  // (LLRTC-000100 through LLRTC-000199) while excluding test case A (LLRTC-000250), so the metadata
   // describes the cross-page match count as matches and separately states that the current selection is
   // kept visible independently of the search. These showcase revisions predate exact TCR title snapshots;
   // their mutable catalog titles are deliberately not treated as revision-specific search evidence.
-  await searchProcedures.fill('LLRTP-0001')
-  await expect(decide).toContainText('100 matching approved procedures.', { timeout: 30_000 })
+  await searchProcedures.fill('LLRTC-0001')
+  await expect(decide).toContainText('100 matching approved test cases.', { timeout: 30_000 })
   await expect(decide).toContainText('Current selection is kept visible independently of the search.', { timeout: 30_000 })
-  await expect(decide.locator('select[name="procedureId"] option').filter({ hasText: 'LLRTP-000250' }))
+  await expect(decide.locator('select[name="artifactId"] option').filter({ hasText: 'LLRTC-000250' }))
     .toHaveCount(1, { timeout: 30_000 })
-  await expect(decide.getByRole('combobox', { name: 'Covering procedure' })).toHaveValue(optionValue!)
+  await expect(decide.getByRole('combobox', { name: 'Covering test case' })).toHaveValue(optionValue!)
   await expect(decide.getByRole('button', { name: 'Next' })).toBeEnabled()
 
   // A search with no matches still keeps the exact current selection hydrated, and the metadata reports
-  // zero matches truthfully rather than claiming there are no procedures in this build.
-  await searchProcedures.fill('zz-no-such-procedure-zz')
-  await expect(decide.locator('select[name="procedureId"] option').filter({ hasText: 'LLRTP-000250' }))
+  // zero matches truthfully rather than claiming there are no test cases in this build.
+  await searchProcedures.fill('zz-no-such-test-case-zz')
+  await expect(decide.locator('select[name="artifactId"] option').filter({ hasText: 'LLRTC-000250' }))
     .toHaveCount(1, { timeout: 30_000 })
-  await expect(decide.getByRole('combobox', { name: 'Covering procedure' })).toHaveValue(optionValue!)
-  await expect(decide).toContainText('0 matching approved procedures.', { timeout: 30_000 })
+  await expect(decide.getByRole('combobox', { name: 'Covering test case' })).toHaveValue(optionValue!)
+  await expect(decide).toContainText('0 matching approved test cases.', { timeout: 30_000 })
   await expect(decide).toContainText('Current selection is kept visible independently of the search.', { timeout: 30_000 })
-  await expect(decide).not.toContainText('0 approved procedures in this build')
+  await expect(decide).not.toContainText('0 approved test cases in this build')
 
-  await decide.getByLabel('Rationale').fill('The carried LLR procedure already verifies this requirement.')
+  await decide.getByLabel('Rationale').fill('The carried LLR test case already verifies this requirement.')
   await decide.getByRole('button', { name: 'Record decision' }).click()
   await expect(decide).toHaveCount(0, { timeout: 30_000 })
-  await expect(assessment.locator('.decisionList')).toContainText('LLRTP-000250.00', { timeout: 30_000 })
+  await expect(assessment.locator('.decisionList')).toContainText('LLRTC-000250.00', { timeout: 30_000 })
 
   await page.reload()
   const reopenedRow = page.locator('.downstreamAssessment').filter({ hasText: displayNumber }).first()
   await expect(reopenedRow).toBeVisible({ timeout: 30_000 })
   await reopenedRow.getByRole('button', { name: 'Open assessment' }).click()
   const reopened = page.getByRole('dialog', { name: /test impact/ })
-  await expect(reopened.locator('.decisionList')).toContainText('LLRTP-000250.00', { timeout: 30_000 })
+  await expect(reopened.locator('.decisionList')).toContainText('LLRTC-000250.00', { timeout: 30_000 })
 })
 
 test('a Modify target beyond the former 500 limit is reachable in the real picker and survives reload', async ({ page, request }) => {
@@ -541,16 +541,16 @@ test('a Modify target beyond the former 500 limit is reachable in the real picke
   await assessment2.getByRole('button', { name: /^SYSTCR-\d{6}\.\d{2}$/ }).click()
   const workspaceDrawer = page.getByRole('dialog', { name: /procedure decisions/ })
   await expect(workspaceDrawer).toBeVisible({ timeout: 30_000 })
-  await expect(workspaceDrawer.getByRole('button', { name: 'Propose a procedure change' }))
+  await expect(workspaceDrawer.getByRole('button', { name: 'Propose a test procedure change' }))
     .toBeVisible({ timeout: 60_000 })
-  await workspaceDrawer.getByRole('button', { name: 'Propose a procedure change' }).click()
-  const dialog = page.getByRole('dialog', { name: 'Propose a procedure change' })
+  await workspaceDrawer.getByRole('button', { name: 'Propose a test procedure change' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Propose a test procedure change' })
   await dialog.getByLabel('What is being done').selectOption('Modify')
-  await expect(dialog).toContainText('520 carried procedures in this build', { timeout: 30_000 })
+  await expect(dialog).toContainText('520 carried test procedures in this build', { timeout: 30_000 })
   const firstPageOptions = dialog.locator('select[aria-label="Procedure"] option')
   await expect(firstPageOptions).toHaveCount(51, { timeout: 30_000 })
   await expect(firstPageOptions.filter({ hasText: targetNumber })).toHaveCount(0)
-  await dialog.getByRole('textbox', { name: 'Search procedures' }).fill(targetNumber)
+  await dialog.getByRole('textbox', { name: 'Search test procedures' }).fill(targetNumber)
   const targetOption = dialog.locator('select[aria-label="Procedure"] option').filter({ hasText: targetNumber })
   await expect(targetOption).toHaveCount(1, { timeout: 30_000 })
   await dialog.getByRole('combobox', { name: 'Procedure' }).selectOption(targetNumber)
@@ -558,7 +558,7 @@ test('a Modify target beyond the former 500 limit is reachable in the real picke
   await dialog.getByLabel('Objective').fill('Verify the carried volume procedure behavior.')
   await dialog.getByLabel('Steps').fill('Execute the controlled steps.')
   await dialog.getByLabel('Expected result').fill('The expected behavior is observed.')
-  await dialog.getByLabel('Why this procedure work is required').fill('The approved change requires an exact procedure update.')
+  await dialog.getByLabel('Why this test procedure work is required').fill('The approved change requires an exact procedure update.')
   await dialog.getByRole('button', { name: 'Propose decision' }).click()
   await expect(dialog).toHaveCount(0, { timeout: 30_000 })
 

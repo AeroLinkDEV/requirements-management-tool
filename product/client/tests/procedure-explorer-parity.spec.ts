@@ -12,8 +12,8 @@ import { login } from './auth'
 
 const openExplorer = async (page: import('@playwright/test').Page, branch: string) => {
   const root = new URL(page.url()).pathname.replace(/\/[^/]*$/, '')
-  await page.goto(new URL(`${root}/${branch}/procedures`, page.url()).toString(), { waitUntil: 'load' })
-  await expect(page.getByRole('heading', { name: 'Test Procedure Explorer', level: 1 })).toBeVisible({ timeout: 30_000 })
+  await page.goto(new URL(`${root}/${branch}/cases`, page.url()).toString(), { waitUntil: 'load' })
+  await expect(page.getByRole('heading', { name: 'Software Test Case Explorer', level: 1 })).toBeVisible({ timeout: 30_000 })
   return root
 }
 
@@ -32,7 +32,7 @@ const libraryCount = async (page: import('@playwright/test').Page) => {
   return Number((await count.textContent())!.replace(/[^\d]/g, ''))
 }
 
-test('the Explorer groups procedures by the document they are written into', async ({ page }) => {
+test('the Explorer groups Cases by the document they are written into', async ({ page }) => {
   test.setTimeout(180_000)
   await page.setViewportSize({ width: 1600, height: 900 })
   await login(page)
@@ -45,18 +45,18 @@ test('the Explorer groups procedures by the document they are written into', asy
   await expect(page.locator('.reqResults')).toBeVisible()
   await expect(page.locator('.requirementInspector')).toBeVisible()
   await expect(page.getByRole('button', { name: 'Advanced' })).toBeVisible()
-  await expect(page.getByRole('tablist', { name: 'Test procedure views' })).toHaveCount(0)
+  await expect(page.getByRole('tablist', { name: 'Test case views' })).toHaveCount(0)
 
-  const rail = page.getByRole('navigation', { name: 'Test procedure documents' })
+  const rail = page.getByRole('navigation', { name: 'test case documents' })
   await expect(rail).toBeVisible()
   // The rail remains the full software document catalogue while the worklist opens on its configured HLR level.
   await expect(rail.locator('[data-document]')).toHaveCount(2, { timeout: 30_000 })
   await expect(rail.locator('[data-document^="HLRTD-"]')).toHaveCount(1)
   await expect(rail.locator('[data-document^="LLRTD-"]')).toHaveCount(1)
-  await expect(rail.getByRole('button', { name: /All procedures/ })).toBeVisible()
+  await expect(rail.getByRole('button', { name: /All cases/ })).toBeVisible()
 })
 
-test('the search reports how many procedures matched', async ({ page }) => {
+test('the search reports how many Cases matched', async ({ page }) => {
   test.setTimeout(180_000)
   await page.setViewportSize({ width: 1600, height: 900 })
   await login(page)
@@ -66,7 +66,7 @@ test('the search reports how many procedures matched', async ({ page }) => {
   await expect(count).toContainText('found')
   // A count that never moves is decoration. Narrowing the search must narrow it.
   const before = await libraryCount(page)
-  await page.getByLabel('Find a procedure').fill('HLRTP-000001')
+  await page.getByLabel('Find a case').fill('HLRTC-000001')
   await expect.poll(async () => Number((await count.textContent())!.replace(/[^\d]/g, '')), { timeout: 30_000 })
     .toBeLessThan(before)
 })
@@ -94,12 +94,12 @@ test('rows and the document selection survive a reload', async ({ page }) => {
   const documentNumber = (await document.getAttribute('data-document'))!
   await page.getByLabel('Rows per page').selectOption('50')
   await document.click()
-  await expect(page).toHaveURL(/procedureRows=50/, { timeout: 30_000 })
-  await expect(page).toHaveURL(/procedureDocument=/, { timeout: 30_000 })
+  await expect(page).toHaveURL(/caseRows=50/, { timeout: 30_000 })
+  await expect(page).toHaveURL(/caseDocument=/, { timeout: 30_000 })
 
   // A filtered worklist that does not survive a reload is a worklist somebody has to rebuild by hand.
   await page.reload({ waitUntil: 'load' })
-  await expect(page.getByRole('heading', { name: 'Test Procedure Explorer', level: 1 })).toBeVisible({ timeout: 30_000 })
+  await expect(page.getByRole('heading', { name: 'Software Test Case Explorer', level: 1 })).toBeVisible({ timeout: 30_000 })
   await expect(page.getByLabel('Rows per page')).toHaveValue('50')
   await expect(page.locator(`[data-document="${documentNumber}"]`)).toHaveAttribute('aria-pressed', 'true')
 })
@@ -115,8 +115,8 @@ test('the procedure document is offered where the procedures are read', async ({
   const outputs = page.locator('.documentOutputs')
   await expect(outputs).toBeVisible({ timeout: 30_000 })
   // The document action follows the exact configured level currently being browsed.
-  await expect(outputs.getByText('HLR Test Procedure Document (HLRTD)')).toBeVisible()
-  await expect(outputs.getByText('LLR Test Procedure Document (LLRTD)')).toHaveCount(0)
+  await expect(outputs.getByText('HLR Test Case Document (HLRTD)')).toBeVisible()
+  await expect(outputs.getByText('LLR Test Case Document (LLRTD)')).toHaveCount(0)
   await expect(outputs.locator('.documentOutput')).toHaveCount(1)
   await expect(outputs.getByRole('link', { name: /DOCX$/ })).toHaveCount(1)
   await expect(outputs.getByRole('link', { name: /PDF$/ })).toHaveCount(1)
@@ -133,7 +133,7 @@ test('a worklist can be saved, reopened and removed', async ({ page }) => {
   const whole = await libraryCount(page)
 
   // Save the narrowed list, not the whole library — a saved view that does not narrow proves nothing.
-  await page.getByLabel('Procedure state').selectOption('Draft')
+  await page.getByLabel('Case state').selectOption('Draft')
   await expect.poll(async () => Number((await count.textContent())!.replace(/[^\d]/g, '')), { timeout: 30_000 })
     .toBeLessThan(whole)
   const views = page.locator('.savedViews')
@@ -145,10 +145,10 @@ test('a worklist can be saved, reopened and removed', async ({ page }) => {
 
   // Clearing puts the whole library back, and applying the view has to bring the worklist back with it.
   await page.getByRole('button', { name: 'Clear', exact: true }).click()
-  await expect(page.getByLabel('Procedure state')).toHaveValue('')
+  await expect(page.getByLabel('Case state')).toHaveValue('')
   await page.locator(`[data-saved-view="${name}"]`).click()
-  await expect(page.getByLabel('Procedure state')).toHaveValue('Draft')
-  await expect(page).toHaveURL(/procedureView=/, { timeout: 30_000 })
+  await expect(page.getByLabel('Case state')).toHaveValue('Draft')
+  await expect(page).toHaveURL(/caseView=/, { timeout: 30_000 })
 
   // An owner who cannot remove their own view is how duplicates that have to be lived with accumulate.
   page.once('dialog', dialog => dialog.accept())
@@ -170,7 +170,7 @@ test('Clear returns the whole library', async ({ page }) => {
   const whole = await libraryCount(page)
   await page.getByLabel('Level filter').selectOption('HighLevel')
   await expect.poll(() => libraryCount(page), { timeout: 30_000 }).toBe(configuredLevel)
-  await page.getByLabel('Find a procedure').fill('HLRTP-000002')
+  await page.getByLabel('Find a case').fill('HLRTC-000002')
   await expect.poll(async () => Number((await count.textContent())!.replace(/[^\d]/g, '')), { timeout: 30_000 })
     .toBeLessThan(whole)
 
@@ -193,13 +193,13 @@ test('the Explorer names the software workspace and opens on its first configure
   await login(page)
   await openExplorer(page, 'software-verification')
 
-  await expect(page.getByRole('heading', { name: 'Software Test Procedure Explorer', level: 1 })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Software Test Case Explorer', level: 1 })).toBeVisible()
   await expect(page.getByLabel('Level filter')).toHaveValue('HighLevel')
-  await expect(page.getByLabel('Level filter')).toContainText('All software test procedures')
+  await expect(page.getByLabel('Level filter')).toContainText('All software test cases')
   await expect(page.getByLabel('Level filter')).toContainText('Software LLR')
 })
 
-test('the result summary says how many answer and where in them you are', async ({ page }) => {
+test('the result summary says how many Cases answer and where in them you are', async ({ page }) => {
   test.setTimeout(180_000)
   await page.setViewportSize({ width: 1600, height: 900 })
   await login(page)
@@ -207,7 +207,7 @@ test('the result summary says how many answer and where in them you are', async 
 
   const summary = page.locator('.resultSummary')
   await expect(summary).toBeVisible({ timeout: 30_000 })
-  await expect(summary).toContainText('procedures')
+  await expect(summary).toContainText('cases')
   // Where you are in the results, which the count in the search box could never say.
   await expect(summary).toContainText(/Page \d+ of \d+ · exact current revisions/)
   await expect(summary).toContainText('Permission-aware · Live index')
@@ -220,8 +220,8 @@ test('the filters read as one row rather than a stack of captioned fields', asyn
   await openExplorer(page, 'software-verification')
 
   // The names moved onto the controls rather than being lost: still addressable, still announced.
-  await expect(page.getByLabel('Find a procedure')).toBeVisible()
-  await expect(page.getByLabel('Procedure state')).toBeVisible()
+  await expect(page.getByLabel('Find a case')).toBeVisible()
+  await expect(page.getByLabel('Case state')).toBeVisible()
   await expect(page.getByLabel('Latest result')).toBeVisible()
   // The captions that made the bar a form are gone.
   await expect(page.locator('.reqCommand label span')).toHaveCount(1)
