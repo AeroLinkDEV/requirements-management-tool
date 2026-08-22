@@ -2,6 +2,7 @@ using System.Security.Cryptography;
 using System.Text;
 using AeroLink.Domain.ChangeControl;
 using AeroLink.Domain.Common;
+using AeroLink.Domain.Imports;
 using AeroLink.Domain.Verification;
 
 namespace AeroLink.Domain.Baselines;
@@ -54,6 +55,7 @@ public sealed class BaselineEvent
 public sealed class CandidateBaseline
 {
     private readonly List<BaselineChangeRequestSelection> _selections = [];
+    private readonly List<BaselineExternalPackageSelection> _externalPackageSelections = [];
     private readonly List<BaselineTestChangeRequestSelection> _testChangeSelections = [];
     private readonly List<BaselineEvent> _events = [];
     private CandidateBaseline() { }
@@ -88,6 +90,7 @@ public sealed class CandidateBaseline
     public DateTimeOffset? TestProceduresMaterializedAt { get; private set; }
     public string? TestProceduresHash { get; private set; }
     public IReadOnlyCollection<BaselineChangeRequestSelection> Selections => _selections.AsReadOnly();
+    public IReadOnlyCollection<BaselineExternalPackageSelection> ExternalPackageSelections => _externalPackageSelections.AsReadOnly();
     public IReadOnlyCollection<BaselineTestChangeRequestSelection> TestChangeSelections => _testChangeSelections.AsReadOnly();
     public IReadOnlyCollection<BaselineEvent> Events => _events.AsReadOnly();
 
@@ -121,6 +124,55 @@ public sealed class CandidateBaseline
         UpdatedAt = now;
         scr.UnmarkSelectedForBaseline(actorId, now);
         Event("ScrRemoved", actorId, $"Removed {scr.DisplayNumber}.", now);
+    }
+
+    /// <summary>
+    /// Binds a fully accepted external package to this explicit draft. The package does not create a release or
+    /// baseline, and it cannot be appended once this baseline has been frozen.
+    /// </summary>
+    public void SelectExternalPackage(BaselineImport import, string actorId, DateTimeOffset now,
+        string? packageContentHash = null)
+    {
+        EnsureDraft();
+        if (import.State is not (BaselineImportState.Reconciled or BaselineImportState.Accepted))
+            throw new DomainException("Only a reconciled or accepted external package can be selected into a baseline.");
+        if (import.ProjectId != ProjectId)
+            throw new DomainException("The external package does not belong to this project.");
+        if (import.ReleaseId is not null && import.ReleaseId != ReleaseId)
+            throw new DomainException("The external package does not belong to this release.");
+        if (_externalPackageSelections.Any(x => x.BaselineImportId == import.Id))
+            throw new DomainException("The external package is already selected in this baseline.");
+        var hash = packageContentHash ?? import.PackageManifestHash;
+        if (string.IsNullOrWhiteSpace(hash))
+            // Direct domain callers can bind only an already hashed package. API callers calculate this from the
+            // immutable staged rows immediately before the binding transaction.
+            throw new DomainException("The external package has no immutable staged-content manifest.");
+        if (import.State == BaselineImportState.Reconciled)
+            import.AcceptForExternalPackage(actorId, Id, ReleaseId, hash, now);
+        else
+            import.BindPackage(Id, hash, now);
+        _externalPackageSelections.Add(new BaselineExternalPackageSelection(Id, import.Id, hash, now, actorId));
+        UpdatedAt = now;
+        Event("ExternalPackageSelected", actorId, $"Selected external package {import.Id:D}.", now);
+    }
+
+    public void SelectExternalPackage(BaselineImport import, IReadOnlyCollection<BaselineImportPackageItem> items,
+        string actorId, DateTimeOffset now)
+    {
+        if (items is null || items.Count == 0) throw new DomainException("An external package must contain staged Customer items.");
+        if (items.Any(x => x.BaselineImportId != import.Id || x.ProjectId != ProjectId))
+            throw new DomainException("External package items must belong to this package and project.");
+        SelectExternalPackage(import, actorId, now, BaselineImportPackageManifest.Hash(items));
+    }
+
+    public void RemoveExternalPackage(Guid baselineImportId, string actorId, DateTimeOffset now)
+    {
+        EnsureDraft();
+        var selection = _externalPackageSelections.SingleOrDefault(x => x.BaselineImportId == baselineImportId)
+            ?? throw new DomainException("The external package is not selected in this baseline.");
+        _externalPackageSelections.Remove(selection);
+        UpdatedAt = now;
+        Event("ExternalPackageRemoved", actorId, $"Removed external package {baselineImportId:D}.", now);
     }
 
     /// <summary>
@@ -223,14 +275,17 @@ public sealed class CandidateBaseline
     public void Freeze(string actorId, DateTimeOffset now)
     {
         EnsureDraft();
-        if (_selections.Count == 0) throw new DomainException("At least one approved change request must be selected before freezing a baseline.");
+        if (_selections.Count == 0 && _externalPackageSelections.Count == 0)
+            throw new DomainException("At least one approved change request or external package must be selected before freezing a baseline.");
         var manifest = string.Join("|", DisplayNumber, ProjectId, ReleaseId,
-            string.Join(";", _selections.OrderBy(x => x.ChangeRequestDisplayNumber).Select(x => $"{x.ChangeRequestId}:{x.ChangeRequestDisplayNumber}")));
+            string.Join(";", _selections.OrderBy(x => x.ChangeRequestDisplayNumber).Select(x => $"scr:{x.ChangeRequestId}:{x.ChangeRequestDisplayNumber}")),
+            string.Join(";", _externalPackageSelections.OrderBy(x => x.BaselineImportId)
+            .Select(x => $"external:{x.BaselineImportId}:{x.PackageContentHash}")));
         ContentHash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(manifest))).ToLowerInvariant();
         State = CandidateBaselineState.Frozen;
         FrozenAt = now;
         UpdatedAt = now;
-        Event("CandidateBaselineFrozen", actorId, $"Frozen {DisplayNumber} with {_selections.Count} exact change request revisions and hash {ContentHash}.", now);
+        Event("CandidateBaselineFrozen", actorId, $"Frozen {DisplayNumber} with {_selections.Count} change request and {_externalPackageSelections.Count} external package selections and hash {ContentHash}.", now);
     }
 
     /// <summary>

@@ -9,6 +9,14 @@
     },
     {
       "method": "DELETE",
+      "path": "/api/baselines/{id:guid}/external-packages/{baselineImportId:guid}",
+      "file": "BaselineEndpoints.cs",
+      "coveredBy": [
+        "BaselineImportApiTests"
+      ]
+    },
+    {
+      "method": "DELETE",
       "path": "/api/baselines/{id:guid}/selections/{changeRequestId:guid}",
       "file": "BaselineEndpoints.cs",
       "coveredBy": [
@@ -392,6 +400,14 @@
     },
     {
       "method": "POST",
+      "path": "/api/baseline-imports/{id:guid}/customer-items",
+      "file": "BaselineImportEndpoints.cs",
+      "coveredBy": [
+        "BaselineImportApiTests"
+      ]
+    },
+    {
+      "method": "POST",
       "path": "/api/baseline-imports/{id:guid}/mapping",
       "file": "BaselineImportEndpoints.cs",
       "coveredBy": [
@@ -424,9 +440,18 @@
     },
     {
       "method": "POST",
+      "path": "/api/baselines/{id:guid}/external-packages",
+      "file": "BaselineEndpoints.cs",
+      "coveredBy": [
+        "BaselineImportApiTests"
+      ]
+    },
+    {
+      "method": "POST",
       "path": "/api/baselines/{id:guid}/freeze",
       "file": "BaselineEndpoints.cs",
       "coveredBy": [
+        "BaselineImportApiTests",
         "ChangeAuthoringInvariantApiTests",
         "ReopenBaselineConsequencesApiTests",
         "VerificationImpactApiTests",
@@ -455,6 +480,7 @@
       "path": "/api/baselines/{id:guid}/materialize-requirements",
       "file": "BaselineEndpoints.cs",
       "coveredBy": [
+        "BaselineImportApiTests",
         "ChangeAuthoringInvariantApiTests",
         "ControlledProcedureDocumentApiTests",
         "ProcedureBaselineApiTests",
@@ -1558,6 +1584,7 @@
       "path": "/api/projects/{projectId:guid}/configuration/activate",
       "file": "ProjectConfigurationEndpoints.cs",
       "coveredBy": [
+        "BaselineImportApiTests",
         "ProjectConfigurationApiTests"
       ]
     },
@@ -2137,6 +2164,7 @@
       "path": "/api/projects/{projectId:guid}/configuration",
       "file": "ProjectConfigurationEndpoints.cs",
       "coveredBy": [
+        "BaselineImportApiTests",
         "ProjectConfigurationApiTests"
       ]
     },

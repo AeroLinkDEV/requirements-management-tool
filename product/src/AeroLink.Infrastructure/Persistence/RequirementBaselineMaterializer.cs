@@ -5,6 +5,7 @@ using AeroLink.Domain.Baselines;
 using AeroLink.Domain.ChangeControl;
 using AeroLink.Domain.Common;
 using AeroLink.Domain.Requirements;
+using AeroLink.Domain.Imports;
 using AeroLink.Domain.Traceability;
 using AeroLink.Domain.Hierarchy;
 using Microsoft.EntityFrameworkCore;
@@ -19,7 +20,7 @@ public sealed class RequirementBaselineMaterializer(AeroLinkDbContext db, Verifi
     public async Task<MaterializationResult> MaterializeAsync(Guid baselineId, string actorId, DateTimeOffset now, CancellationToken ct)
     {
         await using var transaction = await db.Database.BeginTransactionAsync(ct);
-        var baseline = await db.CandidateBaselines.Include(x => x.Selections).Include(x => x.Events).SingleOrDefaultAsync(x => x.Id == baselineId, ct)
+        var baseline = await db.CandidateBaselines.Include(x => x.Selections).Include(x => x.ExternalPackageSelections).Include(x => x.Events).SingleOrDefaultAsync(x => x.Id == baselineId, ct)
             ?? throw new DomainException("Baseline not found.");
         if (baseline.State != CandidateBaselineState.Frozen) throw new DomainException("Freeze the baseline before materializing its requirements.");
         if (baseline.RequirementsMaterializedAt is not null) throw new DomainException("The requirement baseline is already materialized and immutable.");
@@ -57,6 +58,51 @@ public sealed class RequirementBaselineMaterializer(AeroLinkDbContext db, Verifi
 
         var scrIds = baseline.Selections.Select(x => x.ChangeRequestId).ToList();
         var scrs = await db.SystemChangeRequests.AsNoTracking().Where(x => scrIds.Contains(x.Id)).Include(x => x.RequirementChanges).ToListAsync(ct);
+        var packageIds = baseline.ExternalPackageSelections.Select(x => x.BaselineImportId).ToList();
+        var packages = await db.BaselineImports.AsNoTracking().Where(x => packageIds.Contains(x.Id)).ToDictionaryAsync(x => x.Id, ct);
+        if (packages.Count != packageIds.Distinct().Count())
+            throw new DomainException("A selected external package no longer exists.");
+        foreach (var package in packages.Values)
+        {
+            if (package.State != BaselineImportState.Accepted)
+                throw new DomainException("Only accepted external packages can be materialized.");
+            if (package.ProjectId != baseline.ProjectId || (package.ReleaseId is not null && package.ReleaseId != baseline.ReleaseId))
+                throw new DomainException("A selected external package does not belong to this project and release.");
+            if (package.BoundCandidateBaselineId != baseline.Id || string.IsNullOrWhiteSpace(package.PackageManifestHash))
+                throw new DomainException("A selected external package is not bound to this baseline.");
+        }
+        var packageItems = await db.BaselineImportPackageItems.AsNoTracking()
+            .Where(x => packageIds.Contains(x.BaselineImportId)).OrderBy(x => x.BaselineImportId).ThenBy(x => x.BaseNumber)
+            .ThenBy(x => x.Revision).ToListAsync(ct);
+        foreach (var selection in baseline.ExternalPackageSelections)
+        {
+            var selectedItems = packageItems.Where(x => x.BaselineImportId == selection.BaselineImportId).ToList();
+            if (selectedItems.Count == 0 || !string.Equals(BaselineImportPackageManifest.Hash(selectedItems), selection.PackageContentHash,
+                    StringComparison.OrdinalIgnoreCase))
+                throw new DomainException("The staged external package contents changed after selection.");
+        }
+        if (packageItems.GroupBy(x => (x.BaselineImportId, x.SourceIdentityId)).Any(x => x.Count() > 1))
+            throw new DomainException("An external package contains duplicate source identities.");
+        var sourceIdentityIds = packageItems.Select(x => x.SourceIdentityId).Distinct().ToList();
+        var sourceIdentities = await db.SourceIdentities.AsNoTracking().Where(x => sourceIdentityIds.Contains(x.Id)).ToDictionaryAsync(x => x.Id, ct);
+        if (sourceIdentities.Count != sourceIdentityIds.Count)
+            throw new DomainException("An external package item references a missing source identity.");
+        var sourceMemberships = await db.BaselineImportSourceIdentityMemberships.AsNoTracking()
+            .Where(x => packageIds.Contains(x.BaselineImportId) && sourceIdentityIds.Contains(x.SourceIdentityId))
+            .ToListAsync(ct);
+        foreach (var item in packageItems)
+        {
+            if (!packages.TryGetValue(item.BaselineImportId, out var package)
+                || item.ProjectId != baseline.ProjectId || package.ProjectId != baseline.ProjectId)
+                throw new DomainException("An external package item does not belong to this project.");
+            var identity = sourceIdentities[item.SourceIdentityId];
+            var membership = sourceMemberships.SingleOrDefault(x => x.BaselineImportId == item.BaselineImportId
+                && x.SourceIdentityId == item.SourceIdentityId);
+            if (identity.ProjectId != baseline.ProjectId || membership is null || !membership.InImportedBaseline)
+                throw new DomainException("An external package item has an inconsistent source identity.");
+            if (!string.Equals(identity.SourceIdentifier, item.SourceIdentifier, StringComparison.Ordinal))
+                throw new DomainException("An external package item does not preserve its source identifier.");
+        }
         // DEC-071 superseded DEC-062: review submission, baseline selection/freeze/materialization and
         // integrity checkpoints do not require the former five impact dispositions, and existing stored
         // disposition data remains historical and is not rewritten. A legacy change whose
@@ -95,6 +141,38 @@ public sealed class RequirementBaselineMaterializer(AeroLinkDbContext db, Verifi
             AddProfile(next,change,schemas,actorId,now);
             materialized.Add(new(pair.scr.Id, change.Id, change.Kind, prior.Id, next.Id, change.DisplayNumber));
             if (state == RequirementRevisionState.Retired) current.Remove(existing.Id); else current[existing.Id] = next;
+        }
+
+        // External package items are already reconciled source content, not change requests. They become
+        // effective only here, alongside the ordinary predecessor/SCR pass, and retain the package that
+        // committed this revision even when the SourceIdentity was first seen in an earlier import.
+        foreach (var item in packageItems.OrderBy(x => x.BaseNumber).ThenBy(x => x.Revision).ThenBy(x => x.Id))
+        {
+            var customer = ladderPolicy.Definition(RequirementLevel.Customer);
+            if (!customer.UsesExternalOrigin || customer.Has(LevelCapabilities.HasChangeControl)
+                || customer.Has(LevelCapabilities.HasVerification) || customer.Has(LevelCapabilities.HasRequirementsDocument))
+                throw new DomainException("The Customer ladder definition must be external-origin only, without AeroLink change control, verification, or a requirements document.");
+            if (!artifactByBase.TryGetValue(item.BaseNumber, out var artifact))
+            {
+                if (item.Revision != 0)
+                    throw new DomainException($"{item.BaseNumber} must start at revision 00.");
+                artifact = new RequirementArtifact(baseline.ProjectId, item.BaseNumber, RequirementLevel.Customer, now);
+                db.Requirements.Add(artifact); artifactByBase.Add(artifact.BaseNumber, artifact);
+                var revision = RequirementRevision.FromExternalSourcePackage(artifact.Id, item.Revision, item.Statement,
+                    item.Rationale, RequirementRevisionState.Active, item.BaselineImportId, baseline.Id, now);
+                db.RequirementRevisions.Add(revision); revisions.Add(revision); current[artifact.Id] = revision; created++;
+                db.SourceIdentityLinks.Add(sourceIdentities[item.SourceIdentityId].LinkToFromImport(revision.Id, item.BaselineImportId, now));
+                continue;
+            }
+
+            if (artifact.Level != RequirementLevel.Customer || !current.TryGetValue(artifact.Id, out var prior))
+                throw new DomainException($"{item.BaseNumber} is not active in the predecessor baseline.");
+            if (item.Revision <= prior.Revision)
+                throw new DomainException($"{item.BaseNumber}.{item.Revision:D2} must have a revision greater than {prior.Revision:D2}.");
+            var next = RequirementRevision.FromExternalSourcePackage(artifact.Id, item.Revision, item.Statement,
+                item.Rationale, RequirementRevisionState.Active, item.BaselineImportId, baseline.Id, now);
+            db.RequirementRevisions.Add(next); revisions.Add(next); current[artifact.Id] = next; created++;
+            db.SourceIdentityLinks.Add(sourceIdentities[item.SourceIdentityId].LinkToFromImport(next.Id, item.BaselineImportId, now));
         }
 
         // Requirement revisions exist for the first time here, so this is the earliest point at which
@@ -136,7 +214,13 @@ public sealed class RequirementBaselineMaterializer(AeroLinkDbContext db, Verifi
             .Select(x => $"{artifactById[x.Key].BaseNumber}.{x.Value.Revision:D2}:{x.Value.Id}"));
         var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(manifest))).ToLowerInvariant();
         baseline.MarkRequirementsMaterialized(actorId, hash, current.Count, now);
-        await db.SaveChangesAsync(ct); await transaction.CommitAsync(ct);
+        var priorSealActor = db.LadderSealActor;
+        db.LadderSealActor = actorId;
+        try
+        {
+            await db.SaveChangesAsync(ct); await transaction.CommitAsync(ct);
+        }
+        finally { db.LadderSealActor = priorSealActor; }
         return new MaterializationResult(hash, current.Count, created);
     }
 

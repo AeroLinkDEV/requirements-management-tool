@@ -123,7 +123,7 @@ public sealed class ChangeRequestScopeAuditTests
         {
             Assert.Equal(level == RequirementLevel.System,
                 SystemChangeRequest.AcceptsRequirementLevel(ChangeRequestType.System, level));
-            Assert.Equal(level != RequirementLevel.System,
+            Assert.Equal(level is RequirementLevel.HighLevel or RequirementLevel.LowLevel,
                 SystemChangeRequest.AcceptsRequirementLevel(ChangeRequestType.Software, level));
         }
     }

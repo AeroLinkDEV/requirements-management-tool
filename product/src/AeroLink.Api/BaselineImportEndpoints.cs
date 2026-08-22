@@ -24,6 +24,9 @@ public sealed record SourceRecordRequest(string SourceModule, string SourceObjec
 public sealed record SourceHistoryRequest(string SourceBaselineName, string? Statement, string? ChangedBy,
     DateTimeOffset? ChangedAt, string? SourceChangeReference);
 public sealed record RecordSourceRecordsRequest(SourceRecordRequest[] Records);
+public sealed record StageCustomerPackageItemRequest(Guid SourceIdentityId, string? BaseNumber, int Revision,
+    string Statement, string? Rationale, string? SourceIdentifier);
+public sealed record StageCustomerPackageItemsRequest(StageCustomerPackageItemRequest[] Items);
 
 /// <summary>
 /// Bringing in a program that already exists in another requirements tool.
@@ -69,26 +72,29 @@ public static class BaselineImportEndpoints
             if (import is null) return Results.NotFound();
             if (!await http.HasProjectAccessAsync(db, import.ProjectId, ct)) return Results.Forbid();
             const int page = 2000;
-            var matching = db.SourceIdentities.AsNoTracking().Where(x => x.BaselineImportId == id);
+            var matching = from membership in db.BaselineImportSourceIdentityMemberships.AsNoTracking().Where(x => x.BaselineImportId == id)
+                           join identity in db.SourceIdentities.AsNoTracking() on membership.SourceIdentityId equals identity.Id
+                           select new { membership, identity };
             // A real extract runs to thousands of objects, so this page is reached in ordinary use. The total
             // is reported alongside it: a capped list that does not say it was capped reads as the whole set,
             // which on this endpoint means reading a partial import as a complete one.
             var total = await matching.CountAsync(ct);
             var identities = await matching
-                .OrderBy(x => x.SourceModule).ThenBy(x => x.SourceIdentifier)
+                .OrderBy(x => x.identity.SourceModule).ThenBy(x => x.identity.SourceIdentifier)
                 .Take(page).ToListAsync(ct);
-            var ids = identities.Select(x => x.Id).ToList();
+            var ids = identities.Select(x => x.identity.Id).ToList();
             var history = await db.SourceHistoryEntries.AsNoTracking()
-                .Where(x => ids.Contains(x.SourceIdentityId)).ToListAsync(ct);
+                .Where(x => x.BaselineImportId == id && ids.Contains(x.SourceIdentityId)).ToListAsync(ct);
             return Results.Ok(new
             {
                 total,
                 returned = identities.Count,
                 records = identities.Select(x => new
             {
-                x.Id, x.SourceModule, x.SourceObjectKey, x.SourceIdentifier, x.InImportedBaseline,
-                x.FirstSeenAt, x.LastSeenAt,
-                sourceHistory = history.Where(entry => entry.SourceIdentityId == x.Id)
+                x.identity.Id, x.identity.SourceModule, x.identity.SourceObjectKey, x.identity.SourceIdentifier,
+                inImportedBaseline = x.membership.InImportedBaseline,
+                x.identity.FirstSeenAt, x.identity.LastSeenAt,
+                sourceHistory = history.Where(entry => entry.SourceIdentityId == x.identity.Id)
                     .OrderBy(entry => entry.SourceBaselineName)
                     .Select(entry => new
                     {
@@ -167,6 +173,9 @@ public static class BaselineImportEndpoints
             var existing = await db.SourceIdentities
                 .Where(x => x.ProjectId == import.ProjectId && x.SourceSystem == import.SourceSystem)
                 .ToDictionaryAsync(x => new { x.SourceModule, x.SourceObjectKey }, ct);
+            var existingMemberships = await db.BaselineImportSourceIdentityMemberships
+                .Where(x => x.BaselineImportId == import.Id)
+                .ToDictionaryAsync(x => x.SourceIdentityId, ct);
             var recorded = 0;
             var seenAgain = 0;
             try
@@ -195,6 +204,19 @@ public static class BaselineImportEndpoints
                         recorded++;
                     }
 
+                    if (existingMemberships.TryGetValue(subject.Id, out var membership))
+                    {
+                        if (membership.InImportedBaseline != record.InImportedBaseline)
+                            throw new DomainException($"Source identity {subject.SourceIdentifier} was recorded with conflicting membership in this import.");
+                    }
+                    else
+                    {
+                        membership = new BaselineImportSourceIdentityMembership(import.Id, subject.Id,
+                            record.InImportedBaseline, now);
+                        db.BaselineImportSourceIdentityMemberships.Add(membership);
+                        existingMemberships.Add(subject.Id, membership);
+                    }
+
                     foreach (var entry in record.History ?? [])
                         db.SourceHistoryEntries.Add(new SourceHistoryEntry(import.ProjectId, subject.Id, import.Id,
                             entry.SourceBaselineName, entry.Statement ?? "", entry.ChangedBy ?? "", entry.ChangedAt,
@@ -218,6 +240,87 @@ public static class BaselineImportEndpoints
             });
         });
 
+        // External Customer content is staged separately from SourceIdentity history. Staging never creates a
+        // controlled revision; all rows are validated before one save so a malformed or duplicate payload cannot
+        // leave half a package behind.
+        app.MapGet("/api/baseline-imports/{id:guid}/customer-items", async (Guid id, HttpContext http,
+            AeroLinkDbContext db, CancellationToken ct) =>
+        {
+            var import = await db.BaselineImports.AsNoTracking().SingleOrDefaultAsync(x => x.Id == id, ct);
+            if (import is null) return Results.NotFound();
+            if (!await http.HasProjectAccessAsync(db, import.ProjectId, ct)) return Results.Forbid();
+            var rows = await db.BaselineImportPackageItems.AsNoTracking().Where(x => x.BaselineImportId == id)
+                .OrderBy(x => x.BaseNumber).ThenBy(x => x.Revision).ToListAsync(ct);
+            return Results.Ok(rows.Select(x => new { x.Id, x.SourceIdentityId, x.BaseNumber, x.Revision,
+                x.Statement, x.Rationale, x.SourceIdentifier, x.StagedAt }));
+        });
+
+        app.MapPost("/api/baseline-imports/{id:guid}/customer-items", async (Guid id,
+            StageCustomerPackageItemsRequest request, HttpContext http, AeroLinkDbContext db, IdentityService identity,
+            CancellationToken ct) =>
+        {
+            var import = await db.BaselineImports.SingleOrDefaultAsync(x => x.Id == id, ct);
+            if (import is null) return Results.NotFound();
+            if (!await http.HasProjectAccessAsync(db, import.ProjectId, ct)) return Results.Forbid();
+            if (!await AuthorizedAsync(import.ProjectId, http, db, identity, ct)) return Results.Forbid();
+            var items = request.Items ?? [];
+            if (items.Length == 0) return Results.BadRequest(new { error = "No Customer package items were supplied." });
+            if (import.State != BaselineImportState.Reconciled)
+                return Results.BadRequest(new { error = "Customer package items can only be staged before package acceptance." });
+            if (import.BoundCandidateBaselineId is not null)
+                return Results.Conflict(new { error = "The external package is already bound to a candidate baseline." });
+            var duplicateIdentity = items.GroupBy(x => x.SourceIdentityId).FirstOrDefault(x => x.Count() > 1);
+            if (duplicateIdentity is not null)
+                return Results.BadRequest(new { error = "A Customer package cannot contain the same source identity twice." });
+            var duplicateBase = items.Where(x => !string.IsNullOrWhiteSpace(x.BaseNumber))
+                .GroupBy(x => x.BaseNumber!.Trim().ToUpperInvariant()).FirstOrDefault(x => x.Count() > 1);
+            if (duplicateBase is not null)
+                return Results.BadRequest(new { error = "A Customer package cannot contain the same controlled identifier twice." });
+            var sourceIds = items.Select(x => x.SourceIdentityId).Distinct().ToList();
+            var identities = await db.SourceIdentities.Where(x => sourceIds.Contains(x.Id)).ToDictionaryAsync(x => x.Id, ct);
+            var memberships = await db.BaselineImportSourceIdentityMemberships
+                .Where(x => x.BaselineImportId == import.Id && sourceIds.Contains(x.SourceIdentityId))
+                .ToDictionaryAsync(x => x.SourceIdentityId, ct);
+            if (identities.Count != sourceIds.Count || memberships.Count != sourceIds.Count
+                    || identities.Values.Any(x => x.ProjectId != import.ProjectId)
+                    || memberships.Values.Any(x => !x.InImportedBaseline))
+                return Results.BadRequest(new { error = "Every Customer package item must reference an in-baseline source identity from this import." });
+            var mismatchedIdentifier = items.FirstOrDefault(x => !string.IsNullOrWhiteSpace(x.SourceIdentifier)
+                && !string.Equals(x.SourceIdentifier.Trim(), identities[x.SourceIdentityId].SourceIdentifier, StringComparison.Ordinal));
+            if (mismatchedIdentifier is not null)
+                return Results.BadRequest(new { error = "A Customer package item must preserve the immutable SourceIdentity source identifier." });
+            var existingIds = await db.BaselineImportPackageItems.Where(x => x.BaselineImportId == id
+                && sourceIds.Contains(x.SourceIdentityId)).Select(x => x.SourceIdentityId).ToListAsync(ct);
+            if (existingIds.Count > 0)
+                return Results.Conflict(new { error = "One or more source identities are already staged in this package." });
+
+            var staged = new List<BaselineImportPackageItem>();
+            try
+            {
+                foreach (var item in items)
+                {
+                    var number = string.IsNullOrWhiteSpace(item.BaseNumber)
+                        ? await IdentifierAllocator.NextRequirementAsync(db, "CUSR", ct)
+                        : item.BaseNumber.Trim().ToUpperInvariant();
+                    // The immutable SourceIdentity is the authority for the quoted external identifier. A
+                    // caller may omit it for convenience, but cannot replace it with a value that would make
+                    // the staged package disagree with its provenance.
+                    var identifier = identities[item.SourceIdentityId].SourceIdentifier;
+                    staged.Add(new BaselineImportPackageItem(import.ProjectId, import.Id, item.SourceIdentityId,
+                        number, item.Revision, item.Statement, item.Rationale ?? "", identifier, DateTimeOffset.UtcNow));
+                }
+                db.BaselineImportPackageItems.AddRange(staged);
+                import.RecordCustomerPackageStaging(DateTimeOffset.UtcNow);
+                await db.SaveChangesAsync(ct);
+                return Results.Ok(new { staged = staged.Count, items = staged.Select(x => new { x.Id, x.BaseNumber, x.Revision }) });
+            }
+            catch (DbUpdateConcurrencyException)
+            {
+                return Results.Conflict(new { error = "The import changed while Customer package content was being staged. Reload it and retry." });
+            }
+            catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
+        });
+
         // Gate 4. Every source object accounted for, before anything is committed.
         app.MapPost("/api/baseline-imports/{id:guid}/reconciliation", (Guid id, RecordReconciliationRequest request,
             HttpContext http, AeroLinkDbContext db, IdentityService identity, CancellationToken ct) =>
@@ -231,7 +334,15 @@ public static class BaselineImportEndpoints
             {
                 await db.SourceHistoryEntries.Where(x => x.BaselineImportId == id).ExecuteDeleteAsync(ct);
                 await db.SourceIdentityLinks.Where(x => x.BaselineImportId == id).ExecuteDeleteAsync(ct);
-                await db.SourceIdentities.Where(x => x.BaselineImportId == id).ExecuteDeleteAsync(ct);
+                await db.BaselineImportPackageItems.Where(x => x.BaselineImportId == id).ExecuteDeleteAsync(ct);
+                await db.BaselineImportSourceIdentityMemberships.Where(x => x.BaselineImportId == id).ExecuteDeleteAsync(ct);
+                // A later delta can have observed the same stable identity. Retain that first-seen identity
+                // whenever another import, history row, package item, or provenance link still depends on it.
+                await db.SourceIdentities.Where(x => x.BaselineImportId == id
+                    && !db.BaselineImportSourceIdentityMemberships.Any(m => m.SourceIdentityId == x.Id)
+                    && !db.SourceHistoryEntries.Any(h => h.SourceIdentityId == x.Id)
+                    && !db.BaselineImportPackageItems.Any(p => p.SourceIdentityId == x.Id)
+                    && !db.SourceIdentityLinks.Any(l => l.SourceIdentityId == x.Id)).ExecuteDeleteAsync(ct);
             }));
 
         // Gate 5. A named person accepts it, and the build exists from here.
@@ -244,6 +355,8 @@ public static class BaselineImportEndpoints
             if (!await AuthorizedAsync(import.ProjectId, http, db, identity, ct)) return Results.Forbid();
             if (string.IsNullOrWhiteSpace(request.Version))
                 return Results.BadRequest(new { error = "Name the build this import becomes, for example 1.0." });
+            if (await db.BaselineImportPackageItems.AnyAsync(x => x.BaselineImportId == id, ct))
+                return Results.BadRequest(new { error = "This import has staged Customer package content; select it into an existing Draft candidate baseline instead." });
             var version = request.Version.Trim();
             if (await db.Releases.AnyAsync(x => x.ProjectId == import.ProjectId && x.Version == version, ct))
                 return Results.Conflict(new { error = $"Build {version} already exists in this Project." });
@@ -287,6 +400,9 @@ public static class BaselineImportEndpoints
                 .Where(x => ids.Contains(x.SourceIdentityId)).ToListAsync(ct);
             var history = await db.SourceHistoryEntries.AsNoTracking()
                 .Where(x => ids.Contains(x.SourceIdentityId)).ToListAsync(ct);
+            var latestLink = links.GroupBy(x => x.SourceIdentityId)
+                .ToDictionary(group => group.Key, group => group.OrderByDescending(x => x.CreatedAt)
+                    .ThenByDescending(x => x.Id).First());
             return Results.Ok(new
             {
                 total,
@@ -297,7 +413,11 @@ public static class BaselineImportEndpoints
                 // False means the object was in the source's history but not the baseline that was imported.
                 // It is answerable, and it joins nothing.
                 x.InImportedBaseline,
-                requirementRevisionId = links.SingleOrDefault(link => link.SourceIdentityId == x.Id)?.RequirementRevisionId,
+                requirementRevisionId = latestLink.TryGetValue(x.Id, out var committed) ? committed.RequirementRevisionId : (Guid?)null,
+                provenance = links.Where(link => link.SourceIdentityId == x.Id)
+                    .OrderByDescending(link => link.CreatedAt).ThenByDescending(link => link.Id)
+                    .Select(link => new { requirementRevisionId = link.RequirementRevisionId,
+                        baselineImportId = link.BaselineImportId, link.CreatedAt }),
                 sourceHistory = history.Where(entry => entry.SourceIdentityId == x.Id)
                     .OrderBy(entry => entry.SourceBaselineName)
                     .Select(entry => new
@@ -321,10 +441,17 @@ public static class BaselineImportEndpoints
             if (!await AuthorizedAsync(import.ProjectId, http, db, identity, ct)) return Results.Forbid();
             try
             {
+                await using var transaction = after is null ? null : await db.Database.BeginTransactionAsync(ct);
                 act(import, DateTimeOffset.UtcNow);
                 await db.SaveChangesAsync(ct);
                 if (after is not null) await after();
-                return Results.Ok(Detail(import, await TallyAsync(db, id, ct)));
+                var tally = await TallyAsync(db, id, ct);
+                if (transaction is not null) await transaction.CommitAsync(ct);
+                return Results.Ok(Detail(import, tally));
+            }
+            catch (DbUpdateConcurrencyException)
+            {
+                return Results.Conflict(new { error = "The import changed while it was being updated. Reload it and retry." });
             }
             catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
         }
@@ -334,7 +461,8 @@ public static class BaselineImportEndpoints
     {
         x.Id, x.ProjectId, state = x.State.ToString(), carries = x.Carries.ToString(),
         x.SourceSystem, x.SourceBaselineName, x.SourceBaselineDate, x.ExtractFileName,
-        x.StartedBy, x.StartedAt, x.AcceptedBy, x.AcceptedAt, x.ReleaseId
+        x.StartedBy, x.StartedAt, x.AcceptedBy, x.AcceptedAt, x.ReleaseId,
+        x.BoundCandidateBaselineId, x.PackageBoundAt, x.PackageManifestHash
     };
 
     /// <param name="InImportedBaseline">Objects that will become requirements and carry a provenance link.</param>
@@ -345,8 +473,8 @@ public static class BaselineImportEndpoints
     }
 
     private static async Task<ImportTally> TallyAsync(AeroLinkDbContext db, Guid importId, CancellationToken ct) =>
-        new(await db.SourceIdentities.CountAsync(x => x.BaselineImportId == importId && x.InImportedBaseline, ct),
-            await db.SourceIdentities.CountAsync(x => x.BaselineImportId == importId && !x.InImportedBaseline, ct),
+        new(await db.BaselineImportSourceIdentityMemberships.CountAsync(x => x.BaselineImportId == importId && x.InImportedBaseline, ct),
+            await db.BaselineImportSourceIdentityMemberships.CountAsync(x => x.BaselineImportId == importId && !x.InImportedBaseline, ct),
             await db.SourceHistoryEntries.CountAsync(x => x.BaselineImportId == importId, ct));
 
     private static object Detail(BaselineImport x, ImportTally tally) => new
@@ -357,6 +485,7 @@ public static class BaselineImportEndpoints
         x.ExtractedBy, x.ExtractedAt, x.StartedBy, x.StartedAt,
         mappingJson = x.MappingJson, reconciliationJson = x.ReconciliationJson,
         x.AcceptedBy, x.AcceptedAt, x.ReleaseId, x.Version,
+        x.BoundCandidateBaselineId, x.PackageBoundAt, x.PackageManifestHash,
         // What this import accounted for, which on a re-extract exceeds what it newly recorded.
         x.SourceRecordCount,
         sourceIdentityCount = tally.Total,

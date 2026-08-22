@@ -56,7 +56,7 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db, IProjectLadderPolicy
         foreach (var row in currentRows.Where(x => x.revision.Revision > 0))
             for (var rev = 0; rev < row.revision.Revision; rev++) db.RequirementRevisions.Add(new RequirementRevision(row.artifact.Id, rev,
                 HistoricalStatement(row.artifact.Level, row.artifact.BaseNumber, rev), "Earlier approved wording retained for history.", row.revision.VerificationMethod,
-                RequirementRevisionState.Superseded, row.revision.SourceChangeRequestId, baseline15.Id, start.AddDays(10 + rev)));
+                RequirementRevisionState.Superseded, row.revision.SourceChangeRequestId!.Value, baseline15.Id, start.AddDays(10 + rev)));
         await db.SaveChangesAsync(ct);
 
         var current = currentRows.ToDictionary(x => x.artifact.BaseNumber, x => new CurrentRequirement(x.artifact, x.revision));

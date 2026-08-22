@@ -93,6 +93,20 @@ public sealed class SystemChangeRequestTests
     }
 
     [Fact]
+    public void Software_change_request_rejects_customer_external_origin_level()
+    {
+        var swcr = new SystemChangeRequest("HLRCR-01051", 0, ProjectId, ReleaseId,
+            "Software change", "Problem", "Analysis", "Solution", "author", Now,
+            ChangeRequestType.Software, softwareLevel: RequirementLevel.HighLevel);
+
+        var error = Assert.Throws<DomainException>(() => swcr.AddRequirementChange("author", "CUSR-00000001", 0,
+            RequirementLevel.Customer, RequirementChangeKind.Introduce, "Customer behavior.", "Rationale.", "", Now));
+
+        Assert.Contains("HLR or LLR requirements only", error.Message);
+        Assert.Empty(swcr.RequirementChanges);
+    }
+
+    [Fact]
     public void Draft_content_cannot_change_during_review()
     {
         var scr = CreateDraftWithRequirement();

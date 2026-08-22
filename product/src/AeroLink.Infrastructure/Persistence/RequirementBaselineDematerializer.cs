@@ -269,7 +269,7 @@ public sealed class RequirementBaselineDematerializer(AeroLinkDbContext db, Veri
                 $"Left covering nothing: {artifact.BaseNumber} was introduced by {baselineNumber} and ceases to exist. "
                 + "It becomes verification work rather than being left in the library covering no requirement."));
             orphaned.Add(new OrphanedProcedureRef(row.Id, row.BaseNumber, row.Level,
-                revisionById[link.RequirementRevisionId].SourceChangeRequestId));
+                revisionById[link.RequirementRevisionId].SourceChangeRequestId!.Value));
         }
         return new CoveragePlan(coverage, toMove, disturbed, orphaned);
     }

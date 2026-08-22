@@ -32,7 +32,8 @@ public static class RequirementsEndpoints
             var resolvedPage=Math.Max(1,page??1);var resolvedPageSize=Math.Clamp(pageSize??50,1,200);
             var source = from artifact in db.Requirements.AsNoTracking().Where(x => x.ProjectId == projectId)
                          join revision in db.RequirementRevisions.AsNoTracking() on artifact.Id equals revision.ArtifactId
-                         join scr in db.SystemChangeRequests.AsNoTracking() on revision.SourceChangeRequestId equals scr.Id
+                         join scr in db.SystemChangeRequests.AsNoTracking() on revision.SourceChangeRequestId equals scr.Id into sourceRequests
+                         from scr in sourceRequests.DefaultIfEmpty()
                          select new { artifact, revision, scr };
             if(string.Equals(scope,"System",StringComparison.OrdinalIgnoreCase))source=source.Where(x=>x.artifact.Level==RequirementLevel.System);
             else if(string.Equals(scope,"Software",StringComparison.OrdinalIgnoreCase))source=source.Where(x=>x.artifact.Level==RequirementLevel.HighLevel||x.artifact.Level==RequirementLevel.LowLevel);
@@ -58,8 +59,11 @@ public static class RequirementsEndpoints
                 .OrderBy(x => x.artifact.BaseNumber).ThenByDescending(x => x.revision.Revision).ToList();
             var items = rows.Select(x => new { x.artifact.Id, x.artifact.BaseNumber, level = x.artifact.Level.ToString(), revisionId = x.revision.Id, x.revision.Revision,
                     displayNumber = x.artifact.BaseNumber + "." + (x.revision.Revision < 10 ? "0" : "") + x.revision.Revision, x.revision.Statement, x.revision.Rationale,
-                    x.revision.VerificationMethod, state = x.revision.State.ToString(), x.revision.EffectiveBaselineId, sourceChangeRequestId = x.scr.Id,
-                    sourceScr = x.scr.BaseNumber + "." + (x.scr.Revision < 10 ? "0" : "") + x.scr.Revision, x.revision.CreatedAt }).ToList();
+                    x.revision.VerificationMethod, state = x.revision.State.ToString(), x.revision.EffectiveBaselineId,
+                    originKind = x.revision.OriginKind.ToString(), x.revision.SourceBaselineImportId,
+                    sourceChangeRequestId = x.scr == null ? (Guid?)null : x.scr.Id,
+                    sourceScr = x.scr == null ? null : x.scr.BaseNumber + "." + (x.scr.Revision < 10 ? "0" : "") + x.scr.Revision,
+                    x.revision.CreatedAt }).ToList();
             return Results.Ok(new { page=resolvedPage, pageSize=resolvedPageSize, totalCount = total, totalPages = (int)Math.Ceiling(total / (double)resolvedPageSize), items });
         });
 
@@ -68,11 +72,14 @@ public static class RequirementsEndpoints
             var artifact = await db.Requirements.AsNoTracking().SingleOrDefaultAsync(x => x.Id == id, ct); if (artifact is null) return Results.NotFound();
             if (!await http.HasProjectAccessAsync(db, artifact.ProjectId, ct)) return Results.Forbid();
             var revisions = await (from revision in db.RequirementRevisions.AsNoTracking().Where(x => x.ArtifactId == id)
-                                   join scr in db.SystemChangeRequests.AsNoTracking() on revision.SourceChangeRequestId equals scr.Id
+                                   join scr in db.SystemChangeRequests.AsNoTracking() on revision.SourceChangeRequestId equals scr.Id into sourceRequests
+                                   from scr in sourceRequests.DefaultIfEmpty()
                                    join baseline in db.CandidateBaselines.AsNoTracking() on revision.EffectiveBaselineId equals baseline.Id
                                    orderby revision.Revision descending select new { revision.Id, revision.Revision, displayNumber = artifact.BaseNumber + "." + (revision.Revision < 10 ? "0" : "") + revision.Revision,
                                        revision.Statement, revision.Rationale, revision.VerificationMethod, state = revision.State.ToString(), revision.CreatedAt,
-                                       sourceChangeRequestId = scr.Id, sourceScr = scr.BaseNumber + "." + (scr.Revision < 10 ? "0" : "") + scr.Revision,
+                                       originKind = revision.OriginKind.ToString(), revision.SourceBaselineImportId,
+                                       sourceChangeRequestId = scr == null ? (Guid?)null : scr.Id,
+                                       sourceScr = scr == null ? null : scr.BaseNumber + "." + (scr.Revision < 10 ? "0" : "") + scr.Revision,
                                        baselineId = baseline.Id, baseline = baseline.BaseNumber + "." + (baseline.Revision < 10 ? "0" : "") + baseline.Revision }).ToListAsync(ct);
             return Results.Ok(new { artifact.Id, artifact.BaseNumber, level = artifact.Level.ToString(), revisions });
         });
@@ -152,7 +159,7 @@ public static class RequirementsEndpoints
             }
             var ordered=sort?.ToLowerInvariant() switch{"updated" when !db.Database.IsSqlite()=>current.OrderByDescending(x=>x.revision.CreatedAt).ThenBy(x=>x.artifact.BaseNumber),"verification"=>current.OrderBy(x=>x.revision.VerificationMethod).ThenBy(x=>x.artifact.BaseNumber),"state"=>current.OrderBy(x=>x.revision.State).ThenBy(x=>x.artifact.BaseNumber),_=>current.OrderBy(x=>x.artifact.BaseNumber)};
             var total=await current.CountAsync(ct);var rows=await ordered.Skip((page-1)*pageSize).Take(pageSize)
-                .Select(x=>new{x.artifact.Id,x.artifact.BaseNumber,level=x.artifact.Level.ToString(),revisionId=x.revision.Id,x.revision.Revision,x.revision.Statement,x.revision.Rationale,x.revision.VerificationMethod,state=x.revision.State.ToString(),x.revision.SourceChangeRequestId,x.revision.CreatedAt}).ToListAsync(ct);
+                .Select(x=>new{x.artifact.Id,x.artifact.BaseNumber,level=x.artifact.Level.ToString(),revisionId=x.revision.Id,x.revision.Revision,x.revision.Statement,x.revision.Rationale,x.revision.VerificationMethod,state=x.revision.State.ToString(),originKind=x.revision.OriginKind.ToString(),x.revision.SourceChangeRequestId,x.revision.SourceBaselineImportId,x.revision.CreatedAt}).ToListAsync(ct);
             var revisionIds=rows.Select(x=>x.revisionId).ToList();
             // The controlled number of the change request that authorized each revision. The inspector names
             // its source authority after this rather than after the workspace it is being read in — a fixed
@@ -173,7 +180,7 @@ public static class RequirementsEndpoints
             var specifications=specificationRows.Select(x=>new{x.Id,x.DocumentNumber,x.Title,x.Level,x.Description,x.nodeCount,sections=sectionRows.Where(s=>s.SpecificationId==x.Id).Select(s=>new{s.Id,s.Heading,s.Position,s.count})}).ToList();
             var views=await db.SavedRequirementViews.AsNoTracking().Where(x=>x.ProjectId==projectId&&(x.OwnerId==http.UserAccount().Id||x.IsShared)).OrderBy(x=>x.Name).Select(x=>new{x.Id,x.Name,x.QueryJson,x.ColumnsJson,x.IsShared,owned=x.OwnerId==http.UserAccount().Id}).ToListAsync(ct);
             var build=releaseId is null?null:await db.Releases.AsNoTracking().Where(x=>x.Id==releaseId&&x.ProjectId==projectId).Select(x=>new{x.Id,x.Version,x.IsReleased}).SingleOrDefaultAsync(ct);
-            timer.Stop();return Results.Ok(new{page,pageSize,totalCount=total,totalPages=(int)Math.Ceiling(total/(double)pageSize),queryElapsedMs=timer.ElapsedMilliseconds,effectiveBaselineId,build,schemas,specifications,views,items=rows.Select(x=>{profiles.TryGetValue(x.revisionId,out var profile);commentCounts.TryGetValue(x.Id,out var comments);return new{x.Id,x.BaseNumber,displayNumber=$"{x.BaseNumber}.{x.Revision:D2}",x.level,x.revisionId,x.Revision,x.Statement,x.Rationale,x.VerificationMethod,x.state,x.SourceChangeRequestId,sourceChangeRequestReleaseId=sourceRequests.TryGetValue(x.SourceChangeRequestId,out var sourceRequest)?sourceRequest.TargetReleaseId:(Guid?)null,sourceScr=sourceNumbers.TryGetValue(x.SourceChangeRequestId,out var sourceNumber)?sourceNumber:"",x.CreatedAt,richText=profile?.RichText??x.Statement,attributesJson=profile?.AttributesJson??"{}",tagsJson=profile?.TagsJson??"[]",commentCount=comments?.Count??0,openCommentCount=comments?.Open??0,coverageState=coverageStates.TryGetValue(x.revisionId,out var rowCoverage)?rowCoverage:RequirementCoverageState.Uncovered};})});
+            timer.Stop();return Results.Ok(new{page,pageSize,totalCount=total,totalPages=(int)Math.Ceiling(total/(double)pageSize),queryElapsedMs=timer.ElapsedMilliseconds,effectiveBaselineId,build,schemas,specifications,views,items=rows.Select(x=>{profiles.TryGetValue(x.revisionId,out var profile);commentCounts.TryGetValue(x.Id,out var comments);Guid? sourceId=x.SourceChangeRequestId;var hasSource=sourceId is Guid;return new{x.Id,x.BaseNumber,displayNumber=$"{x.BaseNumber}.{x.Revision:D2}",x.level,x.revisionId,x.Revision,x.Statement,x.Rationale,x.VerificationMethod,x.state,x.originKind,x.SourceChangeRequestId,x.SourceBaselineImportId,sourceChangeRequestReleaseId=hasSource&&sourceRequests.TryGetValue(sourceId!.Value,out var sourceRequest)?sourceRequest.TargetReleaseId:(Guid?)null,sourceScr=hasSource&&sourceNumbers.TryGetValue(sourceId!.Value,out var sourceNumber)?sourceNumber:"",x.CreatedAt,richText=profile?.RichText??x.Statement,attributesJson=profile?.AttributesJson??"{}",tagsJson=profile?.TagsJson??"[]",commentCount=comments?.Count??0,openCommentCount=comments?.Open??0,coverageState=coverageStates.TryGetValue(x.revisionId,out var rowCoverage)?rowCoverage:RequirementCoverageState.Uncovered};})});
         });
 
         app.MapGet("/api/enterprise-requirements/{artifactId:guid}", async (Guid artifactId,Guid? releaseId,HttpContext http,AeroLinkDbContext db,CancellationToken ct) =>
@@ -183,18 +190,19 @@ public static class RequirementsEndpoints
             var effectiveBaselineId=releaseId is null?null:await BuildScope.EffectiveBaselineAsync(db,artifact.ProjectId,releaseId.Value,ct);
             if(releaseId is not null&&(effectiveBaselineId is null||!await db.BaselineRequirements.AnyAsync(x=>x.BaselineId==effectiveBaselineId&&x.ArtifactId==artifactId,ct)))return Results.NotFound(new{error="This requirement is not primary content in the active build.",code="cross_build_requirement"});
             var history=await (from r in db.RequirementRevisions.AsNoTracking().Where(x=>x.ArtifactId==artifactId)
-                               join s in db.SystemChangeRequests.AsNoTracking() on r.SourceChangeRequestId equals s.Id
+                               join s in db.SystemChangeRequests.AsNoTracking() on r.SourceChangeRequestId equals s.Id into sourceRequests
+                               from s in sourceRequests.DefaultIfEmpty()
                                join b in db.CandidateBaselines.AsNoTracking() on r.EffectiveBaselineId equals b.Id
                                join release in db.Releases.AsNoTracking() on b.ReleaseId equals release.Id
                                // The source change request's own release travels with it. A historical revision is by
                                // definition sourced from an earlier build, so opening that change request in the build
                                // currently selected would present a released, frozen record inside an in-work context.
-                               orderby r.Revision descending select new{r.Id,r.Revision,displayNumber=artifact.BaseNumber+"."+(r.Revision<10?"0":"")+r.Revision,r.Statement,r.Rationale,r.VerificationMethod,state=r.State.ToString(),r.SourceChangeRequestId,sourceChangeRequestReleaseId=s.TargetReleaseId,sourceScr=s.BaseNumber+"."+(s.Revision<10?"0":"")+s.Revision,r.CreatedAt,originBuild=release.Version,isHistorical=releaseId!=null&&release.Id!=releaseId}).ToListAsync(ct);
+                               orderby r.Revision descending select new{r.Id,r.Revision,displayNumber=artifact.BaseNumber+"."+(r.Revision<10?"0":"")+r.Revision,r.Statement,r.Rationale,r.VerificationMethod,state=r.State.ToString(),originKind=r.OriginKind.ToString(),r.SourceBaselineImportId,sourceChangeRequestId=s==null?(Guid?)null:s.Id,sourceChangeRequestReleaseId=s==null?(Guid?)null:s.TargetReleaseId,sourceScr=s==null?null:s.BaseNumber+"."+(s.Revision<10?"0":"")+s.Revision,r.CreatedAt,originBuild=release.Version,isHistorical=releaseId!=null&&release.Id!=releaseId}).ToListAsync(ct);
             var revisionIds=history.Select(x=>x.Id).ToList();var profiles=await db.RequirementRevisionProfiles.AsNoTracking().Where(x=>revisionIds.Contains(x.RevisionId)).ToListAsync(ct);
             var placements=await (from n in db.SpecificationNodes.AsNoTracking().Where(x=>x.RequirementArtifactId==artifactId) join spec in db.RequirementSpecifications.AsNoTracking() on n.SpecificationId equals spec.Id join parent in db.SpecificationNodes.AsNoTracking() on n.ParentId equals parent.Id select new{spec.Id,spec.DocumentNumber,spec.Title,section=parent.Heading,n.Position}).ToListAsync(ct);
             var procedureEffectivity=releaseId is null?null:await TestProcedureEffectivity.ForReleaseAsync(db,artifact.ProjectId,releaseId.Value,ct);var effectiveProcedureRevisionIds=procedureEffectivity?.RevisionIds;
             var traces=await db.RequirementTraces.AsNoTracking().CountAsync(x=>revisionIds.Contains(x.SourceRevisionId)||revisionIds.Contains(x.TargetRevisionId),ct);var testSource=db.TestCoverage.AsNoTracking().Where(x=>revisionIds.Contains(x.RequirementRevisionId));if(effectiveProcedureRevisionIds is not null)testSource=testSource.Where(x=>effectiveProcedureRevisionIds.Contains(x.ProcedureRevisionId));var tests=await testSource.CountAsync(ct);
-            return Results.Ok(new{artifact.Id,artifact.BaseNumber,level=artifact.Level.ToString(),activeBuildId=releaseId,effectiveBaselineId,history=history.Select(x=>new{x.Id,x.Revision,x.displayNumber,x.Statement,x.Rationale,x.VerificationMethod,x.state,x.SourceChangeRequestId,x.sourceChangeRequestReleaseId,x.sourceScr,x.CreatedAt,x.originBuild,x.isHistorical,richText=profiles.SingleOrDefault(p=>p.RevisionId==x.Id)?.RichText,attributesJson=profiles.SingleOrDefault(p=>p.RevisionId==x.Id)?.AttributesJson??"{}",tagsJson=profiles.SingleOrDefault(p=>p.RevisionId==x.Id)?.TagsJson??"[]"}),placements,traceCount=traces,testCoverageCount=tests});
+            return Results.Ok(new{artifact.Id,artifact.BaseNumber,level=artifact.Level.ToString(),activeBuildId=releaseId,effectiveBaselineId,history=history.Select(x=>new{x.Id,x.Revision,x.displayNumber,x.Statement,x.Rationale,x.VerificationMethod,x.state,x.originKind,x.SourceBaselineImportId,x.sourceChangeRequestId,x.sourceChangeRequestReleaseId,x.sourceScr,x.CreatedAt,x.originBuild,x.isHistorical,richText=profiles.SingleOrDefault(p=>p.RevisionId==x.Id)?.RichText,attributesJson=profiles.SingleOrDefault(p=>p.RevisionId==x.Id)?.AttributesJson??"{}",tagsJson=profiles.SingleOrDefault(p=>p.RevisionId==x.Id)?.TagsJson??"[]"}),placements,traceCount=traces,testCoverageCount=tests});
         });
 
         app.MapGet("/api/enterprise-requirements/{artifactId:guid}/redline",async(Guid artifactId,Guid fromRevisionId,Guid toRevisionId,HttpContext http,AeroLinkDbContext db,CancellationToken ct)=>

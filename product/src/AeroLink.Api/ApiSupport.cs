@@ -163,7 +163,15 @@ static class ApiMap
         state = x.State.ToString(), x.DecisionRecorded, x.CreatedAt, x.UpdatedAt, x.PublishedAt,
         isMine = string.Equals(x.AuthorId, viewer, StringComparison.OrdinalIgnoreCase),
     };
-    public static object Baseline(CandidateBaseline x) => new { x.Id, x.DisplayNumber, x.Name, x.ProjectId, x.ReleaseId, x.PredecessorBaselineId, state = x.State.ToString(), x.ContentHash, x.RequirementsHash, x.RequirementsMaterializedAt, x.CreatedAt, x.FrozenAt, x.TestProceduresHash, x.TestProceduresMaterializedAt, selectionCount = x.Selections.Count };
+    public static object Baseline(CandidateBaseline x) => new
+    {
+        x.Id, x.DisplayNumber, x.Name, x.ProjectId, x.ReleaseId, x.PredecessorBaselineId,
+        state = x.State.ToString(), x.ContentHash, x.RequirementsHash, x.RequirementsMaterializedAt,
+        x.CreatedAt, x.FrozenAt, x.TestProceduresHash, x.TestProceduresMaterializedAt,
+        scrSelectionCount = x.Selections.Count,
+        externalPackageSelectionCount = x.ExternalPackageSelections.Count,
+        selectionCount = x.Selections.Count + x.ExternalPackageSelections.Count
+    };
     public static object BaselineDetail(CandidateBaseline x, IReadOnlyList<SystemChangeRequest> selected) => new
     {
         x.Id, x.DisplayNumber, x.Name, x.ProjectId, x.ReleaseId, x.PredecessorBaselineId, state = x.State.ToString(), x.ContentHash, x.RequirementsHash, x.RequirementsMaterializedAt, x.CreatedAt, x.FrozenAt, x.TestProceduresHash, x.TestProceduresMaterializedAt,
@@ -171,6 +179,11 @@ static class ApiMap
         {
             scr.Id, scr.DisplayNumber, scr.Title,
             requirementChanges = scr.RequirementChanges.OrderBy(r => r.DisplayNumber).Select(r => new { r.Id, r.DisplayNumber, level = r.Level.ToString(), kind = r.Kind.ToString(), r.Statement, r.VerificationMethod })
+        }),
+        externalPackageSelections = x.ExternalPackageSelections.OrderBy(selection => selection.BaselineImportId).Select(selection => new
+        {
+            selection.Id, selection.BaselineImportId, selection.PackageContentHash,
+            selection.SelectedAt, selection.SelectedBy
         }),
         events = x.Events.OrderByDescending(e => e.OccurredAt).Select(e => new { e.EventType, e.ActorId, e.Detail, e.OccurredAt })
     };

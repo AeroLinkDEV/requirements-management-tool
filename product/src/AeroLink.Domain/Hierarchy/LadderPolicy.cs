@@ -30,13 +30,15 @@ public sealed record VerificationLevelBinding(
 public sealed record RequirementsCatalogueBinding(string SchemaKey, string SchemaName, string SpecificationNumber,
     string SpecificationTitle);
 
+public enum LevelOriginKind { ChangeRequest, ExternalSourcePackage }
+
 /// <summary>A complete product-curated definition for one requirement level.</summary>
 public sealed class LevelDefinition
 {
     public LevelDefinition(RequirementLevel level, string requirementPrefix, LevelCapabilities capabilities,
         ChangeRequestLevelBinding? changeRequest = null, VerificationLevelBinding? verification = null,
         ControlledDocumentType? requirementsDocumentType = null, RequirementsCatalogueBinding? requirementsCatalogue = null,
-        string? testProcedureDocumentTitle = null)
+        string? testProcedureDocumentTitle = null, LevelOriginKind originKind = LevelOriginKind.ChangeRequest)
     {
         if (!Enum.IsDefined(level)) throw new DomainException($"Unknown requirement level value: {(int)level}.");
         if (string.IsNullOrWhiteSpace(requirementPrefix)) throw new DomainException("A level requires a requirement prefix.");
@@ -51,6 +53,7 @@ public sealed class LevelDefinition
         TestProcedureDocumentTitle = string.IsNullOrWhiteSpace(testProcedureDocumentTitle)
             ? null
             : testProcedureDocumentTitle.Trim();
+        OriginKind = originKind;
 
         RequireBinding(LevelCapabilities.HasChangeControl, changeRequest is not null,
             "HasChangeControl requires a change-request binding.");
@@ -93,6 +96,10 @@ public sealed class LevelDefinition
                 || TestDocumentFor(level) != verification.DocumentType)
                 throw new DomainException($"The {level} verification binding does not match its level.");
         }
+        if (originKind == LevelOriginKind.ExternalSourcePackage
+            && (changeRequest is not null || verification is not null || requirementsDocumentType is not null
+                || requirementsCatalogue is not null || testProcedureDocumentTitle is not null))
+            throw new DomainException("An external-origin level cannot carry change control, verification, or document bindings.");
     }
 
     public RequirementLevel Level { get; }
@@ -103,6 +110,8 @@ public sealed class LevelDefinition
     public ControlledDocumentType? RequirementsDocumentType { get; }
     public RequirementsCatalogueBinding? RequirementsCatalogue { get; }
     public string? TestProcedureDocumentTitle { get; }
+    public LevelOriginKind OriginKind { get; }
+    public bool UsesExternalOrigin => OriginKind == LevelOriginKind.ExternalSourcePackage;
 
     public bool Has(LevelCapabilities capability) => (Capabilities & capability) == capability;
 
@@ -228,8 +237,10 @@ public sealed class LegacyLadderPolicy : ILadderPolicy, ILegacyLadderCompatibili
     public IReadOnlyList<LevelRelationship> ParentRelationships => Relationships;
     public IReadOnlyList<ControlledDocumentType> ControlledDocumentTypes => Documents;
 
+    private static readonly LevelDefinition CustomerDefinition = new(RequirementLevel.Customer, "CUSR", LevelCapabilities.None,
+        originKind: LevelOriginKind.ExternalSourcePackage);
     public LevelDefinition Definition(RequirementLevel level) => LevelDefinitions.SingleOrDefault(x => x.Level == level)
-        ?? throw Unknown(level);
+        ?? (level == RequirementLevel.Customer ? CustomerDefinition : throw Unknown(level));
 
     public IReadOnlyList<RequirementLevel> ParentLevels(RequirementLevel child)
     {
@@ -385,6 +396,7 @@ public sealed class LegacyLadderPolicy : ILadderPolicy, ILegacyLadderCompatibili
             "system" or "sysr" => RequirementLevel.System,
             "highlevel" or "hlr" => RequirementLevel.HighLevel,
             "lowlevel" or "llr" => RequirementLevel.LowLevel,
+            "customer" or "cusr" => RequirementLevel.Customer,
             _ => (RequirementLevel)(-1),
         };
         return (int)level >= 0;
@@ -440,7 +452,8 @@ public class ResolvedProjectLadderPolicy : ILadderPolicy
                 capabilities.HasFlag(LevelCapabilities.HasVerification) ? source.Verification : null,
                 capabilities.HasFlag(LevelCapabilities.HasRequirementsDocument) ? source.RequirementsDocumentType : null,
                 capabilities.HasFlag(LevelCapabilities.HasRequirementsDocument) ? source.RequirementsCatalogue : null,
-                capabilities.HasFlag(LevelCapabilities.HasVerification) ? source.TestProcedureDocumentTitle : null);
+                capabilities.HasFlag(LevelCapabilities.HasVerification) ? source.TestProcedureDocumentTitle : null,
+                source.OriginKind);
         }).ToArray();
         relationships = resolved.AllowedUpstream.Select(x => new LevelRelationship(x.Parent, x.Child)).ToArray();
         documents = definitions.Where(x => x.RequirementsDocumentType is not null).Select(x => x.RequirementsDocumentType!.Value)

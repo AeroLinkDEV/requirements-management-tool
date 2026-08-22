@@ -83,6 +83,10 @@ public sealed class BaselineImport
     public DateTimeOffset? AcceptedAt { get; private set; }
     /// <summary>The released baseline this import produced. Set once, at acceptance.</summary>
     public Guid? ReleaseId { get; private set; }
+    /// <summary>The one candidate baseline to which this package's staged contents were bound.</summary>
+    public Guid? BoundCandidateBaselineId { get; private set; }
+    public DateTimeOffset? PackageBoundAt { get; private set; }
+    public string? PackageManifestHash { get; private set; }
     public long Version { get; private set; } = 1;
 
     public void RecordAnalysis(DateTimeOffset now)
@@ -158,6 +162,54 @@ public sealed class BaselineImport
         AcceptedAt = now;
         ReleaseId = releaseId;
         State = BaselineImportState.Accepted;
+        Touch(now);
+    }
+
+    /// <summary>
+    /// Accepts a reconciled import as an external package for one existing draft candidate. Unlike the legacy
+    /// import acceptance gate, this path does not create a release: the candidate's release is the package's
+    /// release context and the package is bound atomically with its immutable manifest.
+    /// </summary>
+    internal void AcceptForExternalPackage(string actorId, Guid candidateBaselineId, Guid candidateReleaseId,
+        string manifestHash, DateTimeOffset now)
+    {
+        if (State != BaselineImportState.Reconciled)
+            throw new DomainException("An external package must be reconciled before it can be selected.");
+        if (candidateBaselineId == Guid.Empty || candidateReleaseId == Guid.Empty)
+            throw new DomainException("An external package requires an existing candidate baseline and release.");
+        AcceptedBy = Required(actorId, "person accepting the external package");
+        AcceptedAt = now;
+        ReleaseId = candidateReleaseId;
+        State = BaselineImportState.Accepted;
+        BindPackage(candidateBaselineId, manifestHash, now);
+    }
+
+    internal void BindPackage(Guid candidateBaselineId, string manifestHash, DateTimeOffset now)
+    {
+        if (State != BaselineImportState.Accepted)
+            throw new DomainException("Only an accepted external package can be bound to a candidate baseline.");
+        if (candidateBaselineId == Guid.Empty) throw new DomainException("A package binding requires a candidate baseline.");
+        if (BoundCandidateBaselineId is not null && BoundCandidateBaselineId != candidateBaselineId)
+            throw new DomainException("An external package can be selected into exactly one candidate baseline.");
+        if (string.IsNullOrWhiteSpace(manifestHash) || manifestHash.Length != 64)
+            throw new DomainException("A valid external package manifest hash is required.");
+        BoundCandidateBaselineId = candidateBaselineId;
+        PackageManifestHash = manifestHash.ToLowerInvariant();
+        PackageBoundAt ??= now;
+        Touch(now);
+    }
+
+    /// <summary>
+    /// Records that staged Customer package content changed while the import was still selectable. The
+    /// version bump is an optimistic concurrency boundary with package selection: either the staged rows or
+    /// the acceptance/binding update wins, never a stale package hash over late content.
+    /// </summary>
+    public void RecordCustomerPackageStaging(DateTimeOffset now)
+    {
+        if (State != BaselineImportState.Reconciled)
+            throw new DomainException("Customer package content can only be staged for a reconciled import.");
+        if (BoundCandidateBaselineId is not null)
+            throw new DomainException("The external package is already bound to a candidate baseline.");
         Touch(now);
     }
 

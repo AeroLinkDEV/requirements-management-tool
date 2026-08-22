@@ -89,9 +89,9 @@ public sealed class ProgramRepository(AeroLinkDbContext db) : IProgramRepository
 public sealed class BaselineRepository(AeroLinkDbContext db) : IBaselineRepository
 {
     public async Task<IReadOnlyList<CandidateBaseline>> ListAsync(CancellationToken cancellationToken) =>
-        await db.CandidateBaselines.AsNoTracking().Include(x => x.Selections).Include(x => x.Events).ToListAsync(cancellationToken);
+        await db.CandidateBaselines.AsNoTracking().Include(x => x.Selections).Include(x => x.ExternalPackageSelections).Include(x => x.Events).ToListAsync(cancellationToken);
     public Task<CandidateBaseline?> GetAsync(Guid id, CancellationToken cancellationToken) =>
-        db.CandidateBaselines.Include(x => x.Selections).Include(x => x.Events).SingleOrDefaultAsync(x => x.Id == id, cancellationToken);
+        db.CandidateBaselines.Include(x => x.Selections).Include(x => x.ExternalPackageSelections).Include(x => x.Events).SingleOrDefaultAsync(x => x.Id == id, cancellationToken);
     public Task AddAsync(CandidateBaseline baseline, CancellationToken cancellationToken) =>
         db.CandidateBaselines.AddAsync(baseline, cancellationToken).AsTask();
     public Task SaveAsync(CancellationToken cancellationToken) => db.SaveChangesAsync(cancellationToken);
