@@ -147,6 +147,14 @@ public sealed class ProjectLadderPostgresQualificationTests
         var after = await db.ProjectLadderSteps.AsNoTracking().SingleAsync(x => x.Id == stepId);
         Assert.Equal(string.Empty, after.EnabledArtifactKindsValue);
         Assert.Equal(before.VerificationProfileSchemaVersion, (await db.ProjectLadderConfigurations.AsNoTracking().SingleAsync(x => x.Id == configurationId)).VerificationProfileSchemaVersion);
+
+        // Exercise the neutral migration's Down and reapply path as well as an idempotent latest-Migrate call.
+        await db.Database.GetService<IMigrator>().MigrateAsync("20260822143555_GeneralizeVerificationProfiles");
+        await db.Database.GetService<IMigrator>().MigrateAsync();
+        var reapplied = await db.ProjectLadderSteps.AsNoTracking().SingleAsync(x => x.Id == stepId);
+        Assert.Equal(string.Empty, reapplied.EnabledArtifactKindsValue);
+        Assert.Empty(await db.ProjectLadderConfigurationHistories.AsNoTracking()
+            .Where(x => x.ConfigurationId == configurationId).ToListAsync());
     }
 
     [DisposablePostgresFact]
