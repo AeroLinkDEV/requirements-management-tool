@@ -253,9 +253,26 @@ public sealed class SecondShowcaseSeeder(
             request.ApproveActiveStage(approver, now.AddHours(2));
             await db.SaveChangesAsync(ct);
         }
+        if (request.State is ChangeRequestState.Approved or ChangeRequestState.SelectedForBaseline)
+            EnsureApprovedReviewEvidence(request, approver);
         if (request.State is not (ChangeRequestState.Approved or ChangeRequestState.SelectedForBaseline))
             throw new InvalidOperationException($"The second showcase request {request.DisplayNumber} did not reach Approved state.");
         return request;
+    }
+
+    private static void EnsureApprovedReviewEvidence(SystemChangeRequest request, string expectedApprover)
+    {
+        var approvedCycles = request.ReviewCycles
+            .Where(x => x.State == ReviewCycleState.Approved)
+            .ToList();
+        var approvedSteps = approvedCycles.SelectMany(x => x.Steps)
+            .Where(x => x.State == ApprovalStepState.Approved)
+            .ToList();
+        if (approvedCycles.Count != 1 || approvedSteps.Count != 1
+            || !string.Equals(approvedSteps[0].ApproverId, expectedApprover, StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException(
+                $"The already-approved second showcase request {request.DisplayNumber} has review evidence "
+                + $"that is not exactly one approval by the curated approver '{expectedApprover}'; it was not changed.");
     }
 
     private async Task EnsureDownstreamAssessmentAsync(SystemChangeRequest request,

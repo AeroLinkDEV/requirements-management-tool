@@ -175,6 +175,51 @@ public sealed class SecondShowcaseSeederTests
     }
 
     [Fact]
+    public async Task Refuses_an_already_approved_reserved_request_with_wrong_approval_evidence()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"aerolink-second-showcase-approval-guard-{Guid.NewGuid():N}.db");
+        var options = new DbContextOptionsBuilder<AeroLinkDbContext>()
+            .UseSqlite($"Data Source={path};Pooling=False;Foreign Keys=True")
+            .Options;
+        try
+        {
+            await using var db = new AeroLinkDbContext(options);
+            await db.Database.EnsureCreatedAsync();
+            var consumers = LadderConsumerManifestCatalog.RequiredConsumerIds
+                .Select(id => (ILadderConsumerRegistration)new LadderConsumerRegistration(id, id)).ToArray();
+            var resolver = new EffectiveProjectLadderPolicyResolver(db);
+            var seeder = new SecondShowcaseSeeder(db,
+                new ProjectLadderAuthoringService(db, LegacyLadderPolicy.Instance, consumers), resolver);
+            var summary = await seeder.EnsureSeededAsync();
+            var stepId = await db.ApprovalSteps
+                .Where(x => x.ApproverId == "systems.reviewer")
+                .Join(db.ReviewCycles, step => step.ReviewCycleId, cycle => cycle.Id,
+                    (step, cycle) => new { step.Id, cycle.ChangeRequestId })
+                .Join(db.SystemChangeRequests, x => x.ChangeRequestId, request => request.Id,
+                    (x, request) => new { x.Id, request.ProjectId, request.BaseNumber })
+                .Where(x => x.ProjectId == summary.ProjectId && x.BaseNumber == "SRCR-71201")
+                .Select(x => x.Id).SingleAsync();
+            await db.Database.ExecuteSqlInterpolatedAsync($"UPDATE approval_steps SET ApproverId = {"wrong.approver"} WHERE Id = {stepId}");
+            db.ChangeTracker.Clear();
+            var before = await db.ApprovalSteps.AsNoTracking().Where(x => x.Id == stepId)
+                .Select(x => new { x.ApproverId, x.State }).SingleAsync();
+
+            var exception = await Assert.ThrowsAsync<InvalidOperationException>(() => seeder.EnsureSeededAsync());
+
+            Assert.Contains("curated approver", exception.Message, StringComparison.Ordinal);
+            var after = await db.ApprovalSteps.AsNoTracking().Where(x => x.Id == stepId)
+                .Select(x => new { x.ApproverId, x.State }).SingleAsync();
+            Assert.Equal(before.ApproverId, after.ApproverId);
+            Assert.Equal(before.State, after.State);
+        }
+        finally
+        {
+            SqliteConnection.ClearAllPools();
+            try { if (File.Exists(path)) File.Delete(path); } catch (IOException) { }
+        }
+    }
+
+    [Fact]
     public async Task Seeding_the_second_workspace_does_not_change_an_existing_fms_workspace()
     {
         var path = Path.Combine(Path.GetTempPath(), $"aerolink-second-showcase-fms-{Guid.NewGuid():N}.db");
