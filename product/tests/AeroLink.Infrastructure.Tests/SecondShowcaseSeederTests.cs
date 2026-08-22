@@ -3,6 +3,7 @@ using AeroLink.Domain.Hierarchy;
 using AeroLink.Domain.Requirements;
 using AeroLink.Domain.Traceability;
 using AeroLink.Domain.Verification;
+using AeroLink.Domain.Programs;
 using AeroLink.Infrastructure.Persistence;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
@@ -48,6 +49,16 @@ public sealed class SecondShowcaseSeederTests
                 .Where(x => x.ProjectId == first.ProjectId).ToListAsync())
                 .Single(x => x.Reason.StartsWith("Activated ladder:", StringComparison.Ordinal));
             Assert.Equal("showcase.second", activationHistory.Actor);
+            var systemRequest = await db.SystemChangeRequests
+                .Include(x => x.ReviewCycles).ThenInclude(x => x.Steps)
+                .SingleAsync(x => x.ProjectId == first.ProjectId && x.BaseNumber == "SRCR-71201");
+            var lowLevelRequest = await db.SystemChangeRequests
+                .Include(x => x.ReviewCycles).ThenInclude(x => x.Steps)
+                .SingleAsync(x => x.ProjectId == first.ProjectId && x.BaseNumber == "LLRCR-71202");
+            Assert.Single(systemRequest.ReviewCycles.SelectMany(x => x.Steps),
+                x => x.ApproverId == "systems.reviewer" && x.State == ApprovalStepState.Approved);
+            Assert.Single(lowLevelRequest.ReviewCycles.SelectMany(x => x.Steps),
+                x => x.ApproverId == "software.lead" && x.State == ApprovalStepState.Approved);
             Assert.Equal(1, await db.Requirements.CountAsync(x => x.ProjectId == first.ProjectId && x.Level == RequirementLevel.System));
             Assert.Equal(1, await db.Requirements.CountAsync(x => x.ProjectId == first.ProjectId && x.Level == RequirementLevel.LowLevel));
             Assert.Equal(0, await db.Requirements.CountAsync(x => x.ProjectId == first.ProjectId && x.Level == RequirementLevel.HighLevel));
@@ -77,6 +88,50 @@ public sealed class SecondShowcaseSeederTests
             Assert.Equal(RequirementLevel.LowLevel, trace.Level);
             Assert.Equal(RequirementLevel.System, trace.TargetLevel);
             Assert.Equal(RequirementTraceType.DerivedFrom, trace.link.Type);
+        }
+        finally
+        {
+            SqliteConnection.ClearAllPools();
+            try { if (File.Exists(path)) File.Delete(path); } catch (IOException) { }
+        }
+    }
+
+    [Fact]
+    public async Task Resumes_after_the_initial_workspace_checkpoint()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"aerolink-second-showcase-recovery-{Guid.NewGuid():N}.db");
+        var options = new DbContextOptionsBuilder<AeroLinkDbContext>()
+            .UseSqlite($"Data Source={path};Pooling=False;Foreign Keys=True")
+            .Options;
+        try
+        {
+            await using var db = new AeroLinkDbContext(options);
+            await db.Database.EnsureCreatedAsync();
+            var program = new ProgramRecord(SecondShowcaseSeeder.ProjectName, SecondShowcaseSeeder.ProgramCode);
+            var project = new ProjectRecord(program.Id, SecondShowcaseSeeder.ProjectName, "Configured Ladder Software");
+            var release = new SoftwareRelease(project.Id, "2.0", false);
+            db.AddRange(program, project, release,
+                LegacyDefaultProjectLadderFactory.Create(project.Id, new DateTimeOffset(2026, 1, 12, 13, 0, 0, TimeSpan.Zero)));
+            await db.SaveChangesAsync();
+
+            var consumers = LadderConsumerManifestCatalog.RequiredConsumerIds
+                .Select(id => (ILadderConsumerRegistration)new LadderConsumerRegistration(id, id)).ToArray();
+            var resolver = new EffectiveProjectLadderPolicyResolver(db);
+            var seeder = new SecondShowcaseSeeder(db,
+                new ProjectLadderAuthoringService(db, LegacyLadderPolicy.Instance, consumers), resolver);
+
+            var first = await seeder.EnsureSeededAsync();
+            var second = await seeder.EnsureSeededAsync();
+
+            Assert.Equal(first, second);
+            Assert.Equal(SecondShowcaseSeeder.ProgramCode,
+                await db.Programs.Where(x => x.Id == first.ProgramId).Select(x => x.Code).SingleAsync());
+            Assert.Equal(1, await db.Projects.CountAsync(x => x.ProgramId == first.ProgramId));
+            Assert.Equal(1, await db.Releases.CountAsync(x => x.ProjectId == first.ProjectId));
+            Assert.Equal(1, await db.ProjectLadderConfigurations.CountAsync(x => x.ProjectId == first.ProjectId));
+            Assert.Equal(ProjectLadderConfigurationState.Active,
+                await db.ProjectLadderConfigurations.Where(x => x.ProjectId == first.ProjectId)
+                    .Select(x => x.State).SingleAsync());
         }
         finally
         {
