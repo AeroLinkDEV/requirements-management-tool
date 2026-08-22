@@ -306,10 +306,7 @@ public sealed class SecondShowcaseSeederTests
     }
 
     private static IReadOnlyList<IVerificationArtifactConsumerRegistration> Typed(
-        IEnumerable<ILadderConsumerRegistration> consumers) => consumers
-        .Select(LadderConsumerManifestCatalog.TypedRegistration)
-        .Cast<IVerificationArtifactConsumerRegistration>()
-        .ToArray();
+        IEnumerable<ILadderConsumerRegistration> consumers) => VerificationConsumerTestData.Typed(consumers);
 
     private static async Task<FmsSnapshot> SnapshotFmsAsync(AeroLinkDbContext db, Guid projectId)
     {

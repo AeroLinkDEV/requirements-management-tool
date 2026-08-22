@@ -505,9 +505,7 @@ public sealed class ProjectLadderPersistenceTests : IAsyncLifetime
         {
             new LadderRelationshipDraft(nameof(RequirementLevel.System), nameof(RequirementLevel.LowLevel))
         };
-        var typedConsumers = consumers.Select(registration =>
-            (IVerificationArtifactConsumerRegistration)LadderConsumerManifestCatalog.TypedRegistration(registration))
-            .ToArray();
+        var typedConsumers = VerificationConsumerTestData.Typed(consumers);
         var authority = new ProjectLadderUpgradeAuthority(db, LegacyLadderPolicy.Instance, consumers, typedConsumers);
         var result = await authority.UpgradeAsync(_fmsProjectId,
             new ProjectLadderUpgradeCommand(configuration.Version, "platform-v2", "Replace governed graph", steps, relationships),
@@ -536,7 +534,7 @@ public sealed class ProjectLadderPersistenceTests : IAsyncLifetime
             .Select(id => (ILadderConsumerRegistration)new LadderConsumerRegistration(id, id)).ToArray();
         var typedConsumers = consumers.Select(registration =>
         {
-            var typed = LadderConsumerManifestCatalog.TypedRegistration(registration);
+            var typed = VerificationConsumerTestData.Typed(registration);
             return (IVerificationArtifactConsumerRegistration)(typed.Id == "verification.test-change-workflow"
                 ? typed with { SupportedCapabilities = VerificationArtifactCapability.None }
                 : typed);
@@ -577,7 +575,7 @@ public sealed class ProjectLadderPersistenceTests : IAsyncLifetime
             .Select(id => (ILadderConsumerRegistration)new LadderConsumerRegistration(id, id)).ToArray();
         var typedConsumers = consumers.Select(registration =>
         {
-            var typed = LadderConsumerManifestCatalog.TypedRegistration(registration);
+            var typed = VerificationConsumerTestData.Typed(registration);
             return (IVerificationArtifactConsumerRegistration)(typed.Id == "verification.coverage"
                 ? typed with { SupportedCapabilities = VerificationArtifactCapability.None }
                 : typed);

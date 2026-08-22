@@ -37,9 +37,13 @@ public sealed class VerificationProfileTests
         Assert.Equal(new VerificationArtifactKey(VerificationDiscipline.System, VerificationArtifactKind.Procedure), system.ArtifactKey);
         Assert.Equal(new VerificationArtifactKey(VerificationDiscipline.HighLevelSoftware, VerificationArtifactKind.Case), software.ArtifactKey);
         Assert.Equal(software.ArtifactKey, software.Header.ArtifactKey);
-        Assert.Equal(VerificationArtifactKind.Case, revision.Content(software.ArtifactKey).Kind);
-        Assert.Equal("Logical preconditions", ((VerificationCaseRevisionContent)revision.Content(software.ArtifactKey)).Preconditions);
-        Assert.Equal(VerificationArtifactLifecycleState.Active, revision.RevisionHeader(software.ArtifactKey).State);
+        Assert.Equal(VerificationArtifactKind.Case, revision.Content(software).Kind);
+        Assert.Equal("Logical preconditions", ((VerificationCaseRevisionContent)revision.Content(software)).Preconditions);
+        Assert.Equal(VerificationArtifactLifecycleState.Active, revision.RevisionHeader(software).State);
+        Assert.Throws<DomainException>(() => revision.Content(system));
+        Assert.Throws<DomainException>(() => revision.RevisionHeader(system));
+        Assert.Throws<DomainException>(() => new TestProcedure(Guid.NewGuid(), "HLRTP-000002", "Software procedure", "tester",
+            now, TestProcedureLevel.HighLevel, artifactKind: VerificationArtifactKind.Procedure));
     }
 
     [Theory]
@@ -160,7 +164,7 @@ public sealed class VerificationProfileTests
         var legacy = LadderConsumerManifestCatalog.RequiredConsumerIds
             .Select(id => (ILadderConsumerRegistration)new LadderConsumerRegistration(id, id));
         var typed = LadderConsumerManifestCatalog.RequiredConsumerIds
-            .Select(id => LadderConsumerManifestCatalog.TypedRegistration(new LadderConsumerRegistration(id, id)))
+            .Select(id => ExplicitTyped(new LadderConsumerRegistration(id, id)))
             .Select(registration => registration.Id == consumerId
                 ? registration with { SupportedCapabilities = registration.SupportedCapabilities & ~removedCapability }
                 : registration)
@@ -171,5 +175,30 @@ public sealed class VerificationProfileTests
         Assert.False(manifest.IsReady);
         Assert.Contains(manifest.MissingArtifactCoverage,
             x => x.ConsumerId == consumerId && !x.SupportsCapabilities);
+    }
+
+    private static VerificationArtifactConsumerRegistration ExplicitTyped(ILadderConsumerRegistration registration)
+    {
+        var keys = new VerificationArtifactKey[]
+        {
+            new(VerificationDiscipline.System, VerificationArtifactKind.Procedure),
+            new(VerificationDiscipline.HighLevelSoftware, VerificationArtifactKind.Case),
+            new(VerificationDiscipline.LowLevelSoftware, VerificationArtifactKind.Case),
+        };
+        return registration.Id switch
+        {
+            "verification.procedure-level" => new(registration.Id, registration.Description, keys,
+                VerificationArtifactCapability.Identity | VerificationArtifactCapability.Header
+                | VerificationArtifactCapability.Revision | VerificationArtifactCapability.Lifecycle),
+            "verification.test-change-workflow" => new(registration.Id, registration.Description, keys,
+                VerificationArtifactCapability.ChangeReview),
+            "verification.coverage" => new(registration.Id, registration.Description, keys,
+                VerificationArtifactCapability.Coverage),
+            "baseline.controlled-documents" => new(registration.Id, registration.Description, keys,
+                VerificationArtifactCapability.ControlledDocument),
+            "release.readiness" => new(registration.Id, registration.Description, keys,
+                VerificationArtifactCapability.Execution),
+            _ => new(registration.Id, registration.Description, [], VerificationArtifactCapability.None),
+        };
     }
 }

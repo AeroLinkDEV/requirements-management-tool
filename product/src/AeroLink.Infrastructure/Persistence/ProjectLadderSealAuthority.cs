@@ -77,18 +77,21 @@ public sealed class ProjectLadderSealAuthority(AeroLinkDbContext db)
         _ = ProjectLadderResolver.Resolve(configuration);
 
         var steps = configuration.Steps.OrderBy(x => x.Position)
-            .Select(x => new LadderStepDraft(x.CatalogueEntry, x.Position, x.Capabilities)).ToArray();
+            .Select(x => new LadderStepDraft(x.CatalogueEntry, x.Position, x.Capabilities,
+                x.EnabledArtifactKinds)).ToArray();
         var byId = configuration.Steps.ToDictionary(x => x.Id);
         var relationships = configuration.AllowedUpstream
             .Select(x => new LadderRelationshipDraft(byId[x.ParentStepId].CatalogueEntry,
                 byId[x.ChildStepId].CatalogueEntry)).ToArray();
-        var canonical = ProjectLadderSnapshot.Canonicalize(steps, relationships);
+        var canonical = ProjectLadderSnapshot.CanonicalizeForSchema(
+            configuration.VerificationProfileSchemaVersion, steps, relationships);
         var hash = ProjectLadderSnapshot.Hash(canonical);
         configuration.Seal(contentKind, contentIdentity, actor, now);
         db.TrackLadderSeal(configuration, projectId, contentKind, contentIdentity);
         db.ProjectLadderConfigurationHistories.Add(new ProjectLadderConfigurationHistory(
             configuration.Id, projectId, configuration.Version, actor, now,
-            $"Sealed ladder with first {contentKind} '{contentIdentity}'.", canonical, hash));
+            $"Sealed ladder with first {contentKind} '{contentIdentity}'.", canonical, hash,
+            configuration.VerificationProfileSchemaVersion));
         return new(ProjectLadderSealResultKind.Sealed, configuration);
     }
 

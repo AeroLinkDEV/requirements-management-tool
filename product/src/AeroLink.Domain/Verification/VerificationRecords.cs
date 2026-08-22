@@ -28,6 +28,11 @@ public sealed class TestProcedure : IVerificationArtifactHeader
         ArtifactKind = artifactKind ?? (level == TestProcedureLevel.System
             ? VerificationArtifactKind.Procedure
             : VerificationArtifactKind.Case);
+        var expectedKind = level == TestProcedureLevel.System
+            ? VerificationArtifactKind.Procedure
+            : VerificationArtifactKind.Case;
+        if (ArtifactKind != expectedKind)
+            throw new DomainException($"{level} verification artifacts must use {expectedKind}.");
         _ = VerificationArtifactVocabulary.Definition(ArtifactKey);
     }
 
@@ -126,20 +131,27 @@ public sealed class TestProcedureRevision
     public DateTimeOffset CreatedAt { get; private set; }
 
     /// <summary>Typed compatibility content; kind is always derived from the owning artifact identity.</summary>
-    public VerificationArtifactRevisionHeader RevisionHeader(VerificationArtifactKey artifactKey) => new(Id, ProcedureId,
-        artifactKey.Kind, Revision,
-        State switch
-        {
-            TestProcedureState.Draft => VerificationArtifactLifecycleState.Draft,
-            TestProcedureState.Approved => VerificationArtifactLifecycleState.Active,
-            TestProcedureState.Retired => VerificationArtifactLifecycleState.Retired,
-            _ => throw new DomainException($"Unknown test procedure state: {State}.")
-        }, AuthorId, SourceTestChangeRequestId, EffectiveBaselineId, CreatedAt);
+    public VerificationArtifactRevisionHeader RevisionHeader(TestProcedure owner)
+    {
+        var artifactKey = EnsureOwner(owner).ArtifactKey;
+        return new(Id, ProcedureId, artifactKey.Kind, Revision,
+            State switch
+            {
+                TestProcedureState.Draft => VerificationArtifactLifecycleState.Draft,
+                TestProcedureState.Approved => VerificationArtifactLifecycleState.Active,
+                TestProcedureState.Retired => VerificationArtifactLifecycleState.Retired,
+                _ => throw new DomainException($"Unknown test procedure state: {State}.")
+            }, AuthorId, SourceTestChangeRequestId, EffectiveBaselineId, CreatedAt);
+    }
     public VerificationArtifactRevisionProvenance RevisionProvenance =>
         new(SourceTestChangeRequestId, EffectiveBaselineId, SourceChangeRequestsJson);
-    public IVerificationArtifactRevisionContent Content(VerificationArtifactKey artifactKey) => artifactKey.Kind == VerificationArtifactKind.Case
-        ? new VerificationCaseRevisionContent(Objective, Preconditions, Steps, ExpectedResult)
-        : new VerificationProcedureRevisionContent(Objective, Preconditions, Steps, ExpectedResult);
+    public IVerificationArtifactRevisionContent Content(TestProcedure owner) => EnsureOwner(owner).ArtifactKind == VerificationArtifactKind.Case
+            ? new VerificationCaseRevisionContent(Objective, Preconditions, Steps, ExpectedResult)
+            : new VerificationProcedureRevisionContent(Objective, Preconditions, Steps, ExpectedResult);
+
+    private TestProcedure EnsureOwner(TestProcedure owner) => owner is not null && owner.Id == ProcedureId
+        ? owner
+        : throw new DomainException("A verification revision must be projected through its owning artifact.");
 
     public void UpdateDraft(string objective, string preconditions, string steps, string expectedResult, string actor)
     {

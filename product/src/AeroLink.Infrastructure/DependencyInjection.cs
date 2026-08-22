@@ -5,6 +5,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using AeroLink.Domain.Hierarchy;
+using AeroLink.Domain.Verification;
 
 namespace AeroLink.Infrastructure;
 
@@ -40,9 +41,38 @@ public static class DependencyInjection
         };
         foreach (var registration in legacyRegistrations)
             services.AddSingleton<ILadderConsumerRegistration>(registration);
-        foreach (var registration in legacyRegistrations)
-            services.AddSingleton<IVerificationArtifactConsumerRegistration>(
-                LadderConsumerManifestCatalog.TypedRegistration(registration));
+        // These declarations live beside the routed infrastructure seams. Do not infer artifact obligations from
+        // the legacy string inventory: a consumer that happens to have a familiar ID is not thereby a handler for
+        // every kind or capability. The current product exposes System Procedure and software Case only; software
+        // Procedure registrations remain dormant until the governed future slice.
+        var systemProcedure = new VerificationArtifactKey(
+            VerificationDiscipline.System, VerificationArtifactKind.Procedure);
+        var highLevelCase = new VerificationArtifactKey(
+            VerificationDiscipline.HighLevelSoftware, VerificationArtifactKind.Case);
+        var lowLevelCase = new VerificationArtifactKey(
+            VerificationDiscipline.LowLevelSoftware, VerificationArtifactKind.Case);
+        var currentArtifactKeys = new[] { systemProcedure, highLevelCase, lowLevelCase };
+        var typedRegistrations = new IVerificationArtifactConsumerRegistration[]
+        {
+            new VerificationArtifactConsumerRegistration("verification.procedure-level",
+                "Verification procedure level mapping", currentArtifactKeys,
+                VerificationArtifactCapability.Identity | VerificationArtifactCapability.Header
+                | VerificationArtifactCapability.Revision | VerificationArtifactCapability.Lifecycle),
+            new VerificationArtifactConsumerRegistration("verification.test-change-workflow",
+                "Test-change workflow disciplines and prefixes", currentArtifactKeys,
+                VerificationArtifactCapability.ChangeReview),
+            new VerificationArtifactConsumerRegistration("verification.coverage",
+                "Same-level coverage mutation and persistence validation", currentArtifactKeys,
+                VerificationArtifactCapability.Coverage),
+            new VerificationArtifactConsumerRegistration("baseline.controlled-documents",
+                "Baseline controlled-document derivation", currentArtifactKeys,
+                VerificationArtifactCapability.ControlledDocument),
+            new VerificationArtifactConsumerRegistration("release.readiness",
+                "Release readiness policy gates", currentArtifactKeys,
+                VerificationArtifactCapability.Execution),
+        };
+        foreach (var registration in typedRegistrations)
+            services.AddSingleton(registration);
         var provider = configuration["Database:Provider"] ?? "Sqlite";
         var connection = configuration.GetConnectionString("AeroLink") ?? "Data Source=aerolink-dev.db";
         // An unrecognised provider used to fall through to SQLite, so an installer who wrote "Postgres"

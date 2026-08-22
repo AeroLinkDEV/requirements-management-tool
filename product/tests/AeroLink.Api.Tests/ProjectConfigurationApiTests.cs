@@ -299,6 +299,7 @@ public sealed class ProjectConfigurationApiTests : IClassFixture<SharedApiHost>
         Assert.Equal(18, readiness.GetProperty("consumers").GetArrayLength());
         var manifestVersion = readiness.GetProperty("version").GetString();
         var manifestHash = readiness.GetProperty("hash").GetString();
+        Assert.Equal(LadderConsumerManifestCatalog.VersionV2, manifestVersion);
         Assert.False(string.IsNullOrWhiteSpace(manifestVersion));
         Assert.Matches("^[0-9a-f]{64}$", manifestHash ?? "");
         Assert.Equal(manifestVersion, activationBody.GetProperty("activationManifestVersion").GetString());
@@ -316,6 +317,7 @@ public sealed class ProjectConfigurationApiTests : IClassFixture<SharedApiHost>
             .Where(x => x.ConfigurationId == configuration.Id).OrderByDescending(x => x.Revision).ToListAsync();
         Assert.Equal(2, history.Count);
         Assert.Contains("Activated ladder: Attempt activation", history[0].Reason);
+        Assert.Equal(2, history[0].SnapshotSchemaVersion);
 
         using var staleActivation = await client.PostAsJsonAsync($"/api/projects/{seeded.ProjectId}/configuration/activate",
             new { expectedVersion = 2, reason = "Stale activation must not mutate the active row" });

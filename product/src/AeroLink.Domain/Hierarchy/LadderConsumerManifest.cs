@@ -223,28 +223,6 @@ public static class LadderConsumerManifestCatalog
         return BuildV2(merged, effectiveProfile);
     }
 
-    public static VerificationArtifactConsumerRegistration TypedRegistration(
-        ILadderConsumerRegistration registration)
-    {
-        ArgumentNullException.ThrowIfNull(registration);
-        var keys = registration.Id is "verification.procedure-level" or "verification.test-change-workflow"
-            or "verification.coverage" or "baseline.controlled-documents" or "release.readiness"
-            ? VerificationArtifactVocabulary.Definitions.Select(x => x.Key)
-            : [];
-        var capabilities = registration.Id switch
-        {
-            "verification.procedure-level" => VerificationArtifactCapability.Identity
-                | VerificationArtifactCapability.Header | VerificationArtifactCapability.Revision
-                | VerificationArtifactCapability.Lifecycle,
-            "verification.test-change-workflow" => VerificationArtifactCapability.ChangeReview,
-            "verification.coverage" => VerificationArtifactCapability.Coverage,
-            "baseline.controlled-documents" => VerificationArtifactCapability.ControlledDocument,
-            "release.readiness" => VerificationArtifactCapability.Execution,
-            _ => VerificationArtifactCapability.None
-        };
-        return new(registration.Id, registration.Description, keys, capabilities);
-    }
-
     private static LadderConsumerManifest Build(IReadOnlyList<ILadderConsumerRegistration> routedConsumers)
     {
         var requiredIds = RequiredConsumers.Select(x => x.Id).ToHashSet(StringComparer.Ordinal);

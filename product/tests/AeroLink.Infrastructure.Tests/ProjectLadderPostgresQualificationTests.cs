@@ -1,6 +1,7 @@
 using AeroLink.Domain.ChangeControl;
 using AeroLink.Domain.Hierarchy;
 using AeroLink.Domain.Programs;
+using AeroLink.Domain.Verification;
 using AeroLink.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
@@ -44,6 +45,13 @@ public sealed class ProjectLadderPostgresQualificationTests
         Assert.True(configuration.IsSealed);
         Assert.Equal("draft-requirement-change", configuration.SealedContentKind);
         Assert.Single(await db.ProjectLadderConfigurationHistories.Where(x => x.ProjectId == project.Id).ToListAsync());
+        var history = await db.ProjectLadderConfigurationHistories.AsNoTracking()
+            .SingleAsync(x => x.ProjectId == project.Id);
+        const string expectedCanonical =
+            "schema[2]|steps[1:System:7:Procedure;2:HighLevel:7:Case;3:LowLevel:15:Case]|edges[HighLevel>LowLevel;System>HighLevel]";
+        Assert.Equal(expectedCanonical, history.CanonicalSnapshot);
+        Assert.Equal(ProjectLadderSnapshot.Hash(expectedCanonical), history.SnapshotHash);
+        Assert.Equal(2, history.SnapshotSchemaVersion);
     }
 
     [DisposablePostgresFact]
@@ -130,6 +138,7 @@ public sealed class ProjectLadderPostgresQualificationTests
         await using var db = await MigrateToPreFeatureAsync(connection);
         var now = DateTimeOffset.UtcNow;
         var programId = Guid.NewGuid(); var projectId = Guid.NewGuid(); var configurationId = Guid.NewGuid(); var stepId = Guid.NewGuid();
+        var systemProcedureId = Guid.NewGuid(); var highLevelProcedureId = Guid.NewGuid();
         await db.Database.ExecuteSqlInterpolatedAsync($"""
             INSERT INTO "programs" ("Id", "Name", "Code") VALUES ({programId}, {"PG no-verification program"}, {"PGN"});
             INSERT INTO "projects" ("Id", "ProgramId", "Name", "SoftwareProduct") VALUES ({projectId}, {programId}, {"PG no-verification project"}, {"PG no-verification software"});
@@ -137,24 +146,42 @@ public sealed class ProjectLadderPostgresQualificationTests
                 VALUES ({configurationId}, {projectId}, {"LegacyDefault"}, {"Stored"}, {now}, {now}, {1L});
             INSERT INTO "project_ladder_steps" ("Id", "ConfigurationId", "ProjectId", "CatalogueEntry", "Position", "Capabilities", "CreatedAt", "UpdatedAt", "Version")
                 VALUES ({stepId}, {configurationId}, {projectId}, {"HighLevel"}, {1}, {1}, {now}, {now}, {1L});
+            INSERT INTO "test_procedures" ("Id", "ProjectId", "BaseNumber", "Title", "OwnerId", "Level", "CreatedAt", "UpdatedAt", "Version")
+                VALUES ({systemProcedureId}, {projectId}, {"SYSTP-72901"}, {"Legacy system procedure"}, {"migration.test"}, {"System"}, {now}, {now}, {1L}),
+                       ({highLevelProcedureId}, {projectId}, {"HLRTP-72901"}, {"Legacy high-level case"}, {"migration.test"}, {"HighLevel"}, {now}, {now}, {1L});
             """);
         await db.Database.GetService<IMigrator>().MigrateAsync();
         var step = await db.ProjectLadderSteps.AsNoTracking().SingleAsync(x => x.Id == stepId);
         Assert.Equal(string.Empty, step.EnabledArtifactKindsValue);
+        var migratedArtifacts = await db.TestProcedures.AsNoTracking().OrderBy(x => x.Level).ToListAsync();
+        Assert.Equal(VerificationDiscipline.System, migratedArtifacts.Single(x => x.Level == TestProcedureLevel.System).ArtifactDiscipline);
+        Assert.Equal(VerificationArtifactKind.Procedure, migratedArtifacts.Single(x => x.Level == TestProcedureLevel.System).ArtifactKind);
+        Assert.Equal(VerificationDiscipline.HighLevelSoftware, migratedArtifacts.Single(x => x.Level == TestProcedureLevel.HighLevel).ArtifactDiscipline);
+        Assert.Equal(VerificationArtifactKind.Case, migratedArtifacts.Single(x => x.Level == TestProcedureLevel.HighLevel).ArtifactKind);
         var before = await db.ProjectLadderConfigurations.AsNoTracking().SingleAsync(x => x.Id == configurationId);
         Assert.Null(before.ActivationManifestVersion);
+        var beforeHistory = await db.ProjectLadderConfigurationHistories.AsNoTracking()
+            .Where(x => x.ConfigurationId == configurationId).OrderBy(x => x.Revision).ToListAsync();
         await db.Database.GetService<IMigrator>().MigrateAsync();
         var after = await db.ProjectLadderSteps.AsNoTracking().SingleAsync(x => x.Id == stepId);
         Assert.Equal(string.Empty, after.EnabledArtifactKindsValue);
         Assert.Equal(before.VerificationProfileSchemaVersion, (await db.ProjectLadderConfigurations.AsNoTracking().SingleAsync(x => x.Id == configurationId)).VerificationProfileSchemaVersion);
 
         // Exercise the neutral migration's Down and reapply path as well as an idempotent latest-Migrate call.
-        await db.Database.GetService<IMigrator>().MigrateAsync("20260822143555_GeneralizeVerificationProfiles");
+        await db.Database.GetService<IMigrator>().MigrateAsync("20260822045540_ExactLinkSuspectLifecycle");
         await db.Database.GetService<IMigrator>().MigrateAsync();
         var reapplied = await db.ProjectLadderSteps.AsNoTracking().SingleAsync(x => x.Id == stepId);
         Assert.Equal(string.Empty, reapplied.EnabledArtifactKindsValue);
-        Assert.Empty(await db.ProjectLadderConfigurationHistories.AsNoTracking()
-            .Where(x => x.ConfigurationId == configurationId).ToListAsync());
+        var reappliedArtifacts = await db.TestProcedures.AsNoTracking().ToListAsync();
+        Assert.Equal(VerificationArtifactKind.Procedure,
+            reappliedArtifacts.Single(x => x.Level == TestProcedureLevel.System).ArtifactKind);
+        Assert.Equal(VerificationArtifactKind.Case,
+            reappliedArtifacts.Single(x => x.Level == TestProcedureLevel.HighLevel).ArtifactKind);
+        var reappliedHistory = await db.ProjectLadderConfigurationHistories.AsNoTracking()
+            .Where(x => x.ConfigurationId == configurationId).OrderBy(x => x.Revision).ToListAsync();
+        Assert.Equal(beforeHistory.Count, reappliedHistory.Count);
+        Assert.Equal(beforeHistory.Select(x => (x.Revision, x.CanonicalSnapshot, x.SnapshotHash, x.SnapshotSchemaVersion)),
+            reappliedHistory.Select(x => (x.Revision, x.CanonicalSnapshot, x.SnapshotHash, x.SnapshotSchemaVersion)));
     }
 
     [DisposablePostgresFact]
