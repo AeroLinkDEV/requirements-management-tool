@@ -224,6 +224,7 @@ public sealed class SectionPlacementOnMaterializationTests
             await using (var verificationDb = new AeroLinkDbContext(options))
             {
                 Assert.Null((await verificationDb.CandidateBaselines.SingleAsync(x => x.Id == thirdBaselineId)).RequirementsMaterializedAt);
+                Assert.Empty(await verificationDb.BaselineRequirements.Where(x => x.BaselineId == thirdBaselineId).ToListAsync());
                 Assert.Equal(1, await verificationDb.RequirementRevisions.CountAsync(x => x.ArtifactId == targetArtifactId));
                 Assert.Equal(1, await verificationDb.RequirementTraces.CountAsync());
                 Assert.Empty(await verificationDb.ExactLinkSuspectLifecycles.ToListAsync());
