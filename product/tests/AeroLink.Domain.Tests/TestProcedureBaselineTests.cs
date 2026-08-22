@@ -160,6 +160,30 @@ public sealed class TestProcedureBaselineTests
     }
 
     [Fact]
+    public void Procedure_title_and_draft_owner_validation_and_source_json_constructor_are_characterized()
+    {
+        Assert.Throws<DomainException>(() => new TestProcedure(ProjectId, "SYSTP-000010", "  ", "owner", Now,
+            TestProcedureLevel.System));
+
+        var procedure = new TestProcedure(ProjectId, "SYSTP-000010", "Initial title", "owner", Now,
+            TestProcedureLevel.System);
+        Assert.Throws<DomainException>(() => procedure.UpdateDraft("Revised title", "  ", Now.AddMinutes(1)));
+        Assert.Throws<DomainException>(() => procedure.UpdateDraft("  ", "owner", Now.AddMinutes(1)));
+        procedure.UpdateDraft("  Revised title  ", "  revised.owner  ", Now.AddMinutes(1));
+        Assert.Equal("Revised title", procedure.Title);
+        Assert.Equal("revised.owner", procedure.OwnerId);
+
+        Assert.Throws<DomainException>(() => new TestProcedureRevision(Guid.NewGuid(), 0, "Objective",
+            "Preconditions", "Steps", "", TestProcedureState.Approved, "verification.engineer", Now));
+        Assert.Throws<DomainException>(() => new TestProcedureRevision(Guid.NewGuid(), 0, "Objective", "", "Steps",
+            "Expected", TestProcedureState.Approved, "verification.engineer", Now,
+            sourceChangeRequestsJson: "{not-json"));
+        var blankSource = new TestProcedureRevision(Guid.NewGuid(), 0, "Objective", "", "Steps", "Expected",
+            TestProcedureState.Approved, "verification.engineer", Now, sourceChangeRequestsJson: "  ");
+        Assert.Equal("[]", blankSource.SourceChangeRequestsJson);
+    }
+
+    [Fact]
     public void A_retired_procedure_revision_needs_no_body()
     {
         var procedureId = Guid.NewGuid();
