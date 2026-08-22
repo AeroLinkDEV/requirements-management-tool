@@ -47,6 +47,26 @@ public sealed class ProjectLadderPostgresQualificationTests
     }
 
     [DisposablePostgresFact]
+    public async Task Issue729_clean_install_has_dormant_profile_and_neutral_identity_schema_without_evidence()
+    {
+        var connection = QualificationConnectionOrSkip();
+        await using var db = await ResetAtLatestAsync(connection);
+        await using var command = db.Database.GetDbConnection().CreateCommand();
+        command.CommandText = "SELECT table_name, column_name FROM information_schema.columns WHERE table_schema = 'public' AND table_name IN ('project_ladder_steps','project_ladder_configurations','project_ladder_configuration_history','test_procedures')";
+        await db.Database.OpenConnectionAsync();
+        var columns = new HashSet<string>(StringComparer.Ordinal);
+        await using (var reader = await command.ExecuteReaderAsync())
+            while (await reader.ReadAsync()) columns.Add($"{reader.GetString(0)}.{reader.GetString(1)}");
+        Assert.Contains("project_ladder_steps.EnabledArtifactKindsValue", columns);
+        Assert.Contains("project_ladder_configurations.VerificationProfileSchemaVersion", columns);
+        Assert.Contains("project_ladder_configuration_history.SnapshotSchemaVersion", columns);
+        Assert.Contains("test_procedures.ArtifactDiscipline", columns);
+        Assert.Contains("test_procedures.ArtifactKind", columns);
+        Assert.Empty(await db.ProjectLadderConfigurations.ToListAsync());
+        Assert.Empty(await db.ProjectLadderConfigurationHistories.ToListAsync());
+    }
+
+    [DisposablePostgresFact]
     public async Task Pre_feature_database_backfill_seals_with_truthful_immutable_evidence_on_postgresql()
     {
         var connection = QualificationConnectionOrSkip();
@@ -93,7 +113,55 @@ public sealed class ProjectLadderPostgresQualificationTests
         Assert.Equal("migration-backfill", configuration.SealedContentKind);
         Assert.Equal(LegacySnapshot, history.CanonicalSnapshot);
         Assert.Equal(LegacySnapshotHash, history.SnapshotHash);
+        Assert.Equal(2, configuration.VerificationProfileSchemaVersion);
+        Assert.Equal(1, history.SnapshotSchemaVersion);
+        Assert.Equal(["Procedure", "Case", "Case"], await db.ProjectLadderSteps.AsNoTracking()
+            .Where(x => x.ConfigurationId == configurationId).OrderBy(x => x.Position)
+            .Select(x => x.EnabledArtifactKindsValue).ToListAsync());
+        Assert.Null(configuration.ActivationManifestVersion);
+        Assert.Null(configuration.ActivationManifestHash);
         Assert.Contains("historical first content is not inferred", history.Reason, StringComparison.Ordinal);
+    }
+
+    [DisposablePostgresFact]
+    public async Task Issue729_pre_feature_migration_leaves_no_verification_step_empty_and_is_idempotent()
+    {
+        var connection = QualificationConnectionOrSkip();
+        await using var db = await MigrateToPreFeatureAsync(connection);
+        var now = DateTimeOffset.UtcNow;
+        var programId = Guid.NewGuid(); var projectId = Guid.NewGuid(); var configurationId = Guid.NewGuid(); var stepId = Guid.NewGuid();
+        await db.Database.ExecuteSqlInterpolatedAsync($"""
+            INSERT INTO "programs" ("Id", "Name", "Code") VALUES ({programId}, {"PG no-verification program"}, {"PGN"});
+            INSERT INTO "projects" ("Id", "ProgramId", "Name", "SoftwareProduct") VALUES ({projectId}, {programId}, {"PG no-verification project"}, {"PG no-verification software"});
+            INSERT INTO "project_ladder_configurations" ("Id", "ProjectId", "Classification", "State", "CreatedAt", "UpdatedAt", "Version")
+                VALUES ({configurationId}, {projectId}, {"LegacyDefault"}, {"Stored"}, {now}, {now}, {1L});
+            INSERT INTO "project_ladder_steps" ("Id", "ConfigurationId", "ProjectId", "CatalogueEntry", "Position", "Capabilities", "CreatedAt", "UpdatedAt", "Version")
+                VALUES ({stepId}, {configurationId}, {projectId}, {"HighLevel"}, {1}, {1}, {now}, {now}, {1L});
+            """);
+        await db.Database.GetService<IMigrator>().MigrateAsync();
+        var step = await db.ProjectLadderSteps.AsNoTracking().SingleAsync(x => x.Id == stepId);
+        Assert.Equal(string.Empty, step.EnabledArtifactKindsValue);
+        var before = await db.ProjectLadderConfigurations.AsNoTracking().SingleAsync(x => x.Id == configurationId);
+        Assert.Null(before.ActivationManifestVersion);
+        await db.Database.GetService<IMigrator>().MigrateAsync();
+        var after = await db.ProjectLadderSteps.AsNoTracking().SingleAsync(x => x.Id == stepId);
+        Assert.Equal(string.Empty, after.EnabledArtifactKindsValue);
+        Assert.Equal(before.VerificationProfileSchemaVersion, (await db.ProjectLadderConfigurations.AsNoTracking().SingleAsync(x => x.Id == configurationId)).VerificationProfileSchemaVersion);
+    }
+
+    [DisposablePostgresFact]
+    public async Task Issue729_postgresql_profile_constraint_rejects_customer_interface_and_unknown_shapes()
+    {
+        var connection = QualificationConnectionOrSkip();
+        await using var db = await ResetAtLatestAsync(connection);
+        var now = DateTimeOffset.UtcNow;
+        var program = new ProgramRecord("PG invalid profile program", "PGI"); var project = new ProjectRecord(program.Id, "PG invalid profile", "PG invalid profile software");
+        db.AddRange(program, project); await db.SaveChangesAsync();
+        var configuration = LegacyDefaultProjectLadderFactory.Create(project.Id, now); db.Add(configuration); await db.SaveChangesAsync();
+        var stored = await db.ProjectLadderConfigurations.AsNoTracking().SingleAsync(x => x.ProjectId == project.Id);
+        await Assert.ThrowsAsync<PostgresException>(() => db.Database.ExecuteSqlInterpolatedAsync($"UPDATE \"project_ladder_steps\" SET \"CatalogueEntry\" = 'Customer', \"Capabilities\" = 2, \"EnabledArtifactKindsValue\" = 'Case' WHERE \"ConfigurationId\" = {stored.Id} AND \"Position\" = 1"));
+        await Assert.ThrowsAsync<PostgresException>(() => db.Database.ExecuteSqlInterpolatedAsync($"UPDATE \"project_ladder_steps\" SET \"CatalogueEntry\" = 'Interface', \"Capabilities\" = 2, \"EnabledArtifactKindsValue\" = 'Case' WHERE \"ConfigurationId\" = {stored.Id} AND \"Position\" = 1"));
+        await Assert.ThrowsAsync<PostgresException>(() => db.Database.ExecuteSqlInterpolatedAsync($"UPDATE \"project_ladder_steps\" SET \"CatalogueEntry\" = 'Unknown', \"Capabilities\" = 1, \"EnabledArtifactKindsValue\" = '' WHERE \"ConfigurationId\" = {stored.Id} AND \"Position\" = 1"));
     }
 
     [DisposablePostgresFact]

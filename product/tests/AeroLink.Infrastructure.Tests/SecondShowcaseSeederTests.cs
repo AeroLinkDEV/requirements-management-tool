@@ -26,7 +26,7 @@ public sealed class SecondShowcaseSeederTests
             var consumers = LadderConsumerManifestCatalog.RequiredConsumerIds
                 .Select(id => (ILadderConsumerRegistration)new LadderConsumerRegistration(id, id)).ToArray();
             var resolver = new EffectiveProjectLadderPolicyResolver(db);
-            var authoring = new ProjectLadderAuthoringService(db, LegacyLadderPolicy.Instance, consumers);
+            var authoring = new ProjectLadderAuthoringService(db, LegacyLadderPolicy.Instance, consumers, Typed(consumers));
             var seeder = new SecondShowcaseSeeder(db, authoring, resolver);
 
             var first = await seeder.EnsureSeededAsync();
@@ -118,7 +118,7 @@ public sealed class SecondShowcaseSeederTests
                 .Select(id => (ILadderConsumerRegistration)new LadderConsumerRegistration(id, id)).ToArray();
             var resolver = new EffectiveProjectLadderPolicyResolver(db);
             var seeder = new SecondShowcaseSeeder(db,
-                new ProjectLadderAuthoringService(db, LegacyLadderPolicy.Instance, consumers), resolver);
+                new ProjectLadderAuthoringService(db, LegacyLadderPolicy.Instance, consumers, Typed(consumers)), resolver);
 
             var first = await seeder.EnsureSeededAsync();
             var second = await seeder.EnsureSeededAsync();
@@ -157,7 +157,7 @@ public sealed class SecondShowcaseSeederTests
             var consumers = LadderConsumerManifestCatalog.RequiredConsumerIds
                 .Select(id => (ILadderConsumerRegistration)new LadderConsumerRegistration(id, id)).ToArray();
             var seeder = new SecondShowcaseSeeder(db,
-                new ProjectLadderAuthoringService(db, LegacyLadderPolicy.Instance, consumers));
+                new ProjectLadderAuthoringService(db, LegacyLadderPolicy.Instance, consumers, Typed(consumers)));
 
             var exception = await Assert.ThrowsAsync<InvalidOperationException>(() => seeder.EnsureSeededAsync());
 
@@ -189,7 +189,7 @@ public sealed class SecondShowcaseSeederTests
                 .Select(id => (ILadderConsumerRegistration)new LadderConsumerRegistration(id, id)).ToArray();
             var resolver = new EffectiveProjectLadderPolicyResolver(db);
             var seeder = new SecondShowcaseSeeder(db,
-                new ProjectLadderAuthoringService(db, LegacyLadderPolicy.Instance, consumers), resolver);
+                new ProjectLadderAuthoringService(db, LegacyLadderPolicy.Instance, consumers, Typed(consumers)), resolver);
             var summary = await seeder.EnsureSeededAsync();
             var stepId = await db.ApprovalSteps
                 .Where(x => x.ApproverId == "systems.reviewer")
@@ -245,7 +245,7 @@ public sealed class SecondShowcaseSeederTests
             var consumers = LadderConsumerManifestCatalog.RequiredConsumerIds
                 .Select(id => (ILadderConsumerRegistration)new LadderConsumerRegistration(id, id)).ToArray();
             var seeder = new SecondShowcaseSeeder(db,
-                new ProjectLadderAuthoringService(db, LegacyLadderPolicy.Instance, consumers));
+                new ProjectLadderAuthoringService(db, LegacyLadderPolicy.Instance, consumers, Typed(consumers)));
 
             var exception = await Assert.ThrowsAsync<InvalidOperationException>(() => seeder.EnsureSeededAsync());
 
@@ -280,7 +280,7 @@ public sealed class SecondShowcaseSeederTests
                 .Select(id => (ILadderConsumerRegistration)new LadderConsumerRegistration(id, id)).ToArray();
             var resolver = new EffectiveProjectLadderPolicyResolver(db);
             await new SecondShowcaseSeeder(db,
-                new ProjectLadderAuthoringService(db, LegacyLadderPolicy.Instance, consumers), resolver)
+                new ProjectLadderAuthoringService(db, LegacyLadderPolicy.Instance, consumers, Typed(consumers)), resolver)
                 .EnsureSeededAsync();
             var after = await SnapshotFmsAsync(db, fms.ProjectId);
             Assert.Equal(before.Releases, after.Releases);
@@ -304,6 +304,12 @@ public sealed class SecondShowcaseSeederTests
             try { if (File.Exists(path)) File.Delete(path); } catch (IOException) { }
         }
     }
+
+    private static IReadOnlyList<IVerificationArtifactConsumerRegistration> Typed(
+        IEnumerable<ILadderConsumerRegistration> consumers) => consumers
+        .Select(LadderConsumerManifestCatalog.TypedRegistration)
+        .Cast<IVerificationArtifactConsumerRegistration>()
+        .ToArray();
 
     private static async Task<FmsSnapshot> SnapshotFmsAsync(AeroLinkDbContext db, Guid projectId)
     {

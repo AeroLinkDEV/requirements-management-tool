@@ -2077,7 +2077,7 @@ namespace AeroLink.Infrastructure.Persistence.Migrations
 
                             t.HasCheckConstraint("CK_project_ladder_step_position", "\"Position\" > 0");
 
-                            t.HasCheckConstraint("CK_project_ladder_step_profile_shape", "((\"Capabilities\" & 2) = 0 AND \"EnabledArtifactKindsValue\" = '') OR ((\"Capabilities\" & 2) = 2 AND ((\"CatalogueEntry\" = 'System' AND \"EnabledArtifactKindsValue\" = 'Procedure') OR (\"CatalogueEntry\" IN ('HighLevel','LowLevel') AND \"EnabledArtifactKindsValue\" IN ('Case','Case,Procedure')) OR (\"CatalogueEntry\" NOT IN ('System','HighLevel','LowLevel') AND \"EnabledArtifactKindsValue\" IN ('Case','Procedure','Case,Procedure',''))))");
+                            t.HasCheckConstraint("CK_project_ladder_step_profile_shape", "((\"CatalogueEntry\" IN ('Customer','Interface','System','HighLevel','LowLevel') AND (\"Capabilities\" & 2) = 0 AND \"EnabledArtifactKindsValue\" = '') OR ((\"Capabilities\" & 2) = 2 AND ((\"CatalogueEntry\" = 'System' AND \"EnabledArtifactKindsValue\" = 'Procedure') OR (\"CatalogueEntry\" IN ('HighLevel','LowLevel') AND \"EnabledArtifactKindsValue\" IN ('Case','Case,Procedure')))))");
 
                             t.HasCheckConstraint("CK_project_ladder_step_version", "\"Version\" > 0");
                         });

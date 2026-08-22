@@ -46,11 +46,12 @@ public static class ProjectLadderSnapshot
             {
                 var level = Enum.Parse<RequirementLevel>(x.CatalogueEntry, false);
                 var definition = policy.Definition(level);
-                var kinds = (x.EnabledArtifactKinds ?? (definition.Has(LevelCapabilities.HasVerification)
+                var hasVerification = x.Capabilities.HasFlag(LevelCapabilities.HasVerification);
+                var kinds = (x.EnabledArtifactKinds ?? (hasVerification
                     ? definition.VerificationProfile?.EnabledKinds
                     : null) ?? []).ToArray();
                 var profile = definition.VerificationProfile;
-                if (!definition.Has(LevelCapabilities.HasVerification))
+                if (!hasVerification)
                 {
                     if (kinds.Length != 0)
                         throw new DomainException($"A level without verification capability cannot enable verification artifacts.");
@@ -68,6 +69,22 @@ public static class ProjectLadderSnapshot
 
     public static string HashV2(IEnumerable<LadderStepDraft> steps, IEnumerable<LadderRelationshipDraft> relationships,
         ILadderPolicy? policy = null) => Hash(CanonicalizeV2(steps, relationships, policy));
+
+    /// <summary>
+    /// Selects the canonical algorithm from the persisted configuration schema.  History rows are evidence of
+    /// the algorithm that wrote them, so callers must not silently use the current default when re-emitting one.
+    /// </summary>
+    public static string CanonicalizeForSchema(int schemaVersion, IEnumerable<LadderStepDraft> steps,
+        IEnumerable<LadderRelationshipDraft> relationships, ILadderPolicy? policy = null) => schemaVersion switch
+        {
+            LegacySchemaVersion => Canonicalize(steps, relationships),
+            CurrentSchemaVersion => CanonicalizeV2(steps, relationships, policy),
+            _ => throw new DomainException($"Unsupported ladder snapshot schema version {schemaVersion}.")
+        };
+
+    public static string HashForSchema(int schemaVersion, IEnumerable<LadderStepDraft> steps,
+        IEnumerable<LadderRelationshipDraft> relationships, ILadderPolicy? policy = null) =>
+        Hash(CanonicalizeForSchema(schemaVersion, steps, relationships, policy));
 
     public static bool Verify(string canonicalSnapshot, string snapshotHash, int schemaVersion = LegacySchemaVersion)
     {
@@ -105,10 +122,11 @@ public static class ProjectLadderDraftValidator
             var definition = policy.Definition(level);
             if ((step.Capabilities & ~definition.Capabilities) != 0)
                 throw new DomainException($"Capabilities for {level} exceed the supported catalogue bindings.");
-            var kinds = step.EnabledArtifactKinds ?? (definition.Has(LevelCapabilities.HasVerification)
+            var hasVerification = step.Capabilities.HasFlag(LevelCapabilities.HasVerification);
+            var kinds = step.EnabledArtifactKinds ?? (hasVerification
                 ? definition.VerificationProfile?.EnabledKinds
                 : null) ?? [];
-            if (!definition.Has(LevelCapabilities.HasVerification))
+            if (!hasVerification)
             {
                 if (kinds.Count != 0)
                     throw new DomainException($"A level without verification capability cannot enable verification artifacts.");

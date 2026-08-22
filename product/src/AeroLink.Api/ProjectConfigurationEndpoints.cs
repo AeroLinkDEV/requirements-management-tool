@@ -69,6 +69,7 @@ public static class ProjectConfigurationEndpoints
             {
                 error = result.Error,
                 readiness = result.Readiness,
+                artifactReadiness = result.ArtifactReadiness,
                 blockers = result.Readiness?.MissingOrUnrouted.Select(x => new { x.Id, x.Description }),
             });
         }

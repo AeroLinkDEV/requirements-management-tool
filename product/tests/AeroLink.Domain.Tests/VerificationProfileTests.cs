@@ -23,6 +23,25 @@ public sealed class VerificationProfileTests
         Assert.Equal(ControlledDocumentType.HighLevelTestProcedures, high.ExecutableArtifact.DocumentType);
     }
 
+    [Fact]
+    public void Current_verification_artifacts_expose_one_neutral_header_and_typed_revision_content()
+    {
+        var now = DateTimeOffset.UtcNow;
+        var system = new TestProcedure(Guid.NewGuid(), "SYSTP-000001", "System procedure", "tester", now,
+            TestProcedureLevel.System);
+        var software = new TestProcedure(Guid.NewGuid(), "HLRTP-000001", "Software case", "tester", now,
+            TestProcedureLevel.HighLevel);
+        var revision = new TestProcedureRevision(software.Id, 0, "Objective", "Logical preconditions",
+            "Coverage", "Pass criteria", TestProcedureState.Approved, "tester", now);
+
+        Assert.Equal(new VerificationArtifactKey(VerificationDiscipline.System, VerificationArtifactKind.Procedure), system.ArtifactKey);
+        Assert.Equal(new VerificationArtifactKey(VerificationDiscipline.HighLevelSoftware, VerificationArtifactKind.Case), software.ArtifactKey);
+        Assert.Equal(software.ArtifactKey, software.Header.ArtifactKey);
+        Assert.Equal(VerificationArtifactKind.Case, revision.Content(software.ArtifactKey).Kind);
+        Assert.Equal("Logical preconditions", ((VerificationCaseRevisionContent)revision.Content(software.ArtifactKey)).Preconditions);
+        Assert.Equal(VerificationArtifactLifecycleState.Active, revision.RevisionHeader(software.ArtifactKey).State);
+    }
+
     [Theory]
     [InlineData(VerificationDiscipline.System, "Case")]
     [InlineData(VerificationDiscipline.HighLevelSoftware, "Procedure")]
@@ -52,6 +71,15 @@ public sealed class VerificationProfileTests
         Assert.Contains("Procedure", v2);
         Assert.NotEqual(ProjectLadderSnapshot.Hash(v1), ProjectLadderSnapshot.Hash(v2));
         Assert.True(ProjectLadderSnapshot.Verify(v2, ProjectLadderSnapshot.Hash(v2), 2));
+
+        var softwareProcedure = steps.Append(new LadderStepDraft("HighLevel", 2,
+            LegacyLadderPolicy.Instance.Definition(RequirementLevel.HighLevel).Capabilities,
+            [VerificationArtifactKind.Case, VerificationArtifactKind.Procedure])).ToArray();
+        var softwareCase = softwareProcedure.Select(x => x.CatalogueEntry == "HighLevel"
+            ? x with { EnabledArtifactKinds = [VerificationArtifactKind.Case] }
+            : x).ToArray();
+        Assert.NotEqual(ProjectLadderSnapshot.HashV2(softwareProcedure, edges),
+            ProjectLadderSnapshot.HashV2(softwareCase, edges));
     }
 
     [Fact]
@@ -82,6 +110,19 @@ public sealed class VerificationProfileTests
         Assert.False(missingKindManifest.IsReady);
         Assert.Contains(missingKindManifest.MissingArtifactCoverage,
             x => x.ConsumerId == "verification.coverage" && !x.SupportsKey);
+    }
+
+    [Fact]
+    public void Authored_no_verification_capability_never_receives_a_catalogue_default()
+    {
+        var noVerification = new LadderStepDraft(nameof(RequirementLevel.HighLevel), 1,
+            LevelCapabilities.HasChangeControl, null);
+        var (validated, _) = ProjectLadderDraftValidator.Validate([noVerification], [], LegacyLadderPolicy.Instance);
+        Assert.Null(validated[0].EnabledArtifactKinds);
+        var canonical = ProjectLadderSnapshot.CanonicalizeV2(validated, []);
+        Assert.DoesNotContain("Case", canonical, StringComparison.Ordinal);
+        var enabled = noVerification with { Capabilities = LevelCapabilities.HasChangeControl | LevelCapabilities.HasVerification };
+        Assert.NotEqual(ProjectLadderSnapshot.HashV2([noVerification], []), ProjectLadderSnapshot.HashV2([enabled], []));
     }
 
     [Fact]

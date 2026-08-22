@@ -445,7 +445,7 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
             b.ToTable("project_ladder_steps", t => t.HasCheckConstraint("CK_project_ladder_step_capabilities", "\"Capabilities\" >= 0 AND \"Capabilities\" <= 15"));
             b.ToTable("project_ladder_steps", t => t.HasCheckConstraint("CK_project_ladder_step_version", "\"Version\" > 0"));
             b.ToTable("project_ladder_steps", t => t.HasCheckConstraint("CK_project_ladder_step_profile_shape",
-                "((\"Capabilities\" & 2) = 0 AND \"EnabledArtifactKindsValue\" = '') OR ((\"Capabilities\" & 2) = 2 AND ((\"CatalogueEntry\" = 'System' AND \"EnabledArtifactKindsValue\" = 'Procedure') OR (\"CatalogueEntry\" IN ('HighLevel','LowLevel') AND \"EnabledArtifactKindsValue\" IN ('Case','Case,Procedure')) OR (\"CatalogueEntry\" NOT IN ('System','HighLevel','LowLevel') AND \"EnabledArtifactKindsValue\" IN ('Case','Procedure','Case,Procedure',''))))"));
+                "((\"CatalogueEntry\" IN ('Customer','Interface','System','HighLevel','LowLevel') AND (\"Capabilities\" & 2) = 0 AND \"EnabledArtifactKindsValue\" = '') OR ((\"Capabilities\" & 2) = 2 AND ((\"CatalogueEntry\" = 'System' AND \"EnabledArtifactKindsValue\" = 'Procedure') OR (\"CatalogueEntry\" IN ('HighLevel','LowLevel') AND \"EnabledArtifactKindsValue\" IN ('Case','Case,Procedure')))))"));
             b.HasKey(x => x.Id); b.HasAlternateKey(x => new { x.ConfigurationId, x.ProjectId, x.Id });
             b.Property(x => x.CatalogueEntry).HasMaxLength(40).IsRequired();
             b.Property(x => x.EnabledArtifactKindsValue).HasMaxLength(100).IsRequired();
@@ -879,6 +879,10 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
             b.ToTable("test_procedures"); b.HasKey(x => x.Id); b.Property(x => x.BaseNumber).HasMaxLength(30).IsRequired();
             b.Property(x => x.Title).HasMaxLength(300).IsRequired(); b.Property(x => x.OwnerId).HasMaxLength(100).IsRequired();
             b.Property(x => x.Level).HasConversion<string>().HasMaxLength(30);
+            b.Property(x => x.ArtifactDiscipline).HasConversion<string>().HasMaxLength(40).IsRequired();
+            b.Property(x => x.ArtifactKind).HasConversion<string>().HasMaxLength(30).IsRequired();
+            b.ToTable("test_procedures", t => t.HasCheckConstraint("CK_test_procedure_neutral_artifact_identity",
+                "((\"Level\" = 'System' AND \"ArtifactDiscipline\" = 'System' AND \"ArtifactKind\" = 'Procedure') OR (\"Level\" = 'HighLevel' AND \"ArtifactDiscipline\" = 'HighLevelSoftware' AND \"ArtifactKind\" = 'Case') OR (\"Level\" = 'LowLevel' AND \"ArtifactDiscipline\" = 'LowLevelSoftware' AND \"ArtifactKind\" = 'Case'))"));
             b.Property(x => x.Version).IsConcurrencyToken();
             b.HasIndex(x => new { x.ProjectId, x.BaseNumber }).IsUnique();
             b.HasOne<ProjectRecord>().WithMany().HasForeignKey(x => x.ProjectId).OnDelete(DeleteBehavior.Restrict);

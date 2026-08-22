@@ -7,16 +7,28 @@ public enum TestProcedureState { Draft, Approved, Retired }
 public enum TestOutcome { Pass, Fail, Blocked }
 public enum TestProcedureLevel { System, HighLevel, LowLevel }
 
-public sealed class TestProcedure
+public sealed class TestProcedure : IVerificationArtifactHeader
 {
     private TestProcedure() { }
     public TestProcedure(Guid projectId, string baseNumber, string title, string ownerId, DateTimeOffset now,
-        TestProcedureLevel level = TestProcedureLevel.HighLevel, ILadderPolicy? policy = null)
+        TestProcedureLevel level = TestProcedureLevel.HighLevel, ILadderPolicy? policy = null,
+        VerificationArtifactKind? artifactKind = null)
     {
         if (string.IsNullOrWhiteSpace(title)) throw new DomainException("A test procedure title is required.");
         Id = Guid.NewGuid(); ProjectId = projectId; BaseNumber = ArtifactNumber.ValidateBase(baseNumber);
         EnsurePrefixMatchesLevel(BaseNumber, level, policy);
         Title = title.Trim(); OwnerId = ownerId.Trim(); CreatedAt = now; UpdatedAt = now; Level = level;
+        ArtifactDiscipline = level switch
+        {
+            TestProcedureLevel.System => VerificationDiscipline.System,
+            TestProcedureLevel.HighLevel => VerificationDiscipline.HighLevelSoftware,
+            TestProcedureLevel.LowLevel => VerificationDiscipline.LowLevelSoftware,
+            _ => throw new DomainException($"Unknown test procedure level: {level}.")
+        };
+        ArtifactKind = artifactKind ?? (level == TestProcedureLevel.System
+            ? VerificationArtifactKind.Procedure
+            : VerificationArtifactKind.Case);
+        _ = VerificationArtifactVocabulary.Definition(ArtifactKey);
     }
 
     /// <summary>
@@ -45,6 +57,13 @@ public sealed class TestProcedure
     public string Title { get; private set; } = string.Empty;
     public string OwnerId { get; private set; } = string.Empty;
     public TestProcedureLevel Level { get; private set; }
+    /// <summary>Persisted neutral identity; legacy level and number remain unchanged compatibility projections.</summary>
+    public VerificationDiscipline ArtifactDiscipline { get; private set; }
+    public VerificationArtifactKind ArtifactKind { get; private set; }
+    public VerificationArtifactKey ArtifactKey => new(ArtifactDiscipline, ArtifactKind);
+    public Guid ArtifactId => Id;
+    public string Identity => BaseNumber;
+    public VerificationArtifactHeader Header => new(Id, ProjectId, ArtifactKey, BaseNumber, Title, OwnerId);
     public DateTimeOffset CreatedAt { get; private set; }
     public DateTimeOffset UpdatedAt { get; private set; }
     public long Version { get; private set; } = 1;
@@ -105,6 +124,22 @@ public sealed class TestProcedureRevision
     /// <summary>Exact source-CR identities captured from the producing TCR revision.</summary>
     public string SourceChangeRequestsJson { get; private set; } = "[]";
     public DateTimeOffset CreatedAt { get; private set; }
+
+    /// <summary>Typed compatibility content; kind is always derived from the owning artifact identity.</summary>
+    public VerificationArtifactRevisionHeader RevisionHeader(VerificationArtifactKey artifactKey) => new(Id, ProcedureId,
+        artifactKey.Kind, Revision,
+        State switch
+        {
+            TestProcedureState.Draft => VerificationArtifactLifecycleState.Draft,
+            TestProcedureState.Approved => VerificationArtifactLifecycleState.Active,
+            TestProcedureState.Retired => VerificationArtifactLifecycleState.Retired,
+            _ => throw new DomainException($"Unknown test procedure state: {State}.")
+        }, AuthorId, SourceTestChangeRequestId, EffectiveBaselineId, CreatedAt);
+    public VerificationArtifactRevisionProvenance RevisionProvenance =>
+        new(SourceTestChangeRequestId, EffectiveBaselineId, SourceChangeRequestsJson);
+    public IVerificationArtifactRevisionContent Content(VerificationArtifactKey artifactKey) => artifactKey.Kind == VerificationArtifactKind.Case
+        ? new VerificationCaseRevisionContent(Objective, Preconditions, Steps, ExpectedResult)
+        : new VerificationProcedureRevisionContent(Objective, Preconditions, Steps, ExpectedResult);
 
     public void UpdateDraft(string objective, string preconditions, string steps, string expectedResult, string actor)
     {

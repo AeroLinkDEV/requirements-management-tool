@@ -42,7 +42,7 @@ public sealed record ProjectLadderReadModel(
     IReadOnlyList<LadderStepDraft> Steps,
     IReadOnlyList<LadderRelationshipDraft> Relationships,
     IReadOnlyList<ProjectLadderHistoryReadModel> History,
-    LadderConsumerManifest Readiness,
+    LadderConsumerManifestV2 Readiness,
     IReadOnlyList<LadderCatalogueReadModel> Catalogue,
     bool CanManage,
     int VerificationProfileSchemaVersion = VerificationArtifactProfileSchema.Current)
@@ -62,7 +62,8 @@ public enum ProjectLadderEditResultKind { NotFound, Success, Conflict, Invalid }
 
 public sealed record ProjectLadderActivationResult(
     ProjectLadderActivationResultKind Kind, ProjectLadderReadModel? Configuration = null,
-    string? Error = null, LadderConsumerManifest? Readiness = null);
+    string? Error = null, LadderConsumerManifest? Readiness = null,
+    LadderConsumerManifestV2? ArtifactReadiness = null);
 
 public enum ProjectLadderActivationResultKind { NotFound, Success, Refused, Conflict, Invalid }
 
@@ -73,10 +74,13 @@ public enum ProjectLadderActivationResultKind { NotFound, Success, Refused, Conf
 /// create an Active row through another public path.
 /// </summary>
 public sealed class ProjectLadderAuthoringService(
-    AeroLinkDbContext db, ILadderPolicy policy, IEnumerable<ILadderConsumerRegistration> consumerRegistrations)
+    AeroLinkDbContext db, ILadderPolicy policy, IEnumerable<ILadderConsumerRegistration> consumerRegistrations,
+    IEnumerable<IVerificationArtifactConsumerRegistration>? artifactConsumerRegistrations = null)
 {
     private readonly IReadOnlyList<ILadderConsumerRegistration> _consumerRegistrations =
         consumerRegistrations?.ToArray() ?? throw new ArgumentNullException(nameof(consumerRegistrations));
+    private readonly IReadOnlyList<IVerificationArtifactConsumerRegistration> _artifactConsumerRegistrations =
+        artifactConsumerRegistrations?.ToArray() ?? [];
 
     public async Task<ProjectLadderReadModel?> ReadAsync(Guid projectId, CancellationToken ct, bool canManage = false)
     {
@@ -127,7 +131,8 @@ public sealed class ProjectLadderAuthoringService(
                 byName[edge.Parent].Id, byName[edge.Child].Id, now));
         _ = ProjectLadderResolver.Resolve(checkedDraft, policy);
 
-        var canonical = ProjectLadderSnapshot.Canonicalize(steps, relationships);
+        var snapshotSchemaVersion = configuration.VerificationProfileSchemaVersion;
+        var canonical = ProjectLadderSnapshot.CanonicalizeForSchema(snapshotSchemaVersion, steps, relationships, policy);
         var hash = ProjectLadderSnapshot.Hash(canonical);
         // Required children have immutable identities and concurrency tokens. Replace them inside the same
         // transaction, after an explicit SQL delete, rather than asking EF's relationship fix-up to infer whether
@@ -175,7 +180,7 @@ public sealed class ProjectLadderAuthoringService(
         db.ProjectLadderSteps.AddRange(configuration.Steps);
         db.ProjectLadderAllowedUpstreams.AddRange(configuration.AllowedUpstream);
         db.ProjectLadderConfigurationHistories.Add(new ProjectLadderConfigurationHistory(configuration.Id, projectId,
-            configuration.Version, actor, now, command.Reason, canonical, hash));
+            configuration.Version, actor, now, command.Reason, canonical, hash, snapshotSchemaVersion));
         try
         {
             await db.SaveChangesAsync(ct);
@@ -221,11 +226,9 @@ public sealed class ProjectLadderAuthoringService(
             && step.EnabledArtifactKinds.Contains(VerificationArtifactKind.Procedure)))
             return ActivationInvalid("The software Procedure tier is dormant until its governed product upgrade slice.");
         var readiness = LadderConsumerManifestCatalog.BuildForRegistrations(_consumerRegistrations);
-        var blockers = string.Join(", ", readiness.MissingOrUnrouted.Select(x => x.Id)
-            .Concat(readiness.UnknownRegistrations.Select(x => $"unknown:{x.Id}")));
-        if (!readiness.IsReady)
-            return new(ProjectLadderActivationResultKind.Refused, Error:
-                $"Activation is refused until routing is complete. Unrouted consumers: {blockers}.", Readiness: readiness);
+        var artifactReadiness = BuildArtifactReadiness(configuration);
+        if (!readiness.IsReady || !artifactReadiness.IsReady)
+            return Refused(readiness, artifactReadiness);
 
         // Re-read and mutate in one SaveChanges unit. EF wraps the activation row and immutable history insert
         // in one transaction, while leaving no open transaction across the test race gate or the second read.
@@ -256,14 +259,19 @@ public sealed class ProjectLadderAuthoringService(
         var relationships = configuration.AllowedUpstream
             .Select(x => new LadderRelationshipDraft(byId[x.ParentStepId].CatalogueEntry, byId[x.ChildStepId].CatalogueEntry))
             .ToArray();
-        var canonical = ProjectLadderSnapshot.Canonicalize(steps, relationships);
+        var finalReadiness = LadderConsumerManifestCatalog.BuildForRegistrations(_consumerRegistrations);
+        var finalArtifactReadiness = BuildArtifactReadiness(configuration);
+        if (!finalReadiness.IsReady || !finalArtifactReadiness.IsReady)
+            return Refused(finalReadiness, finalArtifactReadiness);
+        var snapshotSchemaVersion = configuration.VerificationProfileSchemaVersion;
+        var canonical = ProjectLadderSnapshot.CanonicalizeForSchema(snapshotSchemaVersion, steps, relationships, policy);
         var snapshotHash = ProjectLadderSnapshot.Hash(canonical);
         try
         {
-            configuration.Activate(actor, now, readiness.Version, readiness.Hash);
+            configuration.Activate(actor, now, finalArtifactReadiness.Version, finalArtifactReadiness.Hash);
             db.ProjectLadderConfigurationHistories.Add(new ProjectLadderConfigurationHistory(
                 configuration.Id, projectId, configuration.Version, actor, now,
-                $"Activated ladder: {command.Reason.Trim()}", canonical, snapshotHash));
+                $"Activated ladder: {command.Reason.Trim()}", canonical, snapshotHash, snapshotSchemaVersion));
             await db.SaveChangesAsync(ct);
         }
         catch (DbUpdateConcurrencyException)
@@ -278,7 +286,8 @@ public sealed class ProjectLadderAuthoringService(
         }
 
         var result = await ReadAsync(projectId, ct, canManage: true);
-        return new(ProjectLadderActivationResultKind.Success, result, Readiness: readiness);
+        return new(ProjectLadderActivationResultKind.Success, result,
+            Readiness: finalReadiness, ArtifactReadiness: finalArtifactReadiness);
     }
 
     private static ProjectLadderEditResult Conflict() =>
@@ -286,6 +295,38 @@ public sealed class ProjectLadderAuthoringService(
     private static ProjectLadderEditResult Invalid(string error) => new(ProjectLadderEditResultKind.Invalid, Error: error);
     private static ProjectLadderActivationResult ActivationInvalid(string error) =>
         new(ProjectLadderActivationResultKind.Invalid, Error: error);
+
+    private static ProjectLadderActivationResult Refused(LadderConsumerManifest readiness,
+        LadderConsumerManifestV2 artifactReadiness)
+    {
+        var blockers = string.Join(", ", readiness.MissingOrUnrouted.Select(x => x.Id)
+            .Concat(readiness.UnknownRegistrations.Select(x => $"unknown:{x.Id}"))
+            .Concat(artifactReadiness.MissingArtifactCoverage.Select(x =>
+                $"artifact:{x.ArtifactKey}:{x.RequiredCapabilities}")));
+        return new(ProjectLadderActivationResultKind.Refused,
+            Error: $"Activation is refused until routing is complete. Unrouted consumers: {blockers}.",
+            Readiness: readiness, ArtifactReadiness: artifactReadiness);
+    }
+
+    private LadderConsumerManifestV2 BuildArtifactReadiness(ProjectLadderConfiguration configuration)
+    {
+        var effectiveProfile = configuration.Steps.OrderBy(x => x.Position)
+            .Where(x => x.Capabilities.HasFlag(LevelCapabilities.HasVerification))
+            .SelectMany(x =>
+            {
+                var definition = policy.Definition(Enum.Parse<RequirementLevel>(x.CatalogueEntry, false));
+                var discipline = definition.VerificationProfile?.Discipline
+                    ?? throw new DomainException($"The {x.CatalogueEntry} definition has no verification profile.");
+                var kinds = x.EnabledArtifactKinds.Count > 0
+                    ? x.EnabledArtifactKinds
+                    : definition.VerificationProfile!.EnabledKinds;
+                return kinds.Select(kind => VerificationArtifactVocabulary.Definition(
+                    new VerificationArtifactKey(discipline, kind)));
+            })
+            .ToArray();
+        return LadderConsumerManifestCatalog.BuildV2(_consumerRegistrations, _artifactConsumerRegistrations,
+            effectiveProfile);
+    }
 
     private static bool IsSqliteLock(DbUpdateException exception) =>
         exception.InnerException is SqliteException { SqliteErrorCode: 5 or 6 };
@@ -327,7 +368,7 @@ public sealed class ProjectLadderAuthoringService(
             configuration.AllowedUpstream.Select(x => new LadderRelationshipDraft(
                 configuration.Steps.Single(s => s.Id == x.ParentStepId).CatalogueEntry,
                 configuration.Steps.Single(s => s.Id == x.ChildStepId).CatalogueEntry)).ToArray(), history,
-            LadderConsumerManifestCatalog.BuildForRegistrations(_consumerRegistrations),
+            BuildArtifactReadiness(configuration),
             policy.Definitions.Concat(new[]
                 {
                     policy.Definition(RequirementLevel.Customer),

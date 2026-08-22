@@ -39,6 +39,85 @@ public readonly record struct VerificationArtifactKey(
     public override string ToString() => $"{Discipline}:{Kind}";
 }
 
+/// <summary>
+/// Neutral shared seams for the current verification aggregate.  The existing procedure storage remains the
+/// compatibility store in this slice; these contracts make identity/header/lifecycle and revision evidence
+/// explicit without creating a parallel Case or Procedure aggregate.
+/// </summary>
+public enum VerificationArtifactLifecycleState { Draft, Active, Retired }
+
+public interface IVerificationArtifactHeader
+{
+    Guid ArtifactId { get; }
+    Guid ProjectId { get; }
+    VerificationArtifactKey ArtifactKey { get; }
+    string Identity { get; }
+    string Title { get; }
+    string OwnerId { get; }
+}
+
+public sealed record VerificationArtifactHeader(
+    Guid ArtifactId,
+    Guid ProjectId,
+    VerificationArtifactKey ArtifactKey,
+    string Identity,
+    string Title,
+    string OwnerId) : IVerificationArtifactHeader;
+
+public interface IVerificationArtifactRevision
+{
+    Guid RevisionId { get; }
+    Guid ArtifactId { get; }
+    VerificationArtifactKind Kind { get; }
+    int Revision { get; }
+    VerificationArtifactLifecycleState State { get; }
+    string AuthorId { get; }
+    Guid? SourceTestChangeRequestId { get; }
+    Guid? EffectiveBaselineId { get; }
+    DateTimeOffset CreatedAt { get; }
+}
+
+public sealed record VerificationArtifactRevisionProvenance(
+    Guid? SourceTestChangeRequestId,
+    Guid? EffectiveBaselineId,
+    string SourceChangeRequestsJson);
+
+public sealed record VerificationArtifactRevisionHeader(
+    Guid RevisionId,
+    Guid ArtifactId,
+    VerificationArtifactKind Kind,
+    int Revision,
+    VerificationArtifactLifecycleState State,
+    string AuthorId,
+    Guid? SourceTestChangeRequestId,
+    Guid? EffectiveBaselineId,
+    DateTimeOffset CreatedAt) : IVerificationArtifactRevision;
+
+public interface IVerificationArtifactRevisionContent
+{
+    VerificationArtifactKind Kind { get; }
+}
+
+/// <summary>Compatibility projection for a Case revision; legacy field meaning is retained verbatim.</summary>
+public sealed record VerificationCaseRevisionContent(
+    string Objective,
+    string Preconditions,
+    string Steps,
+    string ExpectedResult) : IVerificationArtifactRevisionContent
+{
+    public VerificationArtifactKind Kind => VerificationArtifactKind.Case;
+}
+
+/// <summary>Compatibility projection for a Procedure revision; legacy field meaning is retained verbatim.</summary>
+public sealed record VerificationProcedureRevisionContent(
+    string Objective,
+    string Preconditions,
+    string Steps,
+    string ExpectedResult) : IVerificationArtifactRevisionContent
+{
+    public VerificationArtifactKind Kind => VerificationArtifactKind.Procedure;
+}
+
 /// <summary>Capabilities a routed consumer must explicitly declare for a v2 artifact registration.</summary>
 [Flags]
 public enum VerificationArtifactCapability
@@ -159,9 +238,10 @@ public sealed class VerificationArtifactProfile
                 : VerificationArtifactKind.Case);
         if (key.Discipline != discipline)
             throw new DomainException("A verification binding artifact key must match its discipline.");
-        var kind = key.Kind;
-        var definition = new VerificationArtifactDefinition(key, binding.ProcedurePrefix,
-            LegacyTcrPrefix(discipline, kind), LegacySubject(discipline, kind), binding.DocumentType, level);
+        var vocabulary = VerificationArtifactVocabulary.Definition(key);
+        var definition = new VerificationArtifactDefinition(key, vocabulary.ArtifactPrefix,
+            vocabulary.TestChangeRequestPrefix, vocabulary.ReviewSubject, binding.DocumentType, level,
+            vocabulary.RequiredCapabilities);
         return new(discipline, [definition]);
     }
 
@@ -171,14 +251,16 @@ public sealed class VerificationArtifactProfile
         ArgumentNullException.ThrowIfNull(binding);
         var discipline = ToNeutral(binding.Discipline);
         var caseKey = new VerificationArtifactKey(discipline, VerificationArtifactKind.Case);
-        var caseDefinition = new VerificationArtifactDefinition(caseKey, binding.ProcedurePrefix,
-            LegacyTcrPrefix(discipline, VerificationArtifactKind.Case), LegacySubject(discipline, VerificationArtifactKind.Case),
-            binding.DocumentType, level);
+        var caseVocabulary = VerificationArtifactVocabulary.Definition(caseKey);
+        var caseDefinition = new VerificationArtifactDefinition(caseKey, caseVocabulary.ArtifactPrefix,
+            caseVocabulary.TestChangeRequestPrefix, caseVocabulary.ReviewSubject, binding.DocumentType, level,
+            caseVocabulary.RequiredCapabilities);
         if (!includeProcedure) return new(discipline, [caseDefinition]);
         var procedureKey = new VerificationArtifactKey(discipline, VerificationArtifactKind.Procedure);
-        var procedure = new VerificationArtifactDefinition(procedureKey, binding.ProcedurePrefix,
-            LegacyTcrPrefix(discipline, VerificationArtifactKind.Procedure), LegacySubject(discipline, VerificationArtifactKind.Procedure),
-            binding.DocumentType, level);
+        var procedureVocabulary = VerificationArtifactVocabulary.Definition(procedureKey);
+        var procedure = new VerificationArtifactDefinition(procedureKey, procedureVocabulary.ArtifactPrefix,
+            procedureVocabulary.TestChangeRequestPrefix, procedureVocabulary.ReviewSubject, binding.DocumentType, level,
+            procedureVocabulary.RequiredCapabilities);
         return new(discipline, [caseDefinition, procedure]);
     }
 
@@ -242,23 +324,6 @@ public sealed class VerificationArtifactProfile
             throw new DomainException("Software verification must be [Case] or [Case, Procedure].");
     }
 
-    private static string LegacyTcrPrefix(VerificationDiscipline discipline, VerificationArtifactKind kind) =>
-        discipline switch
-        {
-            VerificationDiscipline.System => "SYSTCR",
-            VerificationDiscipline.HighLevelSoftware => "HLRTCR",
-            VerificationDiscipline.LowLevelSoftware => "LLRTCR",
-            _ => throw new DomainException($"Unknown verification discipline: {discipline}.")
-        };
-
-    private static ReviewSubject LegacySubject(VerificationDiscipline discipline, VerificationArtifactKind kind) =>
-        discipline switch
-        {
-            VerificationDiscipline.System => ReviewSubject.SystemTest,
-            VerificationDiscipline.HighLevelSoftware => ReviewSubject.HighLevelSoftwareTest,
-            VerificationDiscipline.LowLevelSoftware => ReviewSubject.LowLevelSoftwareTest,
-            _ => throw new DomainException($"Unknown verification discipline: {discipline}.")
-        };
 }
 
 /// <summary>Code-owned ordered artifact definitions used to validate persisted project profile shapes.</summary>

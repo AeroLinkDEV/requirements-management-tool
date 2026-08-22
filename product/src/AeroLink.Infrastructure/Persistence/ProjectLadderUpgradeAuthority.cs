@@ -127,7 +127,8 @@ internal sealed class ProjectLadderUpgradeAuthority(
             return Conflict("Another ladder edit, seal, or platform upgrade was saved. Refresh before upgrading.");
         }
 
-        var read = await new ProjectLadderAuthoringService(db, policy, registrations).ReadAsync(projectId, ct, true);
+        var read = await new ProjectLadderAuthoringService(db, policy, registrations, artifactRegistrations)
+            .ReadAsync(projectId, ct, true);
         return new(ProjectLadderUpgradeResultKind.Success, read, Readiness: readiness, ArtifactReadiness: artifactReadiness);
     }
 
@@ -162,7 +163,7 @@ internal sealed class ProjectLadderUpgradeAuthority(
         {
             var level = Enum.Parse<RequirementLevel>(step.CatalogueEntry, false);
             var definition = policy.Definition(level);
-            if (!definition.Has(LevelCapabilities.HasVerification)) continue;
+            if (!step.Capabilities.HasFlag(LevelCapabilities.HasVerification)) continue;
             var profile = definition.VerificationProfile
                 ?? throw new DomainException($"The {level} definition has no verification profile.");
             var kinds = step.EnabledArtifactKinds ?? profile.EnabledKinds;
