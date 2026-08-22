@@ -76,9 +76,14 @@ public sealed class LevelDefinition
         {
             if (string.IsNullOrWhiteSpace(changeRequest.Prefix))
                 throw new DomainException("A change-request binding requires a prefix.");
-            var expected = level == RequirementLevel.System
-                ? (ChangeRequestType.System, (RequirementLevel?)null)
-                : (ChangeRequestType.Software, level);
+            var expected = level switch
+            {
+                RequirementLevel.System => (ChangeRequestType.System, (RequirementLevel?)null),
+                RequirementLevel.Interface => (ChangeRequestType.Interface, (RequirementLevel?)null),
+                RequirementLevel.HighLevel or RequirementLevel.LowLevel =>
+                    (ChangeRequestType.Software, (RequirementLevel?)level),
+                _ => throw new DomainException($"The {level} level cannot carry a change-request binding."),
+            };
             if (changeRequest.Type != expected.Item1 || changeRequest.SoftwareLevel != expected.Item2)
                 throw new DomainException($"The {level} change-request binding does not match its level.");
         }
@@ -239,8 +244,21 @@ public sealed class LegacyLadderPolicy : ILadderPolicy, ILegacyLadderCompatibili
 
     private static readonly LevelDefinition CustomerDefinition = new(RequirementLevel.Customer, "CUSR", LevelCapabilities.None,
         originKind: LevelOriginKind.ExternalSourcePackage);
+    /// <summary>
+    /// Interface Control Documents are authored in AeroLink and therefore carry a change-request profile,
+    /// but they are not verification targets and do not produce a generated requirements document. Their
+    /// revisions remain ordinary controlled requirements so System requirements can allocate upward to them.
+    /// </summary>
+    private static readonly LevelDefinition InterfaceDefinition = new(
+        RequirementLevel.Interface, "ICDR", LevelCapabilities.HasChangeControl,
+        new(ChangeRequestType.Interface, null, ChangeRequestNumbering.InterfacePrefix));
     public LevelDefinition Definition(RequirementLevel level) => LevelDefinitions.SingleOrDefault(x => x.Level == level)
-        ?? (level == RequirementLevel.Customer ? CustomerDefinition : throw Unknown(level));
+        ?? (level switch
+        {
+            RequirementLevel.Customer => CustomerDefinition,
+            RequirementLevel.Interface => InterfaceDefinition,
+            _ => throw Unknown(level),
+        });
 
     public IReadOnlyList<RequirementLevel> ParentLevels(RequirementLevel child)
     {
@@ -314,6 +332,8 @@ public sealed class LegacyLadderPolicy : ILadderPolicy, ILegacyLadderCompatibili
         // whether a System aggregate may actually declare software scope.
         if (type == ChangeRequestType.System)
             return Definition(RequirementLevel.System).ChangeRequest!.Prefix;
+        if (type == ChangeRequestType.Interface)
+            return InterfaceDefinition.ChangeRequest!.Prefix;
 
         var level = type switch
         {
@@ -328,6 +348,8 @@ public sealed class LegacyLadderPolicy : ILadderPolicy, ILegacyLadderCompatibili
     {
         if (type == ChangeRequestType.System)
             return softwareLevel is null && Definition(RequirementLevel.System).ChangeRequest?.Type == ChangeRequestType.System;
+        if (type == ChangeRequestType.Interface)
+            return softwareLevel is null && InterfaceDefinition.ChangeRequest?.Type == ChangeRequestType.Interface;
         if (type != ChangeRequestType.Software || softwareLevel is not (RequirementLevel.HighLevel or RequirementLevel.LowLevel))
             return false;
         var binding = Definition(softwareLevel.Value).ChangeRequest;
@@ -366,6 +388,7 @@ public sealed class LegacyLadderPolicy : ILadderPolicy, ILegacyLadderCompatibili
     {
         ChangeRequestType.System => ReviewSubject.System,
         ChangeRequestType.Software => ReviewSubject.Software,
+        ChangeRequestType.Interface => ReviewSubject.Interface,
         _ => throw Unknown(type),
     };
 
@@ -383,6 +406,9 @@ public sealed class LegacyLadderPolicy : ILadderPolicy, ILegacyLadderCompatibili
             return RequirementLevel.HighLevel;
         if (string.Equals(value?.Trim(), nameof(RequirementLevel.LowLevel), StringComparison.Ordinal))
             return RequirementLevel.LowLevel;
+        if (string.Equals(value?.Trim(), nameof(RequirementLevel.Interface), StringComparison.Ordinal)
+            || string.Equals(value?.Trim(), "ICD", StringComparison.Ordinal))
+            return RequirementLevel.Interface;
         // The importer has always treated both an absent legacy level and an unrecognised one as System.
         // Keep that compatibility fallback explicit and isolated from the fail-closed policy methods above.
         return RequirementLevel.System;
@@ -397,6 +423,7 @@ public sealed class LegacyLadderPolicy : ILadderPolicy, ILegacyLadderCompatibili
             "highlevel" or "hlr" => RequirementLevel.HighLevel,
             "lowlevel" or "llr" => RequirementLevel.LowLevel,
             "customer" or "cusr" => RequirementLevel.Customer,
+            "interface" or "icd" or "icdr" => RequirementLevel.Interface,
             _ => (RequirementLevel)(-1),
         };
         return (int)level >= 0;
@@ -404,13 +431,9 @@ public sealed class LegacyLadderPolicy : ILadderPolicy, ILegacyLadderCompatibili
 
     public bool AcceptsChangeRequest(ChangeRequestType type, RequirementLevel level)
     {
-        _ = Definition(level);
-        return type switch
-        {
-            ChangeRequestType.System => level == RequirementLevel.System,
-            ChangeRequestType.Software => level is RequirementLevel.HighLevel or RequirementLevel.LowLevel,
-            _ => throw Unknown(type),
-        };
+        var definition = Definition(level);
+        return definition.Has(LevelCapabilities.HasChangeControl)
+            && definition.ChangeRequest?.Type == type;
     }
 
     public bool IsDownstreamTarget(RequirementLevel level)
@@ -499,6 +522,9 @@ public class ResolvedProjectLadderPolicy : ILadderPolicy
         if (type == ChangeRequestType.System)
             return Definition(RequirementLevel.System).ChangeRequest?.Prefix
                 ?? throw new DomainException("The project ladder does not configure System change control.");
+        if (type == ChangeRequestType.Interface)
+            return Definition(RequirementLevel.Interface).ChangeRequest?.Prefix
+                ?? throw new DomainException("The project ladder does not configure Interface change control.");
         if (type != ChangeRequestType.Software || softwareLevel is null)
             throw new DomainException("A software change request must declare HLR or LLR scope before it can be numbered.");
         return Definition(softwareLevel.Value).ChangeRequest?.Prefix
@@ -509,6 +535,9 @@ public class ResolvedProjectLadderPolicy : ILadderPolicy
         if (type == ChangeRequestType.System)
             return softwareLevel is null && definitions.Any(x => x.Level == RequirementLevel.System
                 && x.ChangeRequest?.Type == ChangeRequestType.System && x.Has(LevelCapabilities.HasChangeControl));
+        if (type == ChangeRequestType.Interface)
+            return softwareLevel is null && definitions.Any(x => x.Level == RequirementLevel.Interface
+                && x.ChangeRequest?.Type == ChangeRequestType.Interface && x.Has(LevelCapabilities.HasChangeControl));
         if (type != ChangeRequestType.Software || softwareLevel is null) return false;
         var binding = definitions.SingleOrDefault(x => x.Level == softwareLevel)?.ChangeRequest;
         return binding?.Type == ChangeRequestType.Software && binding.SoftwareLevel == softwareLevel
@@ -528,16 +557,8 @@ public class ResolvedProjectLadderPolicy : ILadderPolicy
     }
     public ReviewSubject WorkflowSubject(ChangeRequestType type)
     {
-        if (type == ChangeRequestType.System)
-        {
-            var definition = definitions.SingleOrDefault(x => x.Level == RequirementLevel.System);
-            if (definition is null || !definition.Has(LevelCapabilities.HasChangeControl))
-                throw new DomainException("The project ladder does not configure System change-control workflow.");
-        }
-        else if (type == ChangeRequestType.Software
-                 && definitions.All(x => !x.Has(LevelCapabilities.HasChangeControl)
-                                         || x.ChangeRequest?.Type != ChangeRequestType.Software))
-            throw new DomainException("The project ladder does not configure a software change-control workflow.");
+        if (!definitions.Any(x => x.Has(LevelCapabilities.HasChangeControl) && x.ChangeRequest?.Type == type))
+            throw new DomainException($"The project ladder does not configure {type} change-control workflow.");
         return catalogue.WorkflowSubject(type);
     }
     public ReviewSubject WorkflowSubject(TestChangeReviewDiscipline discipline)
@@ -566,12 +587,8 @@ public class ResolvedProjectLadderPolicy : ILadderPolicy
     public bool AcceptsChangeRequest(ChangeRequestType type, RequirementLevel level)
     {
         var definition = Definition(level);
-        return type switch
-        {
-            ChangeRequestType.System => level == RequirementLevel.System && definition.Has(LevelCapabilities.HasChangeControl),
-            ChangeRequestType.Software => level != RequirementLevel.System && definition.Has(LevelCapabilities.HasChangeControl),
-            _ => false,
-        };
+        return definition.Has(LevelCapabilities.HasChangeControl)
+            && definition.ChangeRequest?.Type == type;
     }
     public bool IsDownstreamTarget(RequirementLevel level) => Definition(level) is not null && relationships.Any(x => x.Child == level);
     public bool HasCodeTraceability(RequirementLevel level) => Definition(level).Has(LevelCapabilities.HasCodeTraceability);

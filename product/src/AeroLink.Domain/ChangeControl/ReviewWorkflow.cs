@@ -21,6 +21,7 @@ public enum ReviewSubject
 {
     System,
     Software,
+    Interface,
     SystemTest,
     HighLevelSoftwareTest,
     LowLevelSoftwareTest,

@@ -82,10 +82,7 @@ public sealed class ReleaseExecutionService(AeroLinkDbContext db, EvidenceFileSt
     {
         try
         {
-            return request.Type == ChangeRequestType.System
-                ? policy.IsChangeRequestScopeValid(ChangeRequestType.System, null)
-                : request.SoftwareLevel is not null
-                    && policy.IsChangeRequestScopeValid(ChangeRequestType.Software, request.SoftwareLevel);
+            return policy.IsChangeRequestScopeValid(request.Type, request.SoftwareLevel);
         }
         catch (DomainException) { return false; }
     }

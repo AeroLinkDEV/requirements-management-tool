@@ -112,7 +112,7 @@ type ChangeRequestDetail = {
   displayNumber: string;
   projectId: string;
   targetReleaseId: string;
-  type: "System" | "Software";
+  type: "System" | "Software" | "Interface";
   softwareLevel?: "HighLevel" | "LowLevel";
   title: string;
   problem: string;
@@ -186,10 +186,10 @@ type ScrDraft = {
   problemReportIds?: string[];
 };
 type AuthoringContext = {
-  type: "System" | "Software";
+  type: "System" | "Software" | "Interface";
   changeRequestNumber: string;
   author: { userName: string; displayName: string };
-  requirementNumbers: Partial<Record<"SYSR" | "HLR" | "LLR", string>>;
+  requirementNumbers: Partial<Record<"SYSR" | "HLR" | "LLR" | "ICDR", string>>;
 };
 type Props = {
   api: string;
@@ -218,7 +218,7 @@ const pendingImpact = JSON.stringify({
 const base = (display: string) => display.replace(/\.\d{2}$/, "");
 const revision = (display: string) => Number(display.match(/\.(\d{2})$/)?.[1] ?? 0);
 const prefixFor = (level: RequirementLevel) =>
-  level === "System" ? "SYSR" : level === "HighLevel" ? "HLR" : "LLR";
+  level === "System" ? "SYSR" : level === "HighLevel" ? "HLR" : level === "LowLevel" ? "LLR" : "ICDR";
 const parseObject = (value: string | undefined): Record<string, unknown> => {
   try {
     return JSON.parse(value || "{}") as Record<string, unknown>;
@@ -243,7 +243,7 @@ const createRequirement = (
   kind,
   statement: "",
   rationale: "",
-  verificationMethod: "Test",
+  verificationMethod: level === "Interface" ? "Not applicable" : "Test",
   richText: "",
   attributesJson: JSON.stringify({ criticality: "Normal", owner: "" }),
   impactDispositionJson: pendingImpact,
@@ -297,7 +297,7 @@ const proposalComplete = (item: DraftRequirement) =>
       (item.kind === "Retire" || item.statement.trim()) &&
       (!(item.isDerived ?? parseObject(item.attributesJson).derived === true) ||
         item.rationale.trim()) &&
-      (item.level === "System" ||
+      (item.level === "System" || item.level === "Interface" ||
         (item.isDerived ?? parseObject(item.attributesJson).derived === true) ||
         Boolean(item.upstreamRevisionIds?.length)),
   );
@@ -498,7 +498,7 @@ export default function ChangeRequestWorkspace({
   useEffect(() => {
     if (!scr) return;
     let cancelled = false;
-    fetch(`${api}/api/authoring/context?projectId=${scr.projectId}&type=${scr.type}${scr.type === "System" ? "" : `&softwareLevel=${scr.softwareLevel ?? "HighLevel"}`}`)
+    fetch(`${api}/api/authoring/context?projectId=${scr.projectId}&type=${scr.type}${scr.type === "Software" ? `&softwareLevel=${scr.softwareLevel ?? "HighLevel"}` : ""}`)
       .then(async (response) => {
         if (!response.ok) throw new Error("Authoring context unavailable.");
         return response.json() as Promise<AuthoringContext>;
@@ -569,7 +569,7 @@ export default function ChangeRequestWorkspace({
       const recovered = JSON.parse(value.draftJson) as ScrDraft & {
         requirementChanges?: Partial<DraftRequirement>[];
       };
-      const fallbackLevel: RequirementLevel = scr?.type === "Software" ? "HighLevel" : "System";
+      const fallbackLevel: RequirementLevel = scr?.type === "Software" ? "HighLevel" : scr?.type === "Interface" ? "Interface" : "System";
       const recoveredDraft = {
         title: recovered.title,
         problem: recovered.problem,
@@ -1063,7 +1063,7 @@ export default function ChangeRequestWorkspace({
     setApplicableWorkflow(null);
     void (async () => {
       try {
-        const subject = scr.type === "Software" ? "Software" : "System";
+        const subject = scr.type === "Software" ? "Software" : scr.type === "Interface" ? "Interface" : "System";
         const response = await fetch(
           `${api}/api/review-workflows/applicable?projectId=${scr.projectId}&type=${subject}`);
         if (!response.ok) return;
@@ -1082,7 +1082,7 @@ export default function ChangeRequestWorkspace({
 
   return (
     <ControlledChangePage
-      backLabel={`${scr.type === "Software" ? "Software" : "System"} Change Requests`}
+      backLabel={`${scr.type === "Software" ? "Software" : scr.type === "Interface" ? "Interface / ICD" : "System"} Change Requests`}
       onBack={onBack}
       eyebrow={`CHANGE CONTROL / ${scr.displayNumber}`}
       title={scr.title}
@@ -1178,6 +1178,12 @@ export default function ChangeRequestWorkspace({
                   <button type="button" disabled={!context} onClick={() => addProposal("Introduce", "System")}>+ Introduce System requirement</button>
                   <button type="button" onClick={() => addProposal("Modify", "System")}>Modify existing</button>
                   <button type="button" onClick={() => addProposal("Retire", "System")}>Retire existing</button>
+                </>
+              ) : scr.type === "Interface" ? (
+                <>
+                  <button type="button" disabled={!context} onClick={() => addProposal("Introduce", "Interface")}>+ Introduce Interface / ICD requirement</button>
+                  <button type="button" onClick={() => addProposal("Modify", "Interface")}>Modify existing Interface / ICD</button>
+                  <button type="button" onClick={() => addProposal("Retire", "Interface")}>Retire existing Interface / ICD</button>
                 </>
               ) : (
                 <>

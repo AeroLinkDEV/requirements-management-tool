@@ -154,8 +154,13 @@ public sealed class EnterpriseRequirementsService(AeroLinkDbContext db, ILadderP
         // External-origin levels are controlled by package provenance, not by AeroLink's authored catalogue.
         // Keep them out of schema/specification/profile synchronization so a later package revision can
         // materialize against a predecessor without inventing a Customer requirements document.
+        // A controlled level may intentionally have no generated requirements document (ICD is the first
+        // example). Such artifacts still participate in baselines and traces, but they do not belong in this
+        // structured-document workspace and therefore must not enter the profile/specification backfill below.
         var allowedLevels = ladderPolicy.OrderedLevels
-            .Where(level => !ladderPolicy.Definition(level).UsesExternalOrigin).ToArray();
+            .Where(level => !ladderPolicy.Definition(level).UsesExternalOrigin
+                && ladderPolicy.Definition(level).Has(LevelCapabilities.HasRequirementsDocument)
+                && ladderPolicy.Definition(level).RequirementsCatalogue is not null).ToArray();
         var artifacts=await db.Requirements.AsNoTracking().Where(x=>x.ProjectId==projectId&&allowedLevels.Contains(x.Level)).OrderBy(x=>x.BaseNumber).ToListAsync(ct);
         if(artifacts.Count==0)
         {

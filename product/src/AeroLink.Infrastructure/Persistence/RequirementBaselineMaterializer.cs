@@ -125,8 +125,11 @@ public sealed class RequirementBaselineMaterializer(AeroLinkDbContext db, Verifi
             LevelDefinition definition;
             try { definition = ladderPolicy.Definition(change.Level); }
             catch (DomainException) { throw new DomainException($"The configured project ladder does not contain {change.Level}."); }
-            if (!definition.Has(LevelCapabilities.HasRequirementsDocument) || definition.RequirementsCatalogue is null)
-                throw new DomainException($"The configured project ladder has no active requirements document for {change.Level}.");
+            // ICD is a controlled, traceable requirement level without a generated requirements document.
+            // Its immutable RequirementRevision still belongs in the baseline; only the structured profile
+            // and specification placement are omitted.
+            var hasRequirementsDocument = definition.Has(LevelCapabilities.HasRequirementsDocument)
+                && definition.RequirementsCatalogue is not null;
             if (change.Kind == RequirementChangeKind.Introduce)
             {
                 if (artifactByBase.ContainsKey(change.BaseNumber)) throw new DomainException($"{change.DisplayNumber} cannot be introduced because its stable identity already exists.");
@@ -134,7 +137,7 @@ public sealed class RequirementBaselineMaterializer(AeroLinkDbContext db, Verifi
                 db.Requirements.Add(artifact); artifactByBase.Add(artifact.BaseNumber, artifact);
                 var revision = CreateRevision(artifact, change, pair.scr.Id, baseline.Id, now, RequirementRevisionState.Active);
                 db.RequirementRevisions.Add(revision); revisions.Add(revision); current[artifact.Id] = revision; created++;
-                AddProfile(revision,change,schemas,actorId,now);
+                if (hasRequirementsDocument) AddProfile(revision,change,schemas,actorId,now);
                 materialized.Add(new(pair.scr.Id, change.Id, change.Kind, null, revision.Id, change.DisplayNumber));
                 continue;
             }
@@ -145,7 +148,7 @@ public sealed class RequirementBaselineMaterializer(AeroLinkDbContext db, Verifi
             var state = change.Kind == RequirementChangeKind.Retire ? RequirementRevisionState.Retired : RequirementRevisionState.Active;
             var next = CreateRevision(existing, change, pair.scr.Id, baseline.Id, now, state);
             db.RequirementRevisions.Add(next); revisions.Add(next); created++;
-            AddProfile(next,change,schemas,actorId,now);
+            if (hasRequirementsDocument) AddProfile(next,change,schemas,actorId,now);
             materialized.Add(new(pair.scr.Id, change.Id, change.Kind, prior.Id, next.Id, change.DisplayNumber));
             if (state == RequirementRevisionState.Retired) current.Remove(existing.Id); else current[existing.Id] = next;
         }

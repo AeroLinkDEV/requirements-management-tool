@@ -28,22 +28,19 @@ public static class ChangeRequestScopeAudit
         AeroLinkDbContext db, ILadderPolicy? policy = null, CancellationToken ct = default)
     {
         var ladderPolicy = policy ?? LegacyLadderPolicy.Instance;
-        var systemLevel = ladderPolicy.Definition(RequirementLevel.System).Level;
-        var softwareLevels = ladderPolicy.OrderedLevels
-            .Where(level => ladderPolicy.AcceptsChangeRequest(ChangeRequestType.Software, level))
-            .ToArray();
-        return await (from change in db.RequirementChanges.AsNoTracking()
-                      join request in db.SystemChangeRequests.AsNoTracking() on change.ChangeRequestId equals request.Id
-                      where request.Type == ChangeRequestType.System
-                          ? change.Level != systemLevel
-                          : !softwareLevels.Contains(change.Level)
-                      orderby request.BaseNumber, change.BaseNumber
-                      select new CrossLevelRequirementChange(
-                          request.Id,
-                          request.BaseNumber,
-                          request.Type.ToString(),
-                          change.BaseNumber,
-                          change.Level.ToString()))
+        var rows = await (from change in db.RequirementChanges.AsNoTracking()
+                          join request in db.SystemChangeRequests.AsNoTracking() on change.ChangeRequestId equals request.Id
+                          orderby request.BaseNumber, change.BaseNumber
+                          select new { Change = change, Request = request })
             .ToListAsync(ct);
+        return rows
+            .Where(x => !ladderPolicy.AcceptsChangeRequest(x.Request.Type, x.Request.SoftwareLevel, x.Change.Level))
+            .Select(x => new CrossLevelRequirementChange(
+                x.Request.Id,
+                x.Request.BaseNumber,
+                x.Request.Type.ToString(),
+                x.Change.BaseNumber,
+                x.Change.Level.ToString()))
+            .ToArray();
     }
 }

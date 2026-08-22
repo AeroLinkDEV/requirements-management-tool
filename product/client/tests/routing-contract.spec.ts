@@ -35,6 +35,12 @@ test('software authoring routes preserve the selected HLR or LLR level', () => {
   expect(parseRoute(llr)).toMatchObject({ view: 'createSoftwareChange', artifactKind: 'LowLevel' })
 })
 
+test('configured Interface ladders have a dedicated ICD change authoring route', () => {
+  const address = routePath(context, 'createInterfaceChange', 'system')
+  expect(address).toBe('/programs/program-a/projects/project-a/releases/release-a/interfaces/change-requests/new')
+  expect(parseRoute(address)).toMatchObject({ view: 'createInterfaceChange', discipline: 'system', artifactKind: 'Interface' })
+})
+
 test('software change history routes preserve the selected HLR or LLR level', () => {
   const hlr = routePath(context, 'history', 'software', undefined, 'HighLevel')
   const llr = routePath(context, 'history', 'software', undefined, 'LowLevel')

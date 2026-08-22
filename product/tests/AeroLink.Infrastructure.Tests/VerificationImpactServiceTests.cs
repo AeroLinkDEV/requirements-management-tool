@@ -1,6 +1,7 @@
 using AeroLink.Domain.ChangeControl;
 using AeroLink.Domain.Programs;
 using AeroLink.Domain.Releases;
+using AeroLink.Domain.Hierarchy;
 using AeroLink.Domain.Verification;
 using AeroLink.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
@@ -214,6 +215,42 @@ public sealed class VerificationImpactServiceTests
                 await raise.SaveChangesAsync();
                 Assert.Equal(1, await raise.VerificationImpactItems.CountAsync());
             }
+        }
+        finally { Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools(); if (File.Exists(path)) File.Delete(path); }
+    }
+
+    [Fact]
+    public async Task Approved_interface_change_does_not_create_verification_work_or_test_review()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"aerolink-vimpact-interface-{Guid.NewGuid():N}.db");
+        var options = new DbContextOptionsBuilder<AeroLinkDbContext>().UseSqlite($"Data Source={path};Pooling=False").Options;
+        try
+        {
+            var configuration = ProjectLadderConfiguration.CreateDraft(Guid.NewGuid(), Now);
+            configuration.Steps.Add(new ProjectLadderStep(configuration.Id, configuration.ProjectId,
+                RequirementLevel.Interface, 1,
+                LegacyLadderPolicy.Instance.Definition(RequirementLevel.Interface).Capabilities, Now));
+            var policy = new ResolvedProjectLadderPolicy(ProjectLadderResolver.Resolve(configuration));
+            await using var db = new AeroLinkDbContext(options);
+            await db.Database.EnsureCreatedAsync();
+            var program = new ProgramRecord("Interface Verification Program", "IVP");
+            var project = new ProjectRecord(program.Id, "Interface", "Interface");
+            var release = new SoftwareRelease(project.Id, "1.0", false);
+            var request = new SystemChangeRequest("ICDCR-00001", 0, project.Id, release.Id,
+                "Interface contract", "P", "A", "S", "author", Now, ChangeRequestType.Interface,
+                ladderPolicy: policy);
+            request.AddRequirementChange("author", "ICDR-000001", 0, RequirementLevel.Interface,
+                RequirementChangeKind.Introduce, "The interface shall remain compatible.", "Rationale", "Not applicable", Now,
+                ladderPolicy: policy);
+            request.SubmitForReview("author", [new("reviewer", "Reviewer")], Now, ladderPolicy: policy);
+            request.ApproveActiveStage("reviewer", Now);
+            db.AddRange(program, project, release, request);
+            await db.SaveChangesAsync();
+
+            var service = new VerificationImpactService(db, policy: policy);
+            Assert.Equal(0, await service.RaiseForApprovedChangeRequestAsync(request, Now, default));
+            Assert.Empty(await db.VerificationImpactItems.ToListAsync());
+            Assert.Empty(await db.TestChangeReviews.ToListAsync());
         }
         finally { Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools(); if (File.Exists(path)) File.Delete(path); }
     }

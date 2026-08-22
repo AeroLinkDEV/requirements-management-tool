@@ -74,4 +74,30 @@ public sealed class ResolvedProjectLadderPolicyTests
         Assert.Equal([RequirementLevel.LowLevel], policy.DownstreamLevels(RequirementLevel.System));
         Assert.Equal([RequirementLevel.LowLevel], policy.DownstreamLevels(RequirementLevel.HighLevel));
     }
+
+    [Fact]
+    public void Configured_interface_above_system_allows_system_trace_to_interface_and_direct_downstream_fan_out()
+    {
+        var configuration = ProjectLadderConfiguration.CreateDraft(Guid.NewGuid(), DateTimeOffset.UtcNow);
+        var interfaceStep = new ProjectLadderStep(configuration.Id, configuration.ProjectId, RequirementLevel.Interface, 1,
+            LegacyLadderPolicy.Instance.Definition(RequirementLevel.Interface).Capabilities, DateTimeOffset.UtcNow);
+        var system = new ProjectLadderStep(configuration.Id, configuration.ProjectId, RequirementLevel.System, 2,
+            LegacyLadderPolicy.Instance.Definition(RequirementLevel.System).Capabilities, DateTimeOffset.UtcNow);
+        var high = new ProjectLadderStep(configuration.Id, configuration.ProjectId, RequirementLevel.HighLevel, 3,
+            LegacyLadderPolicy.Instance.Definition(RequirementLevel.HighLevel).Capabilities, DateTimeOffset.UtcNow);
+        configuration.Steps.Add(interfaceStep); configuration.Steps.Add(system); configuration.Steps.Add(high);
+        configuration.AllowedUpstream.Add(new(configuration.Id, configuration.ProjectId,
+            interfaceStep.Id, system.Id, DateTimeOffset.UtcNow));
+        configuration.AllowedUpstream.Add(new(configuration.Id, configuration.ProjectId,
+            interfaceStep.Id, high.Id, DateTimeOffset.UtcNow));
+
+        var policy = new ResolvedProjectLadderPolicy(ProjectLadderResolver.Resolve(configuration));
+
+        Assert.Equal([RequirementLevel.System, RequirementLevel.HighLevel], policy.DownstreamLevels(RequirementLevel.Interface));
+        Assert.Equal([RequirementLevel.Interface], policy.ParentLevels(RequirementLevel.System));
+        RequirementTracePolicy.Validate(policy, RequirementLevel.System, RequirementLevel.Interface,
+            RequirementTraceType.AllocatedFrom);
+        Assert.True(policy.AcceptsChangeRequest(ChangeRequestType.Interface, null, RequirementLevel.Interface));
+        Assert.Equal("ICDCR", policy.ChangeRequestPrefix(ChangeRequestType.Interface, null));
+    }
 }

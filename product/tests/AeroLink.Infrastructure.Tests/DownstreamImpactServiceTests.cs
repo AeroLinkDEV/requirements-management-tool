@@ -208,6 +208,36 @@ public sealed class DownstreamImpactServiceTests
     }
 
     [Fact]
+    public async Task Approved_interface_change_raises_every_direct_configured_downstream_assessment()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"aerolink-downstream-interface-{Guid.NewGuid():N}.db");
+        var options = new DbContextOptionsBuilder<AeroLinkDbContext>().UseSqlite($"Data Source={path};Pooling=False").Options;
+        try
+        {
+            await using var db = new AeroLinkDbContext(options);
+            await db.Database.EnsureCreatedAsync();
+            var program = new ProgramRecord("Interface Program", "DIC");
+            var project = new ProjectRecord(program.Id, "Interface", "Interface");
+            var release = new SoftwareRelease(project.Id, "1.0", false);
+            var policy = ConfiguredInterfaceDownstreamPolicy();
+            var request = Approved(project.Id, release.Id, "ICDCR-00001", RequirementLevel.Interface,
+                "ICDR-000001", ChangeRequestType.Interface, policy: policy);
+            db.AddRange(program, project, release, request);
+            await db.SaveChangesAsync();
+
+            var service = new DownstreamImpactService(db, policyResolver: new FixedProjectLadderPolicyResolver(policy));
+            Assert.Equal(2, await service.RaiseForApprovedChangeRequestAsync(request, Now, default));
+            await db.SaveChangesAsync();
+
+            var assessments = await db.DownstreamChangeAssessments.AsNoTracking().ToListAsync();
+            Assert.Equal([RequirementLevel.System, RequirementLevel.HighLevel],
+                assessments.OrderBy(x => x.TargetLevel).Select(x => x.TargetLevel));
+            Assert.All(assessments, x => Assert.Equal("ICDCR-00001.00", x.SourceChangeRequestNumber));
+        }
+        finally { Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools(); if (File.Exists(path)) File.Delete(path); }
+    }
+
+    [Fact]
     public async Task Correctly_classified_replacement_supersedes_matching_legacy_assessment()
     {
         var path = Path.Combine(Path.GetTempPath(), $"aerolink-downstream-remediation-{Guid.NewGuid():N}.db");
@@ -293,6 +323,21 @@ public sealed class DownstreamImpactServiceTests
         configuration.Steps.Add(system); configuration.Steps.Add(high); configuration.Steps.Add(low);
         configuration.AllowedUpstream.Add(new(configuration.Id, configuration.ProjectId, system.Id, low.Id, Now));
         configuration.AllowedUpstream.Add(new(configuration.Id, configuration.ProjectId, high.Id, low.Id, Now));
+        return new ResolvedProjectLadderPolicy(ProjectLadderResolver.Resolve(configuration));
+    }
+
+    private static ILadderPolicy ConfiguredInterfaceDownstreamPolicy()
+    {
+        var configuration = ProjectLadderConfiguration.CreateDraft(Guid.NewGuid(), Now);
+        var interfaceStep = new ProjectLadderStep(configuration.Id, configuration.ProjectId, RequirementLevel.Interface, 1,
+            LegacyLadderPolicy.Instance.Definition(RequirementLevel.Interface).Capabilities, Now);
+        var system = new ProjectLadderStep(configuration.Id, configuration.ProjectId, RequirementLevel.System, 2,
+            LegacyLadderPolicy.Instance.Definition(RequirementLevel.System).Capabilities, Now);
+        var high = new ProjectLadderStep(configuration.Id, configuration.ProjectId, RequirementLevel.HighLevel, 3,
+            LegacyLadderPolicy.Instance.Definition(RequirementLevel.HighLevel).Capabilities, Now);
+        configuration.Steps.Add(interfaceStep); configuration.Steps.Add(system); configuration.Steps.Add(high);
+        configuration.AllowedUpstream.Add(new(configuration.Id, configuration.ProjectId, interfaceStep.Id, system.Id, Now));
+        configuration.AllowedUpstream.Add(new(configuration.Id, configuration.ProjectId, interfaceStep.Id, high.Id, Now));
         return new ResolvedProjectLadderPolicy(ProjectLadderResolver.Resolve(configuration));
     }
 }

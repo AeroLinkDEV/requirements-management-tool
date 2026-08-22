@@ -170,6 +170,8 @@ export const changeRequestAcronym = (level?: string) => {
     case 'highlevel': return 'HLRCR'
     case 'llr':
     case 'lowlevel': return 'LLRCR'
+    case 'icd':
+    case 'interface': return 'ICDCR'
     default: return 'SRCR'
   }
 }
