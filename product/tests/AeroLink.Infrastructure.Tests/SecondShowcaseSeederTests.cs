@@ -141,6 +141,40 @@ public sealed class SecondShowcaseSeederTests
     }
 
     [Fact]
+    public async Task Rejects_a_mismatched_dedicated_workspace_without_resetting_it()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"aerolink-second-showcase-mismatch-{Guid.NewGuid():N}.db");
+        var options = new DbContextOptionsBuilder<AeroLinkDbContext>()
+            .UseSqlite($"Data Source={path};Pooling=False;Foreign Keys=True")
+            .Options;
+        try
+        {
+            await using var db = new AeroLinkDbContext(options);
+            await db.Database.EnsureCreatedAsync();
+            var program = new ProgramRecord("Unexpected Showcase", SecondShowcaseSeeder.ProgramCode);
+            db.Programs.Add(program);
+            await db.SaveChangesAsync();
+            var consumers = LadderConsumerManifestCatalog.RequiredConsumerIds
+                .Select(id => (ILadderConsumerRegistration)new LadderConsumerRegistration(id, id)).ToArray();
+            var seeder = new SecondShowcaseSeeder(db,
+                new ProjectLadderAuthoringService(db, LegacyLadderPolicy.Instance, consumers));
+
+            var exception = await Assert.ThrowsAsync<InvalidOperationException>(() => seeder.EnsureSeededAsync());
+
+            Assert.Contains("unexpected name", exception.Message, StringComparison.Ordinal);
+            Assert.Equal("Unexpected Showcase",
+                await db.Programs.Where(x => x.Code == SecondShowcaseSeeder.ProgramCode)
+                    .Select(x => x.Name).SingleAsync());
+            Assert.Empty(await db.Projects.Where(x => x.ProgramId == program.Id).ToListAsync());
+        }
+        finally
+        {
+            SqliteConnection.ClearAllPools();
+            try { if (File.Exists(path)) File.Delete(path); } catch (IOException) { }
+        }
+    }
+
+    [Fact]
     public async Task Seeding_the_second_workspace_does_not_change_an_existing_fms_workspace()
     {
         var path = Path.Combine(Path.GetTempPath(), $"aerolink-second-showcase-fms-{Guid.NewGuid():N}.db");
