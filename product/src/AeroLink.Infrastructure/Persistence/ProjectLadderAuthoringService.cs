@@ -314,7 +314,9 @@ public sealed class ProjectLadderAuthoringService(
                 configuration.Steps.Single(s => s.Id == x.ParentStepId).CatalogueEntry,
                 configuration.Steps.Single(s => s.Id == x.ChildStepId).CatalogueEntry)).ToArray(), history,
             LadderConsumerManifestCatalog.BuildForRegistrations(_consumerRegistrations),
-            policy.OrderedLevels.Select(level => new LadderCatalogueReadModel(level.ToString(), policy.Definition(level).Capabilities)).ToArray(),
+            policy.Definitions.Concat(new[] { policy.Definition(RequirementLevel.Customer) })
+                .DistinctBy(level => level.Level)
+                .Select(level => new LadderCatalogueReadModel(level.Level.ToString(), level.Capabilities)).ToArray(),
             canManage) { EffectiveSteps = effectiveSteps };
     }
 }

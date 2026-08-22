@@ -4,6 +4,7 @@ using AeroLink.Domain.Common;
 namespace AeroLink.Domain.Requirements;
 
 public enum RequirementRevisionState { Active, Superseded, Retired }
+public enum RequirementRevisionOriginKind { ChangeRequest, ExternalSourcePackage }
 
 /// <summary>Stable identity for a requirement across all of its immutable revisions.</summary>
 public sealed class RequirementArtifact
@@ -21,7 +22,7 @@ public sealed class RequirementArtifact
     public DateTimeOffset CreatedAt { get; private set; }
 }
 
-/// <summary>An immutable, attributable requirement revision produced by one approved SCR.</summary>
+/// <summary>An immutable, attributable requirement revision produced by exactly one controlled origin.</summary>
 public sealed class RequirementRevision
 {
     private RequirementRevision() { }
@@ -30,12 +31,32 @@ public sealed class RequirementRevision
         DateTimeOffset createdAt)
     {
         if (revision < 0) throw new DomainException("Requirement revision cannot be negative.");
+        if (sourceChangeRequestId == Guid.Empty) throw new DomainException("A change-request revision requires its source change request.");
         if (state == RequirementRevisionState.Active && string.IsNullOrWhiteSpace(statement))
             throw new DomainException("An active requirement revision needs a statement.");
         Id = Guid.NewGuid(); ArtifactId = artifactId; Revision = revision; Statement = statement.Trim();
         Rationale = rationale.Trim(); VerificationMethod = verificationMethod.Trim(); State = state;
+        OriginKind = RequirementRevisionOriginKind.ChangeRequest;
         SourceChangeRequestId = sourceChangeRequestId; EffectiveBaselineId = effectiveBaselineId; CreatedAt = createdAt;
     }
+
+    private RequirementRevision(Guid artifactId, int revision, string statement, string rationale,
+        RequirementRevisionState state, Guid sourceBaselineImportId, Guid effectiveBaselineId, DateTimeOffset createdAt)
+    {
+        if (revision < 0) throw new DomainException("Requirement revision cannot be negative.");
+        if (sourceBaselineImportId == Guid.Empty) throw new DomainException("An external revision requires its source baseline import.");
+        if (state == RequirementRevisionState.Active && string.IsNullOrWhiteSpace(statement))
+            throw new DomainException("An active requirement revision needs a statement.");
+        Id = Guid.NewGuid(); ArtifactId = artifactId; Revision = revision; Statement = statement.Trim();
+        Rationale = (rationale ?? "").Trim(); VerificationMethod = ""; State = state;
+        OriginKind = RequirementRevisionOriginKind.ExternalSourcePackage;
+        SourceBaselineImportId = sourceBaselineImportId; EffectiveBaselineId = effectiveBaselineId; CreatedAt = createdAt;
+    }
+
+    public static RequirementRevision FromExternalSourcePackage(Guid artifactId, int revision, string statement,
+        string rationale, RequirementRevisionState state, Guid sourceBaselineImportId, Guid effectiveBaselineId,
+        DateTimeOffset createdAt) => new(artifactId, revision, statement, rationale, state, sourceBaselineImportId,
+            effectiveBaselineId, createdAt);
     public Guid Id { get; private set; }
     public Guid ArtifactId { get; private set; }
     public int Revision { get; private set; }
@@ -43,7 +64,10 @@ public sealed class RequirementRevision
     public string Rationale { get; private set; } = string.Empty;
     public string VerificationMethod { get; private set; } = string.Empty;
     public RequirementRevisionState State { get; private set; }
-    public Guid SourceChangeRequestId { get; private set; }
+    public RequirementRevisionOriginKind OriginKind { get; private set; }
+    public RequirementRevisionOriginKind Origin => OriginKind;
+    public Guid? SourceChangeRequestId { get; private set; }
+    public Guid? SourceBaselineImportId { get; private set; }
     public Guid EffectiveBaselineId { get; private set; }
     public DateTimeOffset CreatedAt { get; private set; }
 }

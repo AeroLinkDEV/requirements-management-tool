@@ -68,6 +68,20 @@ public sealed class LadderPolicyTests
     }
 
     [Fact]
+    public void Customer_is_authored_selectable_external_origin_but_not_legacy_ladder()
+    {
+        Assert.DoesNotContain(RequirementLevel.Customer, policy.OrderedLevels);
+        Assert.DoesNotContain(policy.Definitions, x => x.Level == RequirementLevel.Customer);
+
+        var customer = policy.Definition(RequirementLevel.Customer);
+        Assert.Equal("CUSR", customer.RequirementPrefix);
+        Assert.Equal(LevelOriginKind.ExternalSourcePackage, customer.OriginKind);
+        Assert.True(customer.UsesExternalOrigin);
+        Assert.False(customer.Has(LevelCapabilities.HasChangeControl));
+        Assert.False(policy.AcceptsChangeRequest(ChangeRequestType.Software, RequirementLevel.Customer));
+    }
+
+    [Fact]
     public void Test_procedure_prefix_validation_uses_catalogue_prefixes_but_preserves_custom_numbering()
     {
         var now = DateTimeOffset.UtcNow;

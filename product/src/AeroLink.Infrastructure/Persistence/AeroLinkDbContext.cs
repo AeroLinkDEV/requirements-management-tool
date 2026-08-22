@@ -49,12 +49,14 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
     public DbSet<SourceIdentity> SourceIdentities => Set<SourceIdentity>();
     public DbSet<SourceIdentityLink> SourceIdentityLinks => Set<SourceIdentityLink>();
     public DbSet<SourceHistoryEntry> SourceHistoryEntries => Set<SourceHistoryEntry>();
+    public DbSet<BaselineImportPackageItem> BaselineImportPackageItems => Set<BaselineImportPackageItem>();
     public DbSet<ReviewCycle> ReviewCycles => Set<ReviewCycle>();
     public DbSet<ApprovalStep> ApprovalSteps => Set<ApprovalStep>();
     public DbSet<ReviewComment> ReviewComments => Set<ReviewComment>();
     public DbSet<AuditEvent> AuditEvents => Set<AuditEvent>();
     public DbSet<CandidateBaseline> CandidateBaselines => Set<CandidateBaseline>();
     public DbSet<BaselineChangeRequestSelection> BaselineSelections => Set<BaselineChangeRequestSelection>();
+    public DbSet<BaselineExternalPackageSelection> BaselineExternalPackageSelections => Set<BaselineExternalPackageSelection>();
     public DbSet<BaselineTestChangeRequestSelection> BaselineTestChangeSelections => Set<BaselineTestChangeRequestSelection>();
     public DbSet<BaselineEvent> BaselineEvents => Set<BaselineEvent>();
     public DbSet<RequirementArtifact> Requirements => Set<RequirementArtifact>();
@@ -605,8 +607,10 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
             b.Property(x => x.ExtractedBy).HasMaxLength(100).IsRequired();
             b.Property(x => x.StartedBy).HasMaxLength(100).IsRequired();
             b.Property(x => x.AcceptedBy).HasMaxLength(100);
+            b.Property(x => x.PackageManifestHash).HasMaxLength(64);
             b.Property(x => x.Version).IsConcurrencyToken();
             b.HasIndex(x => new { x.ProjectId, x.State });
+            b.HasIndex(x => x.BoundCandidateBaselineId).IsUnique();
             b.HasOne<ProjectRecord>().WithMany().HasForeignKey(x => x.ProjectId).OnDelete(DeleteBehavior.Restrict);
             b.HasOne<SoftwareRelease>().WithMany().HasForeignKey(x => x.ReleaseId).OnDelete(DeleteBehavior.Restrict);
         });
@@ -645,6 +649,20 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
             b.HasIndex(x => new { x.SourceIdentityId, x.SourceBaselineName });
             b.HasOne<SourceIdentity>().WithMany().HasForeignKey(x => x.SourceIdentityId).OnDelete(DeleteBehavior.Cascade);
             b.HasOne<BaselineImport>().WithMany().HasForeignKey(x => x.BaselineImportId).OnDelete(DeleteBehavior.Restrict);
+        });
+        modelBuilder.Entity<BaselineImportPackageItem>(b =>
+        {
+            b.ToTable("baseline_import_package_items"); b.HasKey(x => x.Id);
+            b.Property(x => x.Id).ValueGeneratedNever();
+            b.Property(x => x.BaseNumber).HasMaxLength(30).IsRequired();
+            b.Property(x => x.Statement).HasMaxLength(8000).IsRequired();
+            b.Property(x => x.Rationale).HasMaxLength(4000).IsRequired();
+            b.Property(x => x.SourceIdentifier).HasMaxLength(200).IsRequired();
+            b.HasIndex(x => new { x.BaselineImportId, x.SourceIdentityId }).IsUnique();
+            b.HasIndex(x => new { x.ProjectId, x.BaseNumber, x.Revision }).IsUnique();
+            b.HasOne<BaselineImport>().WithMany().HasForeignKey(x => x.BaselineImportId).OnDelete(DeleteBehavior.Restrict);
+            b.HasOne<SourceIdentity>().WithMany().HasForeignKey(x => x.SourceIdentityId).OnDelete(DeleteBehavior.Restrict);
+            b.HasOne<ProjectRecord>().WithMany().HasForeignKey(x => x.ProjectId).OnDelete(DeleteBehavior.Restrict);
         });
         modelBuilder.Entity<DownstreamAssessmentReopening>(b =>
         {
@@ -769,6 +787,16 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
             b.Property(x => x.ChangeRequestDisplayNumber).HasMaxLength(40).IsRequired();
             b.HasIndex(x => new { x.BaselineId, x.ChangeRequestId }).IsUnique();
         });
+        modelBuilder.Entity<BaselineExternalPackageSelection>(b =>
+        {
+            b.ToTable("baseline_external_package_selections"); b.HasKey(x => x.Id);
+            b.Property(x => x.Id).ValueGeneratedNever();
+            b.Property(x => x.SelectedBy).HasMaxLength(100).IsRequired();
+            b.Property(x => x.PackageContentHash).HasMaxLength(64).IsRequired();
+            b.HasIndex(x => new { x.BaselineId, x.BaselineImportId }).IsUnique();
+            b.HasOne<CandidateBaseline>().WithMany(x => x.ExternalPackageSelections).HasForeignKey(x => x.BaselineId).OnDelete(DeleteBehavior.Cascade);
+            b.HasOne<BaselineImport>().WithMany().HasForeignKey(x => x.BaselineImportId).OnDelete(DeleteBehavior.Restrict);
+        });
         modelBuilder.Entity<BaselineTestChangeRequestSelection>(b =>
         {
             b.ToTable("baseline_test_change_request_selections"); b.HasKey(x => x.Id);
@@ -802,11 +830,15 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
             b.Property(x => x.Rationale).HasMaxLength(4000);
             b.Property(x => x.VerificationMethod).HasMaxLength(100);
             b.Property(x => x.State).HasConversion<string>().HasMaxLength(30);
+            b.Property(x => x.OriginKind).HasConversion<string>().HasMaxLength(40).IsRequired();
             b.HasIndex(x => new { x.ArtifactId, x.Revision }).IsUnique();
-            b.HasIndex(x => x.SourceChangeRequestId); b.HasIndex(x => x.EffectiveBaselineId);
+            b.HasIndex(x => x.SourceChangeRequestId); b.HasIndex(x => x.SourceBaselineImportId); b.HasIndex(x => x.EffectiveBaselineId);
             b.HasOne<RequirementArtifact>().WithMany().HasForeignKey(x => x.ArtifactId).OnDelete(DeleteBehavior.Restrict);
             b.HasOne<SystemChangeRequest>().WithMany().HasForeignKey(x => x.SourceChangeRequestId).OnDelete(DeleteBehavior.Restrict);
+            b.HasOne<BaselineImport>().WithMany().HasForeignKey(x => x.SourceBaselineImportId).OnDelete(DeleteBehavior.Restrict);
             b.HasOne<CandidateBaseline>().WithMany().HasForeignKey(x => x.EffectiveBaselineId).OnDelete(DeleteBehavior.Restrict);
+            b.ToTable(t => t.HasCheckConstraint("CK_requirement_revisions_origin_xor",
+                "((\"OriginKind\" = 'ChangeRequest' AND \"SourceChangeRequestId\" IS NOT NULL AND \"SourceBaselineImportId\" IS NULL) OR (\"OriginKind\" = 'ExternalSourcePackage' AND \"SourceChangeRequestId\" IS NULL AND \"SourceBaselineImportId\" IS NOT NULL))"));
         });
         modelBuilder.Entity<BaselineRequirementSelection>(b =>
         {

@@ -24,6 +24,9 @@ public sealed record SourceRecordRequest(string SourceModule, string SourceObjec
 public sealed record SourceHistoryRequest(string SourceBaselineName, string? Statement, string? ChangedBy,
     DateTimeOffset? ChangedAt, string? SourceChangeReference);
 public sealed record RecordSourceRecordsRequest(SourceRecordRequest[] Records);
+public sealed record StageCustomerPackageItemRequest(Guid SourceIdentityId, string? BaseNumber, int Revision,
+    string Statement, string? Rationale, string? SourceIdentifier);
+public sealed record StageCustomerPackageItemsRequest(StageCustomerPackageItemRequest[] Items);
 
 /// <summary>
 /// Bringing in a program that already exists in another requirements tool.
@@ -218,6 +221,72 @@ public static class BaselineImportEndpoints
             });
         });
 
+        // External Customer content is staged separately from SourceIdentity history. Staging never creates a
+        // controlled revision; all rows are validated before one save so a malformed or duplicate payload cannot
+        // leave half a package behind.
+        app.MapGet("/api/baseline-imports/{id:guid}/customer-items", async (Guid id, HttpContext http,
+            AeroLinkDbContext db, CancellationToken ct) =>
+        {
+            var import = await db.BaselineImports.AsNoTracking().SingleOrDefaultAsync(x => x.Id == id, ct);
+            if (import is null) return Results.NotFound();
+            if (!await http.HasProjectAccessAsync(db, import.ProjectId, ct)) return Results.Forbid();
+            var rows = await db.BaselineImportPackageItems.AsNoTracking().Where(x => x.BaselineImportId == id)
+                .OrderBy(x => x.BaseNumber).ThenBy(x => x.Revision).ToListAsync(ct);
+            return Results.Ok(rows.Select(x => new { x.Id, x.SourceIdentityId, x.BaseNumber, x.Revision,
+                x.Statement, x.Rationale, x.SourceIdentifier, x.StagedAt }));
+        });
+
+        app.MapPost("/api/baseline-imports/{id:guid}/customer-items", async (Guid id,
+            StageCustomerPackageItemsRequest request, HttpContext http, AeroLinkDbContext db, IdentityService identity,
+            CancellationToken ct) =>
+        {
+            var import = await db.BaselineImports.SingleOrDefaultAsync(x => x.Id == id, ct);
+            if (import is null) return Results.NotFound();
+            if (!await http.HasProjectAccessAsync(db, import.ProjectId, ct)) return Results.Forbid();
+            if (!await AuthorizedAsync(import.ProjectId, http, db, identity, ct)) return Results.Forbid();
+            var items = request.Items ?? [];
+            if (items.Length == 0) return Results.BadRequest(new { error = "No Customer package items were supplied." });
+            if (import.State != BaselineImportState.Reconciled)
+                return Results.BadRequest(new { error = "Customer package items can only be staged before package acceptance." });
+            if (import.BoundCandidateBaselineId is not null)
+                return Results.Conflict(new { error = "The external package is already bound to a candidate baseline." });
+            var duplicateIdentity = items.GroupBy(x => x.SourceIdentityId).FirstOrDefault(x => x.Count() > 1);
+            if (duplicateIdentity is not null)
+                return Results.BadRequest(new { error = "A Customer package cannot contain the same source identity twice." });
+            var duplicateBase = items.Where(x => !string.IsNullOrWhiteSpace(x.BaseNumber))
+                .GroupBy(x => x.BaseNumber!.Trim().ToUpperInvariant()).FirstOrDefault(x => x.Count() > 1);
+            if (duplicateBase is not null)
+                return Results.BadRequest(new { error = "A Customer package cannot contain the same controlled identifier twice." });
+            var sourceIds = items.Select(x => x.SourceIdentityId).Distinct().ToList();
+            var identities = await db.SourceIdentities.Where(x => sourceIds.Contains(x.Id)).ToDictionaryAsync(x => x.Id, ct);
+            if (identities.Count != sourceIds.Count || identities.Values.Any(x => x.ProjectId != import.ProjectId
+                    || x.BaselineImportId != import.Id || !x.InImportedBaseline))
+                return Results.BadRequest(new { error = "Every Customer package item must reference an in-baseline source identity from this import." });
+            var existingIds = await db.BaselineImportPackageItems.Where(x => x.BaselineImportId == id
+                && sourceIds.Contains(x.SourceIdentityId)).Select(x => x.SourceIdentityId).ToListAsync(ct);
+            if (existingIds.Count > 0)
+                return Results.Conflict(new { error = "One or more source identities are already staged in this package." });
+
+            var staged = new List<BaselineImportPackageItem>();
+            try
+            {
+                foreach (var item in items)
+                {
+                    var number = string.IsNullOrWhiteSpace(item.BaseNumber)
+                        ? await IdentifierAllocator.NextRequirementAsync(db, "CUSR", ct)
+                        : item.BaseNumber.Trim().ToUpperInvariant();
+                    var identifier = string.IsNullOrWhiteSpace(item.SourceIdentifier)
+                        ? identities[item.SourceIdentityId].SourceIdentifier : item.SourceIdentifier.Trim();
+                    staged.Add(new BaselineImportPackageItem(import.ProjectId, import.Id, item.SourceIdentityId,
+                        number, item.Revision, item.Statement, item.Rationale ?? "", identifier, DateTimeOffset.UtcNow));
+                }
+                db.BaselineImportPackageItems.AddRange(staged);
+                await db.SaveChangesAsync(ct);
+                return Results.Ok(new { staged = staged.Count, items = staged.Select(x => new { x.Id, x.BaseNumber, x.Revision }) });
+            }
+            catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
+        });
+
         // Gate 4. Every source object accounted for, before anything is committed.
         app.MapPost("/api/baseline-imports/{id:guid}/reconciliation", (Guid id, RecordReconciliationRequest request,
             HttpContext http, AeroLinkDbContext db, IdentityService identity, CancellationToken ct) =>
@@ -244,6 +313,8 @@ public static class BaselineImportEndpoints
             if (!await AuthorizedAsync(import.ProjectId, http, db, identity, ct)) return Results.Forbid();
             if (string.IsNullOrWhiteSpace(request.Version))
                 return Results.BadRequest(new { error = "Name the build this import becomes, for example 1.0." });
+            if (await db.BaselineImportPackageItems.AnyAsync(x => x.BaselineImportId == id, ct))
+                return Results.BadRequest(new { error = "This import has staged Customer package content; select it into an existing Draft candidate baseline instead." });
             var version = request.Version.Trim();
             if (await db.Releases.AnyAsync(x => x.ProjectId == import.ProjectId && x.Version == version, ct))
                 return Results.Conflict(new { error = $"Build {version} already exists in this Project." });

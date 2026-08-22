@@ -59,7 +59,7 @@ public sealed class ProjectConfigurationApiTests : IClassFixture<SharedApiHost>
         using var readJson = JsonDocument.Parse(await read.Content.ReadAsStringAsync());
         Assert.Equal(1, readJson.RootElement.GetProperty("version").GetInt64());
         Assert.True(readJson.RootElement.GetProperty("canManage").GetBoolean());
-        Assert.Equal(new[] { "System", "HighLevel", "LowLevel" },
+        Assert.Equal(new[] { "System", "HighLevel", "LowLevel", "Customer" },
             readJson.RootElement.GetProperty("catalogue").EnumerateArray().Select(x => x.GetProperty("catalogueEntry").GetString()).ToArray());
 
         var edit = await client.PutAsJsonAsync($"/api/projects/{seeded.ProjectId}/configuration", new

@@ -80,12 +80,15 @@ public sealed class SourceIdentity
     /// be enforced where the identity itself is in hand. Constructing the link directly would let a caller
     /// hang a real trace off an object that was never in the baseline anybody signed for.
     /// </summary>
-    public SourceIdentityLink LinkTo(Guid requirementRevisionId, DateTimeOffset now)
+    public SourceIdentityLink LinkTo(Guid requirementRevisionId, DateTimeOffset now, Guid? committingBaselineImportId = null)
     {
         if (!InImportedBaseline)
             throw new DomainException(
                 $"{SourceIdentifier} was not in the imported baseline. It is recorded so a reference to it can be answered, and nothing here originates from it.");
-        return new SourceIdentityLink(ProjectId, requirementRevisionId, Id, BaselineImportId, now);
+        var packageId = committingBaselineImportId ?? BaselineImportId;
+        if (packageId == Guid.Empty)
+            throw new DomainException("A provenance link requires the package that committed the revision.");
+        return new SourceIdentityLink(ProjectId, requirementRevisionId, Id, packageId, now);
     }
 
     private static string Required(string value, string name) =>

@@ -3,6 +3,7 @@ using AeroLink.Domain.ChangeControl;
 using AeroLink.Domain.Common;
 using AeroLink.Domain.Contracts;
 using AeroLink.Domain.Identity;
+using AeroLink.Domain.Imports;
 using AeroLink.Domain.Hierarchy;
 using AeroLink.Domain.Programs;
 using AeroLink.Domain.Releases;
@@ -336,6 +337,59 @@ public static class BaselineEndpoints
             if (!await http.HasProjectRoleAsync(db, identity, baseline.ProjectId, ct, ProgramRole.ConfigurationManager)) return Results.Forbid();
             var scr = await scrs.GetAsync(request.ChangeRequestId, ct); if (scr is null) return Results.NotFound();
             try { baseline.Select(scr, http.UserAccount().UserName, DateTimeOffset.UtcNow); await baselines.SaveAsync(ct); return Results.Ok(ApiMap.Baseline(baseline)); }
+            catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
+        });
+
+        app.MapPost("/api/baselines/{id:guid}/external-packages", async (Guid id,
+            BaselineExternalPackageSelectionRequest request, HttpContext http, AeroLinkDbContext db,
+            IdentityService identity, IProjectLadderPolicyResolver policyResolver, CancellationToken ct) =>
+        {
+            var baseline = await db.CandidateBaselines.Include(x => x.ExternalPackageSelections).Include(x => x.Events)
+                .SingleOrDefaultAsync(x => x.Id == id, ct);
+            if (baseline is null) return Results.NotFound();
+            if (!await http.HasProjectRoleAsync(db, identity, baseline.ProjectId, ct, ProgramRole.ConfigurationManager)) return Results.Forbid();
+            var import = await db.BaselineImports.SingleOrDefaultAsync(x => x.Id == request.BaselineImportId, ct);
+            if (import is null) return Results.NotFound();
+            try
+            {
+                var packageItems = await db.BaselineImportPackageItems.AsNoTracking()
+                    .Where(x => x.BaselineImportId == import.Id).ToListAsync(ct);
+                if (packageItems.Count == 0)
+                    return Results.BadRequest(new { error = "Stage at least one Customer package item before selecting the package." });
+                ILadderPolicy ladderPolicy;
+                try { ladderPolicy = await policyResolver.ResolveAsync(baseline.ProjectId, ct); }
+                catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
+                LevelDefinition customer;
+                try { customer = ladderPolicy.Definition(RequirementLevel.Customer); }
+                catch (DomainException) { return Results.BadRequest(new { error = "The active project ladder does not configure Customer external-origin requirements." }); }
+                if (!customer.UsesExternalOrigin || customer.ChangeRequest is not null || customer.Verification is not null
+                    || customer.RequirementsDocumentType is not null
+                    || customer.Has(LevelCapabilities.HasChangeControl)
+                    || customer.Has(LevelCapabilities.HasVerification)
+                    || customer.Has(LevelCapabilities.HasRequirementsDocument))
+                    return Results.BadRequest(new { error = "Customer must be bound as an external-origin level without change control, verification, or a requirements document." });
+                var packageHash = BaselineImportPackageManifest.Hash(packageItems);
+                baseline.SelectExternalPackage(import, http.UserAccount().UserName, DateTimeOffset.UtcNow, packageHash);
+                await db.SaveChangesAsync(ct);
+                return Results.Ok(new { baseline.Id, packageId = import.Id,
+                    selected = baseline.ExternalPackageSelections.Count });
+            }
+            catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
+        });
+
+        app.MapDelete("/api/baselines/{id:guid}/external-packages/{baselineImportId:guid}", async (Guid id,
+            Guid baselineImportId, HttpContext http, AeroLinkDbContext db, IdentityService identity, CancellationToken ct) =>
+        {
+            var baseline = await db.CandidateBaselines.Include(x => x.ExternalPackageSelections).Include(x => x.Events)
+                .SingleOrDefaultAsync(x => x.Id == id, ct);
+            if (baseline is null) return Results.NotFound();
+            if (!await http.HasProjectRoleAsync(db, identity, baseline.ProjectId, ct, ProgramRole.ConfigurationManager)) return Results.Forbid();
+            try
+            {
+                baseline.RemoveExternalPackage(baselineImportId, http.UserAccount().UserName, DateTimeOffset.UtcNow);
+                await db.SaveChangesAsync(ct);
+                return Results.NoContent();
+            }
             catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
         });
 
