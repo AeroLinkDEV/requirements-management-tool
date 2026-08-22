@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import ChangeRequestRegister, { type RegisterRow } from './ChangeRequestRegister'
 import type { TestDiscipline } from './TestResultsWorkspace'
+import { verificationArtifactNoun } from './presentation'
 import './HistoryExplorer.css'
 
 /**
@@ -29,7 +30,8 @@ type TestChangeRequestRow = {
   authorId: string
   targetReleaseId: string
   discipline: string
-  procedureCount: number
+  artifactCount?: number
+  procedureCount?: number
   updatedAt: string
   revisionCount: number
 }
@@ -70,6 +72,7 @@ export default function TestChangeRequestRegisterPage({
   const [totalPages, setTotalPages] = useState(1)
   const [rows, setRows] = useState<TestChangeRequestRow[]>([])
   const activeRelease = releases.find(x => x.id === activeReleaseId)
+  const artifactNoun = verificationArtifactNoun(discipline)
 
   const load = useCallback(async () => {
     const params = new URLSearchParams({
@@ -92,7 +95,7 @@ export default function TestChangeRequestRegisterPage({
   const toRegisterRow = (row: TestChangeRequestRow): RegisterRow => ({
     id: row.id, baseNumber: row.baseNumber, revision: row.revision, displayNumber: row.displayNumber,
     title: row.title, state: row.state, deferredFromState: row.deferredFromState, authorId: row.authorId,
-    targetReleaseId: row.targetReleaseId, changeCount: row.procedureCount, updatedAt: row.updatedAt,
+    targetReleaseId: row.targetReleaseId, changeCount: row.artifactCount ?? row.procedureCount ?? 0, updatedAt: row.updatedAt,
     revisionCount: row.revisionCount,
   })
 
@@ -105,7 +108,7 @@ export default function TestChangeRequestRegisterPage({
   }
 
   const register = <ChangeRequestRegister
-    changeNoun="procedure changes"
+    changeNoun={`${artifactNoun} changes`}
     recordNoun={`${disciplineLabel(discipline)} test change requests`}
     contextLabel={`${disciplineArea(discipline)} area`}
     activeRelease={activeRelease} releases={releases}

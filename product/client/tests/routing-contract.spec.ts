@@ -106,7 +106,7 @@ test('Documentation Center has a canonical Project route while legacy build rout
 /**
  * The verification pages, and the corrective action that hangs off one of them.
  *
- * Change control and results keep distinct HLR and LLR routes. The Software procedure Explorer is the one
+ * Change control and results keep distinct HLR and LLR routes. The Software Case Explorer is the one
  * combined exception, matching the Software Requirements Explorer rather than duplicating it by level.
  */
 test('each verification page round-trips, and a results route may carry a problem report', () => {
@@ -114,7 +114,7 @@ test('each verification page round-trips, and a results route may carry a proble
     { view: 'testingCoverage', discipline: 'systemTest', kind: undefined, path: 'system-verification/coverage' },
     { view: 'procedureExplorer', discipline: 'systemTest', kind: undefined, path: 'system-verification/procedures' },
     { view: 'testResults', discipline: 'systemTest', kind: undefined, path: 'system-verification/results' },
-    { view: 'procedureExplorer', discipline: 'softwareTest', kind: undefined, path: 'software-verification/procedures' },
+    { view: 'procedureExplorer', discipline: 'softwareTest', kind: undefined, path: 'software-verification/cases' },
     { view: 'testingCoverage', discipline: 'softwareTest', kind: 'HighLevel', path: 'software-verification/hlr/coverage' },
     { view: 'testResults', discipline: 'softwareTest', kind: 'HighLevel', path: 'software-verification/hlr/results' },
     { view: 'testingCoverage', discipline: 'softwareTest', kind: 'LowLevel', path: 'software-verification/llr/coverage' },
@@ -131,11 +131,17 @@ test('each verification page round-trips, and a results route may carry a proble
     )
   }
 
-  // Existing level-specific Explorer links still open on their requested filter.
+  // Existing level-specific Procedure links remain parse-compatible, while Case is the current vocabulary.
+  expect(parseRoute('/programs/program-a/projects/project-a/releases/release-a/software-verification/hlr/cases'))
+    .toMatchObject({ view: 'procedureExplorer', discipline: 'softwareTest', artifactKind: 'HighLevel' })
+  expect(parseRoute('/programs/program-a/projects/project-a/releases/release-a/software-verification/llr/cases'))
+    .toMatchObject({ view: 'procedureExplorer', discipline: 'softwareTest', artifactKind: 'LowLevel' })
   expect(parseRoute('/programs/program-a/projects/project-a/releases/release-a/software-verification/hlr/procedures'))
     .toMatchObject({ view: 'procedureExplorer', discipline: 'softwareTest', artifactKind: 'HighLevel' })
   expect(parseRoute('/programs/program-a/projects/project-a/releases/release-a/software-verification/llr/procedures'))
     .toMatchObject({ view: 'procedureExplorer', discipline: 'softwareTest', artifactKind: 'LowLevel' })
+  expect(parseRoute('/programs/program-a/projects/project-a/releases/release-a/software-verification/procedures'))
+    .toMatchObject({ view: 'procedureExplorer', discipline: 'softwareTest' })
 
   // The branch root is the chooser between the two, and carries nothing else.
   expect(routePath(context, 'verification', 'systemTest')).toBe('/programs/program-a/projects/project-a/releases/release-a/system-verification')

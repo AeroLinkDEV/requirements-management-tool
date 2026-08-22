@@ -115,6 +115,7 @@ public sealed class DraftDocumentGenerator(AeroLinkDbContext db, RichContentPubl
         CancellationToken ct)
     {
         var level = ProcedureLevelFor(type, ladderPolicy);
+        var isCaseDocument = type is ControlledDocumentType.HighLevelTestCases or ControlledDocumentType.LowLevelTestCases;
         var effectivity = await TestProcedureEffectivity.ForReleaseAsync(db, project.Id, release.Id, ct);
         var revisionIds = effectivity?.RevisionIds ?? [];
         var latest = await (from revision in db.TestProcedureRevisions.AsNoTracking()
@@ -148,7 +149,7 @@ public sealed class DraftDocumentGenerator(AeroLinkDbContext db, RichContentPubl
             "not applicable to a draft",
             new[]
             {
-                ("Test procedures", records.Count.ToString("N0")),
+                (level == TestProcedureLevel.System || !isCaseDocument ? "Test procedures" : "Test cases", records.Count.ToString("N0")),
                 ("Approved revisions", latest.Count(x => x.Revision.State == TestProcedureState.Approved).ToString("N0")),
                 ("In review or draft", latest.Count(x => x.Revision.State != TestProcedureState.Approved).ToString("N0")),
                 ("Status", "Draft - content may still change")
@@ -157,10 +158,14 @@ public sealed class DraftDocumentGenerator(AeroLinkDbContext db, RichContentPubl
             new[] { (revisionNumber.ToString("D2"), "Draft", generatedAt.UtcDateTime.ToString("yyyy-MM-dd"), preparedBy) },
             new[]
             {
-                new PublicationSection("Effective Test Procedures",
+                new PublicationSection(level == TestProcedureLevel.System || !isCaseDocument ? "Effective Test Procedures" : "Effective Test Cases",
                     effectivity?.IsExactManifest == true
-                        ? "Exact controlled procedure revisions carried by the effective build manifest."
-                        : "Approved compatibility projection for a predecessor created before procedure manifests existed.",
+                        ? level == TestProcedureLevel.System || !isCaseDocument
+                            ? "Exact controlled procedure revisions carried by the effective build manifest."
+                            : "Exact controlled Case revisions carried by the effective build manifest."
+                        : level == TestProcedureLevel.System || !isCaseDocument
+                            ? "Approved compatibility projection for a predecessor created before procedure manifests existed."
+                            : "Approved compatibility projection for a predecessor created before Case manifests existed.",
                     records)
             })
         {
@@ -283,7 +288,13 @@ public sealed class DraftDocumentGenerator(AeroLinkDbContext db, RichContentPubl
             .ToArray();
         return matches.Length == 1
             ? matches[0]
-            : throw new DomainException($"Unknown controlled document type: {type}.");
+            : type switch
+            {
+                ControlledDocumentType.SystemTestProcedures => TestProcedureLevel.System,
+                ControlledDocumentType.HighLevelTestProcedures or ControlledDocumentType.HighLevelTestCases => TestProcedureLevel.HighLevel,
+                ControlledDocumentType.LowLevelTestProcedures or ControlledDocumentType.LowLevelTestCases => TestProcedureLevel.LowLevel,
+                _ => throw new DomainException($"Unknown controlled document type: {type}.")
+            };
     }
 
     private static string DocumentTypeName(ControlledDocumentType type) => type switch
@@ -293,6 +304,9 @@ public sealed class DraftDocumentGenerator(AeroLinkDbContext db, RichContentPubl
         ControlledDocumentType.SwrdLowLevel => "Low-Level Software Requirements Document (LLRD)",
         ControlledDocumentType.SystemTestProcedures => "System Test Procedure Document (SYSTD)",
         ControlledDocumentType.HighLevelTestProcedures => "HLR Test Procedure Document (HLRTD)",
-        _ => "LLR Test Procedure Document (LLRTD)",
+        ControlledDocumentType.LowLevelTestProcedures => "LLR Test Procedure Document (LLRTD)",
+        ControlledDocumentType.HighLevelTestCases => "HLR Test Case Document (HLRTD)",
+        ControlledDocumentType.LowLevelTestCases => "LLR Test Case Document (LLRTD)",
+        _ => throw new DomainException($"Unknown controlled document type: {type}"),
     };
 }

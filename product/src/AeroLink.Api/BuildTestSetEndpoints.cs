@@ -6,7 +6,8 @@ using Microsoft.EntityFrameworkCore;
 
 namespace AeroLink.Api;
 
-public sealed record IncludeInTestSetRequest(Guid[] ProcedureRevisionIds, TestSelectionReason Reason, string? Note = null);
+public sealed record IncludeInTestSetRequest(Guid[]? ArtifactRevisionIds, TestSelectionReason Reason,
+    string? Note = null, Guid[]? ProcedureRevisionIds = null);
 
 /// <summary>
 /// Choosing what a build has to run.
@@ -32,32 +33,35 @@ public static class BuildTestSetEndpoints
             return Results.Ok(await DescribeAsync(sets, releaseId, db, ct));
         });
 
-        app.MapPost("/api/releases/{releaseId:guid}/test-sets/{discipline}/procedures", async (Guid releaseId,
+        app.MapPost("/api/releases/{releaseId:guid}/test-sets/{discipline}/{artifactRoute:regex(procedures|cases)}", async (Guid releaseId, string artifactRoute,
             TestChangeReviewDiscipline discipline, IncludeInTestSetRequest request, HttpContext http,
             AeroLinkDbContext db, IdentityService identity, BuildTestSetService service, CancellationToken ct) =>
         {
+            var revisionIds = request.ArtifactRevisionIds ?? request.ProcedureRevisionIds ?? [];
+            var artifactPlural = TestChangeRequestSourceEligibility.ArtifactPlural(discipline);
             var release = await db.Releases.AsNoTracking().Where(x => x.Id == releaseId)
                 .Select(x => new { x.ProjectId, x.IsReleased }).SingleOrDefaultAsync(ct);
             if (release is null) return Results.NotFound();
+            if (artifactRoute == "cases" && discipline == TestChangeReviewDiscipline.System) return Results.NotFound();
             if (release.IsReleased) return Results.Conflict(new { error = "A released build's test set is read-only." });
             if (!await CanPlanAsync(http, db, identity, release.ProjectId, ct)) return Results.Forbid();
-            if (request.ProcedureRevisionIds.Length == 0)
-                return Results.BadRequest(new { error = "Name at least one procedure to add." });
+            if (revisionIds.Length == 0)
+                return Results.BadRequest(new { error = $"Name at least one {TestChangeRequestSourceEligibility.ArtifactNoun(discipline)} to add." });
 
             // Every named revision has to be an approved procedure in this Project. Selecting a draft would
             // put the build behind a procedure that nobody has agreed says the right thing, and selecting one
             // from another Project would measure this release against work that has nothing to do with it.
             var reachable = await (from revision in db.TestProcedureRevisions.AsNoTracking()
                                    join procedure in db.TestProcedures.AsNoTracking() on revision.ProcedureId equals procedure.Id
-                                   where request.ProcedureRevisionIds.Contains(revision.Id)
+                                   where revisionIds.Contains(revision.Id)
                                          && procedure.ProjectId == release.ProjectId
                                          && revision.State == TestProcedureState.Approved
                                    select revision.Id).ToListAsync(ct);
-            var unreachable = request.ProcedureRevisionIds.Except(reachable).ToList();
+            var unreachable = revisionIds.Except(reachable).ToList();
             if (unreachable.Count != 0)
                 return Results.BadRequest(new
                 {
-                    error = "A build can only be set to run approved procedures from its own Project.",
+                    error = $"A build can only be set to run approved {artifactPlural} from its own Project.",
                     code = "procedure_not_selectable"
                 });
 
@@ -72,18 +76,19 @@ public static class BuildTestSetEndpoints
                 await db.SaveChangesAsync(ct);
                 // Says how many were new rather than how many were named. Selecting from two directions at
                 // once is expected, so "8 named, 3 added" is the honest answer and the useful one.
-                return Results.Ok(new { added, named = request.ProcedureRevisionIds.Length, set = (await DescribeAsync([set], releaseId, db, ct)).Single() });
+                return Results.Ok(new { added, named = revisionIds.Length, set = (await DescribeAsync([set], releaseId, db, ct)).Single() });
             }
             catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
         });
 
-        app.MapDelete("/api/releases/{releaseId:guid}/test-sets/{discipline}/procedures/{procedureRevisionId:guid}",
-            async (Guid releaseId, TestChangeReviewDiscipline discipline, Guid procedureRevisionId, HttpContext http,
+        app.MapDelete("/api/releases/{releaseId:guid}/test-sets/{discipline}/{artifactRoute:regex(procedures|cases)}/{artifactRevisionId:guid}",
+            async (Guid releaseId, TestChangeReviewDiscipline discipline, string artifactRoute, Guid artifactRevisionId, HttpContext http,
                 AeroLinkDbContext db, IdentityService identity, BuildTestSetService service, CancellationToken ct) =>
         {
             var release = await db.Releases.AsNoTracking().Where(x => x.Id == releaseId)
                 .Select(x => new { x.ProjectId, x.IsReleased }).SingleOrDefaultAsync(ct);
             if (release is null) return Results.NotFound();
+            if (artifactRoute == "cases" && discipline == TestChangeReviewDiscipline.System) return Results.NotFound();
             if (release.IsReleased) return Results.Conflict(new { error = "A released build's test set is read-only." });
             if (!await CanPlanAsync(http, db, identity, release.ProjectId, ct)) return Results.Forbid();
 
@@ -94,7 +99,7 @@ public static class BuildTestSetEndpoints
             // tidying the same set should not produce an error for whichever of them is slower.
             try
             {
-                set.Exclude(procedureRevisionId, DateTimeOffset.UtcNow);
+                set.Exclude(artifactRevisionId, DateTimeOffset.UtcNow);
                 await db.SaveChangesAsync(ct);
                 return Results.Ok((await DescribeAsync([set], releaseId, db, ct)).Single());
             }
@@ -142,20 +147,17 @@ public static class BuildTestSetEndpoints
             : (await db.TestExecutionEvidence.AsNoTracking().Where(x => runIds.Contains(x.TestExecutionId))
                 .Select(x => x.TestExecutionId).Distinct().ToListAsync(ct)).ToHashSet();
 
-        return sets.OrderBy(x => x.Discipline).Select(set => (object)new
+        return sets.OrderBy(x => x.Discipline).Select(set =>
         {
-            set.Id,
-            discipline = set.Discipline.ToString(),
-            set.ReleaseId,
-            set.Version,
-            procedures = set.Entries.OrderBy(x => byRevision.TryGetValue(x.ProcedureRevisionId, out var p) ? p.BaseNumber : "")
+            var artifacts = set.Entries.OrderBy(x => byRevision.TryGetValue(x.ProcedureRevisionId, out var p) ? p.BaseNumber : "")
                 .Select(entry =>
                 {
                     byRevision.TryGetValue(entry.ProcedureRevisionId, out var procedure);
                     latest.TryGetValue(entry.ProcedureRevisionId, out var run);
                     return new
                     {
-                        entry.ProcedureRevisionId,
+                        artifactRevisionId = entry.ProcedureRevisionId,
+                        procedureRevisionId = entry.ProcedureRevisionId, // compatibility alias
                         displayNumber = procedure is null ? "" : $"{procedure.BaseNumber}.{procedure.Revision:D2}",
                         title = titles.TryGetValue(entry.ProcedureRevisionId, out var title) ? title.Title : "",
                         reason = entry.Reason.ToString(),
@@ -169,7 +171,17 @@ public static class BuildTestSetEndpoints
                         latestExecutedAt = run?.ExecutedAt,
                         hasEvidence = run is not null && evidenced.Contains(run.Id),
                     };
-                }).ToList(),
+                }).ToList();
+            return (object)new
+            {
+                set.Id,
+                discipline = set.Discipline.ToString(),
+                artifactKind = TestChangeRequestSourceEligibility.ArtifactKind(set.Discipline),
+                set.ReleaseId,
+                set.Version,
+                artifacts,
+                procedures = artifacts // compatibility alias
+            };
         }).ToList();
     }
 }

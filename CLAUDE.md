@@ -89,9 +89,11 @@ the code under test.
 - A successor release cannot be created while the current one is in work.
 - An `Introduce` needs a `targetSectionId` before review at **any** level whose specification has
   sections — not only System.
-- Test procedures are numbered for their level — `SYSTP-` / `HLRTP-` / `LLRTP-` — and
-  `TestProcedure` defaults to `HighLevel`. `AeroLinkDbContext` refuses cross-level coverage at
-  `SaveChanges`, but only for links whose procedure revision is already persisted.
+- System Test Procedures use `SYSTP-`; current High- and Low-Level software Test Cases use `HLRTC-`
+  and `LLRTC-`. `HLRTP-` / `LLRTP-` are reserved for the future software Test Procedure tier.
+  `TestProcedure` is the compatibility domain type and defaults to `HighLevel`. `AeroLinkDbContext`
+  refuses cross-level coverage at `SaveChanges`, but only for links whose verification artifact
+  revision is already persisted.
 - Controlled identifiers are allocated from a **monotonic counter per prefix, repository-wide across
   every project**. Gaps are expected and deliberate; a claimed number is burned even if the create
   rolls back.

@@ -313,12 +313,18 @@ public static class ChangeRequestEndpoints
             // An introduced requirement has no history and nothing downstream yet. That is not an error; it is
             // the honest answer, and the caller renders it as "nothing recorded" rather than as a failure.
             if (artifact is null)
-                return Results.Ok(new { baseNumber = normalized, known = false, derivedRequirements = Array.Empty<object>(), coveringProcedures = Array.Empty<object>() });
+            {
+                // The old coveringProcedures field remains only for clients before the neutral artifact seam.
+                return Results.Ok(new { baseNumber = normalized, known = false, derivedRequirements = Array.Empty<object>(), coveringArtifacts = Array.Empty<object>(), coveringProcedures = Array.Empty<object>() });
+            }
 
             var current = await db.RequirementRevisions.AsNoTracking()
                 .Where(x => x.ArtifactId == artifact.Id).OrderByDescending(x => x.Revision).FirstOrDefaultAsync(ct);
             if (current is null)
-                return Results.Ok(new { baseNumber = normalized, known = false, derivedRequirements = Array.Empty<object>(), coveringProcedures = Array.Empty<object>() });
+            {
+                // The old coveringProcedures field remains only for clients before the neutral artifact seam.
+                return Results.Ok(new { baseNumber = normalized, known = false, derivedRequirements = Array.Empty<object>(), coveringArtifacts = Array.Empty<object>(), coveringProcedures = Array.Empty<object>() });
+            }
 
             // Children: requirements that trace *to* this one, so a change here propagates down to them.
             var derived = await (from link in db.RequirementTraces.AsNoTracking().Where(x => x.TargetRevisionId == current.Id)
@@ -336,6 +342,17 @@ public static class ChangeRequestEndpoints
 
             var procedures = await VerificationCoverageProjection.ForRequirementRevisionsAsync(
                 db, [current.Id], ct);
+            var coveringArtifacts = procedures.Select(x => new
+            {
+                id = x.ProcedureId,
+                revisionId = x.ProcedureRevisionId,
+                x.DisplayNumber,
+                x.Title,
+                x.Level,
+                state = x.ProcedureState,
+                x.IsSuspect,
+                x.CoverageState
+            }).ToList();
 
             return Results.Ok(new
             {
@@ -344,17 +361,8 @@ public static class ChangeRequestEndpoints
                 displayNumber = artifact.BaseNumber + "." + (current.Revision < 10 ? "0" : "") + current.Revision,
                 requirementRevisionId = current.Id,
                 derivedRequirements = derived,
-                coveringProcedures = procedures.Select(x => new
-                {
-                    id = x.ProcedureId,
-                    revisionId = x.ProcedureRevisionId,
-                    x.DisplayNumber,
-                    x.Title,
-                    x.Level,
-                    state = x.ProcedureState,
-                    x.IsSuspect,
-                    x.CoverageState
-                }),
+                coveringArtifacts,
+                coveringProcedures = coveringArtifacts, // compatibility alias
             });
         });
 

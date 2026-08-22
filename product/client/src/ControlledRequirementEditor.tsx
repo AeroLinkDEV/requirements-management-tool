@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { stateLabel } from './presentation'
+import { stateLabel, verificationArtifactNoun } from './presentation'
 import { RichContentEditor, RichContentView } from "./RichContent";
 import { emptyRichContent } from "./richContentModel";
 import "./ControlledRequirementEditor.css";
@@ -27,13 +27,15 @@ export type ControlledRequirementDraft = {
   upstreamRevisionIds?: string[];
 };
 
+type CoveringArtifact = { id: string; revisionId: string; displayNumber: string; title: string; level: string; state: string; isSuspect: boolean; coverageState: "Confirmed" | "Suspect" };
 type TracedImpact = {
   baseNumber: string;
   /** False when the requirement does not exist yet, which is the normal case for an introduction. */
   known: boolean;
   displayNumber?: string;
   derivedRequirements: { id: string; displayNumber: string; level: string; statement: string; linkType: string }[];
-  coveringProcedures: { id: string; revisionId: string; displayNumber: string; title: string; level: string; state: string; isSuspect: boolean; coverageState: "Confirmed" | "Suspect" }[];
+  coveringArtifacts: CoveringArtifact[];
+  coveringProcedures?: CoveringArtifact[];
 };
 
 type SpecificationSection = {
@@ -260,6 +262,7 @@ export default function ControlledRequirementEditor({
    * a review. An introduced requirement has nothing downstream, so nothing is fetched for one.
    */
   const [traced, setTraced] = useState<TracedImpact>();
+  const artifactNoun = verificationArtifactNoun(item.level);
   const [tracedBusy, setTracedBusy] = useState(false);
   useEffect(() => {
     if (item.kind === "Introduce" || !item.baseNumber) {
@@ -270,7 +273,8 @@ export default function ControlledRequirementEditor({
     setTracedBusy(true);
     fetch(`${api}/api/authoring/impact?projectId=${projectId}&baseNumber=${encodeURIComponent(item.baseNumber)}`)
       .then((response) => (response.ok ? (response.json() as Promise<TracedImpact>) : undefined))
-      .then((value) => { if (!cancelled) setTraced(value); })
+      .then((value) => { if (!cancelled) setTraced(value ? { ...value,
+        coveringArtifacts: value.coveringArtifacts ?? value.coveringProcedures ?? [] } : undefined); })
       // Never blocks authoring. A proposal must remain writable when this cannot be read.
       .catch(() => { if (!cancelled) setTraced(undefined); })
       .finally(() => { if (!cancelled) setTracedBusy(false); });
@@ -703,10 +707,10 @@ export default function ControlledRequirementEditor({
                     </dd>
                   </div>
                   <div>
-                    <dt>Procedures that verify it</dt>
+                    <dt>{artifactNoun}s that verify it</dt>
                     <dd>
-                      {traced.coveringProcedures.length
-                        ? traced.coveringProcedures.map((row) => (
+                      {traced.coveringArtifacts.length
+                        ? traced.coveringArtifacts.map((row) => (
                             // Only suspect applicability earns a chip. "Approved" was the answer for almost
                             // every procedure listed, so it distinguished nothing and buried the one value
                             // that needed to stand out.
@@ -714,12 +718,12 @@ export default function ControlledRequirementEditor({
                               {row.displayNumber} {row.isSuspect && <i>Suspect applicability</i>}
                             </span>
                           ))
-                        : <em>No covering procedures are recorded.</em>}
+                        : <em>No covering {artifactNoun.toLowerCase()}s are recorded.</em>}
                     </dd>
                   </div>
                 </dl>
               )}
-              {traced?.coveringProcedures.some((row) => row.isSuspect) && <p className="tracedWarning">Changed wording made this applicability suspect. Resolve it through Verification → Change impact; the procedure remains approved, but it does not count as confirmed coverage.</p>}
+              {traced?.coveringArtifacts.some((row) => row.isSuspect) && <p className="tracedWarning">Changed wording made this applicability suspect. Resolve it through Verification → Change impact; the {artifactNoun.toLowerCase()} remains approved, but it does not count as confirmed coverage.</p>}
             </section>
           )}
           {item.kind === "Introduce" && <div className="tracedImpact tracedEmpty"><b>New requirement</b><p>No earlier lifecycle trace exists. Downstream teams will establish the necessary traceability and verification after approval.</p></div>}

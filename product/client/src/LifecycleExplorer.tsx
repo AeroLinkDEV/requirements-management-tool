@@ -2,13 +2,13 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import "./LifecycleExplorer.css";
 import "./ControlledDownloads.css";
 import DocumentActions from "./DocumentActions";
-import { documentTypeLabel } from "./presentation";
+import { documentTypeLabel, verificationArtifactNoun } from "./presentation";
 
 type Baseline = { id: string; releaseId: string; releaseVersion: string; displayNumber: string; name: string; requirementsMaterializedAt?: string };
 type Document = { id: string; type: string; displayNumber: string; title: string; contentHash: string; artifactCount: number; release: string; baselineId: string; baseline: string; generatedAt: string };
 type TraceEvidence = { id: string; originalFileName: string; sha256: string; size: number; uploadedAt: string };
 type TraceExecution = { id: string; outcome: string; executedBy: string; executedAt: string; determination: string; evidenceReference: string; evidence: TraceEvidence[] };
-type TraceTest = { procedureId: string; revisionId: string; displayNumber: string; title: string; level: string; state: string; isSuspect: boolean; coverageState: "Confirmed" | "Suspect"; executions: TraceExecution[] };
+type TraceTest = { artifactId: string; procedureId?: string; artifactRevisionId: string; revisionId?: string; displayNumber: string; title: string; level: string; artifactState: string; state?: string; isSuspect: boolean; coverageState: "Confirmed" | "Suspect"; executions: TraceExecution[] };
 type TraceLifecycle = { state: string; causeKind: string; causeRequirementRevisionId?: string; causeBaselineImportId?: string; outcome?: string; events: { type: string; actorId: string; occurredAt: string; rationale: string; outcome?: string }[] };
 type TraceRelation = { id: string; linkId: string; displayNumber: string; level: string; type: string; lifecycle?: TraceLifecycle | null };
 type Trace = { id: string; revisionId: string; displayNumber: string; level: string; statement: string; testCount: number; suspectTestCount: number; parents: TraceRelation[]; children: TraceRelation[]; tests: TraceTest[] };
@@ -17,7 +17,8 @@ type CompletePath = {
   focusRevisionId: string;
   baseline: { displayNumber: string; name: string };
   nodes: { id: string; revisionId: string; displayNumber: string; level: string; statement: string }[];
-  procedure?: { id: string; revisionId: string; displayNumber: string; title: string; level: string; state: string };
+  artifact?: { id: string; revisionId: string; displayNumber: string; title: string; artifactKind: string; level: string; state: string };
+  procedure?: { id: string; revisionId: string; displayNumber: string; title: string; artifactKind?: string; level: string; state: string };
   execution?: TraceExecution;
   build?: { id: string; buildNumber: string; state: string; recordedAt: string; releasedAt?: string };
 };
@@ -191,6 +192,7 @@ export default function LifecycleExplorer({ api, projectId, activeReleaseId, rel
   const requestedButAbsent = Boolean(initialArtifactId) && traces.length > 0 && !traces.some((item) => item.id === initialArtifactId);
   const selectedBaseline = baselines.find((item) => item.id === baselineId);
   const confirmedTests = useMemo(() => focus?.tests.filter((test) => !test.isSuspect) ?? [], [focus]);
+  const artifactNoun = verificationArtifactNoun(focus?.level ?? completePath?.artifact?.level ?? completePath?.procedure?.level);
   const executions = useMemo(() => confirmedTests.flatMap((test) => test.executions), [confirmedTests]);
   const evidence = useMemo(() => executions.flatMap((execution) => execution.evidence), [executions]);
   const threadPercent = focus ? Math.round(([true, confirmedTests.length > 0, executions.length > 0, evidence.length > 0].filter(Boolean).length / 4) * 100) : 0;
@@ -198,13 +200,13 @@ export default function LifecycleExplorer({ api, projectId, activeReleaseId, rel
     ? "Select a requirement to inspect its digital thread."
     : !confirmedTests.length
       ? focus.tests.some((test) => test.isSuspect)
-        ? "Not yet — procedure applicability is suspect after the requirement changed and does not count as confirmed coverage."
-        : "Not yet — no verification procedure is linked to this controlled revision."
+        ? `Not yet — ${artifactNoun.toLowerCase()} applicability is suspect after the requirement changed and does not count as confirmed coverage.`
+        : `Not yet — no verification ${artifactNoun.toLowerCase()} is linked to this controlled revision.`
       : !executions.length
-        ? "Not yet — linked procedures are awaiting an authoritative execution result."
+        ? `Not yet — linked ${artifactNoun.toLowerCase()}s are awaiting an authoritative execution result.`
         : !evidence.length
           ? "Partially — an execution result exists, but no immutable evidence file is attached."
-          : `Yes — ${confirmedTests.length} confirmed procedure${confirmedTests.length === 1 ? "" : "s"}, ${executions.length} execution${executions.length === 1 ? "" : "s"}, and ${evidence.length} evidence file${evidence.length === 1 ? "" : "s"} support this claim.`;
+          : `Yes — ${confirmedTests.length} confirmed ${artifactNoun.toLowerCase()}${confirmedTests.length === 1 ? "" : "s"}, ${executions.length} execution${executions.length === 1 ? "" : "s"}, and ${evidence.length} evidence file${evidence.length === 1 ? "" : "s"} support this claim.`;
 
   return (
     <main className="lifecyclePage">
@@ -249,12 +251,12 @@ export default function LifecycleExplorer({ api, projectId, activeReleaseId, rel
                   <b>{node.displayNumber}</b><span>{node.statement}</span>
                 </button>
               </div>)}
-              <div className="completeThreadStep"><i className="threadConnector" aria-hidden="true">›</i><article className={!completePath.procedure ? "missing" : ""}><small>TEST PROCEDURE</small><b>{completePath.procedure?.displayNumber ?? "Not linked"}</b><span>{completePath.procedure?.title ?? "Procedure linkage required"}</span></article></div>
+              <div className="completeThreadStep"><i className="threadConnector" aria-hidden="true">›</i><article className={!completePath.artifact ? "missing" : ""}><small>TEST {artifactNoun.toUpperCase()}</small><b>{completePath.artifact?.displayNumber ?? "Not linked"}</b><span>{completePath.artifact?.title ?? `${artifactNoun} linkage required`}</span></article></div>
               <div className="completeThreadStep"><i className="threadConnector" aria-hidden="true">›</i><article className={!completePath.execution ? "missing" : ""}><small>TEST RESULT</small><b>{completePath.execution?.outcome ?? "Not executed"}</b><span>{completePath.execution?.determination ?? "Authoritative result required"}</span></article></div>
               <div className="completeThreadStep"><i className="threadConnector" aria-hidden="true">›</i><article className={!completePath.execution?.evidence.length ? "missing" : ""}><small>TEST EVIDENCE</small><b>{completePath.execution?.evidence[0]?.originalFileName ?? "Not attached"}</b><span>{completePath.execution?.evidence[0]?.sha256 ?? (completePath.execution?.evidenceReference ? `External reference only: ${completePath.execution.evidenceReference}` : "Checksummed evidence required")}</span></article></div>
               <div className="completeThreadStep"><i className="threadConnector" aria-hidden="true">›</i><article className={!completePath.build ? "missing" : ""}><small>BUILD</small><b>{completePath.build?.buildNumber ?? completePath.baseline.displayNumber}</b><span>{completePath.build ? `${completePath.build.state} · ${completePath.baseline.displayNumber}` : completePath.baseline.name}</span></article></div>
             </div> : <div className="traceEmpty"><b>Resolving complete path…</b><p>Following exact requirement revisions into verification evidence and build configuration.</p></div>}
-            <footer><b>{completePath ? `${completePath.nodes.length} requirement levels in this path` : "Resolving connected records"}</b><span>SYSR → HLR → LLR → procedure → result → evidence → build</span></footer>
+            <footer><b>{completePath ? `${completePath.nodes.length} requirement levels in this path` : "Resolving connected records"}</b><span>SYSR → HLR → LLR → {artifactNoun.toLowerCase()} → result → evidence → build</span></footer>
           </div>
           <aside className="threadInspector">
             <div className="threadFocusMark"><i>{focus.level.slice(0, 2).toUpperCase()}</i><span>{focus.level}</span></div>
@@ -263,15 +265,15 @@ export default function LifecycleExplorer({ api, projectId, activeReleaseId, rel
             <p>{focus.statement}</p>
             <div className="threadCompleteness"><div><b>Thread completeness</b><strong>{threadPercent}%</strong></div><span><i style={{ width: `${threadPercent}%` }} /></span></div>
             <section className="threadAnswer"><small>THE QUESTION THIS ANSWERS</small><h3>Can this baseline claim verification evidence for the selected requirement?</h3><p>{answer}</p></section>
-            <div className="threadRelations"><div><span>Parents</span><b>{focus.parents.length}</b></div><div><span>Children</span><b>{focus.children.length}</b></div><div><span>Confirmed procedures</span><b>{confirmedTests.length}</b></div><div><span>Evidence</span><b>{evidence.length}</b></div></div>
+            <div className="threadRelations"><div><span>Parents</span><b>{focus.parents.length}</b></div><div><span>Children</span><b>{focus.children.length}</b></div><div><span>Confirmed {artifactNoun.toLowerCase()}s</span><b>{confirmedTests.length}</b></div><div><span>Evidence</span><b>{evidence.length}</b></div></div>
             {!!focus.children.length && <section className="threadDownstream"><small>DOWNSTREAM</small>{focus.children.slice(0, 4).map((child) => <button key={child.id} onClick={() => traverse(child)}><span>{child.displayNumber}</span><b>Open path →</b></button>)}</section>}
           </aside>
         </section> : <section className="traceEmpty"><b>No matching digital thread</b><p>Broaden the identifier search or choose another controlled baseline.</p></section> :
         <section className="traceList">{traces.map((item) => <article key={item.revisionId} className={item.revisionId === focusId ? "focused" : ""}>
           <div className="traceIdentity"><button onClick={() => { setFocusId(item.revisionId); setThreadMode("map"); }}>{item.displayNumber}</button><i>{item.level}</i><span>{item.testCount} confirmed{item.suspectTestCount ? ` · ${item.suspectTestCount} suspect` : ""}</span></div><p>{item.statement}</p>
-          <details className="traceDetails" open={query.trim() !== "" && traces.length === 1 ? true : undefined}><summary><span>Explore relationships and evidence</span><small>{item.parents.length} parent{item.parents.length === 1 ? "" : "s"} · {item.children.length} child{item.children.length === 1 ? "" : "ren"} · {item.tests.length} procedure{item.tests.length === 1 ? "" : "s"}</small></summary>
+          <details className="traceDetails" open={query.trim() !== "" && traces.length === 1 ? true : undefined}><summary><span>Explore relationships and evidence</span><small>{item.parents.length} parent{item.parents.length === 1 ? "" : "s"} · {item.children.length} child{item.children.length === 1 ? "" : "ren"} · {item.tests.length} {verificationArtifactNoun(item.level).toLowerCase()}{item.tests.length === 1 ? "" : "s"}</small></summary>
             <div className="traceRelations"><div><small>PARENT / DERIVED FROM</small>{item.parents.map((parent) => <button key={parent.linkId} onClick={() => traverse(parent)}>{parent.displayNumber} · {parent.level}{parent.lifecycle && <i className={`traceLinkState ${parent.lifecycle.state.toLowerCase()}`}>{parent.lifecycle.state}</i>}</button>)}{!item.parents.length && <em>Top-level requirement</em>}</div><div><small>CHILDREN / SATISFIED BY</small>{item.children.slice(0, 8).map((child) => <button key={child.linkId} onClick={() => traverse(child)}>{child.displayNumber} · {child.level}{child.lifecycle && <i className={`traceLinkState ${child.lifecycle.state.toLowerCase()}`}>{child.lifecycle.state}</i>}</button>)}{item.children.length > 8 && <em>+ {item.children.length - 8} additional children</em>}{!item.children.length && <em>Leaf-level requirement</em>}</div></div>
-            {item.tests.length > 0 && <div className="traceVerification"><small>VERIFICATION / RESULTS / EVIDENCE</small>{item.tests.map((test) => <section className={test.isSuspect ? "suspect" : ""} key={test.revisionId}><div><b>{test.displayNumber}</b><span>{test.title} · {test.isSuspect ? "Suspect applicability — not coverage" : "Confirmed applicability"}</span></div>{!test.isSuspect && test.executions.map((run) => <article key={run.id}><i className={run.outcome.toLowerCase()}>{run.outcome}</i><p>{run.determination}</p><small>{run.executedBy} · {new Date(run.executedAt).toLocaleString()}</small>{run.evidence.map((file) => <a key={file.id} href={`${api}/api/evidence/${file.id}`}><b>{file.originalFileName}</b><code>{file.sha256}</code></a>)}</article>)}{test.isSuspect ? <em>Resolve this applicability in Verification change impact.</em> : !test.executions.length && <em>Approved procedure awaiting execution</em>}</section>)}</div>}
+            {item.tests.length > 0 && <div className="traceVerification"><small>VERIFICATION / RESULTS / EVIDENCE</small>{item.tests.map((test) => <section className={test.isSuspect ? "suspect" : ""} key={test.artifactRevisionId}><div><b>{test.displayNumber}</b><span>{test.title} · {test.isSuspect ? "Suspect applicability — not coverage" : "Confirmed applicability"}</span></div>{!test.isSuspect && test.executions.map((run) => <article key={run.id}><i className={run.outcome.toLowerCase()}>{run.outcome}</i><p>{run.determination}</p><small>{run.executedBy} · {new Date(run.executedAt).toLocaleString()}</small>{run.evidence.map((file) => <a key={file.id} href={`${api}/api/evidence/${file.id}`}><b>{file.originalFileName}</b><code>{file.sha256}</code></a>)}</article>)}{test.isSuspect ? <em>Resolve this applicability in Verification change impact.</em> : !test.executions.length && <em>Approved {verificationArtifactNoun(test.level).toLowerCase()} awaiting execution</em>}</section>)}</div>}
           </details>
         </article>)}</section>}
       </> : <>

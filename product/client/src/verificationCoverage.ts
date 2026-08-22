@@ -21,7 +21,7 @@ export type CoverageItem = {
   verified: boolean
   disposition: 'Covered' | 'Suspect' | 'Uncovered'
   coveredBy: {
-    procedureId: string; revisionId: string; displayNumber: string; title: string; state: string
+    artifactId: string; procedureId?: string; revisionId: string; displayNumber: string; title: string; state: string
     coverageState: 'Confirmed' | 'Suspect'
   }[]
 }

@@ -142,6 +142,8 @@ export type DocumentTypeName =
   | 'SystemTestProcedures'
   | 'HighLevelTestProcedures'
   | 'LowLevelTestProcedures'
+  | 'HighLevelTestCases'
+  | 'LowLevelTestCases'
 
 export type DocumentTarget = { type: DocumentTypeName; label: string }
 
@@ -152,6 +154,8 @@ const documentTypeLabels: Record<DocumentTypeName, string> = {
   SystemTestProcedures: 'System Test Procedure Document (SYSTD)',
   HighLevelTestProcedures: 'HLR Test Procedure Document (HLRTD)',
   LowLevelTestProcedures: 'LLR Test Procedure Document (LLRTD)',
+  HighLevelTestCases: 'HLR Test Case Document (HLRTD)',
+  LowLevelTestCases: 'LLR Test Case Document (LLRTD)',
 }
 
 export const documentTypeLabel = (type: string) =>
@@ -184,6 +188,7 @@ export const artifactAcronym = (identifier?: string, kind?: string) => {
     case 'changerequest': return 'CR'
     case 'requirement': return 'REQ'
     case 'testprocedure': return 'TP'
+    case 'testcase': return 'TC'
     case 'problemreport': return 'PR'
     case 'softwarebuild':
     case 'build': return 'SW'
@@ -202,22 +207,58 @@ export const artifactTypeLabel = (kind: string, identifier?: string) => {
     LLR: 'Low-Level Software Requirement (LLR)',
     SYSTCR: 'System Test Change Request (SYSTCR)', HLRTCR: 'HLR Test Change Request (HLRTCR)',
     LLRTCR: 'LLR Test Change Request (LLRTCR)',
-    SYSTP: 'System Test Procedure (SYSTP)', HLRTP: 'HLR Test Procedure (HLRTP)',
+    SYSTP: 'System Test Procedure (SYSTP)', HLRTC: 'HLR Test Case (HLRTC)',
+    LLRTC: 'LLR Test Case (LLRTC)', HLRTP: 'HLR Test Procedure (HLRTP)',
     LLRTP: 'LLR Test Procedure (LLRTP)', PR: 'Problem Report (PR)', SW: 'Software Build (SW)',
     SYSRD: documentTypeLabels.Sysrd, HLRD: documentTypeLabels.SwrdHighLevel,
     LLRD: documentTypeLabels.SwrdLowLevel,
     SYSTD: documentTypeLabels.SystemTestProcedures,
-    HLRTD: documentTypeLabels.HighLevelTestProcedures,
-    LLRTD: documentTypeLabels.LowLevelTestProcedures,
+    // HLRTD/LLRTD are retained document numbers, but their current software content is Case content. Exact
+    // historical document rows still carry their legacy enum and are labelled through documentTypeLabel.
+    HLRTD: documentTypeLabels.HighLevelTestCases,
+    LLRTD: documentTypeLabels.LowLevelTestCases,
   }
   return labels[acronym] ?? stateLabel(kind.replace(/-/g, ' '))
 }
 
+/** Current software verification artifacts are Cases; System remains a Procedure until the later split. */
+export const verificationArtifactNoun = (level?: string) =>
+  level === 'System' ? 'Procedure' : 'Case'
+
+export const verificationArtifactWord = (level?: string) =>
+  `test ${verificationArtifactNoun(level).toLowerCase()}`
+
+/** The current API collection for the artifact profile. System remains on its Procedure route; software is Case. */
+export const verificationArtifactApiRoot = (scope?: string) => {
+  const normalized = (scope ?? '').replace(/[-_\s]/g, '').toLowerCase()
+  return normalized === 'system' || normalized === 'systemtest'
+    ? '/api/test-procedures'
+    : '/api/test-cases'
+}
+
+export const verificationArtifactDocumentApiRoot = (scope?: string) =>
+  verificationArtifactApiRoot(scope) === '/api/test-procedures'
+    ? 'test-procedure-documents'
+    : 'test-case-documents'
+
+/** Current software change routes use Case vocabulary; the API keeps the old Procedure routes as aliases. */
+export const verificationArtifactChangeSegment = (scope?: string) =>
+  verificationArtifactApiRoot(scope) === '/api/test-procedures' ? 'procedure-changes' : 'case-changes'
+
+export const verificationArtifactTargetSegment = (scope?: string) =>
+  verificationArtifactApiRoot(scope) === '/api/test-procedures' ? 'procedure-targets' : 'case-targets'
+
+export const verificationArtifactPrefix = (level?: string) =>
+  level === 'System' ? 'SYSTP' : level === 'LowLevel' ? 'LLRTC' : 'HLRTC'
+
 /** The procedure documents offered by the Explorer, following the same scope/level rule as requirements. */
 export const procedureTargetsFor = (scope: 'System' | 'Software', level?: string): DocumentTarget[] => {
   if (scope === 'System') return [{ type: 'SystemTestProcedures', label: documentTypeLabels.SystemTestProcedures }]
-  const high: DocumentTarget = { type: 'HighLevelTestProcedures', label: documentTypeLabels.HighLevelTestProcedures }
-  const low: DocumentTarget = { type: 'LowLevelTestProcedures', label: documentTypeLabels.LowLevelTestProcedures }
+  // The shared explorer still owns the historical procedure route/component name, but current software
+  // verification is a Case profile. The reserved Procedure document members remain available only to the
+  // future profile and are never selected for today's software path.
+  const high: DocumentTarget = { type: 'HighLevelTestCases', label: documentTypeLabels.HighLevelTestCases }
+  const low: DocumentTarget = { type: 'LowLevelTestCases', label: documentTypeLabels.LowLevelTestCases }
   if (level === 'HighLevel') return [high]
   if (level === 'LowLevel') return [low]
   return [high, low]

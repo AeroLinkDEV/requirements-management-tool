@@ -20,11 +20,11 @@ namespace AeroLink.Api;
 /// </summary>
 public static class ApprovalConfigurationEndpoints
 {
-    /// <summary>The artifact types a project configures a procedure for, in the order the page lists them.</summary>
+    /// <summary>The artifact types a project configures a review workflow for, in the order the page lists them.</summary>
     private static readonly ReviewSubject[] Subjects =
     [
         ReviewSubject.System, ReviewSubject.Software, ReviewSubject.Interface,
-        ReviewSubject.SystemTest, ReviewSubject.HighLevelSoftwareTest, ReviewSubject.LowLevelSoftwareTest,
+        ReviewSubject.SystemTest, ReviewSubject.HighLevelSoftwareCase, ReviewSubject.LowLevelSoftwareCase,
     ];
 
     public static void MapApprovalConfigurationEndpoints(this WebApplication app)
@@ -240,9 +240,9 @@ public static class ApprovalConfigurationEndpoints
             && policy.Definition(RequirementLevel.Interface).Has(LevelCapabilities.HasChangeControl),
         ReviewSubject.SystemTest => policy.OrderedLevels.Contains(RequirementLevel.System)
             && policy.Definition(RequirementLevel.System).Verification is not null,
-        ReviewSubject.HighLevelSoftwareTest => policy.OrderedLevels.Contains(RequirementLevel.HighLevel)
+        ReviewSubject.HighLevelSoftwareCase => policy.OrderedLevels.Contains(RequirementLevel.HighLevel)
             && policy.Definition(RequirementLevel.HighLevel).Verification is not null,
-        ReviewSubject.LowLevelSoftwareTest => policy.OrderedLevels.Contains(RequirementLevel.LowLevel)
+        ReviewSubject.LowLevelSoftwareCase => policy.OrderedLevels.Contains(RequirementLevel.LowLevel)
             && policy.Definition(RequirementLevel.LowLevel).Verification is not null,
         _ => false,
     };

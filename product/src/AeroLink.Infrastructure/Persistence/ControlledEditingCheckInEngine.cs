@@ -894,7 +894,7 @@ public sealed class TestChangeRequestControlledEditingAdapter(AeroLinkDbContext 
         var draft = JsonSerializer.Deserialize<TestChangeRequestDraft>(draftJson, DraftOptions)
             ?? throw new JsonException("The latest autosaved test change request draft is empty.");
         if (draft.ProcedureChanges is null)
-            throw new JsonException("The latest autosaved test change request draft does not contain procedure changes.");
+            throw new JsonException($"The latest autosaved test change request draft does not contain {(item.Discipline == TestChangeReviewDiscipline.System ? "procedure" : "case")} changes.");
 
         item.WriteCase(actor, draft.Title ?? "", draft.Problem ?? "", draft.Analysis ?? "", draft.Solution ?? "",
             now, draft.ProblemRich, draft.AnalysisRich, draft.SolutionRich);

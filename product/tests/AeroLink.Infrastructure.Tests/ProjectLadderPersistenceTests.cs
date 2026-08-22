@@ -313,6 +313,7 @@ public sealed class ProjectLadderPersistenceTests : IAsyncLifetime
             "requirement-artifact" => "requirement-artifact",
             "requirement-revision" => "requirement-artifact", // The artifact prerequisite is the first qualifying row.
             "test-procedure" => "test-procedure",
+            "test-case" => "test-case",
             "test-change-review" => "test-change-review",
             "trace-link" => "requirement-artifact", // Revisions and their artifact are prerequisites.
             "code-traceability" => "code-traceability", // Deterministic kind ordering makes this candidate first in the same UoW.
@@ -635,8 +636,15 @@ public sealed class ProjectLadderPersistenceTests : IAsyncLifetime
             }
             case "test-procedure":
             {
-                var procedure = new TestProcedure(_fmsProjectId, "HLRTP-00001",
-                    "Catalog procedure", "catalog.test", now, TestProcedureLevel.HighLevel);
+                var procedure = new TestProcedure(_fmsProjectId, "SYSTP-00001",
+                    "Catalog procedure", "catalog.test", now, TestProcedureLevel.System);
+                db.TestProcedures.Add(procedure);
+                return procedure.BaseNumber;
+            }
+            case "test-case":
+            {
+                var procedure = new TestProcedure(_fmsProjectId, "HLRTC-00001",
+                    "Catalog case", "catalog.test", now, TestProcedureLevel.HighLevel);
                 db.TestProcedures.Add(procedure);
                 return procedure.BaseNumber;
             }

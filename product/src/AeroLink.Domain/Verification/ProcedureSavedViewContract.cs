@@ -72,9 +72,9 @@ public static class ProcedureSavedViewContract
 
             var text = value.ToString();
             if (string.Equals(key, "level", StringComparison.OrdinalIgnoreCase) && !Levels.Contains(text))
-                return Invalid($"'{text}' is not a procedure level.");
+                return Invalid($"'{text}' is not a verification artifact level.");
             if (string.Equals(key, "state", StringComparison.OrdinalIgnoreCase) && !States.Contains(text))
-                return Invalid($"'{text}' is not a procedure state.");
+                return Invalid($"'{text}' is not a verification artifact state.");
             if (string.Equals(key, "outcome", StringComparison.OrdinalIgnoreCase) && !Outcomes.Contains(text))
                 return Invalid($"'{text}' is not an execution outcome.");
             // A document or section is addressed by id, and an id that is not one would filter to nothing

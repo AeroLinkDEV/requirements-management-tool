@@ -36,7 +36,7 @@ export default function LegacyProcedureBootstrapPanel({ api, baselineId, onCompl
       return
     }
     if (!response.ok) {
-      setError('The legacy procedure snapshot preview could not be loaded.')
+      setError('The legacy verification artifact snapshot preview could not be loaded.')
       return
     }
     setHidden(false)
@@ -67,7 +67,7 @@ export default function LegacyProcedureBootstrapPanel({ api, baselineId, onCompl
     )
     const body = await response.json().catch(() => ({})) as Preview & { error?: string }
     if (!response.ok) {
-      setError(body.error || 'The legacy procedure snapshot could not be established.')
+      setError(body.error || 'The legacy verification artifact snapshot could not be established.')
       setBusy(false)
       return
     }
@@ -80,20 +80,20 @@ export default function LegacyProcedureBootstrapPanel({ api, baselineId, onCompl
   if (hidden || !preview) return error ? <div className="workspaceError">{error}</div> : null
 
   return (
-    <section className="baselineCard" aria-label="Legacy procedure manifest bootstrap">
+    <section className="baselineCard" aria-label="Legacy verification artifact manifest bootstrap">
       <div className="baselineCardTitle">
         <div>
           <p className="eyebrow">LEGACY CONFIGURATION MIGRATION</p>
-          <h3>Legacy procedure manifest</h3>
+          <h3>Legacy verification artifact manifest</h3>
           <p>
-            Exact procedure membership for {preview.baselineDisplayNumber}, established from the
+            Exact verification artifact membership for {preview.baselineDisplayNumber}, established from the
             controlled inventory that exists now.
           </p>
         </div>
         {preview.alreadyBootstrapped && <div className="frozenMark">✓ Snapshot established</div>}
       </div>
       <div className="hashPanel">
-        <span>PROCEDURE MANIFEST SHA-256</span>
+        <span>VERIFICATION ARTIFACT MANIFEST SHA-256</span>
         <code>{preview.proceduresHash}</code>
         <p>{preview.selectionRule}</p>
       </div>
@@ -125,7 +125,7 @@ export default function LegacyProcedureBootstrapPanel({ api, baselineId, onCompl
           {error && <div className="workspaceError">{error}</div>}
           <div className="baselineActions">
             <button type="button" disabled={!confirmed || busy} onClick={establish}>
-              {busy ? 'Establishing…' : 'Establish legacy procedure snapshot'}
+              {busy ? 'Establishing…' : 'Establish legacy verification artifact snapshot'}
             </button>
           </div>
         </>

@@ -118,7 +118,10 @@ static class ApiMap
         ControlledDocumentType.SwrdLowLevel => "Low-Level Software Requirements Document (LLRD)",
         ControlledDocumentType.SystemTestProcedures => "System Test Procedure Document (SYSTD)",
         ControlledDocumentType.HighLevelTestProcedures => "HLR Test Procedure Document (HLRTD)",
-        _ => "LLR Test Procedure Document (LLRTD)"
+        ControlledDocumentType.LowLevelTestProcedures => "LLR Test Procedure Document (LLRTD)",
+        ControlledDocumentType.HighLevelTestCases => "HLR Test Case Document (HLRTD)",
+        ControlledDocumentType.LowLevelTestCases => "LLR Test Case Document (LLRTD)",
+        _ => throw new DomainException($"Unknown controlled document type: {type}.")
     };
 
     private static readonly Regex LegacyRequirementNumber = new(@"\b(SYSR|HLR|LLR)-0*([0-9]{1,6})(\.[0-9]{2})\b", RegexOptions.Compiled | RegexOptions.IgnoreCase);

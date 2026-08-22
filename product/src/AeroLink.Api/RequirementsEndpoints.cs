@@ -229,7 +229,19 @@ public static class RequirementsEndpoints
             var procedureEffectivity=releaseId is null?null:await TestProcedureEffectivity.ForReleaseAsync(db,artifact.ProjectId,releaseId.Value,ct);
             var isExactProcedureSnapshot=procedureEffectivity is not null&&await db.CandidateBaselines.AsNoTracking().AnyAsync(x=>x.Id==procedureEffectivity.BaselineId&&x.ReleaseId==releaseId,ct);
             var coverageLinks=await VerificationCoverageProjection.ForRequirementRevisionsAsync(db,[current.Id],ct,isExactProcedureSnapshot,procedureEffectivity?.RevisionIds);
-            var tests=coverageLinks.Select(x=>new{id=x.ProcedureId,revisionId=x.ProcedureRevisionId,x.DisplayNumber,x.Title,x.Level,state=x.ProcedureState,x.IsSuspect,x.CoverageState}).ToList();
+            var tests=coverageLinks.Select(x=>new
+            {
+                id=x.ArtifactId,
+                artifactId=x.ArtifactId,
+                artifactRevisionId=x.ArtifactRevisionId,
+                artifactKind=x.Level=="System"?"Procedure":"Case",
+                artifactState=x.ArtifactState,
+                procedureId=x.ProcedureId, // compatibility alias
+                procedureRevisionId=x.ProcedureRevisionId, // compatibility alias
+                x.DisplayNumber,x.Title,x.Level,
+                state=x.ArtifactState,
+                x.IsSuspect,x.CoverageState
+            }).ToList();
             var baselines=await (from selection in db.BaselineRequirements.AsNoTracking().Where(x=>x.ArtifactId==artifactId) join baseline in db.CandidateBaselines.AsNoTracking() on selection.BaselineId equals baseline.Id join release in db.Releases.AsNoTracking() on baseline.ReleaseId equals release.Id select new{baseline.Id,baseline=baseline.BaseNumber+"."+(baseline.Revision<10?"0":"")+baseline.Revision,baseline.Name,state=baseline.State.ToString(),release=release.Version,selection.RevisionId}).ToListAsync(ct);
             var baselineIds=baselines.Select(x=>x.Id).ToList();var builds=await db.SoftwareBuilds.AsNoTracking().Where(x=>baselineIds.Contains(x.BaselineId)).Select(x=>new{x.Id,x.BuildNumber,x.Description,state=x.State.ToString()}).ToListAsync(ct);var documents=await db.ControlledDocuments.AsNoTracking().Where(x=>baselineIds.Contains(x.BaselineId)).Select(x=>new{x.Id,x.DocumentNumber,x.Revision,x.Title,type=x.Type.ToString(),x.ContentHash}).ToListAsync(ct);
             var activeChanges=await (from change in db.RequirementChanges.AsNoTracking().Where(x=>x.BaseNumber==artifact.BaseNumber) join scr in db.SystemChangeRequests.AsNoTracking() on change.ChangeRequestId equals scr.Id where scr.State==ChangeRequestState.Draft||scr.State==ChangeRequestState.InReview||scr.State==ChangeRequestState.Approved select new{scr.Id,displayNumber=scr.BaseNumber+"."+(scr.Revision<10?"0":"")+scr.Revision,scr.Title,state=scr.State.ToString(),kind=change.Kind.ToString(),proposedRevision=change.Revision}).ToListAsync(ct);

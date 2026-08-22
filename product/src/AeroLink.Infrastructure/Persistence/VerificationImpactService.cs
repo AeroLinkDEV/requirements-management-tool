@@ -249,7 +249,7 @@ public sealed class VerificationImpactService(AeroLinkDbContext db, ProblemRepor
             foreach (var coverage in priorCoverage.Where(x => x.RequirementRevisionId == change.PriorRevisionId!.Value))
             {
                 var link = TestRequirementCoverage.CarriedForward(coverage.ProcedureRevisionId, change.RevisionId,
-                    $"{change.DisplayNumber} changed under this procedure, which was written against the previous wording.", now);
+                    $"{change.DisplayNumber} changed under this verification artifact, which was written against the previous wording.", now);
                 db.TestCoverage.Add(link);
                 carried.Add(link);
             }

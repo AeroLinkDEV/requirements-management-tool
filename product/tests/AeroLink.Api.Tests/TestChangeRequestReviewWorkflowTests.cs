@@ -28,8 +28,8 @@ public sealed class TestChangeRequestReviewWorkflowTests
         Assert.Equal(ReviewSubject.Software, WorkflowEndpoints.SubjectOf(ChangeRequestType.Software));
         Assert.Equal(ReviewSubject.Interface, WorkflowEndpoints.SubjectOf(ChangeRequestType.Interface));
         Assert.Equal(ReviewSubject.SystemTest, WorkflowEndpoints.SubjectOf(TestChangeReviewDiscipline.System));
-        Assert.Equal(ReviewSubject.HighLevelSoftwareTest, WorkflowEndpoints.SubjectOf(TestChangeReviewDiscipline.HighLevelSoftware));
-        Assert.Equal(ReviewSubject.LowLevelSoftwareTest, WorkflowEndpoints.SubjectOf(TestChangeReviewDiscipline.LowLevelSoftware));
+        Assert.Equal(ReviewSubject.HighLevelSoftwareCase, WorkflowEndpoints.SubjectOf(TestChangeReviewDiscipline.HighLevelSoftware));
+        Assert.Equal(ReviewSubject.LowLevelSoftwareCase, WorkflowEndpoints.SubjectOf(TestChangeReviewDiscipline.LowLevelSoftware));
     }
 
     private sealed record Fixture(Guid ProjectId, Guid ReleaseId, Guid ChangeId, Guid ReviewId, Guid ItemId,
@@ -633,14 +633,14 @@ public sealed class TestChangeRequestReviewWorkflowTests
         {
             projectId = fixture.ProjectId,
             name = "Removed high-level test workflow",
-            appliesTo = nameof(ReviewSubject.HighLevelSoftwareTest),
+            appliesTo = nameof(ReviewSubject.HighLevelSoftwareCase),
             mode = nameof(ReviewMode.Sequential),
             stages = new[] { new { name = "High-level review", requiredRole = nameof(ProgramRole.TestLead) } },
         });
 
         var body = await refused.Content.ReadAsStringAsync();
         Assert.Equal(HttpStatusCode.BadRequest, refused.StatusCode);
-        Assert.Contains("does not configure", body, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("does not configure review discipline HighLevelSoftware", body, StringComparison.OrdinalIgnoreCase);
     }
 
     [Theory]

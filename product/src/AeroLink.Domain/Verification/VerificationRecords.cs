@@ -14,7 +14,8 @@ public sealed class TestProcedure : IVerificationArtifactHeader
         TestProcedureLevel level = TestProcedureLevel.HighLevel, ILadderPolicy? policy = null,
         VerificationArtifactKind? artifactKind = null)
     {
-        if (string.IsNullOrWhiteSpace(title)) throw new DomainException("A test procedure title is required.");
+        var artifactWord = level == TestProcedureLevel.System ? "test procedure" : "test case";
+        if (string.IsNullOrWhiteSpace(title)) throw new DomainException($"A {artifactWord} title is required.");
         Id = Guid.NewGuid(); ProjectId = projectId; BaseNumber = ArtifactNumber.ValidateBase(baseNumber);
         EnsurePrefixMatchesLevel(BaseNumber, level, policy);
         Title = title.Trim(); OwnerId = ownerId.Trim(); CreatedAt = now; UpdatedAt = now; Level = level;
@@ -23,7 +24,7 @@ public sealed class TestProcedure : IVerificationArtifactHeader
             TestProcedureLevel.System => VerificationDiscipline.System,
             TestProcedureLevel.HighLevel => VerificationDiscipline.HighLevelSoftware,
             TestProcedureLevel.LowLevel => VerificationDiscipline.LowLevelSoftware,
-            _ => throw new DomainException($"Unknown test procedure level: {level}.")
+            _ => throw new DomainException($"Unknown verification artifact level: {level}.")
         };
         ArtifactKind = artifactKind ?? (level == TestProcedureLevel.System
             ? VerificationArtifactKind.Procedure
@@ -39,7 +40,7 @@ public sealed class TestProcedure : IVerificationArtifactHeader
     /// <summary>
     /// A procedure's number and its level are one fact, so they are not allowed to disagree.
     ///
-    /// The allocator picks SYSTP, HLRTP or LLRTP <em>from</em> the level, so a SYSTP numbered procedure that
+    /// The allocator picks SYSTP, HLRTC or LLRTC <em>from</em> the level, so a SYSTP numbered procedure that
     /// says it is HighLevel did not come from there — it came from a caller that left the level to its default.
     /// That is not a cosmetic mislabelling: the level decides which requirements the procedure may verify and
     /// which discipline answers for it when a retirement strands it, so a wrong one puts real work in the wrong
@@ -50,11 +51,17 @@ public sealed class TestProcedure : IVerificationArtifactHeader
         var ladderPolicy = policy ?? LegacyLadderPolicy.Instance;
         var expected = ladderPolicy.TestProcedurePrefix(level) + "-";
         if (baseNumber.StartsWith(expected, StringComparison.OrdinalIgnoreCase)) return;
+        // HLRTP/LLRTP are retained only as a read/fixture compatibility spelling for pre-#722 rows. New
+        // software Case creation is always allocated as HLRTC/LLRTC by the policy.
+        if (level == TestProcedureLevel.HighLevel && baseNumber.StartsWith("HLRTP-", StringComparison.OrdinalIgnoreCase)
+            || level == TestProcedureLevel.LowLevel && baseNumber.StartsWith("LLRTP-", StringComparison.OrdinalIgnoreCase))
+            return;
         // Only a number claiming to be a test procedure is judged. A project numbering its procedures some
         // other way is not making this mistake, and is not this rule's business.
         if (!ladderPolicy.IsKnownTestProcedurePrefix(baseNumber)) return;
+        var artifactWord = level == TestProcedureLevel.System ? "test procedure" : "test case";
         throw new DomainException(
-            $"{baseNumber} is numbered for a different level than {level}. A test procedure's number and its level have to agree.");
+            $"{baseNumber} is numbered for a different level than {level}. A {artifactWord}'s number and its level have to agree.");
     }
     public Guid Id { get; private set; }
     public Guid ProjectId { get; private set; }
@@ -75,8 +82,9 @@ public sealed class TestProcedure : IVerificationArtifactHeader
 
     public void UpdateDraft(string title, string ownerId, DateTimeOffset now)
     {
-        if (string.IsNullOrWhiteSpace(title)) throw new DomainException("A test procedure title is required.");
-        if (string.IsNullOrWhiteSpace(ownerId)) throw new DomainException("A test procedure owner is required.");
+        var artifactWord = ArtifactKind == VerificationArtifactKind.Case ? "test case" : "test procedure";
+        if (string.IsNullOrWhiteSpace(title)) throw new DomainException($"A {artifactWord} title is required.");
+        if (string.IsNullOrWhiteSpace(ownerId)) throw new DomainException($"A {artifactWord} owner is required.");
         Title = title.Trim(); OwnerId = ownerId.Trim(); UpdatedAt = now;
     }
 }
@@ -89,7 +97,7 @@ public sealed class TestProcedureRevision
         string? selectedApproverId = null, Guid? sourceTestChangeRequestId = null,
         Guid? effectiveBaselineId = null, string sourceChangeRequestsJson = "[]")
     {
-        if (revision < 0) throw new DomainException("Test procedure revision cannot be negative.");
+        if (revision < 0) throw new DomainException("Verification artifact revision cannot be negative.");
         // A retired procedure is being removed, not restated — the same exemption a retired requirement revision
         // gets, so a retirement does not have to repeat the body of the thing it is withdrawing.
         if (state != TestProcedureState.Retired
@@ -104,7 +112,7 @@ public sealed class TestProcedureRevision
             : sourceChangeRequestsJson.Trim();
         try { using var parsed = System.Text.Json.JsonDocument.Parse(sourceSnapshot); }
         catch (System.Text.Json.JsonException)
-        { throw new DomainException("Test procedure source-change provenance must be valid JSON."); }
+        { throw new DomainException("Verification artifact source-change provenance must be valid JSON."); }
         SourceChangeRequestsJson = sourceSnapshot;
     }
     public Guid Id { get; private set; }
@@ -140,7 +148,7 @@ public sealed class TestProcedureRevision
                 TestProcedureState.Draft => VerificationArtifactLifecycleState.Draft,
                 TestProcedureState.Approved => VerificationArtifactLifecycleState.Active,
                 TestProcedureState.Retired => VerificationArtifactLifecycleState.Retired,
-                _ => throw new DomainException($"Unknown test procedure state: {State}.")
+                _ => throw new DomainException($"Unknown verification artifact state: {State}.")
             }, AuthorId, SourceTestChangeRequestId, EffectiveBaselineId, CreatedAt);
     }
     public VerificationArtifactRevisionProvenance RevisionProvenance =>
@@ -155,10 +163,10 @@ public sealed class TestProcedureRevision
 
     public void UpdateDraft(string objective, string preconditions, string steps, string expectedResult, string actor)
     {
-        if (State != TestProcedureState.Draft) throw new DomainException("Only a Draft test procedure revision can be edited.");
+        if (State != TestProcedureState.Draft) throw new DomainException("Only a Draft verification artifact revision can be edited.");
         if (string.IsNullOrWhiteSpace(objective) || string.IsNullOrWhiteSpace(steps) || string.IsNullOrWhiteSpace(expectedResult))
             throw new DomainException("Objective, steps, and expected result are required.");
-        if (string.IsNullOrWhiteSpace(actor)) throw new DomainException("A test procedure update actor is required.");
+        if (string.IsNullOrWhiteSpace(actor)) throw new DomainException("A verification artifact update actor is required.");
         Objective = objective.Trim(); Preconditions = preconditions.Trim(); Steps = steps.Trim(); ExpectedResult = expectedResult.Trim();
     }
 

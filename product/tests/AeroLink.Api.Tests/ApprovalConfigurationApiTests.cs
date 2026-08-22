@@ -199,7 +199,7 @@ public sealed class ApprovalConfigurationApiTests : IClassFixture<SharedApiHost>
 
         var subjects = (await ReadAsync(client, seeded.ProjectId)).Artifacts.Select(x => x.Subject).ToList();
         Assert.Equal(
-            ["System", "Software", "SystemTest", "HighLevelSoftwareTest", "LowLevelSoftwareTest"],
+            ["System", "Software", "SystemTest", "HighLevelSoftwareCase", "LowLevelSoftwareCase"],
             subjects);
     }
 

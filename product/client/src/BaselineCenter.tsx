@@ -425,13 +425,13 @@ export default function BaselineCenter({
                       this is a second act rather than part of materializing the SWRD. */}
                   {detail.requirementsMaterializedAt && (
                     detail.testProceduresMaterializedAt
-                      ? <div className="frozenMark">✓ Test procedures materialized</div>
+                      ? <div className="frozenMark">✓ Verification artifacts materialized</div>
                       : !readOnly && (
                         <button
                           disabled={busy}
                           onClick={() => action("materialize-test-procedures", "POST", {})}
                         >
-                          {busy ? "Materializing…" : "Materialize test procedures"}
+                          {busy ? "Materializing…" : "Materialize verification artifacts"}
                         </button>
                       )
                   )}

@@ -255,6 +255,10 @@ public sealed class TestChangeReview
     /// </summary>
     public IReadOnlyCollection<TestProcedureChange> ProcedureChanges => _procedureChanges.AsReadOnly();
 
+    private string ArtifactWord => Discipline == TestChangeReviewDiscipline.System ? "test procedure" : "test case";
+    private string ArtifactPlural => Discipline == TestChangeReviewDiscipline.System ? "test procedures" : "test cases";
+    private string ArtifactNoun => Discipline == TestChangeReviewDiscipline.System ? "procedure" : "case";
+
     /// <summary>
     /// Adds a proposed procedure change.
     ///
@@ -277,16 +281,16 @@ public sealed class TestChangeReview
         if (!allowIncomplete && draft.Kind != TestProcedureChangeKind.Retire)
         {
             if (string.IsNullOrWhiteSpace(draft.Title))
-                throw new DomainException("A test procedure title is required.");
+                throw new DomainException($"A {ArtifactWord} title is required.");
             if (string.IsNullOrWhiteSpace(draft.Objective))
-                throw new DomainException("A test procedure objective is required.");
+                throw new DomainException($"A {ArtifactWord} objective is required.");
             if (string.IsNullOrWhiteSpace(draft.Steps))
-                throw new DomainException("A test procedure must state its steps.");
+                throw new DomainException($"A {ArtifactWord} must state its steps.");
         }
         if (Outcome != TestChangeReviewOutcome.ChangeRequired)
-            throw new DomainException("Record that test-procedure work is required before proposing changes to procedures.");
+            throw new DomainException($"Record that {ArtifactWord} work is required before proposing changes to {ArtifactPlural}.");
         if (draft.Level != ProcedureLevel(policy))
-            throw new DomainException($"A {Discipline} test change request can contain {ProcedureLevel(policy)} procedures only.");
+            throw new DomainException($"A {Discipline} test change request can contain {ProcedureLevel(policy)} {ArtifactPlural} only.");
         // One proposal per procedure, but an unnamed proposal is not yet a procedure. Two proposals an author
         // has started and not yet pointed at anything both carry an empty base number, and comparing those
         // for equality would refuse the second with "already has a proposed change" — naming a procedure
@@ -351,7 +355,7 @@ public sealed class TestChangeReview
         if (Outcome == TestChangeReviewOutcome.Pending)
             throw new DomainException("Assess the change before sending it for review.");
         if (!everyItemResolved)
-            throw new DomainException("Every test-procedure decision must be completed before review.");
+            throw new DomainException($"Every {ArtifactWord} decision must be completed before review.");
         var missingCaseFields = MissingCaseFields();
         if (Outcome == TestChangeReviewOutcome.ChangeRequired
             && CaseContractVersion >= CurrentCaseContractVersion && missingCaseFields.Count > 0)
@@ -360,7 +364,7 @@ public sealed class TestChangeReview
         if (Outcome == TestChangeReviewOutcome.ChangeRequired
             && CaseContractVersion >= CurrentCaseContractVersion && _procedureChanges.Count == 0)
             throw new DomainException(
-                "A test change request that requires test work names no procedure decisions. Add an Introduce, Modify, or Retire decision before review.");
+                $"A test change request that requires test work names no {ArtifactNoun} decisions. Add an Introduce, Modify, or Retire decision before review.");
         // A procedure being introduced has to say what it verifies, and submission is where that is checked —
         // not when it is written. A draft package is worked on incrementally, exactly as a change request is,
         // so the gate belongs at the point an approver is asked to sign rather than at the point an engineer
@@ -369,16 +373,16 @@ public sealed class TestChangeReview
                 && (string.IsNullOrWhiteSpace(x.DrivingRequirementRevisionIdsJson)
                     || x.DrivingRequirementRevisionIdsJson.Trim() is "[]" or "")))
             throw new DomainException(
-                "Every procedure this package introduces must name the requirement revisions it verifies.");
+                $"Every {ArtifactNoun} this package introduces must name the requirement revisions it verifies.");
         // The same rule as the driving requirements above, applied to the rest of a proposal. An engineer can
         // leave one half-written across as many sittings as the work takes; what cannot happen is an approver
         // being asked to sign a procedure with no steps, or a retirement with no reason. This is the gate the
         // check-in control used to stand in for, moved to the point it is actually a claim about readiness.
         foreach (var change in _procedureChanges)
         {
-            var identity = string.IsNullOrWhiteSpace(change.BaseNumber) ? "An unnamed procedure proposal" : change.BaseNumber;
+            var identity = string.IsNullOrWhiteSpace(change.BaseNumber) ? $"An unnamed {ArtifactNoun} proposal" : change.BaseNumber;
             if (string.IsNullOrWhiteSpace(change.BaseNumber))
-                throw new DomainException($"{identity} must name its procedure before review.");
+                throw new DomainException($"{identity} must name its {ArtifactNoun} before review.");
             if (change.Kind == TestProcedureChangeKind.Retire)
             {
                 if (string.IsNullOrWhiteSpace(change.Rationale))
@@ -388,7 +392,7 @@ public sealed class TestChangeReview
             if (string.IsNullOrWhiteSpace(change.Title) || string.IsNullOrWhiteSpace(change.Objective)
                 || string.IsNullOrWhiteSpace(change.Steps) || string.IsNullOrWhiteSpace(change.Rationale))
                 throw new DomainException(
-                    $"{identity} is unfinished. A procedure needs its title, objective, steps and rationale before review.");
+                    $"{identity} is unfinished. A {ArtifactNoun} needs its title, objective, steps and rationale before review.");
         }
         if (approvers.Any(x => string.Equals(x.UserId, actorId, StringComparison.OrdinalIgnoreCase)))
             throw new DomainException("The test change request approver must be independent from its submitting engineer.");
@@ -560,6 +564,15 @@ public sealed class TestChangeReview
     }
 
     /// <summary>
+    /// Rebuilds the exact signed review snapshot after an identity-only Case migration. The caller supplies the
+    /// persisted impact/link inputs because those are separate records, while this aggregate retains the full
+    /// procedure-change body and provenance unchanged.
+    /// </summary>
+    public string ComputeSnapshotHashForIdentityMigration(IReadOnlyList<Guid> problemReportIds,
+        IReadOnlyList<VerificationImpactSnapshot> impactDecisions) =>
+        ComputeSnapshotHash(problemReportIds, impactDecisions);
+
+    /// <summary>
     /// The source change requests this package answers for, in a deterministic order independent of the
     /// order the caller happened to fold them in.
     /// </summary>
@@ -576,7 +589,7 @@ public sealed class TestChangeReview
                 (ChangeRequestId: x.ChangeRequestId, DisplayNumber: x.ChangeRequestNumber, Originating: false)))
             .OrderBy(x => x.ChangeRequestId.ToString("D"), StringComparer.Ordinal);
 
-    private static IReadOnlyList<Guid> DrivingRequirementIds(string json)
+    private IReadOnlyList<Guid> DrivingRequirementIds(string json)
     {
         if (string.IsNullOrWhiteSpace(json)) return [];
         try
@@ -586,7 +599,7 @@ public sealed class TestChangeReview
         catch (System.Text.Json.JsonException)
         {
             throw new DomainException(
-                "A procedure change carries malformed driving requirement revisions. Correct it before sending the package for review.");
+                $"A {ArtifactNoun} change carries malformed driving requirement revisions. Correct it before sending the package for review.");
         }
     }
 
@@ -594,7 +607,7 @@ public sealed class TestChangeReview
     {
         EnsureOpen();
         var change = _procedureChanges.SingleOrDefault(x => x.Id == changeId)
-            ?? throw new DomainException("That procedure change is not part of this test change request.");
+            ?? throw new DomainException($"That {ArtifactNoun} change is not part of this test change request.");
         _procedureChanges.Remove(change);
         Touch(now);
     }
@@ -607,7 +620,7 @@ public sealed class TestChangeReview
     {
         if (!string.IsNullOrEmpty(BaseNumber)) return;
         if (Outcome != TestChangeReviewOutcome.ChangeRequired)
-            throw new DomainException("Record that test-procedure work is required before raising the test change request that carries it.");
+            throw new DomainException($"Record that {ArtifactWord} work is required before raising the test change request that carries it.");
         var number = Required(baseNumber, "controlled test change request number");
         var expectedPrefix = (policy ?? LegacyLadderPolicy.Instance).TestChangeReviewPrefix(Discipline) + "-";
         if (!number.StartsWith(expectedPrefix, StringComparison.OrdinalIgnoreCase))

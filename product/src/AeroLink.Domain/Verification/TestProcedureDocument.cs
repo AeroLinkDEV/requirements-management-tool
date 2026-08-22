@@ -23,8 +23,8 @@ public sealed class TestProcedureDocument
     public TestProcedureDocument(Guid projectId, string documentNumber, string title, TestProcedureLevel level,
         string description, string actor, DateTimeOffset now)
     {
-        if (projectId == Guid.Empty) throw new DomainException("A test procedure document belongs to a Project.");
-        if (!Enum.IsDefined(level)) throw new DomainException("A test procedure document requires a known level.");
+        if (projectId == Guid.Empty) throw new DomainException("A verification artifact document belongs to a Project.");
+        if (!Enum.IsDefined(level)) throw new DomainException("A verification artifact document requires a known level.");
         Id = Guid.NewGuid();
         ProjectId = projectId;
         DocumentNumber = Required(documentNumber, "document number");
@@ -66,7 +66,7 @@ public sealed class TestProcedureDocument
     }
 
     private static string Required(string value, string name) =>
-        string.IsNullOrWhiteSpace(value) ? throw new DomainException($"A test procedure document requires a {name}.") : value.Trim();
+        string.IsNullOrWhiteSpace(value) ? throw new DomainException($"A verification artifact document requires a {name}.") : value.Trim();
 }
 
 /// <summary>
@@ -84,9 +84,9 @@ public sealed class TestProcedureDocumentNode
     public TestProcedureDocumentNode(Guid documentId, Guid? parentId, int position,
         TestProcedureDocumentNodeType type, string heading, Guid? procedureId, string actor, DateTimeOffset now)
     {
-        if (documentId == Guid.Empty) throw new DomainException("A node belongs to a test procedure document.");
+        if (documentId == Guid.Empty) throw new DomainException("A node belongs to a verification artifact document.");
         if (type == TestProcedureDocumentNodeType.Procedure && procedureId is null)
-            throw new DomainException("Procedure nodes need a procedure.");
+            throw new DomainException("Artifact nodes need a verification artifact.");
         if (type == TestProcedureDocumentNodeType.Section && string.IsNullOrWhiteSpace(heading))
             throw new DomainException("Section nodes need a heading.");
         Id = Guid.NewGuid();

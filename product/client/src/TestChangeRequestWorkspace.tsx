@@ -4,6 +4,7 @@ import { PersonName } from './People'
 import { ApiError, apiRequest, operationError } from './apiClient'
 import { RichCaseField, RichContentView } from './RichContent'
 import { fromPlainText, toPlainText } from './richContentModel'
+import { verificationArtifactChangeSegment, verificationArtifactNoun, verificationArtifactPrefix, verificationArtifactTargetSegment, verificationArtifactWord } from './presentation'
 // The requirements queue's stylesheet, imported rather than copied. The testing side is meant to be the same
 // surface for the same kind of work, and a second stylesheet that merely looked like it would drift the first
 // time either was touched.
@@ -18,26 +19,30 @@ type CurrentCoverage={id:string;revisionId:string;displayNumber:string;statement
 type ProcedureTarget={procedureId?:string;baseNumber:string;title:string;currentRevision:number;state?:string;currentCoverage:CurrentCoverage[]}
 type ProcedureTargetPage={page:number;pageSize:number;totalCount:number;totalPages:number;items:ProcedureTarget[]}
 type RequirementChoicePage={page:number;pageSize:number;totalCount:number;totalPages:number;items:RequirementChoice[]}
-type Capabilities={canProposeProcedureChange:boolean;canWithdrawProcedureChange:boolean;canRevise:boolean}
-type Package={id:string;displayNumber:string;baseNumber:string;revision:number;discipline:string;state:string;outcome:string;procedureLevel:string;sourceChangeRequestNumber:string;assignedEngineerId?:string;version:number;caseContractVersion:number;title:string;problem:string;analysis:string;solution:string;problemRich:string;analysisRich:string;solutionRich:string;procedureChanges:ProcedureChange[];capabilities:Capabilities;drivingRequirementChoices:RequirementChoice[];procedureTargets:ProcedureTarget[]}
+type Capabilities={canProposeArtifactChange?:boolean;canWithdrawArtifactChange?:boolean;canProposeProcedureChange?:boolean;canWithdrawProcedureChange?:boolean;canRevise:boolean}
+type Package={id:string;displayNumber:string;baseNumber:string;revision:number;discipline:string;state:string;outcome:string;artifactLevel?:string;procedureLevel?:string;artifactKind?:string;artifactLabel?:string;sourceChangeRequestNumber:string;assignedEngineerId?:string;version:number;caseContractVersion:number;title:string;problem:string;analysis:string;solution:string;problemRich:string;analysisRich:string;solutionRich:string;artifactChanges?:ProcedureChange[];procedureChanges?:ProcedureChange[];capabilities:Capabilities;drivingRequirementChoices:RequirementChoice[];artifactTargets?:ProcedureTarget[];procedureTargets?:ProcedureTarget[]}
 type SupersededBy={id:string;displayNumber?:string;reason?:string}
 
 const levelName=(discipline:string)=>discipline==='System'?'SYS':discipline==='HighLevelSoftware'?'HLR':'LLR'
-const procedureWord=(level:string)=>level==='System'?'SYSTP':level==='HighLevel'?'HLRTP':'LLRTP'
+const procedureWord=(level:string)=>verificationArtifactPrefix(level)
+const artifactWord=(level:string)=>verificationArtifactWord(level)
+const artifactNoun=(level:string)=>verificationArtifactNoun(level)
 /**
  * What the package is, and what has happened to it. The same two facts the requirements drawer states, in the
  * same order, because a reader moving between the two should not have to learn a second vocabulary.
  */
 const packageStatus=(item:Package)=>{
   const level=levelName(item.discipline)
+  const word=artifactWord(item.artifactLevel ?? item.procedureLevel ?? 'System')
   if(item.state==='Superseded')return `${level}TCR Superseded`
   if(item.state==='Approved')return `${level}TCR Approved`
   if(item.state==='InReview')return `${level}TCR In Review – Awaiting Approval`
-  return item.procedureChanges.length
-    ? `${level}TCR Open – ${item.procedureChanges.length} procedure ${item.procedureChanges.length===1?'decision':'decisions'} proposed`
-    : `${level}TCR Open – No Procedure Decisions Yet`
+  const changes = item.artifactChanges ?? item.procedureChanges ?? []
+  return changes.length
+    ? `${level}TCR Open – ${changes.length} ${word} ${changes.length===1?'decision':'decisions'} proposed`
+    : `${level}TCR Open – No ${verificationArtifactNoun(item.artifactLevel ?? item.procedureLevel ?? 'System')} Decisions Yet`
 }
-const kindWords=(kind:Kind)=>kind==='Introduce'?'New procedure':kind==='Modify'?'Modified procedure':'Retired procedure'
+const kindWords=(kind:Kind,noun:string)=>kind==='Introduce'?`New ${noun}`:kind==='Modify'?`Modified ${noun}`:`Retired ${noun}`
 const missingCaseFields=(item:Package)=>[
   ['Title',item.title],['Problem',item.problem],['Analysis',item.analysis],['Solution',item.solution],
 ].filter(([,value])=>!value?.trim()).map(([name])=>name)
@@ -52,8 +57,11 @@ const emptyDraft={kind:'Introduce' as Kind,baseNumber:'',revision:0,title:'',obj
  * invented. Nothing proposed here is a controlled procedure revision until the package is approved and
  * materialised into a build.
  */
-export default function TestChangeRequestWorkspace({api,projectId,reviewId,canAuthor,onClose,onChanged,onOpenRequirementRevision,onOpenTestChangeRequest,supersededBy}:{api:string;projectId:string;reviewId:string;canAuthor:boolean;onClose:()=>void;onChanged:()=>void;onOpenRequirementRevision:(requirement:{id:string;revisionId:string;level:string})=>void;onOpenTestChangeRequest:(id:string)=>void;supersededBy?:SupersededBy}){
+export default function TestChangeRequestWorkspace({api,projectId,reviewId,discipline,canAuthor,onClose,onChanged,onOpenRequirementRevision,onOpenTestChangeRequest,supersededBy}:{api:string;projectId:string;reviewId:string;discipline:string;canAuthor:boolean;onClose:()=>void;onChanged:()=>void;onOpenRequirementRevision:(requirement:{id:string;revisionId:string;level:string})=>void;onOpenTestChangeRequest:(id:string)=>void;supersededBy?:SupersededBy}){
   const [item,setItem]=useState<Package>()
+  const currentArtifactLevel = item?.artifactLevel ?? item?.procedureLevel ?? 'System'
+  const currentArtifactWord = artifactWord(currentArtifactLevel)
+  const currentArtifactNoun = artifactNoun(currentArtifactLevel)
   const [busy,setBusy]=useState(false),[error,setError]=useState('')
   const [draft,setDraft]=useState(emptyDraft),[proposing,setProposing]=useState(false)
   // Bounded, server-searched pickers with totals: a valid target or governed requirement beyond the old
@@ -83,10 +91,14 @@ export default function TestChangeRequestWorkspace({api,projectId,reviewId,canAu
   const load=useCallback(async()=>{
     const mine=++loadTicket.current
     setError('')
-    try{const next=await apiRequest<Package>(`${api}/api/test-change-reviews/${reviewId}/procedure-changes`)
-      if(mine===loadTicket.current)setItem(next)}
+    try{const next=await apiRequest<Package>(`${api}/api/test-change-reviews/${reviewId}/${verificationArtifactChangeSegment(discipline)}`)
+      if(mine===loadTicket.current)setItem({
+        ...next,
+        artifactChanges: next.artifactChanges ?? next.procedureChanges ?? [],
+        artifactTargets: next.artifactTargets ?? next.procedureTargets ?? [],
+      })}
     catch(problem){if(mine===loadTicket.current)setError(operationError(problem,'The test change request could not be loaded.'))}
-  },[api,reviewId])
+  },[api,discipline,reviewId])
   useEffect(()=>{void load()},[load])
 
   // The Modify/Retire target picker: the selected build's exact carried procedures for this discipline,
@@ -96,21 +108,21 @@ export default function TestChangeRequestWorkspace({api,projectId,reviewId,canAu
     if(!proposing)return
     let active=true
     const params=new URLSearchParams({page:String(targetPage),pageSize:'50',search:targetQuery})
-    // Existing decisions' targets stay represented from the package payload (item.procedureTargets), and the
+    // Existing decisions' targets stay represented from the package payload (item.artifactTargets), and the
     // current selection is always chosen from those options or the current page. Neither the persisted
     // decision set nor the current selection is serialized into the request line, so the URL cannot grow
     // with the TCR's procedure-decision count.
-    void fetch(`${api}/api/test-change-reviews/${reviewId}/procedure-targets?${params}`)
+    void fetch(`${api}/api/test-change-reviews/${reviewId}/${verificationArtifactTargetSegment(discipline)}?${params}`)
       .then(async response=>{
-        if(!response.ok){if(active)setTargetError('The procedures for this build could not be loaded. Try searching again.');return undefined}
+        if(!response.ok){if(active)setTargetError(`The ${currentArtifactWord}s for this build could not be loaded. Try searching again.`);return undefined}
         if(!active)return undefined
         setTargetError('')
         return response.json()
       })
       .then(paged=>{if(active&&paged)setTargetPicker(paged)})
-      .catch(()=>{if(active)setTargetError('The procedures for this build could not be loaded. Try searching again.')})
+      .catch(()=>{if(active)setTargetError(`The ${currentArtifactWord}s for this build could not be loaded. Try searching again.`)})
     return ()=>{active=false}
-  },[api,reviewId,proposing,targetQuery,targetPage,draft.baseNumber])
+  },[api,discipline,reviewId,proposing,targetQuery,targetPage,draft.baseNumber,currentArtifactWord])
 
   // The driving-requirement picker: the same governed, build-scoped candidate set the server enforces,
   // searched and paged with totals. Selected driving revisions are hydrated by ID.
@@ -133,14 +145,14 @@ export default function TestChangeRequestWorkspace({api,projectId,reviewId,canAu
   },[api,reviewId,proposing,requirementQuery,requirementPage])
 
   const targetSummary = pickerSummary(
-    'carried procedure', targetQuery, targetPicker?.totalCount??0, draft.baseNumber ? 1 : 0)
+    `carried ${currentArtifactWord}`, targetQuery, targetPicker?.totalCount??0, draft.baseNumber ? 1 : 0)
   const targetOptions=useMemo(()=>{
     const options=new Map<string,ProcedureTarget>()
     for(const target of targetPicker?.items??[])options.set(target.baseNumber,target)
-    for(const target of item?.procedureTargets??[])if(!options.has(target.baseNumber))options.set(target.baseNumber,target)
+    for(const target of item?.artifactTargets??item?.procedureTargets??[])if(!options.has(target.baseNumber))options.set(target.baseNumber,target)
     if(selectedTargetDetails&&!options.has(selectedTargetDetails.baseNumber))options.set(selectedTargetDetails.baseNumber,selectedTargetDetails)
     return [...options.values()]
-  },[targetPicker,item?.procedureTargets,selectedTargetDetails])
+  },[targetPicker,item?.artifactTargets,item?.procedureTargets,selectedTargetDetails])
   const requirementSummary = pickerSummary(
     'governed requirement', requirementQuery, requirementPicker?.totalCount??0,
     draft.driving.length, 'in scope')
@@ -169,7 +181,7 @@ export default function TestChangeRequestWorkspace({api,projectId,reviewId,canAu
       expectedVersion:item?.version}
     setBusy(true);setError('')
     try{
-      await apiRequest(`${api}/api/test-change-reviews/${reviewId}/procedure-changes`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})
+      await apiRequest(`${api}/api/test-change-reviews/${reviewId}/${verificationArtifactChangeSegment(discipline)}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})
       await load();onChanged()
       setProposing(false);setDraft(emptyDraft);setDrivingDetails({});setSelectedTargetDetails(undefined)
     }catch(problem){
@@ -177,7 +189,7 @@ export default function TestChangeRequestWorkspace({api,projectId,reviewId,canAu
         'procedure_not_carried_by_build','procedure_manifest_revision_missing','procedure_revision_not_next_for_build',
       ].includes(problem.code??'')
       if(staleTarget){
-        setError(problem.message||'The selected procedure changed. Refresh and reselect a current target.')
+        setError(problem.message||`The selected ${currentArtifactWord} changed. Refresh and reselect a current target.`)
         setTargetPicker(undefined);setSelectedTargetDetails(undefined);setDrivingDetails({})
         setTargetQuery('');setTargetPage(1)
         setDraft(current=>({...current,baseNumber:'',revision:0,driving:[],removed:[],coverageRationale:''}))
@@ -185,7 +197,7 @@ export default function TestChangeRequestWorkspace({api,projectId,reviewId,canAu
     }finally{setBusy(false)}
   }
   const withdraw=(changeId:string)=>void act(()=>apiRequest(
-    `${api}/api/test-change-reviews/${reviewId}/procedure-changes/${changeId}?expectedVersion=${item?.version}`,
+    `${api}/api/test-change-reviews/${reviewId}/${verificationArtifactChangeSegment(discipline)}/${changeId}?expectedVersion=${item?.version}`,
     {method:'DELETE'}))
   const revise=()=>void (async()=>{
     setBusy(true);setError('')
@@ -228,8 +240,8 @@ export default function TestChangeRequestWorkspace({api,projectId,reviewId,canAu
 
   // Answered by the server, not inferred from a broad role here. The workspace was offering authoring to
   // anyone with test authority while the endpoints refused anyone but the engineer holding the package.
-  const mayEdit=canAuthor&&(item?.capabilities?.canProposeProcedureChange??false)
-  const mayEditCase=canAuthor&&(item?.capabilities?.canWithdrawProcedureChange??false)
+  const mayEdit=canAuthor&&(item?.capabilities?.canProposeArtifactChange ?? item?.capabilities?.canProposeProcedureChange ?? false)
+  const mayEditCase=canAuthor&&(item?.capabilities?.canWithdrawArtifactChange ?? item?.capabilities?.canWithdrawProcedureChange ?? false)
   const retiring=draft.kind==='Retire'
   const selectedTarget=targetOptions.find(x=>x.baseNumber===draft.baseNumber)
   const currentCoverage=selectedTarget?.currentCoverage??[]
@@ -243,7 +255,7 @@ export default function TestChangeRequestWorkspace({api,projectId,reviewId,canAu
     :draft.kind==='Modify'&&draft.baseNumber!==''&&finalCoverageCount===0
   const requirementDetails=(revisionId:string)=>
     (item?.drivingRequirementChoices??[]).find(x=>x.revisionId===revisionId)
-      ??(item?.procedureTargets??[]).flatMap(x=>x.currentCoverage).find(x=>x.revisionId===revisionId)
+      ??(item?.artifactTargets??item?.procedureTargets??[]).flatMap(x=>x.currentCoverage).find(x=>x.revisionId===revisionId)
   const requirementLabel=(revisionId:string)=>{
     const known=requirementDetails(revisionId)
     return known?`${known.displayNumber} · ${known.statement}`:revisionId
@@ -255,7 +267,7 @@ export default function TestChangeRequestWorkspace({api,projectId,reviewId,canAu
       : <span key={revisionId}>{index>0?', ':''}{revisionId}</span>
   })
   const procedureCoverageDelta=(change:ProcedureChange)=>{
-    const current=(item?.procedureTargets??[]).find(x=>x.baseNumber===change.baseNumber)?.currentCoverage??[]
+    const current=(item?.artifactTargets??item?.procedureTargets??[]).find(x=>x.baseNumber===change.baseNumber)?.currentCoverage??[]
     const removed=new Set(change.removedRequirementRevisionIds)
     const currentIds=new Set(current.map(x=>x.revisionId))
     const retained=current.map(x=>x.revisionId).filter(id=>!removed.has(id))
@@ -268,7 +280,7 @@ export default function TestChangeRequestWorkspace({api,projectId,reviewId,canAu
       <header>
         <div>
           <p className="eyebrow">{item?`${levelName(item.discipline)} TEST CHANGE REQUEST`:'TEST CHANGE REQUEST'}</p>
-          <h2 id="tcr-workspace-title">{item?`${item.displayNumber} procedure decisions`:'Loading…'}</h2>
+          <h2 id="tcr-workspace-title">{item?`${item.displayNumber} ${currentArtifactWord} decisions`:'Loading…'}</h2>
           {item&&<strong>{packageStatus(item)}</strong>}
         </div>
         <button type="button" className="quiet" onClick={onClose} aria-label="Close test change request">Close</button>
@@ -299,13 +311,13 @@ export default function TestChangeRequestWorkspace({api,projectId,reviewId,canAu
         </section>
 
         <section className="downstreamDecisionWorkbench">
-          <h3>Procedure decisions</h3>
+          <h3>{currentArtifactWord[0].toUpperCase() + currentArtifactWord.slice(1)} decisions</h3>
           {/* Stated outright, as the requirements drawer states its conclusion, so a reader never has to infer
               what the package does from which buttons happen to be enabled. */}
-          {item.procedureChanges.length
-            ? <ul className="drawerChanges">{item.procedureChanges.map(change=>
+          {(item.artifactChanges??item.procedureChanges??[]).length
+            ? <ul className="drawerChanges">{(item.artifactChanges??item.procedureChanges??[]).map(change=>
                 <li className="linkedDraft" key={change.id}>
-                  <b>{change.displayNumber} · {kindWords(change.kind)}</b>
+                  <b>{change.displayNumber} · {kindWords(change.kind,currentArtifactWord)}</b>
                   <span>{change.title||'No title recorded'}</span>
                   {change.objective&&<span>{change.objective}</span>}
                   {change.rationale&&<span>Why: {change.rationale}</span>}
@@ -319,16 +331,16 @@ export default function TestChangeRequestWorkspace({api,projectId,reviewId,canAu
                   {change.coverageChangeRationale&&<span>Coverage rationale: {change.coverageChangeRationale} · {change.coverageChangedBy}</span>}
                   {mayEdit&&<button type="button" className="linkedScr" disabled={busy} onClick={()=>withdraw(change.id)}>Withdraw this decision</button>}
                 </li>)}</ul>
-            : <p className="drawerEmpty">No procedure decisions are proposed yet. A test change request exists because test work is required, so it is not finished until it says what that work is.</p>}
+            : <p className="drawerEmpty">No {currentArtifactWord} decisions are proposed yet. A test change request exists because test work is required, so it is not finished until it says what that work is.</p>}
           <div className="drawerDecisionActions">
-            {mayEdit&&<button type="button" disabled={busy} onClick={()=>{setDraft(emptyDraft);setDrivingDetails({});setSelectedTargetDetails(undefined);setProposing(true);setTargetQuery('');setTargetPage(1);setRequirementQuery('');setRequirementPage(1);setRequirementError('');setTargetError('')}}>Propose a procedure change</button>}
+            {mayEdit&&<button type="button" disabled={busy} onClick={()=>{setDraft(emptyDraft);setDrivingDetails({});setSelectedTargetDetails(undefined);setProposing(true);setTargetQuery('');setTargetPage(1);setRequirementQuery('');setRequirementPage(1);setRequirementError('');setTargetError('')}}>Propose a {currentArtifactWord} change</button>}
             {/* Revising is the test-side twin of revising a change request: reopening approved work to correct
                 it, which carries the existing decisions into the next revision. */}
             {canAuthor&&(item.capabilities?.canRevise??false)&&<button type="button" className="quiet reopenAssessment" disabled={busy} onClick={revise}>Revise this test change request</button>}
             {!canAuthor&&<p className="drawerEmpty">{item.assignedEngineerId
-              ? <><PersonName userName={item.assignedEngineerId}/> holds this test change request and records its procedure decisions.</>
-              : 'Test engineering authority is required to propose procedure work.'}</p>}
-            {canAuthor&&item.state==='InReview'&&<p className="drawerEmpty">This test change request is with its approver. Its procedure decisions cannot change until they approve or return it.</p>}
+              ? <><PersonName userName={item.assignedEngineerId}/> holds this test change request and records its {currentArtifactWord} decisions.</>
+              : `Test engineering authority is required to propose ${currentArtifactWord} work.`}</p>}
+            {canAuthor&&item.state==='InReview'&&<p className="drawerEmpty">This test change request is with its approver. Its {currentArtifactWord} decisions cannot change until they approve or return it.</p>}
           </div>
         </section>
 
@@ -337,7 +349,7 @@ export default function TestChangeRequestWorkspace({api,projectId,reviewId,canAu
           <p>{item.sourceChangeRequestNumber}</p>
           <dl className="sourceCase">
             <div><dt>Discipline</dt><dd>{levelName(item.discipline)} verification</dd></div>
-            <div><dt>Procedure level</dt><dd>{procedureWord(item.procedureLevel)} — this package may only carry {item.procedureLevel} procedures</dd></div>
+            <div><dt>{currentArtifactWord[0].toUpperCase() + currentArtifactWord.slice(1)} level</dt><dd>{procedureWord(currentArtifactLevel)} — this package may only carry {currentArtifactLevel} {currentArtifactWord}s</dd></div>
             <div><dt>Revision</dt><dd>{item.revision.toString().padStart(2,'0')}</dd></div>
           </dl>
         </section>
@@ -346,11 +358,11 @@ export default function TestChangeRequestWorkspace({api,projectId,reviewId,canAu
 
     {proposing&&<div className="downstreamDialogBackdrop" role="presentation">
       <section className="downstreamDecisionDialog" role="dialog" aria-modal="true" aria-labelledby="tcr-propose-title">
-        <p className="eyebrow">PROCEDURE DECISION</p>
-        <h2 id="tcr-propose-title">Propose a procedure change</h2>
+        <p className="eyebrow">{currentArtifactWord.toUpperCase()} DECISION</p>
+        <h2 id="tcr-propose-title">Propose a {currentArtifactWord} change</h2>
         <p>{retiring
-          ? 'A retirement withdraws the procedure rather than restating it, so it needs no body — only the procedure it acts on and why.'
-          : 'What this test change request proposes to do to the procedures. Nothing here becomes a controlled procedure revision until the package is approved and materialised into a build.'}</p>
+          ? `A retirement withdraws the ${currentArtifactWord} rather than restating it, so it needs no body — only the ${currentArtifactWord} it acts on and why.`
+          : `What this test change request proposes to do to the ${currentArtifactWord}s. Nothing here becomes a controlled ${currentArtifactWord} revision until the package is approved and materialised into a build.`}</p>
         {error&&<div className="workspaceError" role="alert">{error}</div>}
         <label>What is being done
           <select value={draft.kind} onChange={event=>{
@@ -358,9 +370,9 @@ export default function TestChangeRequestWorkspace({api,projectId,reviewId,canAu
               kind:event.target.value as Kind,baseNumber:'',revision:0,driving:[],removed:[],coverageRationale:''}))
             setDrivingDetails({});setSelectedTargetDetails(undefined)
           }}>
-            <option value="Introduce">Introduce a new procedure</option>
-            <option value="Modify">Modify an existing procedure</option>
-            <option value="Retire">Retire an existing procedure</option>
+            <option value="Introduce">Introduce a new {currentArtifactWord}</option>
+            <option value="Modify">Modify an existing {currentArtifactWord}</option>
+            <option value="Retire">Retire an existing {currentArtifactWord}</option>
           </select>
         </label>
         {/* Introducing allocates the number centrally, so it is not asked for; anything else has to name the
@@ -371,20 +383,20 @@ export default function TestChangeRequestWorkspace({api,projectId,reviewId,canAu
               project's, or the wrong level, and it survived approval to fail at materialization — which turns
               an authoring mistake into a release-path problem. Selecting also fixes the revision, so the
               engineer is not asked to know what the procedure currently sits at. */}
-          <label>Procedure
-            <input aria-label="Search procedures" className="pickerSearch" value={targetQuery}
-              onChange={event=>{setTargetQuery(event.target.value);setTargetPage(1)}}
-              placeholder="Search by number or title..." />
-                <select aria-label="Procedure" value={draft.baseNumber} onChange={event=>{
+          <label>{currentArtifactNoun}
+            <input aria-label={`Search ${currentArtifactWord}s`} className="pickerSearch" value={targetQuery}
+            onChange={event=>{setTargetQuery(event.target.value);setTargetPage(1)}}
+              placeholder={`Search ${currentArtifactWord} by number or title...`} />
+                <select aria-label={currentArtifactNoun} value={draft.baseNumber} onChange={event=>{
               const target=(targetPicker?.items??[]).find(x=>x.baseNumber===event.target.value)
-                ??(item?.procedureTargets??[]).find(x=>x.baseNumber===event.target.value)
+                ??(item?.artifactTargets??item?.procedureTargets??[]).find(x=>x.baseNumber===event.target.value)
               setError('')
               setSelectedTargetDetails(target)
               setDrivingDetails({})
               setDraft(current=>({...current,baseNumber:event.target.value,revision:(target?.currentRevision??-1)+1,
                 driving:[],removed:[],coverageRationale:''}))
             }}>
-                  <option value="">Choose the procedure this acts on...</option>
+                  <option value="">Choose the {currentArtifactWord} this acts on...</option>
                   {targetOptions.map(target=>
                     <option value={target.baseNumber} key={target.baseNumber}>
                       {target.baseNumber}.{String(Math.max(target.currentRevision,0)).padStart(2,'0')} - {target.title}{target.state?` · ${target.state}`:''}
@@ -423,14 +435,14 @@ export default function TestChangeRequestWorkspace({api,projectId,reviewId,canAu
               <span><b>{coverage.displayNumber}</b> {coverage.statement} · {coverage.isSuspect?'Suspect':'Confirmed'}
                 {!mayRemove?' · retained; outside this package change scope':''}</span>
             </label>
-          }):<p className="drawerEmpty">The carried procedure has no current requirement coverage.</p>}
+          }):<p className="drawerEmpty">The carried {currentArtifactWord} has no current requirement coverage.</p>}
           <p className="drawerEmpty">Checked links carry forward automatically. Clearing an authorized link is an explicit removal.</p>
         </fieldset>}
         {/* What this procedure is written against. Only the requirements this package's own changes touched
             are offered — a procedure verifies what its change request altered, not anything in the project —
             and the link is what lets the decision that asked for the procedure settle when it arrives. */}
         {!retiring&&<fieldset className="drivingRequirements">
-          <legend>Requirements this procedure verifies</legend>
+          <legend>Requirements this {currentArtifactWord} verifies</legend>
           <input aria-label="Search requirements" className="pickerSearch" value={requirementQuery}
             onChange={event=>{setRequirementQuery(event.target.value);setRequirementPage(1)}}
             placeholder="Search by number or wording..." />
@@ -467,8 +479,8 @@ export default function TestChangeRequestWorkspace({api,projectId,reviewId,canAu
             </span>
           </div>
           {missingRequiredCoverage&&<p className="drawerEmpty" role="alert">{draft.kind==='Introduce'
-            ?'Select at least one exact requirement this new procedure verifies.'
-            :'A modified procedure must retain or add at least one exact requirement. Retire it instead if it verifies nothing in this build.'}</p>}
+            ?`Select at least one exact requirement this new ${currentArtifactWord} verifies.`
+            :`A modified ${currentArtifactWord} must retain or add at least one exact requirement. Retire it instead if it verifies nothing in this build.`}</p>}
         </fieldset>}
         {coverageDeltaChanged&&<label>Why coverage is being added or removed
           <textarea value={draft.coverageRationale} onChange={event=>setDraft(current=>({...current,coverageRationale:event.target.value}))}/>
@@ -476,7 +488,7 @@ export default function TestChangeRequestWorkspace({api,projectId,reviewId,canAu
         {draft.kind==='Modify'&&draft.baseNumber&&<p className="drawerEmpty">
           Proposed coverage: {currentCoverage.length-draft.removed.length} retained, {addedCoverage.length} added, {draft.removed.length} removed.
         </p>}
-        <label>Why this procedure work is required<textarea value={draft.rationale} onChange={event=>setDraft(current=>({...current,rationale:event.target.value}))}/></label>
+        <label>Why this {currentArtifactWord} work is required<textarea value={draft.rationale} onChange={event=>setDraft(current=>({...current,rationale:event.target.value}))}/></label>
         <div className="downstreamDialogActions">
           <button type="button" className="quiet" disabled={busy} onClick={()=>{setProposing(false);setError('')}}>Cancel</button>
           <button type="button" disabled={busy||missingRequiredCoverage||(!retiring&&(!draft.title.trim()||!draft.objective.trim()||!draft.steps.trim()))||(draft.kind!=='Introduce'&&!draft.baseNumber.trim())||(coverageDeltaChanged&&!draft.coverageRationale.trim())} onClick={()=>void propose()}>
@@ -499,7 +511,7 @@ export default function TestChangeRequestWorkspace({api,projectId,reviewId,canAu
           <RichCaseField api={api} projectId={projectId} label="Problem" value={caseProblemRich}
             onChange={setCaseProblemRich} placeholder="What is affected and why this package exists" />
           <RichCaseField api={api} projectId={projectId} label="Analysis" value={caseAnalysisRich}
-            onChange={setCaseAnalysisRich} placeholder="What was considered and what it means for the procedures" />
+            onChange={setCaseAnalysisRich} placeholder={`What was considered and what it means for the ${currentArtifactWord}s`} />
           <RichCaseField api={api} projectId={projectId} label="Solution" value={caseSolutionRich}
             onChange={setCaseSolutionRich} placeholder="What controlled outcome is proposed" />
         </div>

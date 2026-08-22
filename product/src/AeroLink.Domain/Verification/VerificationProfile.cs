@@ -174,7 +174,7 @@ public sealed record VerificationArtifactDefinition
         RequirementLevel.System => TestProcedureLevel.System,
         RequirementLevel.HighLevel => TestProcedureLevel.HighLevel,
         RequirementLevel.LowLevel => TestProcedureLevel.LowLevel,
-        _ => throw new DomainException($"The artifact key {ArtifactKey} has no procedure level target.")
+        _ => throw new DomainException($"The artifact key {ArtifactKey} has no verification level target.")
     };
     public VerificationArtifactCapability RequiredCapabilities { get; }
 
@@ -345,11 +345,12 @@ public static class VerificationArtifactVocabulary
             new(new(discipline, kind), prefix, tcr, subject, document, target);
         return
         [
-            // Software Case retains the legacy HLRTP/LLRTP identity until #722 deliberately renames it.
+            // Software Cases own the new identity. HLRTP/LLRTP remain reserved for the future Procedure
+            // family and are intentionally not silently reused for current Case rows.
             D(VerificationDiscipline.System, VerificationArtifactKind.Procedure, "SYSTP", "SYSTCR", ReviewSubject.SystemTest, ControlledDocumentType.SystemTestProcedures, RequirementLevel.System),
-            D(VerificationDiscipline.HighLevelSoftware, VerificationArtifactKind.Case, "HLRTP", "HLRTCR", ReviewSubject.HighLevelSoftwareTest, ControlledDocumentType.HighLevelTestProcedures, RequirementLevel.HighLevel),
+            D(VerificationDiscipline.HighLevelSoftware, VerificationArtifactKind.Case, "HLRTC", "HLRTCR", ReviewSubject.HighLevelSoftwareCase, ControlledDocumentType.HighLevelTestCases, RequirementLevel.HighLevel),
             D(VerificationDiscipline.HighLevelSoftware, VerificationArtifactKind.Procedure, "HLRTP", "HLRTCR", ReviewSubject.HighLevelSoftwareTest, ControlledDocumentType.HighLevelTestProcedures, RequirementLevel.HighLevel),
-            D(VerificationDiscipline.LowLevelSoftware, VerificationArtifactKind.Case, "LLRTP", "LLRTCR", ReviewSubject.LowLevelSoftwareTest, ControlledDocumentType.LowLevelTestProcedures, RequirementLevel.LowLevel),
+            D(VerificationDiscipline.LowLevelSoftware, VerificationArtifactKind.Case, "LLRTC", "LLRTCR", ReviewSubject.LowLevelSoftwareCase, ControlledDocumentType.LowLevelTestCases, RequirementLevel.LowLevel),
             D(VerificationDiscipline.LowLevelSoftware, VerificationArtifactKind.Procedure, "LLRTP", "LLRTCR", ReviewSubject.LowLevelSoftwareTest, ControlledDocumentType.LowLevelTestProcedures, RequirementLevel.LowLevel),
         ];
     }

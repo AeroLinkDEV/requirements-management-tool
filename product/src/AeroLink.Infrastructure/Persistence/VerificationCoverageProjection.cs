@@ -4,7 +4,7 @@ using Microsoft.EntityFrameworkCore;
 namespace AeroLink.Infrastructure.Persistence;
 
 /// <summary>
-/// One exact requirement-revision to procedure-revision applicability link.
+/// One exact requirement-revision to verification-artifact-revision applicability link.
 ///
 /// Procedure lifecycle and applicability are deliberately separate. An approved procedure can still be
 /// suspect for changed wording; calling that link "approved coverage" would hide the work while changing the
@@ -12,14 +12,19 @@ namespace AeroLink.Infrastructure.Persistence;
 /// </summary>
 public sealed record VerificationCoverageLinkProjection(
     Guid RequirementRevisionId,
-    Guid ProcedureId,
-    Guid ProcedureRevisionId,
+    Guid ArtifactId,
+    Guid ArtifactRevisionId,
     string DisplayNumber,
     string Title,
     string Level,
-    string ProcedureState,
+    string ArtifactState,
     bool IsSuspect,
-    string CoverageState);
+    string CoverageState)
+{
+    public Guid ProcedureId => ArtifactId; // compatibility alias for internal consumers during the Case split
+    public Guid ProcedureRevisionId => ArtifactRevisionId; // compatibility alias
+    public string ProcedureState => ArtifactState; // compatibility alias
+}
 
 /// <summary>
 /// The three coverage states a requirement revision can be in. They are mutually exclusive and exhaustive,

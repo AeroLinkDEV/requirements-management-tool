@@ -145,8 +145,8 @@ public sealed class ControlledProcedureDocumentApiTests
         var skipped = body.GetProperty("skipped").EnumerateArray()
             .Select(x => x.GetString()).ToList();
         Assert.Contains("SystemTestProcedures", skipped);
-        Assert.Contains("HighLevelTestProcedures", skipped);
-        Assert.Contains("LowLevelTestProcedures", skipped);
+        Assert.Contains("HighLevelTestCases", skipped);
+        Assert.Contains("LowLevelTestCases", skipped);
 
         using var scope = factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
@@ -154,8 +154,8 @@ public sealed class ControlledProcedureDocumentApiTests
             .Where(x => x.BaselineId == fixture.BaselineId).ToListAsync();
         Assert.Equal(3, documents.Count);
         Assert.DoesNotContain(documents, x => x.Type == ControlledDocumentType.SystemTestProcedures);
-        Assert.DoesNotContain(documents, x => x.Type == ControlledDocumentType.HighLevelTestProcedures);
-        Assert.DoesNotContain(documents, x => x.Type == ControlledDocumentType.LowLevelTestProcedures);
+        Assert.DoesNotContain(documents, x => x.Type == ControlledDocumentType.HighLevelTestCases);
+        Assert.DoesNotContain(documents, x => x.Type == ControlledDocumentType.LowLevelTestCases);
     }
 
     [Fact]

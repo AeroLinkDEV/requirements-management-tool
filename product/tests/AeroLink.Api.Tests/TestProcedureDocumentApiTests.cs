@@ -70,8 +70,8 @@ public sealed class TestProcedureDocumentApiTests : IClassFixture<SharedApiHost>
     }
 
     private sealed record DocumentRow(Guid Id, string DocumentNumber, string Title, string Level,
-        string Description, int ProcedureCount, SectionRow[] Sections);
-    private sealed record SectionRow(Guid Id, string Heading, int Position, int ProcedureCount);
+        string Description, int ArtifactCount, int ProcedureCount, SectionRow[] Sections);
+    private sealed record SectionRow(Guid Id, string Heading, int Position, int ArtifactCount, int ProcedureCount);
 
     [Fact]
     public async Task A_discipline_sees_only_its_own_document()
@@ -94,6 +94,24 @@ public sealed class TestProcedureDocumentApiTests : IClassFixture<SharedApiHost>
         Assert.Equal(1, document.ProcedureCount);
         var section = Assert.Single(document.Sections);
         Assert.Equal(1, section.ProcedureCount);
+    }
+
+    [Fact]
+    public async Task Canonical_case_documents_route_is_software_only_and_uses_artifact_counts()
+    {
+        var seeded = await SeedAsync(_host.Factory);
+        using var client = _host.CreateClient();
+        await LoginAsync(client, seeded.MemberName);
+
+        var documents = await client.GetFromJsonAsync<DocumentRow[]>(
+            $"/api/projects/{seeded.ProjectId}/test-case-documents");
+
+        Assert.NotNull(documents);
+        Assert.Equal(2, documents!.Length);
+        Assert.DoesNotContain(documents, document => document.Level == "System");
+        Assert.All(documents, document => Assert.Equal(document.ProcedureCount, document.ArtifactCount));
+        Assert.All(documents.SelectMany(document => document.Sections), section =>
+            Assert.Equal(section.ProcedureCount, section.ArtifactCount));
     }
 
     [Fact]

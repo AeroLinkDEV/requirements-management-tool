@@ -26,6 +26,8 @@ public sealed class TestChangeRequestOutputGenerator(AeroLinkDbContext db)
             .Include(x => x.ReviewCycles).ThenInclude(x => x.Steps)
             .SingleOrDefaultAsync(x => x.Id == testChangeRequestId, ct);
         if (package is null) return null;
+        var artifactNoun = package.Discipline == TestChangeReviewDiscipline.System ? "procedure" : "case";
+        var artifactTitle = char.ToUpperInvariant(artifactNoun[0]) + artifactNoun[1..];
 
         var project = await db.Projects.AsNoTracking().SingleAsync(x => x.Id == package.ProjectId, ct);
         var program = await db.Programs.AsNoTracking().SingleAsync(x => x.Id == project.ProgramId, ct);
@@ -56,7 +58,7 @@ public sealed class TestChangeRequestOutputGenerator(AeroLinkDbContext db)
         };
 
         PublicationRecord Record(TestProcedureChange change) => new(
-            change.DisplayNumber, change.Level.ToString(), change.Kind + " procedure change",
+            change.DisplayNumber, change.Level.ToString(), change.Kind + $" {artifactNoun} change",
             change.Kind == TestProcedureChangeKind.Retire
                 ? "Retired from future effective baselines"
                 : change.Objective,
@@ -84,14 +86,14 @@ public sealed class TestChangeRequestOutputGenerator(AeroLinkDbContext db)
                 definition),
         };
         if (introduced.Count > 0)
-            sections.Add(new("New Test Procedures",
-                $"{introduced.Count} new stable procedure identit{(introduced.Count == 1 ? "y is" : "ies are")} proposed.", introduced));
+            sections.Add(new($"New Test {artifactTitle}s",
+                $"{introduced.Count} new stable {artifactNoun} identit{(introduced.Count == 1 ? "y is" : "ies are")} proposed.", introduced));
         if (modified.Count > 0)
-            sections.Add(new("Modified Test Procedures",
-                $"{modified.Count} existing procedure{(modified.Count == 1 ? " is" : "s are")} corrected by this package.", modified));
+            sections.Add(new($"Modified Test {artifactTitle}s",
+                $"{modified.Count} existing {artifactNoun}{(modified.Count == 1 ? " is" : "s are")} corrected by this package.", modified));
         if (retired.Count > 0)
-            sections.Add(new("Retired Test Procedures",
-                $"{retired.Count} procedure{(retired.Count == 1 ? " is" : "s are")} removed from future effective baselines while immutable history is retained.", retired));
+            sections.Add(new($"Retired Test {artifactTitle}s",
+                $"{retired.Count} {artifactNoun}{(retired.Count == 1 ? " is" : "s are")} removed from future effective baselines while immutable history is retained.", retired));
 
         var raisedFrom = package.ChangeRequestId is not null
             ? $"Change request {package.SourceChangeRequestNumber}"
@@ -106,7 +108,7 @@ public sealed class TestChangeRequestOutputGenerator(AeroLinkDbContext db)
                 _ => "Low-Level Software Test Change Request",
             },
             package.Title,
-            "Controlled change case, procedure impact, review decisions, and what the package was raised from",
+            $"Controlled change case, {artifactNoun} impact, review decisions, and what the package was raised from",
             package.BaseNumber, package.Revision.ToString("D2"), Humanize(package.State.ToString()),
             release.Version, "Not yet baseline-effective", Person(package.AuthorId), package.UpdatedAt, manifest,
             new[]

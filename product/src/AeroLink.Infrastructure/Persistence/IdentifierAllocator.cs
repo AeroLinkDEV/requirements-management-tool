@@ -49,9 +49,10 @@ public static class IdentifierAllocator
     /// <summary>
     /// The next test change request number, numbered per discipline like the procedures it governs.
     ///
-    /// SYSTCR, HLRTCR and LLRTCR follow SYSTP, HLRTP and LLRTP deliberately: a reader who knows what a
-    /// HLRTP is should not have to be told what an HLRTCR is. Software's two levels are numbered apart for
-    /// the same reason the packages themselves are separate — they are finished by different people.
+    /// SYSTCR, HLRTCR and LLRTCR follow SYSTP, HLRTC and LLRTC deliberately: a reader who knows what an
+    /// HLRTC is should not have to be told what an HLRTCR is. Software's two levels are numbered apart for
+    /// the same reason the packages themselves are separate — they are finished by different people. The
+    /// HLRTP/LLRTP families remain reserved for the later Procedure tier.
     /// </summary>
     public static async Task<string> NextTestChangeRequestAsync(AeroLinkDbContext db, TestChangeReviewDiscipline discipline,
         CancellationToken ct, ILadderPolicy? policy = null)

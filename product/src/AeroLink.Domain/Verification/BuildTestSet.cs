@@ -76,7 +76,7 @@ public sealed class BuildTestSet
     /// </summary>
     public bool Include(string actorId, Guid procedureRevisionId, TestSelectionReason reason, string note, DateTimeOffset now)
     {
-        if (procedureRevisionId == Guid.Empty) throw new DomainException("A test set entry requires its procedure revision.");
+        if (procedureRevisionId == Guid.Empty) throw new DomainException("A test set entry requires its verification artifact revision.");
         if (!Enum.IsDefined(reason)) throw new DomainException("A test set entry requires a known selection reason.");
         var actor = Required(actorId, "selecting engineer");
         var existing = _entries.SingleOrDefault(x => x.ProcedureRevisionId == procedureRevisionId);
@@ -104,7 +104,7 @@ public sealed class BuildTestSet
         var entry = _entries.SingleOrDefault(x => x.ProcedureRevisionId == procedureRevisionId);
         if (entry is null) return false;
         if (entry.Reason == TestSelectionReason.ChangedRequirement)
-            throw new DomainException("A procedure covering a requirement changed by this build is mandatory before release.");
+            throw new DomainException("A verification artifact covering a requirement changed by this build is mandatory before release.");
         _entries.Remove(entry);
         Touch(now);
         return true;

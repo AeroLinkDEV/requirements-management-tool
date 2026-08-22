@@ -54,7 +54,7 @@ public sealed class ProblemReportClosureVerificationPolicy(AeroLinkDbContext db)
             var originRevision = await db.TestProcedureRevisions.AsNoTracking()
                 .SingleOrDefaultAsync(item => item.Id == origin.ProcedureRevisionId, ct);
             if (originRevision is null)
-                return Unknown(report, "The originating execution no longer resolves to a controlled procedure revision.");
+                return Unknown(report, "The originating execution no longer resolves to a controlled verification artifact revision.");
 
             if (report.TargetReleaseId is null)
                 return new(report.Id, null, origin.Id, origin.ExecutedAt, verificationReadyAt, originRevision.ProcedureId,
@@ -67,7 +67,7 @@ public sealed class ProblemReportClosureVerificationPolicy(AeroLinkDbContext db)
                 || !effectivity.RevisionByProcedure.TryGetValue(originRevision.ProcedureId, out var targetRevisionId))
                 return new(report.Id, report.TargetReleaseId, origin.Id, origin.ExecutedAt, verificationReadyAt, originRevision.ProcedureId,
                     new HashSet<Guid>(), "pr_verification_scope_unknown",
-                    "The target build does not carry a controlled effective revision of the procedure whose failure raised this report.");
+                    "The target build does not carry a controlled effective revision of the verification artifact whose failure raised this report.");
 
             return new(report.Id, report.TargetReleaseId, origin.Id, origin.ExecutedAt, verificationReadyAt,
                 originRevision.ProcedureId, new HashSet<Guid> { targetRevisionId }, null, null);
@@ -95,7 +95,7 @@ public sealed class ProblemReportClosureVerificationPolicy(AeroLinkDbContext db)
         var effectivityForManual = await TestProcedureEffectivity.ForReleaseAsync(
             db, report.ProjectId, report.TargetReleaseId.Value, ct);
         if (effectivityForManual is null)
-            return Unknown(report, "The target build has no controlled procedure manifest from which closure scope can be established.");
+            return Unknown(report, "The target build has no controlled verification artifact manifest from which closure scope can be established.");
 
         var procedureIds = (await db.VerificationImpactItems.AsNoTracking()
                 .Where(item => approvedTcrIds.Contains(item.TestChangeReviewId) && item.ResolvedProcedureId != null)
@@ -109,7 +109,7 @@ public sealed class ProblemReportClosureVerificationPolicy(AeroLinkDbContext db)
         var permitted = effectivityForManual.RevisionByProcedure
             .Where(pair => procedureIds.Contains(pair.Key)).Select(pair => pair.Value).ToHashSet();
         if (permitted.Count == 0)
-            return Unknown(report, "The linked corrective Test Change Request does not establish an effective procedure in the target build.");
+            return Unknown(report, "The linked corrective Test Change Request does not establish an effective verification artifact in the target build.");
 
         var singleProcedure = effectivityForManual.RevisionByProcedure
             .Where(pair => permitted.Contains(pair.Value)).Select(pair => (Guid?)pair.Key).Distinct().ToList();
@@ -149,7 +149,7 @@ public sealed class ProblemReportClosureVerificationPolicy(AeroLinkDbContext db)
                 "Closure verification must be recorded against the Problem Report's current target build.");
         if (!scope.PermittedProcedureRevisionIds.Contains(execution.ProcedureRevisionId))
             return ProblemReportVerificationDecision.Reject(scope, "pr_verification_wrong_procedure",
-                "Closure verification must execute the effective corrective procedure revision carried by the target build.");
+                "Closure verification must execute the effective corrective verification artifact revision carried by the target build.");
         if (string.IsNullOrWhiteSpace(execution.EvidenceReference))
             return ProblemReportVerificationDecision.Reject(scope, "pr_verification_missing_evidence",
                 "Closure verification requires an attributable evidence reference.");

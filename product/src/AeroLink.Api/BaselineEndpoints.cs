@@ -173,7 +173,8 @@ public static class BaselineEndpoints
                     // A package belongs to the build it was raised against; that is its allocation.
                     targetReleaseId = x.ReleaseId,
                     discipline = x.Discipline.ToString(),
-                    procedureCount = x.ProcedureChanges.Count,
+                    artifactCount = x.ProcedureChanges.Count,
+                    procedureCount = x.ProcedureChanges.Count, // compatibility alias
                     x.CreatedAt,
                     x.UpdatedAt,
                     revisionCount = x.BaseNumber == "" ? 1 : db.TestChangeReviews
@@ -438,7 +439,7 @@ public static class BaselineEndpoints
             if (baseline is null) return Results.NotFound();
             if (!await http.HasProjectAccessAsync(db, baseline.ProjectId, ct)) return Results.Forbid();
             var selectedIds = baseline.TestChangeSelections.Select(x => x.TestChangeRequestId).ToList();
-            // Only approved packages that actually carry procedure work can be selected. One that concluded no
+            // Only approved packages that actually carry verification-artifact work can be selected. One that concluded no
             // test work was needed has nothing to contribute, and no controlled number to contribute it under.
             // Nor does one approved before procedure decisions existed: it is real history, but a build cannot
             // carry work that was never stated. Approved already excludes a superseded revision.
@@ -450,13 +451,15 @@ public static class BaselineEndpoints
                     && !selectedIds.Contains(x.Id))
                 .Select(x => new { x.Id, x.DisplayNumber, discipline = x.Discipline.ToString(), x.SourceChangeRequestNumber })
                 .ToListAsync(ct);
+            var artifactCount = await db.BaselineTestProcedures.CountAsync(x => x.BaselineId == id, ct);
             return Results.Ok(new
             {
                 baseline.Id, baseline.DisplayNumber, baseline.TestProceduresHash, baseline.TestProceduresMaterializedAt,
                 selected = baseline.TestChangeSelections.OrderBy(x => x.TestChangeRequestDisplayNumber)
                     .Select(x => new { x.TestChangeRequestId, x.TestChangeRequestDisplayNumber }),
                 available = available.OrderBy(x => x.DisplayNumber),
-                procedureCount = await db.BaselineTestProcedures.CountAsync(x => x.BaselineId == id, ct)
+                artifactCount,
+                procedureCount = artifactCount // compatibility alias
             });
         });
 

@@ -122,7 +122,7 @@ public sealed class CodeTraceabilityApiTests(ShowcaseApiFixture showcase)
         var path = await client.GetFromJsonAsync<JsonElement>($"/api/traceability/path?projectId={summary.ProjectId}&baselineId={summary.ReleasedBaselineId}");
 
         Assert.Equal(["System", "HighLevel", "LowLevel"], path.GetProperty("nodes").EnumerateArray().Select(x => x.GetProperty("level").GetString()!).ToArray());
-        Assert.StartsWith("LLRTP-", path.GetProperty("procedure").GetProperty("displayNumber").GetString());
+        Assert.StartsWith("LLRTC-", path.GetProperty("artifact").GetProperty("displayNumber").GetString());
         Assert.Equal("Pass", path.GetProperty("execution").GetProperty("outcome").GetString());
         Assert.False(string.IsNullOrWhiteSpace(path.GetProperty("execution").GetProperty("evidenceReference").GetString()));
         Assert.Empty(path.GetProperty("execution").GetProperty("evidence").EnumerateArray());
@@ -146,11 +146,11 @@ public sealed class CodeTraceabilityApiTests(ShowcaseApiFixture showcase)
             var releasedId = db.Releases.Single(x => x.ProjectId == summary.ProjectId && x.IsReleased).Id;
             var buildId = db.SoftwareBuilds.Single(x => x.ReleaseId == releasedId).Id;
             var now = DateTimeOffset.UtcNow;
-            var decoyProcedure = new TestProcedure(summary.ProjectId, "LLRTP-000000", "Unscoped evidenced procedure", "test.engineer", now, TestProcedureLevel.LowLevel);
+            var decoyProcedure = new TestProcedure(summary.ProjectId, "LLRTC-000000", "Unscoped evidenced case", "test.engineer", now, TestProcedureLevel.LowLevel);
             var decoyRevision = new TestProcedureRevision(decoyProcedure.Id, 0, "Verify an unspecified build.", "Load an unspecified build.", "Exercise the behavior.", "The behavior is observed.", TestProcedureState.Approved, "test.engineer", now);
             var decoyExecution = new TestExecution(summary.ProjectId, decoyRevision.Id, null, null, TestOutcome.Pass, "test.engineer", "Legacy release scope", "This result has no immutable software-build identity.", "external://run/unscoped", now.AddMinutes(1), now.AddMinutes(1), releasedId);
             var decoyEvidence = new EvidenceRecord(summary.ProjectId, "unscoped-run.json", "application/json", 128, new string('c', 64), "test/unscoped-run.json", "test.engineer", now);
-            var procedure = new TestProcedure(summary.ProjectId, "LLRTP-999999", "Verify the evidenced exact LLR path", "test.engineer", now, TestProcedureLevel.LowLevel);
+            var procedure = new TestProcedure(summary.ProjectId, "LLRTC-999999", "Verify the evidenced exact LLR path", "test.engineer", now, TestProcedureLevel.LowLevel);
             var revision = new TestProcedureRevision(procedure.Id, 0, "Verify the exact approved behavior.", "Load the released build.", "Exercise the approved LLR behavior.", "The behavior matches the exact LLR revision.", TestProcedureState.Approved, "test.engineer", now);
             var execution = new TestExecution(summary.ProjectId, revision.Id, buildId, null, TestOutcome.Pass, "test.engineer", "FMS 1.5", "The observed behavior satisfies the approved expected result.", "external://run/evidenced", now, now, releasedId);
             var evidence = new EvidenceRecord(summary.ProjectId, "evidenced-run.json", "application/json", 128, new string('a', 64), "test/evidenced-run.json", "test.engineer", now);
@@ -162,7 +162,7 @@ public sealed class CodeTraceabilityApiTests(ShowcaseApiFixture showcase)
         }
 
         var selected = await client.GetFromJsonAsync<JsonElement>($"/api/traceability/path?projectId={summary.ProjectId}&baselineId={summary.ReleasedBaselineId}&focusRevisionId={llrRevisionId}");
-        Assert.Equal("LLRTP-999999.00", selected.GetProperty("procedure").GetProperty("displayNumber").GetString());
+        Assert.Equal("LLRTC-999999.00", selected.GetProperty("artifact").GetProperty("displayNumber").GetString());
         Assert.Equal(evidencedExecutionId, selected.GetProperty("execution").GetProperty("id").GetGuid());
         var attached = Assert.Single(selected.GetProperty("execution").GetProperty("evidence").EnumerateArray());
         Assert.Equal("evidenced-run.json", attached.GetProperty("originalFileName").GetString());

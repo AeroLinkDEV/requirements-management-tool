@@ -20,7 +20,7 @@ public sealed class VerificationProfileTests
         Assert.Equal(VerificationArtifactKind.Case, high.ExecutableArtifact.Kind);
         Assert.Equal("SYSTP", system.ExecutableArtifact.ArtifactPrefix);
         Assert.Equal("HLRTCR", high.ExecutableArtifact.TestChangeRequestPrefix);
-        Assert.Equal(ControlledDocumentType.HighLevelTestProcedures, high.ExecutableArtifact.DocumentType);
+        Assert.Equal(ControlledDocumentType.HighLevelTestCases, high.ExecutableArtifact.DocumentType);
     }
 
     [Fact]
@@ -29,7 +29,7 @@ public sealed class VerificationProfileTests
         var now = DateTimeOffset.UtcNow;
         var system = new TestProcedure(Guid.NewGuid(), "SYSTP-000001", "System procedure", "tester", now,
             TestProcedureLevel.System);
-        var software = new TestProcedure(Guid.NewGuid(), "HLRTP-000001", "Software case", "tester", now,
+        var software = new TestProcedure(Guid.NewGuid(), "HLRTC-000001", "Software case", "tester", now,
             TestProcedureLevel.HighLevel);
         var revision = new TestProcedureRevision(software.Id, 0, "Objective", "Logical preconditions",
             "Coverage", "Pass criteria", TestProcedureState.Approved, "tester", now);

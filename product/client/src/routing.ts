@@ -155,17 +155,20 @@ export function parseRoute(pathname: string, search = ""): AppRoute {
   if (path === "system-verification/coverage") return { ...base, view: "testingCoverage", discipline: "systemTest" };
   if (tail[0] === "system-verification" && tail[1] === "coverage" && tail[2]) return { ...base, view: "testingCoverage", discipline: "systemTest", artifactId: decoded(tail[2]) };
   if (path === "system-verification/procedures") return { ...base, view: "procedureExplorer", discipline: "systemTest" };
-  if (path === "software-verification/procedures") return { ...base, view: "procedureExplorer", discipline: "softwareTest" };
+  if (path === "software-verification/cases" || path === "software-verification/procedures")
+    return { ...base, view: "procedureExplorer", discipline: "softwareTest" };
   if (path === "system-verification/results") return { ...base, view: "testResults", discipline: "systemTest" };
   if (tail[0] === "system-verification" && tail[1] === "results" && tail[2]) return { ...base, view: "testResults", discipline: "systemTest", artifactId: decoded(tail[2]) };
   if (path === "software-verification/hlr/coverage") return { ...base, view: "testingCoverage", discipline: "softwareTest", artifactKind: "HighLevel" };
   if (tail[0] === "software-verification" && tail[1] === "hlr" && tail[2] === "coverage" && tail[3]) return { ...base, view: "testingCoverage", discipline: "softwareTest", artifactKind: "HighLevel", artifactId: decoded(tail[3]) };
-  if (path === "software-verification/hlr/procedures") return { ...base, view: "procedureExplorer", discipline: "softwareTest", artifactKind: "HighLevel" };
+  if (path === "software-verification/hlr/cases" || path === "software-verification/hlr/procedures")
+    return { ...base, view: "procedureExplorer", discipline: "softwareTest", artifactKind: "HighLevel" };
   if (path === "software-verification/hlr/results") return { ...base, view: "testResults", discipline: "softwareTest", artifactKind: "HighLevel" };
   if (tail[0] === "software-verification" && tail[1] === "hlr" && tail[2] === "results" && tail[3]) return { ...base, view: "testResults", discipline: "softwareTest", artifactKind: "HighLevel", artifactId: decoded(tail[3]) };
   if (path === "software-verification/llr/coverage") return { ...base, view: "testingCoverage", discipline: "softwareTest", artifactKind: "LowLevel" };
   if (tail[0] === "software-verification" && tail[1] === "llr" && tail[2] === "coverage" && tail[3]) return { ...base, view: "testingCoverage", discipline: "softwareTest", artifactKind: "LowLevel", artifactId: decoded(tail[3]) };
-  if (path === "software-verification/llr/procedures") return { ...base, view: "procedureExplorer", discipline: "softwareTest", artifactKind: "LowLevel" };
+  if (path === "software-verification/llr/cases" || path === "software-verification/llr/procedures")
+    return { ...base, view: "procedureExplorer", discipline: "softwareTest", artifactKind: "LowLevel" };
   if (path === "software-verification/llr/results") return { ...base, view: "testResults", discipline: "softwareTest", artifactKind: "LowLevel" };
   if (tail[0] === "software-verification" && tail[1] === "llr" && tail[2] === "results" && tail[3]) return { ...base, view: "testResults", discipline: "softwareTest", artifactKind: "LowLevel", artifactId: decoded(tail[3]) };
   if (path === "system-verification") return { ...base, view: "verification", discipline: "systemTest" };
@@ -267,7 +270,7 @@ export function routePath(context: RouteContext, view: View, discipline: Discipl
     case "testChangeRequest": return `${root}/${verificationBranch(discipline, artifactKind)}/change-requests/${encodeURIComponent(artifactId ?? "")}`;
     case "createTestChangeRequest": return `${root}/${verificationBranch(discipline, artifactKind)}/change-requests/new`;
     case "procedureExplorer": return discipline === "softwareTest"
-      ? `${root}/software-verification/procedures`
+      ? `${root}/software-verification/cases`
       : `${root}/system-verification/procedures`;
     case "testResults": return `${root}/${verificationBranch(discipline, artifactKind)}/results${artifactId ? `/${encodeURIComponent(artifactId)}` : ""}`;
     case "documents": {

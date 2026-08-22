@@ -131,26 +131,29 @@ public sealed class ProcedureSavedViewApiTests
         using var owner = await SignInAsync(factory, Member);
         using var other = await SignInAsync(factory, Other);
 
-        var created = await owner.PostAsJsonAsync("/api/test-procedures/views",
+        var created = await owner.PostAsJsonAsync("/api/test-cases/views",
             Create(seeded.ProjectId, "Shared worklist", """{"state":"Draft"}""", shared: true));
         var id = (await created.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetGuid();
 
         // A shared view is readable by the project...
         var listed = await other.GetFromJsonAsync<JsonElement>(
-            $"/api/test-procedures?projectId={seeded.ProjectId}&pageSize=10");
+            $"/api/test-cases?projectId={seeded.ProjectId}&pageSize=10");
         var seen = Assert.Single(listed.GetProperty("views").EnumerateArray().ToList());
         Assert.False(seen.GetProperty("owned").GetBoolean());
 
         // ...and still belongs to whoever saved it. Not Found rather than Forbidden: confirming that this id
         // exists but is not yours is more than a reader of a shared list needs to know.
-        var renamed = await other.PutAsJsonAsync($"/api/test-procedures/views/{id}", new { name = "Mine now" });
+        var renamed = await other.PutAsJsonAsync($"/api/test-cases/views/{id}", new { name = "Mine now" });
         Assert.Equal(HttpStatusCode.NotFound, renamed.StatusCode);
         using var deleted = await other.DeleteAsync($"/api/test-procedures/views/{id}");
         Assert.Equal(HttpStatusCode.NotFound, deleted.StatusCode);
 
-        var byOwner = await owner.PutAsJsonAsync($"/api/test-procedures/views/{id}", new { name = "Renamed" });
+        var byOwner = await owner.PutAsJsonAsync($"/api/test-cases/views/{id}", new { name = "Renamed" });
         Assert.Equal(HttpStatusCode.OK, byOwner.StatusCode);
         Assert.Equal("Renamed", (await byOwner.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("name").GetString());
+
+        using var removedByOwner = await owner.DeleteAsync($"/api/test-cases/views/{id}");
+        Assert.Equal(HttpStatusCode.NoContent, removedByOwner.StatusCode);
     }
 
     /// <summary>An update is held to the same contract as a create, or the boundary has a hole in it.</summary>

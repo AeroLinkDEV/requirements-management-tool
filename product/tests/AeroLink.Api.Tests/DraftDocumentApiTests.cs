@@ -136,8 +136,8 @@ public sealed class DraftDocumentApiTests(ShowcaseApiFixture showcase)
             (AeroLink.Domain.Traceability.ControlledDocumentType.SwrdHighLevel, "HLRD"),
             (AeroLink.Domain.Traceability.ControlledDocumentType.SwrdLowLevel, "LLRD"),
             (AeroLink.Domain.Traceability.ControlledDocumentType.SystemTestProcedures, "SYSTD"),
-            (AeroLink.Domain.Traceability.ControlledDocumentType.HighLevelTestProcedures, "HLRTD"),
-            (AeroLink.Domain.Traceability.ControlledDocumentType.LowLevelTestProcedures, "LLRTD"),
+            (AeroLink.Domain.Traceability.ControlledDocumentType.HighLevelTestCases, "HLRTD"),
+            (AeroLink.Domain.Traceability.ControlledDocumentType.LowLevelTestCases, "LLRTD"),
         };
 
         GeneratedOutput? highLevelDraft = null;

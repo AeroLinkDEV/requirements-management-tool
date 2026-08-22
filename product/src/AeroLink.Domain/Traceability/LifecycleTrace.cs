@@ -6,7 +6,19 @@ using AeroLink.Domain.ChangeControl;
 namespace AeroLink.Domain.Traceability;
 
 public enum RequirementTraceType { DerivedFrom, AllocatedFrom }
-public enum ControlledDocumentType { Sysrd, SwrdHighLevel, SwrdLowLevel, SystemTestProcedures, HighLevelTestProcedures, LowLevelTestProcedures }
+public enum ControlledDocumentType
+{
+    Sysrd,
+    SwrdHighLevel,
+    SwrdLowLevel,
+    SystemTestProcedures,
+    HighLevelTestProcedures,
+    LowLevelTestProcedures,
+    /// <summary>Current high-level software Case document. The legacy Procedure member remains readable history.</summary>
+    HighLevelTestCases,
+    /// <summary>Current low-level software Case document. The legacy Procedure member remains readable history.</summary>
+    LowLevelTestCases,
+}
 
 /// <summary>Central validation for hierarchy-aware trace mutations.</summary>
 public static class RequirementTracePolicy
@@ -95,6 +107,15 @@ public sealed class ControlledDocument
     public int ArtifactCount { get; private set; }
     public DateTimeOffset GeneratedAt { get; private set; }
     public Guid? TemplateRevisionId { get; private set; }
+
+    /// <summary>Records the controlled content basis before a governed migration rendition is rendered.</summary>
+    public void RecordMigrationContentBasis(string contentHash, DateTimeOffset generatedAt)
+    {
+        if (string.IsNullOrWhiteSpace(contentHash) || contentHash.Length != 64)
+            throw new DomainException("A migrated controlled document requires a SHA-256 content hash.");
+        ContentHash = contentHash.Trim().ToLowerInvariant();
+        GeneratedAt = generatedAt;
+    }
 }
 
 /// <summary>
@@ -125,4 +146,16 @@ public sealed class ControlledDocumentArtifact
     public long Size { get; private set; }
     public string Sha256 { get; private set; } = string.Empty;
     public DateTimeOffset RenderedAt { get; private set; }
+
+    /// <summary>Replaces stored bytes only after a governed renderer has produced and hashed the new rendition.</summary>
+    public void ReplaceMigrationRendition(string storageKey, string originalFileName, string contentType,
+        long size, string sha256, DateTimeOffset renderedAt)
+    {
+        if (string.IsNullOrWhiteSpace(storageKey) || string.IsNullOrWhiteSpace(originalFileName)
+            || string.IsNullOrWhiteSpace(contentType) || size <= 0 || string.IsNullOrWhiteSpace(sha256)
+            || sha256.Length != 64)
+            throw new DomainException("A migrated controlled artifact requires complete immutable storage metadata.");
+        StorageKey = storageKey.Trim(); OriginalFileName = originalFileName.Trim(); ContentType = contentType.Trim();
+        Size = size; Sha256 = sha256.Trim().ToLowerInvariant(); RenderedAt = renderedAt;
+    }
 }

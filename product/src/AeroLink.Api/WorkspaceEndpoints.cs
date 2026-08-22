@@ -212,6 +212,7 @@ public static class WorkspaceEndpoints
                          join procedureRevision in db.TestProcedureRevisions.AsNoTracking() on coverage.ProcedureRevisionId equals procedureRevision.Id
                          select procedureRevision.ProcedureId).Distinct().ToListAsync(ct);
             var executionBuildIds = await db.SoftwareBuilds.AsNoTracking().Where(x => selectedReleaseIds.Contains(x.ReleaseId)).Select(x => x.Id).ToListAsync(ct);
+            var testArtifactCount = await db.TestProcedures.CountAsync(x => procedureIds.Contains(x.Id), ct);
             return Results.Ok(new {
                 releases = releases.Select(x => new { x.Id, x.Version, x.IsReleased }),
                 systemRequirements = await requirements.CountAsync(x => x.Level == RequirementLevel.System, ct),
@@ -221,7 +222,8 @@ public static class WorkspaceEndpoints
                 historicalSwcrs = await requests.CountAsync(x => x.Type == ChangeRequestType.Software, ct),
                 activeRequests = await requests.CountAsync(x => x.State != ChangeRequestState.Deferred, ct),
                 traceLinks = await db.RequirementTraces.CountAsync(x => revisionIds.Contains(x.SourceRevisionId) && revisionIds.Contains(x.TargetRevisionId), ct),
-                testProcedures = await db.TestProcedures.CountAsync(x => procedureIds.Contains(x.Id), ct),
+                testArtifacts = testArtifactCount,
+                testProcedures = testArtifactCount, // compatibility alias
                 testExecutions = await db.TestExecutions.CountAsync(x => x.SoftwareBuildId != null && executionBuildIds.Contains(x.SoftwareBuildId.Value), ct),
                 controlledDocuments = await db.ControlledDocuments.CountAsync(x => x.ProjectId == projectId && selectedReleaseIds.Contains(x.ReleaseId), ct),
                 softwareBuilds = await db.SoftwareBuilds.CountAsync(x => x.ProjectId == projectId && selectedReleaseIds.Contains(x.ReleaseId), ct)
@@ -458,14 +460,16 @@ public static class WorkspaceEndpoints
                     }
                     break;
                 }
-                case "procedure":
+                case "procedure" or "case":
                 {
                     var record = await db.TestProcedures.AsNoTracking().Where(x => x.Id == id)
                         .Select(x => new { x.ProjectId, x.Level }).SingleOrDefaultAsync(ct);
                     if (record is not null)
                     {
                         projectId = record.ProjectId;
-                        tail = record.Level == TestProcedureLevel.System ? "/system-verification" : "/software-verification";
+                        tail = record.Level == TestProcedureLevel.System
+                            ? $"/system-verification/procedures?procedureId={id}"
+                            : $"/software-verification/cases?caseId={id}";
                     }
                     break;
                 }
@@ -665,7 +669,7 @@ public static class WorkspaceEndpoints
                 select new{procedure.Id,procedure.BaseNumber,procedure.Level,revisionId=revision.Id,
                     revision.Revision,revision.State,revision.CreatedAt}).Take(take).ToListAsync(ct);
             var procedureTitles=await TestProcedureRevisionTitleProjection.ForRevisionsAsync(db,procedureCandidates.Select(x=>x.revisionId).Distinct().ToList(),ct);
-            items.AddRange(procedureCandidates.Select(x=>new SearchResultDto(x.Id,"test-procedure",$"{x.BaseNumber}.{x.Revision:D2}",procedureTitles[x.revisionId].Title,x.State.ToString(),x.Level==TestProcedureLevel.System?"system":"software",x.CreatedAt,ladderPolicy.RequirementLevelFor(x.Level).ToString())));
+            items.AddRange(procedureCandidates.Select(x=>new SearchResultDto(x.Id,x.Level==TestProcedureLevel.System?"test-procedure":"test-case",$"{x.BaseNumber}.{x.Revision:D2}",procedureTitles[x.revisionId].Title,x.State.ToString(),x.Level==TestProcedureLevel.System?"system":"software",x.CreatedAt,ladderPolicy.RequirementLevelFor(x.Level).ToString())));
             var documentCandidates=await db.ControlledDocuments.AsNoTracking().Where(x=>x.ProjectId==projectId&&allowedDocumentTypes.Contains(x.Type)&&(releaseId==null||x.ReleaseId==releaseId)&&(x.DocumentNumber.ToLower().Contains(identifierQ)||x.Title.ToLower().Contains(q))).Take(take).Select(x=>new{x.Id,x.DocumentNumber,x.Revision,x.Title,x.Type,x.GeneratedAt}).ToListAsync(ct);
             items.AddRange(documentCandidates.Select(x=>new SearchResultDto(x.Id,"document",x.DocumentNumber+"."+(x.Revision<10?"0":"")+x.Revision,x.Title,"Generated",x.Type==ControlledDocumentType.Sysrd?"system":"software",x.GeneratedAt,documentLevels[x.Type].ToString())));
             items.AddRange(await db.ReleaseCampaigns.AsNoTracking().Where(x=>x.ProjectId==projectId&&(releaseId==null||x.ReleaseId==releaseId)&&x.Name.ToLower().Contains(q)).Take(take).Select(x=>new SearchResultDto(x.Id,"release-campaign",x.Name,x.Name,x.State.ToString(),"configuration",x.CreatedAt)).ToListAsync(ct));
@@ -713,11 +717,13 @@ public static class WorkspaceEndpoints
             if(normalized=="document")
             {var item=await db.ControlledDocuments.AsNoTracking().SingleOrDefaultAsync(x=>x.Id==id,ct);if(item is null)return Results.NotFound();if(!await http.HasProjectAccessAsync(db,item.ProjectId,ct))return Results.Forbid();var baseline=await db.CandidateBaselines.AsNoTracking().SingleAsync(x=>x.Id==item.BaselineId,ct);var related=new[]{new RelatedArtifactDto("baseline",baseline.Id,baseline.DisplayNumber,baseline.Name)};return Results.Ok(new{kind=normalized,item.Id,identifier=$"{item.DocumentNumber}.{item.Revision:D2}",title=item.Title,state="Generated",subtitle=$"{ApiMap.ControlledDocumentTypeLabel(item.Type)} controlled output",updatedAt=item.GeneratedAt,details=Details(("baseline",baseline.DisplayNumber),("artifactCount",item.ArtifactCount),("contentHash",item.ContentHash),("generatedAt",item.GeneratedAt)),related});}
 
-if(normalized=="test-procedure")
+if(normalized is "test-procedure" or "test-case")
 {
     var item=await db.TestProcedures.AsNoTracking().SingleOrDefaultAsync(x=>x.Id==id,ct);
     if(item is null)return Results.NotFound();
     if(!await http.HasProjectAccessAsync(db,item.ProjectId,ct))return Results.Forbid();
+    var canonicalKind=item.Level==TestProcedureLevel.System?"test-procedure":"test-case";
+    if(normalized=="test-case"&&canonicalKind!="test-case")return Results.NotFound();
     var revisions=await db.TestProcedureRevisions.AsNoTracking().Where(x=>x.ProcedureId==id)
         .OrderByDescending(x=>x.Revision).ToListAsync(ct);
     TestProcedureRevision? selected;
@@ -742,10 +748,10 @@ if(normalized=="test-procedure")
             db,[selected.Id],ct))[selected.Id].Title;
     return Results.Ok(new
     {
-        kind=normalized,item.Id,
+        kind=canonicalKind,item.Id,
         identifier=selected is null?item.BaseNumber:$"{item.BaseNumber}.{selected.Revision:D2}",
         title=projectedTitle,state=selected?.State.ToString()??"Draft",
-        subtitle=$"{item.Level} verification procedure",
+        subtitle=$"{item.Level} verification {(item.Level==TestProcedureLevel.System?"procedure":"case")}",
         updatedAt=selected?.CreatedAt??item.CreatedAt,
         details=Details(("owner",item.OwnerId),("revisionCount",revisions.Count),
             ("revisionId",selected?.Id),("effectiveReleaseId",releaseId),
@@ -759,7 +765,7 @@ if(normalized=="test-procedure")
             if(normalized=="release")
             {var item=await db.Releases.AsNoTracking().SingleOrDefaultAsync(x=>x.Id==id,ct);if(item is null)return Results.NotFound();if(!await http.HasProjectAccessAsync(db,item.ProjectId,ct))return Results.Forbid();var related=await db.CandidateBaselines.AsNoTracking().Where(x=>x.ReleaseId==id).Select(x=>new RelatedArtifactDto("baseline",x.Id,x.BaseNumber+"."+(x.Revision<10?"0":"")+x.Revision,x.Name)).ToListAsync(ct);return Results.Ok(new{kind=normalized,item.Id,identifier=item.Version,title="Software release "+item.Version,state=item.IsReleased?"Released":"InWork",subtitle="Explicitly governed product-version record",updatedAt=item.ReleasedAt,details=Details(("predecessorReleaseId",item.PredecessorReleaseId),("releasedAt",item.ReleasedAt)),related});}
             if(normalized=="test-execution")
-            {var item=await db.TestExecutions.AsNoTracking().SingleOrDefaultAsync(x=>x.Id==id,ct);if(item is null)return Results.NotFound();if(!await http.HasProjectAccessAsync(db,item.ProjectId,ct))return Results.Forbid();var revision=await db.TestProcedureRevisions.AsNoTracking().SingleAsync(x=>x.Id==item.ProcedureRevisionId,ct);var procedure=await db.TestProcedures.AsNoTracking().SingleAsync(x=>x.Id==revision.ProcedureId,ct);var projectedTitle=(await TestProcedureRevisionTitleProjection.ForRevisionsAsync(db,[revision.Id],ct))[revision.Id].Title;var related=new[]{new RelatedArtifactDto("test-procedure",procedure.Id,$"{procedure.BaseNumber}.{revision.Revision:D2}",projectedTitle)};return Results.Ok(new{kind=normalized,item.Id,identifier=$"{procedure.BaseNumber}.{revision.Revision:D2}",title=projectedTitle+" result",state=item.Outcome.ToString(),subtitle="Immutable attributable verification determination",updatedAt=item.RecordedAt,details=Details(("executedBy",item.ExecutedBy),("executedAt",item.ExecutedAt),("configuration",item.Configuration),("determination",item.Determination),("evidenceReference",item.EvidenceReference),("retestOfExecutionId",item.RetestOfExecutionId)),related});}
+            {var item=await db.TestExecutions.AsNoTracking().SingleOrDefaultAsync(x=>x.Id==id,ct);if(item is null)return Results.NotFound();if(!await http.HasProjectAccessAsync(db,item.ProjectId,ct))return Results.Forbid();var revision=await db.TestProcedureRevisions.AsNoTracking().SingleAsync(x=>x.Id==item.ProcedureRevisionId,ct);var procedure=await db.TestProcedures.AsNoTracking().SingleAsync(x=>x.Id==revision.ProcedureId,ct);var projectedTitle=(await TestProcedureRevisionTitleProjection.ForRevisionsAsync(db,[revision.Id],ct))[revision.Id].Title;var relatedKind=procedure.Level==TestProcedureLevel.System?"test-procedure":"test-case";var related=new[]{new RelatedArtifactDto(relatedKind,procedure.Id,$"{procedure.BaseNumber}.{revision.Revision:D2}",projectedTitle)};return Results.Ok(new{kind=normalized,item.Id,identifier=$"{procedure.BaseNumber}.{revision.Revision:D2}",title=projectedTitle+" result",state=item.Outcome.ToString(),subtitle="Immutable attributable verification determination",updatedAt=item.RecordedAt,details=Details(("executedBy",item.ExecutedBy),("executedAt",item.ExecutedAt),("configuration",item.Configuration),("determination",item.Determination),("evidenceReference",item.EvidenceReference),("retestOfExecutionId",item.RetestOfExecutionId)),related});}
             if(normalized=="evidence")
             {var item=await db.EvidenceRecords.AsNoTracking().SingleOrDefaultAsync(x=>x.Id==id,ct);if(item is null)return Results.NotFound();if(!await http.HasProjectAccessAsync(db,item.ProjectId,ct))return Results.Forbid();var executionIds=await db.TestExecutionEvidence.AsNoTracking().Where(x=>x.EvidenceId==id).Select(x=>x.TestExecutionId).ToListAsync(ct);var related=await db.TestExecutions.AsNoTracking().Where(x=>executionIds.Contains(x.Id)).Select(x=>new RelatedArtifactDto("test-execution",x.Id,x.Id.ToString(),x.Determination)).ToListAsync(ct);return Results.Ok(new{kind=normalized,item.Id,identifier=item.OriginalFileName,title=item.OriginalFileName,state="Immutable",subtitle="Content-addressed verification evidence",updatedAt=item.UploadedAt,details=Details(("sha256",item.Sha256),("contentType",item.ContentType),("size",item.Size),("uploadedBy",item.UploadedBy),("uploadedAt",item.UploadedAt)),related});}
             if(normalized is "problem-report" or "problemreport" or "pr")

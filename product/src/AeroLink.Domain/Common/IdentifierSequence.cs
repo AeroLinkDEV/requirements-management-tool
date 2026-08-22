@@ -14,7 +14,8 @@ namespace AeroLink.Domain.Common;
 /// not a tracked read-modify-write, because a tracked increment would take effect only at the caller's save
 /// and put the read and the write back on opposite sides of the same race.
 ///
-/// **Scope is repository-wide per prefix.** `SCR`, `SWCR`, `SYSR`, `HLR`, `LLR`, `SYSTP`, `HLRTP`, `LLRTP`
+/// **Scope is repository-wide per prefix.** `SCR`, `SWCR`, `SYSR`, `HLR`, `LLR`, `SYSTP`, `HLRTC`, `LLRTC`,
+/// `HLRTP`, `LLRTP`
 /// and `PR` each number independently and continuously across every Program and Project, which is what the
 /// existing unique indexes already enforce and what the identifier documentation already describes.
 ///

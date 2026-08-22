@@ -29,7 +29,7 @@ public sealed record LegacyProcedureManifestBootstrapView(
 public sealed class LegacyProcedureManifestBootstrapper(AeroLinkDbContext db)
 {
     public const string SelectionRule =
-        "Latest non-Draft controlled revision for each procedure in the same project; a latest Retired revision suppresses that procedure.";
+        "Latest non-Draft controlled revision for each verification artifact in the same project; a latest Retired revision suppresses that artifact.";
 
     private sealed record LegacySnapshot(
         IReadOnlyList<TestProcedureManifestEntry> Active,
@@ -62,9 +62,9 @@ public sealed class LegacyProcedureManifestBootstrapper(AeroLinkDbContext db)
         CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(actorId))
-            throw new DomainException("A Configuration Manager is required for the legacy procedure bootstrap.");
+            throw new DomainException("A Configuration Manager is required for the legacy verification artifact bootstrap.");
         if (string.IsNullOrWhiteSpace(expectedHash) || expectedHash.Length != 64)
-            throw new DomainException("Confirm the exact preview hash before establishing the legacy procedure manifest.");
+            throw new DomainException("Confirm the exact preview hash before establishing the legacy verification artifact manifest.");
 
         await using var transaction = await db.Database.BeginTransactionAsync(IsolationLevel.Serializable, ct);
         try
@@ -76,7 +76,7 @@ public sealed class LegacyProcedureManifestBootstrapper(AeroLinkDbContext db)
             var preview = await PreviewCoreAsync(baseline, ct);
             if (!string.Equals(preview.ProceduresHash, expectedHash, StringComparison.OrdinalIgnoreCase))
                 throw new DomainException(
-                    "The legacy procedure inventory changed after preview. Refresh the preview and confirm its new hash before continuing.");
+                    "The legacy verification artifact inventory changed after preview. Refresh the preview and confirm its new hash before continuing.");
 
             // A retry after a successful commit is an idempotent read, not a second mutation or a duplicate
             // event. The exact stored membership is re-hashed by PreviewCoreAsync before this can be returned.
@@ -89,7 +89,7 @@ public sealed class LegacyProcedureManifestBootstrapper(AeroLinkDbContext db)
             var snapshot = await SnapshotAsync(baseline.ProjectId, ct);
             if (!string.Equals(snapshot.Hash, expectedHash, StringComparison.OrdinalIgnoreCase))
                 throw new DomainException(
-                    "The legacy procedure inventory changed while the bootstrap was starting. Refresh and confirm the new preview.");
+                    "The legacy verification artifact inventory changed while the bootstrap was starting. Refresh and confirm the new preview.");
 
             foreach (var member in snapshot.Active)
                 db.BaselineTestProcedures.Add(
@@ -118,7 +118,7 @@ public sealed class LegacyProcedureManifestBootstrapper(AeroLinkDbContext db)
                 return existing;
 
             throw new DomainException(
-                "Another operation changed the legacy procedure manifest while it was being established. Refresh its current state before retrying.");
+                "Another operation changed the legacy verification artifact manifest while it was being established. Refresh its current state before retrying.");
         }
     }
 
@@ -137,13 +137,13 @@ public sealed class LegacyProcedureManifestBootstrapper(AeroLinkDbContext db)
         {
             if (bootstrapEvent is null)
                 throw new DomainException(
-                    "This baseline already has an ordinary build-scoped procedure manifest; legacy bootstrap does not apply.");
+                    "This baseline already has an ordinary build-scoped verification artifact manifest; legacy bootstrap does not apply.");
 
             var exact = await ExistingManifestAsync(baseline.Id, ct);
             var exactHash = TestProcedureManifest.Hash(exact);
             if (!string.Equals(exactHash, baseline.TestProceduresHash, StringComparison.OrdinalIgnoreCase))
                 throw new DomainException(
-                    "The stored legacy procedure manifest does not match its recorded hash. Stop and investigate the configuration record.");
+                    "The stored legacy verification artifact manifest does not match its recorded hash. Stop and investigate the configuration record.");
 
             return new LegacyProcedureManifestBootstrapView(
                 baseline.Id, baseline.DisplayNumber, exactHash, exact.Count, 0, 0, SelectionRule, true,
@@ -160,9 +160,9 @@ public sealed class LegacyProcedureManifestBootstrapper(AeroLinkDbContext db)
     private async Task ValidateEligibilityAsync(CandidateBaseline baseline, CancellationToken ct)
     {
         if (baseline.State == CandidateBaselineState.Draft)
-            throw new DomainException("Freeze and materialize the legacy requirement baseline before establishing its procedure snapshot.");
+            throw new DomainException("Freeze and materialize the legacy requirement baseline before establishing its verification artifact snapshot.");
         if (baseline.RequirementsMaterializedAt is null)
-            throw new DomainException("The legacy requirement baseline must be materialized before its procedures can be bootstrapped.");
+            throw new DomainException("The legacy requirement baseline must be materialized before its verification artifacts can be bootstrapped.");
 
         var released = await db.Releases.AsNoTracking()
             .Where(x => x.Id == baseline.ReleaseId)
@@ -170,20 +170,20 @@ public sealed class LegacyProcedureManifestBootstrapper(AeroLinkDbContext db)
             .SingleAsync(ct);
         if (!released && baseline.State != CandidateBaselineState.Released)
             throw new DomainException(
-                "Legacy procedure bootstrap is reserved for a released predecessor, not an in-work baseline. Use ordinary procedure materialization for current work.");
+                "Legacy verification artifact bootstrap is reserved for a released predecessor, not an in-work baseline. Use ordinary verification artifact materialization for current work.");
 
         if (await db.CandidateBaselines.AsNoTracking().AnyAsync(
                 x => x.ProjectId == baseline.ProjectId && x.Id != baseline.Id
                      && x.TestProceduresMaterializedAt != null, ct))
             throw new DomainException(
-                "This project already has a build-scoped procedure manifest. Legacy bootstrap is available only for the first predecessor snapshot.");
+                "This project already has a build-scoped verification artifact manifest. Legacy bootstrap is available only for the first predecessor snapshot.");
 
         if (await (from member in db.BaselineTestProcedures.AsNoTracking()
                    join candidate in db.CandidateBaselines.AsNoTracking() on member.BaselineId equals candidate.Id
                    where candidate.ProjectId == baseline.ProjectId
                    select member.Id).AnyAsync(ct))
             throw new DomainException(
-                "Procedure-manifest membership already exists without a complete recorded legacy bootstrap. Stop and investigate rather than replacing it.");
+                "Verification-artifact manifest membership already exists without a complete recorded legacy bootstrap. Stop and investigate rather than replacing it.");
     }
 
     private async Task<LegacySnapshot> SnapshotAsync(Guid projectId, CancellationToken ct)
