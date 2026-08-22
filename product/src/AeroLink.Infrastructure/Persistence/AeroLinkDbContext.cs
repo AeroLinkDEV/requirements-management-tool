@@ -75,6 +75,8 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
     public DbSet<VerificationImpactItem> VerificationImpactItems => Set<VerificationImpactItem>();
     public DbSet<VerificationImpactDecisionHistory> VerificationImpactDecisionHistory => Set<VerificationImpactDecisionHistory>();
     public DbSet<RequirementTraceLink> RequirementTraces => Set<RequirementTraceLink>();
+    public DbSet<ExactLinkSuspectLifecycle> ExactLinkSuspectLifecycles => Set<ExactLinkSuspectLifecycle>();
+    public DbSet<ExactLinkSuspectEvent> ExactLinkSuspectEvents => Set<ExactLinkSuspectEvent>();
     public DbSet<ControlledDocument> ControlledDocuments => Set<ControlledDocument>();
     public DbSet<ControlledDocumentArtifact> ControlledDocumentArtifacts => Set<ControlledDocumentArtifact>();
     public DbSet<ReleaseCampaign> ReleaseCampaigns => Set<ReleaseCampaign>();
@@ -1079,9 +1081,45 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
             b.ToTable("requirement_trace_links"); b.HasKey(x => x.Id); b.Property(x => x.Type).HasConversion<string>().HasMaxLength(30);
             b.Property(x => x.Rationale).HasMaxLength(2000); b.Property(x => x.Version).IsConcurrencyToken(); b.HasIndex(x => new { x.SourceRevisionId, x.TargetRevisionId, x.Type }).IsUnique();
             b.HasIndex(x => x.TargetRevisionId); b.HasIndex(x => x.ProjectId);
+            b.HasIndex(x => x.ExactLinkSuspectLifecycleId).IsUnique();
             b.HasOne<ProjectRecord>().WithMany().HasForeignKey(x => x.ProjectId).OnDelete(DeleteBehavior.Restrict);
             b.HasOne<RequirementRevision>().WithMany().HasForeignKey(x => x.SourceRevisionId).OnDelete(DeleteBehavior.Restrict);
             b.HasOne<RequirementRevision>().WithMany().HasForeignKey(x => x.TargetRevisionId).OnDelete(DeleteBehavior.Restrict);
+            b.HasOne<ExactLinkSuspectLifecycle>().WithOne().HasForeignKey<RequirementTraceLink>(x => x.ExactLinkSuspectLifecycleId).OnDelete(DeleteBehavior.Restrict);
+        });
+        modelBuilder.Entity<ExactLinkSuspectLifecycle>(b =>
+        {
+            b.ToTable("exact_link_suspect_lifecycles"); b.HasKey(x => x.Id);
+            b.Property(x => x.State).HasConversion<string>().HasMaxLength(30).IsRequired();
+            b.Property(x => x.LinkKind).HasConversion<string>().HasMaxLength(40).IsRequired();
+            b.Property(x => x.CauseKind).HasConversion<string>().HasMaxLength(40).IsRequired();
+            b.Property(x => x.RaisedBy).HasMaxLength(100).IsRequired(); b.Property(x => x.RaisedRationale).HasMaxLength(4000).IsRequired();
+            b.Property(x => x.AcknowledgedBy).HasMaxLength(100); b.Property(x => x.AcknowledgementRationale).HasMaxLength(4000);
+            b.Property(x => x.ResolvedBy).HasMaxLength(100); b.Property(x => x.ResolutionRationale).HasMaxLength(4000); b.Property(x => x.Outcome).HasConversion<string>().HasMaxLength(50);
+            b.Property(x => x.Version).IsConcurrencyToken();
+            b.HasIndex(x => new { x.LinkKind, x.LinkId }).IsUnique(); b.HasIndex(x => new { x.ProjectId, x.State });
+            b.HasOne<ProjectRecord>().WithMany().HasForeignKey(x => x.ProjectId).OnDelete(DeleteBehavior.Restrict);
+            b.HasOne<RequirementRevision>().WithMany().HasForeignKey(x => x.CauseRequirementRevisionId).OnDelete(DeleteBehavior.Restrict);
+            b.HasOne<BaselineImport>().WithMany().HasForeignKey(x => x.CauseBaselineImportId).OnDelete(DeleteBehavior.Restrict);
+            b.HasMany(x => x.Events).WithOne().HasForeignKey(x => x.LifecycleId).OnDelete(DeleteBehavior.Cascade);
+            b.Navigation(x => x.Events).UsePropertyAccessMode(PropertyAccessMode.Field);
+            b.ToTable("exact_link_suspect_lifecycles", t => t.HasCheckConstraint("CK_exact_link_suspect_lifecycle_cause_xor",
+                "((\"CauseKind\" = 'InternalRequirementRevision' AND \"CauseRequirementRevisionId\" IS NOT NULL AND \"CauseBaselineImportId\" IS NULL) OR (\"CauseKind\" = 'ExternalBaselineImport' AND \"CauseRequirementRevisionId\" IS NULL AND \"CauseBaselineImportId\" IS NOT NULL))"));
+        });
+        modelBuilder.Entity<ExactLinkSuspectEvent>(b =>
+        {
+            b.ToTable("exact_link_suspect_events"); b.HasKey(x => x.Id);
+            b.Property(x => x.EventType).HasConversion<string>().HasMaxLength(30).IsRequired();
+            b.Property(x => x.LinkKind).HasConversion<string>().HasMaxLength(40).IsRequired();
+            b.Property(x => x.CauseKind).HasConversion<string>().HasMaxLength(40).IsRequired();
+            b.Property(x => x.ActorId).HasMaxLength(100).IsRequired(); b.Property(x => x.Rationale).HasMaxLength(4000).IsRequired();
+            b.Property(x => x.Outcome).HasConversion<string>().HasMaxLength(50);
+            b.HasIndex(x => new { x.LinkKind, x.LinkId, x.OccurredAt });
+            b.HasOne<ProjectRecord>().WithMany().HasForeignKey(x => x.ProjectId).OnDelete(DeleteBehavior.Restrict);
+            b.HasOne<RequirementRevision>().WithMany().HasForeignKey(x => x.CauseRequirementRevisionId).OnDelete(DeleteBehavior.Restrict);
+            b.HasOne<BaselineImport>().WithMany().HasForeignKey(x => x.CauseBaselineImportId).OnDelete(DeleteBehavior.Restrict);
+            b.ToTable("exact_link_suspect_events", t => t.HasCheckConstraint("CK_exact_link_suspect_event_cause_xor",
+                "((\"CauseKind\" = 'InternalRequirementRevision' AND \"CauseRequirementRevisionId\" IS NOT NULL AND \"CauseBaselineImportId\" IS NULL) OR (\"CauseKind\" = 'ExternalBaselineImport' AND \"CauseRequirementRevisionId\" IS NULL AND \"CauseBaselineImportId\" IS NOT NULL))"));
         });
         modelBuilder.Entity<ControlledDocument>(b =>
         {

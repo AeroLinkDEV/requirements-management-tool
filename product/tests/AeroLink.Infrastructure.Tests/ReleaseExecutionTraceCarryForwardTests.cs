@@ -14,7 +14,7 @@ public sealed class ReleaseExecutionTraceCarryForwardTests
     private static readonly DateTimeOffset Now = new(2026, 8, 20, 12, 0, 0, TimeSpan.Zero);
 
     [Fact]
-    public async Task Reconciliation_carries_exact_predecessor_links_once_and_skips_non_member_endpoints()
+    public async Task Reconciliation_reports_only_and_does_not_create_trace_history()
     {
         var path = Path.Combine(Path.GetTempPath(), $"aerolink-release-traces-{Guid.NewGuid():N}.db");
         var options = new DbContextOptionsBuilder<AeroLinkDbContext>()
@@ -86,17 +86,15 @@ public sealed class ReleaseExecutionTraceCarryForwardTests
                 {
                     var result = await new ReleaseExecutionService(reconcile, new EvidenceFileStore(evidenceRoot))
                         .ReconcileAsync(campaignId, "trace.assurance", Now, default);
-                    Assert.Equal(1, result.TraceLinksCreated);
+                    Assert.Equal(0, result.TraceLinksCreated);
                 }
 
                 await using (var assertOnce = new AeroLinkDbContext(options))
                 {
-                    var carried = Assert.Single(await assertOnce.RequirementTraces.AsNoTracking()
+                    Assert.Empty(await assertOnce.RequirementTraces.AsNoTracking()
                         .Where(x => x.SourceRevisionId == currentHighRevisionId && x.TargetRevisionId == currentSystemRevisionId)
                         .ToListAsync());
-                    Assert.Equal(RequirementTraceType.DerivedFrom, carried.Type);
-                    Assert.Contains("predecessor baseline", carried.Rationale);
-                    Assert.Equal(4, await assertOnce.RequirementTraces.CountAsync());
+                    Assert.Equal(3, await assertOnce.RequirementTraces.CountAsync());
                 }
 
                 await using (var repeat = new AeroLinkDbContext(options))
@@ -104,7 +102,7 @@ public sealed class ReleaseExecutionTraceCarryForwardTests
                     var result = await new ReleaseExecutionService(repeat, new EvidenceFileStore(evidenceRoot))
                         .ReconcileAsync(campaignId, "trace.assurance", Now.AddMinutes(1), default);
                     Assert.Equal(0, result.TraceLinksCreated);
-                    Assert.Equal(4, await repeat.RequirementTraces.CountAsync());
+                    Assert.Equal(3, await repeat.RequirementTraces.CountAsync());
                 }
             }
             finally

@@ -2020,6 +2020,22 @@
     },
     {
       "method": "POST",
+      "path": "/api/trace-links/{id:guid}/lifecycle/acknowledge",
+      "file": "VerificationEndpoints.cs",
+      "coveredBy": [
+        "AuthoringTracedImpactTests"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/trace-links/{id:guid}/lifecycle/resolve",
+      "file": "VerificationEndpoints.cs",
+      "coveredBy": [
+        "AuthoringTracedImpactTests"
+      ]
+    },
+    {
+      "method": "POST",
       "path": "/api/v1/events",
       "file": "IntegrationEndpoints.cs",
       "coveredBy": [

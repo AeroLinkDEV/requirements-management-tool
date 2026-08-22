@@ -93,6 +93,42 @@ public sealed class RequirementMaterializationTests
             Assert.Equal(new[] { 0, 1 }, hlrHistory.Select(x => x.Revision));
             Assert.Contains(await db.RequirementTraces.AsNoTracking().ToListAsync(), x => x.SourceRevisionId == hlrHistory[0].Id && x.TargetRevisionId == parents[0]);
             Assert.Contains(await db.RequirementTraces.AsNoTracking().ToListAsync(), x => x.SourceRevisionId == hlrHistory[1].Id && x.TargetRevisionId == parents[0]);
+
+            // A new upstream revision carries each direct predecessor relationship to the exact new target
+            // and raises evidence only for the new exact link. The released predecessor link stays immutable.
+            var parentRevision = new SystemChangeRequest("SRCR-00002", 0, project.Id, release.Id,
+                "Supersede system parent", "P", "A", "S", "author", now);
+            parentRevision.AddRequirementChange("author", "SYSR-000001", 1, RequirementLevel.System,
+                RequirementChangeKind.Modify, "The system shall navigate with integrity monitoring.",
+                "Updated upstream wording.", "Test", now);
+            parentRevision.SubmitForReview("author", [new("reviewer", "Reviewer")], now);
+            parentRevision.ApproveActiveStage("reviewer", now);
+            var fourth = FrozenBaseline("SYSBL-000004", project.Id, release.Id, third.Id, parentRevision, now);
+            db.AddRange(parentRevision, fourth); await db.SaveChangesAsync();
+            await new RequirementBaselineMaterializer(db, new VerificationImpactService(db))
+                .MaterializeAsync(fourth.Id, "cm", now, default);
+
+            var currentParent = await (from artifact in db.Requirements
+                                       where artifact.BaseNumber == "SYSR-000001"
+                                       join revision in db.RequirementRevisions on artifact.Id equals revision.ArtifactId
+                                       where revision.Revision == 1
+                                       select revision).SingleAsync();
+            var carried = await db.RequirementTraces.AsNoTracking()
+                .Where(x => x.TargetRevisionId == currentParent.Id).ToListAsync();
+            Assert.NotEmpty(carried);
+            Assert.All(carried, x => Assert.NotEqual(Guid.Empty, x.ExactLinkSuspectLifecycleId));
+            var carriedLifecycles = await db.ExactLinkSuspectLifecycles.AsNoTracking().ToListAsync();
+            Assert.Equal(carried.Count, carriedLifecycles.Count);
+            Assert.All(carriedLifecycles, lifecycle =>
+            {
+                Assert.Equal(ExactLinkLifecycleState.Suspect, lifecycle.State);
+                Assert.Equal(ExactLinkLifecycleCauseKind.InternalRequirementRevision, lifecycle.CauseKind);
+                Assert.Equal(currentParent.Id, lifecycle.CauseRequirementRevisionId);
+            });
+            Assert.Equal(carried.Count, await db.ExactLinkSuspectEvents.AsNoTracking().CountAsync());
+            Assert.Contains(await db.RequirementTraces.AsNoTracking().ToListAsync(),
+                x => x.SourceRevisionId == hlrHistory[1].Id && x.TargetRevisionId == parents[0]
+                    && x.ExactLinkSuspectLifecycleId == null);
         }
         finally { File.Delete(path); }
     }

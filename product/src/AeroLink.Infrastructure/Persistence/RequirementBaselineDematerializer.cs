@@ -72,9 +72,20 @@ public sealed class RequirementBaselineDematerializer(AeroLinkDbContext db, Veri
         foreach (var stranded in plan.ChangeRequestsToStrand)
             stranded.ChangeRequest.StrandByReopenedBaseline(actorId, baselineDisplayNumber, stranded.Requirements, now);
 
+        // A carried suspect link and its lifecycle evidence were created by this candidate materialization.
+        // Remove that aggregate together so reopening cannot leave an event referring to a deleted exact link.
+        // Historical links/lifecycles are not in plan.Traces and therefore remain untouched.
+        var transientTraceIds = plan.Traces.Select(x => x.Id).ToList();
+        var transientLifecycles = await db.ExactLinkSuspectLifecycles
+            .Where(x => x.LinkKind == ExactLinkKind.RequirementTrace && transientTraceIds.Contains(x.LinkId)).ToListAsync(ct);
+        var transientLifecycleIds = transientLifecycles.Select(x => x.Id).ToList();
+        var transientEvents = await db.ExactLinkSuspectEvents
+            .Where(x => transientLifecycleIds.Contains(x.LifecycleId)).ToListAsync(ct);
+        db.RequirementTraces.RemoveRange(plan.Traces);
+        db.ExactLinkSuspectEvents.RemoveRange(transientEvents);
+        db.ExactLinkSuspectLifecycles.RemoveRange(transientLifecycles);
         db.TestCoverage.RemoveRange(plan.Coverage);
         db.RequirementRevisionProfiles.RemoveRange(plan.Profiles);
-        db.RequirementTraces.RemoveRange(plan.Traces);
         db.CodeTraceabilityRecords.RemoveRange(plan.CodeRecords);
         db.BaselineRequirements.RemoveRange(plan.Selections);
         db.RequirementRevisions.RemoveRange(plan.Revisions);

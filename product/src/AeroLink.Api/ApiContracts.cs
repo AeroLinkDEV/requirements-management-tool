@@ -71,6 +71,8 @@ record SelectBuildRequest(Guid SoftwareBuildId);
 record StartReleaseReviewRequest(List<ApproverRequest> Approvers);
 record CancelReleaseReviewRequest(string? Reason);
 record CreateTraceLinkRequest(Guid ProjectId, Guid SourceRevisionId, Guid TargetRevisionId, RequirementTraceType Type, string Rationale);
+record AcknowledgeExactLinkRequest(string Rationale);
+record ResolveExactLinkRequest(ExactLinkResolutionOutcome Outcome, string Rationale);
 record CreateUserRequest(string UserName, string DisplayName, string Email, string TemporaryPassword);
 record GrantRoleRequest(Guid ProgramId, ProgramRole Role);
 record SetAccountStateRequest(bool Enabled);

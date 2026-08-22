@@ -35,43 +35,6 @@ public sealed class ReleaseExecutionService(AeroLinkDbContext db, EvidenceFileSt
         if (baseline.RequirementsMaterializedAt is null) throw new DomainException("Materialize the release baseline before reconciling lifecycle links.");
         if (baseline.PredecessorBaselineId is null) throw new DomainException("A predecessor baseline is required for controlled link carry-forward.");
 
-        var configuredLevels = ladderPolicy.OrderedLevels.ToHashSet();
-        var current = await (from member in db.BaselineRequirements.AsNoTracking()
-                             join artifact in db.Requirements.AsNoTracking() on member.ArtifactId equals artifact.Id
-                             where member.BaselineId == baseline.Id && configuredLevels.Contains(artifact.Level)
-                             select member).ToListAsync(ct);
-        var prior = await (from member in db.BaselineRequirements.AsNoTracking()
-                           join artifact in db.Requirements.AsNoTracking() on member.ArtifactId equals artifact.Id
-                           where member.BaselineId == baseline.PredecessorBaselineId && configuredLevels.Contains(artifact.Level)
-                           select member).ToListAsync(ct);
-        var currentByArtifact = current.ToDictionary(x => x.ArtifactId, x => x.RevisionId);
-        var priorRevisionToArtifact = prior.ToDictionary(x => x.RevisionId, x => x.ArtifactId);
-        var priorRevisionIds = prior.Select(x => x.RevisionId).ToList();
-
-        var existingTraceKeys = (await db.RequirementTraces.AsNoTracking().Where(x => x.ProjectId == campaign.ProjectId)
-            .Select(x => new { x.SourceRevisionId, x.TargetRevisionId, x.Type }).ToListAsync(ct))
-            .Select(x => (x.SourceRevisionId, x.TargetRevisionId, x.Type)).ToHashSet();
-        var priorTraces = await db.RequirementTraces.AsNoTracking().Where(x => priorRevisionIds.Contains(x.SourceRevisionId) && priorRevisionIds.Contains(x.TargetRevisionId)).ToListAsync(ct);
-        if (ladderPolicy is not ILegacyLadderCompatibilityPolicy)
-        {
-            var endpointIds = priorTraces.SelectMany(x => new[] { x.SourceRevisionId, x.TargetRevisionId }).Distinct().ToList();
-            var endpointLevels = await (from revision in db.RequirementRevisions.AsNoTracking()
-                                        join artifact in db.Requirements.AsNoTracking() on revision.ArtifactId equals artifact.Id
-                                        where endpointIds.Contains(revision.Id)
-                                        select new { revision.Id, artifact.Level }).ToDictionaryAsync(x => x.Id, x => x.Level, ct);
-            priorTraces = priorTraces.Where(trace => endpointLevels.TryGetValue(trace.SourceRevisionId, out var source)
-                && endpointLevels.TryGetValue(trace.TargetRevisionId, out var target)
-                && IsConfiguredTrace(ladderPolicy, source, target, trace.Type)).ToList();
-        }
-        var traceCreated = 0;
-        foreach (var priorTrace in priorTraces)
-        {
-            if (!currentByArtifact.TryGetValue(priorRevisionToArtifact[priorTrace.SourceRevisionId], out var source) || !currentByArtifact.TryGetValue(priorRevisionToArtifact[priorTrace.TargetRevisionId], out var target)) continue;
-            var key = (source, target, priorTrace.Type); if (existingTraceKeys.Contains(key)) continue;
-            db.RequirementTraces.Add(new RequirementTraceLink(campaign.ProjectId, source, target, priorTrace.Type, $"Carried forward from the predecessor baseline during {campaign.Name}; confirm impact disposition provides approval rationale.", now));
-            existingTraceKeys.Add(key); traceCreated++;
-        }
-
         // Coverage carry-forward belongs to materialisation, which marks a link suspect when the requirement
         // changed under the procedure. This step used to carry the same links forward itself and leave them
         // unmarked, which asserted that a procedure written against the previous wording still verified the
@@ -103,9 +66,9 @@ public sealed class ReleaseExecutionService(AeroLinkDbContext db, EvidenceFileSt
         var suspect = currentCoverage.Where(x => x.IsSuspect).Select(x => x.RequirementRevisionId).Distinct().Count();
         var covered = currentCoverage.Where(x => !x.IsSuspect).Select(x => x.RequirementRevisionId).Distinct().Count();
         var uncovered = coverageRevisionIds.Count - covered;
-        campaign.RecordExecutionProgress("LifecycleLinksReconciled", $"Created {traceCreated} baseline-valid trace links; {suspect} requirement revisions carry suspect coverage awaiting verification confirmation and {uncovered} still need confirmed coverage.", actorId, now);
+        campaign.RecordExecutionProgress("LifecycleLinksReconciled", $"Baseline materialization owns exact trace carry-forward; {suspect} requirement revisions carry suspect coverage awaiting verification confirmation and {uncovered} still need confirmed coverage.", actorId, now);
         await db.SaveChangesAsync(ct); await transaction.CommitAsync(ct);
-        return new(traceCreated, suspect, uncovered);
+        return new(0, suspect, uncovered);
     }
 
     private static bool IsConfiguredTrace(ILadderPolicy policy, RequirementLevel source, RequirementLevel target,
@@ -217,7 +180,7 @@ public sealed class ReleaseExecutionService(AeroLinkDbContext db, EvidenceFileSt
             .Where(x => x.CampaignId == campaign.Id).ToListAsync(ct);
         var traces = await db.RequirementTraces.AsNoTracking()
             .Where(x => x.ProjectId == campaign.ProjectId
-                && (revisionIds.Contains(x.SourceRevisionId) || revisionIds.Contains(x.TargetRevisionId)))
+                && revisionIds.Contains(x.SourceRevisionId) && revisionIds.Contains(x.TargetRevisionId))
             .ToListAsync(ct);
         if (ladderPolicy is not ILegacyLadderCompatibilityPolicy)
         {
@@ -233,6 +196,14 @@ public sealed class ReleaseExecutionService(AeroLinkDbContext db, EvidenceFileSt
                 && endpointLevels.TryGetValue(x.TargetRevisionId, out var target)
                 && IsConfiguredTrace(ladderPolicy, source, target, x.Type)).ToList();
         }
+        var traceLinkIds = traces.Select(x => x.Id).ToList();
+        var traceLifecycles = await db.ExactLinkSuspectLifecycles.AsNoTracking()
+            .Where(x => x.LinkKind == ExactLinkKind.RequirementTrace && traceLinkIds.Contains(x.LinkId))
+            .ToDictionaryAsync(x => x.LinkId, ct);
+        var traceLifecycleIds = traceLifecycles.Values.Select(x => x.Id).ToList();
+        var traceLifecycleEvents = (await db.ExactLinkSuspectEvents.AsNoTracking()
+            .Where(x => traceLifecycleIds.Contains(x.LifecycleId)).ToListAsync(ct))
+            .OrderBy(x => x.OccurredAt).ThenBy(x => x.Id).ToList();
         var coverageRevisionIds = revisionLevels.Where(x => verificationLevels.Contains(x.Value)).Select(x => x.Key).ToHashSet();
         var coverage = await db.TestCoverage.AsNoTracking().Where(x => coverageRevisionIds.Contains(x.RequirementRevisionId)).ToListAsync(ct);
         var procedureRevisionIds = coverage.Select(x => x.ProcedureRevisionId).Distinct().ToList();
@@ -297,7 +268,29 @@ public sealed class ReleaseExecutionService(AeroLinkDbContext db, EvidenceFileSt
             members = members.OrderBy(x => x.ArtifactId).ThenBy(x => x.RevisionId).Select(x => new { x.ArtifactId, x.RevisionId }),
             changes = changes.OrderBy(x => x.BaseNumber).ThenBy(x => x.Revision).Select(x => new { x.Id, x.BaseNumber, x.Revision, state = x.State.ToString(), x.Version, x.UpdatedAt }),
             impacts = impacts.OrderBy(x => x.ChangeRequestId).ThenBy(x => x.Kind).ThenBy(x => x.Id).Select(x => new { x.Id, x.ChangeRequestId, kind = x.Kind.ToString(), state = x.State.ToString(), x.Rationale, x.DispositionedBy, x.DispositionedAt }),
-            traces = traces.OrderBy(x => x.SourceRevisionId).ThenBy(x => x.TargetRevisionId).ThenBy(x => x.Type).Select(x => new { x.Id, x.SourceRevisionId, x.TargetRevisionId, type = x.Type.ToString(), x.Rationale }),
+            traces = traces.OrderBy(x => x.SourceRevisionId).ThenBy(x => x.TargetRevisionId).ThenBy(x => x.Type).Select(x =>
+            {
+                traceLifecycles.TryGetValue(x.Id, out var lifecycle);
+                return new
+                {
+                    x.Id, x.SourceRevisionId, x.TargetRevisionId, type = x.Type.ToString(), x.Rationale,
+                    lifecycle = lifecycle is null ? null : new
+                    {
+                        linkKind = lifecycle.LinkKind.ToString(), state = lifecycle.State.ToString(),
+                        causeKind = lifecycle.CauseKind.ToString(), lifecycle.CauseRequirementRevisionId,
+                        lifecycle.CauseBaselineImportId, lifecycle.RaisedBy, lifecycle.RaisedAt,
+                        lifecycle.RaisedRationale, lifecycle.AcknowledgedBy, lifecycle.AcknowledgedAt,
+                        lifecycle.AcknowledgementRationale, outcome = lifecycle.Outcome?.ToString(),
+                        lifecycle.ResolvedBy, lifecycle.ResolvedAt, lifecycle.ResolutionRationale,
+                        events = traceLifecycleEvents.Where(e => e.LifecycleId == lifecycle.Id).Select(e => new
+                        {
+                            type = e.EventType.ToString(), e.ActorId, e.OccurredAt, e.Rationale,
+                            causeKind = e.CauseKind.ToString(), e.CauseRequirementRevisionId,
+                            e.CauseBaselineImportId, outcome = e.Outcome?.ToString()
+                        })
+                    }
+                };
+            }),
             coverage = coverage.OrderBy(x => x.RequirementRevisionId).ThenBy(x => x.ProcedureRevisionId).Select(x => new { x.RequirementRevisionId, x.ProcedureRevisionId }),
             procedures = (from revision in procedureRevisions join procedure in procedures on revision.ProcedureId equals procedure.Id orderby procedure.BaseNumber, revision.Revision select new { procedure.Id, procedure.BaseNumber, title = procedureTitles[revision.Id].Title, revisionId = revision.Id, revision.Revision, state = revision.State.ToString(), revision.Objective, revision.Preconditions, revision.Steps, revision.ExpectedResult }),
             executions = executions.OrderBy(x => x.ProcedureRevisionId).ThenBy(x => x.ExecutedAt).ThenBy(x => x.Id).Select(x => new { x.Id, x.ProcedureRevisionId, x.SoftwareBuildId, x.RetestOfExecutionId, outcome = x.Outcome.ToString(), x.ExecutedBy, x.Configuration, x.Determination, x.EvidenceReference, x.ExecutedAt, x.RecordedAt }),

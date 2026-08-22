@@ -105,9 +105,9 @@ public sealed class ReleaseCampaignPersistenceTests(ShowcaseDatabaseFixture show
             baseline.Freeze("cm.test", now); await db.SaveChangesAsync();
             var materialized = await new RequirementBaselineMaterializer(db, new VerificationImpactService(db)).MaterializeAsync(baseline.Id, "cm.test", now, default); Assert.Equal(1251, materialized.ActiveRequirementCount);
             var service = new ReleaseExecutionService(db, new EvidenceFileStore(evidenceRoot)); var reconciled = await service.ReconcileAsync(campaign.Id, "assurance.test", now, default);
-            Assert.True(reconciled.TraceLinksCreated > 0);
-            // Coverage is carried forward at materialisation and marked suspect where the requirement changed,
-            // so reconciliation reports that state rather than creating unmarked links of its own.
+            Assert.Equal(0, reconciled.TraceLinksCreated);
+            // Exact trace carry-forward is atomic with requirement materialisation and marked suspect where the
+            // upstream requirement changed; reconciliation reports that state rather than creating history.
             Assert.True(reconciled.SuspectCoverage > 0);
             Assert.True(reconciled.UncoveredRequirements >= 1);
 

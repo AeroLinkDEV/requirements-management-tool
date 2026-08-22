@@ -55,6 +55,14 @@ async function useDensity(page: import('@playwright/test').Page, density: Densit
     .toBe(density)
 }
 
+/** Waits for the verification landing route itself, rather than the shell's earlier loading main. */
+async function verificationLandingRendered(page: import('@playwright/test').Page) {
+  const landing = page.locator('.workspaceView > main.verificationLanding')
+  await expect(landing).toBeVisible({ timeout: 15_000 })
+  await expect.poll(() => landing.evaluate(element => element.scrollHeight), { timeout: 15_000 })
+    .toBeGreaterThan(0)
+}
+
 const auditSurface = (minimum: number) => {
   const visible = (el: Element) => {
     const box = el.getBoundingClientRect()
@@ -136,6 +144,7 @@ test('compact density fits materially more on the screen than comfortable', asyn
       // This test compares one height against another, so painted is not enough — the surface has to have
       // stopped growing, or the two densities are measured at different points in their loading.
       await surfacePainted(page)
+      if (path === '/system-verification') await verificationLandingRendered(page)
       await layoutSettled(page)
       const height = await page.evaluate(() => {
         const main = document.querySelector('.workspaceView > main') as HTMLElement | null

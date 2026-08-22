@@ -8,6 +8,7 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="AeroLink.Infrastructure" />
+    <InternalsVisibleTo Include="AeroLink.Infrastructure.Tests" />
   </ItemGroup>
 
 </Project>

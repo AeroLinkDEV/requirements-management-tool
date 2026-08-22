@@ -3,8 +3,11 @@ using AeroLink.Domain.ChangeControl;
 using AeroLink.Domain.Common;
 using AeroLink.Domain.Programs;
 using AeroLink.Domain.Requirements;
+using AeroLink.Domain.Traceability;
 using AeroLink.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
+using System.Text.Json;
 
 namespace AeroLink.Infrastructure.Tests;
 
@@ -156,6 +159,142 @@ public sealed class SectionPlacementOnMaterializationTests
         finally { File.Delete(path); }
     }
 
+    [Fact]
+    public async Task A_late_placement_failure_rolls_back_trace_lifecycle_and_retry_is_single_shot()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"aerolink-section-trace-rollback-{Guid.NewGuid():N}.db");
+        var options = new DbContextOptionsBuilder<AeroLinkDbContext>().UseSqlite($"Data Source={path};Pooling=False").Options;
+        Guid projectId;
+        Guid releaseId;
+        Guid targetArtifactId;
+        Guid thirdBaselineId;
+        DateTimeOffset now = DateTimeOffset.UtcNow;
+        try
+        {
+            Guid navigation;
+            using (var setupDb = new AeroLinkDbContext(options))
+            {
+                await setupDb.Database.EnsureCreatedAsync();
+                (projectId, releaseId, navigation, _) = await SeedAsync(setupDb, now);
+
+                var introduceTarget = ApprovedScr("HLRCR-00001", "SWR-00002375", 0, RequirementChangeKind.Introduce,
+                    "The software shall sequence oceanic waypoints.", projectId, releaseId, now, navigation);
+                var first = FrozenBaseline("SW-00.10", projectId, releaseId, null, introduceTarget, now);
+                setupDb.AddRange(introduceTarget, first);
+                await setupDb.SaveChangesAsync();
+                await new RequirementBaselineMaterializer(setupDb, new VerificationImpactService(setupDb))
+                    .MaterializeAsync(first.Id, "cm", now, default);
+
+                var targetRevision = await (from artifact in setupDb.Requirements
+                                            where artifact.ProjectId == projectId && artifact.BaseNumber == "SWR-00002375"
+                                            join revision in setupDb.RequirementRevisions on artifact.Id equals revision.ArtifactId
+                                            where revision.Revision == 0
+                                            select revision).SingleAsync();
+                targetArtifactId = targetRevision.ArtifactId;
+                var introduceSource = ApprovedScr("HLRCR-00002", "SWR-00002376", 0, RequirementChangeKind.Introduce,
+                    "The software shall retain the selected waypoint.", projectId, releaseId, now, navigation,
+                    JsonSerializer.Serialize(new[] { targetRevision.Id }));
+                var second = FrozenBaseline("SW-00.20", projectId, releaseId, first.Id, introduceSource, now);
+                setupDb.AddRange(introduceSource, second);
+                await setupDb.SaveChangesAsync();
+                await new RequirementBaselineMaterializer(setupDb, new VerificationImpactService(setupDb))
+                    .MaterializeAsync(second.Id, "cm", now, default);
+
+                var reviseTarget = ApprovedScr("HLRCR-00003", "SWR-00002375", 1, RequirementChangeKind.Modify,
+                    "The software shall sequence the selected waypoint.", projectId, releaseId, now, navigation);
+                var third = FrozenBaseline("SW-00.30", projectId, releaseId, second.Id, reviseTarget, now);
+                thirdBaselineId = third.Id;
+                setupDb.AddRange(reviseTarget, third);
+                await setupDb.SaveChangesAsync();
+            }
+
+            var interceptor = new ThrowAfterLifecycleSaveChangesInterceptor();
+            var throwingOptions = new DbContextOptionsBuilder<AeroLinkDbContext>()
+                .UseSqlite($"Data Source={path};Pooling=False")
+                .AddInterceptors(interceptor)
+                .Options;
+            await using (var failedDb = new AeroLinkDbContext(throwingOptions))
+            {
+                var error = await Assert.ThrowsAsync<DomainException>(() =>
+                    new RequirementBaselineMaterializer(failedDb, new VerificationImpactService(failedDb))
+                        .MaterializeAsync(thirdBaselineId, "cm", now, default));
+                Assert.Contains("induced after lifecycle save", error.Message);
+            }
+
+            await using (var verificationDb = new AeroLinkDbContext(options))
+            {
+                Assert.Null((await verificationDb.CandidateBaselines.SingleAsync(x => x.Id == thirdBaselineId)).RequirementsMaterializedAt);
+                Assert.Empty(await verificationDb.BaselineRequirements.Where(x => x.BaselineId == thirdBaselineId).ToListAsync());
+                Assert.Equal(1, await verificationDb.RequirementRevisions.CountAsync(x => x.ArtifactId == targetArtifactId));
+                Assert.Equal(1, await verificationDb.RequirementTraces.CountAsync());
+                Assert.Empty(await verificationDb.ExactLinkSuspectLifecycles.ToListAsync());
+                Assert.Empty(await verificationDb.ExactLinkSuspectEvents.ToListAsync());
+            }
+
+            await using (var retryDb = new AeroLinkDbContext(options))
+            {
+                await new RequirementBaselineMaterializer(retryDb, new VerificationImpactService(retryDb))
+                    .MaterializeAsync(thirdBaselineId, "cm", now, default);
+
+                var currentTarget = await (from artifact in retryDb.Requirements
+                                           where artifact.ProjectId == projectId && artifact.BaseNumber == "SWR-00002375"
+                                           join revision in retryDb.RequirementRevisions on artifact.Id equals revision.ArtifactId
+                                           where revision.Revision == 1
+                                           select revision).SingleAsync();
+                var carried = await retryDb.RequirementTraces.SingleAsync(x => x.TargetRevisionId == currentTarget.Id);
+                var lifecycle = await retryDb.ExactLinkSuspectLifecycles.SingleAsync();
+                Assert.Equal(lifecycle.Id, carried.ExactLinkSuspectLifecycleId);
+                Assert.Equal(ExactLinkLifecycleState.Suspect, lifecycle.State);
+                Assert.Equal(ExactLinkLifecycleCauseKind.InternalRequirementRevision, lifecycle.CauseKind);
+                Assert.Equal(currentTarget.Id, lifecycle.CauseRequirementRevisionId);
+                Assert.Single(await retryDb.ExactLinkSuspectEvents.ToListAsync());
+                Assert.Equal(2, await retryDb.RequirementTraces.CountAsync());
+            }
+
+            await using (var idempotenceDb = new AeroLinkDbContext(options))
+            {
+                var retryError = await Assert.ThrowsAsync<DomainException>(() =>
+                    new RequirementBaselineMaterializer(idempotenceDb, new VerificationImpactService(idempotenceDb))
+                        .MaterializeAsync(thirdBaselineId, "cm", now, default));
+                Assert.Contains("already materialized", retryError.Message);
+                Assert.Single(await idempotenceDb.ExactLinkSuspectLifecycles.ToListAsync());
+                Assert.Single(await idempotenceDb.ExactLinkSuspectEvents.ToListAsync());
+                Assert.Equal(2, await idempotenceDb.RequirementTraces.CountAsync());
+            }
+        }
+        finally { File.Delete(path); }
+    }
+
+    private sealed class ThrowAfterLifecycleSaveChangesInterceptor : SaveChangesInterceptor
+    {
+        private bool _armed;
+        private bool _thrown;
+
+        public override ValueTask<InterceptionResult<int>> SavingChangesAsync(
+            DbContextEventData eventData, InterceptionResult<int> result,
+            CancellationToken cancellationToken = default)
+        {
+            if (!_armed && eventData.Context is not null
+                && eventData.Context.ChangeTracker.Entries<ExactLinkSuspectLifecycle>()
+                    .Any(entry => entry.State == EntityState.Added)
+                && eventData.Context.ChangeTracker.Entries<ExactLinkSuspectEvent>()
+                    .Any(entry => entry.State == EntityState.Added))
+                _armed = true;
+            return ValueTask.FromResult(result);
+        }
+
+        public override ValueTask<int> SavedChangesAsync(SaveChangesCompletedEventData eventData, int result,
+            CancellationToken cancellationToken = default)
+        {
+            if (_armed && !_thrown)
+            {
+                _thrown = true;
+                throw new DomainException("Materialization failure induced after lifecycle save.");
+            }
+            return ValueTask.FromResult(result);
+        }
+    }
+
     private static async Task<(Guid ProjectId, Guid ReleaseId, Guid Navigation, Guid Performance)> SeedAsync(
         AeroLinkDbContext db, DateTimeOffset now, string programName = "FMS", string programCode = "FMSR",
         string specificationNumber = "HLRD-000001")
@@ -179,11 +318,12 @@ public sealed class SectionPlacementOnMaterializationTests
 
     private static SystemChangeRequest ApprovedScr(string scrNumber, string requirementNumber, int revision,
         RequirementChangeKind kind, string statement, Guid projectId, Guid releaseId, DateTimeOffset now,
-        Guid? targetSectionId)
+        Guid? targetSectionId, string proposedUpstreamRevisionIdsJson = "[]")
     {
         var scr = new SystemChangeRequest(scrNumber, 0, projectId, releaseId, kind.ToString(), "P", "A", "S", "author", now, ChangeRequestType.Software, softwareLevel: RequirementLevel.HighLevel);
         scr.AddRequirementChange("author", requirementNumber, revision, RequirementLevel.HighLevel, kind, statement,
-            "Rationale", "Test", now, targetSectionId: targetSectionId);
+            "Rationale", "Test", now, targetSectionId: targetSectionId,
+            proposedUpstreamRevisionIdsJson: proposedUpstreamRevisionIdsJson);
         scr.SubmitForReview("author", [new("reviewer", "Reviewer")], now);
         scr.ApproveActiveStage("reviewer", now);
         return scr;
