@@ -24,7 +24,11 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
     /// carry an actor on their aggregate; this fallback is reserved for explicitly trusted infrastructure seeds.
     /// </summary>
     internal string? LadderSealActor { get; set; }
-    internal (Guid ProjectId, string Kind, string Identity)? PendingLadderSeal { get; set; }
+    internal sealed record PendingLadderSeal(Guid ConfigurationId, Guid ProjectId, string Kind, string Identity);
+    internal List<PendingLadderSeal> PendingLadderSeals { get; } = [];
+
+    internal void TrackLadderSeal(ProjectLadderConfiguration configuration, Guid projectId, string kind, string identity)
+        => PendingLadderSeals.Add(new(configuration.Id, projectId, kind, identity));
 
     public DbSet<ProgramRecord> Programs => Set<ProgramRecord>();
     public DbSet<IdentifierSequence> IdentifierSequences => Set<IdentifierSequence>();
@@ -163,29 +167,27 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
 
     public override int SaveChanges(bool acceptAllChangesOnSuccess)
     {
-        PendingLadderSeal = null;
+        PendingLadderSeals.Clear();
         try
         {
             PrepareLadderSealsAsync(CancellationToken.None).GetAwaiter().GetResult();
             var result = base.SaveChanges(acceptAllChangesOnSuccess);
-            PendingLadderSeal = null;
+            PendingLadderSeals.Clear();
             return result;
         }
-        catch (DbUpdateConcurrencyException ex) when (PendingLadderSeal is not null)
+        catch (DbUpdateConcurrencyException ex) when (TryFindPendingSealConflict(ex, out var pending))
         {
-            var pending = PendingLadderSeal.Value;
-            PendingLadderSeal = null;
+            PendingLadderSeals.Clear();
             throw SealConflict(pending, ex);
         }
-        catch (DbUpdateException ex) when (PendingLadderSeal is not null && IsSealWriteConflict(ex))
+        catch (DbUpdateException ex) when (TryFindPendingSealConflict(ex, out var pendingDbUpdate))
         {
-            var pending = PendingLadderSeal.Value;
-            PendingLadderSeal = null;
-            throw SealConflict(pending, ex);
+            PendingLadderSeals.Clear();
+            throw SealConflict(pendingDbUpdate, ex);
         }
         catch
         {
-            PendingLadderSeal = null;
+            PendingLadderSeals.Clear();
             throw;
         }
     }
@@ -195,57 +197,83 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
 
     public override async Task<int> SaveChangesAsync(bool acceptAllChangesOnSuccess,
         CancellationToken cancellationToken = default)
-    {
-        PendingLadderSeal = null;
-        try
-        {
-            await PrepareLadderSealsAsync(cancellationToken);
-            var result = await base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken);
-            PendingLadderSeal = null;
-            return result;
-        }
-        catch (DbUpdateConcurrencyException ex) when (PendingLadderSeal is not null)
-        {
-            var pending = PendingLadderSeal.Value;
-            PendingLadderSeal = null;
-            throw SealConflict(pending, ex);
-        }
-        catch (DbUpdateException ex) when (PendingLadderSeal is not null && IsSealWriteConflict(ex))
-        {
-            var pending = PendingLadderSeal.Value;
-            PendingLadderSeal = null;
-            throw SealConflict(pending, ex);
-        }
-        catch
-        {
-            PendingLadderSeal = null;
-            throw;
-        }
-    }
+        => await SaveChangesCoreAsync(acceptAllChangesOnSuccess, cancellationToken);
 
     private ProjectLadderSealConcurrencyException SealConflict(
-        (Guid ProjectId, string Kind, string Identity) pending, Exception cause)
+        PendingLadderSeal pending, Exception cause)
     {
         ChangeTracker.Clear();
         return new ProjectLadderSealConcurrencyException(
             $"The project ladder seal race was lost for project '{pending.ProjectId:D}': "
             + $"another first qualifying writer committed before candidate {pending.Kind} '{pending.Identity}'. "
-            + "No candidate content was committed; retry against the now-sealed project to see its winning dependency.");
+            + "No candidate content was committed; retry against the now-sealed project to see its winning dependency.",
+            cause);
     }
 
-    private static bool IsSealWriteConflict(DbUpdateException exception) =>
-        exception.InnerException is Microsoft.Data.Sqlite.SqliteException { SqliteErrorCode: 19 } sqlite
-            && sqlite.Message.Contains("project_ladder_configuration_history", StringComparison.Ordinal)
-            && sqlite.Message.Contains("ConfigurationId", StringComparison.Ordinal)
-            && sqlite.Message.Contains("Revision", StringComparison.Ordinal)
-        || exception.InnerException is Microsoft.Data.Sqlite.SqliteException { SqliteErrorCode: 19 } ladder
-            && ladder.Message.Contains("project_ladder_configurations", StringComparison.Ordinal)
-            && ladder.Message.Contains("ProjectId", StringComparison.Ordinal)
-        || exception.InnerException is Microsoft.Data.Sqlite.SqliteException { SqliteErrorCode: 5 or 6 }
-        || exception.InnerException is Npgsql.PostgresException { SqlState: Npgsql.PostgresErrorCodes.UniqueViolation } postgres
-            && (postgres.ConstraintName?.Contains("project_ladder_configuration_history", StringComparison.Ordinal) == true
-                || postgres.ConstraintName?.Contains("project_ladder_configurations_ProjectId", StringComparison.Ordinal) == true)
-        || exception.InnerException is Npgsql.PostgresException { SqlState: "40001" or "40P01" };
+    private bool TryFindPendingSealConflict(Exception exception, out PendingLadderSeal pending)
+    {
+        pending = null!;
+        if (PendingLadderSeals.Count == 0) return false;
+
+        var entries = exception is DbUpdateException update
+            ? update.Entries.Select(x => x.Entity).ToArray()
+            : [];
+        var configurationIds = entries.Select(entity => entity switch
+        {
+            ProjectLadderConfiguration configuration => configuration.Id,
+            ProjectLadderConfigurationHistory history => history.ConfigurationId,
+            _ => Guid.Empty
+        }).Where(x => x != Guid.Empty).ToHashSet();
+
+        var matches = PendingLadderSeals.Where(x => configurationIds.Contains(x.ConfigurationId)).ToArray();
+        if (matches.Length == 1)
+        {
+            pending = matches[0];
+            return true;
+        }
+
+        if (exception is DbUpdateConcurrencyException)
+            return false;
+
+        if (!IsSealWriteConflict(exception)) return false;
+
+        // Provider lock/serialization errors do not expose an EF entry. They can be attributed safely only when
+        // this unit of work attempted one seal; a multi-project save must not mislabel an unrelated write.
+        if (configurationIds.Count == 0 && PendingLadderSeals.Count == 1)
+        {
+            pending = PendingLadderSeals[0];
+            return true;
+        }
+
+        return false;
+    }
+
+    private static bool IsSealWriteConflict(Exception exception)
+    {
+        var sqlite = exception.GetBaseException() as Microsoft.Data.Sqlite.SqliteException;
+        if (sqlite is { SqliteErrorCode: 19 })
+        {
+            var message = sqlite.Message;
+            return (message.Contains("project_ladder_configuration_history", StringComparison.Ordinal)
+                    && message.Contains("ConfigurationId", StringComparison.Ordinal)
+                    && message.Contains("Revision", StringComparison.Ordinal))
+                || (message.Contains("project_ladder_configurations", StringComparison.Ordinal)
+                    && message.Contains("ProjectId", StringComparison.Ordinal));
+        }
+        if (sqlite is { SqliteErrorCode: 5 or 6 }) return true;
+
+        if (exception.GetBaseException() is Npgsql.PostgresException postgres)
+            return postgres.SqlState is "40001" or "40P01"
+                || (postgres.SqlState == Npgsql.PostgresErrorCodes.UniqueViolation
+                    && (string.Equals(postgres.ConstraintName,
+                        "IX_project_ladder_configuration_history_ConfigurationId_Revision", StringComparison.Ordinal)
+                        || string.Equals(postgres.ConstraintName,
+                            "IX_project_ladder_configuration_history_ConfigurationId_Revisi~", StringComparison.Ordinal)
+                        || string.Equals(postgres.ConstraintName,
+                            "IX_project_ladder_configurations_ProjectId", StringComparison.Ordinal)));
+
+        return false;
+    }
 
     private async Task PrepareLadderSealsAsync(CancellationToken ct)
     {
@@ -1565,11 +1593,19 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
         });
     }
 
-    public override async Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
+    public override Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
+        => SaveChangesCoreAsync(acceptAllChangesOnSuccess: true, cancellationToken);
+
+    private async Task<int> SaveChangesCoreAsync(bool acceptAllChangesOnSuccess, CancellationToken cancellationToken)
     {
-        // Aggregate children use application-assigned GUIDs. EF interprets newly discovered
-        // children with set keys as existing unless their append-only state is made explicit.
-        foreach (var entry in ChangeTracker.Entries<AuditEvent>().Where(x => x.State == EntityState.Modified)) entry.State = EntityState.Added;
+        PendingLadderSeals.Clear();
+        try
+        {
+            await PrepareLadderSealsAsync(cancellationToken);
+
+            // Aggregate children use application-assigned GUIDs. EF interprets newly discovered
+            // children with set keys as existing unless their append-only state is made explicit.
+            foreach (var entry in ChangeTracker.Entries<AuditEvent>().Where(x => x.State == EntityState.Modified)) entry.State = EntityState.Added;
         // A requirement change asks the question the blanket rule was approximating: is this row actually new?
         //
         // The rule above exists because a child discovered with an application-assigned key looks Modified to
@@ -1636,7 +1672,25 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
         await RefuseCrossLevelCoverageAsync(cancellationToken);
         await AddLifecycleEventsAsync(cancellationToken);
         await QueueNotificationDeliveriesAsync(cancellationToken);
-        return await base.SaveChangesAsync(cancellationToken);
+            var result = await base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken);
+            PendingLadderSeals.Clear();
+            return result;
+        }
+        catch (DbUpdateConcurrencyException ex) when (TryFindPendingSealConflict(ex, out var pending))
+        {
+            PendingLadderSeals.Clear();
+            throw SealConflict(pending, ex);
+        }
+        catch (DbUpdateException ex) when (TryFindPendingSealConflict(ex, out var pendingDbUpdate))
+        {
+            PendingLadderSeals.Clear();
+            throw SealConflict(pendingDbUpdate, ex);
+        }
+        catch
+        {
+            PendingLadderSeals.Clear();
+            throw;
+        }
     }
 
     /// <summary>

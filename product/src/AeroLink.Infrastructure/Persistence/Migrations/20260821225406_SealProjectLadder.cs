@@ -83,16 +83,69 @@ namespace AeroLink.Infrastructure.Persistence.Migrations
             migrationBuilder.Sql("""
                 UPDATE "project_ladder_configurations" AS c
                 SET "IsSealed" = TRUE,
-                    "SealedAt" = c."CreatedAt",
+                    "SealedAt" = CURRENT_TIMESTAMP,
                     "SealedBy" = 'migration.backfill',
                     "SealedContentKind" = 'migration-backfill',
-                    "SealedContentIdentity" = 'project:' || CAST(c."ProjectId" AS TEXT) || ':existing-controlled-content'
+                    "SealedContentIdentity" = 'project:' || CAST(c."ProjectId" AS TEXT) || ':existing-controlled-content',
+                    "Version" = c."Version" + 1
                 WHERE EXISTS (SELECT 1 FROM "requirements" r WHERE r."ProjectId" = c."ProjectId")
                    OR EXISTS (SELECT 1 FROM "system_change_requests" scr JOIN "requirement_changes" rc ON rc."ChangeRequestId" = scr."Id" WHERE scr."ProjectId" = c."ProjectId")
                    OR EXISTS (SELECT 1 FROM "test_procedures" tp WHERE tp."ProjectId" = c."ProjectId")
                    OR EXISTS (SELECT 1 FROM "test_change_reviews" tr WHERE tr."ProjectId" = c."ProjectId")
                    OR EXISTS (SELECT 1 FROM "requirement_trace_links" tl WHERE tl."ProjectId" = c."ProjectId")
                    OR EXISTS (SELECT 1 FROM "code_traceability_records" ct WHERE ct."ProjectId" = c."ProjectId");
+                """);
+
+            // Preserve an immutable, migration-owned evidence boundary for every configuration backfilled above.
+            // Non-default configurations must already have a real authoring/activation history snapshot. The
+            // migration refuses to invent one; the fixed legacy snapshot is the exact persisted default graph.
+            migrationBuilder.Sql("""
+                DO $$
+                BEGIN
+                    IF EXISTS (
+                        SELECT 1
+                        FROM "project_ladder_configurations" AS c
+                        WHERE c."IsSealed" = TRUE
+                          AND c."SealedContentKind" = 'migration-backfill'
+                          AND NOT (c."Classification" = 'LegacyDefault' AND c."State" = 'Stored')
+                          AND NOT EXISTS (
+                              SELECT 1 FROM "project_ladder_configuration_history" AS h
+                              WHERE h."ConfigurationId" = c."Id"
+                          )
+                    ) THEN
+                        RAISE EXCEPTION 'Cannot backfill a non-default ladder without an existing real history snapshot';
+                    END IF;
+                END $$;
+                WITH backfilled AS (
+                    SELECT c."Id", c."ProjectId", c."SealedAt", c."Version" AS "Revision",
+                           COALESCE(latest."CanonicalSnapshot",
+                               'steps[1:System:7;2:HighLevel:7;3:LowLevel:15]|edges[HighLevel>LowLevel;System>HighLevel]') AS "CanonicalSnapshot",
+                           COALESCE(latest."SnapshotHash",
+                               '6fc44a4303eee5204f376a377bf139da11c421ca35e3d64b9b15cadcdb502fb7') AS "SnapshotHash"
+                    FROM "project_ladder_configurations" AS c
+                    LEFT JOIN LATERAL (
+                        SELECT h."CanonicalSnapshot", h."SnapshotHash"
+                        FROM "project_ladder_configuration_history" AS h
+                        WHERE h."ConfigurationId" = c."Id"
+                        ORDER BY h."Revision" DESC
+                        LIMIT 1
+                    ) AS latest ON TRUE
+                    WHERE c."IsSealed" = TRUE
+                      AND c."SealedContentKind" = 'migration-backfill'
+                )
+                INSERT INTO "project_ladder_configuration_history"
+                    ("Id", "ConfigurationId", "ProjectId", "Revision", "Actor", "OccurredAt", "Reason", "CanonicalSnapshot", "SnapshotHash")
+                SELECT md5(g."Id"::text || ':migration-backfill:' || g."Revision"::text)::uuid,
+                       g."Id", g."ProjectId", g."Revision", 'migration.backfill', g."SealedAt",
+                       'Migration-owned seal boundary for existing controlled content; historical first content is not inferred.',
+                       g."CanonicalSnapshot", g."SnapshotHash"
+                FROM backfilled AS g
+                WHERE NOT EXISTS (
+                    SELECT 1
+                    FROM "project_ladder_configuration_history" AS existing
+                    WHERE existing."ConfigurationId" = g."Id"
+                      AND existing."Revision" = g."Revision"
+                )
                 """);
 
             migrationBuilder.AddCheckConstraint(

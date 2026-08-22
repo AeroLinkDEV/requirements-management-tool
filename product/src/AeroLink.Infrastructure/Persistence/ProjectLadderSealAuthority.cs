@@ -33,7 +33,8 @@ public sealed record ProjectLadderSealResult(ProjectLadderSealResultKind Kind,
     ProjectLadderConfiguration? Configuration = null, string? Error = null);
 
 /// <summary>Raised after the database identifies the losing first-content seal writer.</summary>
-public sealed class ProjectLadderSealConcurrencyException(string message) : InvalidOperationException(message);
+public sealed class ProjectLadderSealConcurrencyException(string message, Exception? innerException = null)
+    : InvalidOperationException(message, innerException);
 
 /// <summary>
 /// One persistence/application authority for ladder sealing. It prepares the configuration update and immutable
@@ -83,8 +84,8 @@ public sealed class ProjectLadderSealAuthority(AeroLinkDbContext db)
                 byId[x.ChildStepId].CatalogueEntry)).ToArray();
         var canonical = ProjectLadderSnapshot.Canonicalize(steps, relationships);
         var hash = ProjectLadderSnapshot.Hash(canonical);
-        db.PendingLadderSeal = (projectId, contentKind, contentIdentity);
         configuration.Seal(contentKind, contentIdentity, actor, now);
+        db.TrackLadderSeal(configuration, projectId, contentKind, contentIdentity);
         db.ProjectLadderConfigurationHistories.Add(new ProjectLadderConfigurationHistory(
             configuration.Id, projectId, configuration.Version, actor, now,
             $"Sealed ladder with first {contentKind} '{contentIdentity}'.", canonical, hash));

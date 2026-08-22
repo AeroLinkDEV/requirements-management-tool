@@ -3,7 +3,10 @@ using AeroLink.Domain.Common;
 using AeroLink.Domain.Hierarchy;
 using AeroLink.Domain.Imports;
 using AeroLink.Domain.Programs;
+using AeroLink.Domain.Baselines;
+using AeroLink.Domain.Requirements;
 using AeroLink.Domain.Traceability;
+using AeroLink.Domain.Verification;
 using AeroLink.Infrastructure.Persistence;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
@@ -268,6 +271,39 @@ public sealed class ProjectLadderPersistenceTests : IAsyncLifetime
         Assert.Contains(change.DisplayNumber, edit.Error);
     }
 
+    public static IEnumerable<object[]> Catalogued_ladder_bound_content_kinds()
+        => LadderBoundContentCatalog.Current.Select(x => new object[] { x.Id });
+
+    [Theory]
+    [MemberData(nameof(Catalogued_ladder_bound_content_kinds))]
+    public async Task Every_catalogued_entity_seam_is_guarded_by_the_central_save_authority(string contentKind)
+    {
+        await using var db = Context();
+        var now = DateTimeOffset.UtcNow;
+        var expectedIdentity = await AddCataloguedEntityAsync(db, contentKind, now);
+        if (contentKind == "code-traceability")
+            Assert.Contains(db.ChangeTracker.Entries<RequirementArtifact>(), x => x.State == EntityState.Added);
+        await db.SaveChangesAsync();
+
+        var persisted = await db.ProjectLadderConfigurations.SingleAsync(x => x.ProjectId == _fmsProjectId);
+        Assert.True(persisted.IsSealed);
+        Assert.NotNull(persisted.SealedContentKind);
+        Assert.NotNull(persisted.SealedContentIdentity);
+        Assert.Equal(1, await db.ProjectLadderConfigurationHistories.CountAsync());
+        Assert.Contains(contentKind switch
+        {
+            "draft-requirement-change" => "draft-requirement-change",
+            "requirement-artifact" => "requirement-artifact",
+            "requirement-revision" => "requirement-artifact", // The artifact prerequisite is the first qualifying row.
+            "test-procedure" => "test-procedure",
+            "test-change-review" => "test-change-review",
+            "trace-link" => "requirement-artifact", // Revisions and their artifact are prerequisites.
+            "code-traceability" => "code-traceability", // Deterministic kind ordering makes this candidate first in the same UoW.
+            _ => throw new InvalidOperationException(contentKind)
+        }, persisted.SealedContentKind);
+        Assert.True(expectedIdentity.Length > 0);
+    }
+
     [Fact]
     public async Task Baseline_import_scaffolding_does_not_seal_ladder()
     {
@@ -383,6 +419,49 @@ public sealed class ProjectLadderPersistenceTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Multi_project_first_content_conflict_identifies_the_actual_losing_candidate()
+    {
+        await using var loser = Context();
+        _ = await loser.ProjectLadderConfigurations.Include(x => x.Steps).Include(x => x.AllowedUpstream)
+            .SingleAsync(x => x.ProjectId == _fmsProjectId);
+        _ = await loser.ProjectLadderConfigurations.Include(x => x.Steps).Include(x => x.AllowedUpstream)
+            .SingleAsync(x => x.ProjectId == _otherProjectId);
+
+        await using (var winner = Context())
+        {
+            var release = new SoftwareRelease(_fmsProjectId, "5.0", true);
+            var request = new SystemChangeRequest("SRCR-70706", 0, _fmsProjectId, release.Id,
+                "Winning content", "Problem", "Analysis", "Solution", "winner", DateTimeOffset.UtcNow);
+            request.AddRequirementChange("winner", "SYSR-00000005", 0, RequirementLevel.System,
+                RequirementChangeKind.Introduce, "Winner", "Winner", "Review", DateTimeOffset.UtcNow);
+            winner.AddRange(release, request);
+            await winner.SaveChangesAsync();
+        }
+
+        var secondRelease = new SoftwareRelease(_fmsProjectId, "5.1", true);
+        var otherRelease = new SoftwareRelease(_otherProjectId, "1.1", true);
+        var losingRequest = new SystemChangeRequest("SRCR-70707", 0, _fmsProjectId, secondRelease.Id,
+            "Losing content", "Problem", "Analysis", "Solution", "loser", DateTimeOffset.UtcNow);
+        var losingChange = losingRequest.AddRequirementChange("loser", "SYSR-00000006", 0, RequirementLevel.System,
+            RequirementChangeKind.Introduce, "Losing content", "Losing content", "Review", DateTimeOffset.UtcNow);
+        var otherRequest = new SystemChangeRequest("SRCR-70708", 0, _otherProjectId, otherRelease.Id,
+            "Independent content", "Problem", "Analysis", "Solution", "other", DateTimeOffset.UtcNow);
+        otherRequest.AddRequirementChange("other", "SYSR-00000007", 0, RequirementLevel.System,
+            RequirementChangeKind.Introduce, "Independent content", "Independent content", "Review", DateTimeOffset.UtcNow);
+        loser.AddRange(secondRelease, otherRelease, losingRequest, otherRequest);
+
+        var error = await Assert.ThrowsAsync<ProjectLadderSealConcurrencyException>(() => loser.SaveChangesAsync());
+        Assert.Contains(_fmsProjectId.ToString("D"), error.Message);
+        Assert.Contains(losingChange.DisplayNumber, error.Message);
+        Assert.DoesNotContain(otherRequest.Id.ToString("D"), error.Message);
+
+        await using var check = Context();
+        var otherConfiguration = await check.ProjectLadderConfigurations.SingleAsync(x => x.ProjectId == _otherProjectId);
+        Assert.False(otherConfiguration.IsSealed);
+        Assert.Empty(await check.RequirementChanges.Where(x => x.ChangeRequestId == otherRequest.Id).ToListAsync());
+    }
+
+    [Fact]
     public async Task Internal_upgrade_seam_requires_readiness_and_records_the_structural_transform()
     {
         await using var db = Context();
@@ -425,6 +504,101 @@ public sealed class ProjectLadderPersistenceTests : IAsyncLifetime
     }
 
     private AeroLinkDbContext Context() => new(_options);
+
+    private async Task<string> AddCataloguedEntityAsync(AeroLinkDbContext db, string contentKind, DateTimeOffset now)
+    {
+        switch (contentKind)
+        {
+            case "draft-requirement-change":
+            {
+                var release = new SoftwareRelease(_fmsProjectId, "9.0", true);
+                var request = new SystemChangeRequest("SRCR-70710", 0, _fmsProjectId,
+                    release.Id, "Catalog draft", "Problem", "Analysis", "Solution", "catalog.test", now);
+                var change = request.AddRequirementChange("catalog.test", "SYSR-00000010", 0,
+                    RequirementLevel.System, RequirementChangeKind.Introduce, "Catalog content", "Catalog content",
+                    "Review", now);
+                db.AddRange(release, request);
+                return change.DisplayNumber;
+            }
+            case "requirement-artifact":
+            {
+                var artifact = new RequirementArtifact(_fmsProjectId, "SYS-00001",
+                    RequirementLevel.System, now);
+                db.Requirements.Add(artifact);
+                return artifact.BaseNumber;
+            }
+            case "requirement-revision":
+            {
+                var release = new SoftwareRelease(_fmsProjectId, "9.0", true);
+                var request = new SystemChangeRequest("SRCR-70710", 0, _fmsProjectId,
+                    release.Id, "Catalog revision", "Problem", "Analysis", "Solution", "catalog.test", now);
+                var baseline = new CandidateBaseline("BL-00001", 0, _fmsProjectId,
+                    release.Id, null, "Catalog baseline", "catalog.test", now);
+                var artifact = new RequirementArtifact(_fmsProjectId, "SYS-00001",
+                    RequirementLevel.System, now);
+                var revision = new RequirementRevision(artifact.Id, 0, "Catalog revision statement", "Catalog rationale",
+                    "Inspection", RequirementRevisionState.Active, request.Id, baseline.Id, now);
+                db.AddRange(release, request, baseline, artifact, revision);
+                return revision.Id.ToString("D");
+            }
+            case "test-procedure":
+            {
+                var procedure = new TestProcedure(_fmsProjectId, "HLRTP-00001",
+                    "Catalog procedure", "catalog.test", now, TestProcedureLevel.HighLevel);
+                db.TestProcedures.Add(procedure);
+                return procedure.BaseNumber;
+            }
+            case "test-change-review":
+            {
+                var release = new SoftwareRelease(_fmsProjectId, "9.0", true);
+                var request = new SystemChangeRequest("SRCR-70710", 0, _fmsProjectId,
+                    release.Id, "Catalog review", "Problem", "Analysis", "Solution", "catalog.test", now);
+                var review = new TestChangeReview(_fmsProjectId, release.Id, request.Id,
+                    TestChangeReviewDiscipline.System, request.DisplayNumber, now, authorId: "catalog.test");
+                db.AddRange(release, request, review);
+                return review.Id.ToString("D");
+            }
+            case "trace-link":
+            {
+                var (release, request, baseline, first, second) = CreateRevisionPrerequisites(now);
+                var link = new RequirementTraceLink(_fmsProjectId, first.Revision.Id, second.Revision.Id,
+                    RequirementTraceType.DerivedFrom, "Catalog trace", now);
+                db.AddRange(release, request, baseline, first.Artifact, second.Artifact, first.Revision, second.Revision, link);
+                return link.Id.ToString("D");
+            }
+            case "code-traceability":
+            {
+                var (release, request, baseline, first, _) = CreateRevisionPrerequisites(now);
+                var code = new CodeTraceabilityRecord(_fmsProjectId, release.Id, first.Artifact.Id, first.Revision.Id,
+                    CodeTraceDisposition.NoCodeChangeRequired, "", "", "", "", "", null,
+                    "Catalog has no code change.", false, "catalog.test", now);
+                db.AddRange(release, request, baseline, first.Artifact, first.Revision, code);
+                return code.Id.ToString("D");
+            }
+            default:
+                throw new InvalidOperationException($"Unregistered catalog test kind '{contentKind}'.");
+        }
+    }
+
+    private (SoftwareRelease Release, SystemChangeRequest Request, CandidateBaseline Baseline,
+        (RequirementArtifact Artifact, RequirementRevision Revision) First,
+        (RequirementArtifact Artifact, RequirementRevision Revision) Second) CreateRevisionPrerequisites(DateTimeOffset now)
+    {
+        var release = new SoftwareRelease(_fmsProjectId, "9.0", true);
+        var request = new SystemChangeRequest("SRCR-70710", 0, _fmsProjectId,
+            release.Id, "Catalog revisions", "Problem", "Analysis", "Solution", "catalog.test", now);
+        var baseline = new CandidateBaseline("BL-00001", 0, _fmsProjectId,
+            release.Id, null, "Catalog baseline", "catalog.test", now);
+        var firstArtifact = new RequirementArtifact(_fmsProjectId, "SYS-00001",
+            RequirementLevel.System, now);
+        var secondArtifact = new RequirementArtifact(_fmsProjectId, "HLR-00001",
+            RequirementLevel.HighLevel, now);
+        var firstRevision = new RequirementRevision(firstArtifact.Id, 0, "Catalog source statement", "Catalog rationale",
+            "Inspection", RequirementRevisionState.Active, request.Id, baseline.Id, now);
+        var secondRevision = new RequirementRevision(secondArtifact.Id, 0, "Catalog target statement", "Catalog rationale",
+            "Inspection", RequirementRevisionState.Active, request.Id, baseline.Id, now);
+        return (release, request, baseline, (firstArtifact, firstRevision), (secondArtifact, secondRevision));
+    }
 
     private async Task SeedLegacyAsync(Guid projectId)
     {
