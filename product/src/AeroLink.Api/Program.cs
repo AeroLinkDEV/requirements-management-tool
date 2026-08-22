@@ -113,6 +113,7 @@ await using (var scope = app.Services.CreateAsyncScope())
     if (!restoreValidationReadOnly && builder.Configuration.GetValue<bool>("DemoData:Enabled"))
     {
         await scope.ServiceProvider.GetRequiredService<FmsShowcaseSeeder>().EnsureSeededAsync();
+        await scope.ServiceProvider.GetRequiredService<SecondShowcaseSeeder>().EnsureSeededAsync();
         // Before the identity seeding below, which grants the demo directory membership of every Program
         // that exists by then. A practice Program created afterwards would have no members at all.
         await scope.ServiceProvider.GetRequiredService<ImportPracticeSeeder>().EnsureSeededAsync();

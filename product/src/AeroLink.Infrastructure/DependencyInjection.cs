@@ -63,6 +63,7 @@ public static class DependencyInjection
         services.AddScoped<TestProcedureBaselineMaterializer>();
         services.AddScoped<LegacyProcedureManifestBootstrapper>();
         services.AddScoped<FmsShowcaseSeeder>();
+        services.AddScoped<SecondShowcaseSeeder>();
         services.AddScoped<ImportPracticeSeeder>();
         services.AddScoped<NotificationOutbox>();
         services.AddScoped<NotificationLinkBuilder>();
