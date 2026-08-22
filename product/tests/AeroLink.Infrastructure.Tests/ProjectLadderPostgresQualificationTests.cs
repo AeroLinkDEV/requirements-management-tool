@@ -20,11 +20,11 @@ public sealed class ProjectLadderPostgresQualificationTests
         "steps[1:System:7;2:HighLevel:7;3:LowLevel:15]|edges[HighLevel>LowLevel;System>HighLevel]";
     private const string LegacySnapshotHash = "6fc44a4303eee5204f376a377bf139da11c421ca35e3d64b9b15cadcdb502fb7";
 
-    [Fact]
+    [DisposablePostgresFact]
     public async Task Clean_install_seals_first_content_atomically_on_postgresql()
     {
-        if (!HasDisposableConnection()) return;
-        await using var db = await ResetAtLatestAsync();
+        var connection = QualificationConnectionOrSkip();
+        await using var db = await ResetAtLatestAsync(connection);
         var now = DateTimeOffset.UtcNow;
         var program = new ProgramRecord("PG clean program", "PGC");
         var project = new ProjectRecord(program.Id, "PG clean project", "PG clean software");
@@ -46,11 +46,11 @@ public sealed class ProjectLadderPostgresQualificationTests
         Assert.Single(await db.ProjectLadderConfigurationHistories.Where(x => x.ProjectId == project.Id).ToListAsync());
     }
 
-    [Fact]
+    [DisposablePostgresFact]
     public async Task Pre_feature_database_backfill_seals_with_truthful_immutable_evidence_on_postgresql()
     {
-        if (!HasDisposableConnection()) return;
-        await using var db = await MigrateToPreFeatureAsync();
+        var connection = QualificationConnectionOrSkip();
+        await using var db = await MigrateToPreFeatureAsync(connection);
         var now = DateTimeOffset.UtcNow;
         var programId = Guid.NewGuid();
         var projectId = Guid.NewGuid();
@@ -96,11 +96,11 @@ public sealed class ProjectLadderPostgresQualificationTests
         Assert.Contains("historical first content is not inferred", history.Reason, StringComparison.Ordinal);
     }
 
-    [Fact]
+    [DisposablePostgresFact]
     public async Task Concurrent_postgresql_edit_and_first_content_have_one_atomic_winner()
     {
-        if (!HasDisposableConnection()) return;
-        await using (var setup = await ResetAtLatestAsync())
+        var connection = QualificationConnectionOrSkip();
+        await using (var setup = await ResetAtLatestAsync(connection))
         {
             var program = new ProgramRecord("PG race program", "PGR");
             var project = new ProjectRecord(program.Id, "PG race project", "PG race software");
@@ -111,13 +111,23 @@ public sealed class ProjectLadderPostgresQualificationTests
             setup.Add(release);
             await setup.SaveChangesAsync();
 
-            await RunEditVsContentRaceAsync(project.Id, release.Id);
+            await RunEditVsContentRaceAsync(project.Id, release.Id, connection);
         }
     }
 
-    private static async Task RunEditVsContentRaceAsync(Guid projectId, Guid releaseId)
+    [Theory]
+    [InlineData("Host=example.test;Port=55437;Database=aerolink_707_qualify")]
+    [InlineData("Host=127.0.0.1;Port=55437;Database=unrelated_database")]
+    [InlineData("Host=127.0.0.1;Port=54329;Database=aerolink_707_qualify")]
+    public void Qualification_connection_rejects_non_disposable_targets_before_database_access(string connection)
     {
-        var options = Options(ConnectionString());
+        var error = Assert.Throws<InvalidOperationException>(() => ValidateQualificationConnection(connection));
+        Assert.Contains("Issue #707", error.Message, StringComparison.Ordinal);
+    }
+
+    private static async Task RunEditVsContentRaceAsync(Guid projectId, Guid releaseId, string connectionString)
+    {
+        var options = Options(connectionString);
         await using var edit = new AeroLinkDbContext(options);
         await using var content = new AeroLinkDbContext(options);
         var editConfiguration = await edit.ProjectLadderConfigurations
@@ -161,17 +171,17 @@ public sealed class ProjectLadderPostgresQualificationTests
         Assert.Equal(contentWon ? 1 : 0, await check.RequirementChanges.CountAsync());
     }
 
-    private static async Task<AeroLinkDbContext> ResetAtLatestAsync()
+    private static async Task<AeroLinkDbContext> ResetAtLatestAsync(string connectionString)
     {
-        var db = new AeroLinkDbContext(Options(ConnectionString()));
+        var db = new AeroLinkDbContext(Options(connectionString));
         await db.Database.EnsureDeletedAsync();
         await db.Database.MigrateAsync();
         return db;
     }
 
-    private static async Task<AeroLinkDbContext> MigrateToPreFeatureAsync()
+    private static async Task<AeroLinkDbContext> MigrateToPreFeatureAsync(string connectionString)
     {
-        var db = new AeroLinkDbContext(Options(ConnectionString()));
+        var db = new AeroLinkDbContext(Options(connectionString));
         await db.Database.EnsureDeletedAsync();
         await db.Database.GetService<IMigrator>().MigrateAsync(PreFeatureMigration);
         return db;
@@ -180,17 +190,50 @@ public sealed class ProjectLadderPostgresQualificationTests
     private static DbContextOptions<AeroLinkDbContext> Options(string connectionString)
         => new DbContextOptionsBuilder<AeroLinkDbContext>().UseNpgsql(connectionString).Options;
 
-    private static string ConnectionString()
+    private static string QualificationConnectionOrSkip()
     {
         var connection = Environment.GetEnvironmentVariable("AEROLINK_MIGRATIONS_CONNECTION");
+        return ValidateQualificationConnection(connection);
+    }
+
+    private static string ValidateQualificationConnection(string? connection)
+    {
         if (string.IsNullOrWhiteSpace(connection))
-            throw new InvalidOperationException("Set AEROLINK_MIGRATIONS_CONNECTION to a disposable PostgreSQL database.");
+        {
+            throw new InvalidOperationException(
+                "Issue #707 PostgreSQL qualification requires AEROLINK_MIGRATIONS_CONNECTION; the test should have been skipped during discovery.");
+        }
+
         var builder = new NpgsqlConnectionStringBuilder(connection);
+        var host = (builder.Host ?? string.Empty).Trim().Trim('[', ']');
+        if (!string.Equals(host, "127.0.0.1", StringComparison.OrdinalIgnoreCase)
+            && !string.Equals(host, "localhost", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException(
+                "Issue #707 PostgreSQL qualification requires a loopback host (localhost or 127.0.0.1).");
+        }
+
         if (builder.Port == 54329)
             throw new InvalidOperationException("Issue #707 qualification refuses the protected PostgreSQL port 54329.");
+
+        if (!string.Equals(builder.Database, "aerolink_707_qualify", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException(
+                "Issue #707 PostgreSQL qualification requires the dedicated database aerolink_707_qualify.");
+        }
+
         return connection;
     }
 
-    private static bool HasDisposableConnection()
-        => !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("AEROLINK_MIGRATIONS_CONNECTION"));
+    private sealed class DisposablePostgresFactAttribute : FactAttribute
+    {
+        public DisposablePostgresFactAttribute()
+        {
+            if (string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("AEROLINK_MIGRATIONS_CONNECTION")))
+            {
+                Skip =
+                    "Issue #707 PostgreSQL qualification skipped: set AEROLINK_MIGRATIONS_CONNECTION to the dedicated disposable database.";
+            }
+        }
+    }
 }
