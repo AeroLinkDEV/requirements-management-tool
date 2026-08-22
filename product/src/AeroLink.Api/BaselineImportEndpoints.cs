@@ -310,8 +310,13 @@ public static class BaselineImportEndpoints
                         number, item.Revision, item.Statement, item.Rationale ?? "", identifier, DateTimeOffset.UtcNow));
                 }
                 db.BaselineImportPackageItems.AddRange(staged);
+                import.RecordCustomerPackageStaging(DateTimeOffset.UtcNow);
                 await db.SaveChangesAsync(ct);
                 return Results.Ok(new { staged = staged.Count, items = staged.Select(x => new { x.Id, x.BaseNumber, x.Revision }) });
+            }
+            catch (DbUpdateConcurrencyException)
+            {
+                return Results.Conflict(new { error = "The import changed while Customer package content was being staged. Reload it and retry." });
             }
             catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
         });
@@ -436,10 +441,17 @@ public static class BaselineImportEndpoints
             if (!await AuthorizedAsync(import.ProjectId, http, db, identity, ct)) return Results.Forbid();
             try
             {
+                await using var transaction = after is null ? null : await db.Database.BeginTransactionAsync(ct);
                 act(import, DateTimeOffset.UtcNow);
                 await db.SaveChangesAsync(ct);
                 if (after is not null) await after();
-                return Results.Ok(Detail(import, await TallyAsync(db, id, ct)));
+                var tally = await TallyAsync(db, id, ct);
+                if (transaction is not null) await transaction.CommitAsync(ct);
+                return Results.Ok(Detail(import, tally));
+            }
+            catch (DbUpdateConcurrencyException)
+            {
+                return Results.Conflict(new { error = "The import changed while it was being updated. Reload it and retry." });
             }
             catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
         }
@@ -449,7 +461,8 @@ public static class BaselineImportEndpoints
     {
         x.Id, x.ProjectId, state = x.State.ToString(), carries = x.Carries.ToString(),
         x.SourceSystem, x.SourceBaselineName, x.SourceBaselineDate, x.ExtractFileName,
-        x.StartedBy, x.StartedAt, x.AcceptedBy, x.AcceptedAt, x.ReleaseId
+        x.StartedBy, x.StartedAt, x.AcceptedBy, x.AcceptedAt, x.ReleaseId,
+        x.BoundCandidateBaselineId, x.PackageBoundAt, x.PackageManifestHash
     };
 
     /// <param name="InImportedBaseline">Objects that will become requirements and carry a provenance link.</param>
@@ -472,6 +485,7 @@ public static class BaselineImportEndpoints
         x.ExtractedBy, x.ExtractedAt, x.StartedBy, x.StartedAt,
         mappingJson = x.MappingJson, reconciliationJson = x.ReconciliationJson,
         x.AcceptedBy, x.AcceptedAt, x.ReleaseId, x.Version,
+        x.BoundCandidateBaselineId, x.PackageBoundAt, x.PackageManifestHash,
         // What this import accounted for, which on a re-extract exceeds what it newly recorded.
         x.SourceRecordCount,
         sourceIdentityCount = tally.Total,

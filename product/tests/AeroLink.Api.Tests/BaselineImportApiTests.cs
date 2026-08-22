@@ -268,6 +268,27 @@ public sealed class BaselineImportApiTests
         using var selected = await client.PostAsJsonAsync($"/api/baselines/{baselineId}/external-packages",
             new { baselineImportId = importId });
         Assert.Equal(HttpStatusCode.OK, selected.StatusCode);
+
+        var baselineDetail = await client.GetFromJsonAsync<JsonElement>($"/api/baselines/{baselineId}");
+        var packageSelection = Assert.Single(baselineDetail.GetProperty("externalPackageSelections").EnumerateArray());
+        Assert.NotEqual(Guid.Empty, packageSelection.GetProperty("id").GetGuid());
+        Assert.Equal(importId, packageSelection.GetProperty("baselineImportId").GetGuid());
+        var importDetail = await client.GetFromJsonAsync<JsonElement>($"/api/baseline-imports/{importId}");
+        Assert.Equal(baselineId, importDetail.GetProperty("boundCandidateBaselineId").GetGuid());
+        Assert.Equal(packageSelection.GetProperty("packageContentHash").GetString(),
+            importDetail.GetProperty("packageManifestHash").GetString());
+        Assert.Equal(packageSelection.GetProperty("selectedAt").GetDateTimeOffset(),
+            importDetail.GetProperty("packageBoundAt").GetDateTimeOffset());
+        Assert.Equal(packageSelection.GetProperty("selectedBy").GetString(),
+            importDetail.GetProperty("acceptedBy").GetString());
+        var importSummaryResponse = await client.GetFromJsonAsync<JsonElement>(
+            $"/api/baseline-imports?projectId={projectId}");
+        var importSummary = Assert.Single(importSummaryResponse.EnumerateArray());
+        Assert.Equal(baselineId, importSummary.GetProperty("boundCandidateBaselineId").GetGuid());
+        Assert.Equal(importDetail.GetProperty("packageBoundAt").GetDateTimeOffset(),
+            importSummary.GetProperty("packageBoundAt").GetDateTimeOffset());
+        Assert.Equal(importDetail.GetProperty("packageManifestHash").GetString(),
+            importSummary.GetProperty("packageManifestHash").GetString());
         using var frozen = await client.PostAsJsonAsync($"/api/baselines/{baselineId}/freeze", new { });
         Assert.True(frozen.IsSuccessStatusCode, await frozen.Content.ReadAsStringAsync());
         using var materialized = await client.PostAsJsonAsync($"/api/baselines/{baselineId}/materialize-requirements", new { });

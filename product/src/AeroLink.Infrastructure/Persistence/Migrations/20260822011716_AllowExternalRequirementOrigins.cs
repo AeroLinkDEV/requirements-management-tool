@@ -189,7 +189,8 @@ namespace AeroLink.Infrastructure.Persistence.Migrations
             migrationBuilder.CreateIndex(
                 name: "IX_baseline_external_package_selections_BaselineImportId",
                 table: "baseline_external_package_selections",
-                column: "BaselineImportId");
+                column: "BaselineImportId",
+                unique: true);
 
             migrationBuilder.CreateIndex(
                 name: "IX_baseline_import_package_items_BaselineImportId_SourceIdenti~",

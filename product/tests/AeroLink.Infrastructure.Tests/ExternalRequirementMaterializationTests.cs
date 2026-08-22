@@ -124,6 +124,107 @@ public sealed class ExternalRequirementMaterializationTests
         finally { File.Delete(path); }
     }
 
+    [Fact]
+    public async Task Stale_customer_package_stage_cannot_commit_after_external_package_binding()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"aerolink-external-stage-race-{Guid.NewGuid():N}.db");
+        var options = new DbContextOptionsBuilder<AeroLinkDbContext>().UseSqlite($"Data Source={path};Pooling=False").Options;
+        try
+        {
+            var now = DateTimeOffset.UtcNow;
+            Guid projectId, importId, baselineId, lateIdentityId;
+            await using (var seed = new AeroLinkDbContext(options))
+            {
+                await seed.Database.EnsureCreatedAsync();
+                var program = new ProgramRecord("External Race Program", "EXR");
+                var project = new ProjectRecord(program.Id, "Customer Race Product", "Customer Race Product");
+                var release = new SoftwareRelease(project.Id, "3.0", false);
+                var import = new BaselineImport(project.Id, "DOORS", "1", "Customer race", now,
+                    "customer-race.reqif", "9f2c4b1e7a0d3c5589ab41e2f7c60d9b8e35a1470c2df6b849e0d17ac3d07a38", 1,
+                    ImportedArtifactKinds.Requirements, "source", now, "cm", now);
+                import.RecordAnalysis(now); import.RecordMapping("{}", now);
+                import.NoteSourceRecordsAccountedFor(2, now); import.RecordReconciliation("{}", now);
+                var firstIdentity = new SourceIdentity(project.Id, import.Id, "DOORS", "Requirements", "101", "REQ-101", now);
+                var lateIdentity = new SourceIdentity(project.Id, import.Id, "DOORS", "Requirements", "102", "REQ-102", now);
+                var firstMembership = new BaselineImportSourceIdentityMembership(import.Id, firstIdentity.Id, true, now);
+                var lateMembership = new BaselineImportSourceIdentityMembership(import.Id, lateIdentity.Id, true, now);
+                var firstItem = new BaselineImportPackageItem(project.Id, import.Id, firstIdentity.Id, "CUSR-000101", 0,
+                    "The first customer requirement.", "", "REQ-101", now);
+                var baseline = new CandidateBaseline("SW-03.00", 0, project.Id, release.Id, null,
+                    "Customer race baseline", "cm", now);
+                seed.AddRange(program, project, release, import, firstIdentity, lateIdentity,
+                    firstMembership, lateMembership, firstItem, baseline);
+                await seed.SaveChangesAsync();
+                projectId = project.Id; importId = import.Id; baselineId = baseline.Id; lateIdentityId = lateIdentity.Id;
+            }
+
+            await using var staging = new AeroLinkDbContext(options);
+            var staleImport = await staging.BaselineImports.SingleAsync(x => x.Id == importId);
+            await using (var binding = new AeroLinkDbContext(options))
+            {
+                var import = await binding.BaselineImports.SingleAsync(x => x.Id == importId);
+                var baseline = await binding.CandidateBaselines.Include(x => x.ExternalPackageSelections)
+                    .SingleAsync(x => x.Id == baselineId);
+                var items = await binding.BaselineImportPackageItems
+                    .Where(x => x.BaselineImportId == importId).ToListAsync();
+                baseline.SelectExternalPackage(import, items, "cm", now.AddMinutes(1));
+                await binding.SaveChangesAsync();
+            }
+
+            staging.BaselineImportPackageItems.Add(new BaselineImportPackageItem(projectId, importId, lateIdentityId,
+                "CUSR-000102", 0, "A late customer requirement.", "", "REQ-102", now.AddMinutes(2)));
+            staleImport.RecordCustomerPackageStaging(now.AddMinutes(2));
+            await Assert.ThrowsAsync<DbUpdateConcurrencyException>(() => staging.SaveChangesAsync());
+
+            await using var verify = new AeroLinkDbContext(options);
+            var storedImport = await verify.BaselineImports.AsNoTracking().SingleAsync(x => x.Id == importId);
+            Assert.Equal(BaselineImportState.Accepted, storedImport.State);
+            Assert.Equal(baselineId, storedImport.BoundCandidateBaselineId);
+            Assert.False(await verify.BaselineImportPackageItems.AnyAsync(x => x.SourceIdentityId == lateIdentityId));
+        }
+        finally { File.Delete(path); }
+    }
+
+    [Fact]
+    public async Task Database_rejects_the_same_external_package_in_a_second_candidate()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"aerolink-external-package-unique-{Guid.NewGuid():N}.db");
+        var options = new DbContextOptionsBuilder<AeroLinkDbContext>().UseSqlite($"Data Source={path};Pooling=False").Options;
+        try
+        {
+            await using var db = new AeroLinkDbContext(options);
+            await db.Database.EnsureCreatedAsync();
+            var now = DateTimeOffset.UtcNow;
+            var program = new ProgramRecord("External Unique Program", "EXU");
+            var project = new ProjectRecord(program.Id, "Customer Unique Product", "Customer Unique Product");
+            var release = new SoftwareRelease(project.Id, "4.0", false);
+            var import = new BaselineImport(project.Id, "DOORS", "1", "Customer unique", now,
+                "customer-unique.reqif", "9f2c4b1e7a0d3c5589ab41e2f7c60d9b8e35a1470c2df6b849e0d17ac3d07a38", 1,
+                ImportedArtifactKinds.Requirements, "source", now, "cm", now);
+            import.RecordAnalysis(now); import.RecordMapping("{}", now);
+            import.NoteSourceRecordsAccountedFor(1, now); import.RecordReconciliation("{}", now);
+            var identity = new SourceIdentity(project.Id, import.Id, "DOORS", "Requirements", "201", "REQ-201", now);
+            var membership = new BaselineImportSourceIdentityMembership(import.Id, identity.Id, true, now);
+            var item = new BaselineImportPackageItem(project.Id, import.Id, identity.Id, "CUSR-000201", 0,
+                "The unique customer requirement.", "", "REQ-201", now);
+            var first = new CandidateBaseline("SW-04.00", 0, project.Id, release.Id, null, "First", "cm", now);
+            first.SelectExternalPackage(import, new[] { item }, "cm", now);
+            db.AddRange(program, project, release, import, identity, membership, item, first);
+            await db.SaveChangesAsync();
+
+            var second = new CandidateBaseline("SW-04.01", 0, project.Id, release.Id, first.Id, "Second", "cm", now);
+            db.CandidateBaselines.Add(second);
+            await db.SaveChangesAsync();
+            var secondSelectionId = Guid.NewGuid();
+            var hash = BaselineImportPackageManifest.Hash(new[] { item });
+            const string actor = "cm";
+            var error = await Assert.ThrowsAnyAsync<Exception>(() => db.Database.ExecuteSqlInterpolatedAsync($"INSERT INTO baseline_external_package_selections (\"Id\", \"BaselineId\", \"BaselineImportId\", \"PackageContentHash\", \"SelectedAt\", \"SelectedBy\") VALUES ({secondSelectionId}, {second.Id}, {import.Id}, {hash}, {now}, {actor})"));
+            Assert.NotNull(error);
+            Assert.Equal(1, await db.BaselineExternalPackageSelections.CountAsync(x => x.BaselineImportId == import.Id));
+        }
+        finally { File.Delete(path); }
+    }
+
     private static ILadderPolicy CustomerPolicy(Guid projectId, DateTimeOffset now)
     {
         var configuration = ProjectLadderConfiguration.CreateDraft(projectId, now);

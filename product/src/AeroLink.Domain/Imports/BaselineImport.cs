@@ -200,6 +200,20 @@ public sealed class BaselineImport
     }
 
     /// <summary>
+    /// Records that staged Customer package content changed while the import was still selectable. The
+    /// version bump is an optimistic concurrency boundary with package selection: either the staged rows or
+    /// the acceptance/binding update wins, never a stale package hash over late content.
+    /// </summary>
+    public void RecordCustomerPackageStaging(DateTimeOffset now)
+    {
+        if (State != BaselineImportState.Reconciled)
+            throw new DomainException("Customer package content can only be staged for a reconciled import.");
+        if (BoundCandidateBaselineId is not null)
+            throw new DomainException("The external package is already bound to a candidate baseline.");
+        Touch(now);
+    }
+
+    /// <summary>
     /// Walking away from an attempt that was never accepted.
     ///
     /// Getting a program in usually takes more than one attempt — import, find the mapping wrong, abandon,

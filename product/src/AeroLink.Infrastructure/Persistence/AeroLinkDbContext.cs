@@ -806,6 +806,8 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
             b.Property(x => x.SelectedBy).HasMaxLength(100).IsRequired();
             b.Property(x => x.PackageContentHash).HasMaxLength(64).IsRequired();
             b.HasIndex(x => new { x.BaselineId, x.BaselineImportId }).IsUnique();
+            // An immutable staged package can be committed to exactly one candidate baseline.
+            b.HasIndex(x => x.BaselineImportId).IsUnique();
             b.HasOne<CandidateBaseline>().WithMany(x => x.ExternalPackageSelections).HasForeignKey(x => x.BaselineId).OnDelete(DeleteBehavior.Cascade);
             b.HasOne<BaselineImport>().WithMany().HasForeignKey(x => x.BaselineImportId).OnDelete(DeleteBehavior.Restrict);
         });

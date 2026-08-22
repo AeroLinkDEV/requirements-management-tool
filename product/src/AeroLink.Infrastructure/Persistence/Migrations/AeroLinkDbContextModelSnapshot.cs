@@ -2649,7 +2649,8 @@ namespace AeroLink.Infrastructure.Persistence.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("BaselineImportId");
+                    b.HasIndex("BaselineImportId")
+                        .IsUnique();
 
                     b.HasIndex("BaselineId", "BaselineImportId")
                         .IsUnique();

@@ -172,6 +172,11 @@ static class ApiMap
             scr.Id, scr.DisplayNumber, scr.Title,
             requirementChanges = scr.RequirementChanges.OrderBy(r => r.DisplayNumber).Select(r => new { r.Id, r.DisplayNumber, level = r.Level.ToString(), kind = r.Kind.ToString(), r.Statement, r.VerificationMethod })
         }),
+        externalPackageSelections = x.ExternalPackageSelections.OrderBy(selection => selection.BaselineImportId).Select(selection => new
+        {
+            selection.Id, selection.BaselineImportId, selection.PackageContentHash,
+            selection.SelectedAt, selection.SelectedBy
+        }),
         events = x.Events.OrderByDescending(e => e.OccurredAt).Select(e => new { e.EventType, e.ActorId, e.Detail, e.OccurredAt })
     };
 

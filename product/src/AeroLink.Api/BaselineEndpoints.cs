@@ -374,6 +374,17 @@ public static class BaselineEndpoints
                 return Results.Ok(new { baseline.Id, packageId = import.Id,
                     selected = baseline.ExternalPackageSelections.Count });
             }
+            catch (DbUpdateConcurrencyException)
+            {
+                return Results.Conflict(new { error = "The external package changed while it was being selected. Reload the package and retry." });
+            }
+            catch (DbUpdateException)
+            {
+                // The database's one-package/one-candidate invariant is the final race guard. A competing
+                // candidate can therefore lose on the unique package binding index even when both requests
+                // observed the import as Reconciled; expose that as a retryable conflict rather than a 500.
+                return Results.Conflict(new { error = "The external package is already bound to another candidate baseline." });
+            }
             catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
         });
 
