@@ -47,7 +47,7 @@ test('the page lists the change requests controlling test work, and nothing else
   await expect(page.getByRole('heading', { name: 'Downstream Assessments' })).toBeVisible()
   // Numbered as controlled records rather than borrowing the number of the change that raised them. The
   // showcase raises one System package for the in-work build, so this is a fact about the page.
-  const packages = page.locator('.downstreamAssessment').filter({ hasText: /TCR-/ })
+  const packages = page.locator('.downstreamAssessment').filter({ hasText: /SYSTPCR-/ })
   await expect(packages.first()).toContainText(/SYSTPCR-\d{6}\.\d{2}/, { timeout: 30_000 })
 
   // What is no longer here, because it moved rather than being duplicated. A second procedure list, or a
@@ -123,7 +123,7 @@ test('software HLR and LLR each have their own change request page', async ({ pa
   // failed: two loaders on the page shared one "only the newest reply may write the screen" counter, so the
   // procedure search cancelled the load that was fetching the packages. Asserting the package here is what
   // stops that returning as an empty queue nobody can distinguish from having no work.
-  await expect(page.locator('.downstreamAssessment').filter({ hasText: /TCR-/ }).first())
+  await expect(page.locator('.downstreamAssessment').filter({ hasText: /HLRTCCR-/ }).first())
     .toContainText(/HLRTCCR-\d{6}\.\d{2}/, { timeout: 30_000 })
   // The other discipline's packages are not on this page.
   await expect(page.locator('.downstreamAssessment').filter({ hasText: /LLRTCCR-/ })).toHaveCount(0)
