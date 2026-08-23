@@ -54,7 +54,7 @@ public sealed class NewProcedureRequiredGateTests
             "New capability.", "Test", RequirementRevisionState.Active, change.Id, baseline.Id, now);
 
         var review = new TestChangeReview(project.Id, release.Id, change.Id,
-            TestChangeReviewDiscipline.System, change.BaseNumber, now, "SYSTCR-950001");
+            TestChangeReviewDiscipline.System, change.BaseNumber, now, "SYSTPCR-950001");
         var item = VerificationImpactItem.ForIntroducedRequirement(project.Id, release.Id, change.Id, review.Id,
             revision.Id, "SYSR-950001.00", "Test", now);
 

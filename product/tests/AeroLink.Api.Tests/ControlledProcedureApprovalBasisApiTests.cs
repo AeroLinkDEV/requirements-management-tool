@@ -57,13 +57,13 @@ public sealed class ControlledProcedureApprovalBasisApiTests
             baseline.Select(change, "cm", now.AddMinutes(2));
 
             var systemTcr = ApprovedTcr(project.Id, release.Id, change.Id, change.DisplayNumber,
-                TestChangeReviewDiscipline.System, "SYSTCR-990001", "SYSTP-990001",
+                TestChangeReviewDiscipline.System, "SYSTPCR-990001", "SYSTP-990001",
                 TestProcedureLevel.System, "system.tcr.approver", now.AddMinutes(3));
             var secondSystemTcr = ApprovedTcr(project.Id, release.Id, inheritedSource.Id,
-                inheritedSource.DisplayNumber, TestChangeReviewDiscipline.System, "SYSTCR-990002",
+                inheritedSource.DisplayNumber, TestChangeReviewDiscipline.System, "SYSTPCR-990002",
                 "SYSTP-990002", TestProcedureLevel.System, "system.tcr.approver", now.AddMinutes(4));
             var hlrTcr = ApprovedTcr(project.Id, release.Id, change.Id, change.DisplayNumber,
-                TestChangeReviewDiscipline.HighLevelSoftware, "HLRTCR-990001", "HLRTP-990001",
+                TestChangeReviewDiscipline.HighLevelSoftware, "HLRTCCR-990001", "HLRTP-990001",
                 TestProcedureLevel.HighLevel, "hlr.tcr.approver", now.AddMinutes(5));
 
             // Deliberately select only the HLR package. The two System revisions below represent unchanged
@@ -117,12 +117,12 @@ public sealed class ControlledProcedureApprovalBasisApiTests
         var requirementXml = await DocumentXmlAsync(
             Assert.IsType<GeneratedOutput>(await generator.GenerateAsync(requirementDocumentId, "docx", default)));
 
-        Assert.Contains("SYSTCR-990001.00", systemXml);
-        Assert.Contains("SYSTCR-990002.00", systemXml);
-        Assert.Contains("Test Change Authority · SYSTCR-990001.00 · cycle 1 · Reviewer", systemXml);
-        Assert.Contains("Test Change Authority · SYSTCR-990001.00 · cycle 1 · Approver", systemXml);
-        Assert.Contains("Test Change Authority · SYSTCR-990002.00 · cycle 1 · Reviewer", systemXml);
-        Assert.Contains("Test Change Authority · SYSTCR-990002.00 · cycle 1 · Approver", systemXml);
+        Assert.Contains("SYSTPCR-990001.00", systemXml);
+        Assert.Contains("SYSTPCR-990002.00", systemXml);
+        Assert.Contains("Test Change Authority · SYSTPCR-990001.00 · cycle 1 · Reviewer", systemXml);
+        Assert.Contains("Test Change Authority · SYSTPCR-990001.00 · cycle 1 · Approver", systemXml);
+        Assert.Contains("Test Change Authority · SYSTPCR-990002.00 · cycle 1 · Reviewer", systemXml);
+        Assert.Contains("Test Change Authority · SYSTPCR-990002.00 · cycle 1 · Approver", systemXml);
         Assert.Contains("system.tcr.approver.reviewer", systemXml);
         Assert.Contains("system.tcr.approver", systemXml);
         Assert.Contains("signed 04:04 UTC", systemXml);

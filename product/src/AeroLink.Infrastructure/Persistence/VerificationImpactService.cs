@@ -89,7 +89,7 @@ public sealed class VerificationImpactService(AeroLinkDbContext db, ProblemRepor
             {
                 // Raised unnumbered: an approved change needs assessing, and only an assessment that finds
                 // test-procedure work turns this into a controlled test change request. Numbering here gave
-                // every approved change a SYSTCR before anybody had looked at whether it touched a procedure.
+                // every approved change a SYSTPCR before anybody had looked at whether it touched a procedure.
                 review = new TestChangeReview(request.ProjectId, request.TargetReleaseId, request.Id,
                     discipline, request.DisplayNumber, now);
                 db.TestChangeReviews.Add(review);

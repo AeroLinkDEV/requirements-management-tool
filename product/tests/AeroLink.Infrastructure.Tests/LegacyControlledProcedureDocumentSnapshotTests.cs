@@ -33,7 +33,7 @@ public sealed class LegacyControlledProcedureDocumentSnapshotTests
         var procedure = new TestProcedure(project.Id, "SYSTP-419900", "Current catalog title",
             "verification.engineer", t0, TestProcedureLevel.System);
         var tcr00 = Review(project.Id, release.Id, source00.Id, source00.DisplayNumber,
-            "SYSTCR-419900", 0, TestProcedureChangeKind.Introduce, "Generation-time title", t0);
+            "SYSTPCR-419900", 0, TestProcedureChangeKind.Introduce, "Generation-time title", t0);
         var revision00 = new TestProcedureRevision(procedure.Id, 0, "Generation-time objective",
             "Generation-time preconditions", "Generation-time steps", "Generation-time expected result",
             TestProcedureState.Approved, "verification.engineer", t0,
@@ -64,7 +64,7 @@ public sealed class LegacyControlledProcedureDocumentSnapshotTests
             var source01 = new SystemChangeRequest("SRCR-419901", 0, project.Id, release.Id,
                 "Later source", "Problem", "Analysis", "Solution", "author", t2);
             var tcr01 = Review(project.Id, release.Id, source01.Id, source01.DisplayNumber,
-                "SYSTCR-419901", 1, TestProcedureChangeKind.Modify, "Later title", t2);
+                "SYSTPCR-419901", 1, TestProcedureChangeKind.Modify, "Later title", t2);
             var revision01 = new TestProcedureRevision(procedure.Id, 1, "Later objective",
                 "Later preconditions", "Later steps", "Later expected result",
                 TestProcedureState.Approved, "verification.engineer", t2,

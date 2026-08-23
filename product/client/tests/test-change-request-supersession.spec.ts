@@ -118,8 +118,8 @@ test('a revised TCR keeps its predecessor in history and out of active work and 
   await expect(assessmentRow).toBeVisible({ timeout: 30_000 })
   await assessmentRow.getByRole('button', { name: 'Open assessment' }).click()
   const assessment = page.getByRole('dialog', { name: /test impact/ })
-  await assessment.getByRole('button', { name: 'SYSTCR required', exact: true }).click()
-  await expect(assessment.getByRole('button', { name: /SYSTCR-\d{6}\.\d{2}/ })).toBeVisible({ timeout: 30_000 })
+  await assessment.getByRole('button', { name: 'SYSTPCR required', exact: true }).click()
+  await expect(assessment.getByRole('button', { name: /SYSTPCR-\d{6}\.\d{2}/ })).toBeVisible({ timeout: 30_000 })
 
   const reviews = await (await request.get(
     `${apiBase}/api/releases/${workspace.release.id}/test-change-reviews`,
@@ -242,7 +242,7 @@ test('a revised TCR keeps its predecessor in history and out of active work and 
   await expect(historicalWorkspace.getByRole('heading', {
     name: `${predecessor!.displayNumber} test procedure decisions`,
   })).toBeVisible()
-  await expect(historicalWorkspace.getByText('SYSTCR Superseded', { exact: true })).toBeVisible()
+  await expect(historicalWorkspace.getByText('SYSTPCR Superseded', { exact: true })).toBeVisible()
   await expect(historicalWorkspace.getByText(predecessor!.supersededReason!, { exact: true })).toBeVisible()
   const successorLink = historicalWorkspace.getByRole('button', { name: `Open ${successor!.displayNumber}` })
   await expect(successorLink).toBeVisible()

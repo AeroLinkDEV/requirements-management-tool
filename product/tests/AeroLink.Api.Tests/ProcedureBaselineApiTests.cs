@@ -56,7 +56,7 @@ public sealed class ProcedureBaselineApiTests
         var carrying = new TestChangeReview(project.Id, release.Id, scr.Id,
             TestChangeReviewDiscipline.System, scr.DisplayNumber, now);
         carrying.RecordTestChangeRequired("verification.engineer", now);
-        carrying.AssignControlledNumber("SYSTCR-000931", now);
+        carrying.AssignControlledNumber("SYSTPCR-000931", now);
         var noWork = new TestChangeReview(project.Id, release.Id, quiet.Id, TestChangeReviewDiscipline.System,
             quiet.DisplayNumber, now);
         noWork.RecordNoTestChangeRequired("verification.engineer", "Existing procedures already exercise it.", now);

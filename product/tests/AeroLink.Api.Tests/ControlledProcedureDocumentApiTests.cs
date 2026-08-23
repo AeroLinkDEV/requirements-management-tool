@@ -52,7 +52,7 @@ public sealed class ControlledProcedureDocumentApiTests
         var carrying = new TestChangeReview(project.Id, release.Id, scr.Id,
             TestChangeReviewDiscipline.System, scr.DisplayNumber, now);
         carrying.RecordTestChangeRequired("verification.engineer", now);
-        carrying.AssignControlledNumber("SYSTCR-000941", now);
+        carrying.AssignControlledNumber("SYSTPCR-000941", now);
         db.Add(carrying);
 
         foreach (var (user, role) in new[]
@@ -327,7 +327,7 @@ public sealed class ControlledProcedureDocumentApiTests
         Assert.Contains("Oceanic plan display", firstXml);
         // #420: the exact TCR that authorized the materialized procedure revisions is printed as the source
         // test change request, and TCR signatures are the approval authority (DEC-103).
-        Assert.Contains("SYSTCR-000941.00", firstXml);
+        Assert.Contains("SYSTPCR-000941.00", firstXml);
         Assert.Contains("Source test change request", firstXml);
         Assert.Contains("Test Change Authority", firstXml);
         Assert.Contains("test.lead", firstXml);
@@ -353,7 +353,7 @@ public sealed class ControlledProcedureDocumentApiTests
             var tcr2 = new TestChangeReview(fixture.ProjectId, release17.Id, scr2.Id,
                 TestChangeReviewDiscipline.System, scr2.DisplayNumber, now);
             tcr2.RecordTestChangeRequired("verification.engineer", now);
-            tcr2.AssignControlledNumber("SYSTCR-000942", now);
+            tcr2.AssignControlledNumber("SYSTPCR-000942", now);
             tcr2.AddProcedureChange("verification.engineer",
                 Draft("SYSTP-000941", 1, TestProcedureChangeKind.Modify,
                     "Oceanic waypoint sequencing, clarified"), now);
@@ -406,7 +406,7 @@ public sealed class ControlledProcedureDocumentApiTests
         Assert.DoesNotContain("SYSTP-000942.01", secondXml);
         Assert.Contains("Oceanic waypoint sequencing, clarified", secondXml);
         Assert.DoesNotContain(">Oceanic waypoint sequencing<", secondXml);
-        Assert.Contains("SYSTCR-000942.00", secondXml);
+        Assert.Contains("SYSTPCR-000942.00", secondXml);
         Assert.Contains("Test Change Authority", secondXml);
         Assert.DoesNotContain(">Change Authority<", secondXml);
 

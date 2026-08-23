@@ -374,7 +374,7 @@ test('verification, review and administration forms carry the same semantics', a
     { waitUntil: 'load' })
   await surfacePainted(page)
   await layoutSettled(page)
-  const assessment = page.locator('.downstreamAssessment').filter({ hasText: /SYSTCR-/ }).first()
+  const assessment = page.locator('.downstreamAssessment').filter({ hasText: /SYSTPCR-/ }).first()
   await expect(assessment).toBeVisible({ timeout: 30_000 })
   await assessment.getByRole('button', { name: 'Open assessment' }).click()
   const drawer = page.getByRole('dialog', { name: /test impact/ })
@@ -439,7 +439,7 @@ test('verification, review and administration forms carry the same semantics', a
   await authoring.getByLabel('Why it is needed').fill('Nothing in this build covers the new requirement.')
   await authoring.getByRole('button', { name: 'Propose test procedure' }).click()
   await expect(authoring).toHaveCount(0, { timeout: 30_000 })
-  await expect(page.getByRole('status')).toContainText(/Proposed on SYSTCR-|Proposed on the test change request/)
+  await expect(page.getByRole('status')).toContainText(/Proposed on SYSTPCR-|Proposed on the test change request/)
 
   expect(failures, `Form semantics defects:\n  ${failures.join('\n  ')}`).toEqual([])
 })

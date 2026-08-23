@@ -33,7 +33,7 @@ public sealed class ProblemReportClosureVerificationPolicyTests
             var change = new SystemChangeRequest("SRCR-09500", 0, project.Id, targetRelease.Id,
                 "Correct behavior", "Problem", "Analysis", "Solution", "engineer", start);
             var tcr = new TestChangeReview(project.Id, targetRelease.Id, change.Id,
-                TestChangeReviewDiscipline.System, "SRCR-09500", start, "SYSTCR-09500");
+                TestChangeReviewDiscipline.System, "SRCR-09500", start, "SYSTPCR-09500");
             var procedure = new TestProcedure(project.Id, "SYSTP-009500", "Procedure", "test", start, TestProcedureLevel.System);
             var revision0 = new TestProcedureRevision(procedure.Id, 0, "Original", "Pre", "Steps", "Expected",
                 TestProcedureState.Approved, "test", start, effectiveBaselineId: originBaseline.Id);

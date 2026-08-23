@@ -120,7 +120,7 @@ public sealed class TestChangeReview
         ChangeRequestId is not null ? SourceChangeRequestNumber : SourceProblemReportNumber;
     public TestChangeReviewDiscipline Discipline { get; private set; }
     public string SourceChangeRequestNumber { get; private set; } = "";
-    /// <summary>Its controlled number — SYSTCR, HLRTCR or LLRTCR — empty only for rows raised before it had one.</summary>
+    /// <summary>Its controlled number — SYSTPCR, HLRTCCR or LLRTCCR — empty only for rows raised before it had one.</summary>
     public string BaseNumber { get; private set; } = "";
     /// <summary>Advances when an approved package is reopened for further test work against the same change.</summary>
     public int Revision { get; private set; }
@@ -216,7 +216,7 @@ public sealed class TestChangeReview
     /// <summary>
     /// Records that the change needs test-procedure work — and only then is there a test change request.
     ///
-    /// The number is what makes this a controlled SYSTCR, HLRTCR or LLRTCR, so it is not allocated until an
+    /// The number is what makes this a controlled SYSTPCR, HLRTCCR or LLRTCCR, so it is not allocated until an
     /// assessment says one is needed. Numbering at the moment the change was approved produced a controlled
     /// record for every change before anybody had looked at whether it touched a single procedure.
     /// </summary>

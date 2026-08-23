@@ -63,7 +63,7 @@ universal pipeline, and the retired direct-update route returns HTTP 410.
 
 Test procedures are deliberately not part of universal controlled editing. DEC-103 governs procedure change
 through a Test Change Request: a procedure is introduced, modified or retired only by a `TestProcedureChange`
-carried by a SYSTCR / HLRTCR / LLRTCR, reviewed with that package and materialized into the build. There is no
+carried by a SYSTPCR / HLRTCCR / LLRTCCR, reviewed with that package and materialized into the build. There is no
 direct checkout/edit/check-in path and no independent procedure-level approver. The `TestProcedure` family enum
 value is retained only as historical evidence for records written while the family was editable; it resolves to
 no policy, and stale callers receive `unsupported_artifact_type` (checkout/status), `policy_missing`

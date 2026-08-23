@@ -80,7 +80,7 @@ test('a PR links to change requests and System TCRs without changing its lifecyc
   const linkButton = assessment.getByRole('button', { name: /^Link Problem Reports/ })
   await expect(linkButton).toBeVisible()
   await linkButton.click()
-  const dialog = page.getByRole('dialog', { name: /Link PRs to SYSTCR-/ })
+  const dialog = page.getByRole('dialog', { name: /Link PRs to SYSTPCR-/ })
   await expect(dialog).toBeVisible()
   await dialog.getByRole('checkbox', { name: new RegExp(report.displayNumber.replace('.', '\\.')) }).check()
   await dialog.getByRole('button', { name: 'Save links' }).click()

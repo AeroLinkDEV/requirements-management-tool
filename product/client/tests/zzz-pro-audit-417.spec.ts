@@ -155,8 +155,8 @@ async function seedCarriedProcedures(
   await expect(row).toBeVisible({ timeout: 30_000 })
   await row.getByRole('button', { name: 'Open assessment' }).click()
   const assessment = page.getByRole('dialog', { name: /test impact/ })
-  await assessment.getByRole('button', { name: 'SYSTCR required', exact: true }).click()
-  await expect(assessment).toContainText('SYSTCR Created', { timeout: 30_000 })
+  await assessment.getByRole('button', { name: 'SYSTPCR required', exact: true }).click()
+  await expect(assessment).toContainText('SYSTPCR Created', { timeout: 30_000 })
 
   const impactItems = await (await request.get(
     `${apiBase}/api/releases/${workspace.release.id}/verification-impact`,
@@ -222,8 +222,8 @@ async function seedCarriedProcedures(
   await expect(reopenedRow).toBeVisible({ timeout: 30_000 })
   await reopenedRow.getByRole('button', { name: 'Open assessment' }).click()
   const assessment2 = page.getByRole('dialog', { name: /test impact/ })
-  await assessment2.getByRole('button', { name: 'SYSTCR required', exact: true }).click()
-  await expect(assessment2).toContainText('SYSTCR Created', { timeout: 30_000 })
+  await assessment2.getByRole('button', { name: 'SYSTPCR required', exact: true }).click()
+  await expect(assessment2).toContainText('SYSTPCR Created', { timeout: 30_000 })
   const afterTrigger = await (await request.get(
     `${apiBase}/api/releases/${workspace.release.id}/verification-impact`,
   )).json() as { testChangeReviewId: string; subjectStatement?: string }[]
@@ -257,7 +257,7 @@ test('an unsaved Modify target and its driving selections survive search, paging
   await page.reload()
   const row = page.locator('.downstreamAssessment').filter({ hasText: /Audit417 trigger/ }).first()
   await expect(row).toBeVisible({ timeout: 30_000 })
-  await row.getByRole('button', { name: /^SYSTCR-\d{6}\.\d{2}/ }).click()
+  await row.getByRole('button', { name: /^SYSTPCR-\d{6}\.\d{2}/ }).click()
   const workspaceDrawer = page.getByRole('dialog', { name: /test procedure decisions/ })
   await expect(workspaceDrawer.getByRole('button', { name: 'Propose a test procedure change' }))
     .toBeVisible({ timeout: 60_000 })
@@ -365,7 +365,7 @@ test('an unsaved Modify target and its driving selections survive search, paging
   await page.reload()
   const reopenedRow = page.locator('.downstreamAssessment').filter({ hasText: /Audit417 trigger/ }).first()
   await expect(reopenedRow).toBeVisible({ timeout: 30_000 })
-  await reopenedRow.getByRole('button', { name: /^SYSTCR-\d{6}\.\d{2}/ }).click()
+  await reopenedRow.getByRole('button', { name: /^SYSTPCR-\d{6}\.\d{2}/ }).click()
   const reopened = page.getByRole('dialog', { name: /test procedure decisions/ })
   await expect(reopened).toContainText(`${retireTarget}.01`, { timeout: 30_000 })
   await expect(reopened).toContainText('Retired test procedure')
@@ -381,7 +381,7 @@ test('an obsolete successful picker response cannot clear a newer visible failur
   await page.reload()
   const row = page.locator('.downstreamAssessment').filter({ hasText: /Audit417 trigger/ }).first()
   await expect(row).toBeVisible({ timeout: 30_000 })
-  await row.getByRole('button', { name: /^SYSTCR-\d{6}\.\d{2}/ }).click()
+  await row.getByRole('button', { name: /^SYSTPCR-\d{6}\.\d{2}/ }).click()
   const workspaceDrawer = page.getByRole('dialog', { name: /test procedure decisions/ })
   await expect(workspaceDrawer.getByRole('button', { name: 'Propose a test procedure change' }))
     .toBeVisible({ timeout: 60_000 })

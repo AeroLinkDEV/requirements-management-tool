@@ -91,7 +91,7 @@ test('an engineer raises a System test change request with its case from the Cha
   await editor.getByLabel('Title').fill('Verify the TCR authoring behavior as one package')
   await editor.getByLabel('Problem').fill('The approved change introduces behavior with no procedure.')
   await editor.getByLabel('Analysis').fill('The behavior spans one procedure boundary and belongs together.')
-  await editor.getByLabel('Solution').fill('Raise one SYSTCR and write the procedure it needs.')
+  await editor.getByLabel('Solution').fill('Raise one SYSTPCR and write the procedure it needs.')
 
   const sourceCheckbox = editor.getByRole('checkbox', { name: new RegExp(seeded.sourceNumber.replace('.', '\\.')) })
   await expect(sourceCheckbox).toBeVisible()
@@ -117,16 +117,16 @@ test('an engineer raises a System test change request with its case from the Cha
   await proposal.getByLabel('Rationale 1').fill('The approved change introduces behaviour with no procedure.')
 
   // An incomplete decision holds the package back rather than being silently dropped on save.
-  await expect(editor.getByRole('button', { name: 'Raise SYSTCR' })).toBeEnabled()
+  await expect(editor.getByRole('button', { name: 'Raise SYSTPCR' })).toBeEnabled()
 
-  await editor.getByRole('button', { name: 'Raise SYSTCR' }).click()
+  await editor.getByRole('button', { name: 'Raise SYSTPCR' }).click()
 
   // The package opens onto its workspace so the engineer can start its procedure decisions.
   const workspace = page.getByRole('dialog', { name: /procedure decisions/ })
   await expect(workspace).toBeVisible({ timeout: 30_000 })
   await expect(workspace.getByText('Engineering case')).toBeVisible()
   await expect(workspace.getByText('Verify the TCR authoring behavior as one package', { exact: true })).toBeVisible()
-  await expect(workspace.getByText('Raise one SYSTCR and write the procedure it needs.', { exact: true })).toBeVisible()
+  await expect(workspace.getByText('Raise one SYSTPCR and write the procedure it needs.', { exact: true })).toBeVisible()
 
   // The case stays correctable while the package is open.
   await workspace.getByRole('button', { name: 'Edit case' }).click()
@@ -137,8 +137,8 @@ test('an engineer raises a System test change request with its case from the Cha
   await expect(workspace.getByText('Verify the TCR authoring behavior as one package (corrected)', { exact: true })).toBeVisible({ timeout: 30_000 })
 
   await workspace.getByRole('button', { name: 'Close test change request' }).click()
-  await expect(page.locator('.downstreamAssessment').filter({ hasText: /SYSTCR-/ }).first())
-    .toContainText(/SYSTCR-\d{6}\.\d{2}/, { timeout: 30_000 })
+  await expect(page.locator('.downstreamAssessment').filter({ hasText: /SYSTPCR-/ }).first())
+    .toContainText(/SYSTPCR-\d{6}\.\d{2}/, { timeout: 30_000 })
 })
 
 test('released builds offer no new test change request action', async ({ page, request }) => {

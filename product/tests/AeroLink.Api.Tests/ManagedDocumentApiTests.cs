@@ -29,7 +29,7 @@ public sealed class ManagedDocumentApiTests
             var releasedChange = new SystemChangeRequest("SRCR-04940", 0, scope.ProjectId, scope.ReleasedId, "Released-build canonical change", "P", "A", "S", "software.author", now);
             var activeChange = new SystemChangeRequest("HLRCR-04941", 0, scope.ProjectId, scope.ActiveReleaseId, "Active-build canonical change", "P", "A", "S", "software.author", now, ChangeRequestType.Software, softwareLevel: RequirementLevel.HighLevel);
             var report = new ProblemReport(scope.ProjectId, "PR-04940", "Canonical anomaly", "Problem", "Analysis", "software.author", now, targetReleaseId: scope.ActiveReleaseId);
-            var testChange = new TestChangeReview(scope.ProjectId, scope.ReleasedId, releasedChange.Id, TestChangeReviewDiscipline.System, releasedChange.DisplayNumber, now, "SYSTCR-04940");
+            var testChange = new TestChangeReview(scope.ProjectId, scope.ReleasedId, releasedChange.Id, TestChangeReviewDiscipline.System, releasedChange.DisplayNumber, now, "SYSTPCR-04940");
             var otherProgram = new ProgramRecord("Other documents program", $"OD{Guid.NewGuid():N}"[..12]); var otherProject = new ProjectRecord(otherProgram.Id, "Other project", "Isolation"); var otherRelease = new SoftwareRelease(otherProject.Id, "9.9", false);
             var foreignChange = new SystemChangeRequest("SRCR-04942", 0, otherProject.Id, otherRelease.Id, "Foreign change", "P", "A", "S", "outsider", now);
             var configuration = new UserAccount("configuration.manager", "Casey Morgan", "configuration@example.test", IdentityService.HashPassword(AeroLinkApiFactory.MemberPassword), now);

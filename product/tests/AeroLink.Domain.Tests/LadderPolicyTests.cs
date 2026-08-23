@@ -52,7 +52,7 @@ public sealed class LadderPolicyTests
         Assert.Equal(ControlledDocumentType.LowLevelTestCases, policy.TestProcedureDocument(RequirementLevel.LowLevel));
         Assert.Equal("High-Level Software Test Cases Document", policy.TestProcedureDocumentTitle(RequirementLevel.HighLevel));
         Assert.Equal("HLRCR", policy.ChangeRequestPrefix(ChangeRequestType.Software, RequirementLevel.HighLevel));
-        Assert.Equal("LLRTCR", policy.TestChangeReviewPrefix(TestChangeReviewDiscipline.LowLevelSoftware));
+        Assert.Equal("LLRTCCR", policy.TestChangeReviewPrefix(TestChangeReviewDiscipline.LowLevelSoftware));
         Assert.Equal(ReviewSubject.System, policy.WorkflowSubject(ChangeRequestType.System));
         Assert.Equal(ReviewSubject.Software, policy.WorkflowSubject(ChangeRequestType.Software));
         Assert.Equal(ReviewSubject.LowLevelSoftwareCase, policy.WorkflowSubject(TestChangeReviewDiscipline.LowLevelSoftware));

@@ -274,7 +274,7 @@ public sealed class TestProcedureMaterializationTests
                 var tcr = new TestChangeReview(project.Id, release.Id, source.Id,
                     TestChangeReviewDiscipline.System, source.DisplayNumber, now, caseContractVersion: 0);
                 tcr.RecordTestChangeRequired("verification.engineer", now);
-                tcr.AssignControlledNumber("SYSTCR-000400", now);
+                tcr.AssignControlledNumber("SYSTPCR-000400", now);
                 tcr.AddProcedureChange("verification.engineer",
                     Change("SYSTP-000400", 0, TestProcedureChangeKind.Introduce, "Malformed legacy proposal",
                         JsonSerializer.Serialize(new[] { unrelatedRevision.Id })), now);
@@ -400,7 +400,7 @@ public sealed class TestProcedureMaterializationTests
             var history = await db.VerificationImpactDecisionHistory
                 .SingleAsync(x => x.VerificationImpactItemId == item.Id);
             Assert.Contains("SYSTP-000001.00", history.Rationale);
-            Assert.Contains("SYSTCR-", history.Rationale);
+            Assert.Contains("SYSTPCR-", history.Rationale);
         }
         finally { File.Delete(path); }
     }
@@ -486,7 +486,7 @@ public sealed class TestProcedureMaterializationTests
         var tcr = new TestChangeReview(projectId, releaseId, scr.Id, TestChangeReviewDiscipline.System,
             scr.DisplayNumber, now);
         tcr.RecordTestChangeRequired("verification.engineer", now);
-        tcr.AssignControlledNumber($"SYSTCR-{Math.Abs(number.GetHashCode()) % 1000000:D6}", now);
+        tcr.AssignControlledNumber($"SYSTPCR-{Math.Abs(number.GetHashCode()) % 1000000:D6}", now);
         tcr.WriteCase("verification.engineer", "Verification case", "Problem", "Analysis", "Solution", now);
         var requestedIds = JsonSerializer.Deserialize<List<Guid>>(draft.DrivingRequirementRevisionIdsJson) ?? [];
         var removedIds = JsonSerializer.Deserialize<List<Guid>>(draft.RemovedRequirementRevisionIdsJson) ?? [];

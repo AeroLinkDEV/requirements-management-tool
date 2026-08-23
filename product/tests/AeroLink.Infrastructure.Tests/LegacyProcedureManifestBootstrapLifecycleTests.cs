@@ -77,7 +77,7 @@ public sealed class LegacyProcedureManifestBootstrapLifecycleTests
             tcr.RecordTestChangeRequired("verification.engineer", now.AddHours(4));
             tcr.WriteCase("verification.engineer", "Legacy successor procedure work", "Problem",
                 "Analysis", "Solution", now.AddHours(4));
-            tcr.AssignControlledNumber("SYSTCR-09502", now.AddHours(4));
+            tcr.AssignControlledNumber("SYSTPCR-09502", now.AddHours(4));
             tcr.AddProcedureChange("verification.engineer", Change("SYSTP-095001", 1,
                 TestProcedureChangeKind.Modify, "First procedure revised"), now.AddHours(4));
             tcr.AddProcedureChange("verification.engineer", Change("SYSTP-095002", 1,

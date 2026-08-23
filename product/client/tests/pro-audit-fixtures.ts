@@ -139,8 +139,8 @@ export async function seedCarriedProcedures(
   await expect(row).toBeVisible({ timeout: 30_000 })
   await row.getByRole('button', { name: 'Open assessment' }).click()
   const assessment = page.getByRole('dialog', { name: /test impact/ })
-  await assessment.getByRole('button', { name: 'SYSTCR required', exact: true }).click()
-  await expect(assessment).toContainText('SYSTCR Created', { timeout: 30_000 })
+  await assessment.getByRole('button', { name: 'SYSTPCR required', exact: true }).click()
+  await expect(assessment).toContainText('SYSTPCR Created', { timeout: 30_000 })
 
   const impactItems = await (await request.get(
     `${apiBase}/api/releases/${workspace.release.id}/verification-impact`,
@@ -206,8 +206,8 @@ export async function seedCarriedProcedures(
   await expect(reopenedRow).toBeVisible({ timeout: 30_000 })
   await reopenedRow.getByRole('button', { name: 'Open assessment' }).click()
   const assessment2 = page.getByRole('dialog', { name: /test impact/ })
-  await assessment2.getByRole('button', { name: 'SYSTCR required', exact: true }).click()
-  await expect(assessment2).toContainText('SYSTCR Created', { timeout: 30_000 })
+  await assessment2.getByRole('button', { name: 'SYSTPCR required', exact: true }).click()
+  await expect(assessment2).toContainText('SYSTPCR Created', { timeout: 30_000 })
   const afterTrigger = await (await request.get(
     `${apiBase}/api/releases/${workspace.release.id}/verification-impact`,
   )).json() as { testChangeReviewId: string; subjectStatement?: string; id: string; requirementRevisionId?: string }[]

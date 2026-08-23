@@ -65,38 +65,38 @@ public sealed class TestChangeRequestRegisterApiTests
 
         // Two revisions of one controlled package: only the newer belongs on the register.
         var first = new TestChangeReview(project.Id, release.Id, systemChange.Id, TestChangeReviewDiscipline.System,
-            "SRCR-00050.00", now, baseNumber: "SYSTCR-000900", revision: 0, authorId: "first.engineer");
+            "SRCR-00050.00", now, baseNumber: "SYSTPCR-000900", revision: 0, authorId: "first.engineer");
         first.RecordTestChangeRequired("first.engineer", now);
         first.WriteCase("first.engineer", "Superseded package", "P", "A", "S", now);
         var second = new TestChangeReview(project.Id, release.Id, systemChange.Id, TestChangeReviewDiscipline.System,
-            "SRCR-00050.00", now, baseNumber: "SYSTCR-000900", revision: 1, authorId: "second.engineer");
+            "SRCR-00050.00", now, baseNumber: "SYSTPCR-000900", revision: 1, authorId: "second.engineer");
         second.RecordTestChangeRequired("second.engineer", now);
         second.WriteCase("second.engineer", "Current package", "P", "A", "S", now);
 
         // A different discipline, so the discipline filter has something to exclude.
         var software = new TestChangeReview(project.Id, release.Id, softwareChange.Id,
             TestChangeReviewDiscipline.HighLevelSoftware, "HLRCR-00050.00", now,
-            baseNumber: "HLRTCR-000900", revision: 0, authorId: "software.engineer");
+            baseNumber: "HLRTCCR-000900", revision: 0, authorId: "software.engineer");
         software.RecordTestChangeRequired("software.engineer", now);
         software.WriteCase("software.engineer", "Software package", "P", "A", "S", now);
 
         // This automatic assessment is deliberately unnumbered until somebody concludes it needs procedure
-        // work. It remains historical evidence and coverage-queue work, not a current HLRTCR register row.
+        // work. It remains historical evidence and coverage-queue work, not a current HLRTCCR register row.
         var pendingSoftware = new TestChangeReview(project.Id, release.Id, legacySoftwareChange.Id,
             TestChangeReviewDiscipline.HighLevelSoftware, "HLRCR-00051.00", now);
         var lowLevel = new TestChangeReview(project.Id, release.Id, lowLevelChange.Id,
             TestChangeReviewDiscipline.LowLevelSoftware, "LLRCR-00050.00", now,
-            baseNumber: "LLRTCR-000901", authorId: "software.engineer");
+            baseNumber: "LLRTCCR-000901", authorId: "software.engineer");
         lowLevel.RecordTestChangeRequired("software.engineer", now);
         var mismatchedPrefix = new TestChangeReview(project.Id, release.Id, mismatchedPrefixChange.Id,
             TestChangeReviewDiscipline.HighLevelSoftware, "HLRCR-00052.00", now,
-            baseNumber: "LLRTCR-000902", authorId: "software.engineer");
+            baseNumber: "LLRTCCR-000902", authorId: "software.engineer");
         mismatchedPrefix.RecordTestChangeRequired("software.engineer", now);
 
         // A numbered, concluded Draft with no author is the current package the checkout test works on. The
         // unnumbered legacy row below must no longer be selected from the current register.
         var open = new TestChangeReview(project.Id, release.Id, openChange.Id, TestChangeReviewDiscipline.System,
-            "SRCR-00052.00", now, baseNumber: "SYSTCR-000901");
+            "SRCR-00052.00", now, baseNumber: "SYSTPCR-000901");
         open.RecordTestChangeRequired("register.engineer", now);
 
         // A package from before controlled numbering: no BaseNumber at all.
@@ -130,9 +130,9 @@ public sealed class TestChangeRequestRegisterApiTests
 
         var body = await RegisterAsync(client, $"projectId={seeded.ProjectId}&releaseId={seeded.ReleaseId}&discipline=System&page=1&pageSize=50");
         var rows = body.GetProperty("items").EnumerateArray().ToList();
-        var current = Assert.Single(rows, x => x.GetProperty("baseNumber").GetString() == "SYSTCR-000900");
+        var current = Assert.Single(rows, x => x.GetProperty("baseNumber").GetString() == "SYSTPCR-000900");
 
-        Assert.Equal("SYSTCR-000900.01", current.GetProperty("displayNumber").GetString());
+        Assert.Equal("SYSTPCR-000900.01", current.GetProperty("displayNumber").GetString());
         Assert.Equal("Current package", current.GetProperty("title").GetString());
         Assert.Equal("Draft", current.GetProperty("state").GetString());
         Assert.Equal("second.engineer", current.GetProperty("authorId").GetString());
@@ -153,11 +153,11 @@ public sealed class TestChangeRequestRegisterApiTests
 
         var listed = await RegisterAsync(client, $"projectId={seeded.ProjectId}&discipline=System&page=1&pageSize=50");
         var numbered = listed.GetProperty("items").EnumerateArray()
-            .Where(x => x.GetProperty("baseNumber").GetString() == "SYSTCR-000900").ToList();
+            .Where(x => x.GetProperty("baseNumber").GetString() == "SYSTPCR-000900").ToList();
         Assert.Single(numbered);
         Assert.Equal(1, numbered[0].GetProperty("revision").GetInt32());
 
-        var behind = await RegisterAsync(client, $"projectId={seeded.ProjectId}&baseNumber=SYSTCR-000900&page=1&pageSize=50");
+        var behind = await RegisterAsync(client, $"projectId={seeded.ProjectId}&baseNumber=SYSTPCR-000900&page=1&pageSize=50");
         Assert.Equal(2, behind.GetProperty("items").EnumerateArray().Count());
     }
 
@@ -190,16 +190,16 @@ public sealed class TestChangeRequestRegisterApiTests
         var highLevel = await RegisterAsync(client,
             $"projectId={seeded.ProjectId}&discipline=HighLevelSoftware&page=1&pageSize=50");
         var highLevelRows = highLevel.GetProperty("items").EnumerateArray().ToList();
-        Assert.Contains(highLevelRows, x => x.GetProperty("baseNumber").GetString() == "HLRTCR-000900");
-        Assert.DoesNotContain(highLevelRows, x => x.GetProperty("baseNumber").GetString() == "LLRTCR-000902");
+        Assert.Contains(highLevelRows, x => x.GetProperty("baseNumber").GetString() == "HLRTCCR-000900");
+        Assert.DoesNotContain(highLevelRows, x => x.GetProperty("baseNumber").GetString() == "LLRTCCR-000902");
         Assert.DoesNotContain(highLevelRows, x => x.GetProperty("baseNumber").GetString() == "");
 
         var lowLevel = await RegisterAsync(client,
             $"projectId={seeded.ProjectId}&discipline=LowLevelSoftware&page=1&pageSize=50");
         var lowLevelRows = lowLevel.GetProperty("items").EnumerateArray().ToList();
         var low = Assert.Single(lowLevelRows);
-        Assert.Equal("LLRTCR-000901", low.GetProperty("baseNumber").GetString());
-        Assert.StartsWith("LLRTCR-", low.GetProperty("displayNumber").GetString());
+        Assert.Equal("LLRTCCR-000901", low.GetProperty("baseNumber").GetString());
+        Assert.StartsWith("LLRTCCR-", low.GetProperty("displayNumber").GetString());
     }
 
     [Fact]
@@ -217,7 +217,7 @@ public sealed class TestChangeRequestRegisterApiTests
         var historical = await RegisterAsync(client,
             $"projectId={seeded.ProjectId}&discipline=HighLevelSoftware&historical=true&page=1&pageSize=50");
         Assert.Contains(historical.GetProperty("items").EnumerateArray(),
-            x => x.GetProperty("baseNumber").GetString() == "LLRTCR-000902");
+            x => x.GetProperty("baseNumber").GetString() == "LLRTCCR-000902");
     }
 
     [Fact]
@@ -233,13 +233,13 @@ public sealed class TestChangeRequestRegisterApiTests
 
         var software = await RegisterAsync(client, $"projectId={seeded.ProjectId}&discipline=HighLevelSoftware&page=1&pageSize=50");
         var only = Assert.Single(software.GetProperty("items").EnumerateArray().ToList());
-        Assert.Equal("HLRTCR-000900.00", only.GetProperty("displayNumber").GetString());
+        Assert.Equal("HLRTCCR-000900.00", only.GetProperty("displayNumber").GetString());
     }
 
     [Theory]
-    [InlineData("search=Current", "SYSTCR-000900.01")]
+    [InlineData("search=Current", "SYSTPCR-000900.01")]
     // Searching what a package was raised from, which is how somebody arrives from the requirements side.
-    [InlineData("search=SRCR-00050", "SYSTCR-000900.01")]
+    [InlineData("search=SRCR-00050", "SYSTPCR-000900.01")]
     public async Task Search_matches_the_case_and_what_the_package_was_raised_from(string query, string expected)
     {
         await using var factory = new AeroLinkApiFactory();

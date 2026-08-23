@@ -132,7 +132,7 @@ public sealed class ProcedureTraceApiTests
         var review = new TestChangeReview(project.Id, release16.Id, scr16.Id,
             TestChangeReviewDiscipline.System, scr16.DisplayNumber, now);
         review.RecordTestChangeRequired("verification.engineer", now);
-        review.AssignControlledNumber("SYSTCR-000001", now);
+        review.AssignControlledNumber("SYSTPCR-000001", now);
         db.Add(review);
 
         var procedure = new TestProcedure(project.Id, "SYSTP-000001", "Exact trace procedure",
@@ -255,7 +255,7 @@ public sealed class ProcedureTraceApiTests
         Assert.DoesNotContain("SYSR-000004.00", byDisplay.Keys);
 
         var provenance = body.GetProperty("provenance").EnumerateArray().ToList();
-        Assert.Contains(provenance, x => x.GetProperty("package").GetString() == "SYSTCR-000001.00"
+        Assert.Contains(provenance, x => x.GetProperty("package").GetString() == "SYSTPCR-000001.00"
             && x.GetProperty("changeRequest").GetString() == "SRCR-03151.00");
         Assert.Equal(fixture.TcrId, body.GetProperty("sourceTestChangeRequestId").GetGuid());
         Assert.True(body.GetProperty("build").GetProperty("isExactManifest").GetBoolean());
@@ -363,12 +363,12 @@ public sealed class ProcedureTraceApiTests
         Assert.Equal(2, provenance.Count);
         var fromFirst = Assert.Single(provenance,
             x => x.GetProperty("changeRequest").GetString() == "SRCR-04001.00");
-        Assert.Equal("SYSTCR-000401.00", fromFirst.GetProperty("package").GetString());
+        Assert.Equal("SYSTPCR-000401.00", fromFirst.GetProperty("package").GetString());
         Assert.Equal("SYSR-000401.00", fromFirst.GetProperty("subjectDisplayNumber").GetString());
         Assert.Equal("CreateNew", fromFirst.GetProperty("action").GetString());
         var fromSecond = Assert.Single(provenance,
             x => x.GetProperty("changeRequest").GetString() == "SRCR-04002.00");
-        Assert.Equal("SYSTCR-000401.00", fromSecond.GetProperty("package").GetString());
+        Assert.Equal("SYSTPCR-000401.00", fromSecond.GetProperty("package").GetString());
         Assert.Equal("SYSR-000402.00", fromSecond.GetProperty("subjectDisplayNumber").GetString());
         Assert.Equal("ModifyExisting", fromSecond.GetProperty("action").GetString());
         // The folded source must never be mislabeled as the TCR's originating change.
@@ -434,7 +434,7 @@ public sealed class ProcedureTraceApiTests
         var review = new TestChangeReview(project.Id, release.Id, first.Id,
             TestChangeReviewDiscipline.System, first.DisplayNumber, now);
         review.RecordTestChangeRequired("verification.engineer", now);
-        review.AssignControlledNumber("SYSTCR-000401", now);
+        review.AssignControlledNumber("SYSTPCR-000401", now);
         review.IncludeChangeRequest("verification.engineer", second.Id, second.DisplayNumber, now);
         db.Add(review);
 

@@ -17,7 +17,7 @@ test('answering a test change request makes it yours, and it is in My Work after
   // assessment is worked inside it.
   const rows = page.locator('.downstreamAssessment')
   await expect(rows.first()).toBeVisible({ timeout: 30_000 })
-  const claimable = rows.filter({ hasText: /SYSTCR-/ }).first()
+  const claimable = rows.filter({ hasText: /SYSTPCR-/ }).first()
   const sourceNumber = (await claimable.locator('b').first().textContent())!.trim()
   const displayNumber = ((await claimable.locator('.linkedScr').first().textContent()) ?? '')
     .match(/(?:SYS|HLR|LLR)TCR-\d{6}\.\d{2}/)![0]

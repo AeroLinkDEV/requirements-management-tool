@@ -39,12 +39,12 @@ public sealed class IdentifierAllocationPersistenceTests
         Assert.Equal("SYSTP-000001", await IdentifierAllocator.NextTestProcedureAsync(db, TestProcedureLevel.System, default));
         Assert.Equal("HLRTC-000001", await IdentifierAllocator.NextTestProcedureAsync(db, TestProcedureLevel.HighLevel, default));
         Assert.Equal("LLRTC-000001", await IdentifierAllocator.NextTestProcedureAsync(db, TestProcedureLevel.LowLevel, default));
-        Assert.Equal("SYSTCR-000001", await IdentifierAllocator.NextTestChangeRequestAsync(db, TestChangeReviewDiscipline.System, default));
-        Assert.Equal("HLRTCR-000001", await IdentifierAllocator.NextTestChangeRequestAsync(db, TestChangeReviewDiscipline.HighLevelSoftware, default));
-        Assert.Equal("LLRTCR-000001", await IdentifierAllocator.NextTestChangeRequestAsync(db, TestChangeReviewDiscipline.LowLevelSoftware, default));
+        Assert.Equal("SYSTPCR-000001", await IdentifierAllocator.NextTestChangeRequestAsync(db, TestChangeReviewDiscipline.System, default));
+        Assert.Equal("HLRTCCR-000001", await IdentifierAllocator.NextTestChangeRequestAsync(db, TestChangeReviewDiscipline.HighLevelSoftware, default));
+        Assert.Equal("LLRTCCR-000001", await IdentifierAllocator.NextTestChangeRequestAsync(db, TestChangeReviewDiscipline.LowLevelSoftware, default));
 
         var sequences = await db.IdentifierSequences.AsNoTracking().OrderBy(x => x.Scope).ToListAsync();
-        Assert.Equal(new[] { "HLR", "HLRCR", "HLRTC", "HLRTCR", "LLR", "LLRCR", "LLRTC", "LLRTCR", "SRCR", "SYSR", "SYSTCR", "SYSTP" }, sequences.Select(x => x.Scope));
+        Assert.Equal(new[] { "HLR", "HLRCR", "HLRTC", "HLRTCCR", "LLR", "LLRCR", "LLRTC", "LLRTCCR", "SRCR", "SYSR", "SYSTP", "SYSTPCR" }, sequences.Select(x => x.Scope));
     });
 
     [Fact]
@@ -54,6 +54,48 @@ public sealed class IdentifierAllocationPersistenceTests
         Assert.Equal("PR-00002", await IdentifierAllocator.NextProblemReportAsync(db, default));
         Assert.Equal(3, await db.IdentifierSequences.AsNoTracking().Where(x => x.Scope == "PR").Select(x => x.NextValue).SingleAsync());
     });
+
+    [Fact]
+    public async Task Retired_test_change_request_claim_fails_before_io_and_preserves_tombstone()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"aerolink-retired-allocator-{Guid.NewGuid():N}.db");
+        var options = new DbContextOptionsBuilder<AeroLinkDbContext>()
+            .UseSqlite($"Data Source={path};Pooling=False")
+            .Options;
+        try
+        {
+            await using (var db = new AeroLinkDbContext(options))
+            {
+                await db.Database.EnsureCreatedAsync();
+                db.IdentifierSequences.AddRange(
+                    new AeroLink.Domain.Common.IdentifierSequence("SYSTCR", 9),
+                    new AeroLink.Domain.Common.IdentifierSequence("HLRTCR", 47),
+                    new AeroLink.Domain.Common.IdentifierSequence("LLRTCR", 31));
+                await db.SaveChangesAsync();
+            }
+
+            // A disposed context makes any accidental seed/query an observable failure. EnsureAllocatable
+            // must reject the retired scope before it touches the connection or sequence row.
+            await using var disposed = new AeroLinkDbContext(options);
+            await disposed.DisposeAsync();
+            foreach (var scope in new[] { "SYSTCR", "HLRTCR", "LLRTCR" })
+                await Assert.ThrowsAsync<AeroLink.Domain.Common.DomainException>(() =>
+                    IdentifierAllocator.ClaimAsync(disposed, scope, default));
+
+            await using var verification = new AeroLinkDbContext(options);
+            var tombstones = await verification.IdentifierSequences.AsNoTracking()
+                .Where(x => x.Scope == "SYSTCR" || x.Scope == "HLRTCR" || x.Scope == "LLRTCR")
+                .ToDictionaryAsync(x => x.Scope);
+            Assert.Equal(9, tombstones["SYSTCR"].NextValue);
+            Assert.Equal(47, tombstones["HLRTCR"].NextValue);
+            Assert.Equal(31, tombstones["LLRTCR"].NextValue);
+            Assert.All(tombstones.Values, x => Assert.Equal(0, x.ConcurrencyStamp));
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
 
     [Fact]
     public Task Attachment_versions_are_claimed_per_logical_file_and_never_repeat() => WithDatabaseAsync(async db =>

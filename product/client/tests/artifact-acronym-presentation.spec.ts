@@ -5,7 +5,7 @@ test('numbered artifacts keep their canonical uppercase acronym in presentation'
   const examples = [
     ['SRCR-00076.00', 'SRCR'], ['HLRCR-00087.00', 'HLRCR'], ['LLRCR-00088.00', 'LLRCR'],
     ['SYSR-000008.01', 'SYSR'], ['HLR-000008.01', 'HLR'], ['LLR-000008.01', 'LLR'],
-    ['SYSTCR-000002.00', 'SYSTCR'], ['HLRTCR-000003.00', 'HLRTCR'], ['LLRTCR-000004.00', 'LLRTCR'],
+    ['SYSTPCR-000002.00', 'SYSTPCR'], ['HLRTCCR-000003.00', 'HLRTCCR'], ['LLRTCCR-000004.00', 'LLRTCCR'],
     ['SYSTP-000008.00', 'SYSTP'], ['HLRTP-000009.00', 'HLRTP'], ['LLRTP-000010.00', 'LLRTP'],
     ['PR-00001.00', 'PR'], ['SW-01.60', 'SW'],
     ['SYSRD-000016.00', 'SYSRD'], ['HLRD-000016.00', 'HLRD'], ['LLRD-000016.00', 'LLRD'],

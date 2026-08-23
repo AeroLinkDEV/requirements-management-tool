@@ -70,8 +70,8 @@ public sealed class TestChangeRequestExclusivityTests
         var fixture = await DatabaseAsync();
         await using var db = fixture.Db;
 
-        var first = Package(fixture, fixture.FirstOrigin, "SYSTCR-000001");
-        var second = Package(fixture, fixture.SecondOrigin, "SYSTCR-000002");
+        var first = Package(fixture, fixture.FirstOrigin, "SYSTPCR-000001");
+        var second = Package(fixture, fixture.SecondOrigin, "SYSTPCR-000002");
         db.AddRange(first, second);
         await db.SaveChangesAsync();
 
@@ -91,8 +91,8 @@ public sealed class TestChangeRequestExclusivityTests
         var fixture = await DatabaseAsync();
         await using var db = fixture.Db;
 
-        var first = Package(fixture, fixture.FirstOrigin, "SYSTCR-000001");
-        var second = Package(fixture, fixture.SecondOrigin, "SYSTCR-000002");
+        var first = Package(fixture, fixture.FirstOrigin, "SYSTPCR-000001");
+        var second = Package(fixture, fixture.SecondOrigin, "SYSTPCR-000002");
         db.AddRange(first, second);
         await db.SaveChangesAsync();
 
@@ -116,7 +116,7 @@ public sealed class TestChangeRequestExclusivityTests
         var fixture = await DatabaseAsync();
         await using var db = fixture.Db;
 
-        var package = Package(fixture, fixture.FirstOrigin, "HLRTCR-000007");
+        var package = Package(fixture, fixture.FirstOrigin, "HLRTCCR-000007");
         db.Add(package);
         await db.SaveChangesAsync();
         db.ChangeTracker.Clear();
@@ -126,8 +126,8 @@ public sealed class TestChangeRequestExclusivityTests
         db.ChangeTracker.Clear();
 
         var read = await db.TestChangeReviews.Include(x => x.AdditionalSources).SingleAsync(x => x.Id == package.Id);
-        Assert.Equal("HLRTCR-000007", read.BaseNumber);
-        Assert.Equal("HLRTCR-000007.00", read.DisplayNumber);
+        Assert.Equal("HLRTCCR-000007", read.BaseNumber);
+        Assert.Equal("HLRTCCR-000007.00", read.DisplayNumber);
         Assert.Equal("SRCR-00040", read.AdditionalSources.Single().ChangeRequestNumber);
         Assert.Equal(2, read.CoveredChangeRequestIds.Count());
     }
@@ -149,7 +149,7 @@ public sealed class TestChangeRequestExclusivityTests
         var fixture = await DatabaseAsync();
         await using var db = fixture.Db;
 
-        var package = Package(fixture, fixture.FirstOrigin, "SYSTCR-000044");
+        var package = Package(fixture, fixture.FirstOrigin, "SYSTPCR-000044");
         db.Add(package);
         await db.SaveChangesAsync();
 

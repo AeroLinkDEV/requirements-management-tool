@@ -30,7 +30,7 @@ public sealed class TestProcedureBaselineTests
         baseline.SelectTestChangeRequest(tcr, "verification.lead", Now.AddDays(1));
 
         Assert.Single(baseline.TestChangeSelections);
-        Assert.Equal("SYSTCR-000042.00", baseline.TestChangeSelections.Single().TestChangeRequestDisplayNumber);
+        Assert.Equal("SYSTPCR-000042.00", baseline.TestChangeSelections.Single().TestChangeRequestDisplayNumber);
         Assert.Contains(baseline.Events, x => x.EventType == "TestChangeRequestSelected");
     }
 
@@ -61,7 +61,7 @@ public sealed class TestProcedureBaselineTests
             TestChangeReviewDiscipline.System, "SRCR-00039.00", Now);
         elsewhere.RecordTestChangeRequired("verification.engineer", Now);
         elsewhere.WriteCase("verification.engineer", "Verification case", "Problem", "Analysis", "Solution", Now);
-        elsewhere.AssignControlledNumber("SYSTCR-000043", Now);
+        elsewhere.AssignControlledNumber("SYSTPCR-000043", Now);
         elsewhere.AddProcedureChange("verification.engineer", new TestProcedureChangeDraft("SYSTP-000900", 0,
             TestProcedureLevel.System, TestProcedureChangeKind.Introduce, "Elsewhere", "Objective",
             "Preconditions", "Steps", "Expected", "Raised against another build.",
@@ -205,7 +205,7 @@ public sealed class TestProcedureBaselineTests
         var empty = new TestChangeReview(ProjectId, ReleaseId, Guid.NewGuid(),
             TestChangeReviewDiscipline.System, "SRCR-00039.00", Now, caseContractVersion: 0);
         empty.RecordTestChangeRequired("verification.engineer", Now);
-        empty.AssignControlledNumber("SYSTCR-000044", Now);
+        empty.AssignControlledNumber("SYSTPCR-000044", Now);
         empty.Submit("verification.engineer", "test.lead", true, Now.AddMinutes(1));
         empty.Approve("test.lead", "Approved before procedure decisions were captured.", Now.AddMinutes(2));
 
@@ -252,7 +252,7 @@ public sealed class TestProcedureBaselineTests
         var tcr = RaisedTestChangeRequest();
         tcr.RecordTestChangeRequired("verification.engineer", Now);
         tcr.WriteCase("verification.engineer", "Verification case", "Problem", "Analysis", "Solution", Now);
-        tcr.AssignControlledNumber("SYSTCR-000042", Now);
+        tcr.AssignControlledNumber("SYSTPCR-000042", Now);
         tcr.AddProcedureChange("verification.engineer", new TestProcedureChangeDraft("SYSTP-000123", 0,
             TestProcedureLevel.System, TestProcedureChangeKind.Introduce, "Oceanic waypoint sequencing",
             "Verify oceanic waypoints are sequenced in the order the active flight plan holds.",

@@ -19,7 +19,7 @@ public sealed class VerificationProfileTests
         Assert.Equal([VerificationArtifactKind.Case], high.EnabledKinds);
         Assert.Equal(VerificationArtifactKind.Case, high.ExecutableArtifact.Kind);
         Assert.Equal("SYSTP", system.ExecutableArtifact.ArtifactPrefix);
-        Assert.Equal("HLRTCR", high.ExecutableArtifact.TestChangeRequestPrefix);
+        Assert.Equal("HLRTCCR", high.ExecutableArtifact.TestChangeRequestPrefix);
         Assert.Equal(ControlledDocumentType.HighLevelTestCases, high.ExecutableArtifact.DocumentType);
     }
 
@@ -134,7 +134,7 @@ public sealed class VerificationProfileTests
     {
         var definition = new VerificationArtifactDefinition(
             new VerificationArtifactKey(VerificationDiscipline.HighLevelSoftware, VerificationArtifactKind.Case),
-            "HLRTP", "HLRTCR", ReviewSubject.HighLevelSoftwareTest,
+            "HLRTP", "HLRTCCR", ReviewSubject.HighLevelSoftwareTest,
             ControlledDocumentType.HighLevelTestProcedures, RequirementLevel.HighLevel,
             VerificationArtifactCapability.Identity | VerificationArtifactCapability.Coverage);
         var legacy = LadderConsumerManifestCatalog.RequiredConsumerIds

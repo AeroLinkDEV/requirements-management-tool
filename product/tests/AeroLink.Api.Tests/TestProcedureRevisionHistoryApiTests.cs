@@ -230,7 +230,7 @@ Assert.Equal(fixture.Revision01Id,
             var folded = ApprovedChange("SRCR-42420", project.Id, release.Id,
                 "SYSR-42420", "Folded manual-package requirement", now.AddMinutes(1));
             var review = Review(project.Id, release.Id, primary.Id, primary.DisplayNumber,
-                "SYSTCR-42410", 1, TestProcedureChangeKind.Introduce,
+                "SYSTPCR-42410", 1, TestProcedureChangeKind.Introduce,
                 "Verify the manually packaged behavior", Guid.NewGuid(), now.AddMinutes(2));
             review.IncludeChangeRequest("verification.engineer", folded.Id, folded.DisplayNumber,
                 now.AddMinutes(3));
@@ -334,10 +334,10 @@ Assert.Equal(fixture.Revision01Id,
             new BaselineRequirementSelection(baseline16.Id, foldedRequirement16.Id, foldedRequirement16Revision.Id));
 
         var tcr15 = Review(project.Id, release15.Id, scr15.Id, scr15.DisplayNumber,
-            "SYSTCR-42150", 0, TestProcedureChangeKind.Introduce,
+            "SYSTPCR-42150", 0, TestProcedureChangeKind.Introduce,
             "Verify legacy route sequencing", requirement15Revision.Id, now);
         var tcr16 = Review(project.Id, release16.Id, scr16.Id, scr16.DisplayNumber,
-            "SYSTCR-42150", 1, TestProcedureChangeKind.Modify,
+            "SYSTPCR-42150", 1, TestProcedureChangeKind.Modify,
             "Verify route sequencing and discontinuities", requirement16Revision.Id, now.AddMinutes(1),
             procedureRevision: 1);
         tcr16.IncludeChangeRequest("verification.engineer", foldedScr16.Id, foldedScr16.DisplayNumber,
@@ -349,7 +349,7 @@ Assert.Equal(fixture.Revision01Id,
         var revision01 = Revision(procedure.Id, 1, tcr16.Id, baseline16.Id,
             "Discontinuity objective", now.AddMinutes(1));
         var tcrRetire = Review(project.Id, release16.Id, scr16.Id, scr16.DisplayNumber,
-            "SYSTCR-42150", 2, TestProcedureChangeKind.Retire,
+            "SYSTPCR-42150", 2, TestProcedureChangeKind.Retire,
             "Forged retirement rename", requirement16Revision.Id, now.AddMinutes(3), procedureRevision: 2);
         var revision02 = new TestProcedureRevision(procedure.Id, 2, "", "", "", "",
             TestProcedureState.Retired, "verification.engineer", now.AddMinutes(3),

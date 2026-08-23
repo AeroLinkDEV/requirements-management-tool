@@ -79,7 +79,7 @@ public static class ControlledArtifactEditPolicies
         // the approvers are looking at a frozen case, and once approved it is controlled evidence. The
         // aliases cover the three controlled prefixes a package can carry.
         new(ControlledArtifactFamily.TestChangeRequest, "TestChangeRequest", true, 15, 2, 120,
-            Set("Draft"), Set("TestChangeRequest", "TCR", "SYSTCR", "HLRTCR", "LLRTCR"))
+            Set("Draft"), Set("TestChangeRequest", "TCR", "SYSTPCR", "HLRTCCR", "LLRTCCR"))
     ];
 
     private static readonly IReadOnlyDictionary<string, ControlledArtifactEditPolicy> ByAlias =
