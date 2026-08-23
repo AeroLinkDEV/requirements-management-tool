@@ -1934,6 +1934,58 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
             foreach (var projectId in projectIds)
                 policies[projectId] = SaveBoundaryPolicyOverride;
 
+        // Reconcile all exact authored links and parent scope in bounded set-based queries. The showcase
+        // materializes more than a thousand requirement revisions in one unit of work; doing these reads once
+        // per candidate turns the save boundary into thousands of serial database round trips and makes the
+        // seed endpoint time out without changing the invariant being enforced.
+        var linksBySource = await FinalRequirementParentLinksAsync(candidateIds, ct);
+        var allParentIds = linksBySource.Values.SelectMany(x => x).Distinct().ToHashSet();
+        var parentScopes = (await (from parent in RequirementRevisions.AsNoTracking()
+                                   join parentArtifact in Requirements.AsNoTracking()
+                                       on parent.ArtifactId equals parentArtifact.Id
+                                   where allParentIds.Contains(parent.Id)
+                                   select new RequirementScope(parent.Id, parentArtifact.ProjectId,
+                                       parentArtifact.Level, parentArtifact.BaseNumber, parent.EffectiveBaselineId))
+            .ToListAsync(ct)).ToDictionary(x => x.RevisionId);
+        var trackedParentRevisions = ChangeTracker.Entries<RequirementRevision>()
+            .Where(x => x.State != EntityState.Deleted && allParentIds.Contains(x.Entity.Id))
+            .ToList();
+        var trackedParentArtifactIds = trackedParentRevisions.Select(x => x.Entity.ArtifactId).Distinct().ToList();
+        var parentArtifacts = await Requirements.AsNoTracking()
+            .Where(x => trackedParentArtifactIds.Contains(x.Id)).ToDictionaryAsync(x => x.Id, ct);
+        foreach (var tracked in ChangeTracker.Entries<RequirementArtifact>()
+                     .Where(x => x.State != EntityState.Deleted && trackedParentArtifactIds.Contains(x.Entity.Id)))
+            parentArtifacts[tracked.Entity.Id] = tracked.Entity;
+        foreach (var tracked in trackedParentRevisions)
+        {
+            if (parentArtifacts.TryGetValue(tracked.Entity.ArtifactId, out var parentArtifact))
+                parentScopes[tracked.Entity.Id] = new RequirementScope(tracked.Entity.Id,
+                    parentArtifact.ProjectId, parentArtifact.Level, parentArtifact.BaseNumber,
+                    tracked.Entity.EffectiveBaselineId);
+        }
+        var activeParentIds = (await RequirementRevisions.AsNoTracking()
+                .Where(x => allParentIds.Contains(x.Id) && x.State == RequirementRevisionState.Active)
+                .Select(x => x.Id).ToListAsync(ct))
+            .ToHashSet();
+        foreach (var tracked in trackedParentRevisions)
+        {
+            if (tracked.Entity.State == RequirementRevisionState.Active) activeParentIds.Add(tracked.Entity.Id);
+            else activeParentIds.Remove(tracked.Entity.Id);
+        }
+        var governedBaselineIds = candidates.Select(x => x.EffectiveBaselineId).Distinct().ToList();
+        var baselineMemberships = (await BaselineRequirements.AsNoTracking()
+                .Where(x => governedBaselineIds.Contains(x.BaselineId) && allParentIds.Contains(x.RevisionId))
+                .Select(x => new { x.BaselineId, x.RevisionId }).ToListAsync(ct))
+            .Select(x => (x.BaselineId, x.RevisionId)).ToHashSet();
+        foreach (var entry in ChangeTracker.Entries<BaselineRequirementSelection>()
+                     .Where(x => governedBaselineIds.Contains(x.Entity.BaselineId)
+                         && allParentIds.Contains(x.Entity.RevisionId)))
+        {
+            var key = (entry.Entity.BaselineId, entry.Entity.RevisionId);
+            if (entry.State == EntityState.Deleted) baselineMemberships.Remove(key);
+            else if (entry.State == EntityState.Added) baselineMemberships.Add(key);
+        }
+
         foreach (var revision in candidates)
         {
             var artifact = artifacts[revision.ArtifactId];
@@ -1969,11 +2021,10 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
                 && addedIds.Contains(revision.Id)
                 && !changedLinkSourceIds.Contains(revision.Id))
                 continue;
-            var links = await FinalRequirementParentLinksAsync(revision.Id, ct);
-            var linkIds = links.Select(x => x.TargetRevisionId).ToHashSet();
+            var linkIds = linksBySource[revision.Id];
             if (parentLevels.Count == 0)
             {
-                if (links.Count != 0)
+                if (linkIds.Count != 0)
                     throw new DomainException($"{artifact.BaseNumber} is a configured root and cannot carry exact upstream links.");
                 continue;
             }
@@ -2001,83 +2052,51 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
                     $"{artifact.BaseNumber}.{revision.Revision:D2} exact parent identities do not match its persisted AllocatedFrom links.");
             }
 
-            var parentScopes = await (from parent in RequirementRevisions.AsNoTracking()
-                                      join parentArtifact in Requirements.AsNoTracking()
-                                          on parent.ArtifactId equals parentArtifact.Id
-                                      where ids.Contains(parent.Id)
-                                      select new RequirementScope(parent.Id, parentArtifact.ProjectId,
-                                          parentArtifact.Level, parentArtifact.BaseNumber, parent.EffectiveBaselineId))
-                .ToDictionaryAsync(x => x.RevisionId, ct);
-            foreach (var tracked in ChangeTracker.Entries<RequirementRevision>()
-                         .Where(x => x.State != EntityState.Deleted && ids.Contains(x.Entity.Id)))
-            {
-                var parentArtifact = ChangeTracker.Entries<RequirementArtifact>()
-                    .FirstOrDefault(x => x.Entity.Id == tracked.Entity.ArtifactId)?.Entity
-                    ?? await Requirements.AsNoTracking().SingleOrDefaultAsync(x => x.Id == tracked.Entity.ArtifactId, ct);
-                if (parentArtifact is not null)
-                    parentScopes[tracked.Entity.Id] = new RequirementScope(tracked.Entity.Id,
-                        parentArtifact.ProjectId, parentArtifact.Level, parentArtifact.BaseNumber,
-                        tracked.Entity.EffectiveBaselineId);
-            }
             foreach (var id in ids)
             {
                 if (!parentScopes.TryGetValue(id, out var parent))
                     throw new DomainException($"{artifact.BaseNumber} names a requirement revision that is not persisted.");
                 if (parent.ProjectId != artifact.ProjectId
                     || !parentLevels.Contains(parent.Level)
-                    || !await IsRequirementRevisionInBaselineAsync(id, revision.EffectiveBaselineId, ct))
+                    || !baselineMemberships.Contains((revision.EffectiveBaselineId, id)))
                     throw new DomainException(
                         $"{artifact.BaseNumber}.{revision.Revision:D2} exact parents must be valid configured levels in the same project and governed baseline.");
-                if (!await RequirementRevisions.AsNoTracking().AnyAsync(x => x.Id == id
-                        && x.State == RequirementRevisionState.Active, ct)
-                    && !ChangeTracker.Entries<RequirementRevision>().Any(x => x.Entity.Id == id
-                        && x.Entity.State == RequirementRevisionState.Active))
+                if (!activeParentIds.Contains(id))
                     throw new DomainException(
                         $"{artifact.BaseNumber}.{revision.Revision:D2} names a stale or non-current requirement revision.");
             }
         }
     }
 
-    private async Task<IReadOnlyList<(Guid TargetRevisionId, RequirementTraceType Type)>>
-        FinalRequirementParentLinksAsync(Guid sourceRevisionId, CancellationToken ct)
+    private async Task<Dictionary<Guid, HashSet<Guid>>> FinalRequirementParentLinksAsync(
+        IReadOnlyCollection<Guid> sourceRevisionIds, CancellationToken ct)
     {
-        var links = (await RequirementTraces.AsNoTracking()
-            .Where(x => x.SourceRevisionId == sourceRevisionId && x.Type == RequirementTraceType.AllocatedFrom)
+        var sourceIds = sourceRevisionIds.Distinct().ToHashSet();
+        var links = await RequirementTraces.AsNoTracking()
+            .Where(x => sourceIds.Contains(x.SourceRevisionId) && x.Type == RequirementTraceType.AllocatedFrom)
             // A lifecycle-attached relation records #709 downstream revalidation evidence, not a new authored
             // parent selection. Closed lifecycle state is included by baseline-aware read projections only.
             .Where(x => x.ExactLinkSuspectLifecycleId == null)
-            .Select(x => new { x.TargetRevisionId, x.Type }).ToListAsync(ct))
-            .Select(x => (x.TargetRevisionId, x.Type)).ToList();
+            .Select(x => new { x.SourceRevisionId, x.TargetRevisionId }).ToListAsync(ct);
+        var linksBySource = sourceIds.ToDictionary(x => x, _ => new HashSet<Guid>());
+        foreach (var link in links)
+            linksBySource[link.SourceRevisionId].Add(link.TargetRevisionId);
         foreach (var entry in ChangeTracker.Entries<RequirementTraceLink>()
-                     .Where(x => x.Entity.SourceRevisionId == sourceRevisionId))
+                     .Where(x => sourceIds.Contains(x.Entity.SourceRevisionId)))
         {
-            var allocated = (entry.Entity.TargetRevisionId, RequirementTraceType.AllocatedFrom);
+            var linkIds = linksBySource[entry.Entity.SourceRevisionId];
             var currentLifecycleIsAuthored = entry.Entity.ExactLinkSuspectLifecycleId is null;
             var originalLifecycleIsAuthored = entry.State == EntityState.Added
                 || entry.Property(x => x.ExactLinkSuspectLifecycleId).OriginalValue is null;
             if (entry.State is EntityState.Deleted or EntityState.Modified && originalLifecycleIsAuthored)
-                links.Remove(allocated);
+                linkIds.Remove(entry.Entity.TargetRevisionId);
             if (entry.State != EntityState.Deleted
                 && entry.Entity.Type == RequirementTraceType.AllocatedFrom
                 && currentLifecycleIsAuthored
-                && !links.Contains(allocated))
-                links.Add(allocated);
+                && !linkIds.Contains(entry.Entity.TargetRevisionId))
+                linkIds.Add(entry.Entity.TargetRevisionId);
         }
-        return links;
-    }
-
-    private async Task<bool> IsRequirementRevisionInBaselineAsync(Guid revisionId, Guid baselineId,
-        CancellationToken ct)
-    {
-        var member = await BaselineRequirements.AsNoTracking()
-            .AnyAsync(x => x.BaselineId == baselineId && x.RevisionId == revisionId, ct);
-        foreach (var entry in ChangeTracker.Entries<BaselineRequirementSelection>()
-                     .Where(x => x.Entity.BaselineId == baselineId && x.Entity.RevisionId == revisionId))
-        {
-            if (entry.State == EntityState.Deleted) member = false;
-            else if (entry.State == EntityState.Added) member = true;
-        }
-        return member;
+        return linksBySource;
     }
 
     /// <summary>
@@ -2142,12 +2161,23 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
                                          revision.EffectiveBaselineId, procedure.ProjectId, procedure.Level,
                                          procedure.ArtifactKind, procedure.BaseNumber, revision.State))
             .ToDictionaryAsync(x => x.RevisionId, ct);
-        foreach (var revisionEntry in ChangeTracker.Entries<TestProcedureRevision>()
-                     .Where(x => x.State != EntityState.Deleted && procedureRevisionIds.Contains(x.Entity.Id)))
+        var trackedProcedureOwners = ChangeTracker.Entries<TestProcedure>()
+            .Where(x => x.State != EntityState.Deleted)
+            .ToDictionary(x => x.Entity.Id, x => x.Entity);
+        var changedProcedureRevisions = ChangeTracker.Entries<TestProcedureRevision>()
+            .Where(x => x.State != EntityState.Deleted && procedureRevisionIds.Contains(x.Entity.Id))
+            .ToList();
+        var missingProcedureOwnerIds = changedProcedureRevisions
+            .Select(x => x.Entity.ProcedureId).Distinct()
+            .Where(x => !trackedProcedureOwners.Values.Any(owner => owner.Id == x))
+            .ToList();
+        var persistedProcedureOwners = await TestProcedures.AsNoTracking()
+            .Where(x => missingProcedureOwnerIds.Contains(x.Id)).ToDictionaryAsync(x => x.Id, ct);
+        foreach (var revisionEntry in changedProcedureRevisions)
         {
-            var owner = ChangeTracker.Entries<TestProcedure>()
-                .FirstOrDefault(x => x.Entity.Id == revisionEntry.Entity.ProcedureId)?.Entity
-                ?? await TestProcedures.AsNoTracking().SingleOrDefaultAsync(x => x.Id == revisionEntry.Entity.ProcedureId, ct);
+            var owner = trackedProcedureOwners.TryGetValue(revisionEntry.Entity.ProcedureId, out var trackedOwner)
+                ? trackedOwner
+                : persistedProcedureOwners.GetValueOrDefault(revisionEntry.Entity.ProcedureId);
             if (owner is not null)
                 procedureLevels[revisionEntry.Entity.Id] = new ProcedureScope(revisionEntry.Entity.Id,
                     revisionEntry.Entity.ProcedureId, revisionEntry.Entity.Revision,
@@ -2160,12 +2190,22 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
                                        where requirementRevisionIds.Contains(revision.Id)
                                        select new RequirementScope(revision.Id, artifact.ProjectId, artifact.Level, artifact.BaseNumber, revision.EffectiveBaselineId))
             .ToDictionaryAsync(x => x.RevisionId, ct);
-        foreach (var revisionEntry in ChangeTracker.Entries<RequirementRevision>()
-                     .Where(x => x.State != EntityState.Deleted && requirementRevisionIds.Contains(x.Entity.Id)))
+        var trackedRequirementArtifacts = ChangeTracker.Entries<RequirementArtifact>()
+            .Where(x => x.State != EntityState.Deleted)
+            .ToDictionary(x => x.Entity.Id, x => x.Entity);
+        var changedRequirementRevisions = ChangeTracker.Entries<RequirementRevision>()
+            .Where(x => x.State != EntityState.Deleted && requirementRevisionIds.Contains(x.Entity.Id))
+            .ToList();
+        var missingRequirementArtifactIds = changedRequirementRevisions
+            .Select(x => x.Entity.ArtifactId).Distinct()
+            .Where(x => !trackedRequirementArtifacts.ContainsKey(x))
+            .ToList();
+        var persistedRequirementArtifacts = await Requirements.AsNoTracking()
+            .Where(x => missingRequirementArtifactIds.Contains(x.Id)).ToDictionaryAsync(x => x.Id, ct);
+        foreach (var revisionEntry in changedRequirementRevisions)
         {
-            var artifact = ChangeTracker.Entries<RequirementArtifact>()
-                .FirstOrDefault(x => x.Entity.Id == revisionEntry.Entity.ArtifactId)?.Entity
-                ?? await Requirements.AsNoTracking().SingleOrDefaultAsync(x => x.Id == revisionEntry.Entity.ArtifactId, ct);
+            var artifact = trackedRequirementArtifacts.GetValueOrDefault(revisionEntry.Entity.ArtifactId)
+                ?? persistedRequirementArtifacts.GetValueOrDefault(revisionEntry.Entity.ArtifactId);
             if (artifact is not null)
                 requirementLevels[revisionEntry.Entity.Id] = new RequirementScope(revisionEntry.Entity.Id,
                     artifact.ProjectId, artifact.Level, artifact.BaseNumber, revisionEntry.Entity.EffectiveBaselineId);
@@ -2241,6 +2281,7 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
         foreach (var tracked in ChangeTracker.Entries<TestProcedure>().Where(x => x.State != EntityState.Deleted
                      && ownerIds.Contains(x.Entity.Id)))
             owners[tracked.Entity.Id] = tracked.Entity;
+        var parentIdsByRevision = await FinalParentIdsAsync(revisions.Keys.ToArray(), ct);
         foreach (var revision in revisions.Values)
         {
             if (!owners.TryGetValue(revision.ProcedureId, out var owner)) continue;
@@ -2253,7 +2294,7 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
                     || string.IsNullOrWhiteSpace(revision.Cleanup)
                     || string.IsNullOrWhiteSpace(revision.ToolingAutomation)))
                 throw new DomainException("A software Procedure revision requires environment/setup, test data, ordered steps, expected observations, cleanup, and tooling/automation.");
-            revision.ValidateProcedureParents(owner, await FinalParentIdsAsync(revision.Id, ct));
+            revision.ValidateProcedureParents(owner, parentIdsByRevision[revision.Id]);
         }
     }
 
@@ -2298,14 +2339,24 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
             .Select(x => x.Entity.Id)
             .Concat(changedCoverage
                 .Where(x => !suspectLifecycleRevisionIds.Contains(x.Entity.ProcedureRevisionId))
-                .Select(x => x.Entity.ProcedureRevisionId))
+            .Select(x => x.Entity.ProcedureRevisionId))
             .Distinct().ToList();
         if (revisionIds.Count == 0) return;
+        var revisionIdSet = revisionIds.ToHashSet();
+        var revisionEntryById = ChangeTracker.Entries<TestProcedureRevision>()
+            .Where(x => revisionIdSet.Contains(x.Entity.Id))
+            .ToDictionary(x => x.Entity.Id);
+        var addedRevisionIds = revisionEntryById.Values
+            .Where(x => x.State == EntityState.Added)
+            .Select(x => x.Entity.Id)
+            .ToHashSet();
+        var changedCoverageByRevision = changedCoverage
+            .GroupBy(x => x.Entity.ProcedureRevisionId)
+            .ToDictionary(x => x.Key, x => x.ToList());
 
         var revisions = await TestProcedureRevisions.AsNoTracking()
-            .Where(x => revisionIds.Contains(x.Id)).ToDictionaryAsync(x => x.Id, ct);
-        foreach (var tracked in ChangeTracker.Entries<TestProcedureRevision>()
-                     .Where(x => x.State != EntityState.Deleted && revisionIds.Contains(x.Entity.Id)))
+            .Where(x => revisionIdSet.Contains(x.Id)).ToDictionaryAsync(x => x.Id, ct);
+        foreach (var tracked in revisionEntryById.Values.Where(x => x.State != EntityState.Deleted))
             revisions[tracked.Entity.Id] = tracked.Entity;
         var ownerIds = revisions.Values.Select(x => x.ProcedureId).Distinct().ToList();
         var owners = await TestProcedures.AsNoTracking()
@@ -2321,9 +2372,7 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
                 || owner.ArtifactKind == VerificationArtifactKind.Case)).ToList();
         foreach (var revision in changedCaseSystem)
         {
-            var state = ChangeTracker.Entries<TestProcedureRevision>()
-                .FirstOrDefault(x => x.Entity.Id == revision.Id)?.State;
-            if (state == EntityState.Added && revision.SourceTestChangeRequestId is not null
+            if (addedRevisionIds.Contains(revision.Id) && revision.SourceTestChangeRequestId is not null
                 && revision.ParentKind == VerificationProcedureParentKind.Unspecified)
                 throw new DomainException("A newly written active Case/System Procedure revision must resolve Allocated or Derived exact parents before it is persisted.");
         }
@@ -2336,8 +2385,7 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
             // historical evidence during fixture/import setup, but any later mutation of that persisted row
             // remains in candidates and is therefore checked below. Controlled materialization always has a
             // SourceTestChangeRequestId and cannot use this compatibility seam.
-            .Where(revision => !(ChangeTracker.Entries<TestProcedureRevision>()
-                .FirstOrDefault(x => x.Entity.Id == revision.Id)?.State == EntityState.Added
+            .Where(revision => !(addedRevisionIds.Contains(revision.Id)
                 && revision.SourceTestChangeRequestId is null
                 && revision.ParentKind == VerificationProcedureParentKind.Unspecified))
             .ToList();
@@ -2346,7 +2394,7 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
         var requirementIds = new HashSet<Guid>();
         var coverageByRevision = new Dictionary<Guid, IReadOnlyCollection<Guid>>();
         var persistedCoverage = await TestCoverage.AsNoTracking()
-            .Where(x => revisionIds.Contains(x.ProcedureRevisionId))
+            .Where(x => revisionIdSet.Contains(x.ProcedureRevisionId))
             .Select(x => new { x.ProcedureRevisionId, x.RequirementRevisionId, x.IsSuspect })
             .ToListAsync(ct);
         var persistedCoverageByRevision = persistedCoverage
@@ -2354,20 +2402,21 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
             .ToDictionary(x => x.Key, x => x.ToList());
         foreach (var revision in candidates)
         {
-            var revisionWasAdded = ChangeTracker.Entries<TestProcedureRevision>()
-                .Any(x => x.Entity.Id == revision.Id && x.State == EntityState.Added);
+            var revisionWasAdded = addedRevisionIds.Contains(revision.Id);
             var ids = persistedCoverageByRevision.TryGetValue(revision.Id, out var persisted)
                 ? persisted.Where(x => revisionWasAdded || !x.IsSuspect)
                     .Select(x => x.RequirementRevisionId).ToHashSet()
                 : [];
-            foreach (var entry in changedCoverage
-                         .Where(x => x.Entity.ProcedureRevisionId == revision.Id))
+            if (changedCoverageByRevision.TryGetValue(revision.Id, out var changedForRevision))
             {
-                if (entry.State == EntityState.Deleted) ids.Remove(entry.Entity.RequirementRevisionId);
-                else if (entry.State == EntityState.Added || entry.State == EntityState.Modified)
+                foreach (var entry in changedForRevision)
                 {
-                    if (entry.Entity.IsSuspect) ids.Remove(entry.Entity.RequirementRevisionId);
-                    else ids.Add(entry.Entity.RequirementRevisionId);
+                    if (entry.State == EntityState.Deleted) ids.Remove(entry.Entity.RequirementRevisionId);
+                    else if (entry.State == EntityState.Added || entry.State == EntityState.Modified)
+                    {
+                        if (entry.Entity.IsSuspect) ids.Remove(entry.Entity.RequirementRevisionId);
+                        else ids.Add(entry.Entity.RequirementRevisionId);
+                    }
                 }
             }
             coverageByRevision[revision.Id] = ids;
@@ -2376,19 +2425,30 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
 
         // Keep the typed projection below separate from TestCoverage: it needs
         // the requirement's project/level/baseline, not the coverage row itself.
+        var requirementIdSet = requirementIds.ToHashSet();
         var requirementScopes = await (from revision in RequirementRevisions.AsNoTracking()
                                        join artifact in Requirements.AsNoTracking()
                                            on revision.ArtifactId equals artifact.Id
-                                       where requirementIds.Contains(revision.Id)
+                                       where requirementIdSet.Contains(revision.Id)
                                        select new RequirementScope(revision.Id, artifact.ProjectId,
                                            artifact.Level, artifact.BaseNumber, revision.EffectiveBaselineId))
             .ToDictionaryAsync(x => x.RevisionId, ct);
-        foreach (var tracked in ChangeTracker.Entries<RequirementRevision>()
-                     .Where(x => x.State != EntityState.Deleted && requirementIds.Contains(x.Entity.Id)))
+        var trackedRequirementArtifacts = ChangeTracker.Entries<RequirementArtifact>()
+            .Where(x => x.State != EntityState.Deleted)
+            .ToDictionary(x => x.Entity.Id, x => x.Entity);
+        var changedRequirementRevisions = ChangeTracker.Entries<RequirementRevision>()
+            .Where(x => x.State != EntityState.Deleted && requirementIdSet.Contains(x.Entity.Id))
+            .ToList();
+        var missingRequirementArtifactIds = changedRequirementRevisions
+            .Select(x => x.Entity.ArtifactId).Distinct()
+            .Where(x => !trackedRequirementArtifacts.ContainsKey(x))
+            .ToList();
+        var persistedRequirementArtifacts = await Requirements.AsNoTracking()
+            .Where(x => missingRequirementArtifactIds.Contains(x.Id)).ToDictionaryAsync(x => x.Id, ct);
+        foreach (var tracked in changedRequirementRevisions)
         {
-            var artifact = ChangeTracker.Entries<RequirementArtifact>()
-                .FirstOrDefault(x => x.Entity.Id == tracked.Entity.ArtifactId)?.Entity
-                ?? await Requirements.AsNoTracking().SingleOrDefaultAsync(x => x.Id == tracked.Entity.ArtifactId, ct);
+            var artifact = trackedRequirementArtifacts.GetValueOrDefault(tracked.Entity.ArtifactId)
+                ?? persistedRequirementArtifacts.GetValueOrDefault(tracked.Entity.ArtifactId);
             if (artifact is not null)
                 requirementScopes[tracked.Entity.Id] = new RequirementScope(tracked.Entity.Id, artifact.ProjectId,
                     artifact.Level, artifact.BaseNumber, tracked.Entity.EffectiveBaselineId);
@@ -2443,19 +2503,17 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
             var owner = owners[revision.ProcedureId];
             var ids = coverageByRevision[revision.Id];
             var noun = owner.Level == TestProcedureLevel.System ? "System Procedure" : "software Case";
-            var revisionWasAdded = ChangeTracker.Entries<TestProcedureRevision>()
-                .Any(x => x.Entity.Id == revision.Id && x.State == EntityState.Added);
+            var revisionWasAdded = addedRevisionIds.Contains(revision.Id);
             if (!revisionWasAdded && revision.State == TestProcedureState.Approved)
             {
-                foreach (var entry in changedCoverage.Where(x => x.Entity.ProcedureRevisionId == revision.Id
-                             && x.State == EntityState.Added && !x.Entity.IsSuspect
+                var changedForRevision = changedCoverageByRevision.GetValueOrDefault(revision.Id) ?? [];
+                foreach (var entry in changedForRevision.Where(x => x.State == EntityState.Added && !x.Entity.IsSuspect
                              && !IsConfirmedSuspectLifecycleEntry(x)))
                 {
                     throw new DomainException(
                         $"Adding an exact parent to an existing approved {noun} revision requires a controlled successor with a signed parent selection.");
                 }
-                foreach (var entry in changedCoverage.Where(x => x.Entity.ProcedureRevisionId == revision.Id
-                             && x.State == EntityState.Deleted && !x.Entity.IsSuspect))
+                foreach (var entry in changedForRevision.Where(x => x.State == EntityState.Deleted && !x.Entity.IsSuspect))
                     throw new DomainException(
                         $"Removing an exact parent from an existing approved {noun} revision requires a controlled successor with a signed parent selection.");
             }
@@ -2505,18 +2563,30 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
             && entry.Entity.ConfirmedAt is not null;
     }
 
-    private async Task<IReadOnlyCollection<Guid>> FinalParentIdsAsync(Guid procedureRevisionId, CancellationToken ct)
+    private async Task<IReadOnlyDictionary<Guid, IReadOnlyCollection<Guid>>> FinalParentIdsAsync(
+        IReadOnlyCollection<Guid> procedureRevisionIds, CancellationToken ct)
     {
-        var ids = (await TestCaseProcedureLinks.AsNoTracking()
-            .Where(x => x.ProcedureRevisionId == procedureRevisionId)
-            .Select(x => x.CaseRevisionId).ToListAsync(ct)).ToHashSet();
+        var ids = procedureRevisionIds.Distinct().ToHashSet();
+        if (ids.Count == 0) return new Dictionary<Guid, IReadOnlyCollection<Guid>>();
+
+        var parentIdsByProcedure = (await TestCaseProcedureLinks.AsNoTracking()
+                .Where(x => ids.Contains(x.ProcedureRevisionId))
+                .Select(x => new { x.ProcedureRevisionId, x.CaseRevisionId })
+                .ToListAsync(ct))
+            .GroupBy(x => x.ProcedureRevisionId)
+            .ToDictionary(x => x.Key, x => (IReadOnlyCollection<Guid>)x
+                .Select(link => link.CaseRevisionId).ToHashSet());
+        foreach (var id in ids)
+            parentIdsByProcedure.TryAdd(id, new HashSet<Guid>());
+
         foreach (var entry in ChangeTracker.Entries<TestCaseProcedureLink>()
-                     .Where(x => x.Entity.ProcedureRevisionId == procedureRevisionId))
+                     .Where(x => ids.Contains(x.Entity.ProcedureRevisionId)))
         {
-            if (entry.State == EntityState.Deleted) ids.Remove(entry.Entity.CaseRevisionId);
-            else if (entry.State == EntityState.Added) ids.Add(entry.Entity.CaseRevisionId);
+            var parentIds = (HashSet<Guid>)parentIdsByProcedure[entry.Entity.ProcedureRevisionId];
+            if (entry.State == EntityState.Deleted) parentIds.Remove(entry.Entity.CaseRevisionId);
+            else if (entry.State == EntityState.Added) parentIds.Add(entry.Entity.CaseRevisionId);
         }
-        return ids;
+        return parentIdsByProcedure;
     }
 
     /// <summary>
@@ -2529,8 +2599,7 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
             .Where(x => x.State != EntityState.Unchanged)
             .Select(x => x.Entity.ProcedureRevisionId).Distinct().ToList();
         if (procedureRevisionIds.Count == 0) return;
-        var parentIdsByProcedure = new Dictionary<Guid, IReadOnlyCollection<Guid>>();
-        foreach (var id in procedureRevisionIds) parentIdsByProcedure[id] = await FinalParentIdsAsync(id, ct);
+        var parentIdsByProcedure = await FinalParentIdsAsync(procedureRevisionIds, ct);
         var ids = procedureRevisionIds.Concat(parentIdsByProcedure.Values.SelectMany(x => x)).Distinct().ToList();
         var rows = await (from revision in TestProcedureRevisions.AsNoTracking()
                           join procedure in TestProcedures.AsNoTracking() on revision.ProcedureId equals procedure.Id
