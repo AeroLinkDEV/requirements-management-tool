@@ -1269,7 +1269,11 @@ public static class ChangeRequestEndpoints
                 : $"The configured {childLevel} level has no allowed upstream parent.";
         if (derived)
         {
-            if (requireComplete && string.IsNullOrWhiteSpace(derivedRationale))
+            // An explicit Derived choice is already a substantive engineering decision, even while the
+            // surrounding Draft is allowed to remain incomplete.  Do not let the draft-mode relaxation
+            // turn that choice into a blank, unreviewable exception; ordinary Unspecified drafts still
+            // remain saveable until review submission.
+            if (string.IsNullOrWhiteSpace(derivedRationale))
                 return "A derived requirement requires an explicit engineering rationale.";
             return selected.Count == 0 ? null : "A derived requirement uses its documented rationale instead of an upstream allocation.";
         }

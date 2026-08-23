@@ -581,7 +581,7 @@ public sealed class AuthoringTracedImpactTests
         }
 
         async Task<HttpResponseMessage> TryCreateDraftAsync(string level, string baseNumber,
-            IReadOnlyList<Guid> upstream, bool derived = false)
+            IReadOnlyList<Guid> upstream, bool derived = false, string rationale = "Characterization")
         {
             return await client.PostAsJsonAsync("/api/change-request-drafts", new
             {
@@ -597,7 +597,7 @@ public sealed class AuthoringTracedImpactTests
                     {
                         baseNumber, revision = 1, level, kind = "Modify",
                         statement = "The requirement shall remain controlled.",
-                        rationale = "Characterization", verificationMethod = "Test",
+                        rationale, verificationMethod = "Test",
                         attributesJson = derived ? "{\"owner\":\"traced.author\",\"criticality\":\"Safety Significant\"}" : "{}",
                         impactDispositionJson = "{}", isDerived = derived,
                         upstreamRevisionIds = upstream
@@ -618,6 +618,15 @@ public sealed class AuthoringTracedImpactTests
         {
             Assert.Equal(HttpStatusCode.BadRequest, derivedWithParent.StatusCode);
             Assert.Contains("derived requirement", await derivedWithParent.Content.ReadAsStringAsync());
+        }
+
+        // An unfinished ordinary Draft is allowed, but an explicit Derived decision is not meaningful
+        // without its engineering rationale even before the package is submitted for review.
+        using (var derivedWithoutRationale = await TryCreateDraftAsync("HighLevel", childNumber, [],
+                   derived: true, rationale: "  "))
+        {
+            Assert.Equal(HttpStatusCode.BadRequest, derivedWithoutRationale.StatusCode);
+            Assert.Contains("explicit engineering rationale", await derivedWithoutRationale.Content.ReadAsStringAsync());
         }
 
         Guid foreignRevisionId, sameProjectOutOfBaselineRevisionId;
