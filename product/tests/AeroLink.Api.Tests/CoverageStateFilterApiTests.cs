@@ -39,10 +39,10 @@ public sealed class CoverageStateFilterApiTests : IClassFixture<SharedApiHost>
     /// <summary>
     /// Four requirements, one in each condition that matters:
     ///
-    /// SYSR-00000801 settled coverage — an approved procedure revision with nothing in flight behind it.
-    /// SYSR-00000802 suspect coverage — carried forward across a change and never reconfirmed.
-    /// SYSR-00000803 no coverage link at all.
-    /// SYSR-00000804 coverage that is *not* suspect but names a Draft procedure revision. Nobody approved it,
+    /// HLR-00000801 settled coverage — an approved procedure revision with nothing in flight behind it.
+    /// HLR-00000802 suspect coverage — carried forward across a change and never reconfirmed.
+    /// HLR-00000803 no coverage link at all.
+    /// HLR-00000804 coverage that is *not* suspect but names a Draft procedure revision. Nobody approved it,
     ///               so it cannot settle anything, and an implementation testing only IsSuspect calls this
     ///               Covered while the release gate calls it uncovered.
     /// </summary>
@@ -72,10 +72,10 @@ public sealed class CoverageStateFilterApiTests : IClassFixture<SharedApiHost>
             new(artifact.Id, 1, statement, "Rationale", "Test", RequirementRevisionState.Active,
                 scr.Id, baseline.Id, now);
 
-        var settled = new RequirementArtifact(project.Id, "SYSR-00000801", RequirementLevel.System, now);
-        var suspect = new RequirementArtifact(project.Id, "SYSR-00000802", RequirementLevel.System, now);
-        var bare = new RequirementArtifact(project.Id, "SYSR-00000803", RequirementLevel.System, now);
-        var unapproved = new RequirementArtifact(project.Id, "SYSR-00000804", RequirementLevel.HighLevel, now);
+        var settled = new RequirementArtifact(project.Id, "HLR-00000801", RequirementLevel.HighLevel, now);
+        var suspect = new RequirementArtifact(project.Id, "HLR-00000802", RequirementLevel.HighLevel, now);
+        var bare = new RequirementArtifact(project.Id, "HLR-00000803", RequirementLevel.HighLevel, now);
+        var unapproved = new RequirementArtifact(project.Id, "HLR-00000804", RequirementLevel.HighLevel, now);
         var settledRevision = Revision(settled, "The FMS shall sequence oceanic waypoints.");
         var suspectRevision = Revision(suspect, "The FMS shall advance on the configured trigger.");
         var bareRevision = Revision(bare, "The FMS shall record oceanic entry time.");
@@ -83,12 +83,12 @@ public sealed class CoverageStateFilterApiTests : IClassFixture<SharedApiHost>
         db.AddRange(settled, suspect, bare, unapproved,
             settledRevision, suspectRevision, bareRevision, unapprovedRevision);
 
-        var approvedProcedure = new TestProcedure(project.Id, "TP-00000801", "Oceanic sequencing", "test.author", now);
+        var approvedProcedure = new TestProcedure(project.Id, "HLRTC-00000801", "Oceanic sequencing", "test.author", now);
         // Approved as materialisation writes it, on the authority of the package that carried the change.
         var approvedRevision = new TestProcedureRevision(approvedProcedure.Id, 1, "Objective", "Preconditions",
             "Steps", "Expected", TestProcedureState.Approved, "test.author", now);
 
-        var draftProcedure = new TestProcedure(project.Id, "TP-00000802", "Failure annunciation", "test.author", now);
+        var draftProcedure = new TestProcedure(project.Id, "HLRTC-00000802", "Failure annunciation", "test.author", now);
         var draftRevision = new TestProcedureRevision(draftProcedure.Id, 1, "Objective", "Preconditions",
             "Steps", "Expected", TestProcedureState.Draft, "test.author", now);
 
@@ -139,9 +139,9 @@ public sealed class CoverageStateFilterApiTests : IClassFixture<SharedApiHost>
         using var client = _host.CreateClient();
         await SignInAsync(client, fixture.MemberName);
 
-        Assert.Equal(["SYSR-00000801"], Numbers(await WorkspaceAsync(client, fixture.ProjectId, "&coverageState=covered")));
-        Assert.Equal(["SYSR-00000802", "SYSR-00000804"], Numbers(await WorkspaceAsync(client, fixture.ProjectId, "&coverageState=suspect")));
-        Assert.Equal(["SYSR-00000803"], Numbers(await WorkspaceAsync(client, fixture.ProjectId, "&coverageState=uncovered")));
+        Assert.Equal(["HLR-00000801"], Numbers(await WorkspaceAsync(client, fixture.ProjectId, "&coverageState=covered")));
+        Assert.Equal(["HLR-00000802", "HLR-00000804"], Numbers(await WorkspaceAsync(client, fixture.ProjectId, "&coverageState=suspect")));
+        Assert.Equal(["HLR-00000803"], Numbers(await WorkspaceAsync(client, fixture.ProjectId, "&coverageState=uncovered")));
 
         // Exhaustive and mutually exclusive: every requirement lands in exactly one state.
         var all = await WorkspaceAsync(client, fixture.ProjectId);
@@ -150,7 +150,7 @@ public sealed class CoverageStateFilterApiTests : IClassFixture<SharedApiHost>
 
     /// <summary>
     /// The case the release gate already got right and a coverage filter can easily get wrong. The link on
-    /// SYSR-00000804 is not suspect, so <c>!IsSuspect</c> alone reports it covered — while the procedure
+    /// HLR-00000804 is not suspect, so <c>!IsSuspect</c> alone reports it covered — while the procedure
     /// revision it names has never been approved and the gate refuses to count it.
     /// </summary>
     [Fact]
@@ -161,9 +161,9 @@ public sealed class CoverageStateFilterApiTests : IClassFixture<SharedApiHost>
         await SignInAsync(client, fixture.MemberName);
 
         var covered = Numbers(await WorkspaceAsync(client, fixture.ProjectId, "&coverageState=covered"));
-        Assert.DoesNotContain("SYSR-00000804", covered);
+        Assert.DoesNotContain("HLR-00000804", covered);
 
-        var row = (await WorkspaceAsync(client, fixture.ProjectId, "&search=SYSR-00000804"))
+        var row = (await WorkspaceAsync(client, fixture.ProjectId, "&search=HLR-00000804"))
             .GetProperty("items").EnumerateArray().Single();
         Assert.Equal("Suspect", row.GetProperty("coverageState").GetString());
     }
@@ -203,12 +203,12 @@ public sealed class CoverageStateFilterApiTests : IClassFixture<SharedApiHost>
         using var client = _host.CreateClient();
         await SignInAsync(client, fixture.MemberName);
 
-        // Level narrows the suspect set to the one HighLevel requirement in it.
-        Assert.Equal(["SYSR-00000804"],
+        // Level narrows the suspect set to the software requirements in it.
+        Assert.Equal(["HLR-00000802", "HLR-00000804"],
             Numbers(await WorkspaceAsync(client, fixture.ProjectId, "&coverageState=suspect&level=Software")));
 
         // Search composes rather than replacing the coverage predicate.
-        Assert.Empty(Numbers(await WorkspaceAsync(client, fixture.ProjectId, "&coverageState=covered&search=SYSR-00000803")));
+        Assert.Empty(Numbers(await WorkspaceAsync(client, fixture.ProjectId, "&coverageState=covered&search=HLR-00000803")));
 
         // The count reflects the filtered population, and paging walks it deterministically.
         using var firstPage = await client.GetAsync(
@@ -216,7 +216,7 @@ public sealed class CoverageStateFilterApiTests : IClassFixture<SharedApiHost>
         var page = JsonDocument.Parse(await firstPage.Content.ReadAsStringAsync()).RootElement;
         Assert.Equal(2, page.GetProperty("totalCount").GetInt32());
         Assert.Equal(2, page.GetProperty("totalPages").GetInt32());
-        Assert.Equal(["SYSR-00000802"], Numbers(page));
+        Assert.Equal(["HLR-00000802"], Numbers(page));
     }
 
     [Fact]

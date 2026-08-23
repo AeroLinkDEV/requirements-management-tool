@@ -63,11 +63,26 @@ public static class IdentifierAllocator
     }
 
     public static async Task<string> NextTestProcedureAsync(AeroLinkDbContext db, TestProcedureLevel level,
-        CancellationToken ct, ILadderPolicy? policy = null)
+        CancellationToken ct, ILadderPolicy? policy = null,
+        VerificationArtifactKind artifactKind = VerificationArtifactKind.Case)
     {
-        var prefix = (policy ?? LadderPolicy).TestProcedurePrefix(level);
+        var prefix = artifactKind == VerificationArtifactKind.Procedure
+            ? VerificationArtifactVocabulary.Definition(new VerificationArtifactKey(
+                level switch
+                {
+                    TestProcedureLevel.System => VerificationDiscipline.System,
+                    TestProcedureLevel.HighLevel => VerificationDiscipline.HighLevelSoftware,
+                    TestProcedureLevel.LowLevel => VerificationDiscipline.LowLevelSoftware,
+                    _ => throw new DomainException($"Unknown verification artifact level: {level}.")
+                }, VerificationArtifactKind.Procedure)).ArtifactPrefix
+            : (policy ?? LadderPolicy).TestProcedurePrefix(level);
         return Format(prefix, await ClaimAsync(db, prefix, ct));
     }
+
+    /// <summary>Kind-aware overload for new neutral callers; the legacy overload above remains unchanged.</summary>
+    public static Task<string> NextTestProcedureAsync(AeroLinkDbContext db, TestProcedureLevel level,
+        VerificationArtifactKind artifactKind, CancellationToken ct, ILadderPolicy? policy = null) =>
+        NextTestProcedureAsync(db, level, ct, policy, artifactKind);
 
     public static async Task<string> NextProblemReportAsync(AeroLinkDbContext db, CancellationToken ct) =>
         $"PR-{await ClaimAsync(db, "PR", ct):D5}";

@@ -127,9 +127,9 @@ public sealed class VerificationImpactReadinessGateTests
                     RequirementRevisionState.Active, seed.ChangeRequestId, (await arrange.CandidateBaselines.SingleAsync()).Id, Now);
                 var systemProcedure = new TestProcedure(seed.ProjectId, "SYSTP-00000101", "Verify system routing", "test.engineer", Now,
                     TestProcedureLevel.System);
-                var highProcedure = new TestProcedure(seed.ProjectId, "HLRTP-00000102", "Verify HLR routing", "test.engineer", Now,
+                var highProcedure = new TestProcedure(seed.ProjectId, "HLRTC-00000102", "Verify HLR routing", "test.engineer", Now,
                     TestProcedureLevel.HighLevel);
-                var lowProcedure = new TestProcedure(seed.ProjectId, "LLRTP-00000103", "Verify LLR routing", "test.engineer", Now,
+                var lowProcedure = new TestProcedure(seed.ProjectId, "LLRTC-00000103", "Verify LLR routing", "test.engineer", Now,
                     TestProcedureLevel.LowLevel);
                 var systemProcedureRevision = new TestProcedureRevision(systemProcedure.Id, 0, "Purpose", "Configuration",
                     "Steps", "Expected", TestProcedureState.Approved, "test.engineer", Now);
@@ -434,7 +434,8 @@ public sealed class VerificationImpactReadinessGateTests
                 var artifact = new RequirementArtifact(seed.ProjectId, "SYSR-00000101", RequirementLevel.System, Now);
                 var revision = new RequirementRevision(artifact.Id, 0, "The FMS shall sequence oceanic waypoints.",
                     "R", "Test", RequirementRevisionState.Active, seed.ChangeRequestId, baseline.Id, Now);
-                var procedure = new TestProcedure(seed.ProjectId, "TP-00000001", "Oceanic sequencing", "test.lead", Now);
+                var procedure = new TestProcedure(seed.ProjectId, "SYSTP-00000001", "Oceanic sequencing", "test.lead", Now,
+                    TestProcedureLevel.System);
                 var approved = new TestProcedureRevision(procedure.Id, 0, "Verify sequencing", "On ground",
                     "Sequence", "Sequenced", TestProcedureState.Approved, "test.engineer", Now);
                 arrange.AddRange(artifact, revision, procedure, approved);

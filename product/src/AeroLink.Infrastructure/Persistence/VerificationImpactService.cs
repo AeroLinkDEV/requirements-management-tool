@@ -195,7 +195,7 @@ public sealed class VerificationImpactService(AeroLinkDbContext db, ProblemRepor
         if (coverage.Count == 0) return;
         var revisionIds = coverage.Select(x => x.ProcedureRevisionId).Distinct().ToList();
         var levels = await (from revision in db.TestProcedureRevisions.AsNoTracking()
-                            join procedure in db.TestProcedures.AsNoTracking() on revision.ProcedureId equals procedure.Id
+                            join procedure in db.TestProcedures.AsNoTracking().Where(x => x.Level == TestProcedureLevel.System || x.ArtifactKind == VerificationArtifactKind.Case) on revision.ProcedureId equals procedure.Id
                             where revisionIds.Contains(revision.Id)
                             select new { revision.Id, procedure.Level }).ToListAsync(ct);
         var configuredProcedureLevels = ladderPolicy.OrderedLevels
@@ -352,7 +352,8 @@ public sealed class VerificationImpactService(AeroLinkDbContext db, ProblemRepor
 
         var orphanedProcedures = await db.TestProcedureRevisions.AsNoTracking()
             .Where(revision => orphanedRevisionIds.Contains(revision.Id))
-            .Join(db.TestProcedures.AsNoTracking().Where(p => p.ProjectId == projectId),
+            .Join(db.TestProcedures.AsNoTracking().Where(p => p.ProjectId == projectId
+                && (p.Level == TestProcedureLevel.System || p.ArtifactKind == VerificationArtifactKind.Case)),
                 revision => revision.ProcedureId, procedure => procedure.Id,
                 (revision, procedure) => new { procedure.Id, procedure.BaseNumber, procedure.Level })
             .Distinct()
@@ -471,7 +472,8 @@ public sealed class VerificationImpactService(AeroLinkDbContext db, ProblemRepor
     {
         var revisions = await (from revision in db.TestProcedureRevisions.AsNoTracking()
                                where revision.ProcedureId == procedureId && revision.State == TestProcedureState.Approved
-                               join procedure in db.TestProcedures.AsNoTracking().Where(x => x.ProjectId == projectId)
+                               join procedure in db.TestProcedures.AsNoTracking().Where(x => x.ProjectId == projectId
+                                   && (x.Level == TestProcedureLevel.System || x.ArtifactKind == VerificationArtifactKind.Case))
                                    on revision.ProcedureId equals procedure.Id
                                select new
                                {

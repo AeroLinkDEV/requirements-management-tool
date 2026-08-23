@@ -62,9 +62,9 @@ public sealed class ReleaseExecutionConfiguredPolicyTests
 
         var systemProcedure = new TestProcedure(project.Id, "SYSTP-00020", "Configured system procedure",
             "verification", now, TestProcedureLevel.System);
-        var highProcedure = new TestProcedure(project.Id, "HLRTP-00021", "Retained high-level procedure",
+        var highProcedure = new TestProcedure(project.Id, "HLRTC-00021", "Retained high-level procedure",
             "verification", now, TestProcedureLevel.HighLevel);
-        var lowProcedure = new TestProcedure(project.Id, "LLRTP-00022", "Configured low-level procedure",
+        var lowProcedure = new TestProcedure(project.Id, "LLRTC-00022", "Configured low-level procedure",
             "verification", now, TestProcedureLevel.LowLevel);
         var systemProcedureRevision = new TestProcedureRevision(systemProcedure.Id, 0, "System objective", "Pre",
             "System steps", "System result", TestProcedureState.Approved, "verification", now,
@@ -130,7 +130,7 @@ public sealed class ReleaseExecutionConfiguredPolicyTests
 
             var initialHash = await execution.ComputeReviewManifestHashAsync(campaign.Id, default);
 
-            var laterHighProcedure = new TestProcedure(project.Id, "HLRTP-00023",
+            var laterHighProcedure = new TestProcedure(project.Id, "HLRTC-00023",
                 "Retained high-level procedure added later", "verification", now, TestProcedureLevel.HighLevel);
             var laterHighRevision = new TestProcedureRevision(laterHighProcedure.Id, 0, "Later high objective", "Pre",
                 "Later high steps", "Later high result", TestProcedureState.Approved, "verification", now,
@@ -140,7 +140,7 @@ public sealed class ReleaseExecutionConfiguredPolicyTests
             await db.SaveChangesAsync();
             Assert.Equal(initialHash, await execution.ComputeReviewManifestHashAsync(campaign.Id, default));
 
-            var laterLowProcedure = new TestProcedure(project.Id, "LLRTP-00024",
+            var laterLowProcedure = new TestProcedure(project.Id, "LLRTC-00024",
                 "Configured low-level procedure added later", "verification", now, TestProcedureLevel.LowLevel);
             var laterLowRevision = new TestProcedureRevision(laterLowProcedure.Id, 0, "Later low objective", "Pre",
                 "Later low steps", "Later low result", TestProcedureState.Approved, "verification", now,
@@ -184,14 +184,13 @@ public sealed class ReleaseExecutionConfiguredPolicyTests
         var system = new RequirementArtifact(project.Id, "SYSR-00030", RequirementLevel.System, now);
         var systemRevision = new RequirementRevision(system.Id, 0, "The system requirement remains current.",
             "Rationale", "Test", RequirementRevisionState.Active, changeRequest.Id, baseline.Id, now);
-        var removedProcedure = new TestProcedure(project.Id, "HLRTP-00030", "Removed HLR procedure",
+        var removedProcedure = new TestProcedure(project.Id, "HLRTC-00030", "Removed HLR procedure",
             "verification", now, TestProcedureLevel.HighLevel);
         var removedRevision = new TestProcedureRevision(removedProcedure.Id, 0, "Removed objective", "Pre",
             "Removed steps", "Removed result", TestProcedureState.Approved, "verification", now,
             effectiveBaselineId: baseline.Id);
         db.AddRange(program, project, release, baseline, campaign, changeRequest, system, systemRevision,
             removedProcedure, removedRevision,
-            new TestRequirementCoverage(removedRevision.Id, systemRevision.Id),
             new BaselineRequirementSelection(baseline.Id, system.Id, systemRevision.Id),
             LegacyDefaultProjectLadderFactory.Create(project.Id, now));
         await db.SaveChangesAsync();

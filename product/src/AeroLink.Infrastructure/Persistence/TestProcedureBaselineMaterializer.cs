@@ -44,7 +44,10 @@ public sealed class TestProcedureBaselineMaterializer(AeroLinkDbContext db,
         if (baseline.TestProceduresMaterializedAt is not null)
             throw new DomainException("The verification artifact baseline is already materialized and immutable.");
 
-        var procedures = await db.TestProcedures.Where(x => x.ProjectId == baseline.ProjectId).ToListAsync(ct);
+        // This materializer is the current Case/System runtime path. Dormant software Procedures are
+        // authored through the shared artifact service but cannot become baseline membership here.
+        var procedures = await db.TestProcedures.Where(x => x.ProjectId == baseline.ProjectId
+            && (x.Level == TestProcedureLevel.System || x.ArtifactKind == VerificationArtifactKind.Case)).ToListAsync(ct);
         var procedureByBase = procedures.ToDictionary(x => x.BaseNumber, StringComparer.OrdinalIgnoreCase);
         var current = await CarryForwardPredecessorAsync(baseline, ct);
 

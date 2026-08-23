@@ -63,7 +63,7 @@ public sealed class ControlledProcedureApprovalBasisApiTests
                 inheritedSource.DisplayNumber, TestChangeReviewDiscipline.System, "SYSTPCR-990002",
                 "SYSTP-990002", TestProcedureLevel.System, "system.tcr.approver", now.AddMinutes(4));
             var hlrTcr = ApprovedTcr(project.Id, release.Id, change.Id, change.DisplayNumber,
-                TestChangeReviewDiscipline.HighLevelSoftware, "HLRTCCR-990001", "HLRTP-990001",
+                TestChangeReviewDiscipline.HighLevelSoftware, "HLRTCCR-990001", "HLRTC-990001",
                 TestProcedureLevel.HighLevel, "hlr.tcr.approver", now.AddMinutes(5));
 
             // Deliberately select only the HLR package. The two System revisions below represent unchanged
@@ -84,7 +84,7 @@ public sealed class ControlledProcedureApprovalBasisApiTests
                 "Exercise the second system behaviour.", "The second system behaviour is correct.",
                 TestProcedureState.Approved, "system.author", now,
                 sourceTestChangeRequestId: secondSystemTcr.Id);
-            var hlrProcedure = new TestProcedure(project.Id, "HLRTP-990001",
+            var hlrProcedure = new TestProcedure(project.Id, "HLRTC-990001",
                 "Selected HLR procedure", "hlr.author", now, TestProcedureLevel.HighLevel);
             var hlrRevision = new TestProcedureRevision(hlrProcedure.Id, 0,
                 "Verify the HLR behaviour.", "Configured software.", "Exercise HLR behaviour.",

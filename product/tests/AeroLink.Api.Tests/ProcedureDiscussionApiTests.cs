@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
+using AeroLink.Domain.Requirements;
 using AeroLink.Domain.Verification;
 using AeroLink.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
@@ -67,6 +68,85 @@ public sealed class ProcedureDiscussionApiTests(ShowcaseApiFixture showcase)
         using var posted = await client.PostAsJsonAsync($"/api/test-procedures/{Guid.NewGuid()}/comments",
             new { body = "Into the void." });
         Assert.Equal(HttpStatusCode.NotFound, posted.StatusCode);
+    }
+
+    [Fact]
+    public async Task Dormant_software_procedure_discussion_mutations_are_refused_without_notifications()
+    {
+        using var factory = showcase.CreateFactory();
+        using var client = factory.CreateClient();
+        await BootstrapAsync(client);
+
+        using var created = await client.PostAsJsonAsync("/api/test-procedures/drafts", new
+        {
+            projectId = showcase.Summary.ProjectId,
+            level = "HighLevel",
+            title = "Read-only dormant discussion Procedure",
+            environmentSetup = "Bench",
+            testData = "Known vector",
+            orderedSteps = "1. Execute",
+            expectedObservations = "Observed",
+            cleanup = "Restore",
+            toolingAutomation = "Runner",
+            parentKind = "Derived",
+            derivedRationale = "Standalone while dormant."
+        });
+        var createdBody = await created.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal(HttpStatusCode.Created, created.StatusCode);
+        var procedureId = createdBody.GetProperty("id").GetGuid();
+        var revisionId = createdBody.GetProperty("revisionId").GetGuid();
+
+        int commentsBefore;
+        int notificationsBefore;
+        await using (var scope = factory.Services.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            commentsBefore = await db.ArtifactComments.CountAsync(x => x.ArtifactId == procedureId);
+            notificationsBefore = await db.UserNotifications.CountAsync(x => x.ProjectId == showcase.Summary.ProjectId);
+        }
+
+        using var post = await client.PostAsJsonAsync($"/api/test-procedures/{procedureId}/comments", new
+        {
+            revisionId,
+            body = "This must not be stored.",
+            mentions = new[] { "admin" }
+        });
+        var postBody = await post.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal(HttpStatusCode.BadRequest, post.StatusCode);
+        Assert.Equal("dormant_procedure_discussion_read_only", postBody.GetProperty("code").GetString());
+        await using (var scope = factory.Services.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            Assert.Equal(commentsBefore, await db.ArtifactComments.CountAsync(x => x.ArtifactId == procedureId));
+            Assert.Equal(notificationsBefore, await db.UserNotifications.CountAsync(x => x.ProjectId == showcase.Summary.ProjectId));
+        }
+
+        Guid commentId;
+        await using (var scope = factory.Services.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            var comment = new ArtifactComment(showcase.Summary.ProjectId, "TestProcedure", procedureId,
+                revisionId, null, "Existing read-only comment", "[]", "admin", DateTimeOffset.UtcNow);
+            db.ArtifactComments.Add(comment);
+            await db.SaveChangesAsync();
+            commentId = comment.Id;
+        }
+
+        using var resolve = await client.PostAsJsonAsync($"/api/enterprise-requirements/comments/{commentId}/resolve",
+            new { disposition = "Must remain open." });
+        var resolveBody = await resolve.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal(HttpStatusCode.BadRequest, resolve.StatusCode);
+        Assert.Equal("dormant_procedure_discussion_read_only", resolveBody.GetProperty("code").GetString());
+
+        await using (var scope = factory.Services.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            var stored = await db.ArtifactComments.AsNoTracking().SingleAsync(x => x.Id == commentId);
+            Assert.Equal(CollaborationState.Open, stored.State);
+            Assert.Null(stored.ResolvedBy);
+            Assert.Equal(commentsBefore + 1, await db.ArtifactComments.CountAsync(x => x.ArtifactId == procedureId));
+            Assert.Equal(notificationsBefore, await db.UserNotifications.CountAsync(x => x.ProjectId == showcase.Summary.ProjectId));
+        }
     }
 
     private static async Task BootstrapAsync(HttpClient client)

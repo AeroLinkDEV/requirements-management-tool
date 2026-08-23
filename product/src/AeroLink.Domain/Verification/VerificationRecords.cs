@@ -12,12 +12,12 @@ public sealed class TestProcedure : IVerificationArtifactHeader
     private TestProcedure() { }
     public TestProcedure(Guid projectId, string baseNumber, string title, string ownerId, DateTimeOffset now,
         TestProcedureLevel level = TestProcedureLevel.HighLevel, ILadderPolicy? policy = null,
-        VerificationArtifactKind? artifactKind = null)
+        VerificationArtifactKind? artifactKind = null,
+        VerificationProcedureParentKind parentKind = VerificationProcedureParentKind.Unspecified)
     {
-        var artifactWord = level == TestProcedureLevel.System ? "test procedure" : "test case";
+        var artifactWord = artifactKind == VerificationArtifactKind.Procedure ? "test procedure" : "test case";
         if (string.IsNullOrWhiteSpace(title)) throw new DomainException($"A {artifactWord} title is required.");
         Id = Guid.NewGuid(); ProjectId = projectId; BaseNumber = ArtifactNumber.ValidateBase(baseNumber);
-        EnsurePrefixMatchesLevel(BaseNumber, level, policy);
         Title = title.Trim(); OwnerId = ownerId.Trim(); CreatedAt = now; UpdatedAt = now; Level = level;
         ArtifactDiscipline = level switch
         {
@@ -31,10 +31,29 @@ public sealed class TestProcedure : IVerificationArtifactHeader
             : VerificationArtifactKind.Case);
         var expectedKind = level == TestProcedureLevel.System
             ? VerificationArtifactKind.Procedure
-            : VerificationArtifactKind.Case;
-        if (ArtifactKind != expectedKind)
+            : ArtifactKind;
+        if (level == TestProcedureLevel.System && ArtifactKind != expectedKind)
             throw new DomainException($"{level} verification artifacts must use {expectedKind}.");
+        EnsurePrefixMatchesIdentity(BaseNumber, level, ArtifactKind, policy);
+        if (level != TestProcedureLevel.System && ArtifactKind == VerificationArtifactKind.Procedure
+            && parentKind == VerificationProcedureParentKind.Unspecified)
+            throw new DomainException("A software Procedure requires an explicit Allocated or Derived parent classification.");
         _ = VerificationArtifactVocabulary.Definition(ArtifactKey);
+    }
+
+    /// <summary>
+    /// Seeds a genuinely pre-#722 software Case while an upgrade qualification is still on the predecessor
+    /// schema. This is intentionally internal: new Case allocation must never reuse the retired Procedure
+    /// spelling, but the migration fixture must be able to represent the row that #722 relabels.
+    /// </summary>
+    internal static TestProcedure LegacySoftwareCaseForMigration(Guid projectId, string legacyBaseNumber,
+        string title, string ownerId, DateTimeOffset now, TestProcedureLevel level)
+    {
+        var current = new TestProcedure(projectId,
+            level == TestProcedureLevel.HighLevel ? "HLRTC-999999" : "LLRTC-999999",
+            title, ownerId, now, level);
+        current.BaseNumber = ArtifactNumber.ValidateBase(legacyBaseNumber);
+        return current;
     }
 
     /// <summary>
@@ -46,22 +65,25 @@ public sealed class TestProcedure : IVerificationArtifactHeader
     /// which discipline answers for it when a retirement strands it, so a wrong one puts real work in the wrong
     /// team's queue. Checked here because this is the only place a procedure comes into existence.
     /// </summary>
-    private static void EnsurePrefixMatchesLevel(string baseNumber, TestProcedureLevel level, ILadderPolicy? policy = null)
+    private static void EnsurePrefixMatchesIdentity(string baseNumber, TestProcedureLevel level,
+        VerificationArtifactKind artifactKind, ILadderPolicy? policy = null)
     {
         var ladderPolicy = policy ?? LegacyLadderPolicy.Instance;
-        var expected = ladderPolicy.TestProcedurePrefix(level) + "-";
+        var discipline = level switch
+        {
+            TestProcedureLevel.System => VerificationDiscipline.System,
+            TestProcedureLevel.HighLevel => VerificationDiscipline.HighLevelSoftware,
+            TestProcedureLevel.LowLevel => VerificationDiscipline.LowLevelSoftware,
+            _ => throw new DomainException($"Unknown verification artifact level: {level}.")
+        };
+        var expectedPrefix = artifactKind == VerificationArtifactKind.Procedure
+            ? VerificationArtifactVocabulary.Definition(new VerificationArtifactKey(discipline, artifactKind)).ArtifactPrefix
+            : ladderPolicy.TestProcedurePrefix(level);
+        var expected = expectedPrefix + "-";
         if (baseNumber.StartsWith(expected, StringComparison.OrdinalIgnoreCase)) return;
-        // HLRTP/LLRTP are retained only as a read/fixture compatibility spelling for pre-#722 rows. New
-        // software Case creation is always allocated as HLRTC/LLRTC by the policy.
-        if (level == TestProcedureLevel.HighLevel && baseNumber.StartsWith("HLRTP-", StringComparison.OrdinalIgnoreCase)
-            || level == TestProcedureLevel.LowLevel && baseNumber.StartsWith("LLRTP-", StringComparison.OrdinalIgnoreCase))
-            return;
-        // Only a number claiming to be a test procedure is judged. A project numbering its procedures some
-        // other way is not making this mistake, and is not this rule's business.
-        if (!ladderPolicy.IsKnownTestProcedurePrefix(baseNumber)) return;
-        var artifactWord = level == TestProcedureLevel.System ? "test procedure" : "test case";
+        var artifactWord = artifactKind == VerificationArtifactKind.Procedure ? "test procedure" : "test case";
         throw new DomainException(
-            $"{baseNumber} is numbered for a different level than {level}. A {artifactWord}'s number and its level have to agree.");
+            $"{baseNumber} is not a valid {artifactWord} identifier for {level}; expected the {expectedPrefix} family.");
     }
     public Guid Id { get; private set; }
     public Guid ProjectId { get; private set; }
@@ -95,7 +117,11 @@ public sealed class TestProcedureRevision
     public TestProcedureRevision(Guid procedureId, int revision, string objective, string preconditions,
         string steps, string expectedResult, TestProcedureState state, string authorId, DateTimeOffset now,
         string? selectedApproverId = null, Guid? sourceTestChangeRequestId = null,
-        Guid? effectiveBaselineId = null, string sourceChangeRequestsJson = "[]")
+        Guid? effectiveBaselineId = null, string sourceChangeRequestsJson = "[]",
+        string? environmentSetup = null, string? testData = null, string? orderedSteps = null,
+        string? expectedObservations = null, string? cleanup = null, string? toolingAutomation = null,
+        VerificationProcedureParentKind parentKind = VerificationProcedureParentKind.Unspecified,
+        string? derivedRationale = null, string? retirementRationale = null)
     {
         if (revision < 0) throw new DomainException("Verification artifact revision cannot be negative.");
         // A retired procedure is being removed, not restated — the same exemption a retired requirement revision
@@ -105,6 +131,15 @@ public sealed class TestProcedureRevision
             throw new DomainException("Objective, steps, and expected result are required.");
         Id = Guid.NewGuid(); ProcedureId = procedureId; Revision = revision; Objective = objective.Trim();
         Preconditions = preconditions.Trim(); Steps = steps.Trim(); ExpectedResult = expectedResult.Trim();
+        EnvironmentSetup = environmentSetup?.Trim() ?? "";
+        TestData = testData?.Trim() ?? "";
+        OrderedSteps = orderedSteps?.Trim() ?? "";
+        ExpectedObservations = expectedObservations?.Trim() ?? "";
+        Cleanup = cleanup?.Trim() ?? "";
+        ToolingAutomation = toolingAutomation?.Trim() ?? "";
+        ParentKind = parentKind;
+        DerivedRationale = derivedRationale?.Trim() ?? "";
+        RetirementRationale = retirementRationale?.Trim() ?? "";
         State = state; AuthorId = authorId.Trim(); SelectedApproverId = selectedApproverId?.Trim(); CreatedAt = now;
         SourceTestChangeRequestId = sourceTestChangeRequestId; EffectiveBaselineId = effectiveBaselineId;
         var sourceSnapshot = string.IsNullOrWhiteSpace(sourceChangeRequestsJson)
@@ -122,6 +157,21 @@ public sealed class TestProcedureRevision
     public string Preconditions { get; private set; } = string.Empty;
     public string Steps { get; private set; } = string.Empty;
     public string ExpectedResult { get; private set; } = string.Empty;
+    /// <summary>Procedure-only content; Case revisions continue to use the four legacy body fields above.</summary>
+    public string EnvironmentSetup { get; private set; } = string.Empty;
+    public string TestData { get; private set; } = string.Empty;
+    public string OrderedSteps { get; private set; } = string.Empty;
+    public string ExpectedObservations { get; private set; } = string.Empty;
+    public string Cleanup { get; private set; } = string.Empty;
+    public string ToolingAutomation { get; private set; } = string.Empty;
+    public string Setup => EnvironmentSetup;
+    public string ExecutableSteps => OrderedSteps;
+    public string ExpectedObservationsText => ExpectedObservations;
+    public string Tooling => ToolingAutomation;
+    /// <summary>Procedure-only exact parent classification; legacy/System revisions remain Unspecified.</summary>
+    public VerificationProcedureParentKind ParentKind { get; private set; }
+    public string DerivedRationale { get; private set; } = string.Empty;
+    public string RetirementRationale { get; private set; } = string.Empty;
     public TestProcedureState State { get; private set; }
     public string AuthorId { get; private set; } = string.Empty;
     public string? SelectedApproverId { get; private set; }
@@ -155,7 +205,14 @@ public sealed class TestProcedureRevision
         new(SourceTestChangeRequestId, EffectiveBaselineId, SourceChangeRequestsJson);
     public IVerificationArtifactRevisionContent Content(TestProcedure owner) => EnsureOwner(owner).ArtifactKind == VerificationArtifactKind.Case
             ? new VerificationCaseRevisionContent(Objective, Preconditions, Steps, ExpectedResult)
-            : new VerificationProcedureRevisionContent(Objective, Preconditions, Steps, ExpectedResult);
+            : new VerificationProcedureRevisionContent(Objective, Preconditions, Steps, ExpectedResult,
+                EnvironmentSetup, TestData, OrderedSteps, ExpectedObservations, Cleanup, ToolingAutomation);
+
+    public void ValidateProcedureParents(TestProcedure owner, IEnumerable<Guid>? caseRevisionIds = null) {
+        if (owner.ArtifactKind != VerificationArtifactKind.Procedure || owner.Level == TestProcedureLevel.System
+            || State == TestProcedureState.Retired) return;
+        VerificationProcedureParentPolicy.Validate(ParentKind, caseRevisionIds, DerivedRationale);
+    }
 
     private TestProcedure EnsureOwner(TestProcedure owner) => owner is not null && owner.Id == ProcedureId
         ? owner
@@ -174,6 +231,27 @@ public sealed class TestProcedureRevision
     // materialisation writes it as Approved on that authority — signing the revision separately would be a
     // second approval of the same work. The method that did it had one caller, a route now deleted, and a
     // capability nothing calls is not a capability.
+}
+
+/// <summary>
+/// Exact many-to-many parent relation from a software Procedure revision to a Case revision.  Both sides are
+/// revision identities, never mutable artifact ids, so a later Case or Procedure revision cannot silently
+/// change the relationship represented by an earlier controlled record.
+/// </summary>
+public sealed class TestCaseProcedureLink
+{
+    private TestCaseProcedureLink() { }
+    public TestCaseProcedureLink(Guid caseRevisionId, Guid procedureRevisionId)
+    {
+        if (caseRevisionId == Guid.Empty || procedureRevisionId == Guid.Empty)
+            throw new DomainException("An exact Case-to-Procedure link requires both revisions.");
+        if (caseRevisionId == procedureRevisionId)
+            throw new DomainException("An exact Case-to-Procedure link cannot point to the same revision.");
+        Id = Guid.NewGuid(); CaseRevisionId = caseRevisionId; ProcedureRevisionId = procedureRevisionId;
+    }
+    public Guid Id { get; private set; }
+    public Guid CaseRevisionId { get; private set; }
+    public Guid ProcedureRevisionId { get; private set; }
 }
 
 /// <summary>

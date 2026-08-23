@@ -65,6 +65,7 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
     public DbSet<BaselineRequirementSelection> BaselineRequirements => Set<BaselineRequirementSelection>();
     public DbSet<TestProcedure> TestProcedures => Set<TestProcedure>();
     public DbSet<TestProcedureRevision> TestProcedureRevisions => Set<TestProcedureRevision>();
+    public DbSet<TestCaseProcedureLink> TestCaseProcedureLinks => Set<TestCaseProcedureLink>();
     public DbSet<BaselineTestProcedureSelection> BaselineTestProcedures => Set<BaselineTestProcedureSelection>();
     public DbSet<TestRequirementCoverage> TestCoverage => Set<TestRequirementCoverage>();
     public DbSet<TestExecution> TestExecutions => Set<TestExecution>();
@@ -176,6 +177,7 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
         try
         {
             PrepareLadderSealsAsync(CancellationToken.None).GetAwaiter().GetResult();
+            ValidateVerificationIntegrityAsync(CancellationToken.None).GetAwaiter().GetResult();
             var result = base.SaveChanges(acceptAllChangesOnSuccess);
             PendingLadderSeals.Clear();
             return result;
@@ -884,7 +886,7 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
             b.Property(x => x.ArtifactDiscipline).HasConversion<string>().HasMaxLength(40).IsRequired();
             b.Property(x => x.ArtifactKind).HasConversion<string>().HasMaxLength(30).IsRequired();
             b.ToTable("test_procedures", t => t.HasCheckConstraint("CK_test_procedure_neutral_artifact_identity",
-                "((\"Level\" = 'System' AND \"ArtifactDiscipline\" = 'System' AND \"ArtifactKind\" = 'Procedure') OR (\"Level\" = 'HighLevel' AND \"ArtifactDiscipline\" = 'HighLevelSoftware' AND \"ArtifactKind\" = 'Case') OR (\"Level\" = 'LowLevel' AND \"ArtifactDiscipline\" = 'LowLevelSoftware' AND \"ArtifactKind\" = 'Case'))"));
+                "((\"Level\" = 'System' AND \"ArtifactDiscipline\" = 'System' AND \"ArtifactKind\" = 'Procedure' AND \"BaseNumber\" LIKE 'SYSTP-%') OR (\"Level\" = 'HighLevel' AND \"ArtifactDiscipline\" = 'HighLevelSoftware' AND ((\"ArtifactKind\" = 'Case' AND \"BaseNumber\" LIKE 'HLRTC-%') OR (\"ArtifactKind\" = 'Procedure' AND \"BaseNumber\" LIKE 'HLRTP-%'))) OR (\"Level\" = 'LowLevel' AND \"ArtifactDiscipline\" = 'LowLevelSoftware' AND ((\"ArtifactKind\" = 'Case' AND \"BaseNumber\" LIKE 'LLRTC-%') OR (\"ArtifactKind\" = 'Procedure' AND \"BaseNumber\" LIKE 'LLRTP-%'))))"));
             b.Property(x => x.Version).IsConcurrencyToken();
             b.HasIndex(x => new { x.ProjectId, x.BaseNumber }).IsUnique();
             b.HasOne<ProjectRecord>().WithMany().HasForeignKey(x => x.ProjectId).OnDelete(DeleteBehavior.Restrict);
@@ -894,10 +896,23 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
             b.ToTable("test_procedure_revisions"); b.HasKey(x => x.Id); b.Property(x => x.Objective).HasMaxLength(4000).IsRequired();
             b.Property(x => x.Preconditions).HasMaxLength(8000); b.Property(x => x.Steps).HasMaxLength(16000).IsRequired();
             b.Property(x => x.ExpectedResult).HasMaxLength(8000).IsRequired(); b.Property(x => x.State).HasConversion<string>().HasMaxLength(30);
+            b.Property(x => x.EnvironmentSetup).HasMaxLength(8000).IsRequired(); b.Property(x => x.TestData).HasMaxLength(8000).IsRequired();
+            b.Property(x => x.OrderedSteps).HasMaxLength(16000).IsRequired(); b.Property(x => x.ExpectedObservations).HasMaxLength(8000).IsRequired();
+            b.Property(x => x.Cleanup).HasMaxLength(8000).IsRequired(); b.Property(x => x.ToolingAutomation).HasMaxLength(8000).IsRequired();
+            b.Property(x => x.ParentKind).HasConversion<string>().HasMaxLength(30).IsRequired(); b.Property(x => x.DerivedRationale).HasMaxLength(4000).IsRequired();
+            b.Property(x => x.RetirementRationale).HasMaxLength(4000).IsRequired();
             b.Property(x => x.AuthorId).HasMaxLength(100).IsRequired(); b.Property(x => x.SelectedApproverId).HasMaxLength(100); b.HasIndex(x => new { x.ProcedureId, x.Revision }).IsUnique();
             b.Property(x => x.SourceChangeRequestsJson).IsRequired().HasDefaultValue("[]");
             b.HasIndex(x => x.SourceTestChangeRequestId);
             b.HasOne<TestProcedure>().WithMany().HasForeignKey(x => x.ProcedureId).OnDelete(DeleteBehavior.Restrict);
+        });
+        modelBuilder.Entity<TestCaseProcedureLink>(b =>
+        {
+            b.ToTable("test_case_procedure_links"); b.HasKey(x => x.Id);
+            b.HasIndex(x => new { x.CaseRevisionId, x.ProcedureRevisionId }).IsUnique();
+            b.HasIndex(x => x.CaseRevisionId); b.HasIndex(x => x.ProcedureRevisionId);
+            b.HasOne<TestProcedureRevision>().WithMany().HasForeignKey(x => x.CaseRevisionId).OnDelete(DeleteBehavior.Restrict);
+            b.HasOne<TestProcedureRevision>().WithMany().HasForeignKey(x => x.ProcedureRevisionId).OnDelete(DeleteBehavior.Restrict);
         });
         modelBuilder.Entity<BaselineTestProcedureSelection>(b =>
         {
@@ -1777,7 +1792,7 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
                 && entry.Property(x => x.ManagedDocumentRevisionId).CurrentValue is null)
                 entry.State = EntityState.Deleted;
         }
-        await RefuseCrossLevelCoverageAsync(cancellationToken);
+        await ValidateVerificationIntegrityAsync(cancellationToken);
         await AddLifecycleEventsAsync(cancellationToken);
         await QueueNotificationDeliveriesAsync(cancellationToken);
             var result = await base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken);
@@ -1799,6 +1814,43 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
             PendingLadderSeals.Clear();
             throw;
         }
+    }
+
+    private async Task ValidateVerificationIntegrityAsync(CancellationToken ct)
+    {
+        await ValidateProcedureHeadersAsync(ct);
+        await RefuseCrossLevelCoverageAsync(ct);
+        await ValidateProcedureParentsAsync(ct);
+        await ValidateCaseProcedureLinksAsync(ct);
+    }
+
+    /// <summary>
+    /// A dormant software Procedure is one immutable identity plus its first classified revision. Do not
+    /// allow a direct EF caller to insert the header alone and attach a revision later: that creates a window
+    /// where the identity exists without the allocation/derived decision that gives it meaning.
+    /// </summary>
+    private Task ValidateProcedureHeadersAsync(CancellationToken ct)
+    {
+        _ = ct;
+        var addedSoftwareProcedures = ChangeTracker.Entries<TestProcedure>()
+            .Where(x => x.State == EntityState.Added
+                && x.Entity.ArtifactKind == VerificationArtifactKind.Procedure
+                && x.Entity.Level != TestProcedureLevel.System)
+            .Select(x => x.Entity.Id)
+            .ToHashSet();
+        if (addedSoftwareProcedures.Count == 0) return Task.CompletedTask;
+
+        var initialRevisionOwners = ChangeTracker.Entries<TestProcedureRevision>()
+            .Where(x => x.State == EntityState.Added
+                && addedSoftwareProcedures.Contains(x.Entity.ProcedureId)
+                && x.Entity.Revision == 0
+                && x.Entity.State == TestProcedureState.Draft)
+            .Select(x => x.Entity.ProcedureId)
+            .ToHashSet();
+        var missing = addedSoftwareProcedures.Except(initialRevisionOwners).ToArray();
+        if (missing.Length > 0)
+            throw new DomainException("A software Procedure header must be saved with its initial revision in the same unit of work.");
+        return Task.CompletedTask;
     }
 
     /// <summary>
@@ -1830,14 +1882,35 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
                                      join procedure in TestProcedures.AsNoTracking()
                                          on revision.ProcedureId equals procedure.Id
                                      where procedureRevisionIds.Contains(revision.Id)
-                                     select new { revision.Id, procedure.ProjectId, procedure.Level, procedure.BaseNumber })
-            .ToDictionaryAsync(x => x.Id, ct);
+                                     select new ProcedureScope(revision.Id, revision.EffectiveBaselineId,
+                                         procedure.ProjectId, procedure.Level, procedure.ArtifactKind, procedure.BaseNumber))
+            .ToDictionaryAsync(x => x.RevisionId, ct);
+        foreach (var revisionEntry in ChangeTracker.Entries<TestProcedureRevision>()
+                     .Where(x => x.State != EntityState.Deleted && procedureRevisionIds.Contains(x.Entity.Id)))
+        {
+            var owner = ChangeTracker.Entries<TestProcedure>()
+                .FirstOrDefault(x => x.Entity.Id == revisionEntry.Entity.ProcedureId)?.Entity
+                ?? await TestProcedures.AsNoTracking().SingleOrDefaultAsync(x => x.Id == revisionEntry.Entity.ProcedureId, ct);
+            if (owner is not null)
+                procedureLevels[revisionEntry.Entity.Id] = new ProcedureScope(revisionEntry.Entity.Id,
+                    revisionEntry.Entity.EffectiveBaselineId, owner.ProjectId, owner.Level, owner.ArtifactKind, owner.BaseNumber);
+        }
         var requirementLevels = await (from revision in RequirementRevisions.AsNoTracking()
                                        join artifact in Requirements.AsNoTracking()
                                            on revision.ArtifactId equals artifact.Id
                                        where requirementRevisionIds.Contains(revision.Id)
-                                       select new { revision.Id, artifact.ProjectId, artifact.Level, artifact.BaseNumber })
-            .ToDictionaryAsync(x => x.Id, ct);
+                                       select new RequirementScope(revision.Id, artifact.ProjectId, artifact.Level, artifact.BaseNumber))
+            .ToDictionaryAsync(x => x.RevisionId, ct);
+        foreach (var revisionEntry in ChangeTracker.Entries<RequirementRevision>()
+                     .Where(x => x.State != EntityState.Deleted && requirementRevisionIds.Contains(x.Entity.Id)))
+        {
+            var artifact = ChangeTracker.Entries<RequirementArtifact>()
+                .FirstOrDefault(x => x.Entity.Id == revisionEntry.Entity.ArtifactId)?.Entity
+                ?? await Requirements.AsNoTracking().SingleOrDefaultAsync(x => x.Id == revisionEntry.Entity.ArtifactId, ct);
+            if (artifact is not null)
+                requirementLevels[revisionEntry.Entity.Id] = new RequirementScope(revisionEntry.Entity.Id,
+                    artifact.ProjectId, artifact.Level, artifact.BaseNumber);
+        }
 
         var projectIds = procedureLevels.Values.Select(x => x.ProjectId)
             .Concat(requirementLevels.Values.Select(x => x.ProjectId)).Distinct().ToList();
@@ -1846,16 +1919,22 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
             .AsNoTracking().Where(x => projectIds.Contains(x.ProjectId)).ToListAsync(ct);
         var policies = configurations.ToDictionary(x => x.ProjectId,
             x => ProjectLadderPolicyStorage.ResolvePersisted(x, x.ProjectId));
+        foreach (var tracked in ChangeTracker.Entries<ProjectLadderConfiguration>()
+                     .Where(x => x.State != EntityState.Deleted && projectIds.Contains(x.Entity.ProjectId)))
+            policies[tracked.Entity.ProjectId] = ProjectLadderPolicyStorage.ResolvePersisted(tracked.Entity, tracked.Entity.ProjectId);
 
         foreach (var link in added)
         {
             // A revision not yet in the database is one being written in this same unit of work. Its level is
             // not knowable here, and refusing on that basis would block legitimate writes; the authoring paths
             // check before proposing.
-            if (!procedureLevels.TryGetValue(link.ProcedureRevisionId, out var procedure)) continue;
-            if (!requirementLevels.TryGetValue(link.RequirementRevisionId, out var requirement)) continue;
+            if (!procedureLevels.TryGetValue(link.ProcedureRevisionId, out var procedure)
+                || !requirementLevels.TryGetValue(link.RequirementRevisionId, out var requirement))
+                throw new DomainException("A verification coverage link must name persisted revisions in the same unit of work.");
             if (procedure.ProjectId != requirement.ProjectId)
                 throw new DomainException("A verification coverage link cannot cross projects.");
+            if (procedure.ArtifactKind == VerificationArtifactKind.Procedure && procedure.Level != TestProcedureLevel.System)
+                throw new DomainException("A software Procedure cannot link directly to Requirement coverage; link it to exact Case revisions instead.");
             if (!policies.TryGetValue(procedure.ProjectId, out var policyForProject))
                 throw new DomainException($"Project {procedure.ProjectId} has no persisted ladder configuration.");
             if (SameLevel(policyForProject, procedure.Level, requirement.Level)) continue;
@@ -1868,6 +1947,123 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
     /// <summary>The one true correspondence between a procedure's level and a requirement's.</summary>
     private static bool SameLevel(ILadderPolicy policy, TestProcedureLevel procedure, RequirementLevel requirement) =>
         policy.RequirementLevelFor(procedure) == requirement;
+
+    private sealed record ProcedureScope(Guid RevisionId, Guid? EffectiveBaselineId, Guid ProjectId,
+        TestProcedureLevel Level, VerificationArtifactKind ArtifactKind, string BaseNumber);
+
+    private sealed record RequirementScope(Guid RevisionId, Guid ProjectId, RequirementLevel Level, string BaseNumber);
+
+    /// <summary>Enforces the Procedure-side exact-parent-or-derived seam before a revision is persisted.</summary>
+    private async Task ValidateProcedureParentsAsync(CancellationToken ct)
+    {
+        var revisionIds = ChangeTracker.Entries<TestProcedureRevision>()
+            .Where(x => x.State != EntityState.Unchanged)
+            .Select(x => x.Entity.Id)
+            .Concat(ChangeTracker.Entries<TestCaseProcedureLink>()
+                .Where(x => x.State != EntityState.Unchanged)
+                .Select(x => x.Entity.ProcedureRevisionId))
+            .Distinct().ToList();
+        if (revisionIds.Count == 0) return;
+        var revisions = await TestProcedureRevisions.AsNoTracking()
+            .Where(x => revisionIds.Contains(x.Id)).ToDictionaryAsync(x => x.Id, ct);
+        foreach (var tracked in ChangeTracker.Entries<TestProcedureRevision>()
+                     .Where(x => x.State != EntityState.Deleted && revisionIds.Contains(x.Entity.Id)))
+            revisions[tracked.Entity.Id] = tracked.Entity;
+        var ownerIds = revisions.Values.Select(r => r.ProcedureId).Distinct().ToList();
+        var owners = await TestProcedures.AsNoTracking()
+            .Where(x => ownerIds.Contains(x.Id)).ToDictionaryAsync(x => x.Id, ct);
+        foreach (var tracked in ChangeTracker.Entries<TestProcedure>().Where(x => x.State != EntityState.Deleted
+                     && ownerIds.Contains(x.Entity.Id)))
+            owners[tracked.Entity.Id] = tracked.Entity;
+        foreach (var revision in revisions.Values)
+        {
+            if (!owners.TryGetValue(revision.ProcedureId, out var owner)) continue;
+            if (owner.ArtifactKind == VerificationArtifactKind.Procedure && owner.Level != TestProcedureLevel.System
+                && revision.State != TestProcedureState.Retired
+                && (string.IsNullOrWhiteSpace(revision.EnvironmentSetup)
+                    || string.IsNullOrWhiteSpace(revision.TestData)
+                    || string.IsNullOrWhiteSpace(revision.OrderedSteps)
+                    || string.IsNullOrWhiteSpace(revision.ExpectedObservations)
+                    || string.IsNullOrWhiteSpace(revision.Cleanup)
+                    || string.IsNullOrWhiteSpace(revision.ToolingAutomation)))
+                throw new DomainException("A software Procedure revision requires environment/setup, test data, ordered steps, expected observations, cleanup, and tooling/automation.");
+            revision.ValidateProcedureParents(owner, await FinalParentIdsAsync(revision.Id, ct));
+        }
+    }
+
+    private async Task<IReadOnlyCollection<Guid>> FinalParentIdsAsync(Guid procedureRevisionId, CancellationToken ct)
+    {
+        var ids = (await TestCaseProcedureLinks.AsNoTracking()
+            .Where(x => x.ProcedureRevisionId == procedureRevisionId)
+            .Select(x => x.CaseRevisionId).ToListAsync(ct)).ToHashSet();
+        foreach (var entry in ChangeTracker.Entries<TestCaseProcedureLink>()
+                     .Where(x => x.Entity.ProcedureRevisionId == procedureRevisionId))
+        {
+            if (entry.State == EntityState.Deleted) ids.Remove(entry.Entity.CaseRevisionId);
+            else if (entry.State == EntityState.Added) ids.Add(entry.Entity.CaseRevisionId);
+        }
+        return ids;
+    }
+
+    /// <summary>
+    /// Exact parent links are many-to-many but never free-form: both revisions must be software artifacts in
+    /// the same project/discipline, and when provenance is available they must name the same exact baseline.
+    /// </summary>
+    private async Task ValidateCaseProcedureLinksAsync(CancellationToken ct)
+    {
+        var procedureRevisionIds = ChangeTracker.Entries<TestCaseProcedureLink>()
+            .Where(x => x.State != EntityState.Unchanged)
+            .Select(x => x.Entity.ProcedureRevisionId).Distinct().ToList();
+        if (procedureRevisionIds.Count == 0) return;
+        var parentIdsByProcedure = new Dictionary<Guid, IReadOnlyCollection<Guid>>();
+        foreach (var id in procedureRevisionIds) parentIdsByProcedure[id] = await FinalParentIdsAsync(id, ct);
+        var ids = procedureRevisionIds.Concat(parentIdsByProcedure.Values.SelectMany(x => x)).Distinct().ToList();
+        var rows = await (from revision in TestProcedureRevisions.AsNoTracking()
+                          join procedure in TestProcedures.AsNoTracking() on revision.ProcedureId equals procedure.Id
+                          where ids.Contains(revision.Id)
+                          select new ProcedureScope(revision.Id, revision.EffectiveBaselineId, procedure.ProjectId,
+                              procedure.Level, procedure.ArtifactKind, procedure.BaseNumber))
+            .ToDictionaryAsync(x => x.RevisionId, ct);
+        foreach (var revision in ChangeTracker.Entries<TestProcedureRevision>().Where(x => x.State != EntityState.Deleted
+                     && ids.Contains(x.Entity.Id)))
+        {
+            var owner = ChangeTracker.Entries<TestProcedure>().FirstOrDefault(x => x.Entity.Id == revision.Entity.ProcedureId)?.Entity
+                ?? await TestProcedures.AsNoTracking().SingleOrDefaultAsync(x => x.Id == revision.Entity.ProcedureId, ct);
+            if (owner is not null)
+                rows[revision.Entity.Id] = new ProcedureScope(revision.Entity.Id, revision.Entity.EffectiveBaselineId,
+                    owner.ProjectId, owner.Level, owner.ArtifactKind, owner.BaseNumber);
+        }
+        foreach (var procedureRevisionId in procedureRevisionIds)
+        {
+            if (!rows.TryGetValue(procedureRevisionId, out var procedure))
+                throw new DomainException("An exact Case-to-Procedure link must name persisted revisions.");
+            foreach (var caseRevisionId in parentIdsByProcedure[procedureRevisionId])
+            {
+                if (!rows.TryGetValue(caseRevisionId, out var @case))
+                    throw new DomainException("An exact Case-to-Procedure link must name persisted revisions.");
+                if (@case.ArtifactKind != VerificationArtifactKind.Case || @case.Level == TestProcedureLevel.System)
+                    throw new DomainException("A Procedure parent must be a software Case revision, never a System Procedure or Requirement.");
+                if (procedure.ArtifactKind != VerificationArtifactKind.Procedure || procedure.Level == TestProcedureLevel.System)
+                throw new DomainException("An exact parent link must target a dormant software Procedure revision.");
+                if (@case.ProjectId != procedure.ProjectId || @case.Level != procedure.Level)
+                    throw new DomainException("Case and Procedure parent revisions must belong to the same project and software level.");
+                if (@case.EffectiveBaselineId is not null && procedure.EffectiveBaselineId is not null
+                    && @case.EffectiveBaselineId != procedure.EffectiveBaselineId)
+                    throw new DomainException("Case and Procedure parent revisions must come from the same exact baseline.");
+            }
+            var parentBaselines = parentIdsByProcedure[procedureRevisionId]
+                .Where(rows.ContainsKey)
+                .Select(id => rows[id].EffectiveBaselineId)
+                .ToList();
+            var knownBaselines = parentBaselines.Where(x => x is not null).Select(x => x!.Value).Distinct().ToList();
+            var knownParentBaselineCount = parentBaselines.Count(x => x is not null);
+            if (knownBaselines.Count > 1 || (knownBaselines.Count > 0 && knownParentBaselineCount != parentBaselines.Count))
+                throw new DomainException("Case parent revisions must share one exact baseline; mixed or unknown build provenance is not allowed.");
+            if (procedure.EffectiveBaselineId is Guid procedureBaseline
+                && (knownBaselines.Count != 1 || knownBaselines[0] != procedureBaseline))
+                throw new DomainException("The Procedure revision and all exact Case parents must share one exact baseline.");
+        }
+    }
 
     /// <summary>
     /// Queues an outbound delivery for every notification being written, in the same unit of work.

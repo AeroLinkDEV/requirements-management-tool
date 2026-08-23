@@ -203,7 +203,7 @@ public sealed class SoftwareVerificationCaseMigrationAuthority(
                                   where member.BaselineId == baseline.Id
                                   join revision in db.TestProcedureRevisions.AsNoTracking()
                                       on member.RevisionId equals revision.Id
-                                  join procedure in db.TestProcedures.AsNoTracking()
+                                  join procedure in db.TestProcedures.AsNoTracking().Where(x => x.Level == TestProcedureLevel.System || x.ArtifactKind == VerificationArtifactKind.Case)
                                       on member.ProcedureId equals procedure.Id
                                   select new TestProcedureManifestEntry(procedure.Id, revision.Id,
                                       procedure.BaseNumber, revision.Revision)).ToListAsync(ct);

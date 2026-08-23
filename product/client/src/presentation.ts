@@ -229,9 +229,10 @@ export const verificationArtifactWord = (level?: string) =>
   `test ${verificationArtifactNoun(level).toLowerCase()}`
 
 /** The current API collection for the artifact profile. System remains on its Procedure route; software is Case. */
-export const verificationArtifactApiRoot = (scope?: string) => {
+export const verificationArtifactApiRoot = (scope?: string, artifactKind?: string) => {
   const normalized = (scope ?? '').replace(/[-_\s]/g, '').toLowerCase()
-  return normalized === 'system' || normalized === 'systemtest'
+  const kind = (artifactKind ?? '').replace(/[-_\s]/g, '').toLowerCase()
+  return normalized === 'system' || normalized === 'systemtest' || kind === 'procedure'
     ? '/api/test-procedures'
     : '/api/test-cases'
 }

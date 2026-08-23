@@ -2,8 +2,8 @@
   "schemaVersion": "aerolink-api-host-classification/v3",
   "totals": {
     "classes": 94,
-    "tests": 535,
-    "knownCases": 589,
+    "tests": 537,
+    "knownCases": 591,
     "unknownCaseTests": 0
   },
   "summary": {
@@ -15,8 +15,8 @@
     },
     "fresh-host": {
       "classes": 42,
-      "tests": 230,
-      "knownCases": 259,
+      "tests": 231,
+      "knownCases": 260,
       "unknownCaseTests": 0
     },
     "migration-candidate": {
@@ -27,8 +27,8 @@
     },
     "reusable-host": {
       "classes": 31,
-      "tests": 195,
-      "knownCases": 220,
+      "tests": 196,
+      "knownCases": 221,
       "unknownCaseTests": 0
     }
   },
@@ -574,6 +574,18 @@
       ]
     },
     {
+      "cls": "ProcedureDiscussionApiTests",
+      "tests": 3,
+      "knownCases": 3,
+      "unknownCaseTests": 0,
+      "classification": "fresh-host",
+      "reason": "Customizes host state (showcase-template-copy); sharing could change the subject or leak configuration.",
+      "intents": [
+        "ef-translation",
+        "http-boundary"
+      ]
+    },
+    {
       "cls": "ServerAuthorityContractTests",
       "tests": 3,
       "knownCases": 3,
@@ -596,18 +608,6 @@
       "intents": [
         "auth-policy",
         "startup-config"
-      ]
-    },
-    {
-      "cls": "ProcedureDiscussionApiTests",
-      "tests": 2,
-      "knownCases": 2,
-      "unknownCaseTests": 0,
-      "classification": "fresh-host",
-      "reason": "Customizes host state (showcase-template-copy); sharing could change the subject or leak configuration.",
-      "intents": [
-        "ef-translation",
-        "http-boundary"
       ]
     },
     {
@@ -802,8 +802,8 @@
     },
     {
       "cls": "TestProcedureAuthoringApiTests",
-      "tests": 13,
-      "knownCases": 13,
+      "tests": 14,
+      "knownCases": 14,
       "unknownCaseTests": 0,
       "classification": "reusable-host",
       "reason": "Static reuse candidate, not an implementation-ready safety finding: shared-host conversion requires fresh per-test clients, unique per-test tagged logical data, and assertions scoped to that data.",

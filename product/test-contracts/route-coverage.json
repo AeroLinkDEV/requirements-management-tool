@@ -1013,7 +1013,9 @@
       "method": "POST",
       "path": "/api/enterprise-requirements/comments/{id:guid}/resolve",
       "file": "RequirementsEndpoints.cs",
-      "coveredBy": []
+      "coveredBy": [
+        "ProcedureDiscussionApiTests"
+      ]
     },
     {
       "method": "POST",
@@ -2058,6 +2060,31 @@
       "file": "VerificationEndpoints.cs",
       "coveredBy": [
         "ProcedureDiscussionApiTests"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/test-procedures/{id:guid}/retire",
+      "file": "VerificationEndpoints.cs",
+      "coveredBy": [
+        "TestProcedureAuthoringApiTests"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/test-procedures/{id:guid}/revisions",
+      "file": "VerificationEndpoints.cs",
+      "coveredBy": [
+        "TestProcedureAuthoringApiTests"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/test-procedures/drafts",
+      "file": "VerificationEndpoints.cs",
+      "coveredBy": [
+        "ProcedureDiscussionApiTests",
+        "TestProcedureAuthoringApiTests"
       ]
     },
     {

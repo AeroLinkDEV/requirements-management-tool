@@ -20,6 +20,7 @@ import type { ProjectLadderProjection } from './projectLadder'
 
 type Procedure = {
   id: string
+  version?: number
   revisionId: string
   displayNumber: string
   title: string
@@ -33,6 +34,17 @@ type Procedure = {
   preconditions?: string
   steps?: string
   expectedResult?: string
+  environmentSetup?: string
+  testData?: string
+  orderedSteps?: string
+  expectedObservations?: string
+  cleanup?: string
+  toolingAutomation?: string
+  parentKind?: string
+  derivedRationale?: string
+  retirementRationale?: string
+  caseRevisionIds?: string[]
+  parentCount?: number
   level: 'System' | 'HighLevel' | 'LowLevel'
   /// The most recent run's outcome, already projected by the listing endpoint.
   lastOutcome?: string
@@ -43,6 +55,10 @@ type Revision = {
   titleIsExact?: boolean; titleIsLegacy?: boolean; titleNote?: string
   state: string; authorId: string; createdAt: string
   objective: string; preconditions: string; steps: string; expectedResult: string
+  environmentSetup?: string; testData?: string; orderedSteps?: string
+  expectedObservations?: string; cleanup?: string; toolingAutomation?: string
+  parentKind?: string; derivedRationale?: string; caseRevisionIds?: string[]
+  retirementRationale?: string
   sourceTestChangeRequestId?: string; package?: string; provenanceNote?: string
   drivenBy: { changeRequest: string; package: string; subjectDisplayNumber: string; action: string; isLegacy?: boolean }[]
   covers: string[]
@@ -153,17 +169,22 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
   initialLevel?: 'HighLevel' | 'LowLevel'
   ladder: ProjectLadderProjection | null
 }) {
-  const currentArtifactWord = verificationArtifactWord(discipline === 'System' ? 'System' : 'HighLevel')
+  const opening = useRef(typeof location !== 'undefined' ? new URLSearchParams(location.search) : new URLSearchParams()).current
+  // The same explorer can inspect the dormant software-Procedure register through an explicit deep-link
+  // query. It deliberately has no release/effectivity context: a dormant Procedure is not a build artifact.
+  const dormantProcedureMode = discipline === 'Software'
+    && opening.get('artifactKind')?.toLowerCase() === 'procedure'
+  const currentArtifactWord = dormantProcedureMode ? 'test procedure' : verificationArtifactWord(discipline === 'System' ? 'System' : 'HighLevel')
   // The explorer has two copy contracts: its compact filters/counts retain the historic short noun,
   // while document and table landmarks name the full controlled artifact. Keeping both explicit avoids
   // changing System's established "Procedure state" copy when software moves from Procedure to Case.
-  const currentArtifactShortWord = verificationArtifactNoun(discipline === 'System' ? 'System' : 'HighLevel').toLowerCase()
+  const currentArtifactShortWord = verificationArtifactNoun(discipline === 'System' || dormantProcedureMode ? 'System' : 'HighLevel').toLowerCase()
   const currentArtifactShortPlural = `${currentArtifactShortWord}s`
   const currentArtifactPlural = `${currentArtifactWord}s`
-  const currentArtifactNoun = (level?: string) => verificationArtifactNoun(level === 'System' ? 'System' : 'HighLevel')
-  const artifactApiRoot = verificationArtifactApiRoot(discipline)
+  const currentArtifactNoun = (level?: string) => dormantProcedureMode ? 'Procedure' : verificationArtifactNoun(level === 'System' ? 'System' : 'HighLevel')
+  const artifactApiRoot = verificationArtifactApiRoot(discipline, dormantProcedureMode ? 'Procedure' : undefined)
   const queryKey = useCallback((suffix = '') =>
-    `${discipline === 'System' ? 'procedure' : 'case'}${suffix}`, [discipline])
+    `${discipline === 'System' || dormantProcedureMode ? 'procedure' : 'case'}${suffix}`, [discipline, dormantProcedureMode])
   const queryValue = useCallback((params: URLSearchParams, suffix = '') =>
     params.get(queryKey(suffix)) ?? (discipline === 'System' ? null : params.get(`procedure${suffix}`)),
   [discipline, queryKey])
@@ -172,7 +193,6 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
   // everything. The number narrows the list to it; the identifier selects it once the list arrives. These are
   // the parameter names the coverage page used before its library moved here, so links already in circulation
   // — and the requirement trace's "Open test procedure" — keep working.
-  const opening = useRef(typeof location !== 'undefined' ? new URLSearchParams(location.search) : new URLSearchParams()).current
   const [level, setLevel] = useState<ProcedureLevel>(() =>
     validLevel(queryValue(opening, 'Level') ?? initialLevel ?? null, discipline, ladder))
   const [query, setQuery] = useState(queryValue(opening) ?? '')
@@ -222,7 +242,7 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
     setError('')
     try {
       const response = await fetch(
-        `${api}${artifactApiRoot}?projectId=${projectId}&releaseId=${releaseId}&scope=${scope}` +
+        `${api}${artifactApiRoot}?projectId=${projectId}${dormantProcedureMode ? '&artifactKind=Procedure' : `&releaseId=${releaseId}`}&scope=${scope}` +
         `&search=${encodeURIComponent(query)}&state=${procedureState}&outcome=${procedureOutcome}` +
         (documentId ? `&documentId=${documentId}` : '') +
         (sectionId ? `&sectionId=${sectionId}` : '') +
@@ -235,7 +255,7 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
       if (mine !== listTicket.current) return
       setError(operationError(problem, `The ${currentArtifactWord} library could not be loaded.`))
     }
-  }, [api, artifactApiRoot, projectId, releaseId, scope, query, procedureState, procedureOutcome, page, pageSize, documentId, sectionId, currentArtifactWord])
+  }, [api, artifactApiRoot, dormantProcedureMode, projectId, releaseId, scope, query, procedureState, procedureOutcome, page, pageSize, documentId, sectionId, currentArtifactWord])
 
   // The documents this discipline's procedures are written into. Read once per project and scope: the rail
   // is structure, not a result set, and re-reading it on every keystroke would make it flicker.
@@ -401,12 +421,12 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
     void (async () => {
       try {
         const response = await fetch(
-          `${api}${artifactApiRoot}/${selected.id}/history?releaseId=${releaseId}&revisionId=${selected.revisionId}`)
+          `${api}${artifactApiRoot}/${selected.id}/history?${dormantProcedureMode ? '' : `releaseId=${releaseId}&`}revisionId=${selected.revisionId}`)
         if (response.ok && active) setHistory(await response.json())
       } catch { if (active) setHistory(undefined) }
     })()
     return () => { active = false }
-  }, [api, artifactApiRoot, releaseId, selected, tab])
+  }, [api, artifactApiRoot, dormantProcedureMode, releaseId, selected, tab])
 
   // Loaded when the tab is opened rather than with the list, like history: a reader browsing procedures does
   // not need every trace fetched on their behalf. The server projection is authoritative, naming the exact
@@ -418,13 +438,13 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
     void (async () => {
       try {
         const response = await fetch(
-          `${api}${artifactApiRoot}/${selected.id}/trace?releaseId=${releaseId}&revisionId=${selected.revisionId}`)
+          `${api}${artifactApiRoot}/${selected.id}/trace?${dormantProcedureMode ? '' : `releaseId=${releaseId}&`}revisionId=${selected.revisionId}`)
         if (response.ok && active) setTrace(await response.json())
         else if (active) setTraceError(true)
       } catch { if (active) setTraceError(true) }
     })()
     return () => { active = false }
-  }, [api, artifactApiRoot, releaseId, selected, tab])
+  }, [api, artifactApiRoot, dormantProcedureMode, releaseId, selected, tab])
 
   const loadComments = useCallback(async (procedureId: string) => {
     try {
@@ -480,10 +500,10 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
     setCoverage(undefined)
     setCoverageRead(false)
     setShowAllCoverage(false)
-  }, [api, projectId, releaseId, scope])
+  }, [api, projectId, releaseId, scope, dormantProcedureMode])
 
   useEffect(() => {
-    if (!showAdvanced || coverageRead) return
+    if (dormantProcedureMode || !showAdvanced || coverageRead) return
     let active = true
     void (async () => {
       const { coverage: next, failed } = await loadCoverage(api, projectId, releaseId, scope)
@@ -493,7 +513,7 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
       if (failed) setError('The requirement coverage for this build could not be read.')
     })()
     return () => { active = false }
-  }, [api, projectId, releaseId, scope, showAdvanced, coverageRead])
+  }, [api, projectId, releaseId, scope, showAdvanced, coverageRead, dormantProcedureMode])
 
   const uncovered = coverage?.items.filter(item => item.disposition === 'Uncovered') ?? []
   const suspect = coverage?.items.filter(item => item.disposition === 'Suspect') ?? []
@@ -534,20 +554,20 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
     <ControlledArtifactExplorerHeader
       back={onBack ? { label: 'Command Center', onClick: onBack } : undefined}
       eyebrow={`CONTROLLED ${currentArtifactPlural.toUpperCase()} / READ-ONLY EXPLORER`}
-      title={discipline === 'System' ? 'System Test Procedure Explorer' : 'Software Test Case Explorer'}
+      title={dormantProcedureMode ? 'Software Procedure Explorer' : discipline === 'System' ? 'System Test Procedure Explorer' : 'Software Test Case Explorer'}
     />
     {error && <div className="workspaceError" role="alert">{error}</div>}
 
     {/* The document these procedures are written into, offered where they are read — the same place, shape
         and rule the requirements Explorer uses. Which one you get follows the build: approved for a released
         one, a stamped draft for an in-work one. */}
-    <DocumentActions
+    {!dormantProcedureMode && <DocumentActions
       api={api}
       projectId={projectId}
       release={{ id: releaseId, version: releaseVersion, isReleased: released }}
       targets={procedureTargetsFor(discipline, level)}
       heading={released ? `Approved documents for ${releaseVersion}` : `Draft documents for ${releaseVersion}`}
-    />
+    />}
 
     <>
     {/* Browsing, not just searching. The software side of the demonstration Program carries 440 procedures,
@@ -593,10 +613,10 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
         <option value="Fail">Fail</option>
         <option value="Blocked">Blocked</option>
       </select>
-      <button type="button" className={showAdvanced ? 'advanced active' : 'advanced'}
+      {!dormantProcedureMode && <button type="button" className={showAdvanced ? 'advanced active' : 'advanced'}
         aria-expanded={showAdvanced} onClick={() => setShowAdvanced(current => !current)}>
         Advanced
-      </button>
+      </button>}
       <button type="button" className="clear"
         disabled={level === discipline && !query && !procedureState && !procedureOutcome && !documentId && !sectionId && !viewId}
         onClick={() => {
@@ -618,7 +638,7 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
       </label>
     </section>
 
-    {showAdvanced && <div className="explorerCoverage" aria-label={`Advanced ${currentArtifactShortWord} coverage`}>
+    {!dormantProcedureMode && showAdvanced && <div className="explorerCoverage" aria-label={`Advanced ${currentArtifactShortWord} coverage`}>
       <section className="coverageSummary" aria-label="Coverage summary">
         <article><b>{coverage?.total ?? 0}</b><span>Requirements</span></article>
         <article><b>{coverage?.covered ?? 0}</b><span>With a {currentArtifactShortWord}</span></article>
@@ -678,7 +698,7 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
           puts its specifications. Procedures had no container until they were given one; this is the rail
           that was impossible before. */}
       <div className="specRail">
-      <nav className="procedureDocumentRail" aria-label={`${currentArtifactWord} documents`}>
+      {!dormantProcedureMode && <nav className="procedureDocumentRail" aria-label={`${currentArtifactWord} documents`}>
         <div className="railTitle"><b>Documents</b><span>{documents.length}</span></div>
         <button type="button" className={!documentId && !sectionId ? 'railEntry selected' : 'railEntry'}
           aria-pressed={!documentId && !sectionId}
@@ -707,7 +727,7 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
         {documents.length === 0 && (
           <p className="railEmpty">No {currentArtifactShortWord} document for this discipline yet.</p>
         )}
-      </nav>
+      </nav>}
 
       {/* Saved views, in the place and shape the requirements Explorer keeps them. Owners can tidy their
           own; non-owners see a shared view and no controls, which is the same authority the server enforces
@@ -795,7 +815,7 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
               <div className="reqTableHead" role="row">
                 <span role="columnheader">Identifier &amp; title</span>
                 <span role="columnheader">Level</span>
-                <span role="columnheader">Verifies</span>
+                <span role="columnheader">{dormantProcedureMode ? 'Exact Case parents' : 'Verifies'}</span>
                 <span role="columnheader">Latest result</span>
                 <span role="columnheader">State</span>
                 <span role="columnheader">Discussion</span>
@@ -816,7 +836,7 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
                         <p>{procedure.title}</p>
                       </button>
                     <span>{procedureLevelLabel(procedure.level)}</span>
-                    <span>{procedure.requirementCount}</span>
+                    <span>{dormantProcedureMode ? (procedure.parentCount ?? 0) : procedure.requirementCount}</span>
                     <span>{procedure.lastOutcome ?? 'Not run'}</span>
                     <i className={procedure.state.toLowerCase()}>{stateLabel(procedure.state)}</i>
                     <span>○ 0</span>
@@ -863,6 +883,16 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
                 <dt>Preconditions</dt><dd>{selected.preconditions || 'None'}</dd>
                 <dt>Steps</dt><dd>{selected.steps || 'Not recorded'}</dd>
                 <dt>Expected result</dt><dd>{selected.expectedResult || 'Not recorded'}</dd>
+                {dormantProcedureMode && <>
+                  <dt>Environment / setup</dt><dd>{selected.environmentSetup || 'Not recorded'}</dd>
+                  <dt>Test data</dt><dd>{selected.testData || 'Not recorded'}</dd>
+                  <dt>Ordered executable steps</dt><dd>{selected.orderedSteps || 'Not recorded'}</dd>
+                  <dt>Expected observations</dt><dd>{selected.expectedObservations || 'Not recorded'}</dd>
+                  <dt>Cleanup</dt><dd>{selected.cleanup || 'Not recorded'}</dd>
+                  <dt>Tooling / automation</dt><dd>{selected.toolingAutomation || 'Not recorded'}</dd>
+                  <dt>Parent classification</dt><dd>{selected.parentKind || 'Not recorded'}</dd>
+                  {selected.derivedRationale && <><dt>Derived rationale</dt><dd>{selected.derivedRationale}</dd></>}
+                </>}
                 <dt>State</dt><dd>{selected.state}</dd>
                 <dt>Owner</dt><dd><PersonName userName={selected.ownerId} /></dd>
               </dl>
@@ -953,6 +983,11 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
                     {revision.provenanceNote && (
                       <span className="inspectorNote warn">{revision.provenanceNote}</span>
                     )}
+                    {dormantProcedureMode && <span className="revisionDriver">
+                      {revision.parentKind ?? 'Unspecified'} · {revision.caseRevisionIds?.length ?? 0} exact Case parent{revision.caseRevisionIds?.length === 1 ? '' : 's'}
+                      {revision.derivedRationale ? ` · ${revision.derivedRationale}` : ''}
+                    </span>}
+                    {revision.retirementRationale && <span className="inspectorNote">Retirement: {revision.retirementRationale}</span>}
                   </li>))}</ul>
                 : <p className="inspectorNote">Loading history…</p>}
             </div>
@@ -960,7 +995,9 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
 
           {tab === 'discussion' && (
             <div className="inspectorBody discussionPane">
-              {!released ? <form onSubmit={addComment}>
+              {dormantProcedureMode ? <div className="traceEmpty">
+                <span>Discussion is read-only for dormant software Procedures.</span>
+              </div> : !released ? <form onSubmit={addComment}>
                 <textarea name="body" required
                   placeholder="Add an attributable comment. Use @username to mention someone." />
                 <div className="commentFoot"><button>Add comment</button></div>
@@ -977,7 +1014,7 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
                   {comment.disposition && <small>Disposition: {comment.disposition}</small>}
                   <footer>
                     <i>{stateLabel(comment.state)}</i>
-                    {comment.state === 'Open' && !released && (
+                    {comment.state === 'Open' && !released && !dormantProcedureMode && (
                       <button onClick={() => void resolveComment(comment.id)}>Resolve / disposition</button>
                     )}
                   </footer>

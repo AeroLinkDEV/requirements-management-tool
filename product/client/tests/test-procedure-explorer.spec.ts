@@ -133,6 +133,83 @@ test('the Software Explorer opens on HLR and can move to the configured LLR leve
   await expect(page.getByRole('tablist', { name: 'Test case views' })).toHaveCount(0)
 })
 
+test('the shared Explorer deep-link can inspect dormant software Procedures without build surfaces', async ({ page }) => {
+  test.setTimeout(180_000)
+  await login(page, 'admin', { openProject: false })
+  await selectProgram(page, 'Flight Management System Live Program')
+  await openNavigationGroup(page, 'ASSURANCE')
+  await page.getByRole('button', { name: 'Software' }).last().click()
+  await page.getByRole('link', { name: 'Software Test Case Explorer' }).click()
+  await expect(page).toHaveURL(/software-verification\/cases/, { timeout: 30_000 })
+
+  await page.route('**/api/test-procedures?*', async route => {
+    const requestUrl = new URL(route.request().url())
+    if (requestUrl.searchParams.get('artifactKind') !== 'Procedure') return route.continue()
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({
+        page: 1, pageSize: 25, totalCount: 1, totalPages: 1, views: [],
+        items: [{
+          id: 'dormant-procedure', revisionId: 'dormant-revision', displayNumber: 'HLRTP-000001.00',
+          title: 'Dormant procedural verification', state: 'Draft', requirementCount: 0, parentCount: 2,
+          ownerId: 'test.engineer', level: 'HighLevel', artifactKind: 'Procedure',
+          objective: 'Demonstrate the procedure', preconditions: 'Environment is available',
+          steps: 'Follow the ordered procedure', expectedResult: 'Expected observation recorded',
+          environmentSetup: 'Bench setup', testData: 'Known data', orderedSteps: '1. Execute',
+          expectedObservations: 'Expected result', cleanup: 'Restore bench', toolingAutomation: 'Runner',
+          parentKind: 'Allocated', lastOutcome: undefined,
+        }],
+      }),
+    })
+  })
+  await page.route('**/api/test-procedures/dormant-procedure/history*', async route => {
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({
+        artifactId: 'dormant-procedure', artifactKind: 'Procedure', id: 'dormant-procedure',
+        baseNumber: 'HLRTP-000001', title: 'Dormant procedural verification', level: 'HighLevel',
+        ownerId: 'test.engineer', createdAt: '2026-08-23T00:00:00Z', selectedRevisionId: 'dormant-revision',
+        revisions: [{
+          id: 'dormant-revision', displayNumber: 'HLRTP-000001.00', revision: 0,
+          title: 'Dormant procedural verification', state: 'Draft', authorId: 'test.engineer',
+          createdAt: '2026-08-23T00:00:00Z', objective: 'Demonstrate the procedure', preconditions: '',
+          steps: '', expectedResult: '', environmentSetup: 'Bench setup', testData: 'Known data',
+          orderedSteps: '1. Execute', expectedObservations: 'Expected result', cleanup: 'Restore bench',
+          toolingAutomation: 'Runner', parentKind: 'Allocated', caseRevisionIds: ['case-a', 'case-b'],
+          drivenBy: [], covers: [],
+        }],
+      }),
+    })
+  })
+  await page.route('**/api/test-procedures/dormant-procedure/comments', async route => {
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify([{
+        id: 'dormant-comment', revisionId: 'dormant-revision', body: 'Existing read-only discussion',
+        state: 'Open', createdBy: 'test.engineer', createdAt: '2026-08-23T00:00:00Z'
+      }]),
+    })
+  })
+  const dormantUrl = new URL(page.url().replace('/cases', '/procedures'))
+  dormantUrl.searchParams.set('artifactKind', 'Procedure')
+  await page.goto(dormantUrl.toString())
+  await expect(page.getByRole('heading', { name: 'Software Procedure Explorer' })).toBeVisible({ timeout: 30_000 })
+  await expect(page).toHaveURL(/software-verification\/procedures.*artifactKind=Procedure/)
+  await expect(page.getByRole('button', { name: 'Advanced' })).toHaveCount(0)
+  await expect(page.getByRole('navigation', { name: 'test procedure documents' })).toHaveCount(0)
+  await expect(page.locator('.procedureList')).toContainText('Exact Case parents')
+  await expect(page.locator('.procedureRow')).toContainText('HLRTP-000001.00')
+  await page.locator('.procedureRow').click()
+  await expect(page.getByText('Environment / setup')).toBeVisible()
+  await page.getByRole('button', { name: 'History' }).click()
+  await expect(page.getByText('Allocated · 2 exact Case parents')).toBeVisible()
+  await page.getByRole('button', { name: /^Discussion/ }).click()
+  await expect(page.locator('.discussionPane')).toContainText('read-only for dormant software Procedures')
+  await expect(page.locator('.discussionPane textarea')).toHaveCount(0)
+  await expect(page.getByRole('button', { name: 'Add comment' })).toHaveCount(0)
+  await expect(page.getByRole('button', { name: 'Resolve / disposition' })).toHaveCount(0)
+})
+
 /**
  * Nothing here writes a procedure either.
  *

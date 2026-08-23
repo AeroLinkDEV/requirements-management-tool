@@ -482,6 +482,7 @@ public static class VerificationImpactEndpoints
                              .Where(x => targetRevisionIds.Contains(x.Id))
                          join procedure in db.TestProcedures.AsNoTracking()
                              .Where(x => x.ProjectId == review.ProjectId && x.Level == review.ProcedureLevel(ladderPolicy)
+                                 && (x.Level == TestProcedureLevel.System || x.ArtifactKind == VerificationArtifactKind.Case)
                                  && referencedBaseNumbers.Contains(x.BaseNumber))
                              on revision.ProcedureId equals procedure.Id
                          orderby procedure.BaseNumber
@@ -599,7 +600,8 @@ public static class VerificationImpactEndpoints
             var eligibility = from revision in db.TestProcedureRevisions.AsNoTracking()
                                   .Where(x => targetRevisionIds.Contains(x.Id))
                               join procedure in db.TestProcedures.AsNoTracking()
-                                  .Where(x => x.ProjectId == review.ProjectId && x.Level == review.ProcedureLevel(ladderPolicy))
+                                  .Where(x => x.ProjectId == review.ProjectId && x.Level == review.ProcedureLevel(ladderPolicy)
+                                      && (x.Level == TestProcedureLevel.System || x.ArtifactKind == VerificationArtifactKind.Case))
                                   on revision.ProcedureId equals procedure.Id
                               select new
                               {
@@ -800,7 +802,8 @@ public static class VerificationImpactEndpoints
                 if (request.Kind != TestProcedureChangeKind.Introduce)
                 {
                     var target = await db.TestProcedures.AsNoTracking()
-                        .Where(x => x.BaseNumber == baseNumber)
+                        .Where(x => x.BaseNumber == baseNumber
+                            && (x.Level == TestProcedureLevel.System || x.ArtifactKind == VerificationArtifactKind.Case))
                         .Select(x => new { x.Id, x.ProjectId, x.Level }).SingleOrDefaultAsync(ct);
                     if (target is null)
                         return Results.BadRequest(new { error = $"{baseNumber} is not a controlled {artifactWord}." });
@@ -1870,6 +1873,7 @@ public static class VerificationImpactEndpoints
                     join procedureRevision in db.TestProcedureRevisions.AsNoTracking()
                         on coverage.ProcedureRevisionId equals procedureRevision.Id
                     join procedure in db.TestProcedures.AsNoTracking()
+                        .Where(x => x.Level == TestProcedureLevel.System || x.ArtifactKind == VerificationArtifactKind.Case)
                         on procedureRevision.ProcedureId equals procedure.Id
                     where procedure.ProjectId == release.ProjectId && procedure.Level == level
                     // The title is the procedure's, not the revision's — a revision carries objective, steps
@@ -2158,7 +2162,9 @@ public static class VerificationImpactEndpoints
     {
         var rows = await (
             from revision in db.TestProcedureRevisions.AsNoTracking()
-            join procedure in db.TestProcedures.AsNoTracking() on revision.ProcedureId equals procedure.Id
+            join procedure in db.TestProcedures.AsNoTracking()
+                .Where(x => x.Level == TestProcedureLevel.System || x.ArtifactKind == VerificationArtifactKind.Case)
+                on revision.ProcedureId equals procedure.Id
             where revisionIds.Contains(revision.Id) || procedureIds.Contains(procedure.Id)
             select new
             {

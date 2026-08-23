@@ -95,6 +95,7 @@ public static class DependencyInjection
         services.AddScoped<RequirementBaselineMaterializer>();
         services.AddScoped<ExactLinkLifecycleService>();
         services.AddScoped<TestProcedureBaselineMaterializer>();
+        services.AddScoped<VerificationProcedureAuthoringService>();
         services.AddScoped<LegacyProcedureManifestBootstrapper>();
         services.AddScoped<FmsShowcaseSeeder>();
         services.AddScoped<SecondShowcaseSeeder>();

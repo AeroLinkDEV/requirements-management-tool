@@ -32,9 +32,9 @@ public sealed class TestProcedureDocumentBootstrapTests
 
         var system = new TestProcedure(project.Id, "SYSTP-000001", "Verify oceanic sequencing", "test.engineer", now,
             TestProcedureLevel.System);
-        var high = new TestProcedure(project.Id, "HLRTP-000001", "Verify flight plan behaviour", "test.engineer", now,
+        var high = new TestProcedure(project.Id, "HLRTC-000001", "Verify flight plan behaviour", "test.engineer", now,
             TestProcedureLevel.HighLevel);
-        var low = new TestProcedure(project.Id, "LLRTP-000001", "Verify checksum recovery", "test.engineer", now,
+        var low = new TestProcedure(project.Id, "LLRTC-000001", "Verify checksum recovery", "test.engineer", now,
             TestProcedureLevel.LowLevel);
         db.AddRange(system, high, low);
         await db.SaveChangesAsync();

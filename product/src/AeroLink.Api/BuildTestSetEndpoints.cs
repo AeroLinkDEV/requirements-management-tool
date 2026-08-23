@@ -52,7 +52,7 @@ public static class BuildTestSetEndpoints
             // put the build behind a procedure that nobody has agreed says the right thing, and selecting one
             // from another Project would measure this release against work that has nothing to do with it.
             var reachable = await (from revision in db.TestProcedureRevisions.AsNoTracking()
-                                   join procedure in db.TestProcedures.AsNoTracking() on revision.ProcedureId equals procedure.Id
+                                   join procedure in db.TestProcedures.AsNoTracking().Where(x => x.Level == TestProcedureLevel.System || x.ArtifactKind == VerificationArtifactKind.Case) on revision.ProcedureId equals procedure.Id
                                    where revisionIds.Contains(revision.Id)
                                          && procedure.ProjectId == release.ProjectId
                                          && revision.State == TestProcedureState.Approved
@@ -128,7 +128,7 @@ public static class BuildTestSetEndpoints
         var procedures = revisionIds.Count == 0
             ? []
             : await (from revision in db.TestProcedureRevisions.AsNoTracking()
-                     join procedure in db.TestProcedures.AsNoTracking() on revision.ProcedureId equals procedure.Id
+                     join procedure in db.TestProcedures.AsNoTracking().Where(x => x.Level == TestProcedureLevel.System || x.ArtifactKind == VerificationArtifactKind.Case) on revision.ProcedureId equals procedure.Id
                      where revisionIds.Contains(revision.Id)
                      select new { revision.Id, procedure.BaseNumber, revision.Revision, procedure.Level })
                 .ToListAsync(ct);

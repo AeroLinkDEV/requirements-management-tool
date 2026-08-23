@@ -638,4 +638,94 @@ public sealed class TestProcedureAuthoringApiTests
         Assert.Equal(1, next.GetProperty("procedureChanges").GetInt32());
         Assert.Equal("ChangeRequired", next.GetProperty("outcome").GetString());
     }
+
+    [Fact]
+    public async Task Dormant_software_procedure_uses_shared_authoring_and_history_without_a_tcr()
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var client = factory.CreateClient();
+        var fixture = await SeedAsync(factory);
+        await LoginAsync(client, "procedure.engineer");
+        var body = new
+        {
+            projectId = fixture.ProjectId, level = "HighLevel", title = "Dormant HLR procedure",
+            environmentSetup = "Load the controlled software build.", testData = "A known HLR vector.",
+            orderedSteps = "1. Start the harness. 2. Apply the vector.",
+            expectedObservations = "The expected state is observed.", cleanup = "Remove the vector and stop the harness.",
+            toolingAutomation = "Harness command and result capture.", parentKind = "Derived",
+            derivedRationale = "Standalone procedure work is intentionally dormant until Procedure activation.",
+        };
+        using var create = await client.PostAsJsonAsync("/api/test-procedures/drafts", body);
+        var createText = await create.Content.ReadAsStringAsync();
+        Assert.True(create.StatusCode == HttpStatusCode.Created, createText);
+        var created = JsonSerializer.Deserialize<JsonElement>(createText);
+        var id = created.GetProperty("id").GetGuid();
+        Assert.Equal(1, created.GetProperty("version").GetInt64());
+
+        using var revise = await client.PostAsJsonAsync($"/api/test-procedures/{id}/revisions", new
+        {
+            environmentSetup = "Load the controlled software build.", testData = "A second known HLR vector.",
+            orderedSteps = "1. Start the harness. 2. Apply the second vector.",
+            expectedObservations = "The second expected state is observed.", cleanup = "Stop the harness.",
+            toolingAutomation = "Harness command and result capture.", parentKind = "Derived",
+            derivedRationale = "Still standalone while dormant.",
+            expectedVersion = created.GetProperty("version").GetInt64(),
+        });
+        Assert.Equal(HttpStatusCode.Created, revise.StatusCode);
+        var revised = JsonSerializer.Deserialize<JsonElement>(await revise.Content.ReadAsStringAsync());
+        Assert.Equal(2, revised.GetProperty("version").GetInt64());
+
+        using var missingRetireVersion = await client.PostAsJsonAsync($"/api/test-procedures/{id}/retire",
+            new { rationale = "Missing version must be refused." });
+        Assert.Equal(HttpStatusCode.BadRequest, missingRetireVersion.StatusCode);
+        var missingRetireBody = JsonSerializer.Deserialize<JsonElement>(await missingRetireVersion.Content.ReadAsStringAsync());
+        Assert.Equal("verification_procedure_expected_version_required", missingRetireBody.GetProperty("code").GetString());
+        using var list = await client.GetAsync(
+            $"/api/test-procedures?projectId={fixture.ProjectId}&scope=HighLevelSoftware&artifactKind=Procedure&page=1&pageSize=25");
+        Assert.Equal(HttpStatusCode.OK, list.StatusCode);
+        var listBody = JsonSerializer.Deserialize<JsonElement>(await list.Content.ReadAsStringAsync());
+        var listed = Assert.Single(listBody.GetProperty("items").EnumerateArray());
+        Assert.Equal("Procedure", listed.GetProperty("artifactKind").GetString());
+        Assert.Equal(2, listed.GetProperty("version").GetInt64());
+        Assert.Equal("Load the controlled software build.", listed.GetProperty("environmentSetup").GetString());
+        Assert.Equal("A second known HLR vector.", listed.GetProperty("testData").GetString());
+        Assert.Equal("1. Start the harness. 2. Apply the second vector.", listed.GetProperty("orderedSteps").GetString());
+        Assert.Equal("The second expected state is observed.", listed.GetProperty("expectedObservations").GetString());
+        Assert.Equal("Stop the harness.", listed.GetProperty("cleanup").GetString());
+        Assert.Equal("Harness command and result capture.", listed.GetProperty("toolingAutomation").GetString());
+        Assert.Equal("Derived", listed.GetProperty("parentKind").GetString());
+        Assert.Equal("Still standalone while dormant.", listed.GetProperty("derivedRationale").GetString());
+
+        using var staleRetire = await client.PostAsJsonAsync($"/api/test-procedures/{id}/retire",
+            new { rationale = "Stale retirement attempt.", expectedVersion = created.GetProperty("version").GetInt64() });
+        Assert.Equal(HttpStatusCode.Conflict, staleRetire.StatusCode);
+        var staleRetireBody = JsonSerializer.Deserialize<JsonElement>(await staleRetire.Content.ReadAsStringAsync());
+        Assert.Equal("verification_procedure_concurrency_conflict", staleRetireBody.GetProperty("code").GetString());
+
+        using var retire = await client.PostAsJsonAsync($"/api/test-procedures/{id}/retire",
+            new { rationale = "Superseded before Procedure activation.", expectedVersion = revised.GetProperty("version").GetInt64() });
+        Assert.Equal(HttpStatusCode.OK, retire.StatusCode);
+        var retired = JsonSerializer.Deserialize<JsonElement>(await retire.Content.ReadAsStringAsync());
+        Assert.Equal("Superseded before Procedure activation.", retired.GetProperty("retirementRationale").GetString());
+        Assert.Equal(3, retired.GetProperty("version").GetInt64());
+
+        using var reactivation = await client.PostAsJsonAsync($"/api/test-procedures/{id}/revisions", new
+        {
+            environmentSetup = "Load the controlled software build.", testData = "A reactivation attempt.",
+            orderedSteps = "1. Start the harness.", expectedObservations = "Observed.", cleanup = "Stop the harness.",
+            toolingAutomation = "Harness command and result capture.", parentKind = "Derived",
+            derivedRationale = "This must not reactivate a retired Procedure.",
+            expectedVersion = retired.GetProperty("version").GetInt64()
+        });
+        Assert.Equal(HttpStatusCode.BadRequest, reactivation.StatusCode);
+        Assert.Contains("retired", await reactivation.Content.ReadAsStringAsync(), StringComparison.OrdinalIgnoreCase);
+
+        using var history = await client.GetAsync($"/api/test-procedures/{id}/history");
+        Assert.Equal(HttpStatusCode.OK, history.StatusCode);
+        var historyText = await history.Content.ReadAsStringAsync();
+        Assert.Contains("HLRTP-", historyText);
+        Assert.Contains("environmentSetup", historyText);
+        Assert.Contains("retirementRationale", historyText);
+        Assert.Contains("Superseded before Procedure activation.", historyText);
+    }
 }

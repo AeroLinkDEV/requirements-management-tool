@@ -121,7 +121,8 @@ public sealed class DraftDocumentGenerator(AeroLinkDbContext db, RichContentPubl
         var latest = await (from revision in db.TestProcedureRevisions.AsNoTracking()
                                 .Where(x => revisionIds.Contains(x.Id))
                             join procedure in db.TestProcedures.AsNoTracking()
-                                .Where(x => x.ProjectId == project.Id && x.Level == level)
+                                .Where(x => x.ProjectId == project.Id && x.Level == level
+                                    && (x.Level == TestProcedureLevel.System || x.ArtifactKind == VerificationArtifactKind.Case))
                                 on revision.ProcedureId equals procedure.Id
                             orderby procedure.BaseNumber
                             select new { Procedure = procedure, Revision = revision }).ToListAsync(ct);

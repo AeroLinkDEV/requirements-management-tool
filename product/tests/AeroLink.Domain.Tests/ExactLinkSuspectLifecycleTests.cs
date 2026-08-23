@@ -41,6 +41,18 @@ public sealed class ExactLinkSuspectLifecycleTests
     }
 
     [Fact]
+    public void Case_procedure_kind_uses_the_shared_lifecycle_seam_without_raising_assessment_events()
+    {
+        var lifecycle = ExactLinkSuspectLifecycle.Raise(Guid.NewGuid(), ExactLinkKind.CaseProcedure, Guid.NewGuid(),
+            ExactLinkLifecycleCauseKind.InternalRequirementRevision, Guid.NewGuid(), null,
+            "engineer", "The exact Case parent revision changed.", Now);
+
+        Assert.Equal(ExactLinkKind.CaseProcedure, lifecycle.LinkKind);
+        Assert.Single(lifecycle.Events);
+        Assert.Equal(ExactLinkLifecycleEventType.Raised, lifecycle.Events.Single().EventType);
+    }
+
+    [Fact]
     public void Cause_and_link_kind_validation_fail_closed()
     {
         Assert.Throws<DomainException>(() => ExactLinkSuspectLifecycle.Raise(Guid.NewGuid(), (ExactLinkKind)99,

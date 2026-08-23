@@ -56,7 +56,7 @@ public sealed class ReleaseExecutionService(AeroLinkDbContext db, EvidenceFileSt
                 .Select(x => x.Verification!.ProcedureLevel).ToHashSet();
             var candidateProcedureIds = currentCoverage.Select(x => x.ProcedureRevisionId).Distinct().ToList();
             var allowedProcedureIds = await (from revision in db.TestProcedureRevisions.AsNoTracking()
-                                             join procedure in db.TestProcedures.AsNoTracking() on revision.ProcedureId equals procedure.Id
+                                             join procedure in db.TestProcedures.AsNoTracking().Where(x => x.Level == TestProcedureLevel.System || x.ArtifactKind == VerificationArtifactKind.Case) on revision.ProcedureId equals procedure.Id
                                              where candidateProcedureIds.Contains(revision.Id)
                                                  && procedure.ProjectId == campaign.ProjectId
                                                  && allowedProcedureLevels.Contains(procedure.Level)
@@ -208,9 +208,10 @@ public sealed class ReleaseExecutionService(AeroLinkDbContext db, EvidenceFileSt
         {
             var allowedProcedureRevisionIds = await (from revision in db.TestProcedureRevisions.AsNoTracking()
                                                      join procedure in db.TestProcedures.AsNoTracking() on revision.ProcedureId equals procedure.Id
-                                                     where procedureRevisionIds.Contains(revision.Id)
+                                                 where procedureRevisionIds.Contains(revision.Id)
                                                          && procedure.ProjectId == campaign.ProjectId
                                                          && configuredProcedureLevels.Contains(procedure.Level)
+                                                         && (procedure.Level == TestProcedureLevel.System || procedure.ArtifactKind == VerificationArtifactKind.Case)
                                                      select revision.Id).ToListAsync(ct);
             coverage = coverage.Where(x => allowedProcedureRevisionIds.Contains(x.ProcedureRevisionId)).ToList();
             procedureRevisionIds = allowedProcedureRevisionIds;
@@ -244,6 +245,7 @@ public sealed class ReleaseExecutionService(AeroLinkDbContext db, EvidenceFileSt
             var allowedTestSetProcedureIds = await (from revision in db.TestProcedureRevisions.AsNoTracking()
                                                     join procedure in db.TestProcedures.AsNoTracking() on revision.ProcedureId equals procedure.Id
                                                     where testSetProcedureIds.Contains(revision.Id) && configuredProcedureLevels.Contains(procedure.Level)
+                                                        && (procedure.Level == TestProcedureLevel.System || procedure.ArtifactKind == VerificationArtifactKind.Case)
                                                     select revision.Id).ToListAsync(ct);
             testSet = testSet.Where(x => allowedTestSetProcedureIds.Contains(x.ProcedureRevisionId)).ToList();
         }
@@ -327,7 +329,7 @@ public sealed class ReleaseExecutionService(AeroLinkDbContext db, EvidenceFileSt
                 .Where(x => revisionIds.Contains(x.RequirementRevisionId))
                 .Select(x => x.ProcedureRevisionId).Distinct().ToListAsync(ct);
             return await (from revision in db.TestProcedureRevisions.AsNoTracking().Where(x => legacyProcedureRevisionIds.Contains(x.Id))
-                          join procedure in db.TestProcedures.AsNoTracking() on revision.ProcedureId equals procedure.Id
+                          join procedure in db.TestProcedures.AsNoTracking().Where(x => x.Level == TestProcedureLevel.System || x.ArtifactKind == VerificationArtifactKind.Case) on revision.ProcedureId equals procedure.Id
                           orderby procedure.BaseNumber
                           select new ValueTuple<Guid, string>(revision.Id, procedure.BaseNumber + "." + revision.Revision.ToString("D2"))).ToListAsync(ct);
         }
@@ -341,7 +343,7 @@ public sealed class ReleaseExecutionService(AeroLinkDbContext db, EvidenceFileSt
         var allowedProcedureLevels = ladderPolicy.Definitions.Where(x => x.Verification is not null)
             .Select(x => x.Verification!.ProcedureLevel).ToHashSet();
         return await (from revision in db.TestProcedureRevisions.AsNoTracking().Where(x => procedureRevisionIds.Contains(x.Id))
-                      join procedure in db.TestProcedures.AsNoTracking() on revision.ProcedureId equals procedure.Id
+                      join procedure in db.TestProcedures.AsNoTracking().Where(x => x.Level == TestProcedureLevel.System || x.ArtifactKind == VerificationArtifactKind.Case) on revision.ProcedureId equals procedure.Id
                       where procedure.ProjectId == projectId && allowedProcedureLevels.Contains(procedure.Level)
                       orderby procedure.BaseNumber
                       select new ValueTuple<Guid, string>(revision.Id, procedure.BaseNumber + "." + revision.Revision.ToString("D2"))).ToListAsync(ct);
