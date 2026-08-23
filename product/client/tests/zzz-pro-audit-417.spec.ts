@@ -258,11 +258,11 @@ test('an unsaved Modify target and its driving selections survive search, paging
   const row = page.locator('.downstreamAssessment').filter({ hasText: /Audit417 trigger/ }).first()
   await expect(row).toBeVisible({ timeout: 30_000 })
   await row.getByRole('button', { name: /^SYSTCR-\d{6}\.\d{2}/ }).click()
-  const workspaceDrawer = page.getByRole('dialog', { name: /procedure decisions/ })
-  await expect(workspaceDrawer.getByRole('button', { name: 'Propose a procedure change' }))
+  const workspaceDrawer = page.getByRole('dialog', { name: /test procedure decisions/ })
+  await expect(workspaceDrawer.getByRole('button', { name: 'Propose a test procedure change' }))
     .toBeVisible({ timeout: 60_000 })
-  await workspaceDrawer.getByRole('button', { name: 'Propose a procedure change' }).click()
-  const dialog = page.getByRole('dialog', { name: 'Propose a procedure change' })
+  await workspaceDrawer.getByRole('button', { name: 'Propose a test procedure change' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Propose a test procedure change' })
   await dialog.getByLabel('What is being done').selectOption('Modify')
   const options = dialog.locator('select[aria-label="Procedure"] option')
   await expect(options.filter({ hasText: unsavedTarget })).toHaveCount(1, { timeout: 30_000 })
@@ -278,7 +278,7 @@ test('an unsaved Modify target and its driving selections survive search, paging
   expect(coverageIdentity).toMatch(/SYSR-\d{6}\.\d{2}/)
 
   // Finding A: search so the unsaved target would be excluded; it must remain visible and selected.
-  const search = dialog.getByRole('textbox', { name: 'Search procedures' })
+  const search = dialog.getByRole('textbox', { name: 'Search test procedures' })
   await search.fill(targets[0].baseNumber)
   await expect(dialog.locator('select[aria-label="Procedure"] option').filter({ hasText: unsavedTarget }))
     .toHaveCount(1, { timeout: 30_000 })
@@ -327,7 +327,7 @@ test('an unsaved Modify target and its driving selections survive search, paging
   await dialog.getByLabel('Preconditions').fill('The configuration is available.')
   await dialog.getByLabel('Steps').fill('1. Load. 2. Exercise.')
   await dialog.getByLabel('Expected result').fill('The expected behavior is observed.')
-  await dialog.getByLabel('Why this procedure work is required').fill('The approved change requires an exact procedure update.')
+  await dialog.getByLabel('Why this test procedure work is required').fill('The approved change requires an exact procedure update.')
   await dialog.getByRole('button', { name: 'Propose decision' }).click()
   await expect(dialog).toHaveCount(0, { timeout: 30_000 })
 
@@ -341,18 +341,18 @@ test('an unsaved Modify target and its driving selections survive search, paging
 
   // Retire-specific acceptance: an unsaved Retire target stays visibly selected through an excluding
   // search, is the same exact target immediately before submission, and the Retire decision persists.
-  await workspaceDrawer.getByRole('button', { name: 'Propose a procedure change' }).click()
-  const retireDialog = page.getByRole('dialog', { name: 'Propose a procedure change' })
+  await workspaceDrawer.getByRole('button', { name: 'Propose a test procedure change' }).click()
+  const retireDialog = page.getByRole('dialog', { name: 'Propose a test procedure change' })
   await retireDialog.getByLabel('What is being done').selectOption('Retire')
   const retireOptions = retireDialog.locator('select[aria-label="Procedure"] option')
   await expect(retireOptions.filter({ hasText: retireTarget })).toHaveCount(1, { timeout: 30_000 })
   await retireDialog.getByRole('combobox', { name: 'Procedure' }).selectOption(retireTarget)
-  const retireSearch = retireDialog.getByRole('textbox', { name: 'Search procedures' })
+  const retireSearch = retireDialog.getByRole('textbox', { name: 'Search test procedures' })
   await retireSearch.fill(targets[0].baseNumber)
   await expect(retireOptions.filter({ hasText: retireTarget })).toHaveCount(1, { timeout: 30_000 })
   await expect(retireDialog.getByRole('combobox', { name: 'Procedure' })).toHaveValue(retireTarget)
   await expect(retireDialog).toContainText(`${retireTarget}.00`)
-  await retireDialog.getByLabel('Why this procedure work is required').fill('The carried procedure is retired by the approved change.')
+  await retireDialog.getByLabel('Why this test procedure work is required').fill('The carried procedure is retired by the approved change.')
   await retireDialog.getByRole('button', { name: 'Propose decision' }).click()
   await expect(retireDialog).toHaveCount(0, { timeout: 30_000 })
   const retirePayload = await (await request.get(
@@ -366,9 +366,9 @@ test('an unsaved Modify target and its driving selections survive search, paging
   const reopenedRow = page.locator('.downstreamAssessment').filter({ hasText: /Audit417 trigger/ }).first()
   await expect(reopenedRow).toBeVisible({ timeout: 30_000 })
   await reopenedRow.getByRole('button', { name: /^SYSTCR-\d{6}\.\d{2}/ }).click()
-  const reopened = page.getByRole('dialog', { name: /procedure decisions/ })
+  const reopened = page.getByRole('dialog', { name: /test procedure decisions/ })
   await expect(reopened).toContainText(`${retireTarget}.01`, { timeout: 30_000 })
-  await expect(reopened).toContainText('Retired procedure')
+  await expect(reopened).toContainText('Retired test procedure')
 })
 
 test('an obsolete successful picker response cannot clear a newer visible failure', async ({ page, request }) => {
@@ -382,8 +382,8 @@ test('an obsolete successful picker response cannot clear a newer visible failur
   const row = page.locator('.downstreamAssessment').filter({ hasText: /Audit417 trigger/ }).first()
   await expect(row).toBeVisible({ timeout: 30_000 })
   await row.getByRole('button', { name: /^SYSTCR-\d{6}\.\d{2}/ }).click()
-  const workspaceDrawer = page.getByRole('dialog', { name: /procedure decisions/ })
-  await expect(workspaceDrawer.getByRole('button', { name: 'Propose a procedure change' }))
+  const workspaceDrawer = page.getByRole('dialog', { name: /test procedure decisions/ })
+  await expect(workspaceDrawer.getByRole('button', { name: 'Propose a test procedure change' }))
     .toBeVisible({ timeout: 60_000 })
 
   // Hold the first procedure-targets request; fail the second; then release the first successfully.
@@ -402,16 +402,16 @@ test('an obsolete successful picker response cannot clear a newer visible failur
     await route.fulfill({ status: 500, contentType: 'application/json', body: '{"error":"forced failure"}' })
   })
 
-  await workspaceDrawer.getByRole('button', { name: 'Propose a procedure change' }).click()
-  const dialog = page.getByRole('dialog', { name: 'Propose a procedure change' })
+  await workspaceDrawer.getByRole('button', { name: 'Propose a test procedure change' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Propose a test procedure change' })
   await dialog.getByLabel('What is being done').selectOption('Modify')
   await expect.poll(() => heldTargetRoutes.length).toBeGreaterThan(0)
   await expect.poll(() => heldRequirementRoutes.length).toBeGreaterThan(0)
 
   // A newer request fails first and must display its visible error.
-  await dialog.getByRole('textbox', { name: 'Search procedures' }).fill('zz-force-failure')
-  const targetAlert = dialog.getByRole('alert').filter({ hasText: 'The procedures for this build' })
-  await expect(targetAlert).toContainText('The procedures for this build could not be loaded.', { timeout: 15_000 })
+  await dialog.getByRole('textbox', { name: 'Search test procedures' }).fill('zz-force-failure')
+  const targetAlert = dialog.getByRole('alert').filter({ hasText: 'The test procedures for this build' })
+  await expect(targetAlert).toContainText('The test procedures for this build could not be loaded.', { timeout: 15_000 })
   await dialog.getByRole('textbox', { name: 'Search requirements' }).fill('zz-force-failure')
   const requirementAlert = dialog.getByRole('alert').filter({ hasText: 'The governed requirements for this build' })
   await expect(requirementAlert).toContainText('The governed requirements for this build could not be loaded.', { timeout: 15_000 })
@@ -423,20 +423,20 @@ test('an obsolete successful picker response cannot clear a newer visible failur
   for (const route of heldRequirementRoutes) {
     await route.continue()
   }
-  await expect(targetAlert).toContainText('The procedures for this build could not be loaded.', { timeout: 15_000 })
+  await expect(targetAlert).toContainText('The test procedures for this build could not be loaded.', { timeout: 15_000 })
   await expect(requirementAlert).toContainText('The governed requirements for this build could not be loaded.', { timeout: 15_000 })
   // The obsolete successes must also NOT replace the newest request's result state: with the failing search
   // still active, the picker reports zero matches rather than the obsolete page's match count.
-  await expect(dialog).toContainText('0 matching carried procedures.', { timeout: 15_000 })
+  await expect(dialog).toContainText('0 matching carried test procedures.', { timeout: 15_000 })
   await expect(dialog).toContainText('0 matching governed requirements.', { timeout: 15_000 })
 
   // A later successful retry clears the errors and restores current results.
   await page.unroute('**/procedure-targets?**')
   await page.unroute('**/requirement-candidates?**')
-  await dialog.getByRole('textbox', { name: 'Search procedures' }).fill('')
+  await dialog.getByRole('textbox', { name: 'Search test procedures' }).fill('')
   await dialog.getByRole('textbox', { name: 'Search requirements' }).fill('')
   await expect(dialog.getByRole('alert')).toHaveCount(0, { timeout: 15_000 })
-  await expect(dialog).toContainText(`${carriedCount} carried procedures in this build`, { timeout: 15_000 })
+  await expect(dialog).toContainText(`${carriedCount} carried test procedures in this build`, { timeout: 15_000 })
   await expect(dialog).toContainText('1 governed requirement in scope', { timeout: 15_000 })
 
   // Success-vs-success: a newer successful query must publish its own distinct result, and an older
@@ -455,18 +455,18 @@ test('an obsolete successful picker response cannot clear a newer visible failur
     if (phase2RequirementCount === 1) { heldPhase2Requirement.push(route); return }
     await route.continue()
   })
-  await dialog.getByRole('textbox', { name: 'Search procedures' }).fill('zz-no-match')
+  await dialog.getByRole('textbox', { name: 'Search test procedures' }).fill('zz-no-match')
   await expect.poll(() => heldPhase2Target.length).toBeGreaterThan(0)
   await dialog.getByRole('textbox', { name: 'Search requirements' }).fill('zz-no-match')
   await expect.poll(() => heldPhase2Requirement.length).toBeGreaterThan(0)
 
-  await dialog.getByRole('textbox', { name: 'Search procedures' }).fill(targets[0].baseNumber)
-  await expect(dialog).toContainText('1 matching carried procedure.', { timeout: 15_000 })
+  await dialog.getByRole('textbox', { name: 'Search test procedures' }).fill(targets[0].baseNumber)
+  await expect(dialog).toContainText('1 matching carried test procedure.', { timeout: 15_000 })
   await dialog.getByRole('textbox', { name: 'Search requirements' }).fill('trigger requirement')
   await expect(dialog).toContainText('1 matching governed requirement.', { timeout: 15_000 })
 
   for (const route of heldPhase2Target) await route.continue()
   for (const route of heldPhase2Requirement) await route.continue()
-  await expect(dialog).toContainText('1 matching carried procedure.', { timeout: 15_000 })
+  await expect(dialog).toContainText('1 matching carried test procedure.', { timeout: 15_000 })
   await expect(dialog).toContainText('1 matching governed requirement.', { timeout: 15_000 })
 })

@@ -36,6 +36,7 @@ public static class TestProcedureRevisionTitleProjection
                                    {
                                        revision.Id,
                                        revision.ProcedureId,
+                                       procedure.Level,
                                    }).ToListAsync(ct);
         var procedureIds = requestedRows.Select(x => x.ProcedureId).Distinct().ToList();
 
@@ -50,6 +51,7 @@ public static class TestProcedureRevisionTitleProjection
                                 revision.Revision,
                                 revision.SourceTestChangeRequestId,
                                 procedure.BaseNumber,
+                                procedure.Level,
                             }).ToListAsync(ct);
         var tcrIds = chains.Where(x => x.SourceTestChangeRequestId is not null)
             .Select(x => x.SourceTestChangeRequestId!.Value).Distinct().ToList();
@@ -76,7 +78,7 @@ public static class TestProcedureRevisionTitleProjection
                 if (revision.SourceTestChangeRequestId is not Guid sourceTcrId)
                 {
                     snapshot = new(revision.Id,
-                        UnavailableTitle(revision.BaseNumber, revision.Revision, legacy: true),
+                        UnavailableTitle(revision.BaseNumber, revision.Revision, revision.Level, legacy: true),
                         false, true,
                         "Legacy revision — the exact historical title was not recorded on a controlled TCR snapshot; a deterministic compatibility label is shown.");
                 }
@@ -92,7 +94,7 @@ public static class TestProcedureRevisionTitleProjection
                                     ? "Retirement revision — title preserved from the exact predecessor being retired."
                                     : "Retirement revision — the predecessor compatibility label is preserved because no exact historical title exists.")
                             : new(revision.Id,
-                                UnavailableTitle(revision.BaseNumber, revision.Revision, legacy: false),
+                                UnavailableTitle(revision.BaseNumber, revision.Revision, revision.Level, legacy: false),
                                 false, false,
                                 "The TCR records a retirement, but no predecessor title can be resolved; supplied retirement text is not treated as exact.");
                     }
@@ -103,7 +105,7 @@ public static class TestProcedureRevisionTitleProjection
                     else
                     {
                         snapshot = new(revision.Id,
-                            UnavailableTitle(revision.BaseNumber, revision.Revision, legacy: false),
+                            UnavailableTitle(revision.BaseNumber, revision.Revision, revision.Level, legacy: false),
                             false, false,
                             "The producing TCR is recorded, but its revision-title snapshot is unavailable; a deterministic revision label is shown.");
                     }
@@ -111,9 +113,9 @@ public static class TestProcedureRevisionTitleProjection
                 else
                 {
                     snapshot = new(revision.Id,
-                        UnavailableTitle(revision.BaseNumber, revision.Revision, legacy: false),
+                        UnavailableTitle(revision.BaseNumber, revision.Revision, revision.Level, legacy: false),
                         false, false,
-                        "The producing TCR is recorded, but no matching procedure-change title snapshot could be resolved; a deterministic revision label is shown.");
+                            "The producing TCR is recorded, but no matching verification-change title snapshot could be resolved; a deterministic revision label is shown.");
                 }
 
                 resolved[revision.Id] = snapshot;
@@ -144,7 +146,11 @@ public static class TestProcedureRevisionTitleProjection
             .Select(x => x.Key).OrderBy(x => x).ToList();
     }
 
-    private static string UnavailableTitle(string baseNumber, int revision, bool legacy) =>
-        $"{(legacy ? "Legacy procedure" : "Procedure")} {baseNumber}.{revision:D2} — " +
-        (legacy ? "exact historical title was not recorded" : "exact revision title snapshot was not recorded");
+    private static string UnavailableTitle(string baseNumber, int revision, TestProcedureLevel level, bool legacy)
+    {
+        var noun = level == TestProcedureLevel.System ? "procedure" : "case";
+        var label = legacy ? $"Legacy {noun}" : char.ToUpperInvariant(noun[0]) + noun[1..];
+        return $"{label} {baseNumber}.{revision:D2} — " +
+            (legacy ? "exact historical title was not recorded" : "exact revision title snapshot was not recorded");
+    }
 }

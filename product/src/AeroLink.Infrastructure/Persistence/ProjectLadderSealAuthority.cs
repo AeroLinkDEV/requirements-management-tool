@@ -18,6 +18,7 @@ public static class LadderBoundContentCatalog
         new("draft-requirement-change", "A draft RequirementChange proposed at a configured ladder level."),
         new("requirement-artifact", "A materialized controlled RequirementArtifact."),
         new("requirement-revision", "A materialized controlled RequirementRevision."),
+        new("test-case", "A materialized controlled software TestCase."),
         new("test-procedure", "A materialized controlled TestProcedure."),
         new("test-change-review", "A controlled verification change review bound to a ladder discipline."),
         new("trace-link", "A controlled requirement trace relationship between configured ladder levels."),

@@ -64,7 +64,11 @@ record BaselineTestChangeSelectionRequest(Guid TestChangeRequestId);
 record LegacyProcedureManifestBootstrapRequest(string ExpectedHash, bool ConfirmLegacySnapshot);
 record EmptyMutationRequest();
 record CreateBuildRequest(Guid ProjectId, Guid ReleaseId, Guid BaselineId, string BuildNumber, string Description);
-record RecordTestExecutionRequest(Guid ProjectId, Guid ProcedureRevisionId, Guid? SoftwareBuildId, Guid? RetestOfExecutionId, TestOutcome Outcome, string Configuration, string Determination, string EvidenceReference, DateTimeOffset ExecutedAt);
+record RecordTestExecutionRequest(Guid ProjectId, Guid ProcedureRevisionId, Guid? SoftwareBuildId, Guid? RetestOfExecutionId, TestOutcome Outcome, string Configuration, string Determination, string EvidenceReference, DateTimeOffset ExecutedAt)
+{
+    /// <summary>Primary Case/Procedure-neutral wire field; ProcedureRevisionId is the compatibility alias.</summary>
+    public Guid? ArtifactRevisionId { get; init; }
+}
 record DispositionImpactRequest(ImpactDispositionState State, string Rationale);
 record BulkDispositionImpactRequest(Guid? ChangeRequestId, ImpactDispositionState State, string Rationale);
 record SelectBuildRequest(Guid SoftwareBuildId);

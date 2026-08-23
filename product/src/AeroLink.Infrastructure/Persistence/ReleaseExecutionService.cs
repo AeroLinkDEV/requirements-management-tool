@@ -113,9 +113,9 @@ public sealed class ReleaseExecutionService(AeroLinkDbContext db, EvidenceFileSt
             ? LegacyLadderPolicy.Instance
             : await policyResolver.ResolveAsync(campaign.ProjectId, ct);
         var required = await RequiredProceduresAsync(campaign.ProjectId, campaign.BaselineId, ladderPolicy, ct); var requiredIds = required.Select(x => x.Id).ToHashSet();
-        if (requiredIds.Count == 0) throw new DomainException("The baseline has no required covered procedures to import.");
+        if (requiredIds.Count == 0) throw new DomainException("The baseline has no required covered verification artifacts to import.");
         if (manifest.Count != requiredIds.Count || manifest.Select(x => x.ProcedureRevisionId).Distinct().Count() != manifest.Count || manifest.Any(x => !requiredIds.Contains(x.ProcedureRevisionId)))
-            throw new DomainException($"The manifest must contain exactly one result for each of the {requiredIds.Count} required procedure revisions.");
+            throw new DomainException($"The manifest must contain exactly one result for each of the {requiredIds.Count} required verification artifact revisions.");
         var parsed = manifest.Select(x => (Row: x, Outcome: Enum.TryParse<TestOutcome>(x.Outcome, true, out var value) ? value : (TestOutcome?)null)).ToList();
         if (parsed.Any(x => x.Outcome is null || x.Row.ExecutedAt is null || string.IsNullOrWhiteSpace(x.Row.ExecutedBy) || string.IsNullOrWhiteSpace(x.Row.Determination)))
             throw new DomainException("Every row requires a valid outcome, execution time, executor, and human determination.");

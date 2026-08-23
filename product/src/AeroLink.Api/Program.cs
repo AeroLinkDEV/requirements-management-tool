@@ -110,6 +110,8 @@ await using (var scope = app.Services.CreateAsyncScope())
     }
     else if (db.Database.IsNpgsql()) await db.Database.MigrateAsync();
     else await db.Database.EnsureCreatedAsync();
+    if (!restoreValidationReadOnly && db.Database.IsNpgsql())
+        await scope.ServiceProvider.GetRequiredService<SoftwareVerificationCaseMigrationAuthority>().EnsureCompletedAsync();
     if (!restoreValidationReadOnly && builder.Configuration.GetValue<bool>("DemoData:Enabled"))
     {
         await scope.ServiceProvider.GetRequiredService<FmsShowcaseSeeder>().EnsureSeededAsync();

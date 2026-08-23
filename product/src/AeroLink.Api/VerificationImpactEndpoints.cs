@@ -11,9 +11,16 @@ using System.Text.Json;
 namespace AeroLink.Api;
 
 public sealed record AssignVerificationImpactRequest(string EngineerId);
-public sealed record ResolveVerificationImpactRequest(VerificationImpactOutcome Outcome, string Rationale, Guid? ProcedureId,
+public sealed record ResolveVerificationImpactRequest(VerificationImpactOutcome Outcome, string Rationale, Guid? ProcedureId = null,
     TestProcedureChangeAction? ProcedureChangeAction = null, bool PreReleaseEvidenceRequired = false,
-    Guid? RetargetedRequirementRevisionId = null);
+    Guid? RetargetedRequirementRevisionId = null)
+{
+    /// <summary>Canonical neutral Case/Procedure identity; ProcedureId remains a compatibility alias.</summary>
+    public Guid? ArtifactId { get; init; }
+
+    /// <summary>Canonical neutral change action; ProcedureChangeAction remains a compatibility alias.</summary>
+    public TestProcedureChangeAction? ArtifactChangeAction { get; init; }
+}
 public sealed record ReopenVerificationImpactRequest(string Rationale);
 public sealed record IncludeChangeRequestRequest(Guid ChangeRequestId, long? ExpectedVersion = null);
 public sealed record CreateTestChangeRequestRequest(TestChangeReviewDiscipline Discipline, Guid[] ChangeRequestIds,
@@ -26,7 +33,11 @@ public sealed record CreateTestChangeRequestRequest(TestChangeReviewDiscipline D
     /// without its procedure decisions would be the same proposal in two halves, the second of which somebody
     /// has to remember to write. Optional, because a package may still be raised and worked afterwards.
     /// </summary>
-    CreateTestProcedureChangeRequest[]? ProcedureChanges = null);
+    CreateTestProcedureChangeRequest[]? ProcedureChanges = null)
+{
+    /// <summary>Neutral Case/Procedure seam; ProcedureChanges remains the wire alias for older clients.</summary>
+    public CreateTestProcedureChangeRequest[]? ArtifactChanges { get; init; }
+}
 
 /// <summary>One proposed procedure decision, as the authoring page states it before the package exists.</summary>
 public sealed record CreateTestProcedureChangeRequest(string BaseNumber, int Revision, TestProcedureLevel Level,
@@ -112,11 +123,30 @@ internal static class TestChangeRequestSourceEligibility
         _ => "low-level software",
     };
 
+    internal static string ArtifactWord(TestChangeReviewDiscipline discipline) =>
+        discipline == TestChangeReviewDiscipline.System ? "test procedure" : "test case";
+
+    internal static string ArtifactPlural(TestChangeReviewDiscipline discipline) =>
+        discipline == TestChangeReviewDiscipline.System ? "test procedures" : "test cases";
+
+    internal static string ArtifactNoun(TestChangeReviewDiscipline discipline) =>
+        discipline == TestChangeReviewDiscipline.System ? "procedure" : "case";
+
+    internal static string ArtifactKind(TestChangeReviewDiscipline discipline) =>
+        discipline == TestChangeReviewDiscipline.System ? "Procedure" : "Case";
+
+    internal static string ArtifactLabel(TestChangeReviewDiscipline discipline) => discipline switch
+    {
+        TestChangeReviewDiscipline.System => "System Test Procedure",
+        TestChangeReviewDiscipline.HighLevelSoftware => "HLR Test Case",
+        _ => "LLR Test Case",
+    };
+
     internal static IResult LevelRefusal(string displayNumber, TestChangeReviewDiscipline discipline) =>
         Results.BadRequest(new
         {
             error = $"{displayNumber} is not a {LevelName(discipline)} requirement change, so it cannot drive " +
-                $"{LevelName(discipline)} test work. A procedure verifies the requirements one level above it.",
+                $"{LevelName(discipline)} test work. A {ArtifactWord(discipline)} verifies the requirements one level above it.",
             code = "change_request_wrong_level"
         });
 }
@@ -199,6 +229,11 @@ public static class VerificationImpactEndpoints
                     review.AnalysisRich,
                     review.SolutionRich,
                     review.CaseContractVersion,
+                    artifactKind = TestChangeRequestSourceEligibility.ArtifactKind(review.Discipline),
+                    artifactLabel = TestChangeRequestSourceEligibility.ArtifactLabel(review.Discipline),
+                    artifactDecisionCount = review.ProcedureChanges.Count,
+                    // Compatibility alias retained for older clients; current Case clients consume the
+                    // neutral artifact field above.
                     procedureDecisionCount = review.ProcedureChanges.Count,
                     // Every change request this package answers for, the one it was raised from first. A reader
                     // scanning the list needs to see that two changes are being tested together without opening it.
@@ -402,13 +437,13 @@ public static class VerificationImpactEndpoints
 
         // The procedure decisions a test change request carries — what the workspace reads and writes, and the
         // test-side counterpart of the requirement changes a change request carries.
-        app.MapGet("/api/test-change-reviews/{id:guid}/procedure-changes", async (Guid id,
+        app.MapGet("/api/test-change-reviews/{id:guid}/{artifactRoute:regex(procedure-changes|case-changes)}", async (Guid id, string artifactRoute,
             HttpContext http, AeroLinkDbContext db, IdentityService identity,
             IProjectLadderPolicyResolver policyResolver, CancellationToken ct) =>
         {
             var review = await db.TestChangeReviews.AsNoTracking().Include(x => x.ProcedureChanges)
                 .SingleOrDefaultAsync(x => x.Id == id, ct);
-            if (review is null) return Results.NotFound();
+            if (review is null || !ArtifactRouteAllows(artifactRoute, review.Discipline)) return Results.NotFound();
             var ladderPolicy = await policyResolver.ResolveAsync(review.ProjectId, ct);
             if (!await http.HasProjectAccessAsync(db, review.ProjectId, ct)) return Results.Forbid();
             // Derived here rather than inferred by the client from a broad role. The workspace was offering
@@ -476,47 +511,60 @@ public static class VerificationImpactEndpoints
                                             level = artifact.Level.ToString(),
                                             coverage.IsSuspect
                                         }).ToListAsync(ct);
+            var artifactTargets = targets.Select(x => new
+            {
+                x.BaseNumber, title = targetTitles[x.Id].Title,
+                currentRevision = x.CurrentRevision,
+                state = x.State.ToString(),
+                currentCoverage = targetCoverage.Where(c => c.ProcedureRevisionId == x.Id)
+                    .OrderBy(c => c.displayNumber).Select(c => new
+                    {
+                        c.id, c.revisionId, c.displayNumber, statement = c.Statement, c.level,
+                        isSuspect = c.IsSuspect
+                    }).ToList()
+            }).ToList();
+            var artifactChanges = review.ProcedureChanges
+                .OrderBy(x => x.BaseNumber)
+                .Select(x => new
+                {
+                    x.Id, x.DisplayNumber, x.BaseNumber, x.Revision, kind = x.Kind.ToString(),
+                    level = x.Level.ToString(), x.Title, x.Objective, x.Preconditions, x.Steps,
+                    x.ExpectedResult, x.Rationale,
+                    drivingRequirementRevisionIds = DrivingRequirements(x.DrivingRequirementRevisionIdsJson),
+                    removedRequirementRevisionIds = DrivingRequirements(x.RemovedRequirementRevisionIdsJson),
+                    x.CoverageChangeRationale, x.CoverageChangedBy
+                }).ToList();
             return Results.Ok(new
             {
+                artifactKind = TestChangeRequestSourceEligibility.ArtifactKind(review.Discipline),
+                artifactLabel = TestChangeRequestSourceEligibility.ArtifactLabel(review.Discipline),
                 capabilities = new
                 {
-                    canProposeProcedureChange = mayAuthor && review.State == TestChangeReviewState.Draft
+                    canProposeArtifactChange = mayAuthor && review.State == TestChangeReviewState.Draft
                         && review.Outcome == TestChangeReviewOutcome.ChangeRequired,
-                    canWithdrawProcedureChange = mayAuthor && review.State == TestChangeReviewState.Draft,
+                    canWithdrawArtifactChange = mayAuthor && review.State == TestChangeReviewState.Draft,
+                    canProposeProcedureChange = mayAuthor && review.State == TestChangeReviewState.Draft
+                        && review.Outcome == TestChangeReviewOutcome.ChangeRequired, // compatibility alias
+                    canWithdrawProcedureChange = mayAuthor && review.State == TestChangeReviewState.Draft, // compatibility alias
                     canRevise = mayAuthor && review.State == TestChangeReviewState.Approved,
                 },
                 drivingRequirementChoices = candidates,
-                procedureTargets = targets.Select(x => new
-                {
-                    x.BaseNumber, title = targetTitles[x.Id].Title,
-                    currentRevision = x.CurrentRevision,
-                    state = x.State.ToString(),
-                    currentCoverage = targetCoverage.Where(c => c.ProcedureRevisionId == x.Id)
-                        .OrderBy(c => c.displayNumber).Select(c => new
-                        {
-                            c.id, c.revisionId, c.displayNumber, statement = c.Statement, c.level,
-                            isSuspect = c.IsSuspect
-                        }).ToList()
-                }),
+                artifactTargets,
+                procedureTargets = artifactTargets, // compatibility alias
                 review.Id, review.DisplayNumber, review.BaseNumber, review.Revision,
                 discipline = review.Discipline.ToString(), state = review.State.ToString(),
-                outcome = review.Outcome.ToString(), procedureLevel = review.ProcedureLevel(ladderPolicy).ToString(),
+                outcome = review.Outcome.ToString(),
+                artifactLevel = review.ProcedureLevel(ladderPolicy).ToString(),
+                procedureLevel = review.ProcedureLevel(ladderPolicy).ToString(), // compatibility alias
                 review.SourceChangeRequestNumber, review.AssignedEngineerId,
                 version = review.Version,
                 review.Title, review.Problem, review.Analysis, review.Solution,
                 review.ProblemRich, review.AnalysisRich, review.SolutionRich,
                 review.CaseContractVersion,
-                procedureChanges = review.ProcedureChanges
-                    .OrderBy(x => x.BaseNumber)
-                    .Select(x => new
-                    {
-                        x.Id, x.DisplayNumber, x.BaseNumber, x.Revision, kind = x.Kind.ToString(),
-                        level = x.Level.ToString(), x.Title, x.Objective, x.Preconditions, x.Steps,
-                        x.ExpectedResult, x.Rationale,
-                        drivingRequirementRevisionIds = DrivingRequirements(x.DrivingRequirementRevisionIdsJson),
-                        removedRequirementRevisionIds = DrivingRequirements(x.RemovedRequirementRevisionIdsJson),
-                        x.CoverageChangeRationale, x.CoverageChangedBy
-                    }).ToList()
+                artifactDecisionCount = artifactChanges.Count,
+                procedureDecisionCount = artifactChanges.Count, // compatibility alias
+                artifactChanges,
+                procedureChanges = artifactChanges // compatibility alias
             });
         });
 
@@ -525,13 +573,13 @@ public static class VerificationImpactEndpoints
         // Hydration by immutable procedure ID or controlled base number keeps an exact current selection
         // visible even when it lies beyond the current result page — and forged out-of-scope IDs hydrate
         // nothing because the scoped source is the only thing ever queried.
-        app.MapGet("/api/test-change-reviews/{id:guid}/procedure-targets", async (Guid id, string? search,
+        app.MapGet("/api/test-change-reviews/{id:guid}/{artifactRoute:regex(procedure-targets|case-targets)}", async (Guid id, string artifactRoute, string? search,
             string? ids, string? baseNumbers, int? page, int? pageSize,
             HttpContext http, AeroLinkDbContext db, IProjectLadderPolicyResolver policyResolver, CancellationToken ct) =>
         {
             var review = await db.TestChangeReviews.AsNoTracking()
                 .SingleOrDefaultAsync(x => x.Id == id, ct);
-            if (review is null) return Results.NotFound();
+            if (review is null || !ArtifactRouteAllows(artifactRoute, review.Discipline)) return Results.NotFound();
             var ladderPolicy = await policyResolver.ResolveAsync(review.ProjectId, ct);
             if (!await http.HasProjectAccessAsync(db, review.ProjectId, ct)) return Results.Forbid();
             var currentPage = Math.Max(1, page ?? 1);
@@ -604,26 +652,32 @@ public static class VerificationImpactEndpoints
                                           level = artifact.Level.ToString(),
                                           coverage.IsSuspect
                                       }).ToListAsync(ct);
+            var artifactItems = all.Select(x => new
+            {
+                artifactId = x.ProcedureId,
+                procedureId = x.ProcedureId, // compatibility alias for clients before the neutral seam
+                x.BaseNumber,
+                title = exactTitles[x.Id].Title,
+                currentRevision = x.CurrentRevision,
+                state = x.State.ToString(),
+                currentCoverage = coverageRows.Where(c => c.ProcedureRevisionId == x.Id)
+                    .OrderBy(c => c.displayNumber).Select(c => new
+                    {
+                        c.id, c.revisionId, c.displayNumber, statement = c.Statement, c.level,
+                        isSuspect = c.IsSuspect
+                    }).ToList()
+            }).ToList();
             return Results.Ok(new
             {
                 page = currentPage,
                 pageSize = size,
                 totalCount = total,
                 totalPages = (int)Math.Ceiling(total / (double)size),
-                items = all.Select(x => new
-                {
-                    procedureId = x.ProcedureId,
-                    x.BaseNumber,
-                    title = exactTitles[x.Id].Title,
-                    currentRevision = x.CurrentRevision,
-                    state = x.State.ToString(),
-                    currentCoverage = coverageRows.Where(c => c.ProcedureRevisionId == x.Id)
-                        .OrderBy(c => c.displayNumber).Select(c => new
-                        {
-                            c.id, c.revisionId, c.displayNumber, statement = c.Statement, c.level,
-                            isSuspect = c.IsSuspect
-                        }).ToList()
-                })
+                artifactKind = TestChangeRequestSourceEligibility.ArtifactKind(review.Discipline),
+                artifactLabel = TestChangeRequestSourceEligibility.ArtifactLabel(review.Discipline),
+                artifactTargets = artifactItems,
+                items = artifactItems,
+                procedureTargets = artifactItems // compatibility alias
             });
         });
 
@@ -657,43 +711,45 @@ public static class VerificationImpactEndpoints
             });
         });
 
-        app.MapPost("/api/test-change-reviews/{id:guid}/procedure-changes", async (Guid id,
+        app.MapPost("/api/test-change-reviews/{id:guid}/{artifactRoute:regex(procedure-changes|case-changes)}", async (Guid id, string artifactRoute,
             ProposeProcedureChangeRequest request, HttpContext http, AeroLinkDbContext db,
             IdentityService identity, IProjectLadderPolicyResolver policyResolver, CancellationToken ct) =>
         {
             var review = await db.TestChangeReviews.Include(x => x.ProcedureChanges).Include(x => x.ReviewCycles)
                 .SingleOrDefaultAsync(x => x.Id == id, ct);
-            if (review is null) return Results.NotFound();
+            if (review is null || !ArtifactRouteAllows(artifactRoute, review.Discipline)) return Results.NotFound();
             var ladderPolicy = await policyResolver.ResolveAsync(review.ProjectId, ct);
             var refusal = await RefuseUnlessAuthoredBy(review, http, db, identity, ct);
             if (refusal is not null) return refusal;
             if (request.ExpectedVersion is not null && review.Version != request.ExpectedVersion)
                 return Results.Conflict(new
                 {
-                    error = "This test change request changed after it was opened. Refresh before proposing a procedure change.",
+                    error = $"This test change request changed after it was opened. Refresh before proposing a {TestChangeRequestSourceEligibility.ArtifactNoun(review.Discipline)} change.",
                     code = "stale_version"
                 });
             try
             {
                 var now = DateTimeOffset.UtcNow;
+                var artifactWord = TestChangeRequestSourceEligibility.ArtifactWord(review.Discipline);
+                var artifactNoun = TestChangeRequestSourceEligibility.ArtifactNoun(review.Discipline);
                 var driving = request.DrivingRequirementRevisionIds ?? [];
                 var removed = request.RemovedRequirementRevisionIds ?? [];
                 if (request.Kind == TestProcedureChangeKind.Introduce && driving.Length == 0)
                     return Results.BadRequest(new
                     {
-                        error = "A new procedure must name at least one exact requirement revision it verifies.",
+                        error = $"A new {artifactWord} must name at least one exact requirement revision it verifies.",
                         code = "procedure_driving_requirement_required"
                     });
                 if (request.Kind != TestProcedureChangeKind.Modify && removed.Length != 0)
                     return Results.BadRequest(new
                     {
-                        error = "Only a procedure modification can remove existing coverage.",
+                        error = $"Only a {artifactWord} modification can remove existing coverage.",
                         code = "coverage_removal_requires_modify"
                     });
                 if (driving.Intersect(removed).Any())
                     return Results.BadRequest(new
                     {
-                        error = "A requirement cannot be both added and removed by one procedure change.",
+                        error = $"A requirement cannot be both added and removed by one {artifactNoun} change.",
                         code = "coverage_delta_conflict"
                     });
                 var scopedRequirementIds = driving.Concat(removed).Distinct().ToArray();
@@ -712,7 +768,7 @@ public static class VerificationImpactEndpoints
                         if (requirement.ProjectId != review.ProjectId)
                             return Results.BadRequest(new { error = $"Requirement revision {drivingId} belongs to another project.", code = "requirement_revision_project_mismatch" });
                         if (requirement.Level != wanted)
-                            return Results.BadRequest(new { error = $"Requirement revision {drivingId} is a {requirement.Level} requirement, which a {review.Discipline} procedure does not verify.", code = "requirement_revision_level_mismatch" });
+                            return Results.BadRequest(new { error = $"Requirement revision {drivingId} is a {requirement.Level} requirement, which a {review.Discipline} {artifactNoun} does not verify.", code = "requirement_revision_level_mismatch" });
                     }
                     var governed = await TestChangeReviewRequirementScope.ForReviewAsync(db, review, null, ct, ladderPolicy);
                     var governedIds = governed.Select(x => x.RevisionId).ToHashSet();
@@ -730,7 +786,7 @@ public static class VerificationImpactEndpoints
                     ? await IdentifierAllocator.NextTestProcedureAsync(db, review.ProcedureLevel(ladderPolicy), ct, ladderPolicy)
                     : (request.BaseNumber ?? "").Trim();
                 if (request.Kind != TestProcedureChangeKind.Introduce && baseNumber.Length == 0)
-                    return Results.BadRequest(new { error = "A modification or retirement must name the procedure it acts on." });
+                    return Results.BadRequest(new { error = $"A modification or retirement must name the {artifactNoun} it acts on." });
                 var currentCoverageIds = new HashSet<Guid>();
                 // Deliberately no "must name a requirement revision" rule here, though the direct-create route
                 // that this replaced had one. That route wrote a controlled procedure immediately, so it
@@ -747,17 +803,17 @@ public static class VerificationImpactEndpoints
                         .Where(x => x.BaseNumber == baseNumber)
                         .Select(x => new { x.Id, x.ProjectId, x.Level }).SingleOrDefaultAsync(ct);
                     if (target is null)
-                        return Results.BadRequest(new { error = $"{baseNumber} is not a controlled test procedure." });
+                        return Results.BadRequest(new { error = $"{baseNumber} is not a controlled {artifactWord}." });
                     if (target.ProjectId != review.ProjectId)
                         return Results.BadRequest(new { error = $"{baseNumber} belongs to another project." });
                     if (target.Level != review.ProcedureLevel(ladderPolicy))
-                        return Results.BadRequest(new { error = $"{baseNumber} is a {target.Level} procedure and cannot be changed by a {review.Discipline} test change request." });
+                        return Results.BadRequest(new { error = $"{baseNumber} is a {target.Level} {artifactNoun} and cannot be changed by a {review.Discipline} test change request." });
                     var effectivity = await TestProcedureEffectivity.ForReleaseAsync(
                         db, review.ProjectId, review.ReleaseId, ct);
                     if (effectivity is null || !effectivity.RevisionByProcedure.TryGetValue(target.Id, out var carriedRevisionId))
                         return Results.Conflict(new
                         {
-                            error = $"{baseNumber} is not carried by the target software build. Refresh the procedure list and reselect a current target.",
+                            error = $"{baseNumber} is not carried by the target software build. Refresh the {artifactNoun} list and reselect a current target.",
                             code = "procedure_not_carried_by_build"
                         });
                     var current = await db.TestProcedureRevisions.AsNoTracking()
@@ -766,13 +822,13 @@ public static class VerificationImpactEndpoints
                     if (current is null)
                         return Results.Conflict(new
                         {
-                            error = $"The target build's selected revision for {baseNumber} is no longer available. Refresh the procedure list and reselect a current target.",
+                            error = $"The target build's selected revision for {baseNumber} is no longer available. Refresh the {artifactNoun} list and reselect a current target.",
                             code = "procedure_manifest_revision_missing"
                         });
                     if (request.Revision != current.Value + 1)
                         return Results.Conflict(new
                         {
-                            error = $"{baseNumber}.{current.Value:D2} is now carried by the target build. Refresh the procedure list and reselect it before proposing revision {current.Value + 1:D2}.",
+                            error = $"{baseNumber}.{current.Value:D2} is now carried by the target build. Refresh the {artifactNoun} list and reselect it before proposing revision {current.Value + 1:D2}.",
                             code = "procedure_revision_not_next_for_build"
                         });
                     currentCoverageIds = (await db.TestCoverage.AsNoTracking()
@@ -801,7 +857,7 @@ public static class VerificationImpactEndpoints
                     if (finalCoverage == 0)
                         return Results.BadRequest(new
                         {
-                            error = "A modified procedure must retain or add at least one exact requirement revision. Retire the procedure instead if it verifies nothing in this build.",
+                            error = $"A modified {artifactNoun} must retain or add at least one exact requirement revision. Retire the {artifactNoun} instead if it verifies nothing in this build.",
                             code = "procedure_final_coverage_required"
                         });
                 }
@@ -830,19 +886,19 @@ public static class VerificationImpactEndpoints
             catch (DomainException problem) { return Results.BadRequest(new { error = problem.Message }); }
         });
 
-        app.MapDelete("/api/test-change-reviews/{id:guid}/procedure-changes/{changeId:guid}", async (Guid id,
+        app.MapDelete("/api/test-change-reviews/{id:guid}/{artifactRoute:regex(procedure-changes|case-changes)}/{changeId:guid}", async (Guid id, string artifactRoute,
             Guid changeId, long? expectedVersion, HttpContext http, AeroLinkDbContext db,
             IdentityService identity, CancellationToken ct) =>
         {
             var review = await db.TestChangeReviews.Include(x => x.ProcedureChanges)
                 .SingleOrDefaultAsync(x => x.Id == id, ct);
-            if (review is null) return Results.NotFound();
+            if (review is null || !ArtifactRouteAllows(artifactRoute, review.Discipline)) return Results.NotFound();
             var refusal = await RefuseUnlessAuthoredBy(review, http, db, identity, ct);
             if (refusal is not null) return refusal;
             if (expectedVersion is not null && review.Version != expectedVersion)
                 return Results.Conflict(new
                 {
-                    error = "This test change request changed after it was opened. Refresh before withdrawing a procedure change.",
+                    error = $"This test change request changed after it was opened. Refresh before withdrawing a {TestChangeRequestSourceEligibility.ArtifactNoun(review.Discipline)} change.",
                     code = "stale_version"
                 });
             try
@@ -892,7 +948,9 @@ public static class VerificationImpactEndpoints
                 return Results.Ok(new
                 {
                     next.Id, next.DisplayNumber, next.Revision, state = next.State.ToString(),
-                    outcome = next.Outcome.ToString(), procedureChanges = next.ProcedureChanges.Count,
+                    outcome = next.Outcome.ToString(),
+                    artifactChangeCount = next.ProcedureChanges.Count,
+                    procedureChanges = next.ProcedureChanges.Count, // compatibility alias
                     coveredChangeRequests = next.CoveredChangeRequestIds.Count(),
                 });
             }
@@ -1001,14 +1059,17 @@ public static class VerificationImpactEndpoints
                 return Results.Conflict(new { error = "Verification decisions can be changed only while the test change request is a Draft." });
             var decisionRefusal = await RefuseUnlessAuthoredBy(review, http, db, identity, ct);
             if (decisionRefusal is not null) return decisionRefusal;
+            var artifactWord = TestChangeRequestSourceEligibility.ArtifactWord(review.Discipline);
+            var artifactNoun = TestChangeRequestSourceEligibility.ArtifactNoun(review.Discipline);
 
             ApprovedProcedureSelection? selectedProcedure = null;
-            if (request.Outcome == VerificationImpactOutcome.ProcedureCoverageConfirmed && request.ProcedureId is not null)
-                selectedProcedure = await service.FindApprovedProcedureAsync(item.ProjectId, request.ProcedureId.Value, ct);
+            var requestedArtifactId = request.ArtifactId ?? request.ProcedureId;
+            if (request.Outcome == VerificationImpactOutcome.ProcedureCoverageConfirmed && requestedArtifactId is not null)
+                selectedProcedure = await service.FindApprovedProcedureAsync(item.ProjectId, requestedArtifactId.Value, ct);
             if (request.Outcome == VerificationImpactOutcome.ProcedureCoverageConfirmed && selectedProcedure is null)
                 return Results.BadRequest(new
                 {
-                    error = "Coverage can only be confirmed against an approved procedure in this Project."
+                    error = $"Coverage can only be confirmed against an approved {artifactWord} in this Project."
                 });
 
             // A procedure can only be moved onto a requirement that is actually in this Project and still
@@ -1017,7 +1078,7 @@ public static class VerificationImpactEndpoints
             if (request.Outcome == VerificationImpactOutcome.ProcedureRetargeted)
             {
                 if (request.RetargetedRequirementRevisionId is null)
-                    return Results.BadRequest(new { error = "Moving a procedure requires the requirement revision it now covers." });
+                    return Results.BadRequest(new { error = $"Moving a {artifactNoun} requires the requirement revision it now covers." });
                 var reachable = await (from revision in db.RequirementRevisions.AsNoTracking()
                                        join artifact in db.Requirements.AsNoTracking() on revision.ArtifactId equals artifact.Id
                                        where revision.Id == request.RetargetedRequirementRevisionId
@@ -1027,7 +1088,7 @@ public static class VerificationImpactEndpoints
                 if (!reachable)
                     return Results.BadRequest(new
                     {
-                        error = "A procedure can only be moved onto an active requirement revision in this Project."
+                        error = $"A {artifactNoun} can only be moved onto an active requirement revision in this Project."
                     });
             }
 
@@ -1042,7 +1103,7 @@ public static class VerificationImpactEndpoints
                 if (review.AssignedEngineerId is null) review.Assign(actor, actor, now);
                 item.Resolve(actor, request.Outcome, request.Rationale, now,
                     selectedProcedure?.ProcedureId, selectedProcedure?.RevisionId,
-                    request.ProcedureChangeAction, request.PreReleaseEvidenceRequired,
+                    request.ArtifactChangeAction ?? request.ProcedureChangeAction, request.PreReleaseEvidenceRequired,
                     request.RetargetedRequirementRevisionId);
                 db.VerificationImpactDecisionHistory.Add(new VerificationImpactDecisionHistory(
                     item.Id, VerificationImpactHistoryAction.Resolved, item.Outcome,
@@ -1226,7 +1287,7 @@ public static class VerificationImpactEndpoints
                 // Authored with the case and saved with it, the way a change request is created together with
                 // the requirement changes it proposes. The domain refuses a decision that is not well formed,
                 // so a malformed one fails the whole create rather than leaving a half-written package behind.
-                foreach (var change in request.ProcedureChanges ?? [])
+                foreach (var change in request.ArtifactChanges ?? request.ProcedureChanges ?? [])
                     review.AddProcedureChange(actor, new TestProcedureChangeDraft(change.BaseNumber, change.Revision,
                         change.Level, change.Kind, change.Title, change.Objective, change.Preconditions,
                         change.Steps, change.ExpectedResult, change.Rationale,
@@ -1546,7 +1607,11 @@ public static class VerificationImpactEndpoints
                         fields = missingCaseFields
                     });
                 if (review.Outcome == TestChangeReviewOutcome.ChangeRequired && review.ProcedureChanges.Count == 0)
-                    return Results.BadRequest(new { error = $"{review.DisplayNumber} concluded that procedure work is required but names none. Add the procedure decisions it carries before sending it for review." });
+                    return Results.BadRequest(new
+                    {
+                        error = $"{review.DisplayNumber} concluded that {TestChangeRequestSourceEligibility.ArtifactNoun(review.Discipline)} work is required but names none. " +
+                            $"Add the {TestChangeRequestSourceEligibility.ArtifactNoun(review.Discipline)} decisions it carries before sending it for review."
+                    });
                 var allResolved = await db.VerificationImpactItems
                     .Where(x => x.TestChangeReviewId == id)
                     .AllAsync(x => x.State == VerificationImpactState.Resolved, ct);
@@ -1625,7 +1690,12 @@ public static class VerificationImpactEndpoints
                 var blockingProcedures = (await ArtifactClaims.ProcedureContendersAsync(db, review.ProjectId,
                     contendedProcedures, review.Id, ct)).Where(x => x.Holds).ToList();
                 if (blockingProcedures.Count > 0)
-                    return Results.BadRequest(new { error = ArtifactClaims.Refusal(blockingProcedures, "procedures"), code = "procedure_claimed" });
+                    return Results.BadRequest(new
+                    {
+                        error = ArtifactClaims.Refusal(blockingProcedures,
+                            TestChangeRequestSourceEligibility.ArtifactPlural(review.Discipline)),
+                        code = "procedure_claimed"
+                    });
 
                 var cycle = review.SubmitForReview(http.UserAccount().UserName, selections, allResolved, now,
                     workflow?.Mode ?? ReviewMode.Sequential, workflow, problemReportIds, impactDecisions);
@@ -2006,16 +2076,20 @@ public static class VerificationImpactEndpoints
                 x.DeclaredVerificationMethod,
                 x.RequirementChangeId,
                 x.RequirementRevisionId,
-                x.ProcedureId,
+                artifactId = x.ProcedureId,
+                procedureId = x.ProcedureId, // compatibility alias
                 x.AssignedEngineerId,
                 x.AssignedByLeadId,
                 x.AssignedAt,
                 outcome = x.Outcome?.ToString(),
-                procedureChangeAction = x.ProcedureChangeAction?.ToString(),
+                artifactChangeAction = x.ProcedureChangeAction?.ToString(),
+                procedureChangeAction = x.ProcedureChangeAction?.ToString(), // compatibility alias
                 x.PreReleaseEvidenceRequired,
-                x.ResolvedProcedureId,
-                x.ResolvedProcedureRevisionId,
-                resolvedProcedure = procedure is null ? null : new
+                resolvedArtifactId = x.ResolvedProcedureId,
+                resolvedArtifactRevisionId = x.ResolvedProcedureRevisionId,
+                resolvedProcedureId = x.ResolvedProcedureId, // compatibility alias
+                resolvedProcedureRevisionId = x.ResolvedProcedureRevisionId, // compatibility alias
+                resolvedArtifact = procedure is null ? null : new
                 {
                     id = procedure.ProcedureId,
                     revisionId = procedure.RevisionId,
@@ -2026,7 +2100,30 @@ public static class VerificationImpactEndpoints
                     procedure.TitleNote,
                     procedure.Level,
                     procedure.State,
-                    configuration = new { x.RequirementRevisionId, procedureRevisionId = procedure.RevisionId }
+                    configuration = new
+                    {
+                        x.RequirementRevisionId,
+                        artifactRevisionId = procedure.RevisionId,
+                        procedureRevisionId = procedure.RevisionId // compatibility alias
+                    }
+                },
+                resolvedProcedure = procedure is null ? null : new // compatibility alias
+                {
+                    id = procedure.ProcedureId,
+                    revisionId = procedure.RevisionId,
+                    procedure.DisplayNumber,
+                    procedure.Title,
+                    procedure.TitleIsExact,
+                    procedure.TitleIsLegacy,
+                    procedure.TitleNote,
+                    procedure.Level,
+                    procedure.State,
+                    configuration = new
+                    {
+                        x.RequirementRevisionId,
+                        artifactRevisionId = procedure.RevisionId,
+                        procedureRevisionId = procedure.RevisionId // compatibility alias
+                    }
                 },
                 x.ResolutionRationale,
                 x.ResolvedBy,
@@ -2043,8 +2140,10 @@ public static class VerificationImpactEndpoints
                     h.Id,
                     action = h.Action.ToString(),
                     outcome = h.Outcome?.ToString(),
-                    h.ProcedureId,
-                    h.ProcedureRevisionId,
+                    artifactId = h.ProcedureId,
+                    artifactRevisionId = h.ProcedureRevisionId,
+                    procedureId = h.ProcedureId, // compatibility alias
+                    procedureRevisionId = h.ProcedureRevisionId, // compatibility alias
                     h.Rationale,
                     actor = h.ActorId,
                     h.OccurredAt
@@ -2111,6 +2210,10 @@ public static class VerificationImpactEndpoints
             .Where(x => x.State != ReviewCycleState.Cancelled)
             .OrderByDescending(x => x.Sequence)
             .FirstOrDefault();
+
+    private static bool ArtifactRouteAllows(string artifactRoute, TestChangeReviewDiscipline discipline) =>
+        !artifactRoute.StartsWith("case-", StringComparison.OrdinalIgnoreCase)
+        || discipline != TestChangeReviewDiscipline.System;
 
     private static IReadOnlyList<Guid> DrivingRequirements(string json)
     {

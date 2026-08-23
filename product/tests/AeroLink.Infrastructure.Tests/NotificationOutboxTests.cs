@@ -420,6 +420,7 @@ public sealed class NotificationOutboxTests
     [InlineData("scr:abc", "/open/scr/abc")]
     [InlineData("swcr:abc", "/open/swcr/abc")]
     [InlineData("requirement:xyz", "/open/requirement/xyz")]
+    [InlineData("case:xyz", "/open/case/xyz")]
     [InlineData("verification-impact:1", "/system-verification")]
     [InlineData("problem-report:7", "/open/problem-report/7")]
     [InlineData("something-new:1", "/")]

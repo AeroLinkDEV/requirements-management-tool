@@ -327,7 +327,9 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
                     LadderSealActor ?? "system.persistence"));
         }
         foreach (var entry in ChangeTracker.Entries<TestProcedure>().Where(x => x.State == EntityState.Added))
-            candidates.Add((entry.Entity.ProjectId, "test-procedure", entry.Entity.BaseNumber,
+            candidates.Add((entry.Entity.ProjectId,
+                entry.Entity.ArtifactKind == VerificationArtifactKind.Case ? "test-case" : "test-procedure",
+                entry.Entity.BaseNumber,
                 entry.Entity.OwnerId));
         foreach (var entry in ChangeTracker.Entries<TestChangeReview>().Where(x => x.State == EntityState.Added))
             candidates.Add((entry.Entity.ProjectId, "test-change-review",
@@ -1720,10 +1722,19 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
             if (stored is null) entry.State = EntityState.Added;
         }
         foreach (var entry in ChangeTracker.Entries<ArtifactFieldDefinition>().Where(x => x.State == EntityState.Modified)) entry.State = EntityState.Added;
+        // As with RequirementChange below, an application-assigned key does not prove this active cycle is
+        // new. The verification identity migration legitimately updates the snapshot hash of an existing
+        // active cycle; blindly converting that modification into an insert collides with its own primary key
+        // and leaves startup permanently fail-closed. Ask the database before applying the append-only-child
+        // correction, so genuinely new cycles are still inserted and existing governed cycles stay updates.
         foreach (var cycle in ChangeTracker.Entries<ReviewCycle>().Where(x => x.State == EntityState.Modified && x.Entity.CompletedAt is null && x.Entity.Steps.All(s => s.State != ApprovalStepState.Approved)))
         {
-            cycle.State = EntityState.Added;
-            foreach (var step in cycle.Entity.Steps) Entry(step).State = EntityState.Added;
+            var stored = await cycle.GetDatabaseValuesAsync(cancellationToken);
+            if (stored is null)
+            {
+                cycle.State = EntityState.Added;
+                foreach (var step in cycle.Entity.Steps) Entry(step).State = EntityState.Added;
+            }
         }
         foreach (var entry in ChangeTracker.Entries<BaselineChangeRequestSelection>().Where(x => x.State == EntityState.Modified)) entry.State = EntityState.Added;
         foreach (var entry in ChangeTracker.Entries<BaselineEvent>().Where(x => x.State == EntityState.Modified)) entry.State = EntityState.Added;
@@ -1848,8 +1859,9 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
             if (!policies.TryGetValue(procedure.ProjectId, out var policyForProject))
                 throw new DomainException($"Project {procedure.ProjectId} has no persisted ladder configuration.");
             if (SameLevel(policyForProject, procedure.Level, requirement.Level)) continue;
+            var artifactNoun = procedure.Level == TestProcedureLevel.System ? "test procedure" : "test case";
             throw new DomainException(
-                $"{procedure.BaseNumber} is a {procedure.Level} test procedure and cannot verify {requirement.BaseNumber}, which is a {requirement.Level} requirement. A test procedure covers requirements at its own level.");
+                $"{procedure.BaseNumber} is a {procedure.Level} {artifactNoun} and cannot verify {requirement.BaseNumber}, which is a {requirement.Level} requirement. A {artifactNoun} covers requirements at its own level.");
         }
     }
 

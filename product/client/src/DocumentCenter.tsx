@@ -1,6 +1,6 @@
 import DocumentActions from "./DocumentActions";
 import type { Discipline } from "./routing";
-import { documentTypeLabel, type DocumentTarget } from "./presentation";
+import { documentTypeLabel, procedureTargetsFor, type DocumentTarget } from "./presentation";
 
 type Props = {
   api: string;
@@ -20,10 +20,7 @@ const targets = (discipline: Discipline): DocumentTarget[] => {
     ];
   if (discipline === "systemTest")
     return [{ type: "SystemTestProcedures", label: documentTypeLabel("SystemTestProcedures") }];
-  return [
-    { type: "HighLevelTestProcedures", label: documentTypeLabel("HighLevelTestProcedures") },
-    { type: "LowLevelTestProcedures", label: documentTypeLabel("LowLevelTestProcedures") },
-  ];
+  return procedureTargetsFor("Software");
 };
 
 export default function DocumentCenter({ api, projectId, release, discipline, onBack }: Props) {
@@ -58,7 +55,7 @@ export default function DocumentCenter({ api, projectId, release, discipline, on
           <h3>Traceability documentation</h3>
           <p>
             Traceability matrices remain generated from the selected software build’s exact requirement and
-            procedure relationships. Open Digital Thread to choose the focused matrix and output format.
+            verification relationships. Open Digital Thread to choose the focused matrix and output format.
           </p>
         </section>
       )}

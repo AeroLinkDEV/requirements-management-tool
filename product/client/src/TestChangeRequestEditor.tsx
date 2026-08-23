@@ -6,6 +6,7 @@ import { fromPlainText, toPlainText } from './richContentModel'
 import ControlledProcedureEditor from './ControlledProcedureEditor'
 import { apiRequest, operationError } from './apiClient'
 import type { TestDiscipline } from './TestResultsWorkspace'
+import { verificationArtifactNoun, verificationArtifactWord } from './presentation'
 import './ChangeRequestEditor.css'
 
 /**
@@ -104,6 +105,8 @@ export default function TestChangeRequestEditor({
 }) {
   const label = labelFor(discipline)
   const acronym = acronymFor(discipline)
+  const artifactWord = verificationArtifactWord(discipline)
+  const artifactNoun = verificationArtifactNoun(discipline)
 
   const [title, setTitle] = useState('')
   const [problemRich, setProblemRich] = useState(fromPlainText(''))
@@ -209,7 +212,7 @@ export default function TestChangeRequestEditor({
             problemRich,
             analysisRich,
             solutionRich,
-            procedureChanges: procedureChanges.map(draft => ({
+            artifactChanges: procedureChanges.map(draft => ({
               baseNumber: draft.baseNumber.trim(),
               revision: draft.revision,
               level: levelFor(discipline),
@@ -239,7 +242,7 @@ export default function TestChangeRequestEditor({
         <div>
           <p className="eyebrow">VERIFICATION CHANGE CONTROL / NEW {acronym}</p>
           <h1>Create {label} Test Change Request</h1>
-          <p>Build the engineering case and name the procedure work for Build {releaseVersion}.</p>
+          <p>Build the engineering case and name the {artifactWord} work for Build {releaseVersion}.</p>
         </div>
         <span className="draftChip">DRAFT</span>
       </header>
@@ -252,7 +255,7 @@ export default function TestChangeRequestEditor({
           <span>1</span><b>Change case</b><small>{caseComplete ? 'Complete' : 'In progress'}</small>
         </a>
         <a href="#procedure-changes" className={procedureChanges.length && proposalsComplete ? 'complete' : caseComplete ? 'active' : ''}>
-          <span>2</span><b>Procedure changes</b>
+          <span>2</span><b>{artifactNoun} changes</b>
           <small>{procedureChanges.length
             ? `${procedureChanges.length} proposal${procedureChanges.length === 1 ? '' : 's'}`
             : '0 proposals'}</small>
@@ -307,7 +310,7 @@ export default function TestChangeRequestEditor({
             <legend>Approved {label} changes this package answers for</legend>
             {choices.length === 0
               ? <p className="drawerEmpty">
-                  No approved {label} change requests in this build. A {label} procedure verifies {label}{' '}
+                  No approved {label} change requests in this build. A {label} {artifactNoun.toLowerCase()} verifies {label}{' '}
                   requirements, so only {label} changes can drive this package — changes at other levels are
                   not offered.
                 </p>
@@ -337,8 +340,8 @@ export default function TestChangeRequestEditor({
           <div className="sectionTitle">
             <span>02</span>
             <div>
-              <h2>Procedure changes</h2>
-              <p>Which {label} test procedures this package introduces, modifies or retires</p>
+              <h2>{artifactNoun} changes</h2>
+              <p>Which {label} {artifactWord}s this package introduces, modifies or retires</p>
             </div>
             <i className={procedureChanges.length && proposalsComplete ? 'stageState complete' : 'stageState'}>
               {procedureChanges.length ? (proposalsComplete ? 'Complete' : 'Needs content') : 'Optional'}
@@ -347,22 +350,22 @@ export default function TestChangeRequestEditor({
 
           <p className="stageHelp">
             Written here and saved with the package, the way a change request is created together with the
-            requirement changes it proposes. A package may also be raised with none and its procedure work
+            requirement changes it proposes. A package may also be raised with none and its {artifactWord} work
             written afterwards.
           </p>
           {/* The three acts a package can propose, offered as three buttons, exactly as the requirements
               editor offers them. One button labelled "add a procedure decision" made the reader choose the
               act from a dropdown after committing to a card. */}
-          <div className="proposalActions" aria-label="Add procedure proposal">
+          <div className="proposalActions" aria-label={`Add ${artifactNoun.toLowerCase()} proposal`}>
             <span>Add a focused proposal:</span>
-            <button type="button" onClick={() => addProposal("Introduce")}>+ Introduce {label} test procedure</button>
+            <button type="button" onClick={() => addProposal("Introduce")}>+ Introduce {label} {artifactWord}</button>
             <button type="button" onClick={() => addProposal("Modify")}>Modify existing</button>
             <button type="button" onClick={() => addProposal("Retire")}>Retire existing</button>
             {/* The common case, one click instead of a hunt: the procedures that already verify what the
                 selected changes touched, brought in as Modify proposals to re-align. */}
             {selected.length > 0 && (
               <button type="button" className="suggestCoverage" onClick={() => void suggestCoverage()}>
-                Add the procedures these changes affect
+                Add the {artifactNoun.toLowerCase()}s these changes affect
               </button>
             )}
           </div>

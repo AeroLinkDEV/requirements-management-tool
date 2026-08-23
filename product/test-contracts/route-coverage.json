@@ -96,9 +96,33 @@
     },
     {
       "method": "DELETE",
-      "path": "/api/releases/{releaseId:guid}/test-sets/{discipline}/procedures/{procedureRevisionId:guid}",
+      "path": "/api/releases/{releaseId:guid}/test-sets/{discipline}/cases/{artifactRevisionId:guid}",
+      "file": "BuildTestSetEndpoints.cs",
+      "coveredBy": [
+        "BuildTestSetApiTests"
+      ]
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/releases/{releaseId:guid}/test-sets/{discipline}/procedures/{artifactRevisionId:guid}",
       "file": "BuildTestSetEndpoints.cs",
       "coveredBy": []
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/test-cases/views/{id:guid}",
+      "file": "VerificationEndpoints.cs",
+      "coveredBy": [
+        "ProcedureSavedViewApiTests"
+      ]
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/test-change-reviews/{id:guid}/case-changes/{changeId:guid}",
+      "file": "VerificationImpactEndpoints.cs",
+      "coveredBy": [
+        "ManualTestChangeRequestApiTests"
+      ]
     },
     {
       "method": "DELETE",
@@ -1752,6 +1776,14 @@
     },
     {
       "method": "POST",
+      "path": "/api/releases/{releaseId:guid}/test-sets/{discipline}/cases",
+      "file": "BuildTestSetEndpoints.cs",
+      "coveredBy": [
+        "BuildTestSetApiTests"
+      ]
+    },
+    {
+      "method": "POST",
       "path": "/api/releases/{releaseId:guid}/test-sets/{discipline}/procedures",
       "file": "BuildTestSetEndpoints.cs",
       "coveredBy": []
@@ -1864,6 +1896,22 @@
     },
     {
       "method": "POST",
+      "path": "/api/test-cases/{id:guid}/comments",
+      "file": "VerificationEndpoints.cs",
+      "coveredBy": [
+        "ProcedureDiscussionApiTests"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/test-cases/views",
+      "file": "VerificationEndpoints.cs",
+      "coveredBy": [
+        "ProcedureSavedViewApiTests"
+      ]
+    },
+    {
+      "method": "POST",
       "path": "/api/test-change-reviews/{id:guid}/approve",
       "file": "VerificationImpactEndpoints.cs",
       "coveredBy": [
@@ -1888,6 +1936,14 @@
         "ManualTestChangeRequestApiTests",
         "TestChangeRequestReviewWorkflowTests",
         "TestProcedureAuthoringApiTests"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/test-change-reviews/{id:guid}/case-changes",
+      "file": "VerificationImpactEndpoints.cs",
+      "coveredBy": [
+        "ManualTestChangeRequestApiTests"
       ]
     },
     {
@@ -2192,6 +2248,14 @@
       "file": "ReleaseCampaignEndpoints.cs",
       "coveredBy": [
         "SecurityBoundaryTests"
+      ]
+    },
+    {
+      "method": "PUT",
+      "path": "/api/test-cases/views/{id:guid}",
+      "file": "VerificationEndpoints.cs",
+      "coveredBy": [
+        "ProcedureSavedViewApiTests"
       ]
     },
     {

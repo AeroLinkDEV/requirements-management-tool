@@ -21,6 +21,20 @@ export const normalisePath = (path) =>
 export const routeKey = (method, path) => `${method} ${normalisePath(path)}`
 
 /**
+ * A constrained route parameter can intentionally register a small set of literal public aliases, such as
+ * `{artifactRoute:regex(procedures|cases)}`. Treating that segment as an ordinary parameter collapses two
+ * observable routes into `/test-{}` and prevents a test of either alias from proving boundary coverage.
+ * Expand only the deliberately narrow literal-alternative form; arbitrary route regexes remain parameters.
+ */
+function expandLiteralRegexAliases(path) {
+  const match = path.match(/\{[^{}:]+:regex\(((?:[A-Za-z0-9-]+\|)+[A-Za-z0-9-]+)\)\}/)
+  if (!match) return [path]
+  return match[1].split('|').flatMap((alternative) =>
+    expandLiteralRegexAliases(path.slice(0, match.index) + alternative + path.slice(match.index + match[0].length)),
+  )
+}
+
+/**
  * Reads route declarations out of the endpoint sources.
  *
  * Paths written inside a `MapGroup` are group-relative even though they begin with `/`, so the group prefix
@@ -44,7 +58,8 @@ export function extractRoutes(apiDirectory) {
       const path = prefix
         ? prefix + (declared ? `/${declared.replace(/^\//, '')}` : '')
         : declared.startsWith('/') ? declared : `/${declared}`
-      routes.push({ method, path, file, key: routeKey(method, path) })
+      for (const expanded of expandLiteralRegexAliases(path))
+        routes.push({ method, path: expanded, file, key: routeKey(method, expanded) })
     }
   }
   // One entry per distinct route; the same handler registered twice is one surface to cover.

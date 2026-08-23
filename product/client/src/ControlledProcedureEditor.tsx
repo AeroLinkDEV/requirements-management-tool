@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { stateLabel } from './presentation'
+import { stateLabel, verificationArtifactApiRoot, verificationArtifactNoun, verificationArtifactWord } from './presentation'
 import './ControlledRequirementEditor.css'
 
 /**
@@ -67,6 +67,9 @@ export default function ControlledProcedureEditor({
   const [results, setResults] = useState<ExistingProcedure[]>([])
   const [lookupBusy, setLookupBusy] = useState(false)
   const [lookupError, setLookupError] = useState('')
+  const artifactWord = verificationArtifactWord(scope)
+  const artifactNoun = verificationArtifactNoun(scope)
+  const artifactApiRoot = verificationArtifactApiRoot(scope)
 
   // An Introduce proposal has no existing identity to find, and a proposal that has already locked one is
   // not looking for another.
@@ -80,7 +83,7 @@ export default function ControlledProcedureEditor({
     setLookupBusy(true)
     // Debounced, so typing an identifier does not fire a request per keystroke.
     const timer = window.setTimeout(() => {
-      fetch(`${api}/api/test-procedures?projectId=${projectId}&releaseId=${releaseId}&scope=${scope}` +
+      fetch(`${api}${artifactApiRoot}?projectId=${projectId}&releaseId=${releaseId}&scope=${scope}` +
         `&search=${encodeURIComponent(term)}&page=1&pageSize=8`)
         .then(response => response.ok ? response.json() : Promise.reject(new Error(String(response.status))))
         .then((body: { items: ExistingProcedure[] }) => {
@@ -88,11 +91,11 @@ export default function ControlledProcedureEditor({
           setResults(body.items ?? [])
           setLookupError('')
         })
-        .catch(() => { if (!cancelled) { setResults([]); setLookupError('The controlled procedure library could not be searched.') } })
+        .catch(() => { if (!cancelled) { setResults([]); setLookupError(`The controlled ${artifactNoun.toLowerCase()} library could not be searched.`) } })
         .finally(() => { if (!cancelled) setLookupBusy(false) })
     }, 180)
     return () => { cancelled = true; window.clearTimeout(timer) }
-  }, [api, item.kind, projectId, query, releaseId, scope])
+  }, [api, artifactApiRoot, artifactNoun, item.kind, projectId, query, releaseId, scope])
 
   const selectExisting = (selected: ExistingProcedure) => {
     onChange('baseNumber', baseNumberOf(selected.displayNumber))
@@ -108,10 +111,10 @@ export default function ControlledProcedureEditor({
   }
 
   const displayNumber = useMemo(() => item.kind === 'Introduce'
-    ? `New ${levelLabel} test procedure`
+    ? `New ${levelLabel} ${artifactWord}`
     : item.baseNumber
       ? `${item.baseNumber}.${String(item.revision).padStart(2, '0')}`
-      : 'Select an existing controlled procedure', [item.baseNumber, item.kind, item.revision, levelLabel])
+      : `Select an existing controlled ${artifactNoun.toLowerCase()}`, [artifactNoun, item.baseNumber, item.kind, item.revision, levelLabel, artifactWord])
 
   return (
     <article className={`controlledEditor ${identityLocked ? 'identityLocked' : 'identityPending'}`}
@@ -129,28 +132,28 @@ export default function ControlledProcedureEditor({
       </header>
 
       {!identityLocked && item.kind !== 'Introduce' && (
-        <section className="proposalLookup" aria-label={`Select procedure for proposal ${index + 1}`}>
+        <section className="proposalLookup" aria-label={`Select ${artifactNoun.toLowerCase()} for proposal ${index + 1}`}>
           <div>
-            <b>{item.kind === 'Modify' ? 'Select the procedure to modify' : 'Select the procedure to retire'}</b>
-            <span>
-              Search by procedure identifier or words in its title. AeroLink will lock the exact identity and
+              <b>{item.kind === 'Modify' ? `Select the ${artifactNoun.toLowerCase()} to modify` : `Select the ${artifactNoun.toLowerCase()} to retire`}</b>
+              <span>
+                Search by {artifactNoun.toLowerCase()} identifier or words in its title. AeroLink will lock the exact identity and
               next revision.
             </span>
           </div>
           <label>
-            Find controlled procedure
+            Find controlled {artifactNoun.toLowerCase()}
             <input
-              aria-label={`Find controlled procedure ${index + 1}`}
+              aria-label={`Find controlled ${artifactNoun.toLowerCase()} ${index + 1}`}
               value={query}
               onChange={event => setQuery(event.target.value)}
-              placeholder="Search identifier or procedure title"
+              placeholder={`Search identifier or ${artifactNoun.toLowerCase()} title`}
               autoComplete="off"
             />
           </label>
           {lookupBusy && <small className="lookupStatus">Searching…</small>}
           {lookupError && <small className="lookupStatus error">{lookupError}</small>}
           {!lookupBusy && query.trim().length >= 2 && !results.length && !lookupError && (
-            <small className="lookupStatus">No permitted procedures match that identifier or title.</small>
+            <small className="lookupStatus">No permitted {artifactNoun.toLowerCase()}s match that identifier or title.</small>
           )}
           {!!results.length && (
             <div className="proposalLookupResults">
@@ -195,17 +198,17 @@ export default function ControlledProcedureEditor({
               onChange('baseNumber', '')
               onChange('revision', 0)
             }}>
-            {kindOptions.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
+            {kindOptions.map(option => <option key={option.value} value={option.value}>{option.label.replace(/procedure/gi, artifactNoun.toLowerCase())}</option>)}
           </select>
         </label>
       </div>
 
       {item.kind === 'Introduce' && (
         <label className="proposalField">
-          Procedure number
-          <input aria-label={`Procedure number ${index + 1}`} value={item.baseNumber}
+          {artifactNoun} number
+          <input aria-label={`${artifactNoun} number ${index + 1}`} value={item.baseNumber}
             onChange={event => onChange('baseNumber', event.target.value)}
-            placeholder="The controlled number this procedure will carry" />
+            placeholder={`The controlled number this ${artifactNoun.toLowerCase()} will carry`} />
         </label>
       )}
 
@@ -220,7 +223,7 @@ export default function ControlledProcedureEditor({
             Objective
             <textarea aria-label={`Objective ${index + 1}`} value={item.objective}
               onChange={event => onChange('objective', event.target.value)}
-              placeholder="What this procedure sets out to demonstrate" />
+              placeholder={`What this ${artifactNoun.toLowerCase()} sets out to demonstrate`} />
           </label>
           <label className="proposalField">
             Preconditions
@@ -248,7 +251,7 @@ export default function ControlledProcedureEditor({
         <textarea aria-label={`Rationale ${index + 1}`} value={item.rationale}
           onChange={event => onChange('rationale', event.target.value)}
           placeholder={item.kind === 'Retire'
-            ? 'Why this procedure is being withdrawn'
+            ? `Why this ${artifactNoun.toLowerCase()} is being withdrawn`
             : 'Why this change is necessary'} />
       </label>
     </article>

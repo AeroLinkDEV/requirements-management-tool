@@ -25,6 +25,10 @@ public enum ReviewSubject
     SystemTest,
     HighLevelSoftwareTest,
     LowLevelSoftwareTest,
+    /// <summary>Current high-level software Case reviews. The older Test value remains readable history.</summary>
+    HighLevelSoftwareCase,
+    /// <summary>Current low-level software Case reviews. The older Test value remains readable history.</summary>
+    LowLevelSoftwareCase,
 }
 
 /// <summary>

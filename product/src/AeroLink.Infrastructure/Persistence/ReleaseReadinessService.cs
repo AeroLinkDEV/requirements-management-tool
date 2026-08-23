@@ -185,7 +185,7 @@ public sealed class ReleaseReadinessService(AeroLinkDbContext db, ILadderPolicy?
             new("change_control","Change requests integrated",!changeControlConfigured || (requests.Count > 0 && integrated == requests.Count),integrated,requests.Count,$"{requests.Count-integrated} non-deferred change request records remain outside the candidate baseline.","Approve and select every included change, or formally defer it."),
             new("impact_disposition","Impact analysis dispositioned",!changeControlConfigured || (impacts.Count > 0 && disposed == impacts.Count),disposed,impacts.Count,$"{impacts.Count-disposed} impact findings remain pending.","Disposition requirement, trace, verification, and document impacts."),
             new("baseline","Requirement baseline materialized",baseline.State is CandidateBaselineState.Frozen or CandidateBaselineState.Released && baseline.RequirementsMaterializedAt is not null,baseline.RequirementsMaterializedAt is null?0:1,1,"The release needs an exact frozen and materialized requirement set.","Freeze the candidate and materialize its requirements."),
-            new("verification_impact","Verification impact decided",impactDecided == verificationImpacts.Count,impactDecided,verificationImpacts.Count,undecided.Count==0?"Every new, modified, and orphaned requirement in this release has a recorded verification decision.":$"{undecided.Count} changed requirement(s) await a verification decision: {string.Join(", ",undecided.Take(3).Select(x=>x.SubjectDisplayNumber))}.","Assign each item to a test engineer, then record an approved procedure or a confirmation that no test is required."),
+            new("verification_impact","Verification impact decided",impactDecided == verificationImpacts.Count,impactDecided,verificationImpacts.Count,undecided.Count==0?"Every new, modified, and orphaned requirement in this release has a recorded verification decision.":$"{undecided.Count} changed requirement(s) await a verification decision: {string.Join(", ",undecided.Take(3).Select(x=>x.SubjectDisplayNumber))}.","Assign each item to a test engineer, then record an approved verification artifact or a confirmation that no test is required."),
             new("test_change_reviews","Test change requests approved",
                 configuredDisciplines.Count == 0 || (testChangeReviews.Count > 0 && approvedTestChangeReviews == testChangeReviews.Count),
                 approvedTestChangeReviews,testChangeReviews.Count,
@@ -194,7 +194,7 @@ public sealed class ReleaseReadinessService(AeroLinkDbContext db, ILadderPolicy?
                     : testChangeReviews.Count == 0
                     ? "No controlled test change requests have been raised for this software build."
                     : $"{testChangeReviews.Count-approvedTestChangeReviews} System, HLR, or LLR test change request(s) still require approval.",
-                "Complete every procedure decision, submit each discipline review, and record test-lead approval."),
+                "Complete every verification artifact decision, submit each discipline review, and record test-lead approval."),
             baselineMaterialized
                 ? new("traceability","Trace network complete",members.Count > 0 && tracedDerivedIds.Count == derivedIds.Count && suspectTraceCount == 0,tracedDerivedIds.Count,derivedIds.Count + suspectTraceCount,
                     members.Count == 0
@@ -209,10 +209,10 @@ public sealed class ReleaseReadinessService(AeroLinkDbContext db, ILadderPolicy?
                 ? new("coverage","Requirement coverage complete",coverageMembers.Count == 0 || coveredIds.Count == coverageMembers.Count,coveredIds.Count,coverageMembers.Count,
                     coverageMembers.Count == 0
                         ? "The effective ladder declares no verification-capable requirement levels, so no coverage is owed."
-                        : $"{coverageMembers.Count-coveredIds.Count} effective verification requirement revisions have no settled coverage. A link counts only when it is not suspect, names an approved procedure revision, and that procedure has no revision still in draft or review.",
+                        : $"{coverageMembers.Count-coveredIds.Count} effective verification requirement revisions have no settled coverage. A link counts only when it is not suspect, names an approved verification artifact revision, and that artifact has no revision still in draft or review.",
                     coverageMembers.Count == 0
                         ? "No action is required: coverage is not applicable to the configured requirement levels."
-                        : "Approve every procedure being changed, then confirm the coverage each changed requirement needs.")
+                        : "Approve every verification artifact being changed, then confirm the coverage each changed requirement needs.")
                 : WaitingForMaterializedBaseline("coverage", "Requirement coverage complete"),
             baselineMaterialized
                 ? new("code_traceability", "Code traceability complete", mappedCode == requiredCode.Count, mappedCode, requiredCode.Count,
@@ -229,12 +229,12 @@ public sealed class ReleaseReadinessService(AeroLinkDbContext db, ILadderPolicy?
                     selectedPassed,selectedRevisionIds.Count,
                     selectedRevisionIds.Count == 0
                         ? (nothingToTest
-                            ? "This build changed nothing that needs testing, so no procedures were selected."
-                            : "No procedures have been selected for this build yet.")
-                        : $"{selectedRevisionIds.Count-selectedPassed} procedure(s) in the selected test set lack a latest Pass.",
+                            ? "This build changed nothing that needs testing, so no verification artifacts were selected."
+                            : "No verification artifacts have been selected for this build yet.")
+                        : $"{selectedRevisionIds.Count-selectedPassed} verification artifact(s) in the selected test set lack a latest Pass.",
                     selectedRevisionIds.Count == 0
-                        ? "Choose the procedures this build must run — those covering what changed, and any area worth re-exercising."
-                        : "Record a determination for every procedure in the set. Testing beyond it continues after release.")
+                        ? "Choose the verification artifacts this build must run — those covering what changed, and any area worth re-exercising."
+                        : "Record a determination for every verification artifact in the set. Testing beyond it continues after release.")
                 : WaitingForMaterializedBaseline("verification", "Selected test set has results"),
             baselineMaterialized
                 ? new("evidence","Selected test set results carry evidence",
@@ -243,7 +243,7 @@ public sealed class ReleaseReadinessService(AeroLinkDbContext db, ILadderPolicy?
                     selectedRevisionIds.Count == 0
                         ? (nothingToTest
                             ? "This build changed nothing that needs testing, so no evidence is owed."
-                            : "No procedures have been selected for this build yet.")
+                            : "No verification artifacts have been selected for this build yet.")
                         : $"{selectedRevisionIds.Count-selectedEvidenced} result(s) in the selected test set lack checksummed evidence.",
                     "Attach the evidence package for every result in the selected test set.")
                 : WaitingForMaterializedBaseline("evidence", "Selected test set results carry evidence"),

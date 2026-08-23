@@ -11,6 +11,7 @@ import { isControlledTestChangeRequest, reviewsVisibleInCurrentRelease, successo
 import type { TestDiscipline } from './TestResultsWorkspace'
 import { LadderCapability, ladderAllows } from './projectLadder'
 import type { ProjectLadderProjection } from './projectLadder'
+import { verificationArtifactApiRoot, verificationArtifactChangeSegment, verificationArtifactWord } from './presentation'
 import './DownstreamAssessmentQueue.css'
 import './HistoryExplorer.css'
 import './TestingCoverageWorkspace.css'
@@ -24,7 +25,7 @@ type CoverageItem = {
   covered: boolean
   verified: boolean
   disposition: 'Covered' | 'Suspect' | 'Uncovered'
-  coveredBy: { procedureId: string; revisionId: string; displayNumber: string; title: string; state: string; coverageState: 'Confirmed' | 'Suspect' }[]
+  coveredBy: { artifactId: string; procedureId?: string; revisionId: string; displayNumber: string; title: string; state: string; coverageState: 'Confirmed' | 'Suspect' }[]
 }
 type Coverage = { total: number; covered: number; suspect: number; verified: number; uncovered: number; items: CoverageItem[] }
 type ChangeRequestCover = { id: string; number: string; title: string; originating: boolean }
@@ -36,7 +37,10 @@ type TestChangeRequest = {
   analysis?: string
   solution?: string
   caseContractVersion: number
-  procedureDecisionCount: number
+  artifactKind?: string
+  artifactLabel?: string
+  artifactDecisionCount?: number
+  procedureDecisionCount?: number
   discipline: string
   state: string
   supersededByTestChangeRequestId?: string
@@ -83,8 +87,10 @@ type ImpactItem = {
   assignedEngineerId?: string
   outcome?: string
   resolutionRationale: string
-  resolvedProcedure?: { id:string; revisionId:string; displayNumber:string; title:string; state:string }
+  resolvedArtifact?: { id:string; revisionId:string; displayNumber:string; title:string; state:string }
   holdsRelease?: boolean
+  artifactChangeAction?: string
+  procedureChangeAction?: string
   decisionHistory: { id: string; action: string; outcome?: string; rationale: string; actor: string; occurredAt: string }[]
 }
 
@@ -102,6 +108,7 @@ const missingCaseFields = (request: TestChangeRequest) => [
 ].filter(([, value]) => !value?.trim()).map(([name]) => name)
 const tcrNewLabel = (discipline: TestDiscipline) =>
   discipline === 'System' ? 'System' : discipline === 'HighLevelSoftware' ? 'HLR' : 'LLR'
+const artifactWord = (discipline: TestDiscipline) => verificationArtifactWord(discipline === 'System' ? 'System' : discipline === 'HighLevelSoftware' ? 'HighLevel' : 'LowLevel')
 
 /**
  * Whether the test assessment has been done, and what it concluded.
@@ -139,12 +146,12 @@ const testAssessmentStatus = (request: TestChangeRequest, discipline: TestDiscip
  * Until the target build materializes its requirements there is no revision to look coverage up against;
  * that is stated rather than rendered as "no procedure", which would read as a finding.
  */
-function ExistingCoverage({ item, coverage }: { item: ImpactItem; coverage?: Coverage }) {
+function ExistingCoverage({ item, coverage, artifactWord }: { item: ImpactItem; coverage?: Coverage; artifactWord: string }) {
   if (!item.requirementRevisionId)
     return <span className="existingCoverage pending">Existing coverage is known once this build materializes its requirements.</span>
   const row = coverage?.items.find(x => x.revisionId === item.requirementRevisionId)
   if (!row || !row.coveredBy.length)
-    return <span className="existingCoverage none">No approved procedure covers this requirement yet.</span>
+    return <span className="existingCoverage none">No approved {artifactWord} covers this requirement yet.</span>
   const suspect = row.coveredBy.filter(x => x.coverageState === 'Suspect')
   const confirmed = row.coveredBy.filter(x => x.coverageState === 'Confirmed')
   return <span className={`existingCoverage ${suspect.length ? 'suspect' : 'covered'}`}>
@@ -264,6 +271,8 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, re
   const procedureTicket = useRef(0)
   const requirementTicket = useRef(0)
   const scope = discipline
+  const currentArtifactWord = artifactWord(discipline)
+  const artifactApiRoot = verificationArtifactApiRoot(discipline)
 
   const load = useCallback(async () => {
     const mine = ++loadTicket.current
@@ -351,14 +360,14 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, re
     // Hydrate both the already-recorded resolved procedure and the current unsaved choice: an unsaved
     // selection must remain represented by an option in the DOM even when search or paging would otherwise
     // exclude it, so the resolve mutation never reads a procedureId with no matching option.
-    const hydrated = [...new Set([resolving?.resolvedProcedure?.id, procedureChoice].filter(Boolean))]
+    const hydrated = [...new Set([resolving?.resolvedArtifact?.id, procedureChoice].filter(Boolean))]
     if (hydrated.length) params.set('ids', hydrated.join(','))
     void (async () => {
       try {
-        const response = await fetch(`${api}/api/test-procedures?${params}`)
+        const response = await fetch(`${api}${artifactApiRoot}?${params}`)
         if (!response.ok) {
           if (mine === procedureTicket.current) {
-            setProcedureError('The approved procedures for this build could not be loaded. Try searching again.')
+            setProcedureError(`The approved ${currentArtifactWord}s for this build could not be loaded. Try searching again.`)
           }
           return
         }
@@ -367,11 +376,11 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, re
         setProcedurePicker(paged); setProcedureError('')
       } catch {
         if (mine === procedureTicket.current) {
-          setProcedureError('The approved procedures for this build could not be loaded. Try searching again.')
+          setProcedureError(`The approved ${currentArtifactWord}s for this build could not be loaded. Try searching again.`)
         }
       }
     })()
-  }, [api, projectId, releaseId, scope, revision, procedureQuery, procedurePage, resolving?.resolvedProcedure?.id, procedureChoice])
+  }, [api, artifactApiRoot, currentArtifactWord, projectId, releaseId, scope, revision, procedureQuery, procedurePage, resolving?.resolvedArtifact?.id, procedureChoice])
 
   // The requirements a new procedure can be written against — read from the effective baseline rather than
   // from the coverage list, bounded, server-searched and paged with totals. The exact requirement a decision
@@ -406,7 +415,7 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, re
   }, [api, projectId, scope, creating, effectiveBaseline, requirementQuery, requirementPage])
 
   const procedureSummary = pickerSummary(
-    'approved procedure', procedureQuery, procedurePicker?.totalCount ?? 0,
+    `approved ${currentArtifactWord.toLowerCase()}`, procedureQuery, procedurePicker?.totalCount ?? 0,
     procedureChoice ? 1 : 0)
   const requirementSummary = pickerSummary(
     'requirement', requirementQuery, requirementPicker?.totalCount ?? 0,
@@ -464,8 +473,8 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, re
       body: JSON.stringify({
         outcome: chosen,
         rationale: form.get('rationale'),
-        procedureId: chosen === 'ProcedureCoverageConfirmed' ? String(form.get('procedureId') || '') || null : null,
-        procedureChangeAction: chosen === 'NoTestRequired' ? 'NoTestRequired' : form.get('procedureChangeAction') || null,
+        artifactId: chosen === 'ProcedureCoverageConfirmed' ? String(form.get('artifactId') || '') || null : null,
+        artifactChangeAction: chosen === 'NoTestRequired' ? 'NoTestRequired' : form.get('artifactChangeAction') || null,
         retargetedRequirementRevisionId: chosen === 'ProcedureRetargeted' ? String(form.get('retargeted') || '') || null : null,
       }),
     })
@@ -498,7 +507,7 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, re
   }, 'The package could not be moved on.')
 
   const workflowSubject = discipline === 'System' ? 'SystemTest'
-    : discipline === 'HighLevelSoftware' ? 'HighLevelSoftwareTest' : 'LowLevelSoftwareTest'
+    : discipline === 'HighLevelSoftware' ? 'HighLevelSoftwareCase' : 'LowLevelSoftwareCase'
   useEffect(() => {
     if (!submitting) return
     let active = true
@@ -508,7 +517,7 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, re
     setWorkflowError(null)
     fetch(`${api}/api/review-workflows/applicable?projectId=${projectId}&type=${workflowSubject}`)
       .then(async response => {
-        if (!response.ok) throw new Error('The recorded review procedure could not be loaded.')
+        if (!response.ok) throw new Error(`The recorded ${currentArtifactWord} review could not be loaded.`)
         return response.json()
       })
       .then((value: {
@@ -528,10 +537,10 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, re
         })
       })
       .catch(() => {
-        if (active) setWorkflowError('The recorded review procedure could not be loaded. Retry before submitting this package.')
+        if (active) setWorkflowError(`The recorded ${currentArtifactWord} review could not be loaded. Retry before submitting this package.`)
       })
     return () => { active = false }
-  }, [api, projectId, submitting, workflowSubject, workflowReload])
+  }, [api, projectId, submitting, workflowSubject, workflowReload, currentArtifactWord])
 
   const linkReports = (request: TestChangeRequest) => act(async () => {
     await apiRequest(`${api}/api/test-change-reviews/${request.id}/problem-reports`, {
@@ -555,11 +564,11 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, re
     // The selection is state, not the form: options on other pages of the searchable picker are not in the
     // DOM, and a selection made on one page must survive paging to another and back.
     const requirementRevisionIds = requirementSelection
-    if (!requirementRevisionIds.length) { setCreateError('A procedure has to say which requirements it verifies.'); return }
+    if (!requirementRevisionIds.length) { setCreateError(`A ${currentArtifactWord} has to say which requirements it verifies.`); return }
     if (!authoringReviewId) { setCreateError('This proposal has no test change request to belong to.'); return }
     setBusy(true); setCreateError(''); setError(''); setSaved('')
     try {
-      await apiRequest(`${api}/api/test-change-reviews/${authoringReviewId}/procedure-changes`, {
+      await apiRequest(`${api}/api/test-change-reviews/${authoringReviewId}/${verificationArtifactChangeSegment(discipline)}`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           kind: 'Introduce',
@@ -582,7 +591,7 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, re
       setRevision(current => current + 1)
     } catch (problem) {
       recordClientOperationFailure('verification.procedure.propose', problem)
-      setCreateError(operationError(problem, 'The procedure change could not be proposed.'))
+      setCreateError(operationError(problem, `The ${currentArtifactWord} change could not be proposed.`))
     } finally { setBusy(false) }
   }
 
@@ -609,12 +618,12 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, re
           {ladderAllows(ladder, 'HighLevel', LadderCapability.Verification) && <button type="button" role="tab" aria-selected={discipline === 'HighLevelSoftware'}
             aria-current={discipline === 'HighLevelSoftware' ? 'page' : undefined}
             onClick={() => onLevelChange('HighLevel')}>
-            <b>HLR</b><span>High-level test procedures</span>
+            <b>HLR</b><span>High-level test cases</span>
           </button>}
           {ladderAllows(ladder, 'LowLevel', LadderCapability.Verification) && <button type="button" role="tab" aria-selected={discipline === 'LowLevelSoftware'}
             aria-current={discipline === 'LowLevelSoftware' ? 'page' : undefined}
             onClick={() => onLevelChange('LowLevel')}>
-            <b>LLR</b><span>Low-level test procedures</span>
+            <b>LLR</b><span>Low-level test cases</span>
           </button>}
         </nav>
       )}
@@ -633,10 +642,10 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, re
       {!effectiveBaseline && (
         <section className="materializationPrerequisite" role="status">
           <div>
-            <b>Procedure authoring waits for governed requirement materialization</b>
+            <b>{currentArtifactWord[0].toUpperCase() + currentArtifactWord.slice(1)} authoring waits for governed requirement materialization</b>
             <p>
-              This build has no immutable requirement revisions yet, so a new procedure cannot be bound to an
-              exact target. Existing inherited procedures remain visible against their predecessor revisions;
+              This build has no immutable requirement revisions yet, so a new {currentArtifactWord} cannot be bound to an
+              exact target. Existing inherited {currentArtifactWord}s remain visible against their predecessor revisions;
               planned work for new or modified requirements stays in the test change requests below and
               cannot count as confirmed coverage yet.
             </p>
@@ -786,8 +795,8 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, re
                 {request.capabilities.canSubmit && request.totalItems > 0 && request.resolvedItems === request.totalItems && (
                   missingCaseFields(request).length
                     ? <button type="button" disabled={busy} onClick={() => setAuthoring(request.id)}>Complete engineering case</button>
-                    : request.outcome === 'ChangeRequired' && request.procedureDecisionCount === 0
-                    ? <button type="button" disabled={busy} onClick={() => setAuthoring(request.id)}>Add a procedure decision</button>
+                    : request.outcome === 'ChangeRequired' && (request.artifactDecisionCount ?? request.procedureDecisionCount ?? 0) === 0
+                    ? <button type="button" disabled={busy} onClick={() => setAuthoring(request.id)}>Add a {currentArtifactWord} decision</button>
                     : <button type="button" disabled={busy} onClick={() => setSubmitting(request)}>Send for approval</button>
                 )}
                 {request.capabilities.canApprove && (
@@ -816,19 +825,19 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, re
                         A verification engineer deciding whether a procedure must be written is answering a
                         question about the library as it stands, and asking them to hold that in their head —
                         or to leave and look it up — is how "a procedure probably exists" becomes a decision. */}
-                    {item.trigger !== 'ProcedureOrphaned' && <ExistingCoverage item={item} coverage={coverage} />}
+                    {item.trigger !== 'ProcedureOrphaned' && <ExistingCoverage item={item} coverage={coverage} artifactWord={currentArtifactWord} />}
                     <small>
                       Author declared {item.declaredVerificationMethod || 'no method'}
                       {item.assignedEngineerId ? <> · <PersonName userName={item.assignedEngineerId} /></> : ''}
                       {item.resolutionRationale ? ` · ${item.resolutionRationale}` : ''}
                     </small>
-                    {item.resolvedProcedure&&<div className="resolvedProcedure"><b>{item.resolvedProcedure.displayNumber}</b><span>{item.resolvedProcedure.title} · {item.resolvedProcedure.state}</span></div>}
+                    {item.resolvedArtifact&&<div className="resolvedProcedure"><b>{item.resolvedArtifact.displayNumber}</b><span>{item.resolvedArtifact.title} · {item.resolvedArtifact.state}</span></div>}
                     {request.capabilities.canDecide && item.state !== 'Resolved' && (
                       <button type="button" className="quiet" disabled={busy} onClick={() => {
                         setOutcome(item.trigger === 'ProcedureOrphaned' ? 'ProcedureRetired' : 'ProcedureCoverageConfirmed')
                         setProcedureQuery('')
                         setProcedurePage(1)
-                        setProcedureChoice(item.resolvedProcedure?.id ?? '')
+                        setProcedureChoice(item.resolvedArtifact?.id ?? '')
                         setResolving(item)
                       }}>Decide</button>
                     )}
@@ -858,12 +867,12 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, re
                           setRequirementError('')
                           setCreateError('')
                           setCreating(true)
-                        }}>Author the procedure</button>
+                        }}>Author the {currentArtifactWord}</button>
                       )
                       // A procedure binds to an exact approved revision, and a build that has not materialized
                       // its requirements has none — the decision is still worth recording, so the reason the
                       // work cannot start yet is stated rather than the action silently missing.
-                      : <span className="procedureHold">The procedure can be written once this build materializes its requirements.</span>
+                      : <span className="procedureHold">The {currentArtifactWord} can be written once this build materializes its requirements.</span>
                     )}
                     {request.capabilities.canDecide && item.state === 'Resolved' && (
                       <button type="button" className="quiet" disabled={busy} onClick={() => setReopening(item)}>Reopen / change decision…</button>
@@ -940,18 +949,18 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, re
           Explorer. They are a report about the procedures a build carries, so they belong beside the
           procedures rather than on the page about the change requests that produce them.
 
-          The procedure library moved with them, and is not duplicated here. #369 built the Explorer as the
+          The {currentArtifactWord} library moved with them, and is not duplicated here. #369 built the Explorer as the
           place a procedure is browsed, read and discussed; a second list on this page would be a second
           answer to "where do I find a procedure", and the two would drift. */}
 
       {creating && (
-        <div className="decisionModal" role="dialog" aria-label="Propose a test procedure">
+        <div className="decisionModal" role="dialog" aria-label={`Propose a ${currentArtifactWord}`}>
           <form onSubmit={event => { event.preventDefault(); void proposeProcedure(new FormData(event.currentTarget)) }}>
-            <p className="eyebrow">PROPOSED PROCEDURE CHANGE</p>
-            <h2>Introduce a {disciplineLabel(discipline)} test procedure</h2>
+            <p className="eyebrow">PROPOSED {currentArtifactWord.toUpperCase()} CHANGE</p>
+            <h2>Introduce a {disciplineLabel(discipline)} {currentArtifactWord}</h2>
             <p>
               This is proposed on {authoringNumber || 'this test change request'}, as a requirement change is
-              proposed on a change request. It becomes a controlled procedure when that package is approved and
+              proposed on a change request. It becomes a controlled {currentArtifactWord} when that package is approved and
               carried into the build — nothing here writes one on its own.
             </p>
             {createError && <div className="createProcedureError" role="alert" aria-live="assertive">{createError}</div>}
@@ -1004,7 +1013,7 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, re
                 second approver for the procedure alone would be a second approval of the same work. */}
             <label>Why it is needed<textarea name="rationale" required /></label>
             <div className="decisionActions">
-              <button type="submit" disabled={busy}>{busy ? 'Proposing…' : 'Propose procedure'}</button>
+              <button type="submit" disabled={busy}>{busy ? 'Proposing…' : `Propose ${currentArtifactWord}`}</button>
               <button type="button" className="quiet" disabled={busy} onClick={() => { setCreating(false); setCreateError('') }}>Cancel</button>
             </div>
           </form>
@@ -1021,6 +1030,7 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, re
           api={api}
           projectId={projectId}
           reviewId={authoring}
+          discipline={discipline}
           canAuthor={canTest}
           onClose={() => setAuthoring('')}
           onChanged={() => void load()}
@@ -1074,10 +1084,10 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, re
                   <button type="button" className="quiet" onClick={() => setWorkflowReload(value => value + 1)}>Retry</button>
                 </div>
               : reviewWorkflow === undefined
-              ? <p>Loading the recorded review procedure…</p>
+          ? <p>Loading the recorded {currentArtifactWord} review…</p>
               : reviewWorkflow.required
                 ? <>
-                    <p>The recorded review procedure {reviewWorkflow.name} v{reviewWorkflow.version} ({reviewWorkflow.mode}) requires one signer for each configured stage. Additional distinct active Program participants are allowed.</p>
+                    <p>The recorded {currentArtifactWord} review {reviewWorkflow.name} v{reviewWorkflow.version} ({reviewWorkflow.mode}) requires one signer for each configured stage. Additional distinct active Program participants are allowed.</p>
                     {reviewWorkflow.stages.map(stage => (
                       <label key={stage.position}>{stage.name} · {stage.kind ?? 'Review'} · {stage.requiredRole}
                         <select value={stageApprovers[stage.position] ?? ''}
@@ -1102,7 +1112,7 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, re
                     </div>
                   </>
                 : <>
-                    <p>Select the person who will independently review this exact package of test-procedure decisions.</p>
+                    <p>Select the person who will independently review this exact package of {currentArtifactWord} decisions.</p>
                     <PersonPicker api={api} projectId={projectId} value={reviewApprover.userId} name={reviewApprover.name}
                       index={9102} label="Independent test change request approver" excludeUserNames={[submitting.assignedEngineerId??user.userName,user.userName]} onSelect={setReviewApprover} />
                   </>}
@@ -1135,7 +1145,7 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, re
               {' '}{decliningTest.coveredChangeRequests.map(x => x.number).join(', ')}. It goes to a test lead
               for approval, because nothing else downstream will examine it.
             </p>
-            <label>Why no test-procedure work is required
+            <label>Why no {currentArtifactWord} work is required
               <textarea value={declineRationale} onChange={event => setDeclineRationale(event.target.value)} rows={4} />
             </label>
             <div className="decisionActions">
@@ -1163,7 +1173,7 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, re
             <p className="eyebrow">INDEPENDENT REVIEW</p>
             <h2>{reviewDecision.action === 'approve' ? 'Approve' : 'Return'} {reviewDecision.request.displayNumber}</h2>
             <p>{reviewDecision.action === 'approve'
-              ? 'Record why this exact package of test-procedure decisions is acceptable.'
+              ? `Record why this exact package of ${currentArtifactWord} decisions is acceptable.`
               : 'State what the test engineer must update before this package can be approved.'}</p>
             <label>{reviewDecision.action === 'approve' ? 'Approval rationale' : 'Rationale'}<textarea name="rationale" required autoFocus /></label>
             {reviewDecision.action === 'approve' && <>
@@ -1209,30 +1219,30 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, re
               <select name="outcome" value={outcome} onChange={event => setOutcome(event.target.value)}>
                 {resolving.trigger === 'ProcedureOrphaned' ? (
                   <>
-                    <option value="ProcedureRetired">Procedure retired</option>
-                    <option value="ProcedureRetargeted">Procedure moved to another requirement</option>
-                    <option value="ProcedureRetained">Procedure deliberately retained</option>
+                    <option value="ProcedureRetired">{currentArtifactWord[0].toUpperCase() + currentArtifactWord.slice(1)} retired</option>
+                    <option value="ProcedureRetargeted">{currentArtifactWord[0].toUpperCase() + currentArtifactWord.slice(1)} moved to another requirement</option>
+                    <option value="ProcedureRetained">{currentArtifactWord[0].toUpperCase() + currentArtifactWord.slice(1)} deliberately retained</option>
                   </>
                 ) : (
                   <>
-                    <option value="ProcedureCoverageConfirmed">An approved procedure covers this</option>
+                    <option value="ProcedureCoverageConfirmed">An approved {currentArtifactWord} covers this</option>
                     {/* The ordinary answer for a newly introduced requirement, and until now it could not be
                         given: an engineer whose honest answer was "a procedure has to be written" had to leave
                         the item unanswered and go away to write one. */}
-                    <option value="NewProcedureRequired">A test is required and no procedure exists yet</option>
+                    <option value="NewProcedureRequired">A test is required and no {currentArtifactWord} exists yet</option>
                     <option value="NoTestRequired">No test required</option>
                   </>
                 )}
               </select>
             </label>
             {outcome === 'ProcedureCoverageConfirmed' && (
-              <label>Covering procedure
-                <input aria-label="Search approved procedures" className="pickerSearch" value={procedureQuery}
+              <label>Covering {currentArtifactWord}
+                <input aria-label={`Search approved ${currentArtifactWord}s`} className="pickerSearch" value={procedureQuery}
                   onChange={event => { setProcedureQuery(event.target.value); setProcedurePage(1) }}
                   placeholder="Search by number or title..." />
-                <select name="procedureId" aria-label="Covering procedure" aria-describedby="covering-procedure-help" required
+                <select name="artifactId" aria-label={`Covering ${currentArtifactWord}`} aria-describedby="covering-procedure-help" required
                   value={procedureChoice} onChange={event => setProcedureChoice(event.target.value)}>
-                  <option value="">Choose an approved procedure...</option>
+                  <option value="">Choose an approved {currentArtifactWord}...</option>
                   {(procedurePicker?.items ?? []).filter(x => x.state === 'Approved').map(x => (
                     <option key={x.id} value={x.id}>{x.displayNumber} - {x.title.slice(0, 60)}</option>
                   ))}
@@ -1251,7 +1261,7 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, re
                       onClick={() => setProcedurePage(page => page + 1)}>Next</button>
                   </span>
                 </div>
-                <small id="covering-procedure-help">Only approved procedures carried by this build. Search by number or title to bring more into this list.</small>
+                <small id="covering-procedure-help">Only approved {currentArtifactWord}s carried by this build. Search by number or title to bring more into this list.</small>
               </label>
             )}
             {outcome === 'ProcedureRetargeted' && (

@@ -6,6 +6,7 @@ using AeroLink.Domain.Programs;
 using AeroLink.Domain.Verification;
 using AeroLink.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace AeroLink.Api.Tests;
@@ -76,9 +77,10 @@ public sealed class ProcedureBrowsingApiTests : IClassFixture<SharedApiHost>
         Assert.Equal(HttpStatusCode.OK, login.StatusCode);
     }
 
-    private static async Task<JsonElement> PageAsync(HttpClient client, Guid projectId, string query = "")
+    private static async Task<JsonElement> PageAsync(HttpClient client, Guid projectId, string query = "",
+        string route = "/api/test-procedures")
     {
-        using var response = await client.GetAsync($"/api/test-procedures?projectId={projectId}{query}");
+        using var response = await client.GetAsync($"{route}?projectId={projectId}{query}");
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         return JsonDocument.Parse(await response.Content.ReadAsStringAsync()).RootElement.Clone();
     }
@@ -170,26 +172,54 @@ public sealed class ProcedureBrowsingApiTests : IClassFixture<SharedApiHost>
     }
 
     [Fact]
-    public async Task Software_HLR_and_LLR_scopes_return_only_their_own_procedures()
+    public async Task Software_scopes_return_Cases_and_System_remains_a_Procedure()
     {
         using var client = _host.CreateClient();
         var seeded = await SeedAsync(_host.Factory, 0);
         var projectId = seeded.ProjectId;
+        Guid highCaseId;
         using (var scope = _host.Factory.Services.CreateScope())
         {
             var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
             var now = DateTimeOffset.UtcNow;
-            var hlr = new TestProcedure(projectId, "HLRTP-000001", "Verify HLR", "test.author", now, TestProcedureLevel.HighLevel);
-            var llr = new TestProcedure(projectId, "LLRTP-000001", "Verify LLR", "test.author", now, TestProcedureLevel.LowLevel);
-            db.AddRange(hlr, llr,
+            var hlr = new TestProcedure(projectId, "HLRTC-000001", "Verify HLR", "test.author", now, TestProcedureLevel.HighLevel);
+            highCaseId = hlr.Id;
+            var llr = new TestProcedure(projectId, "LLRTC-000001", "Verify LLR", "test.author", now, TestProcedureLevel.LowLevel);
+            var system = new TestProcedure(projectId, "SYSTP-00000001", "Verify System", "test.author", now, TestProcedureLevel.System);
+            db.AddRange(new SoftwareRelease(projectId, $"722-{Guid.NewGuid():N}", true), hlr, llr, system,
                 new TestProcedureRevision(hlr.Id, 0, "HLR", "Ready", "Run", "Pass", TestProcedureState.Draft, "test.author", now),
-                new TestProcedureRevision(llr.Id, 0, "LLR", "Ready", "Run", "Pass", TestProcedureState.Draft, "test.author", now));
+                new TestProcedureRevision(llr.Id, 0, "LLR", "Ready", "Run", "Pass", TestProcedureState.Draft, "test.author", now),
+                new TestProcedureRevision(system.Id, 0, "System", "Ready", "Run", "Pass", TestProcedureState.Draft, "test.author", now));
             await db.SaveChangesAsync();
         }
         await SignInAsync(client, seeded.MemberName);
 
-        Assert.Equal(["HLRTP-000001.00"], Numbers(await PageAsync(client, projectId, "&scope=HighLevelSoftware")));
-        Assert.Equal(["LLRTP-000001.00"], Numbers(await PageAsync(client, projectId, "&scope=LowLevelSoftware")));
+        var highCases = await PageAsync(client, projectId, "&scope=HighLevelSoftware", "/api/test-cases");
+        var lowCases = await PageAsync(client, projectId, "&scope=LowLevelSoftware", "/api/test-cases");
+        Assert.Equal(["HLRTC-000001.00"], Numbers(highCases));
+        Assert.Equal(["LLRTC-000001.00"], Numbers(lowCases));
+        Assert.All(highCases.GetProperty("items").EnumerateArray(), item => Assert.Equal("Case", item.GetProperty("artifactKind").GetString()));
+        Assert.All(lowCases.GetProperty("items").EnumerateArray(), item => Assert.Equal("Case", item.GetProperty("artifactKind").GetString()));
+
+        // The old path remains a compatibility alias for clients that cannot migrate in lockstep; it must
+        // return the same Case-shaped software records rather than reclassifying them as Procedures.
+        var legacySoftwareAlias = await PageAsync(client, projectId, "&scope=HighLevelSoftware", "/api/test-procedures");
+        Assert.Equal(Numbers(highCases), Numbers(legacySoftwareAlias));
+        Assert.All(legacySoftwareAlias.GetProperty("items").EnumerateArray(), item => Assert.Equal("Case", item.GetProperty("artifactKind").GetString()));
+
+        // System remains the one genuine Procedure surface and continues to use its established route.
+        var systemProcedures = await PageAsync(client, projectId, "&scope=System", "/api/test-procedures");
+        Assert.Equal(["SYSTP-00000001.00"], Numbers(systemProcedures));
+        Assert.All(systemProcedures.GetProperty("items").EnumerateArray(), item => Assert.Equal("Procedure", item.GetProperty("artifactKind").GetString()));
+
+        // Notification and other external links use the current Case identity. The legacy Procedure resolver
+        // remains available separately, but a current software link must land on the canonical Case route.
+        using var direct = _host.Factory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
+        await SignInAsync(direct, seeded.MemberName);
+        using var redirect = await direct.GetAsync($"/open/case/{highCaseId}");
+        Assert.Equal(HttpStatusCode.Redirect, redirect.StatusCode);
+        Assert.Contains($"/software-verification/cases?caseId={highCaseId}",
+            redirect.Headers.Location?.OriginalString, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -201,6 +231,66 @@ public sealed class ProcedureBrowsingApiTests : IClassFixture<SharedApiHost>
         await SignInAsync(client, seeded.MemberName);
 
         Assert.Equal(["SYSTP-00000001.01"], Numbers(await PageAsync(client, projectId, "&search=SYSTP-00000001.01")));
+    }
+
+    [Fact]
+    public async Task Signature_api_projects_migration_supersession_without_mutating_original_evidence()
+    {
+        using var client = _host.CreateClient();
+        var seeded = await SeedAsync(_host.Factory, 0);
+        await SignInAsync(client, seeded.MemberName);
+        Guid signatureId;
+        Guid artifactId;
+        const string oldHash = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+        const string newHash = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+        using (var scope = _host.Factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            var project = await db.Projects.SingleAsync(x => x.Id == seeded.ProjectId);
+            var account = await db.UserAccounts.SingleAsync(x => x.UserName == seeded.MemberName);
+            var now = DateTimeOffset.UtcNow;
+            var signature = new ElectronicSignature(account.Id, account.UserName, account.DisplayName, project.ProgramId,
+                "LegacyHistoricalEvidence", Guid.NewGuid(), "HLRTP-000321.00", "Approve", "Historical evidence", oldHash,
+                "127.0.0.1", now);
+            signatureId = signature.Id;
+            artifactId = signature.ArtifactId;
+            var target = $"ElectronicSignature:{signature.Id}";
+            db.AddRange(signature,
+                new SecurityAuditEvent("VerificationIdentityMigration.SignatureSuperseded", "aerolink-migration", target,
+                    "Superseded", JsonSerializer.Serialize(new
+                    {
+                        migration = "VerificationIdentityMigration.SoftwareCases.v1",
+                        oldArtifactIdentity = signature.ArtifactRevision,
+                        oldSignatureHash = oldHash,
+                        newArtifactIdentity = "HLRTC-000321.00",
+                        newContentHash = (string?)null,
+                        reason = "Controlled output was regenerated; a new human signature is required."
+                    }), "", now),
+                new SecurityAuditEvent("VerificationIdentityMigration.SignatureSupersessionCompleted", "aerolink-migration", target,
+                    "Succeeded", JsonSerializer.Serialize(new
+                    {
+                        migration = "VerificationIdentityMigration.SoftwareCases.v1",
+                        oldArtifactIdentity = signature.ArtifactRevision,
+                        oldSignatureHash = oldHash,
+                        newArtifactIdentity = "HLRTC-000321.00",
+                        newContentHash = newHash,
+                        reason = "Stored controlled bytes were regenerated by the governed migration authority."
+                    }), "", now.AddSeconds(1)));
+            await db.SaveChangesAsync();
+        }
+
+        using var response = await client.GetAsync($"/api/signatures?artifactId={artifactId}");
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        using var body = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        var row = Assert.Single(body.RootElement.EnumerateArray());
+        Assert.Equal("Superseded", row.GetProperty("signatureStatus").GetString());
+        Assert.True(row.GetProperty("isSuperseded").GetBoolean());
+        var provenance = row.GetProperty("supersession");
+        Assert.Equal("VerificationIdentityMigration.SoftwareCases.v1", provenance.GetProperty("migration").GetString());
+        Assert.Equal(oldHash, provenance.GetProperty("oldSignatureHash").GetString());
+        Assert.Equal(newHash, provenance.GetProperty("newContentHash").GetString());
+        Assert.Equal("HLRTP-000321.00", row.GetProperty("artifactRevision").GetString());
+        Assert.Equal(oldHash, row.GetProperty("contentHash").GetString());
     }
 
     [Fact]

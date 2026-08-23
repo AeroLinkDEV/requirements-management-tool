@@ -213,7 +213,7 @@ public sealed class TestProcedureBaselineTests
         // still cannot carry work that was never stated, so the route to fixing one is to revise it.
         var error = Assert.Throws<DomainException>(() =>
             baseline.SelectTestChangeRequest(empty, "verification.lead", Now.AddDays(1)));
-        Assert.Contains("carries no procedure decisions", error.Message);
+        Assert.Contains("carries no verification artifact decisions", error.Message);
     }
 
     private static CandidateBaseline Draft() =>

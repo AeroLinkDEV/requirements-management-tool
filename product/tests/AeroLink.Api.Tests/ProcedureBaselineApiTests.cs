@@ -356,7 +356,7 @@ public sealed class ProcedureBaselineApiTests
         using var refused = await client.PostAsJsonAsync(
             $"/api/baselines/{fixture.BaselineId}/materialize-test-procedures", new { });
         Assert.Equal(HttpStatusCode.BadRequest, refused.StatusCode);
-        Assert.Contains("Freeze the baseline before materializing its test procedures", await refused.Content.ReadAsStringAsync());
+        Assert.Contains("Freeze the baseline before materializing its verification artifacts", await refused.Content.ReadAsStringAsync());
 
         var after = await CaptureProcedureStateAsync(factory, fixture.BaselineId);
         Assert.Equal(before, after);
@@ -377,7 +377,7 @@ public sealed class ProcedureBaselineApiTests
         using var refused = await client.PostAsJsonAsync(
             $"/api/baselines/{fixture.BaselineId}/materialize-test-procedures", new { });
         Assert.Equal(HttpStatusCode.BadRequest, refused.StatusCode);
-        Assert.Contains("Freeze the baseline before materializing its test procedures", await refused.Content.ReadAsStringAsync());
+        Assert.Contains("Freeze the baseline before materializing its verification artifacts", await refused.Content.ReadAsStringAsync());
 
         var after = await CaptureProcedureStateAsync(factory, fixture.BaselineId);
         Assert.Equal(before, after);

@@ -103,6 +103,6 @@ public sealed class NewProcedureRequiredTests
         var refused = Assert.Throws<DomainException>(() => item.Resolve("test.engineer",
             VerificationImpactOutcome.NewProcedureRequired, "One must be written.", Now,
             procedureId: Guid.NewGuid(), procedureRevisionId: Guid.NewGuid()));
-        Assert.Contains("Only confirmed coverage names a procedure", refused.Message);
+        Assert.Contains("Only confirmed coverage names a verification artifact", refused.Message);
     }
 }

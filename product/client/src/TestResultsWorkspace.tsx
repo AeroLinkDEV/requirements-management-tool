@@ -2,13 +2,15 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { PersonName } from './People'
 import type { AuthUser } from './IdentityCenter'
 import { apiRequest, operationError, recordClientOperationFailure } from './apiClient'
+import { verificationArtifactApiRoot, verificationArtifactNoun, verificationArtifactWord } from './presentation'
 import './TestResultsWorkspace.css'
 
 /// The three ways a build's test work is split, as the API names them.
 export type TestDiscipline = 'System' | 'HighLevelSoftware' | 'LowLevelSoftware'
 
-type SetProcedure = {
-  procedureRevisionId: string
+type SetArtifact = {
+  artifactRevisionId: string
+  procedureRevisionId?: string
   displayNumber: string
   title: string
   reason: string
@@ -33,10 +35,11 @@ const localWallTime = (instant = new Date()) => {
   const pad = (value: number) => String(value).padStart(2, '0')
   return `${instant.getFullYear()}-${pad(instant.getMonth() + 1)}-${pad(instant.getDate())}T${pad(instant.getHours())}:${pad(instant.getMinutes())}:${pad(instant.getSeconds())}`
 }
-type TestSet = { id: string; discipline: TestDiscipline; releaseId: string; version: number; procedures: SetProcedure[] }
+type TestSet = { id: string; discipline: TestDiscipline; releaseId: string; version: number; artifacts: SetArtifact[]; procedures?: SetArtifact[] }
 type Execution = {
   id: string
-  procedureRevisionId: string
+  artifactRevisionId: string
+  procedureRevisionId?: string
   displayNumber: string
   outcome: string
   executedBy: string
@@ -55,6 +58,11 @@ type CorrectiveAction = {
   discipline: string | null
   reason: string
   executionId?: string
+  artifactId?: string
+  artifactRevisionId?: string
+  artifactNumber?: string
+  artifactTitle?: string
+  artifactKind?: string
   procedureId?: string
   procedureRevisionId?: string
   procedureNumber?: string
@@ -97,6 +105,9 @@ export default function TestResultsWorkspace({ api, projectId, releaseId, discip
   // so the page says who may do it rather than offering a control that answers 403.
   const roles = user.programs.find(program => program.programId === programId)?.roles ?? []
   const canTest = !readOnly && (user.isAdministrator || roles.includes('TestEngineer'))
+  const artifactWord = verificationArtifactWord(discipline)
+  const artifactNoun = verificationArtifactNoun(discipline)
+  const artifactSetSegment = discipline === 'System' ? 'procedures' : 'cases'
   const [sets, setSets] = useState<TestSet[]>([])
   const [candidates, setCandidates] = useState<Candidate[]>([])
   const [query, setQuery] = useState('')
@@ -104,7 +115,7 @@ export default function TestResultsWorkspace({ api, projectId, releaseId, discip
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [saved, setSaved] = useState('')
-  const [recording, setRecording] = useState<SetProcedure>()
+  const [recording, setRecording] = useState<SetArtifact>()
   const [buildId, setBuildId] = useState('')
   // Tracked so the evidence field can be required exactly where the product requires it. A Pass or a Fail
   // is a claim about what was observed and has to say where the observation is recorded; a Blocked run
@@ -117,7 +128,7 @@ export default function TestResultsWorkspace({ api, projectId, releaseId, discip
   const [supersedesExecutionId, setSupersedesExecutionId] = useState<string>()
   const [corrective, setCorrective] = useState<CorrectiveAction>()
 
-  const openRecording = (procedure: SetProcedure, predecessorId?: string | null) => {
+  const openRecording = (procedure: SetArtifact, predecessorId?: string | null) => {
     setOutcome('Pass')
     setSupersedesExecutionId(predecessorId ?? undefined)
     setRecording(procedure)
@@ -152,8 +163,11 @@ export default function TestResultsWorkspace({ api, projectId, releaseId, discip
     const runs = await fetch(`${api}/api/test-executions?projectId=${projectId}&releaseId=${releaseId}`)
     const ran = runs.ok ? await runs.json() : []
     if (mine !== loadTicket.current) return
-    setExecutions(ran)
-    setSets(body)
+    setExecutions((ran as Execution[]).map(run => ({ ...run,
+      artifactRevisionId: run.artifactRevisionId ?? run.procedureRevisionId ?? '' })))
+    setSets((body as TestSet[]).map(set => ({ ...set,
+      artifacts: (set.artifacts ?? set.procedures ?? []).map(item => ({ ...item,
+        artifactRevisionId: item.artifactRevisionId ?? item.procedureRevisionId ?? '' })) })))
     setBuildId(current => built.some((x: { id: string }) => x.id === current) ? current : built[0]?.id ?? '')
   }, [api, projectId, releaseId])
 
@@ -178,7 +192,7 @@ export default function TestResultsWorkspace({ api, projectId, releaseId, discip
     const mine = ++candidateTicket.current
     const timer = setTimeout(async () => {
       const scope = discipline === 'System' ? 'System' : 'Software'
-      const response = await fetch(`${api}/api/test-procedures?projectId=${projectId}&releaseId=${releaseId}&scope=${scope}&search=${encodeURIComponent(query)}&state=Approved&page=1&pageSize=25`)
+      const response = await fetch(`${api}${verificationArtifactApiRoot(scope)}?projectId=${projectId}&releaseId=${releaseId}&scope=${scope}&search=${encodeURIComponent(query)}&state=Approved&page=1&pageSize=25`)
       if (!response.ok) return
       const paged = await response.json()
       if (mine !== candidateTicket.current) return
@@ -188,10 +202,10 @@ export default function TestResultsWorkspace({ api, projectId, releaseId, discip
   }, [api, projectId, releaseId, discipline, query])
 
   const set = sets.find(x => x.discipline === discipline)
-  const inSet = new Set(set?.procedures.map(x => x.procedureRevisionId) ?? [])
-  const run = set?.procedures.filter(x => x.latestOutcome) ?? []
+  const inSet = new Set(set?.artifacts.map(x => x.artifactRevisionId) ?? [])
+  const run = set?.artifacts.filter(x => x.latestOutcome) ?? []
   const passed = run.filter(x => x.latestOutcome === 'Pass').length
-  const evidenced = (set?.procedures ?? []).filter(x => x.hasEvidence).length
+  const evidenced = (set?.artifacts ?? []).filter(x => x.hasEvidence).length
 
   const act = async (work: () => Promise<void>, failure: string) => {
     if (busy) return
@@ -202,23 +216,23 @@ export default function TestResultsWorkspace({ api, projectId, releaseId, discip
   }
 
   const include = (reason: string, note: string, ids: string[]) => act(async () => {
-    if (!ids.length) { setError('Choose at least one procedure.'); return }
-    await apiRequest(`${api}/api/releases/${releaseId}/test-sets/${discipline}/procedures`, {
+    if (!ids.length) { setError(`Choose at least one ${artifactWord}.`); return }
+    await apiRequest(`${api}/api/releases/${releaseId}/test-sets/${discipline}/${artifactSetSegment}`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ procedureRevisionIds: ids, reason, note }),
+      body: JSON.stringify({ artifactRevisionIds: ids, reason, note }),
     })
     setChosen([])
-    setSaved(`${ids.length} procedure${ids.length === 1 ? '' : 's'} considered for this build.`)
-  }, 'The procedures could not be added to the test set.')
+    setSaved(`${ids.length} ${artifactWord}${ids.length === 1 ? '' : 's'} considered for this build.`)
+  }, `The ${artifactNoun.toLowerCase()}s could not be added to the test set.`)
 
-  const recordResult = (procedure: SetProcedure, form: FormData) => act(async () => {
+  const recordResult = (procedure: SetArtifact, form: FormData) => act(async () => {
     const determination = String(form.get('determination') ?? '').trim()
     if (!determination) { setError('Say what the run showed. A verdict without reasoning cannot be read back.'); return }
     const execution = await apiRequest<{ id: string }>(`${api}/api/test-executions`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         projectId,
-        procedureRevisionId: procedure.procedureRevisionId,
+        artifactRevisionId: procedure.artifactRevisionId,
         softwareBuildId: buildId || null,
         // A retest names the run it supersedes, so a failure and its remedy stay attached to each other.
         // When a specific earlier run was chosen it is that one, not merely the latest — a corrective action
@@ -233,7 +247,7 @@ export default function TestResultsWorkspace({ api, projectId, releaseId, discip
     })
     // When the engineer arrived from a Verifying PR and ran its identified procedure, a passing result is
     // explicitly selected as closure evidence. Other passing runs remain ordinary build evidence.
-    if (correctiveProblemReportId && corrective?.procedureRevisionId === procedure.procedureRevisionId && form.get('outcome') === 'Pass') {
+    if (correctiveProblemReportId && (corrective?.artifactRevisionId ?? corrective?.procedureRevisionId) === procedure.artifactRevisionId && form.get('outcome') === 'Pass') {
       const report = await apiRequest<{ version: number; state: string }>(`${api}/api/problem-reports/${correctiveProblemReportId}`)
       if (report.state === 'Verifying') {
         await apiRequest(`${api}/api/problem-reports/${correctiveProblemReportId}/verify`, {
@@ -245,11 +259,11 @@ export default function TestResultsWorkspace({ api, projectId, releaseId, discip
     }
     setRecording(undefined)
     setSupersedesExecutionId(undefined)
-    if (!correctiveProblemReportId || corrective?.procedureRevisionId !== procedure.procedureRevisionId || form.get('outcome') !== 'Pass')
+    if (!correctiveProblemReportId || (corrective?.artifactRevisionId ?? corrective?.procedureRevisionId) !== procedure.artifactRevisionId || form.get('outcome') !== 'Pass')
       setSaved(`Recorded against ${procedure.displayNumber}.`)
   }, 'The result could not be recorded.')
 
-  const attachEvidence = (procedure: SetProcedure, file: File) => act(async () => {
+  const attachEvidence = (procedure: SetArtifact, file: File) => act(async () => {
     if (!procedure.latestExecutionId) { setError('Record a result before attaching its evidence.'); return }
     const body = new FormData()
     body.append('file', file)
@@ -259,10 +273,10 @@ export default function TestResultsWorkspace({ api, projectId, releaseId, discip
     setSaved(`Evidence attached to ${procedure.displayNumber}.`)
   }, 'The evidence could not be stored and linked to this result.')
 
-  const exclude = (procedureRevisionId: string) => act(async () => {
-    await apiRequest(`${api}/api/releases/${releaseId}/test-sets/${discipline}/procedures/${procedureRevisionId}`, { method: 'DELETE' })
+  const exclude = (artifactRevisionId: string) => act(async () => {
+    await apiRequest(`${api}/api/releases/${releaseId}/test-sets/${discipline}/${artifactSetSegment}/${artifactRevisionId}`, { method: 'DELETE' })
     setSaved('Taken out of the test set. Any result it already has is kept.')
-  }, 'The procedure could not be removed from the test set.')
+  }, `The ${artifactNoun.toLowerCase()} could not be removed from the test set.`)
 
   return (
     <main className="testResultsPage">
@@ -287,15 +301,16 @@ export default function TestResultsWorkspace({ api, projectId, releaseId, discip
           </div>
           {(() => {
             if (readOnly) return <span className="correctiveHint">This build is released. Its results are read-only.</span>
-            const target = set?.procedures.find(x => x.procedureRevisionId === corrective.procedureRevisionId)
-            if (!target) return <span className="correctiveHint">Add {corrective.procedureNumber ?? 'the procedure'} to this build&apos;s test set below, then record its result.</span>
+            const targetRevisionId = corrective.artifactRevisionId ?? corrective.procedureRevisionId
+            const target = set?.artifacts.find(x => x.artifactRevisionId === targetRevisionId)
+            if (!target) return <span className="correctiveHint">Add {corrective.procedureNumber ?? `the ${artifactNoun.toLowerCase()}`} to this build&apos;s test set below, then record its result.</span>
             return <button type="button" disabled={busy} onClick={() => openRecording(target, corrective.executionId)}>Record successor execution →</button>
           })()}
         </section>
       )}
 
       <section className="testSetSummary" aria-label="Test set progress">
-        <article><b>{set?.procedures.length ?? 0}</b><span>In the test set</span></article>
+        <article><b>{set?.artifacts.length ?? 0}</b><span>In the test set</span></article>
         <article><b>{run.length}</b><span>Recorded</span></article>
         <article><b>{passed}</b><span>Passed</span></article>
         <article><b>{evidenced}</b><span>With evidence</span></article>
@@ -306,14 +321,14 @@ export default function TestResultsWorkspace({ api, projectId, releaseId, discip
           <h2>The test set</h2>
           <p>Chosen for this build. The release is measured against exactly this list.</p>
         </div>
-        {!set?.procedures.length && (
+        {!set?.artifacts.length && (
           <div className="testSetEmpty">
             <b>Nothing has been chosen for this build yet</b>
-            <span>A build is rarely worth its whole suite. Choose the procedures covering what changed, and any area worth re-exercising.</span>
+            <span>A build is rarely worth its whole suite. Choose the {artifactNoun.toLowerCase()}s covering what changed, and any area worth re-exercising.</span>
           </div>
         )}
-        {set?.procedures.map(procedure => (
-          <article className="testSetRow" key={procedure.procedureRevisionId}>
+        {set?.artifacts.map(procedure => (
+          <article className="testSetRow" key={procedure.artifactRevisionId}>
             <div>
               <b>{procedure.displayNumber}</b>
               <i className={procedure.latestOutcome ? procedure.latestOutcome.toLowerCase() : 'notrun'}>
@@ -345,20 +360,20 @@ export default function TestResultsWorkspace({ api, projectId, releaseId, discip
                 </label>
               )}
               {procedure.latestExecutionId && (
-                <button type="button" className="quiet" onClick={() => setShowRuns(current => current === procedure.procedureRevisionId ? '' : procedure.procedureRevisionId)}>
-                  {showRuns === procedure.procedureRevisionId ? 'Hide runs' : 'Runs'}
+                <button type="button" className="quiet" onClick={() => setShowRuns(current => current === procedure.artifactRevisionId ? '' : procedure.artifactRevisionId)}>
+                  {showRuns === procedure.artifactRevisionId ? 'Hide runs' : 'Runs'}
                 </button>
               )}
-              {onOpenProcedure && <button type="button" className="quiet" onClick={() => onOpenProcedure(procedure.procedureRevisionId)}>Open</button>}
-              {!readOnly && <button type="button" className="quiet" disabled={busy} onClick={() => void exclude(procedure.procedureRevisionId)}>Remove</button>}
+              {onOpenProcedure && <button type="button" className="quiet" onClick={() => onOpenProcedure(procedure.artifactRevisionId)}>Open</button>}
+              {!readOnly && <button type="button" className="quiet" disabled={busy} onClick={() => void exclude(procedure.artifactRevisionId)}>Remove</button>}
             </div>
             {/* Every run against this build, newest first. A determination read alone says what happened;
                 read beside the ones before it, it says whether the build is getting better or worse — and a
                 retest can then answer the specific failure rather than whatever happened last. */}
-            {showRuns === procedure.procedureRevisionId && (
+            {showRuns === procedure.artifactRevisionId && (
               <ol className="runList">
                 {executions
-                  .filter(x => x.procedureRevisionId === procedure.procedureRevisionId)
+                  .filter(x => x.artifactRevisionId === procedure.artifactRevisionId)
                   .map(run => (
                     <li key={run.id}>
                       <i className={run.outcome.toLowerCase()}>{run.outcome}</i>
@@ -371,7 +386,7 @@ export default function TestResultsWorkspace({ api, projectId, releaseId, discip
                       )}
                     </li>
                   ))}
-                {!executions.some(x => x.procedureRevisionId === procedure.procedureRevisionId) && <li className="runNone">No run is recorded against this build yet.</li>}
+                {!executions.some(x => x.artifactRevisionId === procedure.artifactRevisionId) && <li className="runNone">No run is recorded against this build yet.</li>}
               </ol>
             )}
           </article>
@@ -382,11 +397,11 @@ export default function TestResultsWorkspace({ api, projectId, releaseId, discip
         <section className="testSetCard">
           <div className="cardTitle">
             <h2>Add to the test set</h2>
-            <p>Find approved procedures by number or title, then say why this build needs them.</p>
+            <p>Find approved {artifactNoun.toLowerCase()}s by number or title, then say why this build needs them.</p>
           </div>
           <label className="testSetSearch">
-            <span>Find an approved procedure</span>
-            <input value={query} onChange={event => setQuery(event.target.value)} placeholder="Procedure number or title" />
+            <span>Find an approved {artifactNoun.toLowerCase()}</span>
+            <input value={query} onChange={event => setQuery(event.target.value)} placeholder={`${artifactNoun} number or title`} />
           </label>
           <div className="testSetCandidates">
             {candidates.filter(x => !inSet.has(x.revisionId)).map(candidate => (
@@ -403,7 +418,7 @@ export default function TestResultsWorkspace({ api, projectId, releaseId, discip
               </label>
             ))}
             {!candidates.filter(x => !inSet.has(x.revisionId)).length && (
-              <p className="testSetNoCandidates">{query ? 'No approved procedure matches that.' : 'Every approved procedure found is already in the set.'}</p>
+              <p className="testSetNoCandidates">{query ? `No approved ${artifactNoun.toLowerCase()} matches that.` : `Every approved ${artifactNoun.toLowerCase()} found is already in the set.`}</p>
             )}
           </div>
           {/* The two routes a lead arrives by, kept apart because the reason is recorded and read later:

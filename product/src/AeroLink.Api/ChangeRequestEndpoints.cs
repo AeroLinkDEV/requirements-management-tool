@@ -313,12 +313,18 @@ public static class ChangeRequestEndpoints
             // An introduced requirement has no history and nothing downstream yet. That is not an error; it is
             // the honest answer, and the caller renders it as "nothing recorded" rather than as a failure.
             if (artifact is null)
-                return Results.Ok(new { baseNumber = normalized, known = false, derivedRequirements = Array.Empty<object>(), coveringProcedures = Array.Empty<object>() });
+            {
+                // The old coveringProcedures field remains only for clients before the neutral artifact seam.
+                return Results.Ok(new { baseNumber = normalized, known = false, derivedRequirements = Array.Empty<object>(), coveringArtifacts = Array.Empty<object>(), coveringProcedures = Array.Empty<object>() });
+            }
 
             var current = await db.RequirementRevisions.AsNoTracking()
                 .Where(x => x.ArtifactId == artifact.Id).OrderByDescending(x => x.Revision).FirstOrDefaultAsync(ct);
             if (current is null)
-                return Results.Ok(new { baseNumber = normalized, known = false, derivedRequirements = Array.Empty<object>(), coveringProcedures = Array.Empty<object>() });
+            {
+                // The old coveringProcedures field remains only for clients before the neutral artifact seam.
+                return Results.Ok(new { baseNumber = normalized, known = false, derivedRequirements = Array.Empty<object>(), coveringArtifacts = Array.Empty<object>(), coveringProcedures = Array.Empty<object>() });
+            }
 
             // Children: requirements that trace *to* this one, so a change here propagates down to them.
             var derived = await (from link in db.RequirementTraces.AsNoTracking().Where(x => x.TargetRevisionId == current.Id)
@@ -336,6 +342,17 @@ public static class ChangeRequestEndpoints
 
             var procedures = await VerificationCoverageProjection.ForRequirementRevisionsAsync(
                 db, [current.Id], ct);
+            var coveringArtifacts = procedures.Select(x => new
+            {
+                id = x.ProcedureId,
+                revisionId = x.ProcedureRevisionId,
+                x.DisplayNumber,
+                x.Title,
+                x.Level,
+                state = x.ProcedureState,
+                x.IsSuspect,
+                x.CoverageState
+            }).ToList();
 
             return Results.Ok(new
             {
@@ -344,17 +361,8 @@ public static class ChangeRequestEndpoints
                 displayNumber = artifact.BaseNumber + "." + (current.Revision < 10 ? "0" : "") + current.Revision,
                 requirementRevisionId = current.Id,
                 derivedRequirements = derived,
-                coveringProcedures = procedures.Select(x => new
-                {
-                    id = x.ProcedureId,
-                    revisionId = x.ProcedureRevisionId,
-                    x.DisplayNumber,
-                    x.Title,
-                    x.Level,
-                    state = x.ProcedureState,
-                    x.IsSuspect,
-                    x.CoverageState
-                }),
+                coveringArtifacts,
+                coveringProcedures = coveringArtifacts, // compatibility alias
             });
         });
 
@@ -1116,9 +1124,22 @@ public static class ChangeRequestEndpoints
             var actor=http.UserAccount();var query = db.ElectronicSignatures.AsNoTracking().AsQueryable();
             if(!actor.IsAdministrator){var allowed=actor.Programs.Select(x=>x.ProgramId).ToList();query=query.Where(x=>allowed.Contains(x.ProgramId));}
             if (artifactId is not null) query = query.Where(x => x.ArtifactId == artifactId);
-            var projected=query.Select(x => new { x.Id, x.ArtifactType, x.ArtifactId, x.ArtifactRevision, x.Action, x.Authority, x.Meaning, x.ContentHash, x.UserName, x.DisplayName, x.SignedAt });
-            if(db.Database.IsSqlite()){var rows=await projected.ToListAsync(ct);return Results.Ok(rows.OrderByDescending(x=>x.SignedAt).Take(500));}
-            return Results.Ok(await projected.OrderByDescending(x => x.SignedAt).Take(500).ToListAsync(ct));
+            var signatures = db.Database.IsSqlite()
+                ? (await query.ToListAsync(ct)).OrderByDescending(x => x.SignedAt).Take(500).ToList()
+                : await query.OrderByDescending(x => x.SignedAt).Take(500).ToListAsync(ct);
+            var migration = await SignatureMigrationProjector.ForAsync(db, signatures.Select(x => x.Id), ct);
+            return Results.Ok(signatures.Select(x =>
+            {
+                var status = migration.GetValueOrDefault(x.Id) ?? SignatureMigrationProjection.Current;
+                return new
+                {
+                    x.Id, x.ArtifactType, x.ArtifactId, x.ArtifactRevision, x.Action, x.Authority,
+                    x.Meaning, x.ContentHash, x.UserName, x.DisplayName, x.SignedAt,
+                    signatureStatus = status.Status,
+                    isSuperseded = status.IsSuperseded,
+                    supersession = status.Supersession
+                };
+            }));
         });
     }
 

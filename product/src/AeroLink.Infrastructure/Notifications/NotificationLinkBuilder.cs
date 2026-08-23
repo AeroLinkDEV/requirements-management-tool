@@ -40,6 +40,7 @@ public sealed class NotificationLinkBuilder(IConfiguration configuration)
             "swcr" => $"/open/swcr/{id}",
             "requirement" => $"/open/requirement/{id}",
             "procedure" => $"/open/procedure/{id}",
+            "case" => $"/open/case/{id}",
             "verification-impact" => "/system-verification",
             "baseline" => $"/open/baseline/{id}",
             "release" or "campaign" => "/release-readiness",

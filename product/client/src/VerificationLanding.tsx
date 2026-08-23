@@ -1,6 +1,7 @@
 import './VerificationLanding.css'
 import { LadderCapability, ladderAllows } from './projectLadder'
 import type { ProjectLadderProjection } from './projectLadder'
+import { verificationArtifactNoun } from './presentation'
 
 /**
  * The two questions a build's verification work splits into.
@@ -51,12 +52,12 @@ export default function VerificationLanding({ scope, buildName, ladder, onOpen }
                 assessments page, which is the confusion that made the register impossible to find. */}
             <button type="button" onClick={() => onOpen('testChangeRequests', pair.level)}>
               <b>Change Requests</b>
-              <span>The test change requests controlling this build's procedures, and where each one has got to.</span>
+              <span>The test change requests controlling this build&apos;s {verificationArtifactNoun(scope === 'System' ? 'System' : pair.level).toLowerCase()}, and where each one has got to.</span>
               <i>Open Change Requests →</i>
             </button>
             <button type="button" onClick={() => onOpen('testingCoverage', pair.level)}>
               <b>Downstream Assessments</b>
-              <span>Approved changes still waiting for a test conclusion, and what this build's procedures cover.</span>
+              <span>Approved changes still waiting for a test conclusion, and what this build&apos;s {verificationArtifactNoun(scope === 'System' ? 'System' : pair.level).toLowerCase()}s cover.</span>
               <i>Open Downstream Assessments →</i>
             </button>
             <button type="button" onClick={() => onOpen('testResults', pair.level)}>

@@ -201,9 +201,9 @@ test('a revised TCR keeps its predecessor in history and out of active work and 
   await activeRow.getByRole('button', {
     name: new RegExp(`^${escapeRegex(predecessorBefore!.displayNumber)}`),
   }).click()
-  const packageWorkspace = page.getByRole('dialog', { name: /procedure decisions/ })
+  const packageWorkspace = page.getByRole('dialog', { name: /test procedure decisions/ })
   await expect(packageWorkspace.getByRole('heading', {
-    name: `${predecessorBefore!.displayNumber} procedure decisions`,
+    name: `${predecessorBefore!.displayNumber} test procedure decisions`,
   })).toBeVisible()
   await packageWorkspace.getByRole('button', { name: 'Revise this test change request' }).click()
 
@@ -224,7 +224,7 @@ test('a revised TCR keeps its predecessor in history and out of active work and 
   expect(successor?.displayNumber).toMatch(/\.01$/)
 
   await expect(packageWorkspace.getByRole('heading', {
-    name: `${successor!.displayNumber} procedure decisions`,
+    name: `${successor!.displayNumber} test procedure decisions`,
   })).toBeVisible({ timeout: 30_000 })
   await packageWorkspace.getByRole('button', { name: 'Close test change request' }).click()
 
@@ -238,19 +238,19 @@ test('a revised TCR keeps its predecessor in history and out of active work and 
   await expect(predecessorLink).toBeVisible()
   await predecessorLink.click()
 
-  const historicalWorkspace = page.getByRole('dialog', { name: /procedure decisions/ })
+  const historicalWorkspace = page.getByRole('dialog', { name: /test procedure decisions/ })
   await expect(historicalWorkspace.getByRole('heading', {
-    name: `${predecessor!.displayNumber} procedure decisions`,
+    name: `${predecessor!.displayNumber} test procedure decisions`,
   })).toBeVisible()
   await expect(historicalWorkspace.getByText('SYSTCR Superseded', { exact: true })).toBeVisible()
   await expect(historicalWorkspace.getByText(predecessor!.supersededReason!, { exact: true })).toBeVisible()
   const successorLink = historicalWorkspace.getByRole('button', { name: `Open ${successor!.displayNumber}` })
   await expect(successorLink).toBeVisible()
   await successorLink.click()
-  await expect(page.getByRole('dialog', { name: /procedure decisions/ }).getByRole('heading', {
-    name: `${successor!.displayNumber} procedure decisions`,
+  await expect(page.getByRole('dialog', { name: /test procedure decisions/ }).getByRole('heading', {
+    name: `${successor!.displayNumber} test procedure decisions`,
   })).toBeVisible()
-  await page.getByRole('dialog', { name: /procedure decisions/ })
+  await page.getByRole('dialog', { name: /test procedure decisions/ })
     .getByRole('button', { name: 'Close test change request' }).click()
 
   await page.reload()

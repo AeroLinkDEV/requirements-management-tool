@@ -16,8 +16,8 @@ public static class TestProcedureDocumentEndpoints
 {
     public static void MapTestProcedureDocumentEndpoints(this WebApplication app)
     {
-        app.MapGet("/api/projects/{projectId:guid}/test-procedure-documents", async (Guid projectId,
-            string? scope, HttpContext http, AeroLinkDbContext db, IProjectLadderPolicyResolver policyResolver, CancellationToken ct) =>
+        app.MapGet("/api/projects/{projectId:guid}/{artifactRoute:regex(test-procedure-documents|test-case-documents)}", async (Guid projectId,
+            string artifactRoute, string? scope, HttpContext http, AeroLinkDbContext db, IProjectLadderPolicyResolver policyResolver, CancellationToken ct) =>
         {
             if (!await http.HasProjectAccessAsync(db, projectId, ct)) return Results.Forbid();
             var ladderPolicy = await policyResolver.ResolveAsync(projectId, ct);
@@ -32,6 +32,8 @@ public static class TestProcedureDocumentEndpoints
             // Software mirrors the Requirements Explorer and carries both levels; an exact level remains
             // available for compatible deep links and other focused readers.
             var levels = ScopeLevels(scope)?.Intersect(configuredLevels).ToArray() ?? configuredLevels;
+            if (artifactRoute == "test-case-documents")
+                levels = levels.Intersect([TestProcedureLevel.HighLevel, TestProcedureLevel.LowLevel]).ToArray();
             if (levels is not null) documents = documents.Where(x => levels.Contains(x.Level)).ToList();
 
             var documentIds = documents.Select(x => x.Id).ToList();
@@ -52,13 +54,16 @@ public static class TestProcedureDocumentEndpoints
                     level = document.Level.ToString(),
                     description = document.Description,
                     // The count the rail shows beside the document, the way the requirements rail shows one.
-                    procedureCount = own.Count(x => x.Type == TestProcedureDocumentNodeType.Procedure),
+                    artifactCount = own.Count(x => x.Type == TestProcedureDocumentNodeType.Procedure),
+                    procedureCount = own.Count(x => x.Type == TestProcedureDocumentNodeType.Procedure), // compatibility alias
                     sections = sections.Select(section => new
                     {
                         id = section.Id,
                         heading = section.Heading,
                         position = section.Position,
-                        procedureCount = own.Count(x => x.ParentId == section.Id
+                        artifactCount = own.Count(x => x.ParentId == section.Id
+                            && x.Type == TestProcedureDocumentNodeType.Procedure),
+                        procedureCount = own.Count(x => x.ParentId == section.Id // compatibility alias
                             && x.Type == TestProcedureDocumentNodeType.Procedure),
                     }),
                 };

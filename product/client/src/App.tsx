@@ -253,7 +253,7 @@ function AppNavigation({ user, workspaces, activeId, selectedProjectId, selected
           {verificationScope==="softwareTest"
             ? <>
                 {item("Change Requests","testChangeRequests","◫","softwareTest","Software Test Change Requests")}
-                {item("Test Procedure Explorer","procedureExplorer","≡","softwareTest","Software Test Procedure Explorer")}
+                {item("Test Case Explorer","procedureExplorer","≡","softwareTest","Software Test Case Explorer")}
                  {ladderAllows(ladder, "HighLevel", LadderCapability.Verification) && item("HLR Test Results","testResults","▦","softwareTest","Software HLR Test Results","HighLevel")}
                  {ladderAllows(ladder, "LowLevel", LadderCapability.Verification) && item("LLR Test Results","testResults","▦","softwareTest","Software LLR Test Results","LowLevel")}
               </>
@@ -267,7 +267,7 @@ function AppNavigation({ user, workspaces, activeId, selectedProjectId, selected
          {hasCodeTraceability && <div className="navStandalone">{item("Code","code","{ }","software","Code traceability",undefined,true)}</div>}
         <div className="navStandalone">{item("Documentation Center","managedDocuments","▤","system","Documentation Center",undefined,true)}</div>
         <div className="navStandalone">{item("Problem Reports","problemReports","!","system","Problem Reports",undefined,true)}</div>
-        <details className="navGroup" open={releaseView}><summary>RELEASE</summary>{item("Lifecycle Decision Room","release","◆","system","Lifecycle Decision Room / Release Readiness")}{item("Configuration Baselines","baselines","▦","system","Configuration Baselines / Legacy Procedure Bootstrap")}</details>
+        <details className="navGroup" open={releaseView}><summary>RELEASE</summary>{item("Lifecycle Decision Room","release","◆","system","Lifecycle Decision Room / Release Readiness")}{item("Configuration Baselines","baselines","▦","system","Configuration Baselines / Legacy Verification Bootstrap")}</details>
         {user.isAdministrator&&<details className="navGroup" open={view==="admin"||view==="enterprise"||view==="integrations"||view==="reviewWorkflows"}><summary>ADMINISTRATION</summary>{item("People & Authority","admin","⚙")}{item("Review Workflows","reviewWorkflows","⇉","system","Review Workflows / Change Review Procedure")}{item("Integration Center","integrations","↗","system","Integration Command Center")}{item("System Operations","enterprise","◈","system","System Operations / Enterprise Control")}</details>}
       </nav>
       <footer><PersonAvatar userName={user.userName} displayName={user.displayName} size="large"/><div><b>{user.displayName}</b><small>{user.userName}</small></div><button className="signOut" onClick={onSignOut}>Sign out</button><button className="workspaceDisplay" onClick={onDisplay} aria-label="Open workspace display settings"><span>Aa</span><div><b>Workspace display</b><small>{density} density</small></div><i aria-hidden="true">›</i></button></footer>
@@ -547,13 +547,13 @@ function App() {
     try{await apiRequest(`${API}/api/downstream-assessments/${pendingAssessmentLink.assessmentId}/change-requests`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({changeRequestId})});setPendingAssessmentLink(undefined);return true}
     catch{return false}
   }
-  // Opening a procedure named on a requirement's trace lands in the Test Procedure Explorer, which is where a
-  // procedure is read. It used to land on the coverage page, because that page carried a procedure library;
+  // Opening a verification artifact named on a requirement's trace lands in the shared Explorer, which is where
+  // the Case or Procedure is read. It used to land on the coverage page, because that page carried the library;
   // that library moved, and a link into a surface that no longer exists is worse than no link.
-  const openVerificationProcedure=(procedure?:{procedureId:string;revisionId?:string;displayNumber?:string;level?:string})=>{
-    const area:Discipline=procedure?.level==="System"?"systemTest":"softwareTest";
-    setView("procedureExplorer");setDiscipline(area);setSelectedArtifactId("");setSelectedArtifactKind(procedure?.level??"");setRequirementRevisionId("");
-    if(context){const path=routePath(context,"procedureExplorer",area,undefined,procedure?.level);const params=new URLSearchParams();if(procedure?.displayNumber)params.set("procedure",procedure.displayNumber);if(procedure?.procedureId)params.set("procedureId",procedure.procedureId);if(procedure?.revisionId)params.set("procedureRevisionId",procedure.revisionId);history.pushState({},"",`${path}${params.size?`?${params}`:""}`)}
+  const openVerificationProcedure=(artifact?:{artifactId?:string;procedureId?:string;revisionId?:string;displayNumber?:string;level?:string})=>{
+    const area:Discipline=artifact?.level==="System"?"systemTest":"softwareTest";
+    setView("procedureExplorer");setDiscipline(area);setSelectedArtifactId("");setSelectedArtifactKind(artifact?.level??"");setRequirementRevisionId("");
+    if(context){const path=routePath(context,"procedureExplorer",area,undefined,artifact?.level);const params=new URLSearchParams();const prefix=area==="systemTest"?"procedure":"case";if(artifact?.displayNumber)params.set(prefix,artifact.displayNumber);const artifactId=artifact?.artifactId ?? artifact?.procedureId;if(artifactId)params.set(`${prefix}Id`,artifactId);if(artifact?.revisionId)params.set(`${prefix}RevisionId`,artifact.revisionId);history.pushState({},"",`${path}${params.size?`?${params}`:""}`)}
   };
   // The inverse of the procedure deep link: a procedure trace names an exact requirement revision, and the
   // Requirements Explorer must open that exact revision rather than whichever revision is newest now.
@@ -619,7 +619,7 @@ function App() {
    if(view==="projectConfiguration"&&project)return <ProjectConfigurationCenter user={user} api={API} projectId={project.project.id} projectName={project.project.name} initialSection={projectConfigurationSection} onBackToBuilds={()=>{setView("builds");history.pushState({},"",openProjectBuildsPath)}} onOpenApprovalConfiguration={()=>showProjectConfiguration("approvals")} onActivated={value=>{setLadder({effectiveSteps:value.effectiveSteps.map(step=>({...step,catalogueEntry:step.catalogueEntry as LadderLevel}))});setLadderError("");}} onSignOut={signOut}/>;
    const navigation=<AppNavigation user={user} workspaces={workspaces} activeId={activeId} selectedProjectId={project?.project.id??selectedProjectId} selectedReleaseId={release?.id??selectedReleaseId} view={view} discipline={discipline} artifactKind={selectedArtifactKind} context={context} projectWide={view==="managedDocuments"} density={density} ladder={ladder} onNavigate={navigate} onSearch={()=>setPaletteOpen(true)} onDisplay={()=>setDisplayOpen(true)} onExitBuild={exitBuild} onSignOut={signOut}/>;
   const labels:Record<View,string>={projects:"Projects",builds:"Software Builds",baselineImports:"Imported Baselines",personnel:"Personnel",approvalConfiguration:"Approval Configuration",projectConfiguration:"Project Configuration",dashboard:"Command Center",createSystemScr:"New System SRCR",createSoftwareChange:"New Software Change Request",createInterfaceChange:"New Interface / ICD Change Request",scr:"Change Request",baselines:"Baselines",history:"Change Requests",requirements:"Requirements Explorer",verification:"Verification",testingCoverage:"Test Coverage",testChangeRequests:"Change Requests",testChangeRequest:"Test Change Request",createTestChangeRequest:"New Test Change Request",procedureExplorer:"Test Procedure Explorer",testResults:"Test Results",documents:"Generated Documents",managedDocuments:"Documentation Center",code:"Code",problemReports:"Problem Reports",lifecycle:"Digital Thread",release:"Release Readiness",releaseImpact:"Change Impact Review",releaseDecision:"Release Evidence & Decision",releaseOperations:"Release Operations",planning:"Product Versions",mywork:"My Work",admin:"Administration",enterprise:"System Operations",integrations:"Integration Command Center",reviewWorkflows:"Review Workflows",artifact:"Artifact",notFound:"Not Found"};
-  const scopedLabel=view==="history"?`${discipline==="software"?"Software":"System"} ${labels[view]}`:view==="scr"?`${discipline==="software"?"Software":"System"} ${labels[view]}`:view==="requirements"?`${discipline==="software"?"Software":"System"} ${labels[view]}`:view==="verification"?`${discipline==="softwareTest"?"Software":"System"} Verification`:labels[view];
+  const scopedLabel=view==="history"?`${discipline==="software"?"Software":"System"} ${labels[view]}`:view==="scr"?`${discipline==="software"?"Software":"System"} ${labels[view]}`:view==="requirements"?`${discipline==="software"?"Software":"System"} ${labels[view]}`:view==="verification"?`${discipline==="softwareTest"?"Software":"System"} Verification`:view==="procedureExplorer"?`${discipline==="softwareTest"?"Software Test Case":"System Test Procedure"} Explorer`:labels[view];
   const copyLink=async()=>{try{await navigator.clipboard.writeText(location.href);setToast('Link copied to clipboard')}catch{setToast('This browser blocked clipboard access')}};
   const contextBar=<div className="contextBar"><nav aria-label="Breadcrumb"><span title={active?.program.name}>{active?.program.name}</span><b aria-hidden="true">›</b><span title={project?.project.name}>{project?.project.name}</span><b aria-hidden="true">›</b>{view!=="managedDocuments"&&<><span>Build {release?.version}</span><b aria-hidden="true">›</b></>}<strong>{scopedLabel}</strong></nav><div className="contextActions"><span className="contextReleaseState">{view==="managedDocuments"?"Project-wide":release?.isReleased?"Released · read-only":"In work"}</span><button aria-label="Copy link to this page" onClick={copyLink}>Copy link</button></div></div>;
    const palette=context?<CommandPalette api={API} context={context} ladder={ladder} open={paletteOpen} onClose={()=>setPaletteOpen(false)} onNavigate={navigate}/>:null;
@@ -1109,7 +1109,7 @@ function App() {
             {changeCard("Software change control","software",metrics.software)}
             <section className="dashboardAreaCard verification">
               <header><div><span>VERIFICATION</span><h2>Change triage</h2></div><i>V&amp;V</i></header>
-              <p className="verificationIntro">Engineering impact decisions for change requests in Build {release?.version}. Procedure redesign remains in the Verification workspace.</p>
+              <p className="verificationIntro">Engineering impact decisions for change requests in Build {release?.version}. Verification design remains in the Verification workspace.</p>
               <div className="verificationTriageRows">
                 {verificationRow("System",metrics.verification.system)}
                 {verificationRow("Software HLR",metrics.verification.hlr)}

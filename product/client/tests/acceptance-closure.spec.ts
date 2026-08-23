@@ -150,7 +150,7 @@ test('acceptance closure proves governed revisioning, direct review work, public
   expect((await output.body()).subarray(0,format==='pdf'?4:2).toString()).toBe(format==='pdf'?'%PDF':'PK')
  }
  const documents=await (await request.get(`${apiBase}/api/documents?projectId=${project.id}`)).json()
- expect(documents.map((x:any)=>x.type)).toEqual(expect.arrayContaining(['Sysrd','SwrdHighLevel','SwrdLowLevel','SystemTestProcedures','HighLevelTestProcedures','LowLevelTestProcedures']))
+ expect(documents.map((x:any)=>x.type)).toEqual(expect.arrayContaining(['Sysrd','SwrdHighLevel','SwrdLowLevel','SystemTestProcedures','HighLevelTestCases','LowLevelTestCases']))
  for(const document of documents.filter((x:any)=>['Sysrd','SwrdHighLevel','SwrdLowLevel'].includes(x.type))){
   const output=await request.get(`${apiBase}/api/documents/${document.id}/download?format=pdf`)
   expect(output.ok(),await output.text()).toBeTruthy()

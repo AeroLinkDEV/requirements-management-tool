@@ -29,7 +29,7 @@ public static class DependencyInjection
             new LadderConsumerRegistration("trace.generic-mutation", "Generic trace mutation acceptance/refusal"),
             new LadderConsumerRegistration("controlled-editing.identity", "Controlled editing identity and check-in"),
             new LadderConsumerRegistration("approval.workflow-subject", "Approval workflow subject level and scope"),
-            new LadderConsumerRegistration("verification.procedure-level", "Verification procedure level mapping"),
+            new LadderConsumerRegistration("verification.procedure-level", "Verification artifact level mapping"),
             new LadderConsumerRegistration("verification.test-change-workflow", "Test-change workflow disciplines and prefixes"),
             new LadderConsumerRegistration("verification.coverage", "Same-level coverage mutation and persistence validation"),
             new LadderConsumerRegistration("baseline.controlled-documents", "Baseline controlled-document derivation"),
@@ -55,7 +55,7 @@ public static class DependencyInjection
         var typedRegistrations = new IVerificationArtifactConsumerRegistration[]
         {
             new VerificationArtifactConsumerRegistration("verification.procedure-level",
-                "Verification procedure level mapping", currentArtifactKeys,
+                "Verification artifact level mapping", currentArtifactKeys,
                 VerificationArtifactCapability.Identity | VerificationArtifactCapability.Header
                 | VerificationArtifactCapability.Revision | VerificationArtifactCapability.Lifecycle),
             new VerificationArtifactConsumerRegistration("verification.test-change-workflow",
@@ -124,6 +124,7 @@ public static class DependencyInjection
         services.AddScoped<ReleaseReadinessService>();
         services.AddScoped<RichContentPublisher>();
         services.AddScoped<ControlledOutputGenerator>();
+        services.AddScoped<SoftwareVerificationCaseMigrationAuthority>();
         services.AddScoped<DraftDocumentGenerator>();
         services.AddScoped<VariantConfigurationProjectionService>();
         services.AddScoped<VariantPublicationGenerator>();

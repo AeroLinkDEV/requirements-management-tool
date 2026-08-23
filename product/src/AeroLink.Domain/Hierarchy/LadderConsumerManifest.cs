@@ -139,7 +139,7 @@ public static class LadderConsumerManifestCatalog
         new("change-request.downstream-impact", "Approved-change downstream assessment creation"),
         new("reqif.commit", "ReqIF imported-level parsing and commit allocation"),
         new("approval.workflow-subject", "Approval workflow review-subject mapping"),
-        new("verification.procedure-level", "Procedure/requirement level mapping"),
+        new("verification.procedure-level", "Verification artifact/requirement level mapping"),
         new("verification.test-change-workflow", "Test-change review discipline mapping"),
         new("verification.coverage", "Same-level verification coverage"),
         new("baseline.controlled-documents", "Controlled output document hierarchy"),

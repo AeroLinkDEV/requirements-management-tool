@@ -56,9 +56,9 @@ public sealed class TestProcedureDocumentBootstrapTests
         Assert.Equal(["HLRTD-000001", "LLRTD-000001", "SYSTD-000001"], documents.Select(x => x.DocumentNumber));
         Assert.Equal([TestProcedureLevel.HighLevel, TestProcedureLevel.LowLevel, TestProcedureLevel.System],
             documents.Select(x => x.Level));
-        Assert.Equal("High-Level Software Test Procedures Document",
+        Assert.Equal("High-Level Software Test Cases Document",
             documents.Single(x => x.Level == TestProcedureLevel.HighLevel).Title);
-        Assert.Equal("Low-Level Software Test Procedures Document",
+        Assert.Equal("Low-Level Software Test Cases Document",
             documents.Single(x => x.Level == TestProcedureLevel.LowLevel).Title);
         Assert.Equal("System Test Procedures Document",
             documents.Single(x => x.Level == TestProcedureLevel.System).Title);
@@ -92,11 +92,17 @@ public sealed class TestProcedureDocumentBootstrapTests
         await new TestProcedureDocumentBootstrap(fixture.Db).EnsureAllAsync();
 
         var nodes = await fixture.Db.TestProcedureDocumentNodes.AsNoTracking().ToListAsync();
+        var documentLevels = await fixture.Db.TestProcedureDocuments.AsNoTracking()
+            .ToDictionaryAsync(x => x.Id, x => x.Level);
         var sections = nodes.Where(x => x.Type == TestProcedureDocumentNodeType.Section).ToList();
         var procedures = nodes.Where(x => x.Type == TestProcedureDocumentNodeType.Procedure).ToList();
 
         Assert.Equal(3, sections.Count);
-        Assert.All(sections, x => Assert.Equal(TestProcedureDocumentBootstrap.DefaultSectionHeading, x.Heading));
+        Assert.All(sections, x => Assert.Equal(
+            documentLevels[x.DocumentId] == TestProcedureLevel.System
+                ? TestProcedureDocumentBootstrap.DefaultSectionHeading
+                : TestProcedureDocumentBootstrap.DefaultCaseSectionHeading,
+            x.Heading));
         // A procedure hangs under a section rather than loose at the document root, which is what makes the
         // structure a document rather than a list.
         Assert.All(procedures, x => Assert.Contains(sections, section => section.Id == x.ParentId));

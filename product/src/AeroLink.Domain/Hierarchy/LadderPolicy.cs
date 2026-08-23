@@ -77,7 +77,7 @@ public sealed class LevelDefinition
         RequireDisabled(LevelCapabilities.HasRequirementsDocument, requirementsCatalogue is null,
             "A disabled requirements-document capability cannot carry a requirements catalogue binding.");
         RequireDisabled(LevelCapabilities.HasVerification, TestProcedureDocumentTitle is null,
-            "A disabled verification capability cannot carry a test-procedure document title.");
+            "A disabled verification capability cannot carry a verification document title.");
         if (Has(LevelCapabilities.HasVerification) && VerificationProfile is null)
             throw new DomainException("A verification capability requires a verification artifact profile.");
         if (!Has(LevelCapabilities.HasVerification) && VerificationProfile is not null)
@@ -109,7 +109,7 @@ public sealed class LevelDefinition
         if (verification is not null)
         {
             if (string.IsNullOrWhiteSpace(verification.ProcedurePrefix))
-                throw new DomainException("A verification binding requires a procedure prefix.");
+                throw new DomainException("A verification binding requires an artifact prefix.");
             if (ProcedureLevelFor(level) != verification.ProcedureLevel
                 || DisciplineFor(level) != verification.Discipline
                 || TestDocumentFor(level) != verification.DocumentType)
@@ -165,8 +165,8 @@ public sealed class LevelDefinition
     private static ControlledDocumentType TestDocumentFor(RequirementLevel level) => level switch
     {
         RequirementLevel.System => ControlledDocumentType.SystemTestProcedures,
-        RequirementLevel.HighLevel => ControlledDocumentType.HighLevelTestProcedures,
-        RequirementLevel.LowLevel => ControlledDocumentType.LowLevelTestProcedures,
+        RequirementLevel.HighLevel => ControlledDocumentType.HighLevelTestCases,
+        RequirementLevel.LowLevel => ControlledDocumentType.LowLevelTestCases,
         _ => throw new DomainException($"Unknown requirement level value: {(int)level}.")
     };
 }
@@ -243,22 +243,23 @@ public sealed class LegacyLadderPolicy : ILadderPolicy, ILegacyLadderCompatibili
             "System Test Procedures Document"),
         new(RequirementLevel.HighLevel, "HLR", LevelCapabilities.HasChangeControl | LevelCapabilities.HasVerification | LevelCapabilities.HasRequirementsDocument,
             new(ChangeRequestType.Software, RequirementLevel.HighLevel, "HLRCR"),
-            new(TestProcedureLevel.HighLevel, TestChangeReviewDiscipline.HighLevelSoftware, "HLRTP", ControlledDocumentType.HighLevelTestProcedures),
+            new(TestProcedureLevel.HighLevel, TestChangeReviewDiscipline.HighLevelSoftware, "HLRTC", ControlledDocumentType.HighLevelTestCases),
             ControlledDocumentType.SwrdHighLevel,
             new("HLR", "High-Level Software Requirement", "HLRD-000001", "High-Level Software Requirements Document"),
-            "High-Level Software Test Procedures Document"),
+            "High-Level Software Test Cases Document"),
         new(RequirementLevel.LowLevel, "LLR", LevelCapabilities.HasChangeControl | LevelCapabilities.HasVerification | LevelCapabilities.HasRequirementsDocument | LevelCapabilities.HasCodeTraceability,
             new(ChangeRequestType.Software, RequirementLevel.LowLevel, "LLRCR"),
-            new(TestProcedureLevel.LowLevel, TestChangeReviewDiscipline.LowLevelSoftware, "LLRTP", ControlledDocumentType.LowLevelTestProcedures),
+            new(TestProcedureLevel.LowLevel, TestChangeReviewDiscipline.LowLevelSoftware, "LLRTC", ControlledDocumentType.LowLevelTestCases),
             ControlledDocumentType.SwrdLowLevel,
             new("LLR", "Low-Level Software Requirement", "LLRD-000001", "Low-Level Software Requirements Document"),
-            "Low-Level Software Test Procedures Document"),
+            "Low-Level Software Test Cases Document"),
     ];
     private static readonly IReadOnlyList<ControlledDocumentType> Documents =
     [
         ControlledDocumentType.Sysrd, ControlledDocumentType.SwrdHighLevel, ControlledDocumentType.SwrdLowLevel,
         ControlledDocumentType.SystemTestProcedures, ControlledDocumentType.HighLevelTestProcedures,
-        ControlledDocumentType.LowLevelTestProcedures,
+        ControlledDocumentType.LowLevelTestProcedures, ControlledDocumentType.HighLevelTestCases,
+        ControlledDocumentType.LowLevelTestCases,
     ];
 
     public IReadOnlyList<RequirementLevel> OrderedLevels => Levels;
@@ -339,7 +340,7 @@ public sealed class LegacyLadderPolicy : ILadderPolicy, ILegacyLadderCompatibili
         VerificationProfile(level).ExecutableArtifact.DocumentType;
 
     public string TestProcedureDocumentTitle(RequirementLevel level) => Definition(level).TestProcedureDocumentTitle
-        ?? throw new DomainException($"The {level} definition has no test-procedure document title.");
+        ?? throw new DomainException($"The {level} definition has no verification document title.");
 
     public string ControlledDocumentPrefix(ControlledDocumentType type) => type switch
     {
@@ -349,6 +350,8 @@ public sealed class LegacyLadderPolicy : ILadderPolicy, ILegacyLadderCompatibili
         ControlledDocumentType.SystemTestProcedures => "SYSTD",
         ControlledDocumentType.HighLevelTestProcedures => "HLRTD",
         ControlledDocumentType.LowLevelTestProcedures => "LLRTD",
+        ControlledDocumentType.HighLevelTestCases => "HLRTD",
+        ControlledDocumentType.LowLevelTestCases => "LLRTD",
         _ => throw Unknown(type),
     };
 
@@ -360,6 +363,8 @@ public sealed class LegacyLadderPolicy : ILadderPolicy, ILegacyLadderCompatibili
         ControlledDocumentType.SystemTestProcedures => "System Test Procedures",
         ControlledDocumentType.HighLevelTestProcedures => "HLR Test Procedures",
         ControlledDocumentType.LowLevelTestProcedures => "LLR Test Procedures",
+        ControlledDocumentType.HighLevelTestCases => "HLR Test Cases",
+        ControlledDocumentType.LowLevelTestCases => "LLR Test Cases",
         _ => throw Unknown(type),
     };
 
@@ -409,8 +414,8 @@ public sealed class LegacyLadderPolicy : ILadderPolicy, ILegacyLadderCompatibili
 
     public bool IsKnownTestProcedurePrefix(string baseNumber) =>
         !string.IsNullOrWhiteSpace(baseNumber)
-        && OrderedLevels.Any(level => baseNumber.StartsWith(
-            TestProcedurePrefix(ProcedureLevel(level)) + "-", StringComparison.OrdinalIgnoreCase));
+        && VerificationArtifactVocabulary.Definitions.Any(definition =>
+            baseNumber.StartsWith(definition.ArtifactPrefix + "-", StringComparison.OrdinalIgnoreCase));
 
     public string TestChangeReviewPrefix(TestChangeReviewDiscipline discipline) =>
         Definitions.SingleOrDefault(x => x.Verification?.Discipline == discipline)?.VerificationProfile?.ExecutableArtifact.TestChangeRequestPrefix
@@ -552,7 +557,7 @@ public class ResolvedProjectLadderPolicy : ILadderPolicy
     public RequirementLevel AssessmentTarget(VerificationArtifactKey key) => VerificationArtifact(key).AssessmentTarget;
     public VerificationArtifactKey ExecutableArtifactKey(RequirementLevel level) => VerificationProfile(level).ExecutableKey;
     public RequirementLevel RequirementLevelFor(TestProcedureLevel level) => definitions.SingleOrDefault(x => x.Verification?.ProcedureLevel == level)?.Level
-        ?? throw new DomainException($"The project ladder does not configure procedure level {level}.");
+        ?? throw new DomainException($"The project ladder does not configure verification level {level}.");
     public TestChangeReviewDiscipline Discipline(RequirementLevel level) => Definition(level).Verification?.Discipline
         ?? throw new DomainException($"The {level} definition has no verification binding.");
     public RequirementLevel RequirementLevelFor(TestChangeReviewDiscipline discipline) => definitions.SingleOrDefault(x => x.Verification?.Discipline == discipline)?.Level
@@ -561,7 +566,7 @@ public class ResolvedProjectLadderPolicy : ILadderPolicy
         ?? throw new DomainException($"The {level} definition has no requirements document.");
     public ControlledDocumentType TestProcedureDocument(RequirementLevel level) => VerificationProfile(level).ExecutableArtifact.DocumentType;
     public string TestProcedureDocumentTitle(RequirementLevel level) => Definition(level).TestProcedureDocumentTitle
-        ?? throw new DomainException($"The {level} definition has no test-procedure document title.");
+        ?? throw new DomainException($"The {level} definition has no verification document title.");
     public string ControlledDocumentPrefix(ControlledDocumentType type) => catalogue.ControlledDocumentPrefix(type);
     public string ControlledDocumentTitle(ControlledDocumentType type) => catalogue.ControlledDocumentTitle(type);
     public string RequirementPrefix(RequirementLevel level) => Definition(level).RequirementPrefix;
@@ -595,7 +600,7 @@ public class ResolvedProjectLadderPolicy : ILadderPolicy
         IsChangeRequestScopeValid(type, softwareLevel) && AcceptsChangeRequest(type, level)
         && (type != ChangeRequestType.Software || softwareLevel == level);
     public string TestProcedurePrefix(TestProcedureLevel level) => definitions.SingleOrDefault(x => x.Verification?.ProcedureLevel == level)?.VerificationProfile?.ExecutableArtifact.ArtifactPrefix
-        ?? throw new DomainException($"The project ladder does not configure procedure level {level}.");
+        ?? throw new DomainException($"The project ladder does not configure verification level {level}.");
     public bool IsKnownTestProcedurePrefix(string baseNumber) => !string.IsNullOrWhiteSpace(baseNumber)
         && definitions.Any(x => x.VerificationProfile is not null
             && baseNumber.StartsWith(x.VerificationProfile.ExecutableArtifact.ArtifactPrefix + "-", StringComparison.OrdinalIgnoreCase));

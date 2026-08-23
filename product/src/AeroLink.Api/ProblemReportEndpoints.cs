@@ -898,6 +898,7 @@ public static class ProblemReportEndpoints
         var procedureLevel = levels.Count == 1 ? levels[0] : (TestProcedureLevel?)null;
         var discipline = procedureLevel is null ? null
             : procedureLevel == TestProcedureLevel.System ? "system" : "software";
+        var artifactNoun = procedureLevel == TestProcedureLevel.System ? "procedure" : "case";
         string? procedureTitle = null;
         if (revision is not null)
             procedureTitle = (await TestProcedureRevisionTitleProjection.ForRevisionsAsync(db,
@@ -905,7 +906,7 @@ public static class ProblemReportEndpoints
         var reason = scope.IsResolved
             ? procedure is not null
                 ? $"Record a passing successor execution against {procedure.BaseNumber}, using the exact revision carried by the target build."
-                : "Choose one of the controlled corrective procedures carried by the target build."
+                : $"Choose one of the controlled corrective {artifactNoun}s carried by the target build."
             : scope.Error!;
 
         return Results.Ok(new
@@ -917,10 +918,15 @@ public static class ProblemReportEndpoints
             reason,
             verificationCode = scope.ErrorCode,
             executionId = scope.OriginExecutionId,
-            procedureId = procedure?.Id ?? scope.ProcedureId,
-            procedureRevisionId = revision?.Id,
-            procedureNumber = procedure?.BaseNumber,
-            procedureTitle,
+            artifactId = procedure?.Id ?? scope.ProcedureId,
+            artifactRevisionId = revision?.Id,
+            artifactNumber = procedure?.BaseNumber,
+            artifactTitle = procedureTitle,
+            artifactKind = procedureLevel == TestProcedureLevel.System ? "Procedure" : "Case",
+            procedureId = procedure?.Id ?? scope.ProcedureId, // compatibility alias
+            procedureRevisionId = revision?.Id, // compatibility alias
+            procedureNumber = procedure?.BaseNumber, // compatibility alias
+            procedureTitle, // compatibility alias
             // Naming the authority a handoff needs, rather than only refusing.
             requiredRole = ProgramRole.TestEngineer.ToString(),
         });

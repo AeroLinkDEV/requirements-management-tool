@@ -168,6 +168,7 @@ public static class ManagedDocumentEndpoints
         var signatureQuery = db.ElectronicSignatures.AsNoTracking().Where(x => x.ArtifactType == "ManagedDocument" && x.ArtifactId == id);
         var signatures = db.Database.IsNpgsql() ? await signatureQuery.OrderByDescending(x => x.SignedAt).ThenByDescending(x => x.Id).Take(100).ToListAsync(ct)
             : (await signatureQuery.ToListAsync(ct)).OrderByDescending(x => x.SignedAt).ThenByDescending(x => x.Id).Take(100).ToList();
+        var signatureMigration = await SignatureMigrationProjector.ForAsync(db, signatures.Select(x => x.Id), ct);
         var contributorQuery = db.ManagedDocumentReviewContributors.AsNoTracking().Where(x => revisionIds.Contains(x.RevisionId));
         var contributors = db.Database.IsNpgsql() ? await contributorQuery.OrderByDescending(x => x.CapturedAt).Take(100).ToListAsync(ct)
             : (await contributorQuery.ToListAsync(ct)).OrderByDescending(x => x.CapturedAt).Take(100).ToList();
@@ -197,7 +198,19 @@ public static class ManagedDocumentEndpoints
                 , reviewContributors = contributors.Where(x => x.RevisionId == revision.Id).Select(x => new { x.Id, x.ReviewCycle, x.ContributorId, x.EvidenceHash, x.CapturedAt, x.Provenance })
             }),
             assignments = assignments.Select(x => new { x.Id, x.RevisionId, x.AssignmentType, x.PriorAssigneeId, x.NewAssigneeId, x.AssignedBy, x.Reason, x.EffectiveAt }),
-            signatures = signatures.Select(x => new { x.Id, x.UserName, x.DisplayName, x.ArtifactRevision, x.Action, x.Authority, x.AuthoritySource, x.AuthoritySourceId, x.WorkflowId, x.WorkflowVersion, x.ReviewStepId, x.ReviewCycle, x.ReviewStepPosition, x.Meaning, x.Rationale, x.ContentHash, x.SignedAt, isLegacyAuthority = string.IsNullOrWhiteSpace(x.Authority) }),
+            signatures = signatures.Select(x =>
+            {
+                var status = signatureMigration.GetValueOrDefault(x.Id) ?? SignatureMigrationProjection.Current;
+                return new
+                {
+                    x.Id, x.UserName, x.DisplayName, x.ArtifactRevision, x.Action, x.Authority,
+                    x.AuthoritySource, x.AuthoritySourceId, x.WorkflowId, x.WorkflowVersion,
+                    x.ReviewStepId, x.ReviewCycle, x.ReviewStepPosition, x.Meaning, x.Rationale,
+                    x.ContentHash, x.SignedAt, isLegacyAuthority = string.IsNullOrWhiteSpace(x.Authority),
+                    signatureStatus = status.Status, isSuperseded = status.IsSuperseded,
+                    supersession = status.Supersession
+                };
+            }),
             audit = audits.Select(x => new { x.Id, x.EventType, x.ActorId, x.Detail, x.OccurredAt })
         });
     }

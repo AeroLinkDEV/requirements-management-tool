@@ -136,13 +136,13 @@ public sealed class VerificationImpactItem
     public static VerificationImpactItem ForOrphanedProcedure(Guid projectId, Guid releaseId, Guid changeRequestId, Guid testChangeReviewId,
         Guid procedureId, string procedureDisplayNumber, DateTimeOffset now, Guid? causingBaselineId = null)
     {
-        if (procedureId == Guid.Empty) throw new DomainException("An orphaned-procedure item requires its procedure.");
+        if (procedureId == Guid.Empty) throw new DomainException("An orphaned verification artifact item requires its artifact.");
         if (causingBaselineId == Guid.Empty) throw new DomainException("A causing baseline must be a real baseline or absent.");
         return new VerificationImpactItem(projectId, releaseId, changeRequestId, testChangeReviewId, VerificationImpactTrigger.ProcedureOrphaned, now)
         {
             ProcedureId = procedureId,
             CausingBaselineId = causingBaselineId,
-            SubjectDisplayNumber = Required(procedureDisplayNumber, "procedure identifier")
+            SubjectDisplayNumber = Required(procedureDisplayNumber, "verification artifact identifier")
         };
     }
 
@@ -248,21 +248,21 @@ public sealed class VerificationImpactItem
         if (!IsOutcomeValidForTrigger(outcome))
             throw new DomainException($"{outcome} does not apply to a {Trigger} item.");
         if (outcome == VerificationImpactOutcome.ProcedureCoverageConfirmed && (procedureId is null || procedureId == Guid.Empty))
-            throw new DomainException("Confirming coverage requires the approved procedure that covers the requirement.");
+            throw new DomainException("Confirming coverage requires the approved verification artifact that covers the requirement.");
         if (outcome == VerificationImpactOutcome.ProcedureCoverageConfirmed
             && (procedureRevisionId is null || procedureRevisionId == Guid.Empty))
-            throw new DomainException("Confirming coverage requires the exact approved procedure revision.");
+            throw new DomainException("Confirming coverage requires the exact approved verification artifact revision.");
         if (outcome is not (VerificationImpactOutcome.ProcedureCoverageConfirmed or VerificationImpactOutcome.ProcedureRetargeted)
             && (procedureId is not null || procedureRevisionId is not null))
-            throw new DomainException("Only confirmed coverage names a procedure.");
+            throw new DomainException("Only confirmed coverage names a verification artifact.");
         // Retargeting is the one decision that names a requirement rather than a procedure: the procedure is
         // already known — it is the stranded one this item was raised about — and what the engineer is
         // deciding is which requirement it now answers for.
         if (outcome == VerificationImpactOutcome.ProcedureRetargeted
             && (retargetedRequirementRevisionId is null || retargetedRequirementRevisionId == Guid.Empty))
-            throw new DomainException("Moving a procedure requires the requirement revision it now covers.");
+            throw new DomainException("Moving a verification artifact requires the requirement revision it now covers.");
         if (outcome != VerificationImpactOutcome.ProcedureRetargeted && retargetedRequirementRevisionId is not null)
-            throw new DomainException("Only a retargeted procedure names the requirement it moves to.");
+            throw new DomainException("Only a retargeted verification artifact names the requirement it moves to.");
         var action = procedureChangeAction ?? (outcome switch
         {
             VerificationImpactOutcome.NoTestRequired => TestProcedureChangeAction.NoTestRequired,
@@ -274,9 +274,9 @@ public sealed class VerificationImpactItem
         if (outcome == VerificationImpactOutcome.NoTestRequired && action != TestProcedureChangeAction.NoTestRequired)
             throw new DomainException("A no-test decision must use the no-test-required action.");
         if (outcome == VerificationImpactOutcome.NewProcedureRequired && action != TestProcedureChangeAction.CreateNew)
-            throw new DomainException("Deciding that a new procedure is required must use the create-new action.");
+            throw new DomainException("Deciding that a new verification artifact is required must use the create-new action.");
         if (outcome != VerificationImpactOutcome.ProcedureCoverageConfirmed && preReleaseEvidenceRequired)
-            throw new DomainException("Pre-release evidence can only be required for a selected test procedure.");
+            throw new DomainException("Pre-release evidence can only be required for a selected verification artifact.");
         ResolvedProcedureId = procedureId;
         ResolvedProcedureRevisionId = procedureRevisionId;
         RetargetedRequirementRevisionId = retargetedRequirementRevisionId;
@@ -311,12 +311,12 @@ public sealed class VerificationImpactItem
     {
         if (!AwaitsNewProcedure) return false;
         if (procedureId == Guid.Empty || procedureRevisionId == Guid.Empty)
-            throw new DomainException("Settling a new-procedure decision requires the exact approved procedure revision.");
+            throw new DomainException("Settling a new-artifact decision requires the exact approved verification artifact revision.");
         Outcome = VerificationImpactOutcome.ProcedureCoverageConfirmed;
         ProcedureChangeAction = TestProcedureChangeAction.CreateNew;
         ResolvedProcedureId = procedureId;
         ResolvedProcedureRevisionId = procedureRevisionId;
-        ResolutionRationale = $"{ResolutionRationale} Settled when the requested procedure was approved.".Trim();
+        ResolutionRationale = $"{ResolutionRationale} Settled when the requested verification artifact was approved.".Trim();
         Touch(now);
         return true;
     }
@@ -347,7 +347,7 @@ public sealed class VerificationImpactItem
     public void LinkRequirementRevision(Guid requirementRevisionId, DateTimeOffset now)
     {
         if (Trigger == VerificationImpactTrigger.ProcedureOrphaned)
-            throw new DomainException("An orphaned-procedure item does not describe a requirement revision.");
+            throw new DomainException("An orphaned verification artifact item does not describe a requirement revision.");
         if (requirementRevisionId == Guid.Empty) throw new DomainException("An exact requirement revision is required.");
         if (RequirementRevisionId == requirementRevisionId) return;
         RequirementRevisionId = requirementRevisionId;

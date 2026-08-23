@@ -17,7 +17,8 @@ namespace AeroLink.Api.Tests;
 /// </summary>
 public sealed class BuildTestSetApiTests
 {
-    private sealed record Fixture(Guid ProjectId, Guid ReleaseId, Guid ApprovedRevisionId, Guid DraftRevisionId, Guid OtherProjectRevisionId);
+    private sealed record Fixture(Guid ProjectId, Guid ReleaseId, Guid ApprovedRevisionId,
+        Guid ApprovedCaseRevisionId, Guid DraftRevisionId, Guid OtherProjectRevisionId);
 
     private static async Task<Fixture> SeedAsync(AeroLinkApiFactory factory)
     {
@@ -31,15 +32,18 @@ public sealed class BuildTestSetApiTests
         var elsewhere = new ProjectRecord(program.Id, "Other Software", "Other Plan Software");
         db.AddRange(program, project, elsewhere, release);
 
-        (TestProcedure Procedure, TestProcedureRevision Revision) Procedure(Guid projectId, string number, TestProcedureState state)
+        (TestProcedure Procedure, TestProcedureRevision Revision) Procedure(Guid projectId, string number,
+            TestProcedureState state, TestProcedureLevel level = TestProcedureLevel.System)
         {
-            var procedure = new TestProcedure(projectId, number, "Oceanic sequencing", "plan.engineer", now, TestProcedureLevel.System);
+            var procedure = new TestProcedure(projectId, number, "Oceanic sequencing", "plan.engineer", now, level);
             var revision = new TestProcedureRevision(procedure.Id, 0, "Objective", "Pre", "Steps", "Expected", state, "plan.engineer", now);
             db.AddRange(procedure, revision);
             return (procedure, revision);
         }
 
         var approved = Procedure(project.Id, "SYSTP-000901", TestProcedureState.Approved);
+        var approvedCase = Procedure(project.Id, "HLRTC-000901", TestProcedureState.Approved,
+            TestProcedureLevel.HighLevel);
         var draft = Procedure(project.Id, "SYSTP-000902", TestProcedureState.Draft);
         var other = Procedure(elsewhere.Id, "SYSTP-000903", TestProcedureState.Approved);
 
@@ -55,7 +59,8 @@ public sealed class BuildTestSetApiTests
             db.Add(new ProgramMembership(account.Id, program.Id, role, "test.setup", now));
         }
         await db.SaveChangesAsync();
-        return new(project.Id, release.Id, approved.Revision.Id, draft.Revision.Id, other.Revision.Id);
+        return new(project.Id, release.Id, approved.Revision.Id, approvedCase.Revision.Id,
+            draft.Revision.Id, other.Revision.Id);
     }
 
     private static async Task LoginAsync(HttpClient client, string user)
@@ -156,25 +161,27 @@ public sealed class BuildTestSetApiTests
     }
 
     [Fact]
-    public async Task A_procedure_can_be_taken_back_out()
+    public async Task A_case_can_be_taken_back_out_through_the_canonical_case_route()
     {
         using var factory = new AeroLinkApiFactory();
         using var client = factory.CreateClient();
         var fixture = await SeedAsync(factory);
         await LoginAsync(client, "plan.lead");
-        using var added = await client.PostAsJsonAsync($"/api/releases/{fixture.ReleaseId}/test-sets/System/procedures",
-            new { procedureRevisionIds = new[] { fixture.ApprovedRevisionId }, reason = "Chosen", note = "" });
+        var discipline = TestChangeReviewDiscipline.HighLevelSoftware;
+        using var added = await client.PostAsJsonAsync(
+            $"/api/releases/{fixture.ReleaseId}/test-sets/{discipline}/cases",
+            new { artifactRevisionIds = new[] { fixture.ApprovedCaseRevisionId }, reason = "Chosen", note = "" });
         Assert.True(added.IsSuccessStatusCode, await added.Content.ReadAsStringAsync());
 
         using var removed = await client.DeleteAsync(
-            $"/api/releases/{fixture.ReleaseId}/test-sets/System/procedures/{fixture.ApprovedRevisionId}");
+            $"/api/releases/{fixture.ReleaseId}/test-sets/{discipline}/cases/{fixture.ApprovedCaseRevisionId}");
         var body = await removed.Content.ReadAsStringAsync();
         Assert.True(removed.IsSuccessStatusCode, $"{(int)removed.StatusCode}: {body}");
-        Assert.Empty(JsonSerializer.Deserialize<JsonElement>(body).GetProperty("procedures").EnumerateArray());
+        Assert.Empty(JsonSerializer.Deserialize<JsonElement>(body).GetProperty("artifacts").EnumerateArray());
 
         // Removing it again is the state the caller asked for, not a fault.
         using var again = await client.DeleteAsync(
-            $"/api/releases/{fixture.ReleaseId}/test-sets/System/procedures/{fixture.ApprovedRevisionId}");
+            $"/api/releases/{fixture.ReleaseId}/test-sets/{discipline}/cases/{fixture.ApprovedCaseRevisionId}");
         Assert.True(again.IsSuccessStatusCode, await again.Content.ReadAsStringAsync());
     }
 

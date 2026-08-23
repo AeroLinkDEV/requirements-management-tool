@@ -127,11 +127,11 @@ test('a test engineer proposes a new procedure inside the test change request th
 
   // The package opens in its own workspace, as a change request does from the requirements drawer.
   await assessment.getByRole('button', { name: /^SYSTCR-\d{6}\.\d{2}$/ }).click()
-  const drawer = page.getByRole('dialog', { name: /procedure decisions/ })
+  const drawer = page.getByRole('dialog', { name: /test procedure decisions/ })
   await expect(drawer).toBeVisible()
   // A package that has concluded test work is required but names none is unfinished, and says so rather than
   // rendering an empty list that reads as "nothing to do".
-  await expect(drawer).toContainText('No procedure decisions are proposed yet')
+  await expect(drawer).toContainText('No test procedure decisions are proposed yet')
 
   await drawer.getByRole('button', { name: 'Write engineering case' }).click()
   const caseDialog = page.getByRole('dialog', { name: /Edit the case of/ })
@@ -149,17 +149,17 @@ test('a test engineer proposes a new procedure inside the test change request th
   await refreshedRow.getByRole('button', { name: 'Open assessment' }).click()
   const refreshedAssessment = page.getByRole('dialog', { name: /test impact/ })
   await expect(refreshedAssessment.getByRole('button', { name: 'Send for approval' })).toHaveCount(0)
-  const addDecision = refreshedAssessment.getByRole('button', { name: 'Add a procedure decision' })
+  const addDecision = refreshedAssessment.getByRole('button', { name: 'Add a test procedure decision' })
   await expect(addDecision).toBeVisible({ timeout: 30_000 })
   await addDecision.click()
   await expect(drawer).toBeVisible()
 
-  await drawer.getByRole('button', { name: 'Propose a procedure change' }).click()
-  const dialog = page.getByRole('dialog', { name: 'Propose a procedure change' })
+  await drawer.getByRole('button', { name: 'Propose a test procedure change' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Propose a test procedure change' })
 
   // The requirements a procedure verifies are chosen here, not left empty — without them the procedure
   // revision cannot be bound to what caused it.
-  await expect(dialog.getByRole('group', { name: 'Requirements this procedure verifies' })).toBeVisible()
+  await expect(dialog.getByRole('group', { name: 'Requirements this test procedure verifies' })).toBeVisible()
   // Introducing allocates the number centrally, so there is deliberately nowhere to type one.
   await expect(dialog.getByRole('combobox', { name: 'Procedure' })).toHaveCount(0)
   await dialog.getByLabel('What is being done').selectOption('Retire')
@@ -174,16 +174,16 @@ test('a test engineer proposes a new procedure inside the test change request th
   await dialog.getByLabel('Objective').fill('Verify oceanic waypoints sequence in flight-plan order.')
   await dialog.getByLabel('Steps').fill('1. Load the plan. 2. Advance past the first waypoint.')
   await dialog.getByLabel('Expected result').fill('The next eligible oceanic waypoint is sequenced.')
-  await dialog.getByLabel('Why this procedure work is required').fill('No procedure exercises oceanic sequencing after the approved change.')
-  await expect(dialog.getByText('Select at least one exact requirement this new procedure verifies.')).toBeVisible()
+  await dialog.getByLabel('Why this test procedure work is required').fill('No procedure exercises oceanic sequencing after the approved change.')
+  await expect(dialog.getByText('Select at least one exact requirement this new test procedure verifies.')).toBeVisible()
   await expect(dialog.getByRole('button', { name: 'Propose decision' })).toBeDisabled()
-  await dialog.getByRole('group', { name: 'Requirements this procedure verifies' })
+  await dialog.getByRole('group', { name: 'Requirements this test procedure verifies' })
     .getByRole('checkbox').first().check()
   await dialog.getByRole('button', { name: 'Propose decision' }).click()
 
-  await expect(drawer.getByText(/SYSTP-\d{6}\.00 · New procedure/)).toBeVisible({ timeout: 30_000 })
+  await expect(drawer.getByText(/SYSTP-\d{6}\.00 · New test procedure/)).toBeVisible({ timeout: 30_000 })
   await expect(drawer).toContainText('Oceanic waypoint sequencing')
-  await expect(drawer).toContainText('1 procedure decision proposed')
+  await expect(drawer).toContainText('1 test procedure decision proposed')
 
   // It is a controlled record, not drawer state: it survives leaving the page and coming back.
   await page.reload()
@@ -191,12 +191,12 @@ test('a test engineer proposes a new procedure inside the test change request th
   await expect(reopened).toBeVisible({ timeout: 30_000 })
   // Reachable straight from the queue row, without opening the assessment first.
   await reopened.getByRole('button', { name: /^SYSTCR-\d{6}\.\d{2} · / }).click()
-  const again = page.getByRole('dialog', { name: /procedure decisions/ })
-  await expect(again.getByText(/SYSTP-\d{6}\.00 · New procedure/)).toBeVisible({ timeout: 30_000 })
+  const again = page.getByRole('dialog', { name: /test procedure decisions/ })
+  await expect(again.getByText(/SYSTP-\d{6}\.00 · New test procedure/)).toBeVisible({ timeout: 30_000 })
   await expect(again).toContainText('SYSR-')
 
   await again.getByRole('button', { name: 'Withdraw this decision' }).click()
-  await expect(again).toContainText('No procedure decisions are proposed yet', { timeout: 30_000 })
+  await expect(again).toContainText('No test procedure decisions are proposed yet', { timeout: 30_000 })
 })
 
 test('a procedure modification shows retained coverage and records an explicit reviewed delta', async ({ page }) => {
@@ -270,9 +270,9 @@ test('a procedure modification shows retained coverage and records an explicit r
   })
 
   await packageRow.getByRole('button', { name: /^SYSTCR-\d{6}\.\d{2}/ }).click()
-  const drawer = page.getByRole('dialog', { name: /procedure decisions/ })
-  await drawer.getByRole('button', { name: 'Propose a procedure change' }).click()
-  const dialog = page.getByRole('dialog', { name: 'Propose a procedure change' })
+  const drawer = page.getByRole('dialog', { name: /test procedure decisions/ })
+  await drawer.getByRole('button', { name: 'Propose a test procedure change' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Propose a test procedure change' })
   await dialog.getByLabel('What is being done').selectOption('Modify')
   await dialog.getByRole('combobox', { name: /^Procedure/ }).selectOption('SYSTP-000900')
   const current = dialog.getByRole('group', { name: 'Current exact coverage' })
@@ -280,7 +280,7 @@ test('a procedure modification shows retained coverage and records an explicit r
   await expect(current).toContainText('Suspect')
   await expect(current).toContainText('retained; outside this package change scope')
   await current.getByLabel(/SYSR-000401\.00/).uncheck()
-  await dialog.getByRole('group', { name: 'Requirements this procedure verifies' })
+  await dialog.getByRole('group', { name: 'Requirements this test procedure verifies' })
     .getByLabel(/SYSR-000403\.00/).check()
   await expect(dialog).toContainText('Proposed coverage: 1 retained, 1 added, 1 removed.')
   await dialog.getByLabel('Title').fill('Revised procedure')
@@ -288,7 +288,7 @@ test('a procedure modification shows retained coverage and records an explicit r
   await dialog.getByLabel('Steps').fill('Execute.')
   await dialog.getByLabel('Expected result').fill('Observed.')
   await dialog.getByLabel('Why coverage is being added or removed').fill('Replace obsolete coverage.')
-  await dialog.getByLabel('Why this procedure work is required').fill('The approved change alters procedure behavior.')
+  await dialog.getByLabel('Why this test procedure work is required').fill('The approved change alters procedure behavior.')
   await dialog.getByRole('button', { name: 'Propose decision' }).click()
 
   expect(submitted?.drivingRequirementRevisionIds).toEqual([additionId])
@@ -362,9 +362,9 @@ test('a stale Modify target reloads controlled state and requires an explicit re
   })
 
   await packageRow.getByRole('button', { name: /^SYSTCR-\d{6}\.\d{2}/ }).click()
-  const drawer = page.getByRole('dialog', { name: /procedure decisions/ })
-  await drawer.getByRole('button', { name: 'Propose a procedure change' }).click()
-  const dialog = page.getByRole('dialog', { name: 'Propose a procedure change' })
+  const drawer = page.getByRole('dialog', { name: /test procedure decisions/ })
+  await drawer.getByRole('button', { name: 'Propose a test procedure change' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Propose a test procedure change' })
   await dialog.getByLabel('What is being done').selectOption('Modify')
   const procedure = dialog.getByRole('combobox', { name: /^Procedure/ })
   await expect(procedure.getByRole('option', { name: 'SYSTP-000901.00 - Carried recovery procedure · Approved' })).toHaveCount(1)
@@ -373,7 +373,7 @@ test('a stale Modify target reloads controlled state and requires an explicit re
   await dialog.getByLabel('Objective').fill('Preserve authored intent while refreshing the controlled target.')
   await dialog.getByLabel('Steps').fill('Execute the retained controlled procedure.')
   await dialog.getByLabel('Expected result').fill('The selected behavior remains correct.')
-  await dialog.getByLabel('Why this procedure work is required').fill('The build changed after the picker was loaded.')
+  await dialog.getByLabel('Why this test procedure work is required').fill('The build changed after the picker was loaded.')
   const readsBeforeProposal = targetReads
 
   await dialog.getByRole('button', { name: 'Propose decision' }).click()

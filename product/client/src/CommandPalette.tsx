@@ -23,11 +23,11 @@ const commandDefinitions:{label:string;view:View;discipline:Discipline;detail:st
   {label:'System Downstream Assessments',view:'testingCoverage',discipline:'systemTest',detail:'Approved changes waiting for a SYSTCR conclusion',icon:'⊞'},
   {label:'System Test Procedure Explorer',view:'procedureExplorer',discipline:'systemTest',detail:'Browse controlled system procedures and what this build covers',icon:'≡'},
   {label:'System Test Results',view:'testResults',discipline:'systemTest',detail:'What this build runs, and the determinations recorded against it',icon:'▦'},
-  {label:'Software HLR Test Change Requests',view:'testChangeRequests',discipline:'softwareTest',artifactKind:'HighLevel',detail:'The HLRTCRs controlling high-level software test procedures',icon:'◫'},
+  {label:'Software HLR Test Change Requests',view:'testChangeRequests',discipline:'softwareTest',artifactKind:'HighLevel',detail:'The HLRTCRs controlling high-level software test cases',icon:'◫'},
   {label:'Software HLR Downstream Assessments',view:'testingCoverage',discipline:'softwareTest',artifactKind:'HighLevel',detail:'Approved changes waiting for an HLRTCR conclusion',icon:'⊞'},
-  {label:'Software Test Procedure Explorer',view:'procedureExplorer',discipline:'softwareTest',detail:'Browse controlled HLR and LLR procedures and what this build covers',icon:'≡'},
+  {label:'Software Test Case Explorer',view:'procedureExplorer',discipline:'softwareTest',detail:'Browse controlled HLR and LLR test cases and what this build covers',icon:'≡'},
   {label:'Software HLR Test Results',view:'testResults',discipline:'softwareTest',artifactKind:'HighLevel',detail:'High-level software test set and recorded determinations',icon:'▦'},
-  {label:'Software LLR Test Change Requests',view:'testChangeRequests',discipline:'softwareTest',artifactKind:'LowLevel',detail:'The LLRTCRs controlling low-level software test procedures',icon:'◫'},
+  {label:'Software LLR Test Change Requests',view:'testChangeRequests',discipline:'softwareTest',artifactKind:'LowLevel',detail:'The LLRTCRs controlling low-level software test cases',icon:'◫'},
   {label:'Software LLR Downstream Assessments',view:'testingCoverage',discipline:'softwareTest',artifactKind:'LowLevel',detail:'Approved changes waiting for an LLRTCR conclusion',icon:'⊞'},
   {label:'Software LLR Test Results',view:'testResults',discipline:'softwareTest',artifactKind:'LowLevel',detail:'Low-level software test set and recorded determinations',icon:'▦'},
   {label:'Digital Thread',view:'lifecycle',discipline:'system',detail:'Traceability and outputs across the released evidence path',icon:'↗'},
@@ -56,13 +56,13 @@ export default function CommandPalette({api,context,open,ladder,onClose,onNaviga
   }),[ladder])
   const pageEntries=useMemo(()=>configuredPages.filter(item=>item.label.toLowerCase().includes(query.trim().toLowerCase())||item.detail.toLowerCase().includes(query.trim().toLowerCase())),[configuredPages,query])
   const artifactEntries=useMemo<PaletteEntry[]>(()=>results.filter(item=>!hiddenArtifactKinds.has(item.kind)).filter(item=>{
-    const levelBound=['change-request','requirement','test-procedure','test-execution','document'].includes(item.kind)
+    const levelBound=['change-request','requirement','test-procedure','test-case','test-execution','document'].includes(item.kind)
     return !levelBound ? true : !!item.level && ladderAllows(ladder,item.level as 'System'|'HighLevel'|'LowLevel')
   }).map(item=>({key:`artifact-${item.kind}-${item.id}`,category:'artifact',label:item.identifier,detail:item.title,state:item.state,view:item.kind==='change-request'?'scr':item.kind==='requirement'?'requirements':item.kind==='managed-document'?'managedDocuments':'artifact',discipline:(item.kind==='change-request'||item.kind==='requirement')&&item.discipline==='software'?'software':'system',artifactId:item.id,artifactKind:item.kind,level:item.level,icon:artifactAcronym(item.identifier,item.kind),updatedAt:item.updatedAt})),[ladder,results])
   const configuredKeys=useMemo(()=>new Set(configuredPages.map(item=>item.key)),[configuredPages])
   const visibleRecent=recent.filter(item=>{
     if(item.category==='page')return configuredKeys.has(item.key)
-    if(['change-request','requirement','test-procedure','test-execution','document'].includes(item.artifactKind??''))
+    if(['change-request','requirement','test-procedure','test-case','test-execution','document'].includes(item.artifactKind??''))
       return !!item.level&&ladderAllows(ladder,item.level as 'System'|'HighLevel'|'LowLevel')
     return !hiddenArtifactKinds.has(item.artifactKind??'')
   })

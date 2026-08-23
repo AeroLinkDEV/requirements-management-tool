@@ -71,8 +71,8 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db, IProjectLadderPolicy
         db.SoftwareBuilds.Add(build15); await db.SaveChangesAsync(ct);
         var procedures = new List<(TestProcedure Procedure, TestProcedureRevision Revision, List<Guid> Requirements)>();
         procedures.AddRange(BuildProcedures(project.Id, systems.Select(x => x.Revision.Id).ToList(), 75, TestProcedureLevel.System, "SYSTP", start.AddDays(154)));
-        procedures.AddRange(BuildProcedures(project.Id, hlrs.Select(x => x.Revision.Id).ToList(), 160, TestProcedureLevel.HighLevel, "HLRTP", start.AddDays(155)));
-        procedures.AddRange(BuildProcedures(project.Id, llrs.Select(x => x.Revision.Id).ToList(), 280, TestProcedureLevel.LowLevel, "LLRTP", start.AddDays(156)));
+        procedures.AddRange(BuildProcedures(project.Id, hlrs.Select(x => x.Revision.Id).ToList(), 160, TestProcedureLevel.HighLevel, "HLRTC", start.AddDays(155)));
+        procedures.AddRange(BuildProcedures(project.Id, llrs.Select(x => x.Revision.Id).ToList(), 280, TestProcedureLevel.LowLevel, "LLRTC", start.AddDays(156)));
         db.TestProcedures.AddRange(procedures.Select(x => x.Procedure)); db.TestProcedureRevisions.AddRange(procedures.Select(x => x.Revision));
         db.TestCoverage.AddRange(procedures.SelectMany(x => x.Requirements.Select(req => new TestRequirementCoverage(x.Revision.Id, req)))); await db.SaveChangesAsync(ct);
         // This fresh showcase is created after exact procedure manifests exist, so record Build 1.5's
@@ -104,8 +104,8 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db, IProjectLadderPolicy
             (ControlledDocumentType.SwrdHighLevel,"HLRD-000015","FMS High-Level Software Requirements Document",400),
             (ControlledDocumentType.SwrdLowLevel,"LLRD-000015","FMS Low-Level Software Requirements Document",700),
             (ControlledDocumentType.SystemTestProcedures,"SYSTD-000015","FMS System Test Procedures",75),
-            (ControlledDocumentType.HighLevelTestProcedures,"HLRTD-000015","FMS HLR Test Procedures",160),
-            (ControlledDocumentType.LowLevelTestProcedures,"LLRTD-000015","FMS LLR Test Procedures",280) };
+            (ControlledDocumentType.HighLevelTestCases,"HLRTD-000015","FMS HLR Test Cases",160),
+            (ControlledDocumentType.LowLevelTestCases,"LLRTD-000015","FMS LLR Test Cases",280) };
         foreach (var spec in docSpecs) db.ControlledDocuments.Add(new ControlledDocument(project.Id, release15.Id, baseline15.Id, spec.Item1, spec.Item2, spec.Item3, 0, Hash($"{baseline15.RequirementsHash}|{spec.Item1}|{spec.Item4}"), spec.Item4, start.AddDays(159)));
 
         var activeRequests = BuildActive16Requests(project.Id, release16.Id, current, start.AddDays(300));
@@ -453,8 +453,8 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db, IProjectLadderPolicy
                 var prefix = level switch
                 {
                     TestProcedureLevel.System => "SYSTP",
-                    TestProcedureLevel.HighLevel => "HLRTP",
-                    _ => "LLRTP"
+                    TestProcedureLevel.HighLevel => "HLRTC",
+                    _ => "LLRTC"
                 };
                 var sequence = procedureSequences.GetValueOrDefault(level) + 1;
                 procedureSequences[level] = sequence;
@@ -475,7 +475,7 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db, IProjectLadderPolicy
                 procedureCoverage[exact.Revision.Id] = procedure;
             }
             item.Resolve("verification.engineer", VerificationImpactOutcome.ProcedureCoverageConfirmed,
-                $"Procedure alignment completed for released software build SW-01.50 under {change.BaseNumber}.",
+                $"Verification artifact alignment completed for released software build SW-01.50 under {change.BaseNumber}.",
                 now, procedure.Procedure.Id, procedure.Revision.Id,
                 change.Kind == RequirementChangeKind.Introduce
                     ? TestProcedureChangeAction.CreateNew
@@ -527,7 +527,7 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db, IProjectLadderPolicy
                 db.Entry(review).Property(x => x.CaseContractVersion).CurrentValue = 0;
             review.Submit("verification.engineer", "assurance.reviewer", !incompleteReviewIds.Contains(review.Id), now);
             review.Approve("assurance.reviewer",
-                "Historical procedure changes and exact coverage were approved for released software build SW-01.50.", now);
+                "Historical verification artifact changes and exact coverage were approved for released software build SW-01.50.", now);
         }
         await db.SaveChangesAsync(ct);
 
@@ -564,7 +564,7 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db, IProjectLadderPolicy
             new("releases", releases.Count >= 2, $"{releases.Count} release(s); a released 1.5 and an in-work 1.6 are expected."),
             new("materialized-baseline", materialized.Count >= 1, $"{materialized.Count} materialized baseline(s)."),
             new("documents", documents >= 6, $"{documents} controlled document(s)."),
-            new("procedures", procedures >= 500, $"{procedures} test procedure(s)."),
+            new("procedures", procedures >= 500, $"{procedures} verification artifact(s)."),
             new("executions", executions >= 500, $"{executions} recorded execution(s)."),
             // The one this work exists for: approved change requests with an empty queue is the state the
             // product calls impossible, and a live installation was sitting in it.
@@ -721,7 +721,7 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db, IProjectLadderPolicy
         campaign.StartVerification("release.manager", now.AddHours(1));
         campaign.SelectVerificationBuild(build.Id, "release.manager", now.AddHours(2));
         campaign.RecordExecutionProgress("VerificationCompleted",
-            "Every procedure required for the 1.5 configuration was executed and its determination recorded.",
+            "Every verification artifact required for the 1.5 configuration was executed and its determination recorded.",
             "test.engineer", now.AddDays(1));
         db.ReleaseCampaigns.Add(campaign);
 

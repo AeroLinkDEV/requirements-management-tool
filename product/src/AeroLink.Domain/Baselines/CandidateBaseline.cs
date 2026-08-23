@@ -190,11 +190,11 @@ public sealed class CandidateBaseline
         if (tcr.State != TestChangeReviewState.Approved)
             throw new DomainException("Only an approved test change request can be selected into a baseline.");
         if (tcr.Outcome != TestChangeReviewOutcome.ChangeRequired)
-            throw new DomainException("This assessment concluded that no test work was required, so it has no procedure decisions to carry.");
+            throw new DomainException("This assessment concluded that no test work was required, so it has no verification artifact decisions to carry.");
         // Packages approved before procedure decisions existed are legitimate history and stay readable, but a
         // build cannot carry work that was never stated. Revising one is the route to adding it.
         if (tcr.ProcedureChanges.Count == 0)
-            throw new DomainException($"{tcr.DisplayNumber} carries no procedure decisions, so there is nothing for this build to materialize. Revise it to add the procedure work it needs.");
+            throw new DomainException($"{tcr.DisplayNumber} carries no verification artifact decisions, so there is nothing for this build to materialize. Revise it to add the verification work it needs.");
         if (tcr.ProjectId != ProjectId || tcr.ReleaseId != ReleaseId)
             throw new DomainException("The test change request does not belong to this project and target release.");
         if (_testChangeSelections.Any(x => x.TestChangeRequestId == tcr.Id))
@@ -225,16 +225,16 @@ public sealed class CandidateBaseline
     public void MarkTestProceduresMaterialized(string actorId, string proceduresHash, int activeCount, DateTimeOffset now)
     {
         if (State != CandidateBaselineState.Frozen)
-            throw new DomainException("Only a frozen baseline can materialize its test procedures.");
+            throw new DomainException("Only a frozen baseline can materialize its verification artifacts.");
         if (RequirementsMaterializedAt is null)
-            throw new DomainException("Materialize the requirement baseline before its test procedures — a procedure verifies a requirement that has to exist first.");
+            throw new DomainException("Materialize the requirement baseline before its verification artifacts — an artifact verifies a requirement that has to exist first.");
         if (TestProceduresMaterializedAt is not null)
-            throw new DomainException("The test procedure baseline is already materialized and immutable.");
+            throw new DomainException("The verification artifact baseline is already materialized and immutable.");
         if (string.IsNullOrWhiteSpace(proceduresHash) || proceduresHash.Length != 64)
-            throw new DomainException("A valid test procedure manifest hash is required.");
+            throw new DomainException("A valid verification artifact manifest hash is required.");
         TestProceduresHash = proceduresHash; TestProceduresMaterializedAt = now;
         UpdatedAt = now;
-        Event("TestProceduresMaterialized", actorId, $"Materialized {activeCount} effective test procedure revisions with hash {proceduresHash}.", now);
+        Event("TestProceduresMaterialized", actorId, $"Materialized {activeCount} effective verification artifact revisions with hash {proceduresHash}.", now);
     }
 
     /// <summary>
@@ -249,27 +249,44 @@ public sealed class CandidateBaseline
         int retiredCount, string selectionRule, DateTimeOffset now)
     {
         if (State == CandidateBaselineState.Draft)
-            throw new DomainException("Only a frozen or released legacy baseline can establish a procedure bootstrap snapshot.");
+            throw new DomainException("Only a frozen or released legacy baseline can establish a verification artifact bootstrap snapshot.");
         if (RequirementsMaterializedAt is null)
-            throw new DomainException("Materialize the legacy requirement baseline before establishing its procedure snapshot.");
+            throw new DomainException("Materialize the legacy requirement baseline before establishing its verification artifact snapshot.");
         if (TestProceduresMaterializedAt is not null)
-            throw new DomainException("The test procedure baseline is already materialized and immutable.");
+            throw new DomainException("The verification artifact baseline is already materialized and immutable.");
         if (string.IsNullOrWhiteSpace(actorId))
-            throw new DomainException("A Configuration Manager is required for the legacy procedure bootstrap.");
+            throw new DomainException("A Configuration Manager is required for the legacy verification artifact bootstrap.");
         if (string.IsNullOrWhiteSpace(proceduresHash) || proceduresHash.Length != 64)
-            throw new DomainException("A valid test procedure manifest hash is required.");
+            throw new DomainException("A valid verification artifact manifest hash is required.");
         if (activeCount < 0 || retiredCount < 0)
-            throw new DomainException("Legacy procedure bootstrap counts cannot be negative.");
+            throw new DomainException("Legacy verification artifact bootstrap counts cannot be negative.");
         if (string.IsNullOrWhiteSpace(selectionRule))
-            throw new DomainException("The legacy procedure selection rule must be recorded.");
+            throw new DomainException("The legacy verification artifact selection rule must be recorded.");
 
         TestProceduresHash = proceduresHash;
         TestProceduresMaterializedAt = now;
         UpdatedAt = now;
         Event("LegacyProcedureManifestBootstrapped", actorId.Trim(),
-            $"Established a legacy bootstrap snapshot with {activeCount} active procedure revisions, " +
-            $"{retiredCount} retired procedure identities suppressed, and hash {proceduresHash}. " +
+            $"Established a legacy bootstrap snapshot with {activeCount} active verification artifact revisions, " +
+            $"{retiredCount} retired verification artifact identities suppressed, and hash {proceduresHash}. " +
             $"Migration selection rule: {selectionRule}", now);
+    }
+
+    /// <summary>
+    /// Recomputes an immutable procedure manifest after a controlled identity-only migration. The selected
+    /// revision rows and their bodies are unchanged; only their visible family prefix changed.
+    /// </summary>
+    public void RecordVerificationIdentityMigration(string actorId, string proceduresHash, DateTimeOffset now)
+    {
+        if (string.IsNullOrWhiteSpace(actorId) || string.IsNullOrWhiteSpace(proceduresHash) || proceduresHash.Length != 64)
+            throw new DomainException("A verification identity migration requires an actor and SHA-256 manifest hash.");
+        if (TestProceduresMaterializedAt is null) return;
+        if (string.Equals(TestProceduresHash, proceduresHash, StringComparison.OrdinalIgnoreCase)) return;
+        var previous = TestProceduresHash;
+        TestProceduresHash = proceduresHash.Trim().ToLowerInvariant();
+        UpdatedAt = now;
+        Event("VerificationIdentityManifestMigrated", actorId.Trim(),
+            $"Recomputed the controlled software verification manifest from {previous ?? "<none>"} to {TestProceduresHash}; revision bodies and membership were preserved.", now);
     }
 
     public void Freeze(string actorId, DateTimeOffset now)
@@ -346,6 +363,6 @@ public sealed class CandidateBaseline
 
     private void EnsureDraft() { if (State != CandidateBaselineState.Draft) throw new DomainException("A frozen baseline is immutable."); }
     private void EnsureTestProceduresOpen()
-    { if (State == CandidateBaselineState.Released) throw new DomainException("Released baselines are immutable; test procedure selections cannot change after release."); if (TestProceduresMaterializedAt is not null) throw new DomainException("The test procedure baseline is already materialized and immutable."); }
+    { if (State == CandidateBaselineState.Released) throw new DomainException("Released baselines are immutable; verification artifact selections cannot change after release."); if (TestProceduresMaterializedAt is not null) throw new DomainException("The verification artifact baseline is already materialized and immutable."); }
     private void Event(string type, string actorId, string detail, DateTimeOffset now) => _events.Add(new BaselineEvent(Id, type, actorId, detail, now));
 }

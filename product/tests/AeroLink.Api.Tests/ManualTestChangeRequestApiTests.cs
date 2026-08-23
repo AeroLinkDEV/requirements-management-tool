@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
+using AeroLink.Domain.Baselines;
 using AeroLink.Domain.ChangeControl;
 using AeroLink.Domain.Identity;
 using AeroLink.Domain.Programs;
@@ -839,7 +840,7 @@ public sealed class ManualTestChangeRequestApiTests
         var fixture = await SeedAsync(factory);
         await LoginAsync(client, "manual.engineer");
 
-        Guid hlrId, llrId;
+        Guid hlrId, llrId, hlrRevisionId;
         using (var scope = factory.Services.CreateScope())
         {
             var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
@@ -860,18 +861,63 @@ public sealed class ManualTestChangeRequestApiTests
             llr.SubmitForReview("author", [new("reviewer", "Reviewer")], now);
             llr.ApproveActiveStage("reviewer", now);
 
-            db.AddRange(hlr, llr);
+            var baseline = new CandidateBaseline("SW-09.20", 0, fixture.ProjectId, fixture.ReleaseId, null,
+                "Software Case authoring", "manual.engineer", now);
+            var hlrArtifact = new RequirementArtifact(fixture.ProjectId, "HLR-000001",
+                RequirementLevel.HighLevel, now);
+            var hlrRevision = new RequirementRevision(hlrArtifact.Id, 0,
+                "The HLR shall expose the new behavior.", "Case authoring coverage.", "Test",
+                RequirementRevisionState.Active, hlr.Id, baseline.Id, now);
+            baseline.Select(hlr, "manual.engineer", now);
+            baseline.Freeze("manual.engineer", now);
+            baseline.MarkRequirementsMaterialized("manual.engineer", new string('a', 64), 1, now);
+
+            db.AddRange(hlr, llr, baseline, hlrArtifact, hlrRevision,
+                new BaselineRequirementSelection(baseline.Id, hlrArtifact.Id, hlrRevision.Id));
+            await db.SaveChangesAsync();
+
+            await scope.ServiceProvider.GetRequiredService<VerificationImpactService>()
+                .RaiseForApprovedChangeRequestAsync(hlr, now, default);
+            await db.SaveChangesAsync();
+            var hlrReviewId = await db.TestChangeReviews
+                .Where(x => x.ChangeRequestId == hlr.Id && x.Discipline == TestChangeReviewDiscipline.HighLevelSoftware)
+                .Select(x => x.Id).SingleAsync();
+            var impactItem = await db.VerificationImpactItems.SingleAsync(x =>
+                x.TestChangeReviewId == hlrReviewId && x.RequirementChangeId == hlr.RequirementChanges.Single().Id);
+            impactItem.LinkRequirementRevision(hlrRevision.Id, now);
             await db.SaveChangesAsync();
             hlrId = hlr.Id;
             llrId = llr.Id;
+            hlrRevisionId = hlrRevision.Id;
         }
 
         using var hlrResponse = await client.PostAsJsonAsync($"/api/releases/{fixture.ReleaseId}/test-change-requests",
             new { discipline = "HighLevelSoftware", changeRequestIds = new[] { hlrId }, title = "HLR package" });
         var hlrBody = await hlrResponse.Content.ReadAsStringAsync();
         Assert.True(hlrResponse.StatusCode == HttpStatusCode.Created, $"{(int)hlrResponse.StatusCode}: {hlrBody}");
-        Assert.Matches(@"^HLRTCR-\d{6}\.\d{2}$",
-            JsonSerializer.Deserialize<JsonElement>(hlrBody).GetProperty("displayNumber").GetString()!);
+        var hlrPackage = JsonSerializer.Deserialize<JsonElement>(hlrBody);
+        Assert.Matches(@"^HLRTCR-\d{6}\.\d{2}$", hlrPackage.GetProperty("displayNumber").GetString()!);
+        var hlrPackageId = hlrPackage.GetProperty("id").GetGuid();
+
+        using var caseChange = await client.PostAsJsonAsync(
+            $"/api/test-change-reviews/{hlrPackageId}/case-changes",
+            new
+            {
+                kind = "Introduce", revision = 0, title = "New HLR verification case",
+                objective = "Verify the HLR behavior.", preconditions = "Software loaded.",
+                steps = "Exercise the behavior.", expectedResult = "The behavior is observed.",
+                rationale = "The approved HLR introduces behavior with no existing Case.",
+                drivingRequirementRevisionIds = new[] { hlrRevisionId }
+            });
+        var caseBody = await caseChange.Content.ReadAsStringAsync();
+        Assert.True(caseChange.IsSuccessStatusCode, $"{(int)caseChange.StatusCode}: {caseBody}");
+        var caseChangeId = JsonSerializer.Deserialize<JsonElement>(caseBody).GetProperty("id").GetGuid();
+        Assert.Matches(@"^HLRTC-\d{6}\.00$",
+            JsonSerializer.Deserialize<JsonElement>(caseBody).GetProperty("displayNumber").GetString()!);
+
+        using var removed = await client.DeleteAsync(
+            $"/api/test-change-reviews/{hlrPackageId}/case-changes/{caseChangeId}");
+        Assert.Equal(HttpStatusCode.OK, removed.StatusCode);
 
         using var llrResponse = await client.PostAsJsonAsync($"/api/releases/{fixture.ReleaseId}/test-change-requests",
             new { discipline = "LowLevelSoftware", changeRequestIds = new[] { llrId }, title = "LLR package" });

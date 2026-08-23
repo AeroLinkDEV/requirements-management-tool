@@ -36,7 +36,7 @@ test('Every artifact type a procedure can govern is listed, configured or not', 
   await expect(artifacts.first()).toBeVisible()
   await expect(artifacts).toHaveCount(5)
   expect(await artifacts.evaluateAll(items => items.map(item => item.getAttribute('data-artifact'))))
-    .toEqual(['System', 'Software', 'SystemTest', 'HighLevelSoftwareTest', 'LowLevelSoftwareTest'])
+    .toEqual(['System', 'Software', 'SystemTest', 'HighLevelSoftwareCase', 'LowLevelSoftwareCase'])
 
   // Documents are deliberately absent: their reviewers are chosen per document by the author.
   await expect(page.getByText('Controlled documents are absent on purpose', { exact: false })).toBeVisible()

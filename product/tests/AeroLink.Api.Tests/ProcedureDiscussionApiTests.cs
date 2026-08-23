@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
+using AeroLink.Domain.Verification;
 using AeroLink.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
@@ -18,29 +19,29 @@ namespace AeroLink.Api.Tests;
 public sealed class ProcedureDiscussionApiTests(ShowcaseApiFixture showcase)
 {
     [Fact]
-    public async Task A_remark_on_a_procedure_is_stored_against_the_procedure_and_read_back()
+    public async Task A_remark_on_a_case_is_stored_against_the_artifact_and_read_back()
     {
         using var factory = showcase.CreateFactory();
         using var client = factory.CreateClient();
         await BootstrapAsync(client);
 
-        Guid procedureId;
+        Guid caseId;
         using (var scope = factory.Services.CreateScope())
         {
             var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
-            procedureId = await db.TestProcedures.AsNoTracking()
-                .Where(x => x.ProjectId == showcase.Summary.ProjectId)
+            caseId = await db.TestProcedures.AsNoTracking()
+                .Where(x => x.ProjectId == showcase.Summary.ProjectId && x.Level != TestProcedureLevel.System)
                 .Select(x => x.Id).FirstAsync();
         }
 
-        var before = await client.GetFromJsonAsync<JsonElement>($"/api/test-procedures/{procedureId}/comments");
+        var before = await client.GetFromJsonAsync<JsonElement>($"/api/test-cases/{caseId}/comments");
         var alreadySaid = before.GetArrayLength();
 
-        using var posted = await client.PostAsJsonAsync($"/api/test-procedures/{procedureId}/comments",
+        using var posted = await client.PostAsJsonAsync($"/api/test-cases/{caseId}/comments",
             new { body = "Confirmed against the oceanic rig." });
         Assert.True(posted.StatusCode == HttpStatusCode.Created, await posted.Content.ReadAsStringAsync());
 
-        var after = await client.GetFromJsonAsync<JsonElement>($"/api/test-procedures/{procedureId}/comments");
+        var after = await client.GetFromJsonAsync<JsonElement>($"/api/test-cases/{caseId}/comments");
         Assert.Equal(alreadySaid + 1, after.GetArrayLength());
         var comment = after.EnumerateArray().Last();
         Assert.Equal("Confirmed against the oceanic rig.", comment.GetProperty("body").GetString());
@@ -51,8 +52,8 @@ public sealed class ProcedureDiscussionApiTests(ShowcaseApiFixture showcase)
         using (var scope = factory.Services.CreateScope())
         {
             var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
-            var stored = await db.ArtifactComments.AsNoTracking().SingleAsync(x => x.ArtifactId == procedureId);
-            Assert.Equal("TestProcedure", stored.ArtifactType);
+            var stored = await db.ArtifactComments.AsNoTracking().SingleAsync(x => x.ArtifactId == caseId);
+            Assert.Equal("TestCase", stored.ArtifactType);
         }
     }
 

@@ -42,8 +42,11 @@ const subjectLabels: Record<string, string> = {
   System: 'System Change Request',
   Software: 'Software Change Request',
   SystemTest: 'System Test Change Request',
-  HighLevelSoftwareTest: 'HLR Test Change Request',
-  LowLevelSoftwareTest: 'LLR Test Change Request',
+  HighLevelSoftwareCase: 'HLR Test Case Change Request',
+  LowLevelSoftwareCase: 'LLR Test Case Change Request',
+  // Legacy subject names are readable only for historical records returned by compatibility APIs.
+  HighLevelSoftwareTest: 'Historical HLR Test Procedure Change Request',
+  LowLevelSoftwareTest: 'Historical LLR Test Procedure Change Request',
 }
 
 const roleLabels: Record<string, string> = {

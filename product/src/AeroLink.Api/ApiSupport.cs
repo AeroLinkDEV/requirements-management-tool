@@ -39,6 +39,91 @@ static class IdentityHttpExtensions
     }
 }
 
+/// <summary>
+/// Projects the append-only identity-migration evidence alongside the original signature. The signature row
+/// remains the source of truth for who signed which old hash; this projection only reports the governed hand-off
+/// recorded by the migration and never changes or re-signs that row.
+/// </summary>
+internal sealed record SignatureMigrationProvenance(
+    string? Migration,
+    string? Reason,
+    string? OldArtifactIdentity,
+    string? OldSignatureHash,
+    string? NewArtifactIdentity,
+    string? NewContentHash,
+    Guid? PendingEvidenceId,
+    Guid? CompletedEvidenceId,
+    DateTimeOffset? SupersededAt,
+    DateTimeOffset? CompletedAt);
+
+internal sealed record SignatureMigrationProjection(
+    string Status,
+    bool IsSuperseded,
+    SignatureMigrationProvenance? Supersession)
+{
+    public static SignatureMigrationProjection Current { get; } = new("Current", false, null);
+}
+
+internal static class SignatureMigrationProjector
+{
+    private const string PendingType = "VerificationIdentityMigration.SignatureSuperseded";
+    private const string CompletedType = "VerificationIdentityMigration.SignatureSupersessionCompleted";
+
+    public static async Task<IReadOnlyDictionary<Guid, SignatureMigrationProjection>> ForAsync(
+        AeroLinkDbContext db, IEnumerable<Guid> signatureIds, CancellationToken ct)
+    {
+        var ids = signatureIds.Distinct().ToArray();
+        if (ids.Length == 0) return new Dictionary<Guid, SignatureMigrationProjection>();
+        var targets = ids.Select(id => $"ElectronicSignature:{id}").ToArray();
+        var eventQuery = db.SecurityAuditEvents.AsNoTracking()
+            .Where(x => targets.Contains(x.Target) && (x.EventType == PendingType || x.EventType == CompletedType));
+        var events = db.Database.IsSqlite()
+            ? (await eventQuery.ToListAsync(ct)).OrderBy(x => x.OccurredAt).ToList()
+            : await eventQuery.OrderBy(x => x.OccurredAt).ToListAsync(ct);
+        var result = new Dictionary<Guid, SignatureMigrationProjection>();
+        foreach (var id in ids)
+        {
+            var target = $"ElectronicSignature:{id}";
+            var pending = events.LastOrDefault(x => x.Target == target && x.EventType == PendingType);
+            var completed = events.LastOrDefault(x => x.Target == target && x.EventType == CompletedType);
+            if (pending is null && completed is null) continue;
+            var source = completed ?? pending!;
+            result[id] = new SignatureMigrationProjection(
+                "Superseded", true,
+                new SignatureMigrationProvenance(
+                    DetailString(source.Detail, "migration"),
+                    DetailString(source.Detail, "reason"),
+                    DetailString(source.Detail, "oldArtifactIdentity"),
+                    DetailString(source.Detail, "oldSignatureHash"),
+                    DetailString(source.Detail, "newArtifactIdentity"),
+                    DetailString(source.Detail, "newContentHash"),
+                    pending?.Id,
+                    completed?.Id,
+                    pending?.OccurredAt,
+                    completed?.OccurredAt));
+        }
+        return result;
+    }
+
+    private static string? DetailString(string detail, string property)
+    {
+        try
+        {
+            using var document = JsonDocument.Parse(detail);
+            return document.RootElement.TryGetProperty(property, out var value)
+                && value.ValueKind == JsonValueKind.String
+                ? value.GetString()
+                : null;
+        }
+        catch (JsonException)
+        {
+            // The migration writes structured evidence. A malformed historical event is not converted into
+            // invented provenance; the signature remains visible with the immutable row fields only.
+            return null;
+        }
+    }
+}
+
 static class DirectoryTitles
 {
     public static string For(string userName,IReadOnlyCollection<string> roles)
@@ -118,7 +203,10 @@ static class ApiMap
         ControlledDocumentType.SwrdLowLevel => "Low-Level Software Requirements Document (LLRD)",
         ControlledDocumentType.SystemTestProcedures => "System Test Procedure Document (SYSTD)",
         ControlledDocumentType.HighLevelTestProcedures => "HLR Test Procedure Document (HLRTD)",
-        _ => "LLR Test Procedure Document (LLRTD)"
+        ControlledDocumentType.LowLevelTestProcedures => "LLR Test Procedure Document (LLRTD)",
+        ControlledDocumentType.HighLevelTestCases => "HLR Test Case Document (HLRTD)",
+        ControlledDocumentType.LowLevelTestCases => "LLR Test Case Document (LLRTD)",
+        _ => throw new DomainException($"Unknown controlled document type: {type}.")
     };
 
     private static readonly Regex LegacyRequirementNumber = new(@"\b(SYSR|HLR|LLR)-0*([0-9]{1,6})(\.[0-9]{2})\b", RegexOptions.Compiled | RegexOptions.IgnoreCase);

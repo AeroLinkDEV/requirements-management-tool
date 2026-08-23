@@ -35,7 +35,7 @@ public sealed class ControlledOutputGenerator(AeroLinkDbContext db, RichContentP
         var allowedProcedureLevels = ladderPolicy.Definitions.Where(x => x.Verification is not null).Select(x => x.Verification!.ProcedureLevel).ToArray();
         var coverage=await(from link in db.TestCoverage.AsNoTracking().Where(x=>ids.Contains(x.RequirementRevisionId)&&effectiveProcedureRevisionIds.Contains(x.ProcedureRevisionId)) join revision in db.TestProcedureRevisions.AsNoTracking() on link.ProcedureRevisionId equals revision.Id join procedure in db.TestProcedures.AsNoTracking().Where(x=>allowedProcedureLevels.Contains(x.Level)) on revision.ProcedureId equals procedure.Id select new{link.RequirementRevisionId,ProcedureRevisionId=revision.Id,display=procedure.BaseNumber+"."+revision.Revision.ToString("D2")}).ToListAsync(ct);
         var procedureTitles=await TestProcedureRevisionTitleProjection.ForRevisionsAsync(db,coverage.Select(x=>x.ProcedureRevisionId).Distinct().ToList(),ct);
-        var records=requirements.Select(req=>{var parents=links.Where(x=>x.SourceRevisionId==req.Id&&byId.ContainsKey(x.TargetRevisionId)).Select(x=>byId[x.TargetRevisionId].display).ToList();var children=links.Where(x=>x.TargetRevisionId==req.Id&&byId.ContainsKey(x.SourceRevisionId)).Select(x=>byId[x.SourceRevisionId].display).ToList();var tests=coverage.Where(x=>x.RequirementRevisionId==req.Id).Select(x=>$"{x.display} - {procedureTitles[x.ProcedureRevisionId].Title}").ToList();return new PublicationRecord(req.display,req.level.ToString(),"Full lifecycle linkage",req.Statement,new[]{("Parent requirement revisions",parents.Count==0?"Top-level / none":string.Join("; ",parents)),("Child requirement revisions",children.Count==0?"Leaf-level / none":string.Join("; ",children)),("Verification procedure revisions",tests.Count==0?"Coverage gap - none recorded":string.Join("; ",tests))});}).ToList();
+        var records=requirements.Select(req=>{var parents=links.Where(x=>x.SourceRevisionId==req.Id&&byId.ContainsKey(x.TargetRevisionId)).Select(x=>byId[x.TargetRevisionId].display).ToList();var children=links.Where(x=>x.TargetRevisionId==req.Id&&byId.ContainsKey(x.SourceRevisionId)).Select(x=>byId[x.SourceRevisionId].display).ToList();var tests=coverage.Where(x=>x.RequirementRevisionId==req.Id).Select(x=>$"{x.display} - {procedureTitles[x.ProcedureRevisionId].Title}").ToList();var artifactNoun=req.level==RequirementLevel.System?"procedure":"case";return new PublicationRecord(req.display,req.level.ToString(),"Full lifecycle linkage",req.Statement,new[]{("Parent requirement revisions",parents.Count==0?"Top-level / none":string.Join("; ",parents)),("Child requirement revisions",children.Count==0?"Leaf-level / none":string.Join("; ",children)),($"Verification {artifactNoun} revisions",tests.Count==0?"Coverage gap - none recorded":string.Join("; ",tests))});}).ToList();
         var generatedAt=DateTimeOffset.UtcNow;var approvals=await ApprovalBasis(baselineId,release.Id,generatedAt,ct);var hash=baseline.RequirementsHash??baseline.ContentHash??new string('0',64);var status=release.IsReleased?"Approved and Released":"Controlled Draft";
         var createdBy=(await db.BaselineEvents.AsNoTracking().Where(x=>x.BaselineId==baseline.Id&&x.EventType=="CandidateBaselineCreated").ToListAsync(ct)).OrderBy(x=>x.OccurredAt).Select(x=>x.ActorId).FirstOrDefault()??"system";
         var publication=new ProfessionalPublication(project.SoftwareProduct,program.Name+" ("+program.Code+")",project.Name,"Lifecycle Traceability Report",$"{project.SoftwareProduct} Full Traceability Evidence",$"Readable upward, downward, change-authority, and verification linkage for baseline {baseline.DisplayNumber}","TRACE-"+release.Version.Replace(".",""),"00",status,release.Version,baseline.DisplayNumber,createdBy,generatedAt,hash,new[]{("Requirements",records.Count.ToString("N0")),("Trace links",links.Count.ToString("N0")),("Verification links",coverage.Count.ToString("N0")),("Requirement manifest hash",hash)},approvals,new[]{("00",status,generatedAt.UtcDateTime.ToString("yyyy-MM-dd"),createdBy)},new[]{new PublicationSection("Complete Requirement Linkage","Each row identifies one exact baseline requirement revision and all of its upward, downward, and verification relationships.",records)});
@@ -67,18 +67,18 @@ public sealed class ControlledOutputGenerator(AeroLinkDbContext db, RichContentP
             ? null
             : await ControlledProcedureDocumentSnapshotProjection.ForDocumentAsync(db, document.BaselineId,
                 approvalProcedureLevel.Value, document.GeneratedAt, ct);
+        var isCaseDocument = document.Type is ControlledDocumentType.HighLevelTestCases or ControlledDocumentType.LowLevelTestCases;
         var records = requirementLevel is not null
             ? await RequirementPublicationRows(document.BaselineId, requirementLevel.Value, ct)
-            : await ProcedurePublicationRows(procedureSnapshot!, approvalProcedureLevel!.Value, ct);
+            : await ProcedurePublicationRows(procedureSnapshot!, approvalProcedureLevel!.Value, isCaseDocument, ct);
         var isProcedureDocument = approvalProcedureLevel is not null;
+        var verificationNoun = approvalProcedureLevel == TestProcedureLevel.System || !isCaseDocument ? "procedure" : "case";
         // A document reports the procedure-manifest state that existed when that document was generated, not
-        // the baseline's current state. Exact procedure documents bind directly to their stored content hash;
-        // a legacy record remains explicitly pre-manifest even if the baseline is materialized later.
-        var testProcedureManifestHashAtGeneration = procedureSnapshot?.IsExactManifest == true
-            ? document.ContentHash
-            : baseline.TestProceduresMaterializedAt is not null
-              && baseline.TestProceduresMaterializedAt.Value <= document.GeneratedAt
-                ? baseline.TestProceduresHash ?? "Exact procedure manifest hash unavailable"
+        // the baseline's current state. The baseline manifest is the configuration hash; the document's
+        // content basis is rendered separately into the publication front matter.
+        var testProcedureManifestHashAtGeneration = baseline.TestProceduresMaterializedAt is not null
+            && baseline.TestProceduresMaterializedAt.Value <= document.GeneratedAt
+                ? baseline.TestProceduresHash ?? "Exact verification artifact manifest hash unavailable"
                 : "Not materialized when this document was generated";
         var approvals = await ApprovalBasis(document.BaselineId, document.ReleaseId, document.GeneratedAt, ct,
             approvalProcedureLevel, procedureSnapshot); var createdBy = (await db.BaselineEvents.AsNoTracking().Where(x => x.BaselineId == baseline.Id && x.EventType == "CandidateBaselineCreated").ToListAsync(ct)).OrderBy(x => x.OccurredAt).Select(x => x.ActorId).FirstOrDefault() ?? "system";
@@ -151,16 +151,16 @@ public sealed class ControlledOutputGenerator(AeroLinkDbContext db, RichContentP
         var publication = new ProfessionalPublication(project.SoftwareProduct, program.Name + " (" + program.Code + ")", project.Name, type, title,
             subtitle, document.DocumentNumber, document.Revision.ToString("D2"), status, release.Version, baseline.DisplayNumber, createdBy, document.GeneratedAt, document.ContentHash,
             [("Controlled records", records.Count.ToString("N0")), ("Baseline content hash", baseline.ContentHash ?? "Not frozen"), ("Requirement manifest hash", baseline.RequirementsHash ?? "Not materialized"),
-             ("Test procedure manifest hash", testProcedureManifestHashAtGeneration),
-             ("Test procedure configuration basis", procedureSnapshot is null
+             ($"Test {verificationNoun} manifest hash", testProcedureManifestHashAtGeneration),
+             ($"Test {verificationNoun} configuration basis", procedureSnapshot is null
                  ? "Not applicable"
                  : procedureSnapshot.IsExactManifest
-                     ? "Exact immutable BaselineTestProcedures manifest"
+                     ? "Exact immutable verification artifact manifest"
                      : "Legacy generation-time compatibility snapshot — exact historical manifest was not recorded"),
              // Named in the front matter so a reader can tell which layout produced what they are holding.
              ("Document template", templateRevision is null ? "Built-in layout" : $"{templateName} revision {templateRevision.Revision} (approved {templateRevision.ApprovedAt.UtcDateTime:yyyy-MM-dd} by {templateRevision.ApprovedBy}, manifest {templateRevision.ManifestHash[..Math.Min(12, templateRevision.ManifestHash.Length)]})"),
              ("Approval basis", isProcedureDocument
-                 ? "Named approvers and snapshot references from the exact approved test change requests that authorized the included procedure revisions; upstream requirement-change authority is labelled separately; completed release approvals remain separate release authority"
+                 ? $"Named approvers and snapshot references from the exact approved test change requests that authorized the included verification {verificationNoun}s; upstream requirement-change authority is labelled separately; completed release approvals remain separate release authority"
                  : "Named approvers from exact approved change requests and completed release approvals recorded by generation time")], approvals,
             new[] { (document.Revision.ToString("D2"), status, document.GeneratedAt.UtcDateTime.ToString("yyyy-MM-dd"), createdBy) }, sections);
         return ProfessionalPublicationRenderer.Render(publication, format, $"{document.DocumentNumber}.{document.Revision:D2}_{release.Version}");
@@ -177,7 +177,14 @@ public sealed class ControlledOutputGenerator(AeroLinkDbContext db, RichContentP
             .Where(level => ladderPolicy.Definition(level).Verification?.DocumentType == type)
             .Select(level => ladderPolicy.Definition(level).Verification!.ProcedureLevel)
             .Cast<TestProcedureLevel?>()
-            .SingleOrDefault();
+            .SingleOrDefault()
+            ?? type switch
+            {
+                ControlledDocumentType.SystemTestProcedures => TestProcedureLevel.System,
+                ControlledDocumentType.HighLevelTestProcedures or ControlledDocumentType.HighLevelTestCases => TestProcedureLevel.HighLevel,
+                ControlledDocumentType.LowLevelTestProcedures or ControlledDocumentType.LowLevelTestCases => TestProcedureLevel.LowLevel,
+                _ => null,
+            };
 
     private async Task<List<PublicationRecord>> RequirementPublicationRows(Guid baselineId, RequirementLevel level, CancellationToken ct)
     {
@@ -249,18 +256,19 @@ public sealed class ControlledOutputGenerator(AeroLinkDbContext db, RichContentP
         return sources.Select(source =>
         {
             var covering = coverage.Where(x => x.RequirementRevisionId == source.Id).ToList();
+            var artifactNoun = level == RequirementLevel.System ? "procedure" : "case";
             // A gap is stated as a gap. A blank cell where coverage should be reads as an oversight in the
             // document rather than as a fact about the product.
             var body = covering.Count == 0
-                ? "Coverage gap - no approved verification procedure covers this requirement revision."
+                ? $"Coverage gap - no approved verification {artifactNoun} covers this requirement revision."
                 : string.Join("; ", covering.Select(x => $"{x.display} - {procedureTitles[x.ProcedureRevisionId].Title}{(x.IsSuspect ? " (suspect)" : "")}"));
             return new PublicationRecord(source.display, level.ToString(), "Verification coverage", body,
-                new[] { ("Verification method", source.VerificationMethod), ("Covering procedure revisions", covering.Count.ToString()), ("Suspect links", covering.Count(x => x.IsSuspect).ToString()) });
+                new[] { ("Verification method", source.VerificationMethod), ($"Covering {artifactNoun} revisions", covering.Count.ToString()), ("Suspect links", covering.Count(x => x.IsSuspect).ToString()) });
         }).ToList();
     }
 
     private async Task<List<PublicationRecord>> ProcedurePublicationRows(
-        ControlledProcedureDocumentSnapshot snapshot, TestProcedureLevel level, CancellationToken ct)
+        ControlledProcedureDocumentSnapshot snapshot, TestProcedureLevel level, bool isCaseDocument, CancellationToken ct)
     {
         var rows = snapshot.Rows;
         // #420: the exact TCR that authorized each procedure revision is the controlled provenance for that
@@ -271,8 +279,13 @@ public sealed class ControlledOutputGenerator(AeroLinkDbContext db, RichContentP
         var tcrDisplay = await db.TestChangeReviews.AsNoTracking()
             .Where(x => tcrIds.Contains(x.Id))
             .ToDictionaryAsync(x => x.Id, x => x.DisplayNumber, ct);
+        var title = level == TestProcedureLevel.System ? "System Test Procedure"
+            : isCaseDocument
+                ? level == TestProcedureLevel.HighLevel ? "High-Level Software Test Case" : "Low-Level Software Test Case"
+                : level == TestProcedureLevel.HighLevel ? "High-Level Software Test Procedure" : "Low-Level Software Test Procedure";
+        var stepsLabel = isCaseDocument && level != TestProcedureLevel.System ? "Case steps" : "Procedure steps";
         return rows.OrderBy(x => x.BaseNumber)
-            .Select(x => new PublicationRecord(x.BaseNumber + "." + x.Revision.ToString("D2"), level + " Test Procedure", x.Title, x.Objective, new[] { ("State", x.State.ToString()), ("Author / owner", x.AuthorId), ("Preconditions", x.Preconditions), ("Procedure steps", x.Steps), ("Expected result", x.ExpectedResult), ("Source test change request", x.SourceTestChangeRequestId is null ? "Legacy / unattributed" : tcrDisplay.GetValueOrDefault(x.SourceTestChangeRequestId.Value, "Unknown TCR")) })).ToList();
+            .Select(x => new PublicationRecord(x.BaseNumber + "." + x.Revision.ToString("D2"), title, x.Title, x.Objective, new[] { ("State", x.State.ToString()), ("Author / owner", x.AuthorId), ("Preconditions", x.Preconditions), (stepsLabel, x.Steps), ("Expected result", x.ExpectedResult), ("Source test change request", x.SourceTestChangeRequestId is null ? "Legacy / unattributed" : tcrDisplay.GetValueOrDefault(x.SourceTestChangeRequestId.Value, "Unknown TCR")) })).ToList();
     }
     private async Task<List<PublicationApproval>> ApprovalBasis(Guid baselineId, Guid releaseId,
         DateTimeOffset generatedAt, CancellationToken ct, TestProcedureLevel? procedureLevel = null,
@@ -322,7 +335,7 @@ public sealed class ControlledOutputGenerator(AeroLinkDbContext db, RichContentP
         approvals.AddRange(campaigns.SelectMany(x => x.Approvals.Where(a => a.State == AeroLink.Domain.Releases.ReleaseApprovalState.Approved && a.ApprovedAt <= generatedAt).Select(a => new PublicationApproval("Release Authority", a.ApproverName, a.ApproverId, "Approved", a.ApprovedAt))));
         return approvals.GroupBy(x => new { x.Role, x.UserId }).Select(x => x.OrderByDescending(a => a.DecidedAt).First()).OrderBy(x => x.Role).ThenBy(x => x.Name).ToList();
     }
-    private static string DocumentTypeName(ControlledDocumentType type) => type switch { ControlledDocumentType.Sysrd => "System Requirements Document", ControlledDocumentType.SwrdHighLevel => "High-Level Software Requirements Document", ControlledDocumentType.SwrdLowLevel => "Low-Level Software Requirements Document", ControlledDocumentType.SystemTestProcedures => "System Test Procedure Document", ControlledDocumentType.HighLevelTestProcedures => "High-Level Test Procedure Document", _ => "Low-Level Test Procedure Document" };
+    private static string DocumentTypeName(ControlledDocumentType type) => type switch { ControlledDocumentType.Sysrd => "System Requirements Document", ControlledDocumentType.SwrdHighLevel => "High-Level Software Requirements Document", ControlledDocumentType.SwrdLowLevel => "Low-Level Software Requirements Document", ControlledDocumentType.SystemTestProcedures => "System Test Procedure Document", ControlledDocumentType.HighLevelTestProcedures => "High-Level Test Procedure Document", ControlledDocumentType.HighLevelTestCases => "High-Level Test Case Document", ControlledDocumentType.LowLevelTestProcedures => "Low-Level Test Procedure Document", ControlledDocumentType.LowLevelTestCases => "Low-Level Test Case Document", _ => throw new DomainException($"Unknown controlled document type: {type}.") };
 
     private async Task<List<OutputRow>> RequirementRows(Guid baselineId, RequirementLevel level, CancellationToken ct) => await (from member in db.BaselineRequirements.AsNoTracking().Where(x => x.BaselineId == baselineId)
         join artifact in db.Requirements.AsNoTracking().Where(x => x.Level == level) on member.ArtifactId equals artifact.Id join revision in db.RequirementRevisions.AsNoTracking() on member.RevisionId equals revision.Id

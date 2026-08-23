@@ -152,6 +152,29 @@ test('a group-relative path is resolved against its group prefix', () => {
   assert.deepEqual(extractRoutes(directory).map((route) => route.key).sort(), ['POST /api/plain', 'POST /api/sample/checkout'])
 })
 
+test('literal regex aliases are inventoried as the public routes tests actually exercise', () => {
+  const api = mkdtempSync(join(tmpdir(), 'route-alias-api-'))
+  writeFileSync(
+    join(api, 'Cases.cs'),
+    'app.MapPost("/api/test-{artifactRoute:regex(procedures|cases)}/{id:guid}/comments", Handler);\n',
+    'utf8',
+  )
+  const tests = mkdtempSync(join(tmpdir(), 'route-alias-tests-'))
+  writeFileSync(
+    join(tests, 'CaseCommentsApiTests.cs'),
+    'await client.PostAsJsonAsync($"/api/test-cases/{id}/comments", body);\n',
+    'utf8',
+  )
+
+  const coverage = buildRouteCoverage(api, tests)
+  assert.deepEqual(coverage.map((route) => routeKey(route.method, route.path)), [
+    'POST /api/test-cases/{}/comments',
+    'POST /api/test-procedures/{}/comments',
+  ])
+  assert.deepEqual(coverage[0].coveredBy, ['CaseCommentsApiTests'])
+  assert.deepEqual(coverage[1].coveredBy, [])
+})
+
 test('an interpolated test URL counts, and a URL with no identifiable verb does not', () => {
   const directory = mkdtempSync(join(tmpdir(), 'route-refs-'))
   mkdirSync(directory, { recursive: true })

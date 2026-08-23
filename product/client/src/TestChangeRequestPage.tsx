@@ -18,7 +18,7 @@ import { RichCaseField, RichContentView } from './RichContent'
 import { apiRequest, operationError } from './apiClient'
 import { useDebouncedSave } from './autosave'
 import { fromPlainText, toPlainText } from './richContentModel'
-import { changeRequestAllocation, changeRequestState } from './presentation'
+import { changeRequestAllocation, changeRequestState, verificationArtifactChangeSegment, verificationArtifactNoun, verificationArtifactWord } from './presentation'
 import type { TestDiscipline } from './TestResultsWorkspace'
 import './ChangeRequestWorkspace.css'
 
@@ -65,7 +65,12 @@ type Package = {
   sourceChangeRequestNumber: string
   version: number
   updatedAt?: string
+  artifactKind?: string
+  artifactLabel?: string
+  artifactChanges?: ProcedureChange[]
   capabilities?: {
+    canProposeArtifactChange?: boolean
+    canWithdrawArtifactChange?: boolean
     canProposeProcedureChange?: boolean
     canWithdrawProcedureChange?: boolean
     canRevise?: boolean
@@ -73,8 +78,21 @@ type Package = {
     canReturn?: boolean
   }
   reviewCycle?: ReviewCycleSummary
-  procedureChanges: ProcedureChange[]
+  procedureChanges?: ProcedureChange[]
   coveredChangeRequests: { id: string; number: string; title: string; originating: boolean }[]
+}
+
+type SignatureEvidence = {
+  id: string
+  displayName: string
+  action: string
+  meaning: string
+  artifactRevision: string
+  contentHash: string
+  signedAt: string
+  signatureStatus?: string
+  isSuperseded?: boolean
+  supersession?: { migration?: string; reason?: string; oldArtifactIdentity?: string; oldSignatureHash?: string; newArtifactIdentity?: string; newContentHash?: string }
 }
 
 type EditLock = {
@@ -189,6 +207,8 @@ export default function TestChangeRequestPage({
   onOpenTestChangeRequest: (id: string) => void
 }) {
   const [item, setItem] = useState<Package>()
+  const [signatures, setSignatures] = useState<SignatureEvidence[]>([])
+  const [signatureError, setSignatureError] = useState('')
   const [error, setError] = useState('')
   const [saved, setSaved] = useState('')
   const [busy, setBusy] = useState(false)
@@ -197,6 +217,8 @@ export default function TestChangeRequestPage({
   const [lockStatus, setLockStatus] = useState<LockStatus>()
   const [autosaveStatus, setAutosaveStatus] = useState<'Saved' | 'Unsaved' | 'Saving' | 'Error' | 'Conflict'>('Saved')
   const [draft, setDraft] = useState<WorkingDraft>()
+  const artifactWord = verificationArtifactWord(discipline)
+  const artifactNoun = verificationArtifactNoun(discipline)
   const lockRef = useRef<EditLock | undefined>(undefined)
   const draftRef = useRef('')
   const lastSavedRef = useRef('')
@@ -205,20 +227,31 @@ export default function TestChangeRequestPage({
 
   const load = useCallback(async () => {
     setError('')
+    setSignatureError('')
     try {
-      const detail = await apiRequest<Package>(`${api}/api/test-change-reviews/${packageId}/procedure-changes`)
-      const list = await apiRequest<{ items: Package[] }>(`${api}/api/releases/${releaseId}/test-change-reviews`)
+      const [detail, list] = await Promise.all([
+        apiRequest<Package>(`${api}/api/test-change-reviews/${packageId}/${verificationArtifactChangeSegment(discipline)}`),
+        apiRequest<{ items: Package[] }>(`${api}/api/releases/${releaseId}/test-change-reviews`),
+      ])
+      let signatureRows: SignatureEvidence[] = []
+      try {
+        signatureRows = await apiRequest<SignatureEvidence[]>(`${api}/api/signatures?artifactId=${packageId}`)
+      } catch (reason) {
+        setSignatureError(operationError(reason, 'Signature evidence could not be loaded.'))
+      }
       const row = list.items.find(x => x.id === packageId)
+      setSignatures(signatureRows)
       setItem({
         ...detail,
         ...(row ?? {}),
         capabilities: { ...detail.capabilities, ...(row?.capabilities ?? {}) },
-        procedureChanges: detail.procedureChanges ?? [],
+        artifactChanges: detail.artifactChanges ?? detail.procedureChanges ?? [],
+        procedureChanges: detail.artifactChanges ?? detail.procedureChanges ?? [],
       })
     } catch (reason) {
       setError(operationError(reason, 'The test change request could not be loaded.'))
     }
-  }, [api, packageId, releaseId])
+  }, [api, discipline, packageId, releaseId])
 
   const loadStatus = useCallback(async () => {
     const response = await fetch(`${api}/api/controlled-editing/status?artifactType=TestChangeRequest&artifactId=${packageId}`)
@@ -403,7 +436,8 @@ export default function TestChangeRequestPage({
     targetRelease: releases.find(x => x.id === item.releaseId),
     superseded: item.state === 'Superseded',
   }
-  const canAuthor = Boolean(item.capabilities?.canProposeProcedureChange
+  const canAuthor = Boolean(item.capabilities?.canProposeArtifactChange
+    || item.capabilities?.canWithdrawArtifactChange || item.capabilities?.canProposeProcedureChange
     || item.capabilities?.canWithdrawProcedureChange || item.capabilities?.canRevise)
   const isAuthor = !item.authorId || item.authorId.toLowerCase() === currentUser.toLowerCase() || currentUser.toLowerCase() === 'admin'
   const editable = item.state === 'Draft'
@@ -442,7 +476,7 @@ export default function TestChangeRequestPage({
     onBack={onBack}
     eyebrow={`TEST CHANGE CONTROL / ${item.displayNumber}`}
     title={item.title || 'Not written up yet'}
-    description="Revision-controlled change case, procedure proposals, and review authority."
+    description={`Revision-controlled change case, ${artifactWord} proposals, and review authority.`}
     allocation={changeRequestAllocation(facts)}
     state={changeRequestState(facts)}
     stateCode={item.state}
@@ -456,7 +490,7 @@ export default function TestChangeRequestPage({
       onSubmit={checkIn}
       stages={[
         { href: '#checked-change-case', label: 'Change case', status: caseComplete ? 'Complete' : 'Required', complete: caseComplete, active: !caseComplete },
-        { href: '#checked-procedures', label: 'Procedure changes', status: proposalsComplete ? 'Complete' : 'In progress', complete: proposalsComplete, active: caseComplete && !proposalsComplete },
+        { href: '#checked-procedures', label: `${artifactNoun} changes`, status: proposalsComplete ? 'Complete' : 'In progress', complete: proposalsComplete, active: caseComplete && !proposalsComplete },
       ]}
       actions={<ControlledChangeAuthoringActions
         summary={caseComplete && proposalsComplete ? 'Ready for review after check-in' : 'Draft can be checked in before review readiness'}
@@ -504,14 +538,14 @@ export default function TestChangeRequestPage({
 
       <section className="workspaceCard authoringCard" id="checked-procedures">
         <div className="workspaceTitle">
-          <div><span className="stageKicker">STAGE 2</span><h2>Controlled procedure authoring</h2><p>One shared editor for procedure content and classification.</p></div>
+          <div><span className="stageKicker">STAGE 2</span><h2>Controlled {artifactWord} authoring</h2><p>One shared editor for {artifactWord} content and classification.</p></div>
           <span className={proposalsComplete ? 'completionBadge complete' : 'completionBadge'}>
             {proposalsComplete ? 'Complete' : `${draft.procedureChanges.length} proposal${draft.procedureChanges.length === 1 ? '' : 's'}`}
           </span>
         </div>
         <div className="workspaceProposalActions">
           <span>Add proposal</span>
-          <button type="button" onClick={() => setDraft(current => current ? { ...current, procedureChanges: [...current.procedureChanges, emptyProcedure(discipline, 'Introduce')] } : current)}>+ Introduce {disciplineLabel(discipline)} test procedure</button>
+            <button type="button" onClick={() => setDraft(current => current ? { ...current, procedureChanges: [...current.procedureChanges, emptyProcedure(discipline, 'Introduce')] } : current)}>+ Introduce {disciplineLabel(discipline)} {artifactWord}</button>
           <button type="button" onClick={() => setDraft(current => current ? { ...current, procedureChanges: [...current.procedureChanges, emptyProcedure(discipline, 'Modify')] } : current)}>Modify existing</button>
           <button type="button" onClick={() => setDraft(current => current ? { ...current, procedureChanges: [...current.procedureChanges, emptyProcedure(discipline, 'Retire')] } : current)}>Retire existing</button>
         </div>
@@ -527,7 +561,7 @@ export default function TestChangeRequestPage({
           onChange={(field, value) => updateProcedure(proposal.key, field, value)}
           onRemove={() => setDraft(current => current ? { ...current, procedureChanges: current.procedureChanges.filter(value => value.key !== proposal.key) } : current)}
         />)}
-        {!draft.procedureChanges.length && <div className="workspaceEmptyState"><b>No procedure proposals</b><p>Add the smallest controlled set needed to deliver this verification change.</p></div>}
+        {!draft.procedureChanges.length && <div className="workspaceEmptyState"><b>No {artifactNoun.toLowerCase()} proposals</b><p>Add the smallest controlled set needed to deliver this verification change.</p></div>}
       </section>
     </ControlledChangeAuthoringForm> : <ControlledChangeReadLayout>
       <div className="workspaceStack">
@@ -552,9 +586,9 @@ export default function TestChangeRequestPage({
         </section>
 
         <section className="workspaceCard">
-          <div className="workspaceTitle"><div><h2>Procedure impact</h2><p>{item.procedureChanges.length} proposed controlled change{item.procedureChanges.length === 1 ? '' : 's'}</p></div></div>
-          {!item.procedureChanges.length && <p className="workspaceEmpty">No procedure changes are proposed yet.</p>}
-          {item.procedureChanges.map(change => <article className="requirementView" key={change.id} data-procedure-change={change.displayNumber}>
+          <div className="workspaceTitle"><div><h2>{artifactNoun} impact</h2><p>{(item.artifactChanges ?? item.procedureChanges ?? []).length} proposed controlled change{(item.artifactChanges ?? item.procedureChanges ?? []).length === 1 ? '' : 's'}</p></div></div>
+          {!(item.artifactChanges ?? item.procedureChanges ?? []).length && <p className="workspaceEmpty">No {artifactNoun.toLowerCase()} changes are proposed yet.</p>}
+          {(item.artifactChanges ?? item.procedureChanges ?? []).map(change => <article className="requirementView" key={change.id} data-procedure-change={change.displayNumber}>
             <div><b>{change.displayNumber}</b><span>{changeKindLabel(change.kind)}</span></div>
             <p>{change.objective || change.title}</p>
             {change.rationale && <small>{change.rationale}</small>}
@@ -564,6 +598,20 @@ export default function TestChangeRequestPage({
         <section className="workspaceCard">
           <div className="workspaceTitle"><div><h2>Audit history</h2></div></div>
           <p className="workspaceEmpty">Controlled checkout, check-in, review, and approval evidence is retained with this record.</p>
+        </section>
+
+        <section className="workspaceCard" data-signature-evidence>
+          <div className="workspaceTitle"><div><h2>Signature evidence</h2><p>Original signatures remain immutable; migration status is shown from append-only provenance.</p></div></div>
+          {signatureError
+            ? <p className="workspaceEmpty">{signatureError}</p>
+            : signatures.length
+            ? <div className="workspaceStack">{signatures.map(signature => <article className="requirementView" key={signature.id}>
+              <div><b>{signature.isSuperseded ? 'Superseded signature' : signature.action}</b><span>{signature.displayName}</span></div>
+              <p>{signature.isSuperseded ? signature.supersession?.reason ?? 'Identity migration superseded this signature.' : signature.meaning}</p>
+              {signature.isSuperseded && signature.supersession?.migration && <small>Migration: {signature.supersession.migration}{signature.supersession.newArtifactIdentity ? ` · replacement identity ${signature.supersession.newArtifactIdentity}` : ''}{signature.supersession.newContentHash ? ` · replacement hash ${signature.supersession.newContentHash.slice(0, 12)}…` : ''}</small>}
+              <code>{signature.contentHash}</code>
+            </article>)}</div>
+            : <p className="workspaceEmpty">No signatures are recorded for this test change request.</p>}
         </section>
       </div>
 
@@ -578,7 +626,7 @@ export default function TestChangeRequestPage({
             { label: 'Updated', value: item.updatedAt ? new Date(item.updatedAt).toLocaleDateString() : '—' },
           ]}
         >
-          {editable && isAuthor && !item.procedureChanges.length && <div className="railReadiness"><b>Draft needs authoring</b><span>Complete the procedure proposals.</span><button type="button" disabled={busy} onClick={beginEdit}>Complete Draft readiness</button></div>}
+          {editable && isAuthor && !(item.artifactChanges ?? item.procedureChanges ?? []).length && <div className="railReadiness"><b>Draft needs authoring</b><span>Complete the {artifactNoun.toLowerCase()} proposals.</span><button type="button" disabled={busy} onClick={beginEdit}>Complete Draft readiness</button></div>}
         </ControlledStatusCard>
         <ReviewCycleCard cycle={item.reviewCycle} />
       </aside>

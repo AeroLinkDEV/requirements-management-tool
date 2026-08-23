@@ -152,6 +152,19 @@ public sealed class ReviewCycle
     public int ActivePosition => _steps.Where(x => x.State == ApprovalStepState.Active).OrderBy(x => x.Position).FirstOrDefault()?.Position ?? -1;
 
     /// <summary>
+    /// Rebinds the stored canonical snapshot hash after the forward-only verification identity migration.
+    /// The review steps, decisions, workflow version and comments remain immutable history; only the hash of
+    /// the same package's structured identity is refreshed by the governed migration authority.
+    /// </summary>
+    public void RecordVerificationIdentityMigration(string snapshotHash)
+    {
+        if (string.IsNullOrWhiteSpace(snapshotHash) || snapshotHash.Length != 64
+            || snapshotHash.Any(character => !Uri.IsHexDigit(character)))
+            throw new DomainException("A review-cycle migration requires a valid SHA-256 snapshot hash.");
+        SnapshotHash = snapshotHash.Trim().ToLowerInvariant();
+    }
+
+    /// <summary>
     /// Adds a reviewer's remark about one part of the package, as a draft only its author can see.
     ///
     /// Anyone holding a step in this cycle may comment, not only whoever is active. In a sequential review a

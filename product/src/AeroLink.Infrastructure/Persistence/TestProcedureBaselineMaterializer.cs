@@ -38,11 +38,11 @@ public sealed class TestProcedureBaselineMaterializer(AeroLinkDbContext db,
             ? (policy ?? LegacyLadderPolicy.Instance)
             : await policyResolver.ResolveAsync(baseline.ProjectId, ct);
         if (baseline.State != CandidateBaselineState.Frozen)
-            throw new DomainException("Freeze the baseline before materializing its test procedures.");
+            throw new DomainException("Freeze the baseline before materializing its verification artifacts.");
         if (baseline.RequirementsMaterializedAt is null)
-            throw new DomainException("Materialize the requirement baseline before its test procedures — a procedure verifies a requirement that has to exist first.");
+            throw new DomainException("Materialize the requirement baseline before its verification artifacts — an artifact verifies a requirement that has to exist first.");
         if (baseline.TestProceduresMaterializedAt is not null)
-            throw new DomainException("The test procedure baseline is already materialized and immutable.");
+            throw new DomainException("The verification artifact baseline is already materialized and immutable.");
 
         var procedures = await db.TestProcedures.Where(x => x.ProjectId == baseline.ProjectId).ToListAsync(ct);
         var procedureByBase = procedures.ToDictionary(x => x.BaseNumber, StringComparer.OrdinalIgnoreCase);
@@ -148,7 +148,7 @@ public sealed class TestProcedureBaselineMaterializer(AeroLinkDbContext db,
         // precision while materializing an unrelated successor.
         if (predecessor.TestProceduresMaterializedAt is null)
             throw new DomainException(
-                $"Predecessor {predecessor.DisplayNumber} has no exact procedure manifest. A Configuration Manager must establish its legacy bootstrap snapshot before this successor can materialize procedures.");
+                $"Predecessor {predecessor.DisplayNumber} has no exact verification artifact manifest. A Configuration Manager must establish its legacy bootstrap snapshot before this successor can materialize verification artifacts.");
         var items = await db.BaselineTestProcedures.AsNoTracking().Where(x => x.BaselineId == predecessor.Id).ToListAsync(ct);
         var revisionIds = items.Select(x => x.RevisionId).ToList();
         var revisions = await db.TestProcedureRevisions.AsNoTracking()
@@ -292,7 +292,7 @@ public sealed class TestProcedureBaselineMaterializer(AeroLinkDbContext db,
             db.VerificationImpactDecisionHistory.Add(new VerificationImpactDecisionHistory(
                 item.Id, VerificationImpactHistoryAction.Resolved,
                 VerificationImpactOutcome.ProcedureCoverageConfirmed, procedure.Id, match.RevisionId,
-                $"The requested procedure {match.Change.DisplayNumber} was approved in {match.Tcr.DisplayNumber} and now covers this requirement.",
+                $"The requested {(match.Change.Level == TestProcedureLevel.System ? "procedure" : "case")} {match.Change.DisplayNumber} was approved in {match.Tcr.DisplayNumber} and now covers this requirement.",
                 actorId, now));
             settled++;
         }

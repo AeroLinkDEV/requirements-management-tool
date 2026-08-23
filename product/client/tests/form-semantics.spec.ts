@@ -349,7 +349,7 @@ test('verification, review and administration forms carry the same semantics', a
   }
 
   // The approved requirement change raised a package. It concludes that test work is required, and one of its
-  // decisions asks for a new procedure — which is exactly the state that offers "Author the procedure".
+  // decisions asks for a new procedure — which is exactly the state that offers "Author the test procedure".
   const reviewsResponse = await request.get(`${apiBase}/api/releases/${workspace.release.id}/test-change-reviews`)
   expect(reviewsResponse.ok(), await reviewsResponse.text()).toBeTruthy()
   const review = (await reviewsResponse.json()).items.find((item: { discipline: string }) => item.discipline === 'System')
@@ -379,7 +379,7 @@ test('verification, review and administration forms carry the same semantics', a
   await assessment.getByRole('button', { name: 'Open assessment' }).click()
   const drawer = page.getByRole('dialog', { name: /test impact/ })
   await expect(drawer).toBeVisible({ timeout: 30_000 })
-  await drawer.getByRole('button', { name: 'Author the procedure' }).first().click()
+  await drawer.getByRole('button', { name: 'Author the test procedure' }).first().click()
 
   const authoring = page.getByRole('dialog', { name: 'Propose a test procedure' })
   await expect(authoring).toBeVisible({ timeout: 30_000 })
@@ -413,7 +413,7 @@ test('verification, review and administration forms carry the same semantics', a
       body: JSON.stringify({ error: 'The selected exact requirement changed. Refresh and choose it again.' }),
     })
     : route.continue())
-  await authoring.getByRole('button', { name: 'Propose procedure' }).click()
+  await authoring.getByRole('button', { name: 'Propose test procedure' }).click()
   const refusal = authoring.getByRole('alert')
   await expect(refusal).toContainText('The selected exact requirement changed')
   // Announced, not merely painted, and the engineer's input is still there to correct.
@@ -425,7 +425,7 @@ test('verification, review and administration forms carry the same semantics', a
   // Closing and reopening the controlled workspace leaves the semantics as they were.
   await authoring.getByRole('button', { name: 'Cancel' }).click()
   await expect(authoring).toHaveCount(0)
-  await drawer.getByRole('button', { name: 'Author the procedure' }).first().click()
+  await drawer.getByRole('button', { name: 'Author the test procedure' }).first().click()
   await expect(authoring).toBeVisible({ timeout: 30_000 })
   await inspect(page, 'Propose a test procedure reopened', failures)
   await labelActivatesControl(page, 'Title', 'Propose a test procedure reopened', failures)
@@ -437,7 +437,7 @@ test('verification, review and administration forms carry the same semantics', a
   await authoring.getByLabel('Steps').fill('Exercise the exact requirement.')
   await authoring.getByLabel('Expected result').fill('The required behavior is observed.')
   await authoring.getByLabel('Why it is needed').fill('Nothing in this build covers the new requirement.')
-  await authoring.getByRole('button', { name: 'Propose procedure' }).click()
+  await authoring.getByRole('button', { name: 'Propose test procedure' }).click()
   await expect(authoring).toHaveCount(0, { timeout: 30_000 })
   await expect(page.getByRole('status')).toContainText(/Proposed on SYSTCR-|Proposed on the test change request/)
 

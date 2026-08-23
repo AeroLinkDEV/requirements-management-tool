@@ -240,7 +240,7 @@ public sealed class RequirementBaselineDematerializer(AeroLinkDbContext db, Veri
             .ToDictionaryAsync(x => x.RevisionId, ct);
         string Name(Guid procedureRevisionId) => procedures.TryGetValue(procedureRevisionId, out var row)
             ? ArtifactNumber.Display(row.BaseNumber, row.Revision)
-            : "a test procedure";
+            : "a verification artifact";
 
         var toMove = new List<(TestRequirementCoverage, Guid, string)>();
         var disturbed = new List<DisturbedCoverage>();
@@ -259,7 +259,7 @@ public sealed class RequirementBaselineDematerializer(AeroLinkDbContext db, Veri
 
             var restored = ArtifactNumber.Display(artifactById[artifactId].BaseNumber, onto.Revision);
             toMove.Add((link, onto.Id,
-                $"{baselineNumber} was reopened and the revision this procedure was written against was taken back. "
+                $"{baselineNumber} was reopened and the revision this verification artifact was written against was taken back. "
                 + $"It covers {restored} again, which says something different."));
             disturbed.Add(new DisturbedCoverage(Name(link.ProcedureRevisionId), restored,
                 $"Returns to {restored} and is marked suspect until somebody confirms it still verifies it."));

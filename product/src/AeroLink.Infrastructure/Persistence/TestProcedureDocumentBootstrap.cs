@@ -26,6 +26,7 @@ public sealed class TestProcedureDocumentBootstrap(AeroLinkDbContext db, ILadder
     private readonly ILadderPolicy fallbackPolicy = policy ?? LegacyLadderPolicy.Instance;
     /// <summary>The section every backfilled procedure lands in, named so its provenance is obvious.</summary>
     public const string DefaultSectionHeading = "Unsectioned procedures";
+    public const string DefaultCaseSectionHeading = "Unsectioned cases";
 
     public async Task EnsureAllAsync(CancellationToken ct = default)
     {
@@ -62,7 +63,7 @@ public sealed class TestProcedureDocumentBootstrap(AeroLinkDbContext db, ILadder
                 existing.Add(document);
             }
 
-            var section = await FindOrCreateDefaultSectionAsync(document, now, ct);
+            var section = await FindOrCreateDefaultSectionAsync(document, level, now, ct);
             await PlaceUnfiledProceduresAsync(projectId, level, document, section, now, ct);
         }
     }
@@ -89,19 +90,20 @@ public sealed class TestProcedureDocumentBootstrap(AeroLinkDbContext db, ILadder
     }
 
     private async Task<TestProcedureDocumentNode> FindOrCreateDefaultSectionAsync(TestProcedureDocument document,
-        DateTimeOffset now, CancellationToken ct)
+        TestProcedureLevel level, DateTimeOffset now, CancellationToken ct)
     {
+        var defaultHeading = level == TestProcedureLevel.System ? DefaultSectionHeading : DefaultCaseSectionHeading;
         var sections = await db.TestProcedureDocumentNodes
             .Where(x => x.DocumentId == document.Id && x.Type == TestProcedureDocumentNodeType.Section)
             .ToListAsync(ct);
         var pendingSections = db.TestProcedureDocumentNodes.Local
             .Where(x => x.DocumentId == document.Id && x.Type == TestProcedureDocumentNodeType.Section);
         var existing = sections.Concat(pendingSections)
-            .FirstOrDefault(x => x.Heading == DefaultSectionHeading);
+            .FirstOrDefault(x => x.Heading == defaultHeading);
         if (existing is not null) return existing;
 
         var section = new TestProcedureDocumentNode(document.Id, null, 0,
-            TestProcedureDocumentNodeType.Section, DefaultSectionHeading, null, "system.bootstrap", now);
+            TestProcedureDocumentNodeType.Section, defaultHeading, null, "system.bootstrap", now);
         db.TestProcedureDocumentNodes.Add(section);
         return section;
     }

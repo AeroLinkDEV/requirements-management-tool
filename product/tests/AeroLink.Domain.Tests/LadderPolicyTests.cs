@@ -16,8 +16,8 @@ public sealed class LadderPolicyTests
         Assert.Equal([RequirementLevel.System, RequirementLevel.HighLevel, RequirementLevel.LowLevel], policy.OrderedLevels);
         Assert.Equal(["SYSR", "HLR", "LLR"], policy.Definitions.Select(x => x.RequirementPrefix));
         Assert.Equal(["SRCR", "HLRCR", "LLRCR"], policy.Definitions.Select(x => x.ChangeRequest!.Prefix));
-        Assert.Equal(["SYSTP", "HLRTP", "LLRTP"], policy.Definitions.Select(x => x.Verification!.ProcedurePrefix));
-        Assert.Equal(["System Test Procedures Document", "High-Level Software Test Procedures Document", "Low-Level Software Test Procedures Document"],
+        Assert.Equal(["SYSTP", "HLRTC", "LLRTC"], policy.Definitions.Select(x => x.Verification!.ProcedurePrefix));
+        Assert.Equal(["System Test Procedures Document", "High-Level Software Test Cases Document", "Low-Level Software Test Cases Document"],
             policy.Definitions.Select(x => x.TestProcedureDocumentTitle));
         Assert.Equal(
             [TestChangeReviewDiscipline.System, TestChangeReviewDiscipline.HighLevelSoftware, TestChangeReviewDiscipline.LowLevelSoftware],
@@ -49,13 +49,13 @@ public sealed class LadderPolicyTests
         Assert.Equal(RequirementLevel.HighLevel, policy.RequirementLevelFor(TestProcedureLevel.HighLevel));
         Assert.Equal(RequirementLevel.LowLevel, policy.RequirementLevelFor(TestChangeReviewDiscipline.LowLevelSoftware));
         Assert.Equal(ControlledDocumentType.SwrdHighLevel, policy.RequirementsDocument(RequirementLevel.HighLevel));
-        Assert.Equal(ControlledDocumentType.LowLevelTestProcedures, policy.TestProcedureDocument(RequirementLevel.LowLevel));
-        Assert.Equal("High-Level Software Test Procedures Document", policy.TestProcedureDocumentTitle(RequirementLevel.HighLevel));
+        Assert.Equal(ControlledDocumentType.LowLevelTestCases, policy.TestProcedureDocument(RequirementLevel.LowLevel));
+        Assert.Equal("High-Level Software Test Cases Document", policy.TestProcedureDocumentTitle(RequirementLevel.HighLevel));
         Assert.Equal("HLRCR", policy.ChangeRequestPrefix(ChangeRequestType.Software, RequirementLevel.HighLevel));
         Assert.Equal("LLRTCR", policy.TestChangeReviewPrefix(TestChangeReviewDiscipline.LowLevelSoftware));
         Assert.Equal(ReviewSubject.System, policy.WorkflowSubject(ChangeRequestType.System));
         Assert.Equal(ReviewSubject.Software, policy.WorkflowSubject(ChangeRequestType.Software));
-        Assert.Equal(ReviewSubject.LowLevelSoftwareTest, policy.WorkflowSubject(TestChangeReviewDiscipline.LowLevelSoftware));
+        Assert.Equal(ReviewSubject.LowLevelSoftwareCase, policy.WorkflowSubject(TestChangeReviewDiscipline.LowLevelSoftware));
         Assert.True(policy.IsChangeRequestScopeValid(ChangeRequestType.System, null));
         Assert.True(policy.IsChangeRequestScopeValid(ChangeRequestType.Software, RequirementLevel.HighLevel));
         Assert.False(policy.IsChangeRequestScopeValid(ChangeRequestType.Software, RequirementLevel.System));

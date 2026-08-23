@@ -27,8 +27,8 @@ public sealed class LegacyProcedureManifestBootstrapDomainTests
         var recorded = Assert.Single(baseline.Events,
             item => item.EventType == "LegacyProcedureManifestBootstrapped");
         Assert.Equal("migration.cm", recorded.ActorId);
-        Assert.Contains("42 active procedure revisions", recorded.Detail);
-        Assert.Contains("3 retired procedure identities suppressed", recorded.Detail);
+        Assert.Contains("42 active verification artifact revisions", recorded.Detail);
+        Assert.Contains("3 retired verification artifact identities suppressed", recorded.Detail);
         Assert.Contains(Hash, recorded.Detail);
         Assert.Contains(Rule, recorded.Detail);
 
