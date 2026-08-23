@@ -59,7 +59,7 @@ test('the verification register is the same register over test change requests',
   await expect(row).toBeVisible({ timeout: 30_000 })
   // The count that was an uninterpretable "Procedure decisions" column now reads as what it is, in the place
   // the requirements row puts the same fact.
-  await expect(row).toContainText('procedure changes')
+  await expect(row).toContainText('Procedure changes')
   await expect(page.locator('[data-register-row]').first()).toBeVisible()
 })
 

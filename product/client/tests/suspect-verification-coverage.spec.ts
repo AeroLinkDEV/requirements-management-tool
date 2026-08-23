@@ -173,7 +173,7 @@ test('modified requirement coverage stays suspect until an exact approved proced
     await decisionRow.first().getByRole('button', { name: 'Decide' }).click()
     const dialog = page.getByRole('dialog', { name: `Decide ${subject}` })
     await dialog.getByLabel('Decision').selectOption('ProcedureCoverageConfirmed')
-    await dialog.getByLabel('Covering procedure').selectOption(approvedProcedure.procedureId)
+    await dialog.getByLabel('Covering test procedure').selectOption(approvedProcedure.procedureId)
     await dialog.getByLabel('Rationale').fill(rationale)
     await dialog.getByRole('button', { name: 'Record decision' }).click()
     await expect(dialog).toHaveCount(0, { timeout: 30_000 })

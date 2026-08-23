@@ -428,7 +428,7 @@ test('a stale released-build context cannot overwrite the active build effective
   await activeRow.getByRole('button', { name: 'Open assessment' }).click()
   const reopened = page.getByRole('dialog', { name: /test impact/ })
   const decided = reopened.locator('.decisionList li').filter({ hasText: subject }).first()
-  await decided.getByRole('button', { name: 'Author the procedure' }).click()
+  await decided.getByRole('button', { name: 'Author the test procedure' }).click()
   const authoring = page.getByRole('dialog', { name: 'Propose a test procedure' })
   await expect.poll(() => pickerUrl).not.toBe('')
   expect(new URL(pickerUrl).searchParams.get('baselineId')).toBe(activeBaselineId)
@@ -466,7 +466,7 @@ test('a multi-page requirement selection keeps the picker request line bounded a
   await decideNewProcedure(page, assessment, subject)
 
   const decided = assessment.locator('.decisionList li').filter({ hasText: subject }).first()
-  await decided.getByRole('button', { name: 'Author the procedure' }).click()
+  await decided.getByRole('button', { name: 'Author the test procedure' }).click()
   const authoring = page.getByRole('dialog', { name: 'Propose a test procedure' })
   const select = authoring.locator('select[name="requirement"]')
   await expect(select.locator('option').first()).toBeVisible({ timeout: 30_000 })
@@ -524,7 +524,7 @@ test('a multi-page requirement selection keeps the picker request line bounded a
   await authoring.getByLabel('Steps').fill('1. Load the configuration. 2. Exercise the behavior.')
   await authoring.getByLabel('Expected result').fill('The expected behavior is observed.')
   await authoring.getByLabel('Why it is needed').fill('Nothing covers the picker integrity requirements yet.')
-  await authoring.getByRole('button', { name: 'Propose procedure' }).click()
+  await authoring.getByRole('button', { name: 'Propose test procedure' }).click()
   await expect(authoring).toHaveCount(0, { timeout: 30_000 })
 
   // The exact intended set reaches authoritative server validation and persists.
@@ -569,9 +569,9 @@ test('the TCR driving-requirement picker stays bounded with a large selection', 
   // Open the TCR workspace's Introduce drawer: its governed candidate universe is the 220 requirements
   // this package's source change introduced.
   await assessment.getByRole('button', { name: /^SYSTCR-\d{6}\.\d{2}$/ }).click()
-  const workspaceDrawer = page.getByRole('dialog', { name: /procedure decisions/ })
-  await workspaceDrawer.getByRole('button', { name: 'Propose a procedure change' }).click()
-  const drawer = page.getByRole('dialog', { name: 'Propose a procedure change' })
+  const workspaceDrawer = page.getByRole('dialog', { name: /test procedure decisions/ })
+  await workspaceDrawer.getByRole('button', { name: 'Propose a test procedure change' }).click()
+  const drawer = page.getByRole('dialog', { name: 'Propose a test procedure change' })
   const fieldset = drawer.locator('fieldset.drivingRequirements').last()
   await expect(fieldset).toContainText('220 governed requirements in scope', { timeout: 30_000 })
 
@@ -616,7 +616,7 @@ test('the TCR driving-requirement picker stays bounded with a large selection', 
   await drawer.getByLabel('Preconditions').fill('The configuration is available.')
   await drawer.getByLabel('Steps').fill('1. Load. 2. Exercise.')
   await drawer.getByLabel('Expected result').fill('The expected behavior is observed.')
-  await drawer.getByLabel('Why this procedure work is required').fill('Nothing covers these requirements yet.')
+  await drawer.getByLabel('Why this test procedure work is required').fill('Nothing covers these requirements yet.')
   await drawer.getByRole('button', { name: 'Propose decision' }).click()
   await expect(drawer).toHaveCount(0, { timeout: 30_000 })
 
@@ -659,7 +659,7 @@ test('a failed picker response shows a visible error and recovers instead of sil
   await decideNewProcedure(page, assessment, subject)
 
   const decided = assessment.locator('.decisionList li').filter({ hasText: subject }).first()
-  await decided.getByRole('button', { name: 'Author the procedure' }).click()
+  await decided.getByRole('button', { name: 'Author the test procedure' }).click()
   const authoring = page.getByRole('dialog', { name: 'Propose a test procedure' })
   await expect(authoring.locator('select[name="requirement"] option').first()).toBeVisible({ timeout: 30_000 })
 
@@ -722,8 +722,8 @@ test('a Modify/Retire target picker stays bounded with a large existing-decision
   const row = page.locator('.downstreamAssessment').filter({ hasText: /TCR volume trigger/ }).first()
   await expect(row).toBeVisible({ timeout: 30_000 })
   await row.getByRole('button', { name: /^SYSTCR-\d{6}\.\d{2}/ }).click()
-  const workspaceDrawer = page.getByRole('dialog', { name: /procedure decisions/ })
-  await expect(workspaceDrawer.getByRole('button', { name: 'Propose a procedure change' }))
+  const workspaceDrawer = page.getByRole('dialog', { name: /test procedure decisions/ })
+  await expect(workspaceDrawer.getByRole('button', { name: 'Propose a test procedure change' }))
     .toBeVisible({ timeout: 60_000 })
 
   const requestUrls: string[] = []
@@ -735,10 +735,10 @@ test('a Modify/Retire target picker stays bounded with a large existing-decision
     if (res.url().includes('/procedure-targets?')) responseStatuses.push(res.status())
   })
 
-  await workspaceDrawer.getByRole('button', { name: 'Propose a procedure change' }).click()
-  const dialog = page.getByRole('dialog', { name: 'Propose a procedure change' })
+  await workspaceDrawer.getByRole('button', { name: 'Propose a test procedure change' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Propose a test procedure change' })
   await dialog.getByLabel('What is being done').selectOption('Modify')
-  await expect(dialog).toContainText(`${carriedCount} carried procedures in this build`, { timeout: 30_000 })
+  await expect(dialog).toContainText(`${carriedCount} carried test procedures in this build`, { timeout: 30_000 })
 
   // The search/paging request must never serialize the existing decision set into baseNumbers.
   await expect.poll(() => requestUrls.length).toBeGreaterThan(0)
@@ -763,7 +763,7 @@ test('a Modify/Retire target picker stays bounded with a large existing-decision
 
   // Searching for and selecting another carried procedure still works.
   const searchTarget = targets[carriedCount - 1].baseNumber
-  await dialog.getByRole('textbox', { name: 'Search procedures' }).fill(searchTarget)
+  await dialog.getByRole('textbox', { name: 'Search test procedures' }).fill(searchTarget)
   const searchOption = options.filter({ hasText: searchTarget })
   await expect(searchOption).toHaveCount(1, { timeout: 30_000 })
   await dialog.getByRole('combobox', { name: 'Procedure' }).selectOption(searchTarget)
@@ -774,7 +774,7 @@ test('a Modify/Retire target picker stays bounded with a large existing-decision
   await dialog.getByLabel('Preconditions').fill('The volume configuration is available.')
   await dialog.getByLabel('Steps').fill('1. Load. 2. Exercise.')
   await dialog.getByLabel('Expected result').fill('The expected behavior is observed.')
-  await dialog.getByLabel('Why this procedure work is required').fill('The approved change requires an exact procedure update.')
+  await dialog.getByLabel('Why this test procedure work is required').fill('The approved change requires an exact procedure update.')
   await dialog.getByRole('button', { name: 'Propose decision' }).click()
   await expect(dialog).toHaveCount(0, { timeout: 30_000 })
 
