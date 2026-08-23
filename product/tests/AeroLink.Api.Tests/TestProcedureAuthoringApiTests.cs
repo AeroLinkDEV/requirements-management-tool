@@ -664,6 +664,20 @@ public sealed class TestProcedureAuthoringApiTests
         Assert.Equal("procedure_final_coverage_required",
             JsonSerializer.Deserialize<JsonElement>(await emptyFinalCoverage.Content.ReadAsStringAsync())
                 .GetProperty("code").GetString());
+
+        // A #709 suspect carry-forward is lifecycle evidence, not a current authored parent. It cannot be
+        // removed through the ordinary procedure-change delta; only the lifecycle/materialization path may
+        // confirm or transition that evidence.
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            var suspect = await db.TestCoverage.SingleAsync(x => x.RequirementRevisionId == fixture.RequirementRevisionId);
+            suspect.MarkSuspect("The carried requirement awaits lifecycle confirmation.", DateTimeOffset.UtcNow);
+            await db.SaveChangesAsync();
+        }
+        Assert.Equal("coverage_removal_not_current",
+            (await Refused(fixture.RequirementRevisionId, "Do not remove lifecycle evidence."))
+                .GetProperty("code").GetString());
     }
 
     [Fact]

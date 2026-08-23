@@ -468,14 +468,19 @@ export default function TestChangeRequestWorkspace({api,projectId,reviewId,disci
           <legend>Current exact coverage</legend>
           {currentCoverage.length?currentCoverage.map(coverage=>{
             const mayRemove=!coverage.isSuspect&&governedIds.has(coverage.revisionId)
-            const retained=coverage.isSuspect||!draft.removed.includes(coverage.revisionId)
+            // A #709 suspect carry-forward is lifecycle evidence, not an approved parent selection.  Keep it
+            // visible so the author understands the history, but never present it as checked/retained in the
+            // successor or offer an ordinary coverage-removal control for it.
+            const retained=!coverage.isSuspect&&!draft.removed.includes(coverage.revisionId)
             return <label key={coverage.revisionId} className="drivingChoice">
               <input type="checkbox" checked={retained} disabled={!mayRemove}
                 onChange={event=>setDraft(current=>({...current,removed:event.target.checked
                   ?current.removed.filter(id=>id!==coverage.revisionId)
                   :[...current.removed,coverage.revisionId]}))}/>
               <span><b>{coverage.displayNumber}</b> {coverage.statement} · {coverage.isSuspect?'Suspect':'Confirmed'}
-                {!mayRemove?' · retained; outside this package change scope':''}</span>
+                {coverage.isSuspect
+                  ? ' · lifecycle evidence; excluded from successor exact parents'
+                  : !mayRemove?' · retained; outside this package change scope':''}</span>
             </label>
           }):<p className="drawerEmpty">The carried {currentArtifactWord} has no current requirement coverage.</p>}
           <p className="drawerEmpty">Checked confirmed links carry forward automatically. Suspect links remain lifecycle evidence until confirmed and are never silently retained.</p>

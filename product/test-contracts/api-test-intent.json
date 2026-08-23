@@ -21,16 +21,16 @@
     "http-boundary": {
       "label": "HTTP boundary: route, status, JSON shape",
       "level": "API (must stay hosted)",
-      "tests": 343,
-      "cases": 377,
+      "tests": 342,
+      "cases": 376,
       "unknownCases": 0,
       "classes": 80
     },
     "ef-translation": {
       "label": "EF translation / relational constraints",
       "level": "Infrastructure (needs a database, not a host)",
-      "tests": 105,
-      "cases": 112,
+      "tests": 106,
+      "cases": 113,
       "unknownCases": 0,
       "classes": 43
     },
@@ -8704,17 +8704,18 @@
       "cls": "TestProcedureAuthoringApiTests",
       "test": "A_coverage_removal_must_be_current_governed_and_rationalized",
       "kind": "Fact",
-      "intent": "http-boundary",
+      "intent": "ef-translation",
       "cases": 1,
       "caseEvidence": "Fact",
       "hosted": "hosted",
       "hostEvidence": [
         "factory-construction",
-        "factory-client"
+        "factory-client",
+        "factory-services"
       ],
       "sourceLines": {
         "start": 622,
-        "end": 667
+        "end": 681
       }
     },
     {
@@ -8817,8 +8818,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 669,
-        "end": 694
+        "start": 683,
+        "end": 708
       }
     },
     {
@@ -8834,8 +8835,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 710,
-        "end": 729
+        "start": 724,
+        "end": 743
       }
     },
     {
@@ -8852,8 +8853,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 731,
-        "end": 799
+        "start": 745,
+        "end": 813
       }
     },
     {
@@ -8887,8 +8888,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 801,
-        "end": 900
+        "start": 815,
+        "end": 914
       }
     },
     {
@@ -8956,8 +8957,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 696,
-        "end": 708
+        "start": 710,
+        "end": 722
       }
     },
     {

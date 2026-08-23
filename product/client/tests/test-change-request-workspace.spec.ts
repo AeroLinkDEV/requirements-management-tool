@@ -208,7 +208,7 @@ test('a procedure modification shows retained coverage and records an explicit r
   await expect(packageRow).toBeVisible({ timeout: 30_000 })
 
   const retainedId = '10000000-0000-0000-0000-000000000001'
-  const removableId = '10000000-0000-0000-0000-000000000002'
+  const suspectId = '10000000-0000-0000-0000-000000000002'
   const additionId = '10000000-0000-0000-0000-000000000003'
   let recorded = false
   let submitted: Record<string, unknown> | undefined
@@ -230,12 +230,12 @@ test('a procedure modification shows retained coverage and records an explicit r
       solution: 'Retain unchanged links and record additions/removals.', problemRich: '', analysisRich: '', solutionRich: '',
       capabilities: { canProposeProcedureChange: true, canWithdrawProcedureChange: true, canRevise: false },
       drivingRequirementChoices: [
-        { id: '50000000-0000-0000-0000-000000000001', revisionId: removableId, displayNumber: 'SYSR-000401.00', statement: 'Changed requirement.', level: 'System' },
+        { id: '50000000-0000-0000-0000-000000000001', revisionId: suspectId, displayNumber: 'SYSR-000401.00', statement: 'Changed requirement.', level: 'System' },
         { id: '50000000-0000-0000-0000-000000000002', revisionId: additionId, displayNumber: 'SYSR-000403.00', statement: 'New governed requirement.', level: 'System' },
       ],
       procedureTargets: [{ baseNumber: 'SYSTP-000900', title: 'Carried procedure', currentRevision: 0,
         currentCoverage: [
-          { id: '50000000-0000-0000-0000-000000000003', revisionId: removableId, displayNumber: 'SYSR-000401.00', statement: 'Changed requirement.', level: 'System', isSuspect: true },
+          { id: '50000000-0000-0000-0000-000000000003', revisionId: suspectId, displayNumber: 'SYSR-000401.00', statement: 'Changed requirement.', level: 'System', isSuspect: true },
           { id: '50000000-0000-0000-0000-000000000004', revisionId: retainedId, displayNumber: 'SYSR-000402.00', statement: 'Unchanged requirement.', level: 'System', isSuspect: false },
         ] }],
       procedureChanges: recorded ? [{
@@ -243,7 +243,8 @@ test('a procedure modification shows retained coverage and records an explicit r
         baseNumber: 'SYSTP-000900', revision: 1, kind: 'Modify', level: 'System', title: 'Revised procedure',
         objective: 'Verify revised behavior.', preconditions: '', steps: 'Execute.', expectedResult: 'Observed.',
         rationale: 'The approved change alters procedure behavior.', drivingRequirementRevisionIds: [additionId],
-        removedRequirementRevisionIds: [removableId], coverageChangeRationale: 'Replace obsolete coverage.',
+        parentKind: 'Allocated', parentRevisionIds: [retainedId, additionId],
+        removedRequirementRevisionIds: [], coverageChangeRationale: 'Replace obsolete coverage.',
         coverageChangedBy: 'test.engineer',
       }] : [],
     }) })
@@ -254,7 +255,7 @@ test('a procedure modification shows retained coverage and records an explicit r
       items: [{ procedureId: '60000000-0000-0000-0000-000000000001', baseNumber: 'SYSTP-000900',
         title: 'Carried procedure', currentRevision: 0,
         currentCoverage: [
-          { id: '50000000-0000-0000-0000-000000000003', revisionId: removableId, displayNumber: 'SYSR-000401.00', statement: 'Changed requirement.', level: 'System', isSuspect: true },
+          { id: '50000000-0000-0000-0000-000000000003', revisionId: suspectId, displayNumber: 'SYSR-000401.00', statement: 'Changed requirement.', level: 'System', isSuspect: true },
           { id: '50000000-0000-0000-0000-000000000004', revisionId: retainedId, displayNumber: 'SYSR-000402.00', statement: 'Unchanged requirement.', level: 'System', isSuspect: false },
         ] }],
     }) })
@@ -263,7 +264,7 @@ test('a procedure modification shows retained coverage and records an explicit r
     await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({
       page: 1, pageSize: 50, totalCount: 2, totalPages: 1,
       items: [
-        { id: '50000000-0000-0000-0000-000000000001', revisionId: removableId, displayNumber: 'SYSR-000401.00', statement: 'Changed requirement.', level: 'System' },
+        { id: '50000000-0000-0000-0000-000000000001', revisionId: suspectId, displayNumber: 'SYSR-000401.00', statement: 'Changed requirement.', level: 'System' },
         { id: '50000000-0000-0000-0000-000000000002', revisionId: additionId, displayNumber: 'SYSR-000403.00', statement: 'New governed requirement.', level: 'System' },
       ],
     }) })
@@ -278,11 +279,15 @@ test('a procedure modification shows retained coverage and records an explicit r
   const current = dialog.getByRole('group', { name: 'Current exact coverage' })
   await expect(current).toContainText('SYSR-000401.00')
   await expect(current).toContainText('Suspect')
-  await expect(current).toContainText('retained; outside this package change scope')
-  await current.getByLabel(/SYSR-000401\.00/).uncheck()
+  const suspect = current.getByLabel(/SYSR-000401\.00/)
+  await expect(suspect).not.toBeChecked()
+  await expect(suspect).toBeDisabled()
+  await expect(current).toContainText('lifecycle evidence; excluded from successor exact parents')
+  await expect(current.getByLabel(/SYSR-000402\.00/)).toBeChecked()
+  await expect(current.getByLabel(/SYSR-000402\.00/)).toBeDisabled()
   await dialog.getByRole('group', { name: 'Requirements this test procedure verifies' })
     .getByLabel(/SYSR-000403\.00/).check()
-  await expect(dialog).toContainText('Proposed coverage: 1 retained, 1 added, 1 removed.')
+  await expect(dialog).toContainText('Proposed coverage: 1 retained, 1 added, 0 removed.')
   await dialog.getByLabel('Title').fill('Revised procedure')
   await dialog.getByLabel('Objective').fill('Verify revised behavior.')
   await dialog.getByLabel('Steps').fill('Execute.')
@@ -292,13 +297,17 @@ test('a procedure modification shows retained coverage and records an explicit r
   await dialog.getByRole('button', { name: 'Propose decision' }).click()
 
   expect(submitted?.drivingRequirementRevisionIds).toEqual([additionId])
-  expect(submitted?.removedRequirementRevisionIds).toEqual([removableId])
+  expect(submitted?.parentRevisionIds).toEqual([retainedId, additionId])
+  expect(submitted?.removedRequirementRevisionIds).toEqual([])
   expect(submitted?.coverageChangeRationale).toBe('Replace obsolete coverage.')
-  await expect(drawer).toContainText('Retained coverage: SYSR-000402.00')
-  await expect(drawer).toContainText('Added coverage: SYSR-000403.00')
-  await expect(drawer).toContainText('Removed coverage: SYSR-000401.00')
-  await expect(drawer).toContainText('Approved final coverage: SYSR-000402.00 · Unchanged requirement., SYSR-000403.00 · New governed requirement.')
-  await expect(drawer).toContainText('Coverage rationale: Replace obsolete coverage. · test.engineer')
+  const recordedDecision = drawer.locator('li.linkedDraft').filter({ hasText: 'SYSTP-000900.01' }).first()
+  await expect(recordedDecision).toContainText('Parent mode: Allocated')
+  await expect(recordedDecision).toContainText('Exact parent requirements: SYSR-000402.00 · Unchanged requirement., SYSR-000403.00 · New governed requirement.')
+  await expect(recordedDecision).toContainText('Retained coverage: SYSR-000402.00')
+  await expect(recordedDecision).toContainText('Added coverage: SYSR-000403.00')
+  await expect(recordedDecision).toContainText('Removed coverage: none')
+  await expect(recordedDecision).toContainText('Approved final coverage: SYSR-000402.00 · Unchanged requirement., SYSR-000403.00 · New governed requirement.')
+  await expect(recordedDecision).toContainText('Coverage rationale: Replace obsolete coverage. · test.engineer')
 })
 test('a stale Modify target reloads controlled state and requires an explicit re-selection', async ({ page }) => {
   test.setTimeout(120_000)
