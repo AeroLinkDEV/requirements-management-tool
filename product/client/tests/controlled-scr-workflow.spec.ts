@@ -27,14 +27,14 @@ test('author creates, edits, submits, and sequentially approves a change request
   }
 
   await openPageFromPalette(page,'Software HLR Downstream Assessments')
-  await expect(page.getByText('Procedure authoring waits for governed requirement materialization')).toBeVisible()
+  await expect(page.getByText('Test case authoring waits for governed requirement materialization')).toBeVisible()
   await expect(page.getByText(/no immutable requirement revisions yet/)).toBeVisible()
-  await expect(page.getByText(/Existing inherited procedures remain visible/)).toBeVisible()
+  await expect(page.getByText(/Existing inherited test cases remain visible/)).toBeVisible()
   await expect(page.getByText(/Requirement materialization is not exposed/)).toBeVisible()
-  // No such control, disabled or otherwise. A procedure is introduced by a test change request, so the page
-  // that lists procedures offers no way to write one — the same way the requirements explorer offers no way
+  // No such control, disabled or otherwise. A test case is introduced by a test change request, so the page
+  // that lists test cases offers no way to write one — the same way the requirements explorer offers no way
   // to write a requirement.
-  await expect(page.getByRole('button',{name:'+ New test procedure'})).toHaveCount(0)
+  await expect(page.getByRole('button',{name:'+ New test case'})).toHaveCount(0)
   await page.getByRole('link',{name:'Command Center'}).click()
 
   await openNewSoftwareChangeRequest(page,'HLR')
