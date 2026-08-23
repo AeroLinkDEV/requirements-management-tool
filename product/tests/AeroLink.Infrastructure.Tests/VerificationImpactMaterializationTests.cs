@@ -1,5 +1,6 @@
 using AeroLink.Domain.Baselines;
 using AeroLink.Domain.ChangeControl;
+using AeroLink.Domain.Common;
 using AeroLink.Domain.Programs;
 using AeroLink.Domain.Requirements;
 using AeroLink.Domain.Verification;
@@ -40,7 +41,7 @@ public sealed class VerificationImpactMaterializationTests
     {
         var scr = new SystemChangeRequest(scrNumber, 0, projectId, releaseId, kind.ToString(), "P", "A", "S", "author", now, ChangeRequestType.Software, softwareLevel: RequirementLevel.HighLevel);
         scr.AddRequirementChange("author", requirementNumber, revision, RequirementLevel.HighLevel, kind,
-            statement, "Rationale", verificationMethod, now);
+            statement, "Rationale", verificationMethod, now, attributesJson: "{\"derived\":true}");
         scr.SubmitForReview("author", [new("reviewer", "Reviewer")], now);
         scr.ApproveActiveStage("reviewer", now);
         return scr;
@@ -98,12 +99,21 @@ public sealed class VerificationImpactMaterializationTests
             var scr = ApprovedScr("HLRCR-00001", "SWR-00002375", 0, RequirementChangeKind.Introduce,
                 "The FMS shall sequence oceanic waypoints.", seed.ProjectId, seed.ReleaseId, now);
             var baseline = FrozenBaseline("SW-00.10", seed.ProjectId, seed.ReleaseId, null, scr, now);
+            db.AddRange(scr, baseline);
+            await new VerificationImpactService(db).RaiseForApprovedChangeRequestAsync(scr, now, default);
+            await db.SaveChangesAsync();
+
+            // The controlled requirement revision must exist before a newly authored Case can record its
+            // exact Allocated parent. The impact decision remains open while that baseline is materialized.
+            await MaterializeAsync(db, baseline.Id, now);
+            var revision = await db.RequirementRevisions.AsNoTracking().SingleAsync();
             var procedure = new TestProcedure(seed.ProjectId, "HLRTC-00000001", "Oceanic sequencing", "test.lead", now);
             var procedureRevision = new TestProcedureRevision(procedure.Id, 0, "Verify oceanic sequencing",
                 "Aircraft on ground", "Load the plan and sequence", "Waypoints sequence in order",
-                TestProcedureState.Approved, "test.engineer", now);
-            db.AddRange(scr, baseline, procedure, procedureRevision);
-            await new VerificationImpactService(db).RaiseForApprovedChangeRequestAsync(scr, now, default);
+                TestProcedureState.Approved, "test.engineer", now, effectiveBaselineId: baseline.Id,
+                parentKind: VerificationProcedureParentKind.Allocated);
+            db.AddRange(procedure, procedureRevision,
+                new TestRequirementCoverage(procedureRevision.Id, revision.Id));
             await db.SaveChangesAsync();
 
             var item = await db.VerificationImpactItems.SingleAsync();
@@ -111,11 +121,11 @@ public sealed class VerificationImpactMaterializationTests
             item.Resolve("test.engineer", VerificationImpactOutcome.ProcedureCoverageConfirmed,
                 "This approved procedure verifies the introduced requirement.", now,
                 procedure.Id, procedureRevision.Id);
+            var change = scr.RequirementChanges.Single();
+            await new VerificationImpactService(db).ApplyMaterializationAsync(seed.ProjectId, seed.ReleaseId,
+                [new MaterializedRequirementChange(scr.Id, change.Id, change.Kind, null, revision.Id, change.DisplayNumber)],
+                "test.engineer", now, default);
             await db.SaveChangesAsync();
-
-            await MaterializeAsync(db, baseline.Id, now);
-
-            var revision = await db.RequirementRevisions.AsNoTracking().SingleAsync();
             Assert.Equal(procedureRevision.Id, (await db.TestCoverage.AsNoTracking()
                 .SingleAsync(x => x.RequirementRevisionId == revision.Id)).ProcedureRevisionId);
             var mandatorySet = await db.BuildTestSets.Include(x => x.Entries)
@@ -124,6 +134,68 @@ public sealed class VerificationImpactMaterializationTests
             var mandatory = Assert.Single(mandatorySet.Entries);
             Assert.Equal(procedureRevision.Id, mandatory.ProcedureRevisionId);
             Assert.Equal(TestSelectionReason.ChangedRequirement, mandatory.Reason);
+        }
+        finally { File.Delete(seed.Path); }
+    }
+
+    [Fact]
+    public async Task Pre_materialisation_confirmation_without_a_predecessor_defers_until_a_controlled_successor()
+    {
+        var seed = await SeedAsync();
+        try
+        {
+            var now = DateTimeOffset.UtcNow;
+            await using var db = new AeroLinkDbContext(seed.Options);
+
+            // Establish an existing approved Case/System Procedure revision and one exact parent.
+            var firstScr = ApprovedScr("HLRCR-00001", "SWR-00002375", 0, RequirementChangeKind.Introduce,
+                "The FMS shall sequence oceanic waypoints.", seed.ProjectId, seed.ReleaseId, now);
+            var first = FrozenBaseline("SW-00.10", seed.ProjectId, seed.ReleaseId, null, firstScr, now);
+            db.AddRange(firstScr, first);
+            await db.SaveChangesAsync();
+            await MaterializeAsync(db, first.Id, now);
+            var firstRevision = await db.RequirementRevisions.SingleAsync();
+            var procedure = new TestProcedure(seed.ProjectId, "HLRTC-00000001", "Oceanic sequencing", "test.lead", now);
+            var procedureRevision = new TestProcedureRevision(procedure.Id, 0, "Verify oceanic sequencing",
+                "Aircraft on ground", "Load the plan and sequence", "Waypoints sequence in order",
+                TestProcedureState.Approved, "test.engineer", now, effectiveBaselineId: first.Id,
+                parentKind: VerificationProcedureParentKind.Allocated);
+            db.AddRange(procedure, procedureRevision,
+                new TestRequirementCoverage(procedureRevision.Id, firstRevision.Id));
+            await db.SaveChangesAsync();
+
+            // This is a new requirement: its impact item has no exact revision yet. Naming the existing
+            // procedure is useful evidence, but it cannot mutate that approved revision in place.
+            var secondScr = ApprovedScr("HLRCR-00002", "SWR-00002376", 0, RequirementChangeKind.Introduce,
+                "The FMS shall annunciate sequencing failures.", seed.ProjectId, seed.ReleaseId, now);
+            var second = FrozenBaseline("SW-00.20", seed.ProjectId, seed.ReleaseId, first.Id, secondScr, now);
+            db.Add(secondScr);
+            var impactService = new VerificationImpactService(db);
+            await impactService.RaiseForApprovedChangeRequestAsync(secondScr, now, default);
+            db.Add(second);
+            await db.SaveChangesAsync();
+
+            var item = await db.VerificationImpactItems.SingleAsync(x => x.ChangeRequestId == secondScr.Id);
+            item.Resolve("test.engineer", VerificationImpactOutcome.ProcedureCoverageConfirmed,
+                "The existing procedure is the intended verifier once the exact requirement exists.", now,
+                procedure.Id, procedureRevision.Id);
+            await db.SaveChangesAsync();
+            var review = await db.TestChangeReviews.SingleAsync(x => x.Id == item.TestChangeReviewId);
+
+            var submitException = await Assert.ThrowsAsync<DomainException>(() =>
+                TestChangeReviewRequirementScope.ValidateRetargetPlansForSubmissionAsync(db, review, default));
+            Assert.Contains("exact requirement revision", submitException.Message, StringComparison.OrdinalIgnoreCase);
+
+            await MaterializeAsync(db, second.Id, now);
+
+            var exactLinks = await db.TestCoverage.AsNoTracking()
+                .Where(x => x.ProcedureRevisionId == procedureRevision.Id)
+                .ToListAsync();
+            Assert.Single(exactLinks);
+            Assert.Equal(firstRevision.Id, exactLinks[0].RequirementRevisionId);
+            Assert.DoesNotContain(await db.RequirementRevisions.AsNoTracking()
+                .Where(x => x.ArtifactId != firstRevision.ArtifactId)
+                .Select(x => x.Id).ToListAsync(), id => exactLinks.Any(link => link.RequirementRevisionId == id));
         }
         finally { File.Delete(seed.Path); }
     }
@@ -149,7 +221,8 @@ public sealed class VerificationImpactMaterializationTests
             var procedure = new TestProcedure(seed.ProjectId, "HLRTC-00000001", "Oceanic sequencing", "test.lead", now);
             var procedureRevision = new TestProcedureRevision(procedure.Id, 0, "Verify oceanic sequencing",
                 "Aircraft on ground", "Load the plan and sequence", "Waypoints sequence in order",
-                TestProcedureState.Approved, "test.engineer", now);
+                TestProcedureState.Approved, "test.engineer", now, effectiveBaselineId: first.Id,
+                parentKind: VerificationProcedureParentKind.Allocated);
             db.AddRange(procedure, procedureRevision);
             db.TestCoverage.Add(new TestRequirementCoverage(procedureRevision.Id, firstRevision.Id));
             await db.SaveChangesAsync();
@@ -202,7 +275,8 @@ public sealed class VerificationImpactMaterializationTests
             var procedure = new TestProcedure(seed.ProjectId, "HLRTC-00000001", "Oceanic sequencing", "test.lead", now);
             var procedureRevision = new TestProcedureRevision(procedure.Id, 0, "Verify oceanic sequencing",
                 "Aircraft on ground", "Load the plan and sequence", "Waypoints sequence in order",
-                TestProcedureState.Approved, "test.engineer", now);
+                TestProcedureState.Approved, "test.engineer", now, effectiveBaselineId: first.Id,
+                parentKind: VerificationProcedureParentKind.Allocated);
             db.AddRange(procedure, procedureRevision);
             db.TestCoverage.Add(new TestRequirementCoverage(procedureRevision.Id, firstRevision.Id));
             await db.SaveChangesAsync();
@@ -255,7 +329,8 @@ public sealed class VerificationImpactMaterializationTests
             var procedure = new TestProcedure(seed.ProjectId, "HLRTC-00000001", "Oceanic sequencing", "test.lead", now);
             var procedureRevision = new TestProcedureRevision(procedure.Id, 0, "Verify oceanic sequencing",
                 "Aircraft on ground", "Load the plan and sequence", "Waypoints sequence in order",
-                TestProcedureState.Approved, "test.engineer", now);
+                TestProcedureState.Approved, "test.engineer", now, effectiveBaselineId: first.Id,
+                parentKind: VerificationProcedureParentKind.Allocated);
             db.AddRange(procedure, procedureRevision);
             db.TestCoverage.Add(new TestRequirementCoverage(procedureRevision.Id, firstRevision.Id));
             await db.SaveChangesAsync();
@@ -310,7 +385,8 @@ public sealed class VerificationImpactMaterializationTests
             var procedure = new TestProcedure(seed.ProjectId, "HLRTC-00000001", "Oceanic sequencing", "test.lead", now);
             var procedureRevision = new TestProcedureRevision(procedure.Id, 0, "Verify oceanic sequencing",
                 "Aircraft on ground", "Load the plan and sequence", "Waypoints sequence in order",
-                TestProcedureState.Approved, "test.engineer", now);
+                TestProcedureState.Approved, "test.engineer", now, effectiveBaselineId: first.Id,
+                parentKind: VerificationProcedureParentKind.Allocated);
             db.AddRange(procedure, procedureRevision);
             db.TestCoverage.Add(new TestRequirementCoverage(procedureRevision.Id, firstRevision.Id));
             await db.SaveChangesAsync();
@@ -349,9 +425,11 @@ public sealed class VerificationImpactMaterializationTests
             var introduce = new SystemChangeRequest("HLRCR-00001", 0, seed.ProjectId, seed.ReleaseId,
                 "Introduce", "P", "A", "S", "author", now, ChangeRequestType.Software, softwareLevel: RequirementLevel.HighLevel);
             introduce.AddRequirementChange("author", "SWR-00002375", 0, RequirementLevel.HighLevel,
-                RequirementChangeKind.Introduce, "The FMS shall sequence oceanic waypoints.", "R", "Test", now);
+                RequirementChangeKind.Introduce, "The FMS shall sequence oceanic waypoints.", "R", "Test", now,
+                attributesJson: "{\"derived\":true}");
             introduce.AddRequirementChange("author", "SWR-00002376", 0, RequirementLevel.HighLevel,
-                RequirementChangeKind.Introduce, "The FMS shall annunciate sequencing failures.", "R", "Test", now);
+                RequirementChangeKind.Introduce, "The FMS shall annunciate sequencing failures.", "R", "Test", now,
+                attributesJson: "{\"derived\":true}");
             introduce.SubmitForReview("author", [new("reviewer", "Reviewer")], now);
             introduce.ApproveActiveStage("reviewer", now);
             var first = FrozenBaseline("SW-00.10", seed.ProjectId, seed.ReleaseId, null, introduce, now);
@@ -363,7 +441,8 @@ public sealed class VerificationImpactMaterializationTests
             var procedure = new TestProcedure(seed.ProjectId, "HLRTC-00000001", "Oceanic sequencing", "test.lead", now);
             var procedureRevision = new TestProcedureRevision(procedure.Id, 0, "Verify sequencing",
                 "Aircraft on ground", "Sequence and fail", "Both behaviours observed",
-                TestProcedureState.Approved, "test.engineer", now);
+                TestProcedureState.Approved, "test.engineer", now, effectiveBaselineId: first.Id,
+                parentKind: VerificationProcedureParentKind.Allocated);
             db.AddRange(procedure, procedureRevision);
             foreach (var revision in revisions) db.TestCoverage.Add(new TestRequirementCoverage(procedureRevision.Id, revision.Id));
             await db.SaveChangesAsync();

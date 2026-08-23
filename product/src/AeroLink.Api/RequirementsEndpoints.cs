@@ -5,6 +5,7 @@ using AeroLink.Domain.Contracts;
 using AeroLink.Domain.Identity;
 using AeroLink.Domain.Hierarchy;
 using AeroLink.Domain.Requirements;
+using AeroLink.Domain.Traceability;
 using AeroLink.Domain.Verification;
 using AeroLink.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
@@ -200,9 +201,17 @@ public static class RequirementsEndpoints
                                // currently selected would present a released, frozen record inside an in-work context.
                                orderby r.Revision descending select new{r.Id,r.Revision,displayNumber=artifact.BaseNumber+"."+(r.Revision<10?"0":"")+r.Revision,r.Statement,r.Rationale,r.VerificationMethod,state=r.State.ToString(),originKind=r.OriginKind.ToString(),r.SourceBaselineImportId,sourceChangeRequestId=s==null?(Guid?)null:s.Id,sourceChangeRequestReleaseId=s==null?(Guid?)null:s.TargetReleaseId,sourceScr=s==null?null:s.BaseNumber+"."+(s.Revision<10?"0":"")+s.Revision,r.CreatedAt,originBuild=release.Version,isHistorical=releaseId!=null&&release.Id!=releaseId}).ToListAsync(ct);
             var revisionIds=history.Select(x=>x.Id).ToList();var profiles=await db.RequirementRevisionProfiles.AsNoTracking().Where(x=>revisionIds.Contains(x.RevisionId)).ToListAsync(ct);
+            var traceScopeIds=effectiveBaselineId is null
+                ? []
+                : await db.BaselineRequirements.AsNoTracking().Where(x=>x.BaselineId==effectiveBaselineId).Select(x=>x.RevisionId).ToListAsync(ct);
             var placements=await (from n in db.SpecificationNodes.AsNoTracking().Where(x=>x.RequirementArtifactId==artifactId) join spec in db.RequirementSpecifications.AsNoTracking() on n.SpecificationId equals spec.Id join parent in db.SpecificationNodes.AsNoTracking() on n.ParentId equals parent.Id select new{spec.Id,spec.DocumentNumber,spec.Title,section=parent.Heading,n.Position}).ToListAsync(ct);
             var procedureEffectivity=releaseId is null?null:await TestProcedureEffectivity.ForReleaseAsync(db,artifact.ProjectId,releaseId.Value,ct);var effectiveProcedureRevisionIds=procedureEffectivity?.RevisionIds;
-            var traces=await db.RequirementTraces.AsNoTracking().CountAsync(x=>revisionIds.Contains(x.SourceRevisionId)||revisionIds.Contains(x.TargetRevisionId),ct);var testSource=db.TestCoverage.AsNoTracking().Where(x=>revisionIds.Contains(x.RequirementRevisionId));if(effectiveProcedureRevisionIds is not null)testSource=testSource.Where(x=>effectiveProcedureRevisionIds.Contains(x.ProcedureRevisionId));var tests=await testSource.CountAsync(ct);
+            var traceQuery=db.RequirementTraces.AsNoTracking();
+            if(effectiveBaselineId is not null)
+                traceQuery=traceQuery.Where(x=>traceScopeIds.Contains(x.SourceRevisionId)&&traceScopeIds.Contains(x.TargetRevisionId)&&(x.ExactLinkSuspectLifecycleId==null||db.ExactLinkSuspectLifecycles.Any(lifecycle=>lifecycle.Id==x.ExactLinkSuspectLifecycleId&&lifecycle.LinkKind==ExactLinkKind.RequirementTrace&&lifecycle.State==ExactLinkLifecycleState.Closed)));
+            else
+                traceQuery=traceQuery.Where(x=>(revisionIds.Contains(x.SourceRevisionId)||revisionIds.Contains(x.TargetRevisionId))&&x.ExactLinkSuspectLifecycleId==null);
+            var traces=await traceQuery.CountAsync(ct);var testSource=db.TestCoverage.AsNoTracking().Where(x=>revisionIds.Contains(x.RequirementRevisionId)&&!x.IsSuspect);if(effectiveProcedureRevisionIds is not null)testSource=testSource.Where(x=>effectiveProcedureRevisionIds.Contains(x.ProcedureRevisionId));var tests=await testSource.CountAsync(ct);
             return Results.Ok(new{artifact.Id,artifact.BaseNumber,level=artifact.Level.ToString(),activeBuildId=releaseId,effectiveBaselineId,history=history.Select(x=>new{x.Id,x.Revision,x.displayNumber,x.Statement,x.Rationale,x.VerificationMethod,x.state,x.originKind,x.SourceBaselineImportId,x.sourceChangeRequestId,x.sourceChangeRequestReleaseId,x.sourceScr,x.CreatedAt,x.originBuild,x.isHistorical,richText=profiles.SingleOrDefault(p=>p.RevisionId==x.Id)?.RichText,attributesJson=profiles.SingleOrDefault(p=>p.RevisionId==x.Id)?.AttributesJson??"{}",tagsJson=profiles.SingleOrDefault(p=>p.RevisionId==x.Id)?.TagsJson??"[]"}),placements,traceCount=traces,testCoverageCount=tests});
         });
 
@@ -225,8 +234,29 @@ public static class RequirementsEndpoints
                 ? revisions.OrderByDescending(x=>x.Revision).First()
                 : revisions.SingleOrDefault(x=>x.Id==effectiveRevisionId);
             if(current is null)return Results.NotFound(new{error="This requirement is not primary content in the active build.",code="cross_build_requirement"});
-            var parents=await (from link in db.RequirementTraces.AsNoTracking().Where(x=>x.SourceRevisionId==current.Id) join revision in db.RequirementRevisions.AsNoTracking() on link.TargetRevisionId equals revision.Id join related in db.Requirements.AsNoTracking() on revision.ArtifactId equals related.Id select new{related.Id,displayNumber=related.BaseNumber+"."+(revision.Revision<10?"0":"")+revision.Revision,level=related.Level.ToString(),revision.Statement,type=link.Type.ToString(),link.Rationale}).ToListAsync(ct);
-            var children=await (from link in db.RequirementTraces.AsNoTracking().Where(x=>x.TargetRevisionId==current.Id) join revision in db.RequirementRevisions.AsNoTracking() on link.SourceRevisionId equals revision.Id join related in db.Requirements.AsNoTracking() on revision.ArtifactId equals related.Id select new{related.Id,displayNumber=related.BaseNumber+"."+(revision.Revision<10?"0":"")+revision.Revision,level=related.Level.ToString(),revision.Statement,type=link.Type.ToString(),link.Rationale}).ToListAsync(ct);
+            Guid? impactBaselineId=effectiveBaselineId??(Guid?)current.EffectiveBaselineId;
+            var impactScopeIds=impactBaselineId is null
+                ? []
+                : await db.BaselineRequirements.AsNoTracking().Where(x=>x.BaselineId==impactBaselineId).Select(x=>x.RevisionId).ToListAsync(ct);
+            var parentLinks=db.RequirementTraces.AsNoTracking().Where(x=>x.SourceRevisionId==current.Id);
+            var childLinks=db.RequirementTraces.AsNoTracking().Where(x=>x.TargetRevisionId==current.Id);
+            if(impactBaselineId is not null)
+            {
+                parentLinks=parentLinks.Where(x=>impactScopeIds.Contains(x.TargetRevisionId));
+                childLinks=childLinks.Where(x=>impactScopeIds.Contains(x.SourceRevisionId));
+            }
+            if(effectiveBaselineId is null)
+            {
+                parentLinks=parentLinks.Where(x=>x.ExactLinkSuspectLifecycleId==null);
+                childLinks=childLinks.Where(x=>x.ExactLinkSuspectLifecycleId==null);
+            }
+            else
+            {
+                parentLinks=parentLinks.Where(x=>x.ExactLinkSuspectLifecycleId==null||db.ExactLinkSuspectLifecycles.Any(lifecycle=>lifecycle.Id==x.ExactLinkSuspectLifecycleId&&lifecycle.LinkKind==ExactLinkKind.RequirementTrace&&lifecycle.State==ExactLinkLifecycleState.Closed));
+                childLinks=childLinks.Where(x=>x.ExactLinkSuspectLifecycleId==null||db.ExactLinkSuspectLifecycles.Any(lifecycle=>lifecycle.Id==x.ExactLinkSuspectLifecycleId&&lifecycle.LinkKind==ExactLinkKind.RequirementTrace&&lifecycle.State==ExactLinkLifecycleState.Closed));
+            }
+            var parents=await (from link in parentLinks join revision in db.RequirementRevisions.AsNoTracking() on link.TargetRevisionId equals revision.Id join related in db.Requirements.AsNoTracking() on revision.ArtifactId equals related.Id select new{related.Id,displayNumber=related.BaseNumber+"."+(revision.Revision<10?"0":"")+revision.Revision,level=related.Level.ToString(),revision.Statement,type=link.Type.ToString(),link.Rationale}).ToListAsync(ct);
+            var children=await (from link in childLinks join revision in db.RequirementRevisions.AsNoTracking() on link.SourceRevisionId equals revision.Id join related in db.Requirements.AsNoTracking() on revision.ArtifactId equals related.Id select new{related.Id,displayNumber=related.BaseNumber+"."+(revision.Revision<10?"0":"")+revision.Revision,level=related.Level.ToString(),revision.Statement,type=link.Type.ToString(),link.Rationale}).ToListAsync(ct);
             var procedureEffectivity=releaseId is null?null:await TestProcedureEffectivity.ForReleaseAsync(db,artifact.ProjectId,releaseId.Value,ct);
             var isExactProcedureSnapshot=procedureEffectivity is not null&&await db.CandidateBaselines.AsNoTracking().AnyAsync(x=>x.Id==procedureEffectivity.BaselineId&&x.ReleaseId==releaseId,ct);
             var coverageLinks=await VerificationCoverageProjection.ForRequirementRevisionsAsync(db,[current.Id],ct,isExactProcedureSnapshot,procedureEffectivity?.RevisionIds);

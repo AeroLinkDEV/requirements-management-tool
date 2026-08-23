@@ -195,7 +195,7 @@ public sealed class ProblemReportLinkServiceTests
                 ChangeRequestType.Software, softwareLevel: RequirementLevel.LowLevel);
             scr.AddRequirementChange("software.engineer", "LLR-000001", 1, RequirementLevel.LowLevel,
                 RequirementChangeKind.Modify, "The software shall reject a stale position source.",
-                "Correct the reported disagreement.", "Test", now);
+                "Correct the reported disagreement.", "Test", now, attributesJson: "{\"derived\":true}");
             var replacement = new ProblemReport(project.Id, "PR-00002", "Replacement trace",
                 "The original selection was incorrect.", "", "quality.engineer", now);
             db.AddRange(program, project, release, otherRelease, report, replacement, scr);

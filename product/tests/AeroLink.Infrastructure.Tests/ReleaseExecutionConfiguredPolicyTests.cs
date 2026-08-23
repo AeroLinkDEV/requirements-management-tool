@@ -50,15 +50,19 @@ public sealed class ReleaseExecutionConfiguredPolicyTests
         var predecessorSystem = new RequirementRevision(system.Id, 0, "Predecessor system wording", "R", "Test",
             RequirementRevisionState.Active, scr.Id, predecessor.Id, now);
         var predecessorHigh = new RequirementRevision(high.Id, 0, "Predecessor high-level wording", "R", "Test",
-            RequirementRevisionState.Active, scr.Id, predecessor.Id, now);
+            RequirementRevisionState.Active, scr.Id, predecessor.Id, now,
+            parentKind: RequirementParentKind.Derived, derivedRationale: "This release execution fixture has no authored upstream selection.");
         var predecessorLow = new RequirementRevision(low.Id, 0, "Predecessor low-level wording", "R", "Test",
-            RequirementRevisionState.Active, scr.Id, predecessor.Id, now);
+            RequirementRevisionState.Active, scr.Id, predecessor.Id, now,
+            parentKind: RequirementParentKind.Derived, derivedRationale: "This release execution fixture has no authored upstream selection.");
         var currentSystem = new RequirementRevision(system.Id, 1, "Current system wording", "R", "Test",
             RequirementRevisionState.Active, scr.Id, baseline.Id, now);
         var currentHigh = new RequirementRevision(high.Id, 1, "Current retained high-level wording", "R", "Test",
-            RequirementRevisionState.Active, scr.Id, baseline.Id, now);
+            RequirementRevisionState.Active, scr.Id, baseline.Id, now,
+            parentKind: RequirementParentKind.Derived, derivedRationale: "This release execution fixture has no authored upstream selection.");
         var currentLow = new RequirementRevision(low.Id, 1, "Current low-level wording", "R", "Test",
-            RequirementRevisionState.Active, scr.Id, baseline.Id, now);
+            RequirementRevisionState.Active, scr.Id, baseline.Id, now,
+            parentKind: RequirementParentKind.Derived, derivedRationale: "This release execution fixture has no authored upstream selection.");
 
         var systemProcedure = new TestProcedure(project.Id, "SYSTP-00020", "Configured system procedure",
             "verification", now, TestProcedureLevel.System);

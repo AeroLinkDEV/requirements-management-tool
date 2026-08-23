@@ -34,7 +34,8 @@ public sealed class CodeTraceabilityProjectionTests
         baseline.MarkRequirementsMaterialized("cm", new string('b', 64), 1, now);
         var campaign = new ReleaseCampaign(project.Id, release.Id, baseline.Id, "Build 1.6 release", "program.manager", now);
         var artifact = new RequirementArtifact(project.Id, "LLR-900001", RequirementLevel.LowLevel, now);
-        var revision = new RequirementRevision(artifact.Id, 0, "The software shall retain the approved behavior.", "Historical requirement.", "Test", RequirementRevisionState.Active, historicalChange.Id, baseline.Id, now);
+        var revision = new RequirementRevision(artifact.Id, 0, "The software shall retain the approved behavior.", "Historical requirement.", "Test", RequirementRevisionState.Active, historicalChange.Id, baseline.Id, now,
+            parentKind: RequirementParentKind.Derived, derivedRationale: "This code-traceability fixture has no authored upstream selection.");
 
         db.AddRange(program, project, previousRelease, release, selectedChange, historicalChange, baseline, campaign, artifact, revision,
             new BaselineRequirementSelection(baseline.Id, artifact.Id, revision.Id));
@@ -67,7 +68,8 @@ public sealed class CodeTraceabilityProjectionTests
         var historicalChange = new SystemChangeRequest("LLRCR-800001", 0, project.Id, previousRelease.Id, "Historical LLRs", "P", "A", "S", "software.author", now, ChangeRequestType.Software, softwareLevel: RequirementLevel.LowLevel);
         var buildChange = new SystemChangeRequest("LLRCR-800002", 0, project.Id, release.Id, "Change one LLR in this build", "P", "A", "S", "software.author", now, ChangeRequestType.Software, softwareLevel: RequirementLevel.LowLevel);
         buildChange.AddRequirementChange("software.author", "LLR-000736", 0, RequirementLevel.LowLevel, RequirementChangeKind.Introduce,
-            "The software shall apply the corrected oceanic sequencing.", "Introduced by this build.", "Test", now);
+            "The software shall apply the corrected oceanic sequencing.", "Introduced by this build.", "Test", now,
+            attributesJson: "{\"derived\":true}");
         buildChange.SubmitForReview("software.author", [new ApproverSelection("software.reviewer", "Software Reviewer")], now);
         buildChange.ApproveActiveStage("software.reviewer", now);
         var baseline = new CandidateBaseline("SW-01.60", 0, project.Id, release.Id, null, "Build 1.6", "cm", now);
@@ -81,11 +83,13 @@ public sealed class CodeTraceabilityProjectionTests
         foreach (var number in new[] { 1, 2, 3, 4, 5 })
         {
             var carried = new RequirementArtifact(project.Id, $"LLR-00000{number}", RequirementLevel.LowLevel, now);
-            var carriedRevision = new RequirementRevision(carried.Id, 0, "Behavior carried forward unchanged.", "Historical.", "Test", RequirementRevisionState.Active, historicalChange.Id, baseline.Id, now);
+            var carriedRevision = new RequirementRevision(carried.Id, 0, "Behavior carried forward unchanged.", "Historical.", "Test", RequirementRevisionState.Active, historicalChange.Id, baseline.Id, now,
+                parentKind: RequirementParentKind.Derived, derivedRationale: "This code-traceability fixture has no authored upstream selection.");
             db.AddRange(carried, carriedRevision, new BaselineRequirementSelection(baseline.Id, carried.Id, carriedRevision.Id));
         }
         var changed = new RequirementArtifact(project.Id, "LLR-000736", RequirementLevel.LowLevel, now);
-        var changedRevision = new RequirementRevision(changed.Id, 0, "Behavior introduced by this build.", "Changed here.", "Test", RequirementRevisionState.Active, buildChange.Id, baseline.Id, now);
+        var changedRevision = new RequirementRevision(changed.Id, 0, "Behavior introduced by this build.", "Changed here.", "Test", RequirementRevisionState.Active, buildChange.Id, baseline.Id, now,
+            parentKind: RequirementParentKind.Derived, derivedRationale: "This code-traceability fixture has no authored upstream selection.");
         db.AddRange(changed, changedRevision, new BaselineRequirementSelection(baseline.Id, changed.Id, changedRevision.Id));
         await db.SaveChangesAsync();
 

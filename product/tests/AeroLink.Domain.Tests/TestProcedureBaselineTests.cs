@@ -206,6 +206,7 @@ public sealed class TestProcedureBaselineTests
             TestChangeReviewDiscipline.System, "SRCR-00039.00", Now, caseContractVersion: 0);
         empty.RecordTestChangeRequired("verification.engineer", Now);
         empty.AssignControlledNumber("SYSTPCR-000044", Now);
+        empty.MarkAsLegacyHistoricalPackage("verification.engineer", Now.AddSeconds(1));
         empty.Submit("verification.engineer", "test.lead", true, Now.AddMinutes(1));
         empty.Approve("test.lead", "Approved before procedure decisions were captured.", Now.AddMinutes(2));
 

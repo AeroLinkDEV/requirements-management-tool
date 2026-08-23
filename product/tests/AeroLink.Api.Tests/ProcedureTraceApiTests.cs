@@ -142,7 +142,9 @@ public sealed class ProcedureTraceApiTests
         var revision02 = Revision(procedure.Id, 2, "Future 1.7 procedure", baseline17.Id);
         var zeroCoverage = new TestProcedure(project.Id, "SYSTP-000002", "Retained zero-coverage procedure",
             "test.author", now, TestProcedureLevel.System);
-        var zeroRevision = Revision(zeroCoverage.Id, 0, "Carried without current coverage", baseline15.Id);
+        var zeroRevision = Revision(zeroCoverage.Id, 0, "Carried without current coverage", baseline15.Id,
+            parentKind: VerificationProcedureParentKind.Derived,
+            derivedRationale: "This zero-coverage procedure is intentionally standalone in the trace fixture.");
         db.AddRange(procedure, revision00, revision01, revision02, zeroCoverage, zeroRevision);
 
         db.TestCoverage.AddRange(
@@ -155,7 +157,8 @@ public sealed class ProcedureTraceApiTests
                 "Requirement wording changed; reconfirmation pending.", now),
             // Deliberately malformed/historical: revision01 (Build 1.6's carried revision) has a coverage row
             // to a requirement revision only Build 1.7 carries. It must never surface in Build 1.6's trace.
-            new TestRequirementCoverage(revision01.Id, requirement4Revision.Id),
+            TestRequirementCoverage.CarriedForward(revision01.Id, requirement4Revision.Id,
+                "This carried endpoint is outside the current build and requires reconfirmation.", now),
             new TestRequirementCoverage(revision02.Id, requirement1Revision.Id),
             new TestRequirementCoverage(revision02.Id, requirement4Revision.Id));
         db.BaselineTestProcedures.AddRange(
@@ -201,10 +204,12 @@ public sealed class ProcedureTraceApiTests
             review.Id);
 
         TestProcedureRevision Revision(Guid procedureId, int revision, string objective, Guid baselineId,
-            Guid? sourceTestChangeRequestId = null) =>
+            Guid? sourceTestChangeRequestId = null, VerificationProcedureParentKind parentKind = VerificationProcedureParentKind.Allocated,
+            string? derivedRationale = null) =>
             new(procedureId, revision, objective, "Configured test environment", "Execute the controlled steps.",
                 "The expected behavior is observed.", TestProcedureState.Approved, "test.author", now,
-                sourceTestChangeRequestId: sourceTestChangeRequestId, effectiveBaselineId: baselineId);
+                sourceTestChangeRequestId: sourceTestChangeRequestId, effectiveBaselineId: baselineId,
+                parentKind: parentKind, derivedRationale: derivedRationale);
     }
 
     private static async Task LoginAsync(HttpClient client, string user)
@@ -443,7 +448,8 @@ public sealed class ProcedureTraceApiTests
         var revision = new TestProcedureRevision(procedure.Id, 0,
             "Verify both folded sources.", "Configured environment", "Execute steps.",
             "Expected behavior observed.", TestProcedureState.Approved, "test.author", now,
-            sourceTestChangeRequestId: review.Id, effectiveBaselineId: baseline.Id);
+            sourceTestChangeRequestId: review.Id, effectiveBaselineId: baseline.Id,
+            parentKind: VerificationProcedureParentKind.Allocated);
         db.AddRange(procedure, revision);
         db.TestCoverage.AddRange(
             new TestRequirementCoverage(revision.Id, revisionA.Id),

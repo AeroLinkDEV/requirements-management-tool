@@ -267,7 +267,16 @@ public static class VerificationEndpoints
                          select new { artifact, revision };
             if (!string.IsNullOrWhiteSpace(search)) { var q = search.Trim().ToLower(); source = source.Where(x => x.artifact.BaseNumber.ToLower().Contains(q) || x.revision.Statement.ToLower().Contains(q)); }
             var total = await source.CountAsync(ct); var selected = await source.OrderBy(x => x.artifact.BaseNumber).Skip((page - 1) * pageSize).Take(pageSize).ToListAsync(ct);
-            var selectedIds = selected.Select(x => x.revision.Id).ToList(); var links = await db.RequirementTraces.AsNoTracking().Where(x => selectedIds.Contains(x.SourceRevisionId) || selectedIds.Contains(x.TargetRevisionId)).ToListAsync(ct);
+            var selectedIds = selected.Select(x => x.revision.Id).ToList();
+            var baselineRevisionIds = await db.BaselineRequirements.AsNoTracking()
+                .Where(x => x.BaselineId == baselineId).Select(x => x.RevisionId).ToHashSetAsync(ct);
+            // Both endpoints must belong to the selected baseline. A closed #709 carried link is valid in
+            // the successor baseline that selected its new target, but must not leak into an older release
+            // merely because its unchanged source revision is also present there.
+            var links = await db.RequirementTraces.AsNoTracking()
+                .Where(x => selectedIds.Contains(x.SourceRevisionId) && baselineRevisionIds.Contains(x.TargetRevisionId)
+                    || selectedIds.Contains(x.TargetRevisionId) && baselineRevisionIds.Contains(x.SourceRevisionId))
+                .ToListAsync(ct);
             var relatedIds = links.SelectMany(x => new[] { x.SourceRevisionId, x.TargetRevisionId }).Distinct().ToList();
             var related = await (from revision in db.RequirementRevisions.AsNoTracking().Where(x => relatedIds.Contains(x.Id)) join artifact in db.Requirements.AsNoTracking() on revision.ArtifactId equals artifact.Id select new { revision.Id, artifact.BaseNumber, revision.Revision, level = artifact.Level.ToString() }).ToDictionaryAsync(x => x.Id, ct);
             var linkIds = links.Select(x => x.Id).ToList();

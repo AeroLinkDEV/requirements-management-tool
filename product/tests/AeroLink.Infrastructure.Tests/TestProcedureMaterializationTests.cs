@@ -122,7 +122,7 @@ public sealed class TestProcedureMaterializationTests
     }
 
     [Fact]
-    public async Task Modifying_for_one_requirement_preserves_unchanged_predecessor_coverage()
+    public async Task Modifying_for_one_requirement_does_not_promote_suspect_predecessor_coverage()
     {
         var path = Path.Combine(Path.GetTempPath(), $"aerolink-tp-carry-coverage-{Guid.NewGuid():N}.db");
         var options = new DbContextOptionsBuilder<AeroLinkDbContext>()
@@ -159,12 +159,47 @@ public sealed class TestProcedureMaterializationTests
             var modifiedCoverage = await db.TestCoverage.AsNoTracking()
                 .Where(x => x.ProcedureRevisionId == modifiedRevision.Id)
                 .Select(x => x.RequirementRevisionId).ToHashSetAsync();
-            Assert.True(modifiedCoverage.SetEquals(originalCoverage));
-            var retainedLink = await db.TestCoverage.SingleAsync(x =>
-                x.ProcedureRevisionId == modifiedRevision.Id
-                && x.RequirementRevisionId == unchangedRequirement);
-            Assert.True(retainedLink.IsSuspect);
-            Assert.Equal("Unchanged requirement still awaits confirmation.", retainedLink.SuspectReason);
+            Assert.Equal([changedRequirement], modifiedCoverage);
+            Assert.DoesNotContain(unchangedRequirement, await db.TestCoverage.AsNoTracking()
+                .Where(x => x.ProcedureRevisionId == modifiedRevision.Id)
+                .Select(x => x.RequirementRevisionId).ToListAsync());
+        }
+        finally { File.Delete(path); }
+    }
+
+    [Fact]
+    public async Task Derived_modification_drops_carried_coverage_and_cannot_satisfy_upstream_coverage()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"aerolink-tp-derived-modify-{Guid.NewGuid():N}.db");
+        var options = new DbContextOptionsBuilder<AeroLinkDbContext>()
+            .UseSqlite($"Data Source={path};Pooling=False").Options;
+        try
+        {
+            await using var db = new AeroLinkDbContext(options);
+            await db.Database.EnsureCreatedAsync();
+            var now = DateTimeOffset.UtcNow;
+            var (project, release) = await SeedProjectAsync(db, "FMSDERIVED");
+            var first = await MaterializeAsync(db, project.Id, release.Id, "SW-00.10", null, now,
+                Change("SYSTP-000001", 0, TestProcedureChangeKind.Introduce, "Standalone transition",
+                    JsonSerializer.Serialize(new[] { Guid.Parse("5a1d1f92-6c2f-4a1e-9d33-0f5b2c7a4e10") })));
+
+            var derived = Change("SYSTP-000001", 1, TestProcedureChangeKind.Modify, "Standalone transition",
+                "[]") with
+            {
+                ParentKind = VerificationProcedureParentKind.Derived,
+                ParentRevisionIdsJson = "[]",
+                DerivedRationale = "The successor is an independent engineering qualification."
+            };
+            var successorBaseline = await MaterializeAsync(db, project.Id, release.Id, "SW-00.20", first.Id, now, derived);
+
+            var successor = await db.TestProcedureRevisions.SingleAsync(x => x.Revision == 1);
+            Assert.Equal(VerificationProcedureParentKind.Derived, successor.ParentKind);
+            Assert.Empty(await db.TestCoverage.Where(x => x.ProcedureRevisionId == successor.Id).ToListAsync());
+            Assert.NotEmpty(await db.TestCoverage.Where(x => x.ProcedureRevisionId != successor.Id).ToListAsync());
+            // The standalone Procedure is still a member of the governed build; it simply contributes no
+            // upstream coverage and therefore cannot satisfy a requirement's verification obligation.
+            Assert.Single(await db.BaselineTestProcedures.Where(x => x.BaselineId == successorBaseline.Id
+                && x.RevisionId == successor.Id).ToListAsync());
         }
         finally { File.Delete(path); }
     }
@@ -211,6 +246,94 @@ public sealed class TestProcedureMaterializationTests
     }
 
     [Fact]
+    public async Task A_retarget_decision_defers_new_parent_to_a_signed_successor_materialization()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"aerolink-tp-retarget-successor-{Guid.NewGuid():N}.db");
+        var options = new DbContextOptionsBuilder<AeroLinkDbContext>()
+            .UseSqlite($"Data Source={path};Pooling=False").Options;
+        try
+        {
+            await using var db = new AeroLinkDbContext(options);
+            await db.Database.EnsureCreatedAsync();
+            var now = DateTimeOffset.UtcNow;
+            var (project, release) = await SeedProjectAsync(db, "FMSRETARGET");
+            var retained = await MaterializeRequirementAsync(db, project.Id, release.Id, now);
+            var first = await MaterializeAsync(db, project.Id, release.Id, "SW-00.10", null, now,
+                Change("SYSTP-000001", 0, TestProcedureChangeKind.Introduce, "Oceanic sequencing",
+                    JsonSerializer.Serialize(new[] { retained })));
+            var firstRevision = await db.TestProcedureRevisions.SingleAsync(x =>
+                x.EffectiveBaselineId == first.Id && x.State == TestProcedureState.Approved);
+            var firstRequirementMembership = await db.BaselineRequirements.AsNoTracking()
+                .Where(x => x.BaselineId == first.Id)
+                .Select(x => new { x.ArtifactId, x.RevisionId })
+                .ToListAsync();
+            var source = ApprovedChangeRequest(project.Id, release.Id, "SRCR-09998", now);
+            var successorNow = now.AddMinutes(1);
+            var successor = new CandidateBaseline("SW-00.20", 0, project.Id, release.Id, first.Id,
+                "Retargeted successor", "cm", successorNow);
+            successor.Select(source, "cm", successorNow);
+            successor.Freeze("cm", successorNow);
+            successor.MarkRequirementsMaterialized("cm", new string('d', 64), 2, successorNow);
+            foreach (var member in firstRequirementMembership)
+                db.BaselineRequirements.Add(new BaselineRequirementSelection(successor.Id,
+                    member.ArtifactId, member.RevisionId));
+            var targetArtifact = new RequirementArtifact(project.Id, "SYSR-000999", RequirementLevel.System, now);
+            var targetRevision = new RequirementRevision(targetArtifact.Id, 0,
+                "The FMS shall sequence the retargeted waypoint.", "Retargeted verification target.", "Test",
+                RequirementRevisionState.Active, source.Id, successor.Id, successorNow);
+            db.AddRange(source, successor, targetArtifact, targetRevision,
+                new BaselineRequirementSelection(successor.Id, targetArtifact.Id, targetRevision.Id));
+            await db.SaveChangesAsync();
+            Assert.Equal(firstRequirementMembership.Select(x => x.RevisionId).OrderBy(x => x),
+                (await db.BaselineRequirements.AsNoTracking().Where(x => x.BaselineId == first.Id)
+                    .Select(x => x.RevisionId).ToListAsync()).OrderBy(x => x));
+            Assert.DoesNotContain(targetRevision.Id, await db.BaselineRequirements.AsNoTracking()
+                .Where(x => x.BaselineId == first.Id).Select(x => x.RevisionId).ToListAsync());
+            var tcr = new TestChangeReview(project.Id, release.Id, source.Id,
+                TestChangeReviewDiscipline.System, source.DisplayNumber, now);
+            tcr.RecordTestChangeRequired("verification.engineer", now);
+            tcr.AssignControlledNumber("SYSTPCR-09998", now);
+            tcr.WriteCase("verification.engineer", "Retargeted successor", "Retarget", "Analysis", "Solution", now);
+            var retarget = VerificationImpactItem.ForOrphanedProcedure(project.Id, release.Id, source.Id,
+                tcr.Id, firstRevision.ProcedureId, "SYSTP-000001", now);
+            retarget.Resolve("verification.engineer", VerificationImpactOutcome.ProcedureRetargeted,
+                "The retarget plan is carried by the controlled successor.", now,
+                procedureChangeAction: TestProcedureChangeAction.ModifyExisting,
+                retargetedRequirementRevisionId: targetRevision.Id);
+            Assert.False(await new VerificationImpactService(db)
+                .ApplyRetargetedCoverageAsync(retarget, now, default));
+            Assert.Single(await db.TestCoverage.AsNoTracking()
+                .Where(x => x.ProcedureRevisionId == firstRevision.Id).ToListAsync());
+
+            tcr.AddProcedureChange("verification.engineer", Change("SYSTP-000001", 1,
+                TestProcedureChangeKind.Modify, "Oceanic sequencing retarget",
+                JsonSerializer.Serialize(new[] { targetRevision.Id }), "[]",
+                "The retargeted parent is selected by this signed successor.") with
+            {
+                ParentKind = VerificationProcedureParentKind.Allocated,
+                ParentRevisionIdsJson = JsonSerializer.Serialize(new[] { retained, targetRevision.Id })
+            }, now);
+            db.AddRange(tcr, retarget);
+            await db.SaveChangesAsync();
+            tcr.Submit("verification.engineer", "test.lead", true, now);
+            tcr.Approve("test.lead", "Retarget successor approved.", now);
+            await db.SaveChangesAsync();
+            successor.SelectTestChangeRequest(tcr, "verification.lead", now);
+            await db.SaveChangesAsync();
+            await new TestProcedureBaselineMaterializer(db).MaterializeAsync(successor.Id, "cm", now, default);
+            var successorRevision = await db.TestProcedureRevisions.SingleAsync(x =>
+                x.EffectiveBaselineId == successor.Id && x.State == TestProcedureState.Approved);
+            Assert.Contains(targetRevision.Id, await db.TestCoverage.AsNoTracking()
+                .Where(x => x.ProcedureRevisionId == successorRevision.Id)
+                .Select(x => x.RequirementRevisionId).ToListAsync());
+            Assert.DoesNotContain(targetRevision.Id, await db.TestCoverage.AsNoTracking()
+                .Where(x => x.ProcedureRevisionId == firstRevision.Id)
+                .Select(x => x.RequirementRevisionId).ToListAsync());
+        }
+        finally { File.Delete(path); }
+    }
+
+    [Fact]
     public async Task An_invalid_coverage_removal_rolls_back_the_new_revision_and_manifest()
     {
         var path = Path.Combine(Path.GetTempPath(), $"aerolink-tp-delta-rollback-{Guid.NewGuid():N}.db");
@@ -229,7 +352,13 @@ public sealed class TestProcedureMaterializationTests
             var error = await Assert.ThrowsAsync<DomainException>(() => MaterializeAsync(db, project.Id,
                 release.Id, "SW-00.20", first.Id, now,
                 Change("SYSTP-000001", 1, TestProcedureChangeKind.Modify, "Invalid removal", "[]",
-                    JsonSerializer.Serialize(new[] { marker }), "Remove coverage that never existed.")));
+                    JsonSerializer.Serialize(new[] { marker }), "Remove coverage that never existed.") with
+                {
+                    ParentKind = VerificationProcedureParentKind.Allocated,
+                    ParentRevisionIdsJson = JsonSerializer.Serialize(new[] {
+                        Guid.Parse("5a1d1f92-6c2f-4a1e-9d33-0f5b2c7a4e10")
+                    })
+                }));
             Assert.Contains("does not cover", error.Message, StringComparison.OrdinalIgnoreCase);
 
             Assert.Single(await db.TestProcedureRevisions.ToListAsync());
@@ -278,6 +407,7 @@ public sealed class TestProcedureMaterializationTests
                 tcr.AddProcedureChange("verification.engineer",
                     Change("SYSTP-000400", 0, TestProcedureChangeKind.Introduce, "Malformed legacy proposal",
                         JsonSerializer.Serialize(new[] { unrelatedRevision.Id })), now);
+                tcr.WriteCase("verification.engineer", "Verification case", "Problem", "Analysis", "Solution", now);
                 tcr.Submit("verification.engineer", "test.lead", true, now);
                 tcr.Approve("test.lead", "Approved legacy snapshot.", now);
                 var item = VerificationImpactItem.ForIntroducedRequirement(project.Id, release.Id, source.Id,
@@ -523,7 +653,19 @@ public sealed class TestProcedureMaterializationTests
         draft = draft with
         {
             DrivingRequirementRevisionIdsJson = JsonSerializer.Serialize(requestedIds),
-            RemovedRequirementRevisionIdsJson = JsonSerializer.Serialize(removedIds)
+            RemovedRequirementRevisionIdsJson = JsonSerializer.Serialize(removedIds),
+            ParentRevisionIdsJson = draft.ParentKind == VerificationProcedureParentKind.Derived
+                ? "[]"
+                : JsonSerializer.Serialize(
+                    draft.Kind == TestProcedureChangeKind.Modify && predecessor is not null
+                        ? (await (from selection in db.BaselineTestProcedures
+                                  where selection.BaselineId == predecessor.Value
+                                  join coverage in db.TestCoverage
+                                      on selection.RevisionId equals coverage.ProcedureRevisionId
+                                  where !coverage.IsSuspect
+                                  select coverage.RequirementRevisionId).ToListAsync())
+                            .Except(removedIds).Concat(requestedIds).Distinct().ToArray()
+                        : requestedIds.Distinct().ToArray())
         };
         var scopedIds = requestedIds.Concat(removedIds).Distinct().ToList();
         var persisted = await (from revision in db.RequirementRevisions

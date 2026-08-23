@@ -1773,7 +1773,8 @@
       "file": "VerificationImpactEndpoints.cs",
       "coveredBy": [
         "ManualTestChangeRequestApiTests",
-        "TestChangeRequestConsolidationTests"
+        "TestChangeRequestConsolidationTests",
+        "TestProcedureAuthoringApiTests"
       ]
     },
     {

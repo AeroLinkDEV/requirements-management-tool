@@ -36,10 +36,17 @@ public enum TestChangeReviewOutcome { Pending, ChangeRequired, NoChangeRequired 
 /// </summary>
 public sealed class TestChangeReview
 {
-    public const int CurrentCaseContractVersion = 1;
+    // Version 1 is the pre-#738 signed snapshot contract. Keep it available for
+    // historical packages so recomputing their evidence does not silently move a
+    // signature onto a different byte sequence. New packages use version 2, whose
+    // manifest includes exact-parent classification and identity.
+    public const int CurrentCaseContractVersion = 2;
     private readonly List<TestChangeRequestClaim> _additionalSources = [];
     private readonly List<TestProcedureChange> _procedureChanges = [];
     private readonly List<ChangeControl.ReviewCycle> _reviewCycles = [];
+    // Not persisted. Only an explicit clean-history seed may use this one-shot v1 compatibility path;
+    // migrated drafts re-entering review must be upgraded to the current exact-parent contract.
+    private bool _allowLegacyHistoricalSubmission;
 
     private TestChangeReview() { }
 
@@ -301,8 +308,13 @@ public sealed class TestChangeReview
         var change = new TestProcedureChange(Id, draft.BaseNumber, draft.Revision, draft.Level, draft.Kind,
             draft.Title, draft.Objective, draft.Preconditions, draft.Steps, draft.ExpectedResult, draft.Rationale,
             draft.DrivingRequirementRevisionIdsJson, draft.RemovedRequirementRevisionIdsJson,
-            draft.CoverageChangeRationale, actorId);
+            draft.CoverageChangeRationale, actorId, draft.ParentKind, draft.ParentRevisionIdsJson,
+            draft.DerivedRationale);
         _procedureChanges.Add(change);
+        // Re-opening a legacy package and authoring a new decision is a new signed
+        // contract. Do not let the old snapshot format cover newly introduced bytes.
+        CaseContractVersion = CurrentCaseContractVersion;
+        _allowLegacyHistoricalSubmission = false;
         Touch(now);
         return change;
     }
@@ -322,6 +334,7 @@ public sealed class TestChangeReview
         (Analysis, AnalysisRich) = Resolve(analysis, analysisRich);
         (Solution, SolutionRich) = Resolve(solution, solutionRich);
         CaseContractVersion = CurrentCaseContractVersion;
+        _allowLegacyHistoricalSubmission = false;
         Touch(now);
 
         static (string Plain, string Rich) Resolve(string plain, string? rich)
@@ -352,6 +365,10 @@ public sealed class TestChangeReview
         IReadOnlyList<VerificationImpactSnapshot>? impactDecisions = null)
     {
         EnsureOpen();
+        // A v1 row can legitimately remain as historical evidence after migration, but an ordinary new
+        // review cycle must sign the v2 bytes. The only exception is the explicit one-shot seed seam below.
+        if (CaseContractVersion < CurrentCaseContractVersion && !_allowLegacyHistoricalSubmission)
+            CaseContractVersion = CurrentCaseContractVersion;
         if (Outcome == TestChangeReviewOutcome.Pending)
             throw new DomainException("Assess the change before sending it for review.");
         if (!everyItemResolved)
@@ -369,11 +386,20 @@ public sealed class TestChangeReview
         // not when it is written. A draft package is worked on incrementally, exactly as a change request is,
         // so the gate belongs at the point an approver is asked to sign rather than at the point an engineer
         // starts typing. What must never happen is an approver signing a procedure that verifies nothing.
-        if (_procedureChanges.Any(x => x.Kind == TestProcedureChangeKind.Introduce
-                && (string.IsNullOrWhiteSpace(x.DrivingRequirementRevisionIdsJson)
-                    || x.DrivingRequirementRevisionIdsJson.Trim() is "[]" or "")))
-            throw new DomainException(
-                $"Every {ArtifactNoun} this package introduces must name the requirement revisions it verifies.");
+        foreach (var introduced in _procedureChanges.Where(x => x.Kind != TestProcedureChangeKind.Retire))
+        {
+            var ids = ParseParentIds(introduced.ParentRevisionIdsJson, introduced.DisplayNumber);
+            ExactParentSelectionPolicy.Validate(VerificationProcedureParentPolicy.Classification(introduced.ParentKind), ids,
+                introduced.DerivedRationale, ArtifactNoun);
+            var driving = DrivingRequirementIds(introduced.DrivingRequirementRevisionIdsJson);
+            if (introduced.ParentKind == VerificationProcedureParentKind.Derived && driving.Count != 0)
+                throw new DomainException(
+                    $"{introduced.DisplayNumber} is Derived but still names driving requirement revisions. A Derived {ArtifactNoun} must have no exact parents.");
+            if (introduced.ParentKind == VerificationProcedureParentKind.Allocated
+                && !driving.All(ids.Contains))
+                throw new DomainException(
+                    $"{introduced.DisplayNumber} has driving requirement revisions outside its exact final parent selection.");
+        }
         // The same rule as the driving requirements above, applied to the rest of a proposal. An engineer can
         // leave one half-written across as many sittings as the work takes; what cannot happen is an approver
         // being asked to sign a procedure with no steps, or a retirement with no reason. This is the gate the
@@ -401,12 +427,26 @@ public sealed class TestChangeReview
         var cycle = ChangeControl.ReviewCycle.ForTestChangeRequest(Id, _reviewCycles.Count + 1,
             ComputeSnapshotHash(problemReportIds, impactDecisions), approvers, now, mode, workflow);
         _reviewCycles.Add(cycle);
+        _allowLegacyHistoricalSubmission = false;
         SubmittedBy = Required(actorId, "submitting verification engineer");
         SelectedApproverId = approvers[0].UserId;
         SubmittedAt = now;
         State = TestChangeReviewState.InReview;
         Touch(now);
         return cycle;
+    }
+
+    /// <summary>
+    /// Explicit compatibility seam for a clean pre-#738 showcase/import package. It is intentionally
+    /// internal and one-shot: ordinary callers, including migrated Draft rows, use the current contract.
+    /// </summary>
+    internal void MarkAsLegacyHistoricalPackage(string actorId, DateTimeOffset now)
+    {
+        EnsureOpen();
+        Required(actorId, "authoring verification engineer");
+        CaseContractVersion = 1;
+        _allowLegacyHistoricalSubmission = true;
+        Touch(now);
     }
 
     /// <summary>Records one stage's approval. The package is approved when the last stage is.</summary>
@@ -443,7 +483,8 @@ public sealed class TestChangeReview
         {
             writer.WriteStartObject();
             writer.WriteString("contract", "aerolink.tcr-review-snapshot");
-            writer.WriteNumber("version", 1);
+            var snapshotVersion = CaseContractVersion >= 2 ? 2 : 1;
+            writer.WriteNumber("version", snapshotVersion);
 
             writer.WriteStartObject("package");
             writer.WriteString("baseNumber", BaseNumber);
@@ -504,6 +545,16 @@ public sealed class TestChangeReview
                 writer.WriteString("steps", change.Steps);
                 writer.WriteString("expectedResult", change.ExpectedResult);
                 writer.WriteString("rationale", change.Rationale);
+                if (snapshotVersion >= 2)
+                {
+                    writer.WriteString("parentKind", change.ParentKind.ToString());
+                    writer.WriteString("derivedRationale", change.DerivedRationale);
+                    writer.WriteStartArray("exactParentRevisionIds");
+                    foreach (var id in ParseParentIds(change.ParentRevisionIdsJson, change.DisplayNumber)
+                                 .OrderBy(x => x.ToString("D"), StringComparer.Ordinal))
+                        writer.WriteStringValue(id.ToString("D"));
+                    writer.WriteEndArray();
+                }
                 writer.WriteStartArray("drivingRequirementRevisionIds");
                 foreach (var id in DrivingRequirementIds(change.DrivingRequirementRevisionIdsJson)
                              .OrderBy(x => x.ToString("D"), StringComparer.Ordinal))
@@ -600,6 +651,20 @@ public sealed class TestChangeReview
         {
             throw new DomainException(
                 $"A {ArtifactNoun} change carries malformed driving requirement revisions. Correct it before sending the package for review.");
+        }
+    }
+
+    private static IReadOnlyList<Guid> ParseParentIds(string json, string displayNumber)
+    {
+        try
+        {
+            return ExactParentSelectionPolicy.NormalizeIds(
+                System.Text.Json.JsonSerializer.Deserialize<List<Guid>>(string.IsNullOrWhiteSpace(json) ? "[]" : json)
+                    ?? [], displayNumber);
+        }
+        catch (System.Text.Json.JsonException)
+        {
+            throw new DomainException($"{displayNumber} carries malformed exact parent revisions.");
         }
     }
 
@@ -790,7 +855,8 @@ public sealed class TestChangeReview
             next.AddProcedureChange(actorId, new TestProcedureChangeDraft(change.BaseNumber, change.Revision,
                 change.Level, change.Kind, change.Title, change.Objective, change.Preconditions, change.Steps,
                 change.ExpectedResult, change.Rationale, change.DrivingRequirementRevisionIdsJson,
-                change.RemovedRequirementRevisionIdsJson, change.CoverageChangeRationale), now, policy: policy);
+                change.RemovedRequirementRevisionIdsJson, change.CoverageChangeRationale, change.ParentKind,
+                change.ParentRevisionIdsJson, change.DerivedRationale), now, policy: policy);
 
         // Folded-in claims move to the successor rather than staying behind or being dropped. A change
         // request is claimed by at most one package, enforced by a unique index, so the two revisions cannot

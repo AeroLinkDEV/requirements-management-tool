@@ -71,17 +71,26 @@ public sealed class AuthoringTracedImpactTests
         var low = new RequirementArtifact(project.Id, "LLR-000503", RequirementLevel.LowLevel, now);
         db.AddRange(parent, child, low);
         var parentRevision = new RequirementRevision(parent.Id, 0, "The FMS shall sequence oceanic waypoints.",
-            "Rationale", "Test", RequirementRevisionState.Active, origin.Id, baseline.Id, now);
+            "Rationale", "Test", RequirementRevisionState.Active, origin.Id, baseline.Id, now,
+            RequirementParentKind.Derived, "The system-level source is standalone in this trace projection fixture.");
         var childRevision = new RequirementRevision(child.Id, 0, "The software shall compute the sequence.",
-            "Rationale", "Test", RequirementRevisionState.Active, origin.Id, baseline.Id, now);
+            "Rationale", "Test", RequirementRevisionState.Active, origin.Id, baseline.Id, now,
+            RequirementParentKind.Allocated, parentRevisionIds: [parentRevision.Id]);
         var lowRevision = new RequirementRevision(low.Id, 0, "The implementation shall compute the sequence.",
-            "Rationale", "Test", RequirementRevisionState.Active, origin.Id, baseline.Id, now);
-        db.AddRange(parentRevision, childRevision, lowRevision);
+            "Rationale", "Test", RequirementRevisionState.Active, origin.Id, baseline.Id, now,
+            RequirementParentKind.Derived,
+            "This trace projection fixture exercises authored trace relations separately from upstream allocation.");
+        db.AddRange(parentRevision, childRevision, lowRevision,
+            new BaselineRequirementSelection(baseline.Id, parent.Id, parentRevision.Id),
+            new BaselineRequirementSelection(baseline.Id, child.Id, childRevision.Id),
+            new BaselineRequirementSelection(baseline.Id, low.Id, lowRevision.Id));
 
         // The child traces up to the parent: source derives from target. A change to the parent therefore
         // propagates down to the child, which is the direction the endpoint has to read.
         db.RequirementTraces.Add(new RequirementTraceLink(project.Id, childRevision.Id, parentRevision.Id,
             RequirementTraceType.DerivedFrom, "Derived from the system requirement.", now));
+        db.RequirementTraces.Add(new RequirementTraceLink(project.Id, childRevision.Id, parentRevision.Id,
+            RequirementTraceType.AllocatedFrom, "Allocated to the exact system parent.", now));
 
         var procedure = new TestProcedure(project.Id, "SYSTP-000503", "Verify oceanic sequencing",
             "test.author", now, TestProcedureLevel.System);
@@ -120,7 +129,9 @@ public sealed class AuthoringTracedImpactTests
 
         Assert.True(traced.Known);
         Assert.Equal($"{parentNumber}.00", traced.DisplayNumber);
-        Assert.Equal(childNumber, Assert.Single(traced.DerivedRequirements).DisplayNumber[..childNumber.Length]);
+        Assert.Equal(childNumber,
+            Assert.Single(traced.DerivedRequirements, x => x.LinkType == "DerivedFrom")
+                .DisplayNumber[..childNumber.Length]);
         Assert.Equal("HighLevel", traced.DerivedRequirements[0].Level);
         Assert.Equal(procedureNumber, Assert.Single(traced.CoveringProcedures).DisplayNumber[..procedureNumber.Length]);
         Assert.Equal("Approved", traced.CoveringProcedures[0].State);
@@ -164,8 +175,8 @@ public sealed class AuthoringTracedImpactTests
             projectId,
             sourceRevisionId = parentRevisionId,
             targetRevisionId = lowRevisionId,
-            type = "AllocatedFrom",
-            rationale = "The low-level implementation is allocated from the system requirement.",
+            type = "DerivedFrom",
+            rationale = "The low-level implementation derives from the system requirement.",
         });
         Assert.Equal(HttpStatusCode.Created, created.StatusCode);
         var allocatedLinkId = (await created.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetGuid();
@@ -186,7 +197,7 @@ public sealed class AuthoringTracedImpactTests
             projectId,
             sourceRevisionId = parentRevisionId,
             targetRevisionId = lowRevisionId,
-            type = "AllocatedFrom",
+            type = "DerivedFrom",
             rationale = "A duplicate controlled link must not be created.",
         });
         Assert.Equal(HttpStatusCode.BadRequest, duplicate.StatusCode);
@@ -231,16 +242,11 @@ public sealed class AuthoringTracedImpactTests
         Assert.Equal(HttpStatusCode.BadRequest, wrongProject.StatusCode);
 
         using var deleted = await client.DeleteAsync($"/api/trace-links/{allocatedLinkId}");
-        Assert.Equal(HttpStatusCode.NoContent, deleted.StatusCode);
+        Assert.Equal(HttpStatusCode.Conflict, deleted.StatusCode);
 
         using (var freezeScope = factory.Services.CreateScope())
         {
             var db = freezeScope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
-            db.BaselineRequirements.AddRange(
-                new BaselineRequirementSelection(baselineId,
-                    await db.Requirements.Where(x => x.ProjectId == projectId && x.BaseNumber == parentNumber).Select(x => x.Id).SingleAsync(), parentRevisionId),
-                new BaselineRequirementSelection(baselineId,
-                    await db.Requirements.Where(x => x.ProjectId == projectId && x.BaseNumber == "LLR-000503").Select(x => x.Id).SingleAsync(), lowRevisionId));
             var campaign = new ReleaseCampaign(projectId, releaseId, baselineId, "Trace freeze", "traced.author", DateTimeOffset.UtcNow);
             campaign.StartVerification("traced.author", DateTimeOffset.UtcNow);
             campaign.BeginReleaseReview("traced.author", [("traced.author", "Trace approver")], new string('a', 64), DateTimeOffset.UtcNow);
@@ -286,7 +292,9 @@ public sealed class AuthoringTracedImpactTests
                                    select revision.Id).SingleAsync();
             baselineId = await db.CandidateBaselines.Where(x => x.ProjectId == projectId).Select(x => x.Id).SingleAsync();
             releaseId = await db.Releases.Where(x => x.ProjectId == projectId).Select(x => x.Id).SingleAsync();
-            var link = await db.RequirementTraces.SingleAsync(x => x.SourceRevisionId == childRevisionId && x.TargetRevisionId == parentRevisionId);
+            var link = await db.RequirementTraces.SingleAsync(x => x.SourceRevisionId == childRevisionId
+                && x.TargetRevisionId == parentRevisionId
+                && x.Type == RequirementTraceType.DerivedFrom);
             var lifecycle = ExactLinkSuspectLifecycle.Raise(projectId, ExactLinkKind.RequirementTrace, link.Id,
                 ExactLinkLifecycleCauseKind.InternalRequirementRevision, parentRevisionId, null,
                 "traced.author", "The exact upstream revision changed.", DateTimeOffset.UtcNow);
@@ -349,10 +357,6 @@ public sealed class AuthoringTracedImpactTests
         using (var freeze = factory.Services.CreateScope())
         {
             var db = freeze.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
-            var sourceArtifactId = await db.RequirementRevisions.Where(x => x.Id == parentRevisionId).Select(x => x.ArtifactId).SingleAsync();
-            var targetArtifactId = await db.RequirementRevisions.Where(x => x.Id == lowRevisionId).Select(x => x.ArtifactId).SingleAsync();
-            db.BaselineRequirements.AddRange(new BaselineRequirementSelection(baselineId, sourceArtifactId, parentRevisionId),
-                new BaselineRequirementSelection(baselineId, targetArtifactId, lowRevisionId));
             var lifecycle = ExactLinkSuspectLifecycle.Raise(projectId, ExactLinkKind.RequirementTrace, ordinaryId,
                 ExactLinkLifecycleCauseKind.InternalRequirementRevision, lowRevisionId, null,
                 "traced.author", "The exact upstream revision changed.", DateTimeOffset.UtcNow);
@@ -465,7 +469,6 @@ public sealed class AuthoringTracedImpactTests
             var parent = db.Requirements.Single(x => x.ProjectId == projectId && x.BaseNumber == parentNumber);
             var parentRevision = db.RequirementRevisions.Single(x => x.ArtifactId == parent.Id);
             parentRevisionId = parentRevision.Id;
-            db.BaselineRequirements.Add(new BaselineRequirementSelection(baseline.Id, parent.Id, parentRevision.Id));
             await db.SaveChangesAsync();
             await db.CandidateBaselines.Where(x => x.Id == baseline.Id)
                 .ExecuteUpdateAsync(update => update.SetProperty(x => x.RequirementsMaterializedAt, DateTimeOffset.UtcNow));
@@ -578,7 +581,7 @@ public sealed class AuthoringTracedImpactTests
         }
 
         async Task<HttpResponseMessage> TryCreateDraftAsync(string level, string baseNumber,
-            IReadOnlyList<Guid> upstream, bool derived = false)
+            IReadOnlyList<Guid> upstream, bool derived = false, string rationale = "Characterization")
         {
             return await client.PostAsJsonAsync("/api/change-request-drafts", new
             {
@@ -594,7 +597,7 @@ public sealed class AuthoringTracedImpactTests
                     {
                         baseNumber, revision = 1, level, kind = "Modify",
                         statement = "The requirement shall remain controlled.",
-                        rationale = "Characterization", verificationMethod = "Test",
+                        rationale, verificationMethod = "Test",
                         attributesJson = derived ? "{\"owner\":\"traced.author\",\"criticality\":\"Safety Significant\"}" : "{}",
                         impactDispositionJson = "{}", isDerived = derived,
                         upstreamRevisionIds = upstream
@@ -615,6 +618,15 @@ public sealed class AuthoringTracedImpactTests
         {
             Assert.Equal(HttpStatusCode.BadRequest, derivedWithParent.StatusCode);
             Assert.Contains("derived requirement", await derivedWithParent.Content.ReadAsStringAsync());
+        }
+
+        // An unfinished ordinary Draft is allowed, but an explicit Derived decision is not meaningful
+        // without its engineering rationale even before the package is submitted for review.
+        using (var derivedWithoutRationale = await TryCreateDraftAsync("HighLevel", childNumber, [],
+                   derived: true, rationale: "  "))
+        {
+            Assert.Equal(HttpStatusCode.BadRequest, derivedWithoutRationale.StatusCode);
+            Assert.Contains("explicit engineering rationale", await derivedWithoutRationale.Content.ReadAsStringAsync());
         }
 
         Guid foreignRevisionId, sameProjectOutOfBaselineRevisionId;
@@ -860,10 +872,15 @@ public sealed class AuthoringTracedImpactTests
         var revisions = await db.RequirementRevisions
             .Where(x => artifacts.Values.Select(a => a.Id).Contains(x.ArtifactId))
             .ToDictionaryAsync(x => x.ArtifactId);
-        db.BaselineRequirements.AddRange(
-            new BaselineRequirementSelection(baseline.Id, artifacts[parentNumber].Id, revisions[artifacts[parentNumber].Id].Id),
-            new BaselineRequirementSelection(baseline.Id, artifacts[childNumber].Id, revisions[artifacts[childNumber].Id].Id),
-            new BaselineRequirementSelection(baseline.Id, artifacts["LLR-000503"].Id, revisions[artifacts["LLR-000503"].Id].Id));
+        var selectedRevisionIds = await db.BaselineRequirements.AsNoTracking()
+            .Where(x => x.BaselineId == baseline.Id)
+            .Select(x => x.RevisionId)
+            .ToHashSetAsync();
+        var selections = new[] { parentNumber, childNumber, "LLR-000503" }
+            .Select(number => (Artifact: artifacts[number], Revision: revisions[artifacts[number].Id]))
+            .Where(x => selectedRevisionIds.Add(x.Revision.Id))
+            .Select(x => new BaselineRequirementSelection(baseline.Id, x.Artifact.Id, x.Revision.Id));
+        db.BaselineRequirements.AddRange(selections);
         await db.SaveChangesAsync();
         await db.CandidateBaselines.Where(x => x.Id == baseline.Id).ExecuteUpdateAsync(update => update
             .SetProperty(x => x.State, CandidateBaselineState.Frozen)

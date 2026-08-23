@@ -23,7 +23,8 @@ public sealed class BuildProvenanceTests
                 var project = new ProjectRecord(program.Id, "FMS Software", "Flight Management Software");
                 var release = new SoftwareRelease(project.Id, "3.3", false);
                 var scr = new SystemChangeRequest("HLRCR-00042", 1, project.Id, release.Id, "Round robin", "P", "A", "S", "author", now, ChangeRequestType.Software, softwareLevel: RequirementLevel.HighLevel);
-                scr.AddRequirementChange("author", "SWR-00002375", 4, RequirementLevel.HighLevel, RequirementChangeKind.Introduce, "Provide round robin routing.", "New function", "Test", now);
+                scr.AddRequirementChange("author", "SWR-00002375", 4, RequirementLevel.HighLevel, RequirementChangeKind.Introduce, "Provide round robin routing.", "New function", "Test", now,
+                    attributesJson: "{\"derived\":true}");
                 scr.SubmitForReview("author", [new("reviewer", "Reviewer")], now); scr.ApproveActiveStage("reviewer", now);
                 var baseline = new CandidateBaseline("SW-03.30", 0, project.Id, release.Id, null, "FMS 3.3", "cm", now);
                 baseline.Select(scr, "cm", now); baseline.Freeze("cm", now);

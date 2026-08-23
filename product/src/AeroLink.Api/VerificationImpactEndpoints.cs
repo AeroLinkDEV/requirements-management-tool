@@ -42,7 +42,9 @@ public sealed record CreateTestChangeRequestRequest(TestChangeReviewDiscipline D
 /// <summary>One proposed procedure decision, as the authoring page states it before the package exists.</summary>
 public sealed record CreateTestProcedureChangeRequest(string BaseNumber, int Revision, TestProcedureLevel Level,
     TestProcedureChangeKind Kind, string Title, string Objective, string Preconditions, string Steps,
-    string ExpectedResult, string Rationale, Guid[]? DrivingRequirementRevisionIds = null);
+    string ExpectedResult, string Rationale, Guid[]? DrivingRequirementRevisionIds = null,
+    VerificationProcedureParentKind ParentKind = VerificationProcedureParentKind.Unspecified,
+    Guid[]? ParentRevisionIds = null, string? DerivedRationale = null);
 public sealed record WriteTestChangeRequestCaseRequest(string Title, string Problem, string Analysis,
     string Solution, string? ProblemRich = null, string? AnalysisRich = null, string? SolutionRich = null,
     long? ExpectedVersion = null);
@@ -63,7 +65,9 @@ public sealed record ApproveTestChangeReviewRequest(string Rationale, string Pas
 public sealed record ProposeProcedureChangeRequest(TestProcedureChangeKind Kind, string? BaseNumber, int Revision,
     string Title, string Objective, string Preconditions, string Steps, string ExpectedResult, string Rationale,
     Guid[]? DrivingRequirementRevisionIds, long? ExpectedVersion = null,
-    Guid[]? RemovedRequirementRevisionIds = null, string? CoverageChangeRationale = null);
+    Guid[]? RemovedRequirementRevisionIds = null, string? CoverageChangeRationale = null,
+    VerificationProcedureParentKind ParentKind = VerificationProcedureParentKind.Unspecified,
+    Guid[]? ParentRevisionIds = null, string? DerivedRationale = null);
 public sealed record ReturnTestChangeReviewRequest(string Rationale);
 public sealed record DeferTestChangeReviewRequest(string Reason);
 
@@ -491,7 +495,9 @@ public static class VerificationImpactEndpoints
                              revision.Id,
                              procedure.BaseNumber,
                              CurrentRevision = revision.Revision,
-                             State = revision.State
+                             State = revision.State,
+                             revision.ParentKind,
+                             revision.DerivedRationale
                          }).ToListAsync(ct);
             var targetTitles = await TestProcedureRevisionTitleProjection.ForRevisionsAsync(db,
                 targets.Select(x => x.Id).Distinct().ToList(), ct);
@@ -517,6 +523,11 @@ public static class VerificationImpactEndpoints
                 x.BaseNumber, title = targetTitles[x.Id].Title,
                 currentRevision = x.CurrentRevision,
                 state = x.State.ToString(),
+                parentKind = x.ParentKind.ToString(),
+                derivedRationale = x.DerivedRationale,
+                parentRevisionIds = targetCoverage.Where(c => c.ProcedureRevisionId == x.Id)
+                    .Where(c => !c.IsSuspect)
+                    .Select(c => c.revisionId).Distinct().OrderBy(c => c).ToArray(),
                 currentCoverage = targetCoverage.Where(c => c.ProcedureRevisionId == x.Id)
                     .OrderBy(c => c.displayNumber).Select(c => new
                     {
@@ -532,6 +543,9 @@ public static class VerificationImpactEndpoints
                     level = x.Level.ToString(), x.Title, x.Objective, x.Preconditions, x.Steps,
                     x.ExpectedResult, x.Rationale,
                     drivingRequirementRevisionIds = DrivingRequirements(x.DrivingRequirementRevisionIdsJson),
+                    parentKind = x.ParentKind.ToString(),
+                    parentRevisionIds = DrivingRequirements(x.ParentRevisionIdsJson),
+                    derivedRationale = x.DerivedRationale,
                     removedRequirementRevisionIds = DrivingRequirements(x.RemovedRequirementRevisionIdsJson),
                     x.CoverageChangeRationale, x.CoverageChangedBy
                 }).ToList();
@@ -609,7 +623,9 @@ public static class VerificationImpactEndpoints
                                   ProcedureId = procedure.Id,
                                   procedure.BaseNumber,
                                   CurrentRevision = revision.Revision,
-                             State = revision.State
+                             State = revision.State,
+                             revision.ParentKind,
+                             revision.DerivedRationale
                               };
             var query = eligibility;
             if (!string.IsNullOrWhiteSpace(search))
@@ -662,6 +678,11 @@ public static class VerificationImpactEndpoints
                 title = exactTitles[x.Id].Title,
                 currentRevision = x.CurrentRevision,
                 state = x.State.ToString(),
+                parentKind = x.ParentKind.ToString(),
+                derivedRationale = x.DerivedRationale,
+                parentRevisionIds = coverageRows.Where(c => c.ProcedureRevisionId == x.Id)
+                    .Where(c => !c.IsSuspect)
+                    .Select(c => c.revisionId).Distinct().OrderBy(c => c).ToArray(),
                 currentCoverage = coverageRows.Where(c => c.ProcedureRevisionId == x.Id)
                     .OrderBy(c => c.displayNumber).Select(c => new
                     {
@@ -735,13 +756,26 @@ public static class VerificationImpactEndpoints
                 var artifactWord = TestChangeRequestSourceEligibility.ArtifactWord(review.Discipline);
                 var artifactNoun = TestChangeRequestSourceEligibility.ArtifactNoun(review.Discipline);
                 var driving = request.DrivingRequirementRevisionIds ?? [];
-                var removed = request.RemovedRequirementRevisionIds ?? [];
-                if (request.Kind == TestProcedureChangeKind.Introduce && driving.Length == 0)
+                var parentIds = request.ParentRevisionIds ?? driving;
+                var parentKind = request.ParentKind != VerificationProcedureParentKind.Unspecified
+                    ? request.ParentKind
+                    : parentIds.Length > 0
+                        ? VerificationProcedureParentKind.Allocated
+                        : VerificationProcedureParentKind.Unspecified;
+                // A derived artifact is intentionally standalone. Do not normalize
+                // an explicit parent/driving selection away: that would turn the
+                // invalid "derived with parents" combination into a valid draft and
+                // make alternate clients disagree about the review contract. Empty
+                // arrays are harmless; any supplied identity is an explicit XOR
+                // violation and is refused before persistence.
+                if (parentKind == VerificationProcedureParentKind.Derived
+                    && (request.ParentRevisionIds?.Length > 0 || driving.Length > 0))
                     return Results.BadRequest(new
                     {
-                        error = $"A new {artifactWord} must name at least one exact requirement revision it verifies.",
-                        code = "procedure_driving_requirement_required"
+                        error = $"A derived {artifactNoun} cannot carry exact parent revisions.",
+                        code = "derived_parent_conflict"
                     });
+                var removed = request.RemovedRequirementRevisionIds ?? [];
                 if (request.Kind != TestProcedureChangeKind.Modify && removed.Length != 0)
                     return Results.BadRequest(new
                     {
@@ -754,7 +788,14 @@ public static class VerificationImpactEndpoints
                         error = $"A requirement cannot be both added and removed by one {artifactNoun} change.",
                         code = "coverage_delta_conflict"
                     });
-                var scopedRequirementIds = driving.Concat(removed).Distinct().ToArray();
+                // A Modify parent list is the full successor selection. Retained parents belong to the
+                // carried revision and need not be in this package's fresh impact delta; only fresh driving
+                // and removal identities are scoped eagerly. The final selection is checked below against
+                // the package scope plus the carried coverage.
+                var scopedRequirementIds = (request.Kind == TestProcedureChangeKind.Modify
+                        ? driving.Concat(removed)
+                        : parentIds.Concat(driving).Concat(removed))
+                    .Distinct().ToArray();
                 if (scopedRequirementIds.Length != 0)
                 {
                     var known = await (from revision in db.RequirementRevisions.AsNoTracking()
@@ -834,9 +875,20 @@ public static class VerificationImpactEndpoints
                             error = $"{baseNumber}.{current.Value:D2} is now carried by the target build. Refresh the {artifactNoun} list and reselect it before proposing revision {current.Value + 1:D2}.",
                             code = "procedure_revision_not_next_for_build"
                         });
-                    currentCoverageIds = (await db.TestCoverage.AsNoTracking()
-                            .Where(x => x.ProcedureRevisionId == carriedRevisionId)
-                            .Select(x => x.RequirementRevisionId).ToListAsync(ct)).ToHashSet();
+                    var targetRequirementBaselineId = await TestChangeReviewRequirementScope
+                        .EffectiveRequirementBaselineIdAsync(db, review.ProjectId, review.ReleaseId, ct);
+                    if (targetRequirementBaselineId is Guid targetBaselineId)
+                    {
+                        var targetRequirementIds = (await db.BaselineRequirements.AsNoTracking()
+                            .Where(x => x.BaselineId == targetBaselineId)
+                            .Select(x => x.RevisionId)
+                            .ToListAsync(ct)).ToHashSet();
+                        currentCoverageIds = (await db.TestCoverage.AsNoTracking()
+                                .Where(x => x.ProcedureRevisionId == carriedRevisionId
+                                    && !x.IsSuspect
+                                    && targetRequirementIds.Contains(x.RequirementRevisionId))
+                                .Select(x => x.RequirementRevisionId).ToListAsync(ct)).ToHashSet();
+                    }
                 }
 
                 if (request.Kind == TestProcedureChangeKind.Modify)
@@ -848,16 +900,56 @@ public static class VerificationImpactEndpoints
                             error = $"Requirement revision {absent} is not currently covered by {baseNumber} and cannot be removed.",
                             code = "coverage_removal_not_current"
                         });
-                    var addsCoverage = driving.Distinct().Any(x => !currentCoverageIds.Contains(x));
-                    if ((addsCoverage || removed.Length != 0)
+                    if (request.ParentRevisionIds is null
+                        && parentKind != VerificationProcedureParentKind.Derived)
+                        parentIds = currentCoverageIds.Except(removed).Concat(driving).Distinct().ToArray();
+                    if (request.ParentKind == VerificationProcedureParentKind.Unspecified)
+                        parentKind = parentIds.Length > 0
+                            ? VerificationProcedureParentKind.Allocated
+                            : VerificationProcedureParentKind.Unspecified;
+                    var addsOrRemovesCoverage = !currentCoverageIds.SetEquals(parentIds.ToHashSet());
+                    if (parentKind != VerificationProcedureParentKind.Derived
+                        && addsOrRemovesCoverage
                         && string.IsNullOrWhiteSpace(request.CoverageChangeRationale))
                         return Results.BadRequest(new
                         {
                             error = "Explain why this modification adds or removes requirement coverage.",
                             code = "coverage_delta_rationale_required"
                         });
-                    var finalCoverage = currentCoverageIds.Except(removed).Concat(driving).Distinct().Count();
-                    if (finalCoverage == 0)
+                    // The first scope check above covers the request's delta. A modify
+                    // with no explicit parent list derives its full successor set from
+                    // the carried revision, so validate that resolved set as well.
+                    var finalParentIds = parentIds.Distinct().ToArray();
+                    if (finalParentIds.Length != 0)
+                    {
+                        var finalKnown = await (from revision in db.RequirementRevisions.AsNoTracking()
+                                                join artifact in db.Requirements.AsNoTracking() on revision.ArtifactId equals artifact.Id
+                                                where finalParentIds.Contains(revision.Id)
+                                                select new { revision.Id, artifact.ProjectId, artifact.Level })
+                            .ToDictionaryAsync(x => x.Id, ct);
+                        var wanted = ApiMap.RequirementLevelFor(review.ProcedureLevel(ladderPolicy), ladderPolicy);
+                        foreach (var finalId in finalParentIds)
+                        {
+                            if (!finalKnown.TryGetValue(finalId, out var requirement))
+                                return Results.BadRequest(new { error = $"Requirement revision {finalId} does not exist.", code = "requirement_revision_not_found" });
+                            if (requirement.ProjectId != review.ProjectId)
+                                return Results.BadRequest(new { error = $"Requirement revision {finalId} belongs to another project.", code = "requirement_revision_project_mismatch" });
+                            if (requirement.Level != wanted)
+                                return Results.BadRequest(new { error = $"Requirement revision {finalId} is a {requirement.Level} requirement, which a {review.Discipline} {artifactNoun} does not verify.", code = "requirement_revision_level_mismatch" });
+                        }
+                        var finalGoverned = await TestChangeReviewRequirementScope.ForReviewAsync(db, review, null, ct, ladderPolicy);
+                        var finalGovernedIds = finalGoverned.Select(x => x.RevisionId).ToHashSet();
+                        finalGovernedIds.UnionWith(currentCoverageIds);
+                        var finalOutside = finalParentIds.FirstOrDefault(x => !finalGovernedIds.Contains(x));
+                        if (finalOutside != Guid.Empty)
+                            return Results.BadRequest(new
+                            {
+                                error = $"Requirement revision {finalOutside} is outside this test change request's governed package/build scope.",
+                                code = "requirement_revision_outside_tcr_scope"
+                            });
+                    }
+                    var finalCoverage = parentIds.Distinct().Count();
+                    if (finalCoverage == 0 && parentKind != VerificationProcedureParentKind.Derived)
                         return Results.BadRequest(new
                         {
                             error = $"A modified {artifactNoun} must retain or add at least one exact requirement revision. Retire the {artifactNoun} instead if it verifies nothing in this build.",
@@ -865,12 +957,19 @@ public static class VerificationImpactEndpoints
                         });
                 }
 
+                // A test-change package is incrementally authored.  Keep scope
+                // checks above eager for any IDs the draft supplies, but defer
+                // the Allocated/Derived XOR (including a blank rationale) to
+                // SubmitForReview.  The aggregate and materialization/save
+                // boundaries still enforce it before controlled state changes.
                 var change = review.AddProcedureChange(http.UserAccount().UserName, new TestProcedureChangeDraft(
                     baseNumber, request.Revision, review.ProcedureLevel(ladderPolicy), request.Kind, request.Title ?? "",
                     request.Objective ?? "", request.Preconditions ?? "", request.Steps ?? "",
                     request.ExpectedResult ?? "", request.Rationale ?? "",
                     JsonSerializer.Serialize(driving.Distinct()), JsonSerializer.Serialize(removed.Distinct()),
-                    request.CoverageChangeRationale ?? ""), now, policy: ladderPolicy);
+                    request.CoverageChangeRationale ?? "", parentKind,
+                    JsonSerializer.Serialize(parentIds.Distinct()), request.DerivedRationale ?? ""), now,
+                    policy: ladderPolicy);
                 await db.SaveChangesAsync(ct);
                 return Results.Ok(new
                 {
@@ -1064,6 +1163,8 @@ public static class VerificationImpactEndpoints
             if (decisionRefusal is not null) return decisionRefusal;
             var artifactWord = TestChangeRequestSourceEligibility.ArtifactWord(review.Discipline);
             var artifactNoun = TestChangeRequestSourceEligibility.ArtifactNoun(review.Discipline);
+            var requestedChangeAction = request.ArtifactChangeAction ?? request.ProcedureChangeAction;
+            TestProcedureChangeAction? resolvedChangeAction = requestedChangeAction;
 
             ApprovedProcedureSelection? selectedProcedure = null;
             var requestedArtifactId = request.ArtifactId ?? request.ProcedureId;
@@ -1080,19 +1181,35 @@ public static class VerificationImpactEndpoints
             // a requirement that had itself been retired, which is the fault this decision exists to avoid.
             if (request.Outcome == VerificationImpactOutcome.ProcedureRetargeted)
             {
+                if (item.ProcedureId is not Guid strandedProcedureId || strandedProcedureId == Guid.Empty)
+                    return Results.BadRequest(new { error = $"A retargeted {artifactNoun} must identify the stranded controlled artifact." });
                 if (request.RetargetedRequirementRevisionId is null)
                     return Results.BadRequest(new { error = $"Moving a {artifactNoun} requires the requirement revision it now covers." });
-                var reachable = await (from revision in db.RequirementRevisions.AsNoTracking()
-                                       join artifact in db.Requirements.AsNoTracking() on revision.ArtifactId equals artifact.Id
-                                       where revision.Id == request.RetargetedRequirementRevisionId
-                                             && artifact.ProjectId == item.ProjectId
-                                             && revision.State == RequirementRevisionState.Active
-                                       select revision.Id).AnyAsync(ct);
+                var reachable = await service.IsExactRetargetTargetInBuildAsync(item.ProjectId, item.ReleaseId,
+                    strandedProcedureId, request.RetargetedRequirementRevisionId.Value, ct);
                 if (!reachable)
                     return Results.BadRequest(new
                     {
-                        error = $"A {artifactNoun} can only be moved onto an active requirement revision in this Project."
+                        error = $"A {artifactNoun} can only be moved onto an active requirement revision selected in the target build's exact requirement baseline."
                     });
+
+                var targetAlreadyLinked = await service.HasEffectiveRetargetTargetAsync(item.ProjectId, item.ReleaseId,
+                    strandedProcedureId, request.RetargetedRequirementRevisionId.Value, ct);
+                if (requestedChangeAction is TestProcedureChangeAction.CreateNew or TestProcedureChangeAction.NoTestRequired)
+                    return Results.BadRequest(new
+                    {
+                        error = $"A retargeted {artifactNoun} must use LinkExisting for an existing exact link or ModifyExisting for a controlled successor."
+                    });
+                if (requestedChangeAction == TestProcedureChangeAction.LinkExisting && !targetAlreadyLinked)
+                    return Results.BadRequest(new
+                    {
+                        error = $"The retargeted {artifactNoun} has no existing exact link. Use ModifyExisting and include the target in the successor's full parent selection."
+                    });
+                // Preserve the compact LinkExisting decision for an already-present (possibly #709 suspect)
+                // target, while making a missing target an explicit controlled-successor decision.
+                resolvedChangeAction ??= targetAlreadyLinked
+                    ? TestProcedureChangeAction.LinkExisting
+                    : TestProcedureChangeAction.ModifyExisting;
             }
 
             try
@@ -1105,8 +1222,13 @@ public static class VerificationImpactEndpoints
                 // package unheld, missing from My Work and unsubmittable.
                 if (review.AssignedEngineerId is null) review.Assign(actor, actor, now);
                 item.Resolve(actor, request.Outcome, request.Rationale, now,
-                    selectedProcedure?.ProcedureId, selectedProcedure?.RevisionId,
-                    request.ArtifactChangeAction ?? request.ProcedureChangeAction, request.PreReleaseEvidenceRequired,
+                    request.Outcome == VerificationImpactOutcome.ProcedureRetargeted
+                        ? item.ProcedureId
+                        : selectedProcedure?.ProcedureId,
+                    request.Outcome == VerificationImpactOutcome.ProcedureRetargeted
+                        ? null
+                        : selectedProcedure?.RevisionId,
+                    resolvedChangeAction, request.PreReleaseEvidenceRequired,
                     request.RetargetedRequirementRevisionId);
                 db.VerificationImpactDecisionHistory.Add(new VerificationImpactDecisionHistory(
                     item.Id, VerificationImpactHistoryAction.Resolved, item.Outcome,
@@ -1291,10 +1413,25 @@ public static class VerificationImpactEndpoints
                 // the requirement changes it proposes. The domain refuses a decision that is not well formed,
                 // so a malformed one fails the whole create rather than leaving a half-written package behind.
                 foreach (var change in request.ArtifactChanges ?? request.ProcedureChanges ?? [])
+                {
+                    var suppliedParentIds = (change.ParentRevisionIds ?? [])
+                        .Concat(change.DrivingRequirementRevisionIds ?? [])
+                        .Distinct().ToArray();
+                    if (change.ParentKind == VerificationProcedureParentKind.Derived
+                        && suppliedParentIds.Length != 0)
+                        throw new DomainException(
+                            $"A derived {TestChangeRequestSourceEligibility.ArtifactNoun(request.Discipline)} cannot carry exact parent revisions.");
+                    var parentRevisionIds = change.ParentKind == VerificationProcedureParentKind.Derived
+                        ? Array.Empty<Guid>()
+                        : change.ParentRevisionIds ?? change.DrivingRequirementRevisionIds ?? [];
                     review.AddProcedureChange(actor, new TestProcedureChangeDraft(change.BaseNumber, change.Revision,
                         change.Level, change.Kind, change.Title, change.Objective, change.Preconditions,
                         change.Steps, change.ExpectedResult, change.Rationale,
-                        JsonSerializer.Serialize(change.DrivingRequirementRevisionIds ?? [])), now, policy: ladderPolicy);
+                        JsonSerializer.Serialize(change.DrivingRequirementRevisionIds ?? []),
+                        ParentKind: change.ParentKind,
+                        ParentRevisionIdsJson: JsonSerializer.Serialize(parentRevisionIds),
+                        DerivedRationale: change.DerivedRationale ?? ""), now, policy: ladderPolicy);
+                }
                 // DEC-102: raising the package is itself taking it on. The engineer who built it holds it,
                 // so it appears in My Work and can be worked without a meaningless "Take it on" step.
                 review.Assign(actor, actor, now);
@@ -1615,6 +1752,9 @@ public static class VerificationImpactEndpoints
                         error = $"{review.DisplayNumber} concluded that {TestChangeRequestSourceEligibility.ArtifactNoun(review.Discipline)} work is required but names none. " +
                             $"Add the {TestChangeRequestSourceEligibility.ArtifactNoun(review.Discipline)} decisions it carries before sending it for review."
                     });
+                await TestChangeReviewRequirementScope.ValidateProcedureChangesForSubmissionAsync(
+                    db, review, ladderPolicy, ct);
+                await TestChangeReviewRequirementScope.ValidateRetargetPlansForSubmissionAsync(db, review, ct, ladderPolicy);
                 var allResolved = await db.VerificationImpactItems
                     .Where(x => x.TestChangeReviewId == id)
                     .AllAsync(x => x.State == VerificationImpactState.Resolved, ct);
@@ -2223,8 +2363,16 @@ public static class VerificationImpactEndpoints
 
     private static IReadOnlyList<Guid> DrivingRequirements(string json)
     {
-        try { return JsonSerializer.Deserialize<List<Guid>>(json) ?? []; }
-        catch (JsonException) { return []; }
+        try
+        {
+            return ExactParentSelectionPolicy.NormalizeIds(
+                JsonSerializer.Deserialize<List<Guid>>(string.IsNullOrWhiteSpace(json) ? "[]" : json) ?? [],
+                "exact parent selection");
+        }
+        catch (JsonException)
+        {
+            throw new DomainException("A test artifact carries malformed exact parent revisions.");
+        }
     }
 
     private static ApprovedProcedureSelection ToSelection(ProcedureRow row) =>

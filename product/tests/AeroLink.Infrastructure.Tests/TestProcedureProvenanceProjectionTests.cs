@@ -107,6 +107,7 @@ public async Task Exact_source_snapshot_survives_claims_moving_to_a_successor_tc
         baseNumber: "SYSTPCR-04255", revision: 0, caseContractVersion: 0);
     tcr.RecordTestChangeRequired("verification.engineer", now);
     tcr.IncludeChangeRequest("verification.engineer", folded.Id, folded.DisplayNumber, now);
+    tcr.MarkAsLegacyHistoricalPackage("verification.engineer", now.AddSeconds(1));
     tcr.Submit("verification.engineer", "test.lead", true, now.AddMinutes(1));
     tcr.Approve("test.lead", "Approved exact manual package.", now.AddMinutes(2));
     var procedure = new TestProcedure(fixture.Project.Id, "SYSTP-04255",
@@ -121,7 +122,9 @@ public async Task Exact_source_snapshot_survives_claims_moving_to_a_successor_tc
         "Verify exact provenance.", "The build is available.",
         "1. Exercise the controlled behavior.", "The expected behavior is observed.",
         TestProcedureState.Approved, "verification.engineer", now,
-        sourceTestChangeRequestId: tcr.Id, sourceChangeRequestsJson: snapshot);
+        sourceTestChangeRequestId: tcr.Id, sourceChangeRequestsJson: snapshot,
+        parentKind: VerificationProcedureParentKind.Derived,
+        derivedRationale: "This provenance projection fixture intentionally has no upstream coverage.");
     fixture.Db.AddRange(primary, folded, tcr, procedure, revision);
     await fixture.Db.SaveChangesAsync();
 
@@ -214,7 +217,9 @@ public async Task Exact_source_snapshot_survives_claims_moving_to_a_successor_tc
         new(procedureId, number, "Verify exact provenance.", "The build is available.",
             "1. Exercise the controlled behavior.", "The expected behavior is observed.",
             TestProcedureState.Approved, "verification.engineer", now,
-            sourceTestChangeRequestId: sourceTcrId);
+            sourceTestChangeRequestId: sourceTcrId,
+            parentKind: sourceTcrId is null ? VerificationProcedureParentKind.Unspecified : VerificationProcedureParentKind.Derived,
+            derivedRationale: sourceTcrId is null ? null : "This provenance projection fixture intentionally has no upstream coverage.");
 
     private sealed class Fixture : IAsyncDisposable
     {

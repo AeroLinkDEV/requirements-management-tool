@@ -6,6 +6,7 @@ using AeroLink.Domain.ChangeControl;
 using AeroLink.Domain.Identity;
 using AeroLink.Domain.Programs;
 using AeroLink.Domain.Releases;
+using AeroLink.Domain.Requirements;
 using AeroLink.Domain.Verification;
 using AeroLink.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
@@ -174,6 +175,108 @@ public sealed class VerificationImpactApiTests
     }
 
     [Fact]
+    public async Task A_missing_retarget_target_requires_a_controlled_successor_before_link_existing_can_be_recorded()
+    {
+        using var factory = new AeroLinkApiFactory();
+        var fixture = await SeedAsync(factory, ("cm.user", ProgramRole.ConfigurationManager), ("eng.user", ProgramRole.TestEngineer));
+        using (var configurationManager = factory.CreateClient())
+        {
+            await LoginAsync(configurationManager, "cm.user");
+            Assert.Equal(HttpStatusCode.OK,
+                (await configurationManager.PostAsJsonAsync($"/api/baselines/{fixture.BaselineId}/freeze", new { })).StatusCode);
+            Assert.Equal(HttpStatusCode.OK,
+                (await configurationManager.PostAsJsonAsync($"/api/baselines/{fixture.BaselineId}/materialize-requirements", new { })).StatusCode);
+        }
+        Guid itemId;
+        Guid targetRevisionId;
+        Guid siblingRevisionId;
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            var now = DateTimeOffset.UtcNow;
+            var source = await db.SystemChangeRequests.SingleAsync();
+            var review = await db.TestChangeReviews.SingleAsync();
+            var original = await db.RequirementRevisions.SingleAsync();
+            var targetArtifact = new RequirementArtifact(fixture.ProjectId, "SYSR-00000902", RequirementLevel.System, now);
+            var target = new RequirementRevision(targetArtifact.Id, 0,
+                "The FMS shall retain the retargeted waypoint.", "Retarget target", "Test",
+                RequirementRevisionState.Active, source.Id, fixture.BaselineId, now);
+            var siblingArtifact = new RequirementArtifact(fixture.ProjectId, "SYSR-00000903",
+                RequirementLevel.System, now);
+            var sibling = new RequirementRevision(siblingArtifact.Id, 0,
+                "An active sibling-build requirement", "Not selected by this target build", "Test",
+                RequirementRevisionState.Active, source.Id, fixture.BaselineId, now);
+            db.AddRange(targetArtifact, target,
+                new BaselineRequirementSelection(fixture.BaselineId, targetArtifact.Id, target.Id),
+                siblingArtifact, sibling);
+            var procedure = new TestProcedure(fixture.ProjectId, "SYSTP-00000998", "Retarget endpoint procedure",
+                "procedure.author", now, TestProcedureLevel.System);
+            var revision = new TestProcedureRevision(procedure.Id, 0, "Objective", "Preconditions",
+                "Steps", "Expected", TestProcedureState.Approved, "procedure.author", now,
+                effectiveBaselineId: fixture.BaselineId, parentKind: VerificationProcedureParentKind.Allocated);
+            db.AddRange(procedure, revision,
+                new BaselineTestProcedureSelection(fixture.BaselineId, procedure.Id, revision.Id),
+                new TestRequirementCoverage(revision.Id, original.Id));
+            var item = VerificationImpactItem.ForOrphanedProcedure(fixture.ProjectId, fixture.ReleaseId,
+                source.Id, review.Id, procedure.Id, procedure.BaseNumber, now);
+            db.Add(item);
+            await db.SaveChangesAsync();
+            itemId = item.Id;
+            targetRevisionId = target.Id;
+            siblingRevisionId = sibling.Id;
+        }
+
+        using var client = factory.CreateClient();
+        await LoginAsync(client, "eng.user");
+        using (var linkExisting = await client.PostAsJsonAsync($"/api/verification-impact/{itemId}/resolve",
+                   new
+                   {
+                       outcome = "ProcedureRetargeted",
+                       rationale = "The existing target was expected to be present.",
+                       procedureChangeAction = "LinkExisting",
+                       retargetedRequirementRevisionId = targetRevisionId
+                   }))
+        {
+            Assert.Equal(HttpStatusCode.BadRequest, linkExisting.StatusCode);
+            var body = await linkExisting.Content.ReadAsStringAsync();
+            Assert.Contains("ModifyExisting", body, StringComparison.OrdinalIgnoreCase);
+        }
+
+        using (var staleLinkExisting = await client.PostAsJsonAsync($"/api/verification-impact/{itemId}/resolve",
+                   new
+                   {
+                       outcome = "ProcedureRetargeted",
+                       rationale = "An active sibling revision must not be accepted.",
+                       procedureChangeAction = "LinkExisting",
+                       retargetedRequirementRevisionId = siblingRevisionId
+                   }))
+        {
+            Assert.Equal(HttpStatusCode.BadRequest, staleLinkExisting.StatusCode);
+            Assert.Contains("target build", await staleLinkExisting.Content.ReadAsStringAsync(),
+                StringComparison.OrdinalIgnoreCase);
+        }
+
+        using (var deferred = await client.PostAsJsonAsync($"/api/verification-impact/{itemId}/resolve",
+                   new
+                   {
+                       outcome = "ProcedureRetargeted",
+                       rationale = "The target will be created by the controlled successor.",
+                       retargetedRequirementRevisionId = targetRevisionId
+                   }))
+        {
+            Assert.Equal(HttpStatusCode.OK, deferred.StatusCode);
+            var body = await deferred.Content.ReadFromJsonAsync<JsonElement>();
+            Assert.Equal("Resolved", body.GetProperty("state").GetString());
+            Assert.Equal("ModifyExisting", body.GetProperty("procedureChangeAction").GetString());
+        }
+
+        using var verify = factory.Services.CreateScope();
+        var verifyDb = verify.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+        Assert.DoesNotContain(await verifyDb.TestCoverage.AsNoTracking().ToListAsync(),
+            x => x.RequirementRevisionId == targetRevisionId);
+    }
+
+    [Fact]
     public async Task Exact_procedure_evidence_survives_reload_and_reopen_preserves_history()
     {
         using var factory = new AeroLinkApiFactory();
@@ -204,8 +307,11 @@ public sealed class VerificationImpactApiTests
             var procedure = new TestProcedure(fixture.ProjectId, "SYSTP-00000999",
                 "Exact retained decision evidence", "procedure.author", now, TestProcedureLevel.System);
             var revision = new TestProcedureRevision(procedure.Id, 2, "Objective", "Configuration",
-                "Steps", "Expected", TestProcedureState.Approved, "procedure.author", now);
+                "Steps", "Expected", TestProcedureState.Approved, "procedure.author", now,
+                effectiveBaselineId: fixture.BaselineId,
+                parentKind: VerificationProcedureParentKind.Allocated);
             db.AddRange(procedure, revision);
+            db.TestCoverage.Add(new TestRequirementCoverage(revision.Id, requirementRevisionId));
             await db.SaveChangesAsync();
             procedureId = procedure.Id;
             procedureRevisionId = revision.Id;

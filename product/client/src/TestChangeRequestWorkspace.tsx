@@ -11,7 +11,8 @@ import { verificationArtifactChangeSegment, verificationArtifactNoun, verificati
 import './DownstreamAssessmentQueue.css'
 
 type Kind='Introduce'|'Modify'|'Retire'
-type ProcedureChange={id:string;displayNumber:string;baseNumber:string;revision:number;kind:Kind;level:string;title:string;objective:string;preconditions:string;steps:string;expectedResult:string;rationale:string;drivingRequirementRevisionIds:string[];removedRequirementRevisionIds:string[];coverageChangeRationale:string;coverageChangedBy:string}
+type ParentKind='Unspecified'|'Allocated'|'Derived'
+type ProcedureChange={id:string;displayNumber:string;baseNumber:string;revision:number;kind:Kind;level:string;title:string;objective:string;preconditions:string;steps:string;expectedResult:string;rationale:string;drivingRequirementRevisionIds:string[];removedRequirementRevisionIds:string[];coverageChangeRationale:string;coverageChangedBy:string;parentKind?:ParentKind;parentRevisionIds?:string[];derivedRationale?:string}
 /** A requirement this package's changes touched, which a procedure here may be written against. */
 type RequirementChoice={id:string;revisionId:string;displayNumber:string;statement:string;level:string}
 /** A controlled procedure a Modify or Retire may target, with the revision it actually sits at. */
@@ -48,7 +49,7 @@ const missingCaseFields=(item:Package)=>[
   ['Title',item.title],['Problem',item.problem],['Analysis',item.analysis],['Solution',item.solution],
 ].filter(([,value])=>!value?.trim()).map(([name])=>name)
 
-const emptyDraft={kind:'Introduce' as Kind,baseNumber:'',revision:0,title:'',objective:'',preconditions:'',steps:'',expectedResult:'',rationale:'',driving:[] as string[],removed:[] as string[],coverageRationale:''}
+const emptyDraft={kind:'Introduce' as Kind,baseNumber:'',revision:0,title:'',objective:'',preconditions:'',steps:'',expectedResult:'',rationale:'',driving:[] as string[],removed:[] as string[],coverageRationale:'',parentKind:'Allocated' as ParentKind,derivedRationale:''}
 
 /**
  * The room where test procedures are actually created, modified and retired.
@@ -171,12 +172,21 @@ export default function TestChangeRequestWorkspace({api,projectId,reviewId,disci
     finally{setBusy(false)}
   }
   const propose=async()=>{
+    const parentRevisionIds=draft.parentKind==='Derived'
+      ?[]
+      :draft.kind==='Modify'
+        ?[...currentCoverage.filter(coverage=>!coverage.isSuspect&&!draft.removed.includes(coverage.revisionId)).map(coverage=>coverage.revisionId),
+          ...draft.driving.filter(id=>!currentCoverageIds.has(id))]
+        :draft.driving
     const body={...draft,
       // Introducing allocates the number on the server, so the client does not send one and cannot pick one.
       baseNumber:draft.kind==='Introduce'?undefined:draft.baseNumber.trim(),
       // The requirements this procedure is written against. Without them the procedure revision cannot be
       // bound to what caused it, and the decision that asked for it never settles.
-      drivingRequirementRevisionIds:draft.driving,
+      drivingRequirementRevisionIds:draft.parentKind==='Derived'?[]:draft.driving,
+      parentRevisionIds,
+      parentKind:draft.parentKind,
+      derivedRationale:draft.derivedRationale,
       removedRequirementRevisionIds:draft.removed,
       coverageChangeRationale:draft.coverageRationale,
       expectedVersion:item?.version}
@@ -193,7 +203,7 @@ export default function TestChangeRequestWorkspace({api,projectId,reviewId,disci
         setError(problem.message||`The selected ${currentArtifactWord} changed. Refresh and reselect a current target.`)
         setTargetPicker(undefined);setSelectedTargetDetails(undefined);setDrivingDetails({})
         setTargetQuery('');setTargetPage(1)
-        setDraft(current=>({...current,baseNumber:'',revision:0,driving:[],removed:[],coverageRationale:''}))
+        setDraft(current=>({...current,baseNumber:'',revision:0,driving:[],removed:[],coverageRationale:'',derivedRationale:''}))
       }else setError(operationError(problem,'The test change request could not be updated.'))
     }finally{setBusy(false)}
   }
@@ -246,14 +256,19 @@ export default function TestChangeRequestWorkspace({api,projectId,reviewId,disci
   const retiring=draft.kind==='Retire'
   const selectedTarget=targetOptions.find(x=>x.baseNumber===draft.baseNumber)
   const currentCoverage=selectedTarget?.currentCoverage??[]
-  const currentCoverageIds=new Set(currentCoverage.map(x=>x.revisionId))
+  // Suspect #709 carry-forward is shown for lifecycle context, but is not an approved exact parent and
+  // must never be retained implicitly by the next controlled revision.
+  const currentCoverageIds=new Set(currentCoverage.filter(x=>!x.isSuspect).map(x=>x.revisionId))
   const governedIds=new Set((item?.drivingRequirementChoices??[]).map(x=>x.revisionId))
   const addedCoverage=draft.driving.filter(id=>!currentCoverageIds.has(id))
-  const coverageDeltaChanged=draft.kind==='Modify'&&(addedCoverage.length>0||draft.removed.length>0)
-  const finalCoverageCount=currentCoverage.filter(x=>!draft.removed.includes(x.revisionId)).length+addedCoverage.length
+  const allocated=draft.parentKind!=='Derived'
+  const coverageDeltaChanged=allocated&&draft.kind==='Modify'&&(addedCoverage.length>0||draft.removed.length>0)
+  const finalCoverageCount=allocated
+    ?currentCoverage.filter(x=>!x.isSuspect&&!draft.removed.includes(x.revisionId)).length+addedCoverage.length
+    :0
   const missingRequiredCoverage=draft.kind==='Introduce'
-    ?draft.driving.length===0
-    :draft.kind==='Modify'&&draft.baseNumber!==''&&finalCoverageCount===0
+    ?allocated&&draft.driving.length===0
+    :allocated&&draft.kind==='Modify'&&draft.baseNumber!==''&&finalCoverageCount===0
   const requirementDetails=(revisionId:string)=>
     (item?.drivingRequirementChoices??[]).find(x=>x.revisionId===revisionId)
       ??(item?.artifactTargets??item?.procedureTargets??[]).flatMap(x=>x.currentCoverage).find(x=>x.revisionId===revisionId)
@@ -270,8 +285,9 @@ export default function TestChangeRequestWorkspace({api,projectId,reviewId,disci
   const procedureCoverageDelta=(change:ProcedureChange)=>{
     const current=(item?.artifactTargets??item?.procedureTargets??[]).find(x=>x.baseNumber===change.baseNumber)?.currentCoverage??[]
     const removed=new Set(change.removedRequirementRevisionIds)
-    const currentIds=new Set(current.map(x=>x.revisionId))
-    const retained=current.map(x=>x.revisionId).filter(id=>!removed.has(id))
+    const exactCurrent=current.filter(x=>!x.isSuspect)
+    const currentIds=new Set(exactCurrent.map(x=>x.revisionId))
+    const retained=exactCurrent.map(x=>x.revisionId).filter(id=>!removed.has(id))
     const added=change.drivingRequirementRevisionIds.filter(id=>!currentIds.has(id))
     return {retained,added,removed:change.removedRequirementRevisionIds,final:[...retained,...added]}
   }
@@ -322,6 +338,9 @@ export default function TestChangeRequestWorkspace({api,projectId,reviewId,disci
                   <span>{change.title||'No title recorded'}</span>
                   {change.objective&&<span>{change.objective}</span>}
                   {change.rationale&&<span>Why: {change.rationale}</span>}
+                  {change.kind!=='Retire'&&<span>Parent mode: {change.parentKind??'Unspecified'}</span>}
+                  {change.parentKind==='Derived'&&<span>Derived rationale: {change.derivedRationale||'Not recorded'}</span>}
+                  {change.parentKind==='Allocated'&&<span>Exact parent requirements: {requirementLinks(change.parentRevisionIds??change.drivingRequirementRevisionIds)}</span>}
                   {change.kind==='Introduce'&&<span>Verified requirements: {requirementLinks(change.drivingRequirementRevisionIds)}</span>}
                   {change.kind==='Modify'&&<>
                     <span>Retained coverage: {procedureCoverageDelta(change).retained.map(requirementLabel).join(', ')||'none'}</span>
@@ -422,27 +441,54 @@ export default function TestChangeRequestWorkspace({api,projectId,reviewId,disci
           <label>Preconditions<textarea value={draft.preconditions} onChange={event=>setDraft(current=>({...current,preconditions:event.target.value}))}/></label>
           <label>Steps<textarea value={draft.steps} onChange={event=>setDraft(current=>({...current,steps:event.target.value}))}/></label>
           <label>Expected result<textarea value={draft.expectedResult} onChange={event=>setDraft(current=>({...current,expectedResult:event.target.value}))}/></label>
+          <fieldset className="drivingRequirements">
+            <legend>Exact parent classification</legend>
+            <label className="drivingChoice">
+              <input type="radio" name="parentKind" value="Allocated"
+                checked={draft.parentKind==='Allocated'}
+                onChange={()=>setDraft(current=>({...current,parentKind:'Allocated',derivedRationale:''}))}/>
+              <span><b>Allocated</b> — select one or more exact current requirement revisions.</span>
+            </label>
+            <label className="drivingChoice">
+              <input type="radio" name="parentKind" value="Derived"
+                checked={draft.parentKind==='Derived'}
+                onChange={()=>{setDraft(current=>({...current,parentKind:'Derived',driving:[],removed:[],coverageRationale:'',derivedRationale:current.derivedRationale})) ;setDrivingDetails({})}}/>
+              <span><b>Derived</b> — standalone work with no requirement coverage.</span>
+            </label>
+            {draft.parentKind==='Derived'&&<>
+              <p className="drawerEmpty">This {currentArtifactWord} will not carry predecessor coverage and cannot satisfy an upstream verification obligation.</p>
+              <label>Engineering rationale for deriving this {currentArtifactWord}
+                <textarea aria-label="Derived engineering rationale" value={draft.derivedRationale}
+                  onChange={event=>setDraft(current=>({...current,derivedRationale:event.target.value}))}/>
+              </label>
+            </>}
+          </fieldset>
         </>}
-        {draft.kind==='Modify'&&draft.baseNumber&&<fieldset className="drivingRequirements">
+        {allocated&&draft.kind==='Modify'&&draft.baseNumber&&<fieldset className="drivingRequirements">
           <legend>Current exact coverage</legend>
           {currentCoverage.length?currentCoverage.map(coverage=>{
-            const mayRemove=governedIds.has(coverage.revisionId)
-            const retained=!draft.removed.includes(coverage.revisionId)
+            const mayRemove=!coverage.isSuspect&&governedIds.has(coverage.revisionId)
+            // A #709 suspect carry-forward is lifecycle evidence, not an approved parent selection.  Keep it
+            // visible so the author understands the history, but never present it as checked/retained in the
+            // successor or offer an ordinary coverage-removal control for it.
+            const retained=!coverage.isSuspect&&!draft.removed.includes(coverage.revisionId)
             return <label key={coverage.revisionId} className="drivingChoice">
               <input type="checkbox" checked={retained} disabled={!mayRemove}
                 onChange={event=>setDraft(current=>({...current,removed:event.target.checked
                   ?current.removed.filter(id=>id!==coverage.revisionId)
                   :[...current.removed,coverage.revisionId]}))}/>
               <span><b>{coverage.displayNumber}</b> {coverage.statement} · {coverage.isSuspect?'Suspect':'Confirmed'}
-                {!mayRemove?' · retained; outside this package change scope':''}</span>
+                {coverage.isSuspect
+                  ? ' · lifecycle evidence; excluded from successor exact parents'
+                  : !mayRemove?' · retained; outside this package change scope':''}</span>
             </label>
           }):<p className="drawerEmpty">The carried {currentArtifactWord} has no current requirement coverage.</p>}
-          <p className="drawerEmpty">Checked links carry forward automatically. Clearing an authorized link is an explicit removal.</p>
+          <p className="drawerEmpty">Checked confirmed links carry forward automatically. Suspect links remain lifecycle evidence until confirmed and are never silently retained.</p>
         </fieldset>}
         {/* What this procedure is written against. Only the requirements this package's own changes touched
             are offered — a procedure verifies what its change request altered, not anything in the project —
             and the link is what lets the decision that asked for the procedure settle when it arrives. */}
-        {!retiring&&<fieldset className="drivingRequirements">
+        {!retiring&&allocated&&<fieldset className="drivingRequirements">
           <legend>Requirements this {currentArtifactWord} verifies</legend>
           <input aria-label="Search requirements" className="pickerSearch" value={requirementQuery}
             onChange={event=>{setRequirementQuery(event.target.value);setRequirementPage(1)}}
@@ -487,12 +533,12 @@ export default function TestChangeRequestWorkspace({api,projectId,reviewId,disci
           <textarea value={draft.coverageRationale} onChange={event=>setDraft(current=>({...current,coverageRationale:event.target.value}))}/>
         </label>}
         {draft.kind==='Modify'&&draft.baseNumber&&<p className="drawerEmpty">
-          Proposed coverage: {currentCoverage.length-draft.removed.length} retained, {addedCoverage.length} added, {draft.removed.length} removed.
+          Proposed coverage: {currentCoverage.filter(x=>!x.isSuspect).length-draft.removed.length} retained, {addedCoverage.length} added, {draft.removed.length} removed.
         </p>}
         <label>Why this {currentArtifactWord} work is required<textarea value={draft.rationale} onChange={event=>setDraft(current=>({...current,rationale:event.target.value}))}/></label>
         <div className="downstreamDialogActions">
           <button type="button" className="quiet" disabled={busy} onClick={()=>{setProposing(false);setError('')}}>Cancel</button>
-          <button type="button" disabled={busy||missingRequiredCoverage||(!retiring&&(!draft.title.trim()||!draft.objective.trim()||!draft.steps.trim()))||(draft.kind!=='Introduce'&&!draft.baseNumber.trim())||(coverageDeltaChanged&&!draft.coverageRationale.trim())} onClick={()=>void propose()}>
+          <button type="button" disabled={busy||missingRequiredCoverage||(!retiring&&(!draft.title.trim()||!draft.objective.trim()||!draft.steps.trim()))||(draft.kind!=='Introduce'&&!draft.baseNumber.trim())||(coverageDeltaChanged&&!draft.coverageRationale.trim())||(!retiring&&draft.parentKind==='Derived'&&!draft.derivedRationale.trim())} onClick={()=>void propose()}>
             {busy?'Recording…':'Propose decision'}
           </button>
         </div>

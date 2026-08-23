@@ -10,7 +10,9 @@ public enum TestProcedureChangeKind { Introduce, Modify, Retire }
 public sealed record TestProcedureChangeDraft(string BaseNumber, int Revision, TestProcedureLevel Level,
     TestProcedureChangeKind Kind, string Title, string Objective, string Preconditions, string Steps,
     string ExpectedResult, string Rationale, string DrivingRequirementRevisionIdsJson = "[]",
-    string RemovedRequirementRevisionIdsJson = "[]", string CoverageChangeRationale = "");
+    string RemovedRequirementRevisionIdsJson = "[]", string CoverageChangeRationale = "",
+    VerificationProcedureParentKind ParentKind = VerificationProcedureParentKind.Unspecified,
+    string ParentRevisionIdsJson = "[]", string DerivedRationale = "");
 
 /// <summary>
 /// One proposed change to one test procedure, carried by a test change request.
@@ -34,7 +36,9 @@ public sealed class TestProcedureChange
         TestProcedureLevel level, TestProcedureChangeKind kind, string title, string objective,
         string preconditions, string steps, string expectedResult, string rationale,
         string drivingRequirementRevisionIdsJson = "[]", string removedRequirementRevisionIdsJson = "[]",
-        string coverageChangeRationale = "", string coverageChangedBy = "")
+        string coverageChangeRationale = "", string coverageChangedBy = "",
+        VerificationProcedureParentKind parentKind = VerificationProcedureParentKind.Unspecified,
+        string parentRevisionIdsJson = "[]", string derivedRationale = "")
     {
         Id = Guid.NewGuid();
         TestChangeReviewId = testChangeReviewId;
@@ -67,6 +71,16 @@ public sealed class TestProcedureChange
             : removedRequirementRevisionIdsJson;
         CoverageChangeRationale = coverageChangeRationale?.Trim() ?? "";
         CoverageChangedBy = coverageChangedBy?.Trim() ?? "";
+        ParentRevisionIdsJson = parentKind != VerificationProcedureParentKind.Derived
+            && (string.IsNullOrWhiteSpace(parentRevisionIdsJson) || parentRevisionIdsJson.Trim() == "[]")
+            ? DrivingRequirementRevisionIdsJson
+            : parentRevisionIdsJson;
+        ParentKind = parentKind != VerificationProcedureParentKind.Unspecified
+            ? parentKind
+            : HasIds(ParentRevisionIdsJson)
+                ? VerificationProcedureParentKind.Allocated
+                : VerificationProcedureParentKind.Unspecified;
+        DerivedRationale = derivedRationale?.Trim() ?? "";
     }
 
     public Guid Id { get; private set; }
@@ -108,4 +122,23 @@ public sealed class TestProcedureChange
     public string CoverageChangeRationale { get; private set; } = "";
     /// <summary>The engineer attributable for the approved coverage delta.</summary>
     public string CoverageChangedBy { get; private set; } = "";
+    /// <summary>
+    /// Shared exact-parent classification. For the current Case/System Procedure
+    /// path the parent identities are requirement revisions; for dormant software
+    /// Procedures they are Case revisions.
+    /// </summary>
+    public VerificationProcedureParentKind ParentKind { get; private set; }
+    public string ParentRevisionIdsJson { get; private set; } = "[]";
+    public string DerivedRationale { get; private set; } = "";
+    public string ExactParentRevisionIdsJson => ParentRevisionIdsJson;
+
+    private static bool HasIds(string json)
+    {
+        try
+        {
+            var ids = System.Text.Json.JsonSerializer.Deserialize<List<Guid>>(json) ?? [];
+            return ids.Count > 0;
+        }
+        catch (System.Text.Json.JsonException) { return false; }
+    }
 }

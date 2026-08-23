@@ -7,6 +7,7 @@ using AeroLink.Domain.Hierarchy;
 using AeroLink.Domain.Releases;
 using AeroLink.Domain.Requirements;
 using AeroLink.Domain.Traceability;
+using AeroLink.Domain.Verification;
 using AeroLink.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 using System.Data;
@@ -221,7 +222,7 @@ public static class ChangeRequestEndpoints
                               join revision in db.RequirementRevisions.AsNoTracking() on artifact.Id equals revision.ArtifactId
                               where revision.Revision == db.RequirementRevisions.Where(x => x.ArtifactId == artifact.Id).Max(x => x.Revision)
                               orderby artifact.BaseNumber
-                              select new { artifact.Id, artifact.BaseNumber, level = artifact.Level.ToString(), revisionId = revision.Id, revision.Revision, revision.Statement, revision.Rationale, revision.VerificationMethod, state = revision.State.ToString() })
+                              select new { artifact.Id, artifact.BaseNumber, level = artifact.Level.ToString(), revisionId = revision.Id, revision.Revision, revision.Statement, revision.Rationale, revision.VerificationMethod, revision.ParentKind, revision.DerivedRationale, revision.ParentRevisionIdsJson, state = revision.State.ToString() })
                 .Take(Math.Clamp(limit ?? 12, 1, 50)).ToListAsync(ct);
             // The section each requirement is currently in, so a modification can offer to keep it. Without this
             // the author is asked to choose a section for a requirement that already has one, which invites
@@ -241,9 +242,11 @@ public static class ChangeRequestEndpoints
                 .Select(x => new { x.SourceRevisionId, x.TargetRevisionId }).ToListAsync(ct);
             var upstreamByRevision = currentAllocations.GroupBy(x => x.SourceRevisionId)
                 .ToDictionary(group => group.Key, group => group.Select(x => x.TargetRevisionId).Distinct().ToArray());
-            return Results.Ok(rows.Select(x => new { x.Id, x.BaseNumber, displayNumber = $"{x.BaseNumber}.{x.Revision:D2}", x.level, x.Revision, nextRevision = x.Revision + 1, x.Statement, x.Rationale, x.VerificationMethod, x.state,
+            return Results.Ok(rows.Select(x => new { x.Id, x.BaseNumber, displayNumber = $"{x.BaseNumber}.{x.Revision:D2}", x.level, x.Revision, nextRevision = x.Revision + 1, x.Statement, x.Rationale, x.VerificationMethod, parentKind = x.ParentKind.ToString(), derivedRationale = x.DerivedRationale, x.state,
                 currentSectionId = sectionByArtifact.TryGetValue(x.Id, out var sectionId) ? sectionId : (Guid?)null,
-                currentUpstreamRevisionIds = upstreamByRevision.TryGetValue(x.revisionId, out var parents) ? parents : [] }));
+                currentUpstreamRevisionIds = x.ParentKind != RequirementParentKind.Unspecified
+                    ? ProposedUpstreamRevisionIds(x.ParentRevisionIdsJson).ToArray()
+                    : upstreamByRevision.TryGetValue(x.revisionId, out var parents) ? parents : [] }));
         });
 
         app.MapGet("/api/authoring/upstream-requirements", async (Guid projectId, Guid releaseId,
@@ -523,8 +526,13 @@ public static class ChangeRequestEndpoints
                     softwareLevel = authoredLevels[0];
                 else if (!authoredLevels.Any(level =>
                 {
-                    try { return ladderPolicy.ParentLevels(level).Count == 0; }
-                    catch (DomainException) { return false; }
+                    try
+                    {
+                        _ = ladderPolicy.Definition(level);
+                        return ladderPolicy.ParentLevels(level).Count == 0;
+                    }
+                    catch (Exception ex) when (ex is DomainException or InvalidOperationException or KeyNotFoundException)
+                    { return false; }
                 }))
                     return Results.BadRequest(new { error = "A Software Draft belongs to one HLR or LLR workspace and cannot mix both levels." });
             }
@@ -557,11 +565,9 @@ public static class ChangeRequestEndpoints
                                 ? "A System change request can contain only System requirement changes."
                                 : "A Software change request can contain only HLR and LLR changes."
                         });
-                    if (change.IsDerived && string.IsNullOrWhiteSpace(change.Rationale))
-                        return Results.BadRequest(new { error = "Every derived software requirement requires an explicit engineering rationale." });
                     var upstreamError = await UpstreamAllocationRefusalAsync(db, ladderPolicy, request.ProjectId,
                         request.TargetReleaseId, change.Level, change.IsDerived,
-                        change.UpstreamRevisionIds ?? [], false, ct);
+                        change.UpstreamRevisionIds ?? [], false, change.Rationale, ct, change.Kind);
                     if (upstreamError is not null) return Results.BadRequest(new { error = upstreamError });
                     string requirementNumber; int revision;
                     if (change.Kind == RequirementChangeKind.Introduce)
@@ -843,7 +849,8 @@ public static class ChangeRequestEndpoints
                     if (sectionError is not null) return Results.BadRequest(new { error = sectionError });
                     var upstreamError = await UpstreamAllocationRefusalAsync(db, ladderPolicy, scr.ProjectId,
                         scr.TargetReleaseId, change.Level, RequirementAuthoringJson.IsDerived(change.AttributesJson),
-                        ProposedUpstreamRevisionIds(change.ProposedUpstreamRevisionIdsJson), true, ct);
+                        ProposedUpstreamRevisionIds(change.ProposedUpstreamRevisionIdsJson), true,
+                        change.Rationale, ct, change.Kind);
                     if (upstreamError is not null) return Results.BadRequest(new { error = upstreamError });
                 }
                 var known = await db.UserAccounts.AsNoTracking().Where(x => request.Approvers.Select(a => a.UserId.ToLower()).Contains(x.UserName) && x.State == AccountState.Active).Select(x => new { x.Id, x.UserName, x.DisplayName }).ToListAsync(ct);
@@ -1225,28 +1232,51 @@ public static class ChangeRequestEndpoints
 
     private static IReadOnlyList<Guid> ProposedUpstreamRevisionIds(string json)
     {
-        try { return JsonSerializer.Deserialize<List<Guid>>(json) ?? []; }
-        catch (JsonException) { return []; }
+        try
+        {
+            return ExactParentSelectionPolicy.NormalizeIds(
+                JsonSerializer.Deserialize<List<Guid>>(string.IsNullOrWhiteSpace(json) ? "[]" : json) ?? [],
+                "requirement revision");
+        }
+        catch (JsonException)
+        {
+            throw new DomainException("A requirement change carries malformed exact upstream revisions.");
+        }
     }
 
     private static async Task<string?> UpstreamAllocationRefusalAsync(AeroLinkDbContext db, ILadderPolicy ladderPolicy, Guid projectId,
         Guid releaseId, RequirementLevel childLevel, bool derived, IReadOnlyCollection<Guid> selected,
-        bool requireComplete, CancellationToken ct)
+        bool requireComplete, string? derivedRationale, CancellationToken ct, RequirementChangeKind? kind = null)
     {
+        if (kind == RequirementChangeKind.Retire)
+            return null;
         IReadOnlyList<RequirementLevel> parentLevels;
-        try { parentLevels = ladderPolicy.ParentLevels(childLevel); }
-        catch (DomainException)
+        try
         {
-            return ladderPolicy is ILegacyLadderCompatibilityPolicy
-                ? "Only HLR and LLR proposals have an upward allocation."
-                : $"The configured project ladder does not contain {childLevel}.";
+            // Resolve the level before interpreting an empty relationship list
+            // as the configured root exemption. Unknown topology must fail
+            // closed rather than becoming an accidental root.
+            _ = ladderPolicy.Definition(childLevel);
+            parentLevels = ladderPolicy.ParentLevels(childLevel);
+        }
+        catch (Exception ex) when (ex is DomainException or InvalidOperationException or KeyNotFoundException)
+        {
+            return $"The configured project ladder cannot resolve the {childLevel} parent topology.";
         }
         if (parentLevels.Count == 0)
             return selected.Count == 0 ? null : ladderPolicy is ILegacyLadderCompatibilityPolicy
                 ? "System requirements cannot carry a software upward allocation."
                 : $"The configured {childLevel} level has no allowed upstream parent.";
         if (derived)
+        {
+            // An explicit Derived choice is already a substantive engineering decision, even while the
+            // surrounding Draft is allowed to remain incomplete.  Do not let the draft-mode relaxation
+            // turn that choice into a blank, unreviewable exception; ordinary Unspecified drafts still
+            // remain saveable until review submission.
+            if (string.IsNullOrWhiteSpace(derivedRationale))
+                return "A derived requirement requires an explicit engineering rationale.";
             return selected.Count == 0 ? null : "A derived requirement uses its documented rationale instead of an upstream allocation.";
+        }
         if (selected.Count == 0)
             return requireComplete ? $"Allocate the proposed {ladderPolicy.RequirementPrefix(childLevel)} to at least one current upstream requirement before review." : null;
         if (selected.Any(x => x == Guid.Empty) || selected.Distinct().Count() != selected.Count)

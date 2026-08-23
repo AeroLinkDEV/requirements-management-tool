@@ -60,13 +60,11 @@ public sealed class CoverageLevelDisciplineTests
 
             var (_, first) = await RequirementAsync(db, world, "SYSR-000001", RequirementLevel.System);
             var (_, second) = await RequirementAsync(db, world, "SYSR-000002", RequirementLevel.System);
-            var (_, procedure) = await ProcedureAsync(db, world, "SYSTP-000001", TestProcedureLevel.System);
+            var (_, procedure) = await ProcedureAsync(db, world, "SYSTP-000001", TestProcedureLevel.System,
+                additionalParentRevisionIds: [first.Id]);
 
             // One System procedure answering for two System requirements is ordinary, and is exactly why a
             // retirement does not always strand it.
-            db.TestCoverage.Add(new TestRequirementCoverage(procedure.Id, first.Id));
-            db.TestCoverage.Add(new TestRequirementCoverage(procedure.Id, second.Id));
-            await db.SaveChangesAsync();
 
             Assert.Equal(2, await db.TestCoverage.CountAsync());
         }
@@ -104,7 +102,9 @@ public sealed class CoverageLevelDisciplineTests
             foreach (var (requirementLevel, requirementRevisionId) in requirements)
             foreach (var (procedureLevel, procedureRevisionId) in procedures)
             {
-                db.TestCoverage.Add(new TestRequirementCoverage(procedureRevisionId, requirementRevisionId));
+                if (!await db.TestCoverage.AnyAsync(x => x.ProcedureRevisionId == procedureRevisionId
+                        && x.RequirementRevisionId == requirementRevisionId))
+                    db.TestCoverage.Add(new TestRequirementCoverage(procedureRevisionId, requirementRevisionId));
                 var matches = requirementLevel.ToString() == procedureLevel.ToString();
                 if (matches) await db.SaveChangesAsync();
                 else
@@ -153,20 +153,45 @@ public sealed class CoverageLevelDisciplineTests
         var now = DateTimeOffset.UtcNow;
         var artifact = new RequirementArtifact(world.ProjectId, baseNumber, level, now);
         var revision = new RequirementRevision(artifact.Id, 0, "The system shall do the thing.", "Because.",
-            "Test", RequirementRevisionState.Active, world.ChangeRequestId, world.BaselineId, now);
-        db.AddRange(artifact, revision);
+            "Test", RequirementRevisionState.Active, world.ChangeRequestId, world.BaselineId, now,
+            parentKind: level == RequirementLevel.System ? RequirementParentKind.Unspecified : RequirementParentKind.Derived,
+            derivedRationale: level == RequirementLevel.System ? null : "This isolated coverage fixture has no upstream requirement selection.");
+        db.AddRange(artifact, revision,
+            new BaselineRequirementSelection(world.BaselineId, artifact.Id, revision.Id));
         await db.SaveChangesAsync();
         return (artifact, revision);
     }
 
     private static async Task<(TestProcedure, TestProcedureRevision)> ProcedureAsync(AeroLinkDbContext db,
-        World world, string baseNumber, TestProcedureLevel level)
+        World world, string baseNumber, TestProcedureLevel level, IReadOnlyCollection<Guid>? additionalParentRevisionIds = null)
     {
         var now = DateTimeOffset.UtcNow;
         var procedure = new TestProcedure(world.ProjectId, baseNumber, "A procedure", "owner", now, level);
+        var expectedLevel = level switch
+        {
+            TestProcedureLevel.System => RequirementLevel.System,
+            TestProcedureLevel.HighLevel => RequirementLevel.HighLevel,
+            TestProcedureLevel.LowLevel => RequirementLevel.LowLevel,
+            _ => throw new InvalidOperationException()
+        };
+        var parent = (await (from requirementRevision in db.RequirementRevisions
+                             join artifact in db.Requirements on requirementRevision.ArtifactId equals artifact.Id
+                             where artifact.ProjectId == world.ProjectId && artifact.Level == expectedLevel
+                             select new { artifact.Id, RevisionId = requirementRevision.Id, requirementRevision.CreatedAt }
+                         ).ToListAsync())
+            .OrderByDescending(x => x.CreatedAt).Select(x => new { x.Id, x.RevisionId }).FirstOrDefault();
+        var parentKind = parent is null ? VerificationProcedureParentKind.Derived : VerificationProcedureParentKind.Allocated;
         var revision = new TestProcedureRevision(procedure.Id, 0, "Objective", "Preconditions", "Steps",
-            "Expected", TestProcedureState.Approved, "author", now);
-        db.AddRange(procedure, revision);
+            "Expected", TestProcedureState.Approved, "author", now,
+            effectiveBaselineId: parent is null ? null : world.BaselineId,
+            parentKind: parentKind,
+            derivedRationale: parent is null ? "This level-pairing fixture has no matching upstream selection." : null);
+        db.Add(procedure);
+        db.Add(revision);
+        if (parent is not null)
+            db.Add(new TestRequirementCoverage(revision.Id, parent.RevisionId));
+        foreach (var additionalParentRevisionId in (additionalParentRevisionIds ?? []).Distinct().Where(x => parent is null || x != parent.RevisionId))
+            db.Add(new TestRequirementCoverage(revision.Id, additionalParentRevisionId));
         await db.SaveChangesAsync();
         return (procedure, revision);
     }

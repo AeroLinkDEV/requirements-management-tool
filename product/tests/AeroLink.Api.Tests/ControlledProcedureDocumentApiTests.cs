@@ -101,7 +101,9 @@ public sealed class ControlledProcedureDocumentApiTests
         review.AddProcedureChange("verification.engineer", new TestProcedureChangeDraft("SYSTP-000941", 0,
             TestProcedureLevel.System, TestProcedureChangeKind.Introduce, "Oceanic waypoint sequencing",
             "Verify oceanic sequencing.", "Cruise.", "1. Load. 2. Read.", "Sequenced.",
-            "Nothing covers oceanic sequencing.", JsonSerializer.Serialize(new[] { revision.Id })), now);
+            "Nothing covers oceanic sequencing.", JsonSerializer.Serialize(new[] { revision.Id }),
+            ParentKind: VerificationProcedureParentKind.Allocated,
+            ParentRevisionIdsJson: JsonSerializer.Serialize(new[] { revision.Id })), now);
         review.WriteCase("verification.engineer", "Verification case", "Problem", "Analysis", "Solution", now);
         review.Submit("verification.engineer", "test.lead", true, now);
         await db.SaveChangesAsync();
@@ -245,7 +247,11 @@ public sealed class ControlledProcedureDocumentApiTests
             : JsonSerializer.Serialize(new[] { drivingRequirementRevisionId.Value });
         return new TestProcedureChangeDraft(baseNumber, revision, TestProcedureLevel.System, kind, title,
             "Verify the exact behavior.", "The configuration is available.", "1. Load. 2. Exercise.",
-            "The expected behavior is observed.", "Controlled procedure work.", drivingJson);
+            "The expected behavior is observed.", "Controlled procedure work.", drivingJson,
+            ParentKind: kind == TestProcedureChangeKind.Retire
+                ? VerificationProcedureParentKind.Unspecified
+                : VerificationProcedureParentKind.Allocated,
+            ParentRevisionIdsJson: drivingJson);
     }
 
     [Fact]
@@ -350,13 +356,17 @@ public sealed class ControlledProcedureDocumentApiTests
                 fixture.BaselineId, "Successor baseline", "cm", now);
             second.Select(scr2, "cm", now);
             second.Freeze("cm", now);
+            var carriedParentRevisionId = await db.BaselineRequirements
+                .Where(x => x.BaselineId == fixture.BaselineId)
+                .Select(x => x.RevisionId)
+                .SingleAsync();
             var tcr2 = new TestChangeReview(fixture.ProjectId, release17.Id, scr2.Id,
                 TestChangeReviewDiscipline.System, scr2.DisplayNumber, now);
             tcr2.RecordTestChangeRequired("verification.engineer", now);
             tcr2.AssignControlledNumber("SYSTPCR-000942", now);
             tcr2.AddProcedureChange("verification.engineer",
                 Draft("SYSTP-000941", 1, TestProcedureChangeKind.Modify,
-                    "Oceanic waypoint sequencing, clarified"), now);
+                    "Oceanic waypoint sequencing, clarified", carriedParentRevisionId), now);
             tcr2.AddProcedureChange("verification.engineer",
                 Draft("SYSTP-000942", 1, TestProcedureChangeKind.Retire, ""), now);
             tcr2.WriteCase("verification.engineer", "Successor package", "Problem", "Analysis", "Solution", now);

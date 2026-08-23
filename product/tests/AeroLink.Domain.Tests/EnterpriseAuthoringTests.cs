@@ -29,7 +29,7 @@ public sealed class EnterpriseAuthoringTests
     public void Controlled_requirement_proposals_freeze_rich_content_without_author_owned_impact_gates()
     {
         var now=DateTimeOffset.UtcNow;var scr=new SystemChangeRequest("HLRCR-00001",0,Guid.NewGuid(),Guid.NewGuid(),"Controlled proposal","Problem","Analysis","Solution","author",now,ChangeRequestType.Software,softwareLevel:RequirementLevel.HighLevel);var pending="{\"trace\":\"Pending\",\"verification\":\"Affected\",\"documents\":\"Not Affected\",\"baseline\":\"Affected\",\"collaboration\":\"Not Affected\"}";
-        scr.AddRequirementChange("author","HLR-00000001",1,RequirementLevel.HighLevel,RequirementChangeKind.Modify,"The FMS software shall navigate.","Controlled rationale.","Test",now,"**The FMS software** shall navigate.","{\"criticality\":\"Safety Significant\"}",pending);
+        scr.AddRequirementChange("author","HLR-00000001",1,RequirementLevel.HighLevel,RequirementChangeKind.Modify,"The FMS software shall navigate.","Controlled rationale.","Test",now,"**The FMS software** shall navigate.","{\"derived\":true,\"criticality\":\"Safety Significant\"}",pending);
         // Supporting content that arrives as plain text is adopted as a single paragraph rather than
         // rejected, so nothing an author already wrote is lost to the storage format changing under them.
         Assert.Equal("**The FMS software** shall navigate.",RichContent.ToPlainText(scr.RequirementChanges.Single().RichText));

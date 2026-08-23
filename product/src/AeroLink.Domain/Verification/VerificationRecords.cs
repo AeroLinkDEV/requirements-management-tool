@@ -168,7 +168,7 @@ public sealed class TestProcedureRevision
     public string ExecutableSteps => OrderedSteps;
     public string ExpectedObservationsText => ExpectedObservations;
     public string Tooling => ToolingAutomation;
-    /// <summary>Procedure-only exact parent classification; legacy/System revisions remain Unspecified.</summary>
+    /// <summary>Exact parent classification for software Procedures and Case/System verification revisions.</summary>
     public VerificationProcedureParentKind ParentKind { get; private set; }
     public string DerivedRationale { get; private set; } = string.Empty;
     public string RetirementRationale { get; private set; } = string.Empty;

@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.Http.Json;
+using System.Reflection;
 using System.Text.Json;
 using AeroLink.Api;
 using AeroLink.Domain.Baselines;
@@ -250,6 +251,9 @@ public sealed class TestChangeRequestReviewWorkflowTests
                 TestChangeReviewDiscipline.System, "SRCR-00960.00", DateTimeOffset.UtcNow,
                 "SYSTPCR-000099", revision: 99, caseContractVersion: 0);
             legacy.RecordTestChangeRequired("historical.import", DateTimeOffset.UtcNow);
+            typeof(TestChangeReview).GetMethod("MarkAsLegacyHistoricalPackage",
+                    BindingFlags.Instance | BindingFlags.NonPublic)!
+                .Invoke(legacy, ["historical.import", DateTimeOffset.UtcNow]);
             legacy.Submit("historical.import", "workflow.one", true, DateTimeOffset.UtcNow);
             legacyId = legacy.Id;
             snapshotHash = legacy.ReviewCycles.Single().SnapshotHash;
@@ -259,13 +263,13 @@ public sealed class TestChangeRequestReviewWorkflowTests
 
         await LoginAsync(client, "workflow.engineer");
         var item = await ReadItemAsync(client, fixture.ReleaseId, legacyId);
-        Assert.Equal(0, item.GetProperty("caseContractVersion").GetInt32());
+        Assert.Equal(1, item.GetProperty("caseContractVersion").GetInt32());
         Assert.Equal("", item.GetProperty("title").GetString());
         Assert.Equal("InReview", item.GetProperty("state").GetString());
 
         var workspace = await client.GetFromJsonAsync<JsonElement>(
             $"/api/test-change-reviews/{legacyId}/procedure-changes");
-        Assert.Equal(0, workspace.GetProperty("caseContractVersion").GetInt32());
+        Assert.Equal(1, workspace.GetProperty("caseContractVersion").GetInt32());
         Assert.Equal("", workspace.GetProperty("problem").GetString());
         using var verificationScope = factory.Services.CreateScope();
         var verificationDb = verificationScope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();

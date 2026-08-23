@@ -282,7 +282,11 @@ public sealed class SystemChangeRequestControlledEditingAdapter(AeroLinkDbContex
                 statement = x.Statement, rationale = x.Rationale, verificationMethod = x.VerificationMethod,
                 richText = x.RichText, attributesJson = x.AttributesJson,
                 impactDispositionJson = x.ImpactDispositionJson, targetSectionId = x.TargetSectionId,
-                upstreamRevisionIds = ProposedParents(x.ProposedUpstreamRevisionIdsJson) }) });
+                parentKind = RequirementAuthoringJson.IsDerived(x.AttributesJson) ? "Derived"
+                    : ProposedParents(x.ProposedUpstreamRevisionIdsJson).Count > 0 ? "Allocated" : "Unspecified",
+                derivedRationale = RequirementAuthoringJson.IsDerived(x.AttributesJson) ? x.Rationale : "",
+                upstreamRevisionIds = ProposedParents(x.ProposedUpstreamRevisionIdsJson)
+                    .OrderBy(id => id).ToArray() }) });
 
     public async Task ApplyDraftAsync(ControlledEditingArtifact artifact, string draftJson, string actor,
         bool administratorAuthority, DateTimeOffset now, CancellationToken ct)
@@ -442,7 +446,11 @@ public sealed class RequirementProposalControlledEditingAdapter(AeroLinkDbContex
             level = item.Level.ToString(), kind = item.Kind.ToString(), item.Statement, item.Rationale,
             item.VerificationMethod, item.RichText, item.AttributesJson, item.ImpactDispositionJson,
             targetSectionId = item.TargetSectionId,
-            upstreamRevisionIds = ProposedParents(item.ProposedUpstreamRevisionIdsJson), parentVersion });
+            parentKind = RequirementAuthoringJson.IsDerived(item.AttributesJson) ? "Derived"
+                : ProposedParents(item.ProposedUpstreamRevisionIdsJson).Count > 0 ? "Allocated" : "Unspecified",
+            derivedRationale = RequirementAuthoringJson.IsDerived(item.AttributesJson) ? item.Rationale : "",
+            upstreamRevisionIds = ProposedParents(item.ProposedUpstreamRevisionIdsJson)
+                .OrderBy(id => id).ToArray(), parentVersion });
 
     public async Task ApplyDraftAsync(ControlledEditingArtifact artifact, string draftJson, string actor,
         bool administratorAuthority, DateTimeOffset now, CancellationToken ct)
@@ -881,6 +889,8 @@ public sealed class TestChangeRequestControlledEditingAdapter(AeroLinkDbContext 
                     rationale = x.Rationale, drivingRequirementRevisionIdsJson = x.DrivingRequirementRevisionIdsJson,
                     removedRequirementRevisionIdsJson = x.RemovedRequirementRevisionIdsJson,
                     coverageChangeRationale = x.CoverageChangeRationale,
+                    parentKind = x.ParentKind.ToString(), parentRevisionIdsJson = x.ParentRevisionIdsJson,
+                    derivedRationale = x.DerivedRationale,
                 }),
         });
 
@@ -912,7 +922,11 @@ public sealed class TestChangeRequestControlledEditingAdapter(AeroLinkDbContext 
                 change.DrivingRequirementRevisionIdsJson ?? "[]", change.RemovedRequirementRevisionIdsJson ?? "[]",
                 // As above: a half-written proposal is checked in as it stands, and SubmitForReview is what
                 // refuses to show it to an approver.
-                 change.CoverageChangeRationale ?? ""), now, allowIncomplete: true, policy: ladderPolicy);
+                 change.CoverageChangeRationale ?? "",
+                 Enum.TryParse<VerificationProcedureParentKind>(change.ParentKind, true, out var parentKind)
+                     ? parentKind : VerificationProcedureParentKind.Unspecified,
+                 change.ParentRevisionIdsJson ?? "[]", change.DerivedRationale ?? ""), now,
+                allowIncomplete: true, policy: ladderPolicy);
     }
 
     private sealed record TestChangeRequestDraft(string? Title, string? Problem, string? Analysis, string? Solution,
@@ -922,5 +936,6 @@ public sealed class TestChangeRequestControlledEditingAdapter(AeroLinkDbContext 
     private sealed record TestProcedureChangeDraftPayload(string? BaseNumber, int Revision, string? Level,
         string? Kind, string? Title, string? Objective, string? Preconditions, string? Steps,
         string? ExpectedResult, string? Rationale, string? DrivingRequirementRevisionIdsJson,
-        string? RemovedRequirementRevisionIdsJson, string? CoverageChangeRationale);
+        string? RemovedRequirementRevisionIdsJson, string? CoverageChangeRationale,
+        string? ParentKind = null, string? ParentRevisionIdsJson = null, string? DerivedRationale = null);
 }

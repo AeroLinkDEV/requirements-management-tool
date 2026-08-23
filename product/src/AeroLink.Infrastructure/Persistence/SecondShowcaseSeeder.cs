@@ -255,6 +255,7 @@ public sealed class SecondShowcaseSeeder(
         var request = await db.SystemChangeRequests
             .Include(x => x.RequirementChanges).Include(x => x.ReviewCycles).ThenInclude(x => x.Steps)
             .SingleOrDefaultAsync(x => x.ProjectId == projectId && x.BaseNumber == baseNumber && x.Revision == 0, ct);
+        var created = request is null;
         if (request is null)
         {
             request = software
@@ -277,6 +278,12 @@ public sealed class SecondShowcaseSeeder(
         var approver = software ? SoftwareLead : SystemsReviewer;
         if (request.State == ChangeRequestState.Draft)
         {
+            // This deterministic Jan-2026 showcase predates exact parent-or-derived classification and
+            // intentionally creates its System and LowLevel requests together, before their materialized
+            // revisions exist. Preserve that historical evidence only on the one initial seed submission;
+            // an ordinary later submission (including a migrated draft) must use the current v2 contract.
+            if (created)
+                request.MarkAsLegacyHistoricalPackage(request.AuthorId, now.AddMinutes(1));
             request.SubmitForReview(request.AuthorId, [new(approver, approver)], now.AddHours(1),
                 ladderPolicy: policy);
             await db.SaveChangesAsync(ct);
@@ -365,7 +372,7 @@ public sealed class SecondShowcaseSeeder(
                 throw new InvalidOperationException("The second showcase baseline is not frozen and cannot be materialized.");
             var materializer = new RequirementBaselineMaterializer(db,
                 new VerificationImpactService(db, policyResolver: resolver), policyResolver: resolver);
-            await materializer.MaterializeAsync(baseline.Id, Actor, now.AddDays(1), ct);
+            await materializer.MaterializeLegacyHistoricalSeedAsync(baseline.Id, Actor, now.AddDays(1), ct);
         }
         return baseline.Id;
     }

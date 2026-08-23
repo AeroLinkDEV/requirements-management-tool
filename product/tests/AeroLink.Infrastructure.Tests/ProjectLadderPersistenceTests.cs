@@ -696,7 +696,8 @@ public sealed class ProjectLadderPersistenceTests : IAsyncLifetime
         var firstRevision = new RequirementRevision(firstArtifact.Id, 0, "Catalog source statement", "Catalog rationale",
             "Inspection", RequirementRevisionState.Active, request.Id, baseline.Id, now);
         var secondRevision = new RequirementRevision(secondArtifact.Id, 0, "Catalog target statement", "Catalog rationale",
-            "Inspection", RequirementRevisionState.Active, request.Id, baseline.Id, now);
+            "Inspection", RequirementRevisionState.Active, request.Id, baseline.Id, now,
+            RequirementParentKind.Derived, "The catalog target is an intentionally independent historical example.");
         return (release, request, baseline, (firstArtifact, firstRevision), (secondArtifact, secondRevision));
     }
 

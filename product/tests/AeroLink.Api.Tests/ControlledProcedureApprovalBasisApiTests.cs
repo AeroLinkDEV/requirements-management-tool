@@ -76,20 +76,26 @@ public sealed class ControlledProcedureApprovalBasisApiTests
             var systemRevision = new TestProcedureRevision(systemProcedure.Id, 0,
                 "Verify the inherited system behaviour.", "Configured system.", "Exercise system behaviour.",
                 "System behaviour is correct.", TestProcedureState.Approved, "system.author", now,
-                sourceTestChangeRequestId: systemTcr.Id);
+                sourceTestChangeRequestId: systemTcr.Id, effectiveBaselineId: baseline.Id,
+                parentKind: VerificationProcedureParentKind.Derived,
+                derivedRationale: "This approval-basis fixture has no persisted exact requirement coverage.");
             var secondSystemProcedure = new TestProcedure(project.Id, "SYSTP-990002",
                 "Second inherited system procedure", "system.author", now, TestProcedureLevel.System);
             var secondSystemRevision = new TestProcedureRevision(secondSystemProcedure.Id, 0,
                 "Verify the second inherited system behaviour.", "Configured system.",
                 "Exercise the second system behaviour.", "The second system behaviour is correct.",
                 TestProcedureState.Approved, "system.author", now,
-                sourceTestChangeRequestId: secondSystemTcr.Id);
+                sourceTestChangeRequestId: secondSystemTcr.Id, effectiveBaselineId: baseline.Id,
+                parentKind: VerificationProcedureParentKind.Derived,
+                derivedRationale: "This approval-basis fixture has no persisted exact requirement coverage.");
             var hlrProcedure = new TestProcedure(project.Id, "HLRTC-990001",
                 "Selected HLR procedure", "hlr.author", now, TestProcedureLevel.HighLevel);
             var hlrRevision = new TestProcedureRevision(hlrProcedure.Id, 0,
                 "Verify the HLR behaviour.", "Configured software.", "Exercise HLR behaviour.",
                 "HLR behaviour is correct.", TestProcedureState.Approved, "hlr.author", now,
-                sourceTestChangeRequestId: hlrTcr.Id);
+                sourceTestChangeRequestId: hlrTcr.Id, effectiveBaselineId: baseline.Id,
+                parentKind: VerificationProcedureParentKind.Derived,
+                derivedRationale: "This approval-basis fixture has no persisted exact requirement coverage.");
 
             var requirementDocument = new ControlledDocument(project.Id, release.Id, baseline.Id,
                 ControlledDocumentType.Sysrd, "SYSRD-990001", "Authority System Requirements", 0,

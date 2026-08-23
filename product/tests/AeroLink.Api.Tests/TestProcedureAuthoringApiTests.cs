@@ -26,7 +26,7 @@ public sealed class TestProcedureAuthoringApiTests
         Guid OtherBuildRequirementRevisionId, Guid WrongLevelRequirementRevisionId,
         Guid OtherProjectRequirementRevisionId);
 
-    private static async Task<Fixture> SeedAsync(AeroLinkApiFactory factory)
+    private static async Task<Fixture> SeedAsync(AeroLinkApiFactory factory, bool includeUnrelatedCurrentCoverage = false)
     {
         using var scope = factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
@@ -108,7 +108,8 @@ public sealed class TestProcedureAuthoringApiTests
         var wrongLevelArtifact = new RequirementArtifact(project.Id, "HLR-00000926", RequirementLevel.HighLevel, now);
         var wrongLevelRevision = new RequirementRevision(wrongLevelArtifact.Id, 0,
             "The software shall implement a lower-level detail.", "Wrong discipline.", "Test",
-            RequirementRevisionState.Active, open.Id, baseline.Id, now);
+            RequirementRevisionState.Active, open.Id, baseline.Id, now,
+            RequirementParentKind.Derived, "This fixture is intentionally outside the procedure discipline.");
         baseline.Select(open, "cm", now);
         baseline.Select(folded, "cm", now);
         baseline.Freeze("cm", now);
@@ -117,7 +118,8 @@ public sealed class TestProcedureAuthoringApiTests
             "test.author", now, TestProcedureLevel.System);
         var carriedProcedureRevision = new TestProcedureRevision(carriedProcedure.Id, 0,
             "Verify existing oceanic behavior.", "Cruise.", "Execute the procedure.", "Behavior observed.",
-            TestProcedureState.Approved, "test.author", now);
+            TestProcedureState.Approved, "test.author", now, effectiveBaselineId: baseline.Id,
+            parentKind: VerificationProcedureParentKind.Allocated);
         baseline.MarkTestProceduresMaterialized("cm", new string('c', 64), 1, now);
         db.AddRange(baseline, artifact, revision, foldedArtifact, foldedRevision,
             unrelatedArtifact, unrelatedRevision, wrongLevelArtifact, wrongLevelRevision,
@@ -126,8 +128,12 @@ public sealed class TestProcedureAuthoringApiTests
             new BaselineRequirementSelection(baseline.Id, foldedArtifact.Id, foldedRevision.Id),
             new BaselineRequirementSelection(baseline.Id, unrelatedArtifact.Id, unrelatedRevision.Id),
             new BaselineRequirementSelection(baseline.Id, wrongLevelArtifact.Id, wrongLevelRevision.Id),
-            new BaselineTestProcedureSelection(baseline.Id, carriedProcedure.Id, carriedProcedureRevision.Id),
-            new TestRequirementCoverage(carriedProcedureRevision.Id, revision.Id));
+            new BaselineTestProcedureSelection(baseline.Id, carriedProcedure.Id, carriedProcedureRevision.Id));
+        db.TestCoverage.Add(new TestRequirementCoverage(carriedProcedureRevision.Id, revision.Id));
+        if (includeUnrelatedCurrentCoverage)
+            // Seed the unrelated current parent as part of the approved revision itself. Adding it later
+            // through a direct save would be the alternate editing bypass #738 refuses.
+            db.TestCoverage.Add(new TestRequirementCoverage(carriedProcedureRevision.Id, unrelatedRevision.Id));
         var governedItem = await db.VerificationImpactItems.SingleAsync(x => x.TestChangeReviewId == tcrId
             && x.RequirementChangeId == open.RequirementChanges.Single().Id);
         governedItem.LinkRequirementRevision(revision.Id, now);
@@ -202,6 +208,98 @@ public sealed class TestProcedureAuthoringApiTests
         Assert.Matches(@"^SYSTP-\d{6}\.00$", created.GetProperty("displayNumber").GetString()!);
         // The discipline fixes the level; the caller does not get to disagree with it.
         Assert.Equal("System", created.GetProperty("level").GetString());
+    }
+
+    [Fact]
+    public async Task Raising_a_package_refuses_a_derived_system_procedure_with_an_exact_parent()
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var client = factory.CreateClient();
+        var fixture = await SeedAsync(factory);
+        await LoginAsync(client, "procedure.engineer");
+
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+        var sourceChangeRequestId = await db.TestChangeReviews.AsNoTracking()
+            .Where(x => x.Id == fixture.TcrId)
+            .Select(x => x.ChangeRequestId)
+            .SingleAsync();
+
+        // This is the alternate package-creation surface, not the ordinary procedure-change draft route.
+        // A derived System Procedure must not be made valid by silently clearing a caller-supplied exact parent.
+        using var response = await client.PostAsJsonAsync(
+            $"/api/releases/{fixture.ReleaseId}/test-change-requests",
+            new
+            {
+                discipline = "System",
+                changeRequestIds = new[] { sourceChangeRequestId },
+                title = "Invalid derived package",
+                problem = "P", analysis = "A", solution = "S",
+                artifactChanges = new[]
+                {
+                    new
+                    {
+                        baseNumber = "SYSTP-009999", revision = 0, level = "System", kind = "Introduce",
+                        title = "Invalid derived System Procedure", objective = "O", preconditions = "P", steps = "S",
+                        expectedResult = "E", rationale = "R", parentKind = "Derived",
+                        parentRevisionIds = new[] { fixture.RequirementRevisionId },
+                        derivedRationale = "It is intentionally invalid."
+                    }
+                }
+            });
+        var body = await response.Content.ReadAsStringAsync();
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Contains("parent", body, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task Submission_rechecks_a_tampered_full_parent_selection_before_review()
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var client = factory.CreateClient();
+        var fixture = await SeedAsync(factory);
+        await LoginAsync(client, "procedure.engineer");
+        await ConcludeTestWorkRequiredAsync(client, fixture.TcrId);
+
+        using var proposed = await client.PostAsJsonAsync(
+            $"/api/test-change-reviews/{fixture.TcrId}/procedure-changes",
+            new
+            {
+                kind = "Introduce", revision = 0, title = "Oceanic waypoint sequencing",
+                objective = "Verify oceanic sequencing.", preconditions = "Cruise.",
+                steps = "1. Load. 2. Read.", expectedResult = "Sequenced.", rationale = "Nothing covers it.",
+                parentKind = "Allocated",
+                parentRevisionIds = new[] { fixture.RequirementRevisionId },
+                drivingRequirementRevisionIds = new[] { fixture.RequirementRevisionId }
+            });
+        Assert.Equal(HttpStatusCode.OK, proposed.StatusCode);
+
+        // Simulate a second editing route changing only the driving delta after the full selection was
+        // authored. Submission must not sign this inconsistent pair merely because the XOR is still valid.
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            var change = await db.Set<TestProcedureChange>().SingleAsync(x => x.TestChangeReviewId == fixture.TcrId);
+            db.Entry(change).Property(x => x.DrivingRequirementRevisionIdsJson).CurrentValue = "[]";
+            await db.SaveChangesAsync();
+            foreach (var item in await db.VerificationImpactItems.Where(x => x.TestChangeReviewId == fixture.TcrId).ToListAsync())
+                item.Resolve("procedure.engineer", VerificationImpactOutcome.NewProcedureRequired,
+                    "The procedure proposed in this package will cover it.", DateTimeOffset.UtcNow);
+            await db.SaveChangesAsync();
+        }
+        using var authoredCase = await client.PostAsJsonAsync($"/api/test-change-reviews/{fixture.TcrId}/case",
+            new
+            {
+                title = "Oceanic sequencing verification", problem = "The changed behavior needs controlled verification.",
+                analysis = "The proposed procedure supplies the required coverage.",
+                solution = "Approve and materialize the procedure change."
+            });
+        Assert.Equal(HttpStatusCode.OK, authoredCase.StatusCode);
+        using var submit = await client.PostAsJsonAsync($"/api/test-change-reviews/{fixture.TcrId}/submit",
+            new { approverId = "procedure.approver" });
+        var body = await submit.Content.ReadAsStringAsync();
+        Assert.Equal(HttpStatusCode.BadRequest, submit.StatusCode);
+        Assert.Contains("exact final parent", body, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -321,7 +419,7 @@ public sealed class TestProcedureAuthoringApiTests
     }
 
     [Fact]
-    public async Task Introduce_refuses_to_create_a_procedure_without_an_exact_driving_requirement()
+    public async Task An_incomplete_introduced_procedure_draft_can_be_saved_but_submission_requires_exact_parents()
     {
         using var factory = new AeroLinkApiFactory();
         using var client = factory.CreateClient();
@@ -337,9 +435,24 @@ public sealed class TestProcedureAuthoringApiTests
                 rationale = "Direct API attempt."
             });
 
-        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
-        var body = JsonSerializer.Deserialize<JsonElement>(await response.Content.ReadAsStringAsync());
-        Assert.Equal("procedure_driving_requirement_required", body.GetProperty("code").GetString());
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            foreach (var item in await db.VerificationImpactItems
+                         .Where(x => x.TestChangeReviewId == fixture.TcrId).ToListAsync())
+                item.Resolve("procedure.engineer", VerificationImpactOutcome.NewProcedureRequired,
+                    "The draft will be completed before approval.", DateTimeOffset.UtcNow);
+            await db.SaveChangesAsync();
+        }
+        using var authoredCase = await client.PostAsJsonAsync($"/api/test-change-reviews/{fixture.TcrId}/case",
+            new { title = "Incomplete parent selection", problem = "Problem", analysis = "Analysis", solution = "Solution" });
+        Assert.True(authoredCase.IsSuccessStatusCode, await authoredCase.Content.ReadAsStringAsync());
+        using var submit = await client.PostAsJsonAsync($"/api/test-change-reviews/{fixture.TcrId}/submit",
+            new { approverId = "procedure.approver" });
+        Assert.Equal(HttpStatusCode.BadRequest, submit.StatusCode);
+        Assert.Contains("must be Allocated", await submit.Content.ReadAsStringAsync());
     }
 
     [Fact]
@@ -428,7 +541,8 @@ public sealed class TestProcedureAuthoringApiTests
             $"/api/test-change-reviews/{fixture.TcrId}/procedure-targets?search=SYSTP-000900&page=1&pageSize=25");
         var target = Assert.Single(targets.GetProperty("items").EnumerateArray());
         Assert.Equal("SYSTP-000900", target.GetProperty("baseNumber").GetString());
-        var current = Assert.Single(target.GetProperty("currentCoverage").EnumerateArray());
+        var current = Assert.Single(target.GetProperty("currentCoverage").EnumerateArray(),
+            x => x.GetProperty("revisionId").GetGuid() == fixture.RequirementRevisionId);
         Assert.Equal(fixture.RequirementRevisionId, current.GetProperty("revisionId").GetGuid());
 
         object Proposal(string? rationale) => new
@@ -458,6 +572,51 @@ public sealed class TestProcedureAuthoringApiTests
         Assert.Equal("The folded source adds a second verification obligation.",
             decision.GetProperty("coverageChangeRationale").GetString());
         Assert.Equal("procedure.engineer", decision.GetProperty("coverageChangedBy").GetString());
+    }
+
+    [Fact]
+    public async Task A_modify_preserves_an_unimpacted_current_parent_while_adding_one_governed_parent()
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var client = factory.CreateClient();
+        var fixture = await SeedAsync(factory, includeUnrelatedCurrentCoverage: true);
+        await LoginAsync(client, "procedure.engineer");
+        await ConcludeTestWorkRequiredAsync(client, fixture.TcrId);
+
+        // The unrelated requirement is already selected in the target requirement baseline and is an
+        // exact current parent, but it is not in this TCR's impact delta. The endpoint must retain it
+        // while accepting the folded, governed addition.
+
+        using var response = await client.PostAsJsonAsync(
+            $"/api/test-change-reviews/{fixture.TcrId}/procedure-changes",
+            new
+            {
+                kind = "Modify", baseNumber = "SYSTP-000900", revision = 1,
+                title = "Expanded governed coverage", objective = "Verify all retained behavior.",
+                steps = "Execute.", expectedResult = "Observed.", rationale = "The approved design expands coverage.",
+                drivingRequirementRevisionIds = new[] { fixture.FoldedRequirementRevisionId },
+                parentRevisionIds = new[]
+                {
+                    fixture.RequirementRevisionId,
+                    fixture.UnrelatedRequirementRevisionId,
+                    fixture.FoldedRequirementRevisionId
+                },
+                coverageChangeRationale = "The folded requirement adds a new obligation while the existing unrelated parent remains valid."
+            });
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        var detail = await client.GetFromJsonAsync<JsonElement>(
+            $"/api/test-change-reviews/{fixture.TcrId}/procedure-changes");
+        var decision = Assert.Single(detail.GetProperty("procedureChanges").EnumerateArray());
+        var selected = decision.GetProperty("parentRevisionIds").EnumerateArray()
+            .Select(x => x.GetGuid()).ToHashSet();
+        Assert.Equal(
+            new[]
+            {
+                fixture.RequirementRevisionId,
+                fixture.UnrelatedRequirementRevisionId,
+                fixture.FoldedRequirementRevisionId
+            }.ToHashSet(), selected);
     }
 
     [Fact]
@@ -504,6 +663,20 @@ public sealed class TestProcedureAuthoringApiTests
         Assert.Equal(HttpStatusCode.BadRequest, emptyFinalCoverage.StatusCode);
         Assert.Equal("procedure_final_coverage_required",
             JsonSerializer.Deserialize<JsonElement>(await emptyFinalCoverage.Content.ReadAsStringAsync())
+                .GetProperty("code").GetString());
+
+        // A #709 suspect carry-forward is lifecycle evidence, not a current authored parent. It cannot be
+        // removed through the ordinary procedure-change delta; only the lifecycle/materialization path may
+        // confirm or transition that evidence.
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            var suspect = await db.TestCoverage.SingleAsync(x => x.RequirementRevisionId == fixture.RequirementRevisionId);
+            suspect.MarkSuspect("The carried requirement awaits lifecycle confirmation.", DateTimeOffset.UtcNow);
+            await db.SaveChangesAsync();
+        }
+        Assert.Equal("coverage_removal_not_current",
+            (await Refused(fixture.RequirementRevisionId, "Do not remove lifecycle evidence."))
                 .GetProperty("code").GetString());
     }
 
@@ -646,6 +819,17 @@ public sealed class TestProcedureAuthoringApiTests
         using var client = factory.CreateClient();
         var fixture = await SeedAsync(factory);
         await LoginAsync(client, "procedure.engineer");
+        using var derivedWithParent = await client.PostAsJsonAsync("/api/test-procedures/drafts", new
+        {
+            projectId = fixture.ProjectId, level = "HighLevel", title = "Invalid derived procedure",
+            environmentSetup = "Load the controlled software build.", testData = "A known vector.",
+            orderedSteps = "1. Start the harness.", expectedObservations = "The expected state is observed.",
+            cleanup = "Stop the harness.", toolingAutomation = "Harness command.", parentKind = "Derived",
+            caseRevisionIds = new[] { Guid.NewGuid() },
+            derivedRationale = "This must be refused because it also names a parent."
+        });
+        Assert.Equal(HttpStatusCode.BadRequest, derivedWithParent.StatusCode);
+        Assert.Contains("parent", await derivedWithParent.Content.ReadAsStringAsync(), StringComparison.OrdinalIgnoreCase);
         var body = new
         {
             projectId = fixture.ProjectId, level = "HighLevel", title = "Dormant HLR procedure",

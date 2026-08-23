@@ -14,7 +14,10 @@ public sealed record ControlledProcedureDocumentRow(
     string Steps,
     string ExpectedResult,
     string AuthorId,
-    Guid? SourceTestChangeRequestId);
+    Guid? SourceTestChangeRequestId,
+    VerificationProcedureParentKind ParentKind = VerificationProcedureParentKind.Unspecified,
+    string DerivedRationale = "",
+    IReadOnlyList<Guid>? ParentRevisionIds = null);
 
 public sealed record ControlledProcedureDocumentSnapshot(
     bool IsExactManifest,
@@ -66,7 +69,9 @@ public static class ControlledProcedureDocumentSnapshotProjection
                               revision.Steps,
                               revision.ExpectedResult,
                               revision.AuthorId,
-                              revision.SourceTestChangeRequestId)).ToListAsync(ct);
+                              revision.SourceTestChangeRequestId,
+                              revision.ParentKind,
+                              revision.DerivedRationale)).ToListAsync(ct);
         }
         else
         {
@@ -91,6 +96,8 @@ public static class ControlledProcedureDocumentSnapshotProjection
                                         revision.ExpectedResult,
                                         revision.AuthorId,
                                         revision.SourceTestChangeRequestId,
+                                        revision.ParentKind,
+                                        revision.DerivedRationale,
                                         revision.CreatedAt,
                                     }).ToListAsync(ct);
             rows = candidates
@@ -104,7 +111,8 @@ public static class ControlledProcedureDocumentSnapshotProjection
                 .OrderBy(x => x.BaseNumber)
                 .Select(x => new ControlledProcedureDocumentRow(
                     x.Id, x.BaseNumber, x.Title, x.Revision, x.State, x.Objective, x.Preconditions,
-                    x.Steps, x.ExpectedResult, x.AuthorId, x.SourceTestChangeRequestId))
+                    x.Steps, x.ExpectedResult, x.AuthorId, x.SourceTestChangeRequestId,
+                    x.ParentKind, x.DerivedRationale))
                 .ToList();
         }
 
@@ -114,6 +122,31 @@ public static class ControlledProcedureDocumentSnapshotProjection
         var titles = await TestProcedureRevisionTitleProjection.ForRevisionsAsync(db,
             rows.Select(x => x.RevisionId).ToList(), ct);
         rows = rows.Select(row => row with { Title = titles[row.RevisionId].Title }).ToList();
+        var revisionIds = rows.Select(x => x.RevisionId).ToList();
+        // Coverage is an exact parent selection only within the governed requirement membership of the
+        // document baseline. A later retarget may add a link to a carried procedure revision, but that link
+        // must not leak into regeneration of an older released baseline whose requirement set never contained
+        // the new endpoint.
+        var baselineRequirementRevisionIds = await db.BaselineRequirements.AsNoTracking()
+            .Where(x => x.BaselineId == baselineId)
+            .Select(x => x.RevisionId)
+            .ToHashSetAsync(ct);
+        var coverage = await db.TestCoverage.AsNoTracking()
+            .Where(x => revisionIds.Contains(x.ProcedureRevisionId)
+                // #709 suspect carry-forward is lifecycle evidence, not an approved exact-parent decision.
+                // It may live on the same immutable revision until a verification engineer confirms it, but
+                // controlled documents must never present that unconfirmed endpoint as signed coverage.
+                && !x.IsSuspect
+                && baselineRequirementRevisionIds.Contains(x.RequirementRevisionId))
+            .Select(x => new { x.ProcedureRevisionId, x.RequirementRevisionId })
+            .ToListAsync(ct);
+        var parentIds = coverage.GroupBy(x => x.ProcedureRevisionId)
+            .ToDictionary(x => x.Key, x => (IReadOnlyList<Guid>)x.Select(y => y.RequirementRevisionId)
+                .Distinct().OrderBy(y => y).ToArray());
+        rows = rows.Select(row => row with
+        {
+            ParentRevisionIds = parentIds.GetValueOrDefault(row.RevisionId, Array.Empty<Guid>())
+        }).ToList();
         return new(exact, rows);
     }
 }

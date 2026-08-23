@@ -78,7 +78,9 @@ public sealed class TestExecutionEffectivityApiTests
             effectiveBaselineId: baseline16.Id);
         var revision01 = new TestProcedureRevision(procedure.Id, 1, "Verify route sequencing and discontinuities",
             "Preconditions", "Steps", "Expected", TestProcedureState.Approved, "test.author", now,
-            sourceTestChangeRequestId: Guid.NewGuid(), effectiveBaselineId: baseline17.Id);
+            sourceTestChangeRequestId: Guid.NewGuid(), effectiveBaselineId: baseline17.Id,
+            parentKind: VerificationProcedureParentKind.Derived,
+            derivedRationale: "This execution-effectivity fixture intentionally has no governed requirement parent.");
         var uncarriedProcedure = new TestProcedure(project.Id, "SYSTP-000999", "Approved but not carried",
             "test.author", now, TestProcedureLevel.System);
         var uncarriedRevision = new TestProcedureRevision(uncarriedProcedure.Id, 0, "Not carried anywhere",

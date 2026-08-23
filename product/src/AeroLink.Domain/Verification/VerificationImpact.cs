@@ -269,12 +269,19 @@ public sealed class VerificationImpactItem
             // Deciding that a procedure has to be written is the CreateNew action by definition; defaulting it
             // to LinkExisting would record the item as pointing at a procedure that does not exist.
             VerificationImpactOutcome.NewProcedureRequired => TestProcedureChangeAction.CreateNew,
+            // A retarget is an immutable controlled-content change when its target is not already present.
+            // The persistence-backed submit validator permits LinkExisting only for an existing (including
+            // #709 suspect) target; the domain default must not silently claim that a missing link was added.
+            VerificationImpactOutcome.ProcedureRetargeted => TestProcedureChangeAction.ModifyExisting,
             _ => TestProcedureChangeAction.LinkExisting,
         });
         if (outcome == VerificationImpactOutcome.NoTestRequired && action != TestProcedureChangeAction.NoTestRequired)
             throw new DomainException("A no-test decision must use the no-test-required action.");
         if (outcome == VerificationImpactOutcome.NewProcedureRequired && action != TestProcedureChangeAction.CreateNew)
             throw new DomainException("Deciding that a new verification artifact is required must use the create-new action.");
+        if (outcome == VerificationImpactOutcome.ProcedureRetargeted
+            && action is not (TestProcedureChangeAction.LinkExisting or TestProcedureChangeAction.ModifyExisting))
+            throw new DomainException("A retargeted verification artifact must use link-existing confirmation or a modify-existing controlled successor.");
         if (outcome != VerificationImpactOutcome.ProcedureCoverageConfirmed && preReleaseEvidenceRequired)
             throw new DomainException("Pre-release evidence can only be required for a selected verification artifact.");
         ResolvedProcedureId = procedureId;

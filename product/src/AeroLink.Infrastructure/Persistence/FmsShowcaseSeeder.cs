@@ -47,7 +47,7 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db, IProjectLadderPolicy
         var baseline15 = new CandidateBaseline("SW-01.50", 0, project.Id, release15.Id, null, "FMS 1.5 Released Software Build", "cm.fms", start.AddDays(150));
         foreach (var request in historical) baseline15.Select(request, "cm.fms", start.AddDays(150));
         baseline15.Freeze("cm.fms", start.AddDays(151)); db.CandidateBaselines.Add(baseline15); await db.SaveChangesAsync(ct);
-        await new RequirementBaselineMaterializer(db, new VerificationImpactService(db, policyResolver: resolver)).MaterializeAsync(baseline15.Id, "cm.fms", start.AddDays(152), ct);
+        await new RequirementBaselineMaterializer(db, new VerificationImpactService(db, policyResolver: resolver)).MaterializeLegacyHistoricalSeedAsync(baseline15.Id, "cm.fms", start.AddDays(152), ct);
 
         var currentRows = await (from member in db.BaselineRequirements.Where(x => x.BaselineId == baseline15.Id)
                                  join artifact in db.Requirements on member.ArtifactId equals artifact.Id
@@ -70,9 +70,9 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db, IProjectLadderPolicy
         var build15 = new SoftwareBuild(project.Id, release15.Id, baseline15.Id, "SW-01.50", "Released operational FMS 1.5 software configuration.", "cm.fms", start.AddDays(160));
         db.SoftwareBuilds.Add(build15); await db.SaveChangesAsync(ct);
         var procedures = new List<(TestProcedure Procedure, TestProcedureRevision Revision, List<Guid> Requirements)>();
-        procedures.AddRange(BuildProcedures(project.Id, systems.Select(x => x.Revision.Id).ToList(), 75, TestProcedureLevel.System, "SYSTP", start.AddDays(154)));
-        procedures.AddRange(BuildProcedures(project.Id, hlrs.Select(x => x.Revision.Id).ToList(), 160, TestProcedureLevel.HighLevel, "HLRTC", start.AddDays(155)));
-        procedures.AddRange(BuildProcedures(project.Id, llrs.Select(x => x.Revision.Id).ToList(), 280, TestProcedureLevel.LowLevel, "LLRTC", start.AddDays(156)));
+        procedures.AddRange(BuildProcedures(project.Id, baseline15.Id, systems.Select(x => x.Revision.Id).ToList(), 75, TestProcedureLevel.System, "SYSTP", start.AddDays(154)));
+        procedures.AddRange(BuildProcedures(project.Id, baseline15.Id, hlrs.Select(x => x.Revision.Id).ToList(), 160, TestProcedureLevel.HighLevel, "HLRTC", start.AddDays(155)));
+        procedures.AddRange(BuildProcedures(project.Id, baseline15.Id, llrs.Select(x => x.Revision.Id).ToList(), 280, TestProcedureLevel.LowLevel, "LLRTC", start.AddDays(156)));
         db.TestProcedures.AddRange(procedures.Select(x => x.Procedure)); db.TestProcedureRevisions.AddRange(procedures.Select(x => x.Revision));
         db.TestCoverage.AddRange(procedures.SelectMany(x => x.Requirements.Select(req => new TestRequirementCoverage(x.Revision.Id, req)))); await db.SaveChangesAsync(ct);
         // This fresh showcase is created after exact procedure manifests exist, so record Build 1.5's
@@ -464,7 +464,8 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db, IProjectLadderPolicy
                     $"Verify the approved behaviour of {change.BaseNumber}.", "Released FMS test environment",
                     "Exercise the requirement under nominal and boundary conditions.",
                     "Observed behaviour satisfies the approved requirement.", TestProcedureState.Approved,
-                    "verification.engineer", now);
+                    "verification.engineer", now, effectiveBaselineId: exact.Revision.EffectiveBaselineId,
+                    parentKind: VerificationProcedureParentKind.Allocated);
                 db.AddRange(record, revision, new TestRequirementCoverage(revision.Id, exact.Revision.Id));
                 procedure = new
                 {
@@ -524,7 +525,12 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db, IProjectLadderPolicy
             // Build 1.5 is imported history from before the engineering-case contract. Classify that history
             // explicitly instead of inventing case prose or weakening the rule for newly authored packages.
             if (review.MissingCaseFields().Count > 0)
+            {
                 db.Entry(review).Property(x => x.CaseContractVersion).CurrentValue = 0;
+                // Preserve the one existing historical submission byte-for-byte. A migrated Draft without
+                // this explicit seed marker must upgrade to v2 before it can start a new review cycle.
+                review.MarkAsLegacyHistoricalPackage("verification.engineer", now);
+            }
             review.Submit("verification.engineer", "assurance.reviewer", !incompleteReviewIds.Contains(review.Id), now);
             review.Approve("assurance.reviewer",
                 "Historical verification artifact changes and exact coverage were approved for released software build SW-01.50.", now);
@@ -783,14 +789,16 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db, IProjectLadderPolicy
         var request = new SystemChangeRequest(number, 0, projectId, releaseId, $"Establish FMS {label} requirement group {number[^2..]}", "The product baseline requires controlled FMS behavior.", "Operational and assurance needs were analyzed and allocated.", "Introduce the approved requirement set with verification criteria.", type == ChangeRequestType.System ? "systems.author" : "software.author", now, type, softwareLevel: type == ChangeRequestType.Software ? level : null);
         for (var j = 1; j <= count; j++) { var index = offset + j; var prefix = level == RequirementLevel.System ? "SYSR" : level == RequirementLevel.HighLevel ? "HLR" : "LLR"; var revision = index % 11 == 0 ? 2 : index % 5 == 0 ? 1 : 0;
             request.AddRequirementChange(request.AuthorId, $"{prefix}-{index:D6}", revision, level, RequirementChangeKind.Introduce, CurrentStatement(level, index), $"Allocated {Topics[(index - 1) % Topics.Length]} capability for the FMS 1.5 baseline.", "Test", now); }
+        request.MarkAsLegacyHistoricalPackage(request.AuthorId, now.AddMinutes(1));
         request.SubmitForReview(request.AuthorId, [new("assurance.reviewer", "Development Assurance Reviewer")], now.AddHours(2)); request.ApproveActiveStage("assurance.reviewer", now.AddDays(1)); return request;
     }
 
-    private static List<(TestProcedure, TestProcedureRevision, List<Guid>)> BuildProcedures(Guid projectId, List<Guid> requirements, int count, TestProcedureLevel level, string prefix, DateTimeOffset now)
+    private static List<(TestProcedure, TestProcedureRevision, List<Guid>)> BuildProcedures(Guid projectId,
+        Guid baselineId, List<Guid> requirements, int count, TestProcedureLevel level, string prefix, DateTimeOffset now)
     {
         var buckets = Enumerable.Range(0, count).Select(_ => new List<Guid>()).ToList(); for (var i = 0; i < requirements.Count; i++) buckets[i % count].Add(requirements[i]);
         return buckets.Select((ids, i) => { var number = $"{prefix}-{i + 1:D6}"; var procedure = new TestProcedure(projectId, number, $"Verify {level} FMS behavior group {i + 1:D3}", "test.author", now, level);
-            var revision = new TestProcedureRevision(procedure.Id, 0, "Verify all linked FMS requirement revisions.", "Load released FMS 1.5 software and the approved navigation database.", "Initialize the applicable mode, stimulate the defined inputs, and record each observable output.", "Every observed output meets the linked requirement acceptance criteria.", TestProcedureState.Approved, "test.author", now); return (procedure, revision, ids); }).ToList();
+            var revision = new TestProcedureRevision(procedure.Id, 0, "Verify all linked FMS requirement revisions.", "Load released FMS 1.5 software and the approved navigation database.", "Initialize the applicable mode, stimulate the defined inputs, and record each observable output.", "Every observed output meets the linked requirement acceptance criteria.", TestProcedureState.Approved, "test.author", now, effectiveBaselineId: baselineId, parentKind: VerificationProcedureParentKind.Allocated); return (procedure, revision, ids); }).ToList();
     }
 
     private static List<SystemChangeRequest> BuildActive16Requests(Guid projectId, Guid releaseId, Dictionary<string, CurrentRequirement> current, DateTimeOffset now)
@@ -807,6 +815,7 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db, IProjectLadderPolicy
             var request = new SystemChangeRequest(number, 0, projectId, releaseId, i == 1 ? "Introduce oceanic round-robin waypoint sequencing" : $"FMS 1.6 change package {i}", "Operational feedback or a product improvement requires controlled change.", "The impact to requirements, traces, and verification has been assessed.", "Update the applicable FMS behavior and verification assets.", type == ChangeRequestType.System ? "systems.author" : "software.author", now.AddDays(i), type, softwareLevel: packageLevel);
             if (i == 1) request.AddRequirementChange(request.AuthorId, "SYSR-000151", 0, RequirementLevel.System, RequirementChangeKind.Introduce, "The FMS shall support configurable round-robin sequencing of eligible oceanic waypoints.", "New FMS 1.6 capability.", "Test", now);
             else { var level = system ? RequirementLevel.System : i <= 4 ? RequirementLevel.HighLevel : RequirementLevel.LowLevel; var prefix = level == RequirementLevel.System ? "SYSR" : level == RequirementLevel.HighLevel ? "HLR" : "LLR"; var max = level == RequirementLevel.System ? 150 : level == RequirementLevel.HighLevel ? 400 : 700; var idx = ((i * 37) % max) + 1; var row = current[$"{prefix}-{idx:D6}"]; request.AddRequirementChange(request.AuthorId, $"{prefix}-{idx:D6}", row.Revision.Revision + 1, level, RequirementChangeKind.Modify, CurrentStatement(level, idx) + " The behavior shall include the approved FMS 1.6 refinement.", "Product improvement or corrective action.", "Test", now); }
+            request.MarkAsLegacyHistoricalPackage(request.AuthorId, now.AddMinutes(1));
             if (i <= 2) { request.SubmitForReview(request.AuthorId, [new("lead.reviewer", "Maya Patel")], now.AddDays(i).AddHours(1)); request.ApproveActiveStage("lead.reviewer", now.AddDays(i).AddHours(2)); }
             else if (i == 3) { request.SubmitForReview(request.AuthorId, [new("lead.reviewer", "Maya Patel"), new("manager.reviewer", "Olivia Chen")], now.AddDays(i).AddHours(1)); request.ApproveActiveStage("lead.reviewer", now.AddDays(i).AddHours(2)); request.ApproveActiveStage("manager.reviewer", now.AddDays(i).AddHours(3)); }
             else if (i == 4) request.SubmitForReview(request.AuthorId, [new("lead.reviewer", "Maya Patel"), new("manager.reviewer", "Olivia Chen")], now.AddDays(i).AddHours(1));

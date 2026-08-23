@@ -37,6 +37,7 @@ public sealed class TestProcedureBaselineMaterializer(AeroLinkDbContext db,
         var ladderPolicy = policyResolver is null
             ? (policy ?? LegacyLadderPolicy.Instance)
             : await policyResolver.ResolveAsync(baseline.ProjectId, ct);
+        using var savePolicyScope = db.UseSaveBoundaryPolicy(ladderPolicy);
         if (baseline.State != CandidateBaselineState.Frozen)
             throw new DomainException("Freeze the baseline before materializing its verification artifacts.");
         if (baseline.RequirementsMaterializedAt is null)
@@ -60,6 +61,8 @@ public sealed class TestProcedureBaselineMaterializer(AeroLinkDbContext db,
         // This is deliberately repeated here even though current API writes enforce the same scope: legacy or
         // malformed controlled data must fail closed at the boundary where it would become real coverage.
         await ValidateDrivingRequirementScopeAsync(baseline.Id, tcrs, procedureByBase, current, ct);
+        foreach (var tcr in tcrs)
+            await TestChangeReviewRequirementScope.ValidateRetargetPlansForSubmissionAsync(db, tcr, ct, ladderPolicy);
 
         var created = 0;
         // What each proposal became, so the requirement links it proposed can bind to a revision that exists.
@@ -77,7 +80,8 @@ public sealed class TestProcedureBaselineMaterializer(AeroLinkDbContext db,
                     actorId, now, change.Level, ladderPolicy);
                 db.TestProcedures.Add(procedure);
                 procedureByBase.Add(procedure.BaseNumber, procedure);
-                var revision = CreateRevision(procedure.Id, change, pair.tcr, baseline.Id, now, TestProcedureState.Approved);
+                var revision = CreateRevision(procedure.Id, change, pair.tcr, baseline.Id, now,
+                    TestProcedureState.Approved);
                 db.TestProcedureRevisions.Add(revision);
                 current[procedure.Id] = revision;
                 created++;
@@ -176,26 +180,67 @@ public sealed class TestProcedureBaselineMaterializer(AeroLinkDbContext db,
         var added = 0;
         foreach (var entry in materialized.Where(x => x.Change.Kind != TestProcedureChangeKind.Retire))
         {
+            // Derived Case/Procedure revisions are deliberately standalone. They
+            // remain in the baseline, but do not create requirement coverage that
+            // could satisfy an upstream obligation.
             var driving = DrivingRequirements(entry.Change).Distinct().ToHashSet();
             var removed = RemovedRequirements(entry.Change).Distinct().ToHashSet();
             var prior = entry.PriorRevisionId is null
                 ? []
                 : await db.TestCoverage.AsNoTracking()
                     .Where(x => x.ProcedureRevisionId == entry.PriorRevisionId.Value
-                        && carriedRequirementIds.Contains(x.RequirementRevisionId)).ToListAsync(ct);
-            foreach (var predecessor in prior.Where(x => !removed.Contains(x.RequirementRevisionId)))
+                        && carriedRequirementIds.Contains(x.RequirementRevisionId)
+                        // #709 suspect carry-forward is lifecycle evidence, not an approved parent to copy
+                        // into the new revision. A fresh explicit selection below creates a non-suspect link.
+                        && !x.IsSuspect
+                        && entry.Change.ParentKind != VerificationProcedureParentKind.Derived).ToListAsync(ct);
+            if (entry.Change.ParentKind == VerificationProcedureParentKind.Derived)
+                continue;
+
+            // ParentRevisionIdsJson is the immutable full selection for a new
+            // package. Older authoring callers only supplied the driving delta,
+            // however, and the aggregate retained that delta in the parent
+            // field for compatibility. For a modification, resolve that
+            // legacy shape against the predecessor before creating links. A
+            // retained link is then copied through the #709 lifecycle rather
+            // than silently discarded or treated as a newly authored link.
+            var declaredParents = ParentRequirements(entry.Change).Distinct().ToHashSet();
+            var finalParents = entry.Change.Kind == TestProcedureChangeKind.Modify
+                && entry.Tcr.CaseContractVersion < TestChangeReview.CurrentCaseContractVersion
+                && declaredParents.SetEquals(driving)
+                ? prior.Select(x => x.RequirementRevisionId).Except(removed).Concat(driving).ToHashSet()
+                : declaredParents;
+            var expectedFinalParents = entry.Change.Kind == TestProcedureChangeKind.Modify
+                ? prior.Select(x => x.RequirementRevisionId).Except(removed).Concat(driving).ToHashSet()
+                : driving;
+            if (!finalParents.SetEquals(expectedFinalParents))
+                throw new DomainException(
+                    $"{entry.Change.DisplayNumber} does not carry the exact final parent selection for its coverage delta.");
+            if (!driving.IsSubsetOf(finalParents))
+                throw new DomainException($"{entry.Change.DisplayNumber} driving requirement deltas are not contained in its exact final parent selection.");
+            if (finalParents.Overlaps(removed))
+                throw new DomainException($"{entry.Change.DisplayNumber} retains a requirement that it also removes.");
+
+            // DrivingRequirementRevisionIdsJson is the delta. The immutable
+            // ParentRevisionIdsJson is the complete final selection. Retained
+            // predecessors must use #709's existing lifecycle so suspect and
+            // confirmation evidence is carried without changing released history.
+            var produced = new HashSet<Guid>();
+            foreach (var predecessor in prior.Where(x => finalParents.Contains(x.RequirementRevisionId)))
             {
-                db.TestCoverage.Add(driving.Contains(predecessor.RequirementRevisionId)
-                    ? new TestRequirementCoverage(entry.RevisionId, predecessor.RequirementRevisionId)
-                    : TestRequirementCoverage.RetainedByProcedureRevision(entry.RevisionId, predecessor));
+                db.TestCoverage.Add(TestRequirementCoverage.RetainedByProcedureRevision(entry.RevisionId, predecessor));
+                produced.Add(predecessor.RequirementRevisionId);
                 added++;
             }
             var priorIds = prior.Select(x => x.RequirementRevisionId).ToHashSet();
-            foreach (var requirementRevisionId in driving.Where(x => !priorIds.Contains(x)))
+            foreach (var requirementRevisionId in finalParents.Where(x => !priorIds.Contains(x)))
             {
                 db.TestCoverage.Add(new TestRequirementCoverage(entry.RevisionId, requirementRevisionId));
+                produced.Add(requirementRevisionId);
                 added++;
             }
+            if (!produced.SetEquals(finalParents))
+                throw new DomainException($"{entry.Change.DisplayNumber} materialized coverage does not equal its exact final parent selection.");
         }
         return added;
 
@@ -212,28 +257,45 @@ public sealed class TestProcedureBaselineMaterializer(AeroLinkDbContext db,
             var governedIds = governed.Select(x => x.RevisionId).ToHashSet();
             foreach (var change in tcr.ProcedureChanges.Where(x => x.Kind != TestProcedureChangeKind.Retire))
             {
-                var driving = DrivingRequirements(change).Distinct().ToHashSet();
+                var driving = ParentRequirements(change).Distinct().ToHashSet();
                 var removed = RemovedRequirements(change).Distinct().ToHashSet();
+                var parentIds = ParseParentIds(change.ParentRevisionIdsJson, change.DisplayNumber);
+                ExactParentSelectionPolicy.Validate(
+                    VerificationProcedureParentPolicy.Classification(change.ParentKind), parentIds,
+                    change.DerivedRationale, tcr.Discipline == TestChangeReviewDiscipline.System
+                        ? "System Procedure"
+                        : "software Case");
+                if (change.ParentKind == VerificationProcedureParentKind.Derived)
+                    continue;
                 if (driving.Overlaps(removed))
                     throw new DomainException($"{change.DisplayNumber} both adds and removes the same requirement coverage.");
-                var outside = driving.Concat(removed)
-                    .FirstOrDefault(x => !governedIds.Contains(x));
+                HashSet<Guid> priorIds = [];
+                if (change.Kind == TestProcedureChangeKind.Modify)
+                {
+                    if (!procedureByBase.TryGetValue(change.BaseNumber, out var procedure)
+                        || !current.TryGetValue(procedure.Id, out var priorRevision))
+                        throw new DomainException($"{change.DisplayNumber} has no carried predecessor coverage to modify.");
+                    priorIds = (await db.TestCoverage.AsNoTracking()
+                            .Where(x => x.ProcedureRevisionId == priorRevision.Id
+                                && !x.IsSuspect
+                                && db.BaselineRequirements.Any(b => b.BaselineId == baselineId
+                                    && b.RevisionId == x.RequirementRevisionId))
+                            .Select(x => x.RequirementRevisionId).ToListAsync(ct)).ToHashSet();
+                    var absent = removed.FirstOrDefault(x => !priorIds.Contains(x));
+                    if (absent != Guid.Empty)
+                        throw new DomainException(
+                            $"{change.DisplayNumber} cannot remove requirement revision {absent} because its predecessor does not cover it.");
+                }
+                // Retained exact parents are governed by the predecessor
+                // procedure's current build coverage even when the new TCR's
+                // impact package only names the changed requirement. They are
+                // not a fresh out-of-scope allocation.
+                var outside = parentIds.Concat(removed)
+                    .FirstOrDefault(x => !governedIds.Contains(x) && !priorIds.Contains(x));
                 if (outside != Guid.Empty)
                     throw new DomainException(
                         $"{change.DisplayNumber} names requirement revision {outside}, which is outside {tcr.DisplayNumber}'s governed package/build scope.");
                 if (change.Kind != TestProcedureChangeKind.Modify) continue;
-                if (!procedureByBase.TryGetValue(change.BaseNumber, out var procedure)
-                    || !current.TryGetValue(procedure.Id, out var priorRevision))
-                    throw new DomainException($"{change.DisplayNumber} has no carried predecessor coverage to modify.");
-                var priorIds = (await db.TestCoverage.AsNoTracking()
-                        .Where(x => x.ProcedureRevisionId == priorRevision.Id
-                            && db.BaselineRequirements.Any(b => b.BaselineId == baselineId
-                                && b.RevisionId == x.RequirementRevisionId))
-                        .Select(x => x.RequirementRevisionId).ToListAsync(ct)).ToHashSet();
-                var absent = removed.FirstOrDefault(x => !priorIds.Contains(x));
-                if (absent != Guid.Empty)
-                    throw new DomainException(
-                        $"{change.DisplayNumber} cannot remove requirement revision {absent} because its predecessor does not cover it.");
                 if ((removed.Count != 0 || driving.Any(x => !priorIds.Contains(x)))
                     && string.IsNullOrWhiteSpace(change.CoverageChangeRationale))
                     throw new DomainException(
@@ -265,7 +327,12 @@ public sealed class TestProcedureBaselineMaterializer(AeroLinkDbContext db,
         CancellationToken ct)
     {
         var byRequirement = materialized
-            .Where(x => x.Change.Kind != TestProcedureChangeKind.Retire)
+            .Where(x => x.Change.Kind != TestProcedureChangeKind.Retire
+                && x.Change.ParentKind != VerificationProcedureParentKind.Derived)
+            // Settlement is attributable to the driving/addition delta, not every retained parent in a
+            // successor's immutable final selection. A retained parent may be present merely because the
+            // successor carries an existing link forward; it must not settle an unrelated NewProcedureRequired
+            // decision that this package never addressed.
             .SelectMany(x => DrivingRequirements(x.Change).Select(requirementRevisionId => new
             {
                 requirementRevisionId,
@@ -307,7 +374,8 @@ private static TestProcedureRevision CreateRevision(Guid procedureId, TestProced
     TestChangeReview tcr, Guid baselineId, DateTimeOffset now, TestProcedureState state) =>
     new(procedureId, change.Revision, change.Objective, change.Preconditions, change.Steps,
         change.ExpectedResult, state, tcr.SubmittedBy ?? tcr.DecidedBy ?? "aerolink.lifecycle", now,
-        null, tcr.Id, baselineId, SourceSnapshotJson(tcr));
+        null, tcr.Id, baselineId, SourceSnapshotJson(tcr),
+        parentKind: change.ParentKind, derivedRationale: change.DerivedRationale);
 
 private static string SourceSnapshotJson(TestChangeReview tcr)
 {
@@ -330,8 +398,41 @@ private static string SourceSnapshotJson(TestChangeReview tcr)
 
     private static IReadOnlyList<Guid> DrivingRequirements(TestProcedureChange change)
     {
-        try { return JsonSerializer.Deserialize<List<Guid>>(change.DrivingRequirementRevisionIdsJson) ?? []; }
-        catch (JsonException) { return []; }
+        try
+        {
+            return ExactParentSelectionPolicy.NormalizeIds(
+                JsonSerializer.Deserialize<List<Guid>>(string.IsNullOrWhiteSpace(change.DrivingRequirementRevisionIdsJson)
+                    ? "[]" : change.DrivingRequirementRevisionIdsJson) ?? [], change.DisplayNumber);
+        }
+        catch (JsonException)
+        {
+            throw new DomainException($"{change.DisplayNumber} carries malformed driving requirement revisions.");
+        }
+    }
+
+    private static IReadOnlyList<Guid> ParentRequirements(TestProcedureChange change)
+    {
+        if (change.ParentKind == VerificationProcedureParentKind.Derived)
+            return [];
+        var json = string.IsNullOrWhiteSpace(change.ParentRevisionIdsJson)
+            || change.ParentRevisionIdsJson.Trim() == "[]"
+            ? change.DrivingRequirementRevisionIdsJson
+            : change.ParentRevisionIdsJson;
+        return ParseParentIds(json, change.DisplayNumber);
+    }
+
+    private static IReadOnlyList<Guid> ParseParentIds(string json, string displayNumber)
+    {
+        try
+        {
+            return ExactParentSelectionPolicy.NormalizeIds(
+                JsonSerializer.Deserialize<List<Guid>>(string.IsNullOrWhiteSpace(json) ? "[]" : json)
+                    ?? [], displayNumber);
+        }
+        catch (JsonException)
+        {
+            throw new DomainException($"{displayNumber} carries malformed exact parent revisions.");
+        }
     }
 
     private static IReadOnlyList<Guid> RemovedRequirements(TestProcedureChange change)

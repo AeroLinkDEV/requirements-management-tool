@@ -269,11 +269,12 @@ test('an unsaved Modify target and its driving selections survive search, paging
   await dialog.getByRole('combobox', { name: 'Procedure' }).selectOption(unsavedTarget)
 
   // Check one governed driving requirement for the selected target (stale-map Finding C).
-  const drivingFieldset = dialog.locator('fieldset.drivingRequirements').last()
+  const drivingFieldset = dialog.locator('fieldset.drivingRequirements').filter({ hasText: 'Requirements this' }).first()
+  const coverageFieldset = dialog.locator('fieldset.drivingRequirements').filter({ hasText: 'Current exact coverage' }).first()
   const drivingBoxes = drivingFieldset.locator('input[type="checkbox"]')
   await expect(drivingBoxes.first()).toBeVisible({ timeout: 30_000 })
   await drivingBoxes.first().check()
-  const coverageIdentity = (await dialog.locator('fieldset.drivingRequirements').first()
+  const coverageIdentity = (await coverageFieldset
     .locator('label.drivingChoice').first().textContent())!.trim()
   expect(coverageIdentity).toMatch(/SYSR-\d{6}\.\d{2}/)
 
@@ -298,14 +299,14 @@ test('an unsaved Modify target and its driving selections survive search, paging
   // The retained target keeps its exact carried revision and exact current coverage across paging.
   await expect(dialog.locator('select[aria-label="Procedure"] option').filter({ hasText: unsavedTarget }))
     .toContainText(`${unsavedTarget}.00`)
-  await expect(dialog.locator('fieldset.drivingRequirements').first()).toContainText('Current exact coverage')
-  await expect(dialog.locator('fieldset.drivingRequirements').first().locator('label.drivingChoice'))
+  await expect(coverageFieldset).toContainText('Current exact coverage')
+  await expect(coverageFieldset.locator('label.drivingChoice'))
     .toHaveCount(1, { timeout: 15_000 })
-  await expect(dialog.locator('fieldset.drivingRequirements').first()).toContainText(coverageIdentity)
+  await expect(coverageFieldset).toContainText(coverageIdentity)
   await targetPager.getByRole('button', { name: 'Next' }).click()
-  await expect(dialog.locator('fieldset.drivingRequirements').first()).toContainText(coverageIdentity)
+  await expect(coverageFieldset).toContainText(coverageIdentity)
   await targetPager.getByRole('button', { name: 'Previous' }).click()
-  await expect(dialog.locator('fieldset.drivingRequirements').first()).toContainText(coverageIdentity)
+  await expect(coverageFieldset).toContainText(coverageIdentity)
 
   // Finding C: switching to another target while a search excludes the previous selection must clear the
   // previous target's driving selections from the rendered candidate list (no stale unchecked choices
