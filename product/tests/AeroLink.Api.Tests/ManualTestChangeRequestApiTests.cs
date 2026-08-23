@@ -57,7 +57,9 @@ public sealed class ManualTestChangeRequestApiTests
             var scr = new SystemChangeRequest(number, 0, project.Id, release.Id, "Oceanic", "P", "A", "S", "author", now,
                 type: ChangeRequestType.Software, softwareLevel: level);
             scr.AddRequirementChange("author", requirement, 0, level, RequirementChangeKind.Introduce,
-                "The FMS software shall sequence oceanic waypoints.", "New capability", "Analysis", now);
+                "The FMS software shall sequence oceanic waypoints.",
+                "This isolated API fixture intentionally stands alone without a governed upstream requirement.",
+                "Analysis", now, attributesJson: "{\"derived\":true}");
             scr.SubmitForReview("author", [new("reviewer", "Reviewer")], now);
             scr.ApproveActiveStage("reviewer", now);
             return scr;
@@ -849,7 +851,9 @@ public sealed class ManualTestChangeRequestApiTests
                 "HLR change", "P", "A", "S", "author", now, ChangeRequestType.Software,
                 softwareLevel: RequirementLevel.HighLevel);
             hlr.AddRequirementChange("author", "HLR-000001", 0, RequirementLevel.HighLevel,
-                RequirementChangeKind.Introduce, "The HLR shall expose the new behavior.", "r", "v", now);
+                RequirementChangeKind.Introduce, "The HLR shall expose the new behavior.",
+                "This isolated HLR fixture intentionally stands alone without a governed upstream requirement.",
+                "v", now, attributesJson: "{\"derived\":true}");
             hlr.SubmitForReview("author", [new("reviewer", "Reviewer")], now);
             hlr.ApproveActiveStage("reviewer", now);
 
@@ -857,7 +861,9 @@ public sealed class ManualTestChangeRequestApiTests
                 "LLR change", "P", "A", "S", "author", now, ChangeRequestType.Software,
                 softwareLevel: RequirementLevel.LowLevel);
             llr.AddRequirementChange("author", "LLR-000001", 0, RequirementLevel.LowLevel,
-                RequirementChangeKind.Introduce, "The LLR shall implement the new behavior.", "r", "v", now);
+                RequirementChangeKind.Introduce, "The LLR shall implement the new behavior.",
+                "This isolated LLR fixture intentionally stands alone without a governed upstream requirement.",
+                "v", now, attributesJson: "{\"derived\":true}");
             llr.SubmitForReview("author", [new("reviewer", "Reviewer")], now);
             llr.ApproveActiveStage("reviewer", now);
 
@@ -867,7 +873,9 @@ public sealed class ManualTestChangeRequestApiTests
                 RequirementLevel.HighLevel, now);
             var hlrRevision = new RequirementRevision(hlrArtifact.Id, 0,
                 "The HLR shall expose the new behavior.", "Case authoring coverage.", "Test",
-                RequirementRevisionState.Active, hlr.Id, baseline.Id, now);
+                RequirementRevisionState.Active, hlr.Id, baseline.Id, now,
+                RequirementParentKind.Derived,
+                "This isolated HLR fixture intentionally stands alone without a governed upstream requirement.");
             baseline.Select(hlr, "manual.engineer", now);
             baseline.Freeze("manual.engineer", now);
             baseline.MarkRequirementsMaterialized("manual.engineer", new string('a', 64), 1, now);

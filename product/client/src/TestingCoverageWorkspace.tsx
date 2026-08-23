@@ -479,7 +479,9 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, re
       }),
     })
     setResolving(undefined)
-    setSaved(`Decision recorded for ${item.subjectDisplayNumber}.`)
+    setSaved(chosen === 'ProcedureRetargeted'
+      ? `Decision recorded for ${item.subjectDisplayNumber}. A new exact parent will be created only by the linked ModifyExisting successor.`
+      : `Decision recorded for ${item.subjectDisplayNumber}.`)
   }, 'The decision could not be recorded.')
 
   const reopen = (item: ImpactItem, rationale: string) => act(async () => {

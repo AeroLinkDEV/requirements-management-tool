@@ -177,10 +177,25 @@ public sealed class SectionPlacementOnMaterializationTests
                 await setupDb.Database.EnsureCreatedAsync();
                 (projectId, releaseId, navigation, _) = await SeedAsync(setupDb, now);
 
-                var introduceTarget = ApprovedScr("HLRCR-00001", "SWR-00002375", 0, RequirementChangeKind.Introduce,
-                    "The software shall sequence oceanic waypoints.", projectId, releaseId, now, navigation);
-                var first = FrozenBaseline("SW-00.10", projectId, releaseId, null, introduceTarget, now);
-                setupDb.AddRange(introduceTarget, first);
+                var introduceTarget = new SystemChangeRequest("HLRCR-00001", 0, projectId, releaseId,
+                    "Introduce", "P", "A", "S", "author", now, ChangeRequestType.Software,
+                    softwareLevel: RequirementLevel.HighLevel);
+                var first = new CandidateBaseline("SW-00.10", 0, projectId, releaseId, null, "SW-00.10", "cm", now);
+                // Both HLR introductions in this lifecycle scenario are allocated to this exact System
+                // revision. A sibling HLR would exercise the wrong-level refusal rather than the rollback.
+                var systemArtifact = new RequirementArtifact(projectId, "SYSR-00002374", RequirementLevel.System, now);
+                var systemRevision = new RequirementRevision(systemArtifact.Id, 0, "The system shall retain selected waypoints.",
+                    "System capability.", "Test", RequirementRevisionState.Active, introduceTarget.Id, first.Id, now);
+                introduceTarget.AddRequirementChange("author", "SWR-00002375", 0, RequirementLevel.HighLevel,
+                    RequirementChangeKind.Introduce, "The software shall sequence oceanic waypoints.", "Rationale", "Test", now,
+                    targetSectionId: navigation, attributesJson: "{\"derived\":true}",
+                    proposedUpstreamRevisionIdsJson: "[]");
+                introduceTarget.SubmitForReview("author", [new("reviewer", "Reviewer")], now);
+                introduceTarget.ApproveActiveStage("reviewer", now);
+                first.Select(introduceTarget, "cm", now);
+                first.Freeze("cm", now);
+                setupDb.AddRange(introduceTarget, first, systemArtifact, systemRevision,
+                    new BaselineRequirementSelection(first.Id, systemArtifact.Id, systemRevision.Id));
                 await setupDb.SaveChangesAsync();
                 await new RequirementBaselineMaterializer(setupDb, new VerificationImpactService(setupDb))
                     .MaterializeAsync(first.Id, "cm", now, default);
@@ -192,16 +207,28 @@ public sealed class SectionPlacementOnMaterializationTests
                                             select revision).SingleAsync();
                 targetArtifactId = targetRevision.ArtifactId;
                 var introduceSource = ApprovedScr("HLRCR-00002", "SWR-00002376", 0, RequirementChangeKind.Introduce,
-                    "The software shall retain the selected waypoint.", projectId, releaseId, now, navigation,
-                    JsonSerializer.Serialize(new[] { targetRevision.Id }));
+                    "The software shall retain the selected waypoint.", projectId, releaseId, now, navigation);
                 var second = FrozenBaseline("SW-00.20", projectId, releaseId, first.Id, introduceSource, now);
                 setupDb.AddRange(introduceSource, second);
                 await setupDb.SaveChangesAsync();
                 await new RequirementBaselineMaterializer(setupDb, new VerificationImpactService(setupDb))
                     .MaterializeAsync(second.Id, "cm", now, default);
 
+                var sourceRevision = await (from artifact in setupDb.Requirements
+                                            where artifact.ProjectId == projectId && artifact.BaseNumber == "SWR-00002376"
+                                            join revision in setupDb.RequirementRevisions on artifact.Id equals revision.ArtifactId
+                                            where revision.Revision == 0
+                                            select revision).SingleAsync();
+                // This is a non-parent provenance relation. It is deliberately not used for the XOR parent
+                // decision, but its carried exact identity must still receive #709 suspect attribution when
+                // the referenced requirement gets a successor.
+                setupDb.RequirementTraces.Add(new RequirementTraceLink(projectId, sourceRevision.Id, targetRevision.Id,
+                    RequirementTraceType.DerivedFrom, "Source wording derives from the earlier requirement.", now));
+                await setupDb.SaveChangesAsync();
+
                 var reviseTarget = ApprovedScr("HLRCR-00003", "SWR-00002375", 1, RequirementChangeKind.Modify,
-                    "The software shall sequence the selected waypoint.", projectId, releaseId, now, navigation);
+                    "The software shall sequence the selected waypoint.", projectId, releaseId, now, navigation,
+                    JsonSerializer.Serialize(new[] { systemRevision.Id }));
                 var third = FrozenBaseline("SW-00.30", projectId, releaseId, second.Id, reviseTarget, now);
                 thirdBaselineId = third.Id;
                 setupDb.AddRange(reviseTarget, third);
@@ -248,7 +275,9 @@ public sealed class SectionPlacementOnMaterializationTests
                 Assert.Equal(ExactLinkLifecycleCauseKind.InternalRequirementRevision, lifecycle.CauseKind);
                 Assert.Equal(currentTarget.Id, lifecycle.CauseRequirementRevisionId);
                 Assert.Single(await retryDb.ExactLinkSuspectEvents.ToListAsync());
-                Assert.Equal(2, await retryDb.RequirementTraces.CountAsync());
+                // The successor also carries its newly authored AllocatedFrom parent; the original
+                // DerivedFrom row and its carried suspect row remain immutable alongside it.
+                Assert.Equal(3, await retryDb.RequirementTraces.CountAsync());
             }
 
             await using (var idempotenceDb = new AeroLinkDbContext(options))
@@ -259,7 +288,7 @@ public sealed class SectionPlacementOnMaterializationTests
                 Assert.Contains("already materialized", retryError.Message);
                 Assert.Single(await idempotenceDb.ExactLinkSuspectLifecycles.ToListAsync());
                 Assert.Single(await idempotenceDb.ExactLinkSuspectEvents.ToListAsync());
-                Assert.Equal(2, await idempotenceDb.RequirementTraces.CountAsync());
+                Assert.Equal(3, await idempotenceDb.RequirementTraces.CountAsync());
             }
         }
         finally { File.Delete(path); }
@@ -323,6 +352,7 @@ public sealed class SectionPlacementOnMaterializationTests
         var scr = new SystemChangeRequest(scrNumber, 0, projectId, releaseId, kind.ToString(), "P", "A", "S", "author", now, ChangeRequestType.Software, softwareLevel: RequirementLevel.HighLevel);
         scr.AddRequirementChange("author", requirementNumber, revision, RequirementLevel.HighLevel, kind, statement,
             "Rationale", "Test", now, targetSectionId: targetSectionId,
+            attributesJson: proposedUpstreamRevisionIdsJson == "[]" ? "{\"derived\":true}" : "{}",
             proposedUpstreamRevisionIdsJson: proposedUpstreamRevisionIdsJson);
         scr.SubmitForReview("author", [new("reviewer", "Reviewer")], now);
         scr.ApproveActiveStage("reviewer", now);

@@ -1,11 +1,11 @@
 {
   "schemaVersion": "aerolink-api-test-intent/v2",
   "totals": {
-    "tests": 537,
-    "cases": 591,
+    "tests": 541,
+    "cases": 595,
     "classes": 94,
-    "hostedTests": 524,
-    "hostedCases": 569,
+    "hostedTests": 528,
+    "hostedCases": 573,
     "nonHostedTests": 8,
     "nonHostedCases": 17,
     "unknownHostTests": 5,
@@ -21,18 +21,18 @@
     "http-boundary": {
       "label": "HTTP boundary: route, status, JSON shape",
       "level": "API (must stay hosted)",
-      "tests": 341,
-      "cases": 375,
+      "tests": 343,
+      "cases": 377,
       "unknownCases": 0,
       "classes": 80
     },
     "ef-translation": {
       "label": "EF translation / relational constraints",
       "level": "Infrastructure (needs a database, not a host)",
-      "tests": 103,
-      "cases": 110,
+      "tests": 105,
+      "cases": 112,
       "unknownCases": 0,
-      "classes": 42
+      "classes": 43
     },
     "auth-policy": {
       "label": "Authentication / authorization wiring",
@@ -566,8 +566,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 108,
-        "end": 131
+        "start": 117,
+        "end": 142
       }
     },
     {
@@ -583,8 +583,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 763,
-        "end": 777
+        "start": 766,
+        "end": 780
       }
     },
     {
@@ -600,8 +600,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 720,
-        "end": 735
+        "start": 723,
+        "end": 738
       }
     },
     {
@@ -618,8 +618,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 373,
-        "end": 412
+        "start": 377,
+        "end": 416
       }
     },
     {
@@ -636,8 +636,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 265,
-        "end": 371
+        "start": 271,
+        "end": 375
       }
     },
     {
@@ -654,8 +654,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 430,
-        "end": 449
+        "start": 434,
+        "end": 453
       }
     },
     {
@@ -671,8 +671,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 414,
-        "end": 428
+        "start": 418,
+        "end": 432
       }
     },
     {
@@ -688,8 +688,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 742,
-        "end": 756
+        "start": 745,
+        "end": 759
       }
     },
     {
@@ -705,8 +705,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 786,
-        "end": 826
+        "start": 789,
+        "end": 829
       }
     },
     {
@@ -723,8 +723,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 133,
-        "end": 263
+        "start": 144,
+        "end": 269
       }
     },
     {
@@ -741,8 +741,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 490,
-        "end": 718
+        "start": 493,
+        "end": 721
       }
     },
     {
@@ -759,8 +759,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 451,
-        "end": 488
+        "start": 455,
+        "end": 491
       }
     },
     {
@@ -2029,7 +2029,7 @@
       ],
       "sourceLines": {
         "start": 23,
-        "end": 140
+        "end": 146
       }
     },
     {
@@ -2046,8 +2046,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 198,
-        "end": 238
+        "start": 200,
+        "end": 240
       }
     },
     {
@@ -2064,8 +2064,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 251,
-        "end": 432
+        "start": 257,
+        "end": 442
       }
     },
     {
@@ -2082,8 +2082,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 161,
-        "end": 196
+        "start": 163,
+        "end": 198
       }
     },
     {
@@ -2100,8 +2100,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 132,
-        "end": 159
+        "start": 134,
+        "end": 161
       }
     },
     {
@@ -2170,8 +2170,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 222,
-        "end": 241
+        "start": 223,
+        "end": 242
       }
     },
     {
@@ -2188,8 +2188,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 243,
-        "end": 253
+        "start": 244,
+        "end": 254
       }
     },
     {
@@ -2206,8 +2206,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 199,
-        "end": 220
+        "start": 200,
+        "end": 221
       }
     },
     {
@@ -2224,8 +2224,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 156,
-        "end": 169
+        "start": 157,
+        "end": 170
       }
     },
     {
@@ -2242,8 +2242,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 135,
-        "end": 149
+        "start": 136,
+        "end": 150
       }
     },
     {
@@ -2260,8 +2260,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 176,
-        "end": 197
+        "start": 177,
+        "end": 198
       }
     },
     {
@@ -2816,7 +2816,7 @@
       ],
       "sourceLines": {
         "start": 26,
-        "end": 141
+        "end": 150
       }
     },
     {
@@ -3454,8 +3454,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 516,
-        "end": 528
+        "start": 518,
+        "end": 530
       }
     },
     {
@@ -3471,8 +3471,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 350,
-        "end": 364
+        "start": 352,
+        "end": 366
       }
     },
     {
@@ -3488,8 +3488,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 161,
-        "end": 178
+        "start": 163,
+        "end": 180
       }
     },
     {
@@ -3506,8 +3506,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 325,
-        "end": 347
+        "start": 327,
+        "end": 349
       }
     },
     {
@@ -3524,8 +3524,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 268,
-        "end": 300
+        "start": 270,
+        "end": 302
       }
     },
     {
@@ -3541,8 +3541,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 667,
-        "end": 679
+        "start": 669,
+        "end": 681
       }
     },
     {
@@ -3558,8 +3558,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 400,
-        "end": 412
+        "start": 402,
+        "end": 414
       }
     },
     {
@@ -3575,8 +3575,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 303,
-        "end": 318
+        "start": 305,
+        "end": 320
       }
     },
     {
@@ -3593,8 +3593,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 446,
-        "end": 475
+        "start": 448,
+        "end": 477
       }
     },
     {
@@ -3610,8 +3610,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 530,
-        "end": 543
+        "start": 532,
+        "end": 545
       }
     },
     {
@@ -3628,8 +3628,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 185,
-        "end": 215
+        "start": 187,
+        "end": 217
       }
     },
     {
@@ -3646,8 +3646,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 1209,
-        "end": 1239
+        "start": 1217,
+        "end": 1247
       }
     },
     {
@@ -3664,8 +3664,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 681,
-        "end": 705
+        "start": 683,
+        "end": 707
       }
     },
     {
@@ -3681,8 +3681,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 930,
-        "end": 962
+        "start": 938,
+        "end": 970
       }
     },
     {
@@ -3698,8 +3698,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 1093,
-        "end": 1117
+        "start": 1101,
+        "end": 1125
       }
     },
     {
@@ -3715,8 +3715,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 1119,
-        "end": 1145
+        "start": 1127,
+        "end": 1153
       }
     },
     {
@@ -3732,8 +3732,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 964,
-        "end": 1000
+        "start": 972,
+        "end": 1008
       }
     },
     {
@@ -3750,8 +3750,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 1147,
-        "end": 1186
+        "start": 1155,
+        "end": 1194
       }
     },
     {
@@ -3767,8 +3767,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 591,
-        "end": 605
+        "start": 593,
+        "end": 607
       }
     },
     {
@@ -3785,8 +3785,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 1368,
-        "end": 1416
+        "start": 1376,
+        "end": 1424
       }
     },
     {
@@ -3803,8 +3803,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 1264,
-        "end": 1317
+        "start": 1272,
+        "end": 1325
       }
     },
     {
@@ -3821,8 +3821,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 1319,
-        "end": 1366
+        "start": 1327,
+        "end": 1374
       }
     },
     {
@@ -3838,8 +3838,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 1051,
-        "end": 1091
+        "start": 1059,
+        "end": 1099
       }
     },
     {
@@ -3856,8 +3856,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 419,
-        "end": 444
+        "start": 421,
+        "end": 446
       }
     },
     {
@@ -3873,8 +3873,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 763,
-        "end": 793
+        "start": 765,
+        "end": 795
       }
     },
     {
@@ -3890,8 +3890,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 369,
-        "end": 398
+        "start": 371,
+        "end": 400
       }
     },
     {
@@ -3907,8 +3907,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 1241,
-        "end": 1262
+        "start": 1249,
+        "end": 1270
       }
     },
     {
@@ -3925,8 +3925,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 795,
-        "end": 833
+        "start": 797,
+        "end": 835
       }
     },
     {
@@ -3943,8 +3943,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 1493,
-        "end": 1528
+        "start": 1501,
+        "end": 1536
       }
     },
     {
@@ -3961,8 +3961,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 477,
-        "end": 514
+        "start": 479,
+        "end": 516
       }
     },
     {
@@ -3979,8 +3979,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 835,
-        "end": 928
+        "start": 837,
+        "end": 936
       }
     },
     {
@@ -3996,8 +3996,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 1418,
-        "end": 1443
+        "start": 1426,
+        "end": 1451
       }
     },
     {
@@ -4014,8 +4014,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 545,
-        "end": 576
+        "start": 547,
+        "end": 578
       }
     },
     {
@@ -4032,8 +4032,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 222,
-        "end": 262
+        "start": 224,
+        "end": 264
       }
     },
     {
@@ -4049,8 +4049,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 578,
-        "end": 589
+        "start": 580,
+        "end": 591
       }
     },
     {
@@ -4067,8 +4067,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 1445,
-        "end": 1491
+        "start": 1453,
+        "end": 1499
       }
     },
     {
@@ -4085,8 +4085,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 615,
-        "end": 665
+        "start": 617,
+        "end": 667
       }
     },
     {
@@ -4103,8 +4103,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 707,
-        "end": 761
+        "start": 709,
+        "end": 763
       }
     },
     {
@@ -4120,8 +4120,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 129,
-        "end": 155
+        "start": 131,
+        "end": 157
       }
     },
     {
@@ -4138,8 +4138,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 1002,
-        "end": 1049
+        "start": 1010,
+        "end": 1057
       }
     },
     {
@@ -4781,8 +4781,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 268,
-        "end": 285
+        "start": 270,
+        "end": 287
       }
     },
     {
@@ -4799,8 +4799,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 519,
-        "end": 589
+        "start": 521,
+        "end": 591
       }
     },
     {
@@ -4816,8 +4816,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 490,
-        "end": 517
+        "start": 492,
+        "end": 519
       }
     },
     {
@@ -4833,8 +4833,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 444,
-        "end": 488
+        "start": 446,
+        "end": 490
       }
     },
     {
@@ -4851,8 +4851,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 287,
-        "end": 412
+        "start": 289,
+        "end": 414
       }
     },
     {
@@ -4868,8 +4868,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 216,
-        "end": 266
+        "start": 218,
+        "end": 268
       }
     },
     {
@@ -4885,8 +4885,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 414,
-        "end": 442
+        "start": 416,
+        "end": 444
       }
     },
     {
@@ -4902,8 +4902,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 591,
-        "end": 611
+        "start": 593,
+        "end": 613
       }
     },
     {
@@ -4920,8 +4920,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 114,
-        "end": 214
+        "start": 116,
+        "end": 216
       }
     },
     {
@@ -5486,8 +5486,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 299,
-        "end": 316
+        "start": 304,
+        "end": 321
       }
     },
     {
@@ -5503,8 +5503,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 266,
-        "end": 297
+        "start": 271,
+        "end": 302
       }
     },
     {
@@ -5520,8 +5520,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 348,
-        "end": 378
+        "start": 353,
+        "end": 383
       }
     },
     {
@@ -5537,8 +5537,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 335,
-        "end": 346
+        "start": 340,
+        "end": 351
       }
     },
     {
@@ -5554,8 +5554,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 218,
-        "end": 264
+        "start": 223,
+        "end": 269
       }
     },
     {
@@ -5571,8 +5571,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 318,
-        "end": 333
+        "start": 323,
+        "end": 338
       }
     },
     {
@@ -7823,8 +7823,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 1082,
-        "end": 1110
+        "start": 1086,
+        "end": 1114
       }
     },
     {
@@ -7841,8 +7841,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 957,
-        "end": 987
+        "start": 961,
+        "end": 991
       }
     },
     {
@@ -7858,8 +7858,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 1401,
-        "end": 1422
+        "start": 1405,
+        "end": 1426
       }
     },
     {
@@ -7875,8 +7875,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 1448,
-        "end": 1463
+        "start": 1452,
+        "end": 1467
       }
     },
     {
@@ -7892,8 +7892,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 451,
-        "end": 470
+        "start": 455,
+        "end": 474
       }
     },
     {
@@ -7909,8 +7909,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 936,
-        "end": 955
+        "start": 940,
+        "end": 959
       }
     },
     {
@@ -7927,8 +7927,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 1050,
-        "end": 1080
+        "start": 1054,
+        "end": 1084
       }
     },
     {
@@ -7944,8 +7944,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 1019,
-        "end": 1034
+        "start": 1023,
+        "end": 1038
       }
     },
     {
@@ -7961,8 +7961,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 1249,
-        "end": 1275
+        "start": 1253,
+        "end": 1279
       }
     },
     {
@@ -7978,8 +7978,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 472,
-        "end": 491
+        "start": 476,
+        "end": 495
       }
     },
     {
@@ -7995,8 +7995,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 1347,
-        "end": 1394
+        "start": 1351,
+        "end": 1398
       }
     },
     {
@@ -8012,8 +8012,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 624,
-        "end": 644
+        "start": 628,
+        "end": 648
       }
     },
     {
@@ -8030,8 +8030,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 705,
-        "end": 738
+        "start": 709,
+        "end": 742
       }
     },
     {
@@ -8047,8 +8047,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 218,
-        "end": 236
+        "start": 219,
+        "end": 237
       }
     },
     {
@@ -8064,8 +8064,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 1424,
-        "end": 1441
+        "start": 1428,
+        "end": 1445
       }
     },
     {
@@ -8082,8 +8082,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 808,
-        "end": 842
+        "start": 812,
+        "end": 846
       }
     },
     {
@@ -8100,8 +8100,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 238,
-        "end": 275
+        "start": 239,
+        "end": 279
       }
     },
     {
@@ -8118,8 +8118,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 646,
-        "end": 680
+        "start": 650,
+        "end": 684
       }
     },
     {
@@ -8136,8 +8136,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 682,
-        "end": 703
+        "start": 686,
+        "end": 707
       }
     },
     {
@@ -8154,8 +8154,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 596,
-        "end": 622
+        "start": 600,
+        "end": 626
       }
     },
     {
@@ -8172,8 +8172,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 740,
-        "end": 765
+        "start": 744,
+        "end": 769
       }
     },
     {
@@ -8189,8 +8189,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 844,
-        "end": 859
+        "start": 848,
+        "end": 863
       }
     },
     {
@@ -8207,8 +8207,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 1210,
-        "end": 1247
+        "start": 1214,
+        "end": 1251
       }
     },
     {
@@ -8225,8 +8225,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 1142,
-        "end": 1181
+        "start": 1146,
+        "end": 1185
       }
     },
     {
@@ -8243,8 +8243,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 1112,
-        "end": 1140
+        "start": 1116,
+        "end": 1144
       }
     },
     {
@@ -8261,8 +8261,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 1183,
-        "end": 1208
+        "start": 1187,
+        "end": 1212
       }
     },
     {
@@ -8279,8 +8279,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 414,
-        "end": 449
+        "start": 418,
+        "end": 453
       }
     },
     {
@@ -8296,8 +8296,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 861,
-        "end": 910
+        "start": 865,
+        "end": 914
       }
     },
     {
@@ -8313,8 +8313,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 912,
-        "end": 934
+        "start": 916,
+        "end": 938
       }
     },
     {
@@ -8330,8 +8330,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 1313,
-        "end": 1345
+        "start": 1317,
+        "end": 1349
       }
     },
     {
@@ -8348,8 +8348,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 514,
-        "end": 594
+        "start": 518,
+        "end": 598
       }
     },
     {
@@ -8365,8 +8365,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 277,
-        "end": 301
+        "start": 281,
+        "end": 305
       }
     },
     {
@@ -8379,8 +8379,8 @@
       "hosted": "unknown",
       "hostEvidence": [],
       "sourceLines": {
-        "start": 24,
-        "end": 33
+        "start": 25,
+        "end": 34
       }
     },
     {
@@ -8397,8 +8397,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 767,
-        "end": 806
+        "start": 771,
+        "end": 810
       }
     },
     {
@@ -8414,8 +8414,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 493,
-        "end": 512
+        "start": 497,
+        "end": 516
       }
     },
     {
@@ -8432,8 +8432,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 386,
-        "end": 412
+        "start": 390,
+        "end": 416
       }
     },
     {
@@ -8450,8 +8450,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 989,
-        "end": 1017
+        "start": 993,
+        "end": 1021
       }
     },
     {
@@ -8468,8 +8468,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 1277,
-        "end": 1311
+        "start": 1281,
+        "end": 1315
       }
     },
     {
@@ -8486,8 +8486,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 303,
-        "end": 384
+        "start": 307,
+        "end": 388
       }
     },
     {
@@ -8606,8 +8606,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 332,
-        "end": 354
+        "start": 334,
+        "end": 356
       }
     },
     {
@@ -8624,8 +8624,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 300,
-        "end": 330
+        "start": 302,
+        "end": 332
       }
     },
     {
@@ -8642,8 +8642,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 148,
-        "end": 195
+        "start": 150,
+        "end": 197
       }
     },
     {
@@ -8660,8 +8660,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 197,
-        "end": 220
+        "start": 199,
+        "end": 222
       }
     },
     {
@@ -8678,8 +8678,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 263,
-        "end": 298
+        "start": 265,
+        "end": 300
       }
     },
     {
@@ -8696,8 +8696,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 222,
-        "end": 261
+        "start": 224,
+        "end": 263
       }
     },
     {
@@ -8713,8 +8713,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 463,
-        "end": 508
+        "start": 622,
+        "end": 667
       }
     },
     {
@@ -8731,8 +8731,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 345,
-        "end": 416
+        "start": 458,
+        "end": 529
       }
     },
     {
@@ -8748,8 +8748,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 281,
-        "end": 321
+        "start": 379,
+        "end": 419
       }
     },
     {
@@ -8765,8 +8765,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 418,
-        "end": 461
+        "start": 531,
+        "end": 575
       }
     },
     {
@@ -8782,8 +8782,25 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 221,
-        "end": 237
+        "start": 319,
+        "end": 335
+      }
+    },
+    {
+      "cls": "TestProcedureAuthoringApiTests",
+      "test": "A_modify_preserves_an_unimpacted_current_parent_while_adding_one_governed_parent",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client"
+      ],
+      "sourceLines": {
+        "start": 577,
+        "end": 620
       }
     },
     {
@@ -8800,8 +8817,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 510,
-        "end": 535
+        "start": 669,
+        "end": 694
       }
     },
     {
@@ -8817,8 +8834,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 551,
-        "end": 570
+        "start": 710,
+        "end": 729
       }
     },
     {
@@ -8835,8 +8852,26 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 572,
-        "end": 640
+        "start": 731,
+        "end": 799
+      }
+    },
+    {
+      "cls": "TestProcedureAuthoringApiTests",
+      "test": "An_incomplete_introduced_procedure_draft_can_be_saved_but_submission_requires_exact_parents",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 421,
+        "end": 456
       }
     },
     {
@@ -8852,25 +8887,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 642,
-        "end": 730
-      }
-    },
-    {
-      "cls": "TestProcedureAuthoringApiTests",
-      "test": "Introduce_refuses_to_create_a_procedure_without_an_exact_driving_requirement",
-      "kind": "Fact",
-      "intent": "http-boundary",
-      "cases": 1,
-      "caseEvidence": "Fact",
-      "hosted": "hosted",
-      "hostEvidence": [
-        "factory-construction",
-        "factory-client"
-      ],
-      "sourceLines": {
-        "start": 323,
-        "end": 343
+        "start": 801,
+        "end": 900
       }
     },
     {
@@ -8886,8 +8904,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 176,
-        "end": 205
+        "start": 182,
+        "end": 211
       }
     },
     {
@@ -8903,8 +8921,26 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 207,
-        "end": 219
+        "start": 305,
+        "end": 317
+      }
+    },
+    {
+      "cls": "TestProcedureAuthoringApiTests",
+      "test": "Raising_a_package_refuses_a_derived_system_procedure_with_an_exact_parent",
+      "kind": "Fact",
+      "intent": "ef-translation",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 213,
+        "end": 253
       }
     },
     {
@@ -8920,8 +8956,26 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 537,
-        "end": 549
+        "start": 696,
+        "end": 708
+      }
+    },
+    {
+      "cls": "TestProcedureAuthoringApiTests",
+      "test": "Submission_rechecks_a_tampered_full_parent_selection_before_review",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 255,
+        "end": 303
       }
     },
     {
@@ -8937,8 +8991,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 239,
-        "end": 275
+        "start": 337,
+        "end": 373
       }
     },
     {
@@ -9082,7 +9136,25 @@
       ],
       "sourceLines": {
         "start": 213,
-        "end": 294
+        "end": 295
+      }
+    },
+    {
+      "cls": "VerificationImpactApiTests",
+      "test": "A_missing_retarget_target_requires_a_controlled_successor_before_link_existing_can_be_recorded",
+      "kind": "Fact",
+      "intent": "ef-translation",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 177,
+        "end": 277
       }
     },
     {
@@ -9098,8 +9170,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 141,
-        "end": 154
+        "start": 142,
+        "end": 155
       }
     },
     {
@@ -9115,8 +9187,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 97,
-        "end": 130
+        "start": 98,
+        "end": 131
       }
     },
     {
@@ -9132,8 +9204,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 156,
-        "end": 174
+        "start": 157,
+        "end": 175
       }
     },
     {
@@ -9150,8 +9222,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 176,
-        "end": 278
+        "start": 279,
+        "end": 384
       }
     },
     {
@@ -9167,8 +9239,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 280,
-        "end": 311
+        "start": 386,
+        "end": 417
       }
     },
     {
@@ -9185,8 +9257,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 313,
-        "end": 353
+        "start": 419,
+        "end": 459
       }
     },
     {
@@ -9202,8 +9274,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 72,
-        "end": 90
+        "start": 73,
+        "end": 91
       }
     },
     {

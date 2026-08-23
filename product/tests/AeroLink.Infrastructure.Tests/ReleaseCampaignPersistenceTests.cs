@@ -98,7 +98,37 @@ public sealed class ReleaseCampaignPersistenceTests(ShowcaseDatabaseFixture show
             var now = new DateTimeOffset(2025, 1, 10, 14, 0, 0, TimeSpan.Zero);
             foreach (var request in requests.Where(x => x.State != ChangeRequestState.Deferred && x.State != ChangeRequestState.SelectedForBaseline))
             {
-                if (request.State == ChangeRequestState.Draft) { request.SubmitForReview(request.AuthorId, [new ApproverSelection("release.reviewer", "Release Reviewer")], now); await db.SaveChangesAsync(); }
+                // The copied showcase contains a small number of pre-#738 approved/in-review v1 packages.
+                // Re-enter those packages through their ordinary lifecycle before making the author's new
+                // classification decision.  This preserves their historical review evidence while ensuring
+                // the successor review is current and cannot rely on the seed-only v1 materialization seam.
+                if (request.SnapshotContractVersion < SystemChangeRequest.CurrentSnapshotContractVersion)
+                {
+                    if (request.State == ChangeRequestState.Approved)
+                    {
+                        request.Defer(request.AuthorId, "Re-open the historical package for release-execution qualification.", now);
+                        request.Reinstate(request.AuthorId, now);
+                    }
+                    else if (request.State == ChangeRequestState.InReview)
+                        request.CancelReview(request.AuthorId, "Re-open the historical package for release-execution qualification.", now);
+                }
+                if (request.State == ChangeRequestState.Draft)
+                {
+                    // These requests are re-entering review through this test journey after the historical
+                    // showcase was rehydrated. Make the reviewer's classification explicit: non-root legacy
+                    // drafts are intentionally documented as independent Derived work, with no fabricated
+                    // parent identity. The production seed remains untouched and preserves its v1 evidence.
+                    var authored = request.RequirementChanges.Select(change => new RequirementChangeDraft(
+                        change.BaseNumber, change.Revision, change.Level, change.Kind, change.Statement,
+                        string.IsNullOrWhiteSpace(change.Rationale) ? "Release execution qualification." : change.Rationale,
+                        change.VerificationMethod, change.RichText,
+                        change.Level == RequirementLevel.System ? "{}" : "{\"derived\":true}",
+                        change.ImpactDispositionJson, change.TargetSectionId, "[]")).ToList();
+                    request.UpdateDraft(request.AuthorId, request.Title, request.Problem, request.Analysis,
+                        request.Solution, authored, now);
+                    request.SubmitForReview(request.AuthorId, [new ApproverSelection("release.reviewer", "Release Reviewer")], now);
+                    await db.SaveChangesAsync();
+                }
                 while (request.State == ChangeRequestState.InReview) { request.ApproveActiveStage(request.ActiveReviewCycle!.Steps.Single(x => x.State == ApprovalStepState.Active).ApproverId, now); await db.SaveChangesAsync(); }
                 baseline.Select(request, "cm.test", now); await db.SaveChangesAsync();
             }

@@ -292,7 +292,7 @@ public sealed class DownstreamImpactServiceTests
             ladderPolicy: policy);
         request.AddRequirementChange("author", requirement, revision, level, RequirementChangeKind.Modify,
             "The requirement shall contain revised controlled behavior.", "Approved revision", "Test", Now,
-            ladderPolicy: policy);
+            attributesJson: level == RequirementLevel.System ? "{}" : "{\"derived\":true}", ladderPolicy: policy);
         request.SubmitForReview("author", [new("reviewer", "Reviewer")], Now, ladderPolicy: policy);
         request.ApproveActiveStage("reviewer", Now);
         return request;

@@ -122,9 +122,11 @@ public sealed class VerificationImpactReadinessGateTests
                 var systemRevision = new RequirementRevision(system.Id, 0, "The system shall route safely.", "R", "Test",
                     RequirementRevisionState.Active, seed.ChangeRequestId, (await arrange.CandidateBaselines.SingleAsync()).Id, Now);
                 var highRevision = new RequirementRevision(high.Id, 0, "The software shall route safely.", "R", "Test",
-                    RequirementRevisionState.Active, seed.ChangeRequestId, (await arrange.CandidateBaselines.SingleAsync()).Id, Now);
+                    RequirementRevisionState.Active, seed.ChangeRequestId, (await arrange.CandidateBaselines.SingleAsync()).Id, Now,
+                    parentKind: RequirementParentKind.Derived, derivedRationale: "This readiness fixture has no authored upstream selection.");
                 var lowRevision = new RequirementRevision(low.Id, 0, "The implementation shall route safely.", "R", "Test",
-                    RequirementRevisionState.Active, seed.ChangeRequestId, (await arrange.CandidateBaselines.SingleAsync()).Id, Now);
+                    RequirementRevisionState.Active, seed.ChangeRequestId, (await arrange.CandidateBaselines.SingleAsync()).Id, Now,
+                    parentKind: RequirementParentKind.Allocated, parentRevisionIds: [highRevision.Id]);
                 var systemProcedure = new TestProcedure(seed.ProjectId, "SYSTP-00000101", "Verify system routing", "test.engineer", Now,
                     TestProcedureLevel.System);
                 var highProcedure = new TestProcedure(seed.ProjectId, "HLRTC-00000102", "Verify HLR routing", "test.engineer", Now,
@@ -187,7 +189,8 @@ public sealed class VerificationImpactReadinessGateTests
                 var source = new RequirementArtifact(seed.ProjectId, "HLR-00000101", RequirementLevel.HighLevel, Now);
                 var target = new RequirementArtifact(seed.ProjectId, "SYSR-00000101", RequirementLevel.System, Now);
                 var sourceRevision = new RequirementRevision(source.Id, 0, "The software shall navigate.", "R", "Test",
-                    RequirementRevisionState.Active, seed.ChangeRequestId, baseline.Id, Now);
+                    RequirementRevisionState.Active, seed.ChangeRequestId, baseline.Id, Now,
+                    parentKind: RequirementParentKind.Derived, derivedRationale: "This readiness fixture has no authored upstream selection.");
                 var targetRevision = new RequirementRevision(target.Id, 0, "The system shall navigate.", "R", "Test",
                     RequirementRevisionState.Active, seed.ChangeRequestId, baseline.Id, Now);
                 var link = new RequirementTraceLink(seed.ProjectId, sourceRevision.Id, targetRevision.Id,

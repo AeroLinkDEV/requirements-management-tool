@@ -32,7 +32,8 @@ public sealed class ExactLinkLifecyclePersistenceTests
                 var request = new SystemChangeRequest("SRCR-00001", 0, project.Id, release.Id, "Trace cause", "P", "A", "S", "author", Now);
                 var sourceArtifact = new RequirementArtifact(project.Id, "HLR-000001", RequirementLevel.HighLevel, Now);
                 var targetArtifact = new RequirementArtifact(project.Id, "SYSR-000002", RequirementLevel.System, Now);
-                var source = new RequirementRevision(sourceArtifact.Id, 0, "Child", "R", "Test", RequirementRevisionState.Active, request.Id, baseline.Id, Now);
+                var source = new RequirementRevision(sourceArtifact.Id, 0, "Child", "R", "Test", RequirementRevisionState.Active, request.Id, baseline.Id, Now,
+                    parentKind: RequirementParentKind.Derived, derivedRationale: "This lifecycle fixture has no upstream requirement allocation.");
                 var target = new RequirementRevision(targetArtifact.Id, 1, "Parent changed", "R", "Test", RequirementRevisionState.Active, request.Id, baseline.Id, Now);
                 var link = new RequirementTraceLink(project.Id, source.Id, target.Id, RequirementTraceType.DerivedFrom, "Child derives from parent.", Now);
                 var lifecycle = ExactLinkSuspectLifecycle.Raise(project.Id, ExactLinkKind.RequirementTrace, link.Id,
@@ -86,7 +87,8 @@ public sealed class ExactLinkLifecyclePersistenceTests
                 var request = new SystemChangeRequest("SRCR-00001", 0, project.Id, release.Id, "Trace cause", "P", "A", "S", "author", Now);
                 var sourceArtifact = new RequirementArtifact(project.Id, "HLR-000001", RequirementLevel.HighLevel, Now);
                 var targetArtifact = new RequirementArtifact(project.Id, "SYSR-000002", RequirementLevel.System, Now);
-                var source = new RequirementRevision(sourceArtifact.Id, 0, "Child", "R", "Test", RequirementRevisionState.Active, request.Id, baseline.Id, Now);
+                var source = new RequirementRevision(sourceArtifact.Id, 0, "Child", "R", "Test", RequirementRevisionState.Active, request.Id, baseline.Id, Now,
+                    parentKind: RequirementParentKind.Derived, derivedRationale: "This lifecycle fixture has no upstream requirement allocation.");
                 var target = new RequirementRevision(targetArtifact.Id, 1, "Parent changed", "R", "Test", RequirementRevisionState.Active, request.Id, baseline.Id, Now);
                 var link = new RequirementTraceLink(project.Id, source.Id, target.Id, RequirementTraceType.DerivedFrom, "Child derives from parent.", Now);
                 var lifecycle = ExactLinkSuspectLifecycle.Raise(project.Id, ExactLinkKind.RequirementTrace, link.Id,
@@ -130,7 +132,8 @@ public sealed class ExactLinkLifecyclePersistenceTests
                 var request = new SystemChangeRequest("SRCR-00001", 0, project.Id, release.Id, "Trace cause", "P", "A", "S", "author", Now);
                 var sourceArtifact = new RequirementArtifact(project.Id, "HLR-000001", RequirementLevel.HighLevel, Now);
                 var targetArtifact = new RequirementArtifact(project.Id, "SYSR-000002", RequirementLevel.System, Now);
-                var source = new RequirementRevision(sourceArtifact.Id, 0, "Child", "R", "Test", RequirementRevisionState.Active, request.Id, baseline.Id, Now);
+                var source = new RequirementRevision(sourceArtifact.Id, 0, "Child", "R", "Test", RequirementRevisionState.Active, request.Id, baseline.Id, Now,
+                    parentKind: RequirementParentKind.Derived, derivedRationale: "This lifecycle fixture has no upstream requirement allocation.");
                 var target = new RequirementRevision(targetArtifact.Id, 0, "Parent", "R", "Test", RequirementRevisionState.Active, request.Id, baseline.Id, Now);
                 var link = new RequirementTraceLink(project.Id, source.Id, target.Id, RequirementTraceType.DerivedFrom, "Child derives from parent.", Now);
                 var lifecycle = ExactLinkSuspectLifecycle.Raise(project.Id, ExactLinkKind.RequirementTrace, link.Id,
@@ -184,7 +187,8 @@ public sealed class ExactLinkLifecyclePersistenceTests
             var request = new SystemChangeRequest("SRCR-00001", 0, project.Id, release.Id, "Transient trace", "P", "A", "S", "author", Now);
             var sourceArtifact = new RequirementArtifact(project.Id, "HLR-000001", RequirementLevel.HighLevel, Now);
             var targetArtifact = new RequirementArtifact(project.Id, "SYSR-000002", RequirementLevel.System, Now);
-            var source = new RequirementRevision(sourceArtifact.Id, 0, "Child", "R", "Test", RequirementRevisionState.Active, request.Id, baseline.Id, Now);
+            var source = new RequirementRevision(sourceArtifact.Id, 0, "Child", "R", "Test", RequirementRevisionState.Active, request.Id, baseline.Id, Now,
+                parentKind: RequirementParentKind.Derived, derivedRationale: "This lifecycle fixture has no upstream requirement allocation.");
             var target = new RequirementRevision(targetArtifact.Id, 0, "Parent", "R", "Test", RequirementRevisionState.Active, request.Id, baseline.Id, Now);
             var link = new RequirementTraceLink(project.Id, source.Id, target.Id, RequirementTraceType.DerivedFrom, "Transient link.", Now);
             var lifecycle = ExactLinkSuspectLifecycle.Raise(project.Id, ExactLinkKind.RequirementTrace, link.Id,

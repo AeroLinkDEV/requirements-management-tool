@@ -1,4 +1,5 @@
 using AeroLink.Domain.ChangeControl;
+using AeroLink.Domain.Common;
 using AeroLink.Domain.Hierarchy;
 using AeroLink.Domain.Requirements;
 using AeroLink.Domain.Verification;
@@ -294,13 +295,23 @@ public sealed class VerificationImpactService(AeroLinkDbContext db, ProblemRepor
                 procedureRevisionId = legacyRevisionId;
             if (procedureRevisionId is null) continue;
             var existing = carried.SingleOrDefault(x =>
-                x.RequirementRevisionId == change.RevisionId && x.ProcedureRevisionId == procedureRevisionId.Value);
+                x.RequirementRevisionId == change.RevisionId && x.ProcedureRevisionId == procedureRevisionId.Value)
+                ?? await db.TestCoverage.SingleOrDefaultAsync(x =>
+                    x.RequirementRevisionId == change.RevisionId
+                    && x.ProcedureRevisionId == procedureRevisionId.Value, ct);
             if (existing is not null)
             {
                 existing.ConfirmStillValid(item.ResolvedBy ?? "verification", now);
             }
             else
             {
+                // Requirement materialisation is attributable for a newly-created requirement revision, but
+                // it is not a second authoring route for an already approved Case/System Procedure. A missing
+                // exact parent remains a resolved impact decision until the ordinary ModifyExisting successor
+                // is reviewed and materialised; only a newly-added successor revision may receive this link.
+                var procedureRevisionWasAdded = db.ChangeTracker.Entries<TestProcedureRevision>()
+                    .Any(entry => entry.Entity.Id == procedureRevisionId.Value && entry.State == EntityState.Added);
+                if (!procedureRevisionWasAdded) continue;
                 db.TestCoverage.Add(new TestRequirementCoverage(procedureRevisionId.Value, change.RevisionId));
             }
             confirmed++;
@@ -496,22 +507,41 @@ public sealed class VerificationImpactService(AeroLinkDbContext db, ProblemRepor
     }
 
     /// <summary>
-    /// Applies a coverage-confirmed decision immediately when materialisation has already bound the item to
-    /// an exact requirement revision. Before materialisation there is nothing to link, so the same decision is
-    /// applied later by <see cref="ApplyMaterializationAsync"/>.
-    /// </summary>
-    /// <summary>
-    /// Moves a stranded procedure onto the requirement it now covers.
+    /// Records a retarget decision without rewriting an existing procedure revision.
     ///
-    /// The retirement that stranded it took away what the procedure was written against. Where the behaviour
-    /// itself did not go away — it moved to another requirement — the procedure is still the right procedure,
-    /// and this is what puts the link back. The old link is left where it is: it records that this procedure
-    /// once covered the retired revision, which is true and is the sort of thing an audit asks about.
-    ///
-    /// Every revision of the procedure is moved, not only its newest. A reader asking "what covers this
-    /// requirement" is asking about the procedure, and leaving earlier revisions pointing only at a retired
-    /// requirement would make the answer depend on which revision they happened to look at.
+    /// A retarget decision can confirm an existing #709 suspect link, but it cannot add a new exact parent to
+    /// an already approved Case/System Procedure revision. That parent selection is immutable controlled
+    /// content: a new link requires a TCR successor with its own signed selection and materialisation. The
+    /// requirement-baseline materialiser has a separate attributable path for a newly-created requirement
+    /// revision and is deliberately not routed through this endpoint helper.
     /// </summary>
+    public async Task<bool> HasEffectiveRetargetTargetAsync(Guid projectId, Guid releaseId, Guid procedureId,
+        Guid requirementRevisionId, CancellationToken ct)
+    {
+        var ladderPolicy = policyResolver is null
+            ? fallbackPolicy
+            : await policyResolver.ResolveAsync(projectId, ct);
+        if (!await TestChangeReviewRequirementScope.IsExactRetargetTargetInBuildAsync(
+                db, projectId, releaseId, procedureId, requirementRevisionId, ladderPolicy, ct))
+            return false;
+        var effectivity = await TestProcedureEffectivity.ForReleaseAsync(db, projectId, releaseId, ct);
+        if (effectivity?.RevisionByProcedure.TryGetValue(procedureId, out var revisionId) != true)
+            return false;
+        return await db.TestCoverage.AsNoTracking().AnyAsync(x =>
+            x.ProcedureRevisionId == revisionId && x.RequirementRevisionId == requirementRevisionId, ct);
+    }
+
+    /// <summary>Shared target-build gate used by the resolve endpoint before it chooses LinkExisting or ModifyExisting.</summary>
+    public async Task<bool> IsExactRetargetTargetInBuildAsync(Guid projectId, Guid releaseId, Guid procedureId,
+        Guid requirementRevisionId, CancellationToken ct)
+    {
+        var ladderPolicy = policyResolver is null
+            ? fallbackPolicy
+            : await policyResolver.ResolveAsync(projectId, ct);
+        return await TestChangeReviewRequirementScope.IsExactRetargetTargetInBuildAsync(
+            db, projectId, releaseId, procedureId, requirementRevisionId, ladderPolicy, ct);
+    }
+
     public async Task<bool> ApplyRetargetedCoverageAsync(VerificationImpactItem item, DateTimeOffset now, CancellationToken ct)
     {
         if (item.Outcome != VerificationImpactOutcome.ProcedureRetargeted
@@ -519,25 +549,49 @@ public sealed class VerificationImpactService(AeroLinkDbContext db, ProblemRepor
             || item.RetargetedRequirementRevisionId is null)
             return false;
 
-        var revisionIds = await db.TestProcedureRevisions.AsNoTracking()
-            .Where(x => x.ProcedureId == item.ProcedureId.Value).Select(x => x.Id).ToListAsync(ct);
-        if (revisionIds.Count == 0) return false;
+        if (!await IsExactRetargetTargetInBuildAsync(item.ProjectId, item.ReleaseId,
+                item.ProcedureId.Value, item.RetargetedRequirementRevisionId.Value, ct))
+            return false;
+
+        var effectivity = await TestProcedureEffectivity.ForReleaseAsync(db, item.ProjectId, item.ReleaseId, ct)
+            ?? throw new DomainException("The retarget decision has no governed procedure baseline. Create a controlled successor revision in a candidate baseline.");
+        var effectiveRevisionIds = effectivity.RevisionByProcedure.TryGetValue(item.ProcedureId.Value, out var effectiveRevisionId)
+            ? new[] { effectiveRevisionId }
+            : Array.Empty<Guid>();
+        var revisions = await db.TestProcedureRevisions.AsNoTracking()
+            .Where(x => effectiveRevisionIds.Contains(x.Id))
+            .Select(x => new { x.Id, x.State })
+            .ToListAsync(ct);
+        if (revisions.Count == 0) return false;
 
         var target = item.RetargetedRequirementRevisionId.Value;
         var already = await db.TestCoverage
-            .Where(x => x.RequirementRevisionId == target && revisionIds.Contains(x.ProcedureRevisionId))
+            .Where(x => x.RequirementRevisionId == target && revisions.Select(r => r.Id).Contains(x.ProcedureRevisionId))
             .ToListAsync(ct);
         var linked = false;
-        foreach (var revisionId in revisionIds)
+        foreach (var revision in revisions)
         {
-            var existing = already.SingleOrDefault(x => x.ProcedureRevisionId == revisionId);
-            if (existing is not null) { existing.ConfirmStillValid(item.ResolvedBy ?? "verification", now); linked = true; continue; }
-            db.TestCoverage.Add(new TestRequirementCoverage(revisionId, target));
-            linked = true;
+            var existing = already.SingleOrDefault(x => x.ProcedureRevisionId == revision.Id);
+            if (existing is not null)
+            {
+                existing.ConfirmStillValid(item.ResolvedBy ?? "verification", now);
+                linked = true;
+                continue;
+            }
+
+            // The decision itself remains attributable to the Draft TCR. The new exact parent is deferred to
+            // that package's controlled successor and materialisation; resolving the impact item must not become
+            // a second authoring route for an already approved revision.
+            return linked;
         }
         return linked;
     }
 
+    /// <summary>
+    /// Applies a coverage-confirmed decision only when an exact link already exists (including an existing
+    /// suspect link). Before materialisation there is nothing to link, and a missing link after materialisation
+    /// is deferred to an ordinary controlled successor rather than added through the impact endpoint.
+    /// </summary>
     public async Task<bool> ApplyResolvedCoverageAsync(VerificationImpactItem item, DateTimeOffset now, CancellationToken ct)
     {
         if (item.Outcome != VerificationImpactOutcome.ProcedureCoverageConfirmed
@@ -563,8 +617,9 @@ public sealed class VerificationImpactService(AeroLinkDbContext db, ProblemRepor
         }
         else
         {
-            db.TestCoverage.Add(new TestRequirementCoverage(
-                procedureRevisionId.Value, item.RequirementRevisionId.Value));
+            // A materialised requirement that has no existing link needs an ordinary controlled successor. The
+            // impact decision remains recorded, while the missing link is intentionally deferred to that path.
+            return false;
         }
         return true;
     }

@@ -42,15 +42,18 @@ public sealed class ReleaseExecutionTraceCarryForwardTests
                 var predecessorSystem = new RequirementRevision(system.Id, 0, "The system behavior is controlled.", "R", "Test",
                     RequirementRevisionState.Active, sourceRequest.Id, predecessor.Id, Now);
                 var predecessorHigh = new RequirementRevision(high.Id, 0, "The high-level behavior is controlled.", "R", "Test",
-                    RequirementRevisionState.Active, sourceRequest.Id, predecessor.Id, Now);
+                    RequirementRevisionState.Active, sourceRequest.Id, predecessor.Id, Now,
+                    parentKind: RequirementParentKind.Derived, derivedRationale: "This trace carry-forward fixture records a non-parent trace graph.");
                 var predecessorSkipped = new RequirementRevision(skipped.Id, 0, "The skipped behavior is controlled.", "R", "Test",
-                    RequirementRevisionState.Active, sourceRequest.Id, predecessor.Id, Now);
+                    RequirementRevisionState.Active, sourceRequest.Id, predecessor.Id, Now,
+                    parentKind: RequirementParentKind.Derived, derivedRationale: "This trace carry-forward fixture has no authored upstream selection.");
                 var predecessorNonMember = new RequirementRevision(nonMember.Id, 0, "The non-member behavior is controlled.", "R", "Test",
                     RequirementRevisionState.Active, sourceRequest.Id, predecessor.Id, Now);
                 var currentSystem = new RequirementRevision(system.Id, 1, "The current system behavior is controlled.", "R", "Test",
                     RequirementRevisionState.Active, sourceRequest.Id, current.Id, Now);
                 var currentHigh = new RequirementRevision(high.Id, 1, "The current high-level behavior is controlled.", "R", "Test",
-                    RequirementRevisionState.Active, sourceRequest.Id, current.Id, Now);
+                    RequirementRevisionState.Active, sourceRequest.Id, current.Id, Now,
+                    parentKind: RequirementParentKind.Derived, derivedRationale: "This trace carry-forward fixture records a non-parent trace graph.");
 
                 setup.AddRange(program, project, release, predecessor, current, campaign, sourceRequest,
                     system, high, skipped, nonMember,
@@ -66,7 +69,7 @@ public sealed class ReleaseExecutionTraceCarryForwardTests
                     new RequirementTraceLink(project.Id, predecessorHigh.Id, predecessorSystem.Id,
                         RequirementTraceType.DerivedFrom, "The HLR derives from the System requirement.", Now),
                     new RequirementTraceLink(project.Id, predecessorHigh.Id, predecessorSkipped.Id,
-                        RequirementTraceType.AllocatedFrom, "The omitted successor member is not carried.", Now),
+                        RequirementTraceType.DerivedFrom, "The omitted successor member is not carried.", Now),
                     new RequirementTraceLink(project.Id, predecessorHigh.Id, predecessorNonMember.Id,
                         RequirementTraceType.DerivedFrom, "An endpoint outside predecessor membership is ignored.", Now));
                 await setup.SaveChangesAsync();

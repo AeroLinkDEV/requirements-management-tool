@@ -2,6 +2,7 @@ using System.IO.Compression;
 using AeroLink.Domain.Baselines;
 using AeroLink.Domain.ChangeControl;
 using AeroLink.Domain.Programs;
+using AeroLink.Domain.Requirements;
 using AeroLink.Domain.Traceability;
 using AeroLink.Domain.Verification;
 using AeroLink.Infrastructure.Persistence;
@@ -12,6 +13,81 @@ namespace AeroLink.Infrastructure.Tests;
 
 public sealed class LegacyControlledProcedureDocumentSnapshotTests
 {
+    [Fact]
+    public async Task A_released_predecessor_document_does_not_leak_successor_coverage_from_a_carried_revision()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        var options = new DbContextOptionsBuilder<AeroLinkDbContext>().UseSqlite(connection).Options;
+        await using var db = new AeroLinkDbContext(options);
+        await db.Database.EnsureCreatedAsync();
+        var now = new DateTimeOffset(2026, 8, 23, 6, 0, 0, TimeSpan.Zero);
+        var program = new ProgramRecord("Released snapshot scope", "RSS");
+        var project = new ProjectRecord(program.Id, "Released snapshot project", "Released snapshot product");
+        var release = new SoftwareRelease(project.Id, "7.0", false);
+        var source0 = new SystemChangeRequest("SRCR-73800", 0, project.Id, release.Id,
+            "Initial system obligation", "Problem", "Analysis", "Solution", "author", now);
+        source0.AddRequirementChange("author", "SYSR-738000", 0, RequirementLevel.System,
+            RequirementChangeKind.Introduce, "The system shall retain the released behavior.", "Initial", "Test", now);
+        source0.SubmitForReview("author", [new ApproverSelection("reviewer", "Reviewer")], now);
+        source0.ApproveActiveStage("reviewer", now);
+        var predecessor = new CandidateBaseline("SW-73.00", 0, project.Id, release.Id, null,
+            "Released predecessor", "cm", now);
+        predecessor.Select(source0, "cm", now); predecessor.Freeze("cm", now);
+        db.AddRange(program, project, release, source0, predecessor);
+        await db.SaveChangesAsync();
+        await new RequirementBaselineMaterializer(db, new VerificationImpactService(db))
+            .MaterializeAsync(predecessor.Id, "cm", now, default);
+        var originalRequirement = await db.RequirementRevisions.SingleAsync();
+
+        var procedure = new TestProcedure(project.Id, "SYSTP-738000", "Released system check", "test", now,
+            TestProcedureLevel.System);
+        var procedureRevision = new TestProcedureRevision(procedure.Id, 0, "Verify released behavior",
+            "Preconditions", "Steps", "Expected", TestProcedureState.Approved, "test", now,
+            effectiveBaselineId: predecessor.Id, parentKind: VerificationProcedureParentKind.Allocated);
+        db.AddRange(procedure, procedureRevision,
+            new BaselineTestProcedureSelection(predecessor.Id, procedure.Id, procedureRevision.Id),
+            new TestRequirementCoverage(procedureRevision.Id, originalRequirement.Id));
+        await db.SaveChangesAsync();
+        await db.CandidateBaselines.Where(x => x.Id == predecessor.Id).ExecuteUpdateAsync(set => set
+            .SetProperty(x => x.TestProceduresMaterializedAt, now)
+            .SetProperty(x => x.TestProceduresHash, new string('a', 64)));
+
+        var source1 = new SystemChangeRequest("SRCR-73801", 0, project.Id, release.Id,
+            "Successor system obligation", "Problem", "Analysis", "Solution", "author", now.AddMinutes(1));
+        source1.AddRequirementChange("author", "SYSR-738000", 1, RequirementLevel.System,
+            RequirementChangeKind.Modify, "The system shall retain the corrected behavior.", "Correction", "Test", now.AddMinutes(1));
+        source1.SubmitForReview("author", [new ApproverSelection("reviewer", "Reviewer")], now.AddMinutes(1));
+        source1.ApproveActiveStage("reviewer", now.AddMinutes(1));
+        var successor = new CandidateBaseline("SW-73.01", 0, project.Id, release.Id, predecessor.Id,
+            "Successor baseline", "cm", now.AddMinutes(1));
+        successor.Select(source1, "cm", now.AddMinutes(1)); successor.Freeze("cm", now.AddMinutes(1));
+        db.AddRange(source1, successor);
+        await db.SaveChangesAsync();
+        await new RequirementBaselineMaterializer(db, new VerificationImpactService(db))
+            .MaterializeAsync(successor.Id, "cm", now.AddMinutes(2), default);
+        var successorRequirement = await db.RequirementRevisions.SingleAsync(x => x.Revision == 1);
+        // The carried endpoint is present for #709 lifecycle review but is not an approved exact parent.
+        if (!await db.TestCoverage.AnyAsync(x => x.ProcedureRevisionId == procedureRevision.Id
+            && x.RequirementRevisionId == successorRequirement.Id))
+            db.TestCoverage.Add(TestRequirementCoverage.CarriedForward(
+                procedureRevision.Id, successorRequirement.Id, "successor wording requires confirmation", now.AddMinutes(2)));
+        db.BaselineTestProcedures.Add(new BaselineTestProcedureSelection(successor.Id, procedure.Id, procedureRevision.Id));
+        await db.SaveChangesAsync();
+        await db.CandidateBaselines.Where(x => x.Id == successor.Id).ExecuteUpdateAsync(set => set
+            .SetProperty(x => x.TestProceduresMaterializedAt, now.AddMinutes(2))
+            .SetProperty(x => x.TestProceduresHash, new string('b', 64)));
+
+        var predecessorSnapshot = await ControlledProcedureDocumentSnapshotProjection.ForDocumentAsync(
+            db, predecessor.Id, TestProcedureLevel.System, now.AddMinutes(3), default);
+        var successorSnapshot = await ControlledProcedureDocumentSnapshotProjection.ForDocumentAsync(
+            db, successor.Id, TestProcedureLevel.System, now.AddMinutes(3), default);
+        var oldRow = Assert.Single(predecessorSnapshot.Rows);
+        var newRow = Assert.Single(successorSnapshot.Rows);
+        Assert.Equal([originalRequirement.Id], oldRow.ParentRevisionIds);
+        Assert.Empty(newRow.ParentRevisionIds ?? Array.Empty<Guid>());
+    }
+
     [Fact]
     public async Task A_pre_manifest_document_keeps_its_generation_time_revision_after_later_activity()
     {
@@ -37,7 +113,9 @@ public sealed class LegacyControlledProcedureDocumentSnapshotTests
         var revision00 = new TestProcedureRevision(procedure.Id, 0, "Generation-time objective",
             "Generation-time preconditions", "Generation-time steps", "Generation-time expected result",
             TestProcedureState.Approved, "verification.engineer", t0,
-            sourceTestChangeRequestId: tcr00.Id);
+            sourceTestChangeRequestId: tcr00.Id,
+            parentKind: VerificationProcedureParentKind.Derived,
+            derivedRationale: "This pre-manifest document fixture has no upstream coverage.");
         var document = new ControlledDocument(project.Id, release.Id, baseline.Id,
             ControlledDocumentType.SystemTestProcedures, "SYSTD-419900",
             "Legacy System Test Procedures", 0, new string('a', 64), 1, generatedAt);
@@ -68,7 +146,9 @@ public sealed class LegacyControlledProcedureDocumentSnapshotTests
             var revision01 = new TestProcedureRevision(procedure.Id, 1, "Later objective",
                 "Later preconditions", "Later steps", "Later expected result",
                 TestProcedureState.Approved, "verification.engineer", t2,
-                sourceTestChangeRequestId: tcr01.Id);
+                sourceTestChangeRequestId: tcr01.Id,
+                parentKind: VerificationProcedureParentKind.Derived,
+                derivedRationale: "This pre-manifest document fixture has no upstream coverage.");
             procedure.UpdateDraft("Later title", procedure.OwnerId, t2);
             db.AddRange(source01, tcr01, revision01);
             await db.SaveChangesAsync();

@@ -66,9 +66,12 @@ public sealed class HistoricalPublicationFreezeApiTests
         {
             var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
             var link = await db.RequirementTraces.SingleAsync(x => x.Id == seed.TraceId);
-            link.UpdateProposal(RequirementTraceType.AllocatedFrom,
+            link.UpdateProposal(RequirementTraceType.DerivedFrom,
                 "The parent trace meaning changed after the document was generated.", seed.Now.AddDays(1));
-            db.TestCoverage.Add(new TestRequirementCoverage(seed.ProcedureRevisionId, seed.RequirementRevisionId));
+            db.TestCoverage.Add(TestRequirementCoverage.CarriedForward(seed.ProcedureRevisionId,
+                seed.CoverageRequirementRevisionId,
+                "Coverage was carried while the frozen publication remained unchanged.",
+                seed.Now.AddDays(1)));
             await db.SaveChangesAsync();
         }
 
@@ -121,6 +124,12 @@ public sealed class HistoricalPublicationFreezeApiTests
             var link = await db.RequirementTraces.SingleAsync(x => x.Id == seed.TraceId);
             link.UpdateProposal(RequirementTraceType.DerivedFrom,
                 "The trace meaning moved again; legacy regeneration follows live state.", seed.Now.AddDays(2));
+            db.RequirementTraces.Add(new RequirementTraceLink(seed.ProjectId, seed.RequirementRevisionId,
+                seed.CoverageRequirementRevisionId, RequirementTraceType.DerivedFrom,
+                "A second upward relationship was added after the legacy document was created.",
+                seed.Now));
+            var procedure = await db.TestProcedures.SingleAsync(x => x.Id == seed.ProcedureId);
+            procedure.UpdateDraft("Frozen coverage procedure (retitled after publication)", "author", seed.Now.AddDays(2));
             await db.SaveChangesAsync();
         }
 
@@ -186,32 +195,44 @@ public sealed class HistoricalPublicationFreezeApiTests
         var targetRevision = new RequirementRevision(target.Id, 0,
             "Parent system requirement.", "Rationale", "Test",
             RequirementRevisionState.Active, scr.Id, baseline.Id, now);
+        var coverageRequirement = new RequirementArtifact(project.Id, "SYSR-004502", RequirementLevel.System, now);
+        var coverageRevision = new RequirementRevision(coverageRequirement.Id, 0,
+            "A requirement carried into a later controlled publication.", "Rationale", "Test",
+            RequirementRevisionState.Active, scr.Id, baseline.Id, now);
         var trace = new RequirementTraceLink(project.Id, revision.Id, targetRevision.Id,
             RequirementTraceType.DerivedFrom, "Original trace rationale.", now);
         var procedure = new TestProcedure(project.Id, "SYSTP-004500", "Frozen coverage procedure",
             "author", now, TestProcedureLevel.System);
         var procedureRevision = new TestProcedureRevision(procedure.Id, 0, "Objective",
-            "Preconditions", "Steps", "Expected", TestProcedureState.Approved, "author", now);
+            "Preconditions", "Steps", "Expected", TestProcedureState.Approved, "author", now,
+            effectiveBaselineId: baseline.Id, parentKind: VerificationProcedureParentKind.Allocated);
         var config = new UserAccount("config.manager", "Config Manager", "config@example.test",
             IdentityService.HashPassword(AeroLinkApiFactory.MemberPassword), now);
 
         db.AddRange(program, project, release, scr, baseline, requirement, revision, target, targetRevision,
+            coverageRequirement, coverageRevision,
             trace, procedure, procedureRevision, config,
             new ProgramMembership(config.Id, program.Id, ProgramRole.ConfigurationManager, "test.setup", now));
         db.BaselineRequirements.Add(new BaselineRequirementSelection(baseline.Id, requirement.Id, revision.Id));
+        db.BaselineRequirements.Add(new BaselineRequirementSelection(baseline.Id, coverageRequirement.Id, coverageRevision.Id));
+        db.TestCoverage.Add(new TestRequirementCoverage(procedureRevision.Id, revision.Id));
         await db.SaveChangesAsync();
 
-        return new Fixture(project.Id, release.Id, baseline.Id, trace.Id, revision.Id, procedureRevision.Id, now);
+        return new Fixture(project.Id, release.Id, baseline.Id, trace.Id, revision.Id, coverageRevision.Id,
+            procedureRevision.Id, procedure.Id, now);
     }
 
     private sealed class Fixture(Guid projectId, Guid releaseId, Guid baselineId, Guid traceId,
-        Guid requirementRevisionId, Guid procedureRevisionId, DateTimeOffset now)
+        Guid requirementRevisionId, Guid coverageRequirementRevisionId, Guid procedureRevisionId,
+        Guid procedureId, DateTimeOffset now)
     {
         public Guid ProjectId { get; } = projectId;
         public Guid ReleaseId { get; } = releaseId;
         public Guid BaselineId { get; } = baselineId;
         public Guid TraceId { get; } = traceId;
         public Guid RequirementRevisionId { get; } = requirementRevisionId;
+        public Guid CoverageRequirementRevisionId { get; } = coverageRequirementRevisionId;
+        public Guid ProcedureId { get; } = procedureId;
         public Guid ProcedureRevisionId { get; } = procedureRevisionId;
         public DateTimeOffset Now { get; } = now;
         public Guid SysrdId { get; set; }

@@ -70,7 +70,8 @@ public sealed class CoverageStateFilterApiTests : IClassFixture<SharedApiHost>
         // enforced foreign keys — a revision that came from nowhere is not a state this product allows.
         RequirementRevision Revision(RequirementArtifact artifact, string statement) =>
             new(artifact.Id, 1, statement, "Rationale", "Test", RequirementRevisionState.Active,
-                scr.Id, baseline.Id, now);
+                scr.Id, baseline.Id, now, RequirementParentKind.Derived,
+                "This coverage-state fixture intentionally keeps each requirement standalone.");
 
         var settled = new RequirementArtifact(project.Id, "HLR-00000801", RequirementLevel.HighLevel, now);
         var suspect = new RequirementArtifact(project.Id, "HLR-00000802", RequirementLevel.HighLevel, now);

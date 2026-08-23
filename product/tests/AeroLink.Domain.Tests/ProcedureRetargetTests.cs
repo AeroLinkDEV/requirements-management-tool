@@ -30,7 +30,32 @@ public sealed class ProcedureRetargetTests
 
         Assert.Equal(VerificationImpactState.Resolved, item.State);
         Assert.Equal(VerificationImpactOutcome.ProcedureRetargeted, item.Outcome);
+        Assert.Equal(TestProcedureChangeAction.ModifyExisting, item.ProcedureChangeAction);
         Assert.Equal(target, item.RetargetedRequirementRevisionId);
+    }
+
+    [Fact]
+    public void An_existing_retarget_target_may_be_confirmed_as_link_existing()
+    {
+        var item = Orphaned();
+        item.Resolve("test.engineer", VerificationImpactOutcome.ProcedureRetargeted,
+            "The existing exact target remains valid.", DateTimeOffset.UtcNow,
+            procedureChangeAction: TestProcedureChangeAction.LinkExisting,
+            retargetedRequirementRevisionId: Guid.NewGuid());
+
+        Assert.Equal(TestProcedureChangeAction.LinkExisting, item.ProcedureChangeAction);
+    }
+
+    [Fact]
+    public void Retargeting_cannot_be_recorded_as_create_new_or_no_test_required()
+    {
+        foreach (var action in new[] { TestProcedureChangeAction.CreateNew, TestProcedureChangeAction.NoTestRequired })
+        {
+            var item = Orphaned();
+            Assert.Throws<DomainException>(() => item.Resolve("test.engineer",
+                VerificationImpactOutcome.ProcedureRetargeted, "The target changed.", DateTimeOffset.UtcNow,
+                procedureChangeAction: action, retargetedRequirementRevisionId: Guid.NewGuid()));
+        }
     }
 
     [Fact]

@@ -141,28 +141,23 @@ public enum VerificationProcedureParentKind
 }
 
 /// <summary>
-/// Small shared seam for the #738 exact-parent-or-derived invariant.  It is deliberately limited to the
-/// Procedure side: requirement coverage remains on Case revisions and is not inferred from this selection.
+/// Compatibility seam for the existing Procedure parent API. Requirements and
+/// Case/System coverage call the neutral policy directly so the XOR invariant
+/// is not reimplemented per artifact type.
 /// </summary>
 public static class VerificationProcedureParentPolicy
 {
+    public static ExactParentClassification Classification(VerificationProcedureParentKind kind) => kind switch
+    {
+        VerificationProcedureParentKind.Allocated => ExactParentClassification.Allocated,
+        VerificationProcedureParentKind.Derived => ExactParentClassification.Derived,
+        _ => ExactParentClassification.Unspecified,
+    };
+
     public static void Validate(VerificationProcedureParentKind kind,
         IEnumerable<Guid>? caseRevisionIds, string? derivedRationale)
-    {
-        var ids = (caseRevisionIds ?? []).Where(x => x != Guid.Empty).Distinct().ToArray();
-        var rationale = derivedRationale?.Trim() ?? "";
-        switch (kind)
-        {
-            case VerificationProcedureParentKind.Allocated when ids.Length > 0 && rationale.Length == 0:
-                return;
-            case VerificationProcedureParentKind.Derived when ids.Length == 0 && rationale.Length > 0:
-                return;
-            case VerificationProcedureParentKind.Unspecified:
-                throw new DomainException("A software Procedure revision must be Allocated to an exact Case revision or explicitly Derived with a rationale.");
-            default:
-                throw new DomainException("A software Procedure revision must have exact Case parents or a nonblank Derived rationale, but not both or neither.");
-        }
-    }
+        => ExactParentSelectionPolicy.Validate(Classification(kind), caseRevisionIds,
+            derivedRationale, "software Procedure revision");
 }
 
 /// <summary>Capabilities a routed consumer must explicitly declare for a v2 artifact registration.</summary>

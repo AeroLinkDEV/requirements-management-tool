@@ -46,7 +46,9 @@ public sealed class ProblemReportVerificationApiTests
         var failedRevision = new TestProcedureRevision(procedure.Id, 0, "Original objective", "Preconditions", "Steps", "Expected",
             TestProcedureState.Approved, "test", start, effectiveBaselineId: originBaseline.Id);
         var targetRevision = new TestProcedureRevision(procedure.Id, 1, "Corrective objective", "Preconditions", "Revised steps", "Expected",
-            TestProcedureState.Approved, "test", start.AddMinutes(3), sourceTestChangeRequestId: Guid.NewGuid(), effectiveBaselineId: targetBaseline.Id);
+            TestProcedureState.Approved, "test", start.AddMinutes(3), sourceTestChangeRequestId: Guid.NewGuid(), effectiveBaselineId: targetBaseline.Id,
+            parentKind: VerificationProcedureParentKind.Derived,
+            derivedRationale: "This isolated verification-history fixture intentionally stands alone without a governed requirement parent.");
         var otherProcedure = new TestProcedure(project.Id, "SYSTP-004491", "Unrelated function", "test", start, TestProcedureLevel.System);
         var otherRevision = new TestProcedureRevision(otherProcedure.Id, 0, "Other objective", "Preconditions", "Steps", "Expected",
             TestProcedureState.Approved, "test", start, effectiveBaselineId: targetBaseline.Id);

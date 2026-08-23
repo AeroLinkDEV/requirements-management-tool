@@ -62,6 +62,25 @@ public sealed class TestChangeReviewTests
     }
 
     [Fact]
+    public void Pre_738_test_change_snapshot_hash_is_fixed_and_recomputable()
+    {
+        var review = new TestChangeReview(
+            Guid.Parse("66666666-6666-6666-6666-666666666666"),
+            Guid.Parse("77777777-7777-7777-7777-777777777777"),
+            Guid.Parse("88888888-8888-8888-8888-888888888888"),
+            TestChangeReviewDiscipline.System, "SRCR-00039.00", Now,
+            caseContractVersion: 1);
+        review.RecordNoTestChangeRequired("verification.engineer", "Existing procedure remains sufficient.", Now);
+        review.MarkAsLegacyHistoricalPackage("verification.engineer", Now.AddSeconds(1));
+
+        review.Submit("verification.engineer", "test.lead", true, Now.AddMinutes(1));
+        var cycle = review.ReviewCycles.Single();
+
+        Assert.Equal("8bfe6b3d71c9be303f81829492cacd23d8ab8aed61d45d8a996693ff690eb7bd", cycle.SnapshotHash);
+        Assert.Equal(1, review.CaseContractVersion);
+    }
+
+    [Fact]
     public void Current_packages_require_a_complete_case_while_legacy_history_can_be_reconstructed_unchanged()
     {
         var current = Raised();
@@ -73,11 +92,25 @@ public sealed class TestChangeReviewTests
         var legacy = new TestChangeReview(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(),
             TestChangeReviewDiscipline.System, "SRCR-00001.00", Now, caseContractVersion: 0);
         legacy.RecordTestChangeRequired("historical.import", Now);
+        legacy.MarkAsLegacyHistoricalPackage("historical.import", Now.AddSeconds(1));
         legacy.Submit("historical.import", "historical.approver", true, Now.AddMinutes(1));
 
         Assert.Equal(TestChangeReviewState.InReview, legacy.State);
-        Assert.Equal(0, legacy.CaseContractVersion);
+        Assert.Equal(1, legacy.CaseContractVersion);
         Assert.Equal(["Title", "Problem", "Analysis", "Solution"], legacy.MissingCaseFields());
+    }
+
+    [Fact]
+    public void A_migrated_v1_draft_upgrades_before_starting_a_new_review_cycle()
+    {
+        var migrated = new TestChangeReview(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(),
+            TestChangeReviewDiscipline.System, "SRCR-00002.00", Now, caseContractVersion: 1);
+        migrated.RecordNoTestChangeRequired("historical.import", "The existing procedure remains sufficient.", Now);
+
+        migrated.Submit("current.author", "current.approver", true, Now.AddMinutes(1));
+
+        Assert.Equal(TestChangeReview.CurrentCaseContractVersion, migrated.CaseContractVersion);
+        Assert.Equal(TestChangeReviewState.InReview, migrated.State);
     }
 
     [Fact]
@@ -174,10 +207,12 @@ public sealed class TestChangeReviewTests
     {
         var required = RaisedLegacy();
         required.RecordTestChangeRequired("verification.engineer", Now.AddMinutes(1));
+        required.MarkAsLegacyHistoricalPackage("verification.engineer", Now.AddSeconds(90));
         required.Submit("verification.engineer", "test.lead", true, Now.AddMinutes(2));
 
         var notRequired = RaisedLegacy();
         notRequired.RecordNoTestChangeRequired("verification.engineer", "Already covered.", Now.AddMinutes(1));
+        notRequired.MarkAsLegacyHistoricalPackage("verification.engineer", Now.AddSeconds(90));
         notRequired.Submit("verification.engineer", "test.lead", true, Now.AddMinutes(2));
 
         Assert.NotEqual(required.ReviewCycles.Single().SnapshotHash,
@@ -264,9 +299,11 @@ public sealed class TestChangeReviewTests
     public void Coverage_removals_rationale_and_author_are_frozen_into_the_review_snapshot()
     {
         var removed = Guid.NewGuid();
+        var retained = Guid.NewGuid();
         TestProcedureChangeDraft Draft(Guid removal, string rationale) => new("SYSTP-000200", 1,
             TestProcedureLevel.System, TestProcedureChangeKind.Modify, "Revised procedure", "Objective", "",
-            "Steps", "Expected", "Procedure rationale", "[]", $"[\"{removal}\"]", rationale);
+            "Steps", "Expected", "Procedure rationale", "[]", $"[\"{removal}\"]", rationale,
+            VerificationProcedureParentKind.Allocated, $"[\"{retained}\"]");
 
         var first = Create();
         first.AssignControlledNumber("SYSTPCR-000061", Now.AddMinutes(1));
@@ -462,6 +499,86 @@ public sealed class TestChangeReviewTests
         var error = Assert.Throws<DomainException>(() => review.SubmitForReview("verification.engineer",
             [new ChangeControl.ApproverSelection("approver", "Approver")], true, Now.AddMinutes(1)));
         Assert.Contains("SYSTP-000502", error.Message);
+    }
+
+    [Fact]
+    public void An_incomplete_parent_selection_can_be_saved_as_a_draft_but_submission_requires_the_xor()
+    {
+        var review = Create();
+        var draft = ProcedureDraftWith(rationale: "Why this procedure work is required.", drivingJson: "[]") with
+        {
+            ParentKind = VerificationProcedureParentKind.Unspecified,
+            ParentRevisionIdsJson = "[]",
+            DerivedRationale = ""
+        };
+
+        var change = review.AddProcedureChange("verification.engineer", draft, Now);
+        Assert.Equal(VerificationProcedureParentKind.Unspecified, change.ParentKind);
+        Assert.Throws<DomainException>(() => review.SubmitForReview("verification.engineer",
+            [new ChangeControl.ApproverSelection("approver", "Approver")], true, Now.AddMinutes(1)));
+    }
+
+    [Fact]
+    public void Derived_procedure_changes_reject_supplied_parents_and_blank_rationale_at_review()
+    {
+        var parent = Guid.Parse("44444444-4444-4444-4444-444444444444");
+        var withParent = Create();
+        withParent.AddProcedureChange("verification.engineer", ProcedureDraftWith(drivingJson: "[]") with
+        {
+            ParentKind = VerificationProcedureParentKind.Derived,
+            ParentRevisionIdsJson = $"[\"{parent}\"]",
+            DerivedRationale = "Standalone engineering function."
+        }, Now);
+        var both = Assert.Throws<DomainException>(() => withParent.SubmitForReview("verification.engineer",
+            [new ChangeControl.ApproverSelection("approver", "Approver")], true, Now.AddMinutes(1)));
+        Assert.Contains("both", both.Message, StringComparison.OrdinalIgnoreCase);
+
+        var blank = Create();
+        blank.AddProcedureChange("verification.engineer", ProcedureDraftWith(drivingJson: "[]") with
+        {
+            ParentKind = VerificationProcedureParentKind.Derived,
+            ParentRevisionIdsJson = "[]",
+            DerivedRationale = " "
+        }, Now);
+        Assert.Throws<DomainException>(() => blank.SubmitForReview("verification.engineer",
+            [new ChangeControl.ApproverSelection("approver", "Approver")], true, Now.AddMinutes(1)));
+    }
+
+    [Fact]
+    public void Allocated_parent_selection_must_contain_every_driving_delta()
+    {
+        var parent = Guid.Parse("44444444-4444-4444-4444-444444444444");
+        var driving = Guid.Parse("55555555-5555-5555-5555-555555555555");
+        var review = Create();
+        review.AddProcedureChange("verification.engineer", ProcedureDraftWith(
+            drivingJson: $"[\"{driving}\"]") with
+        {
+            ParentKind = VerificationProcedureParentKind.Allocated,
+            ParentRevisionIdsJson = $"[\"{parent}\"]"
+        }, Now);
+
+        var error = Assert.Throws<DomainException>(() => review.SubmitForReview("verification.engineer",
+            [new ChangeControl.ApproverSelection("approver", "Approver")], true, Now.AddMinutes(1)));
+        Assert.Contains("outside its exact final parent", error.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void The_v2_snapshot_changes_when_exact_parent_mode_or_rationale_changes()
+    {
+        var parent = Guid.Parse("55555555-5555-5555-5555-555555555555");
+        var allocated = SnapshotFor(ProcedureDraftWith(drivingJson: "[]") with
+        {
+            ParentKind = VerificationProcedureParentKind.Allocated,
+            ParentRevisionIdsJson = $"[\"{parent}\"]"
+        });
+        var derived = SnapshotFor(ProcedureDraftWith(drivingJson: "[]") with
+        {
+            ParentKind = VerificationProcedureParentKind.Derived,
+            ParentRevisionIdsJson = "[]",
+            DerivedRationale = "Standalone engineering function."
+        });
+
+        Assert.NotEqual(allocated, derived);
     }
 
     /// <summary>

@@ -39,7 +39,9 @@ public sealed class TestProcedureRevisionTitleProjectionTests
         var revision01 = Revision(procedure.Id, 1, modify.Id, now.AddMinutes(1));
         var revision02 = new TestProcedureRevision(procedure.Id, 2, "", "", "", "",
             TestProcedureState.Retired, "verification.engineer", now.AddMinutes(2),
-            sourceTestChangeRequestId: retire.Id);
+            sourceTestChangeRequestId: retire.Id,
+            parentKind: VerificationProcedureParentKind.Derived,
+            derivedRationale: "Retirement projection fixture has no upstream coverage.");
 
         // Reproduce the old global mutation: a later Modify rewrote the stable catalog title. Exact revision
         // title projection must remain anchored to each immutable TCR change snapshot despite that mutation.
@@ -115,5 +117,7 @@ public sealed class TestProcedureRevisionTitleProjectionTests
     private static TestProcedureRevision Revision(Guid procedureId, int revision, Guid? sourceTcrId,
         DateTimeOffset now) => new(procedureId, revision, "Verify title.", "Configured system.",
         "Exercise the procedure.", "Expected behavior is observed.", TestProcedureState.Approved,
-        "verification.engineer", now, sourceTestChangeRequestId: sourceTcrId);
+        "verification.engineer", now, sourceTestChangeRequestId: sourceTcrId,
+        parentKind: sourceTcrId is null ? VerificationProcedureParentKind.Unspecified : VerificationProcedureParentKind.Derived,
+        derivedRationale: sourceTcrId is null ? null : "This title projection fixture intentionally has no upstream coverage.");
 }

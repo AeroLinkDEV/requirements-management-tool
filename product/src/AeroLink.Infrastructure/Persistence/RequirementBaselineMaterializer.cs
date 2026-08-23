@@ -17,7 +17,18 @@ public sealed record MaterializationResult(string RequirementsHash, int ActiveRe
 public sealed class RequirementBaselineMaterializer(AeroLinkDbContext db, VerificationImpactService verificationImpact,
     ILadderPolicy? policy = null, IProjectLadderPolicyResolver? policyResolver = null)
 {
-    public async Task<MaterializationResult> MaterializeAsync(Guid baselineId, string actorId, DateTimeOffset now, CancellationToken ct)
+    public Task<MaterializationResult> MaterializeAsync(Guid baselineId, string actorId, DateTimeOffset now, CancellationToken ct)
+        => MaterializeCoreAsync(baselineId, actorId, now, ct, allowLegacyHistoricalSeed: false);
+
+    // The clean showcase creates and materializes a characterized pre-#738 release in one controlled seed
+    // operation. This internal seam is deliberately unavailable through the normal DI/API materializer, so
+    // migrated v1 rows selected into a new baseline cannot reuse the historical Unspecified exemption.
+    internal Task<MaterializationResult> MaterializeLegacyHistoricalSeedAsync(Guid baselineId, string actorId,
+        DateTimeOffset now, CancellationToken ct)
+        => MaterializeCoreAsync(baselineId, actorId, now, ct, allowLegacyHistoricalSeed: true);
+
+    private async Task<MaterializationResult> MaterializeCoreAsync(Guid baselineId, string actorId, DateTimeOffset now,
+        CancellationToken ct, bool allowLegacyHistoricalSeed)
     {
         await using var transaction = await db.Database.BeginTransactionAsync(ct);
         var baseline = await db.CandidateBaselines.Include(x => x.Selections).Include(x => x.ExternalPackageSelections).Include(x => x.Events).SingleOrDefaultAsync(x => x.Id == baselineId, ct)
@@ -26,6 +37,10 @@ public sealed class RequirementBaselineMaterializer(AeroLinkDbContext db, Verifi
         if (baseline.RequirementsMaterializedAt is not null) throw new DomainException("The requirement baseline is already materialized and immutable.");
         var ladderPolicy = policyResolver is null ? (policy ?? LegacyLadderPolicy.Instance)
             : await policyResolver.ResolveAsync(baseline.ProjectId, ct);
+        using var savePolicyScope = db.UseSaveBoundaryPolicy(ladderPolicy);
+        using var legacyHistoricalSeedScope = allowLegacyHistoricalSeed
+            ? db.UseLegacyHistoricalSeed()
+            : null;
         // Materialization is a current mutation seam, so ensure the active schema/specification projection
         // exists for this effective policy before creating profiles or placements. Historical inactive rows are
         // retained by the synchronizer but are never selected below.
@@ -135,7 +150,11 @@ public sealed class RequirementBaselineMaterializer(AeroLinkDbContext db, Verifi
                 if (artifactByBase.ContainsKey(change.BaseNumber)) throw new DomainException($"{change.DisplayNumber} cannot be introduced because its stable identity already exists.");
                 var artifact = new RequirementArtifact(baseline.ProjectId, change.BaseNumber, change.Level, now);
                 db.Requirements.Add(artifact); artifactByBase.Add(artifact.BaseNumber, artifact);
-                var revision = CreateRevision(artifact, change, pair.scr.Id, baseline.Id, now, RequirementRevisionState.Active);
+                var introSelection = ResolveParentSelection(ladderPolicy, change, requireComplete: true,
+                    allowLegacyUnspecified: allowLegacyHistoricalSeed
+                        && pair.scr.SnapshotContractVersion < SystemChangeRequest.CurrentSnapshotContractVersion);
+                var revision = CreateRevision(artifact, change, pair.scr.Id, baseline.Id, now,
+                    RequirementRevisionState.Active, introSelection);
                 db.RequirementRevisions.Add(revision); revisions.Add(revision); current[artifact.Id] = revision; created++;
                 if (hasRequirementsDocument) AddProfile(revision,change,schemas,actorId,now);
                 materialized.Add(new(pair.scr.Id, change.Id, change.Kind, null, revision.Id, change.DisplayNumber));
@@ -146,7 +165,12 @@ public sealed class RequirementBaselineMaterializer(AeroLinkDbContext db, Verifi
                 throw new DomainException($"{change.Kind} requires {change.BaseNumber} to be active in the predecessor or current baseline.");
             if (change.Revision <= prior.Revision) throw new DomainException($"{change.DisplayNumber} must have a revision greater than {prior.Revision:D2}.");
             var state = change.Kind == RequirementChangeKind.Retire ? RequirementRevisionState.Retired : RequirementRevisionState.Active;
-            var next = CreateRevision(existing, change, pair.scr.Id, baseline.Id, now, state);
+            var nextSelection = state == RequirementRevisionState.Retired
+                ? new ParentSelectionData(RequirementParentKind.Unspecified, [], "")
+                : ResolveParentSelection(ladderPolicy, change, requireComplete: false,
+                    allowLegacyUnspecified: allowLegacyHistoricalSeed
+                        && pair.scr.SnapshotContractVersion < SystemChangeRequest.CurrentSnapshotContractVersion);
+            var next = CreateRevision(existing, change, pair.scr.Id, baseline.Id, now, state, nextSelection);
             db.RequirementRevisions.Add(next); revisions.Add(next); created++;
             if (hasRequirementsDocument) AddProfile(next,change,schemas,actorId,now);
             materialized.Add(new(pair.scr.Id, change.Id, change.Kind, prior.Id, next.Id, change.DisplayNumber));
@@ -185,6 +209,13 @@ public sealed class RequirementBaselineMaterializer(AeroLinkDbContext db, Verifi
             db.SourceIdentityLinks.Add(sourceIdentities[item.SourceIdentityId].LinkToFromImport(next.Id, item.BaselineImportId, now));
         }
 
+        // Make the target baseline's exact requirement membership visible to the save-boundary integrity
+        // check before verification coverage is carried forward. The selection is still in this transaction;
+        // no released history is being rewritten.
+        var artifactById = artifactByBase.Values.ToDictionary(x => x.Id);
+        foreach (var item in current.OrderBy(x => artifactById[x.Key].BaseNumber))
+            db.BaselineRequirements.Add(new BaselineRequirementSelection(baseline.Id, item.Key, item.Value.Id));
+
         // Requirement revisions exist for the first time here, so this is the earliest point at which
         // verification work can bind to them, coverage can carry forward, and a stranded procedure is visible.
         await verificationImpact.ApplyMaterializationAsync(baseline.ProjectId, baseline.ReleaseId, materialized, actorId, now, ct);
@@ -197,6 +228,10 @@ public sealed class RequirementBaselineMaterializer(AeroLinkDbContext db, Verifi
                 .Where(x => x.ProjectId == baseline.ProjectId)
                 .Select(x => new { x.SourceRevisionId, x.TargetRevisionId, x.Type }).ToListAsync(ct))
                 .Select(x => (x.SourceRevisionId, x.TargetRevisionId, x.Type)).ToHashSet();
+        var baselineParentIds = (await db.BaselineRequirements.AsNoTracking()
+            .Where(x => x.BaselineId == baseline.Id)
+            .Select(x => x.RevisionId).ToListAsync(ct)).ToHashSet();
+        baselineParentIds.UnionWith(current.Values.Select(x => x.Id));
         var parentLevels = await (from revision in db.RequirementRevisions.AsNoTracking()
                                   join artifact in db.Requirements.AsNoTracking() on revision.ArtifactId equals artifact.Id
                                   where proposed.Select(x => x.Parent).Contains(revision.Id)
@@ -207,6 +242,15 @@ public sealed class RequirementBaselineMaterializer(AeroLinkDbContext db, Verifi
             if (!revisionByChange.TryGetValue(allocation.Change.Id, out var source)) continue;
             if (!parentLevels.TryGetValue(allocation.Parent, out var parentLevel))
                 throw new DomainException("An upstream allocation must reference an exact requirement revision.");
+            if (!baselineParentIds.Contains(allocation.Parent))
+                throw new DomainException("An upstream allocation must reference a current exact revision from this baseline.");
+            var allowedParentLevels = ladderPolicy.ParentLevels(allocation.Change.Level);
+            if (!allowedParentLevels.Contains(parentLevel))
+                throw new DomainException(
+                    $"{allocation.Change.DisplayNumber} names {parentLevel}, which is not a configured exact parent level for {allocation.Change.Level}.");
+            var sourceChange = allocation.Change;
+            if (RequirementAuthoringJson.IsDerived(sourceChange.AttributesJson))
+                throw new DomainException("A derived requirement cannot carry exact upstream allocations.");
             RequirementTracePolicy.Validate(ladderPolicy, allocation.Change.Level, parentLevel, RequirementTraceType.AllocatedFrom);
             var key = (source, allocation.Parent, RequirementTraceType.AllocatedFrom);
             if (!existingTraceKeys.Add(key)) continue;
@@ -275,9 +319,6 @@ public sealed class RequirementBaselineMaterializer(AeroLinkDbContext db, Verifi
 
         await PlaceInChosenSectionsAsync(baseline.ProjectId, scrs, artifactByBase, ladderPolicy, actorId, now, ct);
 
-        var artifactById = artifactByBase.Values.ToDictionary(x => x.Id);
-        foreach (var item in current.OrderBy(x => artifactById[x.Key].BaseNumber))
-            db.BaselineRequirements.Add(new BaselineRequirementSelection(baseline.Id, item.Key, item.Value.Id));
         var manifest = string.Join(";", current.OrderBy(x => artifactById[x.Key].BaseNumber)
             .Select(x => $"{artifactById[x.Key].BaseNumber}.{x.Value.Revision:D2}:{x.Value.Id}"));
         var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(manifest))).ToLowerInvariant();
@@ -374,14 +415,59 @@ public sealed class RequirementBaselineMaterializer(AeroLinkDbContext db, Verifi
         return int.TryParse(digits, out var value) ? value : Math.Abs(baseNumber.GetHashCode() % 100000);
     }
 
+    private sealed record ParentSelectionData(RequirementParentKind Kind, IReadOnlyList<Guid> ParentRevisionIds,
+        string DerivedRationale);
+
+    private static ParentSelectionData ResolveParentSelection(ILadderPolicy policy, RequirementChange change,
+        bool requireComplete, bool allowLegacyUnspecified = false)
+    {
+        var parents = ProposedParents(change);
+        _ = requireComplete;
+        IReadOnlyList<RequirementLevel> allowed;
+        try
+        {
+            _ = policy.Definition(change.Level);
+            allowed = policy.ParentLevels(change.Level);
+        }
+        catch (DomainException ex)
+        {
+            throw new DomainException($"The configured project ladder cannot resolve {change.Level} parent topology: {ex.Message}");
+        }
+        var derived = RequirementAuthoringJson.IsDerived(change.AttributesJson);
+        if (allowed.Count == 0)
+        {
+            if (parents.Count != 0)
+                throw new DomainException($"{change.DisplayNumber} is a configured root and cannot carry upstream allocations.");
+            return new(RequirementParentKind.Unspecified, [], "");
+        }
+        if (allowLegacyUnspecified && !derived && parents.Count == 0)
+            return new(RequirementParentKind.Unspecified, [], "");
+        var kind = derived ? RequirementParentKind.Derived : RequirementParentKind.Allocated;
+        var rationale = derived ? change.Rationale.Trim() : "";
+        ExactParentSelectionPolicy.Validate(
+            kind == RequirementParentKind.Derived ? ExactParentClassification.Derived : ExactParentClassification.Allocated,
+            parents, rationale, "requirement revision");
+        return new(kind, ExactParentSelectionPolicy.NormalizeIds(parents, "requirement revision"), rationale);
+    }
+
     private static RequirementRevision CreateRevision(RequirementArtifact artifact, RequirementChange change, Guid changeRequestId,
-        Guid baselineId, DateTimeOffset now, RequirementRevisionState state) =>
-        new(artifact.Id, change.Revision, change.Statement, change.Rationale, change.VerificationMethod, state, changeRequestId, baselineId, now);
+        Guid baselineId, DateTimeOffset now, RequirementRevisionState state, ParentSelectionData selection) =>
+        new(artifact.Id, change.Revision, change.Statement, change.Rationale, change.VerificationMethod, state,
+            changeRequestId, baselineId, now, selection.Kind, selection.DerivedRationale,
+            selection.ParentRevisionIds);
 
     private static IReadOnlyList<Guid> ProposedParents(RequirementChange change)
     {
-        try { return JsonSerializer.Deserialize<List<Guid>>(change.ProposedUpstreamRevisionIdsJson) ?? []; }
-        catch (JsonException) { return []; }
+        try
+        {
+            return ExactParentSelectionPolicy.NormalizeIds(
+                JsonSerializer.Deserialize<List<Guid>>(string.IsNullOrWhiteSpace(change.ProposedUpstreamRevisionIdsJson)
+                    ? "[]" : change.ProposedUpstreamRevisionIdsJson) ?? [], change.DisplayNumber);
+        }
+        catch (JsonException)
+        {
+            throw new DomainException($"{change.DisplayNumber} carries malformed exact upstream revisions.");
+        }
     }
 
     private static bool IsConfiguredTrace(ILadderPolicy policy, RequirementLevel source, RequirementLevel target,

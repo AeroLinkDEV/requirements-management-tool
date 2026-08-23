@@ -30,9 +30,13 @@ public static class ChangeRequestNumbering
 
 public sealed class SystemChangeRequest
 {
+    public const int CurrentSnapshotContractVersion = 2;
     private readonly List<RequirementChange> _requirementChanges = [];
     private readonly List<ReviewCycle> _reviewCycles = [];
     private readonly List<AuditEvent> _auditEvents = [];
+    // Not persisted. Only the clean historical showcase seed may use this one-shot compatibility path;
+    // migrated v1 drafts re-entering review must upgrade to the current exact-parent contract.
+    private bool _allowLegacyHistoricalSubmission;
     private SystemChangeRequest() { }
 
     public SystemChangeRequest(string baseNumber, int revision, Guid projectId, Guid targetReleaseId,
@@ -140,6 +144,8 @@ public sealed class SystemChangeRequest
     public DateTimeOffset CreatedAt { get; private set; }
     public DateTimeOffset UpdatedAt { get; private set; }
     public long Version { get; private set; } = 1;
+    /// <summary>Version of the canonical signed snapshot bytes; legacy rows remain on version 1.</summary>
+    public int SnapshotContractVersion { get; private set; } = CurrentSnapshotContractVersion;
     public IReadOnlyCollection<RequirementChange> RequirementChanges => _requirementChanges.AsReadOnly();
     public IReadOnlyCollection<ReviewCycle> ReviewCycles => _reviewCycles.AsReadOnly();
     public IReadOnlyCollection<AuditEvent> AuditEvents => _auditEvents.AsReadOnly();
@@ -175,11 +181,31 @@ public sealed class SystemChangeRequest
         var change = new RequirementChange(Id, baseNumber, revision, level, kind, statement, rationale, verificationMethod,
             richText, attributesJson, impactDispositionJson, targetSectionId, proposedUpstreamRevisionIdsJson);
         _requirementChanges.Add(change);
+        SnapshotContractVersion = CurrentSnapshotContractVersion;
         UpdatedAt = now;
         Audit("RequirementChangeAdded", actorId,
             $"Added {change.Kind} {(string.IsNullOrWhiteSpace(change.DisplayNumber) ? "for a requirement not yet chosen" : change.DisplayNumber)}" +
             (RequirementAuthoringJson.IsDerived(change.AttributesJson) ? " as a derived requirement with a documented rationale." : "."), now);
         return change;
+    }
+
+    /// <summary>
+    /// Explicit compatibility seam for the pre-#738 showcase/import history. It is intentionally opt-in:
+    /// ordinary authored packages remain on the current snapshot contract and must resolve every configured
+    /// non-root requirement at review submission. The materializer carries this marker through as legacy
+    /// Unspecified revision evidence rather than inventing an allocation or derived rationale.
+    /// </summary>
+    internal void MarkAsLegacyHistoricalPackage(string actorId, DateTimeOffset now)
+    {
+        EnsureAuthor(actorId, administratorAuthority: false);
+        EnsureDraft();
+        if (_requirementChanges.Count == 0)
+            throw new DomainException("A legacy historical package must contain at least one requirement change.");
+        SnapshotContractVersion = 1;
+        _allowLegacyHistoricalSubmission = true;
+        UpdatedAt = now;
+        Audit("LegacyHistoricalPackageMarked", actorId,
+            $"Preserved {DisplayNumber} as pre-exact-parent historical evidence.", now);
     }
 
     /// <summary>
@@ -326,6 +352,7 @@ public sealed class SystemChangeRequest
         var change = _requirementChanges.SingleOrDefault(x => x.Id == requirementChangeId)
             ?? throw new DomainException("That requirement change is not part of this change request.");
         _requirementChanges.Remove(change);
+        SnapshotContractVersion = CurrentSnapshotContractVersion;
         UpdatedAt = now;
         Audit("RequirementChangeRemoved", actorId,
             $"Removed {change.DisplayNumber} from {DisplayNumber}.", now);
@@ -352,6 +379,7 @@ public sealed class SystemChangeRequest
                 item.Statement, item.Rationale, item.VerificationMethod, item.RichText, item.AttributesJson, item.ImpactDispositionJson,
                 item.TargetSectionId, item.ProposedUpstreamRevisionIdsJson));
         }
+        SnapshotContractVersion = CurrentSnapshotContractVersion;
         UpdatedAt = now;
         var derivedCount = _requirementChanges.Count(x => RequirementAuthoringJson.IsDerived(x.AttributesJson));
         Audit("ScrDraftUpdated", actorId,
@@ -364,9 +392,12 @@ public sealed class SystemChangeRequest
     {
         EnsureAuthor(actorId, administratorAuthority);
         EnsureDraft();
+        if (SnapshotContractVersion < CurrentSnapshotContractVersion && !_allowLegacyHistoricalSubmission)
+            SnapshotContractVersion = CurrentSnapshotContractVersion;
         ValidateReadyForReview(ladderPolicy);
         var cycle = new ReviewCycle(Id, _reviewCycles.Count + 1, ComputeSnapshotHash(), approvers, now, mode, workflow);
         _reviewCycles.Add(cycle);
+        _allowLegacyHistoricalSubmission = false;
         // Offering it to approvers is the author saying they have dealt with whatever a reopen left them, so
         // the flag comes off here rather than lingering into a review it no longer describes. What happened is
         // still in the audit trail, which is where a reviewer asking "why was this returned" looks.
@@ -658,6 +689,38 @@ public sealed class SystemChangeRequest
                 throw new DomainException($"{identity} has no statement. Finish or remove it before review.");
             if (item.Kind != RequirementChangeKind.Introduce && string.IsNullOrWhiteSpace(item.BaseNumber))
                 throw new DomainException("A proposal that changes an existing requirement must name it before review.");
+            var parentLevels = ParentLevels(ladderPolicy, item.Level);
+            var proposed = ProposedParentIds(item.ProposedUpstreamRevisionIdsJson, identity);
+            var derived = RequirementAuthoringJson.IsDerived(item.AttributesJson);
+            if (SnapshotContractVersion >= CurrentSnapshotContractVersion
+                && parentLevels.Count > 0 && item.Kind != RequirementChangeKind.Retire)
+                ExactParentSelectionPolicy.Validate(
+                    derived ? ExactParentClassification.Derived : ExactParentClassification.Allocated,
+                    proposed, derived ? item.Rationale : "", "requirement revision");
+        }
+    }
+
+    private static IReadOnlyList<RequirementLevel> ParentLevels(ILadderPolicy? policy, RequirementLevel child)
+    {
+        // An empty relationship list is a root exemption only after the level
+        // itself has been positively resolved by the configured policy.  Do not
+        // let a policy lookup failure look like a configured root.
+        var resolved = policy ?? LegacyLadderPolicy.Instance;
+        _ = resolved.Definition(child);
+        return resolved.ParentLevels(child);
+    }
+
+    private static IReadOnlyList<Guid> ProposedParentIds(string json, string identity)
+    {
+        try
+        {
+            return ExactParentSelectionPolicy.NormalizeIds(
+                JsonSerializer.Deserialize<List<Guid>>(string.IsNullOrWhiteSpace(json) ? "[]" : json) ?? [],
+                identity);
+        }
+        catch (JsonException)
+        {
+            throw new DomainException($"{identity} carries malformed exact upstream revisions.");
         }
     }
 
@@ -704,10 +767,15 @@ public sealed class SystemChangeRequest
         // The rich forms are in the hash in their own right. Two different structures can reduce to the same
         // readable text — a table and a list of lines, say — and hashing only the projection would let the
         // thing an approver actually looked at change underneath a recorded signature.
+        var changes = _requirementChanges.OrderBy(x => x.DisplayNumber).Select(x =>
+            SnapshotContractVersion < CurrentSnapshotContractVersion
+                ? $"{x.DisplayNumber}:{x.Level}:{x.Kind}:{x.Statement}:{x.Rationale}:{x.VerificationMethod}:{x.RichText}:{x.AttributesJson}:{x.ImpactDispositionJson}:{x.ProposedUpstreamRevisionIdsJson}"
+                : $"{x.DisplayNumber}:{x.Level}:{x.Kind}:{x.Statement}:{x.Rationale}:{x.VerificationMethod}:{x.RichText}:{x.AttributesJson}:{x.ImpactDispositionJson}:" +
+                  $"{(RequirementAuthoringJson.IsDerived(x.AttributesJson) ? "Derived" : ProposedParentIds(x.ProposedUpstreamRevisionIdsJson, x.DisplayNumber).Count > 0 ? "Allocated" : "Unspecified")}:" +
+                  $"{(RequirementAuthoringJson.IsDerived(x.AttributesJson) ? x.Rationale : string.Empty)}:" +
+                  $"{string.Join(",", ProposedParentIds(x.ProposedUpstreamRevisionIdsJson, x.DisplayNumber).OrderBy(id => id))}");
         var content = string.Join("|", DisplayNumber, Title, Problem, Analysis, Solution,
-            ProblemRich, AnalysisRich, SolutionRich,
-            string.Join(";", _requirementChanges.OrderBy(x => x.DisplayNumber).Select(x =>
-                $"{x.DisplayNumber}:{x.Level}:{x.Kind}:{x.Statement}:{x.Rationale}:{x.VerificationMethod}:{x.RichText}:{x.AttributesJson}:{x.ImpactDispositionJson}:{x.ProposedUpstreamRevisionIdsJson}")));
+            ProblemRich, AnalysisRich, SolutionRich, string.Join(";", changes));
         return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(content))).ToLowerInvariant();
     }
 

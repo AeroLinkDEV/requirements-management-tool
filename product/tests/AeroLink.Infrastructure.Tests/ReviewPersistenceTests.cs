@@ -38,7 +38,8 @@ public sealed class ReviewPersistenceTests
                 var project = new ProjectRecord(program.Id, "Software", "Review Software");
                 var release = new SoftwareRelease(project.Id, "1.0", false);
                 var scr = new SystemChangeRequest("HLRCR-00001", 0, project.Id, release.Id, "Review ordering", "P", "A", "S", "author", DateTimeOffset.UtcNow, ChangeRequestType.Software, softwareLevel: RequirementLevel.HighLevel);
-                scr.AddRequirementChange("author", "SWR-00000001", 0, RequirementLevel.HighLevel, RequirementChangeKind.Introduce, "Statement", "Rationale", "Test", DateTimeOffset.UtcNow);
+                scr.AddRequirementChange("author", "SWR-00000001", 0, RequirementLevel.HighLevel, RequirementChangeKind.Introduce, "Statement", "Rationale", "Test", DateTimeOffset.UtcNow,
+                    attributesJson: "{\"derived\":true}");
                 scr.SubmitForReview("author", [new("r1", "One"), new("r2", "Two"), new("r3", "Three")], DateTimeOffset.UtcNow);
                 setup.AddRange(program, project, release, scr);
                 await setup.SaveChangesAsync(); id = scr.Id;

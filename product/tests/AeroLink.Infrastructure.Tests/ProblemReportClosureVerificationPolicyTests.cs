@@ -39,7 +39,9 @@ public sealed class ProblemReportClosureVerificationPolicyTests
                 TestProcedureState.Approved, "test", start, effectiveBaselineId: originBaseline.Id);
             var revision1 = new TestProcedureRevision(procedure.Id, 1, "Corrected", "Pre", "New steps", "Expected",
                 TestProcedureState.Approved, "test", start.AddMinutes(2), sourceTestChangeRequestId: tcr.Id,
-                effectiveBaselineId: targetBaseline.Id);
+                effectiveBaselineId: targetBaseline.Id,
+                parentKind: VerificationProcedureParentKind.Derived,
+                derivedRationale: "The corrective system procedure is independently derived for this regression scenario.");
             var failure = new TestExecution(project.Id, revision0.Id, originBuild.Id, null, TestOutcome.Fail,
                 "test", "Rig", "Failed", "controlled://failure", start, start, originRelease.Id);
             var report = new ProblemReport(project.Id, "PR-09500", "Failure", "Problem", "", "engineer", start.AddMinutes(1),

@@ -82,8 +82,8 @@ public sealed class ArtifactClaimTests(SharedApiHost host) : IClassFixture<Share
                 await ActOnHolderAsync(host.Factory, world, (scr, now) => scr.Defer(world.Author, "Next build.", now));
 
             await using var scope = Scope(host.Factory, out var db);
-            Assert.Empty((await ArtifactClaims.ContendersAsync(db, world.ProjectId, [world.Requirement], second, default))
-                .Where(x => x.Holds));
+            Assert.DoesNotContain((await ArtifactClaims.ContendersAsync(db, world.ProjectId, [world.Requirement], second, default)),
+                x => x.Holds);
         }
     }
 
@@ -190,7 +190,9 @@ public sealed class ArtifactClaimTests(SharedApiHost host) : IClassFixture<Share
         review.RecordTestChangeRequired(world.Author, now);
         review.AddProcedureChange(world.Author, new TestProcedureChangeDraft(Procedure, 1,
             TestProcedureLevel.HighLevel, kind, "Reload timing", "Verify the reload budget",
-            "FMS powered", "Trigger a reload", "Under 1.5 seconds", "Latency"), now);
+            "FMS powered", "Trigger a reload", "Under 1.5 seconds", "Latency",
+            ParentKind: VerificationProcedureParentKind.Derived,
+            DerivedRationale: "This artifact-claim fixture intentionally stands alone without a requirement parent."), now);
         if (submit)
         {
             review.WriteCase(world.Author, "Reload timing", "P", "A", "S", now);

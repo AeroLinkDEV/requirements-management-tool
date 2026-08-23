@@ -130,7 +130,16 @@ public sealed class LegacyProcedureManifestBootstrapLifecycleTests
             kind == TestProcedureChangeKind.Retire ? "" : "Verify the successor behavior.",
             "Configured product.", kind == TestProcedureChangeKind.Retire ? "" : "1. Exercise the behavior.",
             kind == TestProcedureChangeKind.Retire ? "" : "Behavior is correct.",
-            "Approved successor procedure disposition.", drivingRequirementRevisionIdsJson);
+            "Approved successor procedure disposition.", drivingRequirementRevisionIdsJson,
+            ParentKind: kind == TestProcedureChangeKind.Introduce
+                ? VerificationProcedureParentKind.Allocated
+                : kind == TestProcedureChangeKind.Retire
+                    ? VerificationProcedureParentKind.Unspecified
+                    : VerificationProcedureParentKind.Derived,
+            ParentRevisionIdsJson: kind == TestProcedureChangeKind.Introduce ? drivingRequirementRevisionIdsJson : "[]",
+            DerivedRationale: kind == TestProcedureChangeKind.Modify
+                ? "The legacy procedure remains standalone because no exact upstream decision was recorded."
+                : "");
 
     private static TestProcedureRevision Revision(Guid procedureId, int revision,
         TestProcedureState state, DateTimeOffset now) => new(procedureId, revision,

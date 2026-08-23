@@ -237,11 +237,12 @@ Assert.Equal(fixture.Revision01Id,
             var manualProcedure = new TestProcedure(project.Id, "SYSTP-42410", "Mutable manual catalog title",
                 "verification.engineer", now, TestProcedureLevel.System);
             var manualRevision = Revision(manualProcedure.Id, 0, review.Id, null,
-                "Manual objective", now.AddMinutes(4));
+                "Manual objective", now.AddMinutes(4), VerificationProcedureParentKind.Derived,
+                "This manual-package fixture intentionally has no governed requirement coverage.");
             var legacyProcedure = new TestProcedure(project.Id, "SYSTP-42420", "Mutable legacy catalog title",
                 "legacy.author", now, TestProcedureLevel.System);
             var legacyRevision = Revision(legacyProcedure.Id, 0, null, null,
-                "Legacy objective", now.AddMinutes(5));
+                "Legacy objective", now.AddMinutes(5), VerificationProcedureParentKind.Unspecified);
             var engineer = new UserAccount(engineerName, "History Engineer", "history@example.test",
                 IdentityService.HashPassword(AeroLinkApiFactory.MemberPassword), now);
             db.AddRange(program, project, release, primary, folded, review, manualProcedure, manualRevision,
@@ -425,15 +426,22 @@ Assert.Equal(fixture.Revision01Id,
             "SYSTP-42150", procedureRevision, TestProcedureLevel.System, kind, title,
             "Verify exact title.", "Configured system.", "Exercise route sequencing.",
             "Expected sequencing is observed.", "History fixture.",
-            JsonSerializer.Serialize(new[] { requirementRevisionId })), now);
+            JsonSerializer.Serialize(new[] { requirementRevisionId }),
+            ParentKind: kind == TestProcedureChangeKind.Retire
+                ? VerificationProcedureParentKind.Unspecified
+                : VerificationProcedureParentKind.Allocated,
+            ParentRevisionIdsJson: JsonSerializer.Serialize(new[] { requirementRevisionId })), now);
         return review;
     }
 
     private static TestProcedureRevision Revision(Guid procedureId, int revision, Guid? tcrId,
-        Guid? baselineId, string objective, DateTimeOffset now) =>
+        Guid? baselineId, string objective, DateTimeOffset now,
+        VerificationProcedureParentKind parentKind = VerificationProcedureParentKind.Allocated,
+        string? derivedRationale = null) =>
         new(procedureId, revision, objective, "Configured system.", "Exercise route sequencing.",
             "Expected sequencing is observed.", TestProcedureState.Approved, "verification.engineer", now,
-            sourceTestChangeRequestId: tcrId, effectiveBaselineId: baselineId);
+            sourceTestChangeRequestId: tcrId, effectiveBaselineId: baselineId,
+            parentKind: parentKind, derivedRationale: derivedRationale);
 
     private static VerificationImpactItem Impact(Guid projectId, Guid releaseId,
         SystemChangeRequest request, TestChangeReview review, RequirementRevision requirementRevision,

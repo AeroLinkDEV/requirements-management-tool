@@ -26,7 +26,7 @@ public sealed class ControlledEditingCheckInEngineTests
         var result = await scenario.Engine.CheckInAsync(scenario.Session.Id, scenario.Session.Version,
             scenario.Actor, scenario.Now.AddMinutes(1), default);
 
-        Assert.True(result.Success);
+        Assert.True(result.Success, result.Error);
         Assert.Equal(2, result.ResultingArtifactVersion);
         Assert.NotNull(result.ResultingHash);
         scenario.Db.ChangeTracker.Clear();
@@ -460,14 +460,14 @@ public sealed class ControlledEditingCheckInEngineTests
         await scenario.Db.SaveChangesAsync();
         var adapter = new TraceLinkProposalControlledEditingAdapter(scenario.Db);
         var draft = JsonSerializer.Serialize(new { link.Id, link.ProjectId, link.SourceRevisionId, link.TargetRevisionId,
-            type = RequirementTraceType.AllocatedFrom.ToString(), rationale = "Updated rationale", version = link.Version });
+            type = RequirementTraceType.DerivedFrom.ToString(), rationale = "Updated rationale", version = link.Version });
 
         var result = await CheckInAsync(scenario, adapter, "TraceLinkProposal", link.Id, draft);
 
-        Assert.True(result.Success);
+        Assert.True(result.Success, result.Error);
         scenario.Db.ChangeTracker.Clear();
         var stored = await scenario.Db.RequirementTraces.SingleAsync(x => x.Id == link.Id);
-        Assert.Equal(RequirementTraceType.AllocatedFrom, stored.Type);
+        Assert.Equal(RequirementTraceType.DerivedFrom, stored.Type);
         Assert.Equal("Updated rationale", stored.Rationale);
     }
 

@@ -20,6 +20,27 @@ public sealed class SystemChangeRequestTests
     }
 
     [Fact]
+    public void Pre_738_requirement_snapshot_hash_is_fixed_and_recomputable()
+    {
+        var project = Guid.Parse("11111111-1111-1111-1111-111111111111");
+        var release = Guid.Parse("22222222-2222-2222-2222-222222222222");
+        var upstream = Guid.Parse("33333333-3333-3333-3333-333333333333");
+        var scr = new SystemChangeRequest("HLRCR-01049", 0, project, release,
+            "Legacy exact-parent package", "Problem", "Analysis", "Solution", "author", Now,
+            ChangeRequestType.Software, softwareLevel: RequirementLevel.HighLevel);
+        scr.AddRequirementChange("author", "HLR-00002375", 0, RequirementLevel.HighLevel,
+            RequirementChangeKind.Introduce, "The software shall preserve the selected route.",
+            "The legacy package used the authored profile marker.", "Test", Now,
+            attributesJson: "{\"derived\":true}", proposedUpstreamRevisionIdsJson: $"[\"{upstream}\"]");
+        scr.MarkAsLegacyHistoricalPackage("author", Now);
+
+        var cycle = scr.SubmitForReview("author", Approvers(), Now);
+
+        Assert.Equal("be536483dbaa2755d716dc532e5308cc7e093b4c9eda054e421169350b77e980", cycle.SnapshotHash);
+        Assert.Equal(1, scr.SnapshotContractVersion);
+    }
+
+    [Fact]
     public void Change_requests_use_five_digits_and_software_builds_use_the_official_name()
     {
         Assert.Equal("SRCR-00039.00", ArtifactNumber.Display("SRCR-00039", 0));
