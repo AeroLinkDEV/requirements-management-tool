@@ -63,7 +63,7 @@ public sealed class CorrectiveActionRoutingApiTests
         }
 
         var systemReport = Raise(TestProcedureLevel.System, "PR-00001", "SYSTP-00000901");
-        var softwareReport = Raise(TestProcedureLevel.LowLevel, "PR-00002", "LLRTP-00000901");
+        var softwareReport = Raise(TestProcedureLevel.LowLevel, "PR-00002", "LLRTC-00000901");
 
         // Raised by hand, linked to nothing: the scope genuinely cannot be determined and must say so.
         var unlinked = new ProblemReport(project.Id, "PR-00003", "Manual report", "Problem", "Analysis", "reporter", now,
@@ -80,7 +80,7 @@ public sealed class CorrectiveActionRoutingApiTests
             .SetProperty(x => x.TestProceduresMaterializedAt, now)
             .SetProperty(x => x.TestProceduresHash, "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"));
 
-        return new Fixture(project.Id, systemReport, softwareReport, unlinked.Id, "SYSTP-00000901", "LLRTP-00000901");
+        return new Fixture(project.Id, systemReport, softwareReport, unlinked.Id, "SYSTP-00000901", "LLRTC-00000901");
     }
 
     private static async Task<JsonElement> TargetAsync(HttpClient client, Guid reportId)
