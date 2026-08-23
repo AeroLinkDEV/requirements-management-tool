@@ -1,11 +1,11 @@
 {
   "schemaVersion": "aerolink-api-test-intent/v2",
   "totals": {
-    "tests": 535,
-    "cases": 589,
+    "tests": 537,
+    "cases": 591,
     "classes": 94,
-    "hostedTests": 522,
-    "hostedCases": 567,
+    "hostedTests": 524,
+    "hostedCases": 569,
     "nonHostedTests": 8,
     "nonHostedCases": 17,
     "unknownHostTests": 5,
@@ -21,16 +21,16 @@
     "http-boundary": {
       "label": "HTTP boundary: route, status, JSON shape",
       "level": "API (must stay hosted)",
-      "tests": 340,
-      "cases": 374,
+      "tests": 341,
+      "cases": 375,
       "unknownCases": 0,
       "classes": 80
     },
     "ef-translation": {
       "label": "EF translation / relational constraints",
       "level": "Infrastructure (needs a database, not a host)",
-      "tests": 102,
-      "cases": 109,
+      "tests": 103,
+      "cases": 110,
       "unknownCases": 0,
       "classes": 42
     },
@@ -5270,8 +5270,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 21,
-        "end": 58
+        "start": 22,
+        "end": 59
       }
     },
     {
@@ -5287,8 +5287,26 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 60,
-        "end": 70
+        "start": 61,
+        "end": 71
+      }
+    },
+    {
+      "cls": "ProcedureDiscussionApiTests",
+      "test": "Dormant_software_procedure_discussion_mutations_are_refused_without_notifications",
+      "kind": "Fact",
+      "intent": "ef-translation",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "showcase-factory",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 73,
+        "end": 150
       }
     },
     {
@@ -5585,7 +5603,7 @@
       ],
       "sourceLines": {
         "start": 26,
-        "end": 104
+        "end": 102
       }
     },
     {
@@ -8819,6 +8837,23 @@
       "sourceLines": {
         "start": 572,
         "end": 640
+      }
+    },
+    {
+      "cls": "TestProcedureAuthoringApiTests",
+      "test": "Dormant_software_procedure_uses_shared_authoring_and_history_without_a_tcr",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client"
+      ],
+      "sourceLines": {
+        "start": 642,
+        "end": 730
       }
     },
     {

@@ -667,7 +667,7 @@ public static class BaselineEndpoints
             var procedureEffectivity = await TestProcedureEffectivity.ForBaselineAsync(db, id, ct);
             var procedureRevisionIds = procedureEffectivity?.RevisionIds ?? [];
             var testCounts = await (from revision in db.TestProcedureRevisions.AsNoTracking().Where(x => procedureRevisionIds.Contains(x.Id))
-                                    join procedure in db.TestProcedures.AsNoTracking() on revision.ProcedureId equals procedure.Id
+                                    join procedure in db.TestProcedures.AsNoTracking().Where(x => x.Level == TestProcedureLevel.System || x.ArtifactKind == VerificationArtifactKind.Case) on revision.ProcedureId equals procedure.Id
                                     group procedure by procedure.Level into grouped
                                     select new { Key = grouped.Key, Count = grouped.Count() })
                 .ToDictionaryAsync(x => x.Key, x => x.Count, ct);

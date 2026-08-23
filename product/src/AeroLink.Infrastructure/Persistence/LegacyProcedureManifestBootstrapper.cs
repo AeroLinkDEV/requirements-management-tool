@@ -220,7 +220,7 @@ public sealed class LegacyProcedureManifestBootstrapper(AeroLinkDbContext db)
 
     private async Task<List<TestProcedureManifestEntry>> ExistingManifestAsync(Guid baselineId, CancellationToken ct) =>
         await (from member in db.BaselineTestProcedures.AsNoTracking().Where(x => x.BaselineId == baselineId)
-               join procedure in db.TestProcedures.AsNoTracking() on member.ProcedureId equals procedure.Id
+               join procedure in db.TestProcedures.AsNoTracking().Where(x => x.Level == TestProcedureLevel.System || x.ArtifactKind == VerificationArtifactKind.Case) on member.ProcedureId equals procedure.Id
                join revision in db.TestProcedureRevisions.AsNoTracking() on member.RevisionId equals revision.Id
                orderby procedure.BaseNumber, revision.Revision, revision.Id
                select new TestProcedureManifestEntry(

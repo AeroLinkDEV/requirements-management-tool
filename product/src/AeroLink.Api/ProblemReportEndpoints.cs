@@ -889,9 +889,11 @@ public static class ProblemReportEndpoints
         var revision = targetRevisionId is null ? null : await db.TestProcedureRevisions.AsNoTracking()
             .SingleOrDefaultAsync(item => item.Id == targetRevisionId, ct);
         var procedure = revision is null ? null : await db.TestProcedures.AsNoTracking()
+            .Where(item => item.Level == TestProcedureLevel.System || item.ArtifactKind == VerificationArtifactKind.Case)
             .SingleOrDefaultAsync(item => item.Id == revision.ProcedureId, ct);
         var levels = await (from candidateRevision in db.TestProcedureRevisions.AsNoTracking()
                             join candidateProcedure in db.TestProcedures.AsNoTracking()
+                                .Where(item => item.Level == TestProcedureLevel.System || item.ArtifactKind == VerificationArtifactKind.Case)
                                 on candidateRevision.ProcedureId equals candidateProcedure.Id
                             where scope.PermittedProcedureRevisionIds.Contains(candidateRevision.Id)
                             select candidateProcedure.Level).Distinct().ToListAsync(ct);
@@ -984,7 +986,9 @@ public static class ProblemReportEndpoints
             {
                 var item = await (from execution in db.TestExecutions.AsNoTracking().Where(x => x.Id == artifactId)
                                   join revision in db.TestProcedureRevisions.AsNoTracking() on execution.ProcedureRevisionId equals revision.Id
-                                  join procedure in db.TestProcedures.AsNoTracking() on revision.ProcedureId equals procedure.Id
+                                  join procedure in db.TestProcedures.AsNoTracking()
+                                      .Where(item => item.Level == TestProcedureLevel.System || item.ArtifactKind == VerificationArtifactKind.Case)
+                                      on revision.ProcedureId equals procedure.Id
                                   select new { procedure.BaseNumber, revision.Revision }).SingleOrDefaultAsync(ct);
                 return item is null ? null : $"{item.BaseNumber}.{item.Revision:D2}";
             }

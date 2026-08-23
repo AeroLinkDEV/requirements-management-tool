@@ -108,14 +108,61 @@ public sealed record VerificationCaseRevisionContent(
     public VerificationArtifactKind Kind => VerificationArtifactKind.Case;
 }
 
-/// <summary>Compatibility projection for a Procedure revision; legacy field meaning is retained verbatim.</summary>
+/// <summary>
+/// The procedural body of a software Procedure revision.  The four legacy properties are retained as a
+/// compatibility projection for callers that still render the shared verification shell; the six named
+/// fields are the authoritative Procedure vocabulary and are intentionally not used for Case revisions.
+/// </summary>
 public sealed record VerificationProcedureRevisionContent(
     string Objective,
     string Preconditions,
     string Steps,
-    string ExpectedResult) : IVerificationArtifactRevisionContent
+    string ExpectedResult,
+    string EnvironmentSetup = "",
+    string TestData = "",
+    string OrderedSteps = "",
+    string ExpectedObservations = "",
+    string Cleanup = "",
+    string ToolingAutomation = "") : IVerificationArtifactRevisionContent
 {
     public VerificationArtifactKind Kind => VerificationArtifactKind.Procedure;
+    public string Setup => EnvironmentSetup;
+    public string ExecutableSteps => OrderedSteps;
+    public string ExpectedObservationsText => ExpectedObservations;
+    public string Tooling => ToolingAutomation;
+}
+
+/// <summary>How a non-root software Procedure is related to exact Case revisions.</summary>
+public enum VerificationProcedureParentKind
+{
+    Unspecified,
+    Allocated,
+    Derived,
+}
+
+/// <summary>
+/// Small shared seam for the #738 exact-parent-or-derived invariant.  It is deliberately limited to the
+/// Procedure side: requirement coverage remains on Case revisions and is not inferred from this selection.
+/// </summary>
+public static class VerificationProcedureParentPolicy
+{
+    public static void Validate(VerificationProcedureParentKind kind,
+        IEnumerable<Guid>? caseRevisionIds, string? derivedRationale)
+    {
+        var ids = (caseRevisionIds ?? []).Where(x => x != Guid.Empty).Distinct().ToArray();
+        var rationale = derivedRationale?.Trim() ?? "";
+        switch (kind)
+        {
+            case VerificationProcedureParentKind.Allocated when ids.Length > 0 && rationale.Length == 0:
+                return;
+            case VerificationProcedureParentKind.Derived when ids.Length == 0 && rationale.Length > 0:
+                return;
+            case VerificationProcedureParentKind.Unspecified:
+                throw new DomainException("A software Procedure revision must be Allocated to an exact Case revision or explicitly Derived with a rationale.");
+            default:
+                throw new DomainException("A software Procedure revision must have exact Case parents or a nonblank Derived rationale, but not both or neither.");
+        }
+    }
 }
 
 /// <summary>Capabilities a routed consumer must explicitly declare for a v2 artifact registration.</summary>

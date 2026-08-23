@@ -104,9 +104,10 @@ public sealed class ReleaseReadinessService(AeroLinkDbContext db, ILadderPolicy?
             effectiveProcedureRevisionIds = await (from revision in db.TestProcedureRevisions.AsNoTracking()
                                                    join procedure in db.TestProcedures.AsNoTracking()
                                                        on revision.ProcedureId equals procedure.Id
-                                                   where procedure.ProjectId == campaign.ProjectId
+                                                       where procedure.ProjectId == campaign.ProjectId
                                                        && procedureEffectivity.RevisionIds.Contains(revision.Id)
                                                        && configuredProcedureLevels.Contains(procedure.Level)
+                                                       && (procedure.Level == TestProcedureLevel.System || procedure.ArtifactKind == VerificationArtifactKind.Case)
                                                    select revision.Id).ToListAsync(ct);
         }
         var coveredIds = await VerificationCoverageProjection.SettledCoveredAsync(db, coverageRevisionIds, ct,
@@ -149,6 +150,7 @@ public sealed class ReleaseReadinessService(AeroLinkDbContext db, ILadderPolicy?
                                          join procedure in db.TestProcedures.AsNoTracking() on revision.ProcedureId equals procedure.Id
                                          where selectedRevisionIds.Contains(revision.Id)
                                              && configuredProcedureLevels.Contains(procedure.Level)
+                                             && (procedure.Level == TestProcedureLevel.System || procedure.ArtifactKind == VerificationArtifactKind.Case)
                                          select revision.Id).ToListAsync(ct);
         // Scoped through the one shared rule, not a local predicate.
         //

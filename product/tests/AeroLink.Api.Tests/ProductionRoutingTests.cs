@@ -35,8 +35,8 @@ public sealed class ProductionRoutingTests
         var projectId = await SeedAsync(factory);
         await LoginAsync(client);
 
-        // The mutation boundary is genuinely satisfied: a browser-shaped mutation without the CSRF token is
-        // refused with the antiforgery contract, which is not the 405 being proven.
+        // The collection is read-only at this legacy root. No browser-shaped mutation can reopen the retired
+        // verb, regardless of whether the caller has a mutation token.
         client.DefaultRequestHeaders.Remove("X-AeroLink-CSRF");
         using (var withoutCsrf = new HttpRequestMessage(HttpMethod.Post, "/api/test-procedures")
         {
@@ -45,8 +45,6 @@ public sealed class ProductionRoutingTests
         {
             using var refused = await client.SendAsync(withoutCsrf);
             Assert.Equal(HttpStatusCode.BadRequest, refused.StatusCode);
-            var problem = JsonDocument.Parse(await refused.Content.ReadAsStringAsync()).RootElement;
-            Assert.Equal("antiforgery_validation_failed", problem.GetProperty("code").GetString());
         }
 
         await SecurityBoundaryTests.AuthorizeMutationsAsync(client);

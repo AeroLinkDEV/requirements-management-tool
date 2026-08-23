@@ -98,7 +98,7 @@ public sealed class VerificationImpactMaterializationTests
             var scr = ApprovedScr("HLRCR-00001", "SWR-00002375", 0, RequirementChangeKind.Introduce,
                 "The FMS shall sequence oceanic waypoints.", seed.ProjectId, seed.ReleaseId, now);
             var baseline = FrozenBaseline("SW-00.10", seed.ProjectId, seed.ReleaseId, null, scr, now);
-            var procedure = new TestProcedure(seed.ProjectId, "TP-00000001", "Oceanic sequencing", "test.lead", now);
+            var procedure = new TestProcedure(seed.ProjectId, "HLRTC-00000001", "Oceanic sequencing", "test.lead", now);
             var procedureRevision = new TestProcedureRevision(procedure.Id, 0, "Verify oceanic sequencing",
                 "Aircraft on ground", "Load the plan and sequence", "Waypoints sequence in order",
                 TestProcedureState.Approved, "test.engineer", now);
@@ -146,7 +146,7 @@ public sealed class VerificationImpactMaterializationTests
 
             // A procedure verifies revision 00.
             var firstRevision = await db.RequirementRevisions.SingleAsync();
-            var procedure = new TestProcedure(seed.ProjectId, "TP-00000001", "Oceanic sequencing", "test.lead", now);
+            var procedure = new TestProcedure(seed.ProjectId, "HLRTC-00000001", "Oceanic sequencing", "test.lead", now);
             var procedureRevision = new TestProcedureRevision(procedure.Id, 0, "Verify oceanic sequencing",
                 "Aircraft on ground", "Load the plan and sequence", "Waypoints sequence in order",
                 TestProcedureState.Approved, "test.engineer", now);
@@ -199,7 +199,7 @@ public sealed class VerificationImpactMaterializationTests
             await MaterializeAsync(db, first.Id, now);
 
             var firstRevision = await db.RequirementRevisions.SingleAsync();
-            var procedure = new TestProcedure(seed.ProjectId, "TP-00000001", "Oceanic sequencing", "test.lead", now);
+            var procedure = new TestProcedure(seed.ProjectId, "HLRTC-00000001", "Oceanic sequencing", "test.lead", now);
             var procedureRevision = new TestProcedureRevision(procedure.Id, 0, "Verify oceanic sequencing",
                 "Aircraft on ground", "Load the plan and sequence", "Waypoints sequence in order",
                 TestProcedureState.Approved, "test.engineer", now);
@@ -252,7 +252,7 @@ public sealed class VerificationImpactMaterializationTests
             await MaterializeAsync(db, first.Id, now);
 
             var firstRevision = await db.RequirementRevisions.SingleAsync();
-            var procedure = new TestProcedure(seed.ProjectId, "TP-00000001", "Oceanic sequencing", "test.lead", now);
+            var procedure = new TestProcedure(seed.ProjectId, "HLRTC-00000001", "Oceanic sequencing", "test.lead", now);
             var procedureRevision = new TestProcedureRevision(procedure.Id, 0, "Verify oceanic sequencing",
                 "Aircraft on ground", "Load the plan and sequence", "Waypoints sequence in order",
                 TestProcedureState.Approved, "test.engineer", now);
@@ -307,7 +307,7 @@ public sealed class VerificationImpactMaterializationTests
             await MaterializeAsync(db, first.Id, now);
 
             var firstRevision = await db.RequirementRevisions.SingleAsync();
-            var procedure = new TestProcedure(seed.ProjectId, "TP-00000001", "Oceanic sequencing", "test.lead", now);
+            var procedure = new TestProcedure(seed.ProjectId, "HLRTC-00000001", "Oceanic sequencing", "test.lead", now);
             var procedureRevision = new TestProcedureRevision(procedure.Id, 0, "Verify oceanic sequencing",
                 "Aircraft on ground", "Load the plan and sequence", "Waypoints sequence in order",
                 TestProcedureState.Approved, "test.engineer", now);
@@ -330,7 +330,7 @@ public sealed class VerificationImpactMaterializationTests
             var orphan = await db.VerificationImpactItems.AsNoTracking().SingleAsync();
             Assert.Equal(VerificationImpactTrigger.ProcedureOrphaned, orphan.Trigger);
             Assert.Equal(procedure.Id, orphan.ProcedureId);
-            Assert.Equal("TP-00000001", orphan.SubjectDisplayNumber);
+            Assert.Equal("HLRTC-00000001", orphan.SubjectDisplayNumber);
             Assert.True(orphan.BlocksBaselineApproval);
         }
         finally { File.Delete(seed.Path); }
@@ -360,7 +360,7 @@ public sealed class VerificationImpactMaterializationTests
             await MaterializeAsync(db, first.Id, now);
 
             var revisions = await db.RequirementRevisions.ToListAsync();
-            var procedure = new TestProcedure(seed.ProjectId, "TP-00000001", "Oceanic sequencing", "test.lead", now);
+            var procedure = new TestProcedure(seed.ProjectId, "HLRTC-00000001", "Oceanic sequencing", "test.lead", now);
             var procedureRevision = new TestProcedureRevision(procedure.Id, 0, "Verify sequencing",
                 "Aircraft on ground", "Sequence and fail", "Both behaviours observed",
                 TestProcedureState.Approved, "test.engineer", now);

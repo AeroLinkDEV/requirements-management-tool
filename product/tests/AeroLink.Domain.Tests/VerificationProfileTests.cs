@@ -44,6 +44,16 @@ public sealed class VerificationProfileTests
         Assert.Throws<DomainException>(() => revision.RevisionHeader(system));
         Assert.Throws<DomainException>(() => new TestProcedure(Guid.NewGuid(), "HLRTP-000002", "Software procedure", "tester",
             now, TestProcedureLevel.HighLevel, artifactKind: VerificationArtifactKind.Procedure));
+        Assert.Throws<DomainException>(() => new TestProcedure(Guid.NewGuid(), "HLRTP-000003", "Reserved Case", "tester",
+            now, TestProcedureLevel.HighLevel));
+        Assert.Throws<DomainException>(() => new TestProcedure(Guid.NewGuid(), "LLRTP-000003", "Reserved Case", "tester",
+            now, TestProcedureLevel.LowLevel));
+        Assert.Throws<DomainException>(() => new TestProcedure(Guid.NewGuid(), "HLRTC-000003", "Procedure family mismatch", "tester",
+            now, TestProcedureLevel.HighLevel, artifactKind: VerificationArtifactKind.Procedure,
+            parentKind: VerificationProcedureParentKind.Derived));
+        Assert.Throws<DomainException>(() => new TestProcedure(Guid.NewGuid(), "LLRTC-000003", "Procedure family mismatch", "tester",
+            now, TestProcedureLevel.LowLevel, artifactKind: VerificationArtifactKind.Procedure,
+            parentKind: VerificationProcedureParentKind.Derived));
     }
 
     [Theory]

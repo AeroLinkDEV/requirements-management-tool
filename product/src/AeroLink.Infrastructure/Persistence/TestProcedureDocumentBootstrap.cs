@@ -112,7 +112,8 @@ public sealed class TestProcedureDocumentBootstrap(AeroLinkDbContext db, ILadder
         TestProcedureDocument document, TestProcedureDocumentNode section, DateTimeOffset now, CancellationToken ct)
     {
         var candidates = await db.TestProcedures.AsNoTracking()
-            .Where(x => x.ProjectId == projectId && x.Level == level)
+            .Where(x => x.ProjectId == projectId && x.Level == level
+                && (x.Level == TestProcedureLevel.System || x.ArtifactKind == VerificationArtifactKind.Case))
             .OrderBy(x => x.BaseNumber)
             .Select(x => x.Id)
             .ToListAsync(ct);

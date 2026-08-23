@@ -89,7 +89,7 @@ public sealed class SearchableAuthoringPickerApiTests
             db.BaselineTestProcedures.Add(new BaselineTestProcedureSelection(baseline.Id, procedure.Id, revision.Id));
             procedureRevisions.Add((procedure, revision));
         }
-        var hlr = new TestProcedure(project.Id, "HLRTP-000001", "Wrong-level procedure",
+        var hlr = new TestProcedure(project.Id, "HLRTC-000001", "Wrong-level case",
             "test.author", now, TestProcedureLevel.HighLevel);
         var hlrRevision = new TestProcedureRevision(hlr.Id, 0, "HLR objective", "Preconditions", "Steps",
             "Expected", TestProcedureState.Approved, "test.author", now, effectiveBaselineId: baseline.Id);
@@ -264,7 +264,7 @@ public sealed class SearchableAuthoringPickerApiTests
         Assert.Equal(0, future.GetProperty("totalCount").GetInt32());
 
         var wrongLevel = await client.GetFromJsonAsync<JsonElement>(
-            $"/api/test-change-reviews/{fixture.ReviewId}/procedure-targets?search=HLRTP-000001&page=1&pageSize=25");
+            $"/api/test-change-reviews/{fixture.ReviewId}/procedure-targets?search=HLRTC-000001&page=1&pageSize=25");
         Assert.Equal(0, wrongLevel.GetProperty("totalCount").GetInt32());
     }
 

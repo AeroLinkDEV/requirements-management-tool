@@ -31,7 +31,6 @@
     "POST /api/enterprise-requirements/assignments/{}/complete",
     "POST /api/enterprise-requirements/bulk/preview",
     "POST /api/enterprise-requirements/bulk/{}/commit",
-    "POST /api/enterprise-requirements/comments/{}/resolve",
     "POST /api/enterprise-requirements/import-mappings",
     "POST /api/enterprise-requirements/import/preview",
     "POST /api/enterprise-requirements/import/{}/commit",

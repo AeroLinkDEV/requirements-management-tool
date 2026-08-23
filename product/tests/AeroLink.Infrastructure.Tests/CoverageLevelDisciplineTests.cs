@@ -34,14 +34,14 @@ public sealed class CoverageLevelDisciplineTests
             var world = await SeedAsync(db, "LVL");
 
             var (_, systemRequirement) = await RequirementAsync(db, world, "SYSR-000001", RequirementLevel.System);
-            var (_, highLevelProcedure) = await ProcedureAsync(db, world, "HLRTP-000001", TestProcedureLevel.HighLevel);
+            var (_, highLevelProcedure) = await ProcedureAsync(db, world, "HLRTC-000001", TestProcedureLevel.HighLevel);
 
             db.TestCoverage.Add(new TestRequirementCoverage(highLevelProcedure.Id, systemRequirement.Id));
             var error = await Assert.ThrowsAsync<DomainException>(() => db.SaveChangesAsync());
 
             // The message names both artifacts and both levels, because "invalid link" would leave the reader
             // to work out which of the two is in the wrong place.
-            Assert.Contains("HLRTP-000001", error.Message);
+            Assert.Contains("HLRTC-000001", error.Message);
             Assert.Contains("SYSR-000001", error.Message);
             Assert.Contains("its own level", error.Message);
         }
@@ -88,8 +88,8 @@ public sealed class CoverageLevelDisciplineTests
             var levels = new[]
             {
                 (RequirementLevel.System, TestProcedureLevel.System, "SYSR", "SYSTP"),
-                (RequirementLevel.HighLevel, TestProcedureLevel.HighLevel, "HLR", "HLRTP"),
-                (RequirementLevel.LowLevel, TestProcedureLevel.LowLevel, "LLR", "LLRTP"),
+                (RequirementLevel.HighLevel, TestProcedureLevel.HighLevel, "HLR", "HLRTC"),
+                (RequirementLevel.LowLevel, TestProcedureLevel.LowLevel, "LLR", "LLRTC"),
             };
             var index = 1;
             foreach (var (requirementLevel, procedureLevel, requirementPrefix, procedurePrefix) in levels)

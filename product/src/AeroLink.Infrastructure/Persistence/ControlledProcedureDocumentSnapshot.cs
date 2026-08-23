@@ -51,7 +51,8 @@ public static class ControlledProcedureDocumentSnapshotProjection
                           where member.BaselineId == baselineId
                           join revision in db.TestProcedureRevisions.AsNoTracking()
                               on member.RevisionId equals revision.Id
-                          join procedure in db.TestProcedures.AsNoTracking().Where(x => x.Level == level)
+                          join procedure in db.TestProcedures.AsNoTracking().Where(x => x.Level == level
+                              && (x.Level == TestProcedureLevel.System || x.ArtifactKind == VerificationArtifactKind.Case))
                               on member.ProcedureId equals procedure.Id
                           orderby procedure.BaseNumber
                           select new ControlledProcedureDocumentRow(
@@ -75,6 +76,7 @@ public static class ControlledProcedureDocumentSnapshotProjection
                                     join procedure in db.TestProcedures.AsNoTracking()
                                         on revision.ProcedureId equals procedure.Id
                                     where procedure.ProjectId == baseline.ProjectId && procedure.Level == level
+                                        && (procedure.Level == TestProcedureLevel.System || procedure.ArtifactKind == VerificationArtifactKind.Case)
                                     select new
                                     {
                                         ProcedureId = procedure.Id,

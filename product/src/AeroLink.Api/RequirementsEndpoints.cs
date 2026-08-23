@@ -5,6 +5,7 @@ using AeroLink.Domain.Contracts;
 using AeroLink.Domain.Identity;
 using AeroLink.Domain.Hierarchy;
 using AeroLink.Domain.Requirements;
+using AeroLink.Domain.Verification;
 using AeroLink.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 using System.Diagnostics;
@@ -303,7 +304,7 @@ public static class RequirementsEndpoints
         });
 
         app.MapPost("/api/enterprise-requirements/comments/{id:guid}/resolve",async(Guid id,ResolveCommentRequest request,HttpContext http,AeroLinkDbContext db,CancellationToken ct)=>
-        {var comment=await db.ArtifactComments.SingleOrDefaultAsync(x=>x.Id==id,ct);if(comment is null)return Results.NotFound();if(!await http.HasProjectAccessAsync(db,comment.ProjectId,ct))return Results.Forbid();try{comment.Resolve(http.UserAccount().UserName,request.Disposition??"",DateTimeOffset.UtcNow);await db.SaveChangesAsync(ct);return Results.NoContent();}catch(DomainException ex){return Results.BadRequest(new{error=ex.Message});}});
+        {var comment=await db.ArtifactComments.SingleOrDefaultAsync(x=>x.Id==id,ct);if(comment is null)return Results.NotFound();if(!await http.HasProjectAccessAsync(db,comment.ProjectId,ct))return Results.Forbid();var dormantProcedure=await db.TestProcedures.AsNoTracking().AnyAsync(x=>x.Id==comment.ArtifactId&&x.ArtifactKind==VerificationArtifactKind.Procedure&&x.Level!=TestProcedureLevel.System,ct);if(dormantProcedure)return Results.BadRequest(new{error="Dormant software Procedures are read-only; discussion mutation is unavailable.",code="dormant_procedure_discussion_read_only"});try{comment.Resolve(http.UserAccount().UserName,request.Disposition??"",DateTimeOffset.UtcNow);await db.SaveChangesAsync(ct);return Results.NoContent();}catch(DomainException ex){return Results.BadRequest(new{error=ex.Message});}});
 
         app.MapGet("/api/enterprise-requirements/{artifactId:guid}/collaboration",async(Guid artifactId,HttpContext http,AeroLinkDbContext db,CancellationToken ct)=>
         {

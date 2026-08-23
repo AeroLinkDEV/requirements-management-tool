@@ -38,7 +38,9 @@ public static class TestProcedureEffectivity
         {
             var selections = await db.BaselineTestProcedures.AsNoTracking()
                 .Where(x => x.BaselineId == baseline.Id)
-                .Select(x => new { x.ProcedureId, x.RevisionId })
+                .Join(db.TestProcedures.AsNoTracking().Where(x => x.Level == TestProcedureLevel.System
+                    || x.ArtifactKind == VerificationArtifactKind.Case), x => x.ProcedureId, x => x.Id,
+                    (selection, _) => new { selection.ProcedureId, selection.RevisionId })
                 .ToListAsync(ct);
             return new(baseline.Id, true, selections.ToDictionary(x => x.ProcedureId, x => x.RevisionId));
         }
@@ -53,6 +55,9 @@ public static class TestProcedureEffectivity
                           join revision in db.TestProcedureRevisions.AsNoTracking()
                               .Where(x => x.State == TestProcedureState.Approved)
                               on coverage.ProcedureRevisionId equals revision.Id
+                          join procedure in db.TestProcedures.AsNoTracking().Where(x => x.Level == TestProcedureLevel.System
+                              || x.ArtifactKind == VerificationArtifactKind.Case)
+                              on revision.ProcedureId equals procedure.Id
                           select new
                           {
                               revision.ProcedureId, RevisionId = revision.Id, revision.Revision, revision.CreatedAt

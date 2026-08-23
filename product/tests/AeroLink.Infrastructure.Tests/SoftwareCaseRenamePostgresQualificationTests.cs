@@ -46,9 +46,9 @@ public sealed class SoftwareCaseRenamePostgresQualificationTests
             var project = new ProjectRecord(program.Id, "#722 migration project", "#722 software");
             var release = new SoftwareRelease(project.Id, "1.0", true);
             var baseline = new CandidateBaseline("BL-000722", 0, project.Id, release.Id, null, "#722 baseline", "migration.test", now);
-            var high = new TestProcedure(project.Id, "HLRTP-000007", "Legacy high-level case", "migration.test", now,
+            var high = TestProcedure.LegacySoftwareCaseForMigration(project.Id, "HLRTP-000007", "Legacy high-level case", "migration.test", now,
                 TestProcedureLevel.HighLevel);
-            var low = new TestProcedure(project.Id, "LLRTP-000019", "Legacy low-level case", "migration.test", now,
+            var low = TestProcedure.LegacySoftwareCaseForMigration(project.Id, "LLRTP-000019", "Legacy low-level case", "migration.test", now,
                 TestProcedureLevel.LowLevel);
             var system = new TestProcedure(project.Id, "SYSTP-000003", "System procedure remains a procedure", "migration.test", now,
                 TestProcedureLevel.System);

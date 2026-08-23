@@ -2,8 +2,16 @@ using AeroLink.Domain.Common;
 
 namespace AeroLink.Domain.Traceability;
 
-/// <summary>Registration key for the reusable exact-link lifecycle. #709 registers only requirement traces.</summary>
-public enum ExactLinkKind { RequirementTrace }
+/// <summary>
+/// Registration key for the reusable exact-link lifecycle. #709 registers requirement traces; the dormant
+/// Case-to-Procedure relation reserves a stable key for a future suspect projection without raising events in
+/// this slice.
+/// </summary>
+public enum ExactLinkKind
+{
+    RequirementTrace,
+    CaseProcedure,
+}
 
 public enum ExactLinkLifecycleState { Suspect, Acknowledged, ChangeRequired, Closed }
 public enum ExactLinkLifecycleCauseKind { InternalRequirementRevision, ExternalBaselineImport }
@@ -100,7 +108,7 @@ public sealed class ExactLinkSuspectLifecycle
     internal static void Validate(ExactLinkKind linkKind, ExactLinkLifecycleCauseKind causeKind,
         Guid? revisionId, Guid? importId)
     {
-        if (linkKind != ExactLinkKind.RequirementTrace)
+        if (linkKind is not (ExactLinkKind.RequirementTrace or ExactLinkKind.CaseProcedure))
             throw new DomainException($"The exact-link kind '{linkKind}' is not registered.");
         switch (causeKind)
         {

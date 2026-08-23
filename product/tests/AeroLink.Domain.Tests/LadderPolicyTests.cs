@@ -126,16 +126,19 @@ public sealed class LadderPolicyTests
     }
 
     [Fact]
-    public void Test_procedure_prefix_validation_uses_catalogue_prefixes_but_preserves_custom_numbering()
+    public void Test_procedure_prefix_validation_requires_the_catalogue_family()
     {
         var now = DateTimeOffset.UtcNow;
-        _ = new TestProcedure(Guid.NewGuid(), "LLRTP-000001", "Low-level procedure", "owner", now, TestProcedureLevel.LowLevel);
+        _ = new TestProcedure(Guid.NewGuid(), "LLRTP-000001", "Low-level procedure", "owner", now,
+            TestProcedureLevel.LowLevel, artifactKind: VerificationArtifactKind.Procedure,
+            parentKind: VerificationProcedureParentKind.Derived);
 
         var mismatch = Assert.Throws<DomainException>(() =>
             new TestProcedure(Guid.NewGuid(), "LLRTP-000002", "Wrong-level procedure", "owner", now, TestProcedureLevel.System));
-        Assert.Contains("different level", mismatch.Message);
+        Assert.Contains("not a valid", mismatch.Message);
 
-        _ = new TestProcedure(Guid.NewGuid(), "CUSTOM-000001", "Custom-numbered procedure", "owner", now, TestProcedureLevel.System);
+        Assert.Throws<DomainException>(() => new TestProcedure(Guid.NewGuid(), "CUSTOM-000001",
+            "Custom-numbered procedure", "owner", now, TestProcedureLevel.System));
     }
 
     [Fact]

@@ -41,9 +41,9 @@ public sealed class TestProcedureDocumentApiTests : IClassFixture<SharedApiHost>
         var project = new ProjectRecord(program.Id, "Flight Software", "Rail Software");
         db.AddRange(program, project);
 
-        var high = new TestProcedure(project.Id, "HLRTP-000501", "Verify flight plan behaviour", "test.engineer", now,
+        var high = new TestProcedure(project.Id, "HLRTC-000501", "Verify flight plan behaviour", "test.engineer", now,
             TestProcedureLevel.HighLevel);
-        var low = new TestProcedure(project.Id, "LLRTP-000501", "Verify checksum recovery", "test.engineer", now,
+        var low = new TestProcedure(project.Id, "LLRTC-000501", "Verify checksum recovery", "test.engineer", now,
             TestProcedureLevel.LowLevel);
         db.AddRange(high, low);
 
@@ -149,7 +149,7 @@ public sealed class TestProcedureDocumentApiTests : IClassFixture<SharedApiHost>
 
         Assert.NotNull(listed);
         var only = Assert.Single(listed!.Items);
-        Assert.StartsWith("HLRTP-000501", only.DisplayNumber);
+        Assert.StartsWith("HLRTC-000501", only.DisplayNumber);
     }
 
     /// <summary>

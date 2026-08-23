@@ -17,6 +17,7 @@ public sealed record VerificationCoverageLinkProjection(
     string DisplayNumber,
     string Title,
     string Level,
+    string ArtifactKind,
     string ArtifactState,
     bool IsSuspect,
     string CoverageState)
@@ -77,6 +78,8 @@ public static class VerificationCoverageProjection
             .Where(coverage => !coverage.IsSuspect
                 && db.TestProcedureRevisions.Any(revision => revision.Id == coverage.ProcedureRevisionId
                     && revision.State == TestProcedureState.Approved
+                    && db.TestProcedures.Any(procedure => procedure.Id == revision.ProcedureId
+                        && (procedure.Level == TestProcedureLevel.System || procedure.ArtifactKind == VerificationArtifactKind.Case))
                     && (buildScoped || !db.TestProcedureRevisions.Any(sibling => sibling.ProcedureId == revision.ProcedureId
                         && sibling.State != TestProcedureState.Approved))))
             .Select(coverage => coverage.RequirementRevisionId);
@@ -96,7 +99,10 @@ public static class VerificationCoverageProjection
             var procedureRevisionIds = effectiveProcedureRevisionIds.Distinct().ToList();
             source = source.Where(coverage => procedureRevisionIds.Contains(coverage.ProcedureRevisionId));
         }
-        return source.Select(coverage => coverage.RequirementRevisionId);
+        return source.Where(coverage => db.TestProcedureRevisions.Any(revision => revision.Id == coverage.ProcedureRevisionId
+                && db.TestProcedures.Any(procedure => procedure.Id == revision.ProcedureId
+                    && (procedure.Level == TestProcedureLevel.System || procedure.ArtifactKind == VerificationArtifactKind.Case))))
+            .Select(coverage => coverage.RequirementRevisionId);
     }
 
     /// <summary>
@@ -156,6 +162,7 @@ public static class VerificationCoverageProjection
                           on coverage.ProcedureRevisionId equals revision.Id
                       join procedure in db.TestProcedures.AsNoTracking()
                           on revision.ProcedureId equals procedure.Id
+                      where procedure.Level == TestProcedureLevel.System || procedure.ArtifactKind == VerificationArtifactKind.Case
                       orderby procedure.BaseNumber, revision.Revision
                       select new VerificationCoverageLinkProjection(
                           coverage.RequirementRevisionId,
@@ -164,6 +171,7 @@ public static class VerificationCoverageProjection
                           procedure.BaseNumber + "." + revision.Revision.ToString("D2"),
                           procedure.Title,
                           procedure.Level.ToString(),
+                          procedure.ArtifactKind.ToString(),
                           revision.State.ToString(),
                           coverage.IsSuspect,
                           // IsSuspect is the stored flag; CoverageState is the judgement, and it uses the

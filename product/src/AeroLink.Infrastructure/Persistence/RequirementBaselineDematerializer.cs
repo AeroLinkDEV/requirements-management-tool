@@ -234,7 +234,7 @@ public sealed class RequirementBaselineDematerializer(AeroLinkDbContext db, Veri
         // wording is not orphaned -- it is suspect, which is a different finding with a different remedy.
         var stillCovers = linked.Select(x => x.ProcedureRevisionId).ToHashSet();
         var procedures = await (from revision in db.TestProcedureRevisions.AsNoTracking()
-                                join procedure in db.TestProcedures.AsNoTracking() on revision.ProcedureId equals procedure.Id
+                                join procedure in db.TestProcedures.AsNoTracking().Where(x => x.Level == TestProcedureLevel.System || x.ArtifactKind == VerificationArtifactKind.Case) on revision.ProcedureId equals procedure.Id
                                 where procedureRevisionIds.Contains(revision.Id)
                                 select new { RevisionId = revision.Id, procedure.Id, procedure.BaseNumber, procedure.Level, revision.Revision })
             .ToDictionaryAsync(x => x.RevisionId, ct);
