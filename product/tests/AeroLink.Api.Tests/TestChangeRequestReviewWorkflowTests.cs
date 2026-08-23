@@ -248,7 +248,7 @@ public sealed class TestChangeRequestReviewWorkflowTests
             var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
             var legacy = new TestChangeReview(fixture.ProjectId, fixture.ReleaseId, fixture.ChangeId,
                 TestChangeReviewDiscipline.System, "SRCR-00960.00", DateTimeOffset.UtcNow,
-                "SYSTCR-000099", revision: 99, caseContractVersion: 0);
+                "SYSTPCR-000099", revision: 99, caseContractVersion: 0);
             legacy.RecordTestChangeRequired("historical.import", DateTimeOffset.UtcNow);
             legacy.Submit("historical.import", "workflow.one", true, DateTimeOffset.UtcNow);
             legacyId = legacy.Id;

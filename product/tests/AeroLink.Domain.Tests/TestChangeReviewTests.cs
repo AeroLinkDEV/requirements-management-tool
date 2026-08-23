@@ -48,16 +48,16 @@ public sealed class TestChangeReviewTests
     {
         var raised = Raised();
 
-        // Numbering on arrival gave every approved change a SYSTCR before anybody had looked at whether it
+        // Numbering on arrival gave every approved change a SYSTPCR before anybody had looked at whether it
         // touched a single procedure. It is a question until it is answered.
         Assert.Equal(TestChangeReviewOutcome.Pending, raised.Outcome);
         Assert.Equal("", raised.BaseNumber);
-        Assert.Throws<DomainException>(() => raised.AssignControlledNumber("SYSTCR-000042", Now));
+        Assert.Throws<DomainException>(() => raised.AssignControlledNumber("SYSTPCR-000042", Now));
         Assert.Throws<DomainException>(() => raised.Submit("verification.engineer", "test.lead", true, Now));
 
         raised.RecordTestChangeRequired("verification.engineer", Now.AddMinutes(1));
-        raised.AssignControlledNumber("SYSTCR-000042", Now.AddMinutes(1));
-        Assert.Equal("SYSTCR-000042", raised.BaseNumber);
+        raised.AssignControlledNumber("SYSTPCR-000042", Now.AddMinutes(1));
+        Assert.Equal("SYSTPCR-000042", raised.BaseNumber);
         Assert.Equal("verification.engineer", raised.DecidedBy);
     }
 
@@ -87,7 +87,7 @@ public sealed class TestChangeReviewTests
         // would let the same words be re-styled â€” bold, a table, a figure â€” without changing the evidence,
         // which makes the approval of something the reviewer never saw.
         var plain = Submittable();
-        plain.AssignControlledNumber("SYSTCR-000050", Now.AddMinutes(1));
+        plain.AssignControlledNumber("SYSTPCR-000050", Now.AddMinutes(1));
         plain.WriteCase("verification.engineer", "Title", "Problem", "Analysis", "Solution", Now.AddMinutes(2),
             problemRich: "{\"blocks\":[{\"type\":\"paragraph\",\"text\":\"Problem\"}]}",
             analysisRich: "{\"blocks\":[{\"type\":\"paragraph\",\"text\":\"Analysis\"}]}",
@@ -97,7 +97,7 @@ public sealed class TestChangeReviewTests
 
         var attachmentId = Guid.NewGuid();
         var formatted = Submittable();
-        formatted.AssignControlledNumber("SYSTCR-000050", Now.AddMinutes(1));
+        formatted.AssignControlledNumber("SYSTPCR-000050", Now.AddMinutes(1));
         formatted.WriteCase("verification.engineer", "Title", "Problem", "Analysis", "Solution", Now.AddMinutes(2),
             // Same readable words, different rendered content: a diagram replaces the paragraph. The plain
             // projection is identical, so only hashing the rich structure can tell the two reviews apart.
@@ -136,13 +136,13 @@ public sealed class TestChangeReviewTests
         var changeRequestId = Guid.NewGuid();
         var assignedA = CreateWith(changeRequestId);
         assignedA.Assign("lead.user", "engineer.a", Now.AddMinutes(1));
-        assignedA.AssignControlledNumber("SYSTCR-000056", Now.AddMinutes(1));
+        assignedA.AssignControlledNumber("SYSTPCR-000056", Now.AddMinutes(1));
         assignedA.AddProcedureChange("verification.engineer", draft, Now.AddMinutes(2));
         assignedA.Submit("verification.engineer", "test.lead", true, Now.AddMinutes(3));
 
         var assignedB = CreateWith(changeRequestId);
         assignedB.Assign("lead.user", "engineer.b", Now.AddMinutes(1));
-        assignedB.AssignControlledNumber("SYSTCR-000056", Now.AddMinutes(1));
+        assignedB.AssignControlledNumber("SYSTPCR-000056", Now.AddMinutes(1));
         assignedB.AddProcedureChange("verification.engineer", draft, Now.AddMinutes(2));
         assignedB.Submit("verification.engineer", "test.lead", true, Now.AddMinutes(3));
 
@@ -155,12 +155,12 @@ public sealed class TestChangeReviewTests
     {
         var draft = ProcedureDraftWith(drivingJson: $"[\"{Guid.NewGuid()}\"]");
         var solo = Create();
-        solo.AssignControlledNumber("SYSTCR-000057", Now.AddMinutes(1));
+        solo.AssignControlledNumber("SYSTPCR-000057", Now.AddMinutes(1));
         solo.AddProcedureChange("verification.engineer", draft, Now.AddMinutes(2));
         solo.Submit("verification.engineer", "test.lead", true, Now.AddMinutes(3));
 
         var folded = Create();
-        folded.AssignControlledNumber("SYSTCR-000057", Now.AddMinutes(1));
+        folded.AssignControlledNumber("SYSTPCR-000057", Now.AddMinutes(1));
         folded.IncludeChangeRequest("verification.engineer", Guid.NewGuid(), "SRCR-00060.00", Now.AddMinutes(2));
         folded.AddProcedureChange("verification.engineer", draft, Now.AddMinutes(3));
         folded.Submit("verification.engineer", "test.lead", true, Now.AddMinutes(4));
@@ -223,13 +223,13 @@ public sealed class TestChangeReviewTests
         var draft = ProcedureDraftWith(drivingJson: $"[\"{driving}\"]");
 
         var linked = Create();
-        linked.AssignControlledNumber("SYSTCR-000058", Now.AddMinutes(1));
+        linked.AssignControlledNumber("SYSTPCR-000058", Now.AddMinutes(1));
         linked.AddProcedureChange("verification.engineer", draft, Now.AddMinutes(2));
         linked.Submit("verification.engineer", "test.lead", true, Now.AddMinutes(3),
             problemReportIds: new[] { Guid.NewGuid(), Guid.NewGuid() });
 
         var plain = Create();
-        plain.AssignControlledNumber("SYSTCR-000058", Now.AddMinutes(1));
+        plain.AssignControlledNumber("SYSTPCR-000058", Now.AddMinutes(1));
         plain.AddProcedureChange("verification.engineer", draft, Now.AddMinutes(2));
         plain.Submit("verification.engineer", "test.lead", true, Now.AddMinutes(3));
 
@@ -242,7 +242,7 @@ public sealed class TestChangeReviewTests
     {
         var driving = Guid.NewGuid();
         var a = Create();
-        a.AssignControlledNumber("SYSTCR-000059", Now.AddMinutes(1));
+        a.AssignControlledNumber("SYSTPCR-000059", Now.AddMinutes(1));
         a.AddProcedureChange("verification.engineer",
             new TestProcedureChangeDraft("SYSTP-000200", 0, TestProcedureLevel.System,
                 TestProcedureChangeKind.Introduce, "A|B", "C", "", "Steps", "Expected", "Why",
@@ -250,7 +250,7 @@ public sealed class TestChangeReviewTests
         a.Submit("verification.engineer", "test.lead", true, Now.AddMinutes(3));
 
         var b = Create();
-        b.AssignControlledNumber("SYSTCR-000059", Now.AddMinutes(1));
+        b.AssignControlledNumber("SYSTPCR-000059", Now.AddMinutes(1));
         b.AddProcedureChange("verification.engineer",
             new TestProcedureChangeDraft("SYSTP-000200", 0, TestProcedureLevel.System,
                 TestProcedureChangeKind.Introduce, "A", "B|C", "", "Steps", "Expected", "Why",
@@ -269,25 +269,25 @@ public sealed class TestChangeReviewTests
             "Steps", "Expected", "Procedure rationale", "[]", $"[\"{removal}\"]", rationale);
 
         var first = Create();
-        first.AssignControlledNumber("SYSTCR-000061", Now.AddMinutes(1));
+        first.AssignControlledNumber("SYSTPCR-000061", Now.AddMinutes(1));
         var change = first.AddProcedureChange("verification.engineer", Draft(removed, "Coverage no longer applies."),
             Now.AddMinutes(2));
         first.Submit("verification.engineer", "test.lead", true, Now.AddMinutes(3));
 
         var changedRationale = Create();
-        changedRationale.AssignControlledNumber("SYSTCR-000061", Now.AddMinutes(1));
+        changedRationale.AssignControlledNumber("SYSTPCR-000061", Now.AddMinutes(1));
         changedRationale.AddProcedureChange("verification.engineer", Draft(removed, "A different removal decision."),
             Now.AddMinutes(2));
         changedRationale.Submit("verification.engineer", "test.lead", true, Now.AddMinutes(3));
 
         var changedRemoval = Create();
-        changedRemoval.AssignControlledNumber("SYSTCR-000061", Now.AddMinutes(1));
+        changedRemoval.AssignControlledNumber("SYSTPCR-000061", Now.AddMinutes(1));
         changedRemoval.AddProcedureChange("verification.engineer",
             Draft(Guid.NewGuid(), "Coverage no longer applies."), Now.AddMinutes(2));
         changedRemoval.Submit("verification.engineer", "test.lead", true, Now.AddMinutes(3));
 
         var changedAuthor = Create();
-        changedAuthor.AssignControlledNumber("SYSTCR-000061", Now.AddMinutes(1));
+        changedAuthor.AssignControlledNumber("SYSTPCR-000061", Now.AddMinutes(1));
         changedAuthor.AddProcedureChange("another.engineer", Draft(removed, "Coverage no longer applies."),
             Now.AddMinutes(2));
         changedAuthor.Submit("verification.engineer", "test.lead", true, Now.AddMinutes(3));
@@ -306,7 +306,7 @@ public sealed class TestChangeReviewTests
     public void Malformed_driving_requirement_json_is_refused_at_submission()
     {
         var review = Create();
-        review.AssignControlledNumber("SYSTCR-000060", Now.AddMinutes(1));
+        review.AssignControlledNumber("SYSTPCR-000060", Now.AddMinutes(1));
         review.AddProcedureChange("verification.engineer",
             ProcedureDraftWith(drivingJson: "{not-json"), Now.AddMinutes(2));
         Assert.Throws<DomainException>(() =>
@@ -325,7 +325,7 @@ public sealed class TestChangeReviewTests
         TestChangeReview Build(bool reverseSources, bool reverseChanges, bool reverseDriving)
         {
             var review = CreateWith(changeRequestId);
-            review.AssignControlledNumber("SYSTCR-000061", Now.AddMinutes(1));
+            review.AssignControlledNumber("SYSTPCR-000061", Now.AddMinutes(1));
             review.IncludeChangeRequest("verification.engineer", reverseSources ? foldedSourceB : foldedSourceA,
                 reverseSources ? "SRCR-00071.00" : "SRCR-00070.00", Now.AddMinutes(2));
             review.IncludeChangeRequest("verification.engineer", reverseSources ? foldedSourceA : foldedSourceB,
@@ -358,7 +358,7 @@ public sealed class TestChangeReviewTests
     private static TestChangeReview SubmittedWithImpact(VerificationImpactSnapshot impact)
     {
         var review = Create();
-        review.AssignControlledNumber("SYSTCR-000062", Now.AddMinutes(1));
+        review.AssignControlledNumber("SYSTPCR-000062", Now.AddMinutes(1));
         review.AddProcedureChange("verification.engineer",
             ProcedureDraftWith(drivingJson: $"[\"{Guid.NewGuid()}\"]"), Now.AddMinutes(2));
         review.Submit("verification.engineer", "test.lead", true, Now.AddMinutes(3),
@@ -416,14 +416,14 @@ public sealed class TestChangeReviewTests
         var changeRequestId = Guid.NewGuid();
 
         var ordered = CreateWith(changeRequestId);
-        ordered.AssignControlledNumber("SYSTCR-000063", Now.AddMinutes(1));
+        ordered.AssignControlledNumber("SYSTPCR-000063", Now.AddMinutes(1));
         ordered.AddProcedureChange("verification.engineer",
             ProcedureDraftWith(drivingJson: $"[\"{driving}\"]"), Now.AddMinutes(2));
         ordered.Submit("verification.engineer", "test.lead", true, Now.AddMinutes(3),
             impactDecisions: [first, second]);
 
         var reversed = CreateWith(changeRequestId);
-        reversed.AssignControlledNumber("SYSTCR-000063", Now.AddMinutes(1));
+        reversed.AssignControlledNumber("SYSTPCR-000063", Now.AddMinutes(1));
         reversed.AddProcedureChange("verification.engineer",
             ProcedureDraftWith(drivingJson: $"[\"{driving}\"]"), Now.AddMinutes(2));
         reversed.Submit("verification.engineer", "test.lead", true, Now.AddMinutes(3),
@@ -497,7 +497,7 @@ public sealed class TestChangeReviewTests
     private static string SnapshotFor(TestProcedureChangeDraft draft, Guid? changeRequestId = null)
     {
         var review = changeRequestId is null ? Create() : CreateWith(changeRequestId.Value);
-        review.AssignControlledNumber("SYSTCR-000055", Now.AddMinutes(1));
+        review.AssignControlledNumber("SYSTPCR-000055", Now.AddMinutes(1));
         review.AddProcedureChange("verification.engineer", draft, Now.AddMinutes(2));
         review.Submit("verification.engineer", "test.lead", true, Now.AddMinutes(3));
         return review.ReviewCycles.Single().SnapshotHash;
@@ -516,7 +516,7 @@ public sealed class TestChangeReviewTests
     public void A_test_change_request_carries_procedure_changes_the_way_a_change_request_carries_requirements()
     {
         var review = Create();
-        review.AssignControlledNumber("SYSTCR-000042", Now.AddMinutes(1));
+        review.AssignControlledNumber("SYSTPCR-000042", Now.AddMinutes(1));
 
         var change = review.AddProcedureChange("verification.engineer", ProcedureDraft(), Now.AddMinutes(2));
 
@@ -623,14 +623,14 @@ public sealed class TestChangeReviewTests
     public void An_approved_test_change_request_advances_to_its_next_revision_carrying_its_work()
     {
         var review = Create();
-        review.AssignControlledNumber("SYSTCR-000042", Now.AddMinutes(1));
+        review.AssignControlledNumber("SYSTPCR-000042", Now.AddMinutes(1));
         review.AddProcedureChange("verification.engineer", ProcedureDraft(), Now.AddMinutes(2));
         review.Submit("verification.engineer", "test.lead", true, Now.AddMinutes(3));
         review.Approve("test.lead", "Procedure decisions are sound.", Now.AddMinutes(4));
 
         var next = review.StartNextRevision("verification.engineer", Now.AddMinutes(5), targetReleaseIsReleased: false);
 
-        Assert.Equal("SYSTCR-000042.01", next.DisplayNumber);
+        Assert.Equal("SYSTPCR-000042.01", next.DisplayNumber);
         Assert.Equal(TestChangeReviewState.Draft, next.State);
         // Reopening approved procedure work to correct it is not a reason to ask again whether any was needed.
         Assert.Equal(TestChangeReviewOutcome.ChangeRequired, next.Outcome);
@@ -645,7 +645,7 @@ public sealed class TestChangeReviewTests
     public void Only_an_approved_test_change_request_revises_and_never_into_a_released_build()
     {
         var open = Submittable();
-        open.AssignControlledNumber("SYSTCR-000043", Now.AddMinutes(1));
+        open.AssignControlledNumber("SYSTPCR-000043", Now.AddMinutes(1));
         Assert.Throws<DomainException>(() =>
             open.StartNextRevision("verification.engineer", Now.AddMinutes(2), targetReleaseIsReleased: false));
 
@@ -661,7 +661,7 @@ public sealed class TestChangeReviewTests
     public void Revising_an_approved_package_carries_its_case_forward_for_correction()
     {
         var review = Submittable();
-        review.AssignControlledNumber("SYSTCR-000046", Now.AddMinutes(1));
+        review.AssignControlledNumber("SYSTPCR-000046", Now.AddMinutes(1));
         review.WriteCase("verification.engineer", "Oceanic sequencing verification", "Problem", "Analysis",
             "Solution", Now.AddMinutes(2),
             problemRich: "{\"blocks\":[{\"type\":\"paragraph\",\"text\":\"Problem rich\"}]}",
@@ -689,7 +689,7 @@ public sealed class TestChangeReviewTests
         // this one has to reach Approved before it can revise at all.
         var review = Submittable();
         var folded = Guid.NewGuid();
-        review.AssignControlledNumber("SYSTCR-000044", Now.AddMinutes(1));
+        review.AssignControlledNumber("SYSTPCR-000044", Now.AddMinutes(1));
         review.IncludeChangeRequest("verification.engineer", folded, "SRCR-00040.00", Now.AddMinutes(2));
         review.Submit("verification.engineer", "test.lead", true, Now.AddMinutes(3));
         review.Approve("test.lead", "Sound.", Now.AddMinutes(4));
@@ -717,7 +717,7 @@ public sealed class TestChangeReviewTests
     public void A_submitted_package_cannot_grow_underneath_its_approver()
     {
         var review = Create();
-        review.AssignControlledNumber("SYSTCR-000042", Now.AddMinutes(1));
+        review.AssignControlledNumber("SYSTPCR-000042", Now.AddMinutes(1));
         review.AddProcedureChange("verification.engineer", ProcedureDraft(), Now.AddMinutes(2));
         review.Submit("verification.engineer", "test.lead", true, Now.AddMinutes(3));
 
@@ -740,14 +740,14 @@ public sealed class TestChangeReviewTests
         Assert.Equal(TestChangeReviewOutcome.NoChangeRequired, raised.Outcome);
         // No number, because there is no test change request — that is the whole content of the conclusion.
         Assert.Equal("", raised.BaseNumber);
-        Assert.Throws<DomainException>(() => raised.AssignControlledNumber("SYSTCR-000042", Now.AddMinutes(2)));
+        Assert.Throws<DomainException>(() => raised.AssignControlledNumber("SYSTPCR-000042", Now.AddMinutes(2)));
     }
 
     [Fact]
     public void A_controlled_test_change_request_cannot_later_claim_no_test_work_was_needed()
     {
         var review = Create();
-        review.AssignControlledNumber("SYSTCR-000042", Now.AddMinutes(1));
+        review.AssignControlledNumber("SYSTPCR-000042", Now.AddMinutes(1));
 
         // Its procedure decisions exist under that number. Withdrawing the conclusion has to withdraw them
         // too, rather than leaving a numbered record asserting that nothing was ever required.
@@ -838,11 +838,11 @@ public sealed class TestChangeReviewTests
         var review = Create(TestChangeReviewDiscipline.HighLevelSoftware);
 
         Assert.Equal("SRCR-00039.00", review.DisplayNumber);
-        Assert.Throws<DomainException>(() => review.AssignControlledNumber("LLRTCR-000001", Now.AddMinutes(1)));
-        review.AssignControlledNumber("HLRTCR-000014", Now.AddMinutes(2));
-        review.AssignControlledNumber("HLRTCR-999999", Now.AddMinutes(3));
+        Assert.Throws<DomainException>(() => review.AssignControlledNumber("LLRTCCR-000001", Now.AddMinutes(1)));
+        review.AssignControlledNumber("HLRTCCR-000014", Now.AddMinutes(2));
+        review.AssignControlledNumber("HLRTCCR-999999", Now.AddMinutes(3));
 
-        Assert.Equal("HLRTCR-000014.00", review.DisplayNumber);
+        Assert.Equal("HLRTCCR-000014.00", review.DisplayNumber);
     }
 
     /// <summary>

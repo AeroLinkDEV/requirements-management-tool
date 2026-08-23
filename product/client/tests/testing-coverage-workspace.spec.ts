@@ -28,7 +28,7 @@ async function openClaimableAssessment(page: Page) {
 /**
  * The change requests controlling this build's test procedures.
  *
- * The page is named for what it holds, as the requirements-side Change Requests page is: a SYSTCR and an SRCR
+ * The page is named for what it holds, as the requirements-side Change Requests page is: a SYSTPCR and an SRCR
  * present the same way, and the material difference is only which kind of change each controls. Coverage and
  * the procedure library used to sit underneath the queue here; both are reports about procedures as they
  * stand, so both moved to the Test Procedure Explorer beside the procedures they describe.
@@ -47,8 +47,8 @@ test('the page lists the change requests controlling test work, and nothing else
   await expect(page.getByRole('heading', { name: 'Downstream Assessments' })).toBeVisible()
   // Numbered as controlled records rather than borrowing the number of the change that raised them. The
   // showcase raises one System package for the in-work build, so this is a fact about the page.
-  const packages = page.locator('.downstreamAssessment').filter({ hasText: /TCR-/ })
-  await expect(packages.first()).toContainText(/SYSTCR-\d{6}\.\d{2}/, { timeout: 30_000 })
+  const packages = page.locator('.downstreamAssessment').filter({ hasText: /SYSTPCR-/ })
+  await expect(packages.first()).toContainText(/SYSTPCR-\d{6}\.\d{2}/, { timeout: 30_000 })
 
   // What is no longer here, because it moved rather than being duplicated. A second procedure list, or a
   // second coverage report, would be a second answer to the same question and the two would drift.
@@ -76,7 +76,7 @@ test('a package opens onto its decisions, and each one is an explicit judgement'
 
   // One control per row, in every state — the requirements queue's anatomy. Everything the assessment offers
   // is inside it, so the row stays a summary and stops being a control panel.
-  const claimable = page.locator('.downstreamAssessment').filter({ hasText: /SYSTCR-/ }).first()
+  const claimable = page.locator('.downstreamAssessment').filter({ hasText: /SYSTPCR-/ }).first()
   await expect(claimable).toBeVisible({ timeout: 30_000 })
   await expect(claimable.getByRole('button', { name: 'Take it on' })).toHaveCount(0)
   await expect(claimable.getByRole('button')).toHaveCount(2)  // Open assessment, and the link to the package
@@ -123,18 +123,18 @@ test('software HLR and LLR each have their own change request page', async ({ pa
   // failed: two loaders on the page shared one "only the newest reply may write the screen" counter, so the
   // procedure search cancelled the load that was fetching the packages. Asserting the package here is what
   // stops that returning as an empty queue nobody can distinguish from having no work.
-  await expect(page.locator('.downstreamAssessment').filter({ hasText: /TCR-/ }).first())
-    .toContainText(/HLRTCR-\d{6}\.\d{2}/, { timeout: 30_000 })
+  await expect(page.locator('.downstreamAssessment').filter({ hasText: /HLRTCCR-/ }).first())
+    .toContainText(/HLRTCCR-\d{6}\.\d{2}/, { timeout: 30_000 })
   // The other discipline's packages are not on this page.
-  await expect(page.locator('.downstreamAssessment').filter({ hasText: /LLRTCR-/ })).toHaveCount(0)
+  await expect(page.locator('.downstreamAssessment').filter({ hasText: /LLRTCCR-/ })).toHaveCount(0)
 
   await page.getByRole('tab', { name: 'LLR' }).click()
   await expect(page).toHaveURL(/software-verification\/llr\/change-requests$/, { timeout: 30_000 })
   await expect(page.getByText('SOFTWARE LLR TEST CHANGE CONTROL / BUILD 1.6')).toBeVisible()
   // The showcase raises no LLR package for this build, so what this asserts is isolation rather than presence:
-  // whatever the LLR page shows, the HLR package is not on it. Asserting an LLRTCR here would be asserting
+  // whatever the LLR page shows, the HLR package is not on it. Asserting an LLRTCCR here would be asserting
   // something the demonstration data does not contain.
-  await expect(page.locator('.downstreamAssessment').filter({ hasText: /HLRTCR-/ })).toHaveCount(0)
+  await expect(page.locator('.downstreamAssessment').filter({ hasText: /HLRTCCR-/ })).toHaveCount(0)
 })
 
 /**
@@ -250,7 +250,7 @@ test('a test change request opens onto its source changes, its requirements and 
   await page.getByRole('link', { name: 'System Test Change Requests' }).click()
   await expect(page.getByRole('heading', { name: 'Downstream Assessments' })).toBeVisible({ timeout: 30_000 })
 
-  const queueRow = page.locator('.downstreamAssessment').filter({ hasText: /SYSTCR-/ }).first()
+  const queueRow = page.locator('.downstreamAssessment').filter({ hasText: /SYSTPCR-/ }).first()
   await expect(queueRow).toBeVisible({ timeout: 30_000 })
 
   // The row summarises; the assessment is where anything is done. There is no button called "Decisions", and

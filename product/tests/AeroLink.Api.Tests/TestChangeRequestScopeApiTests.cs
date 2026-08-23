@@ -109,10 +109,10 @@ public sealed class TestChangeRequestScopeApiTests
             new { testChangeRequired = true });
         Assert.True(concluded.IsSuccessStatusCode, await concluded.Content.ReadAsStringAsync());
 
-        // Answering that test work is required is what brings the SYSTCR into being.
+        // Answering that test work is required is what brings the SYSTPCR into being.
         var detail = await concluded.Content.ReadFromJsonAsync<JsonElement>();
         Assert.Equal("ChangeRequired", detail.GetProperty("outcome").GetString());
-        Assert.Matches(@"^SYSTCR-\d{6}\.\d{2}$", detail.GetProperty("displayNumber").GetString()!);
+        Assert.Matches(@"^SYSTPCR-\d{6}\.\d{2}$", detail.GetProperty("displayNumber").GetString()!);
     }
 
     [Fact]
@@ -192,7 +192,7 @@ public sealed class TestChangeRequestScopeApiTests
         var body = await second.Content.ReadAsStringAsync();
         // Named, so the engineer knows where the change went rather than being told to try again.
         Assert.Contains("SRCR-00901", body);
-        Assert.Contains("SYSTCR-", body);
+        Assert.Contains("SYSTPCR-", body);
     }
 
     /// <summary>

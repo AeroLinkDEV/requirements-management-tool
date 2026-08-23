@@ -22,7 +22,7 @@ public sealed class TestProcedureProvenanceProjectionTests
         var changeB = AddRequirement(crB, "SYSR-04241", now);
         var tcr = new TestChangeReview(fixture.Project.Id, fixture.Release.Id, crA.Id,
             TestChangeReviewDiscipline.System, crA.DisplayNumber, now,
-            baseNumber: "SYSTCR-04240", revision: 1);
+            baseNumber: "SYSTPCR-04240", revision: 1);
         tcr.IncludeChangeRequest("verification.engineer", crB.Id, crB.DisplayNumber, now);
         var procedure = new TestProcedure(fixture.Project.Id, "SYSTP-04240", "Folded source procedure",
             "verification.engineer", now, TestProcedureLevel.System);
@@ -46,11 +46,11 @@ public sealed class TestProcedureProvenanceProjectionTests
         var provenance = result[revision.Id];
 
         Assert.Equal(tcr.Id, provenance.SourceTestChangeRequestId);
-        Assert.Equal("SYSTCR-04240.01", provenance.Package);
+        Assert.Equal("SYSTPCR-04240.01", provenance.Package);
         Assert.False(provenance.IsLegacy);
         Assert.Null(provenance.Note);
         Assert.Equal(2, provenance.Drivers.Count);
-        Assert.All(provenance.Drivers, row => Assert.Equal("SYSTCR-04240.01", row.Package));
+        Assert.All(provenance.Drivers, row => Assert.Equal("SYSTPCR-04240.01", row.Package));
         Assert.Equal(new[] { "SRCR-04240.00", "SRCR-04241.00" },
             provenance.Drivers.Select(x => x.ChangeRequest).OrderBy(x => x).ToArray());
         Assert.Equal(new[] { changeA.DisplayNumber, changeB.DisplayNumber },
@@ -66,7 +66,7 @@ public sealed class TestProcedureProvenanceProjectionTests
         var folded = ChangeRequest("SRCR-04251", fixture.Project.Id, fixture.Release.Id, "Manual folded", now);
         var tcr = new TestChangeReview(fixture.Project.Id, fixture.Release.Id, primary.Id,
             TestChangeReviewDiscipline.System, primary.DisplayNumber, now,
-            baseNumber: "SYSTCR-04250", revision: 0);
+            baseNumber: "SYSTPCR-04250", revision: 0);
         tcr.IncludeChangeRequest("verification.engineer", folded.Id, folded.DisplayNumber, now);
         var procedure = new TestProcedure(fixture.Project.Id, "SYSTP-04250", "Manual package procedure",
             "verification.engineer", now, TestProcedureLevel.System);
@@ -79,11 +79,11 @@ public sealed class TestProcedureProvenanceProjectionTests
             fixture.Db, [revision.Id], CancellationToken.None);
         var provenance = result[revision.Id];
 
-        Assert.Equal("SYSTCR-04250.00", provenance.Package);
+        Assert.Equal("SYSTPCR-04250.00", provenance.Package);
         Assert.Equal(2, provenance.Drivers.Count);
         Assert.All(provenance.Drivers, row =>
         {
-            Assert.Equal("SYSTCR-04250.00", row.Package);
+            Assert.Equal("SYSTPCR-04250.00", row.Package);
             Assert.Equal("PackageSource", row.Action);
             Assert.Equal("", row.SubjectDisplayNumber);
             Assert.False(row.IsLegacy);
@@ -104,7 +104,7 @@ public async Task Exact_source_snapshot_survives_claims_moving_to_a_successor_tc
         "Revisioned manual folded", now);
     var tcr = new TestChangeReview(fixture.Project.Id, fixture.Release.Id, primary.Id,
         TestChangeReviewDiscipline.System, primary.DisplayNumber, now,
-        baseNumber: "SYSTCR-04255", revision: 0, caseContractVersion: 0);
+        baseNumber: "SYSTPCR-04255", revision: 0, caseContractVersion: 0);
     tcr.RecordTestChangeRequired("verification.engineer", now);
     tcr.IncludeChangeRequest("verification.engineer", folded.Id, folded.DisplayNumber, now);
     tcr.Submit("verification.engineer", "test.lead", true, now.AddMinutes(1));
@@ -135,7 +135,7 @@ public async Task Exact_source_snapshot_survives_claims_moving_to_a_successor_tc
     var result = await TestProcedureProvenanceProjection.ForRevisionsAsync(
         fixture.Db, [revision.Id], CancellationToken.None);
     var provenance = result[revision.Id];
-    Assert.Equal("SYSTCR-04255.00", provenance.Package);
+    Assert.Equal("SYSTPCR-04255.00", provenance.Package);
     Assert.Null(provenance.Note);
     Assert.Equal(new[] { primary.DisplayNumber, folded.DisplayNumber },
         provenance.Drivers.Select(x => x.ChangeRequest).OrderBy(x => x).ToArray());
@@ -172,7 +172,7 @@ public async Task Exact_source_snapshot_survives_claims_moving_to_a_successor_tc
         var change = AddRequirement(source, "SYSR-04261", fixture.Now);
         var tcr = new TestChangeReview(fixture.Project.Id, fixture.Release.Id, source.Id,
             TestChangeReviewDiscipline.System, source.DisplayNumber, fixture.Now,
-            baseNumber: "SYSTCR-04261", revision: 2);
+            baseNumber: "SYSTPCR-04261", revision: 2);
         var procedure = new TestProcedure(fixture.Project.Id, "SYSTP-04261", "Legacy procedure",
             "legacy.author", fixture.Now, TestProcedureLevel.System);
         var revision = Revision(procedure.Id, 0, sourceTcrId: null, fixture.Now);
@@ -194,7 +194,7 @@ public async Task Exact_source_snapshot_survives_claims_moving_to_a_successor_tc
         Assert.Contains("producing test change request was not recorded", provenance.Note);
         var related = Assert.Single(provenance.Drivers);
         Assert.True(related.IsLegacy);
-        Assert.Equal("SYSTCR-04261.02", related.Package);
+        Assert.Equal("SYSTPCR-04261.02", related.Package);
         Assert.Equal("SRCR-04261.00", related.ChangeRequest);
         Assert.Equal(change.DisplayNumber, related.SubjectDisplayNumber);
     }

@@ -129,7 +129,7 @@ public sealed class ProcedureManifestEffectivityApiTests
         var review = new TestChangeReview(project.Id, release16.Id, authoringRequest.Id,
             TestChangeReviewDiscipline.System, authoringRequest.DisplayNumber, now);
         review.RecordTestChangeRequired("manifest.engineer", now);
-        review.AssignControlledNumber("SYSTCR-002140", now);
+        review.AssignControlledNumber("SYSTPCR-002140", now);
         db.AddRange(authoringRequest, review);
 
         var account = new UserAccount("manifest.engineer", "Manifest Engineer", "manifest@example.test",

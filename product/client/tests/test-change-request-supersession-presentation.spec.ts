@@ -15,7 +15,7 @@ const review = (
 ): SupersessionRecord => ({ id, displayNumber, state, supersededByTestChangeRequestId })
 
 test('a cross-release superseded review remains visible when its successor is not loaded', () => {
-  const predecessor = review('old', 'SYSTCR-000101.00', 'Superseded', 'successor-in-another-release')
+  const predecessor = review('old', 'SYSTPCR-000101.00', 'Superseded', 'successor-in-another-release')
   const currentRelease = [predecessor]
 
   expect(reviewsVisibleInCurrentRelease(currentRelease)).toEqual([predecessor])
@@ -25,8 +25,8 @@ test('a cross-release superseded review remains visible when its successor is no
 })
 
 test('a same-release predecessor moves under the exact successor rather than remaining a peer row', () => {
-  const predecessor = review('old', 'SYSTCR-000102.00', 'Superseded', 'new')
-  const successor = review('new', 'SYSTCR-000102.01', 'Draft')
+  const predecessor = review('old', 'SYSTPCR-000102.00', 'Superseded', 'new')
+  const successor = review('new', 'SYSTPCR-000102.01', 'Draft')
   const currentRelease = [predecessor, successor]
 
   expect(reviewsVisibleInCurrentRelease(currentRelease)).toEqual([successor])
@@ -38,10 +38,10 @@ test('a same-release predecessor moves under the exact successor rather than rem
 })
 
 test('folding several automatic assessments preserves every sibling and earlier ancestor', () => {
-  const current = review('current', 'SYSTCR-000200.02', 'Draft')
-  const siblingA = review('a', 'SYSTCR-000200.00', 'Superseded', current.id)
-  const siblingB = review('b', 'SYSTCR-000201.00', 'Superseded', current.id)
-  const ancestor = review('ancestor', 'SYSTCR-000199.00', 'Superseded', siblingB.id)
+  const current = review('current', 'SYSTPCR-000200.02', 'Draft')
+  const siblingA = review('a', 'SYSTPCR-000200.00', 'Superseded', current.id)
+  const siblingB = review('b', 'SYSTPCR-000201.00', 'Superseded', current.id)
+  const ancestor = review('ancestor', 'SYSTPCR-000199.00', 'Superseded', siblingB.id)
   const records = [current, siblingB, ancestor, siblingA]
 
   expect(reviewsVisibleInCurrentRelease(records)).toEqual([current])
@@ -50,8 +50,8 @@ test('folding several automatic assessments preserves every sibling and earlier 
 
 test('folded automatic predecessors remain assessments while numbered predecessors remain TCRs', () => {
   const automatic = review('automatic', 'SRCR-000199.00', 'Superseded', 'current')
-  const controlled = review('controlled', 'SYSTCR-000200.00', 'Superseded', 'current')
+  const controlled = review('controlled', 'SYSTPCR-000200.00', 'Superseded', 'current')
 
-  expect(isControlledTestChangeRequest(automatic, 'SYSTCR-')).toBe(false)
-  expect(isControlledTestChangeRequest(controlled, 'SYSTCR-')).toBe(true)
+  expect(isControlledTestChangeRequest(automatic, 'SYSTPCR-')).toBe(false)
+  expect(isControlledTestChangeRequest(controlled, 'SYSTPCR-')).toBe(true)
 })

@@ -210,8 +210,8 @@ async function seedCarriedProcedureUniverse(
   await login(page, 'test.engineer', { openProject: false })
   await selectProgram(page, `TCR Volume ${suffix}`)
   const { assessment } = await openSystemAssessment(page, draft.displayNumber)
-  await assessment.getByRole('button', { name: 'SYSTCR required', exact: true }).click()
-  await expect(assessment).toContainText('SYSTCR Created', { timeout: 30_000 })
+  await assessment.getByRole('button', { name: 'SYSTPCR required', exact: true }).click()
+  await expect(assessment).toContainText('SYSTPCR Created', { timeout: 30_000 })
 
   const impactItems = await (await request.get(
     `${apiBase}/api/releases/${workspace.release.id}/verification-impact`,
@@ -311,8 +311,8 @@ async function seedCarriedProcedureUniverse(
   await expect(reopenedRow).toBeVisible({ timeout: 30_000 })
   await reopenedRow.getByRole('button', { name: 'Open assessment' }).click()
   const assessment2 = page.getByRole('dialog', { name: /test impact/ })
-  await assessment2.getByRole('button', { name: 'SYSTCR required', exact: true }).click()
-  await expect(assessment2).toContainText('SYSTCR Created', { timeout: 30_000 })
+  await assessment2.getByRole('button', { name: 'SYSTPCR required', exact: true }).click()
+  await expect(assessment2).toContainText('SYSTPCR Created', { timeout: 30_000 })
   const afterTrigger = await (await request.get(
     `${apiBase}/api/releases/${workspace.release.id}/verification-impact`,
   )).json() as { testChangeReviewId: string; subjectStatement?: string }[]
@@ -379,8 +379,8 @@ test('a stale released-build context cannot overwrite the active build effective
   await login(page, 'admin', { openProject: false })
   await selectProgram(page, `Stale Context ${suffix}`)
   const { assessment } = await openSystemAssessment(page, draft.displayNumber)
-  await assessment.getByRole('button', { name: 'SYSTCR required', exact: true }).click()
-  await expect(assessment).toContainText('SYSTCR Created', { timeout: 30_000 })
+  await assessment.getByRole('button', { name: 'SYSTPCR required', exact: true }).click()
+  await expect(assessment).toContainText('SYSTPCR Created', { timeout: 30_000 })
   await decideNewProcedure(page, assessment, subject)
   // The workspace stays mounted across the release switch, so close the assessment before the race.
   await assessment.getByRole('button', { name: /Close test assessment/ }).click()
@@ -461,8 +461,8 @@ test('a multi-page requirement selection keeps the picker request line bounded a
   await login(page, 'admin', { openProject: false })
   await selectProgram(page, `Bounded Selection ${suffix}`)
   const { assessment } = await openSystemAssessment(page, draft.displayNumber)
-  await assessment.getByRole('button', { name: 'SYSTCR required', exact: true }).click()
-  await expect(assessment).toContainText('SYSTCR Created', { timeout: 30_000 })
+  await assessment.getByRole('button', { name: 'SYSTPCR required', exact: true }).click()
+  await expect(assessment).toContainText('SYSTPCR Created', { timeout: 30_000 })
   await decideNewProcedure(page, assessment, subject)
 
   const decided = assessment.locator('.decisionList li').filter({ hasText: subject }).first()
@@ -563,12 +563,12 @@ test('the TCR driving-requirement picker stays bounded with a large selection', 
   await login(page, 'admin', { openProject: false })
   await selectProgram(page, `Driving Bounded ${suffix}`)
   const { assessment } = await openSystemAssessment(page, draft.displayNumber)
-  await assessment.getByRole('button', { name: 'SYSTCR required', exact: true }).click()
-  await expect(assessment).toContainText('SYSTCR Created', { timeout: 30_000 })
+  await assessment.getByRole('button', { name: 'SYSTPCR required', exact: true }).click()
+  await expect(assessment).toContainText('SYSTPCR Created', { timeout: 30_000 })
 
   // Open the TCR workspace's Introduce drawer: its governed candidate universe is the 220 requirements
   // this package's source change introduced.
-  await assessment.getByRole('button', { name: /^SYSTCR-\d{6}\.\d{2}$/ }).click()
+  await assessment.getByRole('button', { name: /^SYSTPCR-\d{6}\.\d{2}$/ }).click()
   const workspaceDrawer = page.getByRole('dialog', { name: /test procedure decisions/ })
   await workspaceDrawer.getByRole('button', { name: 'Propose a test procedure change' }).click()
   const drawer = page.getByRole('dialog', { name: 'Propose a test procedure change' })
@@ -654,8 +654,8 @@ test('a failed picker response shows a visible error and recovers instead of sil
   await login(page, 'admin', { openProject: false })
   await selectProgram(page, `Picker Failure ${suffix}`)
   const { assessment } = await openSystemAssessment(page, draft.displayNumber)
-  await assessment.getByRole('button', { name: 'SYSTCR required', exact: true }).click()
-  await expect(assessment).toContainText('SYSTCR Created', { timeout: 30_000 })
+  await assessment.getByRole('button', { name: 'SYSTPCR required', exact: true }).click()
+  await expect(assessment).toContainText('SYSTPCR Created', { timeout: 30_000 })
   await decideNewProcedure(page, assessment, subject)
 
   const decided = assessment.locator('.decisionList li').filter({ hasText: subject }).first()
@@ -721,7 +721,7 @@ test('a Modify/Retire target picker stays bounded with a large existing-decision
   await page.reload()
   const row = page.locator('.downstreamAssessment').filter({ hasText: /TCR volume trigger/ }).first()
   await expect(row).toBeVisible({ timeout: 30_000 })
-  await row.getByRole('button', { name: /^SYSTCR-\d{6}\.\d{2}/ }).click()
+  await row.getByRole('button', { name: /^SYSTPCR-\d{6}\.\d{2}/ }).click()
   const workspaceDrawer = page.getByRole('dialog', { name: /test procedure decisions/ })
   await expect(workspaceDrawer.getByRole('button', { name: 'Propose a test procedure change' }))
     .toBeVisible({ timeout: 60_000 })

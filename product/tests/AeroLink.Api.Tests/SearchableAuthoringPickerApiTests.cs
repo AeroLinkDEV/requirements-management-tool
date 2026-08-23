@@ -132,7 +132,7 @@ public sealed class SearchableAuthoringPickerApiTests
         var review = new TestChangeReview(project.Id, release.Id, scr.Id,
             TestChangeReviewDiscipline.System, scr.DisplayNumber, now);
         review.RecordTestChangeRequired("verification.engineer", now);
-        review.AssignControlledNumber("SYSTCR-000901", now);
+        review.AssignControlledNumber("SYSTPCR-000901", now);
         db.Add(review);
 
         foreach (var baseNumber in new[] { "SYSR-000001", "SYSR-000002" })

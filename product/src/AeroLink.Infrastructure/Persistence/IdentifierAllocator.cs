@@ -21,9 +21,11 @@ using Microsoft.EntityFrameworkCore.Storage;
 public static class IdentifierAllocator
 {
     private static ILadderPolicy LadderPolicy => LegacyLadderPolicy.Instance;
+    private static readonly IReadOnlySet<string> RetiredTestChangeRequestPrefixes =
+        new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "SYSTCR", "HLRTCR", "LLRTCR" };
     /// <summary>
     /// Software change requests are numbered per level, so HLRCR and LLRCR each count on their own — the
-    /// same choice already made for SYSTCR/HLRTCR/LLRTCR and the procedures they govern. The prefix
+    /// same choice already made for SYSTPCR/HLRTCCR/LLRTCCR and the artifacts they govern. The prefix
     /// disambiguates, and a reader of an HLRCR never has to wonder whether an LLR change is hiding in it.
     /// </summary>
     public static async Task<string> PreviewChangeRequestAsync(AeroLinkDbContext db, ChangeRequestType type,
@@ -49,10 +51,9 @@ public static class IdentifierAllocator
     /// <summary>
     /// The next test change request number, numbered per discipline like the procedures it governs.
     ///
-    /// SYSTCR, HLRTCR and LLRTCR follow SYSTP, HLRTC and LLRTC deliberately: a reader who knows what an
-    /// HLRTC is should not have to be told what an HLRTCR is. Software's two levels are numbered apart for
-    /// the same reason the packages themselves are separate — they are finished by different people. The
-    /// HLRTP/LLRTP families remain reserved for the later Procedure tier.
+    /// SYSTPCR, HLRTCCR and LLRTCCR are derived from SYSTP, HLRTC and LLRTC by appending CR. Software's
+    /// two levels are numbered apart for the same reason the packages themselves are separate — they are
+    /// finished by different people. The HLRTP/LLRTP families remain reserved for the later Procedure tier.
     /// </summary>
     public static async Task<string> NextTestChangeRequestAsync(AeroLinkDbContext db, TestChangeReviewDiscipline discipline,
         CancellationToken ct, ILadderPolicy? policy = null)
@@ -88,6 +89,7 @@ public static class IdentifierAllocator
     private static async Task<int> PreviewAsync(AeroLinkDbContext db, string prefix, CancellationToken ct)
     {
         var scope = prefix.Trim().ToUpperInvariant();
+        EnsureAllocatable(scope);
         var next = await db.IdentifierSequences.AsNoTracking()
             .Where(x => x.Scope == scope)
             .Select(x => (int?)x.NextValue)
@@ -102,6 +104,7 @@ public static class IdentifierAllocator
     public static async Task<int> ClaimAsync(AeroLinkDbContext db, string prefix, Func<Task<int>> seed, CancellationToken ct)
     {
         var scope = prefix.Trim().ToUpperInvariant();
+        EnsureAllocatable(scope);
 
         // Only the very first claim for a prefix can need more than one pass, and only because the row has to
         // exist before it can be incremented. The insert is attempted more than once because it can lose for
@@ -199,6 +202,12 @@ public static class IdentifierAllocator
     public static string Format(string prefix, int sequence) => $"{prefix}-{sequence:D6}";
     private static string FormatChangeRequest(string prefix, int sequence) => $"{prefix}-{sequence:D5}";
     private static int Max(IEnumerable<string> numbers, string prefix) => numbers.Select(x => x.StartsWith(prefix + "-", StringComparison.OrdinalIgnoreCase) && int.TryParse(x[(prefix.Length + 1)..], out var value) ? value : 0).DefaultIfEmpty(0).Max();
+
+    private static void EnsureAllocatable(string scope)
+    {
+        if (RetiredTestChangeRequestPrefixes.Contains(scope))
+            throw new DomainException($"The retired Test Change Request prefix '{scope}' cannot allocate a current identifier.");
+    }
 }
 
 /// <summary>

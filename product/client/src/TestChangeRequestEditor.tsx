@@ -50,7 +50,7 @@ type ProcedureChangeDraft = {
 const labelFor = (discipline: TestDiscipline) =>
   discipline === 'System' ? 'System' : discipline === 'HighLevelSoftware' ? 'HLR' : 'LLR'
 const acronymFor = (discipline: TestDiscipline) =>
-  discipline === 'System' ? 'SYSTCR' : discipline === 'HighLevelSoftware' ? 'HLRTCR' : 'LLRTCR'
+  discipline === 'System' ? 'SYSTPCR' : discipline === 'HighLevelSoftware' ? 'HLRTCCR' : 'LLRTCCR'
 const levelFor = (discipline: TestDiscipline) =>
   discipline === 'System' ? 'System' : discipline === 'HighLevelSoftware' ? 'HighLevel' : 'LowLevel'
 

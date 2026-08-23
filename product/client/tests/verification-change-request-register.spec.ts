@@ -30,9 +30,9 @@ test('every discipline lists the packages controlling its build test procedures'
   const root = await enterBuild(page)
 
   for (const [branch, acronym, heading] of [
-    ['system-verification', 'SYSTCR', 'System Test Change Requests'],
-    ['software-verification/hlr', 'HLRTCR', 'Software Test Change Requests'],
-    ['software-verification/llr', 'LLRTCR', 'Software Test Change Requests'],
+    ['system-verification', 'SYSTPCR', 'System Test Change Requests'],
+    ['software-verification/hlr', 'HLRTCCR', 'Software Test Change Requests'],
+    ['software-verification/llr', 'LLRTCCR', 'Software Test Change Requests'],
   ] as const) {
     await openRegister(page, root, branch, heading)
 

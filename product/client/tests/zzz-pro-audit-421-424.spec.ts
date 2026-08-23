@@ -37,14 +37,14 @@ test('predecessor and successor keep exact titles and folded provenance through 
     steps: 'Exercise route sequencing.',
     expectedResult: 'Sequencing remains deterministic.',
     sourceTestChangeRequestId: successor ? revision01Id : revision00Id,
-    package: `SYSTCR-42499.${successor ? '01' : '00'}`,
+    package: `SYSTPCR-42499.${successor ? '01' : '00'}`,
     provenanceNote: null,
     drivenBy: successor
       ? [
-          { changeRequest: 'SRCR-42410.00', package: 'SYSTCR-42499.01', subjectDisplayNumber: 'SYSR-42410.00', action: 'ModifyExisting' },
-          { changeRequest: 'SRCR-42420.00', package: 'SYSTCR-42499.01', subjectDisplayNumber: 'SYSR-42420.00', action: 'ModifyExisting' },
+          { changeRequest: 'SRCR-42410.00', package: 'SYSTPCR-42499.01', subjectDisplayNumber: 'SYSR-42410.00', action: 'ModifyExisting' },
+          { changeRequest: 'SRCR-42420.00', package: 'SYSTPCR-42499.01', subjectDisplayNumber: 'SYSR-42420.00', action: 'ModifyExisting' },
         ]
-      : [{ changeRequest: 'SRCR-42400.00', package: 'SYSTCR-42499.00', subjectDisplayNumber: 'SYSR-42400.00', action: 'CreateNew' }],
+      : [{ changeRequest: 'SRCR-42400.00', package: 'SYSTPCR-42499.00', subjectDisplayNumber: 'SYSR-42400.00', action: 'CreateNew' }],
     covers: successor ? ['SYSR-42410.00', 'SYSR-42420.00'] : ['SYSR-42400.00'],
   })
 
@@ -105,7 +105,7 @@ test('predecessor and successor keep exact titles and folded provenance through 
   const predecessorInspector = page.locator('.requirementInspector')
   await predecessorInspector.getByRole('button', { name: 'Trace & impact' }).click()
   await expect(predecessorInspector.locator('.traceRevisionIdentity')).toContainText(titleA)
-  await expect(predecessorInspector).toContainText('SYSTCR-42499.00 (SRCR-42400.00)')
+  await expect(predecessorInspector).toContainText('SYSTPCR-42499.00 (SRCR-42400.00)')
   await predecessorInspector.getByRole('button', { name: 'History' }).click()
   await expect(predecessorInspector.locator('.revisionList')).toContainText(`SYSTP-42499.00 — ${titleA}`)
   const predecessorDeepLink = page.url()
@@ -124,14 +124,14 @@ test('predecessor and successor keep exact titles and folded provenance through 
   const successorInspector = page.locator('.requirementInspector')
   await successorInspector.getByRole('button', { name: 'Trace & impact' }).click()
   await expect(successorInspector.locator('.traceRevisionIdentity')).toContainText(titleB)
-  await expect(successorInspector).toContainText('SYSTCR-42499.01 (SRCR-42410.00)')
-  await expect(successorInspector).toContainText('SYSTCR-42499.01 (SRCR-42420.00)')
+  await expect(successorInspector).toContainText('SYSTPCR-42499.01 (SRCR-42410.00)')
+  await expect(successorInspector).toContainText('SYSTPCR-42499.01 (SRCR-42420.00)')
   await successorInspector.getByRole('button', { name: 'History' }).click()
   await expect(successorInspector.locator('.revisionList')).toContainText(`SYSTP-42499.00 — ${titleA}`)
   await expect(successorInspector.locator('.revisionList')).toContainText(`SYSTP-42499.01 — ${titleB}`)
   const successorDeepLink = page.url()
   await page.reload()
   await expect(page).toHaveURL(successorDeepLink)
-  await expect(page.locator('.requirementInspector .revisionList')).toContainText('SYSTCR-42499.01 · SRCR-42420.00',
+  await expect(page.locator('.requirementInspector .revisionList')).toContainText('SYSTPCR-42499.01 · SRCR-42420.00',
     { timeout: 30_000 })
 })

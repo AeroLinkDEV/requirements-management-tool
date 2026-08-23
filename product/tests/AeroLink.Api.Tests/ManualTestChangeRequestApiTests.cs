@@ -123,7 +123,7 @@ public sealed class ManualTestChangeRequestApiTests
     /// <summary>
     /// A procedure verifies the requirements one level above it, so the package that controls HLR test work
     /// answers for HLR requirement changes and nothing else. Before this the picker offered every approved
-    /// change in the build, so raising an HLRTCR presented SRCRs and LLRCRs as choices — neither of which can
+    /// change in the build, so raising an HLRTCCR presented SRCRs and LLRCRs as choices — neither of which can
     /// drive an HLR procedure.
     /// </summary>
     [Theory]
@@ -211,7 +211,7 @@ public sealed class ManualTestChangeRequestApiTests
         Assert.Equal("PR-00910.00", review.SourceProblemReportNumber);
         Assert.Empty(review.CoveredChangeRequestIds);
         // It is still a numbered controlled package.
-        Assert.StartsWith("HLRTCR-", review.DisplayNumber);
+        Assert.StartsWith("HLRTCCR-", review.DisplayNumber);
     }
 
     /// <summary>
@@ -380,13 +380,13 @@ public sealed class ManualTestChangeRequestApiTests
                 title = "Oceanic sequencing verification",
                 problem = "Two approved changes touch the oceanic sequencing path.",
                 analysis = "They share one procedure and are best tested as one package.",
-                solution = "Raise one SYSTCR carrying both and verify the combined behavior." });
+                solution = "Raise one SYSTPCR carrying both and verify the combined behavior." });
         var body = await response.Content.ReadAsStringAsync();
         Assert.True(response.StatusCode == HttpStatusCode.Created, $"{(int)response.StatusCode}: {body}");
 
         var created = JsonSerializer.Deserialize<JsonElement>(body);
         // Numbered like any other controlled package, not marked out as hand-made.
-        Assert.Matches(@"^SYSTCR-\d{6}\.\d{2}$", created.GetProperty("displayNumber").GetString()!);
+        Assert.Matches(@"^SYSTPCR-\d{6}\.\d{2}$", created.GetProperty("displayNumber").GetString()!);
         Assert.Equal(2, created.GetProperty("covered").EnumerateArray().Count());
         var list = await client.GetFromJsonAsync<JsonElement>($"/api/releases/{fixture.ReleaseId}/test-change-reviews");
         var package = Assert.Single(list.GetProperty("items").EnumerateArray(), x => x.GetProperty("id").GetGuid() == created.GetProperty("id").GetGuid());
@@ -467,7 +467,7 @@ public sealed class ManualTestChangeRequestApiTests
             var manual = await db.TestChangeReviews.SingleAsync(x => x.Id == fixture.AutoTcrId);
             Assert.Equal(packageId, manual.Id);
             Assert.Equal(TestChangeReviewState.Draft, manual.State);
-            Assert.Matches("^SYSTCR-", manual.BaseNumber);
+            Assert.Matches("^SYSTPCR-", manual.BaseNumber);
             Assert.Equal("Manual package over the pending automatic review", manual.Title);
             Assert.Equal("manual.engineer", manual.AssignedEngineerId);
             Assert.Contains(fixture.AutoRaisedChangeId, manual.CoveredChangeRequestIds);
@@ -896,7 +896,7 @@ public sealed class ManualTestChangeRequestApiTests
         var hlrBody = await hlrResponse.Content.ReadAsStringAsync();
         Assert.True(hlrResponse.StatusCode == HttpStatusCode.Created, $"{(int)hlrResponse.StatusCode}: {hlrBody}");
         var hlrPackage = JsonSerializer.Deserialize<JsonElement>(hlrBody);
-        Assert.Matches(@"^HLRTCR-\d{6}\.\d{2}$", hlrPackage.GetProperty("displayNumber").GetString()!);
+        Assert.Matches(@"^HLRTCCR-\d{6}\.\d{2}$", hlrPackage.GetProperty("displayNumber").GetString()!);
         var hlrPackageId = hlrPackage.GetProperty("id").GetGuid();
 
         using var caseChange = await client.PostAsJsonAsync(
@@ -923,7 +923,7 @@ public sealed class ManualTestChangeRequestApiTests
             new { discipline = "LowLevelSoftware", changeRequestIds = new[] { llrId }, title = "LLR package" });
         var llrBody = await llrResponse.Content.ReadAsStringAsync();
         Assert.True(llrResponse.StatusCode == HttpStatusCode.Created, $"{(int)llrResponse.StatusCode}: {llrBody}");
-        Assert.Matches(@"^LLRTCR-\d{6}\.\d{2}$",
+        Assert.Matches(@"^LLRTCCR-\d{6}\.\d{2}$",
             JsonSerializer.Deserialize<JsonElement>(llrBody).GetProperty("displayNumber").GetString()!);
     }
 

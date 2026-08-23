@@ -91,7 +91,7 @@ internal static class TestChangeRequestSourceEligibility
     ///
     /// A procedure is written to verify the requirements one level above it, so an HLR test change request
     /// answers for HLR requirement changes and nothing else. Before this, the picker offered every approved
-    /// change in the build — an engineer raising an HLRTCR was shown SRCRs and LLRCRs, neither of which could
+    /// change in the build — an engineer raising an HLRTCCR was shown SRCRs and LLRCRs, neither of which could
     /// drive an HLR procedure. It is a refusal rather than a sort order because selecting one produced a
     /// package that claimed to answer for work it cannot verify.
     /// </summary>
@@ -377,7 +377,7 @@ public static class VerificationImpactEndpoints
         ///
         /// Mirrors the requirements-side downstream assessment exactly, because it is the same question asked
         /// of the verification discipline: does this approved change need work here or not. Concluding that
-        /// it does allocates the controlled SYSTCR, HLRTCR or LLRTCR number; concluding that it does not
+        /// it does allocates the controlled SYSTPCR, HLRTCCR or LLRTCCR number; concluding that it does not
         /// produces nothing, and so is the conclusion that goes for approval.
         /// </summary>
         app.MapPost("/api/test-change-reviews/{id:guid}/conclusion", async (Guid id, TestAssessmentConclusionRequest request,

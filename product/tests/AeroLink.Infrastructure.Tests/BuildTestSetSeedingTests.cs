@@ -36,7 +36,7 @@ public sealed class BuildTestSetSeedingTests
         var revision = new TestProcedureRevision(procedure.Id, 0, "Objective", "Pre", "Steps", "Expected",
             TestProcedureState.Approved, "test.engineer", now);
         var review = new TestChangeReview(project.Id, release.Id, scr.Id, TestChangeReviewDiscipline.System,
-            "SRCR-00800", now, "SYSTCR-000800");
+            "SRCR-00800", now, "SYSTPCR-000800");
         db.AddRange(program, project, release, scr, procedure, revision, review);
         await db.SaveChangesAsync();
 

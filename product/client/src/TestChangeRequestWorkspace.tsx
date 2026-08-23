@@ -24,6 +24,7 @@ type Package={id:string;displayNumber:string;baseNumber:string;revision:number;d
 type SupersededBy={id:string;displayNumber?:string;reason?:string}
 
 const levelName=(discipline:string)=>discipline==='System'?'SYS':discipline==='HighLevelSoftware'?'HLR':'LLR'
+const testChangeRequestAcronym=(discipline:string)=>discipline==='System'?'SYSTPCR':discipline==='HighLevelSoftware'?'HLRTCCR':'LLRTCCR'
 const procedureWord=(level:string)=>verificationArtifactPrefix(level)
 const artifactWord=(level:string)=>verificationArtifactWord(level)
 const artifactNoun=(level:string)=>verificationArtifactNoun(level)
@@ -32,15 +33,15 @@ const artifactNoun=(level:string)=>verificationArtifactNoun(level)
  * same order, because a reader moving between the two should not have to learn a second vocabulary.
  */
 const packageStatus=(item:Package)=>{
-  const level=levelName(item.discipline)
+  const acronym=testChangeRequestAcronym(item.discipline)
   const word=artifactWord(item.artifactLevel ?? item.procedureLevel ?? 'System')
-  if(item.state==='Superseded')return `${level}TCR Superseded`
-  if(item.state==='Approved')return `${level}TCR Approved`
-  if(item.state==='InReview')return `${level}TCR In Review – Awaiting Approval`
+  if(item.state==='Superseded')return `${acronym} Superseded`
+  if(item.state==='Approved')return `${acronym} Approved`
+  if(item.state==='InReview')return `${acronym} In Review – Awaiting Approval`
   const changes = item.artifactChanges ?? item.procedureChanges ?? []
   return changes.length
-    ? `${level}TCR Open – ${changes.length} ${word} ${changes.length===1?'decision':'decisions'} proposed`
-    : `${level}TCR Open – No ${verificationArtifactNoun(item.artifactLevel ?? item.procedureLevel ?? 'System')} Decisions Yet`
+    ? `${acronym} Open – ${changes.length} ${word} ${changes.length===1?'decision':'decisions'} proposed`
+    : `${acronym} Open – No ${verificationArtifactNoun(item.artifactLevel ?? item.procedureLevel ?? 'System')} Decisions Yet`
 }
 const kindWords=(kind:Kind,noun:string)=>kind==='Introduce'?`New ${noun}`:kind==='Modify'?`Modified ${noun}`:`Retired ${noun}`
 const missingCaseFields=(item:Package)=>[

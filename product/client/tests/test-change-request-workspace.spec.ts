@@ -115,9 +115,9 @@ test('a test engineer proposes a new procedure inside the test change request th
   // Claiming and concluding happen inside the assessment; the row offers one control in every state.
   await row.getByRole('button', { name: 'Open assessment' }).click()
   const assessment = page.getByRole('dialog', { name: /test impact/ })
-  // Exact, because "SYSTCR required" is a substring of the button beside it that concludes the opposite.
-  await assessment.getByRole('button', { name: 'SYSTCR required', exact: true }).click()
-  await expect(assessment).toContainText('SYSTCR Created', { timeout: 30_000 })
+  // Exact, because "SYSTPCR required" is a substring of the button beside it that concludes the opposite.
+  await assessment.getByRole('button', { name: 'SYSTPCR required', exact: true }).click()
+  await expect(assessment).toContainText('SYSTPCR Created', { timeout: 30_000 })
   await assessment.getByRole('button', { name: 'Decide' }).click()
   const impactDecision = page.getByRole('dialog', { name: /Decide / })
   await impactDecision.getByLabel('Decision').selectOption('NewProcedureRequired')
@@ -126,7 +126,7 @@ test('a test engineer proposes a new procedure inside the test change request th
   await expect(impactDecision).toHaveCount(0, { timeout: 30_000 })
 
   // The package opens in its own workspace, as a change request does from the requirements drawer.
-  await assessment.getByRole('button', { name: /^SYSTCR-\d{6}\.\d{2}$/ }).click()
+  await assessment.getByRole('button', { name: /^SYSTPCR-\d{6}\.\d{2}$/ }).click()
   const drawer = page.getByRole('dialog', { name: /test procedure decisions/ })
   await expect(drawer).toBeVisible()
   // A package that has concluded test work is required but names none is unfinished, and says so rather than
@@ -190,7 +190,7 @@ test('a test engineer proposes a new procedure inside the test change request th
   const reopened = page.locator('.downstreamAssessment').filter({ hasText: sourceNumber }).first()
   await expect(reopened).toBeVisible({ timeout: 30_000 })
   // Reachable straight from the queue row, without opening the assessment first.
-  await reopened.getByRole('button', { name: /^SYSTCR-\d{6}\.\d{2} · / }).click()
+  await reopened.getByRole('button', { name: /^SYSTPCR-\d{6}\.\d{2} · / }).click()
   const again = page.getByRole('dialog', { name: /test procedure decisions/ })
   await expect(again.getByText(/SYSTP-\d{6}\.00 · New test procedure/)).toBeVisible({ timeout: 30_000 })
   await expect(again).toContainText('SYSR-')
@@ -204,7 +204,7 @@ test('a procedure modification shows retained coverage and records an explicit r
   await login(page, 'test.engineer')
   await openNavigationGroup(page, 'ASSURANCE')
   await page.getByRole('link', { name: 'System Test Change Requests' }).click()
-  const packageRow = page.locator('.downstreamAssessment').filter({ hasText: /SYSTCR-/ }).first()
+  const packageRow = page.locator('.downstreamAssessment').filter({ hasText: /SYSTPCR-/ }).first()
   await expect(packageRow).toBeVisible({ timeout: 30_000 })
 
   const retainedId = '10000000-0000-0000-0000-000000000001'
@@ -222,8 +222,8 @@ test('a procedure modification shows retained coverage and records an explicit r
       }) })
     }
     return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({
-      id: '30000000-0000-0000-0000-000000000001', displayNumber: 'SYSTCR-000401.00',
-      baseNumber: 'SYSTCR-000401', revision: 0, discipline: 'System', state: 'Draft',
+      id: '30000000-0000-0000-0000-000000000001', displayNumber: 'SYSTPCR-000401.00',
+      baseNumber: 'SYSTPCR-000401', revision: 0, discipline: 'System', state: 'Draft',
       outcome: 'ChangeRequired', procedureLevel: 'System', sourceChangeRequestNumber: 'SRCR-000401.00',
       assignedEngineerId: 'test.engineer', version: recorded ? 2 : 1,
       title: 'Govern procedure coverage', problem: 'Coverage must remain exact.', analysis: 'Use an explicit delta.',
@@ -269,7 +269,7 @@ test('a procedure modification shows retained coverage and records an explicit r
     }) })
   })
 
-  await packageRow.getByRole('button', { name: /^SYSTCR-\d{6}\.\d{2}/ }).click()
+  await packageRow.getByRole('button', { name: /^SYSTPCR-\d{6}\.\d{2}/ }).click()
   const drawer = page.getByRole('dialog', { name: /test procedure decisions/ })
   await drawer.getByRole('button', { name: 'Propose a test procedure change' }).click()
   const dialog = page.getByRole('dialog', { name: 'Propose a test procedure change' })
@@ -305,7 +305,7 @@ test('a stale Modify target reloads controlled state and requires an explicit re
   await login(page, 'test.engineer')
   await openNavigationGroup(page, 'ASSURANCE')
   await page.getByRole('link', { name: 'System Test Change Requests' }).click()
-  const packageRow = page.locator('.downstreamAssessment').filter({ hasText: /SYSTCR-/ }).first()
+  const packageRow = page.locator('.downstreamAssessment').filter({ hasText: /SYSTPCR-/ }).first()
   await expect(packageRow).toBeVisible({ timeout: 30_000 })
 
   let targetReads = 0
@@ -321,8 +321,8 @@ test('a stale Modify target reloads controlled state and requires an explicit re
       }) })
     }
     return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({
-      id: '30000000-0000-0000-0000-000000000002', displayNumber: 'SYSTCR-000402.00',
-      baseNumber: 'SYSTCR-000402', revision: 0, discipline: 'System', state: 'Draft',
+      id: '30000000-0000-0000-0000-000000000002', displayNumber: 'SYSTPCR-000402.00',
+      baseNumber: 'SYSTPCR-000402', revision: 0, discipline: 'System', state: 'Draft',
       outcome: 'ChangeRequired', procedureLevel: 'System', sourceChangeRequestNumber: 'SRCR-000402.00',
       assignedEngineerId: 'test.engineer', version: 1,
       title: 'Recover stale procedure target', problem: 'The selected revision may change.', analysis: 'Refresh authoritative effectivity.',
@@ -361,7 +361,7 @@ test('a stale Modify target reloads controlled state and requires an explicit re
     }) })
   })
 
-  await packageRow.getByRole('button', { name: /^SYSTCR-\d{6}\.\d{2}/ }).click()
+  await packageRow.getByRole('button', { name: /^SYSTPCR-\d{6}\.\d{2}/ }).click()
   const drawer = page.getByRole('dialog', { name: /test procedure decisions/ })
   await drawer.getByRole('button', { name: 'Propose a test procedure change' }).click()
   const dialog = page.getByRole('dialog', { name: 'Propose a test procedure change' })

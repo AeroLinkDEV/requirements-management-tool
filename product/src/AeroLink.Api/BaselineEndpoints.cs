@@ -119,7 +119,7 @@ public static class BaselineEndpoints
             {
                 // The current register is the controlled package inventory, not the downstream assessment
                 // queue. An automatic assessment has no controlled number until its engineer concludes that
-                // procedure work is required; showing it here made the source CR number look like an HLRTCR.
+                // procedure work is required; showing it here made the source CR number look like an HLRTCCR.
                 var ladderPolicy = await policyResolver.ResolveAsync(projectId, ct);
                 var configuredDisciplines = ladderPolicy.OrderedLevels
                     .Where(level => ladderPolicy.Definition(level).Verification is not null)

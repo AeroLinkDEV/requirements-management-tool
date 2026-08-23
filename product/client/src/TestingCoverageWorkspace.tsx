@@ -101,7 +101,7 @@ const disciplineLabel = (discipline: TestDiscipline) =>
 const assessmentName = (discipline: TestDiscipline) =>
   discipline === 'System' ? 'System Test' : discipline === 'HighLevelSoftware' ? 'HLR Test' : 'LLR Test'
 const tcrAcronym = (discipline: TestDiscipline) =>
-  discipline === 'System' ? 'SYSTCR' : discipline === 'HighLevelSoftware' ? 'HLRTCR' : 'LLRTCR'
+  discipline === 'System' ? 'SYSTPCR' : discipline === 'HighLevelSoftware' ? 'HLRTCCR' : 'LLRTCCR'
 const missingCaseFields = (request: TestChangeRequest) => [
   ['Title', request.title], ['Problem', request.problem],
   ['Analysis', request.analysis], ['Solution', request.solution],
