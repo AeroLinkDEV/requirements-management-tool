@@ -308,6 +308,7 @@
         "ProblemReportWaiverApiTests",
         "ProcedureBaselineApiTests",
         "ProcedureBrowsingApiTests",
+        "ProcedureControlledDocumentApiTests",
         "ProcedureDiscussionApiTests",
         "ProcedureManifestEffectivityApiTests",
         "ProcedureSavedViewApiTests",
@@ -489,7 +490,8 @@
       "file": "BaselineEndpoints.cs",
       "coveredBy": [
         "ControlledProcedureDocumentApiTests",
-        "HistoricalPublicationFreezeApiTests"
+        "HistoricalPublicationFreezeApiTests",
+        "ProcedureControlledDocumentApiTests"
       ]
     },
     {

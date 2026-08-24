@@ -1,4 +1,8 @@
 using AeroLink.Domain.Programs;
+using AeroLink.Domain.Common;
+using AeroLink.Domain.ChangeControl;
+using AeroLink.Domain.Hierarchy;
+using AeroLink.Domain.Requirements;
 using AeroLink.Domain.Verification;
 using AeroLink.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
@@ -42,6 +46,28 @@ public sealed class TestProcedureDocumentBootstrapTests
         return new(db, project.Id, system.Id, high.Id, low.Id);
     }
 
+    private static ILadderPolicy ProcedurePolicy()
+    {
+        var projectId = Guid.NewGuid();
+        var now = DateTimeOffset.UtcNow;
+        var configuration = ProjectLadderConfiguration.CreateDraft(projectId, now);
+        var steps = LegacyLadderPolicy.Instance.OrderedLevels.Select((level, index) =>
+        {
+            var kinds = level == RequirementLevel.System
+                ? new[] { VerificationArtifactKind.Procedure }
+                : new[] { VerificationArtifactKind.Case, VerificationArtifactKind.Procedure };
+            var step = new ProjectLadderStep(configuration.Id, projectId, level, index + 1,
+                LegacyLadderPolicy.Instance.Definition(level).Capabilities, now, kinds);
+            configuration.Steps.Add(step);
+            return step;
+        }).ToArray();
+        configuration.AllowedUpstream.Add(new ProjectLadderAllowedUpstream(
+            configuration.Id, projectId, steps[0].Id, steps[1].Id, now));
+        configuration.AllowedUpstream.Add(new ProjectLadderAllowedUpstream(
+            configuration.Id, projectId, steps[1].Id, steps[2].Id, now));
+        return new ResolvedProjectLadderPolicy(ProjectLadderResolver.Resolve(configuration));
+    }
+
     [Fact]
     public async Task A_project_gets_one_document_for_each_level()
     {
@@ -62,6 +88,66 @@ public sealed class TestProcedureDocumentBootstrapTests
             documents.Single(x => x.Level == TestProcedureLevel.LowLevel).Title);
         Assert.Equal("System Test Procedures Document",
             documents.Single(x => x.Level == TestProcedureLevel.System).Title);
+    }
+
+    [Fact]
+    public async Task A_Procedure_profile_gets_distinct_shared_registers_and_exact_kind_placement()
+    {
+        var fixture = await DatabaseAsync();
+        var now = DateTimeOffset.UtcNow;
+        var highProcedure = new TestProcedure(fixture.ProjectId, "HLRTP-000001", "Execute HLR behavior",
+            "test.engineer", now, TestProcedureLevel.HighLevel, ProcedurePolicy(),
+            VerificationArtifactKind.Procedure, VerificationProcedureParentKind.Derived);
+        var lowProcedure = new TestProcedure(fixture.ProjectId, "LLRTP-000001", "Execute LLR behavior",
+            "test.engineer", now, TestProcedureLevel.LowLevel, ProcedurePolicy(),
+            VerificationArtifactKind.Procedure, VerificationProcedureParentKind.Derived);
+        var highRevision = ProcedureRevision(highProcedure.Id, now);
+        var lowRevision = ProcedureRevision(lowProcedure.Id, now);
+        fixture.Db.AddRange(highProcedure, highRevision, lowProcedure, lowRevision);
+        await fixture.Db.SaveChangesAsync();
+
+        await new TestProcedureDocumentBootstrap(fixture.Db, ProcedurePolicy()).EnsureAllAsync();
+
+        var documents = await fixture.Db.TestProcedureDocuments.AsNoTracking()
+            .Where(x => x.ProjectId == fixture.ProjectId).OrderBy(x => x.DocumentNumber).ToListAsync();
+        Assert.Equal(5, documents.Count);
+        Assert.Contains(documents, x => x.DocumentNumber == "HLRTPD-000001"
+            && x.ArtifactKey == new VerificationArtifactKey(VerificationDiscipline.HighLevelSoftware,
+                VerificationArtifactKind.Procedure));
+        Assert.Contains(documents, x => x.DocumentNumber == "LLRTPD-000001"
+            && x.ArtifactKey == new VerificationArtifactKey(VerificationDiscipline.LowLevelSoftware,
+                VerificationArtifactKind.Procedure));
+        Assert.Contains(documents, x => x.DocumentNumber == "HLRTD-000001"
+            && x.ArtifactKind == VerificationArtifactKind.Case);
+
+        var placements = await (from node in fixture.Db.TestProcedureDocumentNodes.AsNoTracking()
+                                where node.ProcedureId != null
+                                join document in fixture.Db.TestProcedureDocuments.AsNoTracking()
+                                    on node.DocumentId equals document.Id
+                                join artifact in fixture.Db.TestProcedures.AsNoTracking()
+                                    on node.ProcedureId equals artifact.Id
+                                select new { artifact.ArtifactKind, DocumentKind = document.ArtifactKind,
+                                    artifact.ArtifactDiscipline, DocumentLevel = document.Level })
+            .ToListAsync();
+        Assert.Equal(5, placements.Count);
+        Assert.All(placements, x =>
+        {
+            Assert.Equal(x.ArtifactKind, x.DocumentKind);
+            Assert.Equal(x.ArtifactDiscipline, x.DocumentLevel switch
+            {
+                TestProcedureLevel.System => VerificationDiscipline.System,
+                TestProcedureLevel.HighLevel => VerificationDiscipline.HighLevelSoftware,
+                _ => VerificationDiscipline.LowLevelSoftware,
+            });
+        });
+
+        static TestProcedureRevision ProcedureRevision(Guid artifactId, DateTimeOffset createdAt) =>
+            new(artifactId, 0, "Compatibility objective", "Setup", "Ordered steps", "Expected observations",
+                TestProcedureState.Draft, "test.engineer", createdAt,
+                environmentSetup: "Setup", testData: "Data", orderedSteps: "Ordered steps",
+                expectedObservations: "Expected observations", cleanup: "Cleanup",
+                toolingAutomation: "Tooling", parentKind: VerificationProcedureParentKind.Derived,
+                derivedRationale: "Standalone document-register qualification.");
     }
 
     [Fact]

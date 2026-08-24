@@ -76,9 +76,13 @@ public sealed class TestProcedure : IVerificationArtifactHeader
             TestProcedureLevel.LowLevel => VerificationDiscipline.LowLevelSoftware,
             _ => throw new DomainException($"Unknown verification artifact level: {level}.")
         };
+        // A software profile can enable both Case and Procedure. A Case uses its exact configured key rather
+        // than the profile's executable key. Dormant Procedure identities remain valid before profile
+        // activation, so their globally governed vocabulary prefix does not require the policy to enable them.
+        var key = new VerificationArtifactKey(discipline, artifactKind);
         var expectedPrefix = artifactKind == VerificationArtifactKind.Procedure
-            ? VerificationArtifactVocabulary.Definition(new VerificationArtifactKey(discipline, artifactKind)).ArtifactPrefix
-            : ladderPolicy.TestProcedurePrefix(level);
+            ? VerificationArtifactVocabulary.Definition(key).ArtifactPrefix
+            : ladderPolicy.ArtifactPrefix(key);
         var expected = expectedPrefix + "-";
         if (baseNumber.StartsWith(expected, StringComparison.OrdinalIgnoreCase)) return;
         var artifactWord = artifactKind == VerificationArtifactKind.Procedure ? "test procedure" : "test case";

@@ -301,7 +301,8 @@ public sealed class VerificationArtifactProfile
         var procedureKey = new VerificationArtifactKey(discipline, VerificationArtifactKind.Procedure);
         var procedureVocabulary = VerificationArtifactVocabulary.Definition(procedureKey);
         var procedure = new VerificationArtifactDefinition(procedureKey, procedureVocabulary.ArtifactPrefix,
-            procedureVocabulary.TestChangeRequestPrefix, procedureVocabulary.ReviewSubject, binding.DocumentType, level,
+            procedureVocabulary.TestChangeRequestPrefix, procedureVocabulary.ReviewSubject,
+            procedureVocabulary.ControlledDocumentType, level,
             procedureVocabulary.RequiredCapabilities);
         return new(discipline, [caseDefinition, procedure]);
     }

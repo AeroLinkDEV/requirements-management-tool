@@ -6,7 +6,8 @@ using Microsoft.EntityFrameworkCore;
 namespace AeroLink.Infrastructure.Persistence;
 
 /// <summary>
-/// Gives every Project its three test procedure documents, and puts every procedure in one.
+/// Gives every Project one register for each enabled verification artifact key, and files every artifact in
+/// the exact matching register.
 ///
 /// Procedures had no container: a requirement is authored into SYSRD, HLRD or LLRD and its place in that
 /// document is part of what it is, while a procedure belonged only to a project and a level. This creates
@@ -42,29 +43,37 @@ public sealed class TestProcedureDocumentBootstrap(AeroLinkDbContext db, ILadder
             ? fallbackPolicy
             : await policyResolver.ResolveAsync(projectId, ct);
         var existing = await db.TestProcedureDocuments.Where(x => x.ProjectId == projectId).ToListAsync(ct);
-        var documents = ladderPolicy.Definitions.Where(definition => definition.Verification is not null).Select(definition =>
-        {
-            var level = definition.Level;
-            var verification = definition.Verification!;
-            return (Level: verification.ProcedureLevel, Acronym: ladderPolicy.ControlledDocumentPrefix(verification.DocumentType),
-                Title: definition.TestProcedureDocumentTitle!);
-        }).ToArray();
+        var documents = ladderPolicy.Definitions.Where(definition => definition.VerificationProfile is not null)
+            .SelectMany(definition => definition.VerificationProfile!.Definitions.Select(artifact =>
+                (Level: artifact.ProcedureLevel, Artifact: artifact.Key,
+                    DocumentType: ladderPolicy.ControlledDocument(artifact.Key), Definition: definition)))
+            .Select(item => (item.Level, item.Artifact,
+                Acronym: ladderPolicy.ControlledDocumentPrefix(item.DocumentType),
+                Title: item.Artifact.Kind == VerificationArtifactKind.Case
+                    || item.Artifact.Discipline == VerificationDiscipline.System
+                        ? item.Definition.TestProcedureDocumentTitle!
+                        : item.Artifact.Discipline == VerificationDiscipline.HighLevelSoftware
+                            ? "High-Level Software Test Procedures Document"
+                            : "Low-Level Software Test Procedures Document"))
+            .ToArray();
 
-        foreach (var (level, acronym, title) in documents)
+        foreach (var (level, artifactKey, acronym, title) in documents)
         {
-            var document = existing.FirstOrDefault(x => x.Level == level);
+            var document = existing.FirstOrDefault(x => x.Level == level
+                && x.ArtifactKind == artifactKey.Kind);
             if (document is null)
             {
                 // Numbered across the installation rather than within the project — see NextNumberAsync. The
                 // number is the document's name, so a project's document is not necessarily SYSTD-000001.
                 document = new TestProcedureDocument(projectId, $"{acronym}-{await NextNumberAsync(acronym, ct):D6}",
-                    title, level, $"Controlled {title.ToLowerInvariant()} for this project.", "system.bootstrap", now);
+                    title, level, $"Controlled {title.ToLowerInvariant()} for this project.", "system.bootstrap", now,
+                    artifactKey.Kind);
                 db.TestProcedureDocuments.Add(document);
                 existing.Add(document);
             }
 
-            var section = await FindOrCreateDefaultSectionAsync(document, level, now, ct);
-            await PlaceUnfiledProceduresAsync(projectId, level, document, section, now, ct);
+            var section = await FindOrCreateDefaultSectionAsync(document, artifactKey, now, ct);
+            await PlaceUnfiledProceduresAsync(projectId, artifactKey, document, section, now, ct);
         }
     }
 
@@ -90,9 +99,11 @@ public sealed class TestProcedureDocumentBootstrap(AeroLinkDbContext db, ILadder
     }
 
     private async Task<TestProcedureDocumentNode> FindOrCreateDefaultSectionAsync(TestProcedureDocument document,
-        TestProcedureLevel level, DateTimeOffset now, CancellationToken ct)
+        VerificationArtifactKey artifactKey, DateTimeOffset now, CancellationToken ct)
     {
-        var defaultHeading = level == TestProcedureLevel.System ? DefaultSectionHeading : DefaultCaseSectionHeading;
+        var defaultHeading = artifactKey.Kind == VerificationArtifactKind.Case
+            ? DefaultCaseSectionHeading
+            : DefaultSectionHeading;
         var sections = await db.TestProcedureDocumentNodes
             .Where(x => x.DocumentId == document.Id && x.Type == TestProcedureDocumentNodeType.Section)
             .ToListAsync(ct);
@@ -108,12 +119,13 @@ public sealed class TestProcedureDocumentBootstrap(AeroLinkDbContext db, ILadder
         return section;
     }
 
-    private async Task PlaceUnfiledProceduresAsync(Guid projectId, TestProcedureLevel level,
+    private async Task PlaceUnfiledProceduresAsync(Guid projectId, VerificationArtifactKey artifactKey,
         TestProcedureDocument document, TestProcedureDocumentNode section, DateTimeOffset now, CancellationToken ct)
     {
         var candidates = await db.TestProcedures.AsNoTracking()
-            .Where(x => x.ProjectId == projectId && x.Level == level
-                && (x.Level == TestProcedureLevel.System || x.ArtifactKind == VerificationArtifactKind.Case))
+            .Where(x => x.ProjectId == projectId
+                && x.ArtifactDiscipline == artifactKey.Discipline
+                && x.ArtifactKind == artifactKey.Kind)
             .OrderBy(x => x.BaseNumber)
             .Select(x => x.Id)
             .ToListAsync(ct);

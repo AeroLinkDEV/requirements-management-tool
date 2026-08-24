@@ -53,12 +53,18 @@ public sealed class ControlledOutputGenerator(AeroLinkDbContext db, RichContentP
         // ladder. Interpret its stored enum with the characterized catalogue for regeneration; current
         // policy still governs creation/listing, while a download must not turn into an "unknown" record.
         var interpretationPolicy = ladderPolicy;
-        var approvalProcedureLevel = ProcedureLevelFor(document.Type, interpretationPolicy);
+        var artifactKey = ArtifactKeyForDocument(document.Type, interpretationPolicy);
+        TestProcedureLevel? approvalProcedureLevel = artifactKey is null
+            ? null
+            : VerificationArtifactVocabulary.Definition(artifactKey.Value).ProcedureLevel;
         var requirementLevel = RequirementLevelFor(document.Type, interpretationPolicy);
         if (requirementLevel is null && approvalProcedureLevel is null)
         {
             interpretationPolicy = LegacyLadderPolicy.Instance;
-            approvalProcedureLevel = ProcedureLevelFor(document.Type, interpretationPolicy);
+            artifactKey = ArtifactKeyForDocument(document.Type, interpretationPolicy);
+            approvalProcedureLevel = artifactKey is null
+                ? null
+                : VerificationArtifactVocabulary.Definition(artifactKey.Value).ProcedureLevel;
             requirementLevel = RequirementLevelFor(document.Type, interpretationPolicy);
         }
         if (requirementLevel is null && approvalProcedureLevel is null)
@@ -66,8 +72,8 @@ public sealed class ControlledOutputGenerator(AeroLinkDbContext db, RichContentP
         var procedureSnapshot = approvalProcedureLevel is null
             ? null
             : await ControlledProcedureDocumentSnapshotProjection.ForDocumentAsync(db, document.BaselineId,
-                approvalProcedureLevel.Value, document.GeneratedAt, ct);
-        var isCaseDocument = document.Type is ControlledDocumentType.HighLevelTestCases or ControlledDocumentType.LowLevelTestCases;
+                artifactKey!.Value, document.GeneratedAt, ct);
+        var isCaseDocument = artifactKey?.Kind == VerificationArtifactKind.Case;
         var records = requirementLevel is not null
             ? await RequirementPublicationRows(document.BaselineId, requirementLevel.Value, ct)
             : await ProcedurePublicationRows(procedureSnapshot!, approvalProcedureLevel!.Value, isCaseDocument, ct);
@@ -172,19 +178,16 @@ public sealed class ControlledOutputGenerator(AeroLinkDbContext db, RichContentP
             .Select(level => (RequirementLevel?)level)
             .SingleOrDefault();
 
-    private static TestProcedureLevel? ProcedureLevelFor(ControlledDocumentType type, ILadderPolicy ladderPolicy) =>
-        ladderPolicy.OrderedLevels
-            .Where(level => ladderPolicy.Definition(level).Verification?.DocumentType == type)
-            .Select(level => ladderPolicy.Definition(level).Verification!.ProcedureLevel)
-            .Cast<TestProcedureLevel?>()
-            .SingleOrDefault()
-            ?? type switch
-            {
-                ControlledDocumentType.SystemTestProcedures => TestProcedureLevel.System,
-                ControlledDocumentType.HighLevelTestProcedures or ControlledDocumentType.HighLevelTestCases => TestProcedureLevel.HighLevel,
-                ControlledDocumentType.LowLevelTestProcedures or ControlledDocumentType.LowLevelTestCases => TestProcedureLevel.LowLevel,
-                _ => null,
-            };
+    private static VerificationArtifactKey? ArtifactKeyForDocument(ControlledDocumentType type,
+        ILadderPolicy ladderPolicy)
+    {
+        var configured = ladderPolicy.Definitions.Where(x => x.VerificationProfile is not null)
+            .SelectMany(x => x.VerificationProfile!.Definitions)
+            .SingleOrDefault(x => x.DocumentType == type);
+        if (configured is not null) return configured.Key;
+        return VerificationArtifactVocabulary.Definitions
+            .SingleOrDefault(x => x.DocumentType == type)?.Key;
+    }
 
     private async Task<List<PublicationRecord>> RequirementPublicationRows(Guid baselineId, RequirementLevel level, CancellationToken ct)
     {
@@ -297,9 +300,33 @@ public sealed class ControlledOutputGenerator(AeroLinkDbContext db, RichContentP
             : isCaseDocument
                 ? level == TestProcedureLevel.HighLevel ? "High-Level Software Test Case" : "Low-Level Software Test Case"
                 : level == TestProcedureLevel.HighLevel ? "High-Level Software Test Procedure" : "Low-Level Software Test Procedure";
-        var stepsLabel = isCaseDocument && level != TestProcedureLevel.System ? "Case steps" : "Procedure steps";
         return rows.OrderBy(x => x.BaseNumber)
-            .Select(x => new PublicationRecord(x.BaseNumber + "." + x.Revision.ToString("D2"), title, x.Title, x.Objective, new[] { ("State", x.State.ToString()), ("Author / owner", x.AuthorId), ("Preconditions", x.Preconditions), (stepsLabel, x.Steps), ("Expected result", x.ExpectedResult), ("Parent classification", x.ParentKind.ToString()), ("Derived rationale", x.DerivedRationale), ("Exact parent revision IDs", string.Join("; ", (x.ParentRevisionIds ?? Array.Empty<Guid>()).OrderBy(id => id))), ("Source test change request", x.SourceTestChangeRequestId is null ? "Legacy / unattributed" : tcrDisplay.GetValueOrDefault(x.SourceTestChangeRequestId.Value, "Unknown TCR")) })).ToList();
+            .Select(x => new PublicationRecord(x.BaseNumber + "." + x.Revision.ToString("D2"), title, x.Title,
+                x.Objective,
+                (level == TestProcedureLevel.System || isCaseDocument
+                    ? new[]
+                    {
+                        ("State", x.State.ToString()), ("Author / owner", x.AuthorId),
+                        ("Preconditions", x.Preconditions),
+                        (isCaseDocument ? "Case steps" : "Procedure steps", x.Steps),
+                        ("Expected result", x.ExpectedResult)
+                    }
+                    : new[]
+                    {
+                        ("State", x.State.ToString()), ("Author / owner", x.AuthorId),
+                        ("Environment / setup", x.EnvironmentSetup), ("Test data", x.TestData),
+                        ("Ordered steps", x.OrderedSteps), ("Expected observations", x.ExpectedObservations),
+                        ("Cleanup", x.Cleanup), ("Tooling / automation", x.ToolingAutomation)
+                    })
+                .Concat(new[]
+                {
+                    ("Parent classification", x.ParentKind.ToString()),
+                    ("Derived rationale", x.DerivedRationale),
+                    ("Exact parent revision IDs", string.Join("; ", (x.ParentRevisionIds ?? Array.Empty<Guid>()).OrderBy(id => id))),
+                    ("Source test change request", x.SourceTestChangeRequestId is null
+                        ? "Legacy / unattributed"
+                        : tcrDisplay.GetValueOrDefault(x.SourceTestChangeRequestId.Value, "Unknown TCR"))
+                }).ToArray())).ToList();
     }
     private async Task<List<PublicationApproval>> ApprovalBasis(Guid baselineId, Guid releaseId,
         DateTimeOffset generatedAt, CancellationToken ct, TestProcedureLevel? procedureLevel = null,

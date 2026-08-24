@@ -1,6 +1,7 @@
 using System.IO.Compression;
 using AeroLink.Domain.Baselines;
 using AeroLink.Domain.ChangeControl;
+using AeroLink.Domain.Hierarchy;
 using AeroLink.Domain.Programs;
 using AeroLink.Domain.Requirements;
 using AeroLink.Domain.Traceability;
@@ -13,6 +14,62 @@ namespace AeroLink.Infrastructure.Tests;
 
 public sealed class LegacyControlledProcedureDocumentSnapshotTests
 {
+    [Fact]
+    public async Task An_exact_Procedure_document_excludes_a_link_to_a_predecessor_Case_revision_not_in_its_baseline()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        var options = new DbContextOptionsBuilder<AeroLinkDbContext>().UseSqlite(connection).Options;
+        await using var db = new AeroLinkDbContext(options);
+        await db.Database.EnsureCreatedAsync();
+        var now = new DateTimeOffset(2026, 8, 24, 4, 0, 0, TimeSpan.Zero);
+        var program = new ProgramRecord("Procedure parent manifest", "PPM");
+        var project = new ProjectRecord(program.Id, "Procedure parent project", "Procedure parent product");
+        var release = new SoftwareRelease(project.Id, "7.2", false);
+        var baseline = new CandidateBaseline("SW-72.08", 0, project.Id, release.Id, null,
+            "Exact Procedure baseline", "cm", now);
+        var policy = ProcedurePolicy();
+        var @case = new TestProcedure(project.Id, "HLRTC-728100", "HLR Case", "case.owner", now,
+            TestProcedureLevel.HighLevel, policy, VerificationArtifactKind.Case);
+        var predecessorCase = new TestProcedureRevision(@case.Id, 0, "Old Case objective", "Old preconditions",
+            "Old Case steps", "Old expected result", TestProcedureState.Approved, "case.owner", now);
+        var procedure = new TestProcedure(project.Id, "HLRTP-728100", "HLR Procedure", "procedure.owner", now,
+            TestProcedureLevel.HighLevel, policy, VerificationArtifactKind.Procedure,
+            VerificationProcedureParentKind.Allocated);
+        var procedureRevision = new TestProcedureRevision(procedure.Id, 0, "Procedure objective", "Setup",
+            "Ordered steps", "Expected observations", TestProcedureState.Draft, "procedure.owner", now,
+            parentKind: VerificationProcedureParentKind.Allocated,
+            environmentSetup: "Setup", testData: "Test data", orderedSteps: "Ordered steps",
+            expectedObservations: "Expected observations", cleanup: "Cleanup",
+            toolingAutomation: "Tooling");
+        db.AddRange(program, project, release, baseline, @case, predecessorCase, procedure, procedureRevision,
+            new TestCaseProcedureLink(predecessorCase.Id, procedureRevision.Id));
+        await db.SaveChangesAsync();
+        await db.TestProcedureRevisions.Where(x => x.Id == procedureRevision.Id)
+            .ExecuteUpdateAsync(setters => setters.SetProperty(x => x.State, TestProcedureState.Approved));
+
+        // The link remains valid historical data, but revision 1 is the Case selected for this exact baseline.
+        // A regenerated Procedure document must not silently describe its predecessor as current effectivity.
+        var currentCase = new TestProcedureRevision(@case.Id, 1, "Current Case objective", "Current preconditions",
+            "Current Case steps", "Current expected result", TestProcedureState.Approved, "case.owner", now.AddMinutes(1));
+        db.AddRange(currentCase,
+            new BaselineTestProcedureSelection(baseline.Id, @case.Id, currentCase.Id),
+            new BaselineTestProcedureSelection(baseline.Id, procedure.Id, procedureRevision.Id));
+        await db.SaveChangesAsync();
+        await db.CandidateBaselines.Where(x => x.Id == baseline.Id).ExecuteUpdateAsync(setters => setters
+            .SetProperty(x => x.TestProceduresMaterializedAt, now.AddMinutes(2))
+            .SetProperty(x => x.TestProceduresHash, new string('7', 64)));
+
+        var snapshot = await ControlledProcedureDocumentSnapshotProjection.ForDocumentAsync(db, baseline.Id,
+            new VerificationArtifactKey(VerificationDiscipline.HighLevelSoftware,
+                VerificationArtifactKind.Procedure), now.AddMinutes(3), default);
+
+        var row = Assert.Single(snapshot.Rows);
+        Assert.Equal(procedureRevision.Id, row.RevisionId);
+        Assert.Empty(row.ParentRevisionIds ?? Array.Empty<Guid>());
+        Assert.DoesNotContain(predecessorCase.Id, row.ParentRevisionIds ?? Array.Empty<Guid>());
+    }
+
     [Fact]
     public async Task A_released_predecessor_document_does_not_leak_successor_coverage_from_a_carried_revision()
     {
@@ -288,6 +345,28 @@ public sealed class LegacyControlledProcedureDocumentSnapshotTests
             "SYSTP-419900", revision, TestProcedureLevel.System, kind, title,
             "Objective", "Preconditions", "Steps", "Expected result", "Rationale", "[]"), now);
         return review;
+    }
+
+    private static ILadderPolicy ProcedurePolicy()
+    {
+        var projectId = Guid.NewGuid();
+        var now = DateTimeOffset.UtcNow;
+        var configuration = ProjectLadderConfiguration.CreateDraft(projectId, now);
+        var steps = LegacyLadderPolicy.Instance.OrderedLevels.Select((level, index) =>
+        {
+            var kinds = level == RequirementLevel.System
+                ? new[] { VerificationArtifactKind.Procedure }
+                : new[] { VerificationArtifactKind.Case, VerificationArtifactKind.Procedure };
+            var step = new ProjectLadderStep(configuration.Id, projectId, level, index + 1,
+                LegacyLadderPolicy.Instance.Definition(level).Capabilities, now, kinds);
+            configuration.Steps.Add(step);
+            return step;
+        }).ToArray();
+        configuration.AllowedUpstream.Add(new ProjectLadderAllowedUpstream(
+            configuration.Id, projectId, steps[0].Id, steps[1].Id, now));
+        configuration.AllowedUpstream.Add(new ProjectLadderAllowedUpstream(
+            configuration.Id, projectId, steps[1].Id, steps[2].Id, now));
+        return new ResolvedProjectLadderPolicy(ProjectLadderResolver.Resolve(configuration));
     }
 
     private static string DocumentXml(GeneratedOutput output)

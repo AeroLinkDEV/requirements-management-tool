@@ -13,6 +13,12 @@ public sealed record ControlledProcedureDocumentRow(
     string Preconditions,
     string Steps,
     string ExpectedResult,
+    string EnvironmentSetup,
+    string TestData,
+    string OrderedSteps,
+    string ExpectedObservations,
+    string Cleanup,
+    string ToolingAutomation,
     string AuthorId,
     Guid? SourceTestChangeRequestId,
     VerificationProcedureParentKind ParentKind = VerificationProcedureParentKind.Unspecified,
@@ -34,10 +40,23 @@ public sealed record ControlledProcedureDocumentSnapshot(
 /// </summary>
 public static class ControlledProcedureDocumentSnapshotProjection
 {
+    /// <summary>Compatibility overload for historical System Procedure/software Case documents.</summary>
+    public static Task<ControlledProcedureDocumentSnapshot> ForDocumentAsync(
+        AeroLinkDbContext db, Guid baselineId, TestProcedureLevel level, DateTimeOffset generatedAt,
+        CancellationToken ct) => ForDocumentAsync(db, baselineId, new VerificationArtifactKey(level switch
+        {
+            TestProcedureLevel.System => VerificationDiscipline.System,
+            TestProcedureLevel.HighLevel => VerificationDiscipline.HighLevelSoftware,
+            TestProcedureLevel.LowLevel => VerificationDiscipline.LowLevelSoftware,
+            _ => throw new ArgumentOutOfRangeException(nameof(level), level, null),
+        }, level == TestProcedureLevel.System
+            ? VerificationArtifactKind.Procedure
+            : VerificationArtifactKind.Case), generatedAt, ct);
+
     public static async Task<ControlledProcedureDocumentSnapshot> ForDocumentAsync(
         AeroLinkDbContext db,
         Guid baselineId,
-        TestProcedureLevel level,
+        VerificationArtifactKey artifactKey,
         DateTimeOffset generatedAt,
         CancellationToken ct)
     {
@@ -54,8 +73,9 @@ public static class ControlledProcedureDocumentSnapshotProjection
                           where member.BaselineId == baselineId
                           join revision in db.TestProcedureRevisions.AsNoTracking()
                               on member.RevisionId equals revision.Id
-                          join procedure in db.TestProcedures.AsNoTracking().Where(x => x.Level == level
-                              && (x.Level == TestProcedureLevel.System || x.ArtifactKind == VerificationArtifactKind.Case))
+                          join procedure in db.TestProcedures.AsNoTracking().Where(x =>
+                              x.ArtifactDiscipline == artifactKey.Discipline
+                              && x.ArtifactKind == artifactKey.Kind)
                               on member.ProcedureId equals procedure.Id
                           orderby procedure.BaseNumber
                           select new ControlledProcedureDocumentRow(
@@ -68,6 +88,12 @@ public static class ControlledProcedureDocumentSnapshotProjection
                               revision.Preconditions,
                               revision.Steps,
                               revision.ExpectedResult,
+                              revision.EnvironmentSetup,
+                              revision.TestData,
+                              revision.OrderedSteps,
+                              revision.ExpectedObservations,
+                              revision.Cleanup,
+                              revision.ToolingAutomation,
                               revision.AuthorId,
                               revision.SourceTestChangeRequestId,
                               revision.ParentKind,
@@ -80,8 +106,9 @@ public static class ControlledProcedureDocumentSnapshotProjection
             var candidates = await (from revision in db.TestProcedureRevisions.AsNoTracking()
                                     join procedure in db.TestProcedures.AsNoTracking()
                                         on revision.ProcedureId equals procedure.Id
-                                    where procedure.ProjectId == baseline.ProjectId && procedure.Level == level
-                                        && (procedure.Level == TestProcedureLevel.System || procedure.ArtifactKind == VerificationArtifactKind.Case)
+                                    where procedure.ProjectId == baseline.ProjectId
+                                        && procedure.ArtifactDiscipline == artifactKey.Discipline
+                                        && procedure.ArtifactKind == artifactKey.Kind
                                     select new
                                     {
                                         ProcedureId = procedure.Id,
@@ -94,6 +121,12 @@ public static class ControlledProcedureDocumentSnapshotProjection
                                         revision.Preconditions,
                                         revision.Steps,
                                         revision.ExpectedResult,
+                                        revision.EnvironmentSetup,
+                                        revision.TestData,
+                                        revision.OrderedSteps,
+                                        revision.ExpectedObservations,
+                                        revision.Cleanup,
+                                        revision.ToolingAutomation,
                                         revision.AuthorId,
                                         revision.SourceTestChangeRequestId,
                                         revision.ParentKind,
@@ -111,7 +144,9 @@ public static class ControlledProcedureDocumentSnapshotProjection
                 .OrderBy(x => x.BaseNumber)
                 .Select(x => new ControlledProcedureDocumentRow(
                     x.Id, x.BaseNumber, x.Title, x.Revision, x.State, x.Objective, x.Preconditions,
-                    x.Steps, x.ExpectedResult, x.AuthorId, x.SourceTestChangeRequestId,
+                    x.Steps, x.ExpectedResult, x.EnvironmentSetup, x.TestData, x.OrderedSteps,
+                    x.ExpectedObservations, x.Cleanup, x.ToolingAutomation,
+                    x.AuthorId, x.SourceTestChangeRequestId,
                     x.ParentKind, x.DerivedRationale))
                 .ToList();
         }
@@ -131,17 +166,37 @@ public static class ControlledProcedureDocumentSnapshotProjection
             .Where(x => x.BaselineId == baselineId)
             .Select(x => x.RevisionId)
             .ToHashSetAsync(ct);
-        var coverage = await db.TestCoverage.AsNoTracking()
-            .Where(x => revisionIds.Contains(x.ProcedureRevisionId)
-                // #709 suspect carry-forward is lifecycle evidence, not an approved exact-parent decision.
-                // It may live on the same immutable revision until a verification engineer confirms it, but
-                // controlled documents must never present that unconfirmed endpoint as signed coverage.
-                && !x.IsSuspect
-                && baselineRequirementRevisionIds.Contains(x.RequirementRevisionId))
-            .Select(x => new { x.ProcedureRevisionId, x.RequirementRevisionId })
-            .ToListAsync(ct);
+        // A Procedure's Case parent is controlled effectivity, not merely a live cross-reference. The link can
+        // legitimately survive while a later Case revision replaces its predecessor, but an older/non-current
+        // Case must not leak into a document whose typed manifest selected a different exact Case revision.
+        var baselineCaseRevisionIds = artifactKey.Kind == VerificationArtifactKind.Procedure
+                                      && artifactKey.Discipline != VerificationDiscipline.System
+            ? await (from member in db.BaselineTestProcedures.AsNoTracking()
+                     where member.BaselineId == baselineId
+                     join @case in db.TestProcedures.AsNoTracking().Where(x =>
+                             x.ArtifactDiscipline == artifactKey.Discipline
+                             && x.ArtifactKind == VerificationArtifactKind.Case)
+                         on member.ProcedureId equals @case.Id
+                     select member.RevisionId).ToHashSetAsync(ct)
+            : [];
+        var coverage = artifactKey.Kind == VerificationArtifactKind.Procedure
+                       && artifactKey.Discipline != VerificationDiscipline.System
+            ? await db.TestCaseProcedureLinks.AsNoTracking()
+                .Where(x => revisionIds.Contains(x.ProcedureRevisionId)
+                    && baselineCaseRevisionIds.Contains(x.CaseRevisionId))
+                .Select(x => new { x.ProcedureRevisionId, ParentRevisionId = x.CaseRevisionId })
+                .ToListAsync(ct)
+            : await db.TestCoverage.AsNoTracking()
+                .Where(x => revisionIds.Contains(x.ProcedureRevisionId)
+                    // #709 suspect carry-forward is lifecycle evidence, not an approved exact-parent decision.
+                    // It may live on the same immutable revision until a verification engineer confirms it, but
+                    // controlled documents must never present that unconfirmed endpoint as signed coverage.
+                    && !x.IsSuspect
+                    && baselineRequirementRevisionIds.Contains(x.RequirementRevisionId))
+                .Select(x => new { x.ProcedureRevisionId, ParentRevisionId = x.RequirementRevisionId })
+                .ToListAsync(ct);
         var parentIds = coverage.GroupBy(x => x.ProcedureRevisionId)
-            .ToDictionary(x => x.Key, x => (IReadOnlyList<Guid>)x.Select(y => y.RequirementRevisionId)
+            .ToDictionary(x => x.Key, x => (IReadOnlyList<Guid>)x.Select(y => y.ParentRevisionId)
                 .Distinct().OrderBy(y => y).ToArray());
         rows = rows.Select(row => row with
         {

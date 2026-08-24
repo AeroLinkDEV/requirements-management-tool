@@ -355,8 +355,10 @@ public sealed class LegacyLadderPolicy : ILadderPolicy, ILegacyLadderCompatibili
         ControlledDocumentType.SwrdHighLevel => "HLRD",
         ControlledDocumentType.SwrdLowLevel => "LLRD",
         ControlledDocumentType.SystemTestProcedures => "SYSTD",
-        ControlledDocumentType.HighLevelTestProcedures => "HLRTD",
-        ControlledDocumentType.LowLevelTestProcedures => "LLRTD",
+        // Existing HLRTD/LLRTD numbers are Case history after #722. New software Procedure documents need
+        // their own family or a release containing both kinds would allocate the same document identity.
+        ControlledDocumentType.HighLevelTestProcedures => "HLRTPD",
+        ControlledDocumentType.LowLevelTestProcedures => "LLRTPD",
         ControlledDocumentType.HighLevelTestCases => "HLRTD",
         ControlledDocumentType.LowLevelTestCases => "LLRTD",
         _ => throw Unknown(type),
@@ -533,7 +535,8 @@ public class ResolvedProjectLadderPolicy : ILadderPolicy
         }).ToArray();
         relationships = resolved.AllowedUpstream.Select(x => new LevelRelationship(x.Parent, x.Child)).ToArray();
         documents = definitions.Where(x => x.RequirementsDocumentType is not null).Select(x => x.RequirementsDocumentType!.Value)
-            .Concat(definitions.Where(x => x.Verification is not null).Select(x => x.Verification!.DocumentType))
+            .Concat(definitions.Where(x => x.VerificationProfile is not null)
+                .SelectMany(x => x.VerificationProfile!.Definitions.Select(artifact => artifact.DocumentType)))
             .Distinct().ToArray();
     }
 

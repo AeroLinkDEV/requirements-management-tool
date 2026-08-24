@@ -1,3 +1,5 @@
+import { ladderEnablesArtifactKind, type LadderLevel, type ProjectLadderProjection } from './projectLadder'
+
 const identities:Record<string,string>={
   admin:'AeroLink Administrator',
   'systems.author':'Systems Requirements Author',
@@ -152,8 +154,8 @@ const documentTypeLabels: Record<DocumentTypeName, string> = {
   SwrdHighLevel: 'High-Level Software Requirements Document (HLRD)',
   SwrdLowLevel: 'Low-Level Software Requirements Document (LLRD)',
   SystemTestProcedures: 'System Test Procedure Document (SYSTD)',
-  HighLevelTestProcedures: 'HLR Test Procedure Document (HLRTD)',
-  LowLevelTestProcedures: 'LLR Test Procedure Document (LLRTD)',
+  HighLevelTestProcedures: 'HLR Test Procedure Document (HLRTPD)',
+  LowLevelTestProcedures: 'LLR Test Procedure Document (LLRTPD)',
   HighLevelTestCases: 'HLR Test Case Document (HLRTD)',
   LowLevelTestCases: 'LLR Test Case Document (LLRTD)',
 }
@@ -213,6 +215,8 @@ export const artifactTypeLabel = (kind: string, identifier?: string) => {
     SYSRD: documentTypeLabels.Sysrd, HLRD: documentTypeLabels.SwrdHighLevel,
     LLRD: documentTypeLabels.SwrdLowLevel,
     SYSTD: documentTypeLabels.SystemTestProcedures,
+    HLRTPD: documentTypeLabels.HighLevelTestProcedures,
+    LLRTPD: documentTypeLabels.LowLevelTestProcedures,
     // HLRTD/LLRTD are retained document numbers, but their current software content is Case content. Exact
     // historical document rows still carry their legacy enum and are labelled through documentTypeLabel.
     HLRTD: documentTypeLabels.HighLevelTestCases,
@@ -298,17 +302,43 @@ export const verificationOriginLabel = (originKind?: string) => {
 }
 
 /** The procedure documents offered by the Explorer, following the same scope/level rule as requirements. */
-export const procedureTargetsFor = (scope: 'System' | 'Software', level?: string): DocumentTarget[] => {
+export const procedureTargetsFor = (scope: 'System' | 'Software', level?: string,
+  artifactKind?: string): DocumentTarget[] => {
   if (scope === 'System') return [{ type: 'SystemTestProcedures', label: documentTypeLabels.SystemTestProcedures }]
-  // The shared explorer still owns the historical procedure route/component name, but current software
-  // verification is a Case profile. The reserved Procedure document members remain available only to the
-  // future profile and are never selected for today's software path.
-  const high: DocumentTarget = { type: 'HighLevelTestCases', label: documentTypeLabels.HighLevelTestCases }
-  const low: DocumentTarget = { type: 'LowLevelTestCases', label: documentTypeLabels.LowLevelTestCases }
+  const procedure = isVerificationProcedureKind(artifactKind)
+  const high: DocumentTarget = procedure
+    ? { type: 'HighLevelTestProcedures', label: documentTypeLabels.HighLevelTestProcedures }
+    : { type: 'HighLevelTestCases', label: documentTypeLabels.HighLevelTestCases }
+  const low: DocumentTarget = procedure
+    ? { type: 'LowLevelTestProcedures', label: documentTypeLabels.LowLevelTestProcedures }
+    : { type: 'LowLevelTestCases', label: documentTypeLabels.LowLevelTestCases }
   if (level === 'HighLevel') return [high]
   if (level === 'LowLevel') return [low]
   return [high, low]
 }
+
+/**
+ * One profile-aware verification-document catalogue for every surface that offers generated outputs.
+ * The target vocabulary remains in procedureTargetsFor; this adds only the stored exact-key gate so the
+ * Explorer and Document Center cannot drift or expose the other software level from an any-enabled check.
+ */
+export const configuredProcedureTargetsFor = (
+  ladder: ProjectLadderProjection | null | undefined,
+  scope: 'System' | 'Software',
+  level?: string,
+  artifactKind?: string,
+): DocumentTarget[] => procedureTargetsFor(scope, level, artifactKind).filter(target => {
+  const key: { level: LadderLevel; kind: 'Case' | 'Procedure' } = target.type === 'SystemTestProcedures'
+    ? { level: 'System', kind: 'Procedure' }
+    : target.type === 'HighLevelTestProcedures'
+      ? { level: 'HighLevel', kind: 'Procedure' }
+      : target.type === 'LowLevelTestProcedures'
+        ? { level: 'LowLevel', kind: 'Procedure' }
+        : target.type === 'HighLevelTestCases'
+          ? { level: 'HighLevel', kind: 'Case' }
+          : { level: 'LowLevel', kind: 'Case' }
+  return ladderEnablesArtifactKind(ladder, key.level, key.kind)
+})
 
 export const targetsFor = (scope: 'System' | 'Software', level?: string): DocumentTarget[] => {
   if (scope === 'System') return [{ type: 'Sysrd', label: documentTypeLabels.Sysrd }]

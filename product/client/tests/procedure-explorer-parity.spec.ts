@@ -56,6 +56,82 @@ test('the Explorer groups Cases by the document they are written into', async ({
   await expect(rail.getByRole('button', { name: /All cases/ })).toBeVisible()
 })
 
+test('a Case-only profile does not present dormant software Procedure documents', async ({ page }) => {
+  test.setTimeout(180_000)
+  await page.setViewportSize({ width: 1600, height: 900 })
+  await login(page)
+  const root = new URL(page.url()).pathname.replace(/\/[^/]*$/, '')
+  await page.goto(new URL(`${root}/software-verification/cases?artifactKind=Procedure`, page.url()).toString(),
+    { waitUntil: 'load' })
+  await expect(page.getByRole('heading', { name: 'Software Procedure Explorer', level: 1 }))
+    .toBeVisible({ timeout: 30_000 })
+
+  // The dormant library remains inspectable, but a Case-only effective profile owns no Procedure register
+  // or generated-document action. Showing HLRTPD/LLRTPD here would assert activation that has not happened.
+  await expect(page.getByRole('navigation', { name: 'test procedure documents' })).toHaveCount(0)
+  await expect(page.locator('.documentOutputs')).toHaveCount(0)
+  await expect(page.getByText(/HLRTPD|LLRTPD/)).toHaveCount(0)
+})
+
+test('a Procedure-enabled profile adds distinct HLRTPD and LLRTPD actions in the shared Document Center', async ({ page }) => {
+  test.setTimeout(180_000)
+  await page.route('**/api/projects/*/configuration', async route => {
+    const response = await route.fetch()
+    const configuration = await response.json()
+    configuration.effectiveSteps = configuration.effectiveSteps.map((step: { catalogueEntry: string }) => ({
+      ...step,
+      enabledArtifactKinds: step.catalogueEntry === 'System' ? ['Procedure'] : ['Case', 'Procedure'],
+    }))
+    await route.fulfill({ response, json: configuration })
+  })
+  await login(page)
+  const verification = page.locator('.navGroup').filter({
+    has: page.locator('summary').filter({ hasText: 'VERIFICATION' }),
+  })
+  if (await verification.getAttribute('open') === null) await verification.locator('summary').click()
+  await verification.getByRole('group', { name: 'Verification scope' })
+    .getByRole('button', { name: 'Software' }).click()
+  await verification.getByRole('link', { name: 'Generated Software Verification Documents' }).click()
+
+  await expect(page.getByRole('heading', { name: 'Documents', level: 1 })).toBeVisible()
+  const outputs = page.getByRole('region', { name: 'Software assurance documents' })
+  await expect(outputs.locator('.documentOutput')).toHaveCount(4)
+  await expect(outputs.getByText('HLR Test Case Document (HLRTD)')).toBeVisible()
+  await expect(outputs.getByText('LLR Test Case Document (LLRTD)')).toBeVisible()
+  await expect(outputs.getByText('HLR Test Procedure Document (HLRTPD)')).toBeVisible()
+  await expect(outputs.getByText('LLR Test Procedure Document (LLRTPD)')).toBeVisible()
+})
+
+test('a partial Procedure profile offers only its exact HLR Procedure document target', async ({ page }) => {
+  test.setTimeout(180_000)
+  await page.route('**/api/projects/*/configuration', async route => {
+    const response = await route.fetch()
+    const configuration = await response.json()
+    configuration.effectiveSteps = configuration.effectiveSteps.map((step: { catalogueEntry: string }) => ({
+      ...step,
+      enabledArtifactKinds: step.catalogueEntry === 'System'
+        ? ['Procedure']
+        : step.catalogueEntry === 'HighLevel'
+          ? ['Case', 'Procedure']
+          : ['Case'],
+    }))
+    await route.fulfill({ response, json: configuration })
+  })
+  await login(page)
+  const verification = page.locator('.navGroup').filter({
+    has: page.locator('summary').filter({ hasText: 'VERIFICATION' }),
+  })
+  if (await verification.getAttribute('open') === null) await verification.locator('summary').click()
+  await verification.getByRole('group', { name: 'Verification scope' })
+    .getByRole('button', { name: 'Software' }).click()
+  await verification.getByRole('link', { name: 'Generated Software Verification Documents' }).click()
+
+  const outputs = page.getByRole('region', { name: 'Software assurance documents' })
+  await expect(outputs.locator('.documentOutput')).toHaveCount(3)
+  await expect(outputs.getByText('HLR Test Procedure Document (HLRTPD)')).toBeVisible()
+  await expect(outputs.getByText('LLR Test Procedure Document (LLRTPD)')).toHaveCount(0)
+})
+
 test('the search reports how many Cases matched', async ({ page }) => {
   test.setTimeout(180_000)
   await page.setViewportSize({ width: 1600, height: 900 })

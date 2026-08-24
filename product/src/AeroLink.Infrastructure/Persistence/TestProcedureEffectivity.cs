@@ -38,8 +38,10 @@ public static class TestProcedureEffectivity
         {
             var selections = await db.BaselineTestProcedures.AsNoTracking()
                 .Where(x => x.BaselineId == baseline.Id)
-                .Join(db.TestProcedures.AsNoTracking().Where(x => x.Level == TestProcedureLevel.System
-                    || x.ArtifactKind == VerificationArtifactKind.Case), x => x.ProcedureId, x => x.Id,
+                // Exact membership is already typed by its owning artifact. Do not discard software
+                // Procedure rows here: every downstream controlled-document surface consumes this one
+                // immutable selection set and applies its own exact artifact-key filter.
+                .Join(db.TestProcedures.AsNoTracking(), x => x.ProcedureId, x => x.Id,
                     (selection, _) => new { selection.ProcedureId, selection.RevisionId })
                 .ToListAsync(ct);
             return new(baseline.Id, true, selections.ToDictionary(x => x.ProcedureId, x => x.RevisionId));

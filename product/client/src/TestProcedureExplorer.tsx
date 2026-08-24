@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import { PersonName } from './People'
 import { apiRequest, operationError } from './apiClient'
-import { procedureTargetsFor, stateLabel, verificationArtifactApiRoot, verificationArtifactDocumentApiRoot, verificationArtifactNoun, verificationArtifactWord } from './presentation'
+import { configuredProcedureTargetsFor, stateLabel, verificationArtifactApiRoot, verificationArtifactDocumentApiRoot, verificationArtifactNoun, verificationArtifactWord } from './presentation'
 import DocumentActions from './DocumentActions'
 import { loadCoverage, type Coverage } from './verificationCoverage'
 import {
@@ -195,6 +195,9 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
   // — and the requirement trace's "Open test procedure" — keep working.
   const [level, setLevel] = useState<ProcedureLevel>(() =>
     validLevel(queryValue(opening, 'Level') ?? initialLevel ?? null, discipline, ladder))
+  const procedureDocumentTargets = configuredProcedureTargetsFor(ladder, discipline, level,
+    dormantProcedureMode ? 'Procedure' : undefined)
+  const procedureDocumentsEnabled = procedureDocumentTargets.length > 0
   const [query, setQuery] = useState(queryValue(opening) ?? '')
   const [procedureState, setProcedureState] = useState(queryValue(opening, 'State') ?? '')
   const [procedureOutcome, setProcedureOutcome] = useState(queryValue(opening, 'Outcome') ?? '')
@@ -261,12 +264,13 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
   // is structure, not a result set, and re-reading it on every keystroke would make it flicker.
   useEffect(() => {
     let active = true
-    fetch(`${api}/api/projects/${projectId}/${verificationArtifactDocumentApiRoot(discipline)}?scope=${discipline}`)
+    fetch(`${api}/api/projects/${projectId}/${verificationArtifactDocumentApiRoot(discipline,
+      dormantProcedureMode ? 'Procedure' : undefined)}?scope=${discipline}`)
       .then(response => response.ok ? response.json() : [])
       .then((value: ProcedureDocument[]) => { if (active) setDocuments(value) })
       .catch(() => { if (active) setDocuments([]) })
     return () => { active = false }
-  }, [api, projectId, discipline])
+  }, [api, projectId, discipline, dormantProcedureMode])
   useEffect(() => { void load() }, [load])
 
   /**
@@ -561,11 +565,11 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
     {/* The document these procedures are written into, offered where they are read — the same place, shape
         and rule the requirements Explorer uses. Which one you get follows the build: approved for a released
         one, a stamped draft for an in-work one. */}
-    {!dormantProcedureMode && <DocumentActions
+    {procedureDocumentsEnabled && <DocumentActions
       api={api}
       projectId={projectId}
       release={{ id: releaseId, version: releaseVersion, isReleased: released }}
-      targets={procedureTargetsFor(discipline, level)}
+      targets={procedureDocumentTargets}
       heading={released ? `Approved documents for ${releaseVersion}` : `Draft documents for ${releaseVersion}`}
     />}
 
@@ -698,7 +702,7 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
           puts its specifications. Procedures had no container until they were given one; this is the rail
           that was impossible before. */}
       <div className="specRail">
-      {!dormantProcedureMode && <nav className="procedureDocumentRail" aria-label={`${currentArtifactWord} documents`}>
+      {procedureDocumentsEnabled && <nav className="procedureDocumentRail" aria-label={`${currentArtifactWord} documents`}>
         <div className="railTitle"><b>Documents</b><span>{documents.length}</span></div>
         <button type="button" className={!documentId && !sectionId ? 'railEntry selected' : 'railEntry'}
           aria-pressed={!documentId && !sectionId}
