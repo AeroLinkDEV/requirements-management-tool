@@ -457,4 +457,156 @@ public sealed class VerificationImpactApiTests
         Assert.Contains(await db.SecurityAuditEvents.AsNoTracking().ToListAsync(), audit =>
             audit.EventType == "TestChangeReviewAssigned" && audit.Target == reviewId.ToString());
     }
+
+    /// <summary>
+    /// #726 blocker 3, API path: a software Procedure can carry multiple exact Case parents, and coverage
+    /// work (resolve, reopen, re-confirm) must apply to ALL of them through the authoritative links — never
+    /// one arbitrary Case chosen by provider or insertion order, and never a TestCoverage row against the
+    /// software Procedure revision itself.
+    /// </summary>
+    [Fact]
+    public async Task Resolving_a_software_procedure_with_two_case_parents_applies_coverage_to_both_through_the_api()
+    {
+        using var factory = new AeroLinkApiFactory(testLadderPolicy: ProcedureEnabledTestPolicy.Create());
+        var now = DateTimeOffset.UtcNow;
+        Guid projectId, baselineId, requirementRevisionId, itemId, procedureId,
+            caseARevisionId, caseBRevisionId, procedureRevisionId;
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            var program = new ProgramRecord("All Parent API Program", "APA");
+            var project = new ProjectRecord(program.Id, "All Parent API Software", "All Parent API Product");
+            var release = new SoftwareRelease(project.Id, "1.0", false);
+            var baseline = new CandidateBaseline("SW-01.00", 0, project.Id, release.Id, null,
+                "Candidate", "cm.test", now);
+            var scr = new SystemChangeRequest("HLRCR-00933", 0, project.Id, release.Id,
+                "All-parent authority", "P", "A", "S", "author", now,
+                ChangeRequestType.Software, softwareLevel: RequirementLevel.HighLevel);
+            scr.AddRequirementChange("author", "HLR-00000933", 0, RequirementLevel.HighLevel,
+                RequirementChangeKind.Introduce, "The software shall sequence in all-parent builds.",
+                "All-parent fixture authority.", "Analysis", now,
+                attributesJson: "{\"derived\":true}");
+            scr.SubmitForReview("author", [new ApproverSelection("reviewer", "Reviewer")], now);
+            scr.ApproveActiveStage("reviewer", now);
+            baseline.Select(scr, "cm.test", now);
+            var engineer = new UserAccount("eng.user", "Engineer", "eng.user@example.test",
+                IdentityService.HashPassword(AeroLinkApiFactory.MemberPassword), now);
+            var cm = new UserAccount("cm.user", "Configuration Manager", "cm.user@example.test",
+                IdentityService.HashPassword(AeroLinkApiFactory.MemberPassword), now);
+            db.AddRange(program, project, release, baseline, scr, engineer, cm);
+            db.Add(new ProgramMembership(engineer.Id, program.Id, ProgramRole.TestEngineer,
+                "all-parent-api", now));
+            db.Add(new ProgramMembership(cm.Id, program.Id, ProgramRole.ConfigurationManager,
+                "all-parent-api", now));
+            await db.SaveChangesAsync();
+            await scope.ServiceProvider.GetRequiredService<VerificationImpactService>()
+                .RaiseForApprovedChangeRequestAsync(scr, now, default);
+            await db.SaveChangesAsync();
+            projectId = project.Id;
+            baselineId = baseline.Id;
+        }
+
+        using (var cmClient = factory.CreateClient())
+        {
+            await LoginAsync(cmClient, "cm.user");
+            Assert.Equal(HttpStatusCode.OK,
+                (await cmClient.PostAsJsonAsync($"/api/baselines/{baselineId}/freeze", new { })).StatusCode);
+            Assert.Equal(HttpStatusCode.OK,
+                (await cmClient.PostAsJsonAsync($"/api/baselines/{baselineId}/materialize-requirements", new { })).StatusCode);
+        }
+
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            requirementRevisionId = await db.RequirementRevisions.Select(x => x.Id).SingleAsync();
+            itemId = (await db.VerificationImpactItems.SingleAsync()).Id;
+            var caseA = new TestProcedure(projectId, "HLRTC-000933", "Parent case A",
+                "test.engineer", now, TestProcedureLevel.HighLevel);
+            var caseARevision = new TestProcedureRevision(caseA.Id, 0,
+                "Verify A", "Preconditions", "Steps", "Expected",
+                TestProcedureState.Approved, "test.engineer", now, effectiveBaselineId: baselineId,
+                parentKind: VerificationProcedureParentKind.Allocated);
+            var caseB = new TestProcedure(projectId, "HLRTC-000934", "Parent case B",
+                "test.engineer", now, TestProcedureLevel.HighLevel);
+            var caseBRevision = new TestProcedureRevision(caseB.Id, 0,
+                "Verify B", "Preconditions", "Steps", "Expected",
+                TestProcedureState.Approved, "test.engineer", now, effectiveBaselineId: baselineId,
+                parentKind: VerificationProcedureParentKind.Allocated);
+            var procedure = new TestProcedure(projectId, "HLRTP-000933", "Two-parent procedure",
+                "test.engineer", now, TestProcedureLevel.HighLevel,
+                artifactKind: VerificationArtifactKind.Procedure,
+                parentKind: VerificationProcedureParentKind.Allocated);
+            var procedureRevision = new TestProcedureRevision(procedure.Id, 0,
+                "Execute both parents", "Procedure setup", "Procedure steps", "Expected observation",
+                TestProcedureState.Draft, "test.engineer", now,
+                environmentSetup: "Setup", testData: "Data", orderedSteps: "Steps",
+                expectedObservations: "Expected", cleanup: "Cleanup", toolingAutomation: "Tooling",
+                parentKind: VerificationProcedureParentKind.Allocated);
+            db.AddRange(caseA, caseARevision, caseB, caseBRevision, procedure, procedureRevision,
+                new TestRequirementCoverage(caseARevision.Id, requirementRevisionId),
+                new TestRequirementCoverage(caseBRevision.Id, requirementRevisionId),
+                // Reversed insertion order: B is linked before A. Coverage work must never depend on it.
+                new TestCaseProcedureLink(caseBRevision.Id, procedureRevision.Id),
+                new TestCaseProcedureLink(caseARevision.Id, procedureRevision.Id),
+                new BaselineTestProcedureSelection(baselineId, caseA.Id, caseARevision.Id),
+                new BaselineTestProcedureSelection(baselineId, caseB.Id, caseBRevision.Id),
+                new BaselineTestProcedureSelection(baselineId, procedure.Id, procedureRevision.Id));
+            await db.SaveChangesAsync();
+            db.Entry(procedureRevision).Property(x => x.State).CurrentValue = TestProcedureState.Approved;
+            await db.SaveChangesAsync();
+            procedureId = procedure.Id;
+            caseARevisionId = caseARevision.Id;
+            caseBRevisionId = caseBRevision.Id;
+            procedureRevisionId = procedureRevision.Id;
+        }
+
+        using (var client = factory.CreateClient())
+        {
+            await LoginAsync(client, "eng.user");
+            using var resolved = await client.PostAsJsonAsync($"/api/verification-impact/{itemId}/resolve", new
+            {
+                outcome = "ProcedureCoverageConfirmed",
+                rationale = "The two-parent procedure executes both exact source Cases.",
+                procedureId
+            });
+            Assert.Equal(HttpStatusCode.OK, resolved.StatusCode);
+        }
+
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            Assert.Equal(2, await db.TestCoverage.AsNoTracking().CountAsync(x =>
+                x.RequirementRevisionId == requirementRevisionId && !x.IsSuspect));
+            Assert.Equal(2, await db.TestCoverage.AsNoTracking().CountAsync(x =>
+                x.ProcedureRevisionId == caseARevisionId || x.ProcedureRevisionId == caseBRevisionId));
+            Assert.Equal(0, await db.TestCoverage.AsNoTracking().CountAsync(x =>
+                x.ProcedureRevisionId == procedureRevisionId));
+        }
+
+        using (var client = factory.CreateClient())
+        {
+            await LoginAsync(client, "eng.user");
+            using var reopened = await client.PostAsJsonAsync($"/api/verification-impact/{itemId}/reopen",
+                new { rationale = "Reopen both exact parent Cases." });
+            Assert.Equal(HttpStatusCode.OK, reopened.StatusCode);
+            using var resolvedAgain = await client.PostAsJsonAsync($"/api/verification-impact/{itemId}/resolve", new
+            {
+                outcome = "ProcedureCoverageConfirmed",
+                rationale = "Re-confirmed against both exact source Cases.",
+                procedureId
+            });
+            Assert.Equal(HttpStatusCode.OK, resolvedAgain.StatusCode);
+        }
+
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            Assert.Equal(2, await db.TestCoverage.AsNoTracking().CountAsync(x =>
+                x.RequirementRevisionId == requirementRevisionId && !x.IsSuspect));
+            Assert.Equal(2, await db.TestCoverage.AsNoTracking().CountAsync(x =>
+                x.ProcedureRevisionId == caseARevisionId || x.ProcedureRevisionId == caseBRevisionId));
+            Assert.Equal(0, await db.TestCoverage.AsNoTracking().CountAsync(x =>
+                x.ProcedureRevisionId == procedureRevisionId));
+        }
+    }
 }

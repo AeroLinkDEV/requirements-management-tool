@@ -122,6 +122,7 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
     public DbSet<ProjectRoleBackup> ProjectRoleBackups => Set<ProjectRoleBackup>();
     public DbSet<ElectronicSignature> ElectronicSignatures => Set<ElectronicSignature>();
     public DbSet<SecurityAuditEvent> SecurityAuditEvents => Set<SecurityAuditEvent>();
+    public DbSet<GovernedMigrationCompletion> GovernedMigrationCompletions => Set<GovernedMigrationCompletion>();
     public DbSet<ExternalIdentityProvider> ExternalIdentityProviders => Set<ExternalIdentityProvider>();
     public DbSet<ExternalGroupRoleMapping> ExternalGroupRoleMappings => Set<ExternalGroupRoleMapping>();
     public DbSet<ArtifactSchemaDefinition> ArtifactSchemas => Set<ArtifactSchemaDefinition>();
@@ -1330,6 +1331,14 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
         modelBuilder.Entity<SecurityAuditEvent>(b =>
         {
             b.ToTable("security_audit_events"); b.HasKey(x => x.Id); b.Property(x => x.EventType).HasMaxLength(100).IsRequired(); b.Property(x => x.ActorId).HasMaxLength(100).IsRequired(); b.Property(x => x.Target).HasMaxLength(300).IsRequired(); b.Property(x => x.Outcome).HasMaxLength(30).IsRequired(); b.Property(x => x.Detail).HasMaxLength(4000).IsRequired(); b.Property(x => x.IpAddress).HasMaxLength(100); b.HasIndex(x => x.OccurredAt); b.HasIndex(x => new { x.ActorId, x.OccurredAt });
+        });
+        modelBuilder.Entity<GovernedMigrationCompletion>(b =>
+        {
+            b.ToTable("governed_migration_completions"); b.HasKey(x => x.Id);
+            b.Property(x => x.Marker).HasMaxLength(200).IsRequired();
+            b.Property(x => x.Actor).HasMaxLength(100).IsRequired();
+            b.Property(x => x.TotalsJson).HasMaxLength(4000).IsRequired();
+            b.HasIndex(x => x.Marker).IsUnique();
         });
         modelBuilder.Entity<ExternalIdentityProvider>(b =>
         {

@@ -5,10 +5,12 @@ using AeroLink.Domain.Hierarchy;
 using AeroLink.Domain.Identity;
 using AeroLink.Domain.Programs;
 using AeroLink.Domain.Releases;
+using AeroLink.Domain.Traceability;
 using AeroLink.Domain.Verification;
 using AeroLink.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Npgsql;
+using System.Text;
 
 namespace AeroLink.Infrastructure.Tests;
 
@@ -76,7 +78,7 @@ public sealed class SoftwareProcedureExecutionCutoverPostgresQualificationTests
                 .SingleAsync(x => x.Id == seed.BaselineSelectionId)).ProcedureId);
 
             var rerun = await authority.EnsureCompletedAsync();
-            Assert.Equal(0, rerun.ProceduresGenerated);
+            Assert.Equal(result, rerun);
             Assert.Equal(1, await db.TestProcedures.AsNoTracking()
                 .CountAsync(x => x.ProjectId == seed.ProjectId
                     && x.ArtifactKind == VerificationArtifactKind.Procedure));
@@ -138,6 +140,8 @@ public sealed class SoftwareProcedureExecutionCutoverPostgresQualificationTests
                     && x.Target == $"Project:{projectId}"));
             Assert.Equal(1, await check.SecurityAuditEvents.AsNoTracking()
                 .CountAsync(x => x.EventType == "VerificationExecutionCutover.SoftwareProcedures.v1.Completed"));
+            Assert.Equal(1, await check.GovernedMigrationCompletions.AsNoTracking()
+                .CountAsync(x => x.Marker == "VerificationExecutionCutover.SoftwareProcedures.v1"));
             Assert.Equal(0, await check.SecurityAuditEvents.AsNoTracking()
                 .CountAsync(x => x.EventType == "VerificationExecutionCutover.SoftwareProcedures.v1.ProcedureGenerated"
                     && !x.Target.StartsWith("TestCaseProcedureLink:")));
@@ -222,7 +226,7 @@ public sealed class SoftwareProcedureExecutionCutoverPostgresQualificationTests
                 || x.ProcedureRevisionId == revisions[1].Id));
         var rerun = await new SoftwareProcedureExecutionCutoverAuthority(db, legacy, typed)
             .EnsureCompletedAsync();
-        Assert.Equal(0, rerun.ProceduresGenerated);
+        Assert.Equal(result, rerun);
         Assert.Equal(2, await db.TestCaseProcedureLinks.AsNoTracking().CountAsync());
         Assert.Equal(2, await db.TestProcedureRevisions.AsNoTracking()
             .CountAsync(x => x.ProcedureId == procedureId));
@@ -355,9 +359,198 @@ public sealed class SoftwareProcedureExecutionCutoverPostgresQualificationTests
         Assert.Equal(revisions[1].Id, link.ProcedureRevisionId);
         var rerun = await new SoftwareProcedureExecutionCutoverAuthority(db, legacy, typed)
             .EnsureCompletedAsync();
-        Assert.Equal(0, rerun.ProceduresGenerated);
+        Assert.Equal(result, rerun);
         Assert.Equal(2, await db.TestProcedureRevisions.AsNoTracking()
             .CountAsync(x => x.ProcedureId == procedure.Id));
+    }
+
+    [DisposablePostgresFact]
+    public async Task Concurrent_recovery_claim_after_persisted_project_work_keeps_one_completion()
+    {
+        // Exact crash-recovery state from the Codex finding: per-project cutover work is already persisted,
+        // the global Completed marker is absent, and two startup instances race. The unique marker row must
+        // make the claim atomic so exactly one completion remains and totals stay consistent.
+        var server = ValidateQualificationConnection(
+            Environment.GetEnvironmentVariable("AEROLINK_MIGRATIONS_CONNECTION")!);
+        var databaseName = DatabaseName + "_recoveryclaim";
+        await EnsureDatabaseAsync(server, databaseName);
+        var connection = new NpgsqlConnectionStringBuilder(server) { Database = databaseName }.ConnectionString;
+        var (legacy, typed) = CutoverRegistrations();
+
+        await using (var seedContext = await DatabaseAsync(connection))
+        {
+            var seed = await SeedAsync(seedContext);
+            var first = await new SoftwareProcedureExecutionCutoverAuthority(seedContext, legacy, typed)
+                .EnsureCompletedAsync();
+            Assert.Equal(1, first.ProceduresGenerated);
+            Assert.Equal(1, await seedContext.GovernedMigrationCompletions.AsNoTracking()
+                .CountAsync(x => x.Marker == "VerificationExecutionCutover.SoftwareProcedures.v1"));
+
+            // Simulate the crash boundary: work committed, marker and its completion audit lost.
+            var completionAudits = await seedContext.SecurityAuditEvents
+                .Where(x => x.EventType == "VerificationExecutionCutover.SoftwareProcedures.v1.Completed")
+                .ToListAsync();
+            seedContext.SecurityAuditEvents.RemoveRange(completionAudits);
+            seedContext.GovernedMigrationCompletions.RemoveRange(
+                await seedContext.GovernedMigrationCompletions.ToListAsync());
+            await seedContext.SaveChangesAsync();
+        }
+
+        await using (var first = await DatabaseAsync(connection))
+        await using (var second = await DatabaseAsync(connection))
+        {
+            var parallel = await Task.WhenAll(
+                Task.Run(() => CatchAsync(() =>
+                    new SoftwareProcedureExecutionCutoverAuthority(first, legacy, typed)
+                        .EnsureCompletedAsync())),
+                Task.Run(() => CatchAsync(() =>
+                    new SoftwareProcedureExecutionCutoverAuthority(second, legacy, typed)
+                        .EnsureCompletedAsync())));
+            var expected = new SoftwareProcedureCutoverResult(1, 1, 1, 1, 1, 0);
+            Assert.All(parallel, result => Assert.Equal(expected, result));
+
+            await using var check = await DatabaseAsync(connection);
+            Assert.Equal(1, await check.GovernedMigrationCompletions.AsNoTracking()
+                .CountAsync(x => x.Marker == "VerificationExecutionCutover.SoftwareProcedures.v1"));
+            Assert.Equal(1, await check.SecurityAuditEvents.AsNoTracking()
+                .CountAsync(x => x.EventType == "VerificationExecutionCutover.SoftwareProcedures.v1.Completed"));
+            var projectId = await check.Projects.AsNoTracking().Select(x => x.Id).SingleAsync();
+            Assert.Equal(1, await check.TestProcedures.AsNoTracking()
+                .CountAsync(x => x.ProjectId == projectId
+                    && x.ArtifactKind == VerificationArtifactKind.Procedure));
+            Assert.Equal(1, await check.TestCaseProcedureLinks.AsNoTracking().CountAsync());
+            Assert.Equal(1, await check.TestExecutions.AsNoTracking()
+                .CountAsync(x => x.ProjectId == projectId));
+            Assert.Equal(1, await check.BuildTestSetEntries.AsNoTracking().CountAsync());
+            Assert.Equal(1, await check.BaselineTestProcedures.AsNoTracking().CountAsync());
+            Assert.Equal(1, await check.SecurityAuditEvents.AsNoTracking()
+                .CountAsync(x => x.EventType == "VerificationExecutionCutover.SoftwareProcedures.v1.ProjectUpgraded"
+                    && x.Target == $"Project:{projectId}"));
+        }
+    }
+
+    [DisposablePostgresFact]
+    public async Task Two_projects_complete_with_scoped_signature_supersession_on_postgres()
+    {
+        var server = ValidateQualificationConnection(
+            Environment.GetEnvironmentVariable("AEROLINK_MIGRATIONS_CONNECTION")!);
+        var databaseName = DatabaseName + "_twosig";
+        await EnsureDatabaseAsync(server, databaseName);
+        var connection = new NpgsqlConnectionStringBuilder(server) { Database = databaseName }.ConnectionString;
+        var evidenceRoot = Path.Combine(Path.GetTempPath(), $"aerolink-726-pg-two-{Guid.NewGuid():N}");
+        var files = new EvidenceFileStore(evidenceRoot);
+        try
+        {
+            await using var db = await DatabaseAsync(connection);
+            var first = await SeedSignedDocumentProjectAsync(db, files, "400001");
+            var second = await SeedSignedDocumentProjectAsync(db, files, "400002");
+            var (legacy, typed) = CutoverRegistrations();
+            var generator = new ControlledOutputGenerator(db, new RichContentPublisher(db, files),
+                policyResolver: new EffectiveProjectLadderPolicyResolver(db));
+            var authority = new SoftwareProcedureExecutionCutoverAuthority(db, legacy, typed,
+                generator: generator, files: files);
+
+            var firstRun = await authority.EnsureCompletedAsync();
+            Assert.Equal(2, firstRun.ProjectsUpgraded);
+            foreach (var seed in new[] { first, second })
+            {
+                foreach (var signatureId in new[] { seed.ArtifactSignatureId, seed.DocumentSignatureId })
+                {
+                    var target = $"ElectronicSignature:{signatureId}";
+                    Assert.Equal(1, await db.SecurityAuditEvents.AsNoTracking().CountAsync(
+                        x => x.EventType == "VerificationExecutionCutover.SoftwareProcedures.v1.SignatureSuperseded"
+                            && x.Target == target));
+                    Assert.Equal(1, await db.SecurityAuditEvents.AsNoTracking().CountAsync(
+                        x => x.EventType == "VerificationExecutionCutover.SoftwareProcedures.v1.SignatureSupersessionCompleted"
+                            && x.Target == target));
+                }
+            }
+
+            // Rerun must not reprocess immutable SignatureSuperseded events that already carry completion
+            // evidence: every target stays at exactly one superseded + one completion event.
+            var rerun = await authority.EnsureCompletedAsync();
+            Assert.Equal(firstRun, rerun);
+            foreach (var seed in new[] { first, second })
+            {
+                foreach (var signatureId in new[] { seed.ArtifactSignatureId, seed.DocumentSignatureId })
+                {
+                    var target = $"ElectronicSignature:{signatureId}";
+                    Assert.Equal(1, await db.SecurityAuditEvents.AsNoTracking().CountAsync(
+                        x => x.EventType == "VerificationExecutionCutover.SoftwareProcedures.v1.SignatureSuperseded"
+                            && x.Target == target));
+                    Assert.Equal(1, await db.SecurityAuditEvents.AsNoTracking().CountAsync(
+                        x => x.EventType == "VerificationExecutionCutover.SoftwareProcedures.v1.SignatureSupersessionCompleted"
+                            && x.Target == target));
+                }
+            }
+        }
+        finally
+        {
+            try { Directory.Delete(evidenceRoot, recursive: true); } catch (IOException) { }
+        }
+    }
+
+    [DisposablePostgresFact]
+    public async Task Legacy_unmaterialized_document_cutover_preserves_historical_snapshot_on_postgres()
+    {
+        var server = ValidateQualificationConnection(
+            Environment.GetEnvironmentVariable("AEROLINK_MIGRATIONS_CONNECTION")!);
+        var databaseName = DatabaseName + "_legacydoc";
+        await EnsureDatabaseAsync(server, databaseName);
+        var connection = new NpgsqlConnectionStringBuilder(server) { Database = databaseName }.ConnectionString;
+        var evidenceRoot = Path.Combine(Path.GetTempPath(), $"aerolink-726-pg-legacy-{Guid.NewGuid():N}");
+        var files = new EvidenceFileStore(evidenceRoot);
+        try
+        {
+            await using var db = await DatabaseAsync(connection);
+            var seed = await SeedSignedDocumentProjectAsync(db, files, "400003", materialized: false);
+            var now = DateTimeOffset.UtcNow;
+            var caseArtifact = await db.TestProcedures.AsNoTracking()
+                .SingleAsync(x => x.ProjectId == seed.ProjectId
+                    && x.ArtifactKind == VerificationArtifactKind.Case);
+            // A revision approved AFTER the document's GeneratedAt must never enter the regenerated
+            // historical compatibility output.
+            db.Add(new TestProcedureRevision(caseArtifact.Id, 1, "Later revision", "P", "S", "E",
+                TestProcedureState.Approved, "test.engineer", now.AddDays(10)));
+            await db.SaveChangesAsync();
+
+            var (legacy, typed) = CutoverRegistrations();
+            var generator = new ControlledOutputGenerator(db, new RichContentPublisher(db, files),
+                policyResolver: new EffectiveProjectLadderPolicyResolver(db));
+            var authority = new SoftwareProcedureExecutionCutoverAuthority(db, legacy, typed,
+                generator: generator, files: files);
+            var result = await authority.EnsureCompletedAsync();
+            Assert.Equal(1, result.ProjectsUpgraded);
+
+            var baseline = await db.CandidateBaselines.AsNoTracking().SingleAsync(x => x.Id == seed.BaselineId);
+            Assert.Null(baseline.TestProceduresMaterializedAt);
+            Assert.Null(baseline.TestProceduresHash);
+            Assert.False(await db.BaselineEvents.AsNoTracking().AnyAsync(x =>
+                x.BaselineId == seed.BaselineId
+                && (x.EventType == "ExecutionCutoverManifestMigrated"
+                    || x.EventType == "VerificationIdentityManifestMigrated")));
+            var document = await db.ControlledDocuments.AsNoTracking().SingleAsync(x => x.Id == seed.DocumentId);
+            // PostgreSQL timestamptz stores microsecond precision, so the round-trip may differ from the
+            // in-memory DateTimeOffset by less than one microsecond. The cutover must preserve the original
+            // GeneratedAt to database precision — never replace it with the cutover time.
+            Assert.True(Math.Abs((document.GeneratedAt - seed.GeneratedAt).TotalMicroseconds) < 1,
+                $"GeneratedAt changed: {seed.GeneratedAt} -> {document.GeneratedAt}");
+            Assert.NotEqual(new string('c', 64), document.ContentHash);
+            var artifact = await db.ControlledDocumentArtifacts.AsNoTracking()
+                .SingleAsync(x => x.Id == seed.ArtifactId);
+            Assert.True(files.Exists(artifact.StorageKey));
+            var snapshot = await ControlledProcedureDocumentSnapshotProjection.ForDocumentAsync(db,
+                seed.BaselineId, new VerificationArtifactKey(VerificationDiscipline.HighLevelSoftware,
+                    VerificationArtifactKind.Case), document.GeneratedAt, default);
+            var row = Assert.Single(snapshot.Rows);
+            Assert.Equal(0, row.Revision);
+            Assert.True(await db.SecurityAuditEvents.AsNoTracking().AnyAsync(x =>
+                x.EventType == "VerificationExecutionCutover.SoftwareProcedures.v1.SignatureSupersessionCompleted"));
+        }
+        finally
+        {
+            try { Directory.Delete(evidenceRoot, recursive: true); } catch (IOException) { }
+        }
     }
 
     private enum MatrixState { StoredLegacyDefault, SealedAuthoredDraft, NonDefaultActiveCaseOnly, Retired }
@@ -556,6 +749,72 @@ public sealed class SoftwareProcedureExecutionCutoverPostgresQualificationTests
         await db.SaveChangesAsync();
         return new TwoRevisionSeed(db, project.Id, release.Id, firstBaseline.Id, secondBaseline.Id,
             firstRevision.Id, secondRevision.Id);
+    }
+
+    private sealed record SignedDocumentSeed(AeroLinkDbContext Db, Guid ProjectId, Guid ReleaseId,
+        Guid BaselineId, Guid DocumentId, Guid ArtifactId, Guid ArtifactSignatureId,
+        Guid DocumentSignatureId, DateTimeOffset GeneratedAt);
+
+    private static async Task<SignedDocumentSeed> SeedSignedDocumentProjectAsync(
+        AeroLinkDbContext db, EvidenceFileStore files, string tag, bool materialized = true)
+    {
+        var now = DateTimeOffset.UtcNow;
+        var program = new ProgramRecord($"{tag} Program", $"SDP{tag[^3..]}");
+        var project = new ProjectRecord(program.Id, $"{tag} Software", $"{tag} Product");
+        var release = new SoftwareRelease(project.Id, "1.0", false);
+        var baseline = new CandidateBaseline($"SW-{tag[^2..]}.00", 0, project.Id, release.Id, null,
+            "Candidate", "cm.test", now);
+        db.AddRange(program, project, release, baseline);
+        var configuration = LegacyDefaultProjectLadderFactory.Create(project.Id, now);
+        db.ProjectLadderConfigurations.Add(configuration);
+        await db.SaveChangesAsync();
+        var seal = await new ProjectLadderSealAuthority(db).SealAsync(project.Id,
+            LadderBoundContentCatalog.Current.First().Id, $"{tag}-content", "test.sealer", now);
+        Assert.Equal(ProjectLadderSealResultKind.Sealed, seal.Kind);
+        var caseArtifact = new TestProcedure(project.Id, $"HLRTC-{tag[^6..]}", $"{tag} case",
+            "test.engineer", now, TestProcedureLevel.HighLevel);
+        var caseRevision = new TestProcedureRevision(caseArtifact.Id, 0,
+            "Verify", "Preconditions", "Steps", "Expected",
+            TestProcedureState.Approved, "test.engineer", now, effectiveBaselineId: baseline.Id);
+        var scr = ApprovedBaselineScr(project.Id, release.Id, $"SRCR-{tag[^5..]}", now);
+        db.AddRange(scr, caseArtifact, caseRevision,
+            new BaselineTestProcedureSelection(baseline.Id, caseArtifact.Id, caseRevision.Id));
+        baseline.Select(scr, "cm.test", now);
+        baseline.Freeze("cm.test", now);
+        baseline.MarkRequirementsMaterialized("cm.test", new string('a', 64), 0, now);
+        if (materialized) baseline.MarkTestProceduresMaterialized("cm.test", new string('b', 64), 1, now);
+        await db.SaveChangesAsync();
+        var oldBytes = Encoding.UTF8.GetBytes($"pre-cutover {tag} controlled bytes");
+        var stored = await files.StoreAsync(new MemoryStream(oldBytes), $"{tag}.docx",
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document", default);
+        var document = new ControlledDocument(project.Id, release.Id, baseline.Id,
+            ControlledDocumentType.HighLevelTestCases, $"HLRTD-{tag[^6..]}", $"{tag} cases", 0,
+            new string('c', 64), 1, now);
+        var artifact = new ControlledDocumentArtifact(document.Id, "docx", stored.StorageKey,
+            stored.OriginalFileName, stored.ContentType, stored.Size, stored.Sha256, now);
+        var artifactSignature = new ElectronicSignature(Guid.NewGuid(), "reviewer", "Reviewer", program.Id,
+            "ControlledDocumentArtifact", artifact.Id, $"{document.DocumentNumber}.00/docx", "Approve",
+            "old output", artifact.Sha256, "127.0.0.1", now);
+        var documentSignature = new ElectronicSignature(Guid.NewGuid(), "reviewer", "Reviewer", program.Id,
+            "ControlledDocument", document.Id, $"{document.DocumentNumber}.00", "Approve",
+            "old document", document.ContentHash, "127.0.0.1", now);
+        db.AddRange(document, artifact, artifactSignature, documentSignature);
+        await db.SaveChangesAsync();
+        return new SignedDocumentSeed(db, project.Id, release.Id, baseline.Id, document.Id, artifact.Id,
+            artifactSignature.Id, documentSignature.Id, now);
+    }
+
+    private static SystemChangeRequest ApprovedBaselineScr(Guid projectId, Guid releaseId, string number,
+        DateTimeOffset now)
+    {
+        var scr = new SystemChangeRequest(number, 0, projectId, releaseId,
+            "Baseline authority", "Problem", "Analysis", "Solution", "author", now);
+        scr.AddRequirementChange("author", $"SYSR-{number[^5..]}", 0, RequirementLevel.System,
+            RequirementChangeKind.Introduce, "The system shall retain the controlled fixture behavior.",
+            "Baseline fixture authority.", "Analysis", now);
+        scr.SubmitForReview("author", [new ApproverSelection("reviewer", "Reviewer")], now);
+        scr.ApproveActiveStage("reviewer", now);
+        return scr;
     }
 
     private static (IReadOnlyList<ILadderConsumerRegistration> Legacy,

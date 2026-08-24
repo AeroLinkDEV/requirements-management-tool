@@ -176,7 +176,7 @@ export default function TestResultsWorkspace({ api, projectId, releaseId, discip
       artifacts: (set.artifacts ?? set.procedures ?? []).map(item => ({ ...item,
         artifactRevisionId: item.artifactRevisionId ?? item.procedureRevisionId ?? '' })) })))
     setBuildId(current => built.some((x: { id: string }) => x.id === current) ? current : built[0]?.id ?? '')
-  }, [api, projectId, releaseId])
+  }, [api, projectId, releaseId, discipline])
 
   useEffect(() => { void load() }, [load])
 
@@ -198,6 +198,9 @@ export default function TestResultsWorkspace({ api, projectId, releaseId, discip
   useEffect(() => {
     const mine = ++candidateTicket.current
     const timer = setTimeout(async () => {
+      // Do not guess the artifact kind before the authoritative effective kind arrives from the test-set
+      // contract: until then there is nothing truthful to search.
+      if (effectiveKind === undefined) return
       const scope = discipline === 'System' ? 'System' : 'Software'
       const response = await fetch(`${api}${verificationArtifactApiRoot(scope, resolvedKind)}?projectId=${projectId}&releaseId=${releaseId}&scope=${scope}&search=${encodeURIComponent(query)}&state=Approved&artifactKind=${resolvedKind}&page=1&pageSize=25`)
       if (!response.ok) return
@@ -206,7 +209,7 @@ export default function TestResultsWorkspace({ api, projectId, releaseId, discip
       setCandidates(paged.items.map((x: { revisionId: string; displayNumber: string; title: string; state: string }) => x))
     }, 200)
     return () => clearTimeout(timer)
-  }, [api, projectId, releaseId, discipline, query, resolvedKind])
+  }, [api, projectId, releaseId, discipline, query, resolvedKind, effectiveKind])
 
   const set = sets.find(x => x.discipline === discipline)
   const inSet = new Set(set?.artifacts.map(x => x.artifactRevisionId) ?? [])

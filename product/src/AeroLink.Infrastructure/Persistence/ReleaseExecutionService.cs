@@ -214,6 +214,26 @@ public sealed class ReleaseExecutionService(AeroLinkDbContext db, EvidenceFileSt
             .OrderBy(x => x.OccurredAt).ThenBy(x => x.Id).ToList();
         var coverageRevisionIds = revisionLevels.Where(x => verificationLevels.Contains(x.Value)).Select(x => x.Key).ToHashSet();
         var coverage = await db.TestCoverage.AsNoTracking().Where(x => coverageRevisionIds.Contains(x.RequirementRevisionId)).ToListAsync(ct);
+        // Finding 6: serialized coverage must be the baseline's EFFECTIVE coverage population. A stale
+        // coverage row pointing at a Case revision outside that population (e.g., a predecessor Case not
+        // carried by this baseline) must not alter the review-manifest hash. Pre-manifest compatibility
+        // baselines keep their coverage-derived identities.
+        var exactManifest = await db.CandidateBaselines.AsNoTracking()
+            .Where(x => x.Id == baseline.Id)
+            .Select(x => x.TestProceduresMaterializedAt != null).SingleAsync(ct);
+        if (exactManifest)
+        {
+            var procedureEnabledLevels = ladderPolicy.OrderedLevels
+                .Where(level => ladderPolicy.Definition(level).VerificationProfile?.Enables(
+                        VerificationArtifactKind.Procedure) == true
+                    && ladderPolicy.Definition(level).VerificationProfile?.Enables(
+                        VerificationArtifactKind.Case) == true)
+                .Select(ladderPolicy.ProcedureLevel).ToHashSet();
+            var coverageEffectiveRevisionIds = (await BaselineExecutableMembership.ForPopulationAsync(
+                db, baseline.Id, procedureEnabledLevels, ct)).CoverageRevisionIds.ToHashSet();
+            coverage = coverage.Where(x =>
+                coverageEffectiveRevisionIds.Contains(x.ProcedureRevisionId)).ToList();
+        }
         // Requirement coverage stays Case-scoped; the release package's EXECUTABLE side is the authoritative
         // effective executable population (System Procedures, software Procedures under the full profile,
         // software Cases under a Case-only profile). After the cutover, executions/evidence attach to
