@@ -30,11 +30,9 @@ public sealed class LegacyControlledProcedureDocumentSnapshotTests
     [Fact]
     public void A_verification_revision_state_is_fixed_at_construction_so_CreatedAt_is_its_approval_time()
     {
+        // The domain surface is write-once.
         var stateProperty = typeof(TestProcedureRevision).GetProperty(nameof(TestProcedureRevision.State))!;
         Assert.False(stateProperty.SetMethod?.IsPublic ?? false);
-
-        // No public surface may reassign State. Anything that mutates a revision has to leave CreatedAt
-        // meaning "the moment this state began", which only holds while state is write-once.
         var mutators = typeof(TestProcedureRevision)
             .GetMethods(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance)
             .Where(x => !x.IsSpecialName)
@@ -45,6 +43,39 @@ public sealed class LegacyControlledProcedureDocumentSnapshotTests
                 || x.Contains("SetState", StringComparison.OrdinalIgnoreCase))
             .ToList();
         Assert.Empty(mutators);
+
+        // A private setter is not the whole story. EF bulk updates and the change tracker both write the
+        // column without going through the domain at all, and this very file uses ExecuteUpdateAsync on
+        // TestProcedureRevisions.State to build a scenario — so a reflection check alone would pass while the
+        // invariant was being violated. Production code is therefore scanned for both backdoors. Tests may
+        // still use them to construct states the domain cannot express; product code may not.
+        var sourceRoot = ProductSourceRoot();
+        var offenders = new List<string>();
+        foreach (var file in Directory.EnumerateFiles(sourceRoot, "*.cs", SearchOption.AllDirectories))
+        {
+            if (file.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}")
+                || file.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}")) continue;
+            var text = File.ReadAllText(file);
+            if (System.Text.RegularExpressions.Regex.IsMatch(text,
+                    @"TestProcedureRevisions[\s\S]{0,600}?SetProperty\s*\([^)]*\.State\b")
+                || System.Text.RegularExpressions.Regex.IsMatch(text,
+                    @"Entry\s*\(\s*\w*[Rr]evision\w*\s*\)[\s\S]{0,200}?Property\s*\([^)]*\.State\b"))
+                offenders.Add(Path.GetFileName(file));
+        }
+        Assert.Empty(offenders);
+    }
+
+    /// <summary>Locates product/src by walking up from the test assembly, so the scan is path-independent.</summary>
+    private static string ProductSourceRoot()
+    {
+        var directory = new DirectoryInfo(AppContext.BaseDirectory);
+        while (directory is not null)
+        {
+            var candidate = Path.Combine(directory.FullName, "product", "src");
+            if (Directory.Exists(candidate)) return candidate;
+            directory = directory.Parent;
+        }
+        throw new InvalidOperationException("Could not locate product/src from the test assembly location.");
     }
 
     [Fact]

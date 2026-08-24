@@ -143,9 +143,15 @@ public static class ControlledProcedureDocumentSnapshotProjection
                 // revision never transitions: TestProcedureBaselineMaterializer constructs it already Approved
                 // or Retired, so approval and creation are the same event and CreatedAt is the approval time.
                 // If a state transition were ever introduced, a revision approved after this document was
-                // generated could be admitted into it and the document's identity would silently change. The
-                // invariant is pinned by LegacyControlledProcedureDocumentSnapshotTests
+                // generated could be admitted into it and the document's identity would silently change.
+                //
+                // Nothing in the schema enforces that — there is no approval timestamp to check against — so
+                // the invariant is enforced by product code never writing State after construction, through
+                // the domain or around it via an EF bulk update or the change tracker. All three routes are
+                // pinned by LegacyControlledProcedureDocumentSnapshotTests
                 // .A_verification_revision_state_is_fixed_at_construction_so_CreatedAt_is_its_approval_time.
+                // If that test ever fails, this reconstruction needs a real approval timestamp and a
+                // fail-closed guard; it does not need a weaker assertion.
                 .Where(x => x.CreatedAt <= generatedAt && x.State != TestProcedureState.Draft)
                 .GroupBy(x => x.ProcedureId)
                 .Select(group => group.OrderByDescending(x => x.Revision).First())

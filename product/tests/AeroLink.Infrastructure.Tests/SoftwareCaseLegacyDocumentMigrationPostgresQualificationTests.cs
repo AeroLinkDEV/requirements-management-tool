@@ -362,23 +362,24 @@ public sealed class SoftwareCaseLegacyDocumentMigrationPostgresQualificationTest
     /// <summary>
     /// The connection this qualification runs against, or null when no PostgreSQL server was offered.
     ///
-    /// Every other PostgreSQL qualification fixture in this repository is driven by
-    /// AEROLINK_MIGRATIONS_CONNECTION. Honouring only a bespoke AEROLINK_747_CONNECTION meant a
-    /// maintainer who set the conventional variable and ran the suite silently skipped these four
-    /// tests and still saw a green run — precisely the failure this fixture exists to prevent.
-    /// The shared variable names a <em>server</em>, not this fixture's database, so its database is
-    /// replaced with the dedicated disposable one rather than trusted: the isolation guarantee stays
-    /// with the fixture instead of depending on whatever the caller happened to point at. The
-    /// dedicated variable still wins when both are set, so an explicit #747 target is never silently
-    /// redirected somewhere else.
+    /// A maintainer who sets only the conventional AEROLINK_MIGRATIONS_CONNECTION must not silently
+    /// skip these four tests, so that variable is accepted here too. It is accepted, never rewritten:
+    /// the connection is passed through exactly as supplied and
+    /// <see cref="ValidateQualificationConnection"/> then refuses it unless it already names the
+    /// dedicated disposable database. That refusal is the same contract every sibling PostgreSQL
+    /// fixture uses, and it matters because these tests call EnsureDeletedAsync — retargeting a
+    /// caller's connection to this fixture's database would drop a database the operator never
+    /// nominated for #747, on a server they pointed at some other qualification. A loud refusal
+    /// naming the required database is the honest outcome; a silent redirect is not.
+    ///
+    /// The dedicated variable wins when both are set, so an explicit #747 target is never overridden.
     /// </summary>
     internal static string? ResolveQualificationConnection()
     {
         var dedicated = Environment.GetEnvironmentVariable("AEROLINK_747_CONNECTION");
         if (!string.IsNullOrWhiteSpace(dedicated)) return dedicated;
         var shared = Environment.GetEnvironmentVariable("AEROLINK_MIGRATIONS_CONNECTION");
-        if (string.IsNullOrWhiteSpace(shared)) return null;
-        return new NpgsqlConnectionStringBuilder(shared) { Database = DatabaseName }.ConnectionString;
+        return string.IsNullOrWhiteSpace(shared) ? null : shared;
     }
 
     private static string ValidateQualificationConnection(string? connection)
