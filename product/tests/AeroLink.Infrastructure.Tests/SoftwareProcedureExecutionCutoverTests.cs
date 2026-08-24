@@ -19,7 +19,7 @@ namespace AeroLink.Infrastructure.Tests;
 /// </summary>
 public sealed class SoftwareProcedureExecutionCutoverTests
 {
-    private static (IReadOnlyList<ILadderConsumerRegistration> Legacy,
+    internal static (IReadOnlyList<ILadderConsumerRegistration> Legacy,
         IReadOnlyList<IVerificationArtifactConsumerRegistration> Typed) FullRegistrations()
     {
         var keys = new[]
