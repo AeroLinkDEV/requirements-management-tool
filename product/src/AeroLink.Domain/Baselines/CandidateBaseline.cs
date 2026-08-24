@@ -296,28 +296,34 @@ public sealed class CandidateBaseline
     /// Governed #726 operation: records the executable cutover's manifest change. Unlike the #722
     /// identity-only migration (which preserves revision bodies and membership), this cutover GENERATES
     /// Procedure revision bodies and REPLACES Case executable membership with Procedure membership, so the
-    /// event truthfully records old/new executable identities, hashes, membership counts, and Case-to-
-    /// Procedure provenance — never the identity-only claim.
+    /// event truthfully records old/new executable identities, hashes, membership counts, and a BOUNDED
+    /// Case-to-Procedure provenance summary — never the identity-only claim. The exact per-baseline mapping
+    /// identities are stored in durable, sequence-numbered
+    /// <see cref="BaselineExecutionCutoverProvenance"/> rows linked to this event, so the 4,000-character
+    /// <see cref="BaselineEvent.Detail"/> column stays safely under its limit for every population size.
     /// </summary>
-    public void RecordExecutionCutoverManifestMigration(string actorId, string? previousHash, string newHash,
-        int previousActiveCount, int newActiveCount, string caseProcedureProvenance, DateTimeOffset now)
+    public Guid RecordExecutionCutoverManifestMigration(string actorId, string? previousHash, string newHash,
+        int previousActiveCount, int newActiveCount, string provenanceSummary, DateTimeOffset now)
     {
         if (string.IsNullOrWhiteSpace(actorId)
             || string.IsNullOrWhiteSpace(newHash) || newHash.Length != 64)
             throw new DomainException(
                 "An execution cutover manifest migration requires an actor and SHA-256 manifest hash.");
-        if (string.IsNullOrWhiteSpace(caseProcedureProvenance))
+        if (string.IsNullOrWhiteSpace(provenanceSummary))
             throw new DomainException(
-                "An execution cutover manifest migration requires Case-to-Procedure provenance.");
+                "An execution cutover manifest migration requires a bounded Case-to-Procedure provenance summary.");
+        if (provenanceSummary.Length > 1500)
+            throw new DomainException(
+                "An execution cutover manifest migration provenance summary exceeds the bounded summary limit.");
         var previous = string.IsNullOrWhiteSpace(previousHash)
             ? null : previousHash.Trim().ToLowerInvariant();
         TestProceduresHash = newHash.Trim().ToLowerInvariant();
         UpdatedAt = now;
-        Event("ExecutionCutoverManifestMigrated", actorId.Trim(),
+        return Event("ExecutionCutoverManifestMigrated", actorId.Trim(),
             $"Recomputed the controlled software verification manifest from {previous ?? "<none>"} to {TestProceduresHash}; " +
             $"executable membership changed from {previousActiveCount} to {newActiveCount} active revisions; " +
-            $"Case-to-Procedure provenance: {caseProcedureProvenance}. Revision bodies were generated deterministically; " +
-            "this is not an identity-only migration.", now);
+            $"Case-to-Procedure provenance: {provenanceSummary}. Revision bodies were generated deterministically; " +
+            "this is not an identity-only migration.", now).Id;
     }
 
     public void Freeze(string actorId, DateTimeOffset now)
@@ -401,5 +407,10 @@ public sealed class CandidateBaseline
         if (State == CandidateBaselineState.Released)
             throw new DomainException("Released baselines are immutable; verification artifact selections cannot change after release.");
     }
-    private void Event(string type, string actorId, string detail, DateTimeOffset now) => _events.Add(new BaselineEvent(Id, type, actorId, detail, now));
+    private BaselineEvent Event(string type, string actorId, string detail, DateTimeOffset now)
+    {
+        var entry = new BaselineEvent(Id, type, actorId, detail, now);
+        _events.Add(entry);
+        return entry;
+    }
 }

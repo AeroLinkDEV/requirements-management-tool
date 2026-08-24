@@ -4,6 +4,7 @@ using System.Text;
 using System.Text.Json.Nodes;
 using Microsoft.Data.Sqlite;
 using Npgsql;
+using AeroLink.Domain.Baselines;
 using AeroLink.Domain.ChangeControl;
 using AeroLink.Domain.Common;
 using AeroLink.Domain.Hierarchy;
@@ -52,9 +53,11 @@ public sealed class SoftwareProcedureExecutionCutoverAuthority(
     private ControlledOutputGenerator? generatorField = generator;
     private EvidenceFileStore? filesField = files;
     // Storage keys written by the CURRENT in-flight project transaction. If that transaction rolls back,
-    // these bytes are unreferenced output and are removed by the safe cleanup below; previously referenced
-    // evidence is never deleted.
+    // these bytes are unreferenced output and are removed by the best-effort cleanup below; previously
+    // referenced evidence is never deleted. Any deletion that fails is recorded as durable audit evidence so
+    // the residual orphaned bytes are never silently swallowed.
     private readonly List<string> _pendingNewStorageKeys = [];
+    private IReadOnlyList<string> _lastCleanupFailures = [];
 
     private EvidenceFileStore Files => filesField ??= new EvidenceFileStore(
         Path.Combine(Path.GetTempPath(), "aerolink-726-evidence"));
@@ -114,7 +117,16 @@ public sealed class SoftwareProcedureExecutionCutoverAuthority(
         foreach (var configuration in pending)
         {
             pendingProjectIds.Add(configuration.ProjectId);
-            var perProject = await UpgradeProjectAsync(configuration.Id, configuration.ProjectId, now, ct);
+            SoftwareProcedureCutoverResult perProject;
+            try
+            {
+                perProject = await UpgradeProjectAsync(configuration.Id, configuration.ProjectId, now, ct);
+            }
+            catch
+            {
+                await RecordCleanupFailureAuditAsync(ct);
+                throw;
+            }
             totals = totals with
             {
                 ProjectsUpgraded = totals.ProjectsUpgraded + 1,
@@ -185,16 +197,30 @@ public sealed class SoftwareProcedureExecutionCutoverAuthority(
     /// Fail-closed repair for the only historically possible inconsistent state: a completion marker whose
     /// Completed audit evidence was never committed (the pre-atomic build saved the two rows separately).
     /// The audit is reconstructed from the marker's immutable stored totals, and only when it is genuinely
-    /// missing.
+    /// missing. The repair is database-atomic: the marker row is locked (FOR UPDATE on PostgreSQL) inside a
+    /// transaction before the check, so two startup instances repairing the same historical state serialize
+    /// and exactly one inserts the audit.
     /// </summary>
     private async Task RecoverMissingCompletionAuditAsync(GovernedMigrationCompletion completion,
         CancellationToken ct)
     {
+        await using var transaction = await db.Database.BeginTransactionAsync(ct);
+        // A database-enforced claim: lock the existing marker row so concurrent repair attempts serialize.
+        // The unique marker cannot arbitrate this recovery (it is already present), so the row lock is the
+        // real concurrency boundary. SQLite serializes writers at the database level and needs no FOR UPDATE.
+        if (db.Database.IsNpgsql())
+            await db.Database.ExecuteSqlRawAsync(
+                "SELECT \"Id\" FROM governed_migration_completions WHERE \"Marker\" = {0} FOR UPDATE",
+                new object[] { MigrationMarker }, ct);
         var auditExists = await db.SecurityAuditEvents.AsNoTracking().AnyAsync(x =>
             x.EventType == CompletedEvent
             && x.ActorId == Actor
             && x.Target == "software-procedure-execution-cutover", ct);
-        if (auditExists) return;
+        if (auditExists)
+        {
+            await transaction.CommitAsync(ct);
+            return;
+        }
         var totals = ParseTotals(completion.TotalsJson);
         db.SecurityAuditEvents.Add(new SecurityAuditEvent(
             CompletedEvent, Actor, "software-procedure-execution-cutover", "Succeeded",
@@ -210,6 +236,7 @@ public sealed class SoftwareProcedureExecutionCutoverAuthority(
                 reason = "Recovered missing completion audit evidence after an interrupted claim; totals are the immutable stored completion totals."
             }), "", DateTimeOffset.UtcNow));
         await db.SaveChangesAsync(ct);
+        await transaction.CommitAsync(ct);
     }
 
     private static SoftwareProcedureCutoverResult ParseTotals(string totalsJson) =>
@@ -303,6 +330,15 @@ public sealed class SoftwareProcedureExecutionCutoverAuthority(
         foreach (var link in existingLinks)
             if (migrationOwnedRevisions.TryGetValue(link.ProcedureRevisionId, out var procedureArtifactId))
                 caseRevisionToProcedure[link.CaseRevisionId] = (procedureArtifactId, link.ProcedureRevisionId);
+        // Typed source-of-generation records make the mapping durable and exact for EVERY generated
+        // revision — including dormant/retired mirrors that carry no executable link — and make crash
+        // recovery idempotent without relying on audit prose.
+        var existingMigrationSources = await db.TestProcedureMigrationSources.AsNoTracking()
+            .Where(source => source.ProjectId == projectId)
+            .ToListAsync(ct);
+        foreach (var source in existingMigrationSources)
+            caseRevisionToProcedure[source.SourceCaseRevisionId] =
+                (source.GeneratedProcedureArtifactId, source.GeneratedProcedureRevisionId);
 
         var caseById = cases.ToDictionary(x => x.Id);
         var generated = 0;
@@ -332,31 +368,44 @@ public sealed class SoftwareProcedureExecutionCutoverAuthority(
                 var effectiveBaselineId = selectedCaseRevisionIds.Contains(caseRevision.Id)
                     ? caseRevision.EffectiveBaselineId
                     : null;
+                // A historically-effective Case revision that is no longer selected by any current baseline
+                // cannot carry a governed executable claim: its mirror would not be selectable in the Case's
+                // baseline (membership moved on), so the mirror is preserved in the honest non-executable
+                // Retired state — never an Approved parentless Procedure that runtime selection seams could
+                // mistake for executable work.
+                var dormant = !retired && effectiveBaselineId is null
+                    && caseRevision.EffectiveBaselineId is not null;
+                var mirroredState = retired || dormant
+                    ? TestProcedureState.Retired
+                    : TestProcedureState.Approved;
                 var revision = new TestProcedureRevision(procedure.Id, caseRevision.Revision,
                     caseRevision.Objective, caseRevision.Preconditions, caseRevision.Steps,
                     caseRevision.ExpectedResult,
-                    retired ? TestProcedureState.Retired : TestProcedureState.Approved,
+                    mirroredState,
                     Actor, now,
                     effectiveBaselineId: effectiveBaselineId,
-                    environmentSetup: retired ? "" : caseRevision.Preconditions,
+                    environmentSetup: mirroredState == TestProcedureState.Retired ? "" : caseRevision.Preconditions,
                     testData: "",
-                    orderedSteps: retired ? "" : caseRevision.Steps,
-                    expectedObservations: retired ? "" : caseRevision.ExpectedResult,
+                    orderedSteps: mirroredState == TestProcedureState.Retired ? "" : caseRevision.Steps,
+                    expectedObservations: mirroredState == TestProcedureState.Retired ? "" : caseRevision.ExpectedResult,
                     cleanup: "",
                     toolingAutomation: "",
-                    parentKind: VerificationProcedureParentKind.Allocated);
+                    parentKind: VerificationProcedureParentKind.Allocated,
+                    retirementRationale: retired || dormant
+                        ? (retired
+                            ? "Historical retired Case revision mirrored as a retired Procedure revision; no active executable claim was manufactured."
+                            : "Superseded by a later selected Case revision before the Procedure execution cutover; preserved as history without an executable claim.")
+                        : null);
                 db.TestProcedureRevisions.Add(revision);
-                // A Retired Case cannot be an exact active parent under the persistence rules; the retired
-                // history is preserved by the mirrored Retired Procedure revision and its audit event, never
-                // by manufacturing an active executable claim from retired content. The same rule applies to
-                // a historically-effective Case revision that is no longer selected by any current baseline:
-                // its mirror cannot be selected in the Case's governed baseline (membership moved on), so it
-                // is preserved as history without manufacturing a governed executable claim.
-                var link = retired || (effectiveBaselineId is null
-                        && caseRevision.EffectiveBaselineId is not null)
+                // A Retired Case cannot be an exact active parent under the persistence rules; a dormant
+                // mirror is Retired for the same reason. The typed source record below preserves the exact
+                // Case→Procedure relation durably even when no executable link exists.
+                var link = mirroredState == TestProcedureState.Retired
                     ? null
                     : new TestCaseProcedureLink(caseRevision.Id, revision.Id);
                 if (link is not null) db.TestCaseProcedureLinks.Add(link);
+                db.TestProcedureMigrationSources.Add(new TestProcedureMigrationSource(
+                    projectId, caseRevision.Id, procedure.Id, revision.Id));
                 db.SecurityAuditEvents.Add(new SecurityAuditEvent(
                     MigrationMarker + ".ProcedureGenerated", Actor,
                     link is null ? $"TestProcedureRevision:{revision.Id}" : $"TestCaseProcedureLink:{link.Id}",
@@ -373,9 +422,8 @@ public sealed class SoftwareProcedureExecutionCutoverAuthority(
                         generatedProcedureRevision = revision.Id,
                         generatedState = revision.State.ToString(),
                         sourceTcrId = caseRevision.SourceTestChangeRequestId,
-                        reason = retired || (effectiveBaselineId is null
-                                && caseRevision.EffectiveBaselineId is not null)
-                            ? "Historical Case revision mirrored without an active executable claim (retired or superseded by a later selected revision); no governed claim was manufactured."
+                        reason = retired || dormant
+                            ? "Historical Case revision mirrored as a Retired Procedure revision with typed source provenance; no governed executable claim was manufactured."
                             : "Deterministically generated from the exact legacy Case revision; no TCR, reviewer, or human approval fabricated."
                     }), "", now));
                 caseRevisionToProcedure[caseRevision.Id] = (procedure.Id, revision.Id);
@@ -411,14 +459,15 @@ public sealed class SoftwareProcedureExecutionCutoverAuthority(
         var provenanceByBaseline = baselineSelections
             .Where(selection => migratedCaseRevisionIdsList.Contains(selection.RevisionId))
             .GroupBy(selection => selection.BaselineId)
-            .ToDictionary(group => group.Key, group => string.Join(";", group
+            .ToDictionary(group => group.Key, group => group
                 .Select(selection =>
                 {
                     var (procedureArtifactId, procedureRevisionId) =
                         caseRevisionToProcedure[selection.RevisionId];
                     return $"case:{selection.RevisionId}->procedure:{procedureArtifactId}:{procedureRevisionId}";
                 })
-                .OrderBy(identity => identity, StringComparer.Ordinal)));
+                .OrderBy(identity => identity, StringComparer.Ordinal)
+                .ToList());
         foreach (var selection in baselineSelections)
             if (caseRevisionToProcedure.TryGetValue(selection.RevisionId, out var executable))
                 selection.RebindMigrationExecutable(executable.ArtifactId, executable.RevisionId);
@@ -475,12 +524,44 @@ public sealed class SoftwareProcedureExecutionCutoverAuthority(
                                              select new TestProcedureManifestEntry(procedure.Id, revision.Id,
                                                  procedure.BaseNumber, revision.Revision)).ToListAsync(ct);
                 var newHash = TestProcedureManifest.Hash(manifestEntries);
-                if (string.Equals(baseline.TestProceduresHash, newHash, StringComparison.OrdinalIgnoreCase))
+                var mappings = provenanceByBaseline.GetValueOrDefault(baseline.Id) ?? [];
+                var chunks = ChunkProvenance(mappings);
+                var canonicalHash = CanonicalProvenanceHash(mappings);
+                var eventExists = await db.BaselineEvents.AsNoTracking().AnyAsync(x =>
+                    x.BaselineId == baseline.Id
+                    && x.EventType == ManifestMigrationEvent, ct);
+                var existingChunkCount = await db.BaselineExecutionCutoverProvenances.AsNoTracking()
+                    .CountAsync(x => x.BaselineId == baseline.Id, ct);
+                if (string.Equals(baseline.TestProceduresHash, newHash, StringComparison.OrdinalIgnoreCase)
+                    && eventExists && existingChunkCount == chunks.Count)
                     continue;
-                baseline.RecordExecutionCutoverManifestMigration(Actor, previousHash, newHash,
-                    oldMembershipCountByBaseline.GetValueOrDefault(baseline.Id), manifestEntries.Count,
-                    provenanceByBaseline.GetValueOrDefault(baseline.Id) ?? "no migrated Case executable memberships in this baseline",
-                    now);
+                Guid eventId;
+                if (eventExists)
+                {
+                    eventId = await db.BaselineEvents.AsNoTracking()
+                        .Where(x => x.BaselineId == baseline.Id
+                            && x.EventType == ManifestMigrationEvent)
+                        .Select(x => x.Id).SingleAsync(ct);
+                }
+                else
+                {
+                    // Bounded summary: exact mappings live in sequence-numbered provenance rows, so the
+                    // BaselineEvent.Detail stays far below 4,000 characters for every population size.
+                    var summary = mappings.Count == 0
+                        ? "no migrated Case executable memberships in this baseline"
+                        : $"mappings={mappings.Count}; chunks={chunks.Count}; canonicalHash={canonicalHash}";
+                    eventId = baseline.RecordExecutionCutoverManifestMigration(Actor, previousHash, newHash,
+                        oldMembershipCountByBaseline.GetValueOrDefault(baseline.Id), manifestEntries.Count,
+                        summary, now);
+                }
+                var existingSequences = await db.BaselineExecutionCutoverProvenances.AsNoTracking()
+                    .Where(x => x.BaselineId == baseline.Id)
+                    .Select(x => x.Sequence).ToListAsync(ct);
+                var existingSequenceSet = existingSequences.ToHashSet();
+                for (var sequence = 0; sequence < chunks.Count; sequence++)
+                    if (!existingSequenceSet.Contains(sequence))
+                        db.BaselineExecutionCutoverProvenances.Add(new BaselineExecutionCutoverProvenance(
+                            baseline.Id, eventId, sequence, mappings.Count, canonicalHash, chunks[sequence]));
             }
             await db.SaveChangesAsync(ct);
             await RegenerateAffectedDocumentsAsync(affectedBaselineIds, now, ct);
@@ -510,25 +591,52 @@ public sealed class SoftwareProcedureExecutionCutoverAuthority(
         catch
         {
             // The surrounding transaction rolls back; any rendition bytes stored by this in-flight project
-            // transaction are now unreferenced output and are removed safely. Previously referenced evidence
-            // is never deleted.
-            RemovePendingNewStorageKeys();
+            // transaction are now unreferenced output and are removed best-effort. Previously referenced
+            // evidence is never deleted. Deletion failures are returned for durable audit recording.
+            _lastCleanupFailures = RemovePendingNewStorageKeys();
             throw;
         }
     }
 
     /// <summary>
-    /// Removes only the storage keys written by the current in-flight project transaction after a rollback.
-    /// Old referenced evidence is never touched.
+    /// Records any failed rollback cleanup as durable audit evidence. Best-effort: if the process cannot
+    /// write this audit either, the residual orphaned bytes remain unreferenced output that must be
+    /// reconciled — they are never claimed to be impossible, and old referenced evidence is never deleted.
     /// </summary>
-    private void RemovePendingNewStorageKeys()
+    private async Task RecordCleanupFailureAuditAsync(CancellationToken ct)
     {
+        if (_lastCleanupFailures.Count == 0) return;
+        var failedKeys = _lastCleanupFailures.ToList();
+        _lastCleanupFailures = [];
+        db.SecurityAuditEvents.Add(new SecurityAuditEvent(
+            MigrationMarker + ".OrphanedRenditionCleanupFailed", Actor,
+            "evidence-store-rollback-cleanup", "Failed",
+            Json(new
+            {
+                migration = MigrationMarker,
+                storageKeys = failedKeys,
+                reason = "Rollback cleanup could not delete newly stored orphaned rendition bytes after a failed Procedure cutover transaction. The keys are unreferenced output and require reconciliation; previously referenced evidence was never deleted."
+            }), "", DateTimeOffset.UtcNow));
+        try { await db.SaveChangesAsync(ct); }
+        catch { /* the residual failure is documented in the handoff; old evidence is never deleted */ }
+    }
+
+    /// <summary>
+    /// Best-effort removal of ONLY the storage keys written by the current in-flight project transaction
+    /// after a rollback. Old referenced evidence is never touched. A deletion failure does not silently
+    /// disappear: the failed keys are returned and recorded as audit evidence by the caller, so the residual
+    /// orphaned bytes are explicitly known and reconcilable rather than claimed to be impossible.
+    /// </summary>
+    private IReadOnlyList<string> RemovePendingNewStorageKeys()
+    {
+        var failed = new List<string>();
         foreach (var storageKey in _pendingNewStorageKeys)
         {
             try { Files.Delete(storageKey); }
-            catch { /* best-effort cleanup; referenced evidence is never deleted */ }
+            catch { failed.Add(storageKey); }
         }
         _pendingNewStorageKeys.Clear();
+        return failed;
     }
 
     /// <summary>
@@ -823,18 +931,20 @@ public sealed class SoftwareProcedureExecutionCutoverAuthority(
             .Select(x => x.ProjectId).ToListAsync(ct);
         if (upgradedProjectIds.Count == 0) return new(0, 0, 0, 0, 0, 0);
         // The generated revisions must be restricted to the recovered projects' own procedures; unrelated
-        // or still-pending projects' evidence must never leak into these totals.
+        // or still-pending projects' evidence must never leak into these totals. The typed
+        // TestProcedureMigrationSource rows are the authoritative generated-revision inventory — never a
+        // heuristic over author strings, which a fabricated migration-looking revision could spoof.
         var upgradedProjectIdSet = upgradedProjectIds.ToHashSet();
-        var generatedRevisions = await (from revision in db.TestProcedureRevisions.AsNoTracking()
+        var generatedRevisions = await (from source in db.TestProcedureMigrationSources.AsNoTracking()
                                         join procedure in db.TestProcedures.AsNoTracking()
-                                            on revision.ProcedureId equals procedure.Id
-                                        where revision.AuthorId == Actor
-                                            && revision.ParentKind == VerificationProcedureParentKind.Allocated
-                                            && (revision.State == TestProcedureState.Approved
-                                                || revision.State == TestProcedureState.Retired)
-                                            && upgradedProjectIdSet.Contains(procedure.ProjectId)
-                                        select new { revision.Id, revision.ProcedureId }).ToListAsync(ct);
-        var generatedRevisionIds = generatedRevisions.Select(x => x.Id).ToHashSet();
+                                            on source.GeneratedProcedureArtifactId equals procedure.Id
+                                        where upgradedProjectIdSet.Contains(procedure.ProjectId)
+                                        select new
+                                        {
+                                            RevisionId = source.GeneratedProcedureRevisionId,
+                                            ProcedureId = source.GeneratedProcedureArtifactId
+                                        }).ToListAsync(ct);
+        var generatedRevisionIds = generatedRevisions.Select(x => x.RevisionId).ToHashSet();
         var generatedProcedureIds = generatedRevisions.Select(x => x.ProcedureId).ToHashSet();
         var executions = await db.TestExecutions.AsNoTracking()
             .CountAsync(x => generatedRevisionIds.Contains(x.ProcedureRevisionId), ct);
@@ -897,4 +1007,19 @@ public sealed class SoftwareProcedureExecutionCutoverAuthority(
     }
 
     private static string Json(object value) => JsonSerializer.Serialize(value);
+
+    private const string ManifestMigrationEvent = "ExecutionCutoverManifestMigrated";
+
+    private static IReadOnlyList<IReadOnlyList<string>> ChunkProvenance(IReadOnlyList<string> mappings)
+    {
+        const int chunkSize = 10;
+        var chunks = new List<IReadOnlyList<string>>();
+        for (var offset = 0; offset < mappings.Count; offset += chunkSize)
+            chunks.Add(mappings.Skip(offset).Take(chunkSize).ToArray());
+        return chunks;
+    }
+
+    private static string CanonicalProvenanceHash(IReadOnlyList<string> mappings) =>
+        Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(string.Join(";", mappings))))
+            .ToLowerInvariant();
 }

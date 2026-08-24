@@ -2083,7 +2083,8 @@
         "ControlledEditingProcedureAuthorityTests",
         "EffectiveExecutionAuthorityApiTests",
         "ProblemReportVerificationApiTests",
-        "TestExecutionEffectivityApiTests"
+        "TestExecutionEffectivityApiTests",
+        "VerificationImpactApiTests"
       ]
     },
     {

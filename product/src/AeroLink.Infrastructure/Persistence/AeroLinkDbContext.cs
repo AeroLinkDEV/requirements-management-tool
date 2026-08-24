@@ -87,12 +87,16 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
     public DbSet<BaselineExternalPackageSelection> BaselineExternalPackageSelections => Set<BaselineExternalPackageSelection>();
     public DbSet<BaselineTestChangeRequestSelection> BaselineTestChangeSelections => Set<BaselineTestChangeRequestSelection>();
     public DbSet<BaselineEvent> BaselineEvents => Set<BaselineEvent>();
+    public DbSet<BaselineExecutionCutoverProvenance> BaselineExecutionCutoverProvenances =>
+        Set<BaselineExecutionCutoverProvenance>();
     public DbSet<RequirementArtifact> Requirements => Set<RequirementArtifact>();
     public DbSet<RequirementRevision> RequirementRevisions => Set<RequirementRevision>();
     public DbSet<BaselineRequirementSelection> BaselineRequirements => Set<BaselineRequirementSelection>();
     public DbSet<TestProcedure> TestProcedures => Set<TestProcedure>();
     public DbSet<TestProcedureRevision> TestProcedureRevisions => Set<TestProcedureRevision>();
     public DbSet<TestCaseProcedureLink> TestCaseProcedureLinks => Set<TestCaseProcedureLink>();
+    public DbSet<TestProcedureMigrationSource> TestProcedureMigrationSources =>
+        Set<TestProcedureMigrationSource>();
     public DbSet<BaselineTestProcedureSelection> BaselineTestProcedures => Set<BaselineTestProcedureSelection>();
     public DbSet<TestRequirementCoverage> TestCoverage => Set<TestRequirementCoverage>();
     public DbSet<TestExecution> TestExecutions => Set<TestExecution>();
@@ -906,6 +910,16 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
             b.Property(x => x.Detail).HasMaxLength(4000).IsRequired();
             b.HasIndex(x => new { x.BaselineId, x.OccurredAt });
         });
+        modelBuilder.Entity<BaselineExecutionCutoverProvenance>(b =>
+        {
+            b.ToTable("baseline_execution_cutover_provenance"); b.HasKey(x => x.Id);
+            b.Property(x => x.CanonicalAggregateHash).HasMaxLength(64).IsRequired();
+            b.Property(x => x.Content).HasMaxLength(2000).IsRequired();
+            b.HasIndex(x => new { x.BaselineId, x.Sequence }).IsUnique();
+            b.HasIndex(x => x.EventId);
+            b.HasOne<CandidateBaseline>().WithMany().HasForeignKey(x => x.BaselineId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
         modelBuilder.Entity<RequirementArtifact>(b =>
         {
             b.ToTable("requirements"); b.HasKey(x => x.Id);
@@ -982,6 +996,13 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
             b.HasOne<ExactLinkSuspectLifecycle>().WithOne()
                 .HasForeignKey<TestCaseProcedureLink>(x => x.ExactLinkSuspectLifecycleId)
                 .OnDelete(DeleteBehavior.Restrict);
+        });
+        modelBuilder.Entity<TestProcedureMigrationSource>(b =>
+        {
+            b.ToTable("test_procedure_migration_sources"); b.HasKey(x => x.Id);
+            b.HasIndex(x => x.SourceCaseRevisionId).IsUnique();
+            b.HasIndex(x => x.GeneratedProcedureRevisionId).IsUnique();
+            b.HasOne<ProjectRecord>().WithMany().HasForeignKey(x => x.ProjectId).OnDelete(DeleteBehavior.Restrict);
         });
         modelBuilder.Entity<BaselineTestProcedureSelection>(b =>
         {
@@ -2829,13 +2850,6 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
             var isGovernedMigration = revision.AuthorId == VerificationArtifactProfileSchema.GovernedMigrationActor
                 && revision.ParentKind == VerificationProcedureParentKind.Allocated
                 && revision.State == TestProcedureState.Approved;
-            // A migration-generated mirror of a historically-effective Case revision that is no longer
-            // selected by any current baseline is preserved as history: it carries no baseline and no exact
-            // parent claim. The ordinary Allocated XOR rule cannot apply to an explicitly claim-free
-            // migration mirror, and the mirror is never executable (it is selected in no baseline).
-            var isDormantMigrationMirror = isGovernedMigration
-                && revision.EffectiveBaselineId is null
-                && parentIdsByRevision[revision.Id].Count == 0;
             if (owner.ArtifactKind == VerificationArtifactKind.Procedure && owner.Level != TestProcedureLevel.System
                 && revision.State != TestProcedureState.Retired
                 && (string.IsNullOrWhiteSpace(revision.EnvironmentSetup)
@@ -2845,8 +2859,9 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
                         || string.IsNullOrWhiteSpace(revision.Cleanup)
                         || string.IsNullOrWhiteSpace(revision.ToolingAutomation))))
                 throw new DomainException("A software Procedure revision requires environment/setup, test data, ordered steps, expected observations, cleanup, and tooling/automation.");
-            if (!isDormantMigrationMirror)
-                revision.ValidateProcedureParents(owner, parentIdsByRevision[revision.Id]);
+            // Retired revisions are exempt inside ValidateProcedureParents, so a historical migration mirror
+            // preserved in the Retired state never needs a global persistence exemption.
+            revision.ValidateProcedureParents(owner, parentIdsByRevision[revision.Id]);
         }
     }
 

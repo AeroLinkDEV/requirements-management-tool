@@ -987,10 +987,31 @@ public sealed class SoftwareProcedureExecutionCutoverTests
                 && x.EventType == "ExecutionCutoverManifestMigrated");
         Assert.Contains("Case-to-Procedure provenance", manifestEvent.Detail, StringComparison.Ordinal);
         Assert.Contains("executable membership changed", manifestEvent.Detail, StringComparison.Ordinal);
-        // Finding 5: provenance names the exact per-baseline Case→Procedure identities, deterministically
-        // ordered — never project-wide counts described as baseline provenance.
-        Assert.Contains("case:", manifestEvent.Detail, StringComparison.Ordinal);
+        // Finding 5/Blocker 2: the event detail carries only a BOUNDED summary (mappings/chunks/canonical
+        // hash) — never project-wide counts — while the exact per-baseline Case→Procedure identities live in
+        // durable, sequence-numbered provenance rows that stay under the 4,000-character detail limit.
+        Assert.Contains("mappings=", manifestEvent.Detail, StringComparison.Ordinal);
+        Assert.True(manifestEvent.Detail.Length < 4000);
         Assert.DoesNotContain("generatedProcedureRevisions=", manifestEvent.Detail, StringComparison.Ordinal);
+        var provenanceRows = await db.BaselineExecutionCutoverProvenances.AsNoTracking()
+            .Where(x => x.BaselineId == baseline.Id)
+            .OrderBy(x => x.Sequence).ToListAsync();
+        Assert.NotEmpty(provenanceRows);
+        var provenanceEntries = provenanceRows.SelectMany(x => x.Content.Split(';')).ToList();
+        Assert.All(provenanceEntries, entry => Assert.StartsWith("case:", entry));
+        Assert.Equal(provenanceRows.Sum(x => x.EntryCount), provenanceEntries.Count);
+        Assert.Equal(provenanceEntries.Count, provenanceEntries.Distinct().Count());
+        // Every provenance entry must resolve to a typed migration-source record: exact Case revision → the
+        // generated Procedure artifact/revision it names.
+        foreach (var entry in provenanceEntries)
+        {
+            var caseId = Guid.Parse(entry.Split("->procedure:")[0]["case:".Length..]);
+            var generated = entry.Split("->procedure:")[1].Split(':');
+            Assert.True(await db.TestProcedureMigrationSources.AsNoTracking().AnyAsync(x =>
+                x.SourceCaseRevisionId == caseId
+                && x.GeneratedProcedureArtifactId == Guid.Parse(generated[0])
+                && x.GeneratedProcedureRevisionId == Guid.Parse(generated[1])));
+        }
         // The cutover event must explicitly disclaim the #722 identity-only claim: bodies were generated
         // and Case executable membership was replaced, so the detail says so instead of asserting it.
         Assert.Contains("not an identity-only migration", manifestEvent.Detail, StringComparison.Ordinal);
@@ -1994,11 +2015,97 @@ public sealed class SoftwareProcedureExecutionCutoverTests
             var xml = await reader.ReadToEndAsync();
             Assert.Contains(caseArtifact.BaseNumber, xml);
             Assert.DoesNotContain($"{caseArtifact.BaseNumber}.01", xml);
+
+            // Blocker 3: the superseded .00 mirror is preserved in the honest Retired state with typed
+            // source provenance and NO executable link; the current .01 mirror is Approved and linked.
+            var procedure = await db.TestProcedures.AsNoTracking()
+                .SingleAsync(x => x.ProjectId == seed.ProjectId
+                    && x.ArtifactKind == VerificationArtifactKind.Procedure);
+            var mirroredRevisions = await db.TestProcedureRevisions.AsNoTracking()
+                .Where(x => x.ProcedureId == procedure.Id).OrderBy(x => x.Revision).ToListAsync();
+            Assert.Equal([0, 1], mirroredRevisions.Select(x => x.Revision).ToArray());
+            Assert.Equal(TestProcedureState.Retired, mirroredRevisions[0].State);
+            Assert.Equal(TestProcedureState.Approved, mirroredRevisions[1].State);
+            Assert.Equal(0, await db.TestCaseProcedureLinks.AsNoTracking().CountAsync(x =>
+                x.ProcedureRevisionId == mirroredRevisions[0].Id));
+            Assert.Equal(1, await db.TestCaseProcedureLinks.AsNoTracking().CountAsync(x =>
+                x.ProcedureRevisionId == mirroredRevisions[1].Id));
+            Assert.Equal(2, await db.TestProcedureMigrationSources.AsNoTracking().CountAsync(x =>
+                x.ProjectId == seed.ProjectId));
+            Assert.True(await db.TestProcedureMigrationSources.AsNoTracking().AnyAsync(x =>
+                x.SourceCaseRevisionId == caseRevisionId
+                && x.GeneratedProcedureArtifactId == procedure.Id
+                && x.GeneratedProcedureRevisionId == mirroredRevisions[0].Id));
+            var impactService = new VerificationImpactService(db,
+                policyResolver: new EffectiveProjectLadderPolicyResolver(db));
+            Assert.NotNull(await impactService.FindApprovedProcedureAsync(
+                seed.ProjectId, procedure.Id, default));
+            Assert.Equal(mirroredRevisions[1].Id, (await impactService.FindApprovedProcedureAsync(
+                seed.ProjectId, procedure.Id, default))!.RevisionId);
         }
         finally
         {
             try { Directory.Delete(evidenceRoot, recursive: true); } catch (IOException) { }
         }
+    }
+
+    [Fact]
+    public async Task Fully_dormant_migration_mirror_is_retired_typed_and_never_approved()
+    {
+        var options = new DbContextOptionsBuilder<AeroLinkDbContext>().UseSqlite("Data Source=:memory:").Options;
+        var db = new AeroLinkDbContext(options);
+        await db.Database.OpenConnectionAsync();
+        await db.Database.EnsureCreatedAsync();
+        var now = DateTimeOffset.UtcNow;
+        var program = new ProgramRecord("Dormant Program", "DRM");
+        var project = new ProjectRecord(program.Id, "Dormant Software", "Dormant Product");
+        var release = new SoftwareRelease(project.Id, "1.0", false);
+        var baseline = new CandidateBaseline("SW-01.00", 0, project.Id, release.Id, null,
+            "Candidate", "cm.test", now);
+        db.AddRange(program, project, release, baseline);
+        var configuration = LegacyDefaultProjectLadderFactory.Create(project.Id, now);
+        db.ProjectLadderConfigurations.Add(configuration);
+        await db.SaveChangesAsync();
+        var seal = await new ProjectLadderSealAuthority(db).SealAsync(project.Id,
+            LadderBoundContentCatalog.Current.First().Id, "dormant-content", "test.sealer", now);
+        Assert.Equal(ProjectLadderSealResultKind.Sealed, seal.Kind);
+
+        var caseArtifact = new TestProcedure(project.Id, "HLRTC-000800", "Historical dormant case",
+            "test.engineer", now, TestProcedureLevel.HighLevel);
+        var caseRevision = new TestProcedureRevision(caseArtifact.Id, 0,
+            "Verify historical work", "Preconditions", "Steps", "Expected",
+            TestProcedureState.Approved, "test.engineer", now, effectiveBaselineId: baseline.Id,
+            parentKind: VerificationProcedureParentKind.Derived,
+            derivedRationale: "Historical dormant fixture Case with no current requirement coverage.");
+        // The Case retains its historical EffectiveBaselineId but is selected in NO current baseline: it is
+        // fully dormant at cutover time.
+        db.AddRange(caseArtifact, caseRevision);
+        await db.SaveChangesAsync();
+
+        var (legacy, typed) = FullRegistrations();
+        var result = await new SoftwareProcedureExecutionCutoverAuthority(db, legacy, typed,
+            allowSqliteExecution: true).EnsureCompletedAsync();
+        Assert.Equal(1, result.ProceduresGenerated);
+        var procedure = await db.TestProcedures.AsNoTracking()
+            .SingleAsync(x => x.ProjectId == project.Id
+                && x.ArtifactKind == VerificationArtifactKind.Procedure);
+        var mirror = await db.TestProcedureRevisions.AsNoTracking()
+            .SingleAsync(x => x.ProcedureId == procedure.Id);
+        Assert.Equal(TestProcedureState.Retired, mirror.State);
+        Assert.Null(mirror.EffectiveBaselineId);
+        Assert.Equal(0, await db.TestCaseProcedureLinks.AsNoTracking().CountAsync());
+        var source = await db.TestProcedureMigrationSources.AsNoTracking().SingleAsync(x =>
+            x.ProjectId == project.Id);
+        Assert.Equal(caseRevision.Id, source.SourceCaseRevisionId);
+        Assert.Equal(procedure.Id, source.GeneratedProcedureArtifactId);
+        Assert.Equal(mirror.Id, source.GeneratedProcedureRevisionId);
+
+        // No runtime selection seam can see an approved executable revision on this artifact.
+        var service = new VerificationImpactService(db,
+            policyResolver: new EffectiveProjectLadderPolicyResolver(db));
+        Assert.Null(await service.FindApprovedProcedureAsync(project.Id, procedure.Id, default));
+        var effectivity = await TestProcedureEffectivity.ForReleaseAsync(db, project.Id, release.Id, default);
+        Assert.False(effectivity?.RevisionByProcedure.ContainsKey(procedure.Id) == true);
     }
 
     [Fact]
