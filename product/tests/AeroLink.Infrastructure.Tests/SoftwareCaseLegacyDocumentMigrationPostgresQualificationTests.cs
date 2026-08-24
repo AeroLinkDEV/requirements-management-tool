@@ -357,12 +357,35 @@ public sealed class SoftwareCaseLegacyDocumentMigrationPostgresQualificationTest
         new DbContextOptionsBuilder<AeroLinkDbContext>().UseNpgsql(connection).Options;
 
     private static string QualificationConnectionOrSkip() => ValidateQualificationConnection(
-        Environment.GetEnvironmentVariable("AEROLINK_747_CONNECTION"));
+        ResolveQualificationConnection());
+
+    /// <summary>
+    /// The connection this qualification runs against, or null when no PostgreSQL server was offered.
+    ///
+    /// Every other PostgreSQL qualification fixture in this repository is driven by
+    /// AEROLINK_MIGRATIONS_CONNECTION. Honouring only a bespoke AEROLINK_747_CONNECTION meant a
+    /// maintainer who set the conventional variable and ran the suite silently skipped these four
+    /// tests and still saw a green run — precisely the failure this fixture exists to prevent.
+    /// The shared variable names a <em>server</em>, not this fixture's database, so its database is
+    /// replaced with the dedicated disposable one rather than trusted: the isolation guarantee stays
+    /// with the fixture instead of depending on whatever the caller happened to point at. The
+    /// dedicated variable still wins when both are set, so an explicit #747 target is never silently
+    /// redirected somewhere else.
+    /// </summary>
+    internal static string? ResolveQualificationConnection()
+    {
+        var dedicated = Environment.GetEnvironmentVariable("AEROLINK_747_CONNECTION");
+        if (!string.IsNullOrWhiteSpace(dedicated)) return dedicated;
+        var shared = Environment.GetEnvironmentVariable("AEROLINK_MIGRATIONS_CONNECTION");
+        if (string.IsNullOrWhiteSpace(shared)) return null;
+        return new NpgsqlConnectionStringBuilder(shared) { Database = DatabaseName }.ConnectionString;
+    }
 
     private static string ValidateQualificationConnection(string? connection)
     {
         if (string.IsNullOrWhiteSpace(connection))
-            throw new InvalidOperationException("Issue #747 PostgreSQL qualification requires AEROLINK_747_CONNECTION.");
+            throw new InvalidOperationException(
+                "Issue #747 PostgreSQL qualification requires AEROLINK_747_CONNECTION or AEROLINK_MIGRATIONS_CONNECTION.");
         var builder = new NpgsqlConnectionStringBuilder(connection);
         var host = (builder.Host ?? string.Empty).Trim().Trim('[', ']');
         if (!string.Equals(host, "127.0.0.1", StringComparison.OrdinalIgnoreCase)
@@ -385,8 +408,10 @@ public sealed class SoftwareCaseLegacyDocumentMigrationPostgresQualificationTest
     {
         public Issue747PostgresFactAttribute()
         {
-            if (string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("AEROLINK_747_CONNECTION")))
-                Skip = "Issue #747 PostgreSQL qualification skipped: set AEROLINK_747_CONNECTION to the dedicated disposable database.";
+            // Skip only when no PostgreSQL server was offered at all. A conventional suite run that
+            // sets AEROLINK_MIGRATIONS_CONNECTION now executes these tests instead of skipping them.
+            if (string.IsNullOrWhiteSpace(ResolveQualificationConnection()))
+                Skip = "Issue #747 PostgreSQL qualification skipped: set AEROLINK_747_CONNECTION or AEROLINK_MIGRATIONS_CONNECTION.";
         }
     }
 }

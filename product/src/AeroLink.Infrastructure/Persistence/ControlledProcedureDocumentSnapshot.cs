@@ -138,6 +138,14 @@ public static class ControlledProcedureDocumentSnapshotProjection
                 // A newer Draft is proposed work, not controlled effectivity. Ignore it while selecting the
                 // generation-time revision; a later Retired revision remains eligible and therefore suppresses
                 // the procedure when the final Approved-only filter is applied.
+                //
+                // This bounds CreatedAt but reads the revision's CURRENT State. That is sound only because a
+                // revision never transitions: TestProcedureBaselineMaterializer constructs it already Approved
+                // or Retired, so approval and creation are the same event and CreatedAt is the approval time.
+                // If a state transition were ever introduced, a revision approved after this document was
+                // generated could be admitted into it and the document's identity would silently change. The
+                // invariant is pinned by LegacyControlledProcedureDocumentSnapshotTests
+                // .A_verification_revision_state_is_fixed_at_construction_so_CreatedAt_is_its_approval_time.
                 .Where(x => x.CreatedAt <= generatedAt && x.State != TestProcedureState.Draft)
                 .GroupBy(x => x.ProcedureId)
                 .Select(group => group.OrderByDescending(x => x.Revision).First())

@@ -14,6 +14,39 @@ namespace AeroLink.Infrastructure.Tests;
 
 public sealed class LegacyControlledProcedureDocumentSnapshotTests
 {
+    /// <summary>
+    /// The invariant that makes generation-time reconstruction authoritative rather than merely plausible.
+    ///
+    /// The legacy path selects rows with CreatedAt &lt;= the document's GeneratedAt but reads each revision's
+    /// CURRENT State. That is only sound because a revision never changes state: it is constructed Approved or
+    /// Retired by <see cref="TestProcedureBaselineMaterializer"/> when a package materialises, and approval is
+    /// therefore the same event as creation. If someone later adds a state transition, CreatedAt stops meaning
+    /// "approved at", a revision approved after a document was generated could be admitted into it, and a
+    /// controlled document's identity would silently change. Since #747 makes that reconstruction the migration
+    /// basis for legacy Case documents, the invariant is load-bearing and is pinned here rather than assumed.
+    /// This test failing is the signal to add an explicit approval timestamp and a fail-closed guard — not to
+    /// relax the assertion.
+    /// </summary>
+    [Fact]
+    public void A_verification_revision_state_is_fixed_at_construction_so_CreatedAt_is_its_approval_time()
+    {
+        var stateProperty = typeof(TestProcedureRevision).GetProperty(nameof(TestProcedureRevision.State))!;
+        Assert.False(stateProperty.SetMethod?.IsPublic ?? false);
+
+        // No public surface may reassign State. Anything that mutates a revision has to leave CreatedAt
+        // meaning "the moment this state began", which only holds while state is write-once.
+        var mutators = typeof(TestProcedureRevision)
+            .GetMethods(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance)
+            .Where(x => !x.IsSpecialName)
+            .Select(x => x.Name)
+            .Where(x => x.Contains("Approve", StringComparison.OrdinalIgnoreCase)
+                || x.Contains("Retire", StringComparison.OrdinalIgnoreCase)
+                || x.Contains("Transition", StringComparison.OrdinalIgnoreCase)
+                || x.Contains("SetState", StringComparison.OrdinalIgnoreCase))
+            .ToList();
+        Assert.Empty(mutators);
+    }
+
     [Fact]
     public async Task An_exact_Procedure_document_excludes_a_link_to_a_predecessor_Case_revision_not_in_its_baseline()
     {
