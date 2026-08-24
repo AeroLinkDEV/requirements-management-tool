@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import type { AuthUser } from "./IdentityCenter";
 import ControlledRequirementEditor from "./ControlledRequirementEditor";
+import { useVerificationVocabulary } from "./verificationMethods";
 import RequirementsImportPanel from "./RequirementsImportPanel";
 import type {
   ControlledRequirementDraft,
@@ -77,10 +78,17 @@ const parseObject = (value: string | undefined): Record<string, unknown> => {
     return {};
   }
 };
+/**
+ * A blank proposal. The verification method is supplied by the caller from the project's loaded vocabulary
+ * (#701) rather than defaulted to a product word here: a programme that permits only Similarity must not have
+ * every new requirement start out declaring a method its own vocabulary refuses. Blank when the vocabulary has
+ * not arrived, which submission refuses and names — an honest empty is better than a plausible wrong default.
+ */
 const createProposal = (
   level: RequirementLevel,
   kind: RequirementKind,
   baseNumber = "",
+  defaultVerificationMethod = "",
 ): ControlledRequirementDraft => ({
   baseNumber,
   revision: 0,
@@ -88,7 +96,7 @@ const createProposal = (
   kind,
   statement: "",
   rationale: "",
-  verificationMethod: level === "Interface" ? "Not applicable" : "Test",
+  verificationMethod: level === "Interface" ? "Not applicable" : defaultVerificationMethod,
   richText: "",
   attributesJson: JSON.stringify({ criticality: "Normal", owner: "" }),
   impactDispositionJson: pendingImpact,
@@ -132,6 +140,10 @@ export default function ChangeRequestEditor({
   const abbreviation = changeRequestAcronym(defaultLevel);
   const softwareLevelLabel = defaultLevel === "LowLevel" ? "LLR" : "HLR";
   const storageKey = `aerolink:new-${scope.toLowerCase()}-${scope === "Software" ? softwareLevelLabel.toLowerCase() : scope === "Interface" ? "icd" : "system"}-change:${projectId}:${releaseId}`;
+  // #701: a new proposal starts on a method the project actually permits, taken from the configured
+  // vocabulary rather than from a word this file happens to know.
+  const verification = useVerificationVocabulary(api, projectId);
+  const defaultVerificationMethod = verification.vocabulary?.methods[0] ?? "";
   const seededSource = useRef("");
   const [context, setContext] = useState<AuthoringContext>();
   // Nothing is seeded from a stored draft. It is offered below, and applied only if the author says so.
@@ -257,7 +269,7 @@ export default function ChangeRequestEditor({
     if (validationError?.kind === "proposal") setValidationError(undefined);
     setChanges((items) => [
       ...items,
-      createProposal(level, kind, kind === "Introduce" ? nextIdentifier(level) : ""),
+      createProposal(level, kind, kind === "Introduce" ? nextIdentifier(level) : "", defaultVerificationMethod),
     ]);
   };
 
@@ -524,6 +536,7 @@ export default function ChangeRequestEditor({
                 index={index}
                 key={`${index}-${change.kind}`}
                 identityLocked={Boolean(change.baseNumber)}
+                verification={verification}
                 onChange={(key, value) => updateProposal(index, key, value)}
                 onKindChange={(kind) => changeKind(index, kind)}
                 onRemove={() => {

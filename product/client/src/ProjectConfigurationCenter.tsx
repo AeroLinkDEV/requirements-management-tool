@@ -4,6 +4,7 @@ import PortalHeader from "./PortalHeader";
 import ApprovalConfigurationCenter from "./ApprovalConfigurationCenter";
 import { apiRequest, operationError } from "./apiClient";
 import { capabilityMask } from "./projectLadder";
+import { useVerificationVocabulary } from "./verificationMethods";
 import "./ProjectConfigurationCenter.css";
 
 type Level = string;
@@ -49,17 +50,49 @@ function normalizeConfiguration(value: ConfigurationResponse): Configuration {
 
 export default function ProjectConfigurationCenter({ user, api, projectId, projectName, initialSection = "ladder", onBackToBuilds, onOpenApprovalConfiguration, onActivated, onSignOut }: {
   user: AuthUser; api: string; projectId: string; projectName: string; onBackToBuilds: () => void;
-  initialSection?: "ladder" | "history" | "readiness" | "approvals";
+  initialSection?: "ladder" | "history" | "readiness" | "approvals" | "verification";
   onOpenApprovalConfiguration: () => void; onActivated: (configuration: Configuration) => void; onSignOut: () => void;
 }) {
   const [configuration, setConfiguration] = useState<Configuration>();
   const [steps, setSteps] = useState<Step[]>([]);
   const [relationships, setRelationships] = useState<Relationship[]>([]);
   const [reason, setReason] = useState("");
-  const [section, setSection] = useState<"ladder" | "history" | "readiness" | "approvals">(initialSection);
+  const [section, setSection] = useState<"ladder" | "history" | "readiness" | "approvals" | "verification">(initialSection);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [saving, setSaving] = useState(false);
+
+  // The project's permitted verification methods (#701). Edited here because this decides what every future
+  // submission will accept, which is the same authority the ladder above already carries. The stored values
+  // that do not match are reported beside it and never rewritten: reconciling one is a controlled change to
+  // the record that says it, not a side effect of opening this screen.
+  const { vocabulary, loading: vocabularyLoading, error: vocabularyError, reload: reloadVocabulary } =
+    useVerificationVocabulary(api, projectId);
+  const [methods, setMethods] = useState<string[]>([]);
+  const [newMethod, setNewMethod] = useState("");
+  const [vocabularyReason, setVocabularyReason] = useState("");
+  useEffect(() => { if (vocabulary) setMethods([...vocabulary.methods]); }, [vocabulary]);
+  const vocabularyDirty = !!vocabulary && JSON.stringify(methods) !== JSON.stringify(vocabulary.methods);
+  const canManageVocabulary = !!vocabulary?.canManage;
+  const moveMethod = (index: number, delta: number) => {
+    const next = [...methods]; const target = index + delta; if (target < 0 || target >= next.length) return;
+    [next[index], next[target]] = [next[target], next[index]]; setMethods(next);
+  };
+  const addMethod = () => { if (!newMethod.trim()) return; setMethods([...methods, newMethod.trim()]); setNewMethod(""); };
+  const saveVocabulary = async () => {
+    if (!vocabulary || !vocabularyReason.trim()) { setError("A meaningful reason is required for every configuration edit."); return; }
+    setSaving(true); setError(""); setNotice("");
+    try {
+      await apiRequest(`${api}/api/projects/${projectId}/verification-methods`, {
+        method: "PUT", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ expectedVersion: vocabulary.version, reason: vocabularyReason, methods }),
+      });
+      setVocabularyReason("");
+      setNotice(`Permitted verification methods saved: ${methods.join(", ")}.`);
+      await reloadVocabulary();
+    } catch (failure) { setError(operationError(failure, "The verification vocabulary edit was refused.")); }
+    finally { setSaving(false); }
+  };
 
   const load = useCallback(async () => {
     try {
@@ -143,9 +176,21 @@ export default function ProjectConfigurationCenter({ user, api, projectId, proje
           <button className={section === "history" ? "selected" : ""} onClick={() => setSection("history")}>History<small>{configuration.history.length} attributed edits</small></button>
           <button className={section === "readiness" ? "selected" : ""} onClick={() => setSection("readiness")}>Activation readiness<small>{configuration.readiness.isReady ? "Ready" : `${configuration.readiness.missingOrUnrouted.length} blockers`}</small></button>
           <button className={section === "approvals" ? "selected" : ""} onClick={() => { setSection("approvals"); onOpenApprovalConfiguration(); }}>Approval configuration<small>Nested project policy</small></button>
+          <button className={section === "verification" ? "selected" : ""} onClick={() => setSection("verification")}>Verification methods<small>{vocabularyLoading ? "Loading" : vocabulary ? `${vocabulary.methods.length} permitted${vocabulary.nonConforming.length > 0 ? ` · ${vocabulary.nonConforming.length} off-vocabulary` : ""}` : "Unavailable"}</small></button>
         </nav>
         <section className="projectConfigurationPanel">
           {section === "approvals" && <ApprovalConfigurationCenter embedded user={user} api={api} projectId={projectId} projectName={projectName} onBackToBuilds={onBackToBuilds} onSignOut={onSignOut} />}
+          {section === "verification" && <>
+            <div className="projectConfigurationPanelHeader"><div><h2>Verification methods</h2><p>The controlled vocabulary requirement authoring offers and review enforces. A change request declaring anything else is refused at submission, naming these values.</p></div><span className="projectConfigurationPill">{vocabularyDirty ? "Unsaved changes" : "Saved"}</span></div>
+            {vocabularyLoading && <p>Loading the permitted verification methods…</p>}
+            {!!vocabularyError && <p className="projectConfigurationError" role="alert">{vocabularyError}</p>}
+            {!vocabularyLoading && !vocabularyError && vocabulary && <>
+              <p>Version {vocabulary.version} · {vocabulary.persisted ? "configured for this project" : "not configured yet; these are the methods the product is founded on"}.</p>
+              <ol className="ladderRows">{methods.map((method, index) => <li key={`method-${index}`} className="ladderRow"><span className="ladderPosition">{index + 1}</span><label>Method<input value={method} aria-label={`Verification method ${index + 1}`} disabled={!canManageVocabulary} onChange={event => setMethods(methods.map((current, i) => i === index ? event.target.value : current))} /></label><div className="ladderRowActions">{canManageVocabulary && <><button type="button" onClick={() => moveMethod(index, -1)} disabled={index === 0}>↑</button><button type="button" onClick={() => moveMethod(index, 1)} disabled={index === methods.length - 1}>↓</button><button type="button" onClick={() => setMethods(methods.filter((_, i) => i !== index))} disabled={methods.length <= 1}>Remove</button></>}</div></li>)}</ol>
+              {canManageVocabulary ? <div className="ladderActions"><label>New method<input value={newMethod} aria-label="New verification method" onChange={event => setNewMethod(event.target.value)} placeholder="e.g. Similarity" onKeyDown={event => { if (event.key === "Enter") { event.preventDefault(); addMethod(); } }} /></label><button type="button" onClick={addMethod} disabled={!newMethod.trim()}>Add method</button><label>Reason<input value={vocabularyReason} aria-label="Verification vocabulary reason" onChange={event => setVocabularyReason(event.target.value)} placeholder="Why is this vocabulary changing?" /></label><button type="button" className="primaryProjectConfigurationAction" disabled={saving || !vocabularyDirty} onClick={() => void saveVocabulary()}>Save vocabulary</button></div> : <p className="projectConfigurationNotice">You have read access to this vocabulary. A Configuration Manager, Program Manager, or Administrator must change what this project permits.</p>}
+              <div className="relationshipEditor"><h3>Stored values outside the vocabulary</h3><p>Reported for a deliberate decision. Nothing here is rewritten by this screen, by a migration, or by submitting a change request — a historical record keeps saying what it says until a controlled correction changes it.</p>{vocabulary.nonConforming.length === 0 ? <p className="projectConfigurationNotice">Every stored verification method in this project matches the configured vocabulary.</p> : <table className="configurationHistory"><thead><tr><th>Stored value</th><th>Proposals</th><th>Revisions</th><th>Total</th><th>Example requirements</th></tr></thead><tbody>{vocabulary.nonConforming.map(row => <tr key={row.value}><td><code>{row.value}</code></td><td>{row.changeCount}</td><td>{row.revisionCount}</td><td>{row.totalCount}</td><td>{row.examples.join(", ") || "—"}</td></tr>)}</tbody></table>}</div>
+            </>}
+          </>}
           {section === "ladder" && <>
             <div className="projectConfigurationPanelHeader"><div><h2>Requirement ladder</h2><p>Version {configuration.version} · {configuration.classification} · {configuration.state}. Authored edits remain drafts until the sole activation gate succeeds.</p></div><span className="projectConfigurationPill">{dirty ? "Unsaved changes" : "Saved"}</span></div>
             <ol className="ladderRows">{steps.map((step, index) => <li key={`${step.catalogueEntry}-${index}`} className="ladderRow"><span className="ladderPosition">{index + 1}</span><label>Level<select value={step.catalogueEntry} disabled={!canAuthor} onChange={event => updateStep(index, { catalogueEntry: event.target.value as Level })}>{configuration.catalogue.map(entry => <option key={entry.catalogueEntry} value={entry.catalogueEntry}>{displayLevel(entry.catalogueEntry)}</option>)}</select></label><fieldset disabled={!canAuthor}><legend>Capabilities</legend>{capabilityLabels.map((label, capabilityIndex) => <label key={label}><input type="checkbox" checked={(step.capabilities & (1 << capabilityIndex)) !== 0} onChange={event => updateStep(index, { capabilities: event.target.checked ? step.capabilities | (1 << capabilityIndex) : step.capabilities & ~(1 << capabilityIndex) })}/>{label}</label>)}</fieldset><div className="ladderRowActions">{canAuthor && <><button type="button" onClick={() => reorder(index, -1)} disabled={index === 0}>↑</button><button type="button" onClick={() => reorder(index, 1)} disabled={index === steps.length - 1}>↓</button><button type="button" onClick={() => removeStep(index)}>Remove</button></>}</div></li>)}</ol>

@@ -4,6 +4,7 @@ import type { FormEvent } from "react";
 import { SignatureDialog } from "./IdentityCenter";
 import type { AuthUser } from "./IdentityCenter";
 import ControlledRequirementEditor from "./ControlledRequirementEditor";
+import { useVerificationVocabulary } from "./verificationMethods";
 import type {
   ControlledRequirementDraft,
   RequirementKind,
@@ -232,10 +233,12 @@ const addToIdentifier = (identifier: string | undefined, offset: number) => {
   if (!match) return identifier;
   return `${match[1]}-${(Number(match[2]) + offset).toString().padStart(6, "0")}`;
 };
+/** As in the new change request editor: the verification method comes from the project vocabulary (#701). */
 const createRequirement = (
   level: RequirementLevel,
   kind: RequirementKind,
   baseNumber = "",
+  defaultVerificationMethod = "",
 ): DraftRequirement => ({
   baseNumber,
   revision: 0,
@@ -243,7 +246,7 @@ const createRequirement = (
   kind,
   statement: "",
   rationale: "",
-  verificationMethod: level === "Interface" ? "Not applicable" : "Test",
+  verificationMethod: level === "Interface" ? "Not applicable" : defaultVerificationMethod,
   richText: "",
   attributesJson: JSON.stringify({ criticality: "Normal", owner: "" }),
   impactDispositionJson: pendingImpact,
@@ -411,6 +414,10 @@ export default function ChangeRequestWorkspace({
   const [reason, setReason] = useState("");
   const [approvalRationale, setApprovalRationale] = useState("");
   const [signing, setSigning] = useState(false);
+  // #701: a proposal added to a checked-out Draft starts on a method this project permits, exactly as in the
+  // new change request editor.
+  const verification = useVerificationVocabulary(api, scr?.projectId);
+  const defaultVerificationMethod = verification.vocabulary?.methods[0] ?? "";
   const [lock, setLock] = useState<EditLock>();
   const [lockStatus, setLockStatus] = useState<LockStatus>();
   const [autosaveStatus, setAutosaveStatus] = useState<"Saved" | "Unsaved" | "Saving" | "Error" | "Conflict">("Saved");
@@ -909,7 +916,7 @@ export default function ChangeRequestWorkspace({
   const addProposal = (kind: RequirementKind, level: RequirementLevel) =>
     setRequirements((items) => [
       ...items,
-      createRequirement(level, kind, kind === "Introduce" ? nextIdentifier(level) : ""),
+      createRequirement(level, kind, kind === "Introduce" ? nextIdentifier(level) : "", defaultVerificationMethod),
     ]);
 
   // What a proposal does to a requirement, changed after the card exists. Not a field update: the kind decides
@@ -1206,6 +1213,7 @@ export default function ChangeRequestWorkspace({
                 index={index}
                 key={`${index}-${item.kind}`}
                 identityLocked={Boolean(item.baseNumber)}
+                verification={verification}
                 onChange={(key, value) => updateRequirement(index, key, value)}
                 onKindChange={(kind) => changeRequirementKind(index, kind)}
                 onRemove={() => setRequirements((items) => items.filter((_, position) => position !== index))}

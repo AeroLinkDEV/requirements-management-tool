@@ -832,7 +832,7 @@ public static class ChangeRequestEndpoints
             catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
         });
 
-        app.MapPost("/api/change-requests/{id:guid}/submit", async (Guid id, SubmitReviewRequest request, HttpContext http, IChangeRequestRepository repository, AeroLinkDbContext db, IdentityService identity, ILadderPolicy ladderPolicy, IProjectLadderPolicyResolver policyResolver, CancellationToken ct) =>
+        app.MapPost("/api/change-requests/{id:guid}/submit", async (Guid id, SubmitReviewRequest request, HttpContext http, IChangeRequestRepository repository, AeroLinkDbContext db, IdentityService identity, ILadderPolicy ladderPolicy, IProjectLadderPolicyResolver policyResolver, ProjectVerificationVocabularyService verificationVocabulary, CancellationToken ct) =>
         {
             var scr = await repository.GetAsync(id, ct); if (scr is null) return Results.NotFound();
             if (request.ExpectedVersion is not null && scr.Version != request.ExpectedVersion) return Results.Conflict(new { error = "This change request changed after it was opened. Refresh it before submitting.", code = "stale_version" });
@@ -842,6 +842,12 @@ public static class ChangeRequestEndpoints
                 var actor = http.UserAccount();
                 if (!CanAdminister(scr, actor)) return Results.Forbid();
                 ladderPolicy = await policyResolver.ResolveAsync(scr.ProjectId, ct);
+                // #701: the project's own vocabulary is the submission authority, resolved here where the server
+                // already knows which project this change request belongs to. Nothing a client sends can widen
+                // what review accepts. A project that carries no persisted vocabulary has the founding one
+                // materialized into this unit of work, so it commits only if the submission itself does.
+                var verificationPolicy = await verificationVocabulary.ResolveForSubmissionAsync(scr.ProjectId,
+                    actor.UserName, http.Connection.RemoteIpAddress?.ToString() ?? "local", now, ct);
                 foreach (var change in scr.RequirementChanges)
                 {
                     var sectionError = await TargetSectionRefusalAsync(db, scr.ProjectId, ladderPolicy, change.Level,
@@ -920,7 +926,7 @@ public static class ChangeRequestEndpoints
                     return Results.BadRequest(new { error = ArtifactClaims.Refusal(blocking), code = "requirement_claimed" });
 
                 var cycle = scr.SubmitForReview(actor.UserName, selections, now, request.Mode, workflow,
-                    actor.IsAdministrator, ladderPolicy);
+                    actor.IsAdministrator, ladderPolicy, verificationPolicy);
                 foreach (var step in cycle.Steps.Where(x => x.State == ApprovalStepState.Active))
                     db.UserNotifications.Add(new(scr.ProjectId, step.ApproverId, "ReviewActivated", $"Review {scr.DisplayNumber}", $"You are now authorized to review {scr.DisplayNumber}: {scr.Title}", $"{(scr.Type == ChangeRequestType.Software ? "swcr" : "scr")}:{scr.Id}", scr.Id, now));
                 await repository.SaveAsync(ct); return Results.Ok(ApiMap.ChangeRequestDetail(scr));

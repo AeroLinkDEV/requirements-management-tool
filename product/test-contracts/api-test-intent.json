@@ -1,11 +1,11 @@
 {
   "schemaVersion": "aerolink-api-test-intent/v2",
   "totals": {
-    "tests": 548,
-    "cases": 602,
-    "classes": 98,
-    "hostedTests": 535,
-    "hostedCases": 580,
+    "tests": 561,
+    "cases": 619,
+    "classes": 99,
+    "hostedTests": 548,
+    "hostedCases": 597,
     "nonHostedTests": 8,
     "nonHostedCases": 17,
     "unknownHostTests": 5,
@@ -21,26 +21,26 @@
     "http-boundary": {
       "label": "HTTP boundary: route, status, JSON shape",
       "level": "API (must stay hosted)",
-      "tests": 342,
-      "cases": 376,
+      "tests": 344,
+      "cases": 378,
       "unknownCases": 0,
-      "classes": 80
+      "classes": 81
     },
     "ef-translation": {
       "label": "EF translation / relational constraints",
       "level": "Infrastructure (needs a database, not a host)",
-      "tests": 112,
-      "cases": 119,
+      "tests": 122,
+      "cases": 133,
       "unknownCases": 0,
-      "classes": 46
+      "classes": 47
     },
     "auth-policy": {
       "label": "Authentication / authorization wiring",
       "level": "API (must stay hosted)",
-      "tests": 59,
-      "cases": 63,
+      "tests": 60,
+      "cases": 64,
       "unknownCases": 0,
-      "classes": 38
+      "classes": 39
     },
     "in-process-logic": {
       "label": "In-process logic with no HTTP and no client",
@@ -9472,6 +9472,238 @@
       "sourceLines": {
         "start": 127,
         "end": 157
+      }
+    },
+    {
+      "cls": "VerificationVocabularyApiTests",
+      "test": "A_configured_member_controlled_records_still_declare_cannot_be_removed",
+      "kind": "Fact",
+      "intent": "ef-translation",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 271,
+        "end": 298
+      }
+    },
+    {
+      "cls": "VerificationVocabularyApiTests",
+      "test": "A_level_without_verification_capability_keeps_its_not_applicable_semantics",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client"
+      ],
+      "sourceLines": {
+        "start": 464,
+        "end": 521
+      }
+    },
+    {
+      "cls": "VerificationVocabularyApiTests",
+      "test": "A_new_project_is_created_carrying_a_persisted_vocabulary",
+      "kind": "Fact",
+      "intent": "ef-translation",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 111,
+        "end": 150
+      }
+    },
+    {
+      "cls": "VerificationVocabularyApiTests",
+      "test": "A_programme_configured_method_becomes_submittable_the_moment_it_is_configured",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client"
+      ],
+      "sourceLines": {
+        "start": 318,
+        "end": 350
+      }
+    },
+    {
+      "cls": "VerificationVocabularyApiTests",
+      "test": "A_project_carrying_no_vocabulary_has_the_founding_one_materialized_at_submission",
+      "kind": "Fact",
+      "intent": "ef-translation",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 523,
+        "end": 562
+      }
+    },
+    {
+      "cls": "VerificationVocabularyApiTests",
+      "test": "A_refused_submission_against_an_unpersisted_vocabulary_materializes_nothing",
+      "kind": "Fact",
+      "intent": "ef-translation",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 564,
+        "end": 591
+      }
+    },
+    {
+      "cls": "VerificationVocabularyApiTests",
+      "test": "A_stale_expected_version_conflicts_and_a_blank_or_duplicate_edit_is_refused",
+      "kind": "Fact",
+      "intent": "ef-translation",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 217,
+        "end": 269
+      }
+    },
+    {
+      "cls": "VerificationVocabularyApiTests",
+      "test": "A_value_outside_the_vocabulary_is_refused_at_submission_and_names_the_permitted_values",
+      "kind": "Theory",
+      "intent": "ef-translation",
+      "cases": 5,
+      "caseEvidence": "InlineData",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 352,
+        "end": 389
+      }
+    },
+    {
+      "cls": "VerificationVocabularyApiTests",
+      "test": "An_authorized_manager_reads_and_replaces_the_vocabulary_with_attributable_evidence",
+      "kind": "Fact",
+      "intent": "ef-translation",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 152,
+        "end": 188
+      }
+    },
+    {
+      "cls": "VerificationVocabularyApiTests",
+      "test": "An_exact_configured_value_reaches_review",
+      "kind": "Fact",
+      "intent": "ef-translation",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 300,
+        "end": 316
+      }
+    },
+    {
+      "cls": "VerificationVocabularyApiTests",
+      "test": "An_existing_non_conforming_change_is_reported_and_left_exactly_as_stored",
+      "kind": "Fact",
+      "intent": "ef-translation",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 391,
+        "end": 413
+      }
+    },
+    {
+      "cls": "VerificationVocabularyApiTests",
+      "test": "An_existing_non_conforming_revision_is_reported_and_left_exactly_as_stored",
+      "kind": "Fact",
+      "intent": "ef-translation",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 415,
+        "end": 462
+      }
+    },
+    {
+      "cls": "VerificationVocabularyApiTests",
+      "test": "An_unauthorized_member_may_read_but_not_replace_the_vocabulary",
+      "kind": "Fact",
+      "intent": "auth-policy",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 190,
+        "end": 215
       }
     },
     {

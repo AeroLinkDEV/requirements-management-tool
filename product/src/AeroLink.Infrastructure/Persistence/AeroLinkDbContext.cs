@@ -63,6 +63,8 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
     public DbSet<ProjectLadderStep> ProjectLadderSteps => Set<ProjectLadderStep>();
     public DbSet<ProjectLadderAllowedUpstream> ProjectLadderAllowedUpstreams => Set<ProjectLadderAllowedUpstream>();
     public DbSet<ProjectLadderConfigurationHistory> ProjectLadderConfigurationHistories => Set<ProjectLadderConfigurationHistory>();
+    public DbSet<ProjectVerificationVocabulary> ProjectVerificationVocabularies => Set<ProjectVerificationVocabulary>();
+    public DbSet<ProjectVerificationMethod> ProjectVerificationMethods => Set<ProjectVerificationMethod>();
     public DbSet<SoftwareRelease> Releases => Set<SoftwareRelease>();
     public DbSet<SoftwareBuild> SoftwareBuilds => Set<SoftwareBuild>();
     public DbSet<SystemChangeRequest> SystemChangeRequests => Set<SystemChangeRequest>();
@@ -451,6 +453,36 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
                 .HasPrincipalKey(nameof(ProjectLadderConfiguration.Id), nameof(ProjectLadderConfiguration.ProjectId)).OnDelete(DeleteBehavior.Cascade);
             b.HasMany(x => x.AllowedUpstream).WithOne().HasForeignKey(nameof(ProjectLadderAllowedUpstream.ConfigurationId), nameof(ProjectLadderAllowedUpstream.ProjectId))
                 .HasPrincipalKey(nameof(ProjectLadderConfiguration.Id), nameof(ProjectLadderConfiguration.ProjectId)).OnDelete(DeleteBehavior.Cascade);
+        });
+        modelBuilder.Entity<ProjectVerificationVocabulary>(b =>
+        {
+            b.ToTable("project_verification_vocabularies");
+            b.HasKey(x => x.Id);
+            // One vocabulary per project. Verification method is a programme decision about the whole
+            // project, not a per-build or per-level one, and two rows would mean two answers to the question
+            // of what submission accepts.
+            b.HasIndex(x => x.ProjectId).IsUnique();
+            b.HasIndex(x => new { x.Id, x.ProjectId }).IsUnique();
+            b.Property(x => x.Version).IsConcurrencyToken();
+            b.HasOne<ProjectRecord>().WithMany().HasForeignKey(x => x.ProjectId).OnDelete(DeleteBehavior.Cascade);
+            b.HasMany(x => x.Methods).WithOne()
+                .HasForeignKey(nameof(ProjectVerificationMethod.VocabularyId), nameof(ProjectVerificationMethod.ProjectId))
+                .HasPrincipalKey(nameof(ProjectVerificationVocabulary.Id), nameof(ProjectVerificationVocabulary.ProjectId))
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+        modelBuilder.Entity<ProjectVerificationMethod>(b =>
+        {
+            b.ToTable("project_verification_methods", t =>
+                t.HasCheckConstraint("CK_project_verification_method_position", "\"Position\" > 0"));
+            b.HasKey(x => x.Id);
+            // The normalized name is the configuration key, so the database agrees with the aggregate that
+            // "Test" and "test" are one method configured twice rather than two permitted methods.
+            b.HasIndex(x => new { x.ProjectId, x.NormalizedValue }).IsUnique();
+            b.HasIndex(x => new { x.VocabularyId, x.Position });
+            b.Property(x => x.DisplayValue).HasMaxLength(VerificationMethodName.MaxLength).IsRequired();
+            b.Property(x => x.NormalizedValue).HasMaxLength(VerificationMethodName.MaxLength).IsRequired();
+            b.Property(x => x.Version).IsConcurrencyToken();
+            b.HasOne<ProjectRecord>().WithMany().HasForeignKey(x => x.ProjectId).OnDelete(DeleteBehavior.Cascade);
         });
         modelBuilder.Entity<ProjectLadderConfigurationHistory>(b =>
         {
