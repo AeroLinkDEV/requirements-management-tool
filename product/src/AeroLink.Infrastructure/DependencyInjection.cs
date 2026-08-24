@@ -38,6 +38,8 @@ public static class DependencyInjection
             new LadderConsumerRegistration("enterprise.schema-catalogue", "Enterprise schema/specification catalogue synchronization"),
             new LadderConsumerRegistration("release.readiness", "Release readiness policy gates"),
             new LadderConsumerRegistration("release.reconciliation", "Release trace reconciliation policy"),
+            new LadderConsumerRegistration("verification.execution", "Execution creation and latest build-scoped result resolution"),
+            new LadderConsumerRegistration("baseline.executable-materialization", "Baseline executable artifact selection and materialization"),
             new LadderConsumerRegistration("navigation.primary", "Project-ladder-aware primary navigation and surfaces"),
         };
         foreach (var registration in legacyRegistrations)

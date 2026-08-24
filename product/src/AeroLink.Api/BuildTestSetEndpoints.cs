@@ -58,15 +58,13 @@ public static class BuildTestSetEndpoints
             // #726: a build can only run the EFFECTIVE EXECUTABLE artifact for the discipline. With the
             // software Procedure tier enabled that is the Procedure; Case-only software keeps its Case.
             var policy = await policyResolver.ResolveAsync(release.ProjectId, ct);
-            var executableBindings = EffectiveExecutableArtifact.Bindings(policy);
             var reachable = await (from revision in db.TestProcedureRevisions.AsNoTracking()
-                                   join procedure in db.TestProcedures.AsNoTracking() on revision.ProcedureId equals procedure.Id
+                                   join procedure in db.TestProcedures.AsNoTracking()
+                                       .Where(EffectiveExecutableArtifact.ExecutablePredicate(policy))
+                                       on revision.ProcedureId equals procedure.Id
                                    where revisionIds.Contains(revision.Id)
                                          && procedure.ProjectId == release.ProjectId
                                          && revision.State == TestProcedureState.Approved
-                                         && executableBindings.Any(binding =>
-                                             binding.Level == procedure.Level
-                                             && binding.Kind == procedure.ArtifactKind)
                                    select revision.Id).ToListAsync(ct);
             var unreachable = revisionIds.Except(reachable).ToList();
             if (unreachable.Count != 0)
@@ -138,15 +136,13 @@ public static class BuildTestSetEndpoints
         Guid releaseId, AeroLinkDbContext db, ILadderPolicy policy, CancellationToken ct)
     {
         var revisionIds = sets.SelectMany(x => x.Entries).Select(x => x.ProcedureRevisionId).Distinct().ToList();
-        var executableBindings = EffectiveExecutableArtifact.Bindings(policy);
         var procedures = revisionIds.Count == 0
             ? []
             : await (from revision in db.TestProcedureRevisions.AsNoTracking()
-                     join procedure in db.TestProcedures.AsNoTracking() on revision.ProcedureId equals procedure.Id
+                     join procedure in db.TestProcedures.AsNoTracking()
+                         .Where(EffectiveExecutableArtifact.ExecutablePredicate(policy))
+                         on revision.ProcedureId equals procedure.Id
                      where revisionIds.Contains(revision.Id)
-                         && executableBindings.Any(binding =>
-                             binding.Level == procedure.Level
-                             && binding.Kind == procedure.ArtifactKind)
                      select new { revision.Id, procedure.BaseNumber, revision.Revision, procedure.Level })
                 .ToListAsync(ct);
         var byRevision = procedures.ToDictionary(x => x.Id);

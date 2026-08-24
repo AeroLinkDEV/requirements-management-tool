@@ -557,12 +557,10 @@ public sealed class VerificationImpactService(AeroLinkDbContext db, ProblemRepor
         var policy = policyResolver is null
             ? fallbackPolicy
             : await policyResolver.ResolveAsync(projectId, ct);
-        var executableBindings = EffectiveExecutableArtifact.Bindings(policy);
         var revisions = await (from revision in db.TestProcedureRevisions.AsNoTracking()
                                where revision.ProcedureId == procedureId && revision.State == TestProcedureState.Approved
                                join procedure in db.TestProcedures.AsNoTracking().Where(x => x.ProjectId == projectId
-                                   && executableBindings.Any(binding =>
-                                       binding.Level == x.Level && binding.Kind == x.ArtifactKind))
+                                   ).Where(EffectiveExecutableArtifact.ExecutablePredicate(policy))
                                    on revision.ProcedureId equals procedure.Id
                                select new
                                {

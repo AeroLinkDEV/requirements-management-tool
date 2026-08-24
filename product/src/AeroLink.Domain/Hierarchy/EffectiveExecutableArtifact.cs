@@ -1,5 +1,6 @@
 using AeroLink.Domain.Verification;
 using AeroLink.Domain.ChangeControl;
+using System.Linq.Expressions;
 
 namespace AeroLink.Domain.Hierarchy;
 
@@ -44,6 +45,34 @@ public static class EffectiveExecutableArtifact
     /// <summary>True when the given procedure artifact is the executable for its level under the policy.</summary>
     public static bool IsExecutable(ILadderPolicy policy, TestProcedureLevel level, VerificationArtifactKind kind) =>
         Bindings(policy).Any(binding => binding.Level == level && binding.Kind == kind);
+
+    /// <summary>
+    /// EF-translatable executable-kind predicate with the binding values embedded as constants, so queries
+    /// do not rely on translating a parameter collection of records.
+    /// </summary>
+    public static Expression<Func<TestProcedure, bool>> ExecutablePredicate(ILadderPolicy policy) =>
+        Predicate(policy, Bindings(policy));
+
+    /// <summary>EF-translatable enabled-kind predicate (all profile definitions, not only the executable).</summary>
+    public static Expression<Func<TestProcedure, bool>> EnabledPredicate(ILadderPolicy policy) =>
+        Predicate(policy, EnabledBindings(policy));
+
+    private static Expression<Func<TestProcedure, bool>> Predicate(ILadderPolicy policy,
+        IReadOnlyList<ArtifactKindBinding> bindings)
+    {
+        var procedure = Expression.Parameter(typeof(TestProcedure), "procedure");
+        var level = Expression.Property(procedure, nameof(TestProcedure.Level));
+        var kind = Expression.Property(procedure, nameof(TestProcedure.ArtifactKind));
+        Expression? body = null;
+        foreach (var binding in bindings)
+        {
+            var condition = Expression.AndAlso(
+                Expression.Equal(level, Expression.Constant(binding.Level)),
+                Expression.Equal(kind, Expression.Constant(binding.Kind)));
+            body = body is null ? condition : Expression.OrElse(body, condition);
+        }
+        return Expression.Lambda<Func<TestProcedure, bool>>(body ?? Expression.Constant(false), procedure);
+    }
 }
 
 /// <summary>Stable (level, kind) artifact binding used for EF translation.</summary>

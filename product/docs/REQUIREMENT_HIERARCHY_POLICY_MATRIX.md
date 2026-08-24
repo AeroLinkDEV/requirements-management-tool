@@ -25,7 +25,9 @@ approval.workflow-subject
 verification.procedure-level
 verification.test-change-workflow
 verification.coverage
+verification.execution
 baseline.controlled-documents
+baseline.executable-materialization
 build.test-sets
 enterprise.schema-catalogue
 enterprise.import-aliases

@@ -242,13 +242,11 @@ public sealed class ReleaseExecutionService(AeroLinkDbContext db, EvidenceFileSt
         if (testSet.Count != 0)
         {
             var testSetProcedureIds = testSet.Select(x => x.ProcedureRevisionId).ToHashSet();
-            var executableBindings = EffectiveExecutableArtifact.Bindings(ladderPolicy);
             var allowedTestSetProcedureIds = await (from revision in db.TestProcedureRevisions.AsNoTracking()
-                                                    join procedure in db.TestProcedures.AsNoTracking() on revision.ProcedureId equals procedure.Id
+                                                    join procedure in db.TestProcedures.AsNoTracking()
+                                                        .Where(EffectiveExecutableArtifact.ExecutablePredicate(ladderPolicy))
+                                                        on revision.ProcedureId equals procedure.Id
                                                     where testSetProcedureIds.Contains(revision.Id) && configuredProcedureLevels.Contains(procedure.Level)
-                                                        && executableBindings.Any(binding =>
-                                                            binding.Level == procedure.Level
-                                                            && binding.Kind == procedure.ArtifactKind)
                                                     select revision.Id).ToListAsync(ct);
             testSet = testSet.Where(x => allowedTestSetProcedureIds.Contains(x.ProcedureRevisionId)).ToList();
         }
@@ -338,7 +336,6 @@ public sealed class ReleaseExecutionService(AeroLinkDbContext db, EvidenceFileSt
         }
         var configuredRequirementLevels = ladderPolicy.Definitions.Where(x => x.Verification is not null)
             .Select(x => x.Level).ToHashSet();
-        var executableBindings = EffectiveExecutableArtifact.Bindings(ladderPolicy);
         // #726: the required manifest is the set of EFFECTIVE EXECUTABLE artifacts. With the software
         // Procedure tier enabled, the required executables are the Procedure revisions linked to the
         // baseline's exact Case revisions; Case-only software and System keep their current coverage rule.
@@ -370,11 +367,10 @@ public sealed class ReleaseExecutionService(AeroLinkDbContext db, EvidenceFileSt
         var allowedProcedureLevels = ladderPolicy.Definitions.Where(x => x.Verification is not null)
             .Select(x => x.Verification!.ProcedureLevel).ToHashSet();
         return await (from revision in db.TestProcedureRevisions.AsNoTracking().Where(x => procedureRevisionIds.Contains(x.Id))
-                      join procedure in db.TestProcedures.AsNoTracking() on revision.ProcedureId equals procedure.Id
+                      join procedure in db.TestProcedures.AsNoTracking()
+                          .Where(EffectiveExecutableArtifact.ExecutablePredicate(ladderPolicy))
+                          on revision.ProcedureId equals procedure.Id
                       where procedure.ProjectId == projectId && allowedProcedureLevels.Contains(procedure.Level)
-                          && executableBindings.Any(binding =>
-                              binding.Level == procedure.Level
-                              && binding.Kind == procedure.ArtifactKind)
                       orderby procedure.BaseNumber
                       select new ValueTuple<Guid, string>(revision.Id, procedure.BaseNumber + "." + revision.Revision.ToString("D2"))).ToListAsync(ct);
     }

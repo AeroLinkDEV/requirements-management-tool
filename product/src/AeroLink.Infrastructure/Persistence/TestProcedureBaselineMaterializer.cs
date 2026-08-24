@@ -49,9 +49,8 @@ public sealed class TestProcedureBaselineMaterializer(AeroLinkDbContext db,
         // #726: baseline membership is the ENABLED artifact set for each level. With the software
         // Procedure tier enabled, Procedure revisions from Procedure TCRs materialize alongside the Case
         // revisions they satisfy; Case-only software and System keep their current membership.
-        var enabledBindings = EffectiveExecutableArtifact.EnabledBindings(ladderPolicy);
         var procedures = await db.TestProcedures.Where(x => x.ProjectId == baseline.ProjectId
-            && enabledBindings.Any(binding => binding.Level == x.Level && binding.Kind == x.ArtifactKind))
+            ).Where(EffectiveExecutableArtifact.EnabledPredicate(ladderPolicy))
             .ToListAsync(ct);
         var procedureByBase = procedures.ToDictionary(x => x.BaseNumber, StringComparer.OrdinalIgnoreCase);
         var current = await CarryForwardPredecessorAsync(baseline, ct);

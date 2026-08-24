@@ -29,6 +29,8 @@ public static class VerificationArtifactProfileSchema
 {
     public const int Legacy = 1;
     public const int Current = 2;
+    /// <summary>Named actor for governed platform migrations (e.g. #726). Never a human actor.</summary>
+    public const string GovernedMigrationActor = "aerolink-migration";
 }
 
 /// <summary>Stable identity for one verification artifact family.</summary>

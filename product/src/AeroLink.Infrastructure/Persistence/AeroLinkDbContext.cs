@@ -2619,7 +2619,18 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
                 && x.Entity.State == TestProcedureState.Draft)
             .Select(x => x.Entity.ProcedureId)
             .ToHashSet();
-        var missing = addedSoftwareProcedures.Except(initialRevisionOwners).ToArray();
+        // The governed #726 cutover is the narrow attributed exception: a migration-generated software
+        // Procedure header is saved with its Approved, Allocated, migration-authored revision(s) in the same
+        // unit of work. Authoring paths still require the Draft-0 initial revision above.
+        var migrationOwners = ChangeTracker.Entries<TestProcedureRevision>()
+            .Where(x => x.State == EntityState.Added
+                && addedSoftwareProcedures.Contains(x.Entity.ProcedureId)
+                && x.Entity.AuthorId == VerificationArtifactProfileSchema.GovernedMigrationActor
+                && x.Entity.State == TestProcedureState.Approved
+                && x.Entity.ParentKind == VerificationProcedureParentKind.Allocated)
+            .Select(x => x.Entity.ProcedureId)
+            .ToHashSet();
+        var missing = addedSoftwareProcedures.Except(initialRevisionOwners).Except(migrationOwners).ToArray();
         if (missing.Length > 0)
             throw new DomainException("A software Procedure header must be saved with its initial revision in the same unit of work.");
         return Task.CompletedTask;
@@ -2782,14 +2793,21 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
         foreach (var revision in revisions.Values)
         {
             if (!owners.TryGetValue(revision.ProcedureId, out var owner)) continue;
+            // #726 migration exception: a migration-generated revision seeds environment/setup, ordered
+            // steps and expected observations deterministically from the exact legacy Case, while test data,
+            // cleanup and tooling are honestly empty (the legacy Case had no such content). Fabricating
+            // text would be dishonest; ordinary authored Procedures still require the full vocabulary.
+            var isGovernedMigration = revision.AuthorId == VerificationArtifactProfileSchema.GovernedMigrationActor
+                && revision.ParentKind == VerificationProcedureParentKind.Allocated
+                && revision.State == TestProcedureState.Approved;
             if (owner.ArtifactKind == VerificationArtifactKind.Procedure && owner.Level != TestProcedureLevel.System
                 && revision.State != TestProcedureState.Retired
                 && (string.IsNullOrWhiteSpace(revision.EnvironmentSetup)
-                    || string.IsNullOrWhiteSpace(revision.TestData)
                     || string.IsNullOrWhiteSpace(revision.OrderedSteps)
                     || string.IsNullOrWhiteSpace(revision.ExpectedObservations)
-                    || string.IsNullOrWhiteSpace(revision.Cleanup)
-                    || string.IsNullOrWhiteSpace(revision.ToolingAutomation)))
+                    || !isGovernedMigration && (string.IsNullOrWhiteSpace(revision.TestData)
+                        || string.IsNullOrWhiteSpace(revision.Cleanup)
+                        || string.IsNullOrWhiteSpace(revision.ToolingAutomation))))
                 throw new DomainException("A software Procedure revision requires environment/setup, test data, ordered steps, expected observations, cleanup, and tooling/automation.");
             revision.ValidateProcedureParents(owner, parentIdsByRevision[revision.Id]);
         }

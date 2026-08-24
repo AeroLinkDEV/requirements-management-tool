@@ -27,10 +27,11 @@ public sealed record SoftwareProcedureCutoverResult(int ProjectsUpgraded, int Pr
 public sealed class SoftwareProcedureExecutionCutoverAuthority(
     AeroLinkDbContext db,
     IEnumerable<ILadderConsumerRegistration> consumerRegistrations,
-    IEnumerable<IVerificationArtifactConsumerRegistration>? artifactConsumerRegistrations = null)
+    IEnumerable<IVerificationArtifactConsumerRegistration>? artifactConsumerRegistrations = null,
+    bool allowSqliteExecution = false)
 {
     public const string MigrationMarker = "VerificationExecutionCutover.SoftwareProcedures.v1";
-    public const string Actor = "aerolink-migration";
+    public const string Actor = VerificationArtifactProfileSchema.GovernedMigrationActor;
     private const string CompletedEvent = MigrationMarker + ".Completed";
     private const string UpgradeVersion = "v1";
     private const string UpgradeReason =
@@ -43,11 +44,15 @@ public sealed class SoftwareProcedureExecutionCutoverAuthority(
 
     public async Task<SoftwareProcedureCutoverResult> EnsureCompletedAsync(CancellationToken ct = default)
     {
+        // The governed cutover is a production-database authority, exactly like the Case identity migration:
+        // SQLite test hosts (EnsureCreated) do not carry real sealed product state, and running the cutover
+        // there would rewrite fixtures the tests intentionally keep Case-only. Focused cutover tests opt in.
+        if (!db.Database.IsNpgsql() && !allowSqliteExecution) return new(0, 0, 0, 0, 0, 0);
         if (await db.SecurityAuditEvents.AsNoTracking().AnyAsync(x => x.EventType == CompletedEvent, ct))
             return new(0, 0, 0, 0, 0, 0);
 
         var configurations = await db.ProjectLadderConfigurations.AsNoTracking()
-            .Include(x => x.Steps)
+            .Include(x => x.Steps).Include(x => x.AllowedUpstream)
             .Where(x => x.IsSealed)
             .OrderBy(x => x.ProjectId)
             .ToListAsync(ct);
@@ -95,18 +100,24 @@ public sealed class SoftwareProcedureExecutionCutoverAuthority(
         await using var transaction = await db.Database.BeginTransactionAsync(ct);
         db.ChangeTracker.Clear();
         var configuration = await db.ProjectLadderConfigurations
-            .Include(x => x.Steps)
+            .Include(x => x.Steps).Include(x => x.AllowedUpstream)
             .SingleAsync(x => x.Id == configurationId, ct);
         if (!configuration.IsSealed)
             throw new InvalidOperationException("A governed Procedure cutover requires an already sealed ladder.");
         var kindsByStep = TargetKinds(configuration)
             ?? throw new InvalidOperationException("The project is not pending the software Procedure cutover.");
+        var readiness = BuildReadiness(configuration);
         foreach (var step in configuration.Steps)
             if (kindsByStep.TryGetValue(Enum.Parse<RequirementLevel>(step.CatalogueEntry, false), out var kinds))
                 step.ApplyPlatformUpgradeKinds(kinds);
 
-        var readiness = BuildReadiness(configuration);
         configuration.RecordPlatformUpgrade(UpgradeVersion, Actor, readiness.Hash, now);
+        // RecordPlatformUpgrade converts a LegacyDefault Stored ladder into an authored Draft so the change is
+        // attributable and reviewable. #726 is itself the governed activation: the cutover immediately
+        // activates that Draft through the same evidence authority, leaving the configuration sealed and
+        // EFFECTIVE (never a half-applied Draft that the runtime would ignore).
+        if (configuration.State == ProjectLadderConfigurationState.Draft)
+            configuration.Activate(Actor, now, LadderConsumerManifestCatalog.VersionV2, readiness.Hash);
         try { await db.SaveChangesAsync(ct); }
         catch (DbUpdateConcurrencyException)
         {
@@ -192,6 +203,7 @@ public sealed class SoftwareProcedureExecutionCutoverAuthority(
             return new(0, 0, 0, 0, 0, 0);
         }
         var migratedCaseRevisionIdsList = caseRevisionToProcedureRevision.Keys.ToList();
+        var migratedCaseArtifactIds = caseArtifactToProcedureArtifact.Keys.ToList();
 
         var executions = await db.TestExecutions
             .Where(x => migratedCaseRevisionIdsList.Contains(x.ProcedureRevisionId)).ToListAsync(ct);
@@ -203,16 +215,17 @@ public sealed class SoftwareProcedureExecutionCutoverAuthority(
             entry.RebindMigrationExecutable(caseRevisionToProcedureRevision[entry.ProcedureRevisionId]);
         var baselineSelections = await db.BaselineTestProcedures
             .Where(x => migratedCaseRevisionIdsList.Contains(x.RevisionId)
-                || caseArtifactToProcedureArtifact.ContainsKey(x.ProcedureId))
+                || migratedCaseArtifactIds.Contains(x.ProcedureId))
             .ToListAsync(ct);
         foreach (var selection in baselineSelections)
             if (caseRevisionToProcedureRevision.TryGetValue(selection.RevisionId, out var newRevisionId)
                 && caseArtifactToProcedureArtifact.TryGetValue(selection.ProcedureId, out var newProcedureId))
                 selection.RebindMigrationExecutable(newProcedureId, newRevisionId);
         var impactItems = await db.VerificationImpactItems
-            .Where(x => migratedCaseRevisionIdsList.Contains(x.ResolvedProcedureRevisionId ?? Guid.Empty)
-                || caseArtifactToProcedureArtifact.ContainsKey(x.ProcedureId ?? Guid.Empty)
-                || caseArtifactToProcedureArtifact.ContainsKey(x.ResolvedProcedureId ?? Guid.Empty))
+            .Where(x => x.ResolvedProcedureRevisionId != null
+                    && migratedCaseRevisionIdsList.Contains(x.ResolvedProcedureRevisionId.Value)
+                || x.ProcedureId != null && migratedCaseArtifactIds.Contains(x.ProcedureId.Value)
+                || x.ResolvedProcedureId != null && migratedCaseArtifactIds.Contains(x.ResolvedProcedureId.Value))
             .ToListAsync(ct);
         foreach (var item in impactItems)
         {

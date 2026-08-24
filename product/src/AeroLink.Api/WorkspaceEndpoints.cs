@@ -254,11 +254,9 @@ public static class WorkspaceEndpoints
             var dashboardPolicy = projectId is null || projectId == Guid.Empty
                 ? null
                 : await policyResolver.ResolveAsync(projectId.Value, ct);
-            var dashboardExecutableBindings = dashboardPolicy is null
-                ? EffectiveExecutableArtifact.Bindings(LegacyLadderPolicy.Instance)
-                : EffectiveExecutableArtifact.Bindings(dashboardPolicy);
             var procedureLevels = await db.TestProcedures.AsNoTracking().Where(x => procedureIds.Contains(x.Id)
-                    && dashboardExecutableBindings.Any(binding => binding.Level == x.Level && binding.Kind == x.ArtifactKind))
+                    ).Where(EffectiveExecutableArtifact.ExecutablePredicate(
+                        dashboardPolicy ?? LegacyLadderPolicy.Instance))
                 .Select(x => new { x.Id, x.Level }).ToDictionaryAsync(x => x.Id, x => x.Level, ct);
             ChangeDashboardSummary ChangeSummary(ChangeRequestType type)
             {
@@ -624,7 +622,6 @@ public static class WorkspaceEndpoints
             var allowedProcedureLevels=ladderPolicy.OrderedLevels.Where(level=>ladderPolicy.Definition(level).Verification is not null).Select(level=>ladderPolicy.ProcedureLevel(level)).ToArray();
             // Search and navigation show every ENABLED artifact (Cases and Procedures under the full
             // software profile), while execution and test-set consumers use the executable-only bindings.
-            var enabledBindings=EffectiveExecutableArtifact.EnabledBindings(ladderPolicy);
              var allowedDocumentTypes=ladderPolicy.ControlledDocumentTypes.ToArray();
              var documentLevels=ladderPolicy.OrderedLevels
                  .SelectMany(level=>new[]{ladderPolicy.Definition(level).RequirementsDocumentType,ladderPolicy.Definition(level).Verification?.DocumentType}
@@ -671,7 +668,7 @@ public static class WorkspaceEndpoints
             var procedureSearchRevisionIds=releaseId is null
                 ? await(from revision in db.TestProcedureRevisions.AsNoTracking()
                          join procedure in db.TestProcedures.AsNoTracking().Where(x=>x.ProjectId==projectId&&allowedProcedureLevels.Contains(x.Level)
-                             && enabledBindings.Any(binding=>binding.Level==x.Level&&binding.Kind==x.ArtifactKind))
+                             ).Where(EffectiveExecutableArtifact.EnabledPredicate(ladderPolicy))
                             on revision.ProcedureId equals procedure.Id
                         where revision.Revision==db.TestProcedureRevisions
                             .Where(other=>other.ProcedureId==procedure.Id).Max(other=>other.Revision)
@@ -681,7 +678,7 @@ public static class WorkspaceEndpoints
                 db,procedureSearchRevisionIds,q,ct);
             var procedureCandidates=await(from revision in db.TestProcedureRevisions.AsNoTracking()
                  join procedure in db.TestProcedures.AsNoTracking().Where(x=>x.ProjectId==projectId&&allowedProcedureLevels.Contains(x.Level)
-                     && enabledBindings.Any(binding=>binding.Level==x.Level&&binding.Kind==x.ArtifactKind))
+                     ).Where(EffectiveExecutableArtifact.EnabledPredicate(ladderPolicy))
                     on revision.ProcedureId equals procedure.Id
                 where (releaseId==null
                     ? revision.Revision==db.TestProcedureRevisions
@@ -702,7 +699,7 @@ public static class WorkspaceEndpoints
                 join revision in db.TestProcedureRevisions.AsNoTracking()
                     on execution.ProcedureRevisionId equals revision.Id
                 join procedure in db.TestProcedures.AsNoTracking().Where(x=>x.ProjectId==projectId&&allowedProcedureLevels.Contains(x.Level)
-                    && enabledBindings.Any(binding=>binding.Level==x.Level&&binding.Kind==x.ArtifactKind))
+                    ).Where(EffectiveExecutableArtifact.EnabledPredicate(ladderPolicy))
                     on revision.ProcedureId equals procedure.Id
                 where releaseId==null
                     ||(effectiveProcedureRevisionIds!=null&&effectiveProcedureRevisionIds.Contains(revision.Id))
@@ -713,7 +710,7 @@ public static class WorkspaceEndpoints
                 join revision in db.TestProcedureRevisions.AsNoTracking()
                     on execution.ProcedureRevisionId equals revision.Id
                 join procedure in db.TestProcedures.AsNoTracking().Where(x=>x.ProjectId==projectId&&allowedProcedureLevels.Contains(x.Level)
-                    && enabledBindings.Any(binding=>binding.Level==x.Level&&binding.Kind==x.ArtifactKind))
+                    ).Where(EffectiveExecutableArtifact.EnabledPredicate(ladderPolicy))
                     on revision.ProcedureId equals procedure.Id
                 where (releaseId==null
                     ||(effectiveProcedureRevisionIds!=null&&effectiveProcedureRevisionIds.Contains(revision.Id)))

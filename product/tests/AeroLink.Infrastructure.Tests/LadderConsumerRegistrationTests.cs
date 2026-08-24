@@ -42,6 +42,8 @@ public sealed class LadderConsumerRegistrationTests
             "enterprise.schema-catalogue",
             "release.readiness",
             "release.reconciliation",
+            "verification.execution",
+            "baseline.executable-materialization",
             "navigation.primary",
         }, ids);
 
@@ -62,6 +64,11 @@ public sealed class LadderConsumerRegistrationTests
             "verification.coverage",
             "baseline.controlled-documents",
             "release.readiness",
+            "build.test-sets",
+            "release.reconciliation",
+            "verification.execution",
+            "baseline.executable-materialization",
+            "navigation.primary",
         }, typed.Select(x => x.Id).ToArray());
         var packageConsumers = typed.Where(x => x.Id is
             "change-request.downstream-impact" or "verification.procedure-level"
@@ -89,12 +96,21 @@ public sealed class LadderConsumerRegistrationTests
         Assert.Contains(coverage.SupportedArtifactKeys,
             x => x == new VerificationArtifactKey(VerificationDiscipline.LowLevelSoftware,
                 VerificationArtifactKind.Procedure));
-        Assert.DoesNotContain(typed.Where(x => x.Id == "release.readiness"), registration =>
-            registration.SupportedArtifactKeys.Any(x => x.Kind == VerificationArtifactKind.Procedure
-                && x.Discipline != VerificationDiscipline.System));
+        // #726: release readiness is an effective-execution consumer and must declare the software Procedure
+        // keys plus the Execution capability; without them the cutover is refused.
+        var readiness = typed.Single(x => x.Id == "release.readiness");
+        Assert.Contains(readiness.SupportedArtifactKeys,
+            x => x == new VerificationArtifactKey(VerificationDiscipline.HighLevelSoftware,
+                VerificationArtifactKind.Procedure));
+        Assert.Contains(readiness.SupportedArtifactKeys,
+            x => x == new VerificationArtifactKey(VerificationDiscipline.LowLevelSoftware,
+                VerificationArtifactKind.Procedure));
+        Assert.Equal(VerificationArtifactCapability.Execution | VerificationArtifactCapability.Coverage,
+            readiness.SupportedCapabilities);
         Assert.Equal(VerificationArtifactCapability.Coverage,
             typed.Single(x => x.Id == "verification.coverage").SupportedCapabilities);
-        Assert.DoesNotContain(typed, x => x.Id == "navigation.primary");
+        var navigation = typed.Single(x => x.Id == "navigation.primary");
+        Assert.True(navigation.SupportedCapabilities.HasFlag(VerificationArtifactCapability.Execution));
         var currentProfile = new[]
         {
             VerificationArtifactVocabulary.Definition(new(VerificationDiscipline.System, VerificationArtifactKind.Procedure)),
@@ -116,19 +132,9 @@ public sealed class LadderConsumerRegistrationTests
         };
         var packageManifest = LadderConsumerManifestCatalog.BuildV2(
             registrations.Cast<ILadderConsumerRegistration>().Concat(typed), typed, packageProfile);
-        Assert.False(packageManifest.IsReady);
+        Assert.True(packageManifest.IsReady);
         var missingPackageCapabilities = packageManifest.MissingArtifactCoverage;
-        Assert.NotEmpty(missingPackageCapabilities);
-        Assert.All(missingPackageCapabilities, missing =>
-            Assert.Equal(VerificationArtifactCapability.Execution, missing.RequiredCapabilities));
-        Assert.Equal(new[]
-        {
-            new VerificationArtifactKey(VerificationDiscipline.HighLevelSoftware,
-                VerificationArtifactKind.Procedure),
-            new VerificationArtifactKey(VerificationDiscipline.LowLevelSoftware,
-                VerificationArtifactKind.Procedure),
-        }, missingPackageCapabilities.Select(x => x.ArtifactKey).Distinct()
-            .OrderBy(x => x.Discipline).ThenBy(x => x.Kind).ToArray());
+        Assert.Empty(missingPackageCapabilities);
 
         var untypedManifest = LadderConsumerManifestCatalog.BuildV2(registrations, [], currentProfile);
         Assert.False(untypedManifest.IsReady);
