@@ -235,7 +235,7 @@ public static class WorkspaceEndpoints
             });
         });
 
-        app.MapGet("/api/dashboard", async (Guid? projectId, Guid? releaseId, HttpContext http, AeroLinkDbContext db, CancellationToken ct) =>
+        app.MapGet("/api/dashboard", async (Guid? projectId, Guid? releaseId, HttpContext http, AeroLinkDbContext db, IProjectLadderPolicyResolver policyResolver, CancellationToken ct) =>
         {
             var actor = http.UserAccount();
             if (projectId is not null && !await http.HasProjectAccessAsync(db, projectId.Value, ct)) return Results.Forbid();
@@ -251,8 +251,14 @@ public static class WorkspaceEndpoints
             var requirementLevels = await db.RequirementChanges.AsNoTracking().Where(x => requirementChangeIds.Contains(x.Id))
                 .Select(x => new { x.Id, x.Level }).ToDictionaryAsync(x => x.Id, x => x.Level, ct);
             var procedureIds = impacts.Where(x => x.ProcedureId is not null).Select(x => x.ProcedureId!.Value).ToList();
+            var dashboardPolicy = projectId is null || projectId == Guid.Empty
+                ? null
+                : await policyResolver.ResolveAsync(projectId.Value, ct);
+            var dashboardExecutableBindings = dashboardPolicy is null
+                ? EffectiveExecutableArtifact.Bindings(LegacyLadderPolicy.Instance)
+                : EffectiveExecutableArtifact.Bindings(dashboardPolicy);
             var procedureLevels = await db.TestProcedures.AsNoTracking().Where(x => procedureIds.Contains(x.Id)
-                    && (x.Level == TestProcedureLevel.System || x.ArtifactKind == VerificationArtifactKind.Case))
+                    && dashboardExecutableBindings.Any(binding => binding.Level == x.Level && binding.Kind == x.ArtifactKind))
                 .Select(x => new { x.Id, x.Level }).ToDictionaryAsync(x => x.Id, x => x.Level, ct);
             ChangeDashboardSummary ChangeSummary(ChangeRequestType type)
             {
@@ -433,7 +439,7 @@ public static class WorkspaceEndpoints
         // Deliberately not under /api: this is opened from a mail client, and the session gate answers an
         // unauthenticated /api request with a JSON 401. Missing, unauthorized and unauthenticated all end at
         // the workspace root, so probing cannot distinguish an artifact that exists from one that does not.
-        app.MapGet("/open/{kind}/{id:guid}", async (string kind, Guid id, HttpContext http, AeroLinkDbContext db, IdentityService identity, CancellationToken ct) =>
+        app.MapGet("/open/{kind}/{id:guid}", async (string kind, Guid id, HttpContext http, AeroLinkDbContext db, IdentityService identity, IProjectLadderPolicyResolver policyResolver, CancellationToken ct) =>
         {
             var user = await identity.ResolveAsync(http.Request.Cookies[IdentityService.CookieName], DateTimeOffset.UtcNow, ct);
             if (user is null) return Results.Redirect("/");
@@ -468,15 +474,20 @@ public static class WorkspaceEndpoints
                 }
                 case "procedure" or "case":
                 {
-                    var record = await db.TestProcedures.AsNoTracking().Where(x => x.Id == id
-                            && (x.Level == TestProcedureLevel.System || x.ArtifactKind == VerificationArtifactKind.Case))
-                        .Select(x => new { x.ProjectId, x.Level }).SingleOrDefaultAsync(ct);
+                    var record = await db.TestProcedures.AsNoTracking().Where(x => x.Id == id)
+                        .Select(x => new { x.ProjectId, x.Level, x.ArtifactKind }).SingleOrDefaultAsync(ct);
                     if (record is not null)
                     {
                         projectId = record.ProjectId;
-                        tail = record.Level == TestProcedureLevel.System
-                            ? $"/system-verification/procedures?procedureId={id}"
-                            : $"/software-verification/cases?caseId={id}";
+                        var openPolicy = await policyResolver.ResolveAsync(projectId.Value, ct);
+                        var enabled = EffectiveExecutableArtifact.EnabledBindings(openPolicy)
+                            .Any(binding => binding.Level == record.Level && binding.Kind == record.ArtifactKind);
+                        if (enabled)
+                            tail = record.Level == TestProcedureLevel.System
+                                ? $"/system-verification/procedures?procedureId={id}"
+                                : record.ArtifactKind == VerificationArtifactKind.Procedure
+                                    ? $"/software-verification/procedures?procedureId={id}"
+                                    : $"/software-verification/cases?caseId={id}";
                     }
                     break;
                 }
@@ -610,7 +621,10 @@ public static class WorkspaceEndpoints
              var ladderPolicy=await policyResolver.ResolveAsync(projectId,ct);
              var allowedRequirementLevels=ladderPolicy.OrderedLevels.ToArray();
              var allowedChangeControlLevels=ladderPolicy.OrderedLevels.Where(level=>ladderPolicy.Definition(level).Has(LevelCapabilities.HasChangeControl)).ToArray();
-             var allowedProcedureLevels=ladderPolicy.OrderedLevels.Where(level=>ladderPolicy.Definition(level).Verification is not null).Select(level=>ladderPolicy.ProcedureLevel(level)).ToArray();
+            var allowedProcedureLevels=ladderPolicy.OrderedLevels.Where(level=>ladderPolicy.Definition(level).Verification is not null).Select(level=>ladderPolicy.ProcedureLevel(level)).ToArray();
+            // Search and navigation show every ENABLED artifact (Cases and Procedures under the full
+            // software profile), while execution and test-set consumers use the executable-only bindings.
+            var enabledBindings=EffectiveExecutableArtifact.EnabledBindings(ladderPolicy);
              var allowedDocumentTypes=ladderPolicy.ControlledDocumentTypes.ToArray();
              var documentLevels=ladderPolicy.OrderedLevels
                  .SelectMany(level=>new[]{ladderPolicy.Definition(level).RequirementsDocumentType,ladderPolicy.Definition(level).Verification?.DocumentType}
@@ -657,7 +671,7 @@ public static class WorkspaceEndpoints
             var procedureSearchRevisionIds=releaseId is null
                 ? await(from revision in db.TestProcedureRevisions.AsNoTracking()
                          join procedure in db.TestProcedures.AsNoTracking().Where(x=>x.ProjectId==projectId&&allowedProcedureLevels.Contains(x.Level)
-                             && (x.Level == TestProcedureLevel.System || x.ArtifactKind == VerificationArtifactKind.Case))
+                             && enabledBindings.Any(binding=>binding.Level==x.Level&&binding.Kind==x.ArtifactKind))
                             on revision.ProcedureId equals procedure.Id
                         where revision.Revision==db.TestProcedureRevisions
                             .Where(other=>other.ProcedureId==procedure.Id).Max(other=>other.Revision)
@@ -667,7 +681,7 @@ public static class WorkspaceEndpoints
                 db,procedureSearchRevisionIds,q,ct);
             var procedureCandidates=await(from revision in db.TestProcedureRevisions.AsNoTracking()
                  join procedure in db.TestProcedures.AsNoTracking().Where(x=>x.ProjectId==projectId&&allowedProcedureLevels.Contains(x.Level)
-                     && (x.Level == TestProcedureLevel.System || x.ArtifactKind == VerificationArtifactKind.Case))
+                     && enabledBindings.Any(binding=>binding.Level==x.Level&&binding.Kind==x.ArtifactKind))
                     on revision.ProcedureId equals procedure.Id
                 where (releaseId==null
                     ? revision.Revision==db.TestProcedureRevisions
@@ -675,10 +689,10 @@ public static class WorkspaceEndpoints
                     : effectiveProcedureRevisionIds!=null&&effectiveProcedureRevisionIds.Contains(revision.Id))
                     &&(procedure.BaseNumber.ToLower().Contains(identifierQ)
                         ||matchingProcedureTitleRevisionIds.Contains(revision.Id))
-                select new{procedure.Id,procedure.BaseNumber,procedure.Level,revisionId=revision.Id,
+                select new{procedure.Id,procedure.BaseNumber,procedure.Level,procedure.ArtifactKind,revisionId=revision.Id,
                     revision.Revision,revision.State,revision.CreatedAt}).Take(take).ToListAsync(ct);
             var procedureTitles=await TestProcedureRevisionTitleProjection.ForRevisionsAsync(db,procedureCandidates.Select(x=>x.revisionId).Distinct().ToList(),ct);
-            items.AddRange(procedureCandidates.Select(x=>new SearchResultDto(x.Id,x.Level==TestProcedureLevel.System?"test-procedure":"test-case",$"{x.BaseNumber}.{x.Revision:D2}",procedureTitles[x.revisionId].Title,x.State.ToString(),x.Level==TestProcedureLevel.System?"system":"software",x.CreatedAt,ladderPolicy.RequirementLevelFor(x.Level).ToString())));
+            items.AddRange(procedureCandidates.Select(x=>new SearchResultDto(x.Id,x.ArtifactKind==VerificationArtifactKind.Procedure||x.Level==TestProcedureLevel.System?"test-procedure":"test-case",$"{x.BaseNumber}.{x.Revision:D2}",procedureTitles[x.revisionId].Title,x.State.ToString(),x.Level==TestProcedureLevel.System?"system":"software",x.CreatedAt,ladderPolicy.RequirementLevelFor(x.Level).ToString())));
             var documentCandidates=await db.ControlledDocuments.AsNoTracking().Where(x=>x.ProjectId==projectId&&allowedDocumentTypes.Contains(x.Type)&&(releaseId==null||x.ReleaseId==releaseId)&&(x.DocumentNumber.ToLower().Contains(identifierQ)||x.Title.ToLower().Contains(q))).Take(take).Select(x=>new{x.Id,x.DocumentNumber,x.Revision,x.Title,x.Type,x.GeneratedAt}).ToListAsync(ct);
             items.AddRange(documentCandidates.Select(x=>new SearchResultDto(x.Id,"document",x.DocumentNumber+"."+(x.Revision<10?"0":"")+x.Revision,x.Title,"Generated",x.Type==ControlledDocumentType.Sysrd?"system":"software",x.GeneratedAt,documentLevels[x.Type].ToString())));
             items.AddRange(await db.ReleaseCampaigns.AsNoTracking().Where(x=>x.ProjectId==projectId&&(releaseId==null||x.ReleaseId==releaseId)&&x.Name.ToLower().Contains(q)).Take(take).Select(x=>new SearchResultDto(x.Id,"release-campaign",x.Name,x.Name,x.State.ToString(),"configuration",x.CreatedAt)).ToListAsync(ct));
@@ -688,7 +702,7 @@ public static class WorkspaceEndpoints
                 join revision in db.TestProcedureRevisions.AsNoTracking()
                     on execution.ProcedureRevisionId equals revision.Id
                 join procedure in db.TestProcedures.AsNoTracking().Where(x=>x.ProjectId==projectId&&allowedProcedureLevels.Contains(x.Level)
-                    && (x.Level == TestProcedureLevel.System || x.ArtifactKind == VerificationArtifactKind.Case))
+                    && enabledBindings.Any(binding=>binding.Level==x.Level&&binding.Kind==x.ArtifactKind))
                     on revision.ProcedureId equals procedure.Id
                 where releaseId==null
                     ||(effectiveProcedureRevisionIds!=null&&effectiveProcedureRevisionIds.Contains(revision.Id))
@@ -699,7 +713,7 @@ public static class WorkspaceEndpoints
                 join revision in db.TestProcedureRevisions.AsNoTracking()
                     on execution.ProcedureRevisionId equals revision.Id
                 join procedure in db.TestProcedures.AsNoTracking().Where(x=>x.ProjectId==projectId&&allowedProcedureLevels.Contains(x.Level)
-                    && (x.Level == TestProcedureLevel.System || x.ArtifactKind == VerificationArtifactKind.Case))
+                    && enabledBindings.Any(binding=>binding.Level==x.Level&&binding.Kind==x.ArtifactKind))
                     on revision.ProcedureId equals procedure.Id
                 where (releaseId==null
                     ||(effectiveProcedureRevisionIds!=null&&effectiveProcedureRevisionIds.Contains(revision.Id)))

@@ -173,12 +173,18 @@ public sealed class ReleaseReadinessService(AeroLinkDbContext db, ILadderPolicy?
             .Where(x => db.BuildTestSets.Any(set => set.Id == x.BuildTestSetId
                 && set.ReleaseId == campaign.ReleaseId && configuredDisciplines.Contains(set.Discipline)))
             .Select(x => x.ProcedureRevisionId).Distinct().ToListAsync(ct);
+        // #726: the selected set is the set of EFFECTIVE EXECUTABLE artifacts. With the software Procedure
+        // tier enabled that means Procedure revisions, not the Case revisions beneath them; a Case-only
+        // profile keeps Case revisions; System keeps its Procedure. One resolver, no per-consumer guesses.
+        var executableBindings = EffectiveExecutableArtifact.Bindings(ladderPolicy);
         if (selectedRevisionIds.Count != 0)
             selectedRevisionIds = await (from revision in db.TestProcedureRevisions.AsNoTracking()
                                          join procedure in db.TestProcedures.AsNoTracking() on revision.ProcedureId equals procedure.Id
                                          where selectedRevisionIds.Contains(revision.Id)
                                              && configuredProcedureLevels.Contains(procedure.Level)
-                                             && (procedure.Level == TestProcedureLevel.System || procedure.ArtifactKind == VerificationArtifactKind.Case)
+                                             && executableBindings.Any(binding =>
+                                                 binding.Level == procedure.Level
+                                                 && binding.Kind == procedure.ArtifactKind)
                                          select revision.Id).ToListAsync(ct);
         // Scoped through the one shared rule, not a local predicate.
         //

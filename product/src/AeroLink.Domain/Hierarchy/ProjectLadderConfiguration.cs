@@ -290,6 +290,26 @@ public sealed class ProjectLadderStep
         VerificationArtifactProfile.ParseKinds(EnabledArtifactKindsValue);
     [NotMapped]
     public IReadOnlyList<VerificationArtifactKind> EnabledKinds => EnabledArtifactKinds;
+
+    /// <summary>
+    /// Governed #726 cutover: enables the exact artifact kinds for this step through the platform upgrade
+    /// authority, never through a public structural-edit route. The step remains sealed; only the persisted
+    /// enabled-kinds evidence changes, and the configuration history records the upgrade.
+    /// </summary>
+    internal void ApplyPlatformUpgradeKinds(IReadOnlyList<VerificationArtifactKind> kinds)
+    {
+        var ordered = kinds.Distinct().ToArray();
+        var level = Enum.Parse<RequirementLevel>(CatalogueEntry, false);
+        var discipline = level switch
+        {
+            RequirementLevel.System => VerificationDiscipline.System,
+            RequirementLevel.HighLevel => VerificationDiscipline.HighLevelSoftware,
+            RequirementLevel.LowLevel => VerificationDiscipline.LowLevelSoftware,
+            _ => throw new DomainException($"The {level} level has no verification discipline.")
+        };
+        VerificationArtifactProfile.ValidateEnabledKinds(discipline, ordered);
+        EnabledArtifactKindsValue = VerificationArtifactProfile.SerializeKinds(ordered);
+    }
     public DateTimeOffset CreatedAt { get; private set; }
     public DateTimeOffset UpdatedAt { get; private set; }
     public long Version { get; private set; }

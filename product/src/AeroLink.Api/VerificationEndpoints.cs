@@ -1311,7 +1311,6 @@ public static class VerificationEndpoints
                     || x.ReleaseId == null && x.SoftwareBuildId != null && db.SoftwareBuilds.Any(b => b.Id == x.SoftwareBuildId && b.ReleaseId == releaseId)));
             var rowsQuery = from execution in source join revision in db.TestProcedureRevisions.AsNoTracking() on execution.ProcedureRevisionId equals revision.Id
                               join procedure in db.TestProcedures.AsNoTracking()
-                                  .Where(x => x.Level == TestProcedureLevel.System || x.ArtifactKind == VerificationArtifactKind.Case)
                                   on revision.ProcedureId equals procedure.Id
                               select new { execution.Id, artifactRevisionId = revision.Id, displayNumber = procedure.BaseNumber + "." + (revision.Revision < 10 ? "0" : "") + revision.Revision,
                                   outcome = execution.Outcome.ToString(), execution.ExecutedBy, execution.Configuration, execution.Determination,

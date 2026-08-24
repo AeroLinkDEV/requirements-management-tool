@@ -261,12 +261,38 @@ public sealed class VerificationImpactService(AeroLinkDbContext db, ProblemRepor
         }
         var changedByRevision = coverage.GroupBy(x => x.ProcedureRevisionId).ToDictionary(x => x.Key,
             x => changes.First(change => x.Any(link => link.RequirementRevisionId == change.RevisionId)).DisplayNumber);
+        // #726: a test set holds the EFFECTIVE EXECUTABLE artifact. When the software Procedure tier is
+        // enabled, the mandatory entry for a changed requirement is the Procedure revision linked to the
+        // exact Case revision, not the Case revision itself; Case-only software and System stay unchanged.
+        var executableBindings = EffectiveExecutableArtifact.Bindings(ladderPolicy);
+        var procedureEnabledProcedureLevels = executableBindings
+            .Where(binding => binding.Kind == VerificationArtifactKind.Procedure
+                && binding.Level != TestProcedureLevel.System)
+            .Select(binding => binding.Level).ToHashSet();
+        var caseIdsNeedingLinkedProcedures = levels
+            .Where(row => procedureEnabledProcedureLevels.Contains(row.Level))
+            .Select(x => x.Id).ToList();
+        var linkedByCase = caseIdsNeedingLinkedProcedures.Count == 0
+            ? []
+            : await (from link in db.TestCaseProcedureLinks.AsNoTracking()
+                     where caseIdsNeedingLinkedProcedures.Contains(link.CaseRevisionId)
+                     join revision in db.TestProcedureRevisions.AsNoTracking()
+                         on link.ProcedureRevisionId equals revision.Id
+                     join procedure in db.TestProcedures.AsNoTracking()
+                         on revision.ProcedureId equals procedure.Id
+                     where procedure.ProjectId == projectId
+                     select new { link.CaseRevisionId, link.ProcedureRevisionId, procedure.Level }).ToListAsync(ct);
         foreach (var row in levels)
         {
             var discipline = ladderPolicy.Discipline(configuredProcedureLevels[row.Level]);
-            sets.Single(x => x.Discipline == discipline).Include(actorId, row.Id,
-                TestSelectionReason.ChangedRequirement,
-                $"Mandatory before release because {changedByRevision[row.Id]} changed.", now);
+            var includeIds = procedureEnabledProcedureLevels.Contains(row.Level)
+                ? linkedByCase.Where(link => link.CaseRevisionId == row.Id && link.Level == row.Level)
+                    .Select(link => link.ProcedureRevisionId).Distinct().ToList()
+                : [row.Id];
+            foreach (var includeId in includeIds)
+                sets.Single(x => x.Discipline == discipline).Include(actorId, includeId,
+                    TestSelectionReason.ChangedRequirement,
+                    $"Mandatory before release because {changedByRevision[row.Id]} changed.", now);
         }
     }
 
@@ -526,10 +552,17 @@ public sealed class VerificationImpactService(AeroLinkDbContext db, ProblemRepor
     public async Task<ApprovedProcedureSelection?> FindApprovedProcedureAsync(
         Guid projectId, Guid procedureId, CancellationToken ct)
     {
+        // #726: impact resolution may select the EFFECTIVE EXECUTABLE artifact. With the software
+        // Procedure tier enabled that is the Procedure; Case-only software and System keep their current rule.
+        var policy = policyResolver is null
+            ? fallbackPolicy
+            : await policyResolver.ResolveAsync(projectId, ct);
+        var executableBindings = EffectiveExecutableArtifact.Bindings(policy);
         var revisions = await (from revision in db.TestProcedureRevisions.AsNoTracking()
                                where revision.ProcedureId == procedureId && revision.State == TestProcedureState.Approved
                                join procedure in db.TestProcedures.AsNoTracking().Where(x => x.ProjectId == projectId
-                                   && (x.Level == TestProcedureLevel.System || x.ArtifactKind == VerificationArtifactKind.Case))
+                                   && executableBindings.Any(binding =>
+                                       binding.Level == x.Level && binding.Kind == x.ArtifactKind))
                                    on revision.ProcedureId equals procedure.Id
                                select new
                                {

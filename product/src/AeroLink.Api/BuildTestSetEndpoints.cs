@@ -1,4 +1,5 @@
 using AeroLink.Domain.Common;
+using AeroLink.Domain.Hierarchy;
 using AeroLink.Domain.Identity;
 using AeroLink.Domain.Verification;
 using AeroLink.Infrastructure.Persistence;
@@ -22,7 +23,8 @@ public static class BuildTestSetEndpoints
     public static IEndpointRouteBuilder MapAeroLinkBuildTestSetEndpoints(this IEndpointRouteBuilder app)
     {
         app.MapGet("/api/releases/{releaseId:guid}/test-sets", async (Guid releaseId, HttpContext http,
-            AeroLinkDbContext db, BuildTestSetService service, CancellationToken ct) =>
+            AeroLinkDbContext db, BuildTestSetService service, IProjectLadderPolicyResolver policyResolver,
+            CancellationToken ct) =>
         {
             var projectId = await db.Releases.AsNoTracking().Where(x => x.Id == releaseId)
                 .Select(x => x.ProjectId).SingleOrDefaultAsync(ct);
@@ -30,12 +32,14 @@ public static class BuildTestSetEndpoints
             if (!await http.HasProjectAccessAsync(db, projectId, ct)) return Results.Forbid();
 
             var sets = await service.EnsureForReleaseAsync(projectId, releaseId, ct);
-            return Results.Ok(await DescribeAsync(sets, releaseId, db, ct));
+            var policy = await policyResolver.ResolveAsync(projectId, ct);
+            return Results.Ok(await DescribeAsync(sets, releaseId, db, policy, ct));
         });
 
         app.MapPost("/api/releases/{releaseId:guid}/test-sets/{discipline}/{artifactRoute:regex(procedures|cases)}", async (Guid releaseId, string artifactRoute,
             TestChangeReviewDiscipline discipline, IncludeInTestSetRequest request, HttpContext http,
-            AeroLinkDbContext db, IdentityService identity, BuildTestSetService service, CancellationToken ct) =>
+            AeroLinkDbContext db, IdentityService identity, BuildTestSetService service,
+            IProjectLadderPolicyResolver policyResolver, CancellationToken ct) =>
         {
             var revisionIds = request.ArtifactRevisionIds ?? request.ProcedureRevisionIds ?? [];
             var artifactPlural = TestChangeRequestSourceEligibility.ArtifactPlural(discipline);
@@ -51,11 +55,18 @@ public static class BuildTestSetEndpoints
             // Every named revision has to be an approved procedure in this Project. Selecting a draft would
             // put the build behind a procedure that nobody has agreed says the right thing, and selecting one
             // from another Project would measure this release against work that has nothing to do with it.
+            // #726: a build can only run the EFFECTIVE EXECUTABLE artifact for the discipline. With the
+            // software Procedure tier enabled that is the Procedure; Case-only software keeps its Case.
+            var policy = await policyResolver.ResolveAsync(release.ProjectId, ct);
+            var executableBindings = EffectiveExecutableArtifact.Bindings(policy);
             var reachable = await (from revision in db.TestProcedureRevisions.AsNoTracking()
-                                   join procedure in db.TestProcedures.AsNoTracking().Where(x => x.Level == TestProcedureLevel.System || x.ArtifactKind == VerificationArtifactKind.Case) on revision.ProcedureId equals procedure.Id
+                                   join procedure in db.TestProcedures.AsNoTracking() on revision.ProcedureId equals procedure.Id
                                    where revisionIds.Contains(revision.Id)
                                          && procedure.ProjectId == release.ProjectId
                                          && revision.State == TestProcedureState.Approved
+                                         && executableBindings.Any(binding =>
+                                             binding.Level == procedure.Level
+                                             && binding.Kind == procedure.ArtifactKind)
                                    select revision.Id).ToListAsync(ct);
             var unreachable = revisionIds.Except(reachable).ToList();
             if (unreachable.Count != 0)
@@ -76,14 +87,15 @@ public static class BuildTestSetEndpoints
                 await db.SaveChangesAsync(ct);
                 // Says how many were new rather than how many were named. Selecting from two directions at
                 // once is expected, so "8 named, 3 added" is the honest answer and the useful one.
-                return Results.Ok(new { added, named = revisionIds.Length, set = (await DescribeAsync([set], releaseId, db, ct)).Single() });
+                return Results.Ok(new { added, named = revisionIds.Length, set = (await DescribeAsync([set], releaseId, db, policy, ct)).Single() });
             }
             catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
         });
 
         app.MapDelete("/api/releases/{releaseId:guid}/test-sets/{discipline}/{artifactRoute:regex(procedures|cases)}/{artifactRevisionId:guid}",
             async (Guid releaseId, TestChangeReviewDiscipline discipline, string artifactRoute, Guid artifactRevisionId, HttpContext http,
-                AeroLinkDbContext db, IdentityService identity, BuildTestSetService service, CancellationToken ct) =>
+                AeroLinkDbContext db, IdentityService identity, BuildTestSetService service,
+                IProjectLadderPolicyResolver policyResolver, CancellationToken ct) =>
         {
             var release = await db.Releases.AsNoTracking().Where(x => x.Id == releaseId)
                 .Select(x => new { x.ProjectId, x.IsReleased }).SingleOrDefaultAsync(ct);
@@ -95,13 +107,14 @@ public static class BuildTestSetEndpoints
             var sets = await service.EnsureForReleaseAsync(release.ProjectId, releaseId, ct);
             var set = sets.SingleOrDefault(x => x.Discipline == discipline);
             if (set is null) return Results.NotFound(new { error = "That discipline has no test set on this build." });
+            var policy = await policyResolver.ResolveAsync(release.ProjectId, ct);
             // A procedure that is not in the set is already in the state the caller asked for. Two people
             // tidying the same set should not produce an error for whichever of them is slower.
             try
             {
                 set.Exclude(artifactRevisionId, DateTimeOffset.UtcNow);
                 await db.SaveChangesAsync(ct);
-                return Results.Ok((await DescribeAsync([set], releaseId, db, ct)).Single());
+                return Results.Ok((await DescribeAsync([set], releaseId, db, policy, ct)).Single());
             }
             catch (DomainException ex)
             {
@@ -122,14 +135,18 @@ public static class BuildTestSetEndpoints
         http.HasProjectRoleAsync(db, identity, projectId, ct, ProgramRole.TestLead, ProgramRole.ProgramManager);
 
     private static async Task<IReadOnlyList<object>> DescribeAsync(IReadOnlyCollection<BuildTestSet> sets,
-        Guid releaseId, AeroLinkDbContext db, CancellationToken ct)
+        Guid releaseId, AeroLinkDbContext db, ILadderPolicy policy, CancellationToken ct)
     {
         var revisionIds = sets.SelectMany(x => x.Entries).Select(x => x.ProcedureRevisionId).Distinct().ToList();
+        var executableBindings = EffectiveExecutableArtifact.Bindings(policy);
         var procedures = revisionIds.Count == 0
             ? []
             : await (from revision in db.TestProcedureRevisions.AsNoTracking()
-                     join procedure in db.TestProcedures.AsNoTracking().Where(x => x.Level == TestProcedureLevel.System || x.ArtifactKind == VerificationArtifactKind.Case) on revision.ProcedureId equals procedure.Id
+                     join procedure in db.TestProcedures.AsNoTracking() on revision.ProcedureId equals procedure.Id
                      where revisionIds.Contains(revision.Id)
+                         && executableBindings.Any(binding =>
+                             binding.Level == procedure.Level
+                             && binding.Kind == procedure.ArtifactKind)
                      select new { revision.Id, procedure.BaseNumber, revision.Revision, procedure.Level })
                 .ToListAsync(ct);
         var byRevision = procedures.ToDictionary(x => x.Id);

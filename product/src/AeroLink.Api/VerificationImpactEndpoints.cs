@@ -2626,7 +2626,6 @@ public static class VerificationImpactEndpoints
         var rows = await (
             from revision in db.TestProcedureRevisions.AsNoTracking()
             join procedure in db.TestProcedures.AsNoTracking()
-                .Where(x => x.Level == TestProcedureLevel.System || x.ArtifactKind == VerificationArtifactKind.Case)
                 on revision.ProcedureId equals procedure.Id
             where revisionIds.Contains(revision.Id) || procedureIds.Contains(procedure.Id)
             select new
