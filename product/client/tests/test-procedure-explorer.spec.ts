@@ -135,6 +135,12 @@ test('the Software Explorer opens on HLR and can move to the configured LLR leve
 
 test('the shared Explorer deep-link can inspect dormant software Procedures without build surfaces', async ({ page }) => {
   test.setTimeout(180_000)
+  let relationshipState = 'Suspect'
+  let relationshipOutcome: string | undefined
+  const lifecycleEvents = [{
+    id: 'raised-event', type: 'Raised', actorId: 'baseline.materializer',
+    occurredAt: '2026-08-23T00:00:00Z', rationale: 'The exact Case revision changed.',
+  }]
   await login(page, 'admin', { openProject: false })
   await selectProgram(page, 'Flight Management System Live Program')
   await openNavigationGroup(page, 'ASSURANCE')
@@ -176,10 +182,38 @@ test('the shared Explorer deep-link can inspect dormant software Procedures with
           steps: '', expectedResult: '', environmentSetup: 'Bench setup', testData: 'Known data',
           orderedSteps: '1. Execute', expectedObservations: 'Expected result', cleanup: 'Restore bench',
           toolingAutomation: 'Runner', parentKind: 'Allocated', caseRevisionIds: ['case-a', 'case-b'],
+          caseParents: [{ linkId: 'case-procedure-link', caseRevisionId: 'case-b',
+            state: relationshipState, outcome: relationshipOutcome }],
           drivenBy: [], covers: [],
         }],
       }),
     })
+  })
+  await page.route('**/api/case-procedure-links/case-procedure-link/lifecycle', async route => {
+    await route.fulfill({ contentType: 'application/json', body: JSON.stringify({
+      linkId: 'case-procedure-link', linkKind: 'CaseProcedure', state: relationshipState,
+      outcome: relationshipOutcome, events: lifecycleEvents,
+    }) })
+  })
+  await page.route('**/api/case-procedure-links/case-procedure-link/lifecycle/acknowledge', async route => {
+    const request = route.request().postDataJSON() as { rationale: string }
+    expect(request.rationale).toBe('Assess the carried exact Case relationship.')
+    relationshipState = 'Acknowledged'
+    lifecycleEvents.push({ id: 'ack-event', type: 'Acknowledged', actorId: 'test.engineer',
+      occurredAt: '2026-08-23T00:01:00Z', rationale: request.rationale })
+    await route.fulfill({ contentType: 'application/json', body: JSON.stringify({
+      linkId: 'case-procedure-link', state: relationshipState,
+    }) })
+  })
+  await page.route('**/api/case-procedure-links/case-procedure-link/lifecycle/resolve', async route => {
+    const request = route.request().postDataJSON() as { rationale: string; outcome: string }
+    expect(request.outcome).toBe('ExistingDownstreamRevisionRemainsValid')
+    relationshipState = 'Closed'; relationshipOutcome = request.outcome
+    lifecycleEvents.push({ id: 'resolve-event', type: 'ResolutionRecorded', actorId: 'test.engineer',
+      occurredAt: '2026-08-23T00:02:00Z', rationale: request.rationale })
+    await route.fulfill({ contentType: 'application/json', body: JSON.stringify({
+      linkId: 'case-procedure-link', state: relationshipState, outcome: relationshipOutcome,
+    }) })
   })
   await page.route('**/api/test-procedures/dormant-procedure/comments', async route => {
     await route.fulfill({
@@ -203,6 +237,16 @@ test('the shared Explorer deep-link can inspect dormant software Procedures with
   await expect(page.getByText('Environment / setup')).toBeVisible()
   await page.getByRole('button', { name: 'History' }).click()
   await expect(page.getByText('Allocated · 2 exact Case parents')).toBeVisible()
+  await expect(page.getByLabel('Exact link lifecycle Suspect')).toBeVisible()
+  await page.getByPlaceholder('Record why this exact relationship is under assessment.')
+    .fill('Assess the carried exact Case relationship.')
+  await page.getByRole('button', { name: 'Acknowledge relationship' }).click()
+  await expect(page.getByLabel('Exact link lifecycle Acknowledged')).toBeVisible()
+  await page.getByPlaceholder('Record the controlled disposition and supporting rationale.')
+    .fill('The existing controlled Procedure revision remains valid.')
+  await page.getByRole('button', { name: 'Record resolution' }).click()
+  await expect(page.getByLabel('Exact link lifecycle Closed')).toContainText(/Existing Downstream Revision Remains Valid/i)
+  await expect(page.getByLabel('Exact link lifecycle Closed')).toContainText('baseline.materializer')
   await page.getByRole('button', { name: /^Discussion/ }).click()
   await expect(page.locator('.discussionPane')).toContainText('read-only for dormant software Procedures')
   await expect(page.locator('.discussionPane textarea')).toHaveCount(0)

@@ -1,3 +1,4 @@
+using AeroLink.Domain.Traceability;
 using AeroLink.Domain.Verification;
 using Microsoft.EntityFrameworkCore;
 
@@ -183,7 +184,16 @@ public static class ControlledProcedureDocumentSnapshotProjection
                        && artifactKey.Discipline != VerificationDiscipline.System
             ? await db.TestCaseProcedureLinks.AsNoTracking()
                 .Where(x => revisionIds.Contains(x.ProcedureRevisionId)
-                    && baselineCaseRevisionIds.Contains(x.CaseRevisionId))
+                    && baselineCaseRevisionIds.Contains(x.CaseRevisionId)
+                    // A carried Case-to-Procedure relation remains lifecycle evidence until the shared #709
+                    // lifecycle closes. Controlled effectivity must fail closed for every open lifecycle state;
+                    // a relation with no lifecycle is an ordinary authored exact link and remains eligible.
+                    && (x.ExactLinkSuspectLifecycleId == null
+                        || db.ExactLinkSuspectLifecycles.Any(lifecycle =>
+                            lifecycle.Id == x.ExactLinkSuspectLifecycleId
+                            && lifecycle.LinkKind == ExactLinkKind.CaseProcedure
+                            && lifecycle.LinkId == x.Id
+                            && lifecycle.State == ExactLinkLifecycleState.Closed)))
                 .Select(x => new { x.ProcedureRevisionId, ParentRevisionId = x.CaseRevisionId })
                 .ToListAsync(ct)
             : await db.TestCoverage.AsNoTracking()

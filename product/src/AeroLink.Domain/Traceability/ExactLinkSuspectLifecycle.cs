@@ -3,9 +3,8 @@ using AeroLink.Domain.Common;
 namespace AeroLink.Domain.Traceability;
 
 /// <summary>
-/// Registration key for the reusable exact-link lifecycle. #709 registers requirement traces; the dormant
-/// Case-to-Procedure relation reserves a stable key for a future suspect projection without raising events in
-/// this slice.
+/// Registration key for the reusable exact-link lifecycle. Requirement traces and exact Case-to-Procedure
+/// relations share this one current projection and immutable attributed event stream.
 /// </summary>
 public enum ExactLinkKind
 {
@@ -14,7 +13,12 @@ public enum ExactLinkKind
 }
 
 public enum ExactLinkLifecycleState { Suspect, Acknowledged, ChangeRequired, Closed }
-public enum ExactLinkLifecycleCauseKind { InternalRequirementRevision, ExternalBaselineImport }
+public enum ExactLinkLifecycleCauseKind
+{
+    InternalRequirementRevision,
+    ExternalBaselineImport,
+    InternalVerificationRevision,
+}
 public enum ExactLinkResolutionOutcome
 {
     NoDownstreamChangeRequired,
@@ -33,24 +37,27 @@ public sealed class ExactLinkSuspectLifecycle
 
     private ExactLinkSuspectLifecycle(Guid projectId, ExactLinkKind linkKind, Guid linkId,
         ExactLinkLifecycleCauseKind causeKind, Guid? causeRequirementRevisionId, Guid? causeBaselineImportId,
-        string actorId, string rationale, DateTimeOffset now)
+        Guid? causeVerificationRevisionId, string actorId, string rationale, DateTimeOffset now)
     {
         if (projectId == Guid.Empty) throw new DomainException("A suspect exact link requires a Project.");
         if (linkId == Guid.Empty) throw new DomainException("A suspect exact link requires a stable link id.");
-        Validate(linkKind, causeKind, causeRequirementRevisionId, causeBaselineImportId);
+        Validate(linkKind, causeKind, causeRequirementRevisionId, causeBaselineImportId,
+            causeVerificationRevisionId);
         Id = Guid.NewGuid(); ProjectId = projectId; LinkKind = linkKind; LinkId = linkId;
         State = ExactLinkLifecycleState.Suspect; CauseKind = causeKind;
         CauseRequirementRevisionId = causeRequirementRevisionId; CauseBaselineImportId = causeBaselineImportId;
+        CauseVerificationRevisionId = causeVerificationRevisionId;
         RaisedBy = Required(actorId, "A suspect-link actor"); RaisedAt = now;
         RaisedRationale = Required(rationale, "A suspect-link rationale"); UpdatedAt = now;
     }
 
     public static ExactLinkSuspectLifecycle Raise(Guid projectId, ExactLinkKind linkKind, Guid linkId,
         ExactLinkLifecycleCauseKind causeKind, Guid? causeRequirementRevisionId, Guid? causeBaselineImportId,
-        string actorId, string rationale, DateTimeOffset now)
+        string actorId, string rationale, DateTimeOffset now, Guid? causeVerificationRevisionId = null)
     {
         var lifecycle = new ExactLinkSuspectLifecycle(projectId, linkKind, linkId, causeKind,
-            causeRequirementRevisionId, causeBaselineImportId, actorId, rationale, now);
+            causeRequirementRevisionId, causeBaselineImportId, causeVerificationRevisionId,
+            actorId, rationale, now);
         lifecycle._events.Add(ExactLinkSuspectEvent.Raised(lifecycle, actorId, rationale, now));
         return lifecycle;
     }
@@ -63,6 +70,7 @@ public sealed class ExactLinkSuspectLifecycle
     public ExactLinkLifecycleCauseKind CauseKind { get; private set; }
     public Guid? CauseRequirementRevisionId { get; private set; }
     public Guid? CauseBaselineImportId { get; private set; }
+    public Guid? CauseVerificationRevisionId { get; private set; }
     public string RaisedBy { get; private set; } = string.Empty;
     public DateTimeOffset RaisedAt { get; private set; }
     public string RaisedRationale { get; private set; } = string.Empty;
@@ -106,19 +114,24 @@ public sealed class ExactLinkSuspectLifecycle
     }
 
     internal static void Validate(ExactLinkKind linkKind, ExactLinkLifecycleCauseKind causeKind,
-        Guid? revisionId, Guid? importId)
+        Guid? requirementRevisionId, Guid? importId, Guid? verificationRevisionId)
     {
         if (linkKind is not (ExactLinkKind.RequirementTrace or ExactLinkKind.CaseProcedure))
             throw new DomainException($"The exact-link kind '{linkKind}' is not registered.");
         switch (causeKind)
         {
-            case ExactLinkLifecycleCauseKind.InternalRequirementRevision when revisionId is not null
-                && revisionId != Guid.Empty && importId is null:
+            case ExactLinkLifecycleCauseKind.InternalRequirementRevision when requirementRevisionId is not null
+                && requirementRevisionId != Guid.Empty && importId is null && verificationRevisionId is null
+                && linkKind == ExactLinkKind.RequirementTrace:
             case ExactLinkLifecycleCauseKind.ExternalBaselineImport when importId is not null
-                && importId != Guid.Empty && revisionId is null:
+                && importId != Guid.Empty && requirementRevisionId is null && verificationRevisionId is null
+                && linkKind == ExactLinkKind.RequirementTrace:
+            case ExactLinkLifecycleCauseKind.InternalVerificationRevision when verificationRevisionId is not null
+                && verificationRevisionId != Guid.Empty && requirementRevisionId is null && importId is null
+                && linkKind == ExactLinkKind.CaseProcedure:
                 return;
             default:
-                throw new DomainException("A suspect exact-link cause must identify exactly one internal revision or external package.");
+                throw new DomainException("A suspect exact-link cause must identify exactly one compatible internal revision or external package.");
         }
     }
 
@@ -132,12 +145,14 @@ public sealed class ExactLinkSuspectEvent
     private ExactLinkSuspectEvent() { }
     private ExactLinkSuspectEvent(Guid id, Guid lifecycleId, Guid projectId, ExactLinkKind linkKind, Guid linkId,
         ExactLinkLifecycleEventType eventType, ExactLinkLifecycleCauseKind causeKind,
-        Guid? causeRequirementRevisionId, Guid? causeBaselineImportId, string actorId, string rationale,
+        Guid? causeRequirementRevisionId, Guid? causeBaselineImportId, Guid? causeVerificationRevisionId,
+        string actorId, string rationale,
         ExactLinkResolutionOutcome? outcome, DateTimeOffset occurredAt)
     {
         Id = id; LifecycleId = lifecycleId; ProjectId = projectId; LinkKind = linkKind; LinkId = linkId;
         EventType = eventType; CauseKind = causeKind; CauseRequirementRevisionId = causeRequirementRevisionId;
-        CauseBaselineImportId = causeBaselineImportId; ActorId = actorId; Rationale = rationale;
+        CauseBaselineImportId = causeBaselineImportId; CauseVerificationRevisionId = causeVerificationRevisionId;
+        ActorId = actorId; Rationale = rationale;
         Outcome = outcome; OccurredAt = occurredAt;
     }
 
@@ -155,7 +170,8 @@ public sealed class ExactLinkSuspectEvent
         ExactLinkLifecycleEventType eventType, string actor, string rationale,
         ExactLinkResolutionOutcome? outcome, DateTimeOffset now) => new(Guid.NewGuid(), lifecycle.Id,
         lifecycle.ProjectId, lifecycle.LinkKind, lifecycle.LinkId, eventType, lifecycle.CauseKind,
-        lifecycle.CauseRequirementRevisionId, lifecycle.CauseBaselineImportId, actor, rationale, outcome, now);
+        lifecycle.CauseRequirementRevisionId, lifecycle.CauseBaselineImportId,
+        lifecycle.CauseVerificationRevisionId, actor, rationale, outcome, now);
 
     public Guid Id { get; private set; }
     public Guid LifecycleId { get; private set; }
@@ -166,6 +182,7 @@ public sealed class ExactLinkSuspectEvent
     public ExactLinkLifecycleCauseKind CauseKind { get; private set; }
     public Guid? CauseRequirementRevisionId { get; private set; }
     public Guid? CauseBaselineImportId { get; private set; }
+    public Guid? CauseVerificationRevisionId { get; private set; }
     public string ActorId { get; private set; } = string.Empty;
     public string Rationale { get; private set; } = string.Empty;
     public ExactLinkResolutionOutcome? Outcome { get; private set; }

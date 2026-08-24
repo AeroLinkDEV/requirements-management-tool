@@ -204,6 +204,8 @@ public static class VerificationImpactEndpoints
                 => new("Case change", change.Identity, change.Title),
             TestChangeReviewOriginKind.CaseAssessment when assessments.TryGetValue(review.OriginReferenceId, out var assessment)
                 => new("Case assessment", assessment.Identity, assessment.Title),
+            TestChangeReviewOriginKind.CaseReview
+                => new("Case TCR", review.SourceCaseOriginNumber, "Approved Case change-control package"),
             TestChangeReviewOriginKind.ChangeRequest
                 => new("Change request", review.SourceChangeRequestNumber,
                     changeRequests.GetValueOrDefault(review.OriginReferenceId) ?? "Source change request"),
@@ -653,6 +655,14 @@ public static class VerificationImpactEndpoints
                     ? new("Case assessment", review.SourceCaseOriginNumber, "")
                     : new("Case assessment", source.SubjectDisplayNumber,
                         $"{source.Outcome} · {source.ResolutionRationale}");
+            }
+            else if (review.OriginKind == TestChangeReviewOriginKind.CaseReview)
+            {
+                var source = await db.TestChangeReviews.AsNoTracking()
+                    .Where(x => x.Id == review.OriginReferenceId)
+                    .Select(x => new { x.Title }).SingleOrDefaultAsync(ct);
+                originDisplay = new("Case TCR", review.SourceCaseOriginNumber,
+                    source?.Title ?? "Approved Case change-control package");
             }
             else if (review.OriginKind == TestChangeReviewOriginKind.ChangeRequest)
             {
@@ -2163,7 +2173,8 @@ public static class VerificationImpactEndpoints
         });
 
         app.MapPost("/api/test-change-reviews/{id:guid}/approve", async (Guid id, ApproveTestChangeReviewRequest request,
-            HttpContext http, AeroLinkDbContext db, IdentityService identity, CancellationToken ct) =>
+            HttpContext http, AeroLinkDbContext db, IdentityService identity,
+            VerificationImpactService verificationImpact, CancellationToken ct) =>
         {
             var review = await db.TestChangeReviews.Include(x => x.ReviewCycles).ThenInclude(x => x.Steps)
                 .SingleOrDefaultAsync(x => x.Id == id, ct);
@@ -2205,6 +2216,7 @@ public static class VerificationImpactEndpoints
                 }, statusCode: StatusCodes.Status401Unauthorized);
             try
             {
+                await using var transaction = await db.Database.BeginTransactionAsync(ct);
                 var now = DateTimeOffset.UtcNow;
                 var snapshotHash = cycle.SnapshotHash;
                 var activeBefore = cycle.Steps.Where(x => x.State == ApprovalStepState.Active)
@@ -2223,6 +2235,16 @@ public static class VerificationImpactEndpoints
                     snapshotHash, http.Connection.RemoteIpAddress?.ToString() ?? "local", now,
                     activeStep.Authority, rationale: request.Rationale.Trim()));
                 await db.SaveChangesAsync(ct);
+                // The exact Case origin must already be Approved when PostgreSQL validates the polymorphic
+                // origin. Keep both saves in one transaction so approval and assessment raising are still one
+                // atomic controlled act, while the direct database guard observes the truthful source state.
+                if (review.State == TestChangeReviewState.Approved
+                    && review.ArtifactKind == VerificationArtifactKind.Case)
+                {
+                    await verificationImpact.RaiseForApprovedCaseReviewAsync(review, now, ct);
+                    await db.SaveChangesAsync(ct);
+                }
+                await transaction.CommitAsync(ct);
                 return Results.Ok(new
                 {
                     review.Id,

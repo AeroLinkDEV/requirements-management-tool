@@ -270,6 +270,7 @@
         "BuildScopedWorkspaceApiTests",
         "BuildTestSetApiTests",
         "CancelReviewAuthorityTests",
+        "CaseProcedureLifecycleApiTests",
         "ChangeAuthoringInvariantApiTests",
         "ChangeRequestReviewRationaleApiTests",
         "ClosedReleaseAuthoringTests",
@@ -306,6 +307,7 @@
         "ProblemReportPagingApiTests",
         "ProblemReportVerificationApiTests",
         "ProblemReportWaiverApiTests",
+        "ProcedureAssessmentChainApiTests",
         "ProcedureBaselineApiTests",
         "ProcedureBrowsingApiTests",
         "ProcedureControlledDocumentApiTests",
@@ -556,6 +558,22 @@
       "path": "/api/builds",
       "file": "BaselineEndpoints.cs",
       "coveredBy": []
+    },
+    {
+      "method": "POST",
+      "path": "/api/case-procedure-links/{id:guid}/lifecycle/acknowledge",
+      "file": "VerificationEndpoints.cs",
+      "coveredBy": [
+        "CaseProcedureLifecycleApiTests"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/case-procedure-links/{id:guid}/lifecycle/resolve",
+      "file": "VerificationEndpoints.cs",
+      "coveredBy": [
+        "CaseProcedureLifecycleApiTests"
+      ]
     },
     {
       "method": "POST",
@@ -1926,6 +1944,7 @@
       "file": "VerificationImpactEndpoints.cs",
       "coveredBy": [
         "ManualTestChangeRequestApiTests",
+        "ProcedureAssessmentChainApiTests",
         "ProcedureTestChangeControlApiTests",
         "TestChangeRequestReviewWorkflowTests"
       ]
@@ -1974,6 +1993,7 @@
       "file": "VerificationImpactEndpoints.cs",
       "coveredBy": [
         "ManualTestChangeRequestApiTests",
+        "ProcedureAssessmentChainApiTests",
         "TestChangeRequestConsolidationTests",
         "TestChangeRequestReviewWorkflowTests",
         "TestChangeRequestScopeApiTests",

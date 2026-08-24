@@ -3,6 +3,7 @@ using AeroLink.Domain.Baselines;
 using AeroLink.Domain.Common;
 using AeroLink.Domain.Verification;
 using AeroLink.Domain.Hierarchy;
+using AeroLink.Domain.Traceability;
 using Microsoft.EntityFrameworkCore;
 
 namespace AeroLink.Infrastructure.Persistence;
@@ -108,6 +109,8 @@ public sealed class TestProcedureBaselineMaterializer(AeroLinkDbContext db,
         }
 
         var coverageLinks = await LinkDrivingRequirementsAsync(baseline.Id, materialized, ct);
+        await CarryCaseProcedureLinksAsync(baseline.ProjectId, baseline.DisplayNumber, materialized,
+            actorId, now, ladderPolicy, ct);
         var settled = await SettleAwaitingDecisionsAsync(baseline.ProjectId, materialized, procedureByBase, actorId, now, ct);
 
         var procedureById = procedureByBase.Values.ToDictionary(x => x.Id);
@@ -244,6 +247,58 @@ public sealed class TestProcedureBaselineMaterializer(AeroLinkDbContext db,
         }
         return added;
 
+    }
+
+    /// <summary>
+    /// Carries each direct exact Case-to-Procedure relationship onto a newly materialized Case revision and
+    /// attaches #709's shared suspect lifecycle. The predecessor link is immutable history; the new link is
+    /// the only relationship whose current validity is unsettled.
+    /// </summary>
+    private async Task<int> CarryCaseProcedureLinksAsync(Guid projectId, string baselineNumber,
+        IReadOnlyList<(TestChangeReview Tcr, TestProcedureChange Change, Guid RevisionId,
+            Guid? PriorRevisionId)> materialized, string actorId, DateTimeOffset now,
+        ILadderPolicy ladderPolicy, CancellationToken ct)
+    {
+        var changedCases = materialized.Where(x =>
+                x.Tcr.ArtifactKind == VerificationArtifactKind.Case
+                && x.Change.Kind == TestProcedureChangeKind.Modify
+                && x.PriorRevisionId is not null)
+            .Where(x => ladderPolicy.VerificationProfile(
+                    ladderPolicy.RequirementLevelFor(x.Tcr.Discipline))
+                .Enables(VerificationArtifactKind.Procedure))
+            .ToList();
+        if (changedCases.Count == 0) return 0;
+
+        var priorIds = changedCases.Select(x => x.PriorRevisionId!.Value).Distinct().ToList();
+        var predecessors = await db.TestCaseProcedureLinks.AsNoTracking()
+            .Where(x => priorIds.Contains(x.CaseRevisionId)).ToListAsync(ct);
+        var existing = (await db.TestCaseProcedureLinks.AsNoTracking()
+                .Where(x => changedCases.Select(change => change.RevisionId).Contains(x.CaseRevisionId))
+                .Select(x => new { x.CaseRevisionId, x.ProcedureRevisionId }).ToListAsync(ct))
+            .Select(x => (x.CaseRevisionId, x.ProcedureRevisionId)).ToHashSet();
+        foreach (var pending in db.TestCaseProcedureLinks.Local)
+            existing.Add((pending.CaseRevisionId, pending.ProcedureRevisionId));
+
+        var carried = 0;
+        foreach (var change in changedCases)
+        {
+            foreach (var predecessor in predecessors.Where(x => x.CaseRevisionId == change.PriorRevisionId))
+            {
+                if (!existing.Add((change.RevisionId, predecessor.ProcedureRevisionId))) continue;
+                var link = new TestCaseProcedureLink(change.RevisionId, predecessor.ProcedureRevisionId);
+                var lifecycle = ExactLinkSuspectLifecycle.Raise(projectId, ExactLinkKind.CaseProcedure,
+                    link.Id, ExactLinkLifecycleCauseKind.InternalVerificationRevision, null, null,
+                    actorId,
+                    $"The exact Case revision changed from {predecessor.CaseRevisionId} to {change.RevisionId} in baseline {baselineNumber}; its direct Procedure relationship requires reassessment.",
+                    now, change.RevisionId);
+                link.AttachExactLinkLifecycle(lifecycle.Id);
+                db.TestCaseProcedureLinks.Add(link);
+                db.ExactLinkSuspectLifecycles.Add(lifecycle);
+                db.ExactLinkSuspectEvents.AddRange(lifecycle.Events);
+                carried++;
+            }
+        }
+        return carried;
     }
 
     private async Task ValidateDrivingRequirementScopeAsync(Guid baselineId,

@@ -943,8 +943,12 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
             b.ToTable("test_case_procedure_links"); b.HasKey(x => x.Id);
             b.HasIndex(x => new { x.CaseRevisionId, x.ProcedureRevisionId }).IsUnique();
             b.HasIndex(x => x.CaseRevisionId); b.HasIndex(x => x.ProcedureRevisionId);
+            b.HasIndex(x => x.ExactLinkSuspectLifecycleId).IsUnique();
             b.HasOne<TestProcedureRevision>().WithMany().HasForeignKey(x => x.CaseRevisionId).OnDelete(DeleteBehavior.Restrict);
             b.HasOne<TestProcedureRevision>().WithMany().HasForeignKey(x => x.ProcedureRevisionId).OnDelete(DeleteBehavior.Restrict);
+            b.HasOne<ExactLinkSuspectLifecycle>().WithOne()
+                .HasForeignKey<TestCaseProcedureLink>(x => x.ExactLinkSuspectLifecycleId)
+                .OnDelete(DeleteBehavior.Restrict);
         });
         modelBuilder.Entity<BaselineTestProcedureSelection>(b =>
         {
@@ -1086,10 +1090,10 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
             // Only new discriminated Case origins receive this uniqueness rule. Historical Problem Report
             // packages were allowed to repeat an origin, and the #725 upgrade must preserve those rows exactly.
             b.HasIndex(x => new { x.OriginKind, x.OriginReferenceId, x.Discipline, x.ArtifactKind, x.Revision })
-                .IsUnique().HasFilter("\"OriginKind\" IN ('CaseChange','CaseAssessment')");
+                .IsUnique().HasFilter("\"OriginKind\" IN ('CaseChange','CaseAssessment','CaseReview')");
             b.HasIndex(x => new { x.ReleaseId, x.State, x.Discipline });
             b.ToTable("test_change_reviews", table => table.HasCheckConstraint("CK_test_change_reviews_origin_xor",
-                "(\"OriginReferenceId\" <> '00000000-0000-0000-0000-000000000000' AND ((\"OriginKind\" = 'ChangeRequest' AND \"OriginReferenceId\" = \"ChangeRequestId\" AND \"ChangeRequestId\" IS NOT NULL AND \"OriginatingProblemReportId\" IS NULL) OR (\"OriginKind\" = 'ProblemReport' AND \"OriginReferenceId\" = \"OriginatingProblemReportId\" AND \"OriginatingProblemReportId\" IS NOT NULL AND \"ChangeRequestId\" IS NULL) OR (\"OriginKind\" IN ('CaseChange','CaseAssessment') AND \"ChangeRequestId\" IS NULL AND \"OriginatingProblemReportId\" IS NULL AND \"Discipline\" IN ('HighLevelSoftware','LowLevelSoftware') AND \"ArtifactKind\" = 'Procedure' AND \"SourceCaseOriginNumber\" <> '')))"));
+                "(\"OriginReferenceId\" <> '00000000-0000-0000-0000-000000000000' AND ((\"OriginKind\" = 'ChangeRequest' AND \"OriginReferenceId\" = \"ChangeRequestId\" AND \"ChangeRequestId\" IS NOT NULL AND \"OriginatingProblemReportId\" IS NULL) OR (\"OriginKind\" = 'ProblemReport' AND \"OriginReferenceId\" = \"OriginatingProblemReportId\" AND \"OriginatingProblemReportId\" IS NOT NULL AND \"ChangeRequestId\" IS NULL) OR (\"OriginKind\" IN ('CaseChange','CaseAssessment','CaseReview') AND \"ChangeRequestId\" IS NULL AND \"OriginatingProblemReportId\" IS NULL AND \"Discipline\" IN ('HighLevelSoftware','LowLevelSoftware') AND \"ArtifactKind\" = 'Procedure' AND \"SourceCaseOriginNumber\" <> '')))"));
             b.HasOne<ProjectRecord>().WithMany().HasForeignKey(x => x.ProjectId).OnDelete(DeleteBehavior.Restrict);
             b.HasOne<SoftwareRelease>().WithMany().HasForeignKey(x => x.ReleaseId).OnDelete(DeleteBehavior.Restrict);
             b.HasOne<SystemChangeRequest>().WithMany().HasForeignKey(x => x.ChangeRequestId).OnDelete(DeleteBehavior.Restrict);
@@ -1177,12 +1181,13 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
             b.Property(x => x.Version).IsConcurrencyToken();
             b.HasIndex(x => new { x.LinkKind, x.LinkId }).IsUnique(); b.HasIndex(x => new { x.ProjectId, x.State });
             b.HasOne<ProjectRecord>().WithMany().HasForeignKey(x => x.ProjectId).OnDelete(DeleteBehavior.Restrict);
-            b.HasOne<RequirementRevision>().WithMany().HasForeignKey(x => x.CauseRequirementRevisionId).OnDelete(DeleteBehavior.Restrict);
+            // Cause ids are immutable attribution, not ownership FKs. Candidate dematerialization may remove
+            // the transient revision/link while the audit fact must remain queryable by its exact identity.
             b.HasOne<BaselineImport>().WithMany().HasForeignKey(x => x.CauseBaselineImportId).OnDelete(DeleteBehavior.Restrict);
             b.HasMany(x => x.Events).WithOne().HasForeignKey(x => x.LifecycleId).OnDelete(DeleteBehavior.Cascade);
             b.Navigation(x => x.Events).UsePropertyAccessMode(PropertyAccessMode.Field);
             b.ToTable("exact_link_suspect_lifecycles", t => t.HasCheckConstraint("CK_exact_link_suspect_lifecycle_cause_xor",
-                "((\"CauseKind\" = 'InternalRequirementRevision' AND \"CauseRequirementRevisionId\" IS NOT NULL AND \"CauseBaselineImportId\" IS NULL) OR (\"CauseKind\" = 'ExternalBaselineImport' AND \"CauseRequirementRevisionId\" IS NULL AND \"CauseBaselineImportId\" IS NOT NULL))"));
+                "((\"LinkKind\" = 'RequirementTrace' AND \"CauseKind\" = 'InternalRequirementRevision' AND \"CauseRequirementRevisionId\" IS NOT NULL AND \"CauseBaselineImportId\" IS NULL AND \"CauseVerificationRevisionId\" IS NULL) OR (\"LinkKind\" = 'RequirementTrace' AND \"CauseKind\" = 'ExternalBaselineImport' AND \"CauseRequirementRevisionId\" IS NULL AND \"CauseBaselineImportId\" IS NOT NULL AND \"CauseVerificationRevisionId\" IS NULL) OR (\"LinkKind\" = 'CaseProcedure' AND \"CauseKind\" = 'InternalVerificationRevision' AND \"CauseRequirementRevisionId\" IS NULL AND \"CauseBaselineImportId\" IS NULL AND \"CauseVerificationRevisionId\" IS NOT NULL))"));
         });
         modelBuilder.Entity<ExactLinkSuspectEvent>(b =>
         {
@@ -1194,10 +1199,9 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
             b.Property(x => x.Outcome).HasConversion<string>().HasMaxLength(50);
             b.HasIndex(x => new { x.LinkKind, x.LinkId, x.OccurredAt });
             b.HasOne<ProjectRecord>().WithMany().HasForeignKey(x => x.ProjectId).OnDelete(DeleteBehavior.Restrict);
-            b.HasOne<RequirementRevision>().WithMany().HasForeignKey(x => x.CauseRequirementRevisionId).OnDelete(DeleteBehavior.Restrict);
             b.HasOne<BaselineImport>().WithMany().HasForeignKey(x => x.CauseBaselineImportId).OnDelete(DeleteBehavior.Restrict);
             b.ToTable("exact_link_suspect_events", t => t.HasCheckConstraint("CK_exact_link_suspect_event_cause_xor",
-                "((\"CauseKind\" = 'InternalRequirementRevision' AND \"CauseRequirementRevisionId\" IS NOT NULL AND \"CauseBaselineImportId\" IS NULL) OR (\"CauseKind\" = 'ExternalBaselineImport' AND \"CauseRequirementRevisionId\" IS NULL AND \"CauseBaselineImportId\" IS NOT NULL))"));
+                "((\"LinkKind\" = 'RequirementTrace' AND \"CauseKind\" = 'InternalRequirementRevision' AND \"CauseRequirementRevisionId\" IS NOT NULL AND \"CauseBaselineImportId\" IS NULL AND \"CauseVerificationRevisionId\" IS NULL) OR (\"LinkKind\" = 'RequirementTrace' AND \"CauseKind\" = 'ExternalBaselineImport' AND \"CauseRequirementRevisionId\" IS NULL AND \"CauseBaselineImportId\" IS NOT NULL AND \"CauseVerificationRevisionId\" IS NULL) OR (\"LinkKind\" = 'CaseProcedure' AND \"CauseKind\" = 'InternalVerificationRevision' AND \"CauseRequirementRevisionId\" IS NULL AND \"CauseBaselineImportId\" IS NULL AND \"CauseVerificationRevisionId\" IS NOT NULL))"));
         });
         modelBuilder.Entity<ControlledDocument>(b =>
         {
@@ -1882,12 +1886,119 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
         await ValidateReferencedCaseChangesAsync(ct);
         await ValidateReferencedCaseAssessmentsAsync(ct);
         await ValidateReferencedCaseAssessmentParentsAsync(ct);
+        await ValidateReferencedCaseReviewsAsync(ct);
         await ValidateRequirementParentSelectionsAsync(ct);
+        ValidateCaseProcedureLinkIdentityIntegrity();
         await ValidateProcedureHeadersAsync(ct);
         await RefuseCrossLevelCoverageAsync(ct);
         await ValidateProcedureParentsAsync(ct);
         await ValidateCaseSystemParentSelectionsAsync(ct);
         await ValidateCaseProcedureLinksAsync(ct);
+        await ValidateExactLinkLifecycleIntegrityAsync(ct);
+    }
+
+    private void ValidateCaseProcedureLinkIdentityIntegrity()
+    {
+        foreach (var entry in ChangeTracker.Entries<TestCaseProcedureLink>()
+                     .Where(x => x.State == EntityState.Modified))
+        {
+            if (entry.Property(x => x.CaseRevisionId).IsModified
+                || entry.Property(x => x.ProcedureRevisionId).IsModified)
+                throw new DomainException("An exact Case-to-Procedure relation cannot be retargeted; create a successor relation.");
+            var originalLifecycleId = entry.Property(x => x.ExactLinkSuspectLifecycleId).OriginalValue;
+            if (entry.Entity.ExactLinkSuspectLifecycleId != originalLifecycleId)
+                throw new DomainException("A Case-to-Procedure relation cannot change its immutable suspect lifecycle association.");
+        }
+    }
+
+    /// <summary>
+    /// Keeps #709's shared projection/event contract exact for every registered link kind. Lifecycle state is
+    /// mutable only through attributed transitions; the link, cause and already-written events are immutable.
+    /// Case-to-Procedure additionally binds the cause to the carried Case revision rather than merely to any
+    /// verification revision in the project.
+    /// </summary>
+    private async Task ValidateExactLinkLifecycleIntegrityAsync(CancellationToken ct)
+    {
+        var changedLifecycles = ChangeTracker.Entries<ExactLinkSuspectLifecycle>()
+            .Where(x => x.State is EntityState.Added or EntityState.Modified or EntityState.Deleted).ToList();
+        if (changedLifecycles.Any(x => x.State == EntityState.Deleted))
+            throw new DomainException("An exact-link lifecycle projection and its attributed history cannot be deleted.");
+        foreach (var entry in changedLifecycles.Where(x => x.State == EntityState.Modified))
+        {
+            var immutable = new[]
+            {
+                nameof(ExactLinkSuspectLifecycle.ProjectId), nameof(ExactLinkSuspectLifecycle.LinkKind),
+                nameof(ExactLinkSuspectLifecycle.LinkId), nameof(ExactLinkSuspectLifecycle.CauseKind),
+                nameof(ExactLinkSuspectLifecycle.CauseRequirementRevisionId),
+                nameof(ExactLinkSuspectLifecycle.CauseBaselineImportId),
+                nameof(ExactLinkSuspectLifecycle.CauseVerificationRevisionId),
+                nameof(ExactLinkSuspectLifecycle.RaisedBy), nameof(ExactLinkSuspectLifecycle.RaisedAt),
+                nameof(ExactLinkSuspectLifecycle.RaisedRationale),
+            };
+            if (immutable.Any(name => entry.Property(name).IsModified))
+                throw new DomainException("An exact-link lifecycle's identity, cause, and raised attribution are immutable.");
+        }
+
+        if (ChangeTracker.Entries<ExactLinkSuspectEvent>()
+            .Any(x => x.State is EntityState.Modified or EntityState.Deleted))
+            throw new DomainException("Exact-link lifecycle events are append-only and cannot be changed or deleted.");
+
+        var lifecycleById = changedLifecycles.ToDictionary(x => x.Entity.Id, x => x.Entity);
+        var addedEvents = ChangeTracker.Entries<ExactLinkSuspectEvent>()
+            .Where(x => x.State == EntityState.Added).Select(x => x.Entity).ToList();
+        var missingLifecycleIds = addedEvents.Select(x => x.LifecycleId)
+            .Where(x => !lifecycleById.ContainsKey(x)).Distinct().ToList();
+        if (missingLifecycleIds.Count > 0)
+        {
+            var persisted = await ExactLinkSuspectLifecycles.AsNoTracking()
+                .Where(x => missingLifecycleIds.Contains(x.Id)).ToListAsync(ct);
+            foreach (var lifecycle in persisted) lifecycleById[lifecycle.Id] = lifecycle;
+        }
+        foreach (var item in addedEvents)
+        {
+            if (!lifecycleById.TryGetValue(item.LifecycleId, out var lifecycle)
+                || item.ProjectId != lifecycle.ProjectId || item.LinkKind != lifecycle.LinkKind
+                || item.LinkId != lifecycle.LinkId || item.CauseKind != lifecycle.CauseKind
+                || item.CauseRequirementRevisionId != lifecycle.CauseRequirementRevisionId
+                || item.CauseBaselineImportId != lifecycle.CauseBaselineImportId
+                || item.CauseVerificationRevisionId != lifecycle.CauseVerificationRevisionId)
+                throw new DomainException("An exact-link event must retain its lifecycle's exact link, cause, and project attribution.");
+        }
+
+        var addedRequirementCauseIds = changedLifecycles
+            .Where(x => x.State == EntityState.Added
+                && x.Entity.LinkKind == ExactLinkKind.RequirementTrace
+                && x.Entity.CauseKind == ExactLinkLifecycleCauseKind.InternalRequirementRevision)
+            .Select(x => x.Entity.CauseRequirementRevisionId!.Value).Distinct().ToHashSet();
+        if (addedRequirementCauseIds.Count > 0)
+        {
+            var known = (await RequirementRevisions.AsNoTracking()
+                    .Where(x => addedRequirementCauseIds.Contains(x.Id)).Select(x => x.Id).ToListAsync(ct))
+                .ToHashSet();
+            known.UnionWith(ChangeTracker.Entries<RequirementRevision>()
+                .Where(x => x.State != EntityState.Deleted && addedRequirementCauseIds.Contains(x.Entity.Id))
+                .Select(x => x.Entity.Id));
+            if (!known.SetEquals(addedRequirementCauseIds))
+                throw new DomainException("An internal exact-link cause must name an existing requirement revision when it is raised.");
+        }
+
+        var caseLifecycles = changedLifecycles.Select(x => x.Entity)
+            .Where(x => x.LinkKind == ExactLinkKind.CaseProcedure).ToList();
+        if (caseLifecycles.Count == 0) return;
+        var linkIds = caseLifecycles.Select(x => x.LinkId).Distinct().ToList();
+        var links = await TestCaseProcedureLinks.AsNoTracking()
+            .Where(x => linkIds.Contains(x.Id)).ToDictionaryAsync(x => x.Id, ct);
+        foreach (var tracked in ChangeTracker.Entries<TestCaseProcedureLink>()
+                     .Where(x => x.State != EntityState.Deleted && linkIds.Contains(x.Entity.Id)))
+            links[tracked.Entity.Id] = tracked.Entity;
+        foreach (var lifecycle in caseLifecycles)
+        {
+            if (!links.TryGetValue(lifecycle.LinkId, out var link)
+                || link.ExactLinkSuspectLifecycleId != lifecycle.Id
+                || lifecycle.CauseKind != ExactLinkLifecycleCauseKind.InternalVerificationRevision
+                || lifecycle.CauseVerificationRevisionId != link.CaseRevisionId)
+                throw new DomainException("A Case-to-Procedure lifecycle must identify its exact carried link and changed Case revision.");
+        }
     }
 
     /// <summary>
@@ -1899,7 +2010,8 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
     {
         var entries = ChangeTracker.Entries<TestChangeReview>()
             .Where(x => x.State is EntityState.Added or EntityState.Modified
-                && x.Entity.OriginKind is TestChangeReviewOriginKind.CaseChange or TestChangeReviewOriginKind.CaseAssessment)
+                && x.Entity.OriginKind is TestChangeReviewOriginKind.CaseChange
+                    or TestChangeReviewOriginKind.CaseAssessment or TestChangeReviewOriginKind.CaseReview)
             .Select(x => x.Entity).ToList();
         foreach (var review in entries)
         {
@@ -1935,6 +2047,29 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
                 if (!string.Equals(review.SourceCaseOriginNumber, identity, StringComparison.Ordinal))
                     throw new DomainException("A Case-change origin must retain the exact Case change identity.");
             }
+            else if (review.OriginKind == TestChangeReviewOriginKind.CaseReview)
+            {
+                var reviewEntry = ChangeTracker.Entries<TestChangeReview>()
+                    .Single(x => ReferenceEquals(x.Entity, review));
+                var source = await TestChangeReviews.AsNoTracking()
+                    .Where(x => x.Id == review.OriginReferenceId)
+                    .Select(x => new
+                    {
+                        x.ProjectId, x.ReleaseId, x.Discipline, x.ArtifactKind, x.State,
+                        x.BaseNumber, x.Revision,
+                    }).SingleOrDefaultAsync(ct);
+                var sourceStateEligible = source is not null
+                    && (source.State == TestChangeReviewState.Approved
+                        || (source.State == TestChangeReviewState.Superseded
+                            && (review.Revision > 0 || reviewEntry.State != EntityState.Added)));
+                if (source is null || source.ProjectId != review.ProjectId || source.ReleaseId != review.ReleaseId
+                    || source.Discipline != review.Discipline
+                    || source.ArtifactKind != VerificationArtifactKind.Case || !sourceStateEligible)
+                    throw new DomainException("A Case-review origin must be an approved exact software Case package in this project and build.");
+                var identity = $"{source.BaseNumber}.{source.Revision:D2}";
+                if (!string.Equals(review.SourceCaseOriginNumber, identity, StringComparison.Ordinal))
+                    throw new DomainException("A Case-review origin must retain the exact Case package identity.");
+            }
             else
             {
                 var reviewEntry = ChangeTracker.Entries<TestChangeReview>()
@@ -1969,6 +2104,50 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
                 if (!string.Equals(review.SourceCaseOriginNumber, source.SubjectDisplayNumber, StringComparison.Ordinal))
                     throw new DomainException("A Case-assessment origin must retain the exact assessment identity.");
             }
+        }
+    }
+
+    /// <summary>The approved Case package is the immutable aggregate origin of its one Procedure assessment.</summary>
+    private async Task ValidateReferencedCaseReviewsAsync(CancellationToken ct)
+    {
+        var changed = ChangeTracker.Entries<TestChangeReview>()
+            .Where(x => x.State is EntityState.Modified or EntityState.Deleted)
+            .Where(x => x.State == EntityState.Deleted || new[]
+            {
+                nameof(TestChangeReview.ProjectId), nameof(TestChangeReview.ReleaseId),
+                nameof(TestChangeReview.Discipline), nameof(TestChangeReview.ArtifactKind),
+                nameof(TestChangeReview.BaseNumber), nameof(TestChangeReview.Revision),
+                nameof(TestChangeReview.ChangeRequestId), nameof(TestChangeReview.State),
+            }.Any(name => x.Property(name).IsModified)).ToList();
+        var ids = changed.Select(x => x.Entity.Id).ToHashSet();
+        if (ids.Count == 0) return;
+        var referenced = (await TestChangeReviews.AsNoTracking()
+                .Where(x => x.OriginKind == TestChangeReviewOriginKind.CaseReview
+                    && ids.Contains(x.OriginReferenceId))
+                .Select(x => x.OriginReferenceId).ToListAsync(ct))
+            .Concat(ChangeTracker.Entries<TestChangeReview>()
+                .Where(x => x.State != EntityState.Deleted
+                    && x.Entity.OriginKind == TestChangeReviewOriginKind.CaseReview
+                    && ids.Contains(x.Entity.OriginReferenceId))
+                .Select(x => x.Entity.OriginReferenceId)).ToHashSet();
+        foreach (var entry in changed.Where(x => referenced.Contains(x.Entity.Id)))
+        {
+            if (entry.State == EntityState.Deleted)
+                throw new DomainException("A Case package that supplies a Procedure assessment origin cannot be deleted.");
+            var stateChanged = entry.Property(nameof(TestChangeReview.State)).IsModified
+                && !Equals(entry.Property(nameof(TestChangeReview.State)).OriginalValue, entry.Entity.State);
+            var historicalAdvance = Equals(entry.Property(nameof(TestChangeReview.State)).OriginalValue,
+                    TestChangeReviewState.Approved)
+                && entry.Entity.State == TestChangeReviewState.Superseded;
+            var identityChanged = new[]
+            {
+                nameof(TestChangeReview.ProjectId), nameof(TestChangeReview.ReleaseId),
+                nameof(TestChangeReview.Discipline), nameof(TestChangeReview.ArtifactKind),
+                nameof(TestChangeReview.BaseNumber), nameof(TestChangeReview.Revision),
+                nameof(TestChangeReview.ChangeRequestId),
+            }.Any(name => entry.Property(name).IsModified);
+            if (identityChanged || stateChanged && !historicalAdvance)
+                throw new DomainException("A Case package used as a Procedure assessment origin is immutable.");
         }
     }
 
@@ -2857,6 +3036,10 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
 
         var parentIdsByProcedure = (await TestCaseProcedureLinks.AsNoTracking()
                 .Where(x => ids.Contains(x.ProcedureRevisionId))
+                // Lifecycle-attached links are carried revalidation evidence, not a silent rewrite of the
+                // Procedure revision's immutable authored parent selection. Closed links are admitted by
+                // baseline/document read projections that deliberately consume the lifecycle outcome.
+                .Where(x => x.ExactLinkSuspectLifecycleId == null)
                 .Select(x => new { x.ProcedureRevisionId, x.CaseRevisionId })
                 .ToListAsync(ct))
             .GroupBy(x => x.ProcedureRevisionId)
@@ -2869,8 +3052,13 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
                      .Where(x => ids.Contains(x.Entity.ProcedureRevisionId)))
         {
             var parentIds = (HashSet<Guid>)parentIdsByProcedure[entry.Entity.ProcedureRevisionId];
-            if (entry.State == EntityState.Deleted) parentIds.Remove(entry.Entity.CaseRevisionId);
-            else if (entry.State == EntityState.Added) parentIds.Add(entry.Entity.CaseRevisionId);
+            var currentLifecycleIsAuthored = entry.Entity.ExactLinkSuspectLifecycleId is null;
+            var originalLifecycleIsAuthored = entry.State == EntityState.Added
+                || entry.Property(x => x.ExactLinkSuspectLifecycleId).OriginalValue is null;
+            if (entry.State is EntityState.Deleted or EntityState.Modified && originalLifecycleIsAuthored)
+                parentIds.Remove(entry.Entity.CaseRevisionId);
+            if (entry.State != EntityState.Deleted && currentLifecycleIsAuthored)
+                parentIds.Add(entry.Entity.CaseRevisionId);
         }
         return parentIdsByProcedure;
     }
@@ -2881,10 +3069,13 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
     /// </summary>
     private async Task ValidateCaseProcedureLinksAsync(CancellationToken ct)
     {
-        var procedureRevisionIds = ChangeTracker.Entries<TestCaseProcedureLink>()
-            .Where(x => x.State != EntityState.Unchanged)
+        var changedLinks = ChangeTracker.Entries<TestCaseProcedureLink>()
+            .Where(x => x.State != EntityState.Unchanged).ToList();
+        var procedureRevisionIds = changedLinks
             .Select(x => x.Entity.ProcedureRevisionId).Distinct().ToList();
         if (procedureRevisionIds.Count == 0) return;
+        var addedPairs = changedLinks.Where(x => x.State == EntityState.Added)
+            .Select(x => (x.Entity.CaseRevisionId, x.Entity.ProcedureRevisionId)).ToHashSet();
         var parentIdsByProcedure = await FinalParentIdsAsync(procedureRevisionIds, ct);
         var ids = procedureRevisionIds.Concat(parentIdsByProcedure.Values.SelectMany(x => x)).Distinct().ToList();
         var rows = await (from revision in TestProcedureRevisions.AsNoTracking()
@@ -2926,7 +3117,11 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
                 if (procedure.EffectiveBaselineId is Guid governedProcedureBaseline
                     && !await IsProcedureRevisionInBaselineAsync(caseRevisionId, governedProcedureBaseline, ct))
                     throw new DomainException("Case and Procedure parent revisions must be members of the same exact governed baseline.");
+                // A historical exact relation remains immutable evidence after a later Case revision is
+                // approved. Revalidate currency only for the newly authored or lifecycle-carried relation;
+                // otherwise adding the successor relation would retroactively invalidate released history.
                 if (procedure.EffectiveBaselineId is null
+                    && addedPairs.Contains((caseRevisionId, procedureRevisionId))
                     && !await IsLatestActiveProcedureRevisionAsync(@case, ct))
                     throw new DomainException("A dormant Procedure without a governed baseline must name the latest active Case revision.");
             }

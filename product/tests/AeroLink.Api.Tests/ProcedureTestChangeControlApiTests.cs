@@ -73,7 +73,7 @@ public sealed class ProcedureTestChangeControlApiTests
 
         // This test-only resolver represents a future governed profile solely inside this disposable API host.
         // It does not call or bypass the production activation endpoint and writes no activation evidence.
-        using var factory = new AeroLinkApiFactory(testLadderPolicy: FutureProcedurePolicy());
+        using var factory = new AeroLinkApiFactory(testLadderPolicy: ProcedureEnabledTestPolicy.Create());
         using var client = factory.CreateClient();
         var fixture = await SeedAsync(factory);
         await CreateProcedureWorkflowAsync(client, fixture.ProjectId);
@@ -217,7 +217,7 @@ public sealed class ProcedureTestChangeControlApiTests
     [Fact]
     public async Task A_referenced_case_assessment_cannot_be_reopened_through_the_api()
     {
-        using var factory = new AeroLinkApiFactory(testLadderPolicy: FutureProcedurePolicy());
+        using var factory = new AeroLinkApiFactory(testLadderPolicy: ProcedureEnabledTestPolicy.Create());
         using var client = factory.CreateClient();
         var fixture = await SeedAsync(factory);
         var now = DateTimeOffset.UtcNow;
@@ -399,29 +399,6 @@ public sealed class ProcedureTestChangeControlApiTests
             relationships,
         });
         Assert.True(edit.IsSuccessStatusCode, await edit.Content.ReadAsStringAsync());
-    }
-
-    private static ILadderPolicy FutureProcedurePolicy()
-    {
-        var projectId = Guid.NewGuid();
-        var now = DateTimeOffset.UtcNow;
-        var configuration = ProjectLadderConfiguration.CreateDraft(projectId, now);
-        var steps = new List<ProjectLadderStep>();
-        foreach (var (level, position) in LegacyLadderPolicy.Instance.OrderedLevels.Select((x, i) => (x, i + 1)))
-        {
-            var kinds = level == RequirementLevel.System
-                ? new[] { VerificationArtifactKind.Procedure }
-                : new[] { VerificationArtifactKind.Case, VerificationArtifactKind.Procedure };
-            var step = new ProjectLadderStep(configuration.Id, projectId, level, position,
-                LegacyLadderPolicy.Instance.Definition(level).Capabilities, now, kinds);
-            configuration.Steps.Add(step);
-            steps.Add(step);
-        }
-        configuration.AllowedUpstream.Add(new ProjectLadderAllowedUpstream(
-            configuration.Id, projectId, steps[0].Id, steps[1].Id, now));
-        configuration.AllowedUpstream.Add(new ProjectLadderAllowedUpstream(
-            configuration.Id, projectId, steps[1].Id, steps[2].Id, now));
-        return new ResolvedProjectLadderPolicy(ProjectLadderResolver.Resolve(configuration));
     }
 
     private static async Task CreateProcedureWorkflowAsync(HttpClient client, Guid projectId)

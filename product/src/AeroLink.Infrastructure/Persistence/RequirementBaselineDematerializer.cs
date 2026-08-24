@@ -72,18 +72,11 @@ public sealed class RequirementBaselineDematerializer(AeroLinkDbContext db, Veri
         foreach (var stranded in plan.ChangeRequestsToStrand)
             stranded.ChangeRequest.StrandByReopenedBaseline(actorId, baselineDisplayNumber, stranded.Requirements, now);
 
-        // A carried suspect link and its lifecycle evidence were created by this candidate materialization.
-        // Remove that aggregate together so reopening cannot leave an event referring to a deleted exact link.
-        // Historical links/lifecycles are not in plan.Traces and therefore remain untouched.
-        var transientTraceIds = plan.Traces.Select(x => x.Id).ToList();
-        var transientLifecycles = await db.ExactLinkSuspectLifecycles
-            .Where(x => x.LinkKind == ExactLinkKind.RequirementTrace && transientTraceIds.Contains(x.LinkId)).ToListAsync(ct);
-        var transientLifecycleIds = transientLifecycles.Select(x => x.Id).ToList();
-        var transientEvents = await db.ExactLinkSuspectEvents
-            .Where(x => transientLifecycleIds.Contains(x.LifecycleId)).ToListAsync(ct);
+        // Reopening removes the candidate's carried exact link, but not the attributed fact that it was raised.
+        // #709 events are immutable audit evidence, even when their candidate relation is later taken back.
+        // The projection's stable LinkId intentionally remains readable to audit/reporting code while ordinary
+        // link endpoints return Not Found and can no longer mutate it.
         db.RequirementTraces.RemoveRange(plan.Traces);
-        db.ExactLinkSuspectEvents.RemoveRange(transientEvents);
-        db.ExactLinkSuspectLifecycles.RemoveRange(transientLifecycles);
         db.TestCoverage.RemoveRange(plan.Coverage);
         db.RequirementRevisionProfiles.RemoveRange(plan.Profiles);
         db.CodeTraceabilityRecords.RemoveRange(plan.CodeRecords);

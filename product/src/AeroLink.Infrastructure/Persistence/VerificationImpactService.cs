@@ -124,6 +124,51 @@ public sealed class VerificationImpactService(AeroLinkDbContext db, ProblemRepor
     }
 
     /// <summary>
+    /// Extends the existing unnumbered assessment chain by one configured artifact step. Each approved Case
+    /// review receives one same-discipline Procedure assessment only when the effective profile contains
+    /// Procedure. The shared conclusion route later decides whether that assessment disappears as no-change
+    /// evidence or becomes a numbered HLRTPCR/LLRTPCR package.
+    /// </summary>
+    public async Task<int> RaiseForApprovedCaseReviewAsync(TestChangeReview caseReview, DateTimeOffset now,
+        CancellationToken ct)
+    {
+        if (caseReview.State != TestChangeReviewState.Approved
+            || caseReview.ArtifactKind != VerificationArtifactKind.Case)
+            return 0;
+
+        var ladderPolicy = policyResolver is null
+            ? fallbackPolicy
+            : await policyResolver.ResolveAsync(caseReview.ProjectId, ct);
+        var level = ladderPolicy.RequirementLevelFor(caseReview.Discipline);
+        var profile = ladderPolicy.VerificationProfile(level);
+        if (!profile.Enables(VerificationArtifactKind.Procedure)) return 0;
+        var procedureKey = new VerificationArtifactKey(profile.Discipline, VerificationArtifactKind.Procedure);
+        _ = ladderPolicy.VerificationArtifact(procedureKey); // typed, fail-closed effective-profile authority
+
+        var changes = await db.Set<TestProcedureChange>().AsNoTracking()
+            .Where(x => x.TestChangeReviewId == caseReview.Id)
+            .OrderBy(x => x.BaseNumber).ThenBy(x => x.Revision).ToListAsync(ct);
+        if (changes.Count == 0) return 0;
+        if (changes.Any(x => string.IsNullOrWhiteSpace(x.BaseNumber)))
+            throw new DomainException("An approved Case package cannot raise Procedure work from an unnumbered Case change.");
+
+        var alreadyRaised = await db.TestChangeReviews.AsNoTracking().AnyAsync(x =>
+            x.OriginKind == TestChangeReviewOriginKind.CaseReview
+            && x.OriginReferenceId == caseReview.Id
+            && x.ArtifactKind == VerificationArtifactKind.Procedure
+            && x.Discipline == caseReview.Discipline, ct);
+        if (alreadyRaised || db.TestChangeReviews.Local.Any(x =>
+                x.OriginKind == TestChangeReviewOriginKind.CaseReview
+                && x.OriginReferenceId == caseReview.Id
+                && x.ArtifactKind == VerificationArtifactKind.Procedure
+                && x.Discipline == caseReview.Discipline))
+            return 0;
+        db.TestChangeReviews.Add(TestChangeReview.FromCaseReview(caseReview.ProjectId,
+            caseReview.ReleaseId, caseReview.Id, procedureKey, caseReview.DisplayNumber, now));
+        return 1;
+    }
+
+    /// <summary>
     /// Moves outstanding verification work with its change request when the target release changes, so the
     /// work is never stranded against a release the change no longer belongs to.
     /// </summary>

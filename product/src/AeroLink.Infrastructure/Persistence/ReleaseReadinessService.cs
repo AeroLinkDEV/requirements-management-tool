@@ -79,6 +79,34 @@ public sealed class ReleaseReadinessService(AeroLinkDbContext db, ILadderPolicy?
                                            && revisionIds.Contains(link.TargetRevisionId)
                                            && lifecycle.State != ExactLinkLifecycleState.Closed
                                        select link.Id).Distinct().CountAsync(ct);
+        var procedureEnabledLevels = configuredLevels.Where(level =>
+                ladderPolicy.Definition(level).VerificationProfile?.Enables(
+                    VerificationArtifactKind.Procedure) == true
+                && ladderPolicy.Definition(level).VerificationProfile?.Enables(
+                    VerificationArtifactKind.Case) == true)
+            .ToHashSet();
+        var procedureEnabledProcedureLevels = procedureEnabledLevels.Select(ladderPolicy.ProcedureLevel)
+            .ToHashSet();
+        List<Guid> exactCaseRevisionIds = procedureEnabledLevels.Count == 0
+            ? []
+            : await (from member in db.BaselineTestProcedures.AsNoTracking()
+                     join revision in db.TestProcedureRevisions.AsNoTracking()
+                         on member.RevisionId equals revision.Id
+                     join artifact in db.TestProcedures.AsNoTracking()
+                         on revision.ProcedureId equals artifact.Id
+                     where member.BaselineId == baseline.Id
+                         && artifact.ArtifactKind == VerificationArtifactKind.Case
+                         && procedureEnabledProcedureLevels.Contains(artifact.Level)
+                     select revision.Id).ToListAsync(ct);
+        var suspectCaseProcedureCount = exactCaseRevisionIds.Count == 0
+            ? 0
+            : await (from link in db.TestCaseProcedureLinks.AsNoTracking()
+                     join lifecycle in db.ExactLinkSuspectLifecycles.AsNoTracking()
+                         on new { LinkKind = ExactLinkKind.CaseProcedure, LinkId = link.Id }
+                         equals new { lifecycle.LinkKind, LinkId = lifecycle.LinkId }
+                     where exactCaseRevisionIds.Contains(link.CaseRevisionId)
+                         && lifecycle.State != ExactLinkLifecycleState.Closed
+                     select link.Id).Distinct().CountAsync(ct);
         // Coverage counts only when it is settled, which takes three things.
         //
         // It must not be suspect: a link carried across a requirement change that nobody has reconfirmed
@@ -208,13 +236,17 @@ public sealed class ReleaseReadinessService(AeroLinkDbContext db, ILadderPolicy?
                         : "Resolve orphan and suspect trace links.")
                 : WaitingForMaterializedBaseline("traceability", "Trace network complete"),
             baselineMaterialized
-                ? new("coverage","Requirement coverage complete",coverageMembers.Count == 0 || coveredIds.Count == coverageMembers.Count,coveredIds.Count,coverageMembers.Count,
+                ? new("coverage","Requirement coverage complete",(coverageMembers.Count == 0 || coveredIds.Count == coverageMembers.Count) && suspectCaseProcedureCount == 0,coveredIds.Count,coverageMembers.Count + suspectCaseProcedureCount,
                     coverageMembers.Count == 0
-                        ? "The effective ladder declares no verification-capable requirement levels, so no coverage is owed."
-                        : $"{coverageMembers.Count-coveredIds.Count} effective verification requirement revisions have no settled coverage. A link counts only when it is not suspect, names an approved verification artifact revision, and that artifact has no revision still in draft or review.",
+                        ? (suspectCaseProcedureCount == 0
+                            ? "The effective ladder declares no verification-capable requirement levels, so no coverage is owed."
+                            : $"{suspectCaseProcedureCount} exact Case-to-Procedure link(s) remain suspect or require Procedure change.")
+                        : $"{coverageMembers.Count-coveredIds.Count} effective verification requirement revisions have no settled coverage; {suspectCaseProcedureCount} exact Case-to-Procedure link(s) remain open. A link counts only when it is not suspect, names an approved verification artifact revision, and that artifact has no revision still in draft or review.",
                     coverageMembers.Count == 0
-                        ? "No action is required: coverage is not applicable to the configured requirement levels."
-                        : "Approve every verification artifact being changed, then confirm the coverage each changed requirement needs.")
+                        ? (suspectCaseProcedureCount == 0
+                            ? "No action is required: coverage is not applicable to the configured requirement levels."
+                            : "Acknowledge and resolve every direct suspect Case-to-Procedure relationship.")
+                        : "Approve every verification artifact being changed, confirm the coverage each changed requirement needs, and resolve every suspect Case-to-Procedure relationship.")
                 : WaitingForMaterializedBaseline("coverage", "Requirement coverage complete"),
             baselineMaterialized
                 ? new("code_traceability", "Code traceability complete", mappedCode == requiredCode.Count, mappedCode, requiredCode.Count,

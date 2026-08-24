@@ -43,9 +43,9 @@ public static class DependencyInjection
             services.AddSingleton<ILadderConsumerRegistration>(registration);
         // These declarations live beside the routed infrastructure seams. Do not infer artifact obligations from
         // the legacy string inventory: a consumer that happens to have a familiar ID is not thereby a handler for
-        // every kind or capability. Software Procedure packages route through the shared identity/review seams;
-        // execution and downstream coverage remain intentionally outside this slice. Controlled documents
-        // cover every package key through the same renderer/register seam; execution remains #726's gate.
+        // every kind or capability. Software Procedure packages route through the shared identity/review and
+        // exact Case-to-Procedure coverage seams. Controlled documents cover every package key through the
+        // same renderer/register seam; execution remains #726's gate.
         var systemProcedure = new VerificationArtifactKey(
             VerificationDiscipline.System, VerificationArtifactKind.Procedure);
         var highLevelCase = new VerificationArtifactKey(
@@ -60,6 +60,9 @@ public static class DependencyInjection
         var packageArtifactKeys = currentArtifactKeys.Concat(new[] { highLevelProcedure, lowLevelProcedure }).ToArray();
         var typedRegistrations = new IVerificationArtifactConsumerRegistration[]
         {
+            new VerificationArtifactConsumerRegistration("change-request.downstream-impact",
+                "Approved-change downstream assessment creation", packageArtifactKeys,
+                VerificationArtifactCapability.ChangeReview),
             new VerificationArtifactConsumerRegistration("verification.procedure-level",
                 "Verification artifact level mapping", packageArtifactKeys,
                 VerificationArtifactCapability.Identity | VerificationArtifactCapability.Header
@@ -68,7 +71,7 @@ public static class DependencyInjection
                 "Test-change workflow disciplines and prefixes", packageArtifactKeys,
                 VerificationArtifactCapability.ChangeReview),
             new VerificationArtifactConsumerRegistration("verification.coverage",
-                "Same-level coverage mutation and persistence validation", currentArtifactKeys,
+                "Same-level coverage mutation and persistence validation", packageArtifactKeys,
                 VerificationArtifactCapability.Coverage),
             new VerificationArtifactConsumerRegistration("baseline.controlled-documents",
                 "Baseline controlled-document derivation", packageArtifactKeys,

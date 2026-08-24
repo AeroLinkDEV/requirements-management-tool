@@ -52,22 +52,44 @@ public sealed class LegacyControlledProcedureDocumentSnapshotTests
         // A regenerated Procedure document must not silently describe its predecessor as current effectivity.
         var currentCase = new TestProcedureRevision(@case.Id, 1, "Current Case objective", "Current preconditions",
             "Current Case steps", "Current expected result", TestProcedureState.Approved, "case.owner", now.AddMinutes(1));
+        var carried = new TestCaseProcedureLink(currentCase.Id, procedureRevision.Id);
+        var lifecycle = ExactLinkSuspectLifecycle.Raise(project.Id, ExactLinkKind.CaseProcedure, carried.Id,
+            ExactLinkLifecycleCauseKind.InternalVerificationRevision, null, null, "cm",
+            "The exact Case successor requires Procedure reassessment.", now.AddMinutes(1), currentCase.Id);
+        carried.AttachExactLinkLifecycle(lifecycle.Id);
         db.AddRange(currentCase,
             new BaselineTestProcedureSelection(baseline.Id, @case.Id, currentCase.Id),
-            new BaselineTestProcedureSelection(baseline.Id, procedure.Id, procedureRevision.Id));
+            new BaselineTestProcedureSelection(baseline.Id, procedure.Id, procedureRevision.Id),
+            carried, lifecycle);
         await db.SaveChangesAsync();
         await db.CandidateBaselines.Where(x => x.Id == baseline.Id).ExecuteUpdateAsync(setters => setters
             .SetProperty(x => x.TestProceduresMaterializedAt, now.AddMinutes(2))
             .SetProperty(x => x.TestProceduresHash, new string('7', 64)));
 
-        var snapshot = await ControlledProcedureDocumentSnapshotProjection.ForDocumentAsync(db, baseline.Id,
-            new VerificationArtifactKey(VerificationDiscipline.HighLevelSoftware,
-                VerificationArtifactKind.Procedure), now.AddMinutes(3), default);
+        async Task<IReadOnlyList<Guid>> SnapshotParentsAsync(DateTimeOffset generatedAt)
+        {
+            var snapshot = await ControlledProcedureDocumentSnapshotProjection.ForDocumentAsync(db, baseline.Id,
+                new VerificationArtifactKey(VerificationDiscipline.HighLevelSoftware,
+                    VerificationArtifactKind.Procedure), generatedAt, default);
+            var row = Assert.Single(snapshot.Rows);
+            Assert.Equal(procedureRevision.Id, row.RevisionId);
+            Assert.DoesNotContain(predecessorCase.Id, row.ParentRevisionIds ?? Array.Empty<Guid>());
+            return row.ParentRevisionIds ?? Array.Empty<Guid>();
+        }
 
-        var row = Assert.Single(snapshot.Rows);
-        Assert.Equal(procedureRevision.Id, row.RevisionId);
-        Assert.Empty(row.ParentRevisionIds ?? Array.Empty<Guid>());
-        Assert.DoesNotContain(predecessorCase.Id, row.ParentRevisionIds ?? Array.Empty<Guid>());
+        Assert.Empty(await SnapshotParentsAsync(now.AddMinutes(3)));
+        var lifecycleService = new ExactLinkLifecycleService(db);
+        await lifecycleService.AcknowledgeAsync(ExactLinkKind.CaseProcedure, carried.Id,
+            "test.lead", "The exact relation is under review.", now.AddMinutes(4), default);
+        Assert.Empty(await SnapshotParentsAsync(now.AddMinutes(5)));
+        await lifecycleService.ResolveAsync(ExactLinkKind.CaseProcedure, carried.Id,
+            ExactLinkResolutionOutcome.DownstreamChangeRequiredNotYetApproved, "test.lead",
+            "The Procedure needs controlled work before this relation can be effective.", now.AddMinutes(6), default);
+        Assert.Empty(await SnapshotParentsAsync(now.AddMinutes(7)));
+        await lifecycleService.ResolveAsync(ExactLinkKind.CaseProcedure, carried.Id,
+            ExactLinkResolutionOutcome.ExistingDownstreamRevisionRemainsValid, "test.lead",
+            "The approved Procedure remains valid after completing the reassessment.", now.AddMinutes(8), default);
+        Assert.Equal([currentCase.Id], await SnapshotParentsAsync(now.AddMinutes(9)));
     }
 
     [Fact]

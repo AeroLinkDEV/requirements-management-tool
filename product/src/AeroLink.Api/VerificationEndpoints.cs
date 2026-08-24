@@ -176,70 +176,33 @@ public static class VerificationEndpoints
             catch (Exception ex) when (ex is DomainException or DbUpdateException) { return Results.BadRequest(new { error = ex.Message }); }
         });
 
-        app.MapGet("/api/trace-links/{id:guid}/lifecycle", async (Guid id, HttpContext http, AeroLinkDbContext db, CancellationToken ct) =>
-        {
-            var link = await db.RequirementTraces.AsNoTracking().SingleOrDefaultAsync(x => x.Id == id, ct);
-            if (link is null) return Results.NotFound();
-            if (!await http.HasProjectAccessAsync(db, link.ProjectId, ct)) return Results.Forbid();
-            var lifecycle = await db.ExactLinkSuspectLifecycles.AsNoTracking()
-                .SingleOrDefaultAsync(x => x.LinkKind == ExactLinkKind.RequirementTrace && x.LinkId == id, ct);
-            if (lifecycle is null) return Results.Ok(new
-            {
-                linkId = id, linkKind = ExactLinkKind.RequirementTrace.ToString(), state = (string?)null,
-                causeKind = (string?)null, causeRequirementRevisionId = (Guid?)null, causeBaselineImportId = (Guid?)null,
-                raisedBy = (string?)null, raisedAt = (DateTimeOffset?)null, raisedRationale = (string?)null,
-                acknowledgedBy = (string?)null, acknowledgedAt = (DateTimeOffset?)null, acknowledgementRationale = (string?)null,
-                outcome = (string?)null, resolvedBy = (string?)null, resolvedAt = (DateTimeOffset?)null,
-                resolutionRationale = (string?)null, events = Array.Empty<object>()
-            });
-            var events = (await db.ExactLinkSuspectEvents.AsNoTracking().Where(x => x.LifecycleId == lifecycle.Id)
-                .ToListAsync(ct)).OrderBy(x => x.OccurredAt).ThenBy(x => x.Id).Select(x => new
-                {
-                    id = x.Id, type = x.EventType.ToString(), x.ActorId, x.OccurredAt, x.Rationale,
-                    causeKind = x.CauseKind.ToString(), x.CauseRequirementRevisionId, x.CauseBaselineImportId,
-                    outcome = x.Outcome == null ? null : x.Outcome.ToString()
-                }).ToList();
-            return Results.Ok(new
-            {
-                linkId = id, linkKind = lifecycle.LinkKind.ToString(), state = lifecycle.State.ToString(),
-                causeKind = lifecycle.CauseKind.ToString(), lifecycle.CauseRequirementRevisionId,
-                lifecycle.CauseBaselineImportId, raisedBy = lifecycle.RaisedBy, raisedAt = lifecycle.RaisedAt,
-                raisedRationale = lifecycle.RaisedRationale, acknowledgedBy = lifecycle.AcknowledgedBy,
-                acknowledgedAt = lifecycle.AcknowledgedAt, acknowledgementRationale = lifecycle.AcknowledgementRationale,
-                outcome = lifecycle.Outcome?.ToString(), resolvedBy = lifecycle.ResolvedBy, resolvedAt = lifecycle.ResolvedAt,
-                resolutionRationale = lifecycle.ResolutionRationale, events
-            });
-        });
+        app.MapGet("/api/trace-links/{id:guid}/lifecycle", (Guid id, HttpContext http,
+            AeroLinkDbContext db, CancellationToken ct) =>
+            ReadExactLinkLifecycleAsync(ExactLinkKind.RequirementTrace, id, http, db, ct));
+        app.MapGet("/api/case-procedure-links/{id:guid}/lifecycle", (Guid id, HttpContext http,
+            AeroLinkDbContext db, CancellationToken ct) =>
+            ReadExactLinkLifecycleAsync(ExactLinkKind.CaseProcedure, id, http, db, ct));
 
-        app.MapPost("/api/trace-links/{id:guid}/lifecycle/acknowledge", async (Guid id, AcknowledgeExactLinkRequest request,
-            HttpContext http, AeroLinkDbContext db, IdentityService identity, ExactLinkLifecycleService service, CancellationToken ct) =>
-        {
-            var projectId = await db.RequirementTraces.AsNoTracking().Where(x => x.Id == id).Select(x => (Guid?)x.ProjectId).SingleOrDefaultAsync(ct);
-            if (projectId is null) return Results.NotFound();
-            if (!await http.HasProjectRoleAsync(db, identity, projectId.Value, ct, ProgramRole.Engineer, ProgramRole.ConfigurationManager)) return Results.Forbid();
-            try
-            {
-                var lifecycle = await service.AcknowledgeAsync(id, http.UserAccount().UserName, request.Rationale, DateTimeOffset.UtcNow, ct);
-                return Results.Ok(new { linkId = id, state = lifecycle.State.ToString(), acknowledgedBy = lifecycle.AcknowledgedBy, acknowledgedAt = lifecycle.AcknowledgedAt });
-            }
-            catch (DbUpdateConcurrencyException) { return Results.Conflict(new { error = "The exact trace lifecycle changed; reload its immutable event history and retry.", code = "trace_lifecycle_concurrency" }); }
-            catch (DomainException ex) { return Results.Conflict(new { error = ex.Message, code = "trace_lifecycle_mutation_refused" }); }
-        });
-
-        app.MapPost("/api/trace-links/{id:guid}/lifecycle/resolve", async (Guid id, ResolveExactLinkRequest request,
-            HttpContext http, AeroLinkDbContext db, IdentityService identity, ExactLinkLifecycleService service, CancellationToken ct) =>
-        {
-            var projectId = await db.RequirementTraces.AsNoTracking().Where(x => x.Id == id).Select(x => (Guid?)x.ProjectId).SingleOrDefaultAsync(ct);
-            if (projectId is null) return Results.NotFound();
-            if (!await http.HasProjectRoleAsync(db, identity, projectId.Value, ct, ProgramRole.Engineer, ProgramRole.ConfigurationManager)) return Results.Forbid();
-            try
-            {
-                var lifecycle = await service.ResolveAsync(id, request.Outcome, http.UserAccount().UserName, request.Rationale, DateTimeOffset.UtcNow, ct);
-                return Results.Ok(new { linkId = id, state = lifecycle.State.ToString(), outcome = lifecycle.Outcome?.ToString(), resolvedBy = lifecycle.ResolvedBy, resolvedAt = lifecycle.ResolvedAt });
-            }
-            catch (DbUpdateConcurrencyException) { return Results.Conflict(new { error = "The exact trace lifecycle changed; reload its immutable event history and retry.", code = "trace_lifecycle_concurrency" }); }
-            catch (DomainException ex) { return Results.Conflict(new { error = ex.Message, code = "trace_lifecycle_mutation_refused" }); }
-        });
+        app.MapPost("/api/trace-links/{id:guid}/lifecycle/acknowledge", (Guid id,
+            AcknowledgeExactLinkRequest request, HttpContext http, AeroLinkDbContext db, IdentityService identity,
+            ExactLinkLifecycleService service, CancellationToken ct) =>
+            MutateExactLinkLifecycleAsync(ExactLinkKind.RequirementTrace, id, request.Rationale, null,
+                http, db, identity, service, ct));
+        app.MapPost("/api/case-procedure-links/{id:guid}/lifecycle/acknowledge", (Guid id,
+            AcknowledgeExactLinkRequest request, HttpContext http, AeroLinkDbContext db, IdentityService identity,
+            ExactLinkLifecycleService service, CancellationToken ct) =>
+            MutateExactLinkLifecycleAsync(ExactLinkKind.CaseProcedure, id, request.Rationale, null,
+                http, db, identity, service, ct));
+        app.MapPost("/api/trace-links/{id:guid}/lifecycle/resolve", (Guid id,
+            ResolveExactLinkRequest request, HttpContext http, AeroLinkDbContext db, IdentityService identity,
+            ExactLinkLifecycleService service, CancellationToken ct) =>
+            MutateExactLinkLifecycleAsync(ExactLinkKind.RequirementTrace, id, request.Rationale, request.Outcome,
+                http, db, identity, service, ct));
+        app.MapPost("/api/case-procedure-links/{id:guid}/lifecycle/resolve", (Guid id,
+            ResolveExactLinkRequest request, HttpContext http, AeroLinkDbContext db, IdentityService identity,
+            ExactLinkLifecycleService service, CancellationToken ct) =>
+            MutateExactLinkLifecycleAsync(ExactLinkKind.CaseProcedure, id, request.Rationale, request.Outcome,
+                http, db, identity, service, ct));
 
         app.MapDelete("/api/trace-links/{id:guid}", async (Guid id, HttpContext http, AeroLinkDbContext db, IdentityService identity, CancellationToken ct) =>
         {
@@ -610,6 +573,11 @@ public static class VerificationEndpoints
             var provenance = await TestProcedureProvenanceProjection.ForRevisionsAsync(db, revisionIds, ct);
             var parentLinks = await db.TestCaseProcedureLinks.AsNoTracking()
                 .Where(x => revisionIds.Contains(x.ProcedureRevisionId)).ToListAsync(ct);
+            var parentLifecycleIds = parentLinks.Where(x => x.ExactLinkSuspectLifecycleId is not null)
+                .Select(x => x.ExactLinkSuspectLifecycleId!.Value).ToList();
+            var parentLifecycles = await db.ExactLinkSuspectLifecycles.AsNoTracking()
+                .Where(x => parentLifecycleIds.Contains(x.Id) && x.LinkKind == ExactLinkKind.CaseProcedure)
+                .ToDictionaryAsync(x => x.Id, ct);
 
             // The requirements each revision covers, so a reader sees what it is for without leaving the page.
             var coverage = await (from link in db.TestCoverage.AsNoTracking()
@@ -668,6 +636,21 @@ public static class VerificationEndpoints
                         retirementRationale = revision.RetirementRationale,
                         caseRevisionIds = parentLinks.Where(x => x.ProcedureRevisionId == revision.Id)
                             .Select(x => x.CaseRevisionId).ToArray(),
+                        caseParents = parentLinks.Where(x => x.ProcedureRevisionId == revision.Id)
+                            .Select(x => new
+                            {
+                                linkId = x.Id,
+                                x.CaseRevisionId,
+                                state = x.ExactLinkSuspectLifecycleId is Guid lifecycleId
+                                    && parentLifecycles.TryGetValue(lifecycleId, out var lifecycle)
+                                        ? lifecycle.State.ToString()
+                                        : "Confirmed",
+                                outcome = x.ExactLinkSuspectLifecycleId is Guid outcomeLifecycleId
+                                    && parentLifecycles.TryGetValue(outcomeLifecycleId, out var outcomeLifecycle)
+                                    && outcomeLifecycle.Outcome is not null
+                                        ? outcomeLifecycle.Outcome.ToString()
+                                        : null,
+                            }).ToArray(),
                         selected = revision.Id == selectedId,
                         revision.SourceTestChangeRequestId,
                         package = source.Package,
@@ -1431,6 +1414,106 @@ public static class VerificationEndpoints
                 items
             });
         });
+    }
+
+    private static async Task<Guid?> ExactLinkProjectIdAsync(ExactLinkKind kind, Guid linkId,
+        AeroLinkDbContext db, CancellationToken ct)
+    {
+        if (kind == ExactLinkKind.RequirementTrace)
+            return await db.RequirementTraces.AsNoTracking().Where(x => x.Id == linkId)
+                .Select(x => (Guid?)x.ProjectId).SingleOrDefaultAsync(ct);
+        if (kind == ExactLinkKind.CaseProcedure)
+            return await (from link in db.TestCaseProcedureLinks.AsNoTracking().Where(x => x.Id == linkId)
+                          join revision in db.TestProcedureRevisions.AsNoTracking()
+                              on link.CaseRevisionId equals revision.Id
+                          join artifact in db.TestProcedures.AsNoTracking()
+                              on revision.ProcedureId equals artifact.Id
+                          select (Guid?)artifact.ProjectId).SingleOrDefaultAsync(ct);
+        return null;
+    }
+
+    private static async Task<IResult> ReadExactLinkLifecycleAsync(ExactLinkKind kind, Guid linkId,
+        HttpContext http, AeroLinkDbContext db, CancellationToken ct)
+    {
+        var projectId = await ExactLinkProjectIdAsync(kind, linkId, db, ct);
+        if (projectId is null) return Results.NotFound();
+        if (!await http.HasProjectAccessAsync(db, projectId.Value, ct)) return Results.Forbid();
+        var lifecycle = await db.ExactLinkSuspectLifecycles.AsNoTracking()
+            .SingleOrDefaultAsync(x => x.LinkKind == kind && x.LinkId == linkId, ct);
+        if (lifecycle is null) return Results.Ok(new
+        {
+            linkId, linkKind = kind.ToString(), lifecycleId = (Guid?)null,
+            state = kind == ExactLinkKind.RequirementTrace ? (string?)null : "Confirmed",
+            causeKind = (string?)null, causeRequirementRevisionId = (Guid?)null,
+            causeBaselineImportId = (Guid?)null, causeVerificationRevisionId = (Guid?)null,
+            raisedBy = (string?)null, raisedAt = (DateTimeOffset?)null, raisedRationale = (string?)null,
+            acknowledgedBy = (string?)null, acknowledgedAt = (DateTimeOffset?)null,
+            acknowledgementRationale = (string?)null, outcome = (string?)null, resolvedBy = (string?)null,
+            resolvedAt = (DateTimeOffset?)null, resolutionRationale = (string?)null, events = Array.Empty<object>(),
+        });
+        var events = (await db.ExactLinkSuspectEvents.AsNoTracking()
+                .Where(x => x.LifecycleId == lifecycle.Id).ToListAsync(ct))
+            .OrderBy(x => x.OccurredAt).ThenBy(x => x.Id).Select(x => new
+            {
+                id = x.Id, type = x.EventType.ToString(), x.ActorId, x.OccurredAt, x.Rationale,
+                causeKind = x.CauseKind.ToString(), x.CauseRequirementRevisionId,
+                x.CauseBaselineImportId, x.CauseVerificationRevisionId,
+                outcome = x.Outcome == null ? null : x.Outcome.ToString(),
+            }).ToList();
+        return Results.Ok(new
+        {
+            linkId, linkKind = lifecycle.LinkKind.ToString(), lifecycleId = lifecycle.Id,
+            state = lifecycle.State.ToString(), causeKind = lifecycle.CauseKind.ToString(),
+            lifecycle.CauseRequirementRevisionId, lifecycle.CauseBaselineImportId,
+            lifecycle.CauseVerificationRevisionId, raisedBy = lifecycle.RaisedBy,
+            raisedAt = lifecycle.RaisedAt, raisedRationale = lifecycle.RaisedRationale,
+            acknowledgedBy = lifecycle.AcknowledgedBy, acknowledgedAt = lifecycle.AcknowledgedAt,
+            acknowledgementRationale = lifecycle.AcknowledgementRationale,
+            outcome = lifecycle.Outcome?.ToString(), resolvedBy = lifecycle.ResolvedBy,
+            resolvedAt = lifecycle.ResolvedAt, resolutionRationale = lifecycle.ResolutionRationale, events,
+        });
+    }
+
+    private static async Task<IResult> MutateExactLinkLifecycleAsync(ExactLinkKind kind, Guid linkId,
+        string rationale, ExactLinkResolutionOutcome? outcome, HttpContext http, AeroLinkDbContext db,
+        IdentityService identity, ExactLinkLifecycleService service, CancellationToken ct)
+    {
+        var projectId = await ExactLinkProjectIdAsync(kind, linkId, db, ct);
+        if (projectId is null) return Results.NotFound();
+        var authorized = kind == ExactLinkKind.RequirementTrace
+            ? await http.HasProjectRoleAsync(db, identity, projectId.Value, ct,
+                ProgramRole.Engineer, ProgramRole.ConfigurationManager)
+            : await http.HasProjectRoleAsync(db, identity, projectId.Value, ct,
+                ProgramRole.TestEngineer, ProgramRole.TestLead, ProgramRole.ConfigurationManager);
+        if (!authorized) return Results.Forbid();
+        var codePrefix = kind == ExactLinkKind.RequirementTrace ? "trace" : "case_procedure";
+        var noun = kind == ExactLinkKind.RequirementTrace ? "trace" : "Case-to-Procedure";
+        try
+        {
+            var lifecycle = outcome is null
+                ? await service.AcknowledgeAsync(kind, linkId, http.UserAccount().UserName,
+                    rationale, DateTimeOffset.UtcNow, ct)
+                : await service.ResolveAsync(kind, linkId, outcome.Value, http.UserAccount().UserName,
+                    rationale, DateTimeOffset.UtcNow, ct);
+            return Results.Ok(new
+            {
+                linkId, state = lifecycle.State.ToString(), outcome = lifecycle.Outcome?.ToString(),
+                acknowledgedBy = lifecycle.AcknowledgedBy, acknowledgedAt = lifecycle.AcknowledgedAt,
+                resolvedBy = lifecycle.ResolvedBy, resolvedAt = lifecycle.ResolvedAt,
+            });
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            return Results.Conflict(new
+            {
+                error = $"The exact {noun} lifecycle changed; reload its immutable event history and retry.",
+                code = $"{codePrefix}_lifecycle_concurrency",
+            });
+        }
+        catch (DomainException ex)
+        {
+            return Results.Conflict(new { error = ex.Message, code = $"{codePrefix}_lifecycle_mutation_refused" });
+        }
     }
 
     private sealed record PathProcedureCandidate(

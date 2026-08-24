@@ -256,6 +256,17 @@ public sealed class TestCaseProcedureLink
     public Guid Id { get; private set; }
     public Guid CaseRevisionId { get; private set; }
     public Guid ProcedureRevisionId { get; private set; }
+    public Guid? ExactLinkSuspectLifecycleId { get; private set; }
+
+    /// <summary>Attaches the shared #709 current projection to a newly carried exact link.</summary>
+    public void AttachExactLinkLifecycle(Guid lifecycleId)
+    {
+        if (lifecycleId == Guid.Empty)
+            throw new DomainException("An exact Case-to-Procedure lifecycle requires an identity.");
+        if (ExactLinkSuspectLifecycleId is not null)
+            throw new DomainException("The exact Case-to-Procedure link already has a suspect lifecycle.");
+        ExactLinkSuspectLifecycleId = lifecycleId;
+    }
 }
 
 /// <summary>
