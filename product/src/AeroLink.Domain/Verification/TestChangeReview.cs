@@ -6,6 +6,18 @@ namespace AeroLink.Domain.Verification;
 
 /// <summary>The independently governed test-procedure discipline affected by an approved engineering change.</summary>
 public enum TestChangeReviewDiscipline { System, HighLevelSoftware, LowLevelSoftware }
+
+/// <summary>
+/// The one attributable source of a test change package. The source identity is interpreted according to this
+/// discriminator; it is never inferred from a nullable column or from the package's discipline.
+/// </summary>
+public enum TestChangeReviewOriginKind
+{
+    ChangeRequest,
+    ProblemReport,
+    CaseChange,
+    CaseAssessment,
+}
 /// <summary>
 /// Where a test change request has got to.
 ///
@@ -54,9 +66,22 @@ public sealed class TestChangeReview
         TestChangeReviewDiscipline discipline, string sourceChangeRequestNumber, DateTimeOffset now,
         string baseNumber = "", int revision = 0, int caseContractVersion = CurrentCaseContractVersion,
         string authorId = "")
-        : this(projectId, releaseId, discipline, now, baseNumber, revision, caseContractVersion, authorId)
+        : this(projectId, releaseId, changeRequestId,
+            ToArtifactKey(discipline), sourceChangeRequestNumber, now,
+            baseNumber, revision, caseContractVersion, authorId)
+    {
+    }
+
+    /// <summary>Creates a package with an explicit Case or Procedure identity.</summary>
+    public TestChangeReview(Guid projectId, Guid releaseId, Guid changeRequestId,
+        VerificationArtifactKey artifactKey, string sourceChangeRequestNumber, DateTimeOffset now,
+        string baseNumber = "", int revision = 0, int caseContractVersion = CurrentCaseContractVersion,
+        string authorId = "")
+        : this(projectId, releaseId, artifactKey, now, baseNumber, revision, caseContractVersion, authorId)
     {
         if (changeRequestId == Guid.Empty) throw new DomainException("A test change review requires its originating change request.");
+        OriginKind = TestChangeReviewOriginKind.ChangeRequest;
+        OriginReferenceId = changeRequestId;
         ChangeRequestId = changeRequestId;
         SourceChangeRequestNumber = Required(sourceChangeRequestNumber, "source change request number");
     }
@@ -76,18 +101,64 @@ public sealed class TestChangeReview
         TestChangeReviewDiscipline discipline, string sourceProblemReportNumber, DateTimeOffset now,
         string baseNumber = "", int revision = 0, int caseContractVersion = CurrentCaseContractVersion,
         string authorId = "")
+        => FromProblemReport(projectId, releaseId, problemReportId,
+            ToArtifactKey(discipline), sourceProblemReportNumber, now,
+            baseNumber, revision, caseContractVersion, authorId);
+
+    /// <summary>Creates an explicit-key package raised from a Problem Report.</summary>
+    public static TestChangeReview FromProblemReport(Guid projectId, Guid releaseId, Guid problemReportId,
+        VerificationArtifactKey artifactKey, string sourceProblemReportNumber, DateTimeOffset now,
+        string baseNumber = "", int revision = 0, int caseContractVersion = CurrentCaseContractVersion,
+        string authorId = "")
     {
         if (problemReportId == Guid.Empty)
             throw new DomainException("A test change review raised from a Problem Report requires that report.");
-        var review = new TestChangeReview(projectId, releaseId, discipline, now, baseNumber, revision, caseContractVersion, authorId)
+        var review = new TestChangeReview(projectId, releaseId, artifactKey, now, baseNumber, revision, caseContractVersion, authorId)
         {
+            OriginKind = TestChangeReviewOriginKind.ProblemReport,
+            OriginReferenceId = problemReportId,
             OriginatingProblemReportId = problemReportId,
         };
         review.SourceProblemReportNumber = Required(sourceProblemReportNumber, "source Problem Report number");
         return review;
     }
 
-    private TestChangeReview(Guid projectId, Guid releaseId, TestChangeReviewDiscipline discipline,
+    /// <summary>
+    /// Creates a software Procedure package whose source is an exact authored Case change. The API/infrastructure
+    /// layer resolves the source row and display number before calling this factory, so this aggregate records
+    /// attribution without fabricating a second Case or changing the Case's review history.
+    /// </summary>
+    public static TestChangeReview FromCaseChange(Guid projectId, Guid releaseId, Guid caseChangeId,
+        VerificationArtifactKey artifactKey, string sourceDisplayNumber, DateTimeOffset now,
+        string baseNumber = "", int revision = 0, string authorId = "")
+        => FromCaseOrigin(projectId, releaseId, caseChangeId, TestChangeReviewOriginKind.CaseChange,
+            artifactKey, sourceDisplayNumber, now, baseNumber, revision, authorId);
+
+    /// <summary>Creates a software Procedure package sourced by a concrete Case assessment item.</summary>
+    public static TestChangeReview FromCaseAssessment(Guid projectId, Guid releaseId, Guid assessmentId,
+        VerificationArtifactKey artifactKey, string sourceDisplayNumber, DateTimeOffset now,
+        string baseNumber = "", int revision = 0, string authorId = "")
+        => FromCaseOrigin(projectId, releaseId, assessmentId, TestChangeReviewOriginKind.CaseAssessment,
+            artifactKey, sourceDisplayNumber, now, baseNumber, revision, authorId);
+
+    private static TestChangeReview FromCaseOrigin(Guid projectId, Guid releaseId, Guid sourceId,
+        TestChangeReviewOriginKind originKind, VerificationArtifactKey artifactKey, string sourceDisplayNumber,
+        DateTimeOffset now, string baseNumber, int revision, string authorId)
+    {
+        if (sourceId == Guid.Empty) throw new DomainException("A Procedure package requires an exact Case origin.");
+        if (artifactKey.Kind != VerificationArtifactKind.Procedure
+            || artifactKey.Discipline == VerificationDiscipline.System)
+            throw new DomainException("A Case origin is valid only for a software Procedure package.");
+        return new TestChangeReview(projectId, releaseId, artifactKey, now, baseNumber, revision,
+            CurrentCaseContractVersion, authorId)
+        {
+            OriginKind = originKind,
+            OriginReferenceId = sourceId,
+            SourceCaseOriginNumber = Required(sourceDisplayNumber, "Case origin display number"),
+        };
+    }
+
+    private TestChangeReview(Guid projectId, Guid releaseId, VerificationArtifactKey artifactKey,
         DateTimeOffset now, string baseNumber, int revision, int caseContractVersion, string authorId = "")
     {
         AuthorId = (authorId ?? "").Trim();
@@ -96,11 +167,20 @@ public sealed class TestChangeReview
             throw new DomainException("A test change request requires a supported engineering-case contract version.");
         if (projectId == Guid.Empty) throw new DomainException("A test change review requires its Project.");
         if (releaseId == Guid.Empty) throw new DomainException("A test change review requires its software build.");
-        if (!Enum.IsDefined(discipline)) throw new DomainException("A test change review requires a known discipline.");
+        if (!Enum.IsDefined(artifactKey.Discipline) || !Enum.IsDefined(artifactKey.Kind))
+            throw new DomainException("A test change review requires a known artifact key.");
+        _ = VerificationArtifactVocabulary.Definition(artifactKey);
         Id = Guid.NewGuid();
         ProjectId = projectId;
         ReleaseId = releaseId;
-        Discipline = discipline;
+        Discipline = artifactKey.Discipline switch
+        {
+            VerificationDiscipline.System => TestChangeReviewDiscipline.System,
+            VerificationDiscipline.HighLevelSoftware => TestChangeReviewDiscipline.HighLevelSoftware,
+            VerificationDiscipline.LowLevelSoftware => TestChangeReviewDiscipline.LowLevelSoftware,
+            _ => throw new DomainException("A test change review requires a known artifact discipline."),
+        };
+        ArtifactKind = artifactKey.Kind;
         // Empty remains readable for databases created before controlled TCR numbering. The showcase
         // upgrade assigns those rows a real number without changing their identity or evidence.
         BaseNumber = baseNumber.Trim();
@@ -113,6 +193,16 @@ public sealed class TestChangeReview
     public Guid Id { get; private set; }
     public Guid ProjectId { get; private set; }
     public Guid ReleaseId { get; private set; }
+    /// <summary>Stable package identity. Discipline is retained as a compatibility projection.</summary>
+    public VerificationArtifactKind ArtifactKind { get; private set; }
+    public VerificationArtifactKey ArtifactKey => new(
+        Discipline switch
+        {
+            TestChangeReviewDiscipline.System => VerificationDiscipline.System,
+            TestChangeReviewDiscipline.HighLevelSoftware => VerificationDiscipline.HighLevelSoftware,
+            TestChangeReviewDiscipline.LowLevelSoftware => VerificationDiscipline.LowLevelSoftware,
+            _ => throw new DomainException("A test change review has an unknown discipline."),
+        }, ArtifactKind);
     /// <summary>The approved change request this package was raised from, when it was raised from one.</summary>
     public Guid? ChangeRequestId { get; private set; }
     /// <summary>
@@ -121,10 +211,21 @@ public sealed class TestChangeReview
     /// covered-sources record and its case snapshot depend on.
     /// </summary>
     public Guid? OriginatingProblemReportId { get; private set; }
+    /// <summary>Discriminated source kind for this package's immutable origin.</summary>
+    public TestChangeReviewOriginKind OriginKind { get; private set; }
+    /// <summary>Non-null source identity interpreted by <see cref="OriginKind"/>.</summary>
+    public Guid OriginReferenceId { get; private set; }
+    /// <summary>Display identity for a Case-change or Case-assessment origin.</summary>
+    public string SourceCaseOriginNumber { get; private set; } = "";
     public string SourceProblemReportNumber { get; private set; } = "";
     /// <summary>What this package was raised from, whichever kind that was.</summary>
-    public string SourceDisplayNumber =>
-        ChangeRequestId is not null ? SourceChangeRequestNumber : SourceProblemReportNumber;
+    public string SourceDisplayNumber => OriginKind switch
+    {
+        TestChangeReviewOriginKind.ChangeRequest => SourceChangeRequestNumber,
+        TestChangeReviewOriginKind.ProblemReport => SourceProblemReportNumber,
+        TestChangeReviewOriginKind.CaseChange or TestChangeReviewOriginKind.CaseAssessment => SourceCaseOriginNumber,
+        _ => "",
+    };
     public TestChangeReviewDiscipline Discipline { get; private set; }
     public string SourceChangeRequestNumber { get; private set; } = "";
     /// <summary>Its controlled number — SYSTPCR, HLRTCCR or LLRTCCR — empty only for rows raised before it had one.</summary>
@@ -262,9 +363,9 @@ public sealed class TestChangeReview
     /// </summary>
     public IReadOnlyCollection<TestProcedureChange> ProcedureChanges => _procedureChanges.AsReadOnly();
 
-    private string ArtifactWord => Discipline == TestChangeReviewDiscipline.System ? "test procedure" : "test case";
-    private string ArtifactPlural => Discipline == TestChangeReviewDiscipline.System ? "test procedures" : "test cases";
-    private string ArtifactNoun => Discipline == TestChangeReviewDiscipline.System ? "procedure" : "case";
+    private string ArtifactWord => ArtifactKind == VerificationArtifactKind.Procedure ? "test procedure" : "test case";
+    private string ArtifactPlural => ArtifactKind == VerificationArtifactKind.Procedure ? "test procedures" : "test cases";
+    private string ArtifactNoun => ArtifactKind == VerificationArtifactKind.Procedure ? "procedure" : "case";
 
     /// <summary>
     /// Adds a proposed procedure change.
@@ -365,6 +466,7 @@ public sealed class TestChangeReview
         IReadOnlyList<VerificationImpactSnapshot>? impactDecisions = null)
     {
         EnsureOpen();
+        ValidateOrigin();
         // A v1 row can legitimately remain as historical evidence after migration, but an ordinary new
         // review cycle must sign the v2 bytes. The only exception is the explicit one-shot seed seam below.
         if (CaseContractVersion < CurrentCaseContractVersion && !_allowLegacyHistoricalSubmission)
@@ -687,7 +789,7 @@ public sealed class TestChangeReview
         if (Outcome != TestChangeReviewOutcome.ChangeRequired)
             throw new DomainException($"Record that {ArtifactWord} work is required before raising the test change request that carries it.");
         var number = Required(baseNumber, "controlled test change request number");
-        var expectedPrefix = (policy ?? LegacyLadderPolicy.Instance).TestChangeReviewPrefix(Discipline) + "-";
+        var expectedPrefix = (policy ?? LegacyLadderPolicy.Instance).TestChangeReviewPrefix(ArtifactKey) + "-";
         if (!number.StartsWith(expectedPrefix, StringComparison.OrdinalIgnoreCase))
             throw new DomainException($"A {Discipline} test change request requires a {expectedPrefix.TrimEnd('-')} number.");
         BaseNumber = number;
@@ -840,11 +942,22 @@ public sealed class TestChangeReview
         // against the same origin; it does not acquire a different one.
         // Revising is raising the next revision, so the engineer who revised it is its author — the same
         // answer the requirements side gives for a change request revision.
-        var next = ChangeRequestId is { } originating
-            ? new TestChangeReview(ProjectId, ReleaseId, originating, Discipline,
-                SourceChangeRequestNumber, now, BaseNumber, Revision + 1, authorId: actorId)
-            : FromProblemReport(ProjectId, ReleaseId, OriginatingProblemReportId!.Value, Discipline,
-                SourceProblemReportNumber, now, BaseNumber, Revision + 1, authorId: actorId);
+        var next = OriginKind switch
+        {
+            TestChangeReviewOriginKind.ChangeRequest when ChangeRequestId is { } originating
+                => new TestChangeReview(ProjectId, ReleaseId, originating, ArtifactKey,
+                    SourceChangeRequestNumber, now, BaseNumber, Revision + 1, authorId: actorId),
+            TestChangeReviewOriginKind.ProblemReport when OriginatingProblemReportId is { } report
+                => FromProblemReport(ProjectId, ReleaseId, report, ArtifactKey,
+                    SourceProblemReportNumber, now, BaseNumber, Revision + 1, authorId: actorId),
+            TestChangeReviewOriginKind.CaseChange
+                => FromCaseChange(ProjectId, ReleaseId, OriginReferenceId, ArtifactKey,
+                    SourceCaseOriginNumber, now, BaseNumber, Revision + 1, actorId),
+            TestChangeReviewOriginKind.CaseAssessment
+                => FromCaseAssessment(ProjectId, ReleaseId, OriginReferenceId, ArtifactKey,
+                    SourceCaseOriginNumber, now, BaseNumber, Revision + 1, actorId),
+            _ => throw new DomainException("A test change review has no valid immutable origin."),
+        };
         next.RecordTestChangeRequired(actorId, now);
         // The case carries forward exactly as a change request's does, so the engineer corrects the rationale
         // rather than retyping it. Packages that predate case authoring carry no fabricated case.
@@ -950,6 +1063,38 @@ public sealed class TestChangeReview
     }
 
     /// <summary>
+    /// The source discriminator and source identity travel together. This is the domain half of the database
+    /// check constraint: a package cannot reach review with no origin, two legacy origins, or a Case-origin
+    /// marker on a Case package. Historical rows are backfilled by migration before they can be submitted.
+    /// </summary>
+    public void ValidateOriginForPersistence() => ValidateOrigin();
+
+    private void ValidateOrigin()
+    {
+        if (OriginReferenceId == Guid.Empty)
+            throw new DomainException("A test change review requires exactly one attributable origin.");
+        switch (OriginKind)
+        {
+            case TestChangeReviewOriginKind.ChangeRequest when ChangeRequestId is not null
+                && OriginatingProblemReportId is null
+                && OriginReferenceId == ChangeRequestId.Value:
+            case TestChangeReviewOriginKind.ProblemReport when OriginatingProblemReportId is not null
+                && ChangeRequestId is null
+                && OriginReferenceId == OriginatingProblemReportId.Value:
+                return;
+            case TestChangeReviewOriginKind.CaseChange:
+            case TestChangeReviewOriginKind.CaseAssessment:
+                if (ArtifactKind == VerificationArtifactKind.Procedure
+                    && Discipline is TestChangeReviewDiscipline.HighLevelSoftware or TestChangeReviewDiscipline.LowLevelSoftware
+                    && ChangeRequestId is null
+                    && OriginatingProblemReportId is null && !string.IsNullOrWhiteSpace(SourceCaseOriginNumber))
+                    return;
+                break;
+        }
+        throw new DomainException("A test change review must have exactly one valid origin for its discriminator.");
+    }
+
+    /// <summary>
     /// Advances the concurrency/version token when governed content held outside this aggregate (Problem
     /// Report links, verification-impact decisions) changes in the same unit of work. This is what makes a
     /// link-versus-submit or decision-versus-submit race collapse to exactly one winner: whichever side
@@ -960,6 +1105,12 @@ public sealed class TestChangeReview
     private void Touch(DateTimeOffset now) { UpdatedAt = now; Version++; }
     private static string Required(string value, string name) =>
         string.IsNullOrWhiteSpace(value) ? throw new DomainException($"A {name} is required.") : value.Trim();
+
+    private static VerificationArtifactKey ToArtifactKey(TestChangeReviewDiscipline discipline) =>
+        new(VerificationArtifactProfile.ToNeutral(discipline),
+            discipline == TestChangeReviewDiscipline.System
+                ? VerificationArtifactKind.Procedure
+                : VerificationArtifactKind.Case);
 }
 
 /// <summary>

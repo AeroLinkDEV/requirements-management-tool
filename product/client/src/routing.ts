@@ -8,8 +8,14 @@ export type Discipline = "system" | "software" | "systemTest" | "softwareTest";
 /// test work is planned, done and approved by different people and asked about separately.
 const verificationBranch = (discipline: Discipline, artifactKind?: string) =>
   discipline === "softwareTest"
-    ? `software-verification/${artifactKind === "LowLevel" ? "llr" : "hlr"}`
+    ? `software-verification/${artifactKind?.toLowerCase().includes("lowlevel") ? "llr" : "hlr"}`
     : "system-verification";
+
+const verificationArtifactKind = (level: string, query: URLSearchParams) =>
+  query.get("kind")?.toLowerCase() === "procedure" ? `${level}Procedure` : level;
+
+const verificationKindSuffix = (artifactKind?: string) =>
+  artifactKind?.toLowerCase().includes("procedure") ? "?kind=Procedure" : "";
 
 export type HistoryStateIntent =
   | "Draft"
@@ -135,23 +141,23 @@ export function parseRoute(pathname: string, search = ""): AppRoute {
   if (path === "system-verification/change-requests/new")
     return { ...base, view: "createTestChangeRequest", discipline: "systemTest" };
   if (path === "software-verification/hlr/change-requests/new")
-    return { ...base, view: "createTestChangeRequest", discipline: "softwareTest", artifactKind: "HighLevel" };
+    return { ...base, view: "createTestChangeRequest", discipline: "softwareTest", artifactKind: verificationArtifactKind("HighLevel", query) };
   if (path === "software-verification/llr/change-requests/new")
-    return { ...base, view: "createTestChangeRequest", discipline: "softwareTest", artifactKind: "LowLevel" };
+    return { ...base, view: "createTestChangeRequest", discipline: "softwareTest", artifactKind: verificationArtifactKind("LowLevel", query) };
   // The register, which is a page of its own here as it is on the requirements side. Declared after the
   // `/new` routes above so raising one is not read as a package whose id happens to be "new".
   if (path === "system-verification/change-requests")
     return { ...base, view: "testChangeRequests", discipline: "systemTest" };
   if (path === "software-verification/hlr/change-requests")
-    return { ...base, view: "testChangeRequests", discipline: "softwareTest", artifactKind: "HighLevel" };
+    return { ...base, view: "testChangeRequests", discipline: "softwareTest", artifactKind: verificationArtifactKind("HighLevel", query) };
   if (path === "software-verification/llr/change-requests")
-    return { ...base, view: "testChangeRequests", discipline: "softwareTest", artifactKind: "LowLevel" };
+    return { ...base, view: "testChangeRequests", discipline: "softwareTest", artifactKind: verificationArtifactKind("LowLevel", query) };
   if (tail[0] === "system-verification" && tail[1] === "change-requests" && tail[2])
     return { ...base, view: "testChangeRequest", discipline: "systemTest", artifactId: decoded(tail[2]) };
   if (tail[0] === "software-verification" && tail[1] === "hlr" && tail[2] === "change-requests" && tail[3])
-    return { ...base, view: "testChangeRequest", discipline: "softwareTest", artifactKind: "HighLevel", artifactId: decoded(tail[3]) };
+    return { ...base, view: "testChangeRequest", discipline: "softwareTest", artifactKind: verificationArtifactKind("HighLevel", query), artifactId: decoded(tail[3]) };
   if (tail[0] === "software-verification" && tail[1] === "llr" && tail[2] === "change-requests" && tail[3])
-    return { ...base, view: "testChangeRequest", discipline: "softwareTest", artifactKind: "LowLevel", artifactId: decoded(tail[3]) };
+    return { ...base, view: "testChangeRequest", discipline: "softwareTest", artifactKind: verificationArtifactKind("LowLevel", query), artifactId: decoded(tail[3]) };
   if (path === "system-verification/coverage") return { ...base, view: "testingCoverage", discipline: "systemTest" };
   if (tail[0] === "system-verification" && tail[1] === "coverage" && tail[2]) return { ...base, view: "testingCoverage", discipline: "systemTest", artifactId: decoded(tail[2]) };
   if (path === "system-verification/procedures") return { ...base, view: "procedureExplorer", discipline: "systemTest" };
@@ -159,14 +165,14 @@ export function parseRoute(pathname: string, search = ""): AppRoute {
     return { ...base, view: "procedureExplorer", discipline: "softwareTest" };
   if (path === "system-verification/results") return { ...base, view: "testResults", discipline: "systemTest" };
   if (tail[0] === "system-verification" && tail[1] === "results" && tail[2]) return { ...base, view: "testResults", discipline: "systemTest", artifactId: decoded(tail[2]) };
-  if (path === "software-verification/hlr/coverage") return { ...base, view: "testingCoverage", discipline: "softwareTest", artifactKind: "HighLevel" };
-  if (tail[0] === "software-verification" && tail[1] === "hlr" && tail[2] === "coverage" && tail[3]) return { ...base, view: "testingCoverage", discipline: "softwareTest", artifactKind: "HighLevel", artifactId: decoded(tail[3]) };
+  if (path === "software-verification/hlr/coverage") return { ...base, view: "testingCoverage", discipline: "softwareTest", artifactKind: verificationArtifactKind("HighLevel", query) };
+  if (tail[0] === "software-verification" && tail[1] === "hlr" && tail[2] === "coverage" && tail[3]) return { ...base, view: "testingCoverage", discipline: "softwareTest", artifactKind: verificationArtifactKind("HighLevel", query), artifactId: decoded(tail[3]) };
   if (path === "software-verification/hlr/cases" || path === "software-verification/hlr/procedures")
     return { ...base, view: "procedureExplorer", discipline: "softwareTest", artifactKind: "HighLevel" };
   if (path === "software-verification/hlr/results") return { ...base, view: "testResults", discipline: "softwareTest", artifactKind: "HighLevel" };
   if (tail[0] === "software-verification" && tail[1] === "hlr" && tail[2] === "results" && tail[3]) return { ...base, view: "testResults", discipline: "softwareTest", artifactKind: "HighLevel", artifactId: decoded(tail[3]) };
-  if (path === "software-verification/llr/coverage") return { ...base, view: "testingCoverage", discipline: "softwareTest", artifactKind: "LowLevel" };
-  if (tail[0] === "software-verification" && tail[1] === "llr" && tail[2] === "coverage" && tail[3]) return { ...base, view: "testingCoverage", discipline: "softwareTest", artifactKind: "LowLevel", artifactId: decoded(tail[3]) };
+  if (path === "software-verification/llr/coverage") return { ...base, view: "testingCoverage", discipline: "softwareTest", artifactKind: verificationArtifactKind("LowLevel", query) };
+  if (tail[0] === "software-verification" && tail[1] === "llr" && tail[2] === "coverage" && tail[3]) return { ...base, view: "testingCoverage", discipline: "softwareTest", artifactKind: verificationArtifactKind("LowLevel", query), artifactId: decoded(tail[3]) };
   if (path === "software-verification/llr/cases" || path === "software-verification/llr/procedures")
     return { ...base, view: "procedureExplorer", discipline: "softwareTest", artifactKind: "LowLevel" };
   if (path === "software-verification/llr/results") return { ...base, view: "testResults", discipline: "softwareTest", artifactKind: "LowLevel" };
@@ -265,10 +271,10 @@ export function routePath(context: RouteContext, view: View, discipline: Discipl
     case "history": return historyPath(typeIntent === "Interface" ? "interfaces" : discipline === "software" ? "software" : "systems");
     case "requirements": return artifactId ? `${root}/requirements/${artifactId}?discipline=${discipline === "software" ? "software" : "system"}` : `${root}/${discipline === "software" ? "software" : "systems"}/requirements`;
     case "verification": return `${root}/${discipline === "softwareTest" ? "software" : "system"}-verification`;
-    case "testingCoverage": return `${root}/${verificationBranch(discipline, artifactKind)}/coverage${artifactId ? `/${encodeURIComponent(artifactId)}` : ""}`;
-    case "testChangeRequests": return `${root}/${verificationBranch(discipline, artifactKind)}/change-requests`;
-    case "testChangeRequest": return `${root}/${verificationBranch(discipline, artifactKind)}/change-requests/${encodeURIComponent(artifactId ?? "")}`;
-    case "createTestChangeRequest": return `${root}/${verificationBranch(discipline, artifactKind)}/change-requests/new`;
+    case "testingCoverage": return `${root}/${verificationBranch(discipline, artifactKind)}/coverage${artifactId ? `/${encodeURIComponent(artifactId)}` : ""}${verificationKindSuffix(artifactKind)}`;
+    case "testChangeRequests": return `${root}/${verificationBranch(discipline, artifactKind)}/change-requests${verificationKindSuffix(artifactKind)}`;
+    case "testChangeRequest": return `${root}/${verificationBranch(discipline, artifactKind)}/change-requests/${encodeURIComponent(artifactId ?? "")}${verificationKindSuffix(artifactKind)}`;
+    case "createTestChangeRequest": return `${root}/${verificationBranch(discipline, artifactKind)}/change-requests/new${verificationKindSuffix(artifactKind)}`;
     case "procedureExplorer": return discipline === "softwareTest"
       ? `${root}/software-verification/cases`
       : `${root}/system-verification/procedures`;

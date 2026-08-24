@@ -241,6 +241,9 @@ public static class WorkflowEndpoints
     public static ReviewSubject SubjectOf(TestChangeReviewDiscipline discipline, ILadderPolicy? ladderPolicy = null)
         => (ladderPolicy ?? LegacyLadderPolicy.Instance).WorkflowSubject(discipline);
 
+    public static ReviewSubject SubjectOf(VerificationArtifactKey key, ILadderPolicy? ladderPolicy = null)
+        => (ladderPolicy ?? LegacyLadderPolicy.Instance).WorkflowSubject(key);
+
     public static async Task<ReviewWorkflowSpecification?> ActiveSpecificationAsync(AeroLinkDbContext db,
         Guid projectId, ChangeRequestType type, CancellationToken ct, ILadderPolicy? ladderPolicy = null) =>
         (await ActiveAsync(db, projectId, SubjectOf(type, ladderPolicy), ct))?.Specification();
@@ -248,6 +251,10 @@ public static class WorkflowEndpoints
     public static async Task<ReviewWorkflowSpecification?> ActiveSpecificationAsync(AeroLinkDbContext db,
         Guid projectId, TestChangeReviewDiscipline discipline, CancellationToken ct, ILadderPolicy? ladderPolicy = null) =>
         (await ActiveAsync(db, projectId, SubjectOf(discipline, ladderPolicy), ct))?.Specification();
+
+    public static async Task<ReviewWorkflowSpecification?> ActiveSpecificationAsync(AeroLinkDbContext db,
+        Guid projectId, VerificationArtifactKey key, CancellationToken ct, ILadderPolicy? ladderPolicy = null) =>
+        (await ActiveAsync(db, projectId, SubjectOf(key, ladderPolicy), ct))?.Specification();
 
     /// <summary>
     /// Loads the exact workflow recorded on an in-flight cycle. Revisions govern future Draft submissions;
@@ -330,6 +337,10 @@ public static class WorkflowEndpoints
             ReviewSubject.SystemTest => policy.WorkflowSubject(TestChangeReviewDiscipline.System),
             ReviewSubject.HighLevelSoftwareCase => policy.WorkflowSubject(TestChangeReviewDiscipline.HighLevelSoftware),
             ReviewSubject.LowLevelSoftwareCase => policy.WorkflowSubject(TestChangeReviewDiscipline.LowLevelSoftware),
+            ReviewSubject.HighLevelSoftwareProcedure => policy.WorkflowSubject(new VerificationArtifactKey(
+                VerificationDiscipline.HighLevelSoftware, VerificationArtifactKind.Procedure)),
+            ReviewSubject.LowLevelSoftwareProcedure => policy.WorkflowSubject(new VerificationArtifactKey(
+                VerificationDiscipline.LowLevelSoftware, VerificationArtifactKind.Procedure)),
             _ => throw new DomainException("The review workflow subject is not supported by the project ladder."),
         };
     }

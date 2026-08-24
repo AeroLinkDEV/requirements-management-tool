@@ -1,4 +1,4 @@
-import { expect, test, type Page } from '@playwright/test'
+import { expect, test, type Page, type Route } from '@playwright/test'
 import { login } from './auth'
 
 /**
@@ -34,6 +34,103 @@ test('a package opens on its own page, not in a drawer', async ({ page }) => {
   await expect(page).toHaveURL(/\/system-verification\/change-requests\/[0-9a-f-]{36}$/, { timeout: 30_000 })
   await expect(page.getByText(`TEST CHANGE CONTROL / ${number}`)).toBeVisible()
   await expect(page.getByRole('dialog')).toHaveCount(0)
+})
+
+test('a seeded software Procedure package uses the shared shell, exact origin, workflow, and Procedure library', async ({ page }) => {
+  test.setTimeout(120_000)
+  await page.setViewportSize({ width: 1600, height: 900 })
+  await login(page)
+  const current = new URL(page.url())
+  const parts = current.pathname.split('/').filter(Boolean)
+  const root = '/' + parts.slice(0, 6).join('/')
+  const projectId = parts[3]
+  const releaseId = parts[5]
+  const packageId = '72500000-0000-0000-0000-000000000001'
+  const procedureSearchUrls: string[] = []
+  const listItem = {
+    id: packageId, baseNumber: 'HLRTPCR-000725', revision: 0,
+    displayNumber: 'HLRTPCR-000725.00', title: 'Procedure package from exact Case change',
+    state: 'Draft', authorId: 'admin', targetReleaseId: releaseId,
+    discipline: 'HighLevelSoftware', artifactKind: 'Procedure',
+    artifactLabel: 'High-level software Procedure', artifactCount: 0, revisionCount: 1,
+    updatedAt: '2026-08-23T12:00:00Z',
+  }
+  const detail = {
+    ...listItem, projectId, releaseId, problem: 'A Case change needs a controlled Procedure.',
+    analysis: 'The exact Case change found new verification work.',
+    solution: 'Author and approve the Procedure in its own package.',
+    problemRich: '{"blocks":[{"type":"paragraph","text":"A Case change needs a controlled Procedure."}]}',
+    analysisRich: '{"blocks":[{"type":"paragraph","text":"The exact Case change found new verification work."}]}',
+    solutionRich: '{"blocks":[{"type":"paragraph","text":"Author and approve the Procedure in its own package."}]}',
+    version: 1, caseContractVersion: 2, artifactLevel: 'HighLevel', procedureLevel: 'HighLevel',
+    sourceChangeRequestNumber: '', originKind: 'CaseChange',
+    originReferenceId: '72500000-0000-0000-0000-000000000010',
+    originDisplayLabel: 'Case change', originDisplayIdentity: 'HLRTC-000738.01',
+    originDisplayTitle: 'Case change: update flight guidance',
+    artifactChanges: [], procedureChanges: [], coveredChangeRequests: [],
+    capabilities: { canProposeArtifactChange: true, canWithdrawArtifactChange: true, canRevise: false },
+    reviewCycle: {
+      sequence: 1, mode: 'Sequential', state: 'InReview',
+      workflowName: 'High-level Software Procedure Review', workflowVersion: 2,
+      steps: [{ position: 0, stageName: 'Procedure approval', authority: 'Procedure Approver',
+        approverId: 'admin', approverName: 'Administrator', state: 'Active' }],
+    },
+  }
+  const fulfill = (route: Route, body: unknown, status = 200) =>
+    route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) })
+  await page.route('**/api/history/test-change-requests*', route => fulfill(route, {
+    items: [listItem], totalCount: 1, totalPages: 1, page: 1, pageSize: 50,
+  }))
+  await page.route('**/api/releases/*/test-change-reviews*', route => fulfill(route, { items: [detail] }))
+  await page.route('**/api/test-change-reviews/' + packageId + '/case-changes',
+    route => fulfill(route, { error: 'Procedure route required' }, 404))
+  await page.route('**/api/test-change-reviews/' + packageId + '/procedure-changes',
+    route => fulfill(route, detail))
+  await page.route('**/api/signatures*', route => fulfill(route, []))
+  await page.route('**/api/controlled-editing/status*',
+    route => fulfill(route, { editable: true, locked: false, mine: false }))
+  await page.route('**/api/controlled-editing/checkout', route => fulfill(route, {
+    id: '72500000-0000-0000-0000-000000000002', version: 1, userName: 'admin',
+    openedAt: '2026-08-23T12:00:00Z', lastActivityAt: '2026-08-23T12:00:00Z',
+    expiresAt: '2026-08-23T13:00:00Z', resumed: false,
+    draftJson: JSON.stringify({ packageVersion: 1, title: detail.title, problem: detail.problem,
+      analysis: detail.analysis, solution: detail.solution, problemRich: detail.problemRich,
+      analysisRich: detail.analysisRich, solutionRich: detail.solutionRich, procedureChanges: [] }),
+  }))
+  await page.route('**/api/test-procedures?*', async route => {
+    procedureSearchUrls.push(route.request().url())
+    await fulfill(route, { page: 1, pageSize: 8, totalCount: 1, totalPages: 1, items: [
+      { id: '72500000-0000-0000-0000-000000000020', displayNumber: 'HLRTP-000700.00',
+        title: 'Existing HLR controlled Procedure', revision: 0, level: 'HighLevel',
+        state: 'Approved' },
+    ] })
+  })
+
+  await page.goto(current.origin + root + '/software-verification/hlr/change-requests?kind=Procedure', { waitUntil: 'load' })
+  await expect(page.getByRole('heading', { name: 'Software Procedure Change Requests', level: 1 })).toBeVisible()
+  await page.locator('[data-register-row]').first().click()
+  await expect(page.getByRole('heading', { name: 'Procedure impact', level: 2 })).toBeVisible()
+  await expect(page.getByText('Case change', { exact: true })).toBeVisible()
+  await expect(page.getByText('HLRTC-000738.01', { exact: true })).toBeVisible()
+  await expect(page.getByText('Case change: update flight guidance', { exact: false })).toBeVisible()
+  await expect(page.getByText('Procedure approval', { exact: false })).toBeVisible()
+  await page.getByRole('button', { name: 'Check out & edit' }).click()
+  await page.getByRole('button', { name: 'Modify existing' }).click()
+  await page.getByLabel('Find controlled procedure 1').fill('existing HLR')
+  await expect.poll(() => procedureSearchUrls.some(url => url.includes('search=existing%20HLR'))).toBeTruthy()
+  expect(procedureSearchUrls.some(url => url.includes('artifactKind=Procedure') && url.includes('search=existing%20HLR'))).toBeTruthy()
+  expect(procedureSearchUrls.every(url => !url.includes('/api/test-cases'))).toBeTruthy()
+  await expect(page.getByText('HLRTP-000700.00', { exact: true })).toBeVisible()
+  await expect(page.getByText('Controlled test procedure authoring', { exact: true })).toBeVisible()
+
+  // Procedure work starts from an exact Case change/assessment, so the shared register must not route a
+  // Procedure user into the Case-only manual creator. A stale/direct create URL is fail-closed as well.
+  await page.goto(current.origin + root + '/software-verification/llr/change-requests?kind=Procedure', { waitUntil: 'load' })
+  await expect(page.getByRole('heading', { name: 'Software Procedure Change Requests', level: 1 })).toBeVisible()
+  await expect(page.getByRole('button', { name: /New .*Test Change Request/ })).toHaveCount(0)
+  await page.goto(current.origin + root + '/software-verification/llr/change-requests/new?kind=Procedure', { waitUntil: 'load' })
+  await expect(page.getByRole('heading', { name: 'Procedure packages require an exact Case origin', level: 1 })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'New Test Change Request', level: 1 })).toHaveCount(0)
 })
 
 test('the page carries the same sections the requirements change request page carries', async ({ page }) => {

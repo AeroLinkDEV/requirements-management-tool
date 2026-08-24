@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test'
-import { artifactAcronym, artifactTypeLabel, documentTypeLabel, targetsFor } from '../src/presentation'
+import { artifactAcronym, artifactTypeLabel, documentTypeLabel, isVerificationProcedureKind, targetsFor, testChangeRequestAcronym, testChangeReviewWorkflowSubject, verificationArtifactApiRoot, verificationArtifactNoun } from '../src/presentation'
 
 test('numbered artifacts keep their canonical uppercase acronym in presentation', () => {
   const examples = [
@@ -33,4 +33,17 @@ test('document labels use canonical acronyms while draft remains a separate stat
     'Low-Level Software Requirements Document (LLRD)',
   ])
   expect(targetsFor('Software').every((target) => !target.label.includes('Draft'))).toBeTruthy()
+})
+
+test('composite HLR and LLR Procedure route kinds share the Procedure vocabulary', () => {
+  for (const [level, kind, acronym, subject] of [
+    ['HighLevel', 'HighLevelProcedure', 'HLRTPCR', 'HighLevelSoftwareProcedure'],
+    ['LowLevel', 'LowLevelProcedure', 'LLRTPCR', 'LowLevelSoftwareProcedure'],
+  ] as const) {
+    expect(isVerificationProcedureKind(kind)).toBeTruthy()
+    expect(verificationArtifactNoun(level, kind)).toBe('Procedure')
+    expect(verificationArtifactApiRoot('softwareTest', kind)).toBe('/api/test-procedures')
+    expect(testChangeRequestAcronym(level, kind)).toBe(acronym)
+    expect(testChangeReviewWorkflowSubject(level, kind)).toBe(subject)
+  }
 })

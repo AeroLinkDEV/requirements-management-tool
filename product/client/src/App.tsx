@@ -1,7 +1,7 @@
 import { lazy, Suspense, useCallback, useEffect, useState } from "react";
 import type { ComponentType, FormEvent } from "react";
 import CommandPalette from "./CommandPalette";
-import { officialBuildName } from "./presentation";
+import { isVerificationProcedureKind, officialBuildName } from "./presentation";
 import ExperienceControls from "./ExperienceControls";
 import type { MotionPreference, WorkspaceDensity } from "./ExperienceControls";
 import { projectAreaPath, projectConfigurationApprovalsPath, projectSlugOf, readRoute, routePath } from "./routing";
@@ -818,8 +818,9 @@ function App() {
         releaseId={release.id}
         releases={project.releases}
         discipline={discipline === "softwareTest"
-          ? (selectedArtifactKind === "LowLevel" ? "LowLevelSoftware" : "HighLevelSoftware")
+          ? (selectedArtifactKind?.toLowerCase().includes("lowlevel") ? "LowLevelSoftware" : "HighLevelSoftware")
           : "System"}
+        artifactKind={selectedArtifactKind}
         buildName={`Build ${release.version}`}
         readOnly={release.isReleased}
         programId={active?.program.id ?? ""}
@@ -831,7 +832,8 @@ function App() {
         onRaiseTestChangeRequest={() => navigate("createTestChangeRequest", discipline, undefined, selectedArtifactKind)}
         onOpenTestChangeRequest={id => navigate("testChangeRequest", discipline, id, selectedArtifactKind)}
         onLevelChange={discipline === "softwareTest"
-          ? level => navigate("testChangeRequests", "softwareTest", undefined, level)
+          ? level => navigate("testChangeRequests", "softwareTest", undefined,
+            isVerificationProcedureKind(selectedArtifactKind) ? `${level}Procedure` : level)
           : undefined}
       />
     );
@@ -845,7 +847,7 @@ function App() {
         releases={project.releases}
         packageId={selectedArtifactId}
         discipline={discipline === "softwareTest"
-          ? (selectedArtifactKind === "LowLevel" ? "LowLevelSoftware" : "HighLevelSoftware")
+          ? (selectedArtifactKind?.toLowerCase().includes("lowlevel") ? "LowLevelSoftware" : "HighLevelSoftware")
           : "System"}
         currentUser={user.userName}
         onBack={() => navigate("testChangeRequests", discipline, undefined, selectedArtifactKind)}
@@ -854,7 +856,26 @@ function App() {
       />
     );
 
-  // Raising a package is a page, exactly as raising a change request is.
+  // Procedure packages are raised only from an exact Case assessment/change origin. The shared editor
+  // cannot truthfully supply that origin, so a stale/direct Procedure create URL fails closed rather than
+  // silently creating a Case package under a Procedure-looking route. #727 owns the assessment raiser.
+  if (view === "createTestChangeRequest" && project && release && isVerificationProcedureKind(selectedArtifactKind))
+    return inShell(
+      <main className="historyPage">
+        <header className="historyHeader">
+          <div>
+            <p className="eyebrow">SOFTWARE PROCEDURE CHANGE CONTROL / BUILD {release.version}</p>
+            <h1>Procedure packages require an exact Case origin</h1>
+            <p>Procedure change-control packages are raised from a resolved Case change or assessment. No manual Case-only creation is available here.</p>
+          </div>
+          <button type="button" className="recordBuild"
+            onClick={() => navigate("testChangeRequests", discipline, undefined, selectedArtifactKind)}>
+            Back to Procedure change requests
+          </button>
+        </header>
+      </main>
+    );
+  // Raising a Case package is a page, exactly as raising a change request is.
   if (view === "createTestChangeRequest" && project && release)
     return inShell(
       <TestChangeRequestEditor

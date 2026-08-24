@@ -33,10 +33,15 @@ public sealed record CreateTestChangeRequestRequest(TestChangeReviewDiscipline D
     /// without its procedure decisions would be the same proposal in two halves, the second of which somebody
     /// has to remember to write. Optional, because a package may still be raised and worked afterwards.
     /// </summary>
-    CreateTestProcedureChangeRequest[]? ProcedureChanges = null)
+    CreateTestProcedureChangeRequest[]? ProcedureChanges = null,
+    VerificationArtifactKind? ArtifactKind = null,
+    Guid[]? CaseChangeIds = null,
+    Guid[]? CaseAssessmentIds = null)
 {
     /// <summary>Neutral Case/Procedure seam; ProcedureChanges remains the wire alias for older clients.</summary>
     public CreateTestProcedureChangeRequest[]? ArtifactChanges { get; init; }
+    /// <summary>Explicit neutral package identity; omitted legacy requests remain Case except System Procedure.</summary>
+    public VerificationArtifactKey? ArtifactKey { get; init; }
 }
 
 /// <summary>One proposed procedure decision, as the authoring page states it before the package exists.</summary>
@@ -139,11 +144,23 @@ internal static class TestChangeRequestSourceEligibility
     internal static string ArtifactKind(TestChangeReviewDiscipline discipline) =>
         discipline == TestChangeReviewDiscipline.System ? "Procedure" : "Case";
 
+    internal static string ArtifactKind(VerificationArtifactKey key) => key.Kind.ToString();
+
     internal static string ArtifactLabel(TestChangeReviewDiscipline discipline) => discipline switch
     {
         TestChangeReviewDiscipline.System => "System Test Procedure",
         TestChangeReviewDiscipline.HighLevelSoftware => "HLR Test Case",
         _ => "LLR Test Case",
+    };
+
+    internal static string ArtifactLabel(VerificationArtifactKey key) => key switch
+    {
+        { Discipline: VerificationDiscipline.System, Kind: VerificationArtifactKind.Procedure } => "System Test Procedure",
+        { Discipline: VerificationDiscipline.HighLevelSoftware, Kind: VerificationArtifactKind.Case } => "HLR Test Case",
+        { Discipline: VerificationDiscipline.LowLevelSoftware, Kind: VerificationArtifactKind.Case } => "LLR Test Case",
+        { Discipline: VerificationDiscipline.HighLevelSoftware, Kind: VerificationArtifactKind.Procedure } => "HLR Test Procedure",
+        { Discipline: VerificationDiscipline.LowLevelSoftware, Kind: VerificationArtifactKind.Procedure } => "LLR Test Procedure",
+        _ => "Verification artifact",
     };
 
     internal static IResult LevelRefusal(string displayNumber, TestChangeReviewDiscipline discipline) =>
@@ -153,10 +170,51 @@ internal static class TestChangeRequestSourceEligibility
                 $"{LevelName(discipline)} test work. A {ArtifactWord(discipline)} verifies the requirements one level above it.",
             code = "change_request_wrong_level"
         });
+
+    internal static string ArtifactWord(VerificationArtifactKey key) =>
+        key.Kind == VerificationArtifactKind.Procedure ? "test procedure" : "test case";
+
+    internal static string ArtifactNoun(VerificationArtifactKey key) =>
+        key.Kind == VerificationArtifactKind.Procedure ? "procedure" : "case";
+
+    internal static string ArtifactPlural(VerificationArtifactKey key) =>
+        key.Kind == VerificationArtifactKind.Procedure ? "test procedures" : "test cases";
+
+    internal static string LevelName(VerificationArtifactKey key) => key.Discipline switch
+    {
+        VerificationDiscipline.System => "system",
+        VerificationDiscipline.HighLevelSoftware => "high-level software",
+        _ => "low-level software",
+    };
 }
 
 public static class VerificationImpactEndpoints
 {
+    private sealed record OriginDisplay(string Label, string Identity, string Title);
+
+    private static OriginDisplay OriginFor(TestChangeReview review,
+        IReadOnlyDictionary<Guid, (string Identity, string Title)> caseChanges,
+        IReadOnlyDictionary<Guid, (string Identity, string Title)> assessments,
+        IReadOnlyDictionary<Guid, string> changeRequests,
+        IReadOnlyDictionary<Guid, (string Identity, string Title)> problemReports)
+    {
+        return review.OriginKind switch
+        {
+            TestChangeReviewOriginKind.CaseChange when caseChanges.TryGetValue(review.OriginReferenceId, out var change)
+                => new("Case change", change.Identity, change.Title),
+            TestChangeReviewOriginKind.CaseAssessment when assessments.TryGetValue(review.OriginReferenceId, out var assessment)
+                => new("Case assessment", assessment.Identity, assessment.Title),
+            TestChangeReviewOriginKind.ChangeRequest
+                => new("Change request", review.SourceChangeRequestNumber,
+                    changeRequests.GetValueOrDefault(review.OriginReferenceId) ?? "Source change request"),
+            TestChangeReviewOriginKind.ProblemReport when problemReports.TryGetValue(review.OriginReferenceId, out var report)
+                => new("Problem Report", report.Identity, report.Title),
+            TestChangeReviewOriginKind.ProblemReport
+                => new("Problem Report", review.SourceProblemReportNumber, "Source Problem Report"),
+            _ => new("Origin", review.SourceDisplayNumber, "")
+        };
+    }
+
     public static IEndpointRouteBuilder MapAeroLinkVerificationImpactEndpoints(this IEndpointRouteBuilder app)
     {
         app.MapGet("/api/releases/{releaseId:guid}/verification-impact", async (Guid releaseId, bool? outstandingOnly,
@@ -192,7 +250,7 @@ public static class VerificationImpactEndpoints
                     .Include(x => x.ReviewCycles).ThenInclude(x => x.Steps)
                     .Where(x => x.ReleaseId == releaseId)
                     .ToListAsync(ct))
-                .OrderBy(x => x.State).ThenBy(x => x.Discipline).ThenBy(x => x.CreatedAt)
+                .OrderBy(x => x.State).ThenBy(x => x.Discipline).ThenBy(x => x.ArtifactKind).ThenBy(x => x.CreatedAt)
                 .ToList();
             var reviewIds = reviews.Select(x => x.Id).ToList();
             var changeRequestIds = reviews.Where(x => x.ChangeRequestId != null).Select(x => x.ChangeRequestId!.Value)
@@ -207,16 +265,41 @@ public static class VerificationImpactEndpoints
             var reportIds = reportLinks.Select(x => x.ProblemReportId).Distinct().ToList();
             var reportDirectory = await db.ProblemReports.AsNoTracking().Where(x => reportIds.Contains(x.Id))
                 .ToDictionaryAsync(x => x.Id, x => new { x.Id, x.DisplayNumber, x.Title, state = x.State.ToString() }, ct);
+            var caseChangeIds = reviews.Where(x => x.OriginKind == TestChangeReviewOriginKind.CaseChange)
+                .Select(x => x.OriginReferenceId).Distinct().ToList();
+            var caseChanges = await db.Set<TestProcedureChange>().AsNoTracking()
+                .Where(x => caseChangeIds.Contains(x.Id))
+                .ToDictionaryAsync(x => x.Id, x => (Identity: x.BaseNumber + "." + (x.Revision < 10 ? "0" : "") + x.Revision, x.Title), ct);
+            var assessmentIds = reviews.Where(x => x.OriginKind == TestChangeReviewOriginKind.CaseAssessment)
+                .Select(x => x.OriginReferenceId).Distinct().ToList();
+            var assessments = await db.VerificationImpactItems.AsNoTracking()
+                .Where(x => assessmentIds.Contains(x.Id))
+                .ToDictionaryAsync(x => x.Id, x => (x.SubjectDisplayNumber, $"{x.Outcome} · {x.ResolutionRationale}"), ct);
+            var originReports = reportDirectory.ToDictionary(x => x.Key,
+                x => (x.Value.DisplayNumber, x.Value.Title));
+            var originChanges = caseChanges.ToDictionary(x => x.Key,
+                x => (x.Value.Identity, x.Value.Title));
+            var originAssessments = assessments.ToDictionary(x => x.Key,
+                x => (x.Value.SubjectDisplayNumber, x.Value.Item2));
             return Results.Ok(new
             {
                 canCreate = canTest,
                 items = reviews.Select(review => new
                 {
+                    origin = OriginFor(review, originChanges, originAssessments, changeRequests, originReports),
                     review.Id,
                     review.ProjectId,
                     review.ReleaseId,
                     review.ChangeRequestId,
                     discipline = review.Discipline.ToString(),
+                    artifactKey = review.ArtifactKey.ToString(),
+                    artifactKind = review.ArtifactKind.ToString(),
+                    originKind = review.OriginKind.ToString(),
+                    originReferenceId = review.OriginReferenceId,
+                    sourceCaseOriginNumber = review.SourceCaseOriginNumber,
+                    originKindLabel = OriginFor(review, originChanges, originAssessments, changeRequests, originReports).Label,
+                    originDisplayIdentity = OriginFor(review, originChanges, originAssessments, changeRequests, originReports).Identity,
+                    originDisplayTitle = OriginFor(review, originChanges, originAssessments, changeRequests, originReports).Title,
                     state = review.State.ToString(),
                     // Deferral reads the way it does on the requirements register: the allocation column says
                     // it is on the shelf, and the state column says how far it had got before it went there.
@@ -233,8 +316,7 @@ public static class VerificationImpactEndpoints
                     review.AnalysisRich,
                     review.SolutionRich,
                     review.CaseContractVersion,
-                    artifactKind = TestChangeRequestSourceEligibility.ArtifactKind(review.Discipline),
-                    artifactLabel = TestChangeRequestSourceEligibility.ArtifactLabel(review.Discipline),
+                    artifactLabel = TestChangeRequestSourceEligibility.ArtifactLabel(review.ArtifactKey),
                     artifactDecisionCount = review.ProcedureChanges.Count,
                     // Compatibility alias retained for older clients; current Case clients consume the
                     // neutral artifact field above.
@@ -417,7 +499,7 @@ public static class VerificationImpactEndpoints
                 {
                     review.RecordTestChangeRequired(actor, now);
                     review.AssignControlledNumber(
-                        await IdentifierAllocator.NextTestChangeRequestAsync(db, review.Discipline, ct, ladderPolicy), now,
+                    await IdentifierAllocator.NextTestChangeRequestAsync(db, review.ArtifactKey, ct, ladderPolicy), now,
                         ladderPolicy);
                 }
                 else review.RecordNoTestChangeRequired(actor, request.Rationale ?? "", now);
@@ -447,7 +529,7 @@ public static class VerificationImpactEndpoints
         {
             var review = await db.TestChangeReviews.AsNoTracking().Include(x => x.ProcedureChanges)
                 .SingleOrDefaultAsync(x => x.Id == id, ct);
-            if (review is null || !ArtifactRouteAllows(artifactRoute, review.Discipline)) return Results.NotFound();
+            if (review is null || !ArtifactRouteAllows(artifactRoute, review.ArtifactKey)) return Results.NotFound();
             var ladderPolicy = await policyResolver.ResolveAsync(review.ProjectId, ct);
             if (!await http.HasProjectAccessAsync(db, review.ProjectId, ct)) return Results.Forbid();
             // Derived here rather than inferred by the client from a broad role. The workspace was offering
@@ -486,7 +568,9 @@ public static class VerificationImpactEndpoints
                              .Where(x => targetRevisionIds.Contains(x.Id))
                          join procedure in db.TestProcedures.AsNoTracking()
                              .Where(x => x.ProjectId == review.ProjectId && x.Level == review.ProcedureLevel(ladderPolicy)
-                                 && (x.Level == TestProcedureLevel.System || x.ArtifactKind == VerificationArtifactKind.Case)
+                                 && (review.ArtifactKey.Kind == VerificationArtifactKind.Procedure
+                                     ? x.ArtifactKind == VerificationArtifactKind.Procedure
+                                     : x.Level == TestProcedureLevel.System || x.ArtifactKind == VerificationArtifactKind.Case)
                                  && referencedBaseNumbers.Contains(x.BaseNumber))
                              on revision.ProcedureId equals procedure.Id
                          orderby procedure.BaseNumber
@@ -549,10 +633,45 @@ public static class VerificationImpactEndpoints
                     removedRequirementRevisionIds = DrivingRequirements(x.RemovedRequirementRevisionIdsJson),
                     x.CoverageChangeRationale, x.CoverageChangedBy
                 }).ToList();
+            OriginDisplay originDisplay;
+            if (review.OriginKind == TestChangeReviewOriginKind.CaseChange)
+            {
+                var source = await db.Set<TestProcedureChange>().AsNoTracking()
+                    .Where(x => x.Id == review.OriginReferenceId)
+                    .Select(x => new { Identity = x.BaseNumber + "." + (x.Revision < 10 ? "0" : "") + x.Revision, x.Title }).SingleOrDefaultAsync(ct);
+                originDisplay = source is null
+                    ? new("Case change", review.SourceCaseOriginNumber, "")
+                    : new("Case change", source.Identity, source.Title);
+            }
+            else if (review.OriginKind == TestChangeReviewOriginKind.CaseAssessment)
+            {
+                var source = await db.VerificationImpactItems.AsNoTracking()
+                    .Where(x => x.Id == review.OriginReferenceId)
+                    .Select(x => new { x.SubjectDisplayNumber, x.Outcome, x.ResolutionRationale })
+                    .SingleOrDefaultAsync(ct);
+                originDisplay = source is null
+                    ? new("Case assessment", review.SourceCaseOriginNumber, "")
+                    : new("Case assessment", source.SubjectDisplayNumber,
+                        $"{source.Outcome} · {source.ResolutionRationale}");
+            }
+            else if (review.OriginKind == TestChangeReviewOriginKind.ChangeRequest)
+            {
+                var title = await db.SystemChangeRequests.AsNoTracking()
+                    .Where(x => x.Id == review.OriginReferenceId).Select(x => x.Title).SingleOrDefaultAsync(ct);
+                originDisplay = new("Change request", review.SourceChangeRequestNumber, title ?? "Source change request");
+            }
+            else
+            {
+                var source = await db.ProblemReports.AsNoTracking()
+                    .Where(x => x.Id == review.OriginReferenceId)
+                    .Select(x => new { x.DisplayNumber, x.Title }).SingleOrDefaultAsync(ct);
+                originDisplay = new("Problem Report", source?.DisplayNumber ?? review.SourceProblemReportNumber,
+                    source?.Title ?? "Source Problem Report");
+            }
             return Results.Ok(new
             {
-                artifactKind = TestChangeRequestSourceEligibility.ArtifactKind(review.Discipline),
-                artifactLabel = TestChangeRequestSourceEligibility.ArtifactLabel(review.Discipline),
+                artifactKind = TestChangeRequestSourceEligibility.ArtifactKind(review.ArtifactKey),
+                artifactLabel = TestChangeRequestSourceEligibility.ArtifactLabel(review.ArtifactKey),
                 capabilities = new
                 {
                     canProposeArtifactChange = mayAuthor && review.State == TestChangeReviewState.Draft
@@ -568,6 +687,9 @@ public static class VerificationImpactEndpoints
                 procedureTargets = artifactTargets, // compatibility alias
                 review.Id, review.DisplayNumber, review.BaseNumber, review.Revision,
                 discipline = review.Discipline.ToString(), state = review.State.ToString(),
+                originKind = review.OriginKind.ToString(), originReferenceId = review.OriginReferenceId,
+                originDisplayLabel = originDisplay.Label, originDisplayIdentity = originDisplay.Identity,
+                originDisplayTitle = originDisplay.Title,
                 outcome = review.Outcome.ToString(),
                 artifactLevel = review.ProcedureLevel(ladderPolicy).ToString(),
                 procedureLevel = review.ProcedureLevel(ladderPolicy).ToString(), // compatibility alias
@@ -594,7 +716,7 @@ public static class VerificationImpactEndpoints
         {
             var review = await db.TestChangeReviews.AsNoTracking()
                 .SingleOrDefaultAsync(x => x.Id == id, ct);
-            if (review is null || !ArtifactRouteAllows(artifactRoute, review.Discipline)) return Results.NotFound();
+            if (review is null || !ArtifactRouteAllows(artifactRoute, review.ArtifactKey)) return Results.NotFound();
             var ladderPolicy = await policyResolver.ResolveAsync(review.ProjectId, ct);
             if (!await http.HasProjectAccessAsync(db, review.ProjectId, ct)) return Results.Forbid();
             var currentPage = Math.Max(1, page ?? 1);
@@ -615,7 +737,9 @@ public static class VerificationImpactEndpoints
                                   .Where(x => targetRevisionIds.Contains(x.Id))
                               join procedure in db.TestProcedures.AsNoTracking()
                                   .Where(x => x.ProjectId == review.ProjectId && x.Level == review.ProcedureLevel(ladderPolicy)
-                                      && (x.Level == TestProcedureLevel.System || x.ArtifactKind == VerificationArtifactKind.Case))
+                                      && (review.ArtifactKey.Kind == VerificationArtifactKind.Procedure
+                                          ? x.ArtifactKind == VerificationArtifactKind.Procedure
+                                          : x.Level == TestProcedureLevel.System || x.ArtifactKind == VerificationArtifactKind.Case))
                                   on revision.ProcedureId equals procedure.Id
                               select new
                               {
@@ -696,8 +820,8 @@ public static class VerificationImpactEndpoints
                 pageSize = size,
                 totalCount = total,
                 totalPages = (int)Math.Ceiling(total / (double)size),
-                artifactKind = TestChangeRequestSourceEligibility.ArtifactKind(review.Discipline),
-                artifactLabel = TestChangeRequestSourceEligibility.ArtifactLabel(review.Discipline),
+                artifactKind = TestChangeRequestSourceEligibility.ArtifactKind(review.ArtifactKey),
+                artifactLabel = TestChangeRequestSourceEligibility.ArtifactLabel(review.ArtifactKey),
                 artifactTargets = artifactItems,
                 items = artifactItems,
                 procedureTargets = artifactItems // compatibility alias
@@ -719,6 +843,44 @@ public static class VerificationImpactEndpoints
             var ladderPolicy = await policyResolver.ResolveAsync(review.ProjectId, ct);
             var currentPage = Math.Max(1, page ?? 1);
             var size = Math.Clamp(pageSize ?? 25, 1, 200);
+            if (review.ArtifactKey.Kind == VerificationArtifactKind.Procedure
+                && review.ArtifactKey.Discipline != VerificationDiscipline.System)
+            {
+                var effectivity = await TestProcedureEffectivity.ForReleaseAsync(db, review.ProjectId, review.ReleaseId, ct);
+                var carried = effectivity?.RevisionIds ?? [];
+                var rows = await (from revision in db.TestProcedureRevisions.AsNoTracking()
+                                  join procedure in db.TestProcedures.AsNoTracking()
+                                      on revision.ProcedureId equals procedure.Id
+                                  where carried.Contains(revision.Id)
+                                      && procedure.ProjectId == review.ProjectId
+                                      && procedure.ArtifactKind == VerificationArtifactKind.Case
+                                      && procedure.Level == review.ProcedureLevel(ladderPolicy)
+                                  select new { procedure.Id, RevisionId = revision.Id, procedure.BaseNumber, revision.Revision })
+                    .ToListAsync(ct);
+                var titles = await TestProcedureRevisionTitleProjection.ForRevisionsAsync(db,
+                    rows.Select(x => x.RevisionId).ToList(), ct);
+                var query = rows.Select(x => new TestChangeReviewRequirementChoice(x.Id, x.RevisionId,
+                    $"{x.BaseNumber}.{x.Revision:D2}", titles[x.RevisionId].Title, ladderPolicy.RequirementLevelFor(review.ProcedureLevel(ladderPolicy))))
+                    .OrderBy(x => x.DisplayNumber).AsEnumerable();
+                if (!string.IsNullOrWhiteSpace(search))
+                {
+                    var q = search.Trim();
+                    query = query.Where(x => x.DisplayNumber.Contains(q, StringComparison.OrdinalIgnoreCase)
+                        || x.Statement.Contains(q, StringComparison.OrdinalIgnoreCase)).OrderBy(x => x.DisplayNumber);
+                }
+                var procedureTotal = query.Count();
+                var selected = query.Skip((currentPage - 1) * size).Take(size).ToList();
+                return Results.Ok(new
+                {
+                    page = currentPage,
+                    pageSize = size,
+                    totalCount = procedureTotal,
+                    totalPages = (int)Math.Ceiling(procedureTotal / (double)size),
+                    items = selected,
+                    artifactKind = review.ArtifactKind.ToString(),
+                    artifactLabel = TestChangeRequestSourceEligibility.ArtifactLabel(review.ArtifactKey)
+                });
+            }
             var requestedIds = (ids ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
                 .Select(x => Guid.TryParse(x, out var value) ? value : Guid.Empty)
                 .Where(x => x != Guid.Empty).Distinct().ToList();
@@ -740,22 +902,26 @@ public static class VerificationImpactEndpoints
         {
             var review = await db.TestChangeReviews.Include(x => x.ProcedureChanges).Include(x => x.ReviewCycles)
                 .SingleOrDefaultAsync(x => x.Id == id, ct);
-            if (review is null || !ArtifactRouteAllows(artifactRoute, review.Discipline)) return Results.NotFound();
+            if (review is null || !ArtifactRouteAllows(artifactRoute, review.ArtifactKey)) return Results.NotFound();
             var ladderPolicy = await policyResolver.ResolveAsync(review.ProjectId, ct);
             var refusal = await RefuseUnlessAuthoredBy(review, http, db, identity, ct);
             if (refusal is not null) return refusal;
             if (request.ExpectedVersion is not null && review.Version != request.ExpectedVersion)
                 return Results.Conflict(new
                 {
-                    error = $"This test change request changed after it was opened. Refresh before proposing a {TestChangeRequestSourceEligibility.ArtifactNoun(review.Discipline)} change.",
+                    error = $"This test change request changed after it was opened. Refresh before proposing a {TestChangeRequestSourceEligibility.ArtifactNoun(review.ArtifactKey)} change.",
                     code = "stale_version"
                 });
             try
             {
                 var now = DateTimeOffset.UtcNow;
-                var artifactWord = TestChangeRequestSourceEligibility.ArtifactWord(review.Discipline);
-                var artifactNoun = TestChangeRequestSourceEligibility.ArtifactNoun(review.Discipline);
+                var isProcedurePackage = review.ArtifactKey.Kind == VerificationArtifactKind.Procedure
+                    && review.ArtifactKey.Discipline != VerificationDiscipline.System;
+                var artifactWord = TestChangeRequestSourceEligibility.ArtifactWord(review.ArtifactKey);
+                var artifactNoun = TestChangeRequestSourceEligibility.ArtifactNoun(review.ArtifactKey);
                 var driving = request.DrivingRequirementRevisionIds ?? [];
+                if (isProcedurePackage && driving.Length != 0)
+                    return Results.BadRequest(new { error = "A software Procedure selects exact Case parents, not requirement revisions.", code = "procedure_parent_kind_mismatch" });
                 var parentIds = request.ParentRevisionIds ?? driving;
                 var parentKind = request.ParentKind != VerificationProcedureParentKind.Unspecified
                     ? request.ParentKind
@@ -796,7 +962,7 @@ public static class VerificationImpactEndpoints
                         ? driving.Concat(removed)
                         : parentIds.Concat(driving).Concat(removed))
                     .Distinct().ToArray();
-                if (scopedRequirementIds.Length != 0)
+                if (!isProcedurePackage && scopedRequirementIds.Length != 0)
                 {
                     var known = await (from revision in db.RequirementRevisions.AsNoTracking()
                                        join artifact in db.Requirements.AsNoTracking() on revision.ArtifactId equals artifact.Id
@@ -826,7 +992,8 @@ public static class VerificationImpactEndpoints
                 // Introducing allocates; modifying or retiring names what already exists. Letting the caller
                 // choose a number for a new procedure would let two engineers pick the same one.
                 var baseNumber = request.Kind == TestProcedureChangeKind.Introduce
-                    ? await IdentifierAllocator.NextTestProcedureAsync(db, review.ProcedureLevel(ladderPolicy), ct, ladderPolicy)
+                    ? await IdentifierAllocator.NextTestProcedureAsync(db, review.ProcedureLevel(ladderPolicy), ct, ladderPolicy,
+                        review.ArtifactKey.Kind)
                     : (request.BaseNumber ?? "").Trim();
                 if (request.Kind != TestProcedureChangeKind.Introduce && baseNumber.Length == 0)
                     return Results.BadRequest(new { error = $"A modification or retirement must name the {artifactNoun} it acts on." });
@@ -844,7 +1011,9 @@ public static class VerificationImpactEndpoints
                 {
                     var target = await db.TestProcedures.AsNoTracking()
                         .Where(x => x.BaseNumber == baseNumber
-                            && (x.Level == TestProcedureLevel.System || x.ArtifactKind == VerificationArtifactKind.Case))
+                            && (review.ArtifactKey.Kind == VerificationArtifactKind.Procedure
+                                ? x.ArtifactKind == VerificationArtifactKind.Procedure
+                                : x.Level == TestProcedureLevel.System || x.ArtifactKind == VerificationArtifactKind.Case))
                         .Select(x => new { x.Id, x.ProjectId, x.Level }).SingleOrDefaultAsync(ct);
                     if (target is null)
                         return Results.BadRequest(new { error = $"{baseNumber} is not a controlled {artifactWord}." });
@@ -891,7 +1060,7 @@ public static class VerificationImpactEndpoints
                     }
                 }
 
-                if (request.Kind == TestProcedureChangeKind.Modify)
+                if (request.Kind == TestProcedureChangeKind.Modify && !isProcedurePackage)
                 {
                     var absent = removed.Distinct().FirstOrDefault(x => !currentCoverageIds.Contains(x));
                     if (absent != Guid.Empty)
@@ -957,6 +1126,29 @@ public static class VerificationImpactEndpoints
                         });
                 }
 
+                if (isProcedurePackage && request.Kind != TestProcedureChangeKind.Retire)
+                {
+                    ExactParentSelectionPolicy.Validate(
+                        VerificationProcedureParentPolicy.Classification(parentKind), parentIds,
+                        request.DerivedRationale, "software Procedure");
+                    if (parentKind == VerificationProcedureParentKind.Allocated)
+                    {
+                        var effectivity = await TestProcedureEffectivity.ForReleaseAsync(db, review.ProjectId, review.ReleaseId, ct);
+                        var carriedCaseIds = effectivity?.RevisionIds.ToHashSet() ?? [];
+                        var caseIds = await (from revision in db.TestProcedureRevisions.AsNoTracking()
+                                             join procedure in db.TestProcedures.AsNoTracking()
+                                                 on revision.ProcedureId equals procedure.Id
+                                             where parentIds.Contains(revision.Id)
+                                                 && procedure.ProjectId == review.ProjectId
+                                                 && procedure.ArtifactKind == VerificationArtifactKind.Case
+                                                 && procedure.Level == review.ProcedureLevel(ladderPolicy)
+                                             select revision.Id).ToListAsync(ct);
+                        var missing = parentIds.FirstOrDefault(x => !caseIds.Contains(x) || !carriedCaseIds.Contains(x));
+                        if (missing != Guid.Empty)
+                            return Results.BadRequest(new { error = $"Case revision {missing} is not an exact Case parent selected by this Project and build.", code = "case_parent_out_of_scope" });
+                    }
+                }
+
                 // A test-change package is incrementally authored.  Keep scope
                 // checks above eager for any IDs the draft supplies, but defer
                 // the Allocated/Derived XOR (including a blank rationale) to
@@ -994,13 +1186,13 @@ public static class VerificationImpactEndpoints
         {
             var review = await db.TestChangeReviews.Include(x => x.ProcedureChanges)
                 .SingleOrDefaultAsync(x => x.Id == id, ct);
-            if (review is null || !ArtifactRouteAllows(artifactRoute, review.Discipline)) return Results.NotFound();
+            if (review is null || !ArtifactRouteAllows(artifactRoute, review.ArtifactKey)) return Results.NotFound();
             var refusal = await RefuseUnlessAuthoredBy(review, http, db, identity, ct);
             if (refusal is not null) return refusal;
             if (expectedVersion is not null && review.Version != expectedVersion)
                 return Results.Conflict(new
                 {
-                    error = $"This test change request changed after it was opened. Refresh before withdrawing a {TestChangeRequestSourceEligibility.ArtifactNoun(review.Discipline)} change.",
+                    error = $"This test change request changed after it was opened. Refresh before withdrawing a {TestChangeRequestSourceEligibility.ArtifactNoun(review.ArtifactKey)} change.",
                     code = "stale_version"
                 });
             try
@@ -1161,8 +1353,8 @@ public static class VerificationImpactEndpoints
                 return Results.Conflict(new { error = "Verification decisions can be changed only while the test change request is a Draft." });
             var decisionRefusal = await RefuseUnlessAuthoredBy(review, http, db, identity, ct);
             if (decisionRefusal is not null) return decisionRefusal;
-            var artifactWord = TestChangeRequestSourceEligibility.ArtifactWord(review.Discipline);
-            var artifactNoun = TestChangeRequestSourceEligibility.ArtifactNoun(review.Discipline);
+            var artifactWord = TestChangeRequestSourceEligibility.ArtifactWord(review.ArtifactKey);
+            var artifactNoun = TestChangeRequestSourceEligibility.ArtifactNoun(review.ArtifactKey);
             var requestedChangeAction = request.ArtifactChangeAction ?? request.ProcedureChangeAction;
             TestProcedureChangeAction? resolvedChangeAction = requestedChangeAction;
 
@@ -1287,15 +1479,91 @@ public static class VerificationImpactEndpoints
             if (release.IsReleased) return Results.Conflict(new { error = "A released build takes no new test change requests." });
             if (!await http.HasProjectRoleAsync(db, identity, release.ProjectId, ct, ProgramRole.TestEngineer, ProgramRole.TestLead))
                 return Results.Forbid();
-            try { _ = ladderPolicy.RequirementLevelFor(request.Discipline); }
+            VerificationArtifactKey artifactKey;
+            try
+            {
+                artifactKey = request.ArtifactKey ?? new VerificationArtifactKey(
+                    VerificationArtifactProfile.ToNeutral(request.Discipline),
+                    request.ArtifactKind ?? (request.Discipline == TestChangeReviewDiscipline.System
+                        ? VerificationArtifactKind.Procedure : VerificationArtifactKind.Case));
+                if (artifactKey.Discipline != VerificationArtifactProfile.ToNeutral(request.Discipline))
+                    throw new DomainException("The artifact key discipline must match the test-change discipline.");
+                _ = ladderPolicy.VerificationArtifact(artifactKey);
+            }
             catch (DomainException) { return Results.BadRequest(new { error = "The test-change discipline is not supported." }); }
             // Test work is not only ever caused by a requirement change: an anomaly found in the field is a
             // legitimate reason to write, correct or withdraw a procedure, and a build may carry no approved
             // change at this package's own level to hang it on. What a package cannot be is raised from
             // nothing — it must say what concluded the work was required.
             // Absent and empty mean the same thing here — the property is optional on the request.
+            var changeRequestIds = request.ChangeRequestIds ?? [];
             var namedProblemReports = request.ProblemReportIds ?? [];
-            if (request.ChangeRequestIds.Length == 0 && namedProblemReports.Length == 0)
+            var caseChangeIds = request.CaseChangeIds ?? [];
+            var caseAssessmentIds = request.CaseAssessmentIds ?? [];
+            Guid caseOriginId = Guid.Empty;
+            string caseOriginDisplay = "";
+            var caseOriginKind = TestChangeReviewOriginKind.CaseChange;
+            if (artifactKey.Kind == VerificationArtifactKind.Procedure
+                && artifactKey.Discipline != VerificationDiscipline.System)
+            {
+                if (changeRequestIds.Length != 0 || namedProblemReports.Length != 0
+                    || caseChangeIds.Length + caseAssessmentIds.Length != 1)
+                    return Results.BadRequest(new
+                    {
+                        error = "A software Procedure package must name exactly one exact Case change or Case assessment origin.",
+                        code = "procedure_origin_required"
+                    });
+                if (caseChangeIds.Length == 1)
+                {
+                    var source = await (from change in db.Set<TestProcedureChange>().AsNoTracking()
+                                        join review in db.TestChangeReviews.AsNoTracking()
+                                            on change.TestChangeReviewId equals review.Id
+                                        where change.Id == caseChangeIds[0]
+                                            && review.ProjectId == release.ProjectId && review.ReleaseId == releaseId
+                                            && review.ArtifactKind == VerificationArtifactKind.Case
+                                            && review.State == TestChangeReviewState.Approved
+                                            && review.Outcome == TestChangeReviewOutcome.ChangeRequired
+                                            && change.BaseNumber != ""
+                                        select new { change.Id,
+                                            DisplayNumber = change.BaseNumber + "." + (change.Revision < 10 ? "0" : "") + change.Revision,
+                                            change.Title, review.Discipline }).SingleOrDefaultAsync(ct);
+                    if (source is null || source.Discipline == TestChangeReviewDiscipline.System
+                        || VerificationArtifactProfile.ToNeutral(source.Discipline) != artifactKey.Discipline)
+                        return Results.BadRequest(new { error = "The Case change origin must be an exact software Case change in this Project and build." });
+                    caseOriginId = source.Id;
+                    caseOriginDisplay = source.DisplayNumber;
+                    caseOriginKind = TestChangeReviewOriginKind.CaseChange;
+                }
+                else
+                {
+                    var source = await (from item in db.VerificationImpactItems.AsNoTracking()
+                                        join review in db.TestChangeReviews.AsNoTracking()
+                                            on item.TestChangeReviewId equals review.Id
+                                        where item.Id == caseAssessmentIds[0]
+                                            && item.ProjectId == release.ProjectId && item.ReleaseId == releaseId
+                                            && review.ArtifactKind == VerificationArtifactKind.Case
+                                            && review.State != TestChangeReviewState.Superseded
+                                            && item.State == VerificationImpactState.Resolved
+                                            && item.Outcome == VerificationImpactOutcome.NewProcedureRequired
+                                            && item.ProcedureChangeAction == TestProcedureChangeAction.CreateNew
+                                            && item.RequirementRevisionId != null
+                                        select new { item.Id, item.SubjectDisplayNumber, item.ResolutionRationale, item.RequirementRevisionId, review.Discipline }).SingleOrDefaultAsync(ct);
+                    if (source is null || source.Discipline == TestChangeReviewDiscipline.System
+                        || VerificationArtifactProfile.ToNeutral(source.Discipline) != artifactKey.Discipline)
+                        return Results.BadRequest(new { error = "The Case assessment origin must be an exact software Case assessment in this Project and build." });
+                    var effectiveBaselineId = await TestChangeReviewRequirementScope.EffectiveRequirementBaselineIdAsync(
+                        db, release.ProjectId, releaseId, ct);
+                    if (effectiveBaselineId is null || source.RequirementRevisionId is null
+                        || !await db.BaselineRequirements.AsNoTracking().AnyAsync(x => x.BaselineId == effectiveBaselineId
+                            && x.RevisionId == source.RequirementRevisionId, ct))
+                        return Results.BadRequest(new { error = "The Case assessment origin is not bound to this build's effective baseline." });
+                    caseOriginId = source.Id;
+                    caseOriginDisplay = source.SubjectDisplayNumber;
+                    caseOriginKind = TestChangeReviewOriginKind.CaseAssessment;
+                }
+            }
+            if (artifactKey.Kind == VerificationArtifactKind.Case
+                && changeRequestIds.Length == 0 && namedProblemReports.Length == 0)
                 return Results.BadRequest(new
                 {
                     error = "Name what this package answers for: an approved change request at its own level, or a Problem Report.",
@@ -1305,10 +1573,10 @@ public static class VerificationImpactEndpoints
                 return Results.BadRequest(new { error = "A manually raised test change request needs a title that says what it is for." });
 
             var changes = await db.SystemChangeRequests.AsNoTracking()
-                .Where(x => request.ChangeRequestIds.Contains(x.Id) && x.ProjectId == release.ProjectId
+                .Where(x => changeRequestIds.Contains(x.Id) && x.ProjectId == release.ProjectId
                     && x.TargetReleaseId == releaseId)
                 .Select(x => new { x.Id, x.DisplayNumber, x.State, x.Type, x.SoftwareLevel }).ToListAsync(ct);
-            if (changes.Count != request.ChangeRequestIds.Length)
+            if (changes.Count != changeRequestIds.Length)
                 return Results.BadRequest(new
                 {
                     error = "A test change request can only answer for approved change requests allocated to this build.",
@@ -1325,9 +1593,11 @@ public static class VerificationImpactEndpoints
                 return TestChangeRequestSourceEligibility.LevelRefusal(wrongLevel.DisplayNumber, request.Discipline);
             // The first change the caller names is the package's base; the rest are folded in. The database
             // row order is not the caller's order, so it is restored explicitly rather than trusted.
-            changes = request.ChangeRequestIds.Select(id => changes.Single(x => x.Id == id)).ToList();
-            var problemReportError = await problemReports.ValidateSelectionAsync(release.ProjectId, releaseId,
-                request.ProblemReportIds, ct);
+            changes = changeRequestIds.Select(id => changes.Single(x => x.Id == id)).ToList();
+            var problemReportError = artifactKey.Kind == VerificationArtifactKind.Procedure
+                && artifactKey.Discipline != VerificationDiscipline.System
+                ? null
+                : await problemReports.ValidateSelectionAsync(release.ProjectId, releaseId, request.ProblemReportIds, ct);
             if (problemReportError is not null) return Results.BadRequest(new { error = problemReportError });
 
             // Already covered, by the package it was raised from or by one it was folded into. The check names
@@ -1339,6 +1609,7 @@ public static class VerificationImpactEndpoints
             {
                 var origin = await db.TestChangeReviews.AsNoTracking()
                     .Where(x => x.ChangeRequestId == change.Id && x.Discipline == request.Discipline
+                        && x.ArtifactKind == artifactKey.Kind
                         && x.State != TestChangeReviewState.Superseded
                         && (x.State != TestChangeReviewState.Draft || x.Outcome != TestChangeReviewOutcome.Pending))
                     .Select(x => x.DisplayNumber).FirstOrDefaultAsync(ct);
@@ -1360,8 +1631,8 @@ public static class VerificationImpactEndpoints
             // review becomes this package, and the others are superseded rather than duplicated. History keeps
             // them; nothing is deleted.
             var pendingAutomatic = await db.TestChangeReviews
-                .Where(x => x.ChangeRequestId != null && request.ChangeRequestIds.Contains(x.ChangeRequestId.Value)
-                    && x.Discipline == request.Discipline
+                .Where(x => x.ChangeRequestId != null && changeRequestIds.Contains(x.ChangeRequestId.Value)
+                        && x.Discipline == request.Discipline && x.ArtifactKind == artifactKey.Kind
                     && x.State == TestChangeReviewState.Draft && x.Outcome == TestChangeReviewOutcome.Pending)
                 .ToListAsync(ct);
 
@@ -1375,11 +1646,23 @@ public static class VerificationImpactEndpoints
                     // Raised from a Problem Report. The report takes the originating slot a change request
                     // would have held, so the package still has exactly one thing it was raised from — which
                     // is what its number, its covered-sources record and its case snapshot depend on.
-                    var originatingReport = await db.ProblemReports.AsNoTracking()
-                        .Where(x => x.Id == namedProblemReports[0])
-                        .Select(x => new { x.Id, x.ReportNumber, x.Revision }).SingleAsync(ct);
-                    review = TestChangeReview.FromProblemReport(release.ProjectId, releaseId, originatingReport.Id,
-                        request.Discipline, $"{originatingReport.ReportNumber}.{originatingReport.Revision:D2}", now, authorId: actor);
+                    if (artifactKey.Kind == VerificationArtifactKind.Procedure
+                        && artifactKey.Discipline != VerificationDiscipline.System)
+                    {
+                        review = caseOriginKind == TestChangeReviewOriginKind.CaseAssessment
+                            ? TestChangeReview.FromCaseAssessment(release.ProjectId, releaseId, caseOriginId,
+                                artifactKey, caseOriginDisplay, now, authorId: actor)
+                            : TestChangeReview.FromCaseChange(release.ProjectId, releaseId, caseOriginId,
+                                artifactKey, caseOriginDisplay, now, authorId: actor);
+                    }
+                    else
+                    {
+                        var originatingReport = await db.ProblemReports.AsNoTracking()
+                            .Where(x => x.Id == namedProblemReports[0])
+                            .Select(x => new { x.Id, x.ReportNumber, x.Revision }).SingleAsync(ct);
+                        review = TestChangeReview.FromProblemReport(release.ProjectId, releaseId, originatingReport.Id,
+                            artifactKey, $"{originatingReport.ReportNumber}.{originatingReport.Revision:D2}", now, authorId: actor);
+                    }
                     db.TestChangeReviews.Add(review);
                 }
                 else
@@ -1396,14 +1679,14 @@ public static class VerificationImpactEndpoints
                     }
                     else
                     {
-                        review = new TestChangeReview(release.ProjectId, releaseId, first.Id, request.Discipline,
+                        review = new TestChangeReview(release.ProjectId, releaseId, first.Id, artifactKey,
                             first.DisplayNumber, now, authorId: actor);
                         db.TestChangeReviews.Add(review);
                     }
                 }
                 review.RecordTestChangeRequired(actor, now);
                 review.AssignControlledNumber(
-                    await IdentifierAllocator.NextTestChangeRequestAsync(db, request.Discipline, ct, ladderPolicy), now,
+                    await IdentifierAllocator.NextTestChangeRequestAsync(db, artifactKey, ct, ladderPolicy), now,
                     ladderPolicy);
                 foreach (var extra in changes.Skip(1))
                     review.IncludeChangeRequest(actor, extra.Id, extra.DisplayNumber, now);
@@ -1583,6 +1866,9 @@ public static class VerificationImpactEndpoints
         {
             var review = await db.TestChangeReviews.Include(x => x.AdditionalSources).SingleOrDefaultAsync(x => x.Id == id, ct);
             if (review is null) return Results.NotFound();
+            if (review.ArtifactKind == VerificationArtifactKind.Procedure
+                && review.ArtifactKey.Discipline != VerificationDiscipline.System)
+                return Results.BadRequest(new { error = "A software Procedure package can only retain its exact Case origin; it cannot fold in a requirement change request." });
             if (await db.Releases.AnyAsync(x => x.Id == review.ReleaseId && x.IsReleased, ct))
                 return Results.Conflict(new { error = "Released software-build test change requests are read-only." });
             var foldRefusal = await RefuseUnlessAuthoredBy(review, http, db, identity, ct);
@@ -1613,6 +1899,7 @@ public static class VerificationImpactEndpoints
             // them where they were made. Checked after claims so a holder is named when one exists.
             var concluded = await db.TestChangeReviews.AsNoTracking()
                 .Where(x => x.ChangeRequestId == request.ChangeRequestId && x.Discipline == review.Discipline
+                    && x.ArtifactKind == review.ArtifactKind
                     && x.State != TestChangeReviewState.Superseded
                     && (x.State != TestChangeReviewState.Draft || x.Outcome != TestChangeReviewOutcome.Pending))
                 .Select(x => x.DisplayNumber).FirstOrDefaultAsync(ct);
@@ -1634,6 +1921,7 @@ public static class VerificationImpactEndpoints
                 // workspace can see and settle them.
                 var automatic = await db.TestChangeReviews
                     .Where(x => x.ChangeRequestId == request.ChangeRequestId && x.Discipline == review.Discipline
+                        && x.ArtifactKind == review.ArtifactKind
                         && x.State == TestChangeReviewState.Draft && x.Outcome == TestChangeReviewOutcome.Pending)
                     .ToListAsync(ct);
                 foreach (var pending in automatic)
@@ -1667,6 +1955,9 @@ public static class VerificationImpactEndpoints
         {
             var review = await db.TestChangeReviews.Include(x => x.AdditionalSources).SingleOrDefaultAsync(x => x.Id == id, ct);
             if (review is null) return Results.NotFound();
+            if (review.ArtifactKind == VerificationArtifactKind.Procedure
+                && review.ArtifactKey.Discipline != VerificationDiscipline.System)
+                return Results.BadRequest(new { error = "A software Procedure package has an immutable Case origin and cannot change its requirement source set." });
             if (await db.Releases.AnyAsync(x => x.Id == review.ReleaseId && x.IsReleased, ct))
                 return Results.Conflict(new { error = "Released software-build test change requests are read-only." });
             var unfoldRefusal = await RefuseUnlessAuthoredBy(review, http, db, identity, ct);
@@ -1696,10 +1987,11 @@ public static class VerificationImpactEndpoints
                     // source has no impact items — so the change is never left without an actionable
                     // assessment and can be selected or folded again. The superseded assessment remains history.
                     var nextRevision = await db.TestChangeReviews
-                        .Where(x => x.ChangeRequestId == changeRequestId && x.Discipline == review.Discipline)
+                        .Where(x => x.ChangeRequestId == changeRequestId && x.Discipline == review.Discipline
+                            && x.ArtifactKind == review.ArtifactKind)
                         .Select(x => (int?)x.Revision).MaxAsync(ct) ?? -1;
                     var fresh = new TestChangeReview(review.ProjectId, review.ReleaseId, change.Id,
-                        review.Discipline, change.DisplayNumber, now, revision: nextRevision + 1);
+                        review.ArtifactKey, change.DisplayNumber, now, revision: nextRevision + 1);
                     db.TestChangeReviews.Add(fresh);
                     foreach (var item in stranded) item.MoveToReview(fresh.Id, now);
                 }
@@ -1749,8 +2041,8 @@ public static class VerificationImpactEndpoints
                 if (review.Outcome == TestChangeReviewOutcome.ChangeRequired && review.ProcedureChanges.Count == 0)
                     return Results.BadRequest(new
                     {
-                        error = $"{review.DisplayNumber} concluded that {TestChangeRequestSourceEligibility.ArtifactNoun(review.Discipline)} work is required but names none. " +
-                            $"Add the {TestChangeRequestSourceEligibility.ArtifactNoun(review.Discipline)} decisions it carries before sending it for review."
+                        error = $"{review.DisplayNumber} concluded that {TestChangeRequestSourceEligibility.ArtifactNoun(review.ArtifactKey)} work is required but names none. " +
+                            $"Add the {TestChangeRequestSourceEligibility.ArtifactNoun(review.ArtifactKey)} decisions it carries before sending it for review."
                     });
                 await TestChangeReviewRequirementScope.ValidateProcedureChangesForSubmissionAsync(
                     db, review, ladderPolicy, ct);
@@ -1761,7 +2053,7 @@ public static class VerificationImpactEndpoints
                 // The project's recorded procedure for this discipline decides the stages. Where none is
                 // recorded the chosen approver stands alone, exactly as before — a rule nobody has written
                 // down must not become a rule that blocks work.
-                var workflow = await WorkflowEndpoints.ActiveSpecificationAsync(db, review.ProjectId, review.Discipline, ct, ladderPolicy);
+                var workflow = await WorkflowEndpoints.ActiveSpecificationAsync(db, review.ProjectId, review.ArtifactKey, ct, ladderPolicy);
                 List<ApproverSelection> selections;
                 if (workflow is null)
                 {
@@ -1836,7 +2128,7 @@ public static class VerificationImpactEndpoints
                     return Results.BadRequest(new
                     {
                         error = ArtifactClaims.Refusal(blockingProcedures,
-                            TestChangeRequestSourceEligibility.ArtifactPlural(review.Discipline)),
+                            TestChangeRequestSourceEligibility.ArtifactPlural(review.ArtifactKey)),
                         code = "procedure_claimed"
                     });
 
@@ -2104,6 +2396,15 @@ public static class VerificationImpactEndpoints
                 return Results.Conflict(new { error = "Verification decisions can be changed only while the test change request is a Draft." });
             var reopenRefusal = await RefuseUnlessAuthoredBy(reopenReview, http, db, identity, ct);
             if (reopenRefusal is not null) return reopenRefusal;
+            if (await db.TestChangeReviews.AsNoTracking().AnyAsync(x =>
+                    x.ArtifactKind == VerificationArtifactKind.Procedure
+                    && x.OriginKind == TestChangeReviewOriginKind.CaseAssessment
+                    && x.OriginReferenceId == item.Id, ct))
+                return Results.Conflict(new
+                {
+                    error = "This Case assessment is the immutable origin of a Procedure package and cannot be reopened; raise a new assessment instead.",
+                    code = "immutable_case_assessment_origin"
+                });
             try
             {
                 var actor = http.UserAccount().UserName;
@@ -2357,9 +2658,15 @@ public static class VerificationImpactEndpoints
             .OrderByDescending(x => x.Sequence)
             .FirstOrDefault();
 
-    private static bool ArtifactRouteAllows(string artifactRoute, TestChangeReviewDiscipline discipline) =>
-        !artifactRoute.StartsWith("case-", StringComparison.OrdinalIgnoreCase)
-        || discipline != TestChangeReviewDiscipline.System;
+    private static bool ArtifactRouteAllows(string artifactRoute, VerificationArtifactKey key)
+    {
+        if (artifactRoute.StartsWith("case-", StringComparison.OrdinalIgnoreCase))
+            return key.Kind == VerificationArtifactKind.Case;
+        // procedure-changes was the original shared route name and remains a compatibility alias for
+        // historical software Case packages. New Procedure packages always use their Procedure key.
+        return artifactRoute.StartsWith("procedure-", StringComparison.OrdinalIgnoreCase)
+            && (key.Kind == VerificationArtifactKind.Procedure || key.Kind == VerificationArtifactKind.Case);
+    }
 
     private static IReadOnlyList<Guid> DrivingRequirements(string json)
     {

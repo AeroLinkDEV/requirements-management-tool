@@ -429,7 +429,7 @@ public sealed class VerificationImpactService(AeroLinkDbContext db, ProblemRepor
                 // the moment it exists.
                 review = new TestChangeReview(projectId, releaseId, changeRequestId, discipline, sourceNumber, now);
                 review.RecordTestChangeRequired("system.verification", now);
-                review.AssignControlledNumber(await IdentifierAllocator.NextTestChangeRequestAsync(db, discipline, ct, ladderPolicy), now, ladderPolicy);
+                review.AssignControlledNumber(await IdentifierAllocator.NextTestChangeRequestAsync(db, review.ArtifactKey, ct, ladderPolicy), now, ladderPolicy);
                 db.TestChangeReviews.Add(review);
                 reviews.Add(discipline, review);
             }

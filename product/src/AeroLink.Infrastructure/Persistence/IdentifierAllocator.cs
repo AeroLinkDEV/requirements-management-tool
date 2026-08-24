@@ -62,6 +62,18 @@ public static class IdentifierAllocator
         return Format(prefix, await ClaimAsync(db, prefix, ct));
     }
 
+    /// <summary>
+    /// Allocates a TCR from the complete verification artifact key. Case and Procedure packages at one
+    /// software level deliberately do not share a sequence: their prefixes are independent repository-wide
+    /// counters, and a claimed number remains burned if the surrounding transaction later rolls back.
+    /// </summary>
+    public static async Task<string> NextTestChangeRequestAsync(AeroLinkDbContext db, VerificationArtifactKey key,
+        CancellationToken ct, ILadderPolicy? policy = null)
+    {
+        var prefix = (policy ?? LadderPolicy).TestChangeReviewPrefix(key);
+        return Format(prefix, await ClaimAsync(db, prefix, ct));
+    }
+
     public static async Task<string> NextTestProcedureAsync(AeroLinkDbContext db, TestProcedureLevel level,
         CancellationToken ct, ILadderPolicy? policy = null,
         VerificationArtifactKind artifactKind = VerificationArtifactKind.Case)

@@ -221,36 +221,81 @@ export const artifactTypeLabel = (kind: string, identifier?: string) => {
   return labels[acronym] ?? stateLabel(kind.replace(/-/g, ' '))
 }
 
-/** Current software verification artifacts are Cases; System remains a Procedure until the later split. */
-export const verificationArtifactNoun = (level?: string) =>
-  level === 'System' ? 'Procedure' : 'Case'
+/** Resolve the shared artifact vocabulary from the exact artifact key when it is available. */
+const legacyVerificationArtifactNoun = (level?: string) => level === 'System' ? 'Procedure' : 'Case'
 
-export const verificationArtifactWord = (level?: string) =>
-  `test ${verificationArtifactNoun(level).toLowerCase()}`
+/** The wire API uses `Procedure`; level-aware client routes use `HighLevelProcedure`/`LowLevelProcedure`.
+ * Keep every shared vocabulary/API helper on the same exact predicate so a composite route key cannot
+ * accidentally fall back to the software Case library. */
+export const isVerificationProcedureKind = (artifactKind?: string) => {
+  const normalized = (artifactKind ?? '').replace(/[-_\s]/g, '').toLowerCase()
+  return normalized === 'procedure' || normalized.endsWith('procedure')
+}
+
+export const verificationArtifactNoun = (level?: string, artifactKind?: string) => {
+  return level === 'System' || isVerificationProcedureKind(artifactKind)
+    ? 'Procedure' : legacyVerificationArtifactNoun(level)
+}
+
+export const verificationArtifactWord = (level?: string, artifactKind?: string) =>
+  artifactKind ? `test ${verificationArtifactNoun(level, artifactKind).toLowerCase()}`
+    : `test ${verificationArtifactNoun(level).toLowerCase()}`
 
 /** The current API collection for the artifact profile. System remains on its Procedure route; software is Case. */
 export const verificationArtifactApiRoot = (scope?: string, artifactKind?: string) => {
   const normalized = (scope ?? '').replace(/[-_\s]/g, '').toLowerCase()
-  const kind = (artifactKind ?? '').replace(/[-_\s]/g, '').toLowerCase()
-  return normalized === 'system' || normalized === 'systemtest' || kind === 'procedure'
+  return normalized === 'system' || normalized === 'systemtest' || isVerificationProcedureKind(artifactKind)
     ? '/api/test-procedures'
     : '/api/test-cases'
 }
 
-export const verificationArtifactDocumentApiRoot = (scope?: string) =>
-  verificationArtifactApiRoot(scope) === '/api/test-procedures'
+export const verificationArtifactDocumentApiRoot = (scope?: string, artifactKind?: string) =>
+  verificationArtifactApiRoot(scope, artifactKind) === '/api/test-procedures'
     ? 'test-procedure-documents'
     : 'test-case-documents'
 
-/** Current software change routes use Case vocabulary; the API keeps the old Procedure routes as aliases. */
-export const verificationArtifactChangeSegment = (scope?: string) =>
-  verificationArtifactApiRoot(scope) === '/api/test-procedures' ? 'procedure-changes' : 'case-changes'
+/** Change routes follow the exact package kind; legacy callers without a kind retain current behavior. */
+export const verificationArtifactChangeSegment = (scope?: string, artifactKind?: string) =>
+  verificationArtifactApiRoot(scope, artifactKind) === '/api/test-procedures' ? 'procedure-changes' : 'case-changes'
 
-export const verificationArtifactTargetSegment = (scope?: string) =>
-  verificationArtifactApiRoot(scope) === '/api/test-procedures' ? 'procedure-targets' : 'case-targets'
+export const verificationArtifactTargetSegment = (scope?: string, artifactKind?: string) =>
+  verificationArtifactApiRoot(scope, artifactKind) === '/api/test-procedures' ? 'procedure-targets' : 'case-targets'
 
-export const verificationArtifactPrefix = (level?: string) =>
-  level === 'System' ? 'SYSTP' : level === 'LowLevel' ? 'LLRTC' : 'HLRTC'
+export const verificationArtifactPrefix = (level?: string, artifactKind?: string) => {
+  if (level === 'System' || isVerificationProcedureKind(artifactKind))
+    return level === 'System' ? 'SYSTP' : level === 'LowLevel' ? 'LLRTP' : 'HLRTP'
+  return level === 'LowLevel' ? 'LLRTC' : 'HLRTC'
+}
+
+/** Shared software test-change metadata. The package key, not the discipline alone, owns these values. */
+export const testChangeRequestAcronym = (level?: string, artifactKind?: string) => {
+  const normalizedLevel = (level ?? '').replace(/[-_\s]/g, '').toLowerCase()
+  const procedure = isVerificationProcedureKind(artifactKind)
+  if (normalizedLevel === 'system' || normalizedLevel === 'systemtest') return 'SYSTPCR'
+  if (normalizedLevel === 'lowlevel' || normalizedLevel === 'lowlevelsoftware' || normalizedLevel === 'llr')
+    return procedure ? 'LLRTPCR' : 'LLRTCCR'
+  return procedure ? 'HLRTPCR' : 'HLRTCCR'
+}
+
+/** The configured review-workflow subject for one exact verification package key. */
+export const testChangeReviewWorkflowSubject = (level?: string, artifactKind?: string) => {
+  const normalizedLevel = (level ?? '').replace(/[-_\s]/g, '').toLowerCase()
+  const procedure = isVerificationProcedureKind(artifactKind)
+  if (normalizedLevel === 'system' || normalizedLevel === 'systemtest') return 'SystemTest'
+  if (normalizedLevel === 'lowlevel' || normalizedLevel === 'lowlevelsoftware' || normalizedLevel === 'llr')
+    return procedure ? 'LowLevelSoftwareProcedure' : 'LowLevelSoftwareCase'
+  return procedure ? 'HighLevelSoftwareProcedure' : 'HighLevelSoftwareCase'
+}
+
+export const verificationOriginLabel = (originKind?: string) => {
+  switch (originKind) {
+    case 'ChangeRequest': return 'Change request'
+    case 'ProblemReport': return 'Problem Report'
+    case 'CaseChange': return 'Case change'
+    case 'CaseAssessment': return 'Case assessment'
+    default: return 'Origin'
+  }
+}
 
 /** The procedure documents offered by the Explorer, following the same scope/level rule as requirements. */
 export const procedureTargetsFor = (scope: 'System' | 'Software', level?: string): DocumentTarget[] => {

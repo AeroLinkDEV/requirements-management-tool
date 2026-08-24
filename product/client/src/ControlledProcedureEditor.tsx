@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { stateLabel, verificationArtifactApiRoot, verificationArtifactNoun, verificationArtifactWord } from './presentation'
+import { isVerificationProcedureKind, stateLabel, verificationArtifactApiRoot, verificationArtifactNoun, verificationArtifactWord } from './presentation'
 import './ControlledRequirementEditor.css'
 
 /**
@@ -50,13 +50,15 @@ const kindOptions: { value: ProcedureChangeKind; label: string }[] = [
 ]
 
 export default function ControlledProcedureEditor({
-  api, projectId, releaseId, scope, levelLabel, item, index, onChange, onRemove,
+  api, projectId, releaseId, scope, artifactKind, levelLabel, item, index, onChange, onRemove,
 }: {
   api: string
   projectId: string
   releaseId: string
   /** The discipline's scope as the procedure list endpoint names it. */
   scope: string
+  /** The exact package artifact key; software Procedure packages must search procedures, not Cases. */
+  artifactKind?: string
   levelLabel: string
   item: ProcedureProposal
   index: number
@@ -67,9 +69,9 @@ export default function ControlledProcedureEditor({
   const [results, setResults] = useState<ExistingProcedure[]>([])
   const [lookupBusy, setLookupBusy] = useState(false)
   const [lookupError, setLookupError] = useState('')
-  const artifactWord = verificationArtifactWord(scope)
-  const artifactNoun = verificationArtifactNoun(scope)
-  const artifactApiRoot = verificationArtifactApiRoot(scope)
+  const artifactWord = verificationArtifactWord(scope, artifactKind)
+  const artifactNoun = verificationArtifactNoun(scope, artifactKind)
+  const artifactApiRoot = verificationArtifactApiRoot(scope, artifactKind)
 
   // An Introduce proposal has no existing identity to find, and a proposal that has already locked one is
   // not looking for another.
@@ -84,6 +86,7 @@ export default function ControlledProcedureEditor({
     // Debounced, so typing an identifier does not fire a request per keystroke.
     const timer = window.setTimeout(() => {
       fetch(`${api}${artifactApiRoot}?projectId=${projectId}&releaseId=${releaseId}&scope=${scope}` +
+        (isVerificationProcedureKind(artifactKind) ? '&artifactKind=Procedure' : '') +
         `&search=${encodeURIComponent(term)}&page=1&pageSize=8`)
         .then(response => response.ok ? response.json() : Promise.reject(new Error(String(response.status))))
         .then((body: { items: ExistingProcedure[] }) => {
@@ -95,7 +98,7 @@ export default function ControlledProcedureEditor({
         .finally(() => { if (!cancelled) setLookupBusy(false) })
     }, 180)
     return () => { cancelled = true; window.clearTimeout(timer) }
-  }, [api, artifactApiRoot, artifactNoun, item.kind, projectId, query, releaseId, scope])
+  }, [api, artifactApiRoot, artifactNoun, item.kind, projectId, query, releaseId, scope, artifactKind])
 
   const selectExisting = (selected: ExistingProcedure) => {
     onChange('baseNumber', baseNumberOf(selected.displayNumber))
