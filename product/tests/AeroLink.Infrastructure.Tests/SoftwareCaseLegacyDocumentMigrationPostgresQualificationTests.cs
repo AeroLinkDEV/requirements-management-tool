@@ -33,6 +33,7 @@ public sealed class SoftwareCaseLegacyDocumentMigrationPostgresQualificationTest
             var files = new EvidenceFileStore(evidenceRoot);
             var seeded = await SeedLegacyCaseDocumentAsync(db, files, artifactCount: 1);
             var originalDocumentHash = seeded.Document.ContentHash;
+            var originalGeneratedAt = seeded.Document.GeneratedAt;
             var originalStorageKey = seeded.Artifact.StorageKey;
             var originalArtifactHash = seeded.Artifact.Sha256;
 
@@ -51,9 +52,20 @@ public sealed class SoftwareCaseLegacyDocumentMigrationPostgresQualificationTest
             var artifact = await db.ControlledDocumentArtifacts.AsNoTracking()
                 .SingleAsync(x => x.Id == seeded.Artifact.Id);
             Assert.NotEqual(originalDocumentHash, document.ContentHash);
+            Assert.Equal(originalGeneratedAt, document.GeneratedAt);
             Assert.NotEqual(originalStorageKey, artifact.StorageKey);
             Assert.NotEqual(originalArtifactHash, artifact.Sha256);
             Assert.True(files.Exists(originalStorageKey));
+
+            // Revision .01 was approved after the historical document existed. Preserving GeneratedAt is what
+            // keeps the migration on the original .00 compatibility snapshot rather than silently publishing
+            // later work into an older controlled record.
+            var snapshot = await ControlledProcedureDocumentSnapshotProjection.ForDocumentAsync(db,
+                seeded.Baseline.Id, TestProcedureLevel.HighLevel, document.GeneratedAt, CancellationToken.None);
+            Assert.False(snapshot.IsExactManifest);
+            var migratedRow = Assert.Single(snapshot.Rows);
+            Assert.Equal(0, migratedRow.Revision);
+            Assert.Equal("HLRTC-000747", migratedRow.BaseNumber);
 
             var events = await db.SecurityAuditEvents.AsNoTracking().ToListAsync();
             var basis = Assert.Single(events, x =>
@@ -67,6 +79,7 @@ public sealed class SoftwareCaseLegacyDocumentMigrationPostgresQualificationTest
                     detail.RootElement.GetProperty("baselineId").GetGuid());
                 Assert.Equal(1, detail.RootElement.GetProperty("artifactCount").GetInt32());
                 Assert.True(detail.RootElement.GetProperty("baselineManifestPreservedAsUnmaterialized").GetBoolean());
+                Assert.True(detail.RootElement.GetProperty("documentGeneratedAtPreserved").GetBoolean());
                 Assert.Equal(64, detail.RootElement.GetProperty("compatibilitySnapshotHash").GetString()!.Length);
             }
             Assert.Single(events, x =>
@@ -81,6 +94,7 @@ public sealed class SoftwareCaseLegacyDocumentMigrationPostgresQualificationTest
                 using var reader = new StreamReader(archive.GetEntry("word/document.xml")!.Open());
                 var xml = await reader.ReadToEndAsync();
                 Assert.Contains("HLRTC-000747", xml);
+                Assert.DoesNotContain("HLRTC-000747.01", xml);
             }
 
             var eventCount = events.Count;
@@ -149,6 +163,10 @@ public sealed class SoftwareCaseLegacyDocumentMigrationPostgresQualificationTest
         var document = new ControlledDocument(project.Id, release.Id, baseline.Id,
             ControlledDocumentType.HighLevelTestCases, "HLRTD-000747", "Legacy HLR Test Cases", 0,
             new string('a', 64), artifactCount, now.AddMinutes(-10));
+        var laterRevision = new TestProcedureRevision(@case.Id, 1,
+            "Later objective that must not leak into the old document", "Later logical preconditions",
+            "Exercise the later behavior", "The later behavior is observed",
+            TestProcedureState.Approved, "later.author", now.AddMinutes(-5));
 
         var legacyBytes = Encoding.UTF8.GetBytes("legacy #747 controlled bytes");
         await using var source = new MemoryStream(legacyBytes, writable: false);
@@ -157,7 +175,7 @@ public sealed class SoftwareCaseLegacyDocumentMigrationPostgresQualificationTest
         var artifact = new ControlledDocumentArtifact(document.Id, "docx", stored.StorageKey,
             stored.OriginalFileName, stored.ContentType, stored.Size, stored.Sha256, now.AddMinutes(-10));
 
-        db.AddRange(program, project, release, baseline, @case, revision, document, artifact);
+        db.AddRange(program, project, release, baseline, @case, revision, laterRevision, document, artifact);
         await db.SaveChangesAsync();
         return new SeededLegacyDocument(baseline, document, artifact);
     }
