@@ -56,6 +56,7 @@ public sealed class LadderConsumerRegistrationTests
             .ToArray();
         Assert.Equal(new[]
         {
+            "change-request.downstream-impact",
             "verification.procedure-level",
             "verification.test-change-workflow",
             "verification.coverage",
@@ -63,8 +64,9 @@ public sealed class LadderConsumerRegistrationTests
             "release.readiness",
         }, typed.Select(x => x.Id).ToArray());
         var packageConsumers = typed.Where(x => x.Id is
-            "verification.procedure-level" or "verification.test-change-workflow").ToArray();
-        Assert.Equal(2, packageConsumers.Length);
+            "change-request.downstream-impact" or "verification.procedure-level"
+                or "verification.test-change-workflow").ToArray();
+        Assert.Equal(3, packageConsumers.Length);
         Assert.All(packageConsumers, registration =>
             Assert.Contains(registration.SupportedArtifactKeys,
                 x => x == new VerificationArtifactKey(VerificationDiscipline.HighLevelSoftware, VerificationArtifactKind.Procedure)));
@@ -80,7 +82,14 @@ public sealed class LadderConsumerRegistrationTests
                 VerificationArtifactKind.Procedure));
         Assert.Equal(VerificationArtifactCapability.ControlledDocument,
             controlledDocuments.SupportedCapabilities);
-        Assert.DoesNotContain(typed.Where(x => x.Id is "verification.coverage" or "release.readiness"), registration =>
+        var coverage = typed.Single(x => x.Id == "verification.coverage");
+        Assert.Contains(coverage.SupportedArtifactKeys,
+            x => x == new VerificationArtifactKey(VerificationDiscipline.HighLevelSoftware,
+                VerificationArtifactKind.Procedure));
+        Assert.Contains(coverage.SupportedArtifactKeys,
+            x => x == new VerificationArtifactKey(VerificationDiscipline.LowLevelSoftware,
+                VerificationArtifactKind.Procedure));
+        Assert.DoesNotContain(typed.Where(x => x.Id == "release.readiness"), registration =>
             registration.SupportedArtifactKeys.Any(x => x.Kind == VerificationArtifactKind.Procedure
                 && x.Discipline != VerificationDiscipline.System));
         Assert.Equal(VerificationArtifactCapability.Coverage,
@@ -108,12 +117,18 @@ public sealed class LadderConsumerRegistrationTests
         var packageManifest = LadderConsumerManifestCatalog.BuildV2(
             registrations.Cast<ILadderConsumerRegistration>().Concat(typed), typed, packageProfile);
         Assert.False(packageManifest.IsReady);
-        Assert.Contains(packageManifest.MissingArtifactCoverage, x =>
-            x.ArtifactKey == new VerificationArtifactKey(VerificationDiscipline.HighLevelSoftware, VerificationArtifactKind.Procedure)
-            && x.RequiredCapabilities.HasFlag(VerificationArtifactCapability.Execution));
-        Assert.DoesNotContain(packageManifest.MissingArtifactCoverage, x =>
-            x.ArtifactKey == new VerificationArtifactKey(VerificationDiscipline.LowLevelSoftware, VerificationArtifactKind.Procedure)
-            && x.RequiredCapabilities.HasFlag(VerificationArtifactCapability.ControlledDocument));
+        var missingPackageCapabilities = packageManifest.MissingArtifactCoverage;
+        Assert.NotEmpty(missingPackageCapabilities);
+        Assert.All(missingPackageCapabilities, missing =>
+            Assert.Equal(VerificationArtifactCapability.Execution, missing.RequiredCapabilities));
+        Assert.Equal(new[]
+        {
+            new VerificationArtifactKey(VerificationDiscipline.HighLevelSoftware,
+                VerificationArtifactKind.Procedure),
+            new VerificationArtifactKey(VerificationDiscipline.LowLevelSoftware,
+                VerificationArtifactKind.Procedure),
+        }, missingPackageCapabilities.Select(x => x.ArtifactKey).Distinct()
+            .OrderBy(x => x.Discipline).ThenBy(x => x.Kind).ToArray());
 
         var untypedManifest = LadderConsumerManifestCatalog.BuildV2(registrations, [], currentProfile);
         Assert.False(untypedManifest.IsReady);

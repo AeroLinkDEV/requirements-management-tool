@@ -172,7 +172,7 @@ public sealed class ExactLinkLifecyclePersistenceTests
     }
 
     [Fact]
-    public async Task Dematerializing_a_candidate_removes_its_transient_trace_lifecycle_aggregate()
+    public async Task Dematerializing_a_candidate_removes_the_transient_trace_but_retains_its_lifecycle_evidence()
     {
         var path = Path.Combine(Path.GetTempPath(), $"aerolink-exact-link-dematerialize-{Guid.NewGuid():N}.db");
         var options = new DbContextOptionsBuilder<AeroLinkDbContext>().UseSqlite($"Data Source={path};Pooling=False").Options;
@@ -203,8 +203,73 @@ public sealed class ExactLinkLifecyclePersistenceTests
                 .DematerializeAsync(baseline.Id, "author", baseline.DisplayNumber, Now.AddMinutes(1), default);
             await db.SaveChangesAsync();
             Assert.Empty(await db.RequirementTraces.AsNoTracking().ToListAsync());
-            Assert.Empty(await db.ExactLinkSuspectLifecycles.AsNoTracking().ToListAsync());
-            Assert.Empty(await db.ExactLinkSuspectEvents.AsNoTracking().ToListAsync());
+            Assert.Single(await db.ExactLinkSuspectLifecycles.AsNoTracking().ToListAsync());
+            Assert.Single(await db.ExactLinkSuspectEvents.AsNoTracking().ToListAsync());
+        }
+        finally
+        {
+            Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
+            if (File.Exists(path)) File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public async Task Persisted_lifecycle_events_and_projection_cannot_be_updated_or_deleted_directly()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"aerolink-exact-link-immutable-{Guid.NewGuid():N}.db");
+        var options = new DbContextOptionsBuilder<AeroLinkDbContext>()
+            .UseSqlite($"Data Source={path};Pooling=False").Options;
+        try
+        {
+            await using (var setup = new AeroLinkDbContext(options))
+            {
+                await setup.Database.EnsureCreatedAsync();
+                var program = new ProgramRecord("Immutable exact link", "IEL");
+                var project = new ProjectRecord(program.Id, "Immutable", "Immutable exact link project");
+                var release = new SoftwareRelease(project.Id, "1.0", false);
+                var baseline = new CandidateBaseline("BL-00000727", 0, project.Id, release.Id, null,
+                    "Candidate", "author", Now);
+                var request = new SystemChangeRequest("SRCR-00727", 0, project.Id, release.Id,
+                    "Trace cause", "P", "A", "S", "author", Now);
+                var sourceArtifact = new RequirementArtifact(project.Id, "HLR-007271", RequirementLevel.HighLevel, Now);
+                var targetArtifact = new RequirementArtifact(project.Id, "SYSR-007272", RequirementLevel.System, Now);
+                var source = new RequirementRevision(sourceArtifact.Id, 0, "Child", "R", "Test",
+                    RequirementRevisionState.Active, request.Id, baseline.Id, Now,
+                    parentKind: RequirementParentKind.Derived, derivedRationale: "Focused immutable fixture.");
+                var target = new RequirementRevision(targetArtifact.Id, 0, "Parent", "R", "Test",
+                    RequirementRevisionState.Active, request.Id, baseline.Id, Now);
+                var link = new RequirementTraceLink(project.Id, source.Id, target.Id,
+                    RequirementTraceType.DerivedFrom, "Exact relation.", Now);
+                var lifecycle = ExactLinkSuspectLifecycle.Raise(project.Id, ExactLinkKind.RequirementTrace,
+                    link.Id, ExactLinkLifecycleCauseKind.InternalRequirementRevision, target.Id, null,
+                    "author", "Parent changed.", Now);
+                link.AttachExactLinkLifecycle(lifecycle.Id);
+                setup.AddRange(program, project, release, baseline, request, sourceArtifact, targetArtifact,
+                    source, target, link, lifecycle);
+                setup.BaselineRequirements.AddRange(
+                    new BaselineRequirementSelection(baseline.Id, sourceArtifact.Id, source.Id),
+                    new BaselineRequirementSelection(baseline.Id, targetArtifact.Id, target.Id));
+                setup.ExactLinkSuspectEvents.AddRange(lifecycle.Events);
+                await setup.SaveChangesAsync();
+            }
+
+            await using (var updateEvent = new AeroLinkDbContext(options))
+            {
+                var item = await updateEvent.ExactLinkSuspectEvents.SingleAsync();
+                updateEvent.Entry(item).Property(x => x.Rationale).CurrentValue = "Rewritten evidence";
+                await Assert.ThrowsAsync<DomainException>(() => updateEvent.SaveChangesAsync());
+            }
+            await using (var deleteEvent = new AeroLinkDbContext(options))
+            {
+                deleteEvent.ExactLinkSuspectEvents.Remove(await deleteEvent.ExactLinkSuspectEvents.SingleAsync());
+                await Assert.ThrowsAsync<DomainException>(() => deleteEvent.SaveChangesAsync());
+            }
+            await using (var deleteLifecycle = new AeroLinkDbContext(options))
+            {
+                deleteLifecycle.ExactLinkSuspectLifecycles.Remove(
+                    await deleteLifecycle.ExactLinkSuspectLifecycles.SingleAsync());
+                await Assert.ThrowsAsync<DomainException>(() => deleteLifecycle.SaveChangesAsync());
+            }
         }
         finally
         {

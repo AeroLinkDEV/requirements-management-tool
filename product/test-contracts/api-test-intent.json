@@ -1,11 +1,11 @@
 {
   "schemaVersion": "aerolink-api-test-intent/v2",
   "totals": {
-    "tests": 544,
-    "cases": 598,
-    "classes": 96,
-    "hostedTests": 531,
-    "hostedCases": 576,
+    "tests": 548,
+    "cases": 602,
+    "classes": 98,
+    "hostedTests": 535,
+    "hostedCases": 580,
     "nonHostedTests": 8,
     "nonHostedCases": 17,
     "unknownHostTests": 5,
@@ -29,18 +29,18 @@
     "ef-translation": {
       "label": "EF translation / relational constraints",
       "level": "Infrastructure (needs a database, not a host)",
-      "tests": 109,
-      "cases": 116,
+      "tests": 112,
+      "cases": 119,
       "unknownCases": 0,
-      "classes": 45
+      "classes": 46
     },
     "auth-policy": {
       "label": "Authentication / authorization wiring",
       "level": "API (must stay hosted)",
-      "tests": 58,
-      "cases": 62,
+      "tests": 59,
+      "cases": 63,
       "unknownCases": 0,
-      "classes": 37
+      "classes": 38
     },
     "in-process-logic": {
       "label": "In-process logic with no HTTP and no client",
@@ -1457,6 +1457,24 @@
       ],
       "sourceLines": {
         "start": 68,
+        "end": 83
+      }
+    },
+    {
+      "cls": "CaseProcedureLifecycleApiTests",
+      "test": "Shared_controls_enforce_test_authority_and_append_exact_attributed_outcomes",
+      "kind": "Fact",
+      "intent": "auth-policy",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 17,
         "end": 83
       }
     },
@@ -4939,6 +4957,60 @@
       "sourceLines": {
         "start": 15,
         "end": 100
+      }
+    },
+    {
+      "cls": "ProcedureAssessmentChainApiTests",
+      "test": "Case_only_profile_preserves_case_approval_without_raising_procedure_work",
+      "kind": "Fact",
+      "intent": "ef-translation",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 138,
+        "end": 161
+      }
+    },
+    {
+      "cls": "ProcedureAssessmentChainApiTests",
+      "test": "Case_review_origin_no_work_conclusion_stays_unnumbered_and_creates_no_procedure_package",
+      "kind": "Fact",
+      "intent": "ef-translation",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 82,
+        "end": 136
+      }
+    },
+    {
+      "cls": "ProcedureAssessmentChainApiTests",
+      "test": "Final_case_approval_raises_one_exact_unnumbered_procedure_assessment_and_work_allocates_once",
+      "kind": "Fact",
+      "intent": "ef-translation",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 19,
+        "end": 80
       }
     },
     {

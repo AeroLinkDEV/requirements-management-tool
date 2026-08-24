@@ -17,6 +17,7 @@ import './TestingCoverageWorkspace.css'
 import './TestProcedureExplorer.css'
 import { LadderCapability, ladderAllows } from './projectLadder'
 import type { ProjectLadderProjection } from './projectLadder'
+import ExactLinkLifecyclePanel from './ExactLinkLifecyclePanel'
 
 type Procedure = {
   id: string
@@ -58,6 +59,7 @@ type Revision = {
   environmentSetup?: string; testData?: string; orderedSteps?: string
   expectedObservations?: string; cleanup?: string; toolingAutomation?: string
   parentKind?: string; derivedRationale?: string; caseRevisionIds?: string[]
+  caseParents?: { linkId: string; caseRevisionId: string; state: string; outcome?: string }[]
   retirementRationale?: string
   sourceTestChangeRequestId?: string; package?: string; provenanceNote?: string
   drivenBy: { changeRequest: string; package: string; subjectDisplayNumber: string; action: string; isLegacy?: boolean }[]
@@ -991,6 +993,20 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
                       {revision.parentKind ?? 'Unspecified'} · {revision.caseRevisionIds?.length ?? 0} exact Case parent{revision.caseRevisionIds?.length === 1 ? '' : 's'}
                       {revision.derivedRationale ? ` · ${revision.derivedRationale}` : ''}
                     </span>}
+                    {dormantProcedureMode && revision.caseParents?.map(parent =>
+                      <div key={parent.linkId}>
+                        <span className="revisionDriver">
+                          Exact Case {parent.caseRevisionId} · relationship {parent.state}
+                          {parent.outcome ? ` · ${parent.outcome}` : ''}
+                        </span>
+                        <ExactLinkLifecyclePanel api={api} routeRoot="case-procedure-links"
+                          linkId={parent.linkId} initialState={parent.state}
+                          onChanged={async () => {
+                            const response = await fetch(
+                              `${api}${artifactApiRoot}/${selected.id}/history?revisionId=${selected.revisionId}`)
+                            if (response.ok) setHistory(await response.json())
+                          }} />
+                      </div>)}
                     {revision.retirementRationale && <span className="inspectorNote">Retirement: {revision.retirementRationale}</span>}
                   </li>))}</ul>
                 : <p className="inspectorNote">Loading history…</p>}

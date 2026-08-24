@@ -17,6 +17,7 @@ public enum TestChangeReviewOriginKind
     ProblemReport,
     CaseChange,
     CaseAssessment,
+    CaseReview,
 }
 /// <summary>
 /// Where a test change request has got to.
@@ -141,6 +142,13 @@ public sealed class TestChangeReview
         => FromCaseOrigin(projectId, releaseId, assessmentId, TestChangeReviewOriginKind.CaseAssessment,
             artifactKey, sourceDisplayNumber, now, baseNumber, revision, authorId);
 
+    /// <summary>Creates the one downstream assessment owed by one approved Case review aggregate.</summary>
+    public static TestChangeReview FromCaseReview(Guid projectId, Guid releaseId, Guid caseReviewId,
+        VerificationArtifactKey artifactKey, string sourceDisplayNumber, DateTimeOffset now,
+        string baseNumber = "", int revision = 0, string authorId = "")
+        => FromCaseOrigin(projectId, releaseId, caseReviewId, TestChangeReviewOriginKind.CaseReview,
+            artifactKey, sourceDisplayNumber, now, baseNumber, revision, authorId);
+
     private static TestChangeReview FromCaseOrigin(Guid projectId, Guid releaseId, Guid sourceId,
         TestChangeReviewOriginKind originKind, VerificationArtifactKey artifactKey, string sourceDisplayNumber,
         DateTimeOffset now, string baseNumber, int revision, string authorId)
@@ -223,7 +231,8 @@ public sealed class TestChangeReview
     {
         TestChangeReviewOriginKind.ChangeRequest => SourceChangeRequestNumber,
         TestChangeReviewOriginKind.ProblemReport => SourceProblemReportNumber,
-        TestChangeReviewOriginKind.CaseChange or TestChangeReviewOriginKind.CaseAssessment => SourceCaseOriginNumber,
+        TestChangeReviewOriginKind.CaseChange or TestChangeReviewOriginKind.CaseAssessment
+            or TestChangeReviewOriginKind.CaseReview => SourceCaseOriginNumber,
         _ => "",
     };
     public TestChangeReviewDiscipline Discipline { get; private set; }
@@ -956,6 +965,9 @@ public sealed class TestChangeReview
             TestChangeReviewOriginKind.CaseAssessment
                 => FromCaseAssessment(ProjectId, ReleaseId, OriginReferenceId, ArtifactKey,
                     SourceCaseOriginNumber, now, BaseNumber, Revision + 1, actorId),
+            TestChangeReviewOriginKind.CaseReview
+                => FromCaseReview(ProjectId, ReleaseId, OriginReferenceId, ArtifactKey,
+                    SourceCaseOriginNumber, now, BaseNumber, Revision + 1, actorId),
             _ => throw new DomainException("A test change review has no valid immutable origin."),
         };
         next.RecordTestChangeRequired(actorId, now);
@@ -1084,6 +1096,7 @@ public sealed class TestChangeReview
                 return;
             case TestChangeReviewOriginKind.CaseChange:
             case TestChangeReviewOriginKind.CaseAssessment:
+            case TestChangeReviewOriginKind.CaseReview:
                 if (ArtifactKind == VerificationArtifactKind.Procedure
                     && Discipline is TestChangeReviewDiscipline.HighLevelSoftware or TestChangeReviewDiscipline.LowLevelSoftware
                     && ChangeRequestId is null

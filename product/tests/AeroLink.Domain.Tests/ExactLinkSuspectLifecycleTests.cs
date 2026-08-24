@@ -41,15 +41,18 @@ public sealed class ExactLinkSuspectLifecycleTests
     }
 
     [Fact]
-    public void Case_procedure_kind_uses_the_shared_lifecycle_seam_without_raising_assessment_events()
+    public void Case_procedure_kind_uses_the_shared_lifecycle_seam_and_exact_verification_cause()
     {
+        var cause = Guid.NewGuid();
         var lifecycle = ExactLinkSuspectLifecycle.Raise(Guid.NewGuid(), ExactLinkKind.CaseProcedure, Guid.NewGuid(),
-            ExactLinkLifecycleCauseKind.InternalRequirementRevision, Guid.NewGuid(), null,
-            "engineer", "The exact Case parent revision changed.", Now);
+            ExactLinkLifecycleCauseKind.InternalVerificationRevision, null, null,
+            "engineer", "The exact Case parent revision changed.", Now, cause);
 
         Assert.Equal(ExactLinkKind.CaseProcedure, lifecycle.LinkKind);
+        Assert.Equal(cause, lifecycle.CauseVerificationRevisionId);
         Assert.Single(lifecycle.Events);
         Assert.Equal(ExactLinkLifecycleEventType.Raised, lifecycle.Events.Single().EventType);
+        Assert.Equal(cause, lifecycle.Events.Single().CauseVerificationRevisionId);
     }
 
     [Fact]
@@ -66,5 +69,8 @@ public sealed class ExactLinkSuspectLifecycleTests
         Assert.Throws<DomainException>(() => ExactLinkSuspectLifecycle.Raise(Guid.NewGuid(), ExactLinkKind.RequirementTrace,
             Guid.NewGuid(), ExactLinkLifecycleCauseKind.InternalRequirementRevision, Guid.NewGuid(), Guid.NewGuid(),
             "engineer", "Reason", Now));
+        Assert.Throws<DomainException>(() => ExactLinkSuspectLifecycle.Raise(Guid.NewGuid(), ExactLinkKind.CaseProcedure,
+            Guid.NewGuid(), ExactLinkLifecycleCauseKind.InternalRequirementRevision, Guid.NewGuid(), null,
+            "engineer", "Wrong cause kind", Now));
     }
 }
