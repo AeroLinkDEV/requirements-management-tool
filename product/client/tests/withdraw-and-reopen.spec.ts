@@ -1,5 +1,64 @@
 import { expect, test } from '@playwright/test'
+import type { APIRequestContext } from '@playwright/test'
 import { apiBase, apiLogin, firstSectionId, login, openNavigationGroup, selectProgram, showcaseSeed } from './auth'
+import type { ShowcaseSeed } from './auth'
+
+type CandidateBaseline = { id: string; displayNumber: string; state: string }
+
+/**
+ * The open build this journey needs before it authors anything of its own.
+ *
+ * The journey used to read the showcase's candidate baseline and simply assert it was a Draft. That held only
+ * because of where the file happened to land in the Playwright shard: journeys share one API and one
+ * database, and any earlier journey that freezes the in-work build — `suspect-verification-coverage` does,
+ * to make coverage suspect — left this one reading `Frozen` and failing on its first assertion. Rebalancing
+ * the shards was enough to expose it, and a retry could not clear it either, because the state that broke the
+ * attempt outlives the attempt.
+ *
+ * So the precondition is established rather than assumed, through the same governed route a configuration
+ * manager would use. Nothing here touches the database directly, deletes history, or resets the showcase: a
+ * frozen build is reopened by `POST /api/baselines/{id}/reopen`, with an attributable reason, under the
+ * authority that endpoint already enforces.
+ *
+ * It runs before this journey creates its own change request, deliberately. Reopening dematerializes the
+ * revisions a frozen baseline produced, so doing it later would take back work this journey had just done and
+ * the test would be unpicking itself.
+ */
+async function draftCandidateBaselineAsync(request: APIRequestContext, showcase: ShowcaseSeed): Promise<CandidateBaseline> {
+  const readAsync = async () => {
+    const response = await request.get(
+      `${apiBase}/api/baselines?projectId=${showcase.projectId}&releaseId=${showcase.activeReleaseId}`)
+    expect(response.ok(), `reading the candidate baselines should succeed: ${await response.text()}`).toBeTruthy()
+    return await response.json() as CandidateBaseline[]
+  }
+
+  // A build carries exactly one candidate baseline, and everything below depends on that being true rather
+  // than on the first row of a list happening to be the right one.
+  const baselines = await readAsync()
+  expect(baselines, 'the in-work build should carry exactly one candidate baseline').toHaveLength(1)
+  const baseline = baselines[0]
+  if (baseline.state === 'Draft') return baseline
+  if (baseline.state !== 'Frozen') {
+    throw new Error(
+      `The in-work build's candidate baseline ${baseline.displayNumber} is ${baseline.state}. This journey `
+      + 'needs it Draft, and only a Frozen baseline can be reopened, so the precondition cannot be established '
+      + 'through the governed route.')
+  }
+
+  const reopened = await request.post(`${apiBase}/api/baselines/${baseline.id}/reopen`, {
+    data: {
+      reason: 'Test precondition: the withdraw-and-reopen journey requires an open build before it authors '
+        + 'its own controlled work.',
+    },
+  })
+  expect(reopened.ok(),
+    `reopening the frozen candidate baseline should succeed: ${await reopened.text()}`).toBeTruthy()
+
+  const after = await readAsync()
+  expect(after, 'the governed reopen must not change how many candidate baselines the build carries').toHaveLength(1)
+  expect(after[0].state, 'the candidate baseline should read Draft after the governed reopen').toBe('Draft')
+  return after[0]
+}
 
 /**
  * Taking work back, and unsealing a build so that becomes possible.
@@ -18,6 +77,10 @@ test('a frozen build refuses a withdrawal, says what reopening costs, and the wo
   test.setTimeout(300_000)
   const showcase = await showcaseSeed(request)
   await apiLogin(request)
+
+  // Before this journey authors anything of its own: the build has to be open. Established through the
+  // governed reopen rather than assumed, so an earlier journey that froze it cannot decide this one.
+  const candidateBaseline = await draftCandidateBaselineAsync(request, showcase)
 
   const suffix = Date.now().toString().slice(-6)
   // A new requirement cannot be sent for review without a place in the document. Which section is not what
@@ -70,8 +133,13 @@ test('a frozen build refuses a withdrawal, says what reopening costs, and the wo
   const baselinesResponse = await request.get(
     `${apiBase}/api/baselines?projectId=${showcase.projectId}&releaseId=${showcase.activeReleaseId}`)
   expect(baselinesResponse.ok(), `reading the baselines should succeed: ${await baselinesResponse.text()}`).toBeTruthy()
-  const baseline = (await baselinesResponse.json())[0]
+  const baselines = await baselinesResponse.json() as CandidateBaseline[]
+  expect(baselines, 'the in-work build should carry exactly one candidate baseline').toHaveLength(1)
+  const baseline = baselines[0]
   expect(baseline, 'the in-work build should have a candidate baseline').toBeTruthy()
+  // Still the same assertion the journey has always made: nothing here is relaxed, and it is the same
+  // baseline the precondition opened.
+  expect(baseline.id).toBe(candidateBaseline.id)
   expect(baseline.state).toBe('Draft')
 
   const selected = await request.post(`${apiBase}/api/baselines/${baseline.id}/selections`, { data: { changeRequestId: scr.id } })
