@@ -87,26 +87,6 @@ public sealed class ReleaseReadinessService(AeroLinkDbContext db, ILadderPolicy?
             .ToHashSet();
         var procedureEnabledProcedureLevels = procedureEnabledLevels.Select(ladderPolicy.ProcedureLevel)
             .ToHashSet();
-        List<Guid> exactCaseRevisionIds = procedureEnabledLevels.Count == 0
-            ? []
-            : await (from member in db.BaselineTestProcedures.AsNoTracking()
-                     join revision in db.TestProcedureRevisions.AsNoTracking()
-                         on member.RevisionId equals revision.Id
-                     join artifact in db.TestProcedures.AsNoTracking()
-                         on revision.ProcedureId equals artifact.Id
-                     where member.BaselineId == baseline.Id
-                         && artifact.ArtifactKind == VerificationArtifactKind.Case
-                         && procedureEnabledProcedureLevels.Contains(artifact.Level)
-                     select revision.Id).ToListAsync(ct);
-        var suspectCaseProcedureCount = exactCaseRevisionIds.Count == 0
-            ? 0
-            : await (from link in db.TestCaseProcedureLinks.AsNoTracking()
-                     join lifecycle in db.ExactLinkSuspectLifecycles.AsNoTracking()
-                         on new { LinkKind = ExactLinkKind.CaseProcedure, LinkId = link.Id }
-                         equals new { lifecycle.LinkKind, LinkId = lifecycle.LinkId }
-                     where exactCaseRevisionIds.Contains(link.CaseRevisionId)
-                         && lifecycle.State != ExactLinkLifecycleState.Closed
-                     select link.Id).Distinct().CountAsync(ct);
         // Coverage counts only when it is settled, which takes three things.
         //
         // It must not be suspect: a link carried across a requirement change that nobody has reconfirmed
@@ -129,14 +109,40 @@ public sealed class ReleaseReadinessService(AeroLinkDbContext db, ILadderPolicy?
             // revision still appears in the historical baseline manifest. Intersect the manifest with both
             // the current project's procedures and the effective verification bindings before evaluating any
             // settled link.
-            effectiveProcedureRevisionIds = await (from revision in db.TestProcedureRevisions.AsNoTracking()
-                                                   join procedure in db.TestProcedures.AsNoTracking()
-                                                       on revision.ProcedureId equals procedure.Id
-                                                       where procedure.ProjectId == campaign.ProjectId
-                                                       && procedureEffectivity.RevisionIds.Contains(revision.Id)
-                                                       && configuredProcedureLevels.Contains(procedure.Level)
-                                                       && (procedure.Level == TestProcedureLevel.System || procedure.ArtifactKind == VerificationArtifactKind.Case)
-                                                   select revision.Id).ToListAsync(ct);
+            //
+            // #726: with the software Procedure tier enabled, the exact baseline manifest holds Procedure
+            // rows (the cutover rebound them) while Requirement coverage remains on Cases. The effectivity
+            // set for coverage therefore keeps System Procedure manifest rows and recovers the effective
+            // software Case population through the typed membership contract — never by searching for a
+            // Case baseline row the migration intentionally removed.
+            var systemProcedureRevisionIds = await (from revision in db.TestProcedureRevisions.AsNoTracking()
+                                                    join procedure in db.TestProcedures.AsNoTracking()
+                                                        on revision.ProcedureId equals procedure.Id
+                                                    where procedure.ProjectId == campaign.ProjectId
+                                                        && procedureEffectivity.RevisionIds.Contains(revision.Id)
+                                                        && procedure.Level == TestProcedureLevel.System
+                                                    select revision.Id).ToListAsync(ct);
+            IReadOnlyList<Guid> softwareCaseRevisionIds;
+            if (procedureEnabledLevels.Count == 0)
+            {
+                softwareCaseRevisionIds = await (from revision in db.TestProcedureRevisions.AsNoTracking()
+                                                 join procedure in db.TestProcedures.AsNoTracking()
+                                                     on revision.ProcedureId equals procedure.Id
+                                                 where procedure.ProjectId == campaign.ProjectId
+                                                     && procedureEffectivity.RevisionIds.Contains(revision.Id)
+                                                     && procedure.ArtifactKind == VerificationArtifactKind.Case
+                                                     && configuredProcedureLevels.Contains(procedure.Level)
+                                                 select revision.Id).ToListAsync(ct);
+            }
+            else
+            {
+                var selections = await BaselineExecutableMembership.ForBaselineAsync(db, baseline.Id, ct);
+                var sourceCases = await BaselineExecutableMembership.SourceCaseRevisionsAsync(db, selections, ct);
+                softwareCaseRevisionIds = await BaselineExecutableMembership.EffectiveCaseRevisionIdsAsync(
+                    db, selections, sourceCases, baseline.Id, procedureEnabledProcedureLevels, ct);
+            }
+            effectiveProcedureRevisionIds = systemProcedureRevisionIds
+                .Concat(softwareCaseRevisionIds).Distinct().ToList();
         }
         var coveredIds = await VerificationCoverageProjection.SettledCoveredAsync(db, coverageRevisionIds, ct,
             effectiveProcedureRevisionIds, buildScoped: false);
@@ -198,6 +204,18 @@ public sealed class ReleaseReadinessService(AeroLinkDbContext db, ILadderPolicy?
         var selectedRunIds = selectedLatest.Select(x => x.Id).ToList();
         var selectedEvidenced = selectedRunIds.Count == 0 ? 0 : await db.TestExecutionEvidence.AsNoTracking()
             .Where(x => selectedRunIds.Contains(x.TestExecutionId)).Select(x => x.TestExecutionId).Distinct().CountAsync(ct);
+        // #726: every effective exact software Case revision in a Procedure-enabled baseline must satisfy
+        // ALL of its required exact Procedure links (effective in this baseline, selected in the matching
+        // discipline BuildTestSet, latest build-scoped execution Pass, no suspect link). Zero links is
+        // unsatisfied. This is the authoritative projection shared with reconciliation, never a global
+        // "all selected tests passed" count.
+        var caseObligations = await CaseProcedureSatisfaction.ForBaselineAsync(
+            db, baseline.Id, campaign.ReleaseId, campaign.SoftwareBuildId,
+            procedureEnabledProcedureLevels, ct);
+        var unsatisfiedCaseProcedureCount = caseObligations.Count(x => !x.Satisfied);
+        var unsatisfiedCaseProcedureDetail = string.Join(", ",
+            caseObligations.Where(x => !x.Satisfied).Take(3)
+                .Select(x => $"{x.RequiredProcedureRevisionIds.Count} required / {x.SatisfiedProcedureRevisionIds.Count} satisfied"));
         // An empty set is only an answer when there was nothing to plan. A build that changed something and
         // has selected nothing has not been planned yet, and a gate that passed it would be reporting
         // "nothing left to run" about a decision nobody has made.
@@ -240,17 +258,17 @@ public sealed class ReleaseReadinessService(AeroLinkDbContext db, ILadderPolicy?
                         : "Resolve orphan and suspect trace links.")
                 : WaitingForMaterializedBaseline("traceability", "Trace network complete"),
             baselineMaterialized
-                ? new("coverage","Requirement coverage complete",(coverageMembers.Count == 0 || coveredIds.Count == coverageMembers.Count) && suspectCaseProcedureCount == 0,coveredIds.Count,coverageMembers.Count + suspectCaseProcedureCount,
+                ? new("coverage","Requirement coverage complete",(coverageMembers.Count == 0 || coveredIds.Count == coverageMembers.Count) && unsatisfiedCaseProcedureCount == 0,coveredIds.Count,coverageMembers.Count + unsatisfiedCaseProcedureCount,
                     coverageMembers.Count == 0
-                        ? (suspectCaseProcedureCount == 0
+                        ? (unsatisfiedCaseProcedureCount == 0
                             ? "The effective ladder declares no verification-capable requirement levels, so no coverage is owed."
-                            : $"{suspectCaseProcedureCount} exact Case-to-Procedure link(s) remain suspect or require Procedure change.")
-                        : $"{coverageMembers.Count-coveredIds.Count} effective verification requirement revisions have no settled coverage; {suspectCaseProcedureCount} exact Case-to-Procedure link(s) remain open. A link counts only when it is not suspect, names an approved verification artifact revision, and that artifact has no revision still in draft or review.",
+                            : $"{unsatisfiedCaseProcedureCount} exact Case-to-Procedure obligation(s) remain unsatisfied: zero links, suspect links, missing effectivity/selection, or no latest build-scoped Pass ({unsatisfiedCaseProcedureDetail}).")
+                        : $"{coverageMembers.Count-coveredIds.Count} effective verification requirement revisions have no settled coverage; {unsatisfiedCaseProcedureCount} exact Case-to-Procedure obligation(s) remain open: zero links, suspect links, missing effectivity/selection, or no latest build-scoped Pass ({unsatisfiedCaseProcedureDetail}).",
                     coverageMembers.Count == 0
-                        ? (suspectCaseProcedureCount == 0
+                        ? (unsatisfiedCaseProcedureCount == 0
                             ? "No action is required: coverage is not applicable to the configured requirement levels."
-                            : "Acknowledge and resolve every direct suspect Case-to-Procedure relationship.")
-                        : "Approve every verification artifact being changed, confirm the coverage each changed requirement needs, and resolve every suspect Case-to-Procedure relationship.")
+                            : "Link every effective Case to an approved allocated Procedure, select it in the matching build test set, and record a latest build-scoped Pass.")
+                        : "Approve every verification artifact being changed, confirm the coverage each changed requirement needs, link every effective Case to an approved allocated Procedure, select it in the matching build test set, and record a latest build-scoped Pass.")
                 : WaitingForMaterializedBaseline("coverage", "Requirement coverage complete"),
             baselineMaterialized
                 ? new("code_traceability", "Code traceability complete", mappedCode == requiredCode.Count, mappedCode, requiredCode.Count,

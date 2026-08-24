@@ -150,9 +150,14 @@ public sealed class ProcedureBaselineApiTests
         Assert.Equal(fixture.BaselineId, revision.EffectiveBaselineId);
         Assert.Single(await db.BaselineTestProcedures.Where(x => x.BaselineId == fixture.BaselineId).ToListAsync());
 
-        // Fixed once. A second materialization would silently rewrite what the build carries.
+        // #726: an in-work manifest is assembled incrementally. A second materialization with no new package
+        // is idempotent — it re-fixes the same manifest without creating revisions or rewriting membership.
         using var again = await client.PostAsJsonAsync($"/api/baselines/{fixture.BaselineId}/materialize-test-procedures", new { });
-        Assert.Equal(HttpStatusCode.BadRequest, again.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, again.StatusCode);
+        var secondResult = JsonSerializer.Deserialize<JsonElement>(await again.Content.ReadAsStringAsync());
+        Assert.Equal(0, secondResult.GetProperty("createdRevisionCount").GetInt32());
+        Assert.Equal(1, secondResult.GetProperty("activeProcedureCount").GetInt32());
+        Assert.Equal(1, await db.BaselineTestProcedures.Where(x => x.BaselineId == fixture.BaselineId).CountAsync());
     }
 
     [Fact]
@@ -456,10 +461,13 @@ public sealed class ProcedureBaselineApiTests
         Assert.True(await db.VerificationImpactDecisionHistory.AnyAsync(x => x.VerificationImpactItemId == item.Id
             && x.ProcedureRevisionId == revision.Id));
 
-        // Fixed exactly once.
+        // #726: an in-work manifest is assembled incrementally; the same set re-materializes idempotently.
         using var again = await client.PostAsJsonAsync(
             $"/api/baselines/{fixture.BaselineId}/materialize-test-procedures", new { });
-        Assert.Equal(HttpStatusCode.BadRequest, again.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, again.StatusCode);
+        var secondResult = JsonSerializer.Deserialize<JsonElement>(await again.Content.ReadAsStringAsync());
+        Assert.Equal(0, secondResult.GetProperty("createdRevisionCount").GetInt32());
+        Assert.Equal(1, secondResult.GetProperty("activeProcedureCount").GetInt32());
     }
 
     [Fact]

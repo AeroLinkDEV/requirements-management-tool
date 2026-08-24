@@ -2630,7 +2630,20 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
                 && x.Entity.ParentKind == VerificationProcedureParentKind.Allocated)
             .Select(x => x.Entity.ProcedureId)
             .ToHashSet();
-        var missing = addedSoftwareProcedures.Except(initialRevisionOwners).Except(migrationOwners).ToArray();
+        // A controlled TCR materializer is the other attributed authority: it writes the Approved revision 0
+        // with a source test change request and an explicit Allocated/Derived classification on the package's
+        // authority, so the header never exists without its classified first revision.
+        var materializerOwners = ChangeTracker.Entries<TestProcedureRevision>()
+            .Where(x => x.State == EntityState.Added
+                && addedSoftwareProcedures.Contains(x.Entity.ProcedureId)
+                && x.Entity.Revision == 0
+                && x.Entity.State == TestProcedureState.Approved
+                && x.Entity.SourceTestChangeRequestId != null
+                && x.Entity.ParentKind != VerificationProcedureParentKind.Unspecified)
+            .Select(x => x.Entity.ProcedureId)
+            .ToHashSet();
+        var missing = addedSoftwareProcedures.Except(initialRevisionOwners)
+            .Except(migrationOwners).Except(materializerOwners).ToArray();
         if (missing.Length > 0)
             throw new DomainException("A software Procedure header must be saved with its initial revision in the same unit of work.");
         return Task.CompletedTask;
@@ -2667,7 +2680,8 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
                                      where procedureRevisionIds.Contains(revision.Id)
                                      select new ProcedureScope(revision.Id, revision.ProcedureId, revision.Revision,
                                          revision.EffectiveBaselineId, procedure.ProjectId, procedure.Level,
-                                         procedure.ArtifactKind, procedure.BaseNumber, revision.State))
+                                         procedure.ArtifactKind, procedure.BaseNumber, revision.State,
+                                         revision.AuthorId, revision.ParentKind))
             .ToDictionaryAsync(x => x.RevisionId, ct);
         var trackedProcedureOwners = ChangeTracker.Entries<TestProcedure>()
             .Where(x => x.State != EntityState.Deleted)
@@ -2690,7 +2704,8 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
                 procedureLevels[revisionEntry.Entity.Id] = new ProcedureScope(revisionEntry.Entity.Id,
                     revisionEntry.Entity.ProcedureId, revisionEntry.Entity.Revision,
                     revisionEntry.Entity.EffectiveBaselineId, owner.ProjectId, owner.Level, owner.ArtifactKind,
-                    owner.BaseNumber, revisionEntry.Entity.State);
+                    owner.BaseNumber, revisionEntry.Entity.State,
+                    revisionEntry.Entity.AuthorId, revisionEntry.Entity.ParentKind);
         }
         var requirementLevels = await (from revision in RequirementRevisions.AsNoTracking()
                                        join artifact in Requirements.AsNoTracking()
@@ -2762,7 +2777,8 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
 
     private sealed record ProcedureScope(Guid RevisionId, Guid ArtifactId, int Revision,
         Guid? EffectiveBaselineId, Guid ProjectId, TestProcedureLevel Level,
-        VerificationArtifactKind ArtifactKind, string BaseNumber, TestProcedureState State);
+        VerificationArtifactKind ArtifactKind, string BaseNumber, TestProcedureState State,
+        string AuthorId, VerificationProcedureParentKind ParentKind);
 
     private sealed record RequirementScope(Guid RevisionId, Guid ProjectId, RequirementLevel Level, string BaseNumber,
         Guid EffectiveBaselineId);
@@ -3058,7 +3074,7 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
                 {
                     var candidate = new ProcedureScope(revision.Id, revision.ProcedureId, revision.Revision,
                         revision.EffectiveBaselineId, owner.ProjectId, owner.Level, owner.ArtifactKind,
-                        owner.BaseNumber, revision.State);
+                        owner.BaseNumber, revision.State, revision.AuthorId, revision.ParentKind);
                     carriedIntoDescendantBaseline = await IsLatestActiveProcedureRevisionAsync(candidate, ct)
                         && await IsBaselineDescendantAsync(requirement.EffectiveBaselineId, sourceBaseline,
                             owner.ProjectId, ct);
@@ -3133,7 +3149,8 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
                           where ids.Contains(revision.Id)
                           select new ProcedureScope(revision.Id, revision.ProcedureId, revision.Revision,
                               revision.EffectiveBaselineId, procedure.ProjectId, procedure.Level,
-                              procedure.ArtifactKind, procedure.BaseNumber, revision.State))
+                              procedure.ArtifactKind, procedure.BaseNumber, revision.State,
+                              revision.AuthorId, revision.ParentKind))
             .ToDictionaryAsync(x => x.RevisionId, ct);
         foreach (var revision in ChangeTracker.Entries<TestProcedureRevision>().Where(x => x.State != EntityState.Deleted
                      && ids.Contains(x.Entity.Id)))
@@ -3143,12 +3160,15 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
             if (owner is not null)
                 rows[revision.Entity.Id] = new ProcedureScope(revision.Entity.Id, revision.Entity.ProcedureId,
                     revision.Entity.Revision, revision.Entity.EffectiveBaselineId, owner.ProjectId, owner.Level,
-                    owner.ArtifactKind, owner.BaseNumber, revision.Entity.State);
+                    owner.ArtifactKind, owner.BaseNumber, revision.Entity.State,
+                    revision.Entity.AuthorId, revision.Entity.ParentKind);
         }
         foreach (var procedureRevisionId in procedureRevisionIds)
         {
             if (!rows.TryGetValue(procedureRevisionId, out var procedure))
                 throw new DomainException("An exact Case-to-Procedure link must name persisted revisions.");
+            var migrationOwned = procedure.AuthorId == VerificationArtifactProfileSchema.GovernedMigrationActor
+                && procedure.ParentKind == VerificationProcedureParentKind.Allocated;
             if (procedure.EffectiveBaselineId is Guid procedureBaseline
                 && !await IsProcedureRevisionInBaselineAsync(procedureRevisionId, procedureBaseline, ct))
                 throw new DomainException("A governed software Procedure revision must be selected in its exact baseline before it can name Case parents.");
@@ -3165,12 +3185,27 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
                 if (@case.ProjectId != procedure.ProjectId || @case.Level != procedure.Level)
                     throw new DomainException("Case and Procedure parent revisions must belong to the same project and software level.");
                 if (procedure.EffectiveBaselineId is Guid governedProcedureBaseline
+                    && !migrationOwned
                     && !await IsProcedureRevisionInBaselineAsync(caseRevisionId, governedProcedureBaseline, ct))
                     throw new DomainException("Case and Procedure parent revisions must be members of the same exact governed baseline.");
+                // A migration-generated Procedure revision is an exact mirror of its source Case revision:
+                // its governed baseline is copied from the Case revision, so identity equality replaces the
+                // membership check that the cutover's baseline rebind intentionally supersedes.
+                if (migrationOwned
+                    && procedure.EffectiveBaselineId is Guid migrationProcedureBaseline
+                    && @case.EffectiveBaselineId != migrationProcedureBaseline)
+                    throw new DomainException(
+                        "A migration-generated Procedure revision must share the exact governed baseline of its source Case revision.");
+                if (migrationOwned
+                    && procedure.EffectiveBaselineId is null
+                    && @case.EffectiveBaselineId is not null)
+                    throw new DomainException(
+                        "A migration-generated Procedure revision must copy the governed baseline of its source Case revision.");
                 // A historical exact relation remains immutable evidence after a later Case revision is
                 // approved. Revalidate currency only for the newly authored or lifecycle-carried relation;
                 // otherwise adding the successor relation would retroactively invalidate released history.
-                if (procedure.EffectiveBaselineId is null
+                if (!migrationOwned
+                    && procedure.EffectiveBaselineId is null
                     && addedPairs.Contains((caseRevisionId, procedureRevisionId))
                     && !await IsLatestActiveProcedureRevisionAsync(@case, ct))
                     throw new DomainException("A dormant Procedure without a governed baseline must name the latest active Case revision.");
@@ -3198,7 +3233,7 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
                      .Where(x => x.Entity.BaselineId == baselineId && x.Entity.RevisionId == revisionId))
         {
             if (entry.State == EntityState.Deleted) member = false;
-            else if (entry.State == EntityState.Added) member = true;
+            else member = true;
         }
         return member;
     }

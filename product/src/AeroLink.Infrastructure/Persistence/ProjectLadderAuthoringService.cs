@@ -222,9 +222,6 @@ public sealed class ProjectLadderAuthoringService(
             return ActivationInvalid("Only a non-default draft ladder can be activated.");
         try { _ = ProjectLadderResolver.Resolve(configuration, policy); }
         catch (DomainException ex) { return ActivationInvalid(ex.Message); }
-        if (configuration.Steps.Any(step => (step.CatalogueEntry is nameof(RequirementLevel.HighLevel) or nameof(RequirementLevel.LowLevel))
-            && step.EnabledArtifactKinds.Contains(VerificationArtifactKind.Procedure)))
-            return ActivationInvalid("The software Procedure tier is dormant until its governed product upgrade slice.");
         var readiness = LadderConsumerManifestCatalog.BuildForRegistrations(_consumerRegistrations);
         var artifactReadiness = BuildArtifactReadiness(configuration);
         if (!readiness.IsReady || !artifactReadiness.IsReady)
@@ -247,9 +244,6 @@ public sealed class ProjectLadderAuthoringService(
             return ActivationInvalid("Only a non-default draft ladder can be activated.");
         try { _ = ProjectLadderResolver.Resolve(configuration, policy); }
         catch (DomainException ex) { return ActivationInvalid(ex.Message); }
-        if (configuration.Steps.Any(step => (step.CatalogueEntry is nameof(RequirementLevel.HighLevel) or nameof(RequirementLevel.LowLevel))
-            && step.EnabledArtifactKinds.Contains(VerificationArtifactKind.Procedure)))
-            return ActivationInvalid("The software Procedure tier is dormant until its governed product upgrade slice.");
 
         var steps = configuration.Steps
             .OrderBy(x => x.Position)

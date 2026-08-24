@@ -85,7 +85,7 @@ public sealed class TestProcedureBaselineTests
     }
 
     [Fact]
-    public void A_materialized_procedure_manifest_is_immutable()
+    public void An_in_work_materialized_procedure_manifest_stays_open_until_release()
     {
         var baseline = Frozen();
         var tcr = ApprovedTestChangeRequest();
@@ -94,8 +94,15 @@ public sealed class TestProcedureBaselineTests
 
         Assert.Equal(Now.AddDays(2), baseline.TestProceduresMaterializedAt);
         Assert.Equal(Hash, baseline.TestProceduresHash);
-        Assert.Throws<DomainException>(() => baseline.RemoveTestChangeRequest(tcr, "verification.lead", Now.AddDays(3)));
-        Assert.Throws<DomainException>(() => baseline.MarkTestProceduresMaterialized("cm", Hash, 12, Now.AddDays(3)));
+        // #726: the verification artifact manifest is assembled incrementally while a build is in work — a
+        // Case materializes first, then its allocated Procedure package is selected and materialized next.
+        // Only a Released baseline closes the manifest.
+        var second = ApprovedTestChangeRequest();
+        baseline.SelectTestChangeRequest(second, "verification.lead", Now.AddDays(3));
+        baseline.MarkTestProceduresMaterialized("cm", new string('b', 64), 13, Now.AddDays(4));
+        baseline.MarkReleased("cm", Now.AddDays(5));
+        Assert.Throws<DomainException>(() => baseline.RemoveTestChangeRequest(second, "verification.lead", Now.AddDays(6)));
+        Assert.Throws<DomainException>(() => baseline.MarkTestProceduresMaterialized("cm", Hash, 12, Now.AddDays(6)));
         Assert.Contains(baseline.Events, x => x.EventType == "TestProceduresMaterialized");
     }
 

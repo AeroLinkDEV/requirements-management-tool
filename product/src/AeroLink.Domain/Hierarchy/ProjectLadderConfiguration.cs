@@ -366,6 +366,41 @@ public static class LegacyDefaultProjectLadderFactory
     }
 }
 
+/// <summary>
+/// The post-#726 default for NEW projects: System executes its Procedure, and software defaults to the full
+/// Case + Procedure tier (the executable is the Procedure). The result is an authored NonDefault Draft so the
+/// owner can deliberately remove Procedure before sealing; the historical legacy Case-only default remains
+/// available through <see cref="LegacyDefaultProjectLadderFactory"/> for pre-#726 rows and qualification.
+/// </summary>
+public static class NewProjectLadderFactory
+{
+    public static ProjectLadderConfiguration Create(Guid projectId, DateTimeOffset now)
+    {
+        var configuration = ProjectLadderConfiguration.CreateDraft(projectId, now);
+        var steps = new List<ProjectLadderStep>();
+        foreach (var (level, position) in LegacyLadderPolicy.Instance.OrderedLevels.Select((x, i) => (x, i + 1)))
+        {
+            var catalogue = LegacyLadderPolicy.Instance.Definition(level);
+            var kinds = level switch
+            {
+                RequirementLevel.System => new[] { VerificationArtifactKind.Procedure },
+                RequirementLevel.HighLevel => new[] { VerificationArtifactKind.Case, VerificationArtifactKind.Procedure },
+                RequirementLevel.LowLevel => new[] { VerificationArtifactKind.Case, VerificationArtifactKind.Procedure },
+                _ => catalogue.VerificationProfile?.EnabledKinds.ToArray() ?? [],
+            };
+            var step = new ProjectLadderStep(configuration.Id, projectId, level, position,
+                catalogue.Capabilities, now, kinds);
+            configuration.Steps.Add(step);
+            steps.Add(step);
+        }
+        configuration.AllowedUpstream.Add(new ProjectLadderAllowedUpstream(
+            configuration.Id, projectId, steps[0].Id, steps[1].Id, now));
+        configuration.AllowedUpstream.Add(new ProjectLadderAllowedUpstream(
+            configuration.Id, projectId, steps[1].Id, steps[2].Id, now));
+        return configuration;
+    }
+}
+
 public sealed record ResolvedProjectLadderStep(RequirementLevel Level, int Position, LevelCapabilities Capabilities,
     IReadOnlyList<VerificationArtifactKind>? EnabledArtifactKinds = null)
 {

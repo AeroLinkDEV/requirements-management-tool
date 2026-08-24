@@ -1134,7 +1134,9 @@ public static class VerificationEndpoints
         // decision that asked for the procedure is settled by the materialiser, which is where the approved
         // revision now comes into existence.
 
-        app.MapPost("/api/test-executions", async (RecordTestExecutionRequest request, HttpContext http, AeroLinkDbContext db, IdentityService identity, CancellationToken ct) =>
+        app.MapPost("/api/test-executions", async (RecordTestExecutionRequest request, HttpContext http,
+            AeroLinkDbContext db, IdentityService identity, IProjectLadderPolicyResolver policyResolver,
+            CancellationToken ct) =>
         {
             if(!await http.HasProjectRoleAsync(db,identity,request.ProjectId,ct,ProgramRole.TestEngineer))return Results.Forbid();
             var artifactRevisionId = request.ArtifactRevisionId ?? request.ProcedureRevisionId;
@@ -1144,7 +1146,18 @@ public static class VerificationEndpoints
             var artifactWord = ArtifactWord(procedure.Level);
             var artifactNoun = ArtifactNoun(procedure.Level);
             if (procedure.Level != TestProcedureLevel.System && procedure.ArtifactKind == VerificationArtifactKind.Procedure)
-                return Results.BadRequest(new { error = "Dormant software Procedures cannot be executed; execute an effective Case revision instead.", code = "dormant_procedure_not_executable" });
+            {
+                // #726: the effective executable for a Procedure-enabled software profile is the Procedure
+                // revision. Only a dormant software Procedure under a Case-only profile is refused here.
+                var ladderPolicy = await policyResolver.ResolveAsync(request.ProjectId, ct);
+                if (!EffectiveExecutableArtifact.IsExecutable(ladderPolicy, procedure.Level,
+                        VerificationArtifactKind.Procedure))
+                    return Results.BadRequest(new
+                    {
+                        error = "This software Procedure is not the effective executable for the project's verification profile; execute the effective Case revision instead.",
+                        code = "dormant_procedure_not_executable"
+                    });
+            }
             if (revision.State != TestProcedureState.Approved) return Results.BadRequest(new { error = $"Only an approved {artifactWord} revision can be executed." });
             if (procedure.ProjectId != request.ProjectId) return Results.BadRequest(new { error = $"The {artifactWord} belongs to a different project." });
             Guid? softwareBuildReleaseId = null;

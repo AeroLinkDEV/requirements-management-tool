@@ -185,18 +185,23 @@ public sealed class TestProcedureDocumentApiTests : IClassFixture<SharedApiHost>
                 .Include(x => x.Steps).Include(x => x.AllowedUpstream)
                 .SingleAsync(x => x.ProjectId == workspace!.Project.Id);
             var resolved = ProjectLadderResolver.Resolve(ladder);
-            Assert.True(resolved.AgreesWithLegacyDefault());
-            Assert.Equal(ProjectLadderConfigurationClassification.LegacyDefault, ladder.Classification);
-            Assert.Equal(ProjectLadderConfigurationState.Stored, ladder.State);
+            // #726: a new project defaults to an authored NonDefault Draft with System [Procedure] and
+            // software [Case, Procedure]; its documents are available immediately.
+            Assert.False(resolved.AgreesWithLegacyDefault());
+            Assert.Equal(ProjectLadderConfigurationClassification.NonDefault, ladder.Classification);
+            Assert.Equal(ProjectLadderConfigurationState.Draft, ladder.State);
             Assert.Equal([RequirementLevel.System, RequirementLevel.HighLevel, RequirementLevel.LowLevel],
                 resolved.Steps.Select(x => x.Level));
             Assert.Equal([7, 7, 15], resolved.Steps.Select(x => (int)x.Capabilities));
             Assert.Equal(2, ladder.AllowedUpstream.Count);
-            Assert.DoesNotContain(await db.ProjectLadderConfigurations.AsNoTracking()
-                .Where(x => x.ProjectId == workspace!.Project.Id)
-                .Select(x => new { x.Classification, x.State })
-                .ToListAsync(), x => x.Classification != ProjectLadderConfigurationClassification.LegacyDefault
-                    || x.State != ProjectLadderConfigurationState.Stored);
+            Assert.Equal([ProjectLadderConfigurationClassification.NonDefault],
+                await db.ProjectLadderConfigurations.AsNoTracking()
+                    .Where(x => x.ProjectId == workspace!.Project.Id)
+                    .Select(x => x.Classification).ToListAsync());
+            Assert.Equal([ProjectLadderConfigurationState.Draft],
+                await db.ProjectLadderConfigurations.AsNoTracking()
+                    .Where(x => x.ProjectId == workspace!.Project.Id)
+                    .Select(x => x.State).ToListAsync());
         }
 
         var documents = (await (await client.GetAsync(

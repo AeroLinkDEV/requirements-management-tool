@@ -3,6 +3,7 @@ using System;
 using AeroLink.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 
@@ -11,9 +12,11 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace AeroLink.Infrastructure.Persistence.Migrations
 {
     [DbContext(typeof(AeroLinkDbContext))]
-    partial class AeroLinkDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260824143229_AddSoftwareProcedureProposalVocabulary")]
+    partial class AddSoftwareProcedureProposalVocabulary
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -6010,86 +6013,6 @@ namespace AeroLink.Infrastructure.Persistence.Migrations
                     b.ToTable("product_variant_baselines", (string)null);
                 });
 
-            modelBuilder.Entity("AeroLink.Domain.Requirements.ProjectVerificationMethod", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid");
-
-                    b.Property<DateTimeOffset>("CreatedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<string>("DisplayValue")
-                        .IsRequired()
-                        .HasMaxLength(100)
-                        .HasColumnType("character varying(100)");
-
-                    b.Property<string>("NormalizedValue")
-                        .IsRequired()
-                        .HasMaxLength(100)
-                        .HasColumnType("character varying(100)");
-
-                    b.Property<int>("Position")
-                        .HasColumnType("integer");
-
-                    b.Property<Guid>("ProjectId")
-                        .HasColumnType("uuid");
-
-                    b.Property<DateTimeOffset>("UpdatedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<long>("Version")
-                        .IsConcurrencyToken()
-                        .HasColumnType("bigint");
-
-                    b.Property<Guid>("VocabularyId")
-                        .HasColumnType("uuid");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("ProjectId", "NormalizedValue")
-                        .IsUnique();
-
-                    b.HasIndex("VocabularyId", "Position");
-
-                    b.HasIndex("VocabularyId", "ProjectId");
-
-                    b.ToTable("project_verification_methods", null, t =>
-                        {
-                            t.HasCheckConstraint("CK_project_verification_method_position", "\"Position\" > 0");
-                        });
-                });
-
-            modelBuilder.Entity("AeroLink.Domain.Requirements.ProjectVerificationVocabulary", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid");
-
-                    b.Property<DateTimeOffset>("CreatedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<Guid>("ProjectId")
-                        .HasColumnType("uuid");
-
-                    b.Property<DateTimeOffset>("UpdatedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<long>("Version")
-                        .IsConcurrencyToken()
-                        .HasColumnType("bigint");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("ProjectId")
-                        .IsUnique();
-
-                    b.HasIndex("Id", "ProjectId")
-                        .IsUnique();
-
-                    b.ToTable("project_verification_vocabularies", (string)null);
-                });
-
             modelBuilder.Entity("AeroLink.Domain.Requirements.ProjectWorkspaceSynchronization", b =>
                 {
                     b.Property<Guid>("Id")
@@ -9502,31 +9425,6 @@ namespace AeroLink.Infrastructure.Persistence.Migrations
                         .IsRequired();
                 });
 
-            modelBuilder.Entity("AeroLink.Domain.Requirements.ProjectVerificationMethod", b =>
-                {
-                    b.HasOne("AeroLink.Domain.Programs.ProjectRecord", null)
-                        .WithMany()
-                        .HasForeignKey("ProjectId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.HasOne("AeroLink.Domain.Requirements.ProjectVerificationVocabulary", null)
-                        .WithMany("Methods")
-                        .HasForeignKey("VocabularyId", "ProjectId")
-                        .HasPrincipalKey("Id", "ProjectId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-                });
-
-            modelBuilder.Entity("AeroLink.Domain.Requirements.ProjectVerificationVocabulary", b =>
-                {
-                    b.HasOne("AeroLink.Domain.Programs.ProjectRecord", null)
-                        .WithMany()
-                        .HasForeignKey("ProjectId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-                });
-
             modelBuilder.Entity("AeroLink.Domain.Requirements.ReqIfExchangeJob", b =>
                 {
                     b.HasOne("AeroLink.Domain.Programs.ProjectRecord", null)
@@ -10067,11 +9965,6 @@ namespace AeroLink.Infrastructure.Persistence.Migrations
             modelBuilder.Entity("AeroLink.Domain.Requirements.ArtifactSchemaDefinition", b =>
                 {
                     b.Navigation("Fields");
-                });
-
-            modelBuilder.Entity("AeroLink.Domain.Requirements.ProjectVerificationVocabulary", b =>
-                {
-                    b.Navigation("Methods");
                 });
 
             modelBuilder.Entity("AeroLink.Domain.Traceability.ExactLinkSuspectLifecycle", b =>

@@ -43,8 +43,6 @@ public sealed class TestProcedureBaselineMaterializer(AeroLinkDbContext db,
             throw new DomainException("Freeze the baseline before materializing its verification artifacts.");
         if (baseline.RequirementsMaterializedAt is null)
             throw new DomainException("Materialize the requirement baseline before its verification artifacts — an artifact verifies a requirement that has to exist first.");
-        if (baseline.TestProceduresMaterializedAt is not null)
-            throw new DomainException("The verification artifact baseline is already materialized and immutable.");
 
         // #726: baseline membership is the ENABLED artifact set for each level. With the software
         // Procedure tier enabled, Procedure revisions from Procedure TCRs materialize alongside the Case
@@ -60,18 +58,36 @@ public sealed class TestProcedureBaselineMaterializer(AeroLinkDbContext db,
             .Include(x => x.ProcedureChanges).Include(x => x.AdditionalSources).ToListAsync(ct);
         foreach (var tcr in tcrs.Where(x => x.State != TestChangeReviewState.Approved))
             throw new DomainException($"{tcr.DisplayNumber} is no longer approved and cannot be materialized.");
+        // #726: materialization is incremental while a build is in work. A first run materializes the Case
+        // package; a later run adds its allocated Procedure package. A TCR that already produced revisions
+        // in this baseline is not re-processed, and membership is add-only.
+        var existingMembership = await db.BaselineTestProcedures.AsNoTracking()
+            .Where(x => x.BaselineId == baseline.Id).ToListAsync(ct);
+        var existingRevisionIds = existingMembership.Select(x => x.RevisionId).ToList();
+        var materializedTcrIds = existingRevisionIds.Count == 0
+            ? []
+            : await db.TestProcedureRevisions.AsNoTracking()
+                .Where(x => existingRevisionIds.Contains(x.Id) && x.SourceTestChangeRequestId != null
+                    && tcrIds.Contains(x.SourceTestChangeRequestId.Value))
+                .Select(x => x.SourceTestChangeRequestId!.Value)
+                .Distinct().ToListAsync(ct);
+        var pendingTcrs = tcrs.Where(x => !materializedTcrIds.Contains(x.Id)).ToList();
+        foreach (var membership in existingMembership)
+            current[membership.ProcedureId] = await db.TestProcedureRevisions.AsNoTracking()
+                .SingleAsync(x => x.Id == membership.RevisionId, ct);
         // Validate the approved snapshots before adding any procedure, revision, coverage, or manifest row.
         // This is deliberately repeated here even though current API writes enforce the same scope: legacy or
         // malformed controlled data must fail closed at the boundary where it would become real coverage.
-        await ValidateDrivingRequirementScopeAsync(baseline.Id, tcrs, procedureByBase, current, ct);
-        foreach (var tcr in tcrs)
+        await ValidateDrivingRequirementScopeAsync(baseline.Id, baseline.ProjectId, pendingTcrs,
+            procedureByBase, current, ladderPolicy, ct);
+        foreach (var tcr in pendingTcrs)
             await TestChangeReviewRequirementScope.ValidateRetargetPlansForSubmissionAsync(db, tcr, ct, ladderPolicy);
 
         var created = 0;
         // What each proposal became, so the requirement links it proposed can bind to a revision that exists.
         var materialized = new List<(TestChangeReview Tcr, TestProcedureChange Change, Guid RevisionId,
             Guid? PriorRevisionId)>();
-        foreach (var pair in tcrs.SelectMany(tcr => tcr.ProcedureChanges.Select(change => new { tcr, change }))
+        foreach (var pair in pendingTcrs.SelectMany(tcr => tcr.ProcedureChanges.Select(change => new { tcr, change }))
                      .OrderBy(x => x.tcr.DisplayNumber).ThenBy(x => x.change.BaseNumber).ThenBy(x => x.change.Revision))
         {
             var change = pair.change;
@@ -80,7 +96,9 @@ public sealed class TestProcedureBaselineMaterializer(AeroLinkDbContext db,
                 if (procedureByBase.ContainsKey(change.BaseNumber))
                     throw new DomainException($"{change.DisplayNumber} cannot be introduced because its stable identity already exists.");
                 var procedure = new TestProcedure(baseline.ProjectId, change.BaseNumber, change.Title,
-                    actorId, now, change.Level, ladderPolicy);
+                    actorId, now, change.Level, ladderPolicy,
+                    artifactKind: pair.tcr.ArtifactKind,
+                    parentKind: change.ParentKind);
                 db.TestProcedures.Add(procedure);
                 procedureByBase.Add(procedure.BaseNumber, procedure);
                 var revision = CreateRevision(procedure.Id, change, pair.tcr, baseline.Id, now,
@@ -117,7 +135,9 @@ public sealed class TestProcedureBaselineMaterializer(AeroLinkDbContext db,
 
         var procedureById = procedureByBase.Values.ToDictionary(x => x.Id);
         foreach (var item in current.OrderBy(x => procedureById[x.Key].BaseNumber))
-            db.BaselineTestProcedures.Add(new BaselineTestProcedureSelection(baseline.Id, item.Key, item.Value.Id));
+            if (!existingMembership.Any(x => x.ProcedureId == item.Key && x.RevisionId == item.Value.Id))
+                db.BaselineTestProcedures.Add(new BaselineTestProcedureSelection(
+                    baseline.Id, item.Key, item.Value.Id));
         var manifestEntries = current.Select(x => new TestProcedureManifestEntry(
             x.Key, x.Value.Id, procedureById[x.Key].BaseNumber, x.Value.Revision));
         var hash = TestProcedureManifest.Hash(manifestEntries);
@@ -183,7 +203,11 @@ public sealed class TestProcedureBaselineMaterializer(AeroLinkDbContext db,
         var carriedRequirementIds = (await db.BaselineRequirements.AsNoTracking()
             .Where(x => x.BaselineId == baselineId).Select(x => x.RevisionId).ToListAsync(ct)).ToHashSet();
         var added = 0;
-        foreach (var entry in materialized.Where(x => x.Change.Kind != TestProcedureChangeKind.Retire))
+        // A software Procedure change never creates requirement coverage: its exact parents are Case
+        // revisions, and the Case→Procedure link is created in CarryCaseProcedureLinksAsync.
+        foreach (var entry in materialized.Where(x => x.Change.Kind != TestProcedureChangeKind.Retire
+                     && !(x.Tcr.ArtifactKind == VerificationArtifactKind.Procedure
+                         && x.Tcr.Discipline != TestChangeReviewDiscipline.System)))
         {
             // Derived Case/Procedure revisions are deliberately standalone. They
             // remain in the baseline, but do not create requirement coverage that
@@ -269,44 +293,62 @@ public sealed class TestProcedureBaselineMaterializer(AeroLinkDbContext db,
                     ladderPolicy.RequirementLevelFor(x.Tcr.Discipline))
                 .Enables(VerificationArtifactKind.Procedure))
             .ToList();
-        if (changedCases.Count == 0) return 0;
-
-        var priorIds = changedCases.Select(x => x.PriorRevisionId!.Value).Distinct().ToList();
-        var predecessors = await db.TestCaseProcedureLinks.AsNoTracking()
-            .Where(x => priorIds.Contains(x.CaseRevisionId)).ToListAsync(ct);
-        var existing = (await db.TestCaseProcedureLinks.AsNoTracking()
-                .Where(x => changedCases.Select(change => change.RevisionId).Contains(x.CaseRevisionId))
-                .Select(x => new { x.CaseRevisionId, x.ProcedureRevisionId }).ToListAsync(ct))
-            .Select(x => (x.CaseRevisionId, x.ProcedureRevisionId)).ToHashSet();
-        foreach (var pending in db.TestCaseProcedureLinks.Local)
-            existing.Add((pending.CaseRevisionId, pending.ProcedureRevisionId));
-
         var carried = 0;
-        foreach (var change in changedCases)
+        if (changedCases.Count != 0)
         {
-            foreach (var predecessor in predecessors.Where(x => x.CaseRevisionId == change.PriorRevisionId))
+            var priorIds = changedCases.Select(x => x.PriorRevisionId!.Value).Distinct().ToList();
+            var predecessors = await db.TestCaseProcedureLinks.AsNoTracking()
+                .Where(x => priorIds.Contains(x.CaseRevisionId)).ToListAsync(ct);
+            var existing = (await db.TestCaseProcedureLinks.AsNoTracking()
+                    .Where(x => changedCases.Select(change => change.RevisionId).Contains(x.CaseRevisionId))
+                    .Select(x => new { x.CaseRevisionId, x.ProcedureRevisionId }).ToListAsync(ct))
+                .Select(x => (x.CaseRevisionId, x.ProcedureRevisionId)).ToHashSet();
+            foreach (var pending in db.TestCaseProcedureLinks.Local)
+                existing.Add((pending.CaseRevisionId, pending.ProcedureRevisionId));
+
+            foreach (var change in changedCases)
             {
-                if (!existing.Add((change.RevisionId, predecessor.ProcedureRevisionId))) continue;
-                var link = new TestCaseProcedureLink(change.RevisionId, predecessor.ProcedureRevisionId);
-                var lifecycle = ExactLinkSuspectLifecycle.Raise(projectId, ExactLinkKind.CaseProcedure,
-                    link.Id, ExactLinkLifecycleCauseKind.InternalVerificationRevision, null, null,
-                    actorId,
-                    $"The exact Case revision changed from {predecessor.CaseRevisionId} to {change.RevisionId} in baseline {baselineNumber}; its direct Procedure relationship requires reassessment.",
-                    now, change.RevisionId);
-                link.AttachExactLinkLifecycle(lifecycle.Id);
-                db.TestCaseProcedureLinks.Add(link);
-                db.ExactLinkSuspectLifecycles.Add(lifecycle);
-                db.ExactLinkSuspectEvents.AddRange(lifecycle.Events);
+                foreach (var predecessor in predecessors.Where(x => x.CaseRevisionId == change.PriorRevisionId))
+                {
+                    if (!existing.Add((change.RevisionId, predecessor.ProcedureRevisionId))) continue;
+                    var link = new TestCaseProcedureLink(change.RevisionId, predecessor.ProcedureRevisionId);
+                    var lifecycle = ExactLinkSuspectLifecycle.Raise(projectId, ExactLinkKind.CaseProcedure,
+                        link.Id, ExactLinkLifecycleCauseKind.InternalVerificationRevision, null, null,
+                        actorId,
+                        $"The exact Case revision changed from {predecessor.CaseRevisionId} to {change.RevisionId} in baseline {baselineNumber}; its direct Procedure relationship requires reassessment.",
+                        now, change.RevisionId);
+                    link.AttachExactLinkLifecycle(lifecycle.Id);
+                    db.TestCaseProcedureLinks.Add(link);
+                    db.ExactLinkSuspectLifecycles.Add(lifecycle);
+                    db.ExactLinkSuspectEvents.AddRange(lifecycle.Events);
+                    carried++;
+                }
+            }
+        }
+        // #726: an Introduce software Procedure change declares its exact Case parents; materialization
+        // creates the immutable link to each exact Case revision. This is the only way a new allocated
+        // software Procedure comes into existence (the dormant authoring seam cannot approve one).
+        foreach (var entry in materialized.Where(x =>
+                     x.Tcr.ArtifactKind == VerificationArtifactKind.Procedure
+                     && x.Tcr.Discipline != TestChangeReviewDiscipline.System
+                     && x.Change.Kind == TestProcedureChangeKind.Introduce
+                     && x.Change.ParentKind == VerificationProcedureParentKind.Allocated))
+        {
+            var parentIds = ParseParentIds(entry.Change.ParentRevisionIdsJson, entry.Change.DisplayNumber);
+            foreach (var caseRevisionId in parentIds)
+            {
+                db.TestCaseProcedureLinks.Add(new TestCaseProcedureLink(caseRevisionId, entry.RevisionId));
                 carried++;
             }
         }
         return carried;
     }
 
-    private async Task ValidateDrivingRequirementScopeAsync(Guid baselineId,
+    private async Task ValidateDrivingRequirementScopeAsync(Guid baselineId, Guid projectId,
         IReadOnlyCollection<TestChangeReview> tcrs,
         IReadOnlyDictionary<string, TestProcedure> procedureByBase,
-        IReadOnlyDictionary<Guid, TestProcedureRevision> current, CancellationToken ct)
+        IReadOnlyDictionary<Guid, TestProcedureRevision> current, ILadderPolicy ladderPolicy,
+        CancellationToken ct)
     {
         foreach (var tcr in tcrs)
         {
@@ -324,6 +366,33 @@ public sealed class TestProcedureBaselineMaterializer(AeroLinkDbContext db,
                         : "software Case");
                 if (change.ParentKind == VerificationProcedureParentKind.Derived)
                     continue;
+                // #726: a software Procedure change's exact parents are Case revisions, never requirement
+                // revisions. They must exist, belong to this Project/level, and be carried by this baseline's
+                // verification artifact manifest (which may have been materialized in an earlier run).
+                var isSoftwareProcedure = tcr.ArtifactKind == VerificationArtifactKind.Procedure
+                    && tcr.Discipline != TestChangeReviewDiscipline.System;
+                if (isSoftwareProcedure)
+                {
+                    foreach (var parentId in parentIds)
+                    {
+                        var caseParent = await (from revision in db.TestProcedureRevisions.AsNoTracking()
+                                                join procedure in db.TestProcedures.AsNoTracking()
+                                                    on revision.ProcedureId equals procedure.Id
+                                                where revision.Id == parentId
+                                                    && procedure.ProjectId == projectId
+                                                    && procedure.ArtifactKind == VerificationArtifactKind.Case
+                                                    && procedure.Level == tcr.ProcedureLevel(ladderPolicy)
+                                                select new { revision.Id, ProcedureId = (Guid?)procedure.Id }).SingleOrDefaultAsync(ct);
+                        if (caseParent?.ProcedureId is not Guid caseProcedureId)
+                            throw new DomainException(
+                                $"{change.DisplayNumber} names Case revision {parentId}, which is not an exact Case parent in this Project and build.");
+                        if (!current.TryGetValue(caseProcedureId, out var carriedCase)
+                            || carriedCase.Id != parentId)
+                            throw new DomainException(
+                                $"Case revision {parentId} is not carried by this baseline's verification artifact manifest.");
+                    }
+                    continue;
+                }
                 if (driving.Overlaps(removed))
                     throw new DomainException($"{change.DisplayNumber} both adds and removes the same requirement coverage.");
                 HashSet<Guid> priorIds = [];
@@ -432,6 +501,12 @@ private static TestProcedureRevision CreateRevision(Guid procedureId, TestProced
     new(procedureId, change.Revision, change.Objective, change.Preconditions, change.Steps,
         change.ExpectedResult, state, tcr.SubmittedBy ?? tcr.DecidedBy ?? "aerolink.lifecycle", now,
         null, tcr.Id, baselineId, SourceSnapshotJson(tcr),
+        environmentSetup: change.EnvironmentSetup,
+        testData: change.TestData,
+        orderedSteps: change.OrderedSteps,
+        expectedObservations: change.ExpectedObservations,
+        cleanup: change.Cleanup,
+        toolingAutomation: change.ToolingAutomation,
         parentKind: change.ParentKind, derivedRationale: change.DerivedRationale);
 
 private static string SourceSnapshotJson(TestChangeReview tcr)

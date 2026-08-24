@@ -228,8 +228,11 @@ public sealed class CandidateBaseline
             throw new DomainException("Only a frozen baseline can materialize its verification artifacts.");
         if (RequirementsMaterializedAt is null)
             throw new DomainException("Materialize the requirement baseline before its verification artifacts — an artifact verifies a requirement that has to exist first.");
-        if (TestProceduresMaterializedAt is not null)
-            throw new DomainException("The verification artifact baseline is already materialized and immutable.");
+        // #726: the verification artifact manifest is assembled incrementally while a build is in work — a
+        // Case is materialized first and its allocated Procedure package is selected and materialized next.
+        // Only a Released baseline is immutable; the release review is the gate that closes the manifest.
+        if (State == CandidateBaselineState.Released)
+            throw new DomainException("A released baseline has an immutable verification artifact manifest.");
         if (string.IsNullOrWhiteSpace(proceduresHash) || proceduresHash.Length != 64)
             throw new DomainException("A valid verification artifact manifest hash is required.");
         TestProceduresHash = proceduresHash; TestProceduresMaterializedAt = now;
@@ -363,6 +366,12 @@ public sealed class CandidateBaseline
 
     private void EnsureDraft() { if (State != CandidateBaselineState.Draft) throw new DomainException("A frozen baseline is immutable."); }
     private void EnsureTestProceduresOpen()
-    { if (State == CandidateBaselineState.Released) throw new DomainException("Released baselines are immutable; verification artifact selections cannot change after release."); if (TestProceduresMaterializedAt is not null) throw new DomainException("The verification artifact baseline is already materialized and immutable."); }
+    {
+        // #726: selections remain open while the build is in work, even after a first manifest
+        // materialization, so the Case→Procedure chain can be assembled in the natural order. Only a
+        // Released baseline is immutable.
+        if (State == CandidateBaselineState.Released)
+            throw new DomainException("Released baselines are immutable; verification artifact selections cannot change after release.");
+    }
     private void Event(string type, string actorId, string detail, DateTimeOffset now) => _events.Add(new BaselineEvent(Id, type, actorId, detail, now));
 }

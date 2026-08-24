@@ -15,7 +15,8 @@ namespace AeroLink.Infrastructure.Persistence;
 
 /// <summary><paramref name="SuspectCoverage"/> counts requirement revisions whose only coverage was carried
 /// forward across a change and has not been reconfirmed. It is not coverage for release purposes.</summary>
-public sealed record ReleaseReconciliationResult(int TraceLinksCreated, int SuspectCoverage, int UncoveredRequirements);
+public sealed record ReleaseReconciliationResult(int TraceLinksCreated, int SuspectCoverage,
+    int UncoveredRequirements, int UnsatisfiedCaseObligations);
 public sealed record VerificationManifestRow(Guid ProcedureRevisionId, string DisplayNumber, string Outcome, DateTimeOffset? ExecutedAt, string ExecutedBy, string Configuration, string Determination);
 public sealed record VerificationImportResult(int ExecutionsRecorded, int Passed, int Failed, int Blocked, Guid EvidenceId, string EvidenceSha256);
 
@@ -66,9 +67,19 @@ public sealed class ReleaseExecutionService(AeroLinkDbContext db, EvidenceFileSt
         var suspect = currentCoverage.Where(x => x.IsSuspect).Select(x => x.RequirementRevisionId).Distinct().Count();
         var covered = currentCoverage.Where(x => !x.IsSuspect).Select(x => x.RequirementRevisionId).Distinct().Count();
         var uncovered = coverageRevisionIds.Count - covered;
-        campaign.RecordExecutionProgress("LifecycleLinksReconciled", $"Baseline materialization owns exact trace carry-forward; {suspect} requirement revisions carry suspect coverage awaiting verification confirmation and {uncovered} still need confirmed coverage.", actorId, now);
+        var procedureEnabledLevels = ladderPolicy.OrderedLevels
+            .Where(level => ladderPolicy.Definition(level).Verification is not null
+                && ladderPolicy.VerificationProfile(level).Enables(VerificationArtifactKind.Procedure))
+            .Select(ladderPolicy.ProcedureLevel).ToHashSet();
+        var obligations = await CaseProcedureSatisfaction.ForBaselineAsync(
+            db, baseline.Id, campaign.ReleaseId, campaign.SoftwareBuildId, procedureEnabledLevels, ct);
+        var unsatisfiedObligations = obligations.Count(x => !x.Satisfied);
+        campaign.RecordExecutionProgress("LifecycleLinksReconciled",
+            $"Baseline materialization owns exact trace carry-forward; {suspect} requirement revisions carry suspect coverage awaiting verification confirmation, "
+            + $"{uncovered} still need confirmed coverage, and {unsatisfiedObligations} exact Case-to-Procedure obligations are unsatisfied "
+            + "(zero links, suspect links, missing effectivity/selection, or no latest build-scoped Pass).", actorId, now);
         await db.SaveChangesAsync(ct); await transaction.CommitAsync(ct);
-        return new(0, suspect, uncovered);
+        return new(0, suspect, uncovered, unsatisfiedObligations);
     }
 
     private static bool IsConfiguredTrace(ILadderPolicy policy, RequirementLevel source, RequirementLevel target,
@@ -334,44 +345,40 @@ public sealed class ReleaseExecutionService(AeroLinkDbContext db, EvidenceFileSt
                           orderby procedure.BaseNumber
                           select new ValueTuple<Guid, string>(revision.Id, procedure.BaseNumber + "." + revision.Revision.ToString("D2"))).ToListAsync(ct);
         }
-        var configuredRequirementLevels = ladderPolicy.Definitions.Where(x => x.Verification is not null)
-            .Select(x => x.Level).ToHashSet();
-        // #726: the required manifest is the set of EFFECTIVE EXECUTABLE artifacts. With the software
-        // Procedure tier enabled, the required executables are the Procedure revisions linked to the
-        // baseline's exact Case revisions; Case-only software and System keep their current coverage rule.
-        var procedureEnabledLevels = ladderPolicy.OrderedLevels
-            .Where(level => ladderPolicy.Definition(level).Verification is not null
-                && ladderPolicy.VerificationProfile(level).Enables(VerificationArtifactKind.Procedure))
-            .ToHashSet();
-        var procedureEnabledProcedureLevels = procedureEnabledLevels
-            .Select(ladderPolicy.ProcedureLevel).ToHashSet();
-        var linkedProcedureRevisionIds = procedureEnabledLevels.Count == 0
-            ? []
-            : await (from link in db.TestCaseProcedureLinks.AsNoTracking()
-                     join member in db.BaselineTestProcedures.AsNoTracking()
-                         on link.CaseRevisionId equals member.RevisionId
-                     join caseArtifact in db.TestProcedures.AsNoTracking()
-                         on member.ProcedureId equals caseArtifact.Id
-                     where member.BaselineId == baselineId
-                         && caseArtifact.ArtifactKind == VerificationArtifactKind.Case
-                         && procedureEnabledProcedureLevels.Contains(caseArtifact.Level)
-                     select link.ProcedureRevisionId).Distinct().ToListAsync(ct);
-        var procedureRevisionIds = await (from coverage in db.TestCoverage.AsNoTracking()
-                                          join member in db.BaselineRequirements.AsNoTracking() on coverage.RequirementRevisionId equals member.RevisionId
-                                          join artifact in db.Requirements.AsNoTracking() on member.ArtifactId equals artifact.Id
-                                          where member.BaselineId == baselineId && configuredRequirementLevels.Contains(artifact.Level)
-                                          select coverage.ProcedureRevisionId).Distinct().ToListAsync(ct);
-        // Union, never replace: linked Procedures join the coverage-derived set, and the executable-binding
-        // filter below drops the now-non-executable Case revisions at Procedure-enabled levels.
-        procedureRevisionIds = procedureRevisionIds.Concat(linkedProcedureRevisionIds).Distinct().ToList();
-        var allowedProcedureLevels = ladderPolicy.Definitions.Where(x => x.Verification is not null)
-            .Select(x => x.Verification!.ProcedureLevel).ToHashSet();
-        return await (from revision in db.TestProcedureRevisions.AsNoTracking().Where(x => procedureRevisionIds.Contains(x.Id))
+        // #726 blocker 4: the required manifest is the baseline's EFFECTIVE EXECUTABLE membership. The
+        // cutover rebinds software baseline selections to Procedure revisions, so discovery comes from
+        // BaselineExecutableMembership (executable selections) filtered by the profile's executable kinds —
+        // never by searching for a Case baseline row the migration intentionally rebound.
+        var executableBindings = EffectiveExecutableArtifact.Bindings(ladderPolicy);
+        var selections = await BaselineExecutableMembership.ForBaselineAsync(db, baselineId, ct);
+        var requiredSelections = selections
+            .Where(x => executableBindings.Any(binding => binding.Level == x.Level && binding.Kind == x.Kind))
+            .Select(x => x.RevisionId).Distinct().ToList();
+        if (requiredSelections.Count == 0)
+        {
+            // A pre-manifest baseline has no exact executable selections; derive the required set from its
+            // settled coverage, filtered by the effective executable bindings — the same compatibility rule
+            // TestProcedureEffectivity uses, never a Case-or-System guess.
+            var coverageRevisionIds = await db.BaselineRequirements.AsNoTracking()
+                .Where(x => x.BaselineId == baselineId).Select(x => x.RevisionId).ToListAsync(ct);
+            requiredSelections = await (from coverage in db.TestCoverage.AsNoTracking()
+                                        where coverageRevisionIds.Contains(coverage.RequirementRevisionId)
+                                        join revision in db.TestProcedureRevisions.AsNoTracking()
+                                            on coverage.ProcedureRevisionId equals revision.Id
+                                        join procedure in db.TestProcedures.AsNoTracking()
+                                            .Where(EffectiveExecutableArtifact.ExecutablePredicate(ladderPolicy))
+                                            on revision.ProcedureId equals procedure.Id
+                                        where procedure.ProjectId == projectId
+                                        select revision.Id).Distinct().ToListAsync(ct);
+        }
+        if (requiredSelections.Count == 0) return [];
+        return await (from revision in db.TestProcedureRevisions.AsNoTracking()
+                      where requiredSelections.Contains(revision.Id)
                       join procedure in db.TestProcedures.AsNoTracking()
-                          .Where(EffectiveExecutableArtifact.ExecutablePredicate(ladderPolicy))
                           on revision.ProcedureId equals procedure.Id
-                      where procedure.ProjectId == projectId && allowedProcedureLevels.Contains(procedure.Level)
+                      where procedure.ProjectId == projectId
                       orderby procedure.BaseNumber
-                      select new ValueTuple<Guid, string>(revision.Id, procedure.BaseNumber + "." + revision.Revision.ToString("D2"))).ToListAsync(ct);
+                      select new ValueTuple<Guid, string>(revision.Id,
+                          procedure.BaseNumber + "." + revision.Revision.ToString("D2"))).ToListAsync(ct);
     }
 }

@@ -403,6 +403,25 @@ public sealed class TestChangeReview
                 throw new DomainException($"A {ArtifactWord} objective is required.");
             if (string.IsNullOrWhiteSpace(draft.Steps))
                 throw new DomainException($"A {ArtifactWord} must state its steps.");
+            // #726: a software Procedure is the effective executable; its proposal must carry the full
+            // Procedure vocabulary (environment/setup, test data, ordered steps, expected observations,
+            // cleanup, tooling/automation) — never a silent empty-body Procedure.
+            if (ArtifactKind == VerificationArtifactKind.Procedure
+                && Discipline != TestChangeReviewDiscipline.System)
+            {
+                if (string.IsNullOrWhiteSpace(draft.EnvironmentSetup))
+                    throw new DomainException("A software Procedure proposal requires environment/setup.");
+                if (string.IsNullOrWhiteSpace(draft.TestData))
+                    throw new DomainException("A software Procedure proposal requires test data.");
+                if (string.IsNullOrWhiteSpace(draft.OrderedSteps))
+                    throw new DomainException("A software Procedure proposal requires ordered steps.");
+                if (string.IsNullOrWhiteSpace(draft.ExpectedObservations))
+                    throw new DomainException("A software Procedure proposal requires expected observations.");
+                if (string.IsNullOrWhiteSpace(draft.Cleanup))
+                    throw new DomainException("A software Procedure proposal requires cleanup.");
+                if (string.IsNullOrWhiteSpace(draft.ToolingAutomation))
+                    throw new DomainException("A software Procedure proposal requires tooling/automation.");
+            }
         }
         if (Outcome != TestChangeReviewOutcome.ChangeRequired)
             throw new DomainException($"Record that {ArtifactWord} work is required before proposing changes to {ArtifactPlural}.");
@@ -419,7 +438,8 @@ public sealed class TestChangeReview
             draft.Title, draft.Objective, draft.Preconditions, draft.Steps, draft.ExpectedResult, draft.Rationale,
             draft.DrivingRequirementRevisionIdsJson, draft.RemovedRequirementRevisionIdsJson,
             draft.CoverageChangeRationale, actorId, draft.ParentKind, draft.ParentRevisionIdsJson,
-            draft.DerivedRationale);
+            draft.DerivedRationale, draft.EnvironmentSetup, draft.TestData, draft.OrderedSteps,
+            draft.ExpectedObservations, draft.Cleanup, draft.ToolingAutomation);
         _procedureChanges.Add(change);
         // Re-opening a legacy package and authoring a new decision is a new signed
         // contract. Do not let the old snapshot format cover newly introduced bytes.
@@ -981,7 +1001,9 @@ public sealed class TestChangeReview
                 change.Level, change.Kind, change.Title, change.Objective, change.Preconditions, change.Steps,
                 change.ExpectedResult, change.Rationale, change.DrivingRequirementRevisionIdsJson,
                 change.RemovedRequirementRevisionIdsJson, change.CoverageChangeRationale, change.ParentKind,
-                change.ParentRevisionIdsJson, change.DerivedRationale), now, policy: policy);
+                change.ParentRevisionIdsJson, change.DerivedRationale,
+                change.EnvironmentSetup, change.TestData, change.OrderedSteps,
+                change.ExpectedObservations, change.Cleanup, change.ToolingAutomation), now, policy: policy);
 
         // Folded-in claims move to the successor rather than staying behind or being dropped. A change
         // request is claimed by at most one package, enforced by a unique index, so the two revisions cannot

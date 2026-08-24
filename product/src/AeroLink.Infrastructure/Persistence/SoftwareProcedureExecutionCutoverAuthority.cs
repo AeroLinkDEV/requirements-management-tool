@@ -53,7 +53,7 @@ public sealed class SoftwareProcedureExecutionCutoverAuthority(
 
         var configurations = await db.ProjectLadderConfigurations.AsNoTracking()
             .Include(x => x.Steps).Include(x => x.AllowedUpstream)
-            .Where(x => x.IsSealed)
+            .Where(x => x.IsSealed && x.State != ProjectLadderConfigurationState.Retired)
             .OrderBy(x => x.ProjectId)
             .ToListAsync(ct);
         var pending = configurations.Where(x => TargetKinds(x) is not null).ToList();
@@ -135,92 +135,110 @@ public sealed class SoftwareProcedureExecutionCutoverAuthority(
             .Where(x => caseIds.Contains(x.ProcedureId))
             .OrderBy(x => x.ProcedureId).ThenBy(x => x.Revision)
             .ToListAsync(ct);
+        var caseRevisionIds = caseRevisions.Select(x => x.Id).ToList();
+        if (caseRevisionIds.Count == 0) { await transaction.CommitAsync(ct); return new(0, 0, 0, 0, 0, 0); }
         var existingLinks = await db.TestCaseProcedureLinks.AsNoTracking()
-            .Where(x => caseIds.Contains(x.CaseRevisionId))
+            .Where(x => caseRevisionIds.Contains(x.CaseRevisionId))
             .Select(x => new { x.CaseRevisionId, x.ProcedureRevisionId })
             .ToListAsync(ct);
         var existingProcedureRevisionIds = existingLinks.Select(x => x.ProcedureRevisionId).Distinct().ToList();
-        var migrationOwned = existingProcedureRevisionIds.Count == 0
+        var migrationOwnedRevisions = existingProcedureRevisionIds.Count == 0
             ? []
             : await db.TestProcedureRevisions.AsNoTracking()
-                .Where(x => existingProcedureRevisionIds.Contains(x.Id) && x.AuthorId == Actor)
-                .Select(x => x.Id).ToListAsync(ct);
-        var migratedCaseRevisionIds = existingLinks
-            .Where(x => migrationOwned.Contains(x.ProcedureRevisionId))
-            .Select(x => x.CaseRevisionId).ToHashSet();
+                .Where(x => existingProcedureRevisionIds.Contains(x.Id)
+                    && x.AuthorId == Actor && x.ParentKind == VerificationProcedureParentKind.Allocated)
+                .Select(x => new { x.Id, x.ProcedureId })
+                .ToDictionaryAsync(x => x.Id, x => x.ProcedureId, ct);
 
-        var revisionToCase = caseRevisions.ToDictionary(x => x.Id);
+        // Exact identity mapping: every Case revision maps to exactly one (Procedure artifact, Procedure
+        // revision) pair. One coherent Procedure artifact per Case carries the mirrored revision numbers, so
+        // a Case baseline selection can never pair an old revision with a newer artifact.
+        var caseRevisionToProcedure = new Dictionary<Guid, (Guid ArtifactId, Guid RevisionId)>();
+        foreach (var link in existingLinks)
+            if (migrationOwnedRevisions.TryGetValue(link.ProcedureRevisionId, out var procedureArtifactId))
+                caseRevisionToProcedure[link.CaseRevisionId] = (procedureArtifactId, link.ProcedureRevisionId);
+
         var caseById = cases.ToDictionary(x => x.Id);
-        var caseRevisionToProcedureRevision = new Dictionary<Guid, Guid>();
-        var caseArtifactToProcedureArtifact = new Dictionary<Guid, Guid>();
         var generated = 0;
-        foreach (var caseRevision in caseRevisions)
+        foreach (var caseArtifact in cases)
         {
-            if (migratedCaseRevisionIds.Contains(caseRevision.Id)) continue;
-            var caseArtifact = caseById[caseRevision.ProcedureId];
+            var artifactRevisions = caseRevisions.Where(x => x.ProcedureId == caseArtifact.Id).ToList();
+            var pending = artifactRevisions
+                .Where(x => !caseRevisionToProcedure.ContainsKey(x.Id)).ToList();
+            if (pending.Count == 0) continue;
             var baseNumber = await IdentifierAllocator.NextTestProcedureAsync(db, caseArtifact.Level,
                 VerificationArtifactKind.Procedure, ct);
             var procedure = new TestProcedure(projectId, baseNumber, caseArtifact.Title, caseArtifact.OwnerId,
                 now, caseArtifact.Level, artifactKind: VerificationArtifactKind.Procedure,
                 parentKind: VerificationProcedureParentKind.Allocated);
-            var revision = new TestProcedureRevision(procedure.Id, caseRevision.Revision,
-                caseRevision.Objective, caseRevision.Preconditions, caseRevision.Steps,
-                caseRevision.ExpectedResult, TestProcedureState.Approved, Actor, now,
-                environmentSetup: caseRevision.Preconditions,
-                testData: "",
-                orderedSteps: caseRevision.Steps,
-                expectedObservations: caseRevision.ExpectedResult,
-                cleanup: "",
-                toolingAutomation: "",
-                parentKind: VerificationProcedureParentKind.Allocated);
-            var link = new TestCaseProcedureLink(caseRevision.Id, revision.Id);
             db.TestProcedures.Add(procedure);
-            db.TestProcedureRevisions.Add(revision);
-            db.TestCaseProcedureLinks.Add(link);
-            db.SecurityAuditEvents.Add(new SecurityAuditEvent(
-                MigrationMarker + ".ProcedureGenerated", Actor,
-                $"TestCaseProcedureLink:{link.Id}", "Succeeded",
-                Json(new
-                {
-                    migration = MigrationMarker,
-                    projectId,
-                    sourceCaseRevisionId = caseRevision.Id,
-                    sourceCaseBaseNumber = caseArtifact.BaseNumber,
-                    generatedProcedureId = procedure.Id,
-                    generatedProcedureBaseNumber = baseNumber,
-                    generatedProcedureRevision = revision.Id,
-                    sourceTcrId = caseRevision.SourceTestChangeRequestId,
-                    reason = "Deterministically generated from the exact legacy Case revision; no TCR, reviewer, or human approval fabricated."
-                }), "", now));
-            caseRevisionToProcedureRevision[caseRevision.Id] = revision.Id;
-            caseArtifactToProcedureArtifact[caseArtifact.Id] = procedure.Id;
-            generated++;
+            foreach (var caseRevision in pending)
+            {
+                var revision = new TestProcedureRevision(procedure.Id, caseRevision.Revision,
+                    caseRevision.Objective, caseRevision.Preconditions, caseRevision.Steps,
+                    caseRevision.ExpectedResult, TestProcedureState.Approved, Actor, now,
+                    effectiveBaselineId: caseRevision.EffectiveBaselineId,
+                    environmentSetup: caseRevision.Preconditions,
+                    testData: "",
+                    orderedSteps: caseRevision.Steps,
+                    expectedObservations: caseRevision.ExpectedResult,
+                    cleanup: "",
+                    toolingAutomation: "",
+                    parentKind: VerificationProcedureParentKind.Allocated);
+                var link = new TestCaseProcedureLink(caseRevision.Id, revision.Id);
+                db.TestProcedureRevisions.Add(revision);
+                db.TestCaseProcedureLinks.Add(link);
+                db.SecurityAuditEvents.Add(new SecurityAuditEvent(
+                    MigrationMarker + ".ProcedureGenerated", Actor,
+                    $"TestCaseProcedureLink:{link.Id}", "Succeeded",
+                    Json(new
+                    {
+                        migration = MigrationMarker,
+                        projectId,
+                        sourceCaseRevisionId = caseRevision.Id,
+                        sourceCaseBaseNumber = caseArtifact.BaseNumber,
+                        generatedProcedureId = procedure.Id,
+                        generatedProcedureBaseNumber = baseNumber,
+                        generatedProcedureRevision = revision.Id,
+                        sourceTcrId = caseRevision.SourceTestChangeRequestId,
+                        reason = "Deterministically generated from the exact legacy Case revision; no TCR, reviewer, or human approval fabricated."
+                    }), "", now));
+                caseRevisionToProcedure[caseRevision.Id] = (procedure.Id, revision.Id);
+                generated++;
+            }
         }
-        if (caseRevisionToProcedureRevision.Count == 0)
+        if (generated == 0 && caseRevisionToProcedure.Count == 0)
         {
             await db.SaveChangesAsync(ct);
             await transaction.CommitAsync(ct);
             return new(0, 0, 0, 0, 0, 0);
         }
-        var migratedCaseRevisionIdsList = caseRevisionToProcedureRevision.Keys.ToList();
-        var migratedCaseArtifactIds = caseArtifactToProcedureArtifact.Keys.ToList();
+        var migratedCaseRevisionIdsList = caseRevisionToProcedure.Keys.ToList();
+        var migratedCaseArtifactIds = migratedCaseRevisionIdsList
+            .Select(revisionId => caseById[caseRevisions.Single(x => x.Id == revisionId).ProcedureId].Id)
+            .Distinct().ToList();
+        var caseArtifactToProcedureArtifact = migratedCaseRevisionIdsList
+            .GroupBy(revisionId => caseById[caseRevisions.Single(x => x.Id == revisionId).ProcedureId].Id)
+            .ToDictionary(group => group.Key,
+                group => caseRevisionToProcedure[group.First()].ArtifactId);
 
         var executions = await db.TestExecutions
             .Where(x => migratedCaseRevisionIdsList.Contains(x.ProcedureRevisionId)).ToListAsync(ct);
         foreach (var execution in executions)
-            execution.RebindMigrationExecutable(caseRevisionToProcedureRevision[execution.ProcedureRevisionId], now);
+            execution.RebindMigrationExecutable(
+                caseRevisionToProcedure[execution.ProcedureRevisionId].RevisionId, now);
         var entries = await db.BuildTestSetEntries
             .Where(x => migratedCaseRevisionIdsList.Contains(x.ProcedureRevisionId)).ToListAsync(ct);
         foreach (var entry in entries)
-            entry.RebindMigrationExecutable(caseRevisionToProcedureRevision[entry.ProcedureRevisionId]);
+            entry.RebindMigrationExecutable(
+                caseRevisionToProcedure[entry.ProcedureRevisionId].RevisionId);
         var baselineSelections = await db.BaselineTestProcedures
             .Where(x => migratedCaseRevisionIdsList.Contains(x.RevisionId)
                 || migratedCaseArtifactIds.Contains(x.ProcedureId))
             .ToListAsync(ct);
         foreach (var selection in baselineSelections)
-            if (caseRevisionToProcedureRevision.TryGetValue(selection.RevisionId, out var newRevisionId)
-                && caseArtifactToProcedureArtifact.TryGetValue(selection.ProcedureId, out var newProcedureId))
-                selection.RebindMigrationExecutable(newProcedureId, newRevisionId);
+            if (caseRevisionToProcedure.TryGetValue(selection.RevisionId, out var executable))
+                selection.RebindMigrationExecutable(executable.ArtifactId, executable.RevisionId);
         var impactItems = await db.VerificationImpactItems
             .Where(x => x.ResolvedProcedureRevisionId != null
                     && migratedCaseRevisionIdsList.Contains(x.ResolvedProcedureRevisionId.Value)
@@ -234,7 +252,8 @@ public sealed class SoftwareProcedureExecutionCutoverAuthority(
             Guid? resolvedProcedureId = item.ResolvedProcedureId is { } rpid
                 && caseArtifactToProcedureArtifact.TryGetValue(rpid, out var newRpid) ? newRpid : null;
             Guid? resolvedRevisionId = item.ResolvedProcedureRevisionId is { } rrid
-                && caseRevisionToProcedureRevision.TryGetValue(rrid, out var newRrid) ? newRrid : null;
+                && caseRevisionToProcedure.TryGetValue(rrid, out var revisionPair)
+                    ? revisionPair.RevisionId : null;
             if (procedureId is not null || resolvedProcedureId is not null || resolvedRevisionId is not null)
                 item.RebindMigrationExecutable(procedureId, resolvedProcedureId, resolvedRevisionId);
         }
@@ -296,10 +315,19 @@ public sealed class SoftwareProcedureExecutionCutoverAuthority(
         return LadderConsumerManifestCatalog.BuildV2(registrations, artifactRegistrations, profile);
     }
 
-    /// <summary>Software levels pending the upgrade map to [Case, Procedure]; System and already-upgraded levels are absent.</summary>
+    /// <summary>
+    /// State matrix: only a sealed LegacyDefault Stored ladder is eligible for the governed upgrade.
+    /// A pre-existing sealed Draft is never made runtime-effective by the cutover; Retired history stays
+    /// untouched; a deliberately authored (NonDefault) Active Case-only profile is preserved; an Active
+    /// [Case, Procedure] profile is already upgraded. System levels are never listed.
+    /// </summary>
     private static IReadOnlyDictionary<RequirementLevel, IReadOnlyList<VerificationArtifactKind>>? TargetKinds(
         ProjectLadderConfiguration configuration)
     {
+        if (!configuration.IsSealed
+            || configuration.State != ProjectLadderConfigurationState.Stored
+            || configuration.Classification != ProjectLadderConfigurationClassification.LegacyDefault)
+            return null;
         var pending = new Dictionary<RequirementLevel, IReadOnlyList<VerificationArtifactKind>>();
         foreach (var step in configuration.Steps)
         {

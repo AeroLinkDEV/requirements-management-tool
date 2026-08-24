@@ -94,7 +94,10 @@ public static class WorkspaceEndpoints
                 var program = new ProgramRecord(request.ProgramName, request.ProgramCode);
                 var project = new ProjectRecord(program.Id, request.ProjectName, request.SoftwareProduct);
                 var release = new SoftwareRelease(project.Id, request.InitialRelease, request.InitialReleaseIsReleased);
-                var ladder = LegacyDefaultProjectLadderFactory.Create(project.Id, DateTimeOffset.UtcNow);
+                // #726: new projects default to the full software Procedure tier ([Case, Procedure]) as an
+                // authored Draft, so the owner can deliberately remove Procedure before sealing. The
+                // historical legacy Case-only factory remains for pre-#726 rows only.
+                var ladder = NewProjectLadderFactory.Create(project.Id, DateTimeOffset.UtcNow);
                 // A project is born carrying its verification-method vocabulary (#701), in the same unit of
                 // work as the project row. Authoring needs the permitted set from the first requirement
                 // onward, and a project that had to acquire one later would spend that window accepting the
