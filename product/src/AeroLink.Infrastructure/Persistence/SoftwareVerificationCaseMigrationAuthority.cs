@@ -61,10 +61,14 @@ public sealed class SoftwareVerificationCaseMigrationAuthority(
             await db.SaveChangesAsync(ct);
             foreach (var document in documents)
             {
-                var migrationBasisHash = await ResolveDocumentMigrationBasisHashAsync(document, now, ct);
-                var contentBasis = $"{migrationBasisHash}|{document.Type}|{document.ArtifactCount}|{Actor}";
+                var migrationBasis = await ResolveDocumentMigrationBasisAsync(document, now, ct);
+                var contentBasis = $"{migrationBasis.Hash}|{document.Type}|{document.ArtifactCount}|{Actor}";
                 var contentHash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(contentBasis))).ToLowerInvariant();
-                document.RecordMigrationContentBasis(contentHash, now);
+                // Exact manifests intentionally receive a new migration generation time, as before. A legacy
+                // compatibility snapshot must retain its original GeneratedAt because that timestamp is the
+                // authority selecting which historical revision rows belong in the document. Moving it to now
+                // would allow later approved revisions to leak into a document they never belonged to.
+                document.RecordMigrationContentBasis(contentHash, migrationBasis.GeneratedAt);
             }
             await db.SaveChangesAsync(ct);
 
@@ -207,7 +211,7 @@ public sealed class SoftwareVerificationCaseMigrationAuthority(
         }
     }
 
-    private async Task<string> ResolveDocumentMigrationBasisHashAsync(
+    private async Task<(string Hash, DateTimeOffset GeneratedAt)> ResolveDocumentMigrationBasisAsync(
         ControlledDocument document, DateTimeOffset now, CancellationToken ct)
     {
         var baseline = await db.CandidateBaselines.AsNoTracking()
@@ -222,9 +226,10 @@ public sealed class SoftwareVerificationCaseMigrationAuthority(
             if (string.IsNullOrWhiteSpace(baseline.TestProceduresHash))
                 throw new InvalidOperationException(
                     $"Software Case migration cannot render document {document.Id}: baseline {baseline.Id} is marked verification-materialized but has no recomputed Case manifest hash.");
-            return baseline.TestProceduresHash;
+            return (baseline.TestProceduresHash, now);
         }
 
+        var originalGeneratedAt = document.GeneratedAt;
         var level = document.Type switch
         {
             ControlledDocumentType.HighLevelTestCases => TestProcedureLevel.HighLevel,
@@ -233,7 +238,7 @@ public sealed class SoftwareVerificationCaseMigrationAuthority(
                 $"Software Case migration cannot resolve a legacy snapshot for unsupported document type {document.Type} ({document.Id}).")
         };
         var snapshot = await ControlledProcedureDocumentSnapshotProjection.ForDocumentAsync(
-            db, document.BaselineId, level, document.GeneratedAt, ct);
+            db, document.BaselineId, level, originalGeneratedAt, ct);
         if (snapshot.IsExactManifest)
             throw new InvalidOperationException(
                 $"Software Case migration found an inconsistent verification baseline for document {document.Id}: baseline {baseline.Id} reports no materialization marker but the document projection resolved as exact.");
@@ -265,13 +270,14 @@ public sealed class SoftwareVerificationCaseMigrationAuthority(
                 migration = MigrationMarker,
                 documentId = document.Id,
                 baselineId = baseline.Id,
-                generatedAt = document.GeneratedAt,
+                generatedAt = originalGeneratedAt,
                 artifactCount = document.ArtifactCount,
                 compatibilitySnapshotHash,
                 baselineManifestPreservedAsUnmaterialized = true,
-                reason = "The controlled document predates exact build-scoped verification manifests. Its migration basis was reconstructed from the existing generation-time compatibility snapshot; no historical baseline materialization state was fabricated."
+                documentGeneratedAtPreserved = true,
+                reason = "The controlled document predates exact build-scoped verification manifests. Its migration basis was reconstructed from the existing generation-time compatibility snapshot; no historical baseline materialization state was fabricated and the original generation time was preserved so later revisions cannot leak into the regenerated document."
             }), "", now));
-        return compatibilitySnapshotHash;
+        return (compatibilitySnapshotHash, originalGeneratedAt);
     }
 
     private async Task<int> CompleteSignatureSupersessionsAsync(
