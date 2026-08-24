@@ -201,6 +201,9 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
         PendingLadderSeals.Clear();
         try
         {
+            foreach (var entry in ChangeTracker.Entries<TestChangeReview>()
+                         .Where(x => x.State is EntityState.Added or EntityState.Modified))
+                entry.Entity.ValidateOriginForPersistence();
             PrepareLadderSealsAsync(CancellationToken.None).GetAwaiter().GetResult();
             ValidateVerificationIntegrityAsync(CancellationToken.None).GetAwaiter().GetResult();
             var result = base.SaveChanges(acceptAllChangesOnSuccess);
@@ -1028,6 +1031,9 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
         {
             b.ToTable("test_change_reviews"); b.HasKey(x => x.Id);
             b.Property(x => x.Discipline).HasConversion<string>().HasMaxLength(40);
+            b.Property(x => x.ArtifactKind).HasConversion<string>().HasMaxLength(30).IsRequired();
+            b.Property(x => x.OriginKind).HasConversion<string>().HasMaxLength(40).IsRequired();
+            b.Property(x => x.OriginReferenceId).IsRequired();
             b.Property(x => x.Outcome).HasConversion<string>().HasMaxLength(30);
             // Deferral, the same shape the requirements side stores it in: where the work sits and how far it
             // had got are two different facts, so the origin state is kept rather than inferred on the way back.
@@ -1045,6 +1051,7 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
             // the column keeps its shape, and which origin a package has is told by the two id columns.
             b.Property(x => x.SourceChangeRequestNumber).HasMaxLength(40).IsRequired();
             b.Property(x => x.SourceProblemReportNumber).HasMaxLength(40).IsRequired();
+            b.Property(x => x.SourceCaseOriginNumber).HasMaxLength(80).IsRequired();
             b.HasIndex(x => x.OriginatingProblemReportId);
             b.Property(x => x.BaseNumber).HasMaxLength(40).IsRequired();
             // The case the package argues, sized as a change request's own. Empty on packages raised before
@@ -1072,8 +1079,17 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
             // Revision belongs in the key for the same reason it does on a change request: .01 is a further
             // revision of one package, not a second package claiming the same change. Without it the exclusivity
             // rule and the revision chain contradict each other, and the revision simply cannot be stored.
-            b.HasIndex(x => new { x.ChangeRequestId, x.Discipline, x.Revision }).IsUnique();
+            b.HasIndex(x => new { x.ChangeRequestId, x.Discipline, x.ArtifactKind, x.Revision }).IsUnique();
+            // Case-origin packages have no ChangeRequestId, so the legacy nullable-column index would allow
+            // duplicate package identities. The discriminated origin/reference pair is the repository-wide
+            // uniqueness key for every origin kind, including the same package revision.
+            // Only new discriminated Case origins receive this uniqueness rule. Historical Problem Report
+            // packages were allowed to repeat an origin, and the #725 upgrade must preserve those rows exactly.
+            b.HasIndex(x => new { x.OriginKind, x.OriginReferenceId, x.Discipline, x.ArtifactKind, x.Revision })
+                .IsUnique().HasFilter("\"OriginKind\" IN ('CaseChange','CaseAssessment')");
             b.HasIndex(x => new { x.ReleaseId, x.State, x.Discipline });
+            b.ToTable("test_change_reviews", table => table.HasCheckConstraint("CK_test_change_reviews_origin_xor",
+                "(\"OriginReferenceId\" <> '00000000-0000-0000-0000-000000000000' AND ((\"OriginKind\" = 'ChangeRequest' AND \"OriginReferenceId\" = \"ChangeRequestId\" AND \"ChangeRequestId\" IS NOT NULL AND \"OriginatingProblemReportId\" IS NULL) OR (\"OriginKind\" = 'ProblemReport' AND \"OriginReferenceId\" = \"OriginatingProblemReportId\" AND \"OriginatingProblemReportId\" IS NOT NULL AND \"ChangeRequestId\" IS NULL) OR (\"OriginKind\" IN ('CaseChange','CaseAssessment') AND \"ChangeRequestId\" IS NULL AND \"OriginatingProblemReportId\" IS NULL AND \"Discipline\" IN ('HighLevelSoftware','LowLevelSoftware') AND \"ArtifactKind\" = 'Procedure' AND \"SourceCaseOriginNumber\" <> '')))"));
             b.HasOne<ProjectRecord>().WithMany().HasForeignKey(x => x.ProjectId).OnDelete(DeleteBehavior.Restrict);
             b.HasOne<SoftwareRelease>().WithMany().HasForeignKey(x => x.ReleaseId).OnDelete(DeleteBehavior.Restrict);
             b.HasOne<SystemChangeRequest>().WithMany().HasForeignKey(x => x.ChangeRequestId).OnDelete(DeleteBehavior.Restrict);
@@ -1747,6 +1763,9 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
         PendingLadderSeals.Clear();
         try
         {
+            foreach (var entry in ChangeTracker.Entries<TestChangeReview>()
+                         .Where(x => x.State is EntityState.Added or EntityState.Modified))
+                entry.Entity.ValidateOriginForPersistence();
             await PrepareLadderSealsAsync(cancellationToken);
 
             // Aggregate children use application-assigned GUIDs. EF interprets newly discovered
@@ -1850,12 +1869,270 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
 
     private async Task ValidateVerificationIntegrityAsync(CancellationToken ct)
     {
+        await ValidateTestChangeReviewOriginsAsync(ct);
+        await ValidateReferencedCaseChangesAsync(ct);
+        await ValidateReferencedCaseAssessmentsAsync(ct);
+        await ValidateReferencedCaseAssessmentParentsAsync(ct);
         await ValidateRequirementParentSelectionsAsync(ct);
         await ValidateProcedureHeadersAsync(ct);
         await RefuseCrossLevelCoverageAsync(ct);
         await ValidateProcedureParentsAsync(ct);
         await ValidateCaseSystemParentSelectionsAsync(ct);
         await ValidateCaseProcedureLinksAsync(ct);
+    }
+
+    /// <summary>
+    /// Save-boundary protection for the polymorphic Case-origin reference. The database trigger protects
+    /// PostgreSQL direct writes; this check gives SQLite and every application caller the same fail-closed
+    /// decision without adding parallel nullable origin columns to the aggregate.
+    /// </summary>
+    private async Task ValidateTestChangeReviewOriginsAsync(CancellationToken ct)
+    {
+        var entries = ChangeTracker.Entries<TestChangeReview>()
+            .Where(x => x.State is EntityState.Added or EntityState.Modified
+                && x.Entity.OriginKind is TestChangeReviewOriginKind.CaseChange or TestChangeReviewOriginKind.CaseAssessment)
+            .Select(x => x.Entity).ToList();
+        foreach (var review in entries)
+        {
+            if (review.ArtifactKey.Kind != VerificationArtifactKind.Procedure
+                || review.ArtifactKey.Discipline == VerificationDiscipline.System)
+                throw new DomainException("A Case origin is valid only for a software Procedure package.");
+
+            if (review.OriginKind == TestChangeReviewOriginKind.CaseChange)
+            {
+                var reviewEntry = ChangeTracker.Entries<TestChangeReview>()
+                    .Single(x => ReferenceEquals(x.Entity, review));
+                var source = await (from change in Set<TestProcedureChange>().AsNoTracking()
+                                     join parent in TestChangeReviews.AsNoTracking()
+                                         on change.TestChangeReviewId equals parent.Id
+                                     where change.Id == review.OriginReferenceId
+                                     select new
+                                     {
+                                         parent.ProjectId, parent.ReleaseId, parent.Discipline, parent.ArtifactKind,
+                                         parent.State, change.BaseNumber, change.Revision
+                                     }).SingleOrDefaultAsync(ct);
+                var sourceStateEligible = source is not null
+                    && (source.State == TestChangeReviewState.Approved
+                        || (source.State == TestChangeReviewState.Superseded
+                            && (review.Revision > 0 || reviewEntry.State != EntityState.Added)));
+                if (source is null || source.ProjectId != review.ProjectId || source.ReleaseId != review.ReleaseId
+                    || source.Discipline != review.Discipline || source.ArtifactKind != VerificationArtifactKind.Case
+                    || !sourceStateEligible
+                    || string.IsNullOrWhiteSpace(source.BaseNumber))
+                    throw new DomainException(review.Revision == 0 && review.State != TestChangeReviewState.Superseded
+                        ? "A Case-change origin must be an approved exact software Case change in this project and build."
+                        : "A Procedure revision must retain its exact approved or superseded Case-change origin.");
+                var identity = $"{source.BaseNumber}.{source.Revision:D2}";
+                if (!string.Equals(review.SourceCaseOriginNumber, identity, StringComparison.Ordinal))
+                    throw new DomainException("A Case-change origin must retain the exact Case change identity.");
+            }
+            else
+            {
+                var reviewEntry = ChangeTracker.Entries<TestChangeReview>()
+                    .Single(x => ReferenceEquals(x.Entity, review));
+                var source = await (from item in VerificationImpactItems.AsNoTracking()
+                                     join parent in TestChangeReviews.AsNoTracking()
+                                         on item.TestChangeReviewId equals parent.Id
+                                     where item.Id == review.OriginReferenceId
+                                     select new
+                                     {
+                                         item.ProjectId, item.ReleaseId, parent.Discipline, parent.ArtifactKind,
+                                         parentState = parent.State, itemState = item.State, item.Outcome, item.ProcedureChangeAction,
+                                         item.RequirementRevisionId, item.SubjectDisplayNumber
+                                     }).SingleOrDefaultAsync(ct);
+                if (source is null || source.ProjectId != review.ProjectId || source.ReleaseId != review.ReleaseId
+                    || source.Discipline != review.Discipline || source.ArtifactKind != VerificationArtifactKind.Case
+                     || (source.parentState == TestChangeReviewState.Superseded
+                         && review.Revision == 0 && reviewEntry.State == EntityState.Added)
+                    || source.itemState != VerificationImpactState.Resolved
+                    || source.Outcome != VerificationImpactOutcome.NewProcedureRequired
+                    || source.ProcedureChangeAction != TestProcedureChangeAction.CreateNew
+                    || source.RequirementRevisionId is null)
+                    throw new DomainException("A Case-assessment origin must be a resolved exact assessment that found new Procedure work.");
+                if (review.Revision == 0 && reviewEntry.State == EntityState.Added)
+                {
+                    var baselineId = await TestChangeReviewRequirementScope.EffectiveRequirementBaselineIdAsync(
+                        this, review.ProjectId, review.ReleaseId, ct);
+                    if (baselineId is null || !await BaselineRequirements.AsNoTracking()
+                            .AnyAsync(x => x.BaselineId == baselineId && x.RevisionId == source.RequirementRevisionId, ct))
+                        throw new DomainException("A Case-assessment origin must be bound to this build's effective baseline.");
+                }
+                if (!string.Equals(review.SourceCaseOriginNumber, source.SubjectDisplayNumber, StringComparison.Ordinal))
+                    throw new DomainException("A Case-assessment origin must retain the exact assessment identity.");
+            }
+        }
+    }
+
+    /// <summary>
+    /// A resolved Case assessment is an immutable origin once a Procedure package names it. Ordinary operational
+    /// writes (for example a timestamp or version touch) remain possible, but changing its eligibility or exact
+    /// identity would make the already-issued Procedure package point at a different decision.
+    /// </summary>
+    private async Task ValidateReferencedCaseAssessmentsAsync(CancellationToken ct)
+    {
+        var changed = ChangeTracker.Entries<VerificationImpactItem>()
+            .Where(x => x.State is EntityState.Modified or EntityState.Deleted)
+            .Where(x => x.State == EntityState.Deleted ||
+                new[] { "ProjectId", "ReleaseId", "TestChangeReviewId", "RequirementChangeId", "RequirementRevisionId",
+                    "SubjectDisplayNumber", "State", "Outcome", "ProcedureChangeAction" }
+                    .Any(name => x.Property(name).IsModified))
+            .Select(x => x.Entity.Id)
+            .Where(x => x != Guid.Empty)
+            .ToHashSet();
+        if (changed.Count == 0) return;
+
+        var persisted = await TestChangeReviews.AsNoTracking()
+            .Where(x => x.ArtifactKind == VerificationArtifactKind.Procedure
+                && x.OriginKind == TestChangeReviewOriginKind.CaseAssessment
+                && changed.Contains(x.OriginReferenceId))
+            .Select(x => x.OriginReferenceId)
+            .ToListAsync(ct);
+        var tracked = ChangeTracker.Entries<TestChangeReview>()
+            .Where(x => x.State != EntityState.Deleted
+                && x.Entity.ArtifactKind == VerificationArtifactKind.Procedure
+                && x.Entity.OriginKind == TestChangeReviewOriginKind.CaseAssessment
+                && changed.Contains(x.Entity.OriginReferenceId))
+            .Select(x => x.Entity.OriginReferenceId);
+        if (persisted.Concat(tracked).Any())
+            throw new DomainException("A Case assessment referenced by a Procedure package is immutable; raise a new assessment instead.");
+    }
+
+    /// <summary>
+    /// The assessment item is not the whole source identity: its owning Case review also supplies the
+    /// project/build/discipline/kind and lifecycle context. Protect that parent for the same lifetime as the
+    /// assessment itself, while permitting only the deliberate Approved -> Superseded historical transition.
+    /// </summary>
+    private async Task ValidateReferencedCaseAssessmentParentsAsync(CancellationToken ct)
+    {
+        var changedParents = ChangeTracker.Entries<TestChangeReview>()
+            .Where(x => x.State is EntityState.Modified or EntityState.Deleted)
+            .Where(x => x.State == EntityState.Deleted ||
+                new[] { "ProjectId", "ReleaseId", "Discipline", "ArtifactKind", "BaseNumber", "Revision", "ChangeRequestId", "State" }
+                    .Any(name => x.Property(name).IsModified))
+            .ToList();
+        var changedParentIds = changedParents.Select(x => x.Entity.Id).Where(x => x != Guid.Empty).ToHashSet();
+        if (changedParentIds.Count == 0) return;
+
+        var assessmentSources = await VerificationImpactItems.AsNoTracking()
+            .Where(x => changedParentIds.Contains(x.TestChangeReviewId))
+            .Select(x => new { x.Id, x.TestChangeReviewId })
+            .ToListAsync(ct);
+        if (assessmentSources.Count == 0) return;
+        var assessmentIds = assessmentSources.Select(x => x.Id).ToHashSet();
+
+        var persistedReferences = await TestChangeReviews.AsNoTracking()
+            .Where(x => x.ArtifactKind == VerificationArtifactKind.Procedure
+                && x.OriginKind == TestChangeReviewOriginKind.CaseAssessment
+                && assessmentIds.Contains(x.OriginReferenceId))
+            .Select(x => x.OriginReferenceId)
+            .ToHashSetAsync(ct);
+        var trackedReferences = ChangeTracker.Entries<TestChangeReview>()
+            .Where(x => x.State != EntityState.Deleted
+                && x.Entity.ArtifactKind == VerificationArtifactKind.Procedure
+                && x.Entity.OriginKind == TestChangeReviewOriginKind.CaseAssessment
+                && assessmentIds.Contains(x.Entity.OriginReferenceId))
+            .Select(x => x.Entity.OriginReferenceId)
+            .ToHashSet();
+        var referencedParentIds = assessmentSources
+            .Where(x => persistedReferences.Contains(x.Id) || trackedReferences.Contains(x.Id))
+            .Select(x => x.TestChangeReviewId)
+            .ToHashSet();
+        foreach (var entry in changedParents.Where(x => referencedParentIds.Contains(x.Entity.Id)))
+        {
+            if (entry.State == EntityState.Deleted)
+                throw new DomainException("A Case package that supplies a Procedure assessment origin cannot be deleted.");
+            var stateChanged = entry.Property(nameof(TestChangeReview.State)).IsModified
+                && !Equals(entry.Property(nameof(TestChangeReview.State)).OriginalValue, entry.Entity.State);
+            var originalState = entry.Property(nameof(TestChangeReview.State)).OriginalValue is TestChangeReviewState state
+                ? state
+                : entry.Entity.State;
+            var historicalAdvance = originalState == TestChangeReviewState.Approved
+                && entry.Entity.State == TestChangeReviewState.Superseded;
+            var remainsEligible = entry.Entity.State != TestChangeReviewState.Superseded
+                && originalState != TestChangeReviewState.Superseded;
+            var identityChanged = new[] { "ProjectId", "ReleaseId", "Discipline", "ArtifactKind", "BaseNumber", "Revision", "ChangeRequestId" }
+                .Any(name => entry.Property(name).IsModified);
+            if ((stateChanged && !historicalAdvance && !remainsEligible) || identityChanged)
+                throw new DomainException("A Case package that supplies a Procedure assessment origin may only advance Approved to Superseded.");
+        }
+    }
+
+    /// <summary>
+    /// SQLite and other application callers receive the same source-side protection as PostgreSQL: after a
+    /// Procedure package names an exact Case change, its child identity and project/build/discipline cannot be
+    /// rewritten. The source package may make the one historical transition Approved -> Superseded.
+    /// </summary>
+    private async Task ValidateReferencedCaseChangesAsync(CancellationToken ct)
+    {
+        var changedChildren = ChangeTracker.Entries<TestProcedureChange>()
+            .Where(x => x.State is EntityState.Modified or EntityState.Deleted)
+            .Where(x => x.State == EntityState.Deleted ||
+                new[] { "TestChangeReviewId", "BaseNumber", "Revision" }
+                    .Any(name => x.Property(name).IsModified))
+            .Select(x => x.Entity.Id)
+            .Where(x => x != Guid.Empty)
+            .ToHashSet();
+        var changedParents = ChangeTracker.Entries<TestChangeReview>()
+            .Where(x => x.State is EntityState.Modified or EntityState.Deleted)
+            .Where(x => x.State == EntityState.Deleted ||
+                new[] { "ProjectId", "ReleaseId", "Discipline", "ArtifactKind", "BaseNumber", "Revision", "ChangeRequestId", "State" }
+                    .Any(name => x.Property(name).IsModified))
+            .ToList();
+        var parentIds = changedParents.Select(x => x.Entity.Id).Where(x => x != Guid.Empty).ToHashSet();
+        if (parentIds.Count != 0)
+        {
+            var childIds = await Set<TestProcedureChange>().AsNoTracking()
+                .Where(x => parentIds.Contains(x.TestChangeReviewId))
+                .Select(x => x.Id)
+                .ToListAsync(ct);
+            changedChildren.UnionWith(childIds);
+        }
+        if (changedChildren.Count == 0) return;
+
+        var persistedReferences = await TestChangeReviews.AsNoTracking()
+            .Where(x => x.ArtifactKind == VerificationArtifactKind.Procedure
+                && x.OriginKind == TestChangeReviewOriginKind.CaseChange
+                && changedChildren.Contains(x.OriginReferenceId))
+            .Select(x => x.OriginReferenceId)
+            .ToListAsync(ct);
+        var trackedReferences = ChangeTracker.Entries<TestChangeReview>()
+            .Where(x => x.State != EntityState.Deleted
+                && x.Entity.ArtifactKind == VerificationArtifactKind.Procedure
+                && x.Entity.OriginKind == TestChangeReviewOriginKind.CaseChange
+                && changedChildren.Contains(x.Entity.OriginReferenceId))
+            .Select(x => x.Entity.OriginReferenceId);
+        var referencedIds = persistedReferences.Concat(trackedReferences).ToHashSet();
+        if (referencedIds.Count == 0) return;
+
+        var referencedSourceParentIds = (await Set<TestProcedureChange>().AsNoTracking()
+                .Where(x => referencedIds.Contains(x.Id))
+                .Select(x => x.TestChangeReviewId)
+                .ToListAsync(ct))
+            .Concat(ChangeTracker.Entries<TestProcedureChange>()
+                .Where(x => referencedIds.Contains(x.Entity.Id))
+                .Select(x => x.Entity.TestChangeReviewId))
+            .ToHashSet();
+        foreach (var entry in changedParents.Where(x => referencedSourceParentIds.Contains(x.Entity.Id)))
+        {
+            if (entry.State == EntityState.Deleted)
+                throw new DomainException("A Case package that supplies a Procedure origin cannot be deleted.");
+            var stateChanged = entry.Property(nameof(TestChangeReview.State)).IsModified
+                && !Equals(entry.Property(nameof(TestChangeReview.State)).OriginalValue, entry.Entity.State);
+            var historicalAdvance = Equals(entry.Property(nameof(TestChangeReview.State)).OriginalValue, TestChangeReviewState.Approved)
+                && entry.Entity.State == TestChangeReviewState.Superseded;
+            var identityChanged = new[] { "ProjectId", "ReleaseId", "Discipline", "ArtifactKind", "BaseNumber", "Revision", "ChangeRequestId" }
+                .Any(name => entry.Property(name).IsModified);
+            if ((stateChanged && !historicalAdvance) || identityChanged)
+                throw new DomainException("A Case package that supplies a Procedure origin may only advance Approved to Superseded.");
+        }
+
+        foreach (var entry in ChangeTracker.Entries<TestProcedureChange>()
+                     .Where(x => changedChildren.Contains(x.Entity.Id) && referencedIds.Contains(x.Entity.Id)))
+        {
+            if (entry.State == EntityState.Deleted || new[] { "TestChangeReviewId", "BaseNumber", "Revision" }
+                    .Any(name => entry.Property(name).IsModified))
+                throw new DomainException("A Case change identity referenced by a Procedure package is immutable.");
+        }
     }
 
     /// <summary>

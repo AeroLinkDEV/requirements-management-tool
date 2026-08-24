@@ -215,7 +215,7 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db, IProjectLadderPolicy
         foreach (var review in reviews.Where(x => string.IsNullOrEmpty(x.BaseNumber)
             && x.Outcome == TestChangeReviewOutcome.ChangeRequired))
         {
-            review.AssignControlledNumber(await IdentifierAllocator.NextTestChangeRequestAsync(db, review.Discipline, ct, ladderPolicy), DateTimeOffset.UtcNow, ladderPolicy);
+            review.AssignControlledNumber(await IdentifierAllocator.NextTestChangeRequestAsync(db, review.ArtifactKey, ct, ladderPolicy), DateTimeOffset.UtcNow, ladderPolicy);
             numbered++;
         }
 
@@ -382,7 +382,7 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db, IProjectLadderPolicy
                     review = new TestChangeReview(projectId, request.TargetReleaseId, request.Id,
                         discipline, request.DisplayNumber, now, caseContractVersion: 0);
                     review.RecordTestChangeRequired("verification.engineer", now);
-                    review.AssignControlledNumber(await IdentifierAllocator.NextTestChangeRequestAsync(db, discipline, ct, ladderPolicy), now, ladderPolicy);
+                    review.AssignControlledNumber(await IdentifierAllocator.NextTestChangeRequestAsync(db, review.ArtifactKey, ct, ladderPolicy), now, ladderPolicy);
                     db.TestChangeReviews.Add(review);
                     reviewsByRequestAndDiscipline.Add((request.Id, discipline), review);
                 }
@@ -506,7 +506,7 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db, IProjectLadderPolicy
             review.RecordTestChangeRequired("verification.engineer", now);
             if (string.IsNullOrEmpty(review.BaseNumber))
                 review.AssignControlledNumber(
-                    await IdentifierAllocator.NextTestChangeRequestAsync(db, review.Discipline, ct, ladderPolicy), now, ladderPolicy);
+                    await IdentifierAllocator.NextTestChangeRequestAsync(db, review.ArtifactKey, ct, ladderPolicy), now, ladderPolicy);
         }
         await db.SaveChangesAsync(ct);
 

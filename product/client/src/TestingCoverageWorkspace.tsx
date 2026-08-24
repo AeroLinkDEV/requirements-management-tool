@@ -11,7 +11,7 @@ import { isControlledTestChangeRequest, reviewsVisibleInCurrentRelease, successo
 import type { TestDiscipline } from './TestResultsWorkspace'
 import { LadderCapability, ladderAllows } from './projectLadder'
 import type { ProjectLadderProjection } from './projectLadder'
-import { verificationArtifactApiRoot, verificationArtifactChangeSegment, verificationArtifactWord } from './presentation'
+import { isVerificationProcedureKind, testChangeRequestAcronym, testChangeReviewWorkflowSubject, verificationArtifactApiRoot, verificationArtifactChangeSegment, verificationArtifactWord } from './presentation'
 import './DownstreamAssessmentQueue.css'
 import './HistoryExplorer.css'
 import './TestingCoverageWorkspace.css'
@@ -98,17 +98,20 @@ const disciplineLabel = (discipline: TestDiscipline) =>
   discipline === 'System' ? 'System' : discipline === 'HighLevelSoftware' ? 'Software HLR' : 'Software LLR'
 
 /// What the assessment is called, and what a test change request raised from it is called.
-const assessmentName = (discipline: TestDiscipline) =>
-  discipline === 'System' ? 'System Test' : discipline === 'HighLevelSoftware' ? 'HLR Test' : 'LLR Test'
-const tcrAcronym = (discipline: TestDiscipline) =>
-  discipline === 'System' ? 'SYSTPCR' : discipline === 'HighLevelSoftware' ? 'HLRTCCR' : 'LLRTCCR'
+const assessmentName = (discipline: TestDiscipline, artifactKind?: string) => {
+  const procedure = discipline !== 'System' && isVerificationProcedureKind(artifactKind)
+  return discipline === 'System' ? 'System Test' : discipline === 'HighLevelSoftware'
+    ? procedure ? 'HLR Procedure' : 'HLR Test'
+    : procedure ? 'LLR Procedure' : 'LLR Test'
+}
 const missingCaseFields = (request: TestChangeRequest) => [
   ['Title', request.title], ['Problem', request.problem],
   ['Analysis', request.analysis], ['Solution', request.solution],
 ].filter(([, value]) => !value?.trim()).map(([name]) => name)
 const tcrNewLabel = (discipline: TestDiscipline) =>
   discipline === 'System' ? 'System' : discipline === 'HighLevelSoftware' ? 'HLR' : 'LLR'
-const artifactWord = (discipline: TestDiscipline) => verificationArtifactWord(discipline === 'System' ? 'System' : discipline === 'HighLevelSoftware' ? 'HighLevel' : 'LowLevel')
+const artifactWord = (discipline: TestDiscipline, artifactKind?: string) => verificationArtifactWord(
+  discipline === 'System' ? 'System' : discipline === 'HighLevelSoftware' ? 'HighLevel' : 'LowLevel', artifactKind)
 
 /**
  * Whether the test assessment has been done, and what it concluded.
@@ -118,9 +121,9 @@ const artifactWord = (discipline: TestDiscipline) => verificationArtifactWord(di
  * stage of the same workflow in two unrelated vocabularies, so a reader could not carry what they had
  * learned from one to the other.
  */
-const testAssessmentStatus = (request: TestChangeRequest, discipline: TestDiscipline) => {
-  const name = assessmentName(discipline)
-  const acronym = tcrAcronym(discipline)
+const testAssessmentStatus = (request: TestChangeRequest, discipline: TestDiscipline, artifactKind?: string) => {
+  const name = assessmentName(discipline, artifactKind ?? request.artifactKind)
+  const acronym = testChangeRequestAcronym(discipline, request.artifactKind)
   if (request.state === 'Superseded') return `${name} Assessment Superseded`
   if (request.outcome === 'Pending') return `${name} Assessment Required`
   if (request.outcome === 'NoChangeRequired')
@@ -172,7 +175,7 @@ function ExistingCoverage({ item, coverage, artifactWord }: { item: ImpactItem; 
  * change request is approved, so nothing goes unnoticed; an engineer can also raise one deliberately when a
  * set of changes is best tested together.
  */
-export default function TestingCoverageWorkspace({ api, projectId, releaseId, releases, discipline, buildName, readOnly, programId, user, initialReviewId, onBack, onOpenRequirementRevision, onRaiseTestChangeRequest, onOpenTestChangeRequest, onLevelChange, ladder }: {
+export default function TestingCoverageWorkspace({ api, projectId, releaseId, releases, discipline, buildName, readOnly, programId, user, initialReviewId, onBack, onOpenRequirementRevision, onRaiseTestChangeRequest, onOpenTestChangeRequest, onLevelChange, ladder, artifactKind }: {
   api: string
   projectId: string
   releaseId: string
@@ -190,6 +193,7 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, re
   onOpenTestChangeRequest: (id: string) => void
   onLevelChange?: (level: SoftwareVerificationLevel) => void
   ladder: ProjectLadderProjection | null
+  artifactKind?: string
 }) {
   // Authority is per Program, and it is the server that enforces it. Reflecting it here is about not offering
   // somebody a control that will refuse them — an approval they cannot give is worse than no button at all.
@@ -271,8 +275,8 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, re
   const procedureTicket = useRef(0)
   const requirementTicket = useRef(0)
   const scope = discipline
-  const currentArtifactWord = artifactWord(discipline)
-  const artifactApiRoot = verificationArtifactApiRoot(discipline)
+  const currentArtifactWord = artifactWord(discipline, artifactKind)
+  const artifactApiRoot = verificationArtifactApiRoot(discipline, artifactKind)
 
   const load = useCallback(async () => {
     const mine = ++loadTicket.current
@@ -319,7 +323,7 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, re
     }
     if (nextRequests) {
       setRequests(nextRequests.items ?? [])
-      setCanCreate(Boolean(nextRequests.canCreate))
+      setCanCreate(Boolean(nextRequests.canCreate) && !isVerificationProcedureKind(artifactKind))
     }
     if (nextImpact) setImpact(nextImpact)
     if (!requestResponse.ok) {
@@ -330,7 +334,7 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, re
       recordClientOperationFailure('verification.coverage.load', new Error(`HTTP ${coverageResponse.status}`))
       setError('The requirement coverage for this build could not be read.')
     }
-  }, [api, projectId, releaseId, discipline])
+  }, [api, projectId, releaseId, discipline, artifactKind])
 
   useEffect(() => { void load() }, [load])
 
@@ -429,7 +433,7 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, re
     return [...options.values()]
   }, [requirementPicker, requirementSelectionItems])
 
-  const mine = requests.filter(x => x.discipline === discipline)
+  const mine = requests.filter(x => x.discipline === discipline && (!artifactKind || x.artifactKind === (isVerificationProcedureKind(artifactKind) ? 'Procedure' : 'Case')))
   const visibleMine = reviewsVisibleInCurrentRelease(mine)
   // Only packages that have been numbered are listed as change requests. An assessment that has not yet
   const authoringRequest = mine.find(x => x.id === authoring)
@@ -463,7 +467,7 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, re
     })
     setSaved(testChangeRequired
       ? `${result.displayNumber} raised for ${request.coveredChangeRequests.map(x => x.number).join(', ')}.`
-      : `No ${tcrAcronym(discipline)} required for ${request.coveredChangeRequests.map(x => x.number).join(', ')}.`)
+      : `No ${testChangeRequestAcronym(discipline, request.artifactKind)} required for ${request.coveredChangeRequests.map(x => x.number).join(', ')}.`)
   }, 'The test assessment could not be recorded.')
 
   const resolve = (item: ImpactItem, form: FormData) => act(async () => {
@@ -508,8 +512,7 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, re
     if (action === 'submit') { setSubmitting(undefined); setReviewApprover({ userId: '', name: '' }); setExtraStageApprovers([]) }
   }, 'The package could not be moved on.')
 
-  const workflowSubject = discipline === 'System' ? 'SystemTest'
-    : discipline === 'HighLevelSoftware' ? 'HighLevelSoftwareCase' : 'LowLevelSoftwareCase'
+  const workflowSubject = testChangeReviewWorkflowSubject(submitting?.discipline ?? discipline, submitting?.artifactKind ?? artifactKind)
   useEffect(() => {
     if (!submitting) return
     let active = true
@@ -570,7 +573,7 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, re
     if (!authoringReviewId) { setCreateError('This proposal has no test change request to belong to.'); return }
     setBusy(true); setCreateError(''); setError(''); setSaved('')
     try {
-      await apiRequest(`${api}/api/test-change-reviews/${authoringReviewId}/${verificationArtifactChangeSegment(discipline)}`, {
+      await apiRequest(`${api}/api/test-change-reviews/${authoringReviewId}/${verificationArtifactChangeSegment(discipline, authoringRequest?.artifactKind)}`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           kind: 'Introduce',
@@ -606,7 +609,7 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, re
         <div>
           {onBack && <button className="back" onClick={onBack}>← Command Center</button>}
           <p className="eyebrow">{disciplineLabel(discipline).toUpperCase()} TEST CHANGE CONTROL / BUILD {buildName.replace(/^Build\s+/i, '')}</p>
-          <h1>{discipline === 'System' ? 'System Test Change Requests' : 'Software Test Change Requests'}</h1>
+          <h1>{discipline === 'System' ? 'System Test Change Requests' : isVerificationProcedureKind(artifactKind) ? 'Software Procedure Change Requests' : 'Software Test Change Requests'}</h1>
           <p>Active and deferred {disciplineLabel(discipline)} test change requests owned by {buildName}.</p>
         </div>
         {canCreate && (
@@ -668,7 +671,7 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, re
           {/* Named for the question, not for the artefact one answer to it produces. Approved changes arrive
               here to be assessed; a test change request is what an assessment raises when it finds work. */}
           <h2>Downstream Assessments</h2>
-          <p>Approved upstream changes waiting for an explicit {assessmentName(discipline)} conclusion.</p>
+            <p>Approved upstream changes waiting for an explicit {assessmentName(discipline, artifactKind)} conclusion.</p>
           </div>
         </header>
         {!visibleMine.length && (
@@ -687,11 +690,11 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, re
             <div className="downstreamSource">
               <b>{request.coveredChangeRequests.map(x => x.number).join(', ')}</b>
               <span>{request.coveredChangeRequests[0]?.title ?? ''}</span>
-              <i>{assessmentName(discipline)} assessment</i>
+              <i>{assessmentName(discipline, artifactKind)} assessment</i>
             </div>
             <div className="downstreamConclusion">
-              <strong>{testAssessmentStatus(request, discipline)}</strong>
-              {request.outcome === 'ChangeRequired' && isControlledTestChangeRequest(request, tcrAcronym(discipline)) && (
+              <strong>{testAssessmentStatus(request, discipline, artifactKind)}</strong>
+              {request.outcome === 'ChangeRequired' && isControlledTestChangeRequest(request, testChangeRequestAcronym(discipline, request.artifactKind)) && (
                 <button type="button" className="linkedScr" onClick={() => setAuthoring(request.id)}>
                   {request.displayNumber} · {request.state === 'InReview' ? 'In review' : request.state}
                 </button>
@@ -700,7 +703,7 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, re
                 <details className="decisionHistory tcrRevisionHistory">
                   <summary>Show {supersededRevisions.length} superseded history item{supersededRevisions.length === 1 ? '' : 's'}</summary>
                   {supersededRevisions.map(prior => {
-                    const controlled = isControlledTestChangeRequest(prior, tcrAcronym(discipline))
+                    const controlled = isControlledTestChangeRequest(prior, testChangeRequestAcronym(discipline, prior.artifactKind))
                     return <button type="button" className="linkedScr" key={prior.id} onClick={() => controlled
                       ? setAuthoring(prior.id)
                       : setOpened(prior.id)}>
@@ -718,7 +721,7 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, re
           )
         })}
         <p className="downstreamHelp">
-          One {tcrAcronym(discipline)} may answer several assessments, and an assessment records one decision
+          One {testChangeRequestAcronym(discipline, artifactKind)} may answer several assessments, and an assessment records one decision
           for every requirement the change touched.
         </p>
       </section>
@@ -728,6 +731,7 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, re
         releases={releases}
         activeReleaseId={releaseId}
         discipline={discipline}
+        artifactKind={artifactKind}
         onOpen={onOpenTestChangeRequest}
         embedded
       />
@@ -740,9 +744,9 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, re
           <aside className="downstreamDrawer" role="dialog" aria-modal="true" aria-labelledby="test-assessment-title">
             <header>
               <div>
-                <p className="eyebrow">{assessmentName(discipline).toUpperCase()} ENGINEERING DECISION</p>
+                <p className="eyebrow">{assessmentName(discipline, artifactKind).toUpperCase()} ENGINEERING DECISION</p>
                 <h2 id="test-assessment-title">{request.coveredChangeRequests.map(x => x.number).join(', ')} test impact</h2>
-                <strong>{testAssessmentStatus(request, discipline)}</strong>
+                <strong>{testAssessmentStatus(request, discipline, artifactKind)}</strong>
               </div>
               <button type="button" className="quiet" onClick={() => setOpened('')} aria-label="Close test assessment">Close</button>
             </header>
@@ -753,8 +757,8 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, re
                 ? <div className="recordedConclusion" data-outcome={request.outcome}>
                     <b>Recorded conclusion</b>
                     <p>{request.outcome === 'NoChangeRequired'
-                      ? `No ${tcrAcronym(discipline)} is required.`
-                      : `${tcrAcronym(discipline)} work is required, and is controlled by the linked package.`}</p>
+                      ? `No ${testChangeRequestAcronym(discipline, request.artifactKind)} is required.`
+                      : `${testChangeRequestAcronym(discipline, request.artifactKind)} work is required, and is controlled by the linked package.`}</p>
                     {request.decidedBy && <span className="conclusionAuthor">Recorded by <PersonName userName={request.decidedBy} /></span>}
                     {request.noChangeRationale && <p className="conclusionRationale">{request.noChangeRationale}</p>}
                   </div>
@@ -769,7 +773,7 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, re
                   </button>
                 </div>
               )}
-              {request.outcome === 'ChangeRequired' && isControlledTestChangeRequest(request, tcrAcronym(discipline)) && (
+              {request.outcome === 'ChangeRequired' && isControlledTestChangeRequest(request, testChangeRequestAcronym(discipline, request.artifactKind)) && (
                 <ul className="drawerChanges">
                   <li className="linkedDraft">
                     <button type="button" className="drawerArtifactLink" onClick={() => setAuthoring(request.id)}>{request.displayNumber}</button>
@@ -782,8 +786,8 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, re
                 {/* No claim step. Answering an unheld package is what takes it on. */}
                 {request.outcome === 'Pending' && request.capabilities.canDecide && (
                   <>
-                    <button type="button" disabled={busy} onClick={() => void conclude(request, true)}>{tcrAcronym(discipline)} required</button>
-                    <button type="button" className="quiet" disabled={busy} onClick={() => setDecliningTest(request)}>No {tcrAcronym(discipline)} required</button>
+                    <button type="button" disabled={busy} onClick={() => void conclude(request, true)}>{testChangeRequestAcronym(discipline, request.artifactKind)} required</button>
+                    <button type="button" className="quiet" disabled={busy} onClick={() => setDecliningTest(request)}>No {testChangeRequestAcronym(discipline, request.artifactKind)} required</button>
                   </>
                 )}
                 {canTest && request.state === 'Draft' && (
@@ -1138,8 +1142,8 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, re
               setDecliningTest(undefined); setDeclineRationale('')
             }
           }}>
-            <p className="eyebrow">{assessmentName(discipline).toUpperCase()} ASSESSMENT</p>
-            <h2>No {tcrAcronym(discipline)} required</h2>
+            <p className="eyebrow">{assessmentName(discipline, artifactKind).toUpperCase()} ASSESSMENT</p>
+            <h2>No {testChangeRequestAcronym(discipline, decliningTest.artifactKind)} required</h2>
             {/* This conclusion raises nothing, so nothing downstream will ever examine it. The reasoning is
                 the only record of the judgement, which is why it cannot be skipped. */}
             <p>

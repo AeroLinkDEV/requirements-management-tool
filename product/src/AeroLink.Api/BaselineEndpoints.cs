@@ -85,13 +85,14 @@ public static class BaselineEndpoints
         // release a package has the build it belongs to, and where a change request counts requirement changes
         // a package counts procedure changes.
         app.MapGet("/api/history/test-change-requests", async (Guid projectId, string? search, Guid? releaseId,
-            TestChangeReviewDiscipline? discipline, string? state, string? baseNumber, bool? historical, int page, int pageSize,
+            TestChangeReviewDiscipline? discipline, VerificationArtifactKind? artifactKind, string? state, string? baseNumber, bool? historical, int page, int pageSize,
             HttpContext http, AeroLinkDbContext db, IProjectLadderPolicyResolver policyResolver, CancellationToken ct) =>
         {
             if (!await http.HasProjectAccessAsync(db, projectId, ct)) return Results.Forbid();
             page = Math.Max(1, page == 0 ? 1 : page); pageSize = Math.Clamp(pageSize == 0 ? 50 : pageSize, 1, 200);
             var source = db.TestChangeReviews.AsNoTracking().Where(x => x.ProjectId == projectId);
             if (discipline is not null) source = source.Where(x => x.Discipline == discipline);
+            if (artifactKind is not null) source = source.Where(x => x.ArtifactKind == artifactKind);
             if (!string.IsNullOrWhiteSpace(state))
             {
                 if (Enum.TryParse<TestChangeReviewState>(state, true, out var parsedState))
@@ -131,20 +132,48 @@ public static class BaselineEndpoints
                         code = "ladder_discipline_unavailable"
                     });
 
+                // Prefix resolution is deliberately after the typed enabled-kind gate. The vocabulary contains
+                // dormant Procedure prefixes for identity and migration purposes, but the current legacy ladder
+                // does not enable software Procedure packages and must not expose their history as a usable page.
+                if (discipline is { } requestedDisciplineForKind)
+                {
+                    var requestedLevel = ladderPolicy.RequirementLevelFor(requestedDisciplineForKind);
+                    var requestedKind = artifactKind ?? (requestedDisciplineForKind == TestChangeReviewDiscipline.System
+                        ? VerificationArtifactKind.Procedure : VerificationArtifactKind.Case);
+                    if (!ladderPolicy.VerificationProfile(requestedLevel).Enables(requestedKind))
+                        return Results.BadRequest(new
+                        {
+                            error = $"The {requestedKind} test-change register is not enabled for {requestedDisciplineForKind} in the active project ladder.",
+                            code = "artifact_kind_unavailable"
+                        });
+                }
+                else if (artifactKind == VerificationArtifactKind.Procedure)
+                {
+                    return Results.BadRequest(new
+                    {
+                        error = "A software Procedure test-change register is not enabled in the active project ladder.",
+                        code = "artifact_kind_unavailable"
+                    });
+                }
+
                 source = source.Where(x => x.BaseNumber != "" && x.Outcome != TestChangeReviewOutcome.Pending);
                 if (discipline is { } requestedDiscipline)
                 {
-                    var prefix = ladderPolicy.TestChangeReviewPrefix(requestedDiscipline) + "-";
+                    var key = new VerificationArtifactKey(
+                        VerificationArtifactProfile.ToNeutral(requestedDiscipline),
+                        artifactKind ?? (requestedDiscipline == TestChangeReviewDiscipline.System
+                            ? VerificationArtifactKind.Procedure : VerificationArtifactKind.Case));
+                    var prefix = ladderPolicy.TestChangeReviewPrefix(key) + "-";
                     source = source.Where(x => x.Discipline == requestedDiscipline && x.BaseNumber.StartsWith(prefix));
                 }
                 else
                 {
                     var systemPrefix = configuredDisciplines.Contains(TestChangeReviewDiscipline.System)
-                        ? ladderPolicy.TestChangeReviewPrefix(TestChangeReviewDiscipline.System) + "-" : null;
+                        ? ladderPolicy.TestChangeReviewPrefix(new VerificationArtifactKey(VerificationDiscipline.System, VerificationArtifactKind.Procedure)) + "-" : null;
                     var highLevelPrefix = configuredDisciplines.Contains(TestChangeReviewDiscipline.HighLevelSoftware)
-                        ? ladderPolicy.TestChangeReviewPrefix(TestChangeReviewDiscipline.HighLevelSoftware) + "-" : null;
+                        ? ladderPolicy.TestChangeReviewPrefix(new VerificationArtifactKey(VerificationDiscipline.HighLevelSoftware, artifactKind ?? VerificationArtifactKind.Case)) + "-" : null;
                     var lowLevelPrefix = configuredDisciplines.Contains(TestChangeReviewDiscipline.LowLevelSoftware)
-                        ? ladderPolicy.TestChangeReviewPrefix(TestChangeReviewDiscipline.LowLevelSoftware) + "-" : null;
+                        ? ladderPolicy.TestChangeReviewPrefix(new VerificationArtifactKey(VerificationDiscipline.LowLevelSoftware, artifactKind ?? VerificationArtifactKind.Case)) + "-" : null;
                     source = source.Where(x =>
                         (systemPrefix != null && x.Discipline == TestChangeReviewDiscipline.System && x.BaseNumber.StartsWith(systemPrefix))
                         || (highLevelPrefix != null && x.Discipline == TestChangeReviewDiscipline.HighLevelSoftware && x.BaseNumber.StartsWith(highLevelPrefix))
@@ -173,6 +202,8 @@ public static class BaselineEndpoints
                     // A package belongs to the build it was raised against; that is its allocation.
                     targetReleaseId = x.ReleaseId,
                     discipline = x.Discipline.ToString(),
+                    artifactKind = x.ArtifactKind.ToString(),
+                    artifactLabel = TestChangeRequestSourceEligibility.ArtifactLabel(x.ArtifactKey),
                     artifactCount = x.ProcedureChanges.Count,
                     procedureCount = x.ProcedureChanges.Count, // compatibility alias
                     x.CreatedAt,

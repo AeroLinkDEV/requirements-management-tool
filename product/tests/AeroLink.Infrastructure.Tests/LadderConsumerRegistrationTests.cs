@@ -62,10 +62,18 @@ public sealed class LadderConsumerRegistrationTests
             "baseline.controlled-documents",
             "release.readiness",
         }, typed.Select(x => x.Id).ToArray());
-        Assert.All(typed, registration =>
-            Assert.DoesNotContain(registration.SupportedArtifactKeys,
-                x => x.Kind == VerificationArtifactKind.Procedure
-                    && x.Discipline != VerificationDiscipline.System));
+        var packageConsumers = typed.Where(x => x.Id is
+            "verification.procedure-level" or "verification.test-change-workflow").ToArray();
+        Assert.Equal(2, packageConsumers.Length);
+        Assert.All(packageConsumers, registration =>
+            Assert.Contains(registration.SupportedArtifactKeys,
+                x => x == new VerificationArtifactKey(VerificationDiscipline.HighLevelSoftware, VerificationArtifactKind.Procedure)));
+        Assert.All(packageConsumers, registration =>
+            Assert.Contains(registration.SupportedArtifactKeys,
+                x => x == new VerificationArtifactKey(VerificationDiscipline.LowLevelSoftware, VerificationArtifactKind.Procedure)));
+        Assert.DoesNotContain(typed.Where(x => !packageConsumers.Contains(x)), registration =>
+            registration.SupportedArtifactKeys.Any(x => x.Kind == VerificationArtifactKind.Procedure
+                && x.Discipline != VerificationDiscipline.System));
         Assert.Equal(VerificationArtifactCapability.Coverage,
             typed.Single(x => x.Id == "verification.coverage").SupportedCapabilities);
         Assert.DoesNotContain(typed, x => x.Id == "navigation.primary");
@@ -79,6 +87,24 @@ public sealed class LadderConsumerRegistrationTests
             registrations.Cast<ILadderConsumerRegistration>().Concat(typed), typed,
             currentProfile);
         Assert.True(typedManifest.IsReady);
+
+        var packageProfile = new[]
+        {
+            VerificationArtifactVocabulary.Definition(new(VerificationDiscipline.System, VerificationArtifactKind.Procedure)),
+            VerificationArtifactVocabulary.Definition(new(VerificationDiscipline.HighLevelSoftware, VerificationArtifactKind.Case)),
+            VerificationArtifactVocabulary.Definition(new(VerificationDiscipline.HighLevelSoftware, VerificationArtifactKind.Procedure)),
+            VerificationArtifactVocabulary.Definition(new(VerificationDiscipline.LowLevelSoftware, VerificationArtifactKind.Case)),
+            VerificationArtifactVocabulary.Definition(new(VerificationDiscipline.LowLevelSoftware, VerificationArtifactKind.Procedure)),
+        };
+        var packageManifest = LadderConsumerManifestCatalog.BuildV2(
+            registrations.Cast<ILadderConsumerRegistration>().Concat(typed), typed, packageProfile);
+        Assert.False(packageManifest.IsReady);
+        Assert.Contains(packageManifest.MissingArtifactCoverage, x =>
+            x.ArtifactKey == new VerificationArtifactKey(VerificationDiscipline.HighLevelSoftware, VerificationArtifactKind.Procedure)
+            && x.RequiredCapabilities.HasFlag(VerificationArtifactCapability.Execution));
+        Assert.Contains(packageManifest.MissingArtifactCoverage, x =>
+            x.ArtifactKey == new VerificationArtifactKey(VerificationDiscipline.LowLevelSoftware, VerificationArtifactKind.Procedure)
+            && x.RequiredCapabilities.HasFlag(VerificationArtifactCapability.ControlledDocument));
 
         var untypedManifest = LadderConsumerManifestCatalog.BuildV2(registrations, [], currentProfile);
         Assert.False(untypedManifest.IsReady);

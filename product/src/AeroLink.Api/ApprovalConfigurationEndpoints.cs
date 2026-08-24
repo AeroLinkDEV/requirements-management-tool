@@ -2,6 +2,7 @@ using AeroLink.Domain.ChangeControl;
 using AeroLink.Domain.Common;
 using AeroLink.Domain.Identity;
 using AeroLink.Domain.Hierarchy;
+using AeroLink.Domain.Verification;
 using AeroLink.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 
@@ -25,6 +26,7 @@ public static class ApprovalConfigurationEndpoints
     [
         ReviewSubject.System, ReviewSubject.Software, ReviewSubject.Interface,
         ReviewSubject.SystemTest, ReviewSubject.HighLevelSoftwareCase, ReviewSubject.LowLevelSoftwareCase,
+        ReviewSubject.HighLevelSoftwareProcedure, ReviewSubject.LowLevelSoftwareProcedure,
     ];
 
     public static void MapApprovalConfigurationEndpoints(this WebApplication app)
@@ -244,6 +246,10 @@ public static class ApprovalConfigurationEndpoints
             && policy.Definition(RequirementLevel.HighLevel).Verification is not null,
         ReviewSubject.LowLevelSoftwareCase => policy.OrderedLevels.Contains(RequirementLevel.LowLevel)
             && policy.Definition(RequirementLevel.LowLevel).Verification is not null,
+        ReviewSubject.HighLevelSoftwareProcedure => policy.OrderedLevels.Contains(RequirementLevel.HighLevel)
+            && policy.VerificationProfile(RequirementLevel.HighLevel).Enables(VerificationArtifactKind.Procedure),
+        ReviewSubject.LowLevelSoftwareProcedure => policy.OrderedLevels.Contains(RequirementLevel.LowLevel)
+            && policy.VerificationProfile(RequirementLevel.LowLevel).Enables(VerificationArtifactKind.Procedure),
         _ => false,
     };
 

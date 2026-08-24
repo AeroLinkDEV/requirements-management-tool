@@ -211,6 +211,7 @@ public interface ILadderPolicy
     string TestProcedurePrefix(TestProcedureLevel level);
     bool IsKnownTestProcedurePrefix(string baseNumber);
     string TestChangeReviewPrefix(TestChangeReviewDiscipline discipline);
+    string TestChangeReviewPrefix(VerificationArtifactKey key);
     ReviewSubject WorkflowSubject(ChangeRequestType type);
     ReviewSubject WorkflowSubject(TestChangeReviewDiscipline discipline);
     /// <summary>ReqIF's characterized legacy compatibility rule: unknown or missing level means System.</summary>
@@ -303,8 +304,14 @@ public sealed class LegacyLadderPolicy : ILadderPolicy, ILegacyLadderCompatibili
         Definition(level).VerificationProfile
         ?? throw new DomainException($"The {level} definition has no verification profile.");
 
-    public VerificationArtifactDefinition VerificationArtifact(VerificationArtifactKey key) =>
-        VerificationArtifactVocabulary.Definition(key);
+    public VerificationArtifactDefinition VerificationArtifact(VerificationArtifactKey key)
+    {
+        var definition = VerificationArtifactVocabulary.Definition(key);
+        var profile = VerificationProfile(definition.AssessmentTarget);
+        if (!profile.Enables(key.Kind))
+            throw new DomainException($"The project ladder does not enable verification artifact {key}.");
+        return definition;
+    }
 
     public string ArtifactPrefix(VerificationArtifactKey key) => VerificationArtifact(key).ArtifactPrefix;
     public string TestChangeRequestPrefix(VerificationArtifactKey key) => VerificationArtifact(key).TestChangeRequestPrefix;
@@ -420,6 +427,8 @@ public sealed class LegacyLadderPolicy : ILadderPolicy, ILegacyLadderCompatibili
     public string TestChangeReviewPrefix(TestChangeReviewDiscipline discipline) =>
         Definitions.SingleOrDefault(x => x.Verification?.Discipline == discipline)?.VerificationProfile?.ExecutableArtifact.TestChangeRequestPrefix
         ?? throw Unknown(discipline);
+
+    public string TestChangeReviewPrefix(VerificationArtifactKey key) => VerificationArtifact(key).TestChangeRequestPrefix;
 
     public ReviewSubject WorkflowSubject(ChangeRequestType type) => type switch
     {
@@ -548,8 +557,14 @@ public class ResolvedProjectLadderPolicy : ILadderPolicy
         ?? throw new DomainException($"The {level} definition has no verification binding.");
     public VerificationArtifactProfile VerificationProfile(RequirementLevel level) => Definition(level).VerificationProfile
         ?? throw new DomainException($"The {level} definition has no verification profile.");
-    public VerificationArtifactDefinition VerificationArtifact(VerificationArtifactKey key) =>
-        VerificationArtifactVocabulary.Definition(key);
+    public VerificationArtifactDefinition VerificationArtifact(VerificationArtifactKey key)
+    {
+        var definition = VerificationArtifactVocabulary.Definition(key);
+        var profile = VerificationProfile(definition.AssessmentTarget);
+        if (!profile.Enables(key.Kind))
+            throw new DomainException($"The project ladder does not enable verification artifact {key}.");
+        return definition;
+    }
     public string ArtifactPrefix(VerificationArtifactKey key) => VerificationArtifact(key).ArtifactPrefix;
     public string TestChangeRequestPrefix(VerificationArtifactKey key) => VerificationArtifact(key).TestChangeRequestPrefix;
     public ReviewSubject WorkflowSubject(VerificationArtifactKey key) => VerificationArtifact(key).ReviewSubject;
@@ -609,6 +624,14 @@ public class ResolvedProjectLadderPolicy : ILadderPolicy
         _ = RequirementLevelFor(discipline);
         return definitions.SingleOrDefault(x => x.Verification?.Discipline == discipline)?.VerificationProfile?.ExecutableArtifact.TestChangeRequestPrefix
             ?? throw new DomainException($"The project ladder does not configure review discipline {discipline}.");
+    }
+    public string TestChangeReviewPrefix(VerificationArtifactKey key)
+    {
+        var definition = VerificationArtifact(key);
+        var profile = VerificationProfile(definition.AssessmentTarget);
+        if (!profile.Enables(key.Kind))
+            throw new DomainException($"The project ladder does not enable verification artifact {key}.");
+        return definition.TestChangeRequestPrefix;
     }
     public ReviewSubject WorkflowSubject(ChangeRequestType type)
     {

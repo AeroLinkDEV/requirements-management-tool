@@ -1,4 +1,5 @@
 using System.Net;
+using AeroLink.Domain.Verification;
 using AeroLink.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
@@ -68,6 +69,21 @@ public sealed class ExactParentOrDerivedPostgresQualificationTests
         Assert.Equal(string.Empty, blankDerivedRequirement.DerivedRationale);
         Assert.Equal("Unspecified", unknownMarkerRequirement.ParentKind.ToString());
 
+        // The predecessor legitimately allowed more than one ProblemReport-origin package for the same
+        // report/revision. The #725 origin index must not retroactively reject or rewrite that history.
+        var historicalProblemReportRows = await db.TestChangeReviews.AsNoTracking()
+            .Where(x => x.SourceProblemReportNumber.StartsWith("PR-725-HIST-"))
+            .OrderBy(x => x.BaseNumber)
+            .Select(x => new { x.BaseNumber, x.SourceProblemReportNumber, x.OriginKind, x.OriginReferenceId, x.ArtifactKind })
+            .ToListAsync();
+        Assert.Equal(2, historicalProblemReportRows.Count);
+        Assert.All(historicalProblemReportRows, x =>
+        {
+            Assert.Equal("ProblemReport", x.OriginKind.ToString());
+            Assert.Equal("Case", x.ArtifactKind.ToString());
+            Assert.NotEqual(Guid.Empty, x.OriginReferenceId);
+        });
+
         // Suspect carried links are lifecycle evidence, not the immutable authored parent selection.
         Assert.Equal(3, await db.RequirementTraces.CountAsync(x =>
             x.SourceRevisionId == fixture.AllocatedRequirementRevisionId));
@@ -107,7 +123,7 @@ public sealed class ExactParentOrDerivedPostgresQualificationTests
         Assert.Equal(before, await SnapshotAsync(db));
 
         // The predecessor's signed review/hash rows are not rewritten by this additive migration.
-        Assert.Equal(3, await db.TestChangeReviews.CountAsync());
+        Assert.Equal(5, await db.TestChangeReviews.CountAsync());
         Assert.Equal(3, await db.Set<AeroLink.Domain.Verification.TestProcedureChange>().CountAsync());
     }
 
@@ -124,6 +140,158 @@ public sealed class ExactParentOrDerivedPostgresQualificationTests
         Assert.Equal(1, await db.Database.SqlQueryRaw<int>(
             $"SELECT COUNT(*)::int AS \"Value\" FROM \"__EFMigrationsHistory\" WHERE \"MigrationId\" = '{Migration}'")
             .SingleAsync());
+    }
+
+    [DisposablePostgresFact]
+    public async Task Issue725_case_origin_is_exact_discriminated_immutable_and_database_guarded()
+    {
+        var connection = QualificationConnectionOrThrow();
+        await using var db = await MigrateToPredecessorAsync(connection);
+        var fixture = await SeedPredecessorFixtureAsync(db);
+        await db.Database.GetService<IMigrator>().MigrateAsync();
+        db.ChangeTracker.Clear();
+
+        string packageSql(Guid id, string discipline, string originKind, Guid originId, string baseNumber,
+            string sourceNumber, int revision = 0, Guid? sourceReviewId = null)
+        {
+            var parentId = sourceReviewId ?? fixture.MaterializedModifyReviewId;
+            return $"""
+            INSERT INTO "test_change_reviews"
+                ("Id","ProjectId","ReleaseId","ChangeRequestId","Discipline","SourceChangeRequestNumber",
+                 "BaseNumber","Revision","State","ApprovalRationale","CreatedAt","UpdatedAt","Version",
+                 "OriginatingProblemReportId","SourceProblemReportNumber","Title","Problem","Analysis","Solution",
+                 "AuthorId","AssignedEngineerId","SelectedApproverId","Outcome","NoChangeRationale","DecidedBy",
+                 "DecidedAt","SupersededByTestChangeRequestId","SupersededReason","CaseContractVersion",
+                 "ProblemRich","AnalysisRich","SolutionRich","ApprovedBy","ApprovedAt","SubmittedBy","SubmittedAt",
+                 "DeferralReason","DeferredFromState","ArtifactKind","OriginKind","OriginReferenceId","SourceCaseOriginNumber")
+            SELECT '{id}', "ProjectId", "ReleaseId", NULL, '{discipline}', '',
+                   '{baseNumber}', {revision}, 'Approved', "ApprovalRationale", "CreatedAt", "UpdatedAt", 1,
+                   NULL, '', 'Procedure package', "Problem", "Analysis", "Solution",
+                   "AuthorId", "AssignedEngineerId", "SelectedApproverId", 'ChangeRequired', "NoChangeRationale",
+                   "DecidedBy", "DecidedAt", NULL, "SupersededReason", "CaseContractVersion",
+                   "ProblemRich", "AnalysisRich", "SolutionRich", "ApprovedBy", "ApprovedAt",
+                   "SubmittedBy", "SubmittedAt", "DeferralReason", "DeferredFromState", 'Procedure',
+                   '{originKind}', '{originId}', '{sourceNumber}'
+              FROM "test_change_reviews"
+             WHERE "Id" = '{parentId}';
+            """;
+        }
+        async Task AssertRejected(string sql) =>
+            await Assert.ThrowsAnyAsync<Exception>(() => Sql(db, sql));
+
+        var validId = Guid.NewGuid();
+        var sourceNumber = "HLRTC-000738.01";
+        await Sql(db, packageSql(validId, "HighLevelSoftware", "CaseChange",
+            fixture.MaterializedModifyChangeId, "HLRTPCR-QUAL-01", sourceNumber));
+
+        db.ChangeTracker.Clear();
+        var persisted = await db.TestChangeReviews.AsNoTracking().SingleAsync(x => x.Id == validId);
+        Assert.Equal(TestChangeReviewOriginKind.CaseChange, persisted.OriginKind);
+        Assert.Equal(fixture.MaterializedModifyChangeId, persisted.OriginReferenceId);
+        Assert.Equal(sourceNumber, persisted.SourceCaseOriginNumber);
+        Assert.Equal(VerificationArtifactKind.Procedure, persisted.ArtifactKind);
+        Assert.Equal(TestChangeReviewDiscipline.HighLevelSoftware, persisted.Discipline);
+
+        // An eligible Case assessment can be used once, then its rationale/timestamps may still be maintained,
+        // but reopening or changing its exact identity is refused while the Procedure package points at it.
+        var assessmentId = Guid.NewGuid();
+        var assessmentSourceChangeId = await db.SystemChangeRequests.AsNoTracking()
+            .Where(x => x.BaseNumber == "SCR-738")
+            .Select(x => x.Id)
+            .SingleAsync();
+        await Sql(db, $"""
+            INSERT INTO "verification_impact_items"
+                ("Id","ProjectId","ReleaseId","ChangeRequestId","TestChangeReviewId","Trigger","State",
+                 "RequirementRevisionId","SubjectDisplayNumber","DeclaredVerificationMethod","Outcome",
+                 "ProcedureChangeAction","PreReleaseEvidenceRequired","ResolutionRationale","ResolvedBy",
+                 "ResolvedAt","RaisedAt","UpdatedAt","Version")
+            SELECT '{assessmentId}', "ProjectId", "ReleaseId", '{assessmentSourceChangeId}', '{fixture.PendingModifyReviewId}',
+                    'RequirementIntroduced', 'Resolved', '{fixture.AllocatedRequirementRevisionId}', 'LLR-ASSESS-738', 'Test',
+                   'NewProcedureRequired', 'CreateNew', FALSE, 'Procedure work is required.', 'qualification',
+                   '2026-08-23 12:00:00+00', '2026-08-23 12:00:00+00', '2026-08-23 12:00:00+00', 1
+              FROM "test_change_reviews"
+             WHERE "Id" = '{fixture.PendingModifyReviewId}';
+            """);
+        var assessmentPackageId = Guid.NewGuid();
+        await Sql(db, packageSql(assessmentPackageId, "LowLevelSoftware", "CaseAssessment", assessmentId,
+            "LLRTPCR-ASSESS-01", "LLR-ASSESS-738", sourceReviewId: fixture.PendingModifyReviewId));
+        await Sql(db, $"""
+            UPDATE "verification_impact_items"
+               SET "ResolutionRationale" = 'Maintained rationale without changing the decision.'
+             WHERE "Id" = '{assessmentId}';
+            """);
+        await AssertRejected($"UPDATE \"verification_impact_items\" SET \"State\" = 'Open' WHERE \"Id\" = '{assessmentId}';");
+        await AssertRejected($"UPDATE \"verification_impact_items\" SET \"SubjectDisplayNumber\" = 'HLR-ASSESS-MUTATED' WHERE \"Id\" = '{assessmentId}';");
+        await AssertRejected($"UPDATE \"test_change_reviews\" SET \"Discipline\" = 'HighLevelSoftware' WHERE \"Id\" = '{fixture.PendingModifyReviewId}';");
+        await AssertRejected($"UPDATE \"test_change_reviews\" SET \"ArtifactKind\" = 'Procedure' WHERE \"Id\" = '{fixture.PendingModifyReviewId}';");
+        await AssertRejected($"UPDATE \"test_change_reviews\" SET \"State\" = 'Superseded' WHERE \"Id\" = '{fixture.PendingModifyReviewId}';");
+        await Sql(db, $"UPDATE \"test_change_reviews\" SET \"State\" = 'InReview' WHERE \"Id\" = '{fixture.PendingModifyReviewId}';");
+        await Sql(db, $"UPDATE \"test_change_reviews\" SET \"State\" = 'Approved' WHERE \"Id\" = '{fixture.PendingModifyReviewId}';");
+        await Sql(db, $"UPDATE \"test_change_reviews\" SET \"State\" = 'Superseded' WHERE \"Id\" = '{fixture.PendingModifyReviewId}';");
+        await Sql(db, $"UPDATE \"test_change_reviews\" SET \"ApprovalRationale\" = 'Existing rev0 assessment package remains writable.' WHERE \"Id\" = '{assessmentPackageId}';");
+        var freshAssessmentId = Guid.NewGuid();
+        await Sql(db, $"""
+            INSERT INTO "verification_impact_items"
+                ("Id","ProjectId","ReleaseId","ChangeRequestId","TestChangeReviewId","Trigger","State",
+                 "RequirementRevisionId","SubjectDisplayNumber","DeclaredVerificationMethod","Outcome",
+                 "ProcedureChangeAction","PreReleaseEvidenceRequired","ResolutionRationale","ResolvedBy",
+                 "ResolvedAt","RaisedAt","UpdatedAt","Version")
+            SELECT '{freshAssessmentId}', "ProjectId", "ReleaseId", '{assessmentSourceChangeId}', '{fixture.PendingModifyReviewId}',
+                   'RequirementIntroduced', 'Resolved', '{fixture.AllocatedRequirementRevisionId}', 'LLR-ASSESS-739', 'Test',
+                   'NewProcedureRequired', 'CreateNew', FALSE, 'Fresh assessment must not create from superseded source.', 'qualification',
+                   '2026-08-23 12:00:00+00', '2026-08-23 12:00:00+00', '2026-08-23 12:00:00+00', 1
+              FROM "test_change_reviews"
+             WHERE "Id" = '{fixture.PendingModifyReviewId}';
+            """);
+        await AssertRejected(packageSql(Guid.NewGuid(), "LowLevelSoftware", "CaseAssessment", freshAssessmentId,
+            "LLRTPCR-ASSESS-FRESH", "LLR-ASSESS-739", sourceReviewId: fixture.PendingModifyReviewId));
+
+        // Once a Procedure package exists, its exact source Case package may advance only to Superseded. A
+        // dependent revision retains that historical origin; a brand-new revision-0 package may not use it.
+        var supersededOnlyChangeId = Guid.NewGuid();
+        await Sql(db, $"""
+            INSERT INTO "test_procedure_changes"
+                ("Id","TestChangeReviewId","BaseNumber","Revision","Level","Kind","Objective",
+                 "Preconditions","Steps","ExpectedResult","Rationale","DrivingRequirementRevisionIdsJson")
+            VALUES ('{supersededOnlyChangeId}', '{fixture.MaterializedModifyReviewId}', 'HLRTC-738-NEW', 2,
+                    'HighLevel', 'Modify', 'objective', 'preconditions', 'steps', 'expected', 'rationale',
+                    '["{fixture.AllocatedRequirementRevisionId:D}"]');
+            """);
+        await AssertRejected($"UPDATE \"test_change_reviews\" SET \"State\" = 'Draft' WHERE \"Id\" = '{fixture.MaterializedModifyReviewId}';");
+        await Sql(db, $"""
+            UPDATE "test_change_reviews"
+               SET "State" = 'Superseded'
+              WHERE "Id" = '{fixture.MaterializedModifyReviewId}';
+            """);
+        await Sql(db, $"UPDATE \"test_change_reviews\" SET \"ApprovalRationale\" = 'Existing rev0 CaseChange package remains writable.' WHERE \"Id\" = '{validId}';");
+        await AssertRejected(packageSql(Guid.NewGuid(), "HighLevelSoftware", "CaseChange",
+            supersededOnlyChangeId, "HLRTPCR-SUPERSEDED-NEW", "HLRTC-738-NEW.02"));
+        var successorId = Guid.NewGuid();
+        await Sql(db, packageSql(successorId, "HighLevelSoftware", "CaseChange",
+            fixture.MaterializedModifyChangeId, "HLRTPCR-QUAL-01", sourceNumber, revision: 1));
+        Assert.Equal(1, await db.TestChangeReviews.AsNoTracking()
+            .Where(x => x.Id == successorId).Select(x => x.Revision).SingleAsync());
+        await AssertRejected($"UPDATE \"test_change_reviews\" SET \"ProjectId\" = '{Guid.NewGuid()}' WHERE \"Id\" = '{fixture.MaterializedModifyReviewId}';");
+        await AssertRejected($"UPDATE \"test_procedure_changes\" SET \"BaseNumber\" = 'HLRTC-MUTATED' WHERE \"Id\" = '{fixture.MaterializedModifyChangeId}';");
+
+        var tracked = await db.TestChangeReviews.SingleAsync(x => x.Id == validId);
+        var successor = tracked.StartNextRevision("qualification", DateTimeOffset.Parse("2026-08-23T12:00:00Z"), false);
+        Assert.Equal(TestChangeReviewOriginKind.CaseChange, successor.OriginKind);
+        Assert.Equal(fixture.MaterializedModifyChangeId, successor.OriginReferenceId);
+        Assert.Equal(sourceNumber, successor.SourceCaseOriginNumber);
+
+        // A Case origin cannot be attached to System, a dangling UUID, or an ID from the wrong source table.
+        await AssertRejected(packageSql(Guid.NewGuid(), "System", "CaseChange",
+            fixture.MaterializedModifyChangeId, "SYSTPCR-QUAL-01", sourceNumber));
+        await AssertRejected(packageSql(Guid.NewGuid(), "HighLevelSoftware", "CaseChange",
+            Guid.NewGuid(), "HLRTPCR-QUAL-02", sourceNumber));
+        await AssertRejected(packageSql(Guid.NewGuid(), "HighLevelSoftware", "CaseChange",
+            fixture.MaterializedModifyReviewId, "HLRTPCR-QUAL-03", sourceNumber));
+
+        // The exact origin/revision key is unique for new Case-origin Procedure packages, while the
+        // predecessor's duplicate ProblemReport rows remain outside that partial index.
+        await AssertRejected(packageSql(Guid.NewGuid(), "HighLevelSoftware", "CaseChange",
+            fixture.MaterializedModifyChangeId, "HLRTPCR-QUAL-04", sourceNumber));
     }
 
     [Theory]
@@ -177,6 +345,9 @@ public sealed class ExactParentOrDerivedPostgresQualificationTests
         var introduceChangeId = Guid.NewGuid();
         var materializedModifyChangeId = Guid.NewGuid();
         var pendingModifyChangeId = Guid.NewGuid();
+        var historicalProblemReportId = Guid.NewGuid();
+        var historicalProblemReportReviewAId = Guid.NewGuid();
+        var historicalProblemReportReviewBId = Guid.NewGuid();
         var reviewCycleId = Guid.NewGuid();
         var signatureId = Guid.NewGuid();
         // This is the fixed pre-#738 TestChangeReview snapshot hash. The review cycle and signature
@@ -204,6 +375,7 @@ public sealed class ExactParentOrDerivedPostgresQualificationTests
 
         await Sql(db, $"INSERT INTO \"test_procedures\" (\"Id\",\"ProjectId\",\"BaseNumber\",\"Title\",\"OwnerId\",\"CreatedAt\",\"Level\",\"ArtifactDiscipline\",\"ArtifactKind\") VALUES ('{systemProcedureId}','{projectId}','SYSTP-000738','System procedure','qualification','{now}','System','System','Procedure'),('{caseProcedureId}','{projectId}','HLRTC-000738','Case procedure','qualification','{now}','HighLevel','HighLevelSoftware','Case');");
         await Sql(db, $"INSERT INTO \"test_change_reviews\" (\"Id\",\"ProjectId\",\"ReleaseId\",\"ChangeRequestId\",\"Discipline\",\"SourceChangeRequestNumber\",\"BaseNumber\",\"Revision\",\"State\",\"ApprovalRationale\",\"CreatedAt\",\"UpdatedAt\",\"Version\") VALUES ('{introduceReviewId}','{projectId}','{releaseId}','{scrId}','System','SCR-738.00','SYSTPCR-000738',0,'Approved','legacy approval','{now}','{now}',1),('{materializedModifyReviewId}','{projectId}','{releaseId}','{scrId}','HighLevelSoftware','SCR-738.00','HLRTCCR-000738',0,'Approved','legacy approval','{now}','{now}',1),('{pendingModifyReviewId}','{projectId}','{releaseId}','{scrId}','LowLevelSoftware','SCR-738.00','LLRTCCR-000738',0,'Open','','{now}','{now}',1);");
+        await Sql(db, $"INSERT INTO \"test_change_reviews\" (\"Id\",\"ProjectId\",\"ReleaseId\",\"ChangeRequestId\",\"OriginatingProblemReportId\",\"SourceProblemReportNumber\",\"Discipline\",\"SourceChangeRequestNumber\",\"BaseNumber\",\"Revision\",\"State\",\"ApprovalRationale\",\"CreatedAt\",\"UpdatedAt\",\"Version\") VALUES ('{historicalProblemReportReviewAId}','{projectId}','{releaseId}',NULL,'{historicalProblemReportId}','PR-725-HIST-01','HighLevelSoftware','','HLRTCCR-HIST-A',0,'Approved','legacy ProblemReport evidence','{now}','{now}',1),('{historicalProblemReportReviewBId}','{projectId}','{releaseId}',NULL,'{historicalProblemReportId}','PR-725-HIST-02','HighLevelSoftware','','HLRTCCR-HIST-B',0,'Approved','legacy ProblemReport evidence','{now}','{now}',1);");
         await Sql(db, $"INSERT INTO \"review_cycles\" (\"Id\",\"ChangeRequestId\",\"Sequence\",\"SnapshotHash\",\"State\",\"StartedAt\",\"CompletedAt\",\"TestChangeReviewId\") VALUES ('{reviewCycleId}',NULL,1,'{historicalSnapshotHash}','Approved','{now}','{now}','{introduceReviewId}');");
         await Sql(db, $"INSERT INTO \"electronic_signatures\" (\"Id\",\"UserId\",\"UserName\",\"DisplayName\",\"ProgramId\",\"ArtifactType\",\"ArtifactId\",\"ArtifactRevision\",\"Action\",\"Meaning\",\"ContentHash\",\"IpAddress\",\"SignedAt\",\"Authority\",\"AuthoritySource\",\"Rationale\",\"ReviewCycle\") VALUES ('{signatureId}','{Guid.NewGuid()}','qualification','Qualification Reviewer','{programId}','TestChangeRequest','{introduceReviewId}','SYSTPCR-000738.00','Approve','historical signed review','{historicalSnapshotHash}','127.0.0.1','{now}','Qualification','Fixture','predecessor evidence',1);");
         await Sql(db, $"INSERT INTO \"test_procedure_changes\" (\"Id\",\"TestChangeReviewId\",\"BaseNumber\",\"Revision\",\"Level\",\"Kind\",\"Objective\",\"Preconditions\",\"Steps\",\"ExpectedResult\",\"Rationale\",\"DrivingRequirementRevisionIdsJson\") VALUES ('{introduceChangeId}','{introduceReviewId}','SYSTP-000738',0,'System','Introduce','objective','preconditions','steps','expected','rationale','[\"{allocatedRevisionId:D}\"]'),('{materializedModifyChangeId}','{materializedModifyReviewId}','HLRTC-000738',1,'HighLevel','Modify','objective','preconditions','steps','expected','rationale','[\"{allocatedRevisionId:D}\"]'),('{pendingModifyChangeId}','{pendingModifyReviewId}','LLRTC-000738',1,'LowLevel','Modify','objective','preconditions','steps','expected','rationale','[\"{allocatedRevisionId:D}\"]');");
@@ -212,7 +384,8 @@ public sealed class ExactParentOrDerivedPostgresQualificationTests
 
         return new Fixture(parentRevisionId, allocatedRevisionId, derivedRevisionId, blankDerivedRevisionId,
             unknownMarkerRevisionId, systemProcedureRevisionId, caseRevisionId, introduceChangeId,
-            materializedModifyChangeId, pendingModifyChangeId, reviewCycleId, signatureId);
+            materializedModifyReviewId, materializedModifyChangeId, pendingModifyReviewId, pendingModifyChangeId,
+            reviewCycleId, signatureId);
     }
 
     private static Task Sql(AeroLinkDbContext db, string sql) => db.Database.ExecuteSqlRawAsync(
@@ -240,8 +413,11 @@ public sealed class ExactParentOrDerivedPostgresQualificationTests
             || (IPAddress.TryParse(host, out var address) && IPAddress.IsLoopback(address));
         if (!loopback)
             throw new InvalidOperationException("Issue #738 PostgreSQL qualification requires a loopback host.");
-        if (builder.Port != 55438)
-            throw new InvalidOperationException("Issue #738 qualification requires disposable PostgreSQL port 55438 and refuses 54329.");
+        // Qualification runs use an explicitly dedicated high loopback port. Keep the guard fail-closed against
+        // the persistent demo service while allowing each run to choose its own collision-free port in the
+        // disposable qualification range.
+        if (builder.Port is < 55438 or > 55499 || builder.Port == 54329)
+            throw new InvalidOperationException("Issue #725/#738 qualification requires a disposable PostgreSQL port in 55438-55499 and refuses 54329.");
         if (!string.Equals(builder.Database, DatabaseName, StringComparison.OrdinalIgnoreCase))
             throw new InvalidOperationException($"Issue #738 qualification requires dedicated database {DatabaseName}.");
         return connection;
@@ -265,7 +441,9 @@ public sealed class ExactParentOrDerivedPostgresQualificationTests
         Guid SystemProcedureRevisionId,
         Guid CaseRevisionId,
         Guid IntroduceChangeId,
+        Guid MaterializedModifyReviewId,
         Guid MaterializedModifyChangeId,
+        Guid PendingModifyReviewId,
         Guid PendingModifyChangeId,
         Guid ReviewCycleId,
         Guid SignatureId);

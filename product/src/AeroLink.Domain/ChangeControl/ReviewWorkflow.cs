@@ -29,6 +29,10 @@ public enum ReviewSubject
     HighLevelSoftwareCase,
     /// <summary>Current low-level software Case reviews. The older Test value remains readable history.</summary>
     LowLevelSoftwareCase,
+    /// <summary>Current high-level software Procedure reviews. The older Test value remains readable history.</summary>
+    HighLevelSoftwareProcedure,
+    /// <summary>Current low-level software Procedure reviews. The older Test value remains readable history.</summary>
+    LowLevelSoftwareProcedure,
 }
 
 /// <summary>

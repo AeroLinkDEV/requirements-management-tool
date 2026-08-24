@@ -311,6 +311,7 @@
         "ProcedureDiscussionApiTests",
         "ProcedureManifestEffectivityApiTests",
         "ProcedureSavedViewApiTests",
+        "ProcedureTestChangeControlApiTests",
         "ProcedureTraceApiTests",
         "ProductLineApiTests",
         "ProductionRoutingTests",
@@ -1613,6 +1614,7 @@
       "file": "ProjectConfigurationEndpoints.cs",
       "coveredBy": [
         "BaselineImportApiTests",
+        "ProcedureTestChangeControlApiTests",
         "ProjectConfigurationApiTests"
       ]
     },
@@ -1773,6 +1775,7 @@
       "file": "VerificationImpactEndpoints.cs",
       "coveredBy": [
         "ManualTestChangeRequestApiTests",
+        "ProcedureTestChangeControlApiTests",
         "TestChangeRequestConsolidationTests",
         "TestProcedureAuthoringApiTests"
       ]
@@ -1840,6 +1843,7 @@
       "path": "/api/review-workflows",
       "file": "WorkflowEndpoints.cs",
       "coveredBy": [
+        "ProcedureTestChangeControlApiTests",
         "TestChangeRequestReviewWorkflowTests"
       ]
     },
@@ -1848,6 +1852,7 @@
       "path": "/api/review-workflows/{id:guid}/activate",
       "file": "WorkflowEndpoints.cs",
       "coveredBy": [
+        "ProcedureTestChangeControlApiTests",
         "TestChangeRequestReviewWorkflowTests"
       ]
     },
@@ -1919,6 +1924,7 @@
       "file": "VerificationImpactEndpoints.cs",
       "coveredBy": [
         "ManualTestChangeRequestApiTests",
+        "ProcedureTestChangeControlApiTests",
         "TestChangeRequestReviewWorkflowTests"
       ]
     },
@@ -1937,6 +1943,7 @@
       "file": "VerificationImpactEndpoints.cs",
       "coveredBy": [
         "ManualTestChangeRequestApiTests",
+        "ProcedureTestChangeControlApiTests",
         "TestChangeRequestReviewWorkflowTests",
         "TestProcedureAuthoringApiTests"
       ]
@@ -1995,6 +2002,7 @@
       "coveredBy": [
         "ManualTestChangeRequestApiTests",
         "ProcedureManifestEffectivityApiTests",
+        "ProcedureTestChangeControlApiTests",
         "SearchableAuthoringPickerApiTests",
         "TestChangeRequestReviewWorkflowTests",
         "TestProcedureAuthoringApiTests"
@@ -2023,6 +2031,7 @@
       "file": "VerificationImpactEndpoints.cs",
       "coveredBy": [
         "ManualTestChangeRequestApiTests",
+        "ProcedureTestChangeControlApiTests",
         "TestProcedureAuthoringApiTests"
       ]
     },
@@ -2032,6 +2041,7 @@
       "file": "VerificationImpactEndpoints.cs",
       "coveredBy": [
         "ManualTestChangeRequestApiTests",
+        "ProcedureTestChangeControlApiTests",
         "TestChangeRequestReviewWorkflowTests",
         "TestProcedureAuthoringApiTests"
       ]
@@ -2150,6 +2160,7 @@
       "file": "VerificationImpactEndpoints.cs",
       "coveredBy": [
         "ManualTestChangeRequestApiTests",
+        "ProcedureTestChangeControlApiTests",
         "VerificationImpactApiTests"
       ]
     },
@@ -2267,6 +2278,7 @@
       "file": "ProjectConfigurationEndpoints.cs",
       "coveredBy": [
         "BaselineImportApiTests",
+        "ProcedureTestChangeControlApiTests",
         "ProjectConfigurationApiTests"
       ]
     },

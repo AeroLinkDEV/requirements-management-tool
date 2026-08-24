@@ -86,6 +86,22 @@ test('controlled document TCR links open the exact package in its build and disc
   }
 })
 
+test('HLR and LLR Procedure TCR routes round-trip through their level branch and retain the Procedure kind', () => {
+  for (const [level, id, branch] of [
+    ['HighLevelProcedure', 'procedure-hlr-a', 'hlr'],
+    ['LowLevelProcedure', 'procedure-llr-a', 'llr'],
+  ] as const) {
+    const path = routePath(context, 'testChangeRequest', 'softwareTest', id, level)
+    expect(path).toBe(`/programs/program-a/projects/project-a/releases/release-a/software-verification/${branch}/change-requests/${id}?kind=Procedure`)
+    expect(parseRoute(path)).toMatchObject({
+      view: 'testChangeRequest',
+      discipline: 'softwareTest',
+      artifactKind: level,
+      artifactId: id,
+    })
+  }
+})
+
 test('legacy context-free change-request routes remain loadable until detail canonicalizes them', () => {
   expect(parseRoute('/programs/program-a/projects/project-a/releases/release-a/change-requests/legacy-a'))
     .toMatchObject({ view: 'scr', discipline: 'system', artifactId: 'legacy-a' })

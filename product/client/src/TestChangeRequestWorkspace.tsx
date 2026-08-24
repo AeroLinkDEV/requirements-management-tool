@@ -4,7 +4,7 @@ import { PersonName } from './People'
 import { ApiError, apiRequest, operationError } from './apiClient'
 import { RichCaseField, RichContentView } from './RichContent'
 import { fromPlainText, toPlainText } from './richContentModel'
-import { verificationArtifactChangeSegment, verificationArtifactNoun, verificationArtifactPrefix, verificationArtifactTargetSegment, verificationArtifactWord } from './presentation'
+import { testChangeRequestAcronym, verificationArtifactChangeSegment, verificationArtifactNoun, verificationArtifactPrefix, verificationArtifactTargetSegment, verificationArtifactWord, verificationOriginLabel } from './presentation'
 // The requirements queue's stylesheet, imported rather than copied. The testing side is meant to be the same
 // surface for the same kind of work, and a second stylesheet that merely looked like it would drift the first
 // time either was touched.
@@ -21,28 +21,27 @@ type ProcedureTarget={procedureId?:string;baseNumber:string;title:string;current
 type ProcedureTargetPage={page:number;pageSize:number;totalCount:number;totalPages:number;items:ProcedureTarget[]}
 type RequirementChoicePage={page:number;pageSize:number;totalCount:number;totalPages:number;items:RequirementChoice[]}
 type Capabilities={canProposeArtifactChange?:boolean;canWithdrawArtifactChange?:boolean;canProposeProcedureChange?:boolean;canWithdrawProcedureChange?:boolean;canRevise:boolean}
-type Package={id:string;displayNumber:string;baseNumber:string;revision:number;discipline:string;state:string;outcome:string;artifactLevel?:string;procedureLevel?:string;artifactKind?:string;artifactLabel?:string;sourceChangeRequestNumber:string;assignedEngineerId?:string;version:number;caseContractVersion:number;title:string;problem:string;analysis:string;solution:string;problemRich:string;analysisRich:string;solutionRich:string;artifactChanges?:ProcedureChange[];procedureChanges?:ProcedureChange[];capabilities:Capabilities;drivingRequirementChoices:RequirementChoice[];artifactTargets?:ProcedureTarget[];procedureTargets?:ProcedureTarget[]}
+type Package={id:string;displayNumber:string;baseNumber:string;revision:number;discipline:string;state:string;outcome:string;artifactLevel?:string;procedureLevel?:string;artifactKind?:string;artifactLabel?:string;sourceChangeRequestNumber:string;originKind?:string;originReferenceId?:string;originDisplayIdentity?:string;originDisplayTitle?:string;originDisplayLabel?:string;assignedEngineerId?:string;version:number;caseContractVersion:number;title:string;problem:string;analysis:string;solution:string;problemRich:string;analysisRich:string;solutionRich:string;artifactChanges?:ProcedureChange[];procedureChanges?:ProcedureChange[];capabilities:Capabilities;drivingRequirementChoices:RequirementChoice[];artifactTargets?:ProcedureTarget[];procedureTargets?:ProcedureTarget[]}
 type SupersededBy={id:string;displayNumber?:string;reason?:string}
 
 const levelName=(discipline:string)=>discipline==='System'?'SYS':discipline==='HighLevelSoftware'?'HLR':'LLR'
-const testChangeRequestAcronym=(discipline:string)=>discipline==='System'?'SYSTPCR':discipline==='HighLevelSoftware'?'HLRTCCR':'LLRTCCR'
-const procedureWord=(level:string)=>verificationArtifactPrefix(level)
-const artifactWord=(level:string)=>verificationArtifactWord(level)
-const artifactNoun=(level:string)=>verificationArtifactNoun(level)
+const procedureWord=(level:string,artifactKind?:string)=>verificationArtifactPrefix(level,artifactKind)
+const artifactWord=(level:string,artifactKind?:string)=>verificationArtifactWord(level,artifactKind)
+const artifactNoun=(level:string,artifactKind?:string)=>verificationArtifactNoun(level,artifactKind)
 /**
  * What the package is, and what has happened to it. The same two facts the requirements drawer states, in the
  * same order, because a reader moving between the two should not have to learn a second vocabulary.
  */
 const packageStatus=(item:Package)=>{
-  const acronym=testChangeRequestAcronym(item.discipline)
-  const word=artifactWord(item.artifactLevel ?? item.procedureLevel ?? 'System')
+  const acronym=testChangeRequestAcronym(item.artifactLevel ?? item.procedureLevel ?? item.discipline,item.artifactKind)
+  const word=artifactWord(item.artifactLevel ?? item.procedureLevel ?? 'System',item.artifactKind)
   if(item.state==='Superseded')return `${acronym} Superseded`
   if(item.state==='Approved')return `${acronym} Approved`
   if(item.state==='InReview')return `${acronym} In Review – Awaiting Approval`
   const changes = item.artifactChanges ?? item.procedureChanges ?? []
   return changes.length
     ? `${acronym} Open – ${changes.length} ${word} ${changes.length===1?'decision':'decisions'} proposed`
-    : `${acronym} Open – No ${verificationArtifactNoun(item.artifactLevel ?? item.procedureLevel ?? 'System')} Decisions Yet`
+    : `${acronym} Open – No ${verificationArtifactNoun(item.artifactLevel ?? item.procedureLevel ?? 'System',item.artifactKind)} Decisions Yet`
 }
 const kindWords=(kind:Kind,noun:string)=>kind==='Introduce'?`New ${noun}`:kind==='Modify'?`Modified ${noun}`:`Retired ${noun}`
 const missingCaseFields=(item:Package)=>[
@@ -62,8 +61,11 @@ const emptyDraft={kind:'Introduce' as Kind,baseNumber:'',revision:0,title:'',obj
 export default function TestChangeRequestWorkspace({api,projectId,reviewId,discipline,canAuthor,onClose,onChanged,onOpenRequirementRevision,onOpenTestChangeRequest,supersededBy}:{api:string;projectId:string;reviewId:string;discipline:string;canAuthor:boolean;onClose:()=>void;onChanged:()=>void;onOpenRequirementRevision:(requirement:{id:string;revisionId:string;level:string})=>void;onOpenTestChangeRequest:(id:string)=>void;supersededBy?:SupersededBy}){
   const [item,setItem]=useState<Package>()
   const currentArtifactLevel = item?.artifactLevel ?? item?.procedureLevel ?? 'System'
-  const currentArtifactWord = artifactWord(currentArtifactLevel)
-  const currentArtifactNoun = artifactNoun(currentArtifactLevel)
+  const currentArtifactKind = item?.artifactKind
+  const currentArtifactSegment = verificationArtifactChangeSegment(discipline,currentArtifactKind)
+  const currentTargetSegment = verificationArtifactTargetSegment(discipline,currentArtifactKind)
+  const currentArtifactWord = artifactWord(currentArtifactLevel,currentArtifactKind)
+  const currentArtifactNoun = artifactNoun(currentArtifactLevel,currentArtifactKind)
   const [busy,setBusy]=useState(false),[error,setError]=useState('')
   const [draft,setDraft]=useState(emptyDraft),[proposing,setProposing]=useState(false)
   // Bounded, server-searched pickers with totals: a valid target or governed requirement beyond the old
@@ -93,7 +95,17 @@ export default function TestChangeRequestWorkspace({api,projectId,reviewId,disci
   const load=useCallback(async()=>{
     const mine=++loadTicket.current
     setError('')
-    try{const next=await apiRequest<Package>(`${api}/api/test-change-reviews/${reviewId}/${verificationArtifactChangeSegment(discipline)}`)
+    try{
+      const initialSegment=verificationArtifactChangeSegment(discipline)
+      let next:Package
+      try {
+        next=await apiRequest<Package>(`${api}/api/test-change-reviews/${reviewId}/${initialSegment}`)
+      } catch(problem) {
+        // A package may be a software Procedure while its deep link still carries only the discipline.
+        // Retry the exact Procedure route only for a missing legacy Case-route lookup.
+        if(initialSegment!=='case-changes' || discipline==='System' || !(problem instanceof ApiError) || problem.status!==404) throw problem
+        next=await apiRequest<Package>(`${api}/api/test-change-reviews/${reviewId}/procedure-changes`)
+      }
       if(mine===loadTicket.current)setItem({
         ...next,
         artifactChanges: next.artifactChanges ?? next.procedureChanges ?? [],
@@ -114,7 +126,7 @@ export default function TestChangeRequestWorkspace({api,projectId,reviewId,disci
     // current selection is always chosen from those options or the current page. Neither the persisted
     // decision set nor the current selection is serialized into the request line, so the URL cannot grow
     // with the TCR's procedure-decision count.
-    void fetch(`${api}/api/test-change-reviews/${reviewId}/${verificationArtifactTargetSegment(discipline)}?${params}`)
+    void fetch(`${api}/api/test-change-reviews/${reviewId}/${currentTargetSegment}?${params}`)
       .then(async response=>{
         if(!response.ok){if(active)setTargetError(`The ${currentArtifactWord}s for this build could not be loaded. Try searching again.`);return undefined}
         if(!active)return undefined
@@ -124,7 +136,7 @@ export default function TestChangeRequestWorkspace({api,projectId,reviewId,disci
       .then(paged=>{if(active&&paged)setTargetPicker(paged)})
       .catch(()=>{if(active)setTargetError(`The ${currentArtifactWord}s for this build could not be loaded. Try searching again.`)})
     return ()=>{active=false}
-  },[api,discipline,reviewId,proposing,targetQuery,targetPage,draft.baseNumber,currentArtifactWord])
+  },[api,discipline,reviewId,proposing,targetQuery,targetPage,draft.baseNumber,currentArtifactWord,currentTargetSegment])
 
   // The driving-requirement picker: the same governed, build-scoped candidate set the server enforces,
   // searched and paged with totals. Selected driving revisions are hydrated by ID.
@@ -192,7 +204,7 @@ export default function TestChangeRequestWorkspace({api,projectId,reviewId,disci
       expectedVersion:item?.version}
     setBusy(true);setError('')
     try{
-      await apiRequest(`${api}/api/test-change-reviews/${reviewId}/${verificationArtifactChangeSegment(discipline)}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})
+      await apiRequest(`${api}/api/test-change-reviews/${reviewId}/${currentArtifactSegment}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})
       await load();onChanged()
       setProposing(false);setDraft(emptyDraft);setDrivingDetails({});setSelectedTargetDetails(undefined)
     }catch(problem){
@@ -208,7 +220,7 @@ export default function TestChangeRequestWorkspace({api,projectId,reviewId,disci
     }finally{setBusy(false)}
   }
   const withdraw=(changeId:string)=>void act(()=>apiRequest(
-    `${api}/api/test-change-reviews/${reviewId}/${verificationArtifactChangeSegment(discipline)}/${changeId}?expectedVersion=${item?.version}`,
+    `${api}/api/test-change-reviews/${reviewId}/${currentArtifactSegment}/${changeId}?expectedVersion=${item?.version}`,
     {method:'DELETE'}))
   const revise=()=>void (async()=>{
     setBusy(true);setError('')
@@ -365,8 +377,10 @@ export default function TestChangeRequestWorkspace({api,projectId,reviewId,disci
         </section>
 
         <section>
-          <h3>Source change request</h3>
-          <p>{item.sourceChangeRequestNumber}</p>
+          <h3>Package origin</h3>
+          <p><b>{item.originDisplayLabel || verificationOriginLabel(item.originKind)}</b>{' '}
+            {item.originDisplayIdentity || item.sourceChangeRequestNumber || item.originReferenceId}</p>
+          {item.originDisplayTitle && <p>{item.originDisplayTitle}</p>}
           <dl className="sourceCase">
             <div><dt>Discipline</dt><dd>{levelName(item.discipline)} verification</dd></div>
             <div><dt>{currentArtifactWord[0].toUpperCase() + currentArtifactWord.slice(1)} level</dt><dd>{procedureWord(currentArtifactLevel)} — this package may only carry {currentArtifactLevel} {currentArtifactWord}s</dd></div>

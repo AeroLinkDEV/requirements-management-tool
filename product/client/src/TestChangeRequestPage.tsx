@@ -15,10 +15,10 @@ import {
 import { PersonName } from './People'
 import ReviewCycleCard, { type ReviewCycleSummary } from './ReviewCycleCard'
 import { RichCaseField, RichContentView } from './RichContent'
-import { apiRequest, operationError } from './apiClient'
+import { ApiError, apiRequest, operationError } from './apiClient'
 import { useDebouncedSave } from './autosave'
 import { fromPlainText, toPlainText } from './richContentModel'
-import { changeRequestAllocation, changeRequestState, verificationArtifactChangeSegment, verificationArtifactNoun, verificationArtifactWord } from './presentation'
+import { changeRequestAllocation, changeRequestState, isVerificationProcedureKind, verificationArtifactChangeSegment, verificationArtifactNoun, verificationArtifactWord, verificationOriginLabel } from './presentation'
 import type { TestDiscipline } from './TestResultsWorkspace'
 import './ChangeRequestWorkspace.css'
 
@@ -63,10 +63,17 @@ type Package = {
   assignedEngineerId?: string | null
   discipline: string
   sourceChangeRequestNumber: string
+  originKind?: string
+  originReferenceId?: string
+  originDisplayIdentity?: string
+  originDisplayTitle?: string
+  originDisplayLabel?: string
   version: number
   updatedAt?: string
   artifactKind?: string
   artifactLabel?: string
+  artifactLevel?: string
+  procedureLevel?: string
   artifactChanges?: ProcedureChange[]
   capabilities?: {
     canProposeArtifactChange?: boolean
@@ -217,8 +224,8 @@ export default function TestChangeRequestPage({
   const [lockStatus, setLockStatus] = useState<LockStatus>()
   const [autosaveStatus, setAutosaveStatus] = useState<'Saved' | 'Unsaved' | 'Saving' | 'Error' | 'Conflict'>('Saved')
   const [draft, setDraft] = useState<WorkingDraft>()
-  const artifactWord = verificationArtifactWord(discipline)
-  const artifactNoun = verificationArtifactNoun(discipline)
+  const artifactWord = verificationArtifactWord(item?.artifactLevel ?? discipline, item?.artifactKind)
+  const artifactNoun = verificationArtifactNoun(item?.artifactLevel ?? discipline, item?.artifactKind)
   const lockRef = useRef<EditLock | undefined>(undefined)
   const draftRef = useRef('')
   const lastSavedRef = useRef('')
@@ -229,8 +236,15 @@ export default function TestChangeRequestPage({
     setError('')
     setSignatureError('')
     try {
+      const initialSegment = verificationArtifactChangeSegment(discipline)
+      const detailPromise = apiRequest<Package>(`${api}/api/test-change-reviews/${packageId}/${initialSegment}`).catch(problem => {
+        // A software Procedure package can be opened from a discipline-only deep link. Resolve its
+        // exact kind through the Procedure route without broadening the server's Case route.
+        if (initialSegment !== 'case-changes' || discipline === 'System' || !(problem instanceof ApiError) || problem.status !== 404) throw problem
+        return apiRequest<Package>(`${api}/api/test-change-reviews/${packageId}/procedure-changes`)
+      })
       const [detail, list] = await Promise.all([
-        apiRequest<Package>(`${api}/api/test-change-reviews/${packageId}/${verificationArtifactChangeSegment(discipline)}`),
+        detailPromise,
         apiRequest<{ items: Package[] }>(`${api}/api/releases/${releaseId}/test-change-reviews`),
       ])
       let signatureRows: SignatureEvidence[] = []
@@ -472,7 +486,9 @@ export default function TestChangeRequestPage({
   </>
 
   return <ControlledChangePage
-    backLabel={`${disciplineLabel(discipline)} Test Change Requests`}
+    backLabel={isVerificationProcedureKind(item.artifactKind) && discipline !== 'System'
+      ? disciplineLabel(discipline) + ' Procedure Change Requests'
+      : `${disciplineLabel(discipline)} Test Change Requests`}
     onBack={onBack}
     eyebrow={`TEST CHANGE CONTROL / ${item.displayNumber}`}
     title={item.title || 'Not written up yet'}
@@ -555,6 +571,7 @@ export default function TestChangeRequestPage({
           projectId={item.projectId}
           releaseId={item.releaseId}
           scope={discipline}
+          artifactKind={item.artifactKind}
           levelLabel={disciplineLabel(discipline)}
           item={proposal}
           index={index}
@@ -577,7 +594,13 @@ export default function TestChangeRequestPage({
 
         <section className="workspaceCard">
           <div className="workspaceTitle"><div><h2>Raised from</h2><p>What concluded that this test work was required</p></div></div>
-          {raisedFrom ? <p className="sourceRecord"><b>{raisedFrom.number}</b> {raisedFrom.title}</p> : <p className="sourceRecord"><b>{item.sourceChangeRequestNumber || 'A Problem Report'}</b></p>}
+          {item.originKind
+            ? <p className="sourceRecord"><b>{item.originDisplayLabel || verificationOriginLabel(item.originKind)}</b>{' '}
+                <strong>{item.originDisplayIdentity || item.sourceChangeRequestNumber || item.originReferenceId}</strong>{' '}
+                {item.originDisplayTitle || raisedFrom?.title || ''}</p>
+            : raisedFrom
+              ? <p className="sourceRecord"><b>{raisedFrom.number}</b> {raisedFrom.title}</p>
+              : <p className="sourceRecord"><b>{item.sourceChangeRequestNumber || 'Problem Report'}</b></p>}
         </section>
 
         <section className="workspaceCard">

@@ -1,11 +1,11 @@
 {
   "schemaVersion": "aerolink-api-test-intent/v2",
   "totals": {
-    "tests": 541,
-    "cases": 595,
-    "classes": 94,
-    "hostedTests": 528,
-    "hostedCases": 573,
+    "tests": 543,
+    "cases": 597,
+    "classes": 95,
+    "hostedTests": 530,
+    "hostedCases": 575,
     "nonHostedTests": 8,
     "nonHostedCases": 17,
     "unknownHostTests": 5,
@@ -29,10 +29,10 @@
     "ef-translation": {
       "label": "EF translation / relational constraints",
       "level": "Infrastructure (needs a database, not a host)",
-      "tests": 106,
-      "cases": 113,
+      "tests": 108,
+      "cases": 115,
       "unknownCases": 0,
-      "classes": 43
+      "classes": 44
     },
     "auth-policy": {
       "label": "Authentication / authorization wiring",
@@ -5471,6 +5471,42 @@
       "sourceLines": {
         "start": 160,
         "end": 177
+      }
+    },
+    {
+      "cls": "ProcedureTestChangeControlApiTests",
+      "test": "A_referenced_case_assessment_cannot_be_reopened_through_the_api",
+      "kind": "Fact",
+      "intent": "ef-translation",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 217,
+        "end": 268
+      }
+    },
+    {
+      "cls": "ProcedureTestChangeControlApiTests",
+      "test": "A_valid_case_origin_uses_the_procedure_key_workflow_and_preserves_origin_through_revision",
+      "kind": "Fact",
+      "intent": "ef-translation",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 25,
+        "end": 215
       }
     },
     {

@@ -31,6 +31,12 @@ public static class TestChangeReviewRequirementScope
     public static async Task ValidateProcedureChangesForSubmissionAsync(
         AeroLinkDbContext db, TestChangeReview review, ILadderPolicy policy, CancellationToken ct)
     {
+        if (review.ArtifactKey.Kind == VerificationArtifactKind.Procedure
+            && review.ArtifactKey.Discipline != VerificationDiscipline.System)
+        {
+            await ValidateSoftwareProcedureChangesAsync(db, review, policy, ct);
+            return;
+        }
         var governedIds = (await ForReviewAsync(db, review, null, ct, policy))
             .Select(x => x.RevisionId).ToHashSet();
         var effectivity = await TestProcedureEffectivity.ForReleaseAsync(db, review.ProjectId, review.ReleaseId, ct);
@@ -142,6 +148,46 @@ public static class TestChangeReviewRequirementScope
             if (outside != Guid.Empty)
                 throw new DomainException(
                     $"{change.DisplayNumber} names requirement revision {outside}, which is outside the governed package/build scope.");
+        }
+    }
+
+    /// <summary>
+    /// Procedure packages use the same exact-parent-or-derived policy as Case/System packages, but their
+    /// configured parent kind is an exact software Case revision rather than a requirement revision. The
+    /// policy is kept here so picker, mutation, and submission cannot grow three subtly different XOR rules.
+    /// </summary>
+    private static async Task ValidateSoftwareProcedureChangesAsync(
+        AeroLinkDbContext db, TestChangeReview review, ILadderPolicy policy, CancellationToken ct)
+    {
+        var effectivity = await TestProcedureEffectivity.ForReleaseAsync(db, review.ProjectId, review.ReleaseId, ct);
+        var carriedCaseRevisionIds = effectivity?.RevisionIds.ToHashSet() ?? [];
+        var caseRows = await (from revision in db.TestProcedureRevisions.AsNoTracking()
+                              join procedure in db.TestProcedures.AsNoTracking()
+                                  on revision.ProcedureId equals procedure.Id
+                              where procedure.ProjectId == review.ProjectId
+                                  && procedure.ArtifactKind == VerificationArtifactKind.Case
+                                  && procedure.Level == review.ProcedureLevel(policy)
+                              select new { revision.Id, revision.Revision, procedure.BaseNumber }).ToDictionaryAsync(x => x.Id, ct);
+        foreach (var change in review.ProcedureChanges.Where(x => x.Kind != TestProcedureChangeKind.Retire))
+        {
+            var parentIds = ParseIds(change.ParentRevisionIdsJson, change.DisplayNumber, "exact Case parent");
+            ExactParentSelectionPolicy.Validate(
+                VerificationProcedureParentPolicy.Classification(change.ParentKind), parentIds,
+                change.DerivedRationale, "software Procedure");
+            if (change.DrivingRequirementRevisionIdsJson is not ("" or "[]"))
+            {
+                var driving = ParseIds(change.DrivingRequirementRevisionIdsJson, change.DisplayNumber, "driving");
+                if (driving.Count != 0)
+                    throw new DomainException($"{change.DisplayNumber} is a software Procedure and cannot name requirement parents; select exact Case revisions instead.");
+            }
+            if (change.ParentKind != VerificationProcedureParentKind.Allocated) continue;
+            foreach (var id in parentIds)
+            {
+                if (!caseRows.ContainsKey(id))
+                    throw new DomainException($"{change.DisplayNumber} names Case revision {id}, which does not exist in this Project or level.");
+                if (!carriedCaseRevisionIds.Contains(id))
+                    throw new DomainException($"{change.DisplayNumber} names Case revision {id}, which is not selected by the target build's exact Case manifest.");
+            }
         }
     }
 

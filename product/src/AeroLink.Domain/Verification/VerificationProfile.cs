@@ -383,18 +383,23 @@ public static class VerificationArtifactVocabulary
     private static IReadOnlyList<VerificationArtifactDefinition> Build()
     {
         static VerificationArtifactDefinition D(VerificationDiscipline discipline, VerificationArtifactKind kind,
-            string prefix, string tcr, ReviewSubject subject, ControlledDocumentType document, RequirementLevel target) =>
-            new(new(discipline, kind), prefix, tcr, subject, document, target);
+            string prefix, string tcr, ReviewSubject subject, ControlledDocumentType document, RequirementLevel target,
+            VerificationArtifactCapability requiredCapabilities =
+                VerificationArtifactCapability.Identity | VerificationArtifactCapability.Header |
+                VerificationArtifactCapability.Revision | VerificationArtifactCapability.Lifecycle |
+                VerificationArtifactCapability.Coverage | VerificationArtifactCapability.Execution |
+                VerificationArtifactCapability.ControlledDocument | VerificationArtifactCapability.ChangeReview) =>
+            new(new(discipline, kind), prefix, tcr, subject, document, target, requiredCapabilities);
         return
         [
-            // A current TCR is derived from the current executable artifact prefix: SYSTP + CR,
-            // HLRTC + CR, and LLRTC + CR. The dormant software Procedure vocabulary deliberately
-            // shares the Case TCR binding; it is not a second Procedure TCR family and is not executable.
+            // A TCR is derived from the exact artifact key, not merely its discipline. Historical
+            // software Case rows retain HLRTCCR/LLRTCCR; new software Procedure packages use their
+            // own HLRTPCR/LLRTPCR families so the two review subjects can be configured independently.
             D(VerificationDiscipline.System, VerificationArtifactKind.Procedure, "SYSTP", "SYSTPCR", ReviewSubject.SystemTest, ControlledDocumentType.SystemTestProcedures, RequirementLevel.System),
             D(VerificationDiscipline.HighLevelSoftware, VerificationArtifactKind.Case, "HLRTC", "HLRTCCR", ReviewSubject.HighLevelSoftwareCase, ControlledDocumentType.HighLevelTestCases, RequirementLevel.HighLevel),
-            D(VerificationDiscipline.HighLevelSoftware, VerificationArtifactKind.Procedure, "HLRTP", "HLRTCCR", ReviewSubject.HighLevelSoftwareTest, ControlledDocumentType.HighLevelTestProcedures, RequirementLevel.HighLevel),
+            D(VerificationDiscipline.HighLevelSoftware, VerificationArtifactKind.Procedure, "HLRTP", "HLRTPCR", ReviewSubject.HighLevelSoftwareProcedure, ControlledDocumentType.HighLevelTestProcedures, RequirementLevel.HighLevel),
             D(VerificationDiscipline.LowLevelSoftware, VerificationArtifactKind.Case, "LLRTC", "LLRTCCR", ReviewSubject.LowLevelSoftwareCase, ControlledDocumentType.LowLevelTestCases, RequirementLevel.LowLevel),
-            D(VerificationDiscipline.LowLevelSoftware, VerificationArtifactKind.Procedure, "LLRTP", "LLRTCCR", ReviewSubject.LowLevelSoftwareTest, ControlledDocumentType.LowLevelTestProcedures, RequirementLevel.LowLevel),
+            D(VerificationDiscipline.LowLevelSoftware, VerificationArtifactKind.Procedure, "LLRTP", "LLRTPCR", ReviewSubject.LowLevelSoftwareProcedure, ControlledDocumentType.LowLevelTestProcedures, RequirementLevel.LowLevel),
         ];
     }
 }

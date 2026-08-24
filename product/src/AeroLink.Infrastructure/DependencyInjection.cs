@@ -43,23 +43,28 @@ public static class DependencyInjection
             services.AddSingleton<ILadderConsumerRegistration>(registration);
         // These declarations live beside the routed infrastructure seams. Do not infer artifact obligations from
         // the legacy string inventory: a consumer that happens to have a familiar ID is not thereby a handler for
-        // every kind or capability. The current product exposes System Procedure and software Case only; software
-        // Procedure registrations remain dormant until the governed future slice.
+        // every kind or capability. Software Procedure packages route through the shared identity/review seams;
+        // execution, controlled documents, and downstream coverage remain intentionally outside this slice.
         var systemProcedure = new VerificationArtifactKey(
             VerificationDiscipline.System, VerificationArtifactKind.Procedure);
         var highLevelCase = new VerificationArtifactKey(
             VerificationDiscipline.HighLevelSoftware, VerificationArtifactKind.Case);
         var lowLevelCase = new VerificationArtifactKey(
             VerificationDiscipline.LowLevelSoftware, VerificationArtifactKind.Case);
+        var highLevelProcedure = new VerificationArtifactKey(
+            VerificationDiscipline.HighLevelSoftware, VerificationArtifactKind.Procedure);
+        var lowLevelProcedure = new VerificationArtifactKey(
+            VerificationDiscipline.LowLevelSoftware, VerificationArtifactKind.Procedure);
         var currentArtifactKeys = new[] { systemProcedure, highLevelCase, lowLevelCase };
+        var packageArtifactKeys = currentArtifactKeys.Concat(new[] { highLevelProcedure, lowLevelProcedure }).ToArray();
         var typedRegistrations = new IVerificationArtifactConsumerRegistration[]
         {
             new VerificationArtifactConsumerRegistration("verification.procedure-level",
-                "Verification artifact level mapping", currentArtifactKeys,
+                "Verification artifact level mapping", packageArtifactKeys,
                 VerificationArtifactCapability.Identity | VerificationArtifactCapability.Header
                 | VerificationArtifactCapability.Revision | VerificationArtifactCapability.Lifecycle),
             new VerificationArtifactConsumerRegistration("verification.test-change-workflow",
-                "Test-change workflow disciplines and prefixes", currentArtifactKeys,
+                "Test-change workflow disciplines and prefixes", packageArtifactKeys,
                 VerificationArtifactCapability.ChangeReview),
             new VerificationArtifactConsumerRegistration("verification.coverage",
                 "Same-level coverage mutation and persistence validation", currentArtifactKeys,
