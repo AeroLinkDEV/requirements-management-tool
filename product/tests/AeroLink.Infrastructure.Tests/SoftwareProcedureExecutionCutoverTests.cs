@@ -2301,6 +2301,142 @@ public sealed class SoftwareProcedureExecutionCutoverTests
         }
     }
 
+    [Fact]
+    public async Task Rollback_cleanup_failure_evidence_is_isolated_bounded_and_never_resaves_cutover_work()
+    {
+        await using var connection = new Microsoft.Data.Sqlite.SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        var seedOptions = new DbContextOptionsBuilder<AeroLinkDbContext>().UseSqlite(connection).Options;
+        var db = new AeroLinkDbContext(seedOptions);
+        await db.Database.EnsureCreatedAsync();
+        var evidenceRoot = Path.Combine(Path.GetTempPath(), $"aerolink-726-cleanup-evidence-{Guid.NewGuid():N}");
+        var files = new EvidenceFileStore(evidenceRoot);
+        try
+        {
+            var seed = await SeedSignedDocumentProjectAsync(db, files, "800001", materialized: true);
+            var secondBytes = Encoding.UTF8.GetBytes("second pre-cutover rendition");
+            var secondStored = await files.StoreAsync(new MemoryStream(secondBytes), "800001.pdf",
+                "application/pdf", default);
+            db.Add(new ControlledDocumentArtifact(seed.DocumentId, "pdf", secondStored.StorageKey,
+                secondStored.OriginalFileName, secondStored.ContentType, secondStored.Size,
+                secondStored.Sha256, seed.GeneratedAt));
+            await db.SaveChangesAsync();
+
+            var originalConfiguration = await db.ProjectLadderConfigurations.AsNoTracking()
+                .SingleAsync(x => x.ProjectId == seed.ProjectId);
+            var originalDocumentHash = await db.ControlledDocuments.AsNoTracking()
+                .Where(x => x.Id == seed.DocumentId).Select(x => x.ContentHash).SingleAsync();
+            var originalArtifacts = await db.ControlledDocumentArtifacts.AsNoTracking()
+                .Where(x => x.DocumentId == seed.DocumentId)
+                .Select(x => new { x.Id, x.StorageKey, x.Sha256 }).ToListAsync();
+            var originalSelection = await db.BaselineTestProcedures.AsNoTracking()
+                .SingleAsync(x => x.BaselineId == seed.BaselineId);
+            var originalAuditCount = await db.SecurityAuditEvents.AsNoTracking().CountAsync();
+
+            var (legacy, typed) = FullRegistrations();
+            var failingOptions = new DbContextOptionsBuilder<AeroLinkDbContext>().UseSqlite(connection)
+                .AddInterceptors(new RenditionSaveFailingInterceptor())
+                .Options;
+            var failingDb = new AeroLinkDbContext(failingOptions);
+            var generator = new ControlledOutputGenerator(failingDb, new RichContentPublisher(failingDb, files),
+                policyResolver: new EffectiveProjectLadderPolicyResolver(failingDb));
+            // Every newly written rendition's deletion fails, forcing the cleanup-evidence path.
+            var failingAuthority = new SoftwareProcedureExecutionCutoverAuthority(failingDb, legacy, typed,
+                allowSqliteExecution: true, generator: generator, files: files,
+                cleanupDeleteFailure: _ => true);
+            await Assert.ThrowsAsync<InvalidOperationException>(() => failingAuthority.EnsureCompletedAsync());
+            failingDb.Dispose();
+
+            // NOTHING from the failed cutover committed: no ladder activation, generated Procedure, source,
+            // link, rebind, document replacement, signature supersession, marker, or Completed audit.
+            var configuration = await db.ProjectLadderConfigurations.AsNoTracking()
+                .SingleAsync(x => x.ProjectId == seed.ProjectId);
+            Assert.Equal(ProjectLadderConfigurationState.Stored, configuration.State);
+            Assert.True(configuration.IsSealed);
+            Assert.Null(configuration.LastUpgradeBy);
+            Assert.Equal(0, await db.TestProcedures.AsNoTracking().CountAsync(x =>
+                x.ProjectId == seed.ProjectId && x.ArtifactKind == VerificationArtifactKind.Procedure));
+            Assert.Equal(0, await db.TestProcedureMigrationSources.AsNoTracking().CountAsync());
+            Assert.Equal(0, await db.TestCaseProcedureLinks.AsNoTracking().CountAsync());
+            Assert.Equal(0, await db.GovernedMigrationCompletions.AsNoTracking().CountAsync());
+            Assert.Equal(0, await db.SecurityAuditEvents.AsNoTracking().CountAsync(x =>
+                x.EventType == SoftwareProcedureExecutionCutoverAuthority.MigrationMarker + ".Completed"));
+            Assert.Equal(0, await db.SecurityAuditEvents.AsNoTracking().CountAsync(x =>
+                x.EventType.StartsWith(SoftwareProcedureExecutionCutoverAuthority.MigrationMarker)
+                && x.EventType != SoftwareProcedureExecutionCutoverAuthority.MigrationMarker
+                    + ".OrphanedRenditionCleanupFailed"));
+            Assert.Equal(originalDocumentHash, await db.ControlledDocuments.AsNoTracking()
+                .Where(x => x.Id == seed.DocumentId).Select(x => x.ContentHash).SingleAsync());
+            foreach (var original in originalArtifacts)
+            {
+                var current = await db.ControlledDocumentArtifacts.AsNoTracking()
+                    .SingleAsync(x => x.Id == original.Id);
+                Assert.Equal(original.StorageKey, current.StorageKey);
+                Assert.Equal(original.Sha256, current.Sha256);
+                Assert.True(files.Exists(original.StorageKey));
+            }
+            var selection = await db.BaselineTestProcedures.AsNoTracking()
+                .SingleAsync(x => x.BaselineId == seed.BaselineId);
+            Assert.Equal(originalSelection.ProcedureId, selection.ProcedureId);
+            Assert.Equal(originalSelection.RevisionId, selection.RevisionId);
+
+            // The ONLY new database state is the bounded cleanup-failure evidence.
+            Assert.Equal(originalAuditCount + 1, await db.SecurityAuditEvents.AsNoTracking().CountAsync());
+            var evidenceRows = await db.RollbackCleanupFailureEvidences.AsNoTracking().ToListAsync();
+            var evidenceRow = Assert.Single(evidenceRows);
+            var failedKeys = evidenceRow.Content.Split(';');
+            Assert.Equal(2, failedKeys.Length);
+            Assert.Equal(2, evidenceRow.TotalKeys);
+            Assert.Equal(2, evidenceRow.EntryCount);
+            Assert.True(evidenceRow.Content.Length <= 1500);
+            // Every failed key remains recoverable: the orphaned bytes still exist and are named exactly.
+            Assert.All(failedKeys, key => Assert.True(files.Exists(key), $"orphaned key {key} must be recoverable"));
+            var expectedHash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(
+                Encoding.UTF8.GetBytes(string.Join(";", failedKeys.OrderBy(x => x, StringComparer.Ordinal)))))
+                .ToLowerInvariant();
+            Assert.Equal(expectedHash, evidenceRow.CanonicalAggregateHash);
+            var summary = await db.SecurityAuditEvents.AsNoTracking().SingleAsync(x =>
+                x.EventType == SoftwareProcedureExecutionCutoverAuthority.MigrationMarker
+                    + ".OrphanedRenditionCleanupFailed");
+            Assert.Contains("\"keys\":2", summary.Detail);
+            Assert.Contains("\"chunks\":1", summary.Detail);
+            Assert.True(summary.Detail.Length < 4000);
+
+            // Retry of the SAME operation cannot duplicate cleanup evidence.
+            var retryContext = new AeroLinkDbContext(
+                new DbContextOptionsBuilder<AeroLinkDbContext>().UseSqlite(connection).Options);
+            var retryAuthority = new SoftwareProcedureExecutionCutoverAuthority(retryContext, legacy, typed,
+                allowSqliteExecution: true);
+            await retryAuthority.RecordCleanupFailureEvidenceAsync(evidenceRow.OperationId, failedKeys, default);
+            Assert.Equal(1, await retryContext.RollbackCleanupFailureEvidences.AsNoTracking().CountAsync());
+            Assert.Equal(1, await retryContext.SecurityAuditEvents.AsNoTracking().CountAsync(x =>
+                x.EventType == SoftwareProcedureExecutionCutoverAuthority.MigrationMarker
+                    + ".OrphanedRenditionCleanupFailed"));
+
+            // A fresh successful startup still completes coherently and keeps the evidence intact.
+            var cleanDb = new AeroLinkDbContext(
+                new DbContextOptionsBuilder<AeroLinkDbContext>().UseSqlite(connection).Options);
+            var cleanGenerator = new ControlledOutputGenerator(cleanDb, new RichContentPublisher(cleanDb, files),
+                policyResolver: new EffectiveProjectLadderPolicyResolver(cleanDb));
+            var recovery = await new SoftwareProcedureExecutionCutoverAuthority(cleanDb, legacy, typed,
+                allowSqliteExecution: true, generator: cleanGenerator, files: files).EnsureCompletedAsync();
+            Assert.Equal(1, recovery.ProjectsUpgraded);
+            Assert.Equal(1, recovery.ProceduresGenerated);
+            Assert.Equal(1, await cleanDb.GovernedMigrationCompletions.AsNoTracking().CountAsync());
+            Assert.Equal(1, await cleanDb.SecurityAuditEvents.AsNoTracking().CountAsync(x =>
+                x.EventType == SoftwareProcedureExecutionCutoverAuthority.MigrationMarker + ".Completed"));
+            Assert.Equal(1, await cleanDb.TestProcedureMigrationSources.AsNoTracking().CountAsync());
+            Assert.Equal(1, await cleanDb.RollbackCleanupFailureEvidences.AsNoTracking().CountAsync());
+            Assert.Equal(1, await cleanDb.SecurityAuditEvents.AsNoTracking().CountAsync(x =>
+                x.EventType == SoftwareProcedureExecutionCutoverAuthority.MigrationMarker
+                    + ".OrphanedRenditionCleanupFailed"));
+        }
+        finally
+        {
+            try { Directory.Delete(evidenceRoot, recursive: true); } catch (IOException) { }
+        }
+    }
+
     private sealed class ClaimSaveFailingInterceptor : SaveChangesInterceptor
     {
         public override InterceptionResult<int> SavingChanges(DbContextEventData eventData,

@@ -9,6 +9,7 @@ using AeroLink.Domain.Traceability;
 using AeroLink.Domain.Verification;
 using AeroLink.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Npgsql;
 using System.IO.Compression;
 using System.Text;
@@ -871,6 +872,361 @@ public sealed class SoftwareProcedureExecutionCutoverPostgresQualificationTests
         var service = new VerificationImpactService(db,
             policyResolver: new EffectiveProjectLadderPolicyResolver(db));
         Assert.Null(await service.FindApprovedProcedureAsync(project.Id, procedure.Id, default));
+    }
+
+    [DisposablePostgresFact]
+    public async Task Rollback_cleanup_failure_evidence_is_isolated_and_bounded_on_postgres()
+    {
+        var server = ValidateQualificationConnection(
+            Environment.GetEnvironmentVariable("AEROLINK_MIGRATIONS_CONNECTION")!);
+        var databaseName = DatabaseName + "_cleanupev";
+        await EnsureDatabaseAsync(server, databaseName);
+        var connection = new NpgsqlConnectionStringBuilder(server) { Database = databaseName }.ConnectionString;
+        var evidenceRoot = Path.Combine(Path.GetTempPath(), $"aerolink-726-pg-cleanup-evidence-{Guid.NewGuid():N}");
+        var files = new EvidenceFileStore(evidenceRoot);
+        try
+        {
+            await using var db = await DatabaseAsync(connection);
+            var seed = await SeedSignedDocumentProjectAsync(db, files, "800002", materialized: true);
+            var secondBytes = Encoding.UTF8.GetBytes("second pre-cutover rendition");
+            var secondStored = await files.StoreAsync(new MemoryStream(secondBytes), "800002.pdf",
+                "application/pdf", default);
+            db.Add(new ControlledDocumentArtifact(seed.DocumentId, "pdf", secondStored.StorageKey,
+                secondStored.OriginalFileName, secondStored.ContentType, secondStored.Size,
+                secondStored.Sha256, seed.GeneratedAt));
+            await db.SaveChangesAsync();
+
+            var originalConfiguration = await db.ProjectLadderConfigurations.AsNoTracking()
+                .SingleAsync(x => x.ProjectId == seed.ProjectId);
+            var originalDocumentHash = await db.ControlledDocuments.AsNoTracking()
+                .Where(x => x.Id == seed.DocumentId).Select(x => x.ContentHash).SingleAsync();
+            var originalArtifacts = await db.ControlledDocumentArtifacts.AsNoTracking()
+                .Where(x => x.DocumentId == seed.DocumentId)
+                .Select(x => new { x.Id, x.StorageKey, x.Sha256 }).ToListAsync();
+            var originalSelection = await db.BaselineTestProcedures.AsNoTracking()
+                .SingleAsync(x => x.BaselineId == seed.BaselineId);
+            var originalAuditCount = await db.SecurityAuditEvents.AsNoTracking().CountAsync();
+
+            var (legacy, typed) = CutoverRegistrations();
+            var failingOptions = new DbContextOptionsBuilder<AeroLinkDbContext>().UseNpgsql(connection)
+                .AddInterceptors(new RenditionSaveFailingInterceptor())
+                .Options;
+            await using var failingDb = new AeroLinkDbContext(failingOptions);
+            var generator = new ControlledOutputGenerator(failingDb, new RichContentPublisher(failingDb, files),
+                policyResolver: new EffectiveProjectLadderPolicyResolver(failingDb));
+            var failingAuthority = new SoftwareProcedureExecutionCutoverAuthority(failingDb, legacy, typed,
+                generator: generator, files: files, cleanupDeleteFailure: _ => true);
+            await Assert.ThrowsAsync<InvalidOperationException>(() => failingAuthority.EnsureCompletedAsync());
+            failingDb.ChangeTracker.Clear();
+
+            var configuration = await db.ProjectLadderConfigurations.AsNoTracking()
+                .SingleAsync(x => x.ProjectId == seed.ProjectId);
+            Assert.Equal(ProjectLadderConfigurationState.Stored, configuration.State);
+            Assert.True(configuration.IsSealed);
+            Assert.Null(configuration.LastUpgradeBy);
+            Assert.Equal(0, await db.TestProcedures.AsNoTracking().CountAsync(x =>
+                x.ProjectId == seed.ProjectId && x.ArtifactKind == VerificationArtifactKind.Procedure));
+            Assert.Equal(0, await db.TestProcedureMigrationSources.AsNoTracking().CountAsync());
+            Assert.Equal(0, await db.TestCaseProcedureLinks.AsNoTracking().CountAsync());
+            Assert.Equal(0, await db.GovernedMigrationCompletions.AsNoTracking().CountAsync());
+            Assert.Equal(0, await db.SecurityAuditEvents.AsNoTracking().CountAsync(x =>
+                x.EventType == SoftwareProcedureExecutionCutoverAuthority.MigrationMarker + ".Completed"));
+            Assert.Equal(0, await db.SecurityAuditEvents.AsNoTracking().CountAsync(x =>
+                x.EventType.StartsWith(SoftwareProcedureExecutionCutoverAuthority.MigrationMarker)
+                && x.EventType != SoftwareProcedureExecutionCutoverAuthority.MigrationMarker
+                    + ".OrphanedRenditionCleanupFailed"));
+            Assert.Equal(originalDocumentHash, await db.ControlledDocuments.AsNoTracking()
+                .Where(x => x.Id == seed.DocumentId).Select(x => x.ContentHash).SingleAsync());
+            foreach (var original in originalArtifacts)
+            {
+                var current = await db.ControlledDocumentArtifacts.AsNoTracking()
+                    .SingleAsync(x => x.Id == original.Id);
+                Assert.Equal(original.StorageKey, current.StorageKey);
+                Assert.Equal(original.Sha256, current.Sha256);
+                Assert.True(files.Exists(original.StorageKey));
+            }
+            var selection = await db.BaselineTestProcedures.AsNoTracking()
+                .SingleAsync(x => x.BaselineId == seed.BaselineId);
+            Assert.Equal(originalSelection.ProcedureId, selection.ProcedureId);
+            Assert.Equal(originalSelection.RevisionId, selection.RevisionId);
+
+            Assert.Equal(originalAuditCount + 1, await db.SecurityAuditEvents.AsNoTracking().CountAsync());
+            var evidenceRows = await db.RollbackCleanupFailureEvidences.AsNoTracking().ToListAsync();
+            var evidenceRow = Assert.Single(evidenceRows);
+            var failedKeys = evidenceRow.Content.Split(';');
+            Assert.Equal(2, failedKeys.Length);
+            Assert.Equal(2, evidenceRow.TotalKeys);
+            Assert.Equal(2, evidenceRow.EntryCount);
+            Assert.All(failedKeys, key => Assert.True(files.Exists(key)));
+            var expectedHash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(
+                Encoding.UTF8.GetBytes(string.Join(";", failedKeys.OrderBy(x => x, StringComparer.Ordinal)))))
+                .ToLowerInvariant();
+            Assert.Equal(expectedHash, evidenceRow.CanonicalAggregateHash);
+
+            // Retry of the same operation cannot duplicate evidence.
+            await using var retryDb = await DatabaseAsync(connection);
+            var retryAuthority = new SoftwareProcedureExecutionCutoverAuthority(retryDb, legacy, typed);
+            await retryAuthority.RecordCleanupFailureEvidenceAsync(evidenceRow.OperationId, failedKeys, default);
+            Assert.Equal(1, await retryDb.RollbackCleanupFailureEvidences.AsNoTracking().CountAsync());
+            Assert.Equal(1, await retryDb.SecurityAuditEvents.AsNoTracking().CountAsync(x =>
+                x.EventType == SoftwareProcedureExecutionCutoverAuthority.MigrationMarker
+                    + ".OrphanedRenditionCleanupFailed"));
+
+            // Fresh successful startup completes coherently with the evidence intact.
+            var recovery = await new SoftwareProcedureExecutionCutoverAuthority(retryDb, legacy, typed,
+                generator: new ControlledOutputGenerator(retryDb, new RichContentPublisher(retryDb, files),
+                    policyResolver: new EffectiveProjectLadderPolicyResolver(retryDb)),
+                files: files).EnsureCompletedAsync();
+            Assert.Equal(1, recovery.ProjectsUpgraded);
+            Assert.Equal(1, recovery.ProceduresGenerated);
+            Assert.Equal(1, await retryDb.RollbackCleanupFailureEvidences.AsNoTracking().CountAsync());
+        }
+        finally
+        {
+            try { Directory.Delete(evidenceRoot, recursive: true); } catch (IOException) { }
+        }
+    }
+
+    [DisposablePostgresFact]
+    public async Task Provenance_and_migration_sources_reject_invalid_raw_sql_on_postgres()
+    {
+        var server = ValidateQualificationConnection(
+            Environment.GetEnvironmentVariable("AEROLINK_MIGRATIONS_CONNECTION")!);
+        var databaseName = DatabaseName + "_integrity";
+        await EnsureDatabaseAsync(server, databaseName);
+        var connection = new NpgsqlConnectionStringBuilder(server) { Database = databaseName }.ConnectionString;
+        await using var db = await DatabaseAsync(connection);
+        var seed = await SeedMaterializedSingleCaseAsync(db);
+        var (legacy, typed) = CutoverRegistrations();
+        var completed = await new SoftwareProcedureExecutionCutoverAuthority(db, legacy, typed)
+            .EnsureCompletedAsync();
+        Assert.Equal(1, completed.ProceduresGenerated);
+
+        var now = DateTimeOffset.UtcNow;
+        var tag = Guid.NewGuid().ToString("N")[..8];
+        var foreignProgram = new ProgramRecord("Foreign Program", $"FRG{tag}");
+        var foreignProject = new ProjectRecord(foreignProgram.Id, "Foreign Software", "Foreign Product");
+        var foreignRelease = new SoftwareRelease(foreignProject.Id, "1.0", false);
+        var foreignBaseline = new CandidateBaseline("SW-91.00", 0, foreignProject.Id, foreignRelease.Id, null,
+            "Foreign candidate", "cm.test", now);
+        db.AddRange(foreignProgram, foreignProject, foreignRelease, foreignBaseline);
+        await db.SaveChangesAsync();
+        // Build the foreign project's deliberately configured NonDefault ACTIVE ladder through the real
+        // domain flow BEFORE adding verification content, so the save-boundary auto-seal no-ops instead of
+        // sealing a LegacyDefault ladder that the cutover would later treat as eligible.
+        var foreignConfiguration = ProjectLadderConfiguration.CreateDraft(foreignProject.Id, now);
+        var foreignSteps = new List<ProjectLadderStep>();
+        foreach (var (level, position) in LegacyLadderPolicy.Instance.OrderedLevels.Select((x, i) => (x, i + 1)))
+        {
+            var kinds = level == RequirementLevel.System
+                ? new[] { VerificationArtifactKind.Procedure }
+                : new[] { VerificationArtifactKind.Case };
+            var step = new ProjectLadderStep(foreignConfiguration.Id, foreignProject.Id, level, position,
+                LegacyLadderPolicy.Instance.Definition(level).Capabilities, now, kinds);
+            foreignConfiguration.Steps.Add(step);
+            foreignSteps.Add(step);
+        }
+        foreignConfiguration.AllowedUpstream.Add(new ProjectLadderAllowedUpstream(
+            foreignConfiguration.Id, foreignProject.Id, foreignSteps[0].Id, foreignSteps[1].Id, now));
+        foreignConfiguration.AllowedUpstream.Add(new ProjectLadderAllowedUpstream(
+            foreignConfiguration.Id, foreignProject.Id, foreignSteps[1].Id, foreignSteps[2].Id, now));
+        db.ProjectLadderConfigurations.Add(foreignConfiguration);
+        await db.SaveChangesAsync();
+        var foreignSeal = await new ProjectLadderSealAuthority(db).SealAsync(foreignProject.Id,
+            LadderBoundContentCatalog.Current.First().Id, "foreign-content", "project.owner", now);
+        Assert.Equal(ProjectLadderSealResultKind.Sealed, foreignSeal.Kind);
+        foreignConfiguration.Activate("project.owner", now, LadderConsumerManifestCatalog.VersionV2,
+            new string('0', 64));
+        await db.SaveChangesAsync();
+        var foreignCase = new TestProcedure(foreignProject.Id, $"HLRTC-{Random.Shared.Next(100000, 999999)}",
+            "Foreign case", "test.engineer", now, TestProcedureLevel.HighLevel);
+        var foreignCaseRevision = new TestProcedureRevision(foreignCase.Id, 0,
+            "Foreign", "P", "S", "E", TestProcedureState.Approved, "test.engineer", now,
+            parentKind: VerificationProcedureParentKind.Derived,
+            derivedRationale: "Foreign fixture case.");
+        var foreignProcedure = new TestProcedure(foreignProject.Id,
+            $"HLRTP-{Random.Shared.Next(100000, 999999)}", "Foreign procedure",
+            "test.engineer", now, TestProcedureLevel.HighLevel,
+            artifactKind: VerificationArtifactKind.Procedure,
+            parentKind: VerificationProcedureParentKind.Derived);
+        var foreignProcedureRevision = new TestProcedureRevision(foreignProcedure.Id, 0,
+            "Foreign", "PS", "SS", "E", TestProcedureState.Draft, "test.engineer", now,
+            environmentSetup: "Setup", testData: "Data", orderedSteps: "Steps",
+            expectedObservations: "Expected", cleanup: "Cleanup", toolingAutomation: "Tooling",
+            parentKind: VerificationProcedureParentKind.Derived,
+            derivedRationale: "Foreign fixture procedure.");
+        db.AddRange(foreignCase, foreignCaseRevision, foreignProcedure, foreignProcedureRevision);
+        await db.SaveChangesAsync();
+        // The Draft-0 header shape is saved first; approval is a second attributed step, exactly like the
+        // product's authoring path.
+        db.Entry(foreignProcedureRevision).Property(x => x.State).CurrentValue = TestProcedureState.Approved;
+        await db.SaveChangesAsync();
+
+        var projectId = seed.ProjectId;
+        var baselineId = seed.BaselineId;
+        var manifestEvent = await db.BaselineEvents.AsNoTracking()
+            .SingleAsync(x => x.BaselineId == baselineId
+                && x.EventType == "ExecutionCutoverManifestMigrated");
+        var createdEvent = await db.BaselineEvents.AsNoTracking()
+            .Where(x => x.BaselineId == baselineId && x.EventType == "CandidateBaselineCreated")
+            .Select(x => x.Id).SingleAsync();
+        var foreignEvent = await db.BaselineEvents.AsNoTracking()
+            .Where(x => x.BaselineId == foreignBaseline.Id)
+            .OrderBy(x => x.OccurredAt).Select(x => x.Id).FirstAsync();
+        var provenanceRow = await db.BaselineExecutionCutoverProvenances.AsNoTracking().FirstAsync();
+        var source = await db.TestProcedureMigrationSources.AsNoTracking().FirstAsync();
+        var caseArtifactId = await db.TestProcedures.AsNoTracking()
+            .Where(x => x.ProjectId == projectId && x.ArtifactKind == VerificationArtifactKind.Case)
+            .Select(x => x.Id).SingleAsync();
+        var generatedProcedureId = source.GeneratedProcedureArtifactId;
+        var generatedRevisionId = source.GeneratedProcedureRevisionId;
+        var sourceCaseRevisionId = source.SourceCaseRevisionId;
+        var missing = Guid.NewGuid();
+
+        const string provenanceColumns =
+            "(\"Id\",\"BaselineId\",\"EventId\",\"Sequence\",\"TotalMappings\",\"CanonicalAggregateHash\",\"EntryCount\",\"Content\")";
+        const string sourceColumns =
+            "(\"Id\",\"ProjectId\",\"SourceCaseRevisionId\",\"GeneratedProcedureArtifactId\",\"GeneratedProcedureRevisionId\")";
+        const string sixtyFourA = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+
+        async Task<PostgresException> Refuse(string sql, params object[] parameters) =>
+            await Assert.ThrowsAsync<PostgresException>(() =>
+                db.Database.ExecuteSqlRawAsync(sql, parameters));
+
+        // Baseline provenance: nonexistent event, event from another baseline, and wrong-type same-baseline
+        // event are all refused; committed rows are immutable.
+        await Refuse($"INSERT INTO baseline_execution_cutover_provenance {provenanceColumns} " +
+            "VALUES ({0},{1},{2},99,1,{3},1,'case:attack')",
+            Guid.NewGuid(), baselineId, missing, sixtyFourA);
+        await Refuse($"INSERT INTO baseline_execution_cutover_provenance {provenanceColumns} " +
+            "VALUES ({0},{1},{2},99,1,{3},1,'case:attack')",
+            Guid.NewGuid(), baselineId, foreignEvent, sixtyFourA);
+        await Refuse($"INSERT INTO baseline_execution_cutover_provenance {provenanceColumns} " +
+            "VALUES ({0},{1},{2},99,1,{3},1,'case:attack')",
+            Guid.NewGuid(), baselineId, createdEvent, sixtyFourA);
+        await Refuse("UPDATE baseline_execution_cutover_provenance SET \"TotalMappings\" = 99 WHERE \"Id\" = {0}",
+            provenanceRow.Id);
+        await Refuse("DELETE FROM baseline_execution_cutover_provenance WHERE \"Id\" = {0}", provenanceRow.Id);
+
+        // Migration sources: nonexistent identities, wrong-kind source/generated, generated revision owned by
+        // a different artifact, cross-project mappings, project mismatches, and mutation are all refused.
+        await Refuse($"INSERT INTO test_procedure_migration_sources {sourceColumns} " +
+            "VALUES ({0},{1},{2},{3},{4})",
+            Guid.NewGuid(), projectId, missing, generatedProcedureId, generatedRevisionId);
+        await Refuse($"INSERT INTO test_procedure_migration_sources {sourceColumns} " +
+            "VALUES ({0},{1},{2},{3},{4})",
+            Guid.NewGuid(), projectId, sourceCaseRevisionId, missing, generatedRevisionId);
+        await Refuse($"INSERT INTO test_procedure_migration_sources {sourceColumns} " +
+            "VALUES ({0},{1},{2},{3},{4})",
+            Guid.NewGuid(), projectId, sourceCaseRevisionId, generatedProcedureId, missing);
+        // Source points at a Procedure revision, not a Case revision.
+        await Refuse($"INSERT INTO test_procedure_migration_sources {sourceColumns} " +
+            "VALUES ({0},{1},{2},{3},{4})",
+            Guid.NewGuid(), projectId, generatedRevisionId, generatedProcedureId, generatedRevisionId);
+        // Generated identity points at a Case artifact.
+        await Refuse($"INSERT INTO test_procedure_migration_sources {sourceColumns} " +
+            "VALUES ({0},{1},{2},{3},{4})",
+            Guid.NewGuid(), projectId, sourceCaseRevisionId, caseArtifactId, sourceCaseRevisionId);
+        // Generated revision belongs to a different artifact.
+        await Refuse($"INSERT INTO test_procedure_migration_sources {sourceColumns} " +
+            "VALUES ({0},{1},{2},{3},{4})",
+            Guid.NewGuid(), projectId, sourceCaseRevisionId, generatedProcedureId, foreignProcedureRevision.Id);
+        // Cross-project source.
+        await Refuse($"INSERT INTO test_procedure_migration_sources {sourceColumns} " +
+            "VALUES ({0},{1},{2},{3},{4})",
+            Guid.NewGuid(), projectId, foreignCaseRevision.Id, generatedProcedureId, generatedRevisionId);
+        // Cross-project generated artifact.
+        await Refuse($"INSERT INTO test_procedure_migration_sources {sourceColumns} " +
+            "VALUES ({0},{1},{2},{3},{4})",
+            Guid.NewGuid(), projectId, sourceCaseRevisionId, foreignProcedure.Id, foreignProcedureRevision.Id);
+        // ProjectId disagrees with the mapped records.
+        await Refuse($"INSERT INTO test_procedure_migration_sources {sourceColumns} " +
+            "VALUES ({0},{1},{2},{3},{4})",
+            Guid.NewGuid(), foreignProject.Id, sourceCaseRevisionId, generatedProcedureId, generatedRevisionId);
+        await Refuse("UPDATE test_procedure_migration_sources SET \"ProjectId\" = {0} WHERE \"Id\" = {1}",
+            foreignProject.Id, source.Id);
+        await Refuse("DELETE FROM test_procedure_migration_sources WHERE \"Id\" = {0}", source.Id);
+
+        // Valid cutover data is untouched, idempotent, and recoverable.
+        Assert.Equal(1, await db.TestProcedureMigrationSources.AsNoTracking().CountAsync(x =>
+            x.ProjectId == projectId));
+        Assert.Equal(1, await db.BaselineExecutionCutoverProvenances.AsNoTracking()
+            .CountAsync(x => x.BaselineId == baselineId));
+        db.ChangeTracker.Clear();
+        var marker = await db.GovernedMigrationCompletions
+            .SingleAsync(x => x.Marker == "VerificationExecutionCutover.SoftwareProcedures.v1");
+        var completionAudits = await db.SecurityAuditEvents
+            .Where(x => x.EventType == "VerificationExecutionCutover.SoftwareProcedures.v1.Completed")
+            .ToListAsync();
+        db.SecurityAuditEvents.RemoveRange(completionAudits);
+        db.GovernedMigrationCompletions.Remove(marker);
+        await db.SaveChangesAsync();
+        var recovered = await new SoftwareProcedureExecutionCutoverAuthority(db, legacy, typed)
+            .EnsureCompletedAsync();
+        Assert.Equal(1, recovered.ProjectsUpgraded);
+        Assert.Equal(1, recovered.ProceduresGenerated);
+        Assert.Equal(1, await db.TestProcedureMigrationSources.AsNoTracking().CountAsync(x =>
+            x.ProjectId == projectId));
+        Assert.Equal(1, await db.BaselineExecutionCutoverProvenances.AsNoTracking()
+            .CountAsync(x => x.BaselineId == baselineId));
+    }
+
+    private sealed class RenditionSaveFailingInterceptor : SaveChangesInterceptor
+    {
+        public override InterceptionResult<int> SavingChanges(DbContextEventData eventData,
+            InterceptionResult<int> result)
+        {
+            if (eventData.Context?.ChangeTracker.Entries<ControlledDocumentArtifact>()
+                .Any(entry => entry.State == EntityState.Modified) == true)
+                throw new InvalidOperationException("Forced rollback after new rendition bytes were stored.");
+            return base.SavingChanges(eventData, result);
+        }
+
+        public override ValueTask<InterceptionResult<int>> SavingChangesAsync(DbContextEventData eventData,
+            InterceptionResult<int> result, CancellationToken cancellationToken = default)
+        {
+            if (eventData.Context?.ChangeTracker.Entries<ControlledDocumentArtifact>()
+                .Any(entry => entry.State == EntityState.Modified) == true)
+                throw new InvalidOperationException("Forced rollback after new rendition bytes were stored.");
+            return base.SavingChangesAsync(eventData, result, cancellationToken);
+        }
+    }
+
+    private sealed record MaterializedSeed(AeroLinkDbContext Db, Guid ProjectId, Guid ReleaseId,
+        Guid BaselineId, Guid CaseRevisionId);
+
+    private static async Task<MaterializedSeed> SeedMaterializedSingleCaseAsync(AeroLinkDbContext db)
+    {
+        var now = DateTimeOffset.UtcNow;
+        var tag = Guid.NewGuid().ToString("N")[..8];
+        var program = new ProgramRecord("Integrity Program", $"INT{tag}");
+        var project = new ProjectRecord(program.Id, "Integrity Software", "Integrity Product");
+        var release = new SoftwareRelease(project.Id, "1.0", false);
+        var baseline = new CandidateBaseline("SW-81.00", 0, project.Id, release.Id, null,
+            "Candidate", "cm.test", now);
+        db.AddRange(program, project, release, baseline);
+        var configuration = LegacyDefaultProjectLadderFactory.Create(project.Id, now);
+        db.ProjectLadderConfigurations.Add(configuration);
+        await db.SaveChangesAsync();
+        var seal = await new ProjectLadderSealAuthority(db).SealAsync(project.Id,
+            LadderBoundContentCatalog.Current.First().Id, "integrity-content", "test.sealer", now);
+        Assert.Equal(ProjectLadderSealResultKind.Sealed, seal.Kind);
+        var scr = ApprovedBaselineScr(project.Id, release.Id, "SRCR-81000", now);
+        var caseArtifact = new TestProcedure(project.Id, $"HLRTC-{Random.Shared.Next(100000, 999999)}",
+            "Integrity case", "test.engineer", now, TestProcedureLevel.HighLevel);
+        var caseRevision = new TestProcedureRevision(caseArtifact.Id, 0,
+            "Verify integrity", "Preconditions", "Steps", "Expected",
+            TestProcedureState.Approved, "test.engineer", now, effectiveBaselineId: baseline.Id,
+            parentKind: VerificationProcedureParentKind.Derived,
+            derivedRationale: "Integrity fixture case without requirement coverage.");
+        db.AddRange(scr, caseArtifact, caseRevision,
+            new BaselineTestProcedureSelection(baseline.Id, caseArtifact.Id, caseRevision.Id));
+        baseline.Select(scr, "cm.test", now);
+        baseline.Freeze("cm.test", now);
+        baseline.MarkRequirementsMaterialized("cm.test", new string('a', 64), 0, now);
+        baseline.MarkTestProceduresMaterialized("cm.test", new string('b', 64), 1, now);
+        await db.SaveChangesAsync();
+        return new MaterializedSeed(db, project.Id, release.Id, baseline.Id, caseRevision.Id);
     }
 
     private sealed record LargeBaselineSeed(AeroLinkDbContext Db, Guid ProjectId, Guid ReleaseId,

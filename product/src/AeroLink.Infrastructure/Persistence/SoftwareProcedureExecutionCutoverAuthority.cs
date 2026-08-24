@@ -37,7 +37,8 @@ public sealed class SoftwareProcedureExecutionCutoverAuthority(
     IEnumerable<IVerificationArtifactConsumerRegistration>? artifactConsumerRegistrations = null,
     bool allowSqliteExecution = false,
     ControlledOutputGenerator? generator = null,
-    EvidenceFileStore? files = null)
+    EvidenceFileStore? files = null,
+    Func<string, bool>? cleanupDeleteFailure = null)
 {
     public const string MigrationMarker = "VerificationExecutionCutover.SoftwareProcedures.v1";
     public const string Actor = VerificationArtifactProfileSchema.GovernedMigrationActor;
@@ -58,6 +59,8 @@ public sealed class SoftwareProcedureExecutionCutoverAuthority(
     // the residual orphaned bytes are never silently swallowed.
     private readonly List<string> _pendingNewStorageKeys = [];
     private IReadOnlyList<string> _lastCleanupFailures = [];
+    private Guid _cleanupOperationId = Guid.Empty;
+    private readonly Func<string, bool>? _cleanupDeleteFailure = cleanupDeleteFailure;
 
     private EvidenceFileStore Files => filesField ??= new EvidenceFileStore(
         Path.Combine(Path.GetTempPath(), "aerolink-726-evidence"));
@@ -122,9 +125,22 @@ public sealed class SoftwareProcedureExecutionCutoverAuthority(
             {
                 perProject = await UpgradeProjectAsync(configuration.Id, configuration.ProjectId, now, ct);
             }
-            catch
+            catch (Exception ex)
             {
-                await RecordCleanupFailureAuditAsync(ct);
+                // The cleanup evidence write MUST go through an isolated clean persistence boundary after
+                // the rollback: the failed DbContext still tracks rolled-back entities, and saving through it
+                // could resave part of the cutover or fail on the stale graph. A second failure is reported
+                // honestly on the original exception rather than silently swallowed.
+                try
+                {
+                    await RecordCleanupFailureEvidenceAsync(_cleanupOperationId, _lastCleanupFailures, ct);
+                }
+                catch (Exception evidenceFailure)
+                {
+                    ex.Data["AeroLinkCleanupEvidenceFailure"] =
+                        $"Cleanup-evidence persistence failed after rollback: {evidenceFailure.Message}";
+                }
+                _lastCleanupFailures = [];
                 throw;
             }
             totals = totals with
@@ -593,33 +609,76 @@ public sealed class SoftwareProcedureExecutionCutoverAuthority(
             // The surrounding transaction rolls back; any rendition bytes stored by this in-flight project
             // transaction are now unreferenced output and are removed best-effort. Previously referenced
             // evidence is never deleted. Deletion failures are returned for durable audit recording.
+            _cleanupOperationId = Guid.NewGuid();
             _lastCleanupFailures = RemovePendingNewStorageKeys();
             throw;
         }
     }
 
     /// <summary>
-    /// Records any failed rollback cleanup as durable audit evidence. Best-effort: if the process cannot
-    /// write this audit either, the residual orphaned bytes remain unreferenced output that must be
-    /// reconciled — they are never claimed to be impossible, and old referenced evidence is never deleted.
+    /// Records failed rollback cleanup through an ISOLATED, clean DbContext after the failed transaction has
+    /// rolled back. The evidence save contains ONLY cleanup evidence: chunked storage keys (bounded rows),
+    /// a canonical aggregate hash, and a bounded summary audit event. It can never resave ladder changes,
+    /// generated Procedures, mappings, links, rebindings, documents, signatures, markers, or completion
+    /// evidence from the rolled-back cutover. Unique (OperationId, Sequence) rows make a retry idempotent.
     /// </summary>
-    private async Task RecordCleanupFailureAuditAsync(CancellationToken ct)
+    internal async Task RecordCleanupFailureEvidenceAsync(Guid operationId,
+        IReadOnlyList<string> failedKeys, CancellationToken ct)
     {
-        if (_lastCleanupFailures.Count == 0) return;
-        var failedKeys = _lastCleanupFailures.ToList();
-        _lastCleanupFailures = [];
-        db.SecurityAuditEvents.Add(new SecurityAuditEvent(
-            MigrationMarker + ".OrphanedRenditionCleanupFailed", Actor,
-            "evidence-store-rollback-cleanup", "Failed",
-            Json(new
-            {
-                migration = MigrationMarker,
-                storageKeys = failedKeys,
-                reason = "Rollback cleanup could not delete newly stored orphaned rendition bytes after a failed Procedure cutover transaction. The keys are unreferenced output and require reconciliation; previously referenced evidence was never deleted."
-            }), "", DateTimeOffset.UtcNow));
-        try { await db.SaveChangesAsync(ct); }
-        catch { /* the residual failure is documented in the handoff; old evidence is never deleted */ }
+        if (operationId == Guid.Empty || failedKeys.Count == 0) return;
+        var keys = failedKeys.Distinct().OrderBy(x => x, StringComparer.Ordinal).ToList();
+        var chunks = ChunkStorageKeys(keys);
+        var canonicalHash = CanonicalStorageKeyHash(keys);
+        await using var evidenceDb = NewCleanContext();
+        var existingSequences = await evidenceDb.RollbackCleanupFailureEvidences.AsNoTracking()
+            .Where(x => x.OperationId == operationId)
+            .Select(x => x.Sequence).ToListAsync(ct);
+        var existingSet = existingSequences.ToHashSet();
+        if (existingSequences.Count == 0)
+            evidenceDb.SecurityAuditEvents.Add(new SecurityAuditEvent(
+                MigrationMarker + ".OrphanedRenditionCleanupFailed", Actor,
+                $"rollback-cleanup:{operationId}", "Failed",
+                Json(new
+                {
+                    migration = MigrationMarker,
+                    operationId,
+                    keys = keys.Count,
+                    chunks = chunks.Count,
+                    canonicalHash,
+                    reason = "Rollback cleanup could not delete newly stored orphaned rendition bytes after a failed Procedure cutover transaction. The exact keys are recoverable from the bounded rollback_cleanup_failure_evidence rows; previously referenced evidence was never deleted."
+                }), "", DateTimeOffset.UtcNow));
+        for (var sequence = 0; sequence < chunks.Count; sequence++)
+            if (!existingSet.Contains(sequence))
+                evidenceDb.RollbackCleanupFailureEvidences.Add(new RollbackCleanupFailureEvidence(
+                    operationId, sequence, keys.Count, canonicalHash, chunks[sequence],
+                    DateTimeOffset.UtcNow));
+        await evidenceDb.SaveChangesAsync(ct);
     }
+
+    private AeroLinkDbContext NewCleanContext()
+    {
+        // A fresh DbContext over the SAME physical connection: for file/SQLite and PostgreSQL this is the same
+        // database, and for shared in-memory SQLite it preserves the shared database identity. The failed
+        // context's transaction has already been disposed (rolled back) before this is called.
+        var connection = db.Database.GetDbConnection();
+        var builder = new DbContextOptionsBuilder<AeroLinkDbContext>();
+        if (db.Database.IsNpgsql()) builder.UseNpgsql(connection);
+        else builder.UseSqlite(connection);
+        return new AeroLinkDbContext(builder.Options);
+    }
+
+    private static IReadOnlyList<IReadOnlyList<string>> ChunkStorageKeys(IReadOnlyList<string> keys)
+    {
+        const int chunkSize = 10;
+        var chunks = new List<IReadOnlyList<string>>();
+        for (var offset = 0; offset < keys.Count; offset += chunkSize)
+            chunks.Add(keys.Skip(offset).Take(chunkSize).ToArray());
+        return chunks;
+    }
+
+    private static string CanonicalStorageKeyHash(IReadOnlyList<string> keys) =>
+        Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(string.Join(";", keys))))
+            .ToLowerInvariant();
 
     /// <summary>
     /// Best-effort removal of ONLY the storage keys written by the current in-flight project transaction
@@ -632,6 +691,11 @@ public sealed class SoftwareProcedureExecutionCutoverAuthority(
         var failed = new List<string>();
         foreach (var storageKey in _pendingNewStorageKeys)
         {
+            if (_cleanupDeleteFailure?.Invoke(storageKey) == true)
+            {
+                failed.Add(storageKey);
+                continue;
+            }
             try { Files.Delete(storageKey); }
             catch { failed.Add(storageKey); }
         }

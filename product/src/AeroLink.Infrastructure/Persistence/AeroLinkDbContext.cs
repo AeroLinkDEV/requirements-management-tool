@@ -126,6 +126,8 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
     public DbSet<ProjectRoleBackup> ProjectRoleBackups => Set<ProjectRoleBackup>();
     public DbSet<ElectronicSignature> ElectronicSignatures => Set<ElectronicSignature>();
     public DbSet<SecurityAuditEvent> SecurityAuditEvents => Set<SecurityAuditEvent>();
+    public DbSet<RollbackCleanupFailureEvidence> RollbackCleanupFailureEvidences =>
+        Set<RollbackCleanupFailureEvidence>();
     public DbSet<GovernedMigrationCompletion> GovernedMigrationCompletions => Set<GovernedMigrationCompletion>();
     public DbSet<ExternalIdentityProvider> ExternalIdentityProviders => Set<ExternalIdentityProvider>();
     public DbSet<ExternalGroupRoleMapping> ExternalGroupRoleMappings => Set<ExternalGroupRoleMapping>();
@@ -909,6 +911,9 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
             b.Property(x => x.ActorId).HasMaxLength(100).IsRequired();
             b.Property(x => x.Detail).HasMaxLength(4000).IsRequired();
             b.HasIndex(x => new { x.BaselineId, x.OccurredAt });
+            // Alternate key used by the composite provenance FK, proving a provenance row's event belongs to
+            // the same baseline.
+            b.HasIndex(x => new { x.BaselineId, x.Id }).IsUnique();
         });
         modelBuilder.Entity<BaselineExecutionCutoverProvenance>(b =>
         {
@@ -918,7 +923,14 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
             b.HasIndex(x => new { x.BaselineId, x.Sequence }).IsUnique();
             b.HasIndex(x => x.EventId);
             b.HasOne<CandidateBaseline>().WithMany().HasForeignKey(x => x.BaselineId)
-                .OnDelete(DeleteBehavior.Cascade);
+                .OnDelete(DeleteBehavior.Restrict);
+            // Composite FK through the baseline_events alternate key: EventId must exist AND belong to the
+            // same baseline. PostgreSQL triggers additionally require the event to be the
+            // ExecutionCutoverManifestMigrated summary; immutability is enforced at the database boundary.
+            b.HasOne<BaselineEvent>().WithMany()
+                .HasForeignKey(x => new { x.BaselineId, x.EventId })
+                .HasPrincipalKey(entry => new { entry.BaselineId, entry.Id })
+                .OnDelete(DeleteBehavior.Restrict);
         });
         modelBuilder.Entity<RequirementArtifact>(b =>
         {
@@ -981,6 +993,9 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
             b.Property(x => x.ParentKind).HasConversion<string>().HasMaxLength(30).IsRequired(); b.Property(x => x.DerivedRationale).HasMaxLength(4000).IsRequired();
             b.Property(x => x.RetirementRationale).HasMaxLength(4000).IsRequired();
             b.Property(x => x.AuthorId).HasMaxLength(100).IsRequired(); b.Property(x => x.SelectedApproverId).HasMaxLength(100); b.HasIndex(x => new { x.ProcedureId, x.Revision }).IsUnique();
+            // Alternate key used by the composite migration-source FK, proving a source's generated revision
+            // belongs to its generated artifact.
+            b.HasIndex(x => new { x.ProcedureId, x.Id }).IsUnique();
             b.Property(x => x.SourceChangeRequestsJson).IsRequired().HasDefaultValue("[]");
             b.HasIndex(x => x.SourceTestChangeRequestId);
             b.HasOne<TestProcedure>().WithMany().HasForeignKey(x => x.ProcedureId).OnDelete(DeleteBehavior.Restrict);
@@ -1003,6 +1018,26 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
             b.HasIndex(x => x.SourceCaseRevisionId).IsUnique();
             b.HasIndex(x => x.GeneratedProcedureRevisionId).IsUnique();
             b.HasOne<ProjectRecord>().WithMany().HasForeignKey(x => x.ProjectId).OnDelete(DeleteBehavior.Restrict);
+            b.HasOne<TestProcedureRevision>().WithMany()
+                .HasForeignKey(x => x.SourceCaseRevisionId).OnDelete(DeleteBehavior.Restrict);
+            b.HasOne<TestProcedure>().WithMany()
+                .HasForeignKey(x => x.GeneratedProcedureArtifactId).OnDelete(DeleteBehavior.Restrict);
+            b.HasOne<TestProcedureRevision>().WithMany()
+                .HasForeignKey(x => x.GeneratedProcedureRevisionId).OnDelete(DeleteBehavior.Restrict);
+            // Composite FK through test_procedure_revisions (ProcedureId, Id): the generated revision must
+            // belong to the generated artifact. PostgreSQL triggers additionally enforce artifact kind,
+            // project ownership, and source-Case semantics; immutability is enforced at the database boundary.
+            b.HasOne<TestProcedureRevision>().WithMany()
+                .HasForeignKey(x => new { x.GeneratedProcedureArtifactId, x.GeneratedProcedureRevisionId })
+                .HasPrincipalKey(revision => new { revision.ProcedureId, revision.Id })
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+        modelBuilder.Entity<RollbackCleanupFailureEvidence>(b =>
+        {
+            b.ToTable("rollback_cleanup_failure_evidence"); b.HasKey(x => x.Id);
+            b.Property(x => x.CanonicalAggregateHash).HasMaxLength(64).IsRequired();
+            b.Property(x => x.Content).HasMaxLength(1500).IsRequired();
+            b.HasIndex(x => new { x.OperationId, x.Sequence }).IsUnique();
         });
         modelBuilder.Entity<BaselineTestProcedureSelection>(b =>
         {
@@ -1957,6 +1992,95 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
         await ValidateCaseSystemParentSelectionsAsync(ct);
         await ValidateCaseProcedureLinksAsync(ct);
         await ValidateExactLinkLifecycleIntegrityAsync(ct);
+        await ValidateExecutionCutoverProvenanceIntegrityAsync(ct);
+    }
+
+    /// <summary>
+    /// Application-side integrity for the governed #726 provenance records. The database enforces the same
+    /// relationships with real foreign keys and PostgreSQL triggers; this save-boundary check gives SQLite
+    /// and every application caller the same fail-closed decision without relying on EF alone.
+    /// </summary>
+    private async Task ValidateExecutionCutoverProvenanceIntegrityAsync(CancellationToken ct)
+    {
+        var trackedEvents = ChangeTracker.Entries<BaselineEvent>()
+            .Where(x => x.State != EntityState.Deleted)
+            .ToDictionary(x => x.Entity.Id, x => x.Entity);
+        var trackedProcedures = ChangeTracker.Entries<TestProcedure>()
+            .Where(x => x.State != EntityState.Deleted)
+            .ToDictionary(x => x.Entity.Id, x => x.Entity);
+        var trackedRevisions = ChangeTracker.Entries<TestProcedureRevision>()
+            .Where(x => x.State != EntityState.Deleted)
+            .ToDictionary(x => x.Entity.Id, x => x.Entity);
+        var provenance = ChangeTracker.Entries<BaselineExecutionCutoverProvenance>()
+            .Where(x => x.State is EntityState.Added or EntityState.Modified)
+            .Select(x => x.Entity).ToList();
+        foreach (var row in provenance)
+        {
+            BaselineEvent? entry = trackedEvents.GetValueOrDefault(row.EventId);
+            if (entry is null)
+                entry = await BaselineEvents.AsNoTracking()
+                    .SingleOrDefaultAsync(x => x.Id == row.EventId, ct);
+            if (entry is null)
+                throw new DomainException(
+                    "Execution cutover provenance must reference an existing baseline event.");
+            if (entry.BaselineId != row.BaselineId)
+                throw new DomainException(
+                    "Execution cutover provenance event must belong to the same baseline as the provenance row.");
+            if (entry.EventType != "ExecutionCutoverManifestMigrated")
+                throw new DomainException(
+                    "Execution cutover provenance must reference an ExecutionCutoverManifestMigrated summary event.");
+        }
+
+        var sources = ChangeTracker.Entries<TestProcedureMigrationSource>()
+            .Where(x => x.State is EntityState.Added or EntityState.Modified)
+            .Select(x => x.Entity).ToList();
+        foreach (var source in sources)
+        {
+            var sourceRevision = trackedRevisions.GetValueOrDefault(source.SourceCaseRevisionId);
+            TestProcedure? sourceOwner = null;
+            if (sourceRevision is not null)
+                sourceOwner = trackedProcedures.GetValueOrDefault(sourceRevision.ProcedureId);
+            if (sourceRevision is null || sourceOwner is null)
+            {
+                var persisted = await (from revision in TestProcedureRevisions.AsNoTracking()
+                                       join procedure in TestProcedures.AsNoTracking()
+                                           on revision.ProcedureId equals procedure.Id
+                                       where revision.Id == source.SourceCaseRevisionId
+                                       select new { Revision = revision, Procedure = procedure })
+                    .SingleOrDefaultAsync(ct);
+                if (persisted is null)
+                    throw new DomainException(
+                        "A Procedure migration source must reference an existing source revision.");
+                sourceRevision = persisted.Revision;
+                sourceOwner = persisted.Procedure;
+            }
+            if (sourceOwner.ProjectId != source.ProjectId
+                || sourceOwner.ArtifactKind != VerificationArtifactKind.Case
+                || sourceOwner.Level == TestProcedureLevel.System)
+                throw new DomainException(
+                    "A Procedure migration source Case revision must be a software Case in the stated project.");
+            var generated = trackedProcedures.GetValueOrDefault(source.GeneratedProcedureArtifactId);
+            if (generated is null)
+                generated = await TestProcedures.AsNoTracking()
+                    .SingleOrDefaultAsync(x => x.Id == source.GeneratedProcedureArtifactId, ct);
+            if (generated is null)
+                throw new DomainException(
+                    "A Procedure migration source must reference an existing generated artifact.");
+            if (generated.ProjectId != source.ProjectId
+                || generated.ArtifactKind != VerificationArtifactKind.Procedure)
+                throw new DomainException(
+                    "A Procedure migration source generated artifact must be a Procedure in the stated project.");
+            var generatedRevision = trackedRevisions.GetValueOrDefault(source.GeneratedProcedureRevisionId);
+            if (generatedRevision is null)
+                generatedRevision = await TestProcedureRevisions.AsNoTracking()
+                    .SingleOrDefaultAsync(x => x.Id == source.GeneratedProcedureRevisionId, ct);
+            if (generatedRevision is null)
+                throw new DomainException(
+                    "A Procedure migration source must reference an existing generated revision.");
+            if (generatedRevision.ProcedureId != source.GeneratedProcedureArtifactId)
+                throw new DomainException(
+                    "A Procedure migration source generated revision must belong to its generated artifact.");
+        }
     }
 
     private void ValidateCaseProcedureLinkIdentityIntegrity()
