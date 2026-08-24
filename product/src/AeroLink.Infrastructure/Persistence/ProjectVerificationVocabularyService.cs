@@ -246,6 +246,16 @@ public sealed class ProjectVerificationVocabularyService(AeroLinkDbContext db, I
     /// Both authorities are covered — in-flight proposals and materialized revisions — because either one
     /// declaring a spelling is enough to strand it. Blank values are excluded: nothing is stranded by
     /// removing a method no record names.
+    ///
+    /// Retirement proposals are excluded, because a retirement declares no verification method. Submission
+    /// skips them and the reconciliation report skips them, so counting one here made the same record a
+    /// declaration for the purpose of blocking configuration and a non-declaration everywhere else — and a
+    /// historical value a retirement happened to carry could pin a spelling nobody had asserted.
+    ///
+    /// The exclusion is for retirement <i>proposals</i> only. A materialized <c>RequirementRevision</c> still
+    /// counts however its requirement was later disposed of: immutable history says what it says, and a
+    /// revision declaring "Test" is stranded by removing "Test" whether or not the requirement was retired
+    /// afterwards.
     /// </summary>
     private async Task<IReadOnlyCollection<string>> DeclaredValuesAsync(Guid projectId, CancellationToken ct)
     {
@@ -253,6 +263,7 @@ public sealed class ProjectVerificationVocabularyService(AeroLinkDbContext db, I
         var changeValues = await (from change in db.RequirementChanges.AsNoTracking()
                 join request in db.SystemChangeRequests.AsNoTracking() on change.ChangeRequestId equals request.Id
                 where request.ProjectId == projectId && change.VerificationMethod != ""
+                    && change.Kind != RequirementChangeKind.Retire
                 select change.VerificationMethod).Distinct().ToListAsync(ct);
         declared.UnionWith(changeValues);
         var revisionValues = await (from revision in db.RequirementRevisions.AsNoTracking()

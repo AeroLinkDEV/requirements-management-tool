@@ -66,8 +66,8 @@ export default function ProjectConfigurationCenter({ user, api, projectId, proje
   // submission will accept, which is the same authority the ladder above already carries. The stored values
   // that do not match are reported beside it and never rewritten: reconciling one is a controlled change to
   // the record that says it, not a side effect of opening this screen.
-  const { vocabulary, loading: vocabularyLoading, error: vocabularyError, reload: reloadVocabulary } =
-    useVerificationVocabulary(api, projectId);
+  const verification = useVerificationVocabulary(api, projectId);
+  const { vocabulary, loading: vocabularyLoading, error: vocabularyError, reload: reloadVocabulary } = verification;
   const [methods, setMethods] = useState<string[]>([]);
   const [newMethod, setNewMethod] = useState("");
   const [vocabularyReason, setVocabularyReason] = useState("");
@@ -80,7 +80,13 @@ export default function ProjectConfigurationCenter({ user, api, projectId, proje
   };
   const addMethod = () => { if (!newMethod.trim()) return; setMethods([...methods, newMethod.trim()]); setNewMethod(""); };
   const saveVocabulary = async () => {
-    if (!vocabulary || !vocabularyReason.trim()) { setError("A meaningful reason is required for every configuration edit."); return; }
+    // The version and the methods being saved must belong to the project being saved to. The hook keeps the
+    // two together; this is the assertion that nothing between here and there separated them (#701).
+    if (!vocabulary || verification.projectId !== projectId) {
+      setError("The permitted verification methods for this project are still loading. Try again in a moment.");
+      return;
+    }
+    if (!vocabularyReason.trim()) { setError("A meaningful reason is required for every configuration edit."); return; }
     setSaving(true); setError(""); setNotice("");
     try {
       await apiRequest(`${api}/api/projects/${projectId}/verification-methods`, {

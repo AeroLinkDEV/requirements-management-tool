@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import type { AuthUser } from "./IdentityCenter";
 import ControlledRequirementEditor from "./ControlledRequirementEditor";
-import { canDeclareVerificationMethod, firstPermittedMethod, useVerificationVocabulary, verificationBlockedReason } from "./verificationMethods";
+import { canDeclareVerificationMethod, decideKindChange, firstPermittedMethod, useVerificationVocabulary, verificationBlockedReason } from "./verificationMethods";
 import RequirementsImportPanel from "./RequirementsImportPanel";
 import type {
   ControlledRequirementDraft,
@@ -290,6 +290,16 @@ export default function ChangeRequestEditor({
    * that both retires a requirement and restates it is two different intentions in one row.
    */
   const changeKind = (index: number, kind: RequirementKind) => {
+    const target = changes[index];
+    // #701: the rule is enforced here, not only on the control. Turning a blank retirement into a proposal
+    // that must declare a method is the same act as adding one, and is refused in the same states.
+    const decision = target
+      ? decideKindChange(verification, { level: target.level, toKind: kind, currentMethod: target.verificationMethod })
+      : ({ allowed: false, reason: "" } as const);
+    if (!decision.allowed) {
+      setValidationError({ kind: "proposal", message: decision.reason });
+      return;
+    }
     if (validationError?.kind === "proposal") setValidationError(undefined);
     setChanges((items) =>
       items.map((item, position) => {
@@ -301,6 +311,7 @@ export default function ChangeRequestEditor({
           revision: 0,
           statement: kind === "Retire" ? "" : item.statement,
           richText: kind === "Retire" ? "" : item.richText,
+          verificationMethod: decision.verificationMethod,
         };
       }),
     );

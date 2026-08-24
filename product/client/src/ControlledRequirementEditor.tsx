@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { stateLabel, verificationArtifactNoun } from './presentation'
 import { RichContentEditor, RichContentView } from "./RichContent";
 import { emptyRichContent } from "./richContentModel";
-import { authoringOptions } from "./verificationMethods";
+import { authoringOptions, decideKindChange, verificationBlockedReason } from "./verificationMethods";
 import type { VerificationVocabularyState } from "./verificationMethods";
 import "./ControlledRequirementEditor.css";
 
@@ -147,6 +147,9 @@ export default function ControlledRequirementEditor({
   const verificationOptions = authoringOptions(vocabulary?.methods, item.verificationMethod);
   const verificationOffVocabulary = !!item.verificationMethod && !!vocabulary
     && !vocabulary.methods.includes(item.verificationMethod);
+  // True exactly when this card is a blank retirement that cannot yet become verification-bearing.
+  const kindChangeBlocked = !!onKindChange
+    && !decideKindChange(verification, { level: item.level, toKind: "Modify", currentMethod: item.verificationMethod }).allowed;
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<ExistingRequirement[]>([]);
   const [lookupBusy, setLookupBusy] = useState(false);
@@ -243,7 +246,10 @@ export default function ControlledRequirementEditor({
     onChange("level", selected.level);
     onChange("statement", item.kind === "Retire" ? "" : selected.statement);
     onChange("rationale", selected.rationale);
-    onChange("verificationMethod", selected.verificationMethod);
+    // A retirement declares no verification method, so it must not inherit the one the requirement it is
+    // retiring happens to carry. Copying it made a retirement look like a declaration to every reader, and
+    // pinned that spelling against vocabulary removal for no reason anybody had stated.
+    onChange("verificationMethod", item.kind === "Retire" ? "" : selected.verificationMethod);
     onChange("richText", emptyRichContent);
     // Its existing section comes with it, so choosing a requirement to modify does not quietly relocate it.
     onChange("targetSectionId", selected.currentSectionId ?? "");
@@ -488,10 +494,24 @@ export default function ControlledRequirementEditor({
                 onChange={(event) => onKindChange(event.target.value as RequirementKind)}
               >
                 {kindOptions.map((option) => (
-                  <option value={option.value} key={option.value}>{option.label}</option>
+                  <option
+                    value={option.value}
+                    key={option.value}
+                    disabled={!decideKindChange(verification, { level: item.level, toKind: option.value, currentMethod: item.verificationMethod }).allowed}
+                  >{option.label}</option>
                 ))}
               </select>
               <small id={`proposal-${index + 1}-change-type-help`}>Changing this resets the controlled identity selection above.</small>
+              {/*
+                * #701: while the project has not said what it permits, a retirement cannot become a proposal
+                * that must declare a method. The disabled option is the affordance; the parents refuse the
+                * transition inside their handlers, which is what actually holds.
+                */}
+              {kindChangeBlocked && (
+                <small role={vocabularyError ? "alert" : "status"} className="proposalUnavailable">
+                  {verificationBlockedReason(verification)}
+                </small>
+              )}
             </>
           ) : (
             <input value={item.kind} readOnly aria-readonly="true" />

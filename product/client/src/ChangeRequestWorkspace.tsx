@@ -4,7 +4,7 @@ import type { FormEvent } from "react";
 import { SignatureDialog } from "./IdentityCenter";
 import type { AuthUser } from "./IdentityCenter";
 import ControlledRequirementEditor from "./ControlledRequirementEditor";
-import { canDeclareVerificationMethod, firstPermittedMethod, useVerificationVocabulary, verificationBlockedReason } from "./verificationMethods";
+import { canDeclareVerificationMethod, decideKindChange, firstPermittedMethod, useVerificationVocabulary, verificationBlockedReason } from "./verificationMethods";
 import type {
   ControlledRequirementDraft,
   RequirementKind,
@@ -926,7 +926,17 @@ export default function ChangeRequestWorkspace({
   // what the identifier means, so the identity is re-derived rather than carried across. Same rule as the new
   // change request editor, and here for the same reason — an author editing a checked-out Draft changes their
   // mind about a proposal as readily as one writing it for the first time.
-  const changeRequirementKind = (index: number, kind: RequirementKind) =>
+  const changeRequirementKind = (index: number, kind: RequirementKind) => {
+    const target = requirements[index];
+    // #701: as in the new change request editor. A blank retirement becoming an Introduce or a Modify is the
+    // same act as adding a verification-bearing proposal, and is refused in the same states.
+    const decision = target
+      ? decideKindChange(verification, { level: target.level, toKind: kind, currentMethod: target.verificationMethod })
+      : ({ allowed: false, reason: "" } as const);
+    if (!decision.allowed) {
+      setError(decision.reason);
+      return;
+    }
     setRequirements((items) =>
       items.map((item, position) => {
         if (position !== index || item.kind === kind) return item;
@@ -937,9 +947,11 @@ export default function ChangeRequestWorkspace({
           revision: 0,
           statement: kind === "Retire" ? "" : item.statement,
           richText: kind === "Retire" ? "" : item.richText,
+          verificationMethod: decision.verificationMethod,
         };
       }),
     );
+  };
 
   const saveWorkingCopy = async () => {
     setError("");

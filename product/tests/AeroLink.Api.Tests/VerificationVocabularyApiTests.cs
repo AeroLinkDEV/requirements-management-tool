@@ -402,6 +402,169 @@ public sealed class VerificationVocabularyApiTests
         Assert.Equal(["Test", "Analysis", "INSPECTION", "Demonstration"], Methods(body.RootElement));
     }
 
+    /// <summary>
+    /// A retirement declares no verification method. Submission skips it and the reconciliation report skips
+    /// it, so it must not be the one place that treats the same record as a declaration and pins a spelling
+    /// nobody asserted against configuration.
+    /// </summary>
+    [Fact]
+    public async Task A_retirement_carrying_a_historical_value_does_not_pin_that_spelling()
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var client = factory.CreateClient();
+        var seeded = await SeedAsync(factory);
+        await SignInAsync(client, seeded.ManagerName);
+        using (var narrowed = await client.PutAsJsonAsync(
+                   $"/api/projects/{seeded.ProjectId}/verification-methods", new
+                   {
+                       expectedVersion = 1, reason = "This programme verifies by test only", methods = new[] { "Test" },
+                   }))
+            Assert.True(narrowed.IsSuccessStatusCode, await narrowed.Content.ReadAsStringAsync());
+
+        Guid retirementId;
+        using (var scope = factory.Services.CreateScope())
+        {
+            // A retirement that still carries the value the requirement it retires used to declare.
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            var now = DateTimeOffset.UtcNow;
+            var request = new SystemChangeRequest("SRCR-70160", 0, seeded.ProjectId, seeded.ReleaseId,
+                "Retire a requirement", "P", "A", "S", seeded.AuthorName, now);
+            request.AddRequirementChange(seeded.AuthorName, "SYSR-701600", 1, RequirementLevel.System,
+                RequirementChangeKind.Retire, "", "No longer required", "Test", now);
+            retirementId = request.RequirementChanges.Single().Id;
+            db.Add(request);
+            await db.SaveChangesAsync();
+        }
+
+        // Not reported as non-conforming either — the report and the stranding rule agree.
+        using (var read = await client.GetAsync($"/api/projects/{seeded.ProjectId}/verification-methods"))
+        {
+            using var body = JsonDocument.Parse(await read.Content.ReadAsStringAsync());
+            Assert.Empty(body.RootElement.GetProperty("nonConforming").EnumerateArray());
+        }
+
+        // Both the removal and the re-spelling that a genuine declaration would refuse are permitted here.
+        using var respelled = await client.PutAsJsonAsync($"/api/projects/{seeded.ProjectId}/verification-methods", new
+        {
+            expectedVersion = 2, reason = "House style", methods = new[] { "test" },
+        });
+        Assert.True(respelled.IsSuccessStatusCode, await respelled.Content.ReadAsStringAsync());
+        using var removed = await client.PutAsJsonAsync($"/api/projects/{seeded.ProjectId}/verification-methods", new
+        {
+            expectedVersion = 3, reason = "Analysis only from here", methods = new[] { "Analysis" },
+        });
+        Assert.True(removed.IsSuccessStatusCode, await removed.Content.ReadAsStringAsync());
+
+        using var scope2 = factory.Services.CreateScope();
+        var db2 = scope2.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+        // The retirement itself was never rewritten by any of that.
+        Assert.Equal("Test", await db2.RequirementChanges.AsNoTracking()
+            .Where(x => x.Id == retirementId).Select(x => x.VerificationMethod).SingleAsync());
+    }
+
+    [Fact]
+    public async Task A_genuine_declaration_alongside_a_retirement_still_pins_its_spelling()
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var client = factory.CreateClient();
+        var seeded = await SeedAsync(factory);
+        await SignInAsync(client, seeded.ManagerName);
+        using (var narrowed = await client.PutAsJsonAsync(
+                   $"/api/projects/{seeded.ProjectId}/verification-methods", new
+                   {
+                       expectedVersion = 1, reason = "This programme verifies by test only", methods = new[] { "Test" },
+                   }))
+            Assert.True(narrowed.IsSuccessStatusCode, await narrowed.Content.ReadAsStringAsync());
+
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            var now = DateTimeOffset.UtcNow;
+            var request = new SystemChangeRequest("SRCR-70161", 0, seeded.ProjectId, seeded.ReleaseId,
+                "One retirement and one declaration", "P", "A", "S", seeded.AuthorName, now);
+            request.AddRequirementChange(seeded.AuthorName, "SYSR-701610", 1, RequirementLevel.System,
+                RequirementChangeKind.Retire, "", "No longer required", "Test", now);
+            request.AddRequirementChange(seeded.AuthorName, "SYSR-701611", 0, RequirementLevel.System,
+                RequirementChangeKind.Introduce, "The FMS shall hold altitude.", "Rationale", "Test", now);
+            db.Add(request);
+            await db.SaveChangesAsync();
+        }
+
+        using var refused = await client.PutAsJsonAsync($"/api/projects/{seeded.ProjectId}/verification-methods", new
+        {
+            expectedVersion = 2, reason = "House style", methods = new[] { "test" },
+        });
+        Assert.Equal(HttpStatusCode.Conflict, refused.StatusCode);
+        using var body = JsonDocument.Parse(await refused.Content.ReadAsStringAsync());
+        Assert.Equal(["Test"], body.RootElement.GetProperty("strandedMethods").EnumerateArray()
+            .Select(x => x.GetString()!).ToArray());
+
+        using var scope2 = factory.Services.CreateScope();
+        var db2 = scope2.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+        var vocabulary = await db2.ProjectVerificationVocabularies.AsNoTracking().Include(x => x.Methods)
+            .SingleAsync(x => x.ProjectId == seeded.ProjectId);
+        Assert.Equal(["Test"], vocabulary.OrderedValues);
+        Assert.Equal(2, vocabulary.Version);
+        Assert.Equal(1, vocabulary.Methods.Single().Version);
+        // The refusal produced no audit event of its own: only the earlier legitimate narrowing remains.
+        Assert.Single(await db2.SecurityAuditEvents.AsNoTracking()
+            .Where(x => x.EventType == "VerificationVocabularyConfigured").ToListAsync());
+        Assert.Equal(["Test", "Test"], await db2.RequirementChanges.AsNoTracking()
+            .OrderBy(x => x.BaseNumber).Select(x => x.VerificationMethod).ToListAsync());
+    }
+
+    [Fact]
+    public async Task A_revision_still_pins_its_spelling_even_though_the_requirement_was_later_retired()
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var client = factory.CreateClient();
+        var seeded = await SeedAsync(factory);
+        await SignInAsync(client, seeded.ManagerName);
+        using (var narrowed = await client.PutAsJsonAsync(
+                   $"/api/projects/{seeded.ProjectId}/verification-methods", new
+                   {
+                       expectedVersion = 1, reason = "This programme verifies by test only", methods = new[] { "Test" },
+                   }))
+            Assert.True(narrowed.IsSuccessStatusCode, await narrowed.Content.ReadAsStringAsync());
+
+        using (var scope = factory.Services.CreateScope())
+        {
+            // Immutable history says what it says. Retiring the requirement afterwards does not unsay the
+            // declaration the revision carries, so the spelling stays pinned.
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            var now = DateTimeOffset.UtcNow;
+            var origin = new SystemChangeRequest("SRCR-70162", 0, seeded.ProjectId, seeded.ReleaseId,
+                "Historical declaration", "P", "A", "S", seeded.AuthorName, now);
+            origin.AddRequirementChange(seeded.AuthorName, "SYSR-701620", 0, RequirementLevel.System,
+                RequirementChangeKind.Introduce, "The FMS shall hold altitude.", "Rationale", "Test", now);
+            origin.SubmitForReview(seeded.AuthorName, [new ApproverSelection(seeded.AuthorName, "Author")], now);
+            origin.ApproveActiveStage(seeded.AuthorName, now);
+            var baseline = new CandidateBaseline("SW-01.00", 0, seeded.ProjectId, seeded.ReleaseId, null,
+                "Historical baseline", seeded.AuthorName, now);
+            baseline.Select(origin, seeded.AuthorName, now);
+            baseline.Freeze(seeded.AuthorName, now);
+            baseline.MarkRequirementsMaterialized(seeded.AuthorName, new string('a', 64), 1, now);
+            var artifact = new RequirementArtifact(seeded.ProjectId, "SYSR-701620", RequirementLevel.System, now);
+            var revision = new RequirementRevision(artifact.Id, 0, "The FMS shall hold altitude.", "Rationale",
+                "Test", RequirementRevisionState.Active, origin.Id, baseline.Id, now);
+            var retirement = new SystemChangeRequest("SRCR-70163", 0, seeded.ProjectId, seeded.ReleaseId,
+                "Retire it afterwards", "P", "A", "S", seeded.AuthorName, now);
+            retirement.AddRequirementChange(seeded.AuthorName, "SYSR-701620", 1, RequirementLevel.System,
+                RequirementChangeKind.Retire, "", "No longer required", "Test", now);
+            db.AddRange(origin, baseline, artifact, revision, retirement);
+            await db.SaveChangesAsync();
+        }
+
+        using var refused = await client.PutAsJsonAsync($"/api/projects/{seeded.ProjectId}/verification-methods", new
+        {
+            expectedVersion = 2, reason = "House style", methods = new[] { "test" },
+        });
+        Assert.Equal(HttpStatusCode.Conflict, refused.StatusCode);
+        using var body = JsonDocument.Parse(await refused.Content.ReadAsStringAsync());
+        Assert.Equal(["Test"], body.RootElement.GetProperty("strandedMethods").EnumerateArray()
+            .Select(x => x.GetString()!).ToArray());
+    }
+
     [Fact]
     public async Task An_exact_configured_value_reaches_review()
     {

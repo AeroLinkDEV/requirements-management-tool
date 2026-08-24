@@ -1,11 +1,11 @@
 {
   "schemaVersion": "aerolink-api-test-intent/v2",
   "totals": {
-    "tests": 563,
-    "cases": 621,
+    "tests": 566,
+    "cases": 624,
     "classes": 99,
-    "hostedTests": 550,
-    "hostedCases": 599,
+    "hostedTests": 553,
+    "hostedCases": 602,
     "nonHostedTests": 8,
     "nonHostedCases": 17,
     "unknownHostTests": 5,
@@ -21,16 +21,16 @@
     "http-boundary": {
       "label": "HTTP boundary: route, status, JSON shape",
       "level": "API (must stay hosted)",
-      "tests": 345,
-      "cases": 379,
+      "tests": 346,
+      "cases": 380,
       "unknownCases": 0,
       "classes": 81
     },
     "ef-translation": {
       "label": "EF translation / relational constraints",
       "level": "Infrastructure (needs a database, not a host)",
-      "tests": 123,
-      "cases": 134,
+      "tests": 125,
+      "cases": 136,
       "unknownCases": 0,
       "classes": 47
     },
@@ -9511,6 +9511,24 @@
     },
     {
       "cls": "VerificationVocabularyApiTests",
+      "test": "A_genuine_declaration_alongside_a_retirement_still_pins_its_spelling",
+      "kind": "Fact",
+      "intent": "ef-translation",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 465,
+        "end": 514
+      }
+    },
+    {
+      "cls": "VerificationVocabularyApiTests",
       "test": "A_level_without_verification_capability_keeps_its_not_applicable_semantics",
       "kind": "Fact",
       "intent": "http-boundary",
@@ -9522,8 +9540,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 569,
-        "end": 626
+        "start": 732,
+        "end": 789
       }
     },
     {
@@ -9557,8 +9575,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 423,
-        "end": 455
+        "start": 586,
+        "end": 618
       }
     },
     {
@@ -9575,8 +9593,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 628,
-        "end": 667
+        "start": 791,
+        "end": 830
       }
     },
     {
@@ -9593,8 +9611,44 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 669,
-        "end": 696
+        "start": 832,
+        "end": 859
+      }
+    },
+    {
+      "cls": "VerificationVocabularyApiTests",
+      "test": "A_retirement_carrying_a_historical_value_does_not_pin_that_spelling",
+      "kind": "Fact",
+      "intent": "ef-translation",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 410,
+        "end": 463
+      }
+    },
+    {
+      "cls": "VerificationVocabularyApiTests",
+      "test": "A_revision_still_pins_its_spelling_even_though_the_requirement_was_later_retired",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 516,
+        "end": 566
       }
     },
     {
@@ -9629,8 +9683,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 457,
-        "end": 494
+        "start": 620,
+        "end": 657
       }
     },
     {
@@ -9665,8 +9719,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 405,
-        "end": 421
+        "start": 568,
+        "end": 584
       }
     },
     {
@@ -9683,8 +9737,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 496,
-        "end": 518
+        "start": 659,
+        "end": 681
       }
     },
     {
@@ -9701,8 +9755,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 520,
-        "end": 567
+        "start": 683,
+        "end": 730
       }
     },
     {

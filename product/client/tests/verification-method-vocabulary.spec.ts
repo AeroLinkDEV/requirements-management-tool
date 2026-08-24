@@ -370,3 +370,262 @@ test('a vocabulary that fails to load blocks verification-bearing authoring on b
   await expect(page.getByLabel('Verification method')).toHaveCount(1)
   await expect(page.getByLabel('Verification method')).toHaveValue('Test')
 })
+
+/**
+ * #701 round-3 finding 1: retirement was the way round the gate.
+ *
+ * A retirement declares no method, so its Add button is deliberately available while the vocabulary loads.
+ * Changing that blank retirement's type to Modify or Introduce then produced exactly the blank
+ * verification-bearing proposal the gate exists to prevent. The rule is enforced inside both parents'
+ * change-kind handlers, so these tests drive the handler directly rather than trusting the disabled option.
+ */
+
+/** Fires a change event past a disabled option, so the handler is what is under test, not the affordance. */
+async function forceKindAsync(page: Page, index: number, kind: string) {
+  await page.getByLabel('Change type').nth(index).evaluate((element, value) => {
+    const select = element as HTMLSelectElement
+    select.value = value
+    select.dispatchEvent(new Event('change', { bubbles: true }))
+  }, kind)
+}
+
+test('a blank retirement cannot become a verification-bearing proposal while the vocabulary is unavailable, on the new change request editor', async ({ page }) => {
+  test.setTimeout(180_000)
+  await login(page, 'admin', { openProject: false })
+  const suffix = Date.now().toString(36)
+  const workspace = await createWorkspaceAsync(page.request, suffix)
+  const root = `/programs/${workspace.program.id}/projects/${workspace.project.id}/releases/${workspace.release.id}`
+
+  const drafts: string[][] = []
+  page.on('request', event => {
+    if (event.url().endsWith('/api/change-request-drafts') && event.method() === 'POST')
+      drafts.push((event.postDataJSON() as { requirementChanges: { verificationMethod: string }[] })
+        .requirementChanges.map(change => change.verificationMethod))
+  })
+
+  const held = await holdVocabularyAsync(page)
+  await page.goto(`${root}/systems/change-requests/new`)
+  await expect(page.getByRole('heading', { name: 'Create System Change Request' })).toBeVisible({ timeout: 30_000 })
+
+  // Retirement remains available while the vocabulary is in flight: it declares nothing.
+  await page.getByRole('button', { name: 'Retire existing', exact: true }).click()
+  const kind = page.getByLabel('Change type')
+  await expect(kind).toHaveValue('Retire')
+  await expect(kind.locator('option[value="Modify"]')).toHaveJSProperty("disabled", true)
+  await expect(kind.locator('option[value="Introduce"]')).toHaveJSProperty("disabled", true)
+  await expect(blockedNotice(page).first()).toBeVisible()
+
+  // Driving the handler past the disabled option changes nothing.
+  await forceKindAsync(page, 0, 'Modify')
+  await expect(kind).toHaveValue('Retire')
+  await forceKindAsync(page, 0, 'Introduce')
+  await expect(kind).toHaveValue('Retire')
+  // The card is still a retirement, and its method is still blank — no verification-bearing proposal was
+  // created, and nothing filled the field in behind the author.
+  await expect(page.getByLabel('Verification method')).toHaveValue('')
+
+  held.release()
+  await expect(kind.locator('option[value="Modify"]')).toHaveJSProperty("disabled", false)
+  await kind.selectOption('Introduce')
+  await expect(kind).toHaveValue('Introduce')
+
+  // The transition supplies the authoritative first method, and shows exactly what it will send.
+  const method = page.getByLabel('Verification method')
+  await expect(method).toHaveValue('Test')
+  await expect(method.locator('option:checked')).toHaveText('Test')
+
+  await page.getByLabel('Title').fill(`Retire transition ${suffix}`)
+  await page.getByLabel('Requirement statement').fill('The FMS shall sequence oceanic waypoints.')
+  await page.getByRole('button', { name: /Save SRCR Draft/ }).click()
+  await expect.poll(() => drafts.length).toBe(1)
+  expect(drafts[0]).toEqual(['Test'])
+})
+
+test('a blank retirement cannot become a verification-bearing proposal while the vocabulary is unavailable, on a checked-out draft', async ({ page }) => {
+  test.setTimeout(210_000)
+  await login(page, 'admin', { openProject: false })
+  const suffix = Date.now().toString(36)
+  const workspace = await createWorkspaceAsync(page.request, suffix)
+  const projectId = workspace.project.id
+  const sectionId = await systemSectionAsync(page.request, projectId)
+  const existing = await draftAsync(page.request, projectId, workspace.release.id, sectionId,
+    'Retire transition draft', 'Test')
+  const root = `/programs/${workspace.program.id}/projects/${projectId}/releases/${workspace.release.id}`
+
+  const autosaved: string[][] = []
+  page.on('request', event => {
+    if (!/\/api\/controlled-editing\/sessions\/.*\/autosave$/.test(event.url())) return
+    const body = event.postDataJSON() as { draftJson: string }
+    const copy = JSON.parse(body.draftJson) as { requirementChanges: { kind: string; verificationMethod: string }[] }
+    autosaved.push(copy.requirementChanges.map(change => `${change.kind}:${change.verificationMethod}`))
+  })
+
+  const held = await holdVocabularyAsync(page)
+  await page.goto(`${root}/systems/change-requests/${existing.id}`)
+  await page.getByRole('button', { name: 'Check out & edit' }).click()
+  await page.getByRole('button', { name: 'Retire existing', exact: true }).click()
+
+  const addedKind = page.getByLabel('Change type').nth(1)
+  await expect(addedKind).toHaveValue('Retire')
+  await expect(addedKind.locator('option[value="Modify"]')).toHaveJSProperty("disabled", true)
+  await expect(blockedNotice(page).first()).toBeVisible()
+
+  await forceKindAsync(page, 1, 'Modify')
+  await expect(addedKind).toHaveValue('Retire')
+  await forceKindAsync(page, 1, 'Introduce')
+  await expect(addedKind).toHaveValue('Retire')
+  // No autosave in the whole blocked window ever carried a blank verification-bearing proposal.
+  expect(autosaved.every(copy => copy.every(entry => entry.startsWith('Retire:') || !entry.endsWith(':')))).toBe(true)
+
+  held.release()
+  await expect(addedKind.locator('option[value="Modify"]')).toHaveJSProperty("disabled", false)
+  await addedKind.selectOption('Introduce')
+  await expect(addedKind).toHaveValue('Introduce')
+  const added = page.getByLabel('Verification method').nth(1)
+  await expect(added).toHaveValue('Test')
+  await expect(added.locator('option:checked')).toHaveText('Test')
+  await expect.poll(() => autosaved.at(-1) ?? [], { timeout: 30_000 })
+    .toEqual(['Introduce:Test', 'Introduce:Test'])
+})
+
+test('a vocabulary that fails to load also blocks turning a retirement into a verification-bearing proposal', async ({ page }) => {
+  test.setTimeout(150_000)
+  await login(page, 'admin', { openProject: false })
+  const suffix = Date.now().toString(36)
+  const workspace = await createWorkspaceAsync(page.request, suffix)
+  const root = `/programs/${workspace.program.id}/projects/${workspace.project.id}/releases/${workspace.release.id}`
+
+  await page.route(vocabularyRoute, async (route, request) => {
+    if (request.method() !== 'GET') return route.fallback()
+    await route.fulfill({
+      status: 500,
+      contentType: 'application/json',
+      body: JSON.stringify({ error: 'The permitted verification methods could not be loaded.' }),
+    })
+  })
+
+  await page.goto(`${root}/systems/change-requests/new`)
+  await expect(page.getByRole('heading', { name: 'Create System Change Request' })).toBeVisible({ timeout: 30_000 })
+  await page.getByRole('button', { name: 'Retire existing', exact: true }).click()
+  const kind = page.getByLabel('Change type')
+  await expect(kind).toHaveValue('Retire')
+  await expect(kind.locator('option[value="Modify"]')).toHaveJSProperty("disabled", true)
+  await forceKindAsync(page, 0, 'Modify')
+  await expect(kind).toHaveValue('Retire')
+  await expect(page.getByRole('alert').filter({ hasText: 'authoring is paused' }).first()).toBeVisible()
+  await expect(page.getByLabel('Verification method')).toHaveValue('')
+})
+
+/**
+ * #701 round-3 finding 3: the vocabulary is authority for one project, and only for that project.
+ *
+ * The hook used to keep the previous project's answer until its effect ran, and let a slow response
+ * overwrite a newer one. Either would put project A's permitted methods and A's version on screen while the
+ * component had already moved to B — and Project Configuration would then PUT A's edit state to B.
+ */
+test('a slow vocabulary for one project cannot become the authority for another', async ({ page }) => {
+  test.setTimeout(210_000)
+  await login(page, 'admin', { openProject: false })
+  const suffix = Date.now().toString(36)
+  const first = await createWorkspaceAsync(page.request, `${suffix}a`)
+  const second = await createWorkspaceAsync(page.request, `${suffix}b`)
+
+  for (const [workspace, method] of [[first, 'Analysis'], [second, 'Similarity']] as const) {
+    const narrowed = await page.request.put(
+      `${apiBase}/api/projects/${workspace.project.id}/verification-methods`,
+      { data: { expectedVersion: 1, reason: `Only ${method} on this programme`, methods: [method] } })
+    expect(narrowed.ok(), await narrowed.text()).toBeTruthy()
+  }
+
+  // The first project's answer is held until after the second project's has arrived and been rendered.
+  let releaseFirst = () => {}
+  const heldFirst = new Promise<void>(resolve => { releaseFirst = resolve })
+  await page.route('**/api/projects/*/verification-methods', async (route, request) => {
+    if (request.method() !== 'GET') return route.fallback()
+    if (request.url().includes(first.project.id)) await heldFirst
+    await route.fallback()
+  })
+
+  const writes: string[] = []
+  page.on('request', event => {
+    if (/\/api\/projects\/.*\/verification-methods$/.test(event.url()) && event.method() === 'PUT')
+      writes.push(event.url())
+  })
+
+  const slug = (name: string) => name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '')
+  await page.goto(`/projects/${slug(first.project.name)}/configuration`)
+  await expect(page.getByRole('heading', { name: 'Project configuration', level: 1 })).toBeVisible({ timeout: 30_000 })
+  await page.getByRole('button', { name: /Verification methods/ }).click()
+  await expect(page.getByText('Loading the permitted verification methods')).toBeVisible()
+
+  // Move to the second project while the first is still in flight, and let the second answer first.
+  await page.goto(`/projects/${slug(second.project.name)}/configuration`)
+  await expect(page.getByRole('heading', { name: 'Project configuration', level: 1 })).toBeVisible({ timeout: 30_000 })
+  await page.getByRole('button', { name: /Verification methods/ }).click()
+  await expect(page.getByLabel('Verification method 1')).toHaveValue('Similarity')
+
+  // Now let the first project's slow response land. It must not become the authority for the second.
+  releaseFirst()
+  await page.waitForTimeout(1_500)
+  await expect(page.getByLabel('Verification method 1')).toHaveValue('Similarity')
+  await expect(page.getByLabel('Verification method 2')).toHaveCount(0)
+  await expect(page.getByText('Analysis')).toHaveCount(0)
+
+  // Authoring on the second project defaults only from the second project's vocabulary.
+  const secondRoot = `/programs/${second.program.id}/projects/${second.project.id}/releases/${second.release.id}`
+  await page.goto(`${secondRoot}/systems/change-requests/new`)
+  await expect(page.getByRole('heading', { name: 'Create System Change Request' })).toBeVisible({ timeout: 30_000 })
+  await page.getByRole('button', { name: '+ Introduce System requirement' }).click()
+  await expect(page.getByLabel('Verification method')).toHaveValue('Similarity')
+
+  // And the only configuration write that happened went to the project whose vocabulary was on screen.
+  expect(writes.every(url => url.includes(second.project.id) || url.includes(first.project.id))).toBe(true)
+  expect(writes.filter(url => url.includes(second.project.id) && url.includes(first.project.id))).toEqual([])
+})
+
+test('saving the vocabulary sends the version belonging to the project being saved', async ({ page }) => {
+  test.setTimeout(180_000)
+  await login(page, 'admin', { openProject: false })
+  const suffix = Date.now().toString(36)
+  const first = await createWorkspaceAsync(page.request, `${suffix}c`)
+  const second = await createWorkspaceAsync(page.request, `${suffix}d`)
+  // Give the two projects different versions, so a cross-project version would be detectable.
+  for (const workspace of [first, second]) {
+    const narrowed = await page.request.put(
+      `${apiBase}/api/projects/${workspace.project.id}/verification-methods`,
+      { data: { expectedVersion: 1, reason: 'Narrow first', methods: ['Test', 'Analysis'] } })
+    expect(narrowed.ok(), await narrowed.text()).toBeTruthy()
+  }
+  const bumped = await page.request.put(
+    `${apiBase}/api/projects/${first.project.id}/verification-methods`,
+    { data: { expectedVersion: 2, reason: 'Bump the first project only', methods: ['Test'] } })
+  expect(bumped.ok(), await bumped.text()).toBeTruthy()
+
+  const writes: { url: string; expectedVersion: number; methods: string[] }[] = []
+  page.on('request', event => {
+    if (!/\/api\/projects\/.*\/verification-methods$/.test(event.url()) || event.method() !== 'PUT') return
+    const body = event.postDataJSON() as { expectedVersion: number; methods: string[] }
+    writes.push({ url: event.url(), expectedVersion: body.expectedVersion, methods: body.methods })
+  })
+
+  const slug = (name: string) => name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '')
+  await page.goto(`/projects/${slug(first.project.name)}/configuration`)
+  await page.getByRole('button', { name: /Verification methods/ }).click()
+  await expect(page.getByLabel('Verification method 1')).toHaveValue('Test')
+  await page.goto(`/projects/${slug(second.project.name)}/configuration`)
+  await page.getByRole('button', { name: /Verification methods/ }).click()
+  await expect(page.getByLabel('Verification method 2')).toHaveValue('Analysis')
+
+  await page.getByLabel('New verification method').fill('Similarity')
+  await page.getByRole('button', { name: 'Add method' }).click()
+  await page.getByLabel('Verification vocabulary reason').fill('Add similarity to the second programme')
+  await page.getByRole('button', { name: 'Save vocabulary' }).click()
+  await expect(page.getByRole('status')).toContainText('Permitted verification methods saved')
+
+  const write = writes.at(-1)!
+  expect(write.url).toContain(second.project.id)
+  expect(write.url).not.toContain(first.project.id)
+  // The second project is at version 2; the first is at 3. Sending 3 here would be the cross-project bug.
+  expect(write.expectedVersion).toBe(2)
+  expect(write.methods).toEqual(['Test', 'Analysis', 'Similarity'])
+})
