@@ -1,8 +1,12 @@
 using System.Text.Json;
+using System.Security.Cryptography;
+using System.Text;
+using System.Text.Json.Nodes;
 using AeroLink.Domain.ChangeControl;
 using AeroLink.Domain.Common;
 using AeroLink.Domain.Hierarchy;
 using AeroLink.Domain.Identity;
+using AeroLink.Domain.Traceability;
 using AeroLink.Domain.Verification;
 using Microsoft.EntityFrameworkCore;
 
@@ -28,7 +32,9 @@ public sealed class SoftwareProcedureExecutionCutoverAuthority(
     AeroLinkDbContext db,
     IEnumerable<ILadderConsumerRegistration> consumerRegistrations,
     IEnumerable<IVerificationArtifactConsumerRegistration>? artifactConsumerRegistrations = null,
-    bool allowSqliteExecution = false)
+    bool allowSqliteExecution = false,
+    ControlledOutputGenerator? generator = null,
+    EvidenceFileStore? files = null)
 {
     public const string MigrationMarker = "VerificationExecutionCutover.SoftwareProcedures.v1";
     public const string Actor = VerificationArtifactProfileSchema.GovernedMigrationActor;
@@ -41,6 +47,15 @@ public sealed class SoftwareProcedureExecutionCutoverAuthority(
         consumerRegistrations?.ToArray() ?? throw new ArgumentNullException(nameof(consumerRegistrations));
     private readonly IReadOnlyList<IVerificationArtifactConsumerRegistration> artifactRegistrations =
         artifactConsumerRegistrations?.ToArray() ?? [];
+    private ControlledOutputGenerator? generatorField = generator;
+    private EvidenceFileStore? filesField = files;
+
+    private EvidenceFileStore Files => filesField ??= new EvidenceFileStore(
+        Path.Combine(Path.GetTempPath(), "aerolink-726-evidence"));
+
+    private ControlledOutputGenerator Generator => generatorField ??= new ControlledOutputGenerator(
+        db, new RichContentPublisher(db, Files),
+        policyResolver: new EffectiveProjectLadderPolicyResolver(db));
 
     public async Task<SoftwareProcedureCutoverResult> EnsureCompletedAsync(CancellationToken ct = default)
     {
@@ -59,8 +74,11 @@ public sealed class SoftwareProcedureExecutionCutoverAuthority(
         var pending = configurations.Where(x => TargetKinds(x) is not null).ToList();
         if (pending.Count == 0)
         {
-            await MarkCompletedAsync(ct, new SoftwareProcedureCutoverResult(0, 0, 0, 0, 0, 0));
-            return new(0, 0, 0, 0, 0, 0);
+            // A crash before the global Completed marker must not report inaccurate zero totals: recover the
+            // honest per-project outcome from the persisted governed evidence.
+            var recoveredAtStart = await RecoverCompletedTotalsAsync(new HashSet<Guid>(), ct);
+            await MarkCompletedAsync(ct, recoveredAtStart);
+            return recoveredAtStart;
         }
 
         // Validate every project BEFORE writing anything. A missing typed execution consumer refuses the
@@ -77,8 +95,10 @@ public sealed class SoftwareProcedureExecutionCutoverAuthority(
 
         var totals = new SoftwareProcedureCutoverResult(0, 0, 0, 0, 0, 0);
         var now = DateTimeOffset.UtcNow;
+        var pendingProjectIds = new HashSet<Guid>();
         foreach (var configuration in pending)
         {
+            pendingProjectIds.Add(configuration.ProjectId);
             var perProject = await UpgradeProjectAsync(configuration.Id, configuration.ProjectId, now, ct);
             totals = totals with
             {
@@ -90,6 +110,18 @@ public sealed class SoftwareProcedureExecutionCutoverAuthority(
                 ImpactItemsRebound = totals.ImpactItemsRebound + perProject.ImpactItemsRebound,
             };
         }
+        // If a previous run crashed part-way, projects it already upgraded are Active and no longer pending;
+        // their governed evidence must be counted too, never reported as zero.
+        var recoveredAfterLoop = await RecoverCompletedTotalsAsync(pendingProjectIds, ct);
+        totals = totals with
+        {
+            ProjectsUpgraded = totals.ProjectsUpgraded + recoveredAfterLoop.ProjectsUpgraded,
+            ProceduresGenerated = totals.ProceduresGenerated + recoveredAfterLoop.ProceduresGenerated,
+            ExecutionsRebound = totals.ExecutionsRebound + recoveredAfterLoop.ExecutionsRebound,
+            TestSetEntriesRebound = totals.TestSetEntriesRebound + recoveredAfterLoop.TestSetEntriesRebound,
+            BaselineSelectionsRebound = totals.BaselineSelectionsRebound + recoveredAfterLoop.BaselineSelectionsRebound,
+            ImpactItemsRebound = totals.ImpactItemsRebound + recoveredAfterLoop.ImpactItemsRebound,
+        };
         await MarkCompletedAsync(ct, totals);
         return totals;
     }
@@ -129,14 +161,12 @@ public sealed class SoftwareProcedureExecutionCutoverAuthority(
                 && (x.Level == TestProcedureLevel.HighLevel || x.Level == TestProcedureLevel.LowLevel))
             .OrderBy(x => x.BaseNumber)
             .ToListAsync(ct);
-        if (cases.Count == 0) { await transaction.CommitAsync(ct); return new(0, 0, 0, 0, 0, 0); }
         var caseIds = cases.Select(x => x.Id).ToList();
         var caseRevisions = await db.TestProcedureRevisions.AsNoTracking()
             .Where(x => caseIds.Contains(x.ProcedureId))
             .OrderBy(x => x.ProcedureId).ThenBy(x => x.Revision)
             .ToListAsync(ct);
         var caseRevisionIds = caseRevisions.Select(x => x.Id).ToList();
-        if (caseRevisionIds.Count == 0) { await transaction.CommitAsync(ct); return new(0, 0, 0, 0, 0, 0); }
         var existingLinks = await db.TestCaseProcedureLinks.AsNoTracking()
             .Where(x => caseRevisionIds.Contains(x.CaseRevisionId))
             .Select(x => new { x.CaseRevisionId, x.ProcedureRevisionId })
@@ -160,12 +190,16 @@ public sealed class SoftwareProcedureExecutionCutoverAuthority(
 
         var caseById = cases.ToDictionary(x => x.Id);
         var generated = 0;
+        var selectedCaseRevisionIds = await db.BaselineTestProcedures.AsNoTracking()
+            .Where(x => caseRevisionIds.Contains(x.RevisionId))
+            .Select(x => x.RevisionId).Distinct().ToListAsync(ct);
         foreach (var caseArtifact in cases)
         {
             var artifactRevisions = caseRevisions.Where(x => x.ProcedureId == caseArtifact.Id).ToList();
             var pending = artifactRevisions
                 .Where(x => !caseRevisionToProcedure.ContainsKey(x.Id)).ToList();
             if (pending.Count == 0) continue;
+            var firstRetired = pending.All(x => x.State == TestProcedureState.Retired);
             var baseNumber = await IdentifierAllocator.NextTestProcedureAsync(db, caseArtifact.Level,
                 VerificationArtifactKind.Procedure, ct);
             var procedure = new TestProcedure(projectId, baseNumber, caseArtifact.Title, caseArtifact.OwnerId,
@@ -174,44 +208,56 @@ public sealed class SoftwareProcedureExecutionCutoverAuthority(
             db.TestProcedures.Add(procedure);
             foreach (var caseRevision in pending)
             {
+                var retired = caseRevision.State == TestProcedureState.Retired;
+                // A generated Procedure mirrors the source Case revision exactly, including its governed
+                // baseline — but ONLY when that Case revision is actually carried by a baseline manifest.
+                // A Case that is effective on paper but selected nowhere yields a dormant mirror, not a
+                // governed claim the build never made.
+                var effectiveBaselineId = selectedCaseRevisionIds.Contains(caseRevision.Id)
+                    ? caseRevision.EffectiveBaselineId
+                    : null;
                 var revision = new TestProcedureRevision(procedure.Id, caseRevision.Revision,
                     caseRevision.Objective, caseRevision.Preconditions, caseRevision.Steps,
-                    caseRevision.ExpectedResult, TestProcedureState.Approved, Actor, now,
-                    effectiveBaselineId: caseRevision.EffectiveBaselineId,
-                    environmentSetup: caseRevision.Preconditions,
+                    caseRevision.ExpectedResult,
+                    retired ? TestProcedureState.Retired : TestProcedureState.Approved,
+                    Actor, now,
+                    effectiveBaselineId: effectiveBaselineId,
+                    environmentSetup: retired ? "" : caseRevision.Preconditions,
                     testData: "",
-                    orderedSteps: caseRevision.Steps,
-                    expectedObservations: caseRevision.ExpectedResult,
+                    orderedSteps: retired ? "" : caseRevision.Steps,
+                    expectedObservations: retired ? "" : caseRevision.ExpectedResult,
                     cleanup: "",
                     toolingAutomation: "",
                     parentKind: VerificationProcedureParentKind.Allocated);
-                var link = new TestCaseProcedureLink(caseRevision.Id, revision.Id);
                 db.TestProcedureRevisions.Add(revision);
-                db.TestCaseProcedureLinks.Add(link);
+                // A Retired Case cannot be an exact active parent under the persistence rules; the retired
+                // history is preserved by the mirrored Retired Procedure revision and its audit event, never
+                // by manufacturing an active executable claim from retired content.
+                var link = retired ? null : new TestCaseProcedureLink(caseRevision.Id, revision.Id);
+                if (link is not null) db.TestCaseProcedureLinks.Add(link);
                 db.SecurityAuditEvents.Add(new SecurityAuditEvent(
                     MigrationMarker + ".ProcedureGenerated", Actor,
-                    $"TestCaseProcedureLink:{link.Id}", "Succeeded",
+                    link is null ? $"TestProcedureRevision:{revision.Id}" : $"TestCaseProcedureLink:{link.Id}",
+                    "Succeeded",
                     Json(new
                     {
                         migration = MigrationMarker,
                         projectId,
                         sourceCaseRevisionId = caseRevision.Id,
                         sourceCaseBaseNumber = caseArtifact.BaseNumber,
+                        sourceCaseState = caseRevision.State.ToString(),
                         generatedProcedureId = procedure.Id,
                         generatedProcedureBaseNumber = baseNumber,
                         generatedProcedureRevision = revision.Id,
+                        generatedState = revision.State.ToString(),
                         sourceTcrId = caseRevision.SourceTestChangeRequestId,
-                        reason = "Deterministically generated from the exact legacy Case revision; no TCR, reviewer, or human approval fabricated."
+                        reason = retired
+                            ? "Historical retired Case revision mirrored as a retired Procedure revision; no active executable claim was manufactured."
+                            : "Deterministically generated from the exact legacy Case revision; no TCR, reviewer, or human approval fabricated."
                     }), "", now));
                 caseRevisionToProcedure[caseRevision.Id] = (procedure.Id, revision.Id);
                 generated++;
             }
-        }
-        if (generated == 0 && caseRevisionToProcedure.Count == 0)
-        {
-            await db.SaveChangesAsync(ct);
-            await transaction.CommitAsync(ct);
-            return new(0, 0, 0, 0, 0, 0);
         }
         var migratedCaseRevisionIdsList = caseRevisionToProcedure.Keys.ToList();
         var migratedCaseArtifactIds = migratedCaseRevisionIdsList
@@ -258,6 +304,37 @@ public sealed class SoftwareProcedureExecutionCutoverAuthority(
                 item.RebindMigrationExecutable(procedureId, resolvedProcedureId, resolvedRevisionId);
         }
 
+        // Persist the rebinds first so the canonical manifest is recomputed from the membership the build now
+        // actually carries — never from Case rows that are about to disappear.
+        await db.SaveChangesAsync(ct);
+
+        // Blocker 1: never leave a baseline's canonical TestProceduresHash describing Case identities while
+        // membership points to Procedure identities. Recompute the canonical manifest through the governed
+        // CandidateBaseline manifest-migration operation for every materialized (frozen or released) baseline
+        // whose membership this project changed.
+        var affectedBaselineIds = baselineSelections.Select(x => x.BaselineId).Distinct().ToList();
+        if (affectedBaselineIds.Count != 0)
+        {
+            var materializedBaselines = await db.CandidateBaselines
+                .Where(x => affectedBaselineIds.Contains(x.Id) && x.TestProceduresMaterializedAt != null)
+                .ToListAsync(ct);
+            foreach (var baseline in materializedBaselines)
+            {
+                var manifestEntries = await (from member in db.BaselineTestProcedures.AsNoTracking()
+                                             where member.BaselineId == baseline.Id
+                                             join revision in db.TestProcedureRevisions.AsNoTracking()
+                                                 on member.RevisionId equals revision.Id
+                                             join procedure in db.TestProcedures.AsNoTracking()
+                                                 on member.ProcedureId equals procedure.Id
+                                             select new TestProcedureManifestEntry(procedure.Id, revision.Id,
+                                                 procedure.BaseNumber, revision.Revision)).ToListAsync(ct);
+                baseline.RecordVerificationIdentityMigration(
+                    Actor, TestProcedureManifest.Hash(manifestEntries), now);
+            }
+            await db.SaveChangesAsync(ct);
+            await RegenerateAffectedDocumentsAsync(affectedBaselineIds, now, ct);
+        }
+
         db.SecurityAuditEvents.Add(new SecurityAuditEvent(
             MigrationMarker + ".ProjectUpgraded", Actor,
             $"Project:{projectId}", "Succeeded",
@@ -271,11 +348,220 @@ public sealed class SoftwareProcedureExecutionCutoverAuthority(
                 baselineSelectionsRebound = baselineSelections.Count,
                 impactItemsRebound = impactItems.Count,
                 sourceCaseRevisions = migratedCaseRevisionIdsList.Count,
+                affectedBaselines = affectedBaselineIds.Count,
                 reason = UpgradeReason
             }), "", now));
         await db.SaveChangesAsync(ct);
         await transaction.CommitAsync(ct);
         return new(1, generated, executions.Count, entries.Count, baselineSelections.Count, impactItems.Count);
+    }
+
+    /// <summary>
+    /// Governed controlled-document regeneration for the affected baselines. Prior stored rendition bytes are
+    /// preserved (never deleted) and replaced only after the renderer produced and hashed the new bytes;
+    /// existing human signatures are superseded as evidence, never rewritten or fabricated.
+    /// </summary>
+    private async Task RegenerateAffectedDocumentsAsync(
+        IReadOnlyCollection<Guid> affectedBaselineIds, DateTimeOffset now, CancellationToken ct)
+    {
+        var baselineIds = affectedBaselineIds.ToList();
+        var documents = await db.ControlledDocuments
+            .Where(x => baselineIds.Contains(x.BaselineId)
+                && (x.Type == ControlledDocumentType.SystemTestProcedures
+                    || x.Type == ControlledDocumentType.HighLevelTestCases
+                    || x.Type == ControlledDocumentType.LowLevelTestCases))
+            .OrderBy(x => x.Id).ToListAsync(ct);
+        if (documents.Count == 0) return;
+        var artifacts = await db.ControlledDocumentArtifacts
+            .Where(x => documents.Select(d => d.Id).Contains(x.DocumentId))
+            .OrderBy(x => x.DocumentId).ThenBy(x => x.Format).ToListAsync(ct);
+        var documentIds = documents.Select(x => x.Id).ToList();
+        var artifactIds = artifacts.Select(x => x.Id).ToList();
+        var signatures = await db.ElectronicSignatures.AsNoTracking()
+            .Where(x => x.ArtifactType == "ControlledDocument" && documentIds.Contains(x.ArtifactId)
+                || x.ArtifactType == "ControlledDocumentArtifact" && artifactIds.Contains(x.ArtifactId))
+            .ToListAsync(ct);
+        var signatureTargets = signatures.Select(x => $"ElectronicSignature:{x.Id}").ToHashSet();
+        var alreadyPending = await db.SecurityAuditEvents.AsNoTracking()
+            .Where(x => x.EventType == MigrationMarker + ".SignatureSuperseded"
+                && signatureTargets.Contains(x.Target))
+            .Select(x => x.Target).ToHashSetAsync(ct);
+        foreach (var signature in signatures.Where(x =>
+                     !alreadyPending.Contains($"ElectronicSignature:{x.Id}")))
+            db.SecurityAuditEvents.Add(new SecurityAuditEvent(
+                MigrationMarker + ".SignatureSuperseded", Actor,
+                $"ElectronicSignature:{signature.Id}", "Superseded",
+                Json(new
+                {
+                    migration = MigrationMarker,
+                    oldArtifactIdentity = signature.ArtifactRevision,
+                    oldSignatureId = signature.Id,
+                    oldSignatureHash = signature.ContentHash,
+                    newContentHash = (string?)null,
+                    reason = "Affected controlled document bytes/content basis changed under the governed Procedure cutover; the original human signature row and hash remain unchanged and require a new human signature."
+                }), "", now));
+        await db.SaveChangesAsync(ct);
+
+        var renditionByDocumentId = new Dictionary<Guid, (string OldHash, string NewHash)>();
+        var renditionByArtifactId = new Dictionary<Guid, (string OldHash, string NewHash)>();
+        foreach (var document in documents)
+        {
+            var manifestHash = await db.CandidateBaselines.AsNoTracking()
+                .Where(x => x.Id == document.BaselineId)
+                .Select(x => x.TestProceduresHash).SingleOrDefaultAsync(ct);
+            if (string.IsNullOrWhiteSpace(manifestHash))
+                throw new InvalidOperationException(
+                    $"Procedure cutover cannot render document {document.Id} without a verification manifest hash.");
+            var contentBasis = $"{manifestHash}|{document.Type}|{document.ArtifactCount}|{Actor}";
+            var contentHash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(contentBasis)))
+                .ToLowerInvariant();
+            var oldHash = document.ContentHash;
+            renditionByDocumentId[document.Id] = (oldHash, contentHash);
+            document.RecordMigrationContentBasis(contentHash, now);
+            db.SecurityAuditEvents.Add(new SecurityAuditEvent(
+                MigrationMarker + ".DocumentContentBasisRewritten", Actor,
+                $"ControlledDocument:{document.Id}", "Succeeded",
+                Json(new
+                {
+                    migration = MigrationMarker, documentId = document.Id,
+                    oldContentHash = oldHash, newContentHash = contentHash,
+                    storedArtifactCount = artifacts.Count(x => x.DocumentId == document.Id),
+                    outputBytesRegenerated = artifacts.Any(x => x.DocumentId == document.Id),
+                    reason = "Affected document content basis was refreshed before governed stored-rendition regeneration."
+                }), "", now));
+        }
+        await db.SaveChangesAsync(ct);
+
+        foreach (var artifact in artifacts)
+        {
+            ct.ThrowIfCancellationRequested();
+            if (!Files.Exists(artifact.StorageKey))
+                throw new InvalidOperationException(
+                    $"Procedure cutover cannot read stored rendition {artifact.Id} ({artifact.StorageKey}).");
+            var oldHash = artifact.Sha256;
+            var oldStorageKey = artifact.StorageKey;
+            var output = await Generator.GenerateAsync(artifact.DocumentId, artifact.Format, ct)
+                ?? throw new InvalidOperationException(
+                    $"Procedure cutover could not regenerate document {artifact.DocumentId} ({artifact.Format}).");
+            await using var content = new MemoryStream(output.Content, writable: false);
+            var stored = await Files.StoreAsync(content, output.FileName, output.ContentType, ct);
+            artifact.ReplaceMigrationRendition(stored.StorageKey, stored.OriginalFileName,
+                stored.ContentType, stored.Size, stored.Sha256, now);
+            renditionByArtifactId[artifact.Id] = (oldHash, stored.Sha256);
+            db.SecurityAuditEvents.Add(new SecurityAuditEvent(
+                MigrationMarker + ".DocumentRenditionRewritten", Actor,
+                $"ControlledDocumentArtifact:{artifact.Id}", "Succeeded",
+                Json(new
+                {
+                    migration = MigrationMarker, documentId = artifact.DocumentId, format = artifact.Format,
+                    oldStorageKey, oldContentHash = oldHash, newStorageKey = stored.StorageKey,
+                    newContentHash = stored.Sha256,
+                    reason = "Regenerated through ControlledOutputGenerator after the governed Procedure execution cutover; prior rendition bytes were preserved."
+                }), "", now));
+        }
+        await CompleteDocumentSignatureSupersessionsAsync(renditionByDocumentId,
+            renditionByArtifactId, now, ct);
+        await db.SaveChangesAsync(ct);
+    }
+
+    private async Task CompleteDocumentSignatureSupersessionsAsync(
+        IReadOnlyDictionary<Guid, (string OldHash, string NewHash)> renditionByDocumentId,
+        IReadOnlyDictionary<Guid, (string OldHash, string NewHash)> renditionByArtifactId,
+        DateTimeOffset now, CancellationToken ct)
+    {
+        var pending = await db.SecurityAuditEvents
+            .Where(x => x.EventType == MigrationMarker + ".SignatureSuperseded")
+            .ToListAsync(ct);
+        foreach (var evidence in pending)
+        {
+            var detail = JsonNode.Parse(evidence.Detail)?.AsObject()
+                ?? throw new InvalidOperationException(
+                    $"Procedure cutover signature evidence {evidence.Id} is not valid structured JSON.");
+            var signatureId = ParseSignatureTarget(evidence.Target);
+            var signature = await db.ElectronicSignatures.AsNoTracking()
+                .SingleOrDefaultAsync(x => x.Id == signatureId, ct)
+                ?? throw new InvalidOperationException(
+                    $"Procedure cutover evidence {evidence.Id} has no source signature {signatureId}.");
+            string replacementHash;
+            string eventType = MigrationMarker + ".SignatureSupersessionCompleted";
+            string reason = "The controlled document content basis or stored rendition bytes changed under the governed Procedure cutover; the original human signature row and hash remain unchanged and require a new human signature.";
+            if (signature.ArtifactType.Equals("ControlledDocumentArtifact", StringComparison.OrdinalIgnoreCase)
+                && renditionByArtifactId.TryGetValue(signature.ArtifactId, out var artifactRendition))
+            {
+                if (!string.Equals(signature.ContentHash, artifactRendition.OldHash, StringComparison.OrdinalIgnoreCase))
+                    throw new InvalidOperationException(
+                        $"Signature {signature.Id} does not match the exact pre-migration stored artifact hash.");
+                replacementHash = artifactRendition.NewHash;
+            }
+            else if (signature.ArtifactType.Equals("ControlledDocument", StringComparison.OrdinalIgnoreCase)
+                     && renditionByDocumentId.TryGetValue(signature.ArtifactId, out var documentRendition))
+            {
+                if (!string.Equals(signature.ContentHash, documentRendition.OldHash, StringComparison.OrdinalIgnoreCase))
+                    throw new InvalidOperationException(
+                        $"Signature {signature.Id} does not match the exact pre-migration controlled document content-basis hash.");
+                replacementHash = documentRendition.NewHash;
+            }
+            else
+                throw new InvalidOperationException(
+                    $"Signature {signature.Id} ({signature.ArtifactType}/{signature.ArtifactId}) has no exact replacement hash authority.");
+            if (string.Equals(replacementHash, signature.ContentHash, StringComparison.OrdinalIgnoreCase))
+            {
+                eventType = MigrationMarker + ".SignatureHashVerified";
+                reason = "The signed bytes remained byte-identical after the governed Procedure cutover; the signature remains valid evidence.";
+            }
+            db.SecurityAuditEvents.Add(new SecurityAuditEvent(
+                eventType, Actor, evidence.Target, "Succeeded",
+                Json(new
+                {
+                    migration = MigrationMarker, pendingEvidenceId = evidence.Id, signatureId = signature.Id,
+                    oldArtifactIdentity = signature.ArtifactRevision, oldSignatureHash = signature.ContentHash,
+                    newArtifactIdentity = detail["oldArtifactIdentity"]?.GetValue<string>(),
+                    newContentHash = replacementHash, reason
+                }), "", now));
+        }
+    }
+
+    private static Guid ParseSignatureTarget(string target)
+    {
+        var value = target.StartsWith("ElectronicSignature:", StringComparison.Ordinal)
+            ? target["ElectronicSignature:".Length..] : "";
+        return Guid.TryParse(value, out var id) && id != Guid.Empty
+            ? id : throw new InvalidOperationException(
+                $"Procedure cutover signature target '{target}' is not a valid ElectronicSignature identity.");
+    }
+
+    /// <summary>
+    /// Recovers the honest per-project cutover totals from persisted governed evidence. Used when a previous
+    /// run crashed before the global Completed marker, so a rerun never reports zero for completed work.
+    /// </summary>
+    private async Task<SoftwareProcedureCutoverResult> RecoverCompletedTotalsAsync(
+        IReadOnlySet<Guid> excludeProjectIds, CancellationToken ct)
+    {
+        var upgradedProjectIds = await db.ProjectLadderConfigurations.AsNoTracking()
+            .Where(x => x.IsSealed && x.State == ProjectLadderConfigurationState.Active
+                && x.LastUpgradeVersion == UpgradeVersion && x.LastUpgradeBy == Actor
+                && !excludeProjectIds.Contains(x.ProjectId))
+            .Select(x => x.ProjectId).ToListAsync(ct);
+        if (upgradedProjectIds.Count == 0) return new(0, 0, 0, 0, 0, 0);
+        var generatedRevisions = await db.TestProcedureRevisions.AsNoTracking()
+            .Where(x => x.AuthorId == Actor
+                && x.ParentKind == VerificationProcedureParentKind.Allocated
+                && (x.State == TestProcedureState.Approved || x.State == TestProcedureState.Retired))
+            .Select(x => new { x.Id, x.ProcedureId }).ToListAsync(ct);
+        var generatedRevisionIds = generatedRevisions.Select(x => x.Id).ToHashSet();
+        var generatedProcedureIds = generatedRevisions.Select(x => x.ProcedureId).ToHashSet();
+        var executions = await db.TestExecutions.AsNoTracking()
+            .CountAsync(x => generatedRevisionIds.Contains(x.ProcedureRevisionId), ct);
+        var entries = await db.BuildTestSetEntries.AsNoTracking()
+            .CountAsync(x => generatedRevisionIds.Contains(x.ProcedureRevisionId), ct);
+        var selections = await db.BaselineTestProcedures.AsNoTracking()
+            .CountAsync(x => generatedProcedureIds.Contains(x.ProcedureId), ct);
+        var impacts = await db.VerificationImpactItems.AsNoTracking()
+            .CountAsync(x => x.ResolvedProcedureRevisionId != null
+                    && generatedRevisionIds.Contains(x.ResolvedProcedureRevisionId.Value)
+                || x.ProcedureId != null && generatedProcedureIds.Contains(x.ProcedureId.Value)
+                || x.ResolvedProcedureId != null && generatedProcedureIds.Contains(x.ResolvedProcedureId.Value), ct);
+        return new(upgradedProjectIds.Count, generatedRevisions.Count, executions, entries, selections, impacts);
     }
 
     private async Task MarkCompletedAsync(CancellationToken ct, SoftwareProcedureCutoverResult totals)

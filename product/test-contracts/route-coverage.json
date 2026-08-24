@@ -288,6 +288,7 @@
         "DocumentReviewLinkOutlivedTests",
         "DownstreamAssessmentReopenApiTests",
         "DraftDocumentApiTests",
+        "EffectiveExecutionAuthorityApiTests",
         "ExternalIdentityAdminApiTests",
         "GovernanceEvidenceApiTests",
         "HistoricalPublicationFreezeApiTests",
@@ -2080,6 +2081,7 @@
       "coveredBy": [
         "BuildScopedWorkspaceApiTests",
         "ControlledEditingProcedureAuthorityTests",
+        "EffectiveExecutionAuthorityApiTests",
         "ProblemReportVerificationApiTests",
         "TestExecutionEffectivityApiTests"
       ]

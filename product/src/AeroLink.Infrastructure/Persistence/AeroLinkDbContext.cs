@@ -2626,7 +2626,11 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
             .Where(x => x.State == EntityState.Added
                 && addedSoftwareProcedures.Contains(x.Entity.ProcedureId)
                 && x.Entity.AuthorId == VerificationArtifactProfileSchema.GovernedMigrationActor
-                && x.Entity.State == TestProcedureState.Approved
+                // #726: a retired Case revision is mirrored as a Retired migration Procedure revision so
+                // historical numbering/provenance is preserved without manufacturing an active claim; the
+                // migration remains the attributed header authority for both states.
+                && (x.Entity.State == TestProcedureState.Approved
+                    || x.Entity.State == TestProcedureState.Retired)
                 && x.Entity.ParentKind == VerificationProcedureParentKind.Allocated)
             .Select(x => x.Entity.ProcedureId)
             .ToHashSet();

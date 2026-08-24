@@ -214,7 +214,14 @@ public sealed class ReleaseExecutionService(AeroLinkDbContext db, EvidenceFileSt
             .OrderBy(x => x.OccurredAt).ThenBy(x => x.Id).ToList();
         var coverageRevisionIds = revisionLevels.Where(x => verificationLevels.Contains(x.Value)).Select(x => x.Key).ToHashSet();
         var coverage = await db.TestCoverage.AsNoTracking().Where(x => coverageRevisionIds.Contains(x.RequirementRevisionId)).ToListAsync(ct);
-        var procedureRevisionIds = coverage.Select(x => x.ProcedureRevisionId).Distinct().ToList();
+        // Requirement coverage stays Case-scoped; the release package's EXECUTABLE side is the authoritative
+        // effective executable population (System Procedures, software Procedures under the full profile,
+        // software Cases under a Case-only profile). After the cutover, executions/evidence attach to
+        // Procedure revisions, so deriving the executable set from Case TestCoverage would silently omit
+        // them from the controlled package.
+        var requiredExecutables = await RequiredProceduresAsync(campaign.ProjectId, baseline.Id,
+            ladderPolicy, ct);
+        var procedureRevisionIds = requiredExecutables.Select(x => x.Id).ToList();
         if (ladderPolicy is not ILegacyLadderCompatibilityPolicy && procedureRevisionIds.Count != 0)
         {
             var allowedProcedureRevisionIds = await (from revision in db.TestProcedureRevisions.AsNoTracking()
@@ -222,9 +229,7 @@ public sealed class ReleaseExecutionService(AeroLinkDbContext db, EvidenceFileSt
                                                  where procedureRevisionIds.Contains(revision.Id)
                                                          && procedure.ProjectId == campaign.ProjectId
                                                          && configuredProcedureLevels.Contains(procedure.Level)
-                                                         && (procedure.Level == TestProcedureLevel.System || procedure.ArtifactKind == VerificationArtifactKind.Case)
                                                      select revision.Id).ToListAsync(ct);
-            coverage = coverage.Where(x => allowedProcedureRevisionIds.Contains(x.ProcedureRevisionId)).ToList();
             procedureRevisionIds = allowedProcedureRevisionIds;
         }
         var procedureRevisions = await db.TestProcedureRevisions.AsNoTracking().Where(x => procedureRevisionIds.Contains(x.Id)).ToListAsync(ct);
@@ -237,6 +242,11 @@ public sealed class ReleaseExecutionService(AeroLinkDbContext db, EvidenceFileSt
         var evidenceLinks = await db.TestExecutionEvidence.AsNoTracking().Where(x => executionIds.Contains(x.TestExecutionId)).ToListAsync(ct);
         var evidenceIds = evidenceLinks.Select(x => x.EvidenceId).Distinct().ToList();
         var evidence = await db.EvidenceRecords.AsNoTracking().Where(x => evidenceIds.Contains(x.Id)).ToListAsync(ct);
+        var caseProcedureLinks = procedureRevisionIds.Count == 0
+            ? []
+            : await db.TestCaseProcedureLinks.AsNoTracking()
+                .Where(x => procedureRevisionIds.Contains(x.ProcedureRevisionId))
+                .Select(x => new { x.CaseRevisionId, x.ProcedureRevisionId }).ToListAsync(ct);
         var documents = await db.ControlledDocuments.AsNoTracking()
             .Where(x => x.BaselineId == baseline.Id && configuredDocumentTypes.Contains(x.Type)).ToListAsync(ct);
         var codeTraceability = await db.CodeTraceabilityRecords.AsNoTracking()
@@ -303,6 +313,7 @@ public sealed class ReleaseExecutionService(AeroLinkDbContext db, EvidenceFileSt
                 };
             }),
             coverage = coverage.OrderBy(x => x.RequirementRevisionId).ThenBy(x => x.ProcedureRevisionId).Select(x => new { x.RequirementRevisionId, x.ProcedureRevisionId }),
+            caseProcedureLinks = caseProcedureLinks.OrderBy(x => x.CaseRevisionId).ThenBy(x => x.ProcedureRevisionId).Select(x => new { x.CaseRevisionId, x.ProcedureRevisionId }),
             procedures = (from revision in procedureRevisions join procedure in procedures on revision.ProcedureId equals procedure.Id orderby procedure.BaseNumber, revision.Revision select new { procedure.Id, procedure.BaseNumber, title = procedureTitles[revision.Id].Title, revisionId = revision.Id, revision.Revision, state = revision.State.ToString(), revision.Objective, revision.Preconditions, revision.Steps, revision.ExpectedResult }),
             executions = executions.OrderBy(x => x.ProcedureRevisionId).ThenBy(x => x.ExecutedAt).ThenBy(x => x.Id).Select(x => new { x.Id, x.ProcedureRevisionId, x.SoftwareBuildId, x.RetestOfExecutionId, outcome = x.Outcome.ToString(), x.ExecutedBy, x.Configuration, x.Determination, x.EvidenceReference, x.ExecutedAt, x.RecordedAt }),
             evidence = (from link in evidenceLinks join item in evidence on link.EvidenceId equals item.Id orderby link.TestExecutionId, item.Id select new { link.TestExecutionId, item.Id, item.OriginalFileName, item.ContentType, item.Size, item.Sha256, item.UploadedBy, item.UploadedAt }),

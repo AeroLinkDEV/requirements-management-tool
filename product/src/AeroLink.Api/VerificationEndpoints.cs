@@ -1145,19 +1145,19 @@ public static class VerificationEndpoints
             var procedure = await db.TestProcedures.AsNoTracking().SingleAsync(x => x.Id == revision.ProcedureId, ct);
             var artifactWord = ArtifactWord(procedure.Level);
             var artifactNoun = ArtifactNoun(procedure.Level);
-            if (procedure.Level != TestProcedureLevel.System && procedure.ArtifactKind == VerificationArtifactKind.Procedure)
-            {
-                // #726: the effective executable for a Procedure-enabled software profile is the Procedure
-                // revision. Only a dormant software Procedure under a Case-only profile is refused here.
-                var ladderPolicy = await policyResolver.ResolveAsync(request.ProjectId, ct);
-                if (!EffectiveExecutableArtifact.IsExecutable(ladderPolicy, procedure.Level,
-                        VerificationArtifactKind.Procedure))
-                    return Results.BadRequest(new
-                    {
-                        error = "This software Procedure is not the effective executable for the project's verification profile; execute the effective Case revision instead.",
-                        code = "dormant_procedure_not_executable"
-                    });
-            }
+            // #726: the write boundary resolves the EFFECTIVE executable kind for every submission, never
+            // only when the submitted kind happens to be a software Procedure. Case-only software accepts
+            // Cases and rejects software Procedures; the full Case+Procedure profile accepts Procedures and
+            // rejects Cases; System accepts System Procedures. Draft, Retired, cross-project, wrong-level,
+            // and non-effective identities remain refused below.
+            var ladderPolicy = await policyResolver.ResolveAsync(request.ProjectId, ct);
+            if (!EffectiveExecutableArtifact.IsExecutable(ladderPolicy, procedure.Level,
+                    procedure.ArtifactKind))
+                return Results.BadRequest(new
+                {
+                    error = $"The {artifactWord} is not the effective executable for the project's verification profile; execute the effective executable revision instead.",
+                    code = "not_effective_executable"
+                });
             if (revision.State != TestProcedureState.Approved) return Results.BadRequest(new { error = $"Only an approved {artifactWord} revision can be executed." });
             if (procedure.ProjectId != request.ProjectId) return Results.BadRequest(new { error = $"The {artifactWord} belongs to a different project." });
             Guid? softwareBuildReleaseId = null;

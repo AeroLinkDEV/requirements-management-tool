@@ -30,12 +30,13 @@ public static class CaseProcedureSatisfaction
         IReadOnlySet<TestProcedureLevel> procedureEnabledLevels, CancellationToken ct)
     {
         var selections = await BaselineExecutableMembership.ForBaselineAsync(db, baselineId, ct);
-        var sourceCases = await BaselineExecutableMembership.SourceCaseRevisionsAsync(db, selections, ct);
+        var sourceCaseRevisionIds = await BaselineExecutableMembership.SourceCaseRevisionIdsAsync(
+            db, selections, ct);
         var procedureSelectionsByRevision = selections
             .Where(x => x.Kind == VerificationArtifactKind.Procedure)
             .GroupBy(x => x.RevisionId).ToDictionary(x => x.Key, x => x.First());
         var caseRevisionIds = await BaselineExecutableMembership.EffectiveCaseRevisionIdsAsync(
-            db, selections, sourceCases, baselineId, procedureEnabledLevels, ct);
+            db, selections, sourceCaseRevisionIds, baselineId, procedureEnabledLevels, ct);
         if (caseRevisionIds.Count == 0) return [];
         var caseLevels = await (from revision in db.TestProcedureRevisions.AsNoTracking()
                                 where caseRevisionIds.Contains(revision.Id)

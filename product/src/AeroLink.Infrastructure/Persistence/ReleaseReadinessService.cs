@@ -106,43 +106,14 @@ public sealed class ReleaseReadinessService(AeroLinkDbContext db, ILadderPolicy?
         if (procedureEffectivity is not null)
         {
             // A retained procedure from an absent level must not satisfy current coverage merely because its
-            // revision still appears in the historical baseline manifest. Intersect the manifest with both
-            // the current project's procedures and the effective verification bindings before evaluating any
-            // settled link.
-            //
-            // #726: with the software Procedure tier enabled, the exact baseline manifest holds Procedure
-            // rows (the cutover rebound them) while Requirement coverage remains on Cases. The effectivity
-            // set for coverage therefore keeps System Procedure manifest rows and recovers the effective
-            // software Case population through the typed membership contract — never by searching for a
-            // Case baseline row the migration intentionally removed.
-            var systemProcedureRevisionIds = await (from revision in db.TestProcedureRevisions.AsNoTracking()
-                                                    join procedure in db.TestProcedures.AsNoTracking()
-                                                        on revision.ProcedureId equals procedure.Id
-                                                    where procedure.ProjectId == campaign.ProjectId
-                                                        && procedureEffectivity.RevisionIds.Contains(revision.Id)
-                                                        && procedure.Level == TestProcedureLevel.System
-                                                    select revision.Id).ToListAsync(ct);
-            IReadOnlyList<Guid> softwareCaseRevisionIds;
-            if (procedureEnabledLevels.Count == 0)
-            {
-                softwareCaseRevisionIds = await (from revision in db.TestProcedureRevisions.AsNoTracking()
-                                                 join procedure in db.TestProcedures.AsNoTracking()
-                                                     on revision.ProcedureId equals procedure.Id
-                                                 where procedure.ProjectId == campaign.ProjectId
-                                                     && procedureEffectivity.RevisionIds.Contains(revision.Id)
-                                                     && procedure.ArtifactKind == VerificationArtifactKind.Case
-                                                     && configuredProcedureLevels.Contains(procedure.Level)
-                                                 select revision.Id).ToListAsync(ct);
-            }
-            else
-            {
-                var selections = await BaselineExecutableMembership.ForBaselineAsync(db, baseline.Id, ct);
-                var sourceCases = await BaselineExecutableMembership.SourceCaseRevisionsAsync(db, selections, ct);
-                softwareCaseRevisionIds = await BaselineExecutableMembership.EffectiveCaseRevisionIdsAsync(
-                    db, selections, sourceCases, baseline.Id, procedureEnabledProcedureLevels, ct);
-            }
-            effectiveProcedureRevisionIds = systemProcedureRevisionIds
-                .Concat(softwareCaseRevisionIds).Distinct().ToList();
+            // revision still appears in the historical baseline manifest. #726: requirement coverage stays on
+            // Cases, so the coverage side of the one typed population keeps System Procedure manifest rows
+            // and recovers the effective software Case population through the membership contract — never by
+            // searching for a Case baseline row the migration intentionally removed.
+            effectiveProcedureRevisionIds = procedureEffectivity.IsExactManifest
+                ? (await BaselineExecutableMembership.ForPopulationAsync(
+                    db, baseline.Id, procedureEnabledProcedureLevels, ct)).CoverageRevisionIds
+                : procedureEffectivity.RevisionIds;
         }
         var coveredIds = await VerificationCoverageProjection.SettledCoveredAsync(db, coverageRevisionIds, ct,
             effectiveProcedureRevisionIds, buildScoped: false);

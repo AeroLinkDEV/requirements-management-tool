@@ -46,7 +46,6 @@ public static class BuildTestSetEndpoints
             var release = await db.Releases.AsNoTracking().Where(x => x.Id == releaseId)
                 .Select(x => new { x.ProjectId, x.IsReleased }).SingleOrDefaultAsync(ct);
             if (release is null) return Results.NotFound();
-            if (artifactRoute == "cases" && discipline == TestChangeReviewDiscipline.System) return Results.NotFound();
             if (release.IsReleased) return Results.Conflict(new { error = "A released build's test set is read-only." });
             if (!await CanPlanAsync(http, db, identity, release.ProjectId, ct)) return Results.Forbid();
             if (revisionIds.Length == 0)
@@ -58,6 +57,15 @@ public static class BuildTestSetEndpoints
             // #726: a build can only run the EFFECTIVE EXECUTABLE artifact for the discipline. With the
             // software Procedure tier enabled that is the Procedure; Case-only software keeps its Case.
             var policy = await policyResolver.ResolveAsync(release.ProjectId, ct);
+            var effectiveKind = EffectiveExecutableArtifact.KindFor(policy,
+                policy.RequirementLevelFor(discipline));
+            var expectedSegment = effectiveKind == VerificationArtifactKind.Procedure
+                ? "procedures" : "cases";
+            if (!string.Equals(artifactRoute, expectedSegment, StringComparison.OrdinalIgnoreCase))
+                return Results.NotFound(new
+                {
+                    error = $"The artifact route '{artifactRoute}' does not match the effective executable kind ({effectiveKind}) for this discipline."
+                });
             var reachable = await (from revision in db.TestProcedureRevisions.AsNoTracking()
                                    join procedure in db.TestProcedures.AsNoTracking()
                                        .Where(EffectiveExecutableArtifact.ExecutablePredicate(policy))
@@ -98,14 +106,22 @@ public static class BuildTestSetEndpoints
             var release = await db.Releases.AsNoTracking().Where(x => x.Id == releaseId)
                 .Select(x => new { x.ProjectId, x.IsReleased }).SingleOrDefaultAsync(ct);
             if (release is null) return Results.NotFound();
-            if (artifactRoute == "cases" && discipline == TestChangeReviewDiscipline.System) return Results.NotFound();
             if (release.IsReleased) return Results.Conflict(new { error = "A released build's test set is read-only." });
             if (!await CanPlanAsync(http, db, identity, release.ProjectId, ct)) return Results.Forbid();
 
+            var policy = await policyResolver.ResolveAsync(release.ProjectId, ct);
+            var effectiveKind = EffectiveExecutableArtifact.KindFor(policy,
+                policy.RequirementLevelFor(discipline));
+            var expectedSegment = effectiveKind == VerificationArtifactKind.Procedure
+                ? "procedures" : "cases";
+            if (!string.Equals(artifactRoute, expectedSegment, StringComparison.OrdinalIgnoreCase))
+                return Results.NotFound(new
+                {
+                    error = $"The artifact route '{artifactRoute}' does not match the effective executable kind ({effectiveKind}) for this discipline."
+                });
             var sets = await service.EnsureForReleaseAsync(release.ProjectId, releaseId, ct);
             var set = sets.SingleOrDefault(x => x.Discipline == discipline);
             if (set is null) return Results.NotFound(new { error = "That discipline has no test set on this build." });
-            var policy = await policyResolver.ResolveAsync(release.ProjectId, ct);
             // A procedure that is not in the set is already in the state the caller asked for. Two people
             // tidying the same set should not produce an error for whichever of them is slower.
             try
@@ -189,7 +205,8 @@ public static class BuildTestSetEndpoints
             {
                 set.Id,
                 discipline = set.Discipline.ToString(),
-                artifactKind = TestChangeRequestSourceEligibility.ArtifactKind(set.Discipline),
+                artifactKind = EffectiveExecutableArtifact.KindFor(policy,
+                    policy.RequirementLevelFor(set.Discipline)).ToString(),
                 set.ReleaseId,
                 set.Version,
                 artifacts,

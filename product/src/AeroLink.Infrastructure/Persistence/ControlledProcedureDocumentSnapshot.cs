@@ -70,14 +70,30 @@ public static class ControlledProcedureDocumentSnapshotProjection
         List<ControlledProcedureDocumentRow> rows;
         if (exact)
         {
-            rows = await (from member in db.BaselineTestProcedures.AsNoTracking()
+            var isSoftwareCaseDocument = artifactKey.Kind == VerificationArtifactKind.Case
+                && artifactKey.Discipline != VerificationDiscipline.System;
+            // #726: the cutover deliberately replaced software Case baseline rows with Procedure membership.
+            // A software Case document's exact population is therefore the effective Case population
+            // recovered through the authoritative source-membership projection — never an empty search for
+            // Case rows that no longer exist.
+            var exactRevisionIds = isSoftwareCaseDocument
+                ? await EffectiveCaseParentRevisionIdsAsync(db, baselineId,
+                    VerificationArtifactVocabulary.Definition(artifactKey).ProcedureLevel, ct)
+                : (await (from member in db.BaselineTestProcedures.AsNoTracking()
                           where member.BaselineId == baselineId
                           join revision in db.TestProcedureRevisions.AsNoTracking()
                               on member.RevisionId equals revision.Id
                           join procedure in db.TestProcedures.AsNoTracking().Where(x =>
-                              x.ArtifactDiscipline == artifactKey.Discipline
-                              && x.ArtifactKind == artifactKey.Kind)
+                                  x.ArtifactDiscipline == artifactKey.Discipline
+                                  && x.ArtifactKind == artifactKey.Kind)
                               on member.ProcedureId equals procedure.Id
+                          select revision.Id).ToListAsync(ct)).ToHashSet();
+            rows = await (from revision in db.TestProcedureRevisions.AsNoTracking()
+                          where exactRevisionIds.Contains(revision.Id)
+                          join procedure in db.TestProcedures.AsNoTracking().Where(x =>
+                                  x.ArtifactDiscipline == artifactKey.Discipline
+                                  && x.ArtifactKind == artifactKey.Kind)
+                              on revision.ProcedureId equals procedure.Id
                           orderby procedure.BaseNumber
                           select new ControlledProcedureDocumentRow(
                               revision.Id,
@@ -192,15 +208,13 @@ public static class ControlledProcedureDocumentSnapshotProjection
         // A Procedure's Case parent is controlled effectivity, not merely a live cross-reference. The link can
         // legitimately survive while a later Case revision replaces its predecessor, but an older/non-current
         // Case must not leak into a document whose typed manifest selected a different exact Case revision.
+        // #726: the cutover deliberately replaced software Case baseline rows with Procedure membership, so
+        // the exact Case population is recovered through the authoritative source-membership projection —
+        // never by searching for a Case baseline row that no longer exists.
         var baselineCaseRevisionIds = artifactKey.Kind == VerificationArtifactKind.Procedure
                                       && artifactKey.Discipline != VerificationDiscipline.System
-            ? await (from member in db.BaselineTestProcedures.AsNoTracking()
-                     where member.BaselineId == baselineId
-                     join @case in db.TestProcedures.AsNoTracking().Where(x =>
-                             x.ArtifactDiscipline == artifactKey.Discipline
-                             && x.ArtifactKind == VerificationArtifactKind.Case)
-                         on member.ProcedureId equals @case.Id
-                     select member.RevisionId).ToHashSetAsync(ct)
+            ? await EffectiveCaseParentRevisionIdsAsync(db, baselineId,
+                VerificationArtifactVocabulary.Definition(artifactKey).ProcedureLevel, ct)
             : [];
         var coverage = artifactKey.Kind == VerificationArtifactKind.Procedure
                        && artifactKey.Discipline != VerificationDiscipline.System
@@ -235,5 +249,26 @@ public static class ControlledProcedureDocumentSnapshotProjection
             ParentRevisionIds = parentIds.GetValueOrDefault(row.RevisionId, Array.Empty<Guid>())
         }).ToList();
         return new(exact, rows);
+    }
+
+    private static async Task<HashSet<Guid>> EffectiveCaseParentRevisionIdsAsync(
+        AeroLinkDbContext db, Guid baselineId, TestProcedureLevel level, CancellationToken ct)
+    {
+        var selections = await BaselineExecutableMembership.ForBaselineAsync(db, baselineId, ct);
+        // Controlled effectivity is the STRICT effective Case population of THIS baseline: Case-kind
+        // selections still present, plus Case revisions whose authoritative EffectiveBaselineId names this
+        // baseline (the post-cutover recovery path). A linked Case from an earlier baseline carried only by
+        // its Procedure relationship is historical evidence, not current document effectivity.
+        var ids = selections.Where(x => x.Kind == VerificationArtifactKind.Case)
+            .Select(x => x.RevisionId)
+            .Concat(await (from revision in db.TestProcedureRevisions.AsNoTracking()
+                           join procedure in db.TestProcedures.AsNoTracking()
+                               on revision.ProcedureId equals procedure.Id
+                           where revision.EffectiveBaselineId == baselineId
+                               && procedure.ArtifactKind == VerificationArtifactKind.Case
+                               && procedure.Level == level
+                           select revision.Id).ToListAsync(ct))
+            .Distinct().ToList();
+        return ids.ToHashSet();
     }
 }

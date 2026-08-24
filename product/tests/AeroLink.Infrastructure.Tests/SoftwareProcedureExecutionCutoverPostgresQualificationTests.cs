@@ -288,6 +288,78 @@ public sealed class SoftwareProcedureExecutionCutoverPostgresQualificationTests
                 && x.Target == $"Project:{retiredProject}"));
     }
 
+    [DisposablePostgresFact]
+    public async Task Retired_case_revisions_migrate_on_postgres_without_an_active_claim()
+    {
+        var server = ValidateQualificationConnection(
+            Environment.GetEnvironmentVariable("AEROLINK_MIGRATIONS_CONNECTION")!);
+        var databaseName = DatabaseName + "_retiredcases";
+        await EnsureDatabaseAsync(server, databaseName);
+        var connection = new NpgsqlConnectionStringBuilder(server) { Database = databaseName }.ConnectionString;
+        await using var db = await DatabaseAsync(connection);
+        var now = DateTimeOffset.UtcNow;
+        var tag = Guid.NewGuid().ToString("N")[..8];
+        var program = new ProgramRecord("Retired PG Program", $"RPG{tag}");
+        var project = new ProjectRecord(program.Id, "Retired Case Software", "Retired Case PG Product");
+        var release = new SoftwareRelease(project.Id, "1.0", false);
+        var baseline = new CandidateBaseline("SW-01.00", 0, project.Id, release.Id, null,
+            "Candidate", "cm.test", now);
+        db.AddRange(program, project, release, baseline);
+        var configuration = LegacyDefaultProjectLadderFactory.Create(project.Id, now);
+        db.ProjectLadderConfigurations.Add(configuration);
+        await db.SaveChangesAsync();
+        var seal = await new ProjectLadderSealAuthority(db).SealAsync(project.Id,
+            LadderBoundContentCatalog.Current.First().Id, "retired-content", "test.sealer", now);
+        Assert.Equal(ProjectLadderSealResultKind.Sealed, seal.Kind);
+        await db.SaveChangesAsync();
+
+        var caseArtifact = new TestProcedure(project.Id, $"HLRTC-{Random.Shared.Next(100000, 999999)}",
+            "Retired sequencing case", "test.engineer", now, TestProcedureLevel.HighLevel);
+        var retiredRevision = new TestProcedureRevision(caseArtifact.Id, 0, "", "", "", "",
+            TestProcedureState.Retired, "test.engineer", now);
+        var activeRevision = new TestProcedureRevision(caseArtifact.Id, 1,
+            "Verify sequencing v2", "Logical preconditions", "Scenario steps v2", "Pass criteria v2",
+            TestProcedureState.Approved, "test.engineer", now.AddDays(1),
+            effectiveBaselineId: baseline.Id);
+        var scr = new SystemChangeRequest("SRCR-00729", 0, project.Id, release.Id,
+            "Baseline authority", "P", "A", "S", "author", now);
+        scr.AddRequirementChange("author", "SYSR-000729", 0, RequirementLevel.System,
+            RequirementChangeKind.Introduce, "The system shall retain the controlled fixture behavior.",
+            "Baseline fixture authority.", "Analysis", now);
+        scr.SubmitForReview("author", [new ApproverSelection("reviewer", "Reviewer")], now);
+        scr.ApproveActiveStage("reviewer", now);
+        db.AddRange(scr, caseArtifact, retiredRevision, activeRevision,
+            new BaselineTestProcedureSelection(baseline.Id, caseArtifact.Id, activeRevision.Id));
+        baseline.Select(scr, "cm.test", now);
+        baseline.Freeze("cm.test", now);
+        baseline.MarkRequirementsMaterialized("cm.test", new string('a', 64), 0, now);
+        baseline.MarkTestProceduresMaterialized("cm.test", new string('b', 64), 1, now);
+        await db.SaveChangesAsync();
+
+        var (legacy, typed) = CutoverRegistrations();
+        var result = await new SoftwareProcedureExecutionCutoverAuthority(db, legacy, typed)
+            .EnsureCompletedAsync();
+        Assert.Equal(1, result.ProjectsUpgraded);
+        Assert.Equal(2, result.ProceduresGenerated);
+        var procedure = await db.TestProcedures.AsNoTracking()
+            .SingleAsync(x => x.ProjectId == project.Id
+                && x.ArtifactKind == VerificationArtifactKind.Procedure);
+        var revisions = await db.TestProcedureRevisions.AsNoTracking()
+            .Where(x => x.ProcedureId == procedure.Id).OrderBy(x => x.Revision).ToListAsync();
+        Assert.Equal([0, 1], revisions.Select(x => x.Revision).ToArray());
+        Assert.Equal(TestProcedureState.Retired, revisions[0].State);
+        Assert.Equal(TestProcedureState.Approved, revisions[1].State);
+        Assert.All(revisions, revision => Assert.Equal("aerolink-migration", revision.AuthorId));
+        var link = Assert.Single(await db.TestCaseProcedureLinks.AsNoTracking().ToListAsync());
+        Assert.Equal(activeRevision.Id, link.CaseRevisionId);
+        Assert.Equal(revisions[1].Id, link.ProcedureRevisionId);
+        var rerun = await new SoftwareProcedureExecutionCutoverAuthority(db, legacy, typed)
+            .EnsureCompletedAsync();
+        Assert.Equal(0, rerun.ProceduresGenerated);
+        Assert.Equal(2, await db.TestProcedureRevisions.AsNoTracking()
+            .CountAsync(x => x.ProcedureId == procedure.Id));
+    }
+
     private enum MatrixState { StoredLegacyDefault, SealedAuthoredDraft, NonDefaultActiveCaseOnly, Retired }
 
     private static async Task<Guid> MatrixProjectAsync(AeroLinkDbContext db, ProgramRecord program,

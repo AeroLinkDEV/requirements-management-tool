@@ -5,10 +5,12 @@ using AeroLink.Domain.Identity;
 using AeroLink.Domain.Programs;
 using AeroLink.Domain.Releases;
 using AeroLink.Domain.Requirements;
+using AeroLink.Domain.Traceability;
 using AeroLink.Domain.Verification;
 using AeroLink.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 using System.Text.Json;
+using System.Text;
 
 namespace AeroLink.Infrastructure.Tests;
 
@@ -118,6 +120,52 @@ public sealed class SoftwareProcedureExecutionCutoverTests
         await db.SaveChangesAsync();
         return new Seed(db, project.Id, release.Id, baseline.Id, caseArtifact.Id, caseRevision.Id,
             execution.Id, set.Entries.Single().Id, selection.Id);
+    }
+
+    private static async Task<Seed> SeedIntoAsync(AeroLinkDbContext db, string tag)
+    {
+        var now = DateTimeOffset.UtcNow;
+        var program = new ProgramRecord($"{tag} Program", $"CUT{tag[^3..]}");
+        var project = new ProjectRecord(program.Id, $"{tag} Software", $"{tag} Product");
+        var release = new SoftwareRelease(project.Id, "1.6", false);
+        var baseline = new CandidateBaseline($"SW-01.{tag[^2..]}", 0, project.Id, release.Id, null,
+            "Candidate", "cm.test", now);
+        db.AddRange(program, project, release, baseline);
+        var configuration = LegacyDefaultProjectLadderFactory.Create(project.Id, now);
+        db.ProjectLadderConfigurations.Add(configuration);
+        await db.SaveChangesAsync();
+        var seal = await new ProjectLadderSealAuthority(db).SealAsync(project.Id,
+            LadderBoundContentCatalog.Current.First().Id, $"{tag}-content", "test.sealer", now);
+        Assert.Equal(ProjectLadderSealResultKind.Sealed, seal.Kind);
+        var caseArtifact = new TestProcedure(project.Id, $"HLRTC-{tag[^6..]}", $"{tag} sequencing case",
+            "test.engineer", now, TestProcedureLevel.HighLevel);
+        var caseRevision = new TestProcedureRevision(caseArtifact.Id, 0,
+            "Verify sequencing", "Logical preconditions", "Scenario steps", "Pass criteria",
+            TestProcedureState.Approved, "test.engineer", now);
+        db.AddRange(caseArtifact, caseRevision);
+        await db.SaveChangesAsync();
+        var execution = new TestExecution(project.Id, caseRevision.Id, null, null, TestOutcome.Pass,
+            "test.engineer", "Rig A", "Human determination", "evidence/a.json", now, now, release.Id);
+        var set = new BuildTestSet(project.Id, release.Id, TestChangeReviewDiscipline.HighLevelSoftware, now);
+        set.Include("test.lead", caseRevision.Id, TestSelectionReason.Chosen, "", now);
+        var selection = new BaselineTestProcedureSelection(baseline.Id, caseArtifact.Id, caseRevision.Id);
+        db.AddRange(execution, set, selection);
+        await db.SaveChangesAsync();
+        return new Seed(db, project.Id, release.Id, baseline.Id, caseArtifact.Id, caseRevision.Id,
+            execution.Id, set.Entries.Single().Id, selection.Id);
+    }
+
+    private static SystemChangeRequest ApprovedBaselineScr(Guid projectId, Guid releaseId, string number,
+        DateTimeOffset now)
+    {
+        var scr = new SystemChangeRequest(number, 0, projectId, releaseId,
+            "Baseline authority", "Problem", "Analysis", "Solution", "author", now);
+        scr.AddRequirementChange("author", $"SYSR-{number[^5..]}", 0, RequirementLevel.System,
+            RequirementChangeKind.Introduce, "The system shall retain the controlled fixture behavior.",
+            "Baseline fixture authority.", "Analysis", now);
+        scr.SubmitForReview("author", [new ApproverSelection("reviewer", "Reviewer")], now);
+        scr.ApproveActiveStage("reviewer", now);
+        return scr;
     }
 
     [Fact]
@@ -713,4 +761,596 @@ public sealed class SoftwareProcedureExecutionCutoverTests
         try { if (Directory.Exists(evidenceRoot)) Directory.Delete(evidenceRoot, recursive: true); }
         catch (IOException) { }
     }
+
+    [Fact]
+    public async Task Retired_case_revision_history_migrates_without_an_active_claim()
+    {
+        var options = new DbContextOptionsBuilder<AeroLinkDbContext>().UseSqlite("Data Source=:memory:").Options;
+        var db = new AeroLinkDbContext(options);
+        await db.Database.OpenConnectionAsync();
+        await db.Database.EnsureCreatedAsync();
+        var now = DateTimeOffset.UtcNow;
+        var program = new ProgramRecord("Retired Case Program", "RCP");
+        var project = new ProjectRecord(program.Id, "Retired Case Software", "Retired Case Product");
+        var release = new SoftwareRelease(project.Id, "1.0", false);
+        var baseline = new CandidateBaseline("SW-01.00", 0, project.Id, release.Id, null,
+            "Candidate", "cm.test", now);
+        db.AddRange(program, project, release, baseline);
+        var configuration = LegacyDefaultProjectLadderFactory.Create(project.Id, now);
+        db.ProjectLadderConfigurations.Add(configuration);
+        await db.SaveChangesAsync();
+        var seal = await new ProjectLadderSealAuthority(db).SealAsync(project.Id,
+            LadderBoundContentCatalog.Current.First().Id, "retired-case-content", "test.sealer", now);
+        Assert.Equal(ProjectLadderSealResultKind.Sealed, seal.Kind);
+
+        var caseArtifact = new TestProcedure(project.Id, "HLRTC-000601", "Retired sequencing case",
+            "test.engineer", now, TestProcedureLevel.HighLevel);
+        // A retired Case revision has no body; it is history, not an active claim.
+        var retiredRevision = new TestProcedureRevision(caseArtifact.Id, 0, "", "", "", "",
+            TestProcedureState.Retired, "test.engineer", now);
+        var activeRevision = new TestProcedureRevision(caseArtifact.Id, 1,
+            "Verify sequencing v2", "Logical preconditions", "Scenario steps v2", "Pass criteria v2",
+            TestProcedureState.Approved, "test.engineer", now.AddDays(1),
+            effectiveBaselineId: baseline.Id);
+        var selection = new BaselineTestProcedureSelection(baseline.Id, caseArtifact.Id, activeRevision.Id);
+        db.AddRange(caseArtifact, retiredRevision, activeRevision, selection);
+        var scr = ApprovedBaselineScr(project.Id, release.Id, "SRCR-00726", now);
+        baseline.Select(scr, "cm.test", now);
+        baseline.Freeze("cm.test", now);
+        baseline.MarkRequirementsMaterialized("cm.test", new string('a', 64), 0, now);
+        baseline.MarkTestProceduresMaterialized("cm.test", new string('b', 64), 1, now);
+        await db.SaveChangesAsync();
+
+        var (legacy, typed) = FullRegistrations();
+        var authority = new SoftwareProcedureExecutionCutoverAuthority(db, legacy, typed,
+            allowSqliteExecution: true);
+        var result = await authority.EnsureCompletedAsync();
+        Assert.Equal(1, result.ProjectsUpgraded);
+        Assert.Equal(2, result.ProceduresGenerated);
+        var procedure = await db.TestProcedures.AsNoTracking()
+            .SingleAsync(x => x.ProjectId == project.Id
+                && x.ArtifactKind == VerificationArtifactKind.Procedure);
+        var revisions = await db.TestProcedureRevisions.AsNoTracking()
+            .Where(x => x.ProcedureId == procedure.Id).OrderBy(x => x.Revision).ToListAsync();
+        Assert.Equal([0, 1], revisions.Select(x => x.Revision).ToArray());
+        Assert.Equal(TestProcedureState.Retired, revisions[0].State);
+        Assert.Equal(TestProcedureState.Approved, revisions[1].State);
+        Assert.All(revisions, revision => Assert.Equal("aerolink-migration", revision.AuthorId));
+        // Only the active Case revision gains an exact parent link; the retired history is mirrored without
+        // manufacturing an executable claim.
+        var links = await db.TestCaseProcedureLinks.AsNoTracking().ToListAsync();
+        var link = Assert.Single(links);
+        Assert.Equal(activeRevision.Id, link.CaseRevisionId);
+        Assert.Equal(revisions[1].Id, link.ProcedureRevisionId);
+        var rerun = await authority.EnsureCompletedAsync();
+        Assert.Equal(0, rerun.ProceduresGenerated);
+        Assert.Equal(2, await db.TestProcedureRevisions.AsNoTracking()
+            .CountAsync(x => x.ProcedureId == procedure.Id));
+    }
+
+    [Fact]
+    public async Task Configuration_only_upgrade_counts_honestly_and_records_audit()
+    {
+        var options = new DbContextOptionsBuilder<AeroLinkDbContext>().UseSqlite("Data Source=:memory:").Options;
+        var db = new AeroLinkDbContext(options);
+        await db.Database.OpenConnectionAsync();
+        await db.Database.EnsureCreatedAsync();
+        var now = DateTimeOffset.UtcNow;
+        var program = new ProgramRecord("Config Only Program", "CFG");
+        var project = new ProjectRecord(program.Id, "Config Only Software", "Config Only Product");
+        db.AddRange(program, project);
+        var configuration = LegacyDefaultProjectLadderFactory.Create(project.Id, now);
+        db.ProjectLadderConfigurations.Add(configuration);
+        await db.SaveChangesAsync();
+        var seal = await new ProjectLadderSealAuthority(db).SealAsync(project.Id,
+            LadderBoundContentCatalog.Current.First().Id, "config-only-content", "test.sealer", now);
+        Assert.Equal(ProjectLadderSealResultKind.Sealed, seal.Kind);
+        await db.SaveChangesAsync();
+
+        var (legacy, typed) = FullRegistrations();
+        var authority = new SoftwareProcedureExecutionCutoverAuthority(db, legacy, typed,
+            allowSqliteExecution: true);
+        var result = await authority.EnsureCompletedAsync();
+        Assert.Equal(1, result.ProjectsUpgraded);
+        Assert.Equal(0, result.ProceduresGenerated);
+        var upgraded = await db.ProjectLadderConfigurations.AsNoTracking()
+            .SingleAsync(x => x.ProjectId == project.Id);
+        Assert.Equal(ProjectLadderConfigurationState.Active, upgraded.State);
+        Assert.True(await db.SecurityAuditEvents.AsNoTracking()
+            .AnyAsync(x => x.EventType == "VerificationExecutionCutover.SoftwareProcedures.v1.ProjectUpgraded"
+                && x.Target == $"Project:{project.Id}"));
+    }
+
+    [Fact]
+    public async Task Crash_before_completed_marker_recovers_honest_totals_on_rerun()
+    {
+        var options = new DbContextOptionsBuilder<AeroLinkDbContext>().UseSqlite("Data Source=:memory:").Options;
+        var db = new AeroLinkDbContext(options);
+        await db.Database.OpenConnectionAsync();
+        await db.Database.EnsureCreatedAsync();
+        await SeedIntoAsync(db, "000001");
+        await SeedIntoAsync(db, "000002");
+        var (legacy, typed) = FullRegistrations();
+        var firstRun = await new SoftwareProcedureExecutionCutoverAuthority(
+            db, legacy, typed, allowSqliteExecution: true).EnsureCompletedAsync();
+        Assert.Equal(2, firstRun.ProjectsUpgraded);
+
+        // Simulate a crash between the per-project work and the global Completed marker.
+        var completed = await db.SecurityAuditEvents
+            .Where(x => x.EventType == "VerificationExecutionCutover.SoftwareProcedures.v1.Completed")
+            .ToListAsync();
+        db.SecurityAuditEvents.RemoveRange(completed);
+        await db.SaveChangesAsync();
+        var recovery = await new SoftwareProcedureExecutionCutoverAuthority(
+            db, legacy, typed, allowSqliteExecution: true).EnsureCompletedAsync();
+        Assert.Equal(2, recovery.ProjectsUpgraded);
+        Assert.Equal(firstRun.ProceduresGenerated, recovery.ProceduresGenerated);
+        Assert.Equal(firstRun.ExecutionsRebound, recovery.ExecutionsRebound);
+        Assert.Equal(firstRun.TestSetEntriesRebound, recovery.TestSetEntriesRebound);
+        Assert.Equal(firstRun.BaselineSelectionsRebound, recovery.BaselineSelectionsRebound);
+        Assert.Equal(firstRun.ImpactItemsRebound, recovery.ImpactItemsRebound);
+        Assert.True(await db.SecurityAuditEvents.AsNoTracking()
+            .AnyAsync(x => x.EventType == "VerificationExecutionCutover.SoftwareProcedures.v1.Completed"));
+    }
+
+    [Fact]
+    public async Task Materialized_baseline_manifest_and_controlled_documents_are_recomputed_with_signature_supersession()
+    {
+        var options = new DbContextOptionsBuilder<AeroLinkDbContext>().UseSqlite("Data Source=:memory:").Options;
+        var db = new AeroLinkDbContext(options);
+        await db.Database.OpenConnectionAsync();
+        await db.Database.EnsureCreatedAsync();
+        var now = DateTimeOffset.UtcNow;
+        var program = new ProgramRecord("Document Cutover Program", "DOC");
+        var project = new ProjectRecord(program.Id, "Document Cutover Software", "Document Cutover Product");
+        var release = new SoftwareRelease(project.Id, "1.0", false);
+        var baseline = new CandidateBaseline("SW-01.00", 0, project.Id, release.Id, null,
+            "Candidate", "cm.test", now);
+        db.AddRange(program, project, release, baseline);
+        var configuration = LegacyDefaultProjectLadderFactory.Create(project.Id, now);
+        db.ProjectLadderConfigurations.Add(configuration);
+        await db.SaveChangesAsync();
+        var seal = await new ProjectLadderSealAuthority(db).SealAsync(project.Id,
+            LadderBoundContentCatalog.Current.First().Id, "document-content", "test.sealer", now);
+        Assert.Equal(ProjectLadderSealResultKind.Sealed, seal.Kind);
+
+        var caseArtifact = new TestProcedure(project.Id, "HLRTC-000701", "Documented sequencing case",
+            "test.engineer", now, TestProcedureLevel.HighLevel);
+        var caseRevision = new TestProcedureRevision(caseArtifact.Id, 0,
+            "Verify documented sequencing", "Logical preconditions", "Scenario steps", "Pass criteria",
+            TestProcedureState.Approved, "test.engineer", now, effectiveBaselineId: baseline.Id);
+        var selection = new BaselineTestProcedureSelection(baseline.Id, caseArtifact.Id, caseRevision.Id);
+        db.AddRange(caseArtifact, caseRevision, selection);
+        var scr = ApprovedBaselineScr(project.Id, release.Id, "SRCR-00727", now);
+        baseline.Select(scr, "cm.test", now);
+        baseline.Freeze("cm.test", now);
+        baseline.MarkRequirementsMaterialized("cm.test", new string('a', 64), 0, now);
+        baseline.MarkTestProceduresMaterialized("cm.test", new string('b', 64), 1, now);
+        baseline.MarkReleased("cm.test", now.AddMinutes(1));
+        await db.SaveChangesAsync();
+
+        var oldManifestHash = await db.CandidateBaselines.AsNoTracking()
+            .Where(x => x.Id == baseline.Id).Select(x => x.TestProceduresHash).SingleAsync();
+        var evidenceRoot = Path.Combine(Path.GetTempPath(), $"aerolink-726-doc-{Guid.NewGuid():N}");
+        var files = new EvidenceFileStore(evidenceRoot);
+        var oldBytes = Encoding.UTF8.GetBytes("pre-cutover controlled case document bytes");
+        var stored = await files.StoreAsync(new MemoryStream(oldBytes), "cases.docx",
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document", default);
+        var document = new ControlledDocument(project.Id, release.Id, baseline.Id,
+            ControlledDocumentType.HighLevelTestCases, "HLRTD-000726", "HLR Test Cases", 0,
+            new string('c', 64), 1, now);
+        var artifact = new ControlledDocumentArtifact(document.Id, "docx", stored.StorageKey,
+            stored.OriginalFileName, stored.ContentType, stored.Size, stored.Sha256, now);
+        var artifactSignature = new ElectronicSignature(Guid.NewGuid(), "reviewer", "Reviewer", program.Id,
+            "ControlledDocumentArtifact", artifact.Id, "HLRTD-000726.00/docx", "Approve",
+            "old output", artifact.Sha256, "127.0.0.1", now);
+        var documentSignature = new ElectronicSignature(Guid.NewGuid(), "reviewer", "Reviewer", program.Id,
+            "ControlledDocument", document.Id, "HLRTD-000726.00", "Approve",
+            "old document", document.ContentHash, "127.0.0.1", now);
+        db.AddRange(document, artifact, artifactSignature, documentSignature);
+        await db.SaveChangesAsync();
+
+        var (legacy, typed) = FullRegistrations();
+        var authority = new SoftwareProcedureExecutionCutoverAuthority(db, legacy, typed,
+            allowSqliteExecution: true, generator: new ControlledOutputGenerator(db,
+                new RichContentPublisher(db, files),
+                policyResolver: new EffectiveProjectLadderPolicyResolver(db)), files: files);
+        var result = await authority.EnsureCompletedAsync();
+        Assert.Equal(1, result.ProjectsUpgraded);
+
+        var updatedBaseline = await db.CandidateBaselines.AsNoTracking().SingleAsync(x => x.Id == baseline.Id);
+        Assert.Equal(CandidateBaselineState.Released, updatedBaseline.State);
+        Assert.NotEqual(oldManifestHash, updatedBaseline.TestProceduresHash);
+        var procedure = await db.TestProcedures.AsNoTracking()
+            .SingleAsync(x => x.ProjectId == project.Id
+                && x.ArtifactKind == VerificationArtifactKind.Procedure);
+        var procedureRevision = await db.TestProcedureRevisions.AsNoTracking()
+            .SingleAsync(x => x.ProcedureId == procedure.Id);
+        var dbEntries = await (from member in db.BaselineTestProcedures.AsNoTracking()
+                               where member.BaselineId == baseline.Id
+                               join revision in db.TestProcedureRevisions.AsNoTracking()
+                                   on member.RevisionId equals revision.Id
+                               join p in db.TestProcedures.AsNoTracking()
+                                   on member.ProcedureId equals p.Id
+                               select new TestProcedureManifestEntry(p.Id, revision.Id,
+                                   p.BaseNumber, revision.Revision)).ToListAsync();
+        Assert.Equal(TestProcedureManifest.Hash(dbEntries), updatedBaseline.TestProceduresHash);
+        Assert.True(await db.BaselineEvents.AsNoTracking()
+            .AnyAsync(x => x.BaselineId == baseline.Id
+                && x.EventType == "VerificationIdentityManifestMigrated"));
+
+        var updatedDocument = await db.ControlledDocuments.AsNoTracking()
+            .SingleAsync(x => x.Id == document.Id);
+        Assert.NotEqual(document.ContentHash, updatedDocument.ContentHash);
+        Assert.NotEqual(new string('c', 64), updatedDocument.ContentHash);
+        var updatedArtifact = await db.ControlledDocumentArtifacts.AsNoTracking()
+            .SingleAsync(x => x.Id == artifact.Id);
+        Assert.NotEqual(artifact.Sha256, updatedArtifact.Sha256);
+        // Prior rendition bytes are preserved, never deleted: the old storage key still resolves.
+        Assert.True(files.Exists(stored.StorageKey));
+        await using (var oldStream = files.OpenRead(stored.StorageKey))
+        using (var oldBuffer = new MemoryStream())
+        {
+            await oldStream.CopyToAsync(oldBuffer);
+            Assert.Equal(oldBytes, oldBuffer.ToArray());
+        }
+        Assert.True(files.Exists(updatedArtifact.StorageKey));
+
+        Assert.True(await db.SecurityAuditEvents.AsNoTracking()
+            .AnyAsync(x => x.EventType == "VerificationExecutionCutover.SoftwareProcedures.v1.DocumentContentBasisRewritten"
+                && x.Target == $"ControlledDocument:{document.Id}"));
+        Assert.True(await db.SecurityAuditEvents.AsNoTracking()
+            .AnyAsync(x => x.EventType == "VerificationExecutionCutover.SoftwareProcedures.v1.DocumentRenditionRewritten"
+                && x.Target == $"ControlledDocumentArtifact:{artifact.Id}"));
+        foreach (var signature in new[] { artifactSignature, documentSignature })
+        {
+            Assert.True(await db.SecurityAuditEvents.AsNoTracking()
+                .AnyAsync(x => x.EventType == "VerificationExecutionCutover.SoftwareProcedures.v1.SignatureSuperseded"
+                    && x.Target == $"ElectronicSignature:{signature.Id}"));
+            Assert.True(await db.SecurityAuditEvents.AsNoTracking()
+                .AnyAsync(x => x.EventType == "VerificationExecutionCutover.SoftwareProcedures.v1.SignatureSupersessionCompleted"
+                    && x.Target == $"ElectronicSignature:{signature.Id}"));
+            // The original human signature row is never rewritten.
+            var persisted = await db.ElectronicSignatures.AsNoTracking().SingleAsync(x => x.Id == signature.Id);
+            Assert.Equal(signature.ContentHash, persisted.ContentHash);
+        }
+
+        var rerun = await authority.EnsureCompletedAsync();
+        Assert.Equal(0, rerun.ProjectsUpgraded);
+        Assert.Equal(2, await db.SecurityAuditEvents.AsNoTracking()
+            .CountAsync(x => x.EventType == "VerificationExecutionCutover.SoftwareProcedures.v1.SignatureSuperseded"));
+        try { Directory.Delete(evidenceRoot, recursive: true); } catch (IOException) { }
+    }
+
+    [Fact]
+    public async Task Release_review_package_serializes_rebound_procedure_executions_evidence_and_test_set()
+    {
+        var options = new DbContextOptionsBuilder<AeroLinkDbContext>().UseSqlite("Data Source=:memory:").Options;
+        var db = new AeroLinkDbContext(options);
+        await db.Database.OpenConnectionAsync();
+        await db.Database.EnsureCreatedAsync();
+        var now = DateTimeOffset.UtcNow;
+        var program = new ProgramRecord("Review Package Program", "PKG");
+        var project = new ProjectRecord(program.Id, "Review Package Software", "Review Package Product");
+        var release = new SoftwareRelease(project.Id, "1.0", false);
+        var baseline = new CandidateBaseline("SW-01.00", 0, project.Id, release.Id, null,
+            "Candidate", "cm.test", now);
+        var build = new SoftwareBuild(project.Id, release.Id, baseline.Id, "B-100",
+            "Review build", "cm.test", now);
+        var campaign = new ReleaseCampaign(project.Id, release.Id, baseline.Id, "Review Campaign",
+            "program.manager", now);
+        campaign.SelectVerificationBuild(build.Id, "program.manager", now);
+        db.AddRange(program, project, release, baseline, build, campaign);
+        var configuration = LegacyDefaultProjectLadderFactory.Create(project.Id, now);
+        db.ProjectLadderConfigurations.Add(configuration);
+        await db.SaveChangesAsync();
+        var seal = await new ProjectLadderSealAuthority(db).SealAsync(project.Id,
+            LadderBoundContentCatalog.Current.First().Id, "review-content", "test.sealer", now);
+        Assert.Equal(ProjectLadderSealResultKind.Sealed, seal.Kind);
+
+        var scr = ApprovedBaselineScr(project.Id, release.Id, "SRCR-00728", now);
+        var requirement = new RequirementArtifact(project.Id, "HLR-00000728",
+            RequirementLevel.HighLevel, now);
+        var requirementRevision = new RequirementRevision(requirement.Id, 0,
+            "The software shall sequence.", "Rationale", "Test", RequirementRevisionState.Active,
+            scr.Id, baseline.Id, now, parentKind: RequirementParentKind.Derived,
+            derivedRationale: "Derived for the review package fixture.");
+        var caseArtifact = new TestProcedure(project.Id, "HLRTC-000728", "Review sequencing case",
+            "test.engineer", now, TestProcedureLevel.HighLevel);
+        var caseRevision = new TestProcedureRevision(caseArtifact.Id, 0,
+            "Verify sequencing", "Logical preconditions", "Scenario steps", "Pass criteria",
+            TestProcedureState.Approved, "test.engineer", now, effectiveBaselineId: baseline.Id);
+        var coverage = new TestRequirementCoverage(caseRevision.Id, requirementRevision.Id);
+        var selection = new BaselineTestProcedureSelection(baseline.Id, caseArtifact.Id, caseRevision.Id);
+        var requirementSelection = new BaselineRequirementSelection(baseline.Id,
+            requirement.Id, requirementRevision.Id);
+        var set = new BuildTestSet(project.Id, release.Id, TestChangeReviewDiscipline.HighLevelSoftware, now);
+        set.Include("test.lead", caseRevision.Id, TestSelectionReason.Chosen, "", now);
+        var execution = new TestExecution(project.Id, caseRevision.Id, build.Id, null, TestOutcome.Pass,
+            "test.engineer", "Rig A", "Human determination", "evidence/review.json",
+            now, now, release.Id);
+        var evidenceRecord = new EvidenceRecord(project.Id, "review.json", "application/json", 32,
+            new string('f', 64), "storage/review.json", "test.engineer", now);
+        var evidence = new TestExecutionEvidence(execution.Id, evidenceRecord.Id);
+        db.AddRange(scr, requirement, requirementRevision, caseArtifact, caseRevision, coverage,
+            selection, requirementSelection, set, execution, evidenceRecord, evidence);
+        baseline.Select(scr, "cm.test", now);
+        baseline.Freeze("cm.test", now);
+        baseline.MarkRequirementsMaterialized("cm.test", new string('a', 64), 1, now);
+        baseline.MarkTestProceduresMaterialized("cm.test", new string('b', 64), 1, now);
+        using (db.UseLegacyHistoricalSeed()) await db.SaveChangesAsync();
+
+        var (legacy, typed) = FullRegistrations();
+        var authority = new SoftwareProcedureExecutionCutoverAuthority(db, legacy, typed,
+            allowSqliteExecution: true);
+        var result = await authority.EnsureCompletedAsync();
+        Assert.Equal(1, result.ProjectsUpgraded);
+        var procedureRevision = await db.TestProcedureRevisions.AsNoTracking()
+            .SingleAsync(x => x.ProcedureId != caseArtifact.Id
+                && x.AuthorId == "aerolink-migration");
+        var executionService = new ReleaseExecutionService(db,
+            new EvidenceFileStore(Path.Combine(Path.GetTempPath(), $"aerolink-review-{Guid.NewGuid():N}")),
+            new EffectiveProjectLadderPolicyResolver(db));
+        var withExecution = await executionService.ComputeReviewManifestHashAsync(campaign.Id, default);
+
+        // Remove the rebound Procedure execution: the release-review hash must change, proving the package
+        // serializes the Procedure execution (and would fail if it silently disappeared).
+        var reboundExecution = await db.TestExecutions.AsNoTracking()
+            .SingleAsync(x => x.ProcedureRevisionId == procedureRevision.Id);
+        var reboundEvidenceLinks = await db.TestExecutionEvidence
+            .Where(x => x.TestExecutionId == reboundExecution.Id).ToListAsync();
+        db.TestExecutionEvidence.RemoveRange(reboundEvidenceLinks);
+        db.TestExecutions.Remove(await db.TestExecutions.SingleAsync(x => x.Id == reboundExecution.Id));
+        await db.SaveChangesAsync();
+        var withoutExecution = await executionService.ComputeReviewManifestHashAsync(campaign.Id, default);
+        Assert.NotEqual(withExecution, withoutExecution);
+
+        // Remove the Procedure from the test set: the hash must change, proving test-set membership is part
+        // of the package.
+        var entry = await db.BuildTestSetEntries.AsNoTracking()
+            .SingleAsync(x => x.ProcedureRevisionId == procedureRevision.Id);
+        db.BuildTestSetEntries.Remove(await db.BuildTestSetEntries.SingleAsync(x => x.Id == entry.Id));
+        await db.SaveChangesAsync();
+        var withoutTestSet = await executionService.ComputeReviewManifestHashAsync(campaign.Id, default);
+        Assert.NotEqual(withExecution, withoutTestSet);
+        Assert.NotEqual(withoutExecution, withoutTestSet);
+
+        // Evidence disappears with the execution in this fixture; separately prove evidence participates by
+        // restoring an execution without evidence and comparing against a fully-evidenced package.
+        var restored = new TestExecution(project.Id, procedureRevision.Id, build.Id, null, TestOutcome.Pass,
+            "test.engineer", "Rig A", "Human determination", "evidence/review.json",
+            now, now, release.Id);
+        db.TestExecutions.Add(restored);
+        await db.SaveChangesAsync();
+        var withoutEvidence = await executionService.ComputeReviewManifestHashAsync(campaign.Id, default);
+        Assert.NotEqual(withExecution, withoutEvidence);
+    }
+
+    [Fact]
+    public async Task Controlled_procedure_document_snapshot_recovers_exact_case_parents_after_cutover()
+    {
+        var options = new DbContextOptionsBuilder<AeroLinkDbContext>().UseSqlite("Data Source=:memory:").Options;
+        var db = new AeroLinkDbContext(options);
+        await db.Database.OpenConnectionAsync();
+        await db.Database.EnsureCreatedAsync();
+        var now = DateTimeOffset.UtcNow;
+        var program = new ProgramRecord("Document Parent Program", "DPP");
+        var project = new ProjectRecord(program.Id, "Document Parent Software", "Document Parent Product");
+        var release = new SoftwareRelease(project.Id, "1.0", false);
+        var baseline = new CandidateBaseline("SW-01.00", 0, project.Id, release.Id, null,
+            "Candidate", "cm.test", now);
+        db.AddRange(program, project, release, baseline);
+        var configuration = LegacyDefaultProjectLadderFactory.Create(project.Id, now);
+        db.ProjectLadderConfigurations.Add(configuration);
+        await db.SaveChangesAsync();
+        var seal = await new ProjectLadderSealAuthority(db).SealAsync(project.Id,
+            LadderBoundContentCatalog.Current.First().Id, "parent-content", "test.sealer", now);
+        Assert.Equal(ProjectLadderSealResultKind.Sealed, seal.Kind);
+
+        var caseA = new TestProcedure(project.Id, "HLRTC-000801", "First parent case",
+            "test.engineer", now, TestProcedureLevel.HighLevel);
+        var caseARevision = new TestProcedureRevision(caseA.Id, 0,
+            "Verify first parent case", "Preconditions", "Steps", "Expected",
+            TestProcedureState.Approved, "test.engineer", now, effectiveBaselineId: baseline.Id);
+        var caseB = new TestProcedure(project.Id, "HLRTC-000802", "Second parent case",
+            "test.engineer", now, TestProcedureLevel.HighLevel);
+        var caseBRevision = new TestProcedureRevision(caseB.Id, 0,
+            "Verify second parent case", "Preconditions", "Steps", "Expected",
+            TestProcedureState.Approved, "test.engineer", now, effectiveBaselineId: baseline.Id);
+        var selection = new BaselineTestProcedureSelection(baseline.Id, caseA.Id, caseARevision.Id);
+        var selectionB = new BaselineTestProcedureSelection(baseline.Id, caseB.Id, caseBRevision.Id);
+        db.AddRange(caseA, caseARevision, caseB, caseBRevision, selection, selectionB);
+        var scr = ApprovedBaselineScr(project.Id, release.Id, "SRCR-00730", now);
+        baseline.Select(scr, "cm.test", now);
+        baseline.Freeze("cm.test", now);
+        baseline.MarkRequirementsMaterialized("cm.test", new string('a', 64), 0, now);
+        baseline.MarkTestProceduresMaterialized("cm.test", new string('b', 64), 1, now);
+        await db.SaveChangesAsync();
+
+        var (legacy, typed) = FullRegistrations();
+        var authority = new SoftwareProcedureExecutionCutoverAuthority(db, legacy, typed,
+            allowSqliteExecution: true);
+        await authority.EnsureCompletedAsync();
+        Assert.Equal(2, await db.TestProcedures.AsNoTracking().CountAsync(
+            x => x.ProjectId == project.Id
+                && x.ArtifactKind == VerificationArtifactKind.Procedure
+                && x.BaseNumber.StartsWith("HLRTP-")));
+        var generatedRevision = await (from link in db.TestCaseProcedureLinks.AsNoTracking()
+                                       where link.CaseRevisionId == caseARevision.Id
+                                       join revision in db.TestProcedureRevisions.AsNoTracking()
+                                           on link.ProcedureRevisionId equals revision.Id
+                                       select revision).SingleAsync();
+
+        // An authored software Procedure with TWO exact Case parents must keep both in the controlled
+        // document snapshot — never collapse to First().
+        var policy = new EffectiveProjectLadderPolicyResolver(db);
+        var authored = new TestProcedure(project.Id, "HLRTP-000803", "Authored two-parent procedure",
+            "test.engineer", now, TestProcedureLevel.HighLevel, await policy.ResolveAsync(project.Id),
+            VerificationArtifactKind.Procedure, VerificationProcedureParentKind.Allocated);
+        var authoredRevision = new TestProcedureRevision(authored.Id, 0,
+            "Execute both parent cases", "Procedure setup", "Procedure steps", "Expected observation",
+            TestProcedureState.Draft, "test.engineer", now,
+            environmentSetup: "Procedure setup", testData: "Controlled data",
+            orderedSteps: "Procedure steps", expectedObservations: "Expected observation",
+            cleanup: "Restore fixture", toolingAutomation: "Qualified runner",
+            parentKind: VerificationProcedureParentKind.Allocated);
+        db.AddRange(authored, authoredRevision,
+            new TestCaseProcedureLink(caseARevision.Id, authoredRevision.Id),
+            new TestCaseProcedureLink(caseBRevision.Id, authoredRevision.Id),
+            new BaselineTestProcedureSelection(baseline.Id, authored.Id, authoredRevision.Id));
+        using (db.UseSaveBoundaryPolicy(await policy.ResolveAsync(project.Id)))
+            await db.SaveChangesAsync();
+        db.Entry(authoredRevision).Property(x => x.State).CurrentValue = TestProcedureState.Approved;
+        using (db.UseSaveBoundaryPolicy(await policy.ResolveAsync(project.Id)))
+            await db.SaveChangesAsync();
+
+        var snapshot = await ControlledProcedureDocumentSnapshotProjection.ForDocumentAsync(db, baseline.Id,
+            new VerificationArtifactKey(VerificationDiscipline.HighLevelSoftware,
+                VerificationArtifactKind.Procedure), now.AddMinutes(2), default);
+        Assert.True(snapshot.IsExactManifest);
+        var generatedRow = snapshot.Rows.Single(x => x.RevisionId == generatedRevision.Id);
+        Assert.Equal([caseARevision.Id], generatedRow.ParentRevisionIds);
+        var authoredRow = snapshot.Rows.Single(x => x.RevisionId == authoredRevision.Id);
+        Assert.Equal(2, authoredRow.ParentRevisionIds!.Count);
+        Assert.Contains(caseARevision.Id, authoredRow.ParentRevisionIds);
+        Assert.Contains(caseBRevision.Id, authoredRow.ParentRevisionIds);
+    }
+
+    [Fact]
+    public async Task Requirements_coverage_side_uses_effective_case_revisions_after_cutover()
+    {
+        var options = new DbContextOptionsBuilder<AeroLinkDbContext>().UseSqlite("Data Source=:memory:").Options;
+        var db = new AeroLinkDbContext(options);
+        await db.Database.OpenConnectionAsync();
+        await db.Database.EnsureCreatedAsync();
+        var now = DateTimeOffset.UtcNow;
+        var program = new ProgramRecord("Coverage Side Program", "CSD");
+        var project = new ProjectRecord(program.Id, "Coverage Side Software", "Coverage Side Product");
+        var release = new SoftwareRelease(project.Id, "1.0", false);
+        var baseline = new CandidateBaseline("SW-01.00", 0, project.Id, release.Id, null,
+            "Candidate", "cm.test", now);
+        db.AddRange(program, project, release, baseline);
+        var configuration = LegacyDefaultProjectLadderFactory.Create(project.Id, now);
+        db.ProjectLadderConfigurations.Add(configuration);
+        await db.SaveChangesAsync();
+        var seal = await new ProjectLadderSealAuthority(db).SealAsync(project.Id,
+            LadderBoundContentCatalog.Current.First().Id, "coverage-content", "test.sealer", now);
+        Assert.Equal(ProjectLadderSealResultKind.Sealed, seal.Kind);
+
+        var scr = ApprovedBaselineScr(project.Id, release.Id, "SRCR-00731", now);
+        var requirement = new RequirementArtifact(project.Id, "HLR-00000731",
+            RequirementLevel.HighLevel, now);
+        var requirementRevision = new RequirementRevision(requirement.Id, 0,
+            "The software shall sequence.", "Rationale", "Test", RequirementRevisionState.Active,
+            scr.Id, baseline.Id, now, parentKind: RequirementParentKind.Derived,
+            derivedRationale: "Derived for the coverage-side fixture.");
+        var caseArtifact = new TestProcedure(project.Id, "HLRTC-000731", "Coverage sequencing case",
+            "test.engineer", now, TestProcedureLevel.HighLevel);
+        var caseRevision = new TestProcedureRevision(caseArtifact.Id, 0,
+            "Verify sequencing", "Logical preconditions", "Scenario steps", "Pass criteria",
+            TestProcedureState.Approved, "test.engineer", now, effectiveBaselineId: baseline.Id);
+        db.AddRange(scr, requirement, requirementRevision, caseArtifact, caseRevision,
+            new TestRequirementCoverage(caseRevision.Id, requirementRevision.Id),
+            new BaselineRequirementSelection(baseline.Id, requirement.Id, requirementRevision.Id),
+            new BaselineTestProcedureSelection(baseline.Id, caseArtifact.Id, caseRevision.Id));
+        baseline.Select(scr, "cm.test", now);
+        baseline.Freeze("cm.test", now);
+        baseline.MarkRequirementsMaterialized("cm.test", new string('a', 64), 1, now);
+        baseline.MarkTestProceduresMaterialized("cm.test", new string('b', 64), 1, now);
+        using (db.UseLegacyHistoricalSeed()) await db.SaveChangesAsync();
+
+        var (legacy, typed) = FullRegistrations();
+        await new SoftwareProcedureExecutionCutoverAuthority(db, legacy, typed,
+            allowSqliteExecution: true).EnsureCompletedAsync();
+        var population = await BaselineExecutableMembership.ForPopulationAsync(db, baseline.Id,
+            new HashSet<TestProcedureLevel> { TestProcedureLevel.HighLevel }, default);
+        // The executable side is the Procedure; the coverage side is the exact Case revision.
+        Assert.DoesNotContain(caseRevision.Id, population.ExecutableRevisionIds);
+        var coverageStates = await VerificationCoverageProjection.StatesAsync(db,
+            [requirementRevision.Id], default, population.CoverageRevisionIds, buildScoped: false);
+        Assert.Equal(RequirementCoverageState.Covered, coverageStates[requirementRevision.Id]);
+        var wrongStates = await VerificationCoverageProjection.StatesAsync(db,
+            [requirementRevision.Id], default, population.ExecutableRevisionIds, buildScoped: false);
+        Assert.Equal(RequirementCoverageState.Uncovered, wrongStates[requirementRevision.Id]);
+    }
+
+    [Fact]
+    public async Task Verification_impact_coverage_work_resolves_the_source_case_after_cutover()
+    {
+        var options = new DbContextOptionsBuilder<AeroLinkDbContext>().UseSqlite("Data Source=:memory:").Options;
+        var db = new AeroLinkDbContext(options);
+        await db.Database.OpenConnectionAsync();
+        await db.Database.EnsureCreatedAsync();
+        var now = DateTimeOffset.UtcNow;
+        var program = new ProgramRecord("Impact Semantics Program", "ISP");
+        var project = new ProjectRecord(program.Id, "Impact Semantics Software", "Impact Semantics Product");
+        var release = new SoftwareRelease(project.Id, "1.0", false);
+        var baseline = new CandidateBaseline("SW-01.00", 0, project.Id, release.Id, null,
+            "Candidate", "cm.test", now);
+        db.AddRange(program, project, release, baseline);
+        var configuration = LegacyDefaultProjectLadderFactory.Create(project.Id, now);
+        db.ProjectLadderConfigurations.Add(configuration);
+        await db.SaveChangesAsync();
+        var seal = await new ProjectLadderSealAuthority(db).SealAsync(project.Id,
+            LadderBoundContentCatalog.Current.First().Id, "impact-content", "test.sealer", now);
+        Assert.Equal(ProjectLadderSealResultKind.Sealed, seal.Kind);
+
+        var scr = ApprovedBaselineScr(project.Id, release.Id, "SRCR-00732", now);
+        var requirement = new RequirementArtifact(project.Id, "HLR-00000732",
+            RequirementLevel.HighLevel, now);
+        var requirementRevision = new RequirementRevision(requirement.Id, 0,
+            "The software shall sequence.", "Rationale", "Test", RequirementRevisionState.Active,
+            scr.Id, baseline.Id, now, parentKind: RequirementParentKind.Derived,
+            derivedRationale: "Derived for the impact fixture.");
+        var caseArtifact = new TestProcedure(project.Id, "HLRTC-000732", "Impact sequencing case",
+            "test.engineer", now, TestProcedureLevel.HighLevel);
+        var caseRevision = new TestProcedureRevision(caseArtifact.Id, 0,
+            "Verify sequencing", "Logical preconditions", "Scenario steps", "Pass criteria",
+            TestProcedureState.Approved, "test.engineer", now, effectiveBaselineId: baseline.Id);
+        db.AddRange(scr, requirement, requirementRevision, caseArtifact, caseRevision,
+            new TestRequirementCoverage(caseRevision.Id, requirementRevision.Id),
+            new BaselineRequirementSelection(baseline.Id, requirement.Id, requirementRevision.Id),
+            new BaselineTestProcedureSelection(baseline.Id, caseArtifact.Id, caseRevision.Id));
+        baseline.Select(scr, "cm.test", now);
+        baseline.Freeze("cm.test", now);
+        baseline.MarkRequirementsMaterialized("cm.test", new string('a', 64), 1, now);
+        baseline.MarkTestProceduresMaterialized("cm.test", new string('b', 64), 1, now);
+        using (db.UseLegacyHistoricalSeed()) await db.SaveChangesAsync();
+
+        var (legacy, typed) = FullRegistrations();
+        await new SoftwareProcedureExecutionCutoverAuthority(db, legacy, typed,
+            allowSqliteExecution: true).EnsureCompletedAsync();
+        var procedure = await db.TestProcedures.AsNoTracking()
+            .SingleAsync(x => x.ProjectId == project.Id
+                && x.ArtifactKind == VerificationArtifactKind.Procedure);
+        var procedureRevision = await db.TestProcedureRevisions.AsNoTracking()
+            .SingleAsync(x => x.ProcedureId == procedure.Id);
+
+        var review = new TestChangeReview(project.Id, release.Id, scr.Id,
+            TestChangeReviewDiscipline.HighLevelSoftware, "SRCR-00732.00", now);
+        db.Add(review);
+        var item = VerificationImpactItem.ForIntroducedRequirement(project.Id, release.Id,
+            scr.Id, review.Id, Guid.NewGuid(), "HLR-00000732", "Test", now);
+        SetPrivate(item, nameof(VerificationImpactItem.RequirementRevisionId), requirementRevision.Id);
+        item.Resolve("test.engineer", VerificationImpactOutcome.ProcedureCoverageConfirmed,
+            "The Procedure covers the sequencing requirement through its exact source Case.", now,
+            procedureId: procedure.Id, procedureRevisionId: procedureRevision.Id);
+        db.Add(item);
+        await db.SaveChangesAsync();
+
+        var applied = await new VerificationImpactService(db).ApplyResolvedCoverageAsync(item, now, default);
+        Assert.True(applied);
+        // Coverage work stays on the exact source Case revision — never a TestCoverage row against a
+        // software Procedure revision.
+        Assert.True(await db.TestCoverage.AsNoTracking().AnyAsync(x =>
+            x.ProcedureRevisionId == caseRevision.Id
+            && x.RequirementRevisionId == requirementRevision.Id));
+        Assert.False(await db.TestCoverage.AsNoTracking().AnyAsync(x =>
+            x.ProcedureRevisionId == procedureRevision.Id));
+    }
+
+    private static void SetPrivate(object target, string propertyName, object? value) =>
+        target.GetType().GetProperty(propertyName)!
+            .GetSetMethod(nonPublic: true)!
+            .Invoke(target, [value]);
 }

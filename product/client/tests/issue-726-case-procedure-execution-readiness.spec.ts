@@ -296,15 +296,21 @@ test('Case to allocated Procedure execution chain drives release readiness', asy
       data: { softwareBuildId: build.id },
     })
   expect(selectBuild.ok(), await selectBuild.text()).toBeTruthy()
-  const includeInSet = await request.post(
-    `${apiBase}/api/releases/${workspace.release.id}/test-sets/HighLevelSoftware/procedures`, {
-      data: {
-        procedureRevisionIds: [procedureRevisionId],
-        reason: 'Chosen',
-        note: 'Exact allocated Procedure selected for the #726 execution journey.',
-      },
-    })
-  expect(includeInSet.ok(), await includeInSet.text()).toBeTruthy()
+  // 6. The user visibly searches for and adds the exact Procedure through the real Test Results UI. The
+  //    contract reports the effective executable kind, so software under the full profile searches and
+  //    selects Procedures — this would fail if the UI still hard-coded the Case segment.
+  await login(page, 'admin', { openProject: false })
+  const root = `/programs/${workspace.program.id}/projects/${workspace.project.id}/releases/${workspace.release.id}`
+  await page.goto(`${root}/software-verification/hlr/results`)
+  await expect(page.getByRole('heading', { name: 'Test Results' })).toBeVisible({ timeout: 30_000 })
+  await page.getByLabel('Find an approved procedure').fill(`${label} sequencing procedure`)
+  const candidate = page.locator('.testSetCandidates label').filter({ hasText: procedure.displayNumber }).first()
+  await expect(candidate).toBeVisible({ timeout: 30_000 })
+  await candidate.locator('input[type="checkbox"]').check()
+  await page.getByRole('button', { name: 'Add — covers a change' }).click()
+  const procedureRow = page.locator('.testSetRow').filter({ hasText: procedure.displayNumber }).first()
+  await expect(procedureRow).toBeVisible({ timeout: 30_000 })
+  await expect(procedureRow).toContainText(`${label} sequencing procedure`)
 
   const readinessOf = async () => {
     const response = await request.get(`${apiBase}/api/release-campaigns/${campaign.id}`)
@@ -339,18 +345,7 @@ test('Case to allocated Procedure execution chain drives release readiness', asy
   expect(verificationBefore.complete).toBe(false)
   expect(evidenceBefore.complete).toBe(false)
 
-  // 8. The real UI surfaces: the HLR Test Results workspace lists the exact Procedure revision as the
-  //    executable row, and Release Operations shows the same obligation the API reported.
-  await login(page, 'admin', { openProject: false })
-  const root = `/programs/${workspace.program.id}/projects/${workspace.project.id}/releases/${workspace.release.id}`
-  await page.goto(`${root}/software-verification/hlr/results`)
-  await expect(page.getByRole('heading', { name: 'Test Results' })).toBeVisible({ timeout: 30_000 })
-  const procedureRow = page.locator('.testSetRow').filter({
-    hasText: `${label} sequencing procedure`,
-  }).first()
-  await expect(procedureRow).toBeVisible({ timeout: 30_000 })
-  await expect(procedureRow).toContainText(procedure.displayNumber)
-
+  // 7b. The real UI surface: Release Operations shows the same obligation the API reported.
   await page.goto(`${root}/release-readiness/operations`)
   await expect(page.getByRole('heading', { name: /Release Operations|Release campaign/i }))
     .toBeVisible({ timeout: 30_000 })

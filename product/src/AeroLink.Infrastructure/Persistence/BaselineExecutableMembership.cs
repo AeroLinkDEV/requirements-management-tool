@@ -32,21 +32,20 @@ public static class BaselineExecutableMembership
     }
 
     /// <summary>
-    /// Recovers the exact source Case revisions for a baseline's executable Procedure selections through the
+    /// Recovers ALL exact source Case revisions for a baseline's executable Procedure selections through the
     /// immutable Case→Procedure links. A Procedure selection with no link is a standalone/Derived Procedure
-    /// and contributes no Case obligation.
+    /// and contributes no Case obligation. Every parent is preserved — one-to-many and many-to-many exact
+    /// Case-to-Procedure relationships are never collapsed.
     /// </summary>
-    public static async Task<IReadOnlyDictionary<Guid, Guid>> SourceCaseRevisionsAsync(
+    public static async Task<IReadOnlyList<Guid>> SourceCaseRevisionIdsAsync(
         AeroLinkDbContext db, IReadOnlyCollection<BaselineExecutableSelection> selections, CancellationToken ct)
     {
         var procedureRevisionIds = selections.Where(x => x.Kind == VerificationArtifactKind.Procedure)
             .Select(x => x.RevisionId).ToList();
-        if (procedureRevisionIds.Count == 0) return new Dictionary<Guid, Guid>();
+        if (procedureRevisionIds.Count == 0) return [];
         return await (from link in db.TestCaseProcedureLinks.AsNoTracking()
                       where procedureRevisionIds.Contains(link.ProcedureRevisionId)
-                      select new { link.ProcedureRevisionId, link.CaseRevisionId })
-            .GroupBy(x => x.ProcedureRevisionId)
-            .ToDictionaryAsync(x => x.Key, x => x.First().CaseRevisionId, ct);
+                      select link.CaseRevisionId).Distinct().ToListAsync(ct);
     }
 
     /// <summary>
@@ -59,14 +58,14 @@ public static class BaselineExecutableMembership
     public static async Task<IReadOnlyList<Guid>> EffectiveCaseRevisionIdsAsync(
         AeroLinkDbContext db,
         IReadOnlyList<BaselineExecutableSelection> selections,
-        IReadOnlyDictionary<Guid, Guid> sourceCases,
+        IReadOnlyList<Guid> sourceCaseRevisionIds,
         Guid baselineId,
         IReadOnlySet<TestProcedureLevel> procedureEnabledLevels,
         CancellationToken ct)
     {
         return selections.Where(x => x.Kind == VerificationArtifactKind.Case)
             .Select(x => x.RevisionId)
-            .Concat(sourceCases.Values)
+            .Concat(sourceCaseRevisionIds)
             .Concat(await (from revision in db.TestProcedureRevisions.AsNoTracking()
                            join procedure in db.TestProcedures.AsNoTracking()
                                on revision.ProcedureId equals procedure.Id
@@ -77,4 +76,41 @@ public static class BaselineExecutableMembership
             .Distinct()
             .ToList();
     }
+
+    /// <summary>
+    /// The two sides of one typed effectivity population for a baseline:
+    /// <list type="bullet">
+    /// <item><see cref="CoverageRevisionIds"/> — exact revisions whose TestCoverage rows count for
+    /// requirement coverage (System Procedure revisions plus the effective software Case population).</item>
+    /// <item><see cref="ExecutableRevisionIds"/> — exact effective executable revisions (System Procedures,
+    /// software Procedures under the full profile, software Cases under a Case-only profile).</item>
+    /// </list>
+    /// Consumers that answer "what covers this requirement" use CoverageRevisionIds; consumers that answer
+    /// "what does this build execute" use ExecutableRevisionIds. Never the same set.
+    /// </summary>
+    public static async Task<EffectiveExecutablePopulation> ForPopulationAsync(
+        AeroLinkDbContext db,
+        Guid baselineId,
+        IReadOnlySet<TestProcedureLevel> procedureEnabledLevels,
+        CancellationToken ct)
+    {
+        var selections = await ForBaselineAsync(db, baselineId, ct);
+        var sourceCaseRevisionIds = await SourceCaseRevisionIdsAsync(db, selections, ct);
+        var coverageRevisionIds = selections
+            .Where(x => x.Level == TestProcedureLevel.System)
+            .Select(x => x.RevisionId)
+            .Concat(await EffectiveCaseRevisionIdsAsync(db, selections, sourceCaseRevisionIds,
+                baselineId, procedureEnabledLevels, ct))
+            .Distinct().ToList();
+        var executableRevisionIds = selections
+            .Where(x => !(procedureEnabledLevels.Contains(x.Level)
+                && x.Kind == VerificationArtifactKind.Case))
+            .Select(x => x.RevisionId).Distinct().ToList();
+        return new EffectiveExecutablePopulation(coverageRevisionIds, executableRevisionIds);
+    }
 }
+
+/// <summary>One typed effectivity population: coverage-side revisions and executable-side revisions.</summary>
+public sealed record EffectiveExecutablePopulation(
+    IReadOnlyList<Guid> CoverageRevisionIds,
+    IReadOnlyList<Guid> ExecutableRevisionIds);

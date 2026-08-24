@@ -200,6 +200,36 @@ public sealed class CaseProcedureSatisfactionTests
         Assert.True(Assert.Single(await EvaluateAsync(seed)).Satisfied);
     }
 
+    [Fact]
+    public async Task Many_to_many_case_parents_are_all_preserved_and_each_case_gets_its_own_obligation()
+    {
+        var seed = await BuildAsync();
+        var policy = ProcedureEnabledPolicy();
+        var secondCase = new TestProcedure(seed.ProjectId, "HLRTC-000404",
+            "Second sequencing case", "test.engineer", Now, TestProcedureLevel.HighLevel,
+            policy, VerificationArtifactKind.Case);
+        var secondCaseRevision = new TestProcedureRevision(secondCase.Id, 0,
+            "Verify the second sequencing case", "Logical preconditions", "Scenario steps",
+            "Pass criteria", TestProcedureState.Approved, "test.engineer", Now,
+            effectiveBaselineId: seed.BaselineId);
+        var secondLink = new TestCaseProcedureLink(secondCaseRevision.Id, seed.ProcedureRevisionId);
+        seed.Db.AddRange(secondCase, secondCaseRevision, secondLink);
+        await seed.Db.SaveChangesAsync();
+
+        var selections = await BaselineExecutableMembership.ForBaselineAsync(seed.Db, seed.BaselineId, default);
+        var sourceCaseRevisionIds = await BaselineExecutableMembership.SourceCaseRevisionIdsAsync(
+            seed.Db, selections, default);
+        Assert.Contains(seed.CaseRevisionId, sourceCaseRevisionIds);
+        Assert.Contains(secondCaseRevision.Id, sourceCaseRevisionIds);
+
+        var obligations = await EvaluateAsync(seed);
+        Assert.Equal(2, obligations.Count);
+        var first = obligations.Single(x => x.CaseRevisionId == seed.CaseRevisionId);
+        Assert.True(first.Satisfied);
+        var second = obligations.Single(x => x.CaseRevisionId == secondCaseRevision.Id);
+        Assert.True(second.Satisfied);
+    }
+
     private static async Task<IReadOnlyList<CaseProcedureObligation>> EvaluateAsync(Seed seed)
     {
         var obligations = await CaseProcedureSatisfaction.ForBaselineAsync(seed.Db, seed.BaselineId,
