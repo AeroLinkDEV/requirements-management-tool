@@ -2,6 +2,8 @@ using System.Text.Json;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json.Nodes;
+using Microsoft.Data.Sqlite;
+using Npgsql;
 using AeroLink.Domain.ChangeControl;
 using AeroLink.Domain.Common;
 using AeroLink.Domain.Hierarchy;
@@ -49,6 +51,10 @@ public sealed class SoftwareProcedureExecutionCutoverAuthority(
         artifactConsumerRegistrations?.ToArray() ?? [];
     private ControlledOutputGenerator? generatorField = generator;
     private EvidenceFileStore? filesField = files;
+    // Storage keys written by the CURRENT in-flight project transaction. If that transaction rolls back,
+    // these bytes are unreferenced output and are removed by the safe cleanup below; previously referenced
+    // evidence is never deleted.
+    private readonly List<string> _pendingNewStorageKeys = [];
 
     private EvidenceFileStore Files => filesField ??= new EvidenceFileStore(
         Path.Combine(Path.GetTempPath(), "aerolink-726-evidence"));
@@ -63,13 +69,17 @@ public sealed class SoftwareProcedureExecutionCutoverAuthority(
         // SQLite test hosts (EnsureCreated) do not carry real sealed product state, and running the cutover
         // there would rewrite fixtures the tests intentionally keep Case-only. Focused cutover tests opt in.
         if (!db.Database.IsNpgsql() && !allowSqliteExecution) return new(0, 0, 0, 0, 0, 0);
-        // The global Completed marker is an atomic, database-enforced claim (unique marker row), so two
-        // startup instances can never both insert completion evidence after per-project work committed.
-        if (await db.GovernedMigrationCompletions.AsNoTracking()
-            .AnyAsync(x => x.Marker == MigrationMarker, ct))
+        // The global Completed marker is an atomic, database-enforced claim (unique marker row) committed in
+        // the SAME save as the Completed audit evidence. A completed run is finished forever: the immutable
+        // totals stored with the marker are authoritative and are never recomputed from live data, which
+        // drifts as ordinary post-cutover executions, test-set entries, baseline selections, and impact
+        // records are created.
+        var completion = await db.GovernedMigrationCompletions.AsNoTracking()
+            .SingleOrDefaultAsync(x => x.Marker == MigrationMarker, ct);
+        if (completion is not null)
         {
-            var alreadyComplete = await RecoverCompletedTotalsAsync(new HashSet<Guid>(), ct);
-            return alreadyComplete;
+            await RecoverMissingCompletionAuditAsync(completion, ct);
+            return ParseTotals(completion.TotalsJson);
         }
 
         var configurations = await db.ProjectLadderConfigurations.AsNoTracking()
@@ -84,9 +94,7 @@ public sealed class SoftwareProcedureExecutionCutoverAuthority(
             // A crash before the global Completed marker must not report inaccurate zero totals: recover the
             // honest per-project outcome from the persisted governed evidence.
             var recoveredAtStart = await RecoverCompletedTotalsAsync(new HashSet<Guid>(), ct);
-            if (await TryClaimCompletionAsync(recoveredAtStart, now, ct))
-                await MarkCompletedAsync(ct, recoveredAtStart);
-            return recoveredAtStart;
+            return await ClaimCompletedAsync(recoveredAtStart, now, ct);
         }
 
         // Validate every project BEFORE writing anything. A missing typed execution consumer refuses the
@@ -129,67 +137,146 @@ public sealed class SoftwareProcedureExecutionCutoverAuthority(
             BaselineSelectionsRebound = totals.BaselineSelectionsRebound + recoveredAfterLoop.BaselineSelectionsRebound,
             ImpactItemsRebound = totals.ImpactItemsRebound + recoveredAfterLoop.ImpactItemsRebound,
         };
-        if (await TryClaimCompletionAsync(totals, now, ct))
-            await MarkCompletedAsync(ct, totals);
-        return totals;
+        return await ClaimCompletedAsync(totals, now, ct);
     }
 
     /// <summary>
-    /// Atomically claims the global completion marker. Only the winning instance writes the completion
-    /// evidence; a concurrent loser observes the unique-marker conflict and returns without duplicating it.
+    /// Atomically claims the global completion marker and writes its Completed audit evidence in ONE save
+    /// boundary. Only the winning instance writes the completion evidence; a concurrent loser observes the
+    /// verified unique-marker conflict and returns the winner's immutable stored totals. Any other
+    /// persistence failure propagates — it is never mistaken for a lost race.
     /// </summary>
-    private async Task<bool> TryClaimCompletionAsync(SoftwareProcedureCutoverResult totals,
+    private async Task<SoftwareProcedureCutoverResult> ClaimCompletedAsync(SoftwareProcedureCutoverResult totals,
         DateTimeOffset now, CancellationToken ct)
     {
         db.GovernedMigrationCompletions.Add(new GovernedMigrationCompletion(
             MigrationMarker, Actor, now, Json(totals)));
+        db.SecurityAuditEvents.Add(new SecurityAuditEvent(
+            CompletedEvent, Actor, "software-procedure-execution-cutover", "Succeeded",
+            Json(new
+            {
+                migration = MigrationMarker,
+                projectsUpgraded = totals.ProjectsUpgraded,
+                proceduresGenerated = totals.ProceduresGenerated,
+                executionsRebound = totals.ExecutionsRebound,
+                testSetEntriesRebound = totals.TestSetEntriesRebound,
+                baselineSelectionsRebound = totals.BaselineSelectionsRebound,
+                impactItemsRebound = totals.ImpactItemsRebound,
+                reason = "All eligible sealed projects now execute the software Procedure tier; reruns return the immutable stored completion totals."
+            }), "", now));
         try
         {
             await db.SaveChangesAsync(ct);
-            return true;
+            return totals;
         }
-        catch (DbUpdateException)
+        catch (DbUpdateException ex) when (IsUniqueMarkerConflict(ex))
         {
+            // A concurrent startup instance committed the marker+audit first. The stored marker is the only
+            // authoritative completion record; return its immutable totals, never this run's own numbers.
             db.ChangeTracker.Clear();
-            return false;
+            var winner = await db.GovernedMigrationCompletions.AsNoTracking()
+                .SingleAsync(x => x.Marker == MigrationMarker, ct);
+            await RecoverMissingCompletionAuditAsync(winner, ct);
+            return ParseTotals(winner.TotalsJson);
         }
+    }
+
+    /// <summary>
+    /// Fail-closed repair for the only historically possible inconsistent state: a completion marker whose
+    /// Completed audit evidence was never committed (the pre-atomic build saved the two rows separately).
+    /// The audit is reconstructed from the marker's immutable stored totals, and only when it is genuinely
+    /// missing.
+    /// </summary>
+    private async Task RecoverMissingCompletionAuditAsync(GovernedMigrationCompletion completion,
+        CancellationToken ct)
+    {
+        var auditExists = await db.SecurityAuditEvents.AsNoTracking().AnyAsync(x =>
+            x.EventType == CompletedEvent
+            && x.ActorId == Actor
+            && x.Target == "software-procedure-execution-cutover", ct);
+        if (auditExists) return;
+        var totals = ParseTotals(completion.TotalsJson);
+        db.SecurityAuditEvents.Add(new SecurityAuditEvent(
+            CompletedEvent, Actor, "software-procedure-execution-cutover", "Succeeded",
+            Json(new
+            {
+                migration = MigrationMarker,
+                projectsUpgraded = totals.ProjectsUpgraded,
+                proceduresGenerated = totals.ProceduresGenerated,
+                executionsRebound = totals.ExecutionsRebound,
+                testSetEntriesRebound = totals.TestSetEntriesRebound,
+                baselineSelectionsRebound = totals.BaselineSelectionsRebound,
+                impactItemsRebound = totals.ImpactItemsRebound,
+                reason = "Recovered missing completion audit evidence after an interrupted claim; totals are the immutable stored completion totals."
+            }), "", DateTimeOffset.UtcNow));
+        await db.SaveChangesAsync(ct);
+    }
+
+    private static SoftwareProcedureCutoverResult ParseTotals(string totalsJson) =>
+        JsonSerializer.Deserialize<SoftwareProcedureCutoverResult>(totalsJson)
+        ?? throw new InvalidOperationException(
+            "The stored completion marker carries malformed immutable totals evidence.");
+
+    /// <summary>
+    /// A concurrent claim loses ONLY on the verified unique-marker conflict (PostgreSQL 23505 or the SQLite
+    /// unique index on the expected marker constraint). Every other DbUpdateException is a real persistence
+    /// failure and must surface.
+    /// </summary>
+    private static bool IsUniqueMarkerConflict(DbUpdateException exception)
+    {
+        for (var inner = exception.InnerException; inner is not null; inner = inner.InnerException)
+        {
+            if (inner is PostgresException { SqlState: "23505" } postgres
+                && postgres.ConstraintName?.Contains(
+                    "IX_governed_migration_completions_Marker", StringComparison.OrdinalIgnoreCase) == true)
+                return true;
+            if (inner is SqliteException { SqliteErrorCode: 19 } sqlite
+                && (sqlite.Message?.Contains(
+                    "IX_governed_migration_completions_Marker", StringComparison.OrdinalIgnoreCase) == true
+                    || sqlite.Message?.Contains(
+                        "governed_migration_completions.Marker", StringComparison.OrdinalIgnoreCase) == true))
+                return true;
+        }
+        return false;
     }
 
     private async Task<SoftwareProcedureCutoverResult> UpgradeProjectAsync(Guid configurationId,
         Guid projectId, DateTimeOffset now, CancellationToken ct)
     {
         await using var transaction = await db.Database.BeginTransactionAsync(ct);
-        db.ChangeTracker.Clear();
-        var configuration = await db.ProjectLadderConfigurations
-            .Include(x => x.Steps).Include(x => x.AllowedUpstream)
-            .SingleAsync(x => x.Id == configurationId, ct);
-        if (!configuration.IsSealed)
-            throw new InvalidOperationException("A governed Procedure cutover requires an already sealed ladder.");
-        var kindsByStep = TargetKinds(configuration)
-            ?? throw new InvalidOperationException("The project is not pending the software Procedure cutover.");
-        var readiness = BuildReadiness(configuration);
-        foreach (var step in configuration.Steps)
-            if (kindsByStep.TryGetValue(Enum.Parse<RequirementLevel>(step.CatalogueEntry, false), out var kinds))
-                step.ApplyPlatformUpgradeKinds(kinds);
-
-        configuration.RecordPlatformUpgrade(UpgradeVersion, Actor, readiness.Hash, now);
-        // RecordPlatformUpgrade converts a LegacyDefault Stored ladder into an authored Draft so the change is
-        // attributable and reviewable. #726 is itself the governed activation: the cutover immediately
-        // activates that Draft through the same evidence authority, leaving the configuration sealed and
-        // EFFECTIVE (never a half-applied Draft that the runtime would ignore).
-        if (configuration.State == ProjectLadderConfigurationState.Draft)
-            configuration.Activate(Actor, now, LadderConsumerManifestCatalog.VersionV2, readiness.Hash);
-        try { await db.SaveChangesAsync(ct); }
-        catch (DbUpdateConcurrencyException)
+        try
         {
-            throw new InvalidOperationException("Another ladder edit, seal, or platform upgrade was saved during the Procedure cutover. Refresh and retry.");
-        }
+            db.ChangeTracker.Clear();
+            var configuration = await db.ProjectLadderConfigurations
+                .Include(x => x.Steps).Include(x => x.AllowedUpstream)
+                .SingleAsync(x => x.Id == configurationId, ct);
+            if (!configuration.IsSealed)
+                throw new InvalidOperationException("A governed Procedure cutover requires an already sealed ladder.");
+            var kindsByStep = TargetKinds(configuration)
+                ?? throw new InvalidOperationException("The project is not pending the software Procedure cutover.");
+            var readiness = BuildReadiness(configuration);
+            foreach (var step in configuration.Steps)
+                if (kindsByStep.TryGetValue(Enum.Parse<RequirementLevel>(step.CatalogueEntry, false), out var kinds))
+                    step.ApplyPlatformUpgradeKinds(kinds);
 
-        var cases = await db.TestProcedures.AsNoTracking()
-            .Where(x => x.ProjectId == projectId && x.ArtifactKind == VerificationArtifactKind.Case
-                && (x.Level == TestProcedureLevel.HighLevel || x.Level == TestProcedureLevel.LowLevel))
-            .OrderBy(x => x.BaseNumber)
-            .ToListAsync(ct);
+            configuration.RecordPlatformUpgrade(UpgradeVersion, Actor, readiness.Hash, now);
+            // RecordPlatformUpgrade converts a LegacyDefault Stored ladder into an authored Draft so the
+            // change is attributable and reviewable. #726 is itself the governed activation: the cutover
+            // immediately activates that Draft through the same evidence authority, leaving the configuration
+            // sealed and EFFECTIVE (never a half-applied Draft that the runtime would ignore).
+            if (configuration.State == ProjectLadderConfigurationState.Draft)
+                configuration.Activate(Actor, now, LadderConsumerManifestCatalog.VersionV2, readiness.Hash);
+            try { await db.SaveChangesAsync(ct); }
+            catch (DbUpdateConcurrencyException)
+            {
+                throw new InvalidOperationException("Another ladder edit, seal, or platform upgrade was saved during the Procedure cutover. Refresh and retry.");
+            }
+
+            var cases = await db.TestProcedures.AsNoTracking()
+                .Where(x => x.ProjectId == projectId && x.ArtifactKind == VerificationArtifactKind.Case
+                    && (x.Level == TestProcedureLevel.HighLevel || x.Level == TestProcedureLevel.LowLevel))
+                .OrderBy(x => x.BaseNumber)
+                .ToListAsync(ct);
         var caseIds = cases.Select(x => x.Id).ToList();
         var caseRevisions = await db.TestProcedureRevisions.AsNoTracking()
             .Where(x => caseIds.Contains(x.ProcedureId))
@@ -261,8 +348,14 @@ public sealed class SoftwareProcedureExecutionCutoverAuthority(
                 db.TestProcedureRevisions.Add(revision);
                 // A Retired Case cannot be an exact active parent under the persistence rules; the retired
                 // history is preserved by the mirrored Retired Procedure revision and its audit event, never
-                // by manufacturing an active executable claim from retired content.
-                var link = retired ? null : new TestCaseProcedureLink(caseRevision.Id, revision.Id);
+                // by manufacturing an active executable claim from retired content. The same rule applies to
+                // a historically-effective Case revision that is no longer selected by any current baseline:
+                // its mirror cannot be selected in the Case's governed baseline (membership moved on), so it
+                // is preserved as history without manufacturing a governed executable claim.
+                var link = retired || (effectiveBaselineId is null
+                        && caseRevision.EffectiveBaselineId is not null)
+                    ? null
+                    : new TestCaseProcedureLink(caseRevision.Id, revision.Id);
                 if (link is not null) db.TestCaseProcedureLinks.Add(link);
                 db.SecurityAuditEvents.Add(new SecurityAuditEvent(
                     MigrationMarker + ".ProcedureGenerated", Actor,
@@ -280,8 +373,9 @@ public sealed class SoftwareProcedureExecutionCutoverAuthority(
                         generatedProcedureRevision = revision.Id,
                         generatedState = revision.State.ToString(),
                         sourceTcrId = caseRevision.SourceTestChangeRequestId,
-                        reason = retired
-                            ? "Historical retired Case revision mirrored as a retired Procedure revision; no active executable claim was manufactured."
+                        reason = retired || (effectiveBaselineId is null
+                                && caseRevision.EffectiveBaselineId is not null)
+                            ? "Historical Case revision mirrored without an active executable claim (retired or superseded by a later selected revision); no governed claim was manufactured."
                             : "Deterministically generated from the exact legacy Case revision; no TCR, reviewer, or human approval fabricated."
                     }), "", now));
                 caseRevisionToProcedure[caseRevision.Id] = (procedure.Id, revision.Id);
@@ -297,8 +391,8 @@ public sealed class SoftwareProcedureExecutionCutoverAuthority(
             .ToDictionary(group => group.Key,
                 group => caseRevisionToProcedure[group.First()].ArtifactId);
 
-        var executions = await db.TestExecutions
-            .Where(x => migratedCaseRevisionIdsList.Contains(x.ProcedureRevisionId)).ToListAsync(ct);
+            var executions = await db.TestExecutions
+                .Where(x => migratedCaseRevisionIdsList.Contains(x.ProcedureRevisionId)).ToListAsync(ct);
         foreach (var execution in executions)
             execution.RebindMigrationExecutable(
                 caseRevisionToProcedure[execution.ProcedureRevisionId].RevisionId, now);
@@ -311,6 +405,20 @@ public sealed class SoftwareProcedureExecutionCutoverAuthority(
             .Where(x => migratedCaseRevisionIdsList.Contains(x.RevisionId)
                 || migratedCaseArtifactIds.Contains(x.ProcedureId))
             .ToListAsync(ct);
+        // Finding 5: capture per-baseline provenance BEFORE the rebind replaces Case identities with
+        // Procedure identities, so the manifest event can name the exact old Case revision and its new
+        // Procedure artifact/revision for that baseline, deterministically ordered.
+        var provenanceByBaseline = baselineSelections
+            .Where(selection => migratedCaseRevisionIdsList.Contains(selection.RevisionId))
+            .GroupBy(selection => selection.BaselineId)
+            .ToDictionary(group => group.Key, group => string.Join(";", group
+                .Select(selection =>
+                {
+                    var (procedureArtifactId, procedureRevisionId) =
+                        caseRevisionToProcedure[selection.RevisionId];
+                    return $"case:{selection.RevisionId}->procedure:{procedureArtifactId}:{procedureRevisionId}";
+                })
+                .OrderBy(identity => identity, StringComparer.Ordinal)));
         foreach (var selection in baselineSelections)
             if (caseRevisionToProcedure.TryGetValue(selection.RevisionId, out var executable))
                 selection.RebindMigrationExecutable(executable.ArtifactId, executable.RevisionId);
@@ -371,7 +479,7 @@ public sealed class SoftwareProcedureExecutionCutoverAuthority(
                     continue;
                 baseline.RecordExecutionCutoverManifestMigration(Actor, previousHash, newHash,
                     oldMembershipCountByBaseline.GetValueOrDefault(baseline.Id), manifestEntries.Count,
-                    $"generatedProcedureRevisions={generated}; exactCaseProcedureLinks={migratedCaseRevisionIdsList.Count}",
+                    provenanceByBaseline.GetValueOrDefault(baseline.Id) ?? "no migrated Case executable memberships in this baseline",
                     now);
             }
             await db.SaveChangesAsync(ct);
@@ -396,7 +504,31 @@ public sealed class SoftwareProcedureExecutionCutoverAuthority(
             }), "", now));
         await db.SaveChangesAsync(ct);
         await transaction.CommitAsync(ct);
+        _pendingNewStorageKeys.Clear();
         return new(1, generated, executions.Count, entries.Count, baselineSelections.Count, impactItems.Count);
+        }
+        catch
+        {
+            // The surrounding transaction rolls back; any rendition bytes stored by this in-flight project
+            // transaction are now unreferenced output and are removed safely. Previously referenced evidence
+            // is never deleted.
+            RemovePendingNewStorageKeys();
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// Removes only the storage keys written by the current in-flight project transaction after a rollback.
+    /// Old referenced evidence is never touched.
+    /// </summary>
+    private void RemovePendingNewStorageKeys()
+    {
+        foreach (var storageKey in _pendingNewStorageKeys)
+        {
+            try { Files.Delete(storageKey); }
+            catch { /* best-effort cleanup; referenced evidence is never deleted */ }
+        }
+        _pendingNewStorageKeys.Clear();
     }
 
     /// <summary>
@@ -459,7 +591,11 @@ public sealed class SoftwareProcedureExecutionCutoverAuthority(
         foreach (var document in documents)
         {
             var baseline = baselinesById[document.BaselineId];
-            var exactManifest = baseline.TestProceduresMaterializedAt is not null;
+            // #747 temporal rule: a document is exact ONLY when the baseline was already verification-
+            // materialized at or before the document's own generation time. A document generated before
+            // later baseline materialization remains a legacy compatibility document forever.
+            var exactManifest = baseline.TestProceduresMaterializedAt is { } materializedAt
+                && materializedAt <= document.GeneratedAt;
             string contentBasis;
             if (exactManifest)
             {
@@ -470,18 +606,61 @@ public sealed class SoftwareProcedureExecutionCutoverAuthority(
             }
             else
             {
-                // #747-compatible legacy baseline: no exact manifest exists and none is invented. Reconstruct
-                // the historical compatibility snapshot at the document's ORIGINAL GeneratedAt, validate the
-                // artifact count and selected revision identities fail-closed, and bind the content basis to
-                // that reconstructed snapshot.
+                // #747-compatible legacy document: no exact manifest exists for THIS document and none is
+                // invented. Reconstruct the historical compatibility snapshot at the document's ORIGINAL
+                // GeneratedAt, validate the artifact count, reject duplicate revision identities, require
+                // every revision identity and owner to resolve, then hash the exact identities through the
+                // canonical TestProcedureManifest semantics.
                 var snapshot = await ControlledProcedureDocumentSnapshotProjection.ForDocumentAsync(db,
                     document.BaselineId, ArtifactKeyForDocument(document.Type), document.GeneratedAt, ct);
+                if (snapshot.IsExactManifest)
+                    throw new InvalidOperationException(
+                        $"Procedure cutover legacy document {document.Id} on baseline {baseline.Id} resolved as an exact manifest despite the temporal legacy rule; refusing to fabricate a manifest.");
                 if (snapshot.Rows.Count != document.ArtifactCount)
                     throw new InvalidOperationException(
                         $"Procedure cutover legacy document {document.Id} reconstructed {snapshot.Rows.Count} rows but records ArtifactCount {document.ArtifactCount}.");
-                var canonicalRows = string.Join(";", snapshot.Rows.OrderBy(x => x.BaseNumber).Select(x =>
-                    $"{x.RevisionId}:{x.BaseNumber}.{x.Revision:D2}:{string.Join(",", x.ParentRevisionIds ?? [])}"));
-                contentBasis = $"{canonicalRows}|{document.Type}|{document.ArtifactCount}|{Actor}";
+                var snapshotRevisionIds = snapshot.Rows.Select(row => row.RevisionId).ToList();
+                if (snapshotRevisionIds.Distinct().Count() != snapshotRevisionIds.Count)
+                    throw new InvalidOperationException(
+                        $"Procedure cutover legacy document {document.Id} on baseline {baseline.Id} contains duplicate revision identities; refusing to regenerate.");
+                var snapshotOwners = await db.TestProcedureRevisions.AsNoTracking()
+                    .Where(revision => snapshotRevisionIds.Contains(revision.Id))
+                    .Select(revision => new { revision.Id, revision.ProcedureId })
+                    .ToListAsync(ct);
+                if (snapshotOwners.Count != snapshotRevisionIds.Count)
+                    throw new InvalidOperationException(
+                        $"Procedure cutover legacy document {document.Id} on baseline {baseline.Id} references one or more revisions that no longer exist; refusing to regenerate.");
+                var procedureIdByRevision = snapshotOwners.ToDictionary(x => x.Id, x => x.ProcedureId);
+                var ownerProcedureIds = procedureIdByRevision.Values.Distinct().ToList();
+                var resolvedOwners = await db.TestProcedures.AsNoTracking()
+                    .Where(procedure => ownerProcedureIds.Contains(procedure.Id)
+                        && procedure.ProjectId == baseline.ProjectId)
+                    .Select(procedure => procedure.Id)
+                    .ToListAsync(ct);
+                if (resolvedOwners.Count != ownerProcedureIds.Count)
+                    throw new InvalidOperationException(
+                        $"Procedure cutover legacy document {document.Id} on baseline {baseline.Id} references owners that are missing or outside the baseline project; refusing to regenerate.");
+                var compatibilityEntries = snapshot.Rows.Select(row => new TestProcedureManifestEntry(
+                    procedureIdByRevision[row.RevisionId], row.RevisionId, row.BaseNumber, row.Revision)).ToList();
+                var compatibilitySnapshotHash = TestProcedureManifest.Hash(compatibilityEntries);
+                contentBasis = $"{compatibilitySnapshotHash}|{document.Type}|{document.ArtifactCount}|{Actor}";
+                db.SecurityAuditEvents.Add(new SecurityAuditEvent(
+                    MigrationMarker + ".LegacyDocumentBasisReconstructed", Actor,
+                    $"ControlledDocument:{document.Id}", "Succeeded",
+                    Json(new
+                    {
+                        migration = MigrationMarker,
+                        documentId = document.Id,
+                        baselineId = baseline.Id,
+                        generatedAt = document.GeneratedAt,
+                        artifactCount = document.ArtifactCount,
+                        compatibilitySnapshotHash,
+                        baselineManifestStatePreserved = true,
+                        baselineMaterializedAt = baseline.TestProceduresMaterializedAt,
+                        baselineWasMaterializedWhenDocumentGenerated = false,
+                        documentGeneratedAtPreserved = true,
+                        reason = "The controlled document predates exact build-scoped verification manifests. Its execution-cutover basis was reconstructed from the existing generation-time compatibility snapshot; no historical baseline materialization state was fabricated and the original generation time was preserved so later revisions cannot leak into the regenerated document."
+                    }), "", now));
             }
             var contentHash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(contentBasis)))
                 .ToLowerInvariant();
@@ -519,6 +698,7 @@ public sealed class SoftwareProcedureExecutionCutoverAuthority(
                     $"Procedure cutover could not regenerate document {artifact.DocumentId} ({artifact.Format}).");
             await using var content = new MemoryStream(output.Content, writable: false);
             var stored = await Files.StoreAsync(content, output.FileName, output.ContentType, ct);
+            _pendingNewStorageKeys.Add(stored.StorageKey);
             artifact.ReplaceMigrationRendition(stored.StorageKey, stored.OriginalFileName,
                 stored.ContentType, stored.Size, stored.Sha256, now);
             renditionByArtifactId[artifact.Id] = (oldHash, stored.Sha256);
@@ -668,24 +848,6 @@ public sealed class SoftwareProcedureExecutionCutoverAuthority(
                 || x.ProcedureId != null && generatedProcedureIds.Contains(x.ProcedureId.Value)
                 || x.ResolvedProcedureId != null && generatedProcedureIds.Contains(x.ResolvedProcedureId.Value), ct);
         return new(upgradedProjectIds.Count, generatedRevisions.Count, executions, entries, selections, impacts);
-    }
-
-    private async Task MarkCompletedAsync(CancellationToken ct, SoftwareProcedureCutoverResult totals)
-    {
-        db.SecurityAuditEvents.Add(new SecurityAuditEvent(
-            CompletedEvent, Actor, "software-procedure-execution-cutover", "Succeeded",
-            Json(new
-            {
-                migration = MigrationMarker,
-                projectsUpgraded = totals.ProjectsUpgraded,
-                proceduresGenerated = totals.ProceduresGenerated,
-                executionsRebound = totals.ExecutionsRebound,
-                testSetEntriesRebound = totals.TestSetEntriesRebound,
-                baselineSelectionsRebound = totals.BaselineSelectionsRebound,
-                impactItemsRebound = totals.ImpactItemsRebound,
-                reason = "All eligible sealed projects now execute the software Procedure tier; reruns are idempotent."
-            }), "", DateTimeOffset.UtcNow));
-        await db.SaveChangesAsync(ct);
     }
 
     private LadderConsumerManifestV2 BuildReadiness(ProjectLadderConfiguration configuration)

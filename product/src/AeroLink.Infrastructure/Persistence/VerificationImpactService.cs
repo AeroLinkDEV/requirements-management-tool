@@ -2,6 +2,7 @@ using AeroLink.Domain.ChangeControl;
 using AeroLink.Domain.Common;
 using AeroLink.Domain.Hierarchy;
 using AeroLink.Domain.Requirements;
+using AeroLink.Domain.Traceability;
 using AeroLink.Domain.Verification;
 using Microsoft.EntityFrameworkCore;
 
@@ -614,9 +615,13 @@ public sealed class VerificationImpactService(AeroLinkDbContext db, ProblemRepor
         if (effectivity?.RevisionByProcedure.TryGetValue(procedureId, out var revisionId) != true)
             return false;
         var coverageRevisionIds = await SourceCaseRevisionIdsAsync(revisionId, ct);
-        return coverageRevisionIds.Count != 0 && await db.TestCoverage.AsNoTracking().AnyAsync(x =>
+        // Explicit all-parent rule: the retarget target is effective only when EVERY exact source Case has a
+        // TestCoverage row for the target requirement. A subset would silently drop one parent.
+        if (coverageRevisionIds.Count == 0) return false;
+        var linkedParentCount = await db.TestCoverage.AsNoTracking().CountAsync(x =>
             coverageRevisionIds.Contains(x.ProcedureRevisionId)
             && x.RequirementRevisionId == requirementRevisionId, ct);
+        return linkedParentCount == coverageRevisionIds.Count;
     }
 
     /// <summary>Shared target-build gate used by the resolve endpoint before it chooses LinkExisting or ModifyExisting.</summary>
@@ -656,25 +661,23 @@ public sealed class VerificationImpactService(AeroLinkDbContext db, ProblemRepor
         var coverageRevisionIds = new List<Guid>();
         foreach (var revision in revisions)
             coverageRevisionIds.AddRange(await SourceCaseRevisionIdsAsync(revision.Id, ct));
-        coverageRevisionIds = coverageRevisionIds.Distinct().ToList();
+        coverageRevisionIds = coverageRevisionIds.Distinct().OrderBy(x => x).ToList();
+        if (coverageRevisionIds.Count == 0) return false;
         var already = await db.TestCoverage
             .Where(x => x.RequirementRevisionId == target && coverageRevisionIds.Contains(x.ProcedureRevisionId))
             .ToListAsync(ct);
+        // All-parent precondition: every exact source Case must already carry the target link. Check the
+        // whole population BEFORE mutating anything, so a missing parent can never leave earlier parents
+        // partially confirmed and later parents untouched.
+        var alreadyByParent = already.ToDictionary(x => x.ProcedureRevisionId);
+        if (alreadyByParent.Count != coverageRevisionIds.Count)
+            return false;
         var linked = false;
         foreach (var coverageRevisionId in coverageRevisionIds)
         {
-            var existing = already.SingleOrDefault(x => x.ProcedureRevisionId == coverageRevisionId);
-            if (existing is not null)
-            {
-                existing.ConfirmStillValid(item.ResolvedBy ?? "verification", now);
-                linked = true;
-                continue;
-            }
-
-            // The decision itself remains attributable to the Draft TCR. The new exact parent is deferred to
-            // that package's controlled successor and materialisation; resolving the impact item must not become
-            // a second authoring route for an already approved revision.
-            return linked;
+            alreadyByParent[coverageRevisionId].ConfirmStillValid(
+                item.ResolvedBy ?? "verification", now);
+            linked = true;
         }
         return linked;
     }
@@ -751,23 +754,34 @@ public sealed class VerificationImpactService(AeroLinkDbContext db, ProblemRepor
     private async Task<List<Guid>> SourceCaseRevisionIdsAsync(Guid procedureRevisionId, CancellationToken ct)
     {
         var localLinks = db.TestCaseProcedureLinks.Local
-            .Where(x => x.ProcedureRevisionId == procedureRevisionId)
+            .Where(x => x.ProcedureRevisionId == procedureRevisionId
+                && x.ExactLinkSuspectLifecycleId == null)
             .Select(x => x.CaseRevisionId).ToList();
         var owner = await (from revision in db.TestProcedureRevisions.AsNoTracking()
                            join procedure in db.TestProcedures.AsNoTracking()
                                on revision.ProcedureId equals procedure.Id
                            where revision.Id == procedureRevisionId
                            select new { procedure.ArtifactKind, procedure.Level }).SingleOrDefaultAsync(ct);
-        if (owner is null) return localLinks.Distinct().ToList();
+        if (owner is null) return localLinks.Distinct().OrderBy(x => x).ToList();
         if (owner.Level == TestProcedureLevel.System
             || owner.ArtifactKind == VerificationArtifactKind.Case)
             return new List<Guid> { procedureRevisionId };
         var persisted = await db.TestCaseProcedureLinks.AsNoTracking()
-            .Where(x => x.ProcedureRevisionId == procedureRevisionId)
+            // An OPEN suspect lifecycle is historical revalidation evidence, not an authoritative effective
+            // parent. The same rule controlled effectivity and CaseProcedureSatisfaction use: a link with no
+            // lifecycle is authored and eligible; a link whose lifecycle is CLOSED has completed its
+            // revalidation and is eligible again.
+            .Where(x => x.ProcedureRevisionId == procedureRevisionId
+                && (x.ExactLinkSuspectLifecycleId == null
+                    || db.ExactLinkSuspectLifecycles.Any(lifecycle =>
+                        lifecycle.Id == x.ExactLinkSuspectLifecycleId
+                        && lifecycle.LinkKind == ExactLinkKind.CaseProcedure
+                        && lifecycle.LinkId == x.Id
+                        && lifecycle.State == ExactLinkLifecycleState.Closed)))
             .Select(x => (Guid?)x.CaseRevisionId)
             .ToListAsync(ct);
         return localLinks.Concat(persisted.Where(x => x is not null).Select(x => x!.Value))
-            .Distinct().ToList();
+            .Distinct().OrderBy(x => x).ToList();
     }
 
     private static string ArtifactNumberDisplay(RequirementChange change) =>

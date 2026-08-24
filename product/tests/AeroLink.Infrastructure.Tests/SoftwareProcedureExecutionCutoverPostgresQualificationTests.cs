@@ -10,7 +10,9 @@ using AeroLink.Domain.Verification;
 using AeroLink.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Npgsql;
+using System.IO.Compression;
 using System.Text;
+using System.Text.Json;
 
 namespace AeroLink.Infrastructure.Tests;
 
@@ -414,6 +416,27 @@ public sealed class SoftwareProcedureExecutionCutoverPostgresQualificationTests
                 .CountAsync(x => x.Marker == "VerificationExecutionCutover.SoftwareProcedures.v1"));
             Assert.Equal(1, await check.SecurityAuditEvents.AsNoTracking()
                 .CountAsync(x => x.EventType == "VerificationExecutionCutover.SoftwareProcedures.v1.Completed"));
+            // The completion audit must be the SAME evidence as the marker's immutable totals.
+            var marker = await check.GovernedMigrationCompletions.AsNoTracking()
+                .SingleAsync(x => x.Marker == "VerificationExecutionCutover.SoftwareProcedures.v1");
+            var completedAudit = await check.SecurityAuditEvents.AsNoTracking()
+                .SingleAsync(x => x.EventType == "VerificationExecutionCutover.SoftwareProcedures.v1.Completed");
+            using (var markerJson = JsonDocument.Parse(marker.TotalsJson))
+            using (var auditJson = JsonDocument.Parse(completedAudit.Detail))
+            {
+                Assert.Equal(markerJson.RootElement.GetProperty("ProjectsUpgraded").GetInt32(),
+                    auditJson.RootElement.GetProperty("projectsUpgraded").GetInt32());
+                Assert.Equal(markerJson.RootElement.GetProperty("ProceduresGenerated").GetInt32(),
+                    auditJson.RootElement.GetProperty("proceduresGenerated").GetInt32());
+                Assert.Equal(markerJson.RootElement.GetProperty("ExecutionsRebound").GetInt32(),
+                    auditJson.RootElement.GetProperty("executionsRebound").GetInt32());
+                Assert.Equal(markerJson.RootElement.GetProperty("TestSetEntriesRebound").GetInt32(),
+                    auditJson.RootElement.GetProperty("testSetEntriesRebound").GetInt32());
+                Assert.Equal(markerJson.RootElement.GetProperty("BaselineSelectionsRebound").GetInt32(),
+                    auditJson.RootElement.GetProperty("baselineSelectionsRebound").GetInt32());
+                Assert.Equal(markerJson.RootElement.GetProperty("ImpactItemsRebound").GetInt32(),
+                    auditJson.RootElement.GetProperty("impactItemsRebound").GetInt32());
+            }
             var projectId = await check.Projects.AsNoTracking().Select(x => x.Id).SingleAsync();
             Assert.Equal(1, await check.TestProcedures.AsNoTracking()
                 .CountAsync(x => x.ProjectId == projectId
@@ -546,6 +569,93 @@ public sealed class SoftwareProcedureExecutionCutoverPostgresQualificationTests
             Assert.Equal(0, row.Revision);
             Assert.True(await db.SecurityAuditEvents.AsNoTracking().AnyAsync(x =>
                 x.EventType == "VerificationExecutionCutover.SoftwareProcedures.v1.SignatureSupersessionCompleted"));
+        }
+        finally
+        {
+            try { Directory.Delete(evidenceRoot, recursive: true); } catch (IOException) { }
+        }
+    }
+
+    [DisposablePostgresFact]
+    public async Task Document_generated_before_later_baseline_materialization_still_uses_legacy_basis_on_postgres()
+    {
+        var server = ValidateQualificationConnection(
+            Environment.GetEnvironmentVariable("AEROLINK_MIGRATIONS_CONNECTION")!);
+        var databaseName = DatabaseName + "_temporal";
+        await EnsureDatabaseAsync(server, databaseName);
+        var connection = new NpgsqlConnectionStringBuilder(server) { Database = databaseName }.ConnectionString;
+        var evidenceRoot = Path.Combine(Path.GetTempPath(), $"aerolink-726-pg-temporal-{Guid.NewGuid():N}");
+        var files = new EvidenceFileStore(evidenceRoot);
+        try
+        {
+            await using var db = await DatabaseAsync(connection);
+            var seed = await SeedSignedDocumentProjectAsync(db, files, "500002", materialized: false);
+            var now = DateTimeOffset.UtcNow;
+            var originalStorageKey = await db.ControlledDocumentArtifacts.AsNoTracking()
+                .Where(x => x.Id == seed.ArtifactId).Select(x => x.StorageKey).SingleAsync();
+            var caseArtifact = await db.TestProcedures.AsNoTracking()
+                .SingleAsync(x => x.ProjectId == seed.ProjectId
+                    && x.ArtifactKind == VerificationArtifactKind.Case);
+            var caseRevisionId = await db.TestProcedureRevisions.AsNoTracking()
+                .Where(x => x.ProcedureId == caseArtifact.Id && x.Revision == 0)
+                .Select(x => x.Id).SingleAsync();
+            var laterRevision = new TestProcedureRevision(caseArtifact.Id, 1, "Later revision", "P", "S", "E",
+                TestProcedureState.Approved, "test.engineer", now.AddDays(1),
+                effectiveBaselineId: seed.BaselineId);
+            db.Add(laterRevision);
+            var baseline = await db.CandidateBaselines.SingleAsync(x => x.Id == seed.BaselineId);
+            var materializedAt = seed.GeneratedAt.AddMinutes(1);
+            baseline.MarkTestProceduresMaterialized("cm.test", new string('b', 64), 2, materializedAt);
+            var selection = await db.BaselineTestProcedures.SingleAsync(
+                x => x.BaselineId == baseline.Id && x.ProcedureId == caseArtifact.Id);
+            selection.RebindMigrationExecutable(caseArtifact.Id, laterRevision.Id);
+            await db.SaveChangesAsync();
+
+            var (legacy, typed) = CutoverRegistrations();
+            var generator = new ControlledOutputGenerator(db, new RichContentPublisher(db, files),
+                policyResolver: new EffectiveProjectLadderPolicyResolver(db));
+            var authority = new SoftwareProcedureExecutionCutoverAuthority(db, legacy, typed,
+                generator: generator, files: files);
+            var result = await authority.EnsureCompletedAsync();
+            Assert.Equal(1, result.ProjectsUpgraded);
+            db.ChangeTracker.Clear();
+
+            var updatedBaseline = await db.CandidateBaselines.AsNoTracking()
+                .SingleAsync(x => x.Id == seed.BaselineId);
+            Assert.True(Math.Abs((updatedBaseline.TestProceduresMaterializedAt!.Value - materializedAt)
+                .TotalMicroseconds) < 1);
+            Assert.NotEqual(new string('b', 64), updatedBaseline.TestProceduresHash);
+
+            var document = await db.ControlledDocuments.AsNoTracking().SingleAsync(x => x.Id == seed.DocumentId);
+            Assert.True(Math.Abs((document.GeneratedAt - seed.GeneratedAt).TotalMicroseconds) < 1);
+            Assert.NotEqual(new string('c', 64), document.ContentHash);
+            var basisEvent = await db.SecurityAuditEvents.AsNoTracking().SingleAsync(x =>
+                x.EventType == "VerificationExecutionCutover.SoftwareProcedures.v1.LegacyDocumentBasisReconstructed"
+                && x.Target == $"ControlledDocument:{seed.DocumentId}");
+            using (var detail = JsonDocument.Parse(basisEvent.Detail))
+            {
+                Assert.Equal(seed.DocumentId, detail.RootElement.GetProperty("documentId").GetGuid());
+                Assert.Equal(seed.BaselineId, detail.RootElement.GetProperty("baselineId").GetGuid());
+                Assert.Equal(1, detail.RootElement.GetProperty("artifactCount").GetInt32());
+                Assert.False(detail.RootElement.GetProperty("baselineWasMaterializedWhenDocumentGenerated").GetBoolean());
+                Assert.True(detail.RootElement.GetProperty("baselineManifestStatePreserved").GetBoolean());
+                Assert.True(detail.RootElement.GetProperty("documentGeneratedAtPreserved").GetBoolean());
+                Assert.Equal(64, detail.RootElement.GetProperty("compatibilitySnapshotHash").GetString()!.Length);
+            }
+
+            var artifact = await db.ControlledDocumentArtifacts.AsNoTracking()
+                .SingleAsync(x => x.Id == seed.ArtifactId);
+            Assert.NotEqual(originalStorageKey, artifact.StorageKey);
+            Assert.True(files.Exists(originalStorageKey));
+            await using var generated = await files.OpenVerifiedReadAsync(
+                artifact.StorageKey, artifact.Size, artifact.Sha256, default);
+            using var copy = new MemoryStream();
+            await generated.CopyToAsync(copy);
+            using var archive = new ZipArchive(new MemoryStream(copy.ToArray()), ZipArchiveMode.Read);
+            using var reader = new StreamReader(archive.GetEntry("word/document.xml")!.Open());
+            var xml = await reader.ReadToEndAsync();
+            Assert.Contains(caseArtifact.BaseNumber, xml);
+            Assert.DoesNotContain($"{caseArtifact.BaseNumber}.01", xml);
         }
         finally
         {

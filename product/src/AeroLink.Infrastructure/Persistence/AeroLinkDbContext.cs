@@ -2829,6 +2829,13 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
             var isGovernedMigration = revision.AuthorId == VerificationArtifactProfileSchema.GovernedMigrationActor
                 && revision.ParentKind == VerificationProcedureParentKind.Allocated
                 && revision.State == TestProcedureState.Approved;
+            // A migration-generated mirror of a historically-effective Case revision that is no longer
+            // selected by any current baseline is preserved as history: it carries no baseline and no exact
+            // parent claim. The ordinary Allocated XOR rule cannot apply to an explicitly claim-free
+            // migration mirror, and the mirror is never executable (it is selected in no baseline).
+            var isDormantMigrationMirror = isGovernedMigration
+                && revision.EffectiveBaselineId is null
+                && parentIdsByRevision[revision.Id].Count == 0;
             if (owner.ArtifactKind == VerificationArtifactKind.Procedure && owner.Level != TestProcedureLevel.System
                 && revision.State != TestProcedureState.Retired
                 && (string.IsNullOrWhiteSpace(revision.EnvironmentSetup)
@@ -2838,7 +2845,8 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
                         || string.IsNullOrWhiteSpace(revision.Cleanup)
                         || string.IsNullOrWhiteSpace(revision.ToolingAutomation))))
                 throw new DomainException("A software Procedure revision requires environment/setup, test data, ordered steps, expected observations, cleanup, and tooling/automation.");
-            revision.ValidateProcedureParents(owner, parentIdsByRevision[revision.Id]);
+            if (!isDormantMigrationMirror)
+                revision.ValidateProcedureParents(owner, parentIdsByRevision[revision.Id]);
         }
     }
 

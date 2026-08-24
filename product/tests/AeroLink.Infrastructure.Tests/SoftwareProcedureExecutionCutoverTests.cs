@@ -9,6 +9,8 @@ using AeroLink.Domain.Traceability;
 using AeroLink.Domain.Verification;
 using AeroLink.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
+using System.IO.Compression;
 using System.Text.Json;
 using System.Text;
 
@@ -985,6 +987,10 @@ public sealed class SoftwareProcedureExecutionCutoverTests
                 && x.EventType == "ExecutionCutoverManifestMigrated");
         Assert.Contains("Case-to-Procedure provenance", manifestEvent.Detail, StringComparison.Ordinal);
         Assert.Contains("executable membership changed", manifestEvent.Detail, StringComparison.Ordinal);
+        // Finding 5: provenance names the exact per-baseline Case→Procedure identities, deterministically
+        // ordered — never project-wide counts described as baseline provenance.
+        Assert.Contains("case:", manifestEvent.Detail, StringComparison.Ordinal);
+        Assert.DoesNotContain("generatedProcedureRevisions=", manifestEvent.Detail, StringComparison.Ordinal);
         // The cutover event must explicitly disclaim the #722 identity-only claim: bodies were generated
         // and Case executable membership was replaced, so the detail says so instead of asserting it.
         Assert.Contains("not an identity-only migration", manifestEvent.Detail, StringComparison.Ordinal);
@@ -1618,6 +1624,174 @@ public sealed class SoftwareProcedureExecutionCutoverTests
     [Fact]
     public async Task Impact_coverage_work_uses_all_parent_semantics()
     {
+        var seed = await SeedAllParentFixtureAsync(reversedLinks: true);
+        await ExerciseAllParentCycleAsync(seed);
+    }
+
+    [Fact]
+    public async Task Impact_all_parent_semantics_are_insertion_order_independent()
+    {
+        // The selected Cases must never depend on provider or insertion order: run the full
+        // apply/confirm/reopen/retarget cycle with links inserted A→B and B→A.
+        foreach (var reversed in new[] { false, true })
+        {
+            var seed = await SeedAllParentFixtureAsync(reversedLinks: reversed);
+            await ExerciseAllParentCycleAsync(seed);
+            seed.Db.Dispose();
+        }
+    }
+
+    [Fact]
+    public async Task Open_suspect_case_procedure_link_is_not_an_effective_parent_for_impact_work()
+    {
+        var seed = await SeedAllParentFixtureAsync(reversedLinks: true, openSuspectLinkOnB: true);
+
+        var service = new VerificationImpactService(seed.Db,
+            policyResolver: new EffectiveProjectLadderPolicyResolver(seed.Db));
+        var item = await seed.Db.VerificationImpactItems.SingleAsync(x => x.Id == seed.ItemId);
+        // Reopen first so the confirmation step is observable: apply must confirm the effective parent and
+        // leave the open-suspect-link parent untouched.
+        Assert.True(await service.ReopenResolvedCoverageAsync(item, "Reopen effective parent.", seed.Now, default));
+        await seed.Db.SaveChangesAsync();
+        Assert.True(await service.ApplyResolvedCoverageAsync(item, seed.Now, default));
+        await seed.Db.SaveChangesAsync();
+        var aRow = await seed.Db.TestCoverage.AsNoTracking().SingleAsync(x =>
+            x.ProcedureRevisionId == seed.CaseARevisionId
+            && x.RequirementRevisionId == seed.RequirementRevisionId);
+        var bRow = await seed.Db.TestCoverage.AsNoTracking().SingleAsync(x =>
+            x.ProcedureRevisionId == seed.CaseBRevisionId
+            && x.RequirementRevisionId == seed.RequirementRevisionId);
+        Assert.Equal("test.engineer", aRow.ConfirmedBy);
+        Assert.False(aRow.IsSuspect);
+        Assert.False(bRow.IsSuspect);
+        Assert.Null(bRow.ConfirmedBy);
+
+        // Reopen also operates on the effective set only: A becomes suspect, B is untouched.
+        Assert.True(await service.ReopenResolvedCoverageAsync(item, "Reopen effective parent.", seed.Now, default));
+        await seed.Db.SaveChangesAsync();
+        Assert.True((await seed.Db.TestCoverage.AsNoTracking().SingleAsync(x => x.Id == aRow.Id)).IsSuspect);
+        Assert.False((await seed.Db.TestCoverage.AsNoTracking().SingleAsync(x => x.Id == bRow.Id)).IsSuspect);
+        Assert.Null((await seed.Db.TestCoverage.AsNoTracking().SingleAsync(x => x.Id == bRow.Id)).ConfirmedBy);
+
+        // Retarget follows the same effective all-parent set: only A is an obligation.
+        var retargetItem = VerificationImpactItem.ForOrphanedProcedure(seed.ProjectId, seed.ReleaseId,
+            seed.ScrId, seed.ReviewId, seed.ProcedureId, "HLRTP-000735", seed.Now);
+        SetPrivate(retargetItem, nameof(VerificationImpactItem.RetargetedRequirementRevisionId),
+            seed.RequirementRevisionId);
+        retargetItem.Resolve("test.engineer", VerificationImpactOutcome.ProcedureRetargeted,
+            "Retarget the effective parent.", seed.Now,
+            retargetedRequirementRevisionId: seed.RequirementRevisionId);
+        seed.Db.Add(retargetItem);
+        await seed.Db.SaveChangesAsync();
+        Assert.True(await service.HasEffectiveRetargetTargetAsync(seed.ProjectId, seed.ReleaseId,
+            seed.ProcedureId, seed.RequirementRevisionId, default));
+        Assert.True(await service.ApplyRetargetedCoverageAsync(retargetItem, seed.Now, default));
+        await seed.Db.SaveChangesAsync();
+        Assert.Equal("test.engineer", (await seed.Db.TestCoverage.AsNoTracking()
+            .SingleAsync(x => x.Id == aRow.Id)).ConfirmedBy);
+        Assert.Null((await seed.Db.TestCoverage.AsNoTracking()
+            .SingleAsync(x => x.Id == bRow.Id)).ConfirmedBy);
+    }
+
+    [Fact]
+    public async Task Missing_parent_coverage_defers_apply_and_retarget_refuses_without_partial_mutation()
+    {
+        var seed = await SeedAllParentFixtureAsync(reversedLinks: false, coverageForBoth: false);
+        var service = new VerificationImpactService(seed.Db,
+            policyResolver: new EffectiveProjectLadderPolicyResolver(seed.Db));
+        var item = await seed.Db.VerificationImpactItems.SingleAsync(x => x.Id == seed.ItemId);
+
+        // Reopen makes the existing row suspect, then apply confirms the parent that has a row and
+        // deterministically defers the missing parent to a controlled successor — the outcome does not
+        // depend on which parent is missing or insertion order.
+        Assert.True(await service.ReopenResolvedCoverageAsync(item, "Reopen before apply.", seed.Now, default));
+        await seed.Db.SaveChangesAsync();
+        Assert.True(await service.ApplyResolvedCoverageAsync(item, seed.Now, default));
+        await seed.Db.SaveChangesAsync();
+        var aRow = await seed.Db.TestCoverage.AsNoTracking().SingleAsync(x =>
+            x.ProcedureRevisionId == seed.CaseARevisionId
+            && x.RequirementRevisionId == seed.RequirementRevisionId);
+        Assert.Equal("test.engineer", aRow.ConfirmedBy);
+        Assert.Equal(0, await seed.Db.TestCoverage.AsNoTracking().CountAsync(x =>
+            x.ProcedureRevisionId == seed.CaseBRevisionId
+            && x.RequirementRevisionId == seed.RequirementRevisionId));
+
+        // Retarget's all-parent precondition fails (B has no row), so it must refuse with NO partial
+        // mutation — A's confirmation evidence stays byte-for-byte unchanged.
+        var confirmedAt = aRow.ConfirmedAt;
+        var retargetItem = VerificationImpactItem.ForOrphanedProcedure(seed.ProjectId, seed.ReleaseId,
+            seed.ScrId, seed.ReviewId, seed.ProcedureId, "HLRTP-000735", seed.Now);
+        SetPrivate(retargetItem, nameof(VerificationImpactItem.RetargetedRequirementRevisionId),
+            seed.RequirementRevisionId);
+        retargetItem.Resolve("test.engineer", VerificationImpactOutcome.ProcedureRetargeted,
+            "Retarget both source Cases.", seed.Now,
+            retargetedRequirementRevisionId: seed.RequirementRevisionId);
+        seed.Db.Add(retargetItem);
+        await seed.Db.SaveChangesAsync();
+        Assert.False(await service.HasEffectiveRetargetTargetAsync(seed.ProjectId, seed.ReleaseId,
+            seed.ProcedureId, seed.RequirementRevisionId, default));
+        Assert.False(await service.ApplyRetargetedCoverageAsync(retargetItem, seed.Now, default));
+        await seed.Db.SaveChangesAsync();
+        var after = await seed.Db.TestCoverage.AsNoTracking().SingleAsync(x => x.Id == aRow.Id);
+        Assert.Equal(confirmedAt, after.ConfirmedAt);
+        Assert.Equal("test.engineer", after.ConfirmedBy);
+        Assert.Equal(0, await seed.Db.TestCoverage.AsNoTracking().CountAsync(x =>
+            x.ProcedureRevisionId == seed.CaseBRevisionId
+            && x.RequirementRevisionId == seed.RequirementRevisionId));
+    }
+
+    private static async Task ExerciseAllParentCycleAsync(AllParentSeed seed)
+    {
+        var service = new VerificationImpactService(seed.Db,
+            policyResolver: new EffectiveProjectLadderPolicyResolver(seed.Db));
+        var item = await seed.Db.VerificationImpactItems.SingleAsync(x => x.Id == seed.ItemId);
+        Assert.True(await service.ApplyResolvedCoverageAsync(item, seed.Now, default));
+        await seed.Db.SaveChangesAsync();
+        Assert.True(await seed.Db.TestCoverage.AsNoTracking().AnyAsync(x =>
+            x.ProcedureRevisionId == seed.CaseARevisionId
+            && x.RequirementRevisionId == seed.RequirementRevisionId && !x.IsSuspect));
+        Assert.True(await seed.Db.TestCoverage.AsNoTracking().AnyAsync(x =>
+            x.ProcedureRevisionId == seed.CaseBRevisionId
+            && x.RequirementRevisionId == seed.RequirementRevisionId && !x.IsSuspect));
+
+        Assert.True(await service.ReopenResolvedCoverageAsync(item, "Reopen both parents.", seed.Now, default));
+        await seed.Db.SaveChangesAsync();
+        Assert.Equal(2, await seed.Db.TestCoverage.AsNoTracking().CountAsync(x =>
+            x.RequirementRevisionId == seed.RequirementRevisionId && x.IsSuspect));
+        Assert.True(await service.ApplyResolvedCoverageAsync(item, seed.Now, default));
+        await seed.Db.SaveChangesAsync();
+        Assert.Equal(0, await seed.Db.TestCoverage.AsNoTracking().CountAsync(x =>
+            x.RequirementRevisionId == seed.RequirementRevisionId && x.IsSuspect));
+
+        var change = new MaterializedRequirementChange(seed.ScrId, Guid.NewGuid(),
+            RequirementChangeKind.Introduce, null, seed.RequirementRevisionId, "HLR-00000733.00");
+        var itemByChange = new Dictionary<Guid, VerificationImpactItem> { [change.RequirementChangeId] = item };
+        Assert.Equal(2, await service.ConfirmDecidedCoverageAsync([change], itemByChange,
+            new List<TestRequirementCoverage>(), seed.Now, default));
+        await seed.Db.SaveChangesAsync();
+
+        var retargetItem = VerificationImpactItem.ForOrphanedProcedure(seed.ProjectId, seed.ReleaseId,
+            seed.ScrId, seed.ReviewId, seed.ProcedureId, "HLRTP-000735", seed.Now);
+        SetPrivate(retargetItem, nameof(VerificationImpactItem.RetargetedRequirementRevisionId),
+            seed.RequirementRevisionId);
+        retargetItem.Resolve("test.engineer", VerificationImpactOutcome.ProcedureRetargeted,
+            "Retarget both source Cases.", seed.Now,
+            retargetedRequirementRevisionId: seed.RequirementRevisionId);
+        seed.Db.Add(retargetItem);
+        await seed.Db.SaveChangesAsync();
+        Assert.True(await service.HasEffectiveRetargetTargetAsync(seed.ProjectId, seed.ReleaseId,
+            seed.ProcedureId, seed.RequirementRevisionId, default));
+        Assert.True(await service.ApplyRetargetedCoverageAsync(retargetItem, seed.Now, default));
+        await seed.Db.SaveChangesAsync();
+    }
+
+    private sealed record AllParentSeed(AeroLinkDbContext Db, Guid ProjectId, Guid ReleaseId, Guid BaselineId,
+        Guid RequirementRevisionId, Guid CaseARevisionId, Guid CaseBRevisionId, Guid ProcedureId,
+        Guid ProcedureRevisionId, Guid ItemId, Guid ScrId, Guid ReviewId, DateTimeOffset Now);
+
+    private static async Task<AllParentSeed> SeedAllParentFixtureAsync(bool reversedLinks,
+        bool coverageForBoth = true, bool openSuspectLinkOnB = false)
+    {
         var options = new DbContextOptionsBuilder<AeroLinkDbContext>().UseSqlite("Data Source=:memory:").Options;
         var db = new AeroLinkDbContext(options);
         await db.Database.OpenConnectionAsync();
@@ -1653,13 +1827,18 @@ public sealed class SoftwareProcedureExecutionCutoverTests
         var caseBRevision = new TestProcedureRevision(caseB.Id, 0,
             "Verify B", "Preconditions", "Steps", "Expected",
             TestProcedureState.Approved, "test.engineer", now, effectiveBaselineId: baseline.Id,
-            parentKind: VerificationProcedureParentKind.Allocated);
+            parentKind: coverageForBoth
+                ? VerificationProcedureParentKind.Allocated
+                : VerificationProcedureParentKind.Derived,
+            derivedRationale: coverageForBoth ? null :
+                "Standalone fixture Case without coverage; the missing-parent scenario never links it.");
         db.AddRange(scr, requirement, requirementRevision, caseA, caseARevision, caseB, caseBRevision,
             new TestRequirementCoverage(caseARevision.Id, requirementRevision.Id),
-            new TestRequirementCoverage(caseBRevision.Id, requirementRevision.Id),
             new BaselineRequirementSelection(baseline.Id, requirement.Id, requirementRevision.Id),
             new BaselineTestProcedureSelection(baseline.Id, caseA.Id, caseARevision.Id),
             new BaselineTestProcedureSelection(baseline.Id, caseB.Id, caseBRevision.Id));
+        if (coverageForBoth)
+            db.Add(new TestRequirementCoverage(caseBRevision.Id, requirementRevision.Id));
         baseline.Select(scr, "cm.test", now);
         baseline.Freeze("cm.test", now);
         baseline.MarkRequirementsMaterialized("cm.test", new string('a', 64), 1, now);
@@ -1669,8 +1848,6 @@ public sealed class SoftwareProcedureExecutionCutoverTests
         await new SoftwareProcedureExecutionCutoverAuthority(db, legacy, typed,
             allowSqliteExecution: true).EnsureCompletedAsync();
 
-        // An authored two-parent Procedure linked to BOTH Cases (reversed insertion order) with coverage
-        // rows for both.
         var policy = new EffectiveProjectLadderPolicyResolver(db);
         var ladderPolicy = await policy.ResolveAsync(project.Id);
         var authored = new TestProcedure(project.Id, "HLRTP-000735", "Two-parent procedure",
@@ -1682,10 +1859,27 @@ public sealed class SoftwareProcedureExecutionCutoverTests
             environmentSetup: "Setup", testData: "Data", orderedSteps: "Steps",
             expectedObservations: "Expected", cleanup: "Cleanup", toolingAutomation: "Tooling",
             parentKind: VerificationProcedureParentKind.Allocated);
-        db.AddRange(authored, authoredRevision,
-            new TestCaseProcedureLink(caseBRevision.Id, authoredRevision.Id),
-            new TestCaseProcedureLink(caseARevision.Id, authoredRevision.Id),
-            new BaselineTestProcedureSelection(baseline.Id, authored.Id, authoredRevision.Id));
+        var linkCandidates = reversedLinks
+            ? new[] { new TestCaseProcedureLink(caseBRevision.Id, authoredRevision.Id),
+                      new TestCaseProcedureLink(caseARevision.Id, authoredRevision.Id) }
+            : new[] { new TestCaseProcedureLink(caseARevision.Id, authoredRevision.Id),
+                      new TestCaseProcedureLink(caseBRevision.Id, authoredRevision.Id) };
+        var links = linkCandidates.ToList();
+        if (openSuspectLinkOnB)
+        {
+            // An OPEN suspect lifecycle must be attached when the link is first created; the association is
+            // immutable afterwards. B is then historical revalidation evidence, never an effective parent.
+            var linkB = links.Single(x => x.CaseRevisionId == caseBRevision.Id);
+            var lifecycle = ExactLinkSuspectLifecycle.Raise(project.Id, ExactLinkKind.CaseProcedure,
+                linkB.Id, ExactLinkLifecycleCauseKind.InternalVerificationRevision, null, null,
+                "test.engineer", "Open revalidation evidence, not an effective parent.", now,
+                causeVerificationRevisionId: caseBRevision.Id);
+            linkB.AttachExactLinkLifecycle(lifecycle.Id);
+            db.Add(lifecycle);
+        }
+        db.AddRange(authored, authoredRevision);
+        db.AddRange(links);
+        db.Add(new BaselineTestProcedureSelection(baseline.Id, authored.Id, authoredRevision.Id));
         using (db.UseSaveBoundaryPolicy(ladderPolicy)) await db.SaveChangesAsync();
         db.Entry(authoredRevision).Property(x => x.State).CurrentValue = TestProcedureState.Approved;
         using (db.UseSaveBoundaryPolicy(ladderPolicy)) await db.SaveChangesAsync();
@@ -1701,44 +1895,342 @@ public sealed class SoftwareProcedureExecutionCutoverTests
             procedureId: authored.Id, procedureRevisionId: authoredRevision.Id);
         db.Add(item);
         await db.SaveChangesAsync();
+        return new AllParentSeed(db, project.Id, release.Id, baseline.Id, requirementRevision.Id,
+            caseARevision.Id, caseBRevision.Id, authored.Id, authoredRevision.Id, item.Id, scr.Id,
+            review.Id, now);
+    }
 
-        var service = new VerificationImpactService(db, policyResolver: policy);
-        Assert.True(await service.ApplyResolvedCoverageAsync(item, now, default));
-        await db.SaveChangesAsync();
-        Assert.True(await db.TestCoverage.AsNoTracking().AnyAsync(x =>
-            x.ProcedureRevisionId == caseARevision.Id
-            && x.RequirementRevisionId == requirementRevision.Id && !x.IsSuspect));
-        Assert.True(await db.TestCoverage.AsNoTracking().AnyAsync(x =>
-            x.ProcedureRevisionId == caseBRevision.Id
-            && x.RequirementRevisionId == requirementRevision.Id && !x.IsSuspect));
+    [Fact]
+    public async Task Document_generated_before_later_baseline_materialization_uses_legacy_basis_and_excludes_later_revisions()
+    {
+        var options = new DbContextOptionsBuilder<AeroLinkDbContext>().UseSqlite("Data Source=:memory:").Options;
+        var db = new AeroLinkDbContext(options);
+        await db.Database.OpenConnectionAsync();
+        await db.Database.EnsureCreatedAsync();
+        var evidenceRoot = Path.Combine(Path.GetTempPath(), $"aerolink-726-temporal-{Guid.NewGuid():N}");
+        var files = new EvidenceFileStore(evidenceRoot);
+        try
+        {
+            var seed = await SeedSignedDocumentProjectAsync(db, files, "500001", materialized: false);
+            var now = DateTimeOffset.UtcNow;
+            var originalStorageKey = await db.ControlledDocumentArtifacts.AsNoTracking()
+                .Where(x => x.Id == seed.ArtifactId).Select(x => x.StorageKey).SingleAsync();
+            var caseArtifact = await db.TestProcedures.AsNoTracking()
+                .SingleAsync(x => x.ProjectId == seed.ProjectId
+                    && x.ArtifactKind == VerificationArtifactKind.Case);
+            var caseRevisionId = await db.TestProcedureRevisions.AsNoTracking()
+                .Where(x => x.ProcedureId == caseArtifact.Id && x.Revision == 0)
+                .Select(x => x.Id).SingleAsync();
+            // Case .01 is approved AFTER the document and AFTER later baseline materialization. The legacy
+            // document must stay on .00 forever.
+            var laterRevision = new TestProcedureRevision(caseArtifact.Id, 1, "Later revision", "P", "S", "E",
+                TestProcedureState.Approved, "test.engineer", now.AddDays(1),
+                effectiveBaselineId: seed.BaselineId);
+            db.Add(laterRevision);
+            var baseline = await db.CandidateBaselines.SingleAsync(x => x.Id == seed.BaselineId);
+            var materializedAt = seed.GeneratedAt.AddMinutes(1);
+            baseline.MarkTestProceduresMaterialized("cm.test", new string('b', 64), 2, materializedAt);
+            // Current exact membership moves to .01 (one selection per procedure per baseline), while the
+            // legacy document stays on .00 forever.
+            var selection = await db.BaselineTestProcedures.SingleAsync(
+                x => x.BaselineId == baseline.Id && x.ProcedureId == caseArtifact.Id);
+            selection.RebindMigrationExecutable(caseArtifact.Id, laterRevision.Id);
+            await db.SaveChangesAsync();
 
-        Assert.True(await service.ReopenResolvedCoverageAsync(item, "Reopen both parents.", now, default));
-        await db.SaveChangesAsync();
-        Assert.Equal(2, await db.TestCoverage.AsNoTracking().CountAsync(x =>
-            x.RequirementRevisionId == requirementRevision.Id && x.IsSuspect));
-        Assert.True(await service.ApplyResolvedCoverageAsync(item, now, default));
-        await db.SaveChangesAsync();
-        Assert.Equal(0, await db.TestCoverage.AsNoTracking().CountAsync(x =>
-            x.RequirementRevisionId == requirementRevision.Id && x.IsSuspect));
+            var (legacy, typed) = FullRegistrations();
+            var generator = new ControlledOutputGenerator(db, new RichContentPublisher(db, files),
+                policyResolver: new EffectiveProjectLadderPolicyResolver(db));
+            var authority = new SoftwareProcedureExecutionCutoverAuthority(db, legacy, typed,
+                allowSqliteExecution: true, generator: generator, files: files);
+            var result = await authority.EnsureCompletedAsync();
+            Assert.Equal(1, result.ProjectsUpgraded);
 
-        var change = new MaterializedRequirementChange(scr.Id, Guid.NewGuid(),
-            RequirementChangeKind.Introduce, null, requirementRevision.Id, "HLR-00000733.00");
-        var itemByChange = new Dictionary<Guid, VerificationImpactItem> { [change.RequirementChangeId] = item };
-        Assert.Equal(2, await service.ConfirmDecidedCoverageAsync([change], itemByChange,
-            new List<TestRequirementCoverage>(), now, default));
-        await db.SaveChangesAsync();
+            var updatedBaseline = await db.CandidateBaselines.AsNoTracking()
+                .SingleAsync(x => x.Id == seed.BaselineId);
+            Assert.Equal(materializedAt, updatedBaseline.TestProceduresMaterializedAt);
+            Assert.NotEqual(new string('b', 64), updatedBaseline.TestProceduresHash);
 
-        var retargetItem = VerificationImpactItem.ForOrphanedProcedure(project.Id, release.Id,
-            scr.Id, review.Id, authored.Id, "HLRTP-000735", now);
-        SetPrivate(retargetItem, nameof(VerificationImpactItem.RetargetedRequirementRevisionId),
+            var document = await db.ControlledDocuments.AsNoTracking().SingleAsync(x => x.Id == seed.DocumentId);
+            Assert.Equal(seed.GeneratedAt, document.GeneratedAt);
+            Assert.NotEqual(new string('c', 64), document.ContentHash);
+            var basisEvent = await db.SecurityAuditEvents.AsNoTracking().SingleAsync(x =>
+                x.EventType == "VerificationExecutionCutover.SoftwareProcedures.v1.LegacyDocumentBasisReconstructed"
+                && x.Target == $"ControlledDocument:{seed.DocumentId}");
+            using (var detail = JsonDocument.Parse(basisEvent.Detail))
+            {
+                Assert.Equal(seed.DocumentId, detail.RootElement.GetProperty("documentId").GetGuid());
+                Assert.Equal(seed.BaselineId, detail.RootElement.GetProperty("baselineId").GetGuid());
+                Assert.Equal(seed.GeneratedAt, detail.RootElement.GetProperty("generatedAt").GetDateTimeOffset());
+                Assert.Equal(1, detail.RootElement.GetProperty("artifactCount").GetInt32());
+                Assert.Equal(materializedAt,
+                    detail.RootElement.GetProperty("baselineMaterializedAt").GetDateTimeOffset());
+                Assert.False(detail.RootElement.GetProperty("baselineWasMaterializedWhenDocumentGenerated").GetBoolean());
+                Assert.True(detail.RootElement.GetProperty("baselineManifestStatePreserved").GetBoolean());
+                Assert.True(detail.RootElement.GetProperty("documentGeneratedAtPreserved").GetBoolean());
+                Assert.Equal(64, detail.RootElement.GetProperty("compatibilitySnapshotHash").GetString()!.Length);
+            }
+
+            // The persisted content basis is the canonical manifest hash of the historical .00 population,
+            // not the later baseline's current membership.
+            var historicalEntry = new TestProcedureManifestEntry(
+                caseArtifact.Id, caseRevisionId, caseArtifact.BaseNumber, 0);
+            var expectedBasis = $"{TestProcedureManifest.Hash([historicalEntry])}|" +
+                $"{document.Type}|{document.ArtifactCount}|aerolink-migration";
+            var expectedContentHash = Convert.ToHexString(
+                System.Security.Cryptography.SHA256.HashData(Encoding.UTF8.GetBytes(expectedBasis)))
+                .ToLowerInvariant();
+            Assert.Equal(expectedContentHash, document.ContentHash);
+
+            var artifact = await db.ControlledDocumentArtifacts.AsNoTracking()
+                .SingleAsync(x => x.Id == seed.ArtifactId);
+            Assert.NotEqual(originalStorageKey, artifact.StorageKey);
+            Assert.True(files.Exists(originalStorageKey));
+            await using var generated = await files.OpenVerifiedReadAsync(
+                artifact.StorageKey, artifact.Size, artifact.Sha256, default);
+            using var copy = new MemoryStream();
+            await generated.CopyToAsync(copy);
+            using var archive = new ZipArchive(new MemoryStream(copy.ToArray()), ZipArchiveMode.Read);
+            using var reader = new StreamReader(archive.GetEntry("word/document.xml")!.Open());
+            var xml = await reader.ReadToEndAsync();
+            Assert.Contains(caseArtifact.BaseNumber, xml);
+            Assert.DoesNotContain($"{caseArtifact.BaseNumber}.01", xml);
+        }
+        finally
+        {
+            try { Directory.Delete(evidenceRoot, recursive: true); } catch (IOException) { }
+        }
+    }
+
+    [Fact]
+    public async Task Completed_totals_are_immutable_after_ordinary_post_cutover_activity()
+    {
+        var seed = await SeedAsync();
+        var (legacy, typed) = FullRegistrations();
+        var authority = new SoftwareProcedureExecutionCutoverAuthority(seed.Db, legacy, typed,
+            allowSqliteExecution: true);
+        var completed = await authority.EnsureCompletedAsync();
+        var auditCountBefore = await seed.Db.SecurityAuditEvents.AsNoTracking()
+            .CountAsync(x => x.EventType.StartsWith("VerificationExecutionCutover"));
+
+        // Ordinary post-cutover activity against the generated Procedure must NEVER change the reported
+        // completion totals: the stored marker is the immutable answer.
+        var procedure = await seed.Db.TestProcedures.AsNoTracking()
+            .SingleAsync(x => x.ProjectId == seed.ProjectId
+                && x.ArtifactKind == VerificationArtifactKind.Procedure);
+        var procedureRevision = await seed.Db.TestProcedureRevisions.AsNoTracking()
+            .SingleAsync(x => x.ProcedureId == procedure.Id);
+        seed.Db.TestExecutions.Add(new TestExecution(seed.ProjectId, procedureRevision.Id, null, null,
+            TestOutcome.Pass, "test.engineer", "Rig A", "Human determination", "evidence/post.json",
+            DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, seed.ReleaseId));
+        var set = await seed.Db.BuildTestSets.SingleAsync(x => x.ReleaseId == seed.ReleaseId);
+        set.Include("test.lead", procedureRevision.Id, TestSelectionReason.Chosen,
+            "post-cutover", DateTimeOffset.UtcNow);
+        var now = DateTimeOffset.UtcNow;
+        var scr = ApprovedBaselineScr(seed.ProjectId, seed.ReleaseId, "SRCR-00999", now);
+        var requirement = new RequirementArtifact(seed.ProjectId, "HLR-00000999",
+            RequirementLevel.HighLevel, now);
+        var requirementRevision = new RequirementRevision(requirement.Id, 0,
+            "Post-cutover retarget target.", "Rationale", "Test", RequirementRevisionState.Active,
+            scr.Id, seed.BaselineId, now, parentKind: RequirementParentKind.Derived,
+            derivedRationale: "Post-cutover retarget target.");
+        var review = new TestChangeReview(seed.ProjectId, seed.ReleaseId, scr.Id,
+            TestChangeReviewDiscipline.HighLevelSoftware, scr.DisplayNumber, now);
+        var impact = VerificationImpactItem.ForOrphanedProcedure(seed.ProjectId, seed.ReleaseId,
+            scr.Id, review.Id, procedure.Id, procedure.BaseNumber, now);
+        SetPrivate(impact, nameof(VerificationImpactItem.RetargetedRequirementRevisionId),
             requirementRevision.Id);
-        retargetItem.Resolve("test.engineer", VerificationImpactOutcome.ProcedureRetargeted,
-            "Retarget both source Cases.", now, retargetedRequirementRevisionId: requirementRevision.Id);
-        db.Add(retargetItem);
-        await db.SaveChangesAsync();
-        Assert.True(await service.HasEffectiveRetargetTargetAsync(project.Id, release.Id,
-            authored.Id, requirementRevision.Id, default));
-        Assert.True(await service.ApplyRetargetedCoverageAsync(retargetItem, now, default));
-        await db.SaveChangesAsync();
+        impact.Resolve("test.engineer", VerificationImpactOutcome.ProcedureRetargeted,
+            "Post-cutover decision.", now,
+            retargetedRequirementRevisionId: requirementRevision.Id);
+        seed.Db.AddRange(scr, requirement, requirementRevision, review, impact);
+        await seed.Db.SaveChangesAsync();
+
+        var rerun = await authority.EnsureCompletedAsync();
+        Assert.Equal(completed, rerun);
+        Assert.Equal(auditCountBefore, await seed.Db.SecurityAuditEvents.AsNoTracking()
+            .CountAsync(x => x.EventType.StartsWith("VerificationExecutionCutover")));
+    }
+
+    [Fact]
+    public async Task Completed_marker_without_audit_recovers_and_returns_stored_totals()
+    {
+        var seed = await SeedAsync();
+        var (legacy, typed) = FullRegistrations();
+        var authority = new SoftwareProcedureExecutionCutoverAuthority(seed.Db, legacy, typed,
+            allowSqliteExecution: true);
+        var completed = await authority.EnsureCompletedAsync();
+
+        // Simulate the only historically possible inconsistent state: the marker committed but its Completed
+        // audit evidence did not (the pre-atomic build saved the two rows separately).
+        var completionAudits = await seed.Db.SecurityAuditEvents
+            .Where(x => x.EventType == "VerificationExecutionCutover.SoftwareProcedures.v1.Completed")
+            .ToListAsync();
+        seed.Db.SecurityAuditEvents.RemoveRange(completionAudits);
+        await seed.Db.SaveChangesAsync();
+
+        var recovered = await authority.EnsureCompletedAsync();
+        Assert.Equal(completed, recovered);
+        Assert.Equal(1, await seed.Db.SecurityAuditEvents.AsNoTracking().CountAsync(x =>
+            x.EventType == "VerificationExecutionCutover.SoftwareProcedures.v1.Completed"));
+        var second = await authority.EnsureCompletedAsync();
+        Assert.Equal(completed, second);
+        Assert.Equal(1, await seed.Db.SecurityAuditEvents.AsNoTracking().CountAsync(x =>
+            x.EventType == "VerificationExecutionCutover.SoftwareProcedures.v1.Completed"));
+    }
+
+    [Fact]
+    public async Task Forced_claim_persistence_failure_leaves_no_partial_claim_and_propagates()
+    {
+        // One shared in-memory SQLite connection keeps the same physical database across the failing and
+        // recovery contexts.
+        await using var connection = new Microsoft.Data.Sqlite.SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        var options = new DbContextOptionsBuilder<AeroLinkDbContext>().UseSqlite(connection)
+            .AddInterceptors(new ClaimSaveFailingInterceptor())
+            .Options;
+        var db = new AeroLinkDbContext(options);
+        await db.Database.EnsureCreatedAsync();
+        var seed = await SeedIntoAsync(db, "600001");
+        var (legacy, typed) = FullRegistrations();
+        var authority = new SoftwareProcedureExecutionCutoverAuthority(db, legacy, typed,
+            allowSqliteExecution: true);
+
+        // A non-unique persistence failure during the claim save is a real defect: it must propagate and
+        // leave NO marker and NO completion audit (the claim and its audit commit atomically).
+        await Assert.ThrowsAsync<DbUpdateException>(() => authority.EnsureCompletedAsync());
+        Assert.Equal(0, await db.GovernedMigrationCompletions.AsNoTracking().CountAsync());
+        Assert.Equal(0, await db.SecurityAuditEvents.AsNoTracking().CountAsync(x =>
+            x.EventType == "VerificationExecutionCutover.SoftwareProcedures.v1.Completed"));
+        Assert.Equal(1, await db.ProjectLadderConfigurations.AsNoTracking().CountAsync(x =>
+            x.ProjectId == seed.ProjectId && x.State == ProjectLadderConfigurationState.Active));
+
+        // A fresh startup (no interceptor) recovers the committed per-project work and completes cleanly.
+        var cleanOptions = new DbContextOptionsBuilder<AeroLinkDbContext>().UseSqlite(connection).Options;
+        var cleanDb = new AeroLinkDbContext(cleanOptions);
+        var recovery = await new SoftwareProcedureExecutionCutoverAuthority(cleanDb, legacy, typed,
+            allowSqliteExecution: true).EnsureCompletedAsync();
+        Assert.Equal(1, recovery.ProjectsUpgraded);
+        Assert.Equal(1, await cleanDb.GovernedMigrationCompletions.AsNoTracking().CountAsync());
+        Assert.Equal(1, await cleanDb.SecurityAuditEvents.AsNoTracking().CountAsync(x =>
+            x.EventType == "VerificationExecutionCutover.SoftwareProcedures.v1.Completed"));
+    }
+
+    [Fact]
+    public async Task Rollback_after_stored_rendition_removes_only_orphan_bytes_and_preserves_original_evidence()
+    {
+        // One shared in-memory SQLite connection keeps the same physical database across the failing and
+        // recovery contexts.
+        await using var connection = new Microsoft.Data.Sqlite.SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        var seedOptions = new DbContextOptionsBuilder<AeroLinkDbContext>().UseSqlite(connection).Options;
+        var db = new AeroLinkDbContext(seedOptions);
+        await db.Database.EnsureCreatedAsync();
+        var evidenceRoot = Path.Combine(Path.GetTempPath(), $"aerolink-726-rollback-{Guid.NewGuid():N}");
+        var files = new EvidenceFileStore(evidenceRoot);
+        try
+        {
+            var seed = await SeedSignedDocumentProjectAsync(db, files, "700001", materialized: true);
+            // A second stored rendition makes the rollback observable after the first artifact's new bytes
+            // have already been written.
+            var secondBytes = Encoding.UTF8.GetBytes("second pre-cutover rendition");
+            var secondStored = await files.StoreAsync(new MemoryStream(secondBytes), "700001.pdf",
+                "application/pdf", default);
+            db.Add(new ControlledDocumentArtifact(seed.DocumentId, "pdf", secondStored.StorageKey,
+                secondStored.OriginalFileName, secondStored.ContentType, secondStored.Size,
+                secondStored.Sha256, seed.GeneratedAt));
+            await db.SaveChangesAsync();
+            var originalKeys = Directory.EnumerateFiles(evidenceRoot, "*", SearchOption.AllDirectories)
+                .Select(Path.GetFileName).ToHashSet();
+
+            var (legacy, typed) = FullRegistrations();
+            var failingOptions = new DbContextOptionsBuilder<AeroLinkDbContext>().UseSqlite(connection)
+                .AddInterceptors(new RenditionSaveFailingInterceptor())
+                .Options;
+            var failingDb = new AeroLinkDbContext(failingOptions);
+            var generator = new ControlledOutputGenerator(failingDb, new RichContentPublisher(failingDb, files),
+                policyResolver: new EffectiveProjectLadderPolicyResolver(failingDb));
+            var failingAuthority = new SoftwareProcedureExecutionCutoverAuthority(failingDb, legacy, typed,
+                allowSqliteExecution: true, generator: generator, files: files);
+            await Assert.ThrowsAsync<InvalidOperationException>(() => failingAuthority.EnsureCompletedAsync());
+            failingDb.Dispose();
+
+            // The database transaction rolled back: artifacts still reference the ORIGINAL keys, every
+            // original file remains, and no orphaned new bytes survive the cleanup.
+            var artifacts = await db.ControlledDocumentArtifacts.AsNoTracking().ToListAsync();
+            Assert.Equal(2, artifacts.Count);
+            foreach (var artifact in artifacts)
+            {
+                Assert.Contains(Path.GetFileName(artifact.StorageKey), originalKeys);
+                Assert.True(files.Exists(artifact.StorageKey));
+            }
+            var remainingKeys = Directory.EnumerateFiles(evidenceRoot, "*", SearchOption.AllDirectories)
+                .Select(Path.GetFileName).ToHashSet();
+            Assert.Equal(originalKeys.Count, remainingKeys.Count);
+            Assert.Empty(remainingKeys.Except(originalKeys));
+
+            // Recovery: a fresh startup regenerates from the preserved originals and commits; old bytes are
+            // still retained alongside the new referenced renditions.
+            var cleanDb = new AeroLinkDbContext(
+                new DbContextOptionsBuilder<AeroLinkDbContext>().UseSqlite(connection).Options);
+            var cleanGenerator = new ControlledOutputGenerator(cleanDb, new RichContentPublisher(cleanDb, files),
+                policyResolver: new EffectiveProjectLadderPolicyResolver(cleanDb));
+            var recovery = await new SoftwareProcedureExecutionCutoverAuthority(cleanDb, legacy, typed,
+                allowSqliteExecution: true, generator: cleanGenerator, files: files).EnsureCompletedAsync();
+            Assert.Equal(1, recovery.ProjectsUpgraded);
+            var recoveredArtifacts = await cleanDb.ControlledDocumentArtifacts.AsNoTracking().ToListAsync();
+            Assert.Equal(2, recoveredArtifacts.Count);
+            var finalKeys = Directory.EnumerateFiles(evidenceRoot, "*", SearchOption.AllDirectories)
+                .Select(Path.GetFileName).ToHashSet();
+            foreach (var artifact in recoveredArtifacts)
+            {
+                Assert.True(files.Exists(artifact.StorageKey));
+                Assert.Contains(Path.GetFileName(artifact.StorageKey), finalKeys);
+            }
+            Assert.True(finalKeys.Count >= originalKeys.Count + 2);
+        }
+        finally
+        {
+            try { Directory.Delete(evidenceRoot, recursive: true); } catch (IOException) { }
+        }
+    }
+
+    private sealed class ClaimSaveFailingInterceptor : SaveChangesInterceptor
+    {
+        public override InterceptionResult<int> SavingChanges(DbContextEventData eventData,
+            InterceptionResult<int> result)
+        {
+            if (eventData.Context?.ChangeTracker.Entries<GovernedMigrationCompletion>().Any() == true)
+                throw new DbUpdateException("Forced non-unique persistence failure.", (Exception?)null);
+            return base.SavingChanges(eventData, result);
+        }
+
+        public override ValueTask<InterceptionResult<int>> SavingChangesAsync(DbContextEventData eventData,
+            InterceptionResult<int> result, CancellationToken cancellationToken = default)
+        {
+            if (eventData.Context?.ChangeTracker.Entries<GovernedMigrationCompletion>().Any() == true)
+                throw new DbUpdateException("Forced non-unique persistence failure.", (Exception?)null);
+            return base.SavingChangesAsync(eventData, result, cancellationToken);
+        }
+    }
+
+    private sealed class RenditionSaveFailingInterceptor : SaveChangesInterceptor
+    {
+        public override InterceptionResult<int> SavingChanges(DbContextEventData eventData,
+            InterceptionResult<int> result)
+        {
+            if (eventData.Context?.ChangeTracker.Entries<ControlledDocumentArtifact>()
+                .Any(entry => entry.State == EntityState.Modified) == true)
+                throw new InvalidOperationException("Forced rollback after new rendition bytes were stored.");
+            return base.SavingChanges(eventData, result);
+        }
+
+        public override ValueTask<InterceptionResult<int>> SavingChangesAsync(DbContextEventData eventData,
+            InterceptionResult<int> result, CancellationToken cancellationToken = default)
+        {
+            if (eventData.Context?.ChangeTracker.Entries<ControlledDocumentArtifact>()
+                .Any(entry => entry.State == EntityState.Modified) == true)
+                throw new InvalidOperationException("Forced rollback after new rendition bytes were stored.");
+            return base.SavingChangesAsync(eventData, result, cancellationToken);
+        }
     }
 }
