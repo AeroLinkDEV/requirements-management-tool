@@ -44,23 +44,46 @@ public sealed class LegacyControlledProcedureDocumentSnapshotTests
             .ToList();
         Assert.Empty(mutators);
 
-        // A private setter is not the whole story. EF bulk updates and the change tracker both write the
-        // column without going through the domain at all, and this very file uses ExecuteUpdateAsync on
+        // A private setter is not the whole story. EF bulk updates, the change tracker and raw SQL all write
+        // the column without going through the domain at all, and this very file uses ExecuteUpdateAsync on
         // TestProcedureRevisions.State to build a scenario — so a reflection check alone would pass while the
-        // invariant was being violated. Production code is therefore scanned for both backdoors. Tests may
-        // still use them to construct states the domain cannot express; product code may not.
+        // invariant was being violated. Product source is therefore scanned for those routes as well. Tests
+        // may still use them to construct states the domain cannot express; product code may not.
+        //
+        // This scan is a tripwire, not a proof. It matches the spellings this repository actually uses, and a
+        // determined rewrite can evade any textual check. It exists so the common accidents fail loudly; the
+        // invariant itself still rests on review. See the note at the reconstruction site, which states what
+        // is and is not covered rather than claiming the routes are closed.
+        var patterns = new[]
+        {
+            // EF bulk update, via either the DbSet property or Set<TestProcedureRevision>().
+            @"TestProcedureRevision[\s\S]{0,600}?SetProperty\s*\([^)]*\.State\b",
+            // Change-tracker / Entry write, whatever the entry variable is called.
+            @"(?:Entry\s*\(|Entries\s*<\s*TestProcedureRevision\s*>)[\s\S]{0,400}?Property\s*\([^)]*\.State\b[\s\S]{0,120}?CurrentValue\s*=",
+            // Raw SQL or a migration UPDATE assigning the column. The tempered SET..State span stops at
+            // WHERE so that a legitimate "SET SomethingElse ... WHERE State = ..." is not flagged.
+            @"UPDATE\s+""?test_procedure_revisions""?[\s\S]{0,400}?SET((?!WHERE)[\s\S]){0,300}?""?State""?\s*=",
+        };
         var sourceRoot = ProductSourceRoot();
+        var prefix = sourceRoot.TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
         var offenders = new List<string>();
         foreach (var file in Directory.EnumerateFiles(sourceRoot, "*.cs", SearchOption.AllDirectories))
         {
-            if (file.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}")
-                || file.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}")) continue;
-            var text = File.ReadAllText(file);
-            if (System.Text.RegularExpressions.Regex.IsMatch(text,
-                    @"TestProcedureRevisions[\s\S]{0,600}?SetProperty\s*\([^)]*\.State\b")
-                || System.Text.RegularExpressions.Regex.IsMatch(text,
-                    @"Entry\s*\(\s*\w*[Rr]evision\w*\s*\)[\s\S]{0,200}?Property\s*\([^)]*\.State\b"))
-                offenders.Add(Path.GetFileName(file));
+            // Scope the build-output filter to the path BELOW product/src: a clone living under any directory
+            // named bin or obj would otherwise skip every file and pass vacuously.
+            var relative = file.StartsWith(prefix, StringComparison.OrdinalIgnoreCase) ? file[prefix.Length..] : file;
+            var segments = relative.Split(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            if (segments.Contains("bin") || segments.Contains("obj")) continue;
+            // C# escapes a quote inside a verbatim string by doubling it, so SQL embedded in a migration
+            // reads UPDATE ""test_procedure_revisions"" in the source text. Collapse that first, or the SQL
+            // pattern silently misses every migration — which is exactly where a legacy backfill would live.
+            var text = File.ReadAllText(file).Replace("\"\"", "\"");
+            foreach (var pattern in patterns)
+            {
+                if (!System.Text.RegularExpressions.Regex.IsMatch(text, pattern)) continue;
+                offenders.Add(relative);
+                break;
+            }
         }
         Assert.Empty(offenders);
     }

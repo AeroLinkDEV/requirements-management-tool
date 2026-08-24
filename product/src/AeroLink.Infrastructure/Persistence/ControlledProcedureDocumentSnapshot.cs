@@ -146,12 +146,19 @@ public static class ControlledProcedureDocumentSnapshotProjection
                 // generated could be admitted into it and the document's identity would silently change.
                 //
                 // Nothing in the schema enforces that — there is no approval timestamp to check against — so
-                // the invariant is enforced by product code never writing State after construction, through
-                // the domain or around it via an EF bulk update or the change tracker. All three routes are
-                // pinned by LegacyControlledProcedureDocumentSnapshotTests
-                // .A_verification_revision_state_is_fixed_at_construction_so_CreatedAt_is_its_approval_time.
-                // If that test ever fails, this reconstruction needs a real approval timestamp and a
-                // fail-closed guard; it does not need a weaker assertion.
+                // the invariant rests on product code never writing State after construction, whether through
+                // the domain or around it via an EF bulk update, the change tracker, or raw SQL.
+                //
+                // LegacyControlledProcedureDocumentSnapshotTests
+                // .A_verification_revision_state_is_fixed_at_construction_so_CreatedAt_is_its_approval_time
+                // pins the domain surface by reflection and greps product source for the spellings of those
+                // three routes that this repository actually uses. That grep is a tripwire, not a proof: it
+                // will catch the likely accident and will not catch a determined rewrite, so the invariant is
+                // ultimately maintained by review rather than by the test.
+                //
+                // If that test fails, or a reviewer finds a write it cannot see, the answer is to give
+                // revisions a real approval timestamp and make this reconstruction fail closed against it —
+                // not to weaken the assertion.
                 .Where(x => x.CreatedAt <= generatedAt && x.State != TestProcedureState.Draft)
                 .GroupBy(x => x.ProcedureId)
                 .Select(group => group.OrderByDescending(x => x.Revision).First())
