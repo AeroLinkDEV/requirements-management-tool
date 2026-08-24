@@ -170,25 +170,25 @@ public sealed class ProjectVerificationVocabulary
     /// <summary>
     /// Replaces the permitted set wholesale.
     ///
-    /// <paramref name="referencedNormalizedValues"/> is supplied by the caller because only the caller can
-    /// see the requirement data; the invariant it feeds lives here so no endpoint, importer or seeder can
-    /// route around it. A member those records still declare cannot be dropped — the vocabulary would then
-    /// contradict controlled history, and #701 exists precisely to stop a project's records and its declared
-    /// vocabulary drifting apart.
+    /// <paramref name="declaredValues"/> is supplied by the caller because only the caller can see the
+    /// requirement data; the invariant it feeds lives here so no endpoint, importer or seeder can route
+    /// around it. A spelling those records still declare cannot leave the vocabulary — the vocabulary would
+    /// then contradict controlled history, and #701 exists precisely to stop a project's records and its
+    /// declared vocabulary drifting apart.
     ///
     /// Nothing in this method rewrites a requirement value. Reconciling a stored value that the new
     /// vocabulary does not permit is a separate, deliberate act by whoever owns those records.
     /// </summary>
-    public void ReplaceMembers(IEnumerable<string> methods, IReadOnlyCollection<string> referencedNormalizedValues,
+    public void ReplaceMembers(IEnumerable<string> methods, IReadOnlyCollection<string> declaredValues,
         DateTimeOffset now)
     {
-        ArgumentNullException.ThrowIfNull(referencedNormalizedValues);
+        ArgumentNullException.ThrowIfNull(declaredValues);
         // Everything is validated against a prepared copy before a single member moves. A refused edit must
         // leave the configuration byte-identical, because a half-applied vocabulary would silently change
         // what the next submission accepts.
         var prepared = Prepare(methods, initial: false);
         var surviving = prepared.Select(x => x.Normalized).ToHashSet(StringComparer.Ordinal);
-        var stranded = StrandedBy(prepared.Select(x => x.Display), referencedNormalizedValues);
+        var stranded = StrandedBy(prepared.Select(x => x.Display), declaredValues);
         if (stranded.Count > 0)
             throw new DomainException(StrandingRefusal(stranded));
 
@@ -207,22 +207,40 @@ public sealed class ProjectVerificationVocabulary
     }
 
     /// <summary>
-    /// Which currently configured methods a proposed replacement would drop while controlled records still
+    /// Which configured spellings a proposed replacement would take away while controlled records still
     /// declare them.
     ///
-    /// A pure query, so an API can name the offending methods in a structured refusal without parsing the
+    /// The comparison is <b>exact</b>, on both sides, and that is the whole point. Runtime membership is
+    /// exact ordinal (see <see cref="VerificationMethodPolicy.IsPermitted"/>), so re-spelling a configured
+    /// member strands the records declaring the old spelling every bit as completely as deleting it: a
+    /// project whose requirements say "Test" and whose vocabulary is edited to say "test" would find every
+    /// one of those requirements suddenly non-conforming and every future submission of one refused, with
+    /// nothing having been removed. Comparing normalized keys here — which is what this method used to do —
+    /// declared that edit safe precisely because it could not see the difference that review can.
+    ///
+    /// So a casing change is treated as a removal plus an introduction whenever records declare the old
+    /// exact value, and is refused. A casing change nothing declares is still permitted: no record can be
+    /// stranded by it, and forbidding it would stop a programme correcting its own configuration.
+    ///
+    /// Only currently configured members can be stranded. A stored value the vocabulary never permitted —
+    /// "Testing" against a Test/Analysis/Inspection/Demonstration project — is already reported by the
+    /// reconciliation report and must not also block unrelated configuration work.
+    ///
+    /// A pure query, so an API can name the offending spellings in a structured refusal without parsing the
     /// message text. <see cref="ReplaceMembers"/> asks the same question independently and refuses on the
     /// answer, so calling this first is a courtesy to the caller rather than the thing that enforces the rule.
     /// </summary>
-    public IReadOnlyList<string> StrandedBy(IEnumerable<string> methods,
-        IReadOnlyCollection<string> referencedNormalizedValues)
+    public IReadOnlyList<string> StrandedBy(IEnumerable<string> methods, IReadOnlyCollection<string> declaredValues)
     {
         ArgumentNullException.ThrowIfNull(methods);
-        ArgumentNullException.ThrowIfNull(referencedNormalizedValues);
-        var surviving = methods.Select(VerificationMethodName.Normalize).ToHashSet(StringComparer.Ordinal);
+        ArgumentNullException.ThrowIfNull(declaredValues);
+        // Rebuilt with an ordinal comparer rather than trusted: a set handed in with a case-insensitive one
+        // would silently restore exactly the blindness this method exists to remove.
+        var declared = new HashSet<string>(declaredValues, StringComparer.Ordinal);
+        var surviving = new HashSet<string>(methods.Select(x => (x ?? string.Empty).Trim()), StringComparer.Ordinal);
         return _methods
-            .Where(x => !surviving.Contains(x.NormalizedValue))
-            .Where(x => referencedNormalizedValues.Contains(x.NormalizedValue))
+            .Where(x => !surviving.Contains(x.DisplayValue))
+            .Where(x => declared.Contains(x.DisplayValue))
             .OrderBy(x => x.Position)
             .Select(x => x.DisplayValue)
             .ToArray();
@@ -230,7 +248,7 @@ public sealed class ProjectVerificationVocabulary
 
     /// <summary>The one wording for a stranding refusal, so the aggregate and the API say the same thing.</summary>
     public static string StrandingRefusal(IReadOnlyList<string> stranded) =>
-        $"These verification methods are still declared by controlled requirement records and cannot be removed: {string.Join(", ", stranded)}. Correct or retire those records first.";
+        $"These verification methods are still declared by controlled requirement records, so they cannot be removed or re-spelled: {string.Join(", ", stranded)}. Review matches the configured spelling exactly, so either change would leave those records outside their own project's vocabulary. Correct or retire them first.";
 
     private static List<(string Display, string Normalized)> Prepare(IEnumerable<string> methods, bool initial)
     {

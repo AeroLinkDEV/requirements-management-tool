@@ -117,12 +117,12 @@ public sealed class ProjectVerificationVocabularyService(AeroLinkDbContext db, I
             return new(VerificationVocabularyEditResultKind.Conflict,
                 Error: "The verification vocabulary changed after it was read. Refresh before editing again.");
 
-        var referenced = await ReferencedNormalizedValuesAsync(projectId, ct);
+        var declared = await DeclaredValuesAsync(projectId, ct);
         if (vocabulary is not null && methods.Count > 0)
         {
-            // Asked before the aggregate refuses, purely so the API can name the offending methods in a
+            // Asked before the aggregate refuses, purely so the API can name the offending spellings in a
             // structured field. ReplaceMembers enforces the same rule independently.
-            var stranded = vocabulary.StrandedBy(methods, referenced);
+            var stranded = vocabulary.StrandedBy(methods, declared);
             if (stranded.Count > 0)
                 return new(VerificationVocabularyEditResultKind.Conflict,
                     Error: ProjectVerificationVocabulary.StrandingRefusal(stranded), StrandedMethods: stranded);
@@ -138,7 +138,7 @@ public sealed class ProjectVerificationVocabularyService(AeroLinkDbContext db, I
             else
             {
                 var known = vocabulary.Methods.Select(x => x.Id).ToHashSet();
-                vocabulary.ReplaceMembers(methods, referenced, now);
+                vocabulary.ReplaceMembers(methods, declared, now);
                 // Members introduced by this edit carry client-assigned keys and were discovered through the
                 // aggregate's collection, so EF would attach them by key as updates. Adding them explicitly is
                 // what makes the INSERT happen; without it a replacement that introduces a new method fails as
@@ -234,26 +234,32 @@ public sealed class ProjectVerificationVocabularyService(AeroLinkDbContext db, I
     }
 
     /// <summary>
-    /// The normalized methods that controlled requirement records in this project still declare.
+    /// The exact verification-method spellings that controlled requirement records in this project declare.
     ///
-    /// Normalized because removal safety is a question about the method, not its spelling: a project that has
-    /// requirements saying "Test" must not be able to drop "Test" by re-typing it as "test" first. Blank
-    /// values are excluded — nothing is stranded by removing a method no record names.
+    /// Exact, not normalized. Removal safety has to be asked in the same terms review answers in, and review
+    /// matches the configured spelling byte-for-byte: a project whose requirements say "Test" is stranded by
+    /// re-spelling the configured member to "test" just as completely as by deleting it, because every one of
+    /// those records becomes non-conforming and every future submission of one is refused. Comparing
+    /// normalized keys here declared that edit safe precisely because it could not see the difference that
+    /// review can.
+    ///
+    /// Both authorities are covered — in-flight proposals and materialized revisions — because either one
+    /// declaring a spelling is enough to strand it. Blank values are excluded: nothing is stranded by
+    /// removing a method no record names.
     /// </summary>
-    private async Task<IReadOnlyCollection<string>> ReferencedNormalizedValuesAsync(Guid projectId,
-        CancellationToken ct)
+    private async Task<IReadOnlyCollection<string>> DeclaredValuesAsync(Guid projectId, CancellationToken ct)
     {
         var declared = new HashSet<string>(StringComparer.Ordinal);
         var changeValues = await (from change in db.RequirementChanges.AsNoTracking()
                 join request in db.SystemChangeRequests.AsNoTracking() on change.ChangeRequestId equals request.Id
                 where request.ProjectId == projectId && change.VerificationMethod != ""
                 select change.VerificationMethod).Distinct().ToListAsync(ct);
-        declared.UnionWith(changeValues.Select(VerificationMethodName.Normalize));
+        declared.UnionWith(changeValues);
         var revisionValues = await (from revision in db.RequirementRevisions.AsNoTracking()
                 join artifact in db.Requirements.AsNoTracking() on revision.ArtifactId equals artifact.Id
                 where artifact.ProjectId == projectId && revision.VerificationMethod != ""
                 select revision.VerificationMethod).Distinct().ToListAsync(ct);
-        declared.UnionWith(revisionValues.Select(VerificationMethodName.Normalize));
+        declared.UnionWith(revisionValues);
         declared.Remove(string.Empty);
         return declared;
     }

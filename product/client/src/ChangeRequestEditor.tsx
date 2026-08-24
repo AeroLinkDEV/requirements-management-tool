@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import type { AuthUser } from "./IdentityCenter";
 import ControlledRequirementEditor from "./ControlledRequirementEditor";
-import { useVerificationVocabulary } from "./verificationMethods";
+import { canDeclareVerificationMethod, firstPermittedMethod, useVerificationVocabulary, verificationBlockedReason } from "./verificationMethods";
 import RequirementsImportPanel from "./RequirementsImportPanel";
 import type {
   ControlledRequirementDraft,
@@ -143,7 +143,10 @@ export default function ChangeRequestEditor({
   // #701: a new proposal starts on a method the project actually permits, taken from the configured
   // vocabulary rather than from a word this file happens to know.
   const verification = useVerificationVocabulary(api, projectId);
-  const defaultVerificationMethod = verification.vocabulary?.methods[0] ?? "";
+  const defaultVerificationMethod = firstPermittedMethod(verification);
+  // An ICD declares no verification method at all, so its authoring is never held up by the vocabulary.
+  // Everywhere else a proposal cannot be created until the project has told us what it permits.
+  const verificationBlocked = scope !== "Interface" && !canDeclareVerificationMethod(verification);
   const seededSource = useRef("");
   const [context, setContext] = useState<AuthoringContext>();
   // Nothing is seeded from a stored draft. It is offered below, and applied only if the author says so.
@@ -513,17 +516,18 @@ export default function ChangeRequestEditor({
             <span>Add a focused proposal:</span>
             {scope === "System" && ladderAllows(ladder, "System", LadderCapability.ChangeControl) ? (
               <>
-                <button type="button" onClick={() => addProposal("Introduce", "System")}>+ Introduce System requirement</button>
-                <button type="button" onClick={() => addProposal("Modify", "System")}>Modify existing</button>
+                <button type="button" disabled={verificationBlocked} onClick={() => addProposal("Introduce", "System")}>+ Introduce System requirement</button>
+                <button type="button" disabled={verificationBlocked} onClick={() => addProposal("Modify", "System")}>Modify existing</button>
                 <button type="button" onClick={() => addProposal("Retire", "System")}>Retire existing</button>
               </>
             ) : (scope === "Software" || scope === "Interface") && ladderAllows(ladder, defaultLevel, LadderCapability.ChangeControl) ? (
               <>
-                <button type="button" onClick={() => addProposal("Introduce", defaultLevel)}>+ Introduce {scope === "Interface" ? "Interface / ICD" : softwareLevelLabel} requirement</button>
-                <button type="button" onClick={() => addProposal("Modify", defaultLevel)}>Modify existing {scope === "Interface" ? "Interface / ICD" : softwareLevelLabel}</button>
+                <button type="button" disabled={verificationBlocked} onClick={() => addProposal("Introduce", defaultLevel)}>+ Introduce {scope === "Interface" ? "Interface / ICD" : softwareLevelLabel} requirement</button>
+                <button type="button" disabled={verificationBlocked} onClick={() => addProposal("Modify", defaultLevel)}>Modify existing {scope === "Interface" ? "Interface / ICD" : softwareLevelLabel}</button>
                 <button type="button" onClick={() => addProposal("Retire", defaultLevel)}>Retire existing {scope === "Interface" ? "Interface / ICD" : softwareLevelLabel}</button>
               </>
             ) : <span className="proposalUnavailable">No configured change-control level is available.</span>}
+            {verificationBlocked && <span className="proposalUnavailable" role={verification.error ? "alert" : "status"}>{verificationBlockedReason(verification)}</span>}
           </div>
           <div className="proposalStack">
             {changes.map((change, index) => (

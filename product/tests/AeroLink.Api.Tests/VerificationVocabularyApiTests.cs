@@ -297,6 +297,111 @@ public sealed class VerificationVocabularyApiTests
         Assert.Equal(1, vocabulary.Version);
     }
 
+    /// <summary>
+    /// The #701 review finding. Review matches the configured spelling byte-for-byte, so re-spelling a member
+    /// that controlled records declare strands every one of them without removing anything — the records go
+    /// non-conforming and their future submissions are refused, silently. It is refused as a removal.
+    /// </summary>
+    [Fact]
+    public async Task Re_spelling_a_configured_member_controlled_records_declare_is_refused()
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var client = factory.CreateClient();
+        var seeded = await SeedAsync(factory);
+        await SignInAsync(client, seeded.ManagerName);
+        using (var narrowed = await client.PutAsJsonAsync(
+                   $"/api/projects/{seeded.ProjectId}/verification-methods", new
+                   {
+                       expectedVersion = 1, reason = "This programme verifies by test only", methods = new[] { "Test" },
+                   }))
+            Assert.True(narrowed.IsSuccessStatusCode, await narrowed.Content.ReadAsStringAsync());
+
+        Guid changeId;
+        Guid revisionId;
+        using (var scope = factory.Services.CreateScope())
+        {
+            // Both authorities declare the exact configured spelling: an in-flight proposal and a
+            // materialized revision. Either one alone is enough to pin it.
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            var now = DateTimeOffset.UtcNow;
+            var origin = new SystemChangeRequest("SRCR-70150", 0, seeded.ProjectId, seeded.ReleaseId,
+                "Declares the configured spelling", "P", "A", "S", seeded.AuthorName, now);
+            origin.AddRequirementChange(seeded.AuthorName, "SYSR-701500", 0, RequirementLevel.System,
+                RequirementChangeKind.Introduce, "The FMS shall hold altitude.", "Rationale", "Test", now);
+            origin.SubmitForReview(seeded.AuthorName, [new ApproverSelection(seeded.AuthorName, "Author")], now);
+            origin.ApproveActiveStage(seeded.AuthorName, now);
+            var baseline = new CandidateBaseline("SW-01.00", 0, seeded.ProjectId, seeded.ReleaseId, null,
+                "Spelling baseline", seeded.AuthorName, now);
+            baseline.Select(origin, seeded.AuthorName, now);
+            baseline.Freeze(seeded.AuthorName, now);
+            baseline.MarkRequirementsMaterialized(seeded.AuthorName, new string('a', 64), 1, now);
+            var artifact = new RequirementArtifact(seeded.ProjectId, "SYSR-701500", RequirementLevel.System, now);
+            var revision = new RequirementRevision(artifact.Id, 0, "The FMS shall hold altitude.", "Rationale",
+                "Test", RequirementRevisionState.Active, origin.Id, baseline.Id, now);
+            changeId = origin.RequirementChanges.Single().Id;
+            revisionId = revision.Id;
+            db.AddRange(origin, baseline, artifact, revision);
+            await db.SaveChangesAsync();
+        }
+
+        using var refused = await client.PutAsJsonAsync($"/api/projects/{seeded.ProjectId}/verification-methods", new
+        {
+            expectedVersion = 2, reason = "Lower-case the configured spelling", methods = new[] { "test" },
+        });
+
+        Assert.Equal(HttpStatusCode.Conflict, refused.StatusCode);
+        using var body = JsonDocument.Parse(await refused.Content.ReadAsStringAsync());
+        Assert.Contains("cannot be removed or re-spelled",
+            body.RootElement.GetProperty("error").GetString()!, StringComparison.Ordinal);
+        Assert.Equal(["Test"], body.RootElement.GetProperty("strandedMethods").EnumerateArray()
+            .Select(x => x.GetString()!).ToArray());
+
+        using var scope2 = factory.Services.CreateScope();
+        var db2 = scope2.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+        // Nothing moved: display values, positions, versions, timestamps, and no second audit event.
+        var vocabulary = await db2.ProjectVerificationVocabularies.AsNoTracking().Include(x => x.Methods)
+            .SingleAsync(x => x.ProjectId == seeded.ProjectId);
+        Assert.Equal(["Test"], vocabulary.OrderedValues);
+        Assert.Equal(2, vocabulary.Version);
+        var member = vocabulary.Methods.Single();
+        Assert.Equal("Test", member.DisplayValue);
+        Assert.Equal("test", member.NormalizedValue);
+        Assert.Equal(1, member.Position);
+        Assert.Equal(1, member.Version);
+        Assert.Equal(member.CreatedAt, member.UpdatedAt);
+        Assert.Single(await db2.SecurityAuditEvents.AsNoTracking()
+            .Where(x => x.EventType == "VerificationVocabularyConfigured").ToListAsync());
+        // And the controlled records still say exactly what they said.
+        Assert.Equal("Test", await db2.RequirementChanges.AsNoTracking()
+            .Where(x => x.Id == changeId).Select(x => x.VerificationMethod).SingleAsync());
+        Assert.Equal("Test", await db2.RequirementRevisions.AsNoTracking()
+            .Where(x => x.Id == revisionId).Select(x => x.VerificationMethod).SingleAsync());
+        // The records remain conforming, because the refusal kept the vocabulary that permits them.
+        using var read = await client.GetAsync($"/api/projects/{seeded.ProjectId}/verification-methods");
+        using var readBody = JsonDocument.Parse(await read.Content.ReadAsStringAsync());
+        Assert.Empty(readBody.RootElement.GetProperty("nonConforming").EnumerateArray());
+    }
+
+    [Fact]
+    public async Task A_casing_change_no_controlled_record_declares_is_permitted()
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var client = factory.CreateClient();
+        var seeded = await SeedAsync(factory);
+        await SignInAsync(client, seeded.ManagerName);
+
+        // Nothing declares "Inspection", so nothing is stranded by correcting its spelling.
+        using var accepted = await client.PutAsJsonAsync($"/api/projects/{seeded.ProjectId}/verification-methods", new
+        {
+            expectedVersion = 1,
+            reason = "House style spells it in upper case",
+            methods = new[] { "Test", "Analysis", "INSPECTION", "Demonstration" },
+        });
+        Assert.True(accepted.IsSuccessStatusCode, await accepted.Content.ReadAsStringAsync());
+        using var body = JsonDocument.Parse(await accepted.Content.ReadAsStringAsync());
+        Assert.Equal(["Test", "Analysis", "INSPECTION", "Demonstration"], Methods(body.RootElement));
+    }
+
     [Fact]
     public async Task An_exact_configured_value_reaches_review()
     {

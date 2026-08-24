@@ -562,6 +562,13 @@ export default function ControlledRequirementEditor({
                   onChange={(event) => onChange("verificationMethod", event.target.value)}
                   disabled={!identityLocked || vocabularyLoading || !vocabulary}
                 >
+                  {/*
+                    * A blank method needs an option of its own. Without one the select value matches nothing
+                    * and the browser falls back to displaying the first entry, so the screen showed a method
+                    * the payload did not carry and submission was refused for a field the author had been
+                    * shown a value for. The placeholder makes the displayed option equal the payload, always.
+                    */}
+                  {!item.verificationMethod && <option value="" disabled>Choose a verification method…</option>}
                   {verificationOptions.map((method) => (
                     <option key={method} value={method}>{method}</option>
                   ))}

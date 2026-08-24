@@ -73,3 +73,34 @@ export function authoringOptions(methods: string[] | undefined, current: string)
   if (!current || permitted.includes(current)) return permitted
   return [current, ...permitted]
 }
+
+/**
+ * Whether a proposal that has to declare a verification method can be created yet.
+ *
+ * The vocabulary arrives asynchronously, and until it does there is no authoritative first method to start a
+ * proposal on. Creating one anyway gave it `verificationMethod: ""` while the select — whose `value` matched
+ * no option — displayed the browser's fallback first entry. The author saw a method the payload did not
+ * carry, and the submission was refused for a blank field they had been shown a value for. Authoring waits
+ * instead.
+ */
+export function canDeclareVerificationMethod(state: VerificationVocabularyState): boolean {
+  return !state.loading && !state.error && !!state.vocabulary && state.vocabulary.methods.length > 0
+}
+
+/**
+ * The method a new verification-bearing proposal starts on: the project's first configured value, and never
+ * a guess. Blank only when {@link canDeclareVerificationMethod} is false, which is exactly when authoring is
+ * blocked from creating one.
+ */
+export function firstPermittedMethod(state: VerificationVocabularyState): string {
+  return canDeclareVerificationMethod(state) ? state.vocabulary!.methods[0] : ''
+}
+
+/** Why verification-bearing authoring is blocked, in the reader's terms; empty when it is not blocked. */
+export function verificationBlockedReason(state: VerificationVocabularyState): string {
+  if (state.loading || (!state.vocabulary && !state.error)) return "Loading this project's permitted verification methods…"
+  if (state.error) return `${state.error} A requirement cannot declare a verification method until this loads, so authoring is paused.`
+  if (state.vocabulary && state.vocabulary.methods.length === 0)
+    return 'This project permits no verification methods. Configure them in Project Configuration before authoring a requirement.'
+  return ''
+}

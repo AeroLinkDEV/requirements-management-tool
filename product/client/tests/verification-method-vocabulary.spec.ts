@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test'
-import type { APIRequestContext } from '@playwright/test'
+import type { APIRequestContext, Page } from '@playwright/test'
 import { apiBase, login } from './auth'
 
 /**
@@ -215,4 +215,158 @@ test('A canonical method reaches review while an off-vocabulary one is refused, 
   // And the historical near miss is still exactly as its author wrote it, after all of that.
   expect((await declaredMethodAsync(page.request, nearMiss.id)).requirementChanges[0].verificationMethod)
     .toBe('inspection')
+})
+
+/**
+ * #701 review finding 2: a proposal must never be created while the project has not yet said what it
+ * permits. It used to be, with `verificationMethod: ""` in state while the select — whose value matched no
+ * option — displayed the browser's fallback first entry. The author read a method the payload did not carry.
+ */
+
+const vocabularyRoute = '**/api/projects/*/verification-methods'
+
+/**
+ * The authoring surfaces' own blocked notice. Scoped by class because these pages already carry an unrelated
+ * `role="status"` for draft state, and an unscoped role query is ambiguous.
+ */
+const blockedNotice = (page: Page) => page.locator('.proposalUnavailable').filter({ hasText: 'verification' })
+
+/** Holds the vocabulary response until `release()` is called, so the loading window can be inspected. */
+async function holdVocabularyAsync(page: Page) {
+  let release = () => {}
+  const held = new Promise<void>(resolve => { release = resolve })
+  await page.route(vocabularyRoute, async (route, request) => {
+    if (request.method() !== 'GET') return route.fallback()
+    await held
+    await route.fallback()
+  })
+  return { release: () => release() }
+}
+
+test('the new change request editor cannot start a proposal before the vocabulary arrives, and what it shows is what it sends', async ({ page }) => {
+  test.setTimeout(150_000)
+  await login(page, 'admin', { openProject: false })
+  const suffix = Date.now().toString(36)
+  const workspace = await createWorkspaceAsync(page.request, suffix)
+  const root = `/programs/${workspace.program.id}/projects/${workspace.project.id}/releases/${workspace.release.id}`
+
+  const held = await holdVocabularyAsync(page)
+  const drafts: { verificationMethod: string }[][] = []
+  page.on('request', event => {
+    if (event.url().endsWith('/api/change-request-drafts') && event.method() === 'POST')
+      drafts.push((event.postDataJSON() as { requirementChanges: { verificationMethod: string }[] }).requirementChanges)
+  })
+
+  await page.goto(`${root}/systems/change-requests/new`)
+  await expect(page.getByRole('heading', { name: 'Create System Change Request' })).toBeVisible({ timeout: 30_000 })
+
+  // Blocked while the vocabulary is in flight. Retirement declares no method, so it stays available.
+  const introduce = page.getByRole('button', { name: '+ Introduce System requirement' })
+  const modify = page.getByRole('button', { name: 'Modify existing', exact: true })
+  const retire = page.getByRole('button', { name: 'Retire existing', exact: true })
+  await expect(introduce).toBeDisabled()
+  await expect(modify).toBeDisabled()
+  await expect(retire).toBeEnabled()
+  await expect(blockedNotice(page)).toContainText('Loading this project')
+  // The proposal cannot be created at all, so it cannot acquire a blank method.
+  await expect(page.getByLabel('Verification method')).toHaveCount(0)
+
+  held.release()
+  await expect(introduce).toBeEnabled()
+  await introduce.click()
+
+  // Displayed option and payload value are the same authoritative first configured method.
+  const method = page.getByLabel('Verification method')
+  await expect(method).toHaveValue('Test')
+  await expect(method.locator('option:checked')).toHaveText('Test')
+  await expect(page.getByText('Choose a verification method')).toHaveCount(0)
+
+  await page.getByLabel('Title').fill(`Vocabulary race ${suffix}`)
+  await page.getByLabel('Requirement statement').fill('The FMS shall sequence oceanic waypoints.')
+  await page.getByRole('button', { name: /Save SRCR Draft/ }).click()
+  await expect.poll(() => drafts.length).toBe(1)
+  expect(drafts[0].map(change => change.verificationMethod)).toEqual(['Test'])
+})
+
+test('a checked-out draft cannot start a proposal before the vocabulary arrives, and what it shows is what it sends', async ({ page }) => {
+  test.setTimeout(180_000)
+  await login(page, 'admin', { openProject: false })
+  const suffix = Date.now().toString(36)
+  const workspace = await createWorkspaceAsync(page.request, suffix)
+  const projectId = workspace.project.id
+  const sectionId = await systemSectionAsync(page.request, projectId)
+  const existing = await draftAsync(page.request, projectId, workspace.release.id, sectionId,
+    'Checked out draft', 'Test')
+  const root = `/programs/${workspace.program.id}/projects/${projectId}/releases/${workspace.release.id}`
+
+  // The checked-out workspace persists a working copy through controlled-editing autosave, not through the
+  // change request itself, so the autosave body is the submitted payload for this surface.
+  const autosaved: string[][] = []
+  page.on('request', event => {
+    if (!/\/api\/controlled-editing\/sessions\/.*\/autosave$/.test(event.url())) return
+    const body = event.postDataJSON() as { draftJson: string }
+    const copy = JSON.parse(body.draftJson) as { requirementChanges: { verificationMethod: string }[] }
+    autosaved.push(copy.requirementChanges.map(change => change.verificationMethod))
+  })
+
+  const held = await holdVocabularyAsync(page)
+  await page.goto(`${root}/systems/change-requests/${existing.id}`)
+  await page.getByRole('button', { name: 'Check out & edit' }).click()
+
+  const introduce = page.getByRole('button', { name: '+ Introduce System requirement' })
+  const modify = page.getByRole('button', { name: 'Modify existing', exact: true })
+  const retire = page.getByRole('button', { name: 'Retire existing', exact: true })
+  await expect(introduce).toBeDisabled()
+  await expect(modify).toBeDisabled()
+  await expect(retire).toBeEnabled()
+  await expect(blockedNotice(page)).toContainText('Loading this project')
+  // The draft's own proposal is already there and unchanged; no second, blank one was created.
+  await expect(page.getByLabel('Verification method')).toHaveCount(1)
+  await expect(page.getByLabel('Verification method')).toHaveValue('Test')
+
+  held.release()
+  await expect(introduce).toBeEnabled()
+  await introduce.click()
+  const added = page.getByLabel('Verification method').nth(1)
+  await expect(added).toHaveValue('Test')
+  await expect(added.locator('option:checked')).toHaveText('Test')
+
+  // The autosaved payload carries the same value the screen shows — never a blank the select filled in.
+  await expect.poll(() => autosaved.at(-1) ?? [], { timeout: 30_000 }).toEqual(['Test', 'Test'])
+  expect(autosaved.every(copy => copy.every(method => method === 'Test'))).toBe(true)
+})
+
+test('a vocabulary that fails to load blocks verification-bearing authoring on both surfaces instead of creating a blank proposal', async ({ page }) => {
+  test.setTimeout(150_000)
+  await login(page, 'admin', { openProject: false })
+  const suffix = Date.now().toString(36)
+  const workspace = await createWorkspaceAsync(page.request, suffix)
+  const projectId = workspace.project.id
+  const sectionId = await systemSectionAsync(page.request, projectId)
+  const existing = await draftAsync(page.request, projectId, workspace.release.id, sectionId,
+    'Failure state draft', 'Test')
+  const root = `/programs/${workspace.program.id}/projects/${projectId}/releases/${workspace.release.id}`
+
+  await page.route(vocabularyRoute, async (route, request) => {
+    if (request.method() !== 'GET') return route.fallback()
+    await route.fulfill({
+      status: 500,
+      contentType: 'application/json',
+      body: JSON.stringify({ error: 'The permitted verification methods could not be loaded.' }),
+    })
+  })
+
+  await page.goto(`${root}/systems/change-requests/new`)
+  await expect(page.getByRole('heading', { name: 'Create System Change Request' })).toBeVisible({ timeout: 30_000 })
+  await expect(page.getByRole('button', { name: '+ Introduce System requirement' })).toBeDisabled()
+  await expect(page.getByRole('alert').filter({ hasText: 'authoring is paused' })).toBeVisible()
+  await expect(page.getByLabel('Verification method')).toHaveCount(0)
+
+  await page.goto(`${root}/systems/change-requests/${existing.id}`)
+  await page.getByRole('button', { name: 'Check out & edit' }).click()
+  await expect(page.getByRole('button', { name: '+ Introduce System requirement' })).toBeDisabled()
+  await expect(page.getByRole('alert').filter({ hasText: 'authoring is paused' })).toBeVisible()
+  // The existing proposal still shows exactly what it stores, and no blank one joined it.
+  await expect(page.getByLabel('Verification method')).toHaveCount(1)
+  await expect(page.getByLabel('Verification method')).toHaveValue('Test')
 })

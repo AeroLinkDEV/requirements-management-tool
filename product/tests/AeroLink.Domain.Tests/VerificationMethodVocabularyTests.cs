@@ -110,22 +110,80 @@ public sealed class VerificationMethodVocabularyTests
         var vocabulary = ProjectVerificationVocabulary.Founding(Project, Now);
 
         var error = Assert.Throws<DomainException>(() =>
-            vocabulary.ReplaceMembers(["Analysis", "Inspection", "Demonstration"], ["test"], Now.AddDays(1)));
+            vocabulary.ReplaceMembers(["Analysis", "Inspection", "Demonstration"], ["Test"], Now.AddDays(1)));
 
         Assert.Contains("still declared by controlled requirement records", error.Message, StringComparison.Ordinal);
         Assert.Contains("Test", error.Message, StringComparison.Ordinal);
     }
 
+    /// <summary>
+    /// The #701 review finding: re-spelling a configured member is a removal wearing a disguise.
+    ///
+    /// Review matches the configured spelling byte-for-byte, so a project whose requirements say "Test" and
+    /// whose vocabulary is edited to say "test" would find every one of those requirements suddenly
+    /// non-conforming and every future submission of one refused — with nothing having been removed and no
+    /// refusal shown. Asking the question on normalized keys could not see that, because normalizing is
+    /// exactly the difference review does not forgive.
+    /// </summary>
     [Fact]
-    public void Removal_safety_is_asked_of_the_method_not_its_spelling()
+    public void Re_spelling_a_member_controlled_records_declare_is_refused_as_a_removal()
     {
-        var vocabulary = ProjectVerificationVocabulary.Founding(Project, Now);
+        var vocabulary = ProjectVerificationVocabulary.Declaring(Project, ["Test"], Now);
 
-        // Re-typing the member as "test" and dropping it in the same edit must not slip past the check:
-        // records saying "Test" are stranded by the removal however the removal is spelled.
+        var error = Assert.Throws<DomainException>(() =>
+            vocabulary.ReplaceMembers(["test"], ["Test"], Now.AddDays(1)));
+
+        Assert.Contains("cannot be removed or re-spelled", error.Message, StringComparison.Ordinal);
+        Assert.Contains("Test", error.Message, StringComparison.Ordinal);
+        Assert.Equal(["Test"], vocabulary.OrderedValues);
+        Assert.Equal(["Test"], vocabulary.StrandedBy(["test"], ["Test"]));
+    }
+
+    [Theory]
+    [InlineData("test")]
+    [InlineData("TEST")]
+    [InlineData("tEsT")]
+    public void Every_casing_of_a_declared_member_is_refused(string respelling)
+    {
+        var vocabulary = ProjectVerificationVocabulary.Declaring(Project, ["Test", "Analysis"], Now);
+
         Assert.Throws<DomainException>(() =>
-            vocabulary.ReplaceMembers(["Analysis", "Inspection", "Demonstration"], ["test"], Now.AddDays(1)));
-        Assert.Equal(["Test", "Analysis", "Inspection", "Demonstration"], vocabulary.OrderedValues);
+            vocabulary.ReplaceMembers([respelling, "Analysis"], ["Test"], Now.AddDays(1)));
+        Assert.Equal(["Test", "Analysis"], vocabulary.OrderedValues);
+        Assert.Equal(1, vocabulary.Version);
+    }
+
+    /// <summary>
+    /// The other half of the same rule. Nothing declares the old spelling, so nothing can be stranded by
+    /// changing it, and a programme correcting its own configuration must not be stopped.
+    /// </summary>
+    [Fact]
+    public void A_casing_change_no_record_declares_remains_permitted()
+    {
+        var vocabulary = ProjectVerificationVocabulary.Declaring(Project, ["Test", "Analysis"], Now);
+        var identity = vocabulary.Methods.Single(x => x.DisplayValue == "Test").Id;
+
+        vocabulary.ReplaceMembers(["TEST", "Analysis"], ["Analysis"], Now.AddDays(1));
+
+        Assert.Equal(["TEST", "Analysis"], vocabulary.OrderedValues);
+        Assert.Equal(identity, vocabulary.Methods.Single(x => x.DisplayValue == "TEST").Id);
+        Assert.Equal("test", vocabulary.Methods.Single(x => x.DisplayValue == "TEST").NormalizedValue);
+        Assert.Equal(2, vocabulary.Version);
+    }
+
+    /// <summary>
+    /// A stored value the vocabulary never permitted is the reconciliation report's business, not the
+    /// configuration screen's. Letting it block unrelated edits would leave a project unable to configure
+    /// anything until it had corrected history first.
+    /// </summary>
+    [Fact]
+    public void A_declared_value_that_was_never_configured_does_not_block_an_edit()
+    {
+        var vocabulary = ProjectVerificationVocabulary.Declaring(Project, ["Test"], Now);
+
+        vocabulary.ReplaceMembers(["Test", "Similarity"], ["Test", "Testing"], Now.AddDays(1));
+
+        Assert.Equal(["Test", "Similarity"], vocabulary.OrderedValues);
     }
 
     [Fact]
@@ -133,7 +191,7 @@ public sealed class VerificationMethodVocabularyTests
     {
         var vocabulary = ProjectVerificationVocabulary.Founding(Project, Now);
 
-        var error = Assert.Throws<DomainException>(() => vocabulary.ReplaceMembers([], ["test"], Now.AddDays(1)));
+        var error = Assert.Throws<DomainException>(() => vocabulary.ReplaceMembers([], ["Test"], Now.AddDays(1)));
 
         Assert.Equal("A verification vocabulary cannot be emptied. Configure the methods this programme permits.",
             error.Message);
@@ -159,7 +217,8 @@ public sealed class VerificationMethodVocabularyTests
 
         Assert.Throws<DomainException>(() => vocabulary.ReplaceMembers(["Test", "test"], [], Now.AddDays(1)));
         Assert.Throws<DomainException>(() => vocabulary.ReplaceMembers(["Test", ""], [], Now.AddDays(1)));
-        Assert.Throws<DomainException>(() => vocabulary.ReplaceMembers(["Analysis"], ["test"], Now.AddDays(1)));
+        Assert.Throws<DomainException>(() => vocabulary.ReplaceMembers(["Analysis"], ["Test"], Now.AddDays(1)));
+        Assert.Throws<DomainException>(() => vocabulary.ReplaceMembers(["test", "Analysis", "Inspection", "Demonstration"], ["Test"], Now.AddDays(1)));
 
         Assert.Equal(before, vocabulary.Methods
             .Select(x => (x.Id, x.Position, x.DisplayValue, x.NormalizedValue, x.Version, x.UpdatedAt)).ToArray());
@@ -173,8 +232,10 @@ public sealed class VerificationMethodVocabularyTests
         var vocabulary = ProjectVerificationVocabulary.Founding(Project, Now);
 
         Assert.Equal(["Test", "Inspection"],
-            vocabulary.StrandedBy(["Analysis", "Demonstration"], ["test", "inspection"]));
-        Assert.Empty(vocabulary.StrandedBy(["Analysis", "Demonstration"], ["analysis"]));
+            vocabulary.StrandedBy(["Analysis", "Demonstration"], ["Test", "Inspection"]));
+        Assert.Empty(vocabulary.StrandedBy(["Analysis", "Demonstration"], ["Analysis"]));
+        // Exact on both sides: a lower-cased declaration is a different value, and does not pin "Test".
+        Assert.Empty(vocabulary.StrandedBy(["Analysis", "Demonstration"], ["test"]));
     }
 
     [Fact]

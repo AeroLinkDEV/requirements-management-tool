@@ -4,7 +4,7 @@ import type { FormEvent } from "react";
 import { SignatureDialog } from "./IdentityCenter";
 import type { AuthUser } from "./IdentityCenter";
 import ControlledRequirementEditor from "./ControlledRequirementEditor";
-import { useVerificationVocabulary } from "./verificationMethods";
+import { canDeclareVerificationMethod, firstPermittedMethod, useVerificationVocabulary, verificationBlockedReason } from "./verificationMethods";
 import type {
   ControlledRequirementDraft,
   RequirementKind,
@@ -417,7 +417,10 @@ export default function ChangeRequestWorkspace({
   // #701: a proposal added to a checked-out Draft starts on a method this project permits, exactly as in the
   // new change request editor.
   const verification = useVerificationVocabulary(api, scr?.projectId);
-  const defaultVerificationMethod = verification.vocabulary?.methods[0] ?? "";
+  const defaultVerificationMethod = firstPermittedMethod(verification);
+  // As in the new change request editor: an ICD declares no method, everything else waits for the project
+  // to say what it permits rather than starting a proposal on a blank the select would not display.
+  const verificationBlocked = scr?.type !== "Interface" && !canDeclareVerificationMethod(verification);
   const [lock, setLock] = useState<EditLock>();
   const [lockStatus, setLockStatus] = useState<LockStatus>();
   const [autosaveStatus, setAutosaveStatus] = useState<"Saved" | "Unsaved" | "Saving" | "Error" | "Conflict">("Saved");
@@ -1182,8 +1185,8 @@ export default function ChangeRequestWorkspace({
               <span>Add proposal</span>
               {scr.type === "System" ? (
                 <>
-                  <button type="button" disabled={!context} onClick={() => addProposal("Introduce", "System")}>+ Introduce System requirement</button>
-                  <button type="button" onClick={() => addProposal("Modify", "System")}>Modify existing</button>
+                  <button type="button" disabled={!context || verificationBlocked} onClick={() => addProposal("Introduce", "System")}>+ Introduce System requirement</button>
+                  <button type="button" disabled={verificationBlocked} onClick={() => addProposal("Modify", "System")}>Modify existing</button>
                   <button type="button" onClick={() => addProposal("Retire", "System")}>Retire existing</button>
                 </>
               ) : scr.type === "Interface" ? (
@@ -1194,14 +1197,15 @@ export default function ChangeRequestWorkspace({
                 </>
               ) : (
                 <>
-                  <button type="button" disabled={!context} onClick={() => addProposal("Introduce", "HighLevel")}>+ Introduce HLR</button>
-                  <button type="button" disabled={!context} onClick={() => addProposal("Introduce", "LowLevel")}>+ Introduce LLR</button>
-                  <button type="button" onClick={() => addProposal("Modify", "HighLevel")}>Modify existing HLR</button>
+                  <button type="button" disabled={!context || verificationBlocked} onClick={() => addProposal("Introduce", "HighLevel")}>+ Introduce HLR</button>
+                  <button type="button" disabled={!context || verificationBlocked} onClick={() => addProposal("Introduce", "LowLevel")}>+ Introduce LLR</button>
+                  <button type="button" disabled={verificationBlocked} onClick={() => addProposal("Modify", "HighLevel")}>Modify existing HLR</button>
                   <button type="button" onClick={() => addProposal("Retire", "HighLevel")}>Retire existing HLR</button>
-                  <button type="button" onClick={() => addProposal("Modify", "LowLevel")}>Modify existing LLR</button>
+                  <button type="button" disabled={verificationBlocked} onClick={() => addProposal("Modify", "LowLevel")}>Modify existing LLR</button>
                   <button type="button" onClick={() => addProposal("Retire", "LowLevel")}>Retire existing LLR</button>
                 </>
               )}
+              {verificationBlocked && <span className="proposalUnavailable" role={verification.error ? "alert" : "status"}>{verificationBlockedReason(verification)}</span>}
             </div>
             {requirements.map((item, index) => (
               <ControlledRequirementEditor
