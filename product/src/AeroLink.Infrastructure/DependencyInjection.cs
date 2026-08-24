@@ -44,7 +44,8 @@ public static class DependencyInjection
         // These declarations live beside the routed infrastructure seams. Do not infer artifact obligations from
         // the legacy string inventory: a consumer that happens to have a familiar ID is not thereby a handler for
         // every kind or capability. Software Procedure packages route through the shared identity/review seams;
-        // execution, controlled documents, and downstream coverage remain intentionally outside this slice.
+        // execution and downstream coverage remain intentionally outside this slice. Controlled documents
+        // cover every package key through the same renderer/register seam; execution remains #726's gate.
         var systemProcedure = new VerificationArtifactKey(
             VerificationDiscipline.System, VerificationArtifactKind.Procedure);
         var highLevelCase = new VerificationArtifactKey(
@@ -70,7 +71,7 @@ public static class DependencyInjection
                 "Same-level coverage mutation and persistence validation", currentArtifactKeys,
                 VerificationArtifactCapability.Coverage),
             new VerificationArtifactConsumerRegistration("baseline.controlled-documents",
-                "Baseline controlled-document derivation", currentArtifactKeys,
+                "Baseline controlled-document derivation", packageArtifactKeys,
                 VerificationArtifactCapability.ControlledDocument),
             new VerificationArtifactConsumerRegistration("release.readiness",
                 "Release readiness policy gates", currentArtifactKeys,

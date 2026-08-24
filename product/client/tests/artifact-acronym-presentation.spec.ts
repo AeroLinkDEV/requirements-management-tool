@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test'
-import { artifactAcronym, artifactTypeLabel, documentTypeLabel, isVerificationProcedureKind, targetsFor, testChangeRequestAcronym, testChangeReviewWorkflowSubject, verificationArtifactApiRoot, verificationArtifactNoun } from '../src/presentation'
+import { artifactAcronym, artifactTypeLabel, configuredProcedureTargetsFor, documentTypeLabel, isVerificationProcedureKind, procedureTargetsFor, targetsFor, testChangeRequestAcronym, testChangeReviewWorkflowSubject, verificationArtifactApiRoot, verificationArtifactNoun } from '../src/presentation'
 
 test('numbered artifacts keep their canonical uppercase acronym in presentation', () => {
   const examples = [
@@ -10,6 +10,7 @@ test('numbered artifacts keep their canonical uppercase acronym in presentation'
     ['PR-00001.00', 'PR'], ['SW-01.60', 'SW'],
     ['SYSRD-000016.00', 'SYSRD'], ['HLRD-000016.00', 'HLRD'], ['LLRD-000016.00', 'LLRD'],
     ['SYSTD-000016.00', 'SYSTD'], ['HLRTD-000016.00', 'HLRTD'], ['LLRTD-000016.00', 'LLRTD'],
+    ['HLRTPD-000016.00', 'HLRTPD'], ['LLRTPD-000016.00', 'LLRTPD'],
     ['LIB-SYSR-00001.00', 'LIB-SYSR'],
   ] as const
 
@@ -26,13 +27,19 @@ test('document labels use canonical acronyms while draft remains a separate stat
   expect(documentTypeLabel('SwrdHighLevel')).toBe('High-Level Software Requirements Document (HLRD)')
   expect(documentTypeLabel('SwrdLowLevel')).toBe('Low-Level Software Requirements Document (LLRD)')
   expect(documentTypeLabel('SystemTestProcedures')).toBe('System Test Procedure Document (SYSTD)')
-  expect(documentTypeLabel('HighLevelTestProcedures')).toBe('HLR Test Procedure Document (HLRTD)')
-  expect(documentTypeLabel('LowLevelTestProcedures')).toBe('LLR Test Procedure Document (LLRTD)')
+  expect(documentTypeLabel('HighLevelTestProcedures')).toBe('HLR Test Procedure Document (HLRTPD)')
+  expect(documentTypeLabel('LowLevelTestProcedures')).toBe('LLR Test Procedure Document (LLRTPD)')
   expect(targetsFor('Software').map((target) => target.label)).toEqual([
     'High-Level Software Requirements Document (HLRD)',
     'Low-Level Software Requirements Document (LLRD)',
   ])
   expect(targetsFor('Software').every((target) => !target.label.includes('Draft'))).toBeTruthy()
+  expect(procedureTargetsFor('Software', undefined, 'Procedure').map((target) => target.type)).toEqual([
+    'HighLevelTestProcedures', 'LowLevelTestProcedures',
+  ])
+  expect(procedureTargetsFor('Software').map((target) => target.type)).toEqual([
+    'HighLevelTestCases', 'LowLevelTestCases',
+  ])
 })
 
 test('composite HLR and LLR Procedure route kinds share the Procedure vocabulary', () => {
@@ -46,4 +53,18 @@ test('composite HLR and LLR Procedure route kinds share the Procedure vocabulary
     expect(testChangeRequestAcronym(level, kind)).toBe(acronym)
     expect(testChangeReviewWorkflowSubject(level, kind)).toBe(subject)
   }
+})
+
+test('configured verification document targets are filtered by each exact level and kind', () => {
+  const ladder = { effectiveSteps: [
+    { catalogueEntry: 'System' as const, capabilities: 2, enabledArtifactKinds: ['Procedure'] },
+    { catalogueEntry: 'HighLevel' as const, capabilities: 2, enabledArtifactKinds: ['Case', 'Procedure'] },
+    { catalogueEntry: 'LowLevel' as const, capabilities: 2, enabledArtifactKinds: ['Case'] },
+  ] }
+  expect(configuredProcedureTargetsFor(ladder, 'Software').map(target => target.type)).toEqual([
+    'HighLevelTestCases', 'LowLevelTestCases',
+  ])
+  expect(configuredProcedureTargetsFor(ladder, 'Software', undefined, 'Procedure')
+    .map(target => target.type)).toEqual(['HighLevelTestProcedures'])
+  expect(configuredProcedureTargetsFor(ladder, 'Software', 'LowLevel', 'Procedure')).toEqual([])
 })

@@ -928,6 +928,7 @@ function App() {
         projectId={project.project.id}
         release={release}
         discipline={discipline}
+        ladder={ladder}
         onBack={() => navigate(
           discipline === "systemTest" || discipline === "softwareTest" ? "verification" : "requirements",
           discipline,

@@ -21,9 +21,18 @@ public static class TestProcedureDocumentEndpoints
         {
             if (!await http.HasProjectAccessAsync(db, projectId, ct)) return Results.Forbid();
             var ladderPolicy = await policyResolver.ResolveAsync(projectId, ct);
-            var configuredLevels = ladderPolicy.OrderedLevels
-                .Where(level => ladderPolicy.Definition(level).Verification is not null)
-                .Select(ladderPolicy.ProcedureLevel).ToArray();
+            var profiles = ladderPolicy.Definitions
+                .Where(level => level.VerificationProfile is not null)
+                .Select(level => level.VerificationProfile!)
+                .ToArray();
+            var requestedKeys = artifactRoute == "test-case-documents"
+                ? profiles.SelectMany(profile => profile.Definitions)
+                    .Where(definition => definition.Kind == VerificationArtifactKind.Case)
+                    .Select(definition => definition.Key).ToHashSet()
+                // Compatibility contract: the historical route means the verification artifact executed by
+                // each configured level. Legacy/default software executes Cases; a Procedure-enabled profile
+                // executes Procedures. The canonical Case route above remains exact and never follows this alias.
+                : profiles.Select(profile => profile.ExecutableKey).ToHashSet();
 
             var documents = await db.TestProcedureDocuments.AsNoTracking()
                 .Where(x => x.ProjectId == projectId)
@@ -31,10 +40,10 @@ public static class TestProcedureDocumentEndpoints
                 .ToListAsync(ct);
             // Software mirrors the Requirements Explorer and carries both levels; an exact level remains
             // available for compatible deep links and other focused readers.
-            var levels = ScopeLevels(scope)?.Intersect(configuredLevels).ToArray() ?? configuredLevels;
-            if (artifactRoute == "test-case-documents")
-                levels = levels.Intersect([TestProcedureLevel.HighLevel, TestProcedureLevel.LowLevel]).ToArray();
-            if (levels is not null) documents = documents.Where(x => levels.Contains(x.Level)).ToList();
+            var levels = ScopeLevels(scope);
+            documents = documents.Where(x => requestedKeys.Contains(x.ArtifactKey)
+                    && (levels is null || levels.Contains(x.Level)))
+                .ToList();
 
             var documentIds = documents.Select(x => x.Id).ToList();
             var nodes = await db.TestProcedureDocumentNodes.AsNoTracking()
@@ -52,6 +61,7 @@ public static class TestProcedureDocumentEndpoints
                     documentNumber = document.DocumentNumber,
                     title = document.Title,
                     level = document.Level.ToString(),
+                    artifactKind = document.ArtifactKind.ToString(),
                     description = document.Description,
                     // The count the rail shows beside the document, the way the requirements rail shows one.
                     artifactCount = own.Count(x => x.Type == TestProcedureDocumentNodeType.Procedure),

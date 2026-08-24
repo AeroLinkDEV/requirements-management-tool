@@ -42,8 +42,12 @@ public sealed class DraftDocumentGenerator(AeroLinkDbContext db, RichContentPubl
             : await policyResolver.ResolveAsync(project.Id, ct);
         var program = await db.Programs.AsNoTracking().SingleAsync(x => x.Id == project.ProgramId, ct);
 
-        if (ladderPolicy.Definitions.Any(level => level.Verification?.DocumentType == type))
-            return await GenerateProcedureDraftAsync(release, project, program, type, format, preparedBy, ladderPolicy, ct);
+        var artifactKey = ladderPolicy.Definitions.Where(level => level.VerificationProfile is not null)
+            .SelectMany(level => level.VerificationProfile!.Definitions)
+            .SingleOrDefault(artifact => artifact.DocumentType == type)?.Key;
+        if (artifactKey is not null)
+            return await GenerateProcedureDraftAsync(release, project, program, type, artifactKey.Value,
+                format, preparedBy, ladderPolicy, ct);
 
         var level = RequirementLevelFor(type, ladderPolicy);
         if (level is null) return null;
@@ -111,18 +115,19 @@ public sealed class DraftDocumentGenerator(AeroLinkDbContext db, RichContentPubl
     }
 
     private async Task<GeneratedOutput> GenerateProcedureDraftAsync(SoftwareRelease release, ProjectRecord project,
-        ProgramRecord program, ControlledDocumentType type, string format, string preparedBy, ILadderPolicy ladderPolicy,
-        CancellationToken ct)
+        ProgramRecord program, ControlledDocumentType type, VerificationArtifactKey artifactKey, string format,
+        string preparedBy, ILadderPolicy ladderPolicy, CancellationToken ct)
     {
-        var level = ProcedureLevelFor(type, ladderPolicy);
-        var isCaseDocument = type is ControlledDocumentType.HighLevelTestCases or ControlledDocumentType.LowLevelTestCases;
+        var level = VerificationArtifactVocabulary.Definition(artifactKey).ProcedureLevel;
+        var isCaseDocument = artifactKey.Kind == VerificationArtifactKind.Case;
         var effectivity = await TestProcedureEffectivity.ForReleaseAsync(db, project.Id, release.Id, ct);
         var revisionIds = effectivity?.RevisionIds ?? [];
         var latest = await (from revision in db.TestProcedureRevisions.AsNoTracking()
                                 .Where(x => revisionIds.Contains(x.Id))
                             join procedure in db.TestProcedures.AsNoTracking()
-                                .Where(x => x.ProjectId == project.Id && x.Level == level
-                                    && (x.Level == TestProcedureLevel.System || x.ArtifactKind == VerificationArtifactKind.Case))
+                                .Where(x => x.ProjectId == project.Id
+                                    && x.ArtifactDiscipline == artifactKey.Discipline
+                                    && x.ArtifactKind == artifactKey.Kind)
                                 on revision.ProcedureId equals procedure.Id
                             orderby procedure.BaseNumber
                             select new { Procedure = procedure, Revision = revision }).ToListAsync(ct);
@@ -130,14 +135,25 @@ public sealed class DraftDocumentGenerator(AeroLinkDbContext db, RichContentPubl
             $"{x.Procedure.BaseNumber}.{x.Revision.Revision:D2}",
             $"{level} · {x.Revision.State}",
             x.Procedure.Title,
-            x.Revision.Steps,
-            new[]
-            {
-                ("Objective", x.Revision.Objective),
-                ("Preconditions", x.Revision.Preconditions),
-                ("Expected result", x.Revision.ExpectedResult),
-                ("Owner", x.Procedure.OwnerId)
-            })).ToList();
+            level == TestProcedureLevel.System || isCaseDocument ? x.Revision.Steps : x.Revision.Objective,
+            level == TestProcedureLevel.System || isCaseDocument
+                ? new[]
+                {
+                    ("Objective", x.Revision.Objective),
+                    ("Preconditions", x.Revision.Preconditions),
+                    ("Expected result", x.Revision.ExpectedResult),
+                    ("Owner", x.Procedure.OwnerId)
+                }
+                : new[]
+                {
+                    ("Environment / setup", x.Revision.EnvironmentSetup),
+                    ("Test data", x.Revision.TestData),
+                    ("Ordered steps", x.Revision.OrderedSteps),
+                    ("Expected observations", x.Revision.ExpectedObservations),
+                    ("Cleanup", x.Revision.Cleanup),
+                    ("Tooling / automation", x.Revision.ToolingAutomation),
+                    ("Owner", x.Procedure.OwnerId)
+                })).ToList();
         var generatedAt = DateTimeOffset.UtcNow;
         var documentNumber = DocumentNumber(type, release.Version, ladderPolicy);
         var revisionNumber = await NextRevisionAsync(project.Id, type, ct);
@@ -281,31 +297,14 @@ public sealed class DraftDocumentGenerator(AeroLinkDbContext db, RichContentPubl
             .Select(level => (RequirementLevel?)level)
             .SingleOrDefault();
 
-    private static TestProcedureLevel ProcedureLevelFor(ControlledDocumentType type, ILadderPolicy ladderPolicy)
-    {
-        var matches = ladderPolicy.OrderedLevels
-            .Where(level => ladderPolicy.Definition(level).Verification?.DocumentType == type)
-            .Select(level => ladderPolicy.Definition(level).Verification!.ProcedureLevel)
-            .ToArray();
-        return matches.Length == 1
-            ? matches[0]
-            : type switch
-            {
-                ControlledDocumentType.SystemTestProcedures => TestProcedureLevel.System,
-                ControlledDocumentType.HighLevelTestProcedures or ControlledDocumentType.HighLevelTestCases => TestProcedureLevel.HighLevel,
-                ControlledDocumentType.LowLevelTestProcedures or ControlledDocumentType.LowLevelTestCases => TestProcedureLevel.LowLevel,
-                _ => throw new DomainException($"Unknown controlled document type: {type}.")
-            };
-    }
-
     private static string DocumentTypeName(ControlledDocumentType type) => type switch
     {
         ControlledDocumentType.Sysrd => "System Requirements Document (SYSRD)",
         ControlledDocumentType.SwrdHighLevel => "High-Level Software Requirements Document (HLRD)",
         ControlledDocumentType.SwrdLowLevel => "Low-Level Software Requirements Document (LLRD)",
         ControlledDocumentType.SystemTestProcedures => "System Test Procedure Document (SYSTD)",
-        ControlledDocumentType.HighLevelTestProcedures => "HLR Test Procedure Document (HLRTD)",
-        ControlledDocumentType.LowLevelTestProcedures => "LLR Test Procedure Document (LLRTD)",
+        ControlledDocumentType.HighLevelTestProcedures => "HLR Test Procedure Document (HLRTPD)",
+        ControlledDocumentType.LowLevelTestProcedures => "LLR Test Procedure Document (LLRTPD)",
         ControlledDocumentType.HighLevelTestCases => "HLR Test Case Document (HLRTD)",
         ControlledDocumentType.LowLevelTestCases => "LLR Test Case Document (LLRTD)",
         _ => throw new DomainException($"Unknown controlled document type: {type}"),

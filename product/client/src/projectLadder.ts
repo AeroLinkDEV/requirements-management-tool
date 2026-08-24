@@ -2,7 +2,11 @@ export type LadderLevel = 'System' | 'HighLevel' | 'LowLevel' | 'Interface'
 
 export type ProjectLadderProjection = {
   /** Authored steps are intentionally not used by runtime surfaces; the server supplies this effective view. */
-  effectiveSteps: { catalogueEntry: LadderLevel; capabilities: number | string }[]
+  effectiveSteps: {
+    catalogueEntry: LadderLevel
+    capabilities: number | string
+    enabledArtifactKinds?: string[]
+  }[]
   state?: string
   classification?: string
 }
@@ -58,4 +62,15 @@ export function ladderHasAny(
   capability?: number,
 ): boolean {
   return levels.some(level => ladderAllows(ladder, level, capability))
+}
+
+/** Exact artifact-profile predicate; level verification alone must not activate dormant Procedure surfaces. */
+export function ladderEnablesArtifactKind(
+  ladder: ProjectLadderProjection | null | undefined,
+  level: LadderLevel,
+  kind: string,
+): boolean {
+  if (!ladder) return false
+  const step = ladder.effectiveSteps.find(item => item.catalogueEntry === level)
+  return !!step?.enabledArtifactKinds?.some(value => value.toLowerCase() === kind.toLowerCase())
 }

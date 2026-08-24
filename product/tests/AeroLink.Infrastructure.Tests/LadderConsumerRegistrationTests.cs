@@ -71,7 +71,16 @@ public sealed class LadderConsumerRegistrationTests
         Assert.All(packageConsumers, registration =>
             Assert.Contains(registration.SupportedArtifactKeys,
                 x => x == new VerificationArtifactKey(VerificationDiscipline.LowLevelSoftware, VerificationArtifactKind.Procedure)));
-        Assert.DoesNotContain(typed.Where(x => !packageConsumers.Contains(x)), registration =>
+        var controlledDocuments = typed.Single(x => x.Id == "baseline.controlled-documents");
+        Assert.Contains(controlledDocuments.SupportedArtifactKeys,
+            x => x == new VerificationArtifactKey(VerificationDiscipline.HighLevelSoftware,
+                VerificationArtifactKind.Procedure));
+        Assert.Contains(controlledDocuments.SupportedArtifactKeys,
+            x => x == new VerificationArtifactKey(VerificationDiscipline.LowLevelSoftware,
+                VerificationArtifactKind.Procedure));
+        Assert.Equal(VerificationArtifactCapability.ControlledDocument,
+            controlledDocuments.SupportedCapabilities);
+        Assert.DoesNotContain(typed.Where(x => x.Id is "verification.coverage" or "release.readiness"), registration =>
             registration.SupportedArtifactKeys.Any(x => x.Kind == VerificationArtifactKind.Procedure
                 && x.Discipline != VerificationDiscipline.System));
         Assert.Equal(VerificationArtifactCapability.Coverage,
@@ -102,7 +111,7 @@ public sealed class LadderConsumerRegistrationTests
         Assert.Contains(packageManifest.MissingArtifactCoverage, x =>
             x.ArtifactKey == new VerificationArtifactKey(VerificationDiscipline.HighLevelSoftware, VerificationArtifactKind.Procedure)
             && x.RequiredCapabilities.HasFlag(VerificationArtifactCapability.Execution));
-        Assert.Contains(packageManifest.MissingArtifactCoverage, x =>
+        Assert.DoesNotContain(packageManifest.MissingArtifactCoverage, x =>
             x.ArtifactKey == new VerificationArtifactKey(VerificationDiscipline.LowLevelSoftware, VerificationArtifactKind.Procedure)
             && x.RequiredCapabilities.HasFlag(VerificationArtifactCapability.ControlledDocument));
 

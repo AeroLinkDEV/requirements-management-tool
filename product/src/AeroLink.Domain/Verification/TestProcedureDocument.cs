@@ -21,7 +21,8 @@ public sealed class TestProcedureDocument
     private TestProcedureDocument() { }
 
     public TestProcedureDocument(Guid projectId, string documentNumber, string title, TestProcedureLevel level,
-        string description, string actor, DateTimeOffset now)
+        string description, string actor, DateTimeOffset now,
+        VerificationArtifactKind? artifactKind = null)
     {
         if (projectId == Guid.Empty) throw new DomainException("A verification artifact document belongs to a Project.");
         if (!Enum.IsDefined(level)) throw new DomainException("A verification artifact document requires a known level.");
@@ -30,6 +31,11 @@ public sealed class TestProcedureDocument
         DocumentNumber = Required(documentNumber, "document number");
         Title = Required(title, "title");
         Level = level;
+        ArtifactKind = artifactKind ?? (level == TestProcedureLevel.System
+            ? VerificationArtifactKind.Procedure
+            : VerificationArtifactKind.Case);
+        if (level == TestProcedureLevel.System && ArtifactKind != VerificationArtifactKind.Procedure)
+            throw new DomainException("The System verification document can contain Procedure artifacts only.");
         Description = description?.Trim() ?? "";
         CreatedBy = Required(actor, "author");
         CreatedAt = now;
@@ -42,6 +48,18 @@ public sealed class TestProcedureDocument
     public string DocumentNumber { get; private set; } = "";
     public string Title { get; private set; } = "";
     public TestProcedureLevel Level { get; private set; }
+    /// <summary>
+    /// The exact artifact family filed in this document. Level alone is insufficient once software enables
+    /// both Case and Procedure: HLR Case and HLR Procedure records must never share a register or section.
+    /// </summary>
+    public VerificationArtifactKind ArtifactKind { get; private set; }
+    public VerificationArtifactKey ArtifactKey => new(Level switch
+    {
+        TestProcedureLevel.System => VerificationDiscipline.System,
+        TestProcedureLevel.HighLevel => VerificationDiscipline.HighLevelSoftware,
+        TestProcedureLevel.LowLevel => VerificationDiscipline.LowLevelSoftware,
+        _ => throw new DomainException($"Unknown verification artifact level: {Level}.")
+    }, ArtifactKind);
     public string Description { get; private set; } = "";
     public string CreatedBy { get; private set; } = "";
     public DateTimeOffset CreatedAt { get; private set; }

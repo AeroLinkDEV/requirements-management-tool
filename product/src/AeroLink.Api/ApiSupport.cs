@@ -202,8 +202,8 @@ static class ApiMap
         ControlledDocumentType.SwrdHighLevel => "High-Level Software Requirements Document (HLRD)",
         ControlledDocumentType.SwrdLowLevel => "Low-Level Software Requirements Document (LLRD)",
         ControlledDocumentType.SystemTestProcedures => "System Test Procedure Document (SYSTD)",
-        ControlledDocumentType.HighLevelTestProcedures => "HLR Test Procedure Document (HLRTD)",
-        ControlledDocumentType.LowLevelTestProcedures => "LLR Test Procedure Document (LLRTD)",
+        ControlledDocumentType.HighLevelTestProcedures => "HLR Test Procedure Document (HLRTPD)",
+        ControlledDocumentType.LowLevelTestProcedures => "LLR Test Procedure Document (LLRTPD)",
         ControlledDocumentType.HighLevelTestCases => "HLR Test Case Document (HLRTD)",
         ControlledDocumentType.LowLevelTestCases => "LLR Test Case Document (LLRTD)",
         _ => throw new DomainException($"Unknown controlled document type: {type}.")

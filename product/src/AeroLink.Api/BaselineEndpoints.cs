@@ -697,11 +697,20 @@ public static class BaselineEndpoints
             var requirementCounts = await (from member in db.BaselineRequirements.AsNoTracking().Where(x => x.BaselineId == id) join artifact in db.Requirements.AsNoTracking() on member.ArtifactId equals artifact.Id group artifact by artifact.Level into g select new { g.Key, Count = g.Count() }).ToDictionaryAsync(x => x.Key, x => x.Count, ct);
             var procedureEffectivity = await TestProcedureEffectivity.ForBaselineAsync(db, id, ct);
             var procedureRevisionIds = procedureEffectivity?.RevisionIds ?? [];
-            var testCounts = await (from revision in db.TestProcedureRevisions.AsNoTracking().Where(x => procedureRevisionIds.Contains(x.Id))
-                                    join procedure in db.TestProcedures.AsNoTracking().Where(x => x.Level == TestProcedureLevel.System || x.ArtifactKind == VerificationArtifactKind.Case) on revision.ProcedureId equals procedure.Id
-                                    group procedure by procedure.Level into grouped
-                                    select new { Key = grouped.Key, Count = grouped.Count() })
-                .ToDictionaryAsync(x => x.Key, x => x.Count, ct);
+            var enabledArtifactKeys = ladderPolicy.Definitions
+                .Where(x => x.VerificationProfile is not null)
+                .SelectMany(x => x.VerificationProfile!.Definitions.Select(artifact => artifact.Key))
+                .ToHashSet();
+            var effectiveArtifacts = await (from revision in db.TestProcedureRevisions.AsNoTracking()
+                                                .Where(x => procedureRevisionIds.Contains(x.Id))
+                                            join artifact in db.TestProcedures.AsNoTracking()
+                                                on revision.ProcedureId equals artifact.Id
+                                            select new { artifact.ArtifactDiscipline, artifact.ArtifactKind })
+                .ToListAsync(ct);
+            var testCounts = effectiveArtifacts
+                .GroupBy(x => new VerificationArtifactKey(x.ArtifactDiscipline, x.ArtifactKind))
+                .Where(x => enabledArtifactKeys.Contains(x.Key))
+                .ToDictionary(x => x.Key, x => x.Count());
             var suffix = release.Version.Replace(".", "");
             var specs = new List<(ControlledDocumentType Type, string Number, string Title, int Count)>();
             foreach (var level in ladderPolicy.OrderedLevels)
@@ -710,18 +719,26 @@ public static class BaselineEndpoints
                 if (definition.RequirementsDocumentType is { } requirementDocument)
                     specs.Add((requirementDocument, $"{ladderPolicy.ControlledDocumentPrefix(requirementDocument)}-{int.Parse(suffix):D6}",
                         $"{project.SoftwareProduct} {ladderPolicy.ControlledDocumentTitle(requirementDocument)}", requirementCounts.GetValueOrDefault(level)));
-                if (definition.Verification is { } verification)
-                    specs.Add((verification.DocumentType, $"{ladderPolicy.ControlledDocumentPrefix(verification.DocumentType)}-{int.Parse(suffix):D6}",
-                        $"{project.SoftwareProduct} {ladderPolicy.ControlledDocumentTitle(verification.DocumentType)}",
-                        testCounts.GetValueOrDefault(verification.ProcedureLevel)));
+                if (definition.VerificationProfile is { } verificationProfile)
+                {
+                    foreach (var artifact in verificationProfile.Definitions)
+                    {
+                        var documentType = ladderPolicy.ControlledDocument(artifact.Key);
+                        specs.Add((documentType,
+                            $"{ladderPolicy.ControlledDocumentPrefix(documentType)}-{int.Parse(suffix):D6}",
+                            $"{project.SoftwareProduct} {ladderPolicy.ControlledDocumentTitle(documentType)}",
+                            testCounts.GetValueOrDefault(artifact.Key)));
+                    }
+                }
             }
             // The approved layout for each document type, if the programme has recorded one. Bound to the document
             // at generation and never re-resolved: revising a template afterwards must not change a document that
             // has already been produced and possibly signed.
             var approvedTemplates = await ControlledLayouts.ApprovedAsync(db, project.Id, ct);
             var procedureDocumentTypes = ladderPolicy.Definitions
-                .Where(x => x.Verification is not null)
-                .Select(x => x.Verification!.DocumentType).ToHashSet();
+                .Where(x => x.VerificationProfile is not null)
+                .SelectMany(x => x.VerificationProfile!.Definitions)
+                .Select(x => ladderPolicy.ControlledDocument(x.Key)).ToHashSet();
             // #419: a controlled test-procedure document is one exact, immutable procedure manifest. The
             // record must never be created against a compatibility projection that materialization later
             // changes, and its hash basis must never fall back to the requirement manifest.

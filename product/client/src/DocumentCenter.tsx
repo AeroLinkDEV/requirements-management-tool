@@ -1,16 +1,18 @@
 import DocumentActions from "./DocumentActions";
+import type { ProjectLadderProjection } from "./projectLadder";
 import type { Discipline } from "./routing";
-import { documentTypeLabel, procedureTargetsFor, type DocumentTarget } from "./presentation";
+import { configuredProcedureTargetsFor, documentTypeLabel, type DocumentTarget } from "./presentation";
 
 type Props = {
   api: string;
   projectId: string;
   release: { id: string; version: string; isReleased: boolean };
   discipline: Discipline;
+  ladder: ProjectLadderProjection | null;
   onBack: () => void;
 };
 
-const targets = (discipline: Discipline): DocumentTarget[] => {
+const targets = (discipline: Discipline, ladder: ProjectLadderProjection | null): DocumentTarget[] => {
   if (discipline === "system")
     return [{ type: "Sysrd", label: documentTypeLabel("Sysrd") }];
   if (discipline === "software")
@@ -19,11 +21,14 @@ const targets = (discipline: Discipline): DocumentTarget[] => {
       { type: "SwrdLowLevel", label: documentTypeLabel("SwrdLowLevel") },
     ];
   if (discipline === "systemTest")
-    return [{ type: "SystemTestProcedures", label: documentTypeLabel("SystemTestProcedures") }];
-  return procedureTargetsFor("Software");
+    return configuredProcedureTargetsFor(ladder, "System");
+  return [
+    ...configuredProcedureTargetsFor(ladder, "Software"),
+    ...configuredProcedureTargetsFor(ladder, "Software", undefined, "Procedure"),
+  ];
 };
 
-export default function DocumentCenter({ api, projectId, release, discipline, onBack }: Props) {
+export default function DocumentCenter({ api, projectId, release, discipline, ladder, onBack }: Props) {
   const assurance = discipline === "systemTest" || discipline === "softwareTest";
   const scope = discipline === "software" || discipline === "softwareTest" ? "Software" : "System";
   return (
@@ -47,7 +52,7 @@ export default function DocumentCenter({ api, projectId, release, discipline, on
         api={api}
         projectId={projectId}
         release={release}
-        targets={targets(discipline)}
+        targets={targets(discipline, ladder)}
         heading={`${scope} ${assurance ? "assurance" : "engineering"} documents`}
       />
       {assurance && (

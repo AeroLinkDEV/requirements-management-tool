@@ -1,11 +1,11 @@
 {
   "schemaVersion": "aerolink-api-test-intent/v2",
   "totals": {
-    "tests": 543,
-    "cases": 597,
-    "classes": 95,
-    "hostedTests": 530,
-    "hostedCases": 575,
+    "tests": 544,
+    "cases": 598,
+    "classes": 96,
+    "hostedTests": 531,
+    "hostedCases": 576,
     "nonHostedTests": 8,
     "nonHostedCases": 17,
     "unknownHostTests": 5,
@@ -29,10 +29,10 @@
     "ef-translation": {
       "label": "EF translation / relational constraints",
       "level": "Infrastructure (needs a database, not a host)",
-      "tests": 108,
-      "cases": 115,
+      "tests": 109,
+      "cases": 116,
       "unknownCases": 0,
-      "classes": 44
+      "classes": 45
     },
     "auth-policy": {
       "label": "Authentication / authorization wiring",
@@ -5254,6 +5254,24 @@
       "sourceLines": {
         "start": 296,
         "end": 315
+      }
+    },
+    {
+      "cls": "ProcedureControlledDocumentApiTests",
+      "test": "Exact_key_documents_have_distinct_identity_content_hash_and_frozen_bytes",
+      "kind": "Fact",
+      "intent": "ef-translation",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 24,
+        "end": 127
       }
     },
     {

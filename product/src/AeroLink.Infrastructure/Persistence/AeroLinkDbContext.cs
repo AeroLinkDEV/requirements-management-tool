@@ -1338,14 +1338,23 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
         // sides of the product keep the same shape rather than drifting into two conventions.
         modelBuilder.Entity<TestProcedureDocument>(b =>
         {
-            b.ToTable("test_procedure_documents"); b.HasKey(x => x.Id);
+            b.ToTable("test_procedure_documents", table =>
+            {
+                table.HasCheckConstraint("CK_test_procedure_documents_ArtifactKind",
+                    "\"ArtifactKind\" IN ('Case', 'Procedure')");
+                table.HasCheckConstraint("CK_test_procedure_documents_SystemProcedureOnly",
+                    "\"Level\" <> 'System' OR \"ArtifactKind\" = 'Procedure'");
+            });
+            b.HasKey(x => x.Id);
             b.Property(x => x.DocumentNumber).HasMaxLength(40).IsRequired();
             b.Property(x => x.Title).HasMaxLength(300).IsRequired();
             b.Property(x => x.Level).HasConversion<string>().HasMaxLength(40);
+            b.Property(x => x.ArtifactKind).HasConversion<string>().HasMaxLength(40);
             b.Property(x => x.Description).HasMaxLength(4000);
             b.Property(x => x.CreatedBy).HasMaxLength(100).IsRequired();
-            // One document per level per project, which is what makes "the HLRTD" a thing you can name.
-            b.HasIndex(x => new { x.ProjectId, x.Level }).IsUnique();
+            // One document per exact artifact key. Software Case and Procedure share a discipline but are
+            // separate controlled records with separate content and numbering.
+            b.HasIndex(x => new { x.ProjectId, x.Level, x.ArtifactKind }).IsUnique();
             b.HasIndex(x => x.DocumentNumber).IsUnique();
             b.HasOne<ProjectRecord>().WithMany().HasForeignKey(x => x.ProjectId).OnDelete(DeleteBehavior.Restrict);
         });
