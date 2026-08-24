@@ -46,8 +46,7 @@ public sealed class SoftwareVerificationCaseMigrationAuthority(
                 .Where(x => documents.Select(d => d.Id).Contains(x.DocumentId))
                 .OrderBy(x => x.DocumentId).ThenBy(x => x.Format).ToListAsync(ct);
             var renditionByArtifactId = new Dictionary<Guid, (string OldHash, string NewHash)>();
-            var renditionByDocumentId = new Dictionary<Guid, string>();
-            var documentHashes = new Dictionary<Guid, List<(string Format, byte[] Content)>>();
+            var renditionByDocumentId = new Dictionary<Guid, (string OldHash, string NewHash)>();
 
             // Exact build-scoped manifests are identity-bearing controlled evidence and therefore have to be
             // recomputed after HLRTP/LLRTP become HLRTC/LLRTC. Legacy controlled documents are different:
@@ -64,11 +63,29 @@ public sealed class SoftwareVerificationCaseMigrationAuthority(
                 var migrationBasis = await ResolveDocumentMigrationBasisAsync(document, now, ct);
                 var contentBasis = $"{migrationBasis.Hash}|{document.Type}|{document.ArtifactCount}|{Actor}";
                 var contentHash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(contentBasis))).ToLowerInvariant();
+                var oldDocumentHash = document.ContentHash;
+                renditionByDocumentId[document.Id] = (oldDocumentHash, contentHash);
                 // Exact manifests intentionally receive a new migration generation time, as before. A legacy
                 // compatibility snapshot must retain its original GeneratedAt because that timestamp is the
                 // authority selecting which historical revision rows belong in the document. Moving it to now
                 // would allow later approved revisions to leak into a document they never belonged to.
                 document.RecordMigrationContentBasis(contentHash, migrationBasis.GeneratedAt);
+                var storedArtifactCount = artifacts.Count(x => x.DocumentId == document.Id);
+                db.SecurityAuditEvents.Add(new SecurityAuditEvent(
+                    "VerificationIdentityMigration.DocumentContentBasisRewritten", Actor,
+                    $"ControlledDocument:{document.Id}", "Succeeded",
+                    Json(new
+                    {
+                        migration = MigrationMarker,
+                        documentId = document.Id,
+                        oldContentHash = oldDocumentHash,
+                        newContentHash = contentHash,
+                        storedArtifactCount,
+                        outputBytesRegenerated = storedArtifactCount > 0,
+                        reason = storedArtifactCount > 0
+                            ? "The controlled document content basis was refreshed before governed stored-rendition regeneration."
+                            : "The controlled document has no stored rendition; only its exact on-demand content basis was refreshed."
+                    }), "", now));
             }
             await db.SaveChangesAsync(ct);
 
@@ -86,9 +103,6 @@ public sealed class SoftwareVerificationCaseMigrationAuthority(
                 artifact.ReplaceMigrationRendition(stored.StorageKey, stored.OriginalFileName, stored.ContentType,
                     stored.Size, stored.Sha256, now);
                 renditionByArtifactId[artifact.Id] = (oldHash, stored.Sha256);
-                if (!documentHashes.TryGetValue(artifact.DocumentId, out var outputs))
-                    documentHashes[artifact.DocumentId] = outputs = [];
-                outputs.Add((artifact.Format, output.Content));
                 db.SecurityAuditEvents.Add(new SecurityAuditEvent(
                     "VerificationIdentityMigration.DocumentRenditionRewritten", Actor,
                     $"ControlledDocumentArtifact:{artifact.Id}", "Succeeded",
@@ -106,11 +120,6 @@ public sealed class SoftwareVerificationCaseMigrationAuthority(
             }
 
             var reviewCycleRenditions = await RecomputeReviewCycleSnapshotsAsync(now, ct);
-            foreach (var documentId in documentHashes.Keys)
-            {
-                var document = documents.Single(x => x.Id == documentId);
-                renditionByDocumentId[documentId] = document.ContentHash;
-            }
             var supersededSignatures = await CompleteSignatureSupersessionsAsync(
                 renditionByArtifactId, renditionByDocumentId, reviewCycleRenditions, now, ct);
 
@@ -119,7 +128,7 @@ public sealed class SoftwareVerificationCaseMigrationAuthority(
                 Json(new
                 {
                     migration = MigrationMarker,
-                    renderedDocuments = documentHashes.Count,
+                    renderedDocuments = documents.Count,
                     renderedArtifacts = artifacts.Count,
                     reviewCyclesRewritten = reviewCycleRenditions.Count,
                     signaturesSuperseded = supersededSignatures,
@@ -221,7 +230,11 @@ public sealed class SoftwareVerificationCaseMigrationAuthority(
             ?? throw new InvalidOperationException(
                 $"Software Case migration cannot render document {document.Id}: baseline {document.BaselineId} does not exist.");
 
-        if (baseline.TestProceduresMaterializedAt is not null)
+        // A document generated before exact baseline materialization remains a legacy document forever.
+        // The baseline may have been materialized later; using its current hash here would silently replace
+        // the historical generation-time population with a newer build-scoped selection.
+        if (baseline.TestProceduresMaterializedAt is { } materializedAt
+            && materializedAt <= document.GeneratedAt)
         {
             if (string.IsNullOrWhiteSpace(baseline.TestProceduresHash))
                 throw new InvalidOperationException(
@@ -273,7 +286,9 @@ public sealed class SoftwareVerificationCaseMigrationAuthority(
                 generatedAt = originalGeneratedAt,
                 artifactCount = document.ArtifactCount,
                 compatibilitySnapshotHash,
-                baselineManifestPreservedAsUnmaterialized = true,
+                baselineManifestStatePreserved = true,
+                baselineMaterializedAt = baseline.TestProceduresMaterializedAt,
+                baselineWasMaterializedWhenDocumentGenerated = false,
                 documentGeneratedAtPreserved = true,
                 reason = "The controlled document predates exact build-scoped verification manifests. Its migration basis was reconstructed from the existing generation-time compatibility snapshot; no historical baseline materialization state was fabricated and the original generation time was preserved so later revisions cannot leak into the regenerated document."
             }), "", now));
@@ -282,7 +297,7 @@ public sealed class SoftwareVerificationCaseMigrationAuthority(
 
     private async Task<int> CompleteSignatureSupersessionsAsync(
         IReadOnlyDictionary<Guid, (string OldHash, string NewHash)> renditionByArtifactId,
-        IReadOnlyDictionary<Guid, string> renditionByDocumentId,
+        IReadOnlyDictionary<Guid, (string OldHash, string NewHash)> renditionByDocumentId,
         IReadOnlyDictionary<Guid, (Guid ReviewId, string OldHash, string NewHash)> reviewCycleRenditions,
         DateTimeOffset now, CancellationToken ct)
     {
@@ -357,10 +372,19 @@ public sealed class SoftwareVerificationCaseMigrationAuthority(
             }
             else if (signature.ArtifactType.Equals("ControlledDocumentArtifact", StringComparison.OrdinalIgnoreCase)
                 && renditionByArtifactId.TryGetValue(signature.ArtifactId, out var artifactRendition))
+            {
+                if (!string.Equals(signature.ContentHash, artifactRendition.OldHash, StringComparison.OrdinalIgnoreCase))
+                    throw new InvalidOperationException($"Signature {signature.Id} does not match the exact pre-migration stored artifact hash.");
                 replacementHash = artifactRendition.NewHash;
+            }
             else if (signature.ArtifactType.Equals("ControlledDocument", StringComparison.OrdinalIgnoreCase)
-                && renditionByDocumentId.TryGetValue(signature.ArtifactId, out var documentHash))
-                replacementHash = documentHash;
+                && renditionByDocumentId.TryGetValue(signature.ArtifactId, out var documentRendition))
+            {
+                if (!string.Equals(signature.ContentHash, documentRendition.OldHash, StringComparison.OrdinalIgnoreCase))
+                    throw new InvalidOperationException($"Signature {signature.Id} does not match the exact pre-migration controlled document content-basis hash.");
+                replacementHash = documentRendition.NewHash;
+                evidenceReason = "The exact controlled document content basis changed, including for an on-demand document without a stored rendition; the original human signature row and hash remain unchanged and require a new human signature.";
+            }
             else
                 throw new InvalidOperationException($"Signature {signature.Id} ({signature.ArtifactType}/{signature.ArtifactId}) has no exact controlled-output hash authority; migration remains pending.");
 
