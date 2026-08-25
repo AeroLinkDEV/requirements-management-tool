@@ -1,4 +1,5 @@
 using AeroLink.Domain.Common;
+using AeroLink.Domain.ChangeControl;
 using AeroLink.Domain.Hierarchy;
 using AeroLink.Domain.Identity;
 using AeroLink.Domain.Releases;
@@ -480,18 +481,21 @@ public static class VerificationEndpoints
         });
 
         app.MapPost("/api/test-{artifactRoute:regex(procedures|cases)}/{id:guid}/comments", async (string artifactRoute, Guid id, CreateProcedureCommentRequest request,
-            HttpContext http, AeroLinkDbContext db, CancellationToken ct) =>
+            HttpContext http, AeroLinkDbContext db, IProjectLadderPolicyResolver policyResolver, CancellationToken ct) =>
         {
             var procedure = await db.TestProcedures.AsNoTracking().SingleOrDefaultAsync(x => x.Id == id, ct);
             if (procedure is null || !ArtifactRouteAllows(artifactRoute, procedure.Level, procedure.ArtifactKind)) return Results.NotFound();
             if (!await http.HasProjectAccessAsync(db, procedure.ProjectId, ct)) return Results.Forbid();
-            if (procedure.ArtifactKind == VerificationArtifactKind.Procedure
-                && procedure.Level != TestProcedureLevel.System)
-                return Results.BadRequest(new
-                {
-                    error = "Dormant software Procedures are read-only; discussion mutation is unavailable.",
-                    code = "dormant_procedure_discussion_read_only"
-                });
+            var policy = await policyResolver.ResolveAsync(procedure.ProjectId, ct);
+            var discussionEnabled = procedure.Level switch
+            {
+                TestProcedureLevel.System => policy.VerificationProfile(RequirementLevel.System).Enables(VerificationArtifactKind.Procedure),
+                TestProcedureLevel.HighLevel => policy.VerificationProfile(RequirementLevel.HighLevel).Enables(procedure.ArtifactKind),
+                TestProcedureLevel.LowLevel => policy.VerificationProfile(RequirementLevel.LowLevel).Enables(procedure.ArtifactKind),
+                _ => false,
+            };
+            if (!discussionEnabled)
+                return Results.BadRequest(new { error = "Discussion is unavailable for this disabled verification artifact.", code = "verification_discussion_disabled" });
             if (request.RevisionId is not null
                 && !await db.TestProcedureRevisions.AnyAsync(x => x.Id == request.RevisionId && x.ProcedureId == id, ct))
                 return Results.BadRequest(new { error = $"The comment revision is not part of this {ArtifactNoun(procedure.Level)}." });
@@ -839,7 +843,7 @@ public static class VerificationEndpoints
         // The workspace rendered every procedure it was given — 440 cards on the software side — with no
         // search, filter or page. This returns a bounded page and the total, and every predicate below runs
         // in the database, because a page of twenty-five that costs a full table read is not paging.
-        app.MapGet("/api/test-{artifactRoute:regex(procedures|cases)}", async (string artifactRoute, Guid projectId, Guid? releaseId, string? search, string? scope, string? state,
+        app.MapGet("/api/{artifactRoute:regex(test-procedures|test-cases|verification-artifacts)}", async (string artifactRoute, Guid projectId, Guid? releaseId, string? search, string? scope, string? state,
             string? owner, string? outcome, Guid? requirementRevisionId, string? sort, int? page, int? pageSize, string? ids,
             Guid? documentId, Guid? sectionId, string? artifactKind,
             HttpContext http, AeroLinkDbContext db, IProjectLadderPolicyResolver policyResolver, CancellationToken ct) =>
@@ -850,23 +854,41 @@ public static class VerificationEndpoints
             var allowedProcedureLevels = ladderPolicy.OrderedLevels
                 .Where(level => ladderPolicy.Definition(level).Verification is not null)
                 .Select(level => ladderPolicy.ProcedureLevel(level)).ToArray();
+            var enabledKeys = ladderPolicy.Definitions
+                .Where(level => level.VerificationProfile is not null)
+                .SelectMany(level => level.VerificationProfile!.Definitions)
+                .Select(definition => definition.Key)
+                .ToHashSet();
+            var systemCaseEnabled = enabledKeys.Contains(new VerificationArtifactKey(VerificationDiscipline.System, VerificationArtifactKind.Case));
+            var systemProcedureEnabled = enabledKeys.Contains(new VerificationArtifactKey(VerificationDiscipline.System, VerificationArtifactKind.Procedure));
+            var highCaseEnabled = enabledKeys.Contains(new VerificationArtifactKey(VerificationDiscipline.HighLevelSoftware, VerificationArtifactKind.Case));
+            var highProcedureEnabled = enabledKeys.Contains(new VerificationArtifactKey(VerificationDiscipline.HighLevelSoftware, VerificationArtifactKind.Procedure));
+            var lowCaseEnabled = enabledKeys.Contains(new VerificationArtifactKey(VerificationDiscipline.LowLevelSoftware, VerificationArtifactKind.Case));
+            var lowProcedureEnabled = enabledKeys.Contains(new VerificationArtifactKey(VerificationDiscipline.LowLevelSoftware, VerificationArtifactKind.Procedure));
             var currentPage = Math.Max(1, page ?? 1);
             var size = Math.Clamp(pageSize ?? 25, 1, 200);
             var source = db.TestProcedures.AsNoTracking().Where(x => x.ProjectId == projectId);
             source = allowedProcedureLevels.Length == 0
                 ? source.Where(_ => false)
                 : source.Where(x => allowedProcedureLevels.Contains(x.Level));
-            // /api/test-procedures is a bounded legacy alias for the canonical software Case route.  Dormant
-            // software Procedures are authorable/inspectable through their shared service but never enter the
-            // Case execution/effectivity inventory (System Procedures remain visible here).
-            var explicitProcedureInventory = string.Equals(artifactKind, nameof(VerificationArtifactKind.Procedure), StringComparison.OrdinalIgnoreCase)
-                && string.Equals(artifactRoute, "procedures", StringComparison.OrdinalIgnoreCase);
-            source = explicitProcedureInventory
-                ? source.Where(x => x.ArtifactKind == VerificationArtifactKind.Procedure)
-                : source.Where(x => x.Level == TestProcedureLevel.System || x.ArtifactKind == VerificationArtifactKind.Case);
-            if (string.Equals(artifactRoute, "cases", StringComparison.OrdinalIgnoreCase))
-                source = source.Where(x => x.Level == TestProcedureLevel.HighLevel || x.Level == TestProcedureLevel.LowLevel)
-                    .Where(x => x.ArtifactKind == VerificationArtifactKind.Case);
+            // The effective profile is the authority for both level and kind. Historical rows must not leak into
+            // a combined inventory merely because the aggregate still contains them.
+            var legacyRoute = artifactRoute switch { "test-procedures" => "procedures", "test-cases" => "cases", _ => artifactRoute };
+            var requestedKind = Enum.TryParse<VerificationArtifactKind>(artifactKind, true, out var parsedKind)
+                ? (VerificationArtifactKind?)parsedKind
+                : string.Equals(legacyRoute, "cases", StringComparison.OrdinalIgnoreCase)
+                    ? VerificationArtifactKind.Case
+                    : string.Equals(legacyRoute, "procedures", StringComparison.OrdinalIgnoreCase)
+                        ? VerificationArtifactKind.Procedure
+                    : string.Equals(scope, "System", StringComparison.OrdinalIgnoreCase)
+                        ? VerificationArtifactKind.Procedure
+                        : null;
+            source = source.Where(x =>
+                (x.Level == TestProcedureLevel.System && ((x.ArtifactKind == VerificationArtifactKind.Case && systemCaseEnabled) || (x.ArtifactKind == VerificationArtifactKind.Procedure && systemProcedureEnabled)))
+                || (x.Level == TestProcedureLevel.HighLevel && ((x.ArtifactKind == VerificationArtifactKind.Case && highCaseEnabled) || (x.ArtifactKind == VerificationArtifactKind.Procedure && highProcedureEnabled)))
+                || (x.Level == TestProcedureLevel.LowLevel && ((x.ArtifactKind == VerificationArtifactKind.Case && lowCaseEnabled) || (x.ArtifactKind == VerificationArtifactKind.Procedure && lowProcedureEnabled))));
+            if (requestedKind is not null)
+                source = source.Where(x => x.ArtifactKind == requestedKind.Value);
             Dictionary<Guid, Guid>? scopedRevisions = null;
             if(releaseId is not null)
             {
@@ -1027,8 +1049,9 @@ public static class VerificationEndpoints
             var titles = await TestProcedureRevisionTitleProjection.ForRevisionsAsync(db, selectedRevisionIds, ct);
             var coverage = await db.TestCoverage.AsNoTracking().Where(x => selectedRevisionIds.Contains(x.ProcedureRevisionId)).ToListAsync(ct);
             var executions = await db.TestExecutions.AsNoTracking().Where(x => selectedRevisionIds.Contains(x.ProcedureRevisionId)).ToListAsync(ct);
+            // Keep the order produced by the server-side page (including requested sort). Reordering here by
+            // BaseNumber would make page boundaries lie whenever owner/level/title sorting was requested.
             var projected = all
-                .OrderBy(x => x.BaseNumber).ThenBy(x => x.BaseNumber)
                 .Select(x => { var latest = scopedRevisions is not null && scopedRevisions.TryGetValue(x.Id, out var selectedRevisionId)
                         ? revisions.SingleOrDefault(r => r.Id == selectedRevisionId)
                         : revisions.Where(r => r.ProcedureId == x.Id).OrderByDescending(r => r.Revision).FirstOrDefault();

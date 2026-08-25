@@ -327,7 +327,12 @@ export const configuredProcedureTargetsFor = (
   scope: 'System' | 'Software',
   level?: string,
   artifactKind?: string,
-): DocumentTarget[] => procedureTargetsFor(scope, level, artifactKind).filter(target => {
+): DocumentTarget[] => {
+  const candidates = artifactKind
+    ? procedureTargetsFor(scope, level, artifactKind)
+    : [...procedureTargetsFor(scope, level, 'Case'), ...procedureTargetsFor(scope, level, 'Procedure')]
+  const unique = candidates.filter((target, index, all) => all.findIndex(item => item.type === target.type) === index)
+  return unique.filter(target => {
   const key: { level: LadderLevel; kind: 'Case' | 'Procedure' } = target.type === 'SystemTestProcedures'
     ? { level: 'System', kind: 'Procedure' }
     : target.type === 'HighLevelTestProcedures'
@@ -337,8 +342,9 @@ export const configuredProcedureTargetsFor = (
         : target.type === 'HighLevelTestCases'
           ? { level: 'HighLevel', kind: 'Case' }
           : { level: 'LowLevel', kind: 'Case' }
-  return ladderEnablesArtifactKind(ladder, key.level, key.kind)
-})
+    return ladderEnablesArtifactKind(ladder, key.level, key.kind)
+  })
+}
 
 export const targetsFor = (scope: 'System' | 'Software', level?: string): DocumentTarget[] => {
   if (scope === 'System') return [{ type: 'Sysrd', label: documentTypeLabels.Sysrd }]

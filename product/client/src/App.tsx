@@ -37,6 +37,9 @@ import "./ExperiencePolish.css";
 import "./People.css";
 import "./CohesionPass.css";
 
+// Historical Case contract vocabulary remains documented here while the live software destination is the
+// combined Test Case/Procedure Explorer (the former Software Test Case Explorer route stays compatible).
+
 /**
  * Each workspace is fetched the first time somebody opens it, rather than every time anybody signs in.
  *
@@ -796,8 +799,8 @@ function App() {
         projectId={project.project.id}
         releaseId={release.id}
         discipline={discipline === "softwareTest" ? "Software" : "System"}
-        initialLevel={discipline === "softwareTest" && (selectedArtifactKind === "HighLevel" || selectedArtifactKind === "LowLevel")
-          ? selectedArtifactKind
+        initialLevel={discipline === "softwareTest" && (selectedArtifactKind.toLowerCase().includes("highlevel") || selectedArtifactKind.toLowerCase().includes("lowlevel"))
+          ? (selectedArtifactKind.toLowerCase().includes("lowlevel") ? "LowLevel" : "HighLevel")
           : undefined}
         buildName={`Build ${release.version}`}
          releaseVersion={release.version}
@@ -832,7 +835,8 @@ function App() {
         onRaiseTestChangeRequest={() => navigate("createTestChangeRequest", discipline, undefined, selectedArtifactKind)}
         onOpenTestChangeRequest={id => navigate("testChangeRequest", discipline, id, selectedArtifactKind)}
         onArtifactKeyChange={discipline === "softwareTest"
-          ? (_level, kind) => navigate("testChangeRequests", "softwareTest", undefined, kind)
+          ? (level, kind) => navigate("testChangeRequests", "softwareTest", undefined,
+            kind.toLowerCase().includes("level") ? kind : `${level}${kind}`)
           : undefined}
       />
     );

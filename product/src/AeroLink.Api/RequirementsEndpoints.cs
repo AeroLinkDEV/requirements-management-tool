@@ -343,8 +343,35 @@ public static class RequirementsEndpoints
             var artifact=await db.Requirements.AsNoTracking().SingleOrDefaultAsync(x=>x.Id==artifactId,ct);if(artifact is null)return Results.NotFound();if(!await http.HasProjectAccessAsync(db,artifact.ProjectId,ct))return Results.Forbid();if(request.RevisionId is not null&&!await db.RequirementRevisions.AnyAsync(x=>x.Id==request.RevisionId&&x.ArtifactId==artifactId,ct))return Results.BadRequest(new{error="The comment revision is not part of this requirement."});if(request.ParentCommentId is not null&&!await db.ArtifactComments.AnyAsync(x=>x.Id==request.ParentCommentId&&x.ArtifactId==artifactId,ct))return Results.BadRequest(new{error="The parent comment is not part of this requirement."});try{var actor=http.UserAccount().UserName;var now=DateTimeOffset.UtcNow;var comment=new ArtifactComment(artifact.ProjectId,"Requirement",artifactId,request.RevisionId,request.ParentCommentId,request.Body,JsonSerializer.Serialize(request.Mentions??[]),actor,now);db.ArtifactComments.Add(comment);var requested=(request.Mentions??[]).Select(x=>x.Trim().ToLowerInvariant()).ToHashSet();var watchers=await db.ArtifactWatches.AsNoTracking().Where(x=>x.ArtifactId==artifactId).Select(x=>x.UserName).ToListAsync(ct);requested.UnionWith(watchers);if(request.ParentCommentId is not null){var parentAuthor=await db.ArtifactComments.Where(x=>x.Id==request.ParentCommentId).Select(x=>x.CreatedBy).SingleAsync(ct);requested.Add(parentAuthor.ToLowerInvariant());}var recipients=await db.UserAccounts.AsNoTracking().Where(x=>requested.Contains(x.UserName)&&x.UserName!=actor).Select(x=>x.UserName).ToListAsync(ct);foreach(var recipient in recipients)db.UserNotifications.Add(new(artifact.ProjectId,recipient,"RequirementComment",$"Discussion on {artifact.BaseNumber}",$"{actor}: {request.Body}",$"requirement:{artifactId}",artifactId,now));await db.SaveChangesAsync(ct);return Results.Created($"/api/enterprise-requirements/{artifactId}/comments/{comment.Id}",new{comment.Id,notified=recipients.Count});}catch(DomainException ex){return Results.BadRequest(new{error=ex.Message});}
         });
 
-        app.MapPost("/api/enterprise-requirements/comments/{id:guid}/resolve",async(Guid id,ResolveCommentRequest request,HttpContext http,AeroLinkDbContext db,CancellationToken ct)=>
-        {var comment=await db.ArtifactComments.SingleOrDefaultAsync(x=>x.Id==id,ct);if(comment is null)return Results.NotFound();if(!await http.HasProjectAccessAsync(db,comment.ProjectId,ct))return Results.Forbid();var dormantProcedure=await db.TestProcedures.AsNoTracking().AnyAsync(x=>x.Id==comment.ArtifactId&&x.ArtifactKind==VerificationArtifactKind.Procedure&&x.Level!=TestProcedureLevel.System,ct);if(dormantProcedure)return Results.BadRequest(new{error="Dormant software Procedures are read-only; discussion mutation is unavailable.",code="dormant_procedure_discussion_read_only"});try{comment.Resolve(http.UserAccount().UserName,request.Disposition??"",DateTimeOffset.UtcNow);await db.SaveChangesAsync(ct);return Results.NoContent();}catch(DomainException ex){return Results.BadRequest(new{error=ex.Message});}});
+        app.MapPost("/api/enterprise-requirements/comments/{id:guid}/resolve", async (Guid id, ResolveCommentRequest request,
+            HttpContext http, AeroLinkDbContext db, IProjectLadderPolicyResolver policyResolver, CancellationToken ct) =>
+        {
+            var comment = await db.ArtifactComments.SingleOrDefaultAsync(x => x.Id == id, ct);
+            if (comment is null) return Results.NotFound();
+            if (!await http.HasProjectAccessAsync(db, comment.ProjectId, ct)) return Results.Forbid();
+            var procedure = await db.TestProcedures.AsNoTracking()
+                .Where(x => x.Id == comment.ArtifactId && x.ArtifactKind == VerificationArtifactKind.Procedure)
+                .Select(x => new { x.Level, x.ArtifactKind }).SingleOrDefaultAsync(ct);
+            if (procedure is not null)
+            {
+                var policy = await policyResolver.ResolveAsync(comment.ProjectId, ct);
+                var enabled = procedure.Level switch
+                {
+                    TestProcedureLevel.System => policy.VerificationProfile(RequirementLevel.System).Enables(VerificationArtifactKind.Procedure),
+                    TestProcedureLevel.HighLevel => policy.VerificationProfile(RequirementLevel.HighLevel).Enables(VerificationArtifactKind.Procedure),
+                    TestProcedureLevel.LowLevel => policy.VerificationProfile(RequirementLevel.LowLevel).Enables(VerificationArtifactKind.Procedure),
+                    _ => false,
+                };
+                if (!enabled) return Results.BadRequest(new { error = "Discussion is unavailable for this disabled verification artifact.", code = "verification_discussion_disabled" });
+            }
+            try
+            {
+                comment.Resolve(http.UserAccount().UserName, request.Disposition ?? "", DateTimeOffset.UtcNow);
+                await db.SaveChangesAsync(ct);
+                return Results.NoContent();
+            }
+            catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
+        });
 
         app.MapGet("/api/enterprise-requirements/{artifactId:guid}/collaboration",async(Guid artifactId,HttpContext http,AeroLinkDbContext db,CancellationToken ct)=>
         {
