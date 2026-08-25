@@ -258,7 +258,7 @@ export function localPlan(classification) {
         : 'dotnet test product/tests/AeroLink.Infrastructure.Tests --configuration Release --no-build --filter=FullyQualifiedName!~AeroLink.Infrastructure.Tests.FmsShowcaseSeederTests&FullyQualifiedName!~AeroLink.Infrastructure.Tests.ShowcaseUpgradeTests',
       why: fullFastInfrastructure
         ? 'This change directly affects showcase seed/upgrade coverage or broad test-planner behavior, so Fast restores the complete Infrastructure suite locally.'
-        : 'Fast persistence/provider coverage excludes six synthetic showcase seed/upgrade maintenance cases; the authoritative GitHub backend-core lane still runs the complete infrastructure suite.',
+        : 'Fast persistence/provider coverage excludes six synthetic showcase seed/upgrade maintenance cases; the authoritative GitHub backend-core-infrastructure lane still runs the complete infrastructure suite.',
     })
   }
   if (classification.client) {

@@ -221,8 +221,8 @@ async function main() {
   }
   if (result.outcome === 'provenanced-match' && result.manifestsFound > 0) {
     lines.push(result.canSkip
-      ? '- Trusted tree match: backend-api, backend-core, client, script-contracts, and postgresql-smoke may skip; lightweight cache warming remains.'
-      : '- Would skip under enforcement: backend-api, backend-core, client, script-contracts, postgresql-smoke (lightweight cache warming would remain).')
+      ? '- Trusted tree match: backend-api, backend-core-domain, backend-core-infrastructure, client, script-contracts, and postgresql-smoke may skip; lightweight cache warming remains.'
+      : '- Would skip under enforcement: backend-api, backend-core-domain, backend-core-infrastructure, client, script-contracts, postgresql-smoke (lightweight cache warming would remain).')
   }
   result.markdown = lines.join('\n')
 

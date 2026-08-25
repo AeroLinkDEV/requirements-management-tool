@@ -206,7 +206,7 @@ test('the normal local Fast infrastructure profile leaves only synthetic showcas
   assert.match(infrastructure.command, /--filter=/)
   assert.match(infrastructure.command, /FmsShowcaseSeederTests/)
   assert.match(infrastructure.command, /ShowcaseUpgradeTests/)
-  assert.match(infrastructure.why, /authoritative GitHub backend-core/)
+  assert.match(infrastructure.why, /authoritative GitHub backend-core-infrastructure/)
 })
 
 test('showcase-sensitive and broad changes restore the complete Infrastructure suite in Fast', () => {
@@ -273,12 +273,12 @@ test('the workflow delegates to this module rather than carrying its own copy', 
   assert.doesNotMatch(classifyJob, /backend=true/, 'the inline classification must not come back')
 })
 
-test('backend-core runs every hosted contract test file', () => {
+test('backend-core-domain runs every hosted contract test file', () => {
   // A single named route test let a later inventory contract be green locally but invisible in CI.
   // Keep the workflow contract directory-driven so adding another `*.test.mjs` is automatically gated.
   const workflow = readFileSync(join(repoRoot, '.github/workflows/ci.yml'), 'utf8')
-  const backendStart = workflow.indexOf('\n  backend-core:')
-  const clientStart = workflow.indexOf('\n  client:', backendStart)
+  const backendStart = workflow.indexOf('\n  backend-core-domain:')
+  const clientStart = workflow.indexOf('\n  backend-core-infrastructure:', backendStart)
   const backendCore = workflow.slice(backendStart, clientStart)
   assert.match(backendCore, /Get-ChildItem\s+-LiteralPath\s+product\/test-contracts\/tests\s+-Filter\s+'\*\.test\.mjs'/)
   assert.match(backendCore, /node\s+--test\s+\$tests/)

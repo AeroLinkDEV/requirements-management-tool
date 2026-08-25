@@ -41,11 +41,11 @@ export function normalizeFileList(files) {
  */
 export const PLANNER_LANES = Object.freeze({
   full: Object.freeze({
-    key: 'full', label: 'full quality-gate forecast', jobs: Object.freeze(['backend-api', 'backend-core', 'client', 'script-contracts', 'browser-pr', 'browser-production', 'postgresql-smoke', 'gate', 'metrics-tooling', 'metrics-report']),
+    key: 'full', label: 'full quality-gate forecast', jobs: Object.freeze(['backend-api', 'backend-core-domain', 'backend-core-infrastructure', 'client', 'script-contracts', 'browser-pr', 'browser-production', 'postgresql-smoke', 'gate', 'metrics-tooling', 'metrics-report']),
     reason: 'Workflow, planner, graph, or otherwise broad changes can alter which validation runs; inspect the complete CI forecast.',
   }),
   backend: Object.freeze({
-    key: 'backend', label: 'backend API/core lanes', jobs: Object.freeze(['backend-api', 'backend-core']),
+    key: 'backend', label: 'backend API/core lanes', jobs: Object.freeze(['backend-api', 'backend-core-domain', 'backend-core-infrastructure']),
     reason: 'Backend, contract, routing, harness, or domain changes can affect API and domain/infrastructure validation.',
   }),
   client: Object.freeze({

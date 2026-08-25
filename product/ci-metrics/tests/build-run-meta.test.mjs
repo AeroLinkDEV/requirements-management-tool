@@ -58,14 +58,14 @@ test('full pull-request topology has every product instance, exact gate needs, a
     assert.equal(result.status, 0, result.stderr)
     assertSelectedExactly(meta, [
       'changes', 'metrics-tooling',
-      'backend-api-1', 'backend-api-2', 'backend-api-3', 'backend-core',
+      'backend-api-1', 'backend-api-2', 'backend-api-3', 'backend-core-domain', 'backend-core-infrastructure',
       'client', 'script-contracts',
       'browser-pr-1', 'browser-pr-2', 'browser-pr-3', 'browser-pr-4',
       'browser-production', 'postgresql-smoke', 'gate',
     ])
     const gate = meta.expectedJobs.find((job) => job.instance === 'gate')
     assert.deepEqual(gate.needs, [
-      'changes', 'metrics-tooling', 'backend-api', 'backend-core', 'client',
+      'changes', 'metrics-tooling', 'backend-api', 'backend-core-domain', 'backend-core-infrastructure', 'client',
       'script-contracts', 'browser-pr', 'browser-production', 'postgresql-smoke',
     ])
     assert.deepEqual(meta.skippedJobs.map((job) => job.instance), [
@@ -84,7 +84,7 @@ test('docs-only runs still expect changes, metrics-tooling, and gate, with every
     assertSelectedExactly(meta, ['changes', 'metrics-tooling', 'gate'])
     assert.deepEqual(meta.expectedJobs.find((job) => job.instance === 'gate').needs, ['changes', 'metrics-tooling'])
     const skipped = meta.skippedJobs.map((job) => job.instance)
-    for (const expected of ['backend-api-1', 'backend-core', 'client', 'script-contracts', 'browser-pr-1', 'browser-production', 'browser-full-1', 'postgresql-smoke', 'warm-chromium-cache']) {
+    for (const expected of ['backend-api-1', 'backend-core-domain', 'backend-core-infrastructure', 'client', 'script-contracts', 'browser-pr-1', 'browser-production', 'browser-full-1', 'postgresql-smoke', 'warm-chromium-cache']) {
       assert.ok(skipped.includes(expected), `missing deliberate skip ${expected}`)
     }
     assert.ok(meta.skippedJobs.every((job) => job.reason.length > 0))
@@ -99,11 +99,11 @@ test('backend-only pull request prunes client/browser/postgres groups from selec
     assert.equal(result.status, 0, result.stderr)
     assertSelectedExactly(meta, [
       'changes', 'metrics-tooling',
-      'backend-api-1', 'backend-api-2', 'backend-api-3', 'backend-core',
+      'backend-api-1', 'backend-api-2', 'backend-api-3', 'backend-core-domain', 'backend-core-infrastructure',
       'script-contracts', 'gate',
     ])
     assert.deepEqual(meta.expectedJobs.find((job) => job.instance === 'gate').needs, [
-      'changes', 'metrics-tooling', 'backend-api', 'backend-core', 'script-contracts',
+      'changes', 'metrics-tooling', 'backend-api', 'backend-core-domain', 'backend-core-infrastructure', 'script-contracts',
     ])
   } finally {
     rmSync(directory, { recursive: true, force: true })
@@ -143,7 +143,7 @@ test('push on main selects the cache warmer, skips browser families, and is trus
     assert.ok(instances(meta).includes('warm-chromium-cache'))
     for (const absent of ['browser-pr-1', 'browser-production', 'browser-full-1']) assert.ok(!instances(meta).includes(absent))
     assert.deepEqual(meta.expectedJobs.find((job) => job.instance === 'gate').needs, [
-      'changes', 'metrics-tooling', 'backend-api', 'backend-core', 'client', 'script-contracts', 'postgresql-smoke',
+      'changes', 'metrics-tooling', 'backend-api', 'backend-core-domain', 'backend-core-infrastructure', 'client', 'script-contracts', 'postgresql-smoke',
     ])
     assert.equal(meta.provenance.mode, 'trusted')
   } finally {

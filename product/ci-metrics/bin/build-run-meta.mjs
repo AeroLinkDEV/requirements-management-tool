@@ -85,11 +85,13 @@ if (!docsOnly && backend) {
   addSelected('backend-api', 'backend-api-1', ['changes'])
   addSelected('backend-api', 'backend-api-2', ['changes'])
   addSelected('backend-api', 'backend-api-3', ['changes'])
-  addSelected('backend-core', 'backend-core', ['changes'])
+  addSelected('backend-core-domain', 'backend-core-domain', ['changes'])
+  addSelected('backend-core-infrastructure', 'backend-core-infrastructure', ['changes'])
 } else {
   const reason = docsOnly ? docsReason : 'backend classification is false'
   skipJob('backend-api', ['backend-api-1', 'backend-api-2', 'backend-api-3'], reason)
-  addSkipped('backend-core', 'backend-core', reason)
+  addSkipped('backend-core-domain', 'backend-core-domain', reason)
+  addSkipped('backend-core-infrastructure', 'backend-core-infrastructure', reason)
 }
 
 if (!docsOnly && client) {
@@ -141,7 +143,7 @@ if (isPushEvent) {
 // path and never a "dependency group has no instances" contradiction.
 const selectedGroups = new Set(selected.map((job) => job.group))
 const gateNeeds = ['changes', 'metrics-tooling']
-for (const group of ['backend-api', 'backend-core', 'client', 'script-contracts', 'browser-pr', 'browser-production', 'postgresql-smoke']) {
+for (const group of ['backend-api', 'backend-core-domain', 'backend-core-infrastructure', 'client', 'script-contracts', 'browser-pr', 'browser-production', 'postgresql-smoke']) {
   if (selectedGroups.has(group)) gateNeeds.push(group)
 }
 addSelected('gate', 'gate', gateNeeds)

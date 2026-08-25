@@ -59,7 +59,9 @@ test('main quality gate enforcement is fail-safe and leaves cache warming active
   const workflow = readFileSync(join(repoRoot, '.github/workflows/ci.yml'), 'utf8')
   assert.match(workflow, /permissions:\s+actions: read\s+contents: read/)
   assert.match(workflow, /id: provenance[\s\S]*github\.event_name == 'push'[\s\S]*continue-on-error: true[\s\S]*PROVENANCE_MODE: enforce/)
-  assert.equal((workflow.match(/if: needs\.changes\.outputs\.post_merge_skip != 'true' && needs\.changes\.outputs\.docs_only != 'true' && needs\.changes\.outputs\.backend == 'true'/g) ?? []).length, 2)
+  // Three backend jobs gate on the same predicate since #758 split backend-core into parallel
+  // domain/infrastructure jobs: backend-api, backend-core-domain, backend-core-infrastructure.
+  assert.equal((workflow.match(/if: needs\.changes\.outputs\.post_merge_skip != 'true' && needs\.changes\.outputs\.docs_only != 'true' && needs\.changes\.outputs\.backend == 'true'/g) ?? []).length, 3)
   assert.match(workflow, /if: needs\.changes\.outputs\.post_merge_skip != 'true' && needs\.changes\.outputs\.docs_only != 'true' && needs\.changes\.outputs\.client == 'true'/)
   assert.match(workflow, /script-contracts:[\s\S]*?if: needs\.changes\.outputs\.post_merge_skip != 'true' && needs\.changes\.outputs\.docs_only != 'true'/)
   assert.match(workflow, /postgresql-smoke:[\s\S]*?if: needs\.changes\.outputs\.post_merge_skip != 'true' && needs\.changes\.outputs\.postgresql == 'true'/)

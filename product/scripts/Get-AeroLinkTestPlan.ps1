@@ -144,9 +144,9 @@ function Get-PersistentEvidenceFingerprint {
 function Get-CiJobsForStep {
     param([Parameter(Mandatory)][string]$Label)
     switch ($Label) {
-        'Build the solution' { return @('backend-api', 'backend-core') }
-        'Domain suite' { return @('backend-core') }
-        'Infrastructure suite' { return @('backend-core') }
+        'Build the solution' { return @('backend-api', 'backend-core-domain', 'backend-core-infrastructure') }
+        'Domain suite' { return @('backend-core-domain') }
+        'Infrastructure suite' { return @('backend-core-infrastructure') }
         'Client lint, type-check and build' { return @('client') }
         'Browser smoke journeys' { return @('browser-pr', 'browser-production', 'browser-full') }
         'Operator and recovery script contracts' { return @('script-contracts') }
@@ -765,10 +765,10 @@ function Invoke-FullPlan {
     $selectedCiJobs = Get-StringArray $plan.compact.ci.selected
     if ($selectedCiJobs -contains 'postgresql-smoke') { $null = Get-DisposableDockerCommand }
     if ($classification.backend) {
-        Invoke-TimedAction -Label 'Build the solution' -CiJobs @('backend-api', 'backend-core') -Action { Invoke-CheckedProcess 'dotnet' @('build', 'product/AeroLink.slnx', '--configuration', 'Release') }
+        Invoke-TimedAction -Label 'Build the solution' -CiJobs @('backend-api', 'backend-core-domain', 'backend-core-infrastructure') -Action { Invoke-CheckedProcess 'dotnet' @('build', 'product/AeroLink.slnx', '--configuration', 'Release') }
         Invoke-TimedAction -Label 'API suite' -CiJobs @('backend-api') -Action { Invoke-TestSuiteWithDiagnostics -Label 'API suite' -FilePath 'dotnet' -Arguments @('test', 'product/tests/AeroLink.Api.Tests', '--configuration', 'Release', '--no-build') }
-        Invoke-TimedAction -Label 'Domain suite' -CiJobs @('backend-core') -Action { Invoke-TestSuiteWithDiagnostics -Label 'Domain suite' -FilePath 'dotnet' -Arguments @('test', 'product/tests/AeroLink.Domain.Tests', '--configuration', 'Release', '--no-build') }
-        Invoke-TimedAction -Label 'Infrastructure suite' -CiJobs @('backend-core') -Action { Invoke-TestSuiteWithDiagnostics -Label 'Infrastructure suite' -FilePath 'dotnet' -Arguments @('test', 'product/tests/AeroLink.Infrastructure.Tests', '--configuration', 'Release', '--no-build') }
+        Invoke-TimedAction -Label 'Domain suite' -CiJobs @('backend-core-domain') -Action { Invoke-TestSuiteWithDiagnostics -Label 'Domain suite' -FilePath 'dotnet' -Arguments @('test', 'product/tests/AeroLink.Domain.Tests', '--configuration', 'Release', '--no-build') }
+        Invoke-TimedAction -Label 'Infrastructure suite' -CiJobs @('backend-core-infrastructure') -Action { Invoke-TestSuiteWithDiagnostics -Label 'Infrastructure suite' -FilePath 'dotnet' -Arguments @('test', 'product/tests/AeroLink.Infrastructure.Tests', '--configuration', 'Release', '--no-build') }
     }
     elseif ($classification.postgresql) {
         Invoke-TimedAction -Label 'Build the solution for PostgreSQL gate' -CiJobs @('postgresql-smoke') -Action { Invoke-CheckedProcess 'dotnet' @('build', 'product/AeroLink.slnx', '--configuration', 'Release') }
