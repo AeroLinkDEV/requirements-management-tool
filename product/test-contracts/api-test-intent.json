@@ -1,11 +1,11 @@
 {
   "schemaVersion": "aerolink-api-test-intent/v2",
   "totals": {
-    "tests": 571,
-    "cases": 629,
+    "tests": 572,
+    "cases": 630,
     "classes": 100,
-    "hostedTests": 558,
-    "hostedCases": 607,
+    "hostedTests": 559,
+    "hostedCases": 608,
     "nonHostedTests": 8,
     "nonHostedCases": 17,
     "unknownHostTests": 5,
@@ -21,8 +21,8 @@
     "http-boundary": {
       "label": "HTTP boundary: route, status, JSON shape",
       "level": "API (must stay hosted)",
-      "tests": 348,
-      "cases": 382,
+      "tests": 349,
+      "cases": 383,
       "unknownCases": 0,
       "classes": 82
     },
@@ -2744,8 +2744,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 23,
-        "end": 42
+        "start": 24,
+        "end": 43
       }
     },
     {
@@ -2761,8 +2761,25 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 44,
-        "end": 63
+        "start": 45,
+        "end": 64
+      }
+    },
+    {
+      "cls": "EffectiveExecutionAuthorityApiTests",
+      "test": "System_candidate_inventory_accepts_the_authoritative_procedure_kind",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client"
+      ],
+      "sourceLines": {
+        "start": 66,
+        "end": 82
       }
     },
     {
