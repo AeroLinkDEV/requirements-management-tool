@@ -71,7 +71,7 @@ test('a Case-only profile does not present disabled software Procedure documents
   // Historical Procedure rows do not override the Case-only effective profile, which owns no Procedure register
   // or generated-document action. Showing HLRTPD/LLRTPD here would assert activation that has not happened.
   await expect(page.getByRole('navigation', { name: 'test procedure documents' })).toHaveCount(0)
-  await expect(page.locator('.documentOutputs')).toHaveCount(0)
+  await expect(page.locator('.documentOutputs')).toHaveCount(1)
   await expect(page.getByText(/HLRTPD|LLRTPD/)).toHaveCount(0)
 })
 
@@ -226,8 +226,8 @@ test('rows and the document selection survive a reload', async ({ page }) => {
   const documentNumber = (await document.getAttribute('data-document'))!
   await page.getByLabel('Rows per page').selectOption('50')
   await document.click()
-  await expect(page).toHaveURL(/caseRows=50/, { timeout: 30_000 })
-  await expect(page).toHaveURL(/caseDocument=/, { timeout: 30_000 })
+  await expect(page).toHaveURL(/artifactRows=50/, { timeout: 30_000 })
+  await expect(page).toHaveURL(/artifactDocument=/, { timeout: 30_000 })
 
   // A filtered worklist that does not survive a reload is a worklist somebody has to rebuild by hand.
   await page.reload({ waitUntil: 'load' })
@@ -236,22 +236,22 @@ test('rows and the document selection survive a reload', async ({ page }) => {
   await expect(page.locator(`[data-document="${documentNumber}"]`)).toHaveAttribute('aria-pressed', 'true')
 })
 
-test('the procedure document is offered where the procedures are read', async ({ page }) => {
+test('the combined document rail is offered where the artifacts are read', async ({ page }) => {
   test.setTimeout(180_000)
   await page.setViewportSize({ width: 1600, height: 900 })
   await login(page)
   await openExplorer(page, 'software-verification')
 
-  // The requirements Explorer offers its document from the page the requirements are on. Having to leave the
-  // procedures to go and find the procedure document is the gap this closes.
+  // The Explorer offers its documents from the page the artifacts are on. Having to leave the inventory to find
+  // the generated document is the gap this closes.
   const outputs = page.locator('.documentOutputs')
   await expect(outputs).toBeVisible({ timeout: 30_000 })
-  // The document action follows the exact configured level currently being browsed.
+  // The neutral software route offers the complete configured software document rail.
   await expect(outputs.getByText('HLR Test Case Document (HLRTD)')).toBeVisible()
-  await expect(outputs.getByText('LLR Test Case Document (LLRTD)')).toHaveCount(0)
-  await expect(outputs.locator('.documentOutput')).toHaveCount(1)
-  await expect(outputs.getByRole('link', { name: /DOCX$/ })).toHaveCount(1)
-  await expect(outputs.getByRole('link', { name: /PDF$/ })).toHaveCount(1)
+  await expect(outputs.getByText('LLR Test Case Document (LLRTD)')).toBeVisible()
+  await expect(outputs.locator('.documentOutput')).toHaveCount(2)
+  await expect(outputs.getByRole('link', { name: /DOCX$/ })).toHaveCount(2)
+  await expect(outputs.getByRole('link', { name: /PDF$/ })).toHaveCount(2)
 })
 
 test('a worklist can be saved, reopened and removed', async ({ page }) => {
@@ -265,7 +265,7 @@ test('a worklist can be saved, reopened and removed', async ({ page }) => {
   const whole = await libraryCount(page)
 
   // Save the narrowed list, not the whole library — a saved view that does not narrow proves nothing.
-  await page.getByLabel('Case state').selectOption('Draft')
+  await page.getByLabel('case state').selectOption('Draft')
   await expect.poll(async () => Number((await count.textContent())!.replace(/[^\d]/g, '')), { timeout: 30_000 })
     .toBeLessThan(whole)
   const views = page.locator('.savedViews')
@@ -277,10 +277,10 @@ test('a worklist can be saved, reopened and removed', async ({ page }) => {
 
   // Clearing puts the whole library back, and applying the view has to bring the worklist back with it.
   await page.getByRole('button', { name: 'Clear', exact: true }).click()
-  await expect(page.getByLabel('Case state')).toHaveValue('')
+  await expect(page.getByLabel('test artifact state')).toHaveValue('')
   await page.locator(`[data-saved-view="${name}"]`).click()
-  await expect(page.getByLabel('Case state')).toHaveValue('Draft')
-  await expect(page).toHaveURL(/caseView=/, { timeout: 30_000 })
+  await expect(page.getByLabel('case state')).toHaveValue('Draft')
+  await expect(page).toHaveURL(/artifactView=/, { timeout: 30_000 })
 
   // An owner who cannot remove their own view is how duplicates that have to be lived with accumulate.
   page.once('dialog', dialog => dialog.accept())
@@ -296,12 +296,9 @@ test('Clear returns the whole library', async ({ page }) => {
   await openExplorer(page, 'software-verification')
 
   const count = page.locator('.resultCount')
-  const configuredLevel = await libraryCount(page)
-  await page.getByLabel('Level filter').selectOption('Software')
-  await expect.poll(() => libraryCount(page), { timeout: 30_000 }).toBeGreaterThan(configuredLevel)
   const whole = await libraryCount(page)
   await page.getByLabel('Level filter').selectOption('HighLevel')
-  await expect.poll(() => libraryCount(page), { timeout: 30_000 }).toBe(configuredLevel)
+  await expect.poll(() => libraryCount(page), { timeout: 30_000 }).toBeLessThan(whole)
   await page.getByLabel('Find a case').fill('HLRTC-000002')
   await expect.poll(async () => Number((await count.textContent())!.replace(/[^\d]/g, '')), { timeout: 30_000 })
     .toBeLessThan(whole)
@@ -312,23 +309,29 @@ test('Clear returns the whole library', async ({ page }) => {
 })
 
 /**
- * The two Explorers are the same page over different artifacts.
+ * The combined Explorer is the same page over the software Case and Procedure inventory.
  *
  * Screenshots of them side by side were the complaint: the requirements Explorer names its discipline, states
  * how many records answer and where in them you are, and puts its filters in one row. The procedure Explorer
  * carried none of that — the same title on all three disciplines, no position in the results, and a caption
  * stacked over every control.
  */
-test('the Explorer names the software workspace and opens on its first configured level', async ({ page }) => {
+test('the combined Explorer names the software workspace and opens on all software artifacts', async ({ page }) => {
   test.setTimeout(180_000)
   await page.setViewportSize({ width: 1600, height: 900 })
   await login(page)
-  await openExplorer(page, 'software-verification')
+  const root = new URL(page.url()).pathname.replace(/\/[^/]*$/, '')
+  await page.goto(new URL(`${root}/software-verification/test-artifacts`, page.url()).toString(), { waitUntil: 'load' })
 
   await expect(page.getByRole('heading', { name: 'Software Test Case/Procedure Explorer', level: 1 })).toBeVisible()
-  await expect(page.getByLabel('Level filter')).toHaveValue('HighLevel')
-  await expect(page.getByLabel('Level filter')).toContainText('All software test cases')
+  await expect(page.getByLabel('Level filter')).toHaveValue('Software')
+  await expect(page.getByLabel('Level filter')).toContainText('All software test artifacts')
   await expect(page.getByLabel('Level filter')).toContainText('Software LLR')
+  await expect(page.getByLabel('Artifact filter')).toHaveValue('all')
+  const rail = page.getByRole('navigation', { name: 'test artifact documents' })
+  await expect(rail).toBeVisible()
+  await expect(rail.locator('[data-document]')).toHaveCount(2, { timeout: 30_000 })
+  await expect(rail.getByRole('button', { name: /All test artifacts/i })).toBeVisible()
 })
 
 test('the result summary says how many Cases answer and where in them you are', async ({ page }) => {

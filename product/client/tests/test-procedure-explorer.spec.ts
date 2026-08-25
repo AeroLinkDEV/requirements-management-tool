@@ -108,7 +108,7 @@ test('a procedure says who wrote it and what drove each revision', async ({ page
 /**
  * Software procedures share the same Explorer and can still be narrowed to either controlled level.
  */
-test('the Software Explorer opens on HLR and can move to the configured LLR level', async ({ page }) => {
+test('the Software Explorer opens on all artifacts and can move to the configured LLR level', async ({ page }) => {
   test.setTimeout(180_000)
   await login(page, 'admin', { openProject: false })
   await selectProgram(page, 'Flight Management System Live Program')
