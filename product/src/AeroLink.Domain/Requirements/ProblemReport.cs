@@ -239,13 +239,25 @@ public sealed class ProblemReport
         Analysis = analysis?.Trim() ?? ""; Touch(now);
     }
 
+    /// <summary>
+    /// Corrects what the report says. Deliberately not restricted to the responsible engineer.
+    ///
+    /// Describing the problem and owning the problem are different things. The person who can correct
+    /// a wrong root cause is whoever knows the right one, and requiring reassignment first meant the
+    /// alternative was a second report contradicting the first — two records where the truth needed
+    /// one. <see cref="Reassign"/> and <see cref="Retarget"/> keep the owner check, because who is
+    /// accountable and which build this lands in are decisions rather than corrections.
+    ///
+    /// The actor is still required and still recorded: the API takes the exclusive lease, and the
+    /// caller writes a ProblemReportRevision naming whoever checked in.
+    /// </summary>
     public void UpdateDetails(string actor, string title, string problem, string problemRich,
         string additionalInformation, string additionalInformationRich, string analysis, string rootCause,
         string correctiveAction, string systemAircraftImpact, string impactAssessmentJson,
         ProblemReportSeverity severity, ProblemReportPriority priority, DateTimeOffset now,
         ProblemReportType? type = null, string? workaround = null)
     {
-        EnsureResponsible(actor); EnsureEditable(); InvalidateClosureVerificationForChange();
+        Required(actor, "A problem-report correction actor is required."); EnsureEditable(); InvalidateClosureVerificationForChange();
         if (type is not null) Type = type.Value;
         if (workaround is not null) Workaround = workaround.Trim();
         Title = Required(title, "A problem-report title is required."); Problem = Required(problem, "A problem statement is required.");

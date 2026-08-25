@@ -263,4 +263,166 @@ public sealed class ProblemReportCheckoutApiTests
         Assert.Equal(before.GetProperty("responsibleEngineerId").GetString(), after.GetProperty("responsibleEngineerId").GetString());
         Assert.Equal(before.GetProperty("createdAt").GetDateTimeOffset(), after.GetProperty("createdAt").GetDateTimeOffset());
     }
+
+    /// <summary>
+    /// Seeds a Program member who has access to the Project and nothing else — no engineering role, and
+    /// not the report's responsible engineer. Reviewer is deliberate: it is a membership, so Project
+    /// access is satisfied, and it is absent from both the engineering-authority set and the four roles
+    /// the shared checkout endpoint demands.
+    /// </summary>
+    private static async Task<string> SeedBystanderAsync(AeroLinkApiFactory factory, Guid projectId, string prefix)
+    {
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+        var programId = db.Projects.Single(project => project.Id == projectId).ProgramId;
+        var userName = $"{prefix.ToLowerInvariant()}.bystander.{Guid.NewGuid():N}";
+        var account = new UserAccount(userName, "Bystander Reviewer", $"{userName}@example.test",
+            IdentityService.HashPassword(AeroLinkApiFactory.MemberPassword), DateTimeOffset.UtcNow);
+        db.AddRange(account,
+            new ProgramMembership(account.Id, programId, ProgramRole.Reviewer, "test.setup", DateTimeOffset.UtcNow));
+        await db.SaveChangesAsync();
+        return userName;
+    }
+
+    private static async Task LoginAsync(HttpClient client, string userName, string password)
+    {
+        using var login = await client.PostAsJsonAsync("/api/auth/login", new { userName, password });
+        Assert.Equal(HttpStatusCode.OK, login.StatusCode);
+        await SecurityBoundaryTests.AuthorizeMutationsAsync(client);
+    }
+
+    /// <summary>Walks an Open report to Verifying, which needs nothing but Project access.</summary>
+    private static async Task VerifyingAsync(HttpClient client, Guid id)
+    {
+        foreach (var target in new[] { "Implementing", "Verifying" })
+        {
+            var version = (await client.GetFromJsonAsync<JsonElement>($"/api/problem-reports/{id}")).GetProperty("version").GetInt64();
+            using var moved = await client.PostAsJsonAsync($"/api/problem-reports/{id}/transition",
+                new { expectedVersion = version, targetState = target });
+            Assert.Equal(HttpStatusCode.OK, moved.StatusCode);
+        }
+    }
+
+    /// <summary>
+    /// The reported defect: a report in Verifying offered no way in to anybody but its responsible
+    /// engineer, so the tester who found the mistake in it could only raise a second report saying so.
+    ///
+    /// Every other test in this class runs as the administrator, which was always exempt from the
+    /// governing-author comparison — which is exactly why the whole suite stayed green while the rule it
+    /// was meant to cover was wrong. This one runs as an ordinary member holding no engineering role.
+    /// </summary>
+    [Fact]
+    public async Task A_project_member_who_does_not_own_the_report_can_correct_it_in_Verifying()
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var client = factory.CreateClient();
+        await ProblemReportApiTests.BootstrapAndLoginAsync(client);
+        var (projectId, releaseId, sccbUserName) = await SeedAsync(factory, "PRBY");
+        var id = await RaiseAsync(client, projectId, releaseId);
+        await OpenAsync(client, id, sccbUserName);
+        await VerifyingAsync(client, id);
+        var bystander = await SeedBystanderAsync(factory, projectId, "PRBY");
+
+        var owner = (await client.GetFromJsonAsync<JsonElement>($"/api/problem-reports/{id}"))
+            .GetProperty("responsibleEngineerId").GetString();
+        Assert.NotEqual(bystander, owner);
+
+        await LoginAsync(client, bystander, AeroLinkApiFactory.MemberPassword);
+        var status = await client.GetFromJsonAsync<JsonElement>(
+            $"/api/controlled-editing/status?artifactType=ProblemReport&artifactId={id}");
+        Assert.Equal("Verifying", status.GetProperty("state").GetString());
+        Assert.True(status.GetProperty("editable").GetBoolean(),
+            "A Verifying report must offer a checkout to any member of its Project.");
+
+        await EditUnderCheckoutAsync(client, id, draft => draft["rootCause"] = "The tone is queued behind the annunciator.");
+
+        var detail = await client.GetFromJsonAsync<JsonElement>($"/api/problem-reports/{id}");
+        Assert.Equal("The tone is queued behind the annunciator.", detail.GetProperty("rootCause").GetString());
+        // Ownership is a separate decision from correctness, and correcting the report does not take it.
+        Assert.Equal(owner, detail.GetProperty("responsibleEngineerId").GetString());
+        // The correction is credited to whoever made it, not to whoever the report is assigned to.
+        var checkIn = detail.GetProperty("revisions").EnumerateArray()
+            .First(revision => revision.GetProperty("eventType").GetString() == "DetailsCheckedIn");
+        Assert.Equal(bystander, checkIn.GetProperty("actor").GetString());
+    }
+
+    /// <summary>
+    /// The lease is what makes shared editing safe, so widening who may check out must not widen how many
+    /// may hold it at once.
+    /// </summary>
+    [Fact]
+    public async Task A_second_member_is_refused_while_somebody_else_holds_the_lease()
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var client = factory.CreateClient();
+        await ProblemReportApiTests.BootstrapAndLoginAsync(client);
+        var (projectId, releaseId, sccbUserName) = await SeedAsync(factory, "PRLS");
+        var id = await RaiseAsync(client, projectId, releaseId);
+        await OpenAsync(client, id, sccbUserName);
+        var first = await SeedBystanderAsync(factory, projectId, "PRLS");
+        var second = await SeedBystanderAsync(factory, projectId, "PRLT");
+
+        await LoginAsync(client, first, AeroLinkApiFactory.MemberPassword);
+        using var held = await client.PostAsJsonAsync("/api/controlled-editing/checkout",
+            new { artifactType = "ProblemReport", artifactId = id, leaseMinutes = 15 });
+        Assert.True(held.IsSuccessStatusCode, await held.Content.ReadAsStringAsync());
+
+        await LoginAsync(client, second, AeroLinkApiFactory.MemberPassword);
+        using var refused = await client.PostAsJsonAsync("/api/controlled-editing/checkout",
+            new { artifactType = "ProblemReport", artifactId = id, leaseMinutes = 15 });
+        Assert.Equal(HttpStatusCode.Conflict, refused.StatusCode);
+        var body = await refused.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal("exclusive_lock", body.GetProperty("code").GetString());
+        Assert.Equal(first, body.GetProperty("holder").GetString());
+
+        var status = await client.GetFromJsonAsync<JsonElement>(
+            $"/api/controlled-editing/status?artifactType=ProblemReport&artifactId={id}");
+        Assert.True(status.GetProperty("locked").GetBoolean());
+        Assert.False(status.GetProperty("mine").GetBoolean());
+    }
+
+    /// <summary>
+    /// A finished report is revived, never edited in place. The capability reports whether the reopen edge
+    /// is available to this actor, and it is the same SQA-only edge the transition policy already governs.
+    /// </summary>
+    [Fact]
+    public async Task Only_Software_Quality_is_offered_the_revive_on_a_rejected_report()
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var client = factory.CreateClient();
+        await ProblemReportApiTests.BootstrapAndLoginAsync(client);
+        var (projectId, releaseId, sccbUserName) = await SeedAsync(factory, "PRRV");
+        var id = await RaiseAsync(client, projectId, releaseId);
+        await OpenAsync(client, id, sccbUserName);
+        var bystander = await SeedBystanderAsync(factory, projectId, "PRRV");
+
+        var version = (await client.GetFromJsonAsync<JsonElement>($"/api/problem-reports/{id}")).GetProperty("version").GetInt64();
+        using var rejected = await client.PostAsJsonAsync($"/api/problem-reports/{id}/disposition",
+            new { expectedVersion = version, disposition = "Rejected", rationale = "The behaviour is as specified." });
+        Assert.Equal(HttpStatusCode.OK, rejected.StatusCode);
+
+        await LoginAsync(client, bystander, AeroLinkApiFactory.MemberPassword);
+        var toMember = await client.GetFromJsonAsync<JsonElement>($"/api/problem-reports/{id}");
+        Assert.False(toMember.GetProperty("capabilities").GetProperty("canRevive").GetBoolean());
+        Assert.False((await client.GetFromJsonAsync<JsonElement>(
+            $"/api/controlled-editing/status?artifactType=ProblemReport&artifactId={id}")).GetProperty("editable").GetBoolean());
+
+        await LoginAsync(client, sccbUserName, AeroLinkApiFactory.MemberPassword);
+        var toQuality = await client.GetFromJsonAsync<JsonElement>($"/api/problem-reports/{id}");
+        var capabilities = toQuality.GetProperty("capabilities");
+        Assert.True(capabilities.GetProperty("canRevive").GetBoolean());
+        Assert.Equal("Draft", capabilities.GetProperty("reviveTargetState").GetString());
+
+        // Reviving is the reopen it always was: the rationale is mandatory and the revision advances.
+        var beforeRevision = toQuality.GetProperty("revision").GetInt32();
+        version = toQuality.GetProperty("version").GetInt64();
+        using var revived = await client.PostAsJsonAsync($"/api/problem-reports/{id}/transition",
+            new { expectedVersion = version, targetState = "Draft", rationale = "A second crew report shows the tone really is late." });
+        Assert.Equal(HttpStatusCode.OK, revived.StatusCode);
+        var after = await client.GetFromJsonAsync<JsonElement>($"/api/problem-reports/{id}");
+        Assert.Equal("Draft", after.GetProperty("state").GetString());
+        Assert.Equal(beforeRevision + 1, after.GetProperty("revision").GetInt32());
+        Assert.True((await client.GetFromJsonAsync<JsonElement>(
+            $"/api/controlled-editing/status?artifactType=ProblemReport&artifactId={id}")).GetProperty("editable").GetBoolean());
+    }
 }
