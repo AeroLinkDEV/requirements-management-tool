@@ -1,3 +1,4 @@
+using AeroLink.Domain.Assurance;
 using AeroLink.Domain.Common;
 using AeroLink.Domain.Identity;
 using AeroLink.Domain.Hierarchy;
@@ -73,7 +74,7 @@ public static class ReleaseCampaignEndpoints
             return Results.Ok(output);
         });
 
-        app.MapPost("/api/release-campaigns", async (CreateReleaseCampaignRequest request, HttpContext http, AeroLinkDbContext db, IdentityService identity, CancellationToken ct) =>
+        app.MapPost("/api/release-campaigns", async (CreateReleaseCampaignRequest request, HttpContext http, AeroLinkDbContext db, IdentityService identity, IProjectAssurancePolicyResolver assurance, CancellationToken ct) =>
         {
             if (!await http.HasProjectRoleAsync(db, identity, request.ProjectId, ct, ProgramRole.ConfigurationManager, ProgramRole.ProgramManager)) return Results.Forbid();
             if (await db.ReleaseCampaigns.AnyAsync(x => x.ProjectId == request.ProjectId && x.ReleaseId == request.ReleaseId, ct)) return Results.Conflict(new { error = "This release already has a campaign." });
@@ -83,7 +84,11 @@ public static class ReleaseCampaignEndpoints
             try
             {
                 var actor = http.UserAccount(); var now = DateTimeOffset.UtcNow;
-                var campaign = new ReleaseCampaign(request.ProjectId, request.ReleaseId, request.BaselineId, request.Name, actor.UserName, now); db.ReleaseCampaigns.Add(campaign);
+                // The campaign takes the project's assurance policy as it stands now and keeps it. Readiness
+                // is judged against this snapshot for the campaign's whole life, so a policy change later
+                // governs the next release rather than reinterpreting this one.
+                var policySnapshot = (await assurance.ResolveAsync(request.ProjectId, ct)).PolicyVersionId;
+                var campaign = new ReleaseCampaign(request.ProjectId, request.ReleaseId, request.BaselineId, request.Name, actor.UserName, now, policySnapshot); db.ReleaseCampaigns.Add(campaign);
                 var changes = await db.SystemChangeRequests.Where(x => x.TargetReleaseId == request.ReleaseId).ToListAsync(ct);
                 foreach (var change in changes) foreach (var kind in Enum.GetValues<ImpactKind>())
                     db.ImpactDispositions.Add(new ChangeImpactDisposition(campaign.Id, change.Id, kind, change.DisplayNumber, $"Disposition {kind.ToString().ToLowerInvariant()} impact for {change.DisplayNumber}."));

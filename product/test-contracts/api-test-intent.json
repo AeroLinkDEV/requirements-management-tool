@@ -1,11 +1,11 @@
 {
   "schemaVersion": "aerolink-api-test-intent/v2",
   "totals": {
-    "tests": 572,
-    "cases": 630,
-    "classes": 100,
-    "hostedTests": 559,
-    "hostedCases": 608,
+    "tests": 582,
+    "cases": 640,
+    "classes": 101,
+    "hostedTests": 569,
+    "hostedCases": 618,
     "nonHostedTests": 8,
     "nonHostedCases": 17,
     "unknownHostTests": 5,
@@ -21,26 +21,26 @@
     "http-boundary": {
       "label": "HTTP boundary: route, status, JSON shape",
       "level": "API (must stay hosted)",
-      "tests": 349,
-      "cases": 383,
+      "tests": 357,
+      "cases": 391,
       "unknownCases": 0,
-      "classes": 82
+      "classes": 83
     },
     "ef-translation": {
       "label": "EF translation / relational constraints",
       "level": "Infrastructure (needs a database, not a host)",
-      "tests": 128,
-      "cases": 139,
+      "tests": 129,
+      "cases": 140,
       "unknownCases": 0,
-      "classes": 47
+      "classes": 48
     },
     "auth-policy": {
       "label": "Authentication / authorization wiring",
       "level": "API (must stay hosted)",
-      "tests": 60,
-      "cases": 64,
+      "tests": 61,
+      "cases": 65,
       "unknownCases": 0,
-      "classes": 39
+      "classes": 40
     },
     "in-process-logic": {
       "label": "In-process logic with no HTTP and no client",
@@ -482,6 +482,186 @@
       "sourceLines": {
         "start": 103,
         "end": 112
+      }
+    },
+    {
+      "cls": "AssurancePolicyApiTests",
+      "test": "A_relaxation_is_refused_without_a_deviation_and_without_a_rationale",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "shared-host-fixture",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 158,
+        "end": 188
+      }
+    },
+    {
+      "cls": "AssurancePolicyApiTests",
+      "test": "A_release_campaign_records_the_policy_snapshot_it_began_under",
+      "kind": "Fact",
+      "intent": "ef-translation",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "shared-host-fixture",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 407,
+        "end": 462
+      }
+    },
+    {
+      "cls": "AssurancePolicyApiTests",
+      "test": "A_scoped_and_dated_delegation_approves_and_an_expired_one_does_not",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "shared-host-fixture",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 259,
+        "end": 298
+      }
+    },
+    {
+      "cls": "AssurancePolicyApiTests",
+      "test": "A_verification_relaxation_needs_sqa_and_refuses_a_program_manager_an_administrator_and_a_cm",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "shared-host-fixture",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 190,
+        "end": 236
+      }
+    },
+    {
+      "cls": "AssurancePolicyApiTests",
+      "test": "An_airworthiness_designated_deviation_requires_airworthiness_even_when_sqa_would_otherwise_approve",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "shared-host-fixture",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 238,
+        "end": 257
+      }
+    },
+    {
+      "cls": "AssurancePolicyApiTests",
+      "test": "Assurance_policy_cannot_reach_the_sealed_ladders_structural_configuration",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "shared-host-fixture",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 355,
+        "end": 385
+      }
+    },
+    {
+      "cls": "AssurancePolicyApiTests",
+      "test": "Policy_versions_and_deviations_are_superseded_rather_than_rewritten",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "shared-host-fixture",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 300,
+        "end": 353
+      }
+    },
+    {
+      "cls": "AssurancePolicyApiTests",
+      "test": "Recording_a_policy_requires_configuration_authority_while_reading_needs_only_project_access",
+      "kind": "Fact",
+      "intent": "auth-policy",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "shared-host-fixture",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 387,
+        "end": 405
+      }
+    },
+    {
+      "cls": "AssurancePolicyApiTests",
+      "test": "The_declared_level_is_metadata_and_does_not_change_a_single_recommendation",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "shared-host-fixture",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 125,
+        "end": 156
+      }
+    },
+    {
+      "cls": "AssurancePolicyApiTests",
+      "test": "The_default_view_states_the_recommendation_its_basis_and_that_no_certification_mapping_is_approved",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "shared-host-fixture",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 89,
+        "end": 123
       }
     },
     {

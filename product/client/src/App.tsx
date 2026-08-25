@@ -4,7 +4,7 @@ import CommandPalette from "./CommandPalette";
 import { isVerificationProcedureKind, officialBuildName } from "./presentation";
 import ExperienceControls from "./ExperienceControls";
 import type { MotionPreference, WorkspaceDensity } from "./ExperienceControls";
-import { projectAreaPath, projectConfigurationApprovalsPath, projectSlugOf, readRoute, routePath } from "./routing";
+import { projectAreaPath, projectConfigurationApprovalsPath, projectConfigurationAssurancePath, projectSlugOf, readRoute, routePath } from "./routing";
 import type { AppRoute, Discipline, HistoryStateIntent, HistoryTypeIntent, RouteContext, View } from "./routing";
 import { usePasswordVisibilityControls } from "./PasswordVisibility";
 import {
@@ -311,7 +311,7 @@ function App() {
     [dashboardLoading,setDashboardLoading]=useState(true),
     [historyStateIntent,setHistoryStateIntent]=useState<HistoryStateIntent|undefined>(initialRoute.historyStateIntent),
     [historyTypeIntent,setHistoryTypeIntent]=useState<HistoryTypeIntent|undefined>(initialRoute.historyTypeIntent),
-    [projectConfigurationSection,setProjectConfigurationSection]=useState<"ladder"|"history"|"readiness"|"approvals">(initialRoute.projectConfigurationSection??"ladder"),
+    [projectConfigurationSection,setProjectConfigurationSection]=useState<"ladder"|"assurance"|"history"|"readiness"|"approvals">(initialRoute.projectConfigurationSection??"ladder"),
     [discipline,setDiscipline]=useState<Discipline>(initialRoute.discipline),
     [view, setView] = useState<View>(initialRoute.view);
   useEffect(() => {
@@ -605,7 +605,7 @@ function App() {
   const projectConfigurationPath=projectAreaPath(openProjectSlug,"projectConfiguration");
   const showImports=()=>{setView("baselineImports");history.pushState({},"",importsPath)};
   const showPersonnel=()=>{setView("personnel");history.pushState({},"",personnelPath)};
-  const showProjectConfiguration=(section:"ladder"|"history"|"readiness"|"approvals"="ladder")=>{setView("projectConfiguration");setProjectConfigurationSection(section);history.pushState({},"",section==="approvals"?projectConfigurationApprovalsPath(openProjectSlug):projectConfigurationPath)};
+  const showProjectConfiguration=(section:"ladder"|"assurance"|"history"|"readiness"|"approvals"="ladder")=>{setView("projectConfiguration");setProjectConfigurationSection(section);history.pushState({},"",section==="approvals"?projectConfigurationApprovalsPath(openProjectSlug):section==="assurance"?projectConfigurationAssurancePath(openProjectSlug):projectConfigurationPath)};
   if(view==="builds")return <SoftwareBuildsLanding user={user} releases={project?.releases??[]} onProjectOverview={showProjects} onImportedBaselines={showImports} onPersonnel={showPersonnel} onProjectConfiguration={()=>showProjectConfiguration()} onOpenBuild={(selected)=>{if(!active||!project||!project.releases.some(item=>item.id===selected.id))return;setSelectedReleaseId(selected.id);setView("dashboard");history.pushState({},"",routePath({programId:active.program.id,projectId:project.project.id,releaseId:selected.id},"dashboard"))}} onSignOut={signOut}/>;
   // Rendered beside Software Builds rather than inside a build workspace, because an import does not belong
   // to a build — it creates one. There is no build to have entered when this page is what you need.

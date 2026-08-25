@@ -1,3 +1,4 @@
+using AeroLink.Domain.Assurance;
 using AeroLink.Domain.Baselines;
 using AeroLink.Domain.ChangeControl;
 using AeroLink.Domain.Common;
@@ -191,6 +192,8 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
     public DbSet<OperationalAlert> OperationalAlerts => Set<OperationalAlert>();
     public DbSet<QualityLifecycleObjective> QualityLifecycleObjectives => Set<QualityLifecycleObjective>();
     public DbSet<ReadinessWaiver> ReadinessWaivers => Set<ReadinessWaiver>();
+    public DbSet<ProjectAssurancePolicy> ProjectAssurancePolicies => Set<ProjectAssurancePolicy>();
+    public DbSet<AssurancePolicyDeviation> AssurancePolicyDeviations => Set<AssurancePolicyDeviation>();
     public DbSet<CertificationEvidenceIndexEntry> CertificationEvidenceIndex => Set<CertificationEvidenceIndexEntry>();
     public DbSet<ManagedDocument> ManagedDocuments => Set<ManagedDocument>();
     public DbSet<ManagedDocumentRevision> ManagedDocumentRevisions => Set<ManagedDocumentRevision>();
@@ -570,6 +573,50 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
         modelBuilder.Entity<OperationalAlert>(b=>{b.ToTable("operational_alerts");b.HasKey(x=>x.Id);b.Property(x=>x.Severity).HasMaxLength(30).IsRequired();b.Property(x=>x.Signal).HasMaxLength(160).IsRequired();b.Property(x=>x.Detail).HasMaxLength(4000).IsRequired();b.Property(x=>x.RunbookUrl).HasMaxLength(500).IsRequired();b.Property(x=>x.State).HasConversion<string>().HasMaxLength(30);b.Property(x=>x.OpenedBy).HasMaxLength(100).IsRequired();b.Property(x=>x.ResolvedBy).HasMaxLength(100);b.HasIndex(x=>new{x.ProjectId,x.State,x.OpenedAt});});
         modelBuilder.Entity<QualityLifecycleObjective>(b=>{b.ToTable("quality_lifecycle_objectives");b.HasKey(x=>x.Id);b.Property(x=>x.Code).HasMaxLength(80).IsRequired();b.Property(x=>x.Title).HasMaxLength(300).IsRequired();b.Property(x=>x.TargetJson).IsRequired();b.Property(x=>x.EvidenceExpectation).HasMaxLength(4000).IsRequired();b.Property(x=>x.CreatedBy).HasMaxLength(100).IsRequired();b.HasIndex(x=>new{x.ProjectId,x.Code}).IsUnique();});
         modelBuilder.Entity<ReadinessWaiver>(b=>{b.ToTable("readiness_waivers");b.HasKey(x=>x.Id);b.Property(x=>x.BlockerType).HasMaxLength(80).IsRequired();b.Property(x=>x.Rationale).HasMaxLength(4000).IsRequired();b.Property(x=>x.ApprovedBy).HasMaxLength(100).IsRequired();b.Property(x=>x.ApprovalAuthority).HasMaxLength(80).IsRequired();b.Property(x=>x.SignatureMeaning).HasMaxLength(120).IsRequired();b.Property(x=>x.Provenance).HasMaxLength(80).IsRequired();b.Property(x=>x.CreatedBy).HasMaxLength(100).IsRequired();b.Property(x=>x.RevokedBy).HasMaxLength(100);b.Property(x=>x.RevocationReason).HasMaxLength(4000);b.HasIndex(x=>new{x.ProjectId,x.BlockerType,x.BlockerId,x.BlockerRevision,x.BlockerVersion});b.HasIndex(x=>new{x.ProjectId,x.BlockerType,x.BlockerId,x.ExpiresAt});});
+        modelBuilder.Entity<ProjectAssurancePolicy>(b =>
+        {
+            b.ToTable("project_assurance_policies", t => t.HasCheckConstraint("CK_project_assurance_policy_version", "\"Version\" > 0"));
+            b.HasKey(x => x.Id);
+            b.Property(x => x.DeclaredLevel).HasConversion<string>().HasMaxLength(30).IsRequired();
+            b.Property(x => x.SelectionsSnapshot).HasMaxLength(4000).IsRequired();
+            b.Property(x => x.SnapshotHash).HasMaxLength(64).IsRequired();
+            b.Property(x => x.Reason).HasMaxLength(4000).IsRequired();
+            b.Property(x => x.CreatedBy).HasMaxLength(100).IsRequired();
+            b.Property(x => x.SupersededBy).HasMaxLength(100);
+            b.HasIndex(x => new { x.ProjectId, x.Version }).IsUnique();
+            // At most one effective version per project, enforced by the database rather than by the service
+            // alone: two concurrent policy edits that both believed they were superseding version N would
+            // otherwise leave a project with two policies in force and no way to say which one ran.
+            b.HasIndex(x => x.ProjectId).IsUnique()
+                .HasFilter("\"SupersededAt\" IS NULL")
+                .HasDatabaseName("IX_project_assurance_policies_effective");
+            b.HasOne<ProjectRecord>().WithMany().HasForeignKey(x => x.ProjectId).OnDelete(DeleteBehavior.Cascade);
+        });
+        modelBuilder.Entity<AssurancePolicyDeviation>(b =>
+        {
+            b.ToTable("assurance_policy_deviations", t => t.HasCheckConstraint("CK_assurance_deviation_distinct_parties",
+                "\"ProposedByAccountId\" <> \"ApprovedByAccountId\""));
+            b.HasKey(x => x.Id);
+            b.Property(x => x.Lever).HasConversion<string>().HasMaxLength(80).IsRequired();
+            b.Property(x => x.Scope).HasMaxLength(200).IsRequired();
+            b.Property(x => x.RecommendedValue).HasConversion<string>().HasMaxLength(40).IsRequired();
+            b.Property(x => x.SelectedValue).HasConversion<string>().HasMaxLength(40).IsRequired();
+            b.Property(x => x.RecommendationBasis).HasMaxLength(4000).IsRequired();
+            b.Property(x => x.BasisKind).HasConversion<string>().HasMaxLength(40).IsRequired();
+            b.Property(x => x.Rationale).HasMaxLength(4000).IsRequired();
+            b.Property(x => x.DeviationClass).HasConversion<string>().HasMaxLength(40).IsRequired();
+            b.Property(x => x.ReleaseEffect).HasMaxLength(4000).IsRequired();
+            b.Property(x => x.ProposedBy).HasMaxLength(100).IsRequired();
+            b.Property(x => x.ApprovedBy).HasMaxLength(100).IsRequired();
+            b.Property(x => x.ApprovalAuthority).HasConversion<string>().HasMaxLength(60).IsRequired();
+            b.Property(x => x.ApprovalAuthoritySource).HasConversion<string>().HasMaxLength(30).IsRequired();
+            b.Property(x => x.SupersededBy).HasMaxLength(100);
+            b.Property(x => x.SupersededReason).HasMaxLength(4000);
+            b.Property(x => x.RecordHash).HasMaxLength(64).IsRequired();
+            b.HasIndex(x => new { x.ProjectId, x.Lever, x.EffectiveFrom });
+            b.HasOne<ProjectRecord>().WithMany().HasForeignKey(x => x.ProjectId).OnDelete(DeleteBehavior.Cascade);
+            b.HasOne<ProjectAssurancePolicy>().WithMany().HasForeignKey(x => x.PolicyVersionId).OnDelete(DeleteBehavior.Restrict);
+        });
         modelBuilder.Entity<CertificationEvidenceIndexEntry>(b=>{b.ToTable("certification_evidence_index");b.HasKey(x=>x.Id);b.Property(x=>x.ObjectiveCode).HasMaxLength(80).IsRequired();b.Property(x=>x.ArtifactType).HasMaxLength(80).IsRequired();b.Property(x=>x.EvidenceHash).HasMaxLength(64).IsRequired();b.Property(x=>x.ClaimBoundary).HasMaxLength(2000).IsRequired();b.Property(x=>x.IndexedBy).HasMaxLength(100).IsRequired();b.HasIndex(x=>new{x.ProjectId,x.ObjectiveCode,x.ArtifactType,x.ArtifactId}).IsUnique();});
         modelBuilder.Entity<SoftwareRelease>(b =>
         {
