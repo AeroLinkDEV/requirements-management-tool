@@ -121,7 +121,8 @@ public static class RequirementsEndpoints
                 : effectiveBaselineId is not null
                     ? await TestProcedureEffectivity.ForBaselineAsync(db, effectiveBaselineId.Value, ct)
                     : null;
-            var effectiveProcedureRevisionIds = procedureEffectivity?.RevisionIds;
+            var effectiveProcedureRevisionIds = await EffectiveCoverageRevisionIdsAsync(
+                db, effectiveBaselineId, ladderPolicy, procedureEffectivity, ct);
             var isExactProcedureSnapshot = procedureEffectivity is not null && (releaseId is null ||
                 await db.CandidateBaselines.AsNoTracking().AnyAsync(x =>
                     x.Id == procedureEffectivity.BaselineId && x.ReleaseId == releaseId.Value, ct));
@@ -185,10 +186,12 @@ public static class RequirementsEndpoints
             timer.Stop();return Results.Ok(new{page,pageSize,totalCount=total,totalPages=(int)Math.Ceiling(total/(double)pageSize),queryElapsedMs=timer.ElapsedMilliseconds,effectiveBaselineId,build,schemas,specifications,views,items=rows.Select(x=>{profiles.TryGetValue(x.revisionId,out var profile);commentCounts.TryGetValue(x.Id,out var comments);Guid? sourceId=x.SourceChangeRequestId;var hasSource=sourceId is Guid;return new{x.Id,x.BaseNumber,displayNumber=$"{x.BaseNumber}.{x.Revision:D2}",x.level,x.revisionId,x.Revision,x.Statement,x.Rationale,x.VerificationMethod,x.state,x.originKind,x.SourceChangeRequestId,x.SourceBaselineImportId,sourceChangeRequestReleaseId=hasSource&&sourceRequests.TryGetValue(sourceId!.Value,out var sourceRequest)?sourceRequest.TargetReleaseId:(Guid?)null,sourceScr=hasSource&&sourceNumbers.TryGetValue(sourceId!.Value,out var sourceNumber)?sourceNumber:"",x.CreatedAt,richText=profile?.RichText??x.Statement,attributesJson=profile?.AttributesJson??"{}",tagsJson=profile?.TagsJson??"[]",commentCount=comments?.Count??0,openCommentCount=comments?.Open??0,coverageState=coverageStates.TryGetValue(x.revisionId,out var rowCoverage)?rowCoverage:RequirementCoverageState.Uncovered};})});
         });
 
-        app.MapGet("/api/enterprise-requirements/{artifactId:guid}", async (Guid artifactId,Guid? releaseId,HttpContext http,AeroLinkDbContext db,CancellationToken ct) =>
+        app.MapGet("/api/enterprise-requirements/{artifactId:guid}", async (Guid artifactId,Guid? releaseId,HttpContext http,
+            AeroLinkDbContext db, IProjectLadderPolicyResolver policyResolver, CancellationToken ct) =>
         {
             var artifact=await db.Requirements.AsNoTracking().SingleOrDefaultAsync(x=>x.Id==artifactId,ct);if(artifact is null)return Results.NotFound();
             if(!await http.HasProjectAccessAsync(db,artifact.ProjectId,ct))return Results.Forbid();
+            var ladderPolicy = await policyResolver.ResolveAsync(artifact.ProjectId, ct);
             var effectiveBaselineId=releaseId is null?null:await BuildScope.EffectiveBaselineAsync(db,artifact.ProjectId,releaseId.Value,ct);
             if(releaseId is not null&&(effectiveBaselineId is null||!await db.BaselineRequirements.AnyAsync(x=>x.BaselineId==effectiveBaselineId&&x.ArtifactId==artifactId,ct)))return Results.NotFound(new{error="This requirement is not primary content in the active build.",code="cross_build_requirement"});
             var history=await (from r in db.RequirementRevisions.AsNoTracking().Where(x=>x.ArtifactId==artifactId)
@@ -205,7 +208,9 @@ public static class RequirementsEndpoints
                 ? []
                 : await db.BaselineRequirements.AsNoTracking().Where(x=>x.BaselineId==effectiveBaselineId).Select(x=>x.RevisionId).ToListAsync(ct);
             var placements=await (from n in db.SpecificationNodes.AsNoTracking().Where(x=>x.RequirementArtifactId==artifactId) join spec in db.RequirementSpecifications.AsNoTracking() on n.SpecificationId equals spec.Id join parent in db.SpecificationNodes.AsNoTracking() on n.ParentId equals parent.Id select new{spec.Id,spec.DocumentNumber,spec.Title,section=parent.Heading,n.Position}).ToListAsync(ct);
-            var procedureEffectivity=releaseId is null?null:await TestProcedureEffectivity.ForReleaseAsync(db,artifact.ProjectId,releaseId.Value,ct);var effectiveProcedureRevisionIds=procedureEffectivity?.RevisionIds;
+            var procedureEffectivity=releaseId is null?null:await TestProcedureEffectivity.ForReleaseAsync(db,artifact.ProjectId,releaseId.Value,ct);
+            var effectiveProcedureRevisionIds = await EffectiveCoverageRevisionIdsAsync(
+                db, effectiveBaselineId, ladderPolicy, procedureEffectivity, ct);
             var traceQuery=db.RequirementTraces.AsNoTracking();
             if(effectiveBaselineId is not null)
                 traceQuery=traceQuery.Where(x=>traceScopeIds.Contains(x.SourceRevisionId)&&traceScopeIds.Contains(x.TargetRevisionId)&&(x.ExactLinkSuspectLifecycleId==null||db.ExactLinkSuspectLifecycles.Any(lifecycle=>lifecycle.Id==x.ExactLinkSuspectLifecycleId&&lifecycle.LinkKind==ExactLinkKind.RequirementTrace&&lifecycle.State==ExactLinkLifecycleState.Closed)));
@@ -224,9 +229,11 @@ public static class RequirementsEndpoints
             return Results.Ok(new{from=from.Revision,to=to.Revision,statement=EnterpriseRequirementsService.Diff(from.Statement,to.Statement),rationale=EnterpriseRequirementsService.Diff(from.Rationale,to.Rationale),richText=EnterpriseRequirementsService.Diff(fromProfile?.RichText??from.Statement,toProfile?.RichText??to.Statement),attributesChanged=(fromProfile?.AttributesJson??"{}")!=(toProfile?.AttributesJson??"{}"),fromAttributes=fromProfile?.AttributesJson??"{}",toAttributes=toProfile?.AttributesJson??"{}",verificationChanged=from.VerificationMethod!=to.VerificationMethod,fromVerification=from.VerificationMethod,toVerification=to.VerificationMethod,attachmentChanges});
         });
 
-        app.MapGet("/api/enterprise-requirements/{artifactId:guid}/impact",async(Guid artifactId,Guid? releaseId,HttpContext http,AeroLinkDbContext db,CancellationToken ct)=>
+        app.MapGet("/api/enterprise-requirements/{artifactId:guid}/impact",async(Guid artifactId,Guid? releaseId,HttpContext http,
+            AeroLinkDbContext db, IProjectLadderPolicyResolver policyResolver, CancellationToken ct)=>
         {
             var artifact=await db.Requirements.AsNoTracking().SingleOrDefaultAsync(x=>x.Id==artifactId,ct);if(artifact is null)return Results.NotFound();if(!await http.HasProjectAccessAsync(db,artifact.ProjectId,ct))return Results.Forbid();
+            var ladderPolicy = await policyResolver.ResolveAsync(artifact.ProjectId, ct);
             var effectiveBaselineId=releaseId is null?null:await BuildScope.EffectiveBaselineAsync(db,artifact.ProjectId,releaseId.Value,ct);
             var revisions=await db.RequirementRevisions.AsNoTracking().Where(x=>x.ArtifactId==artifactId).ToListAsync(ct);
             var effectiveRevisionId=effectiveBaselineId is null?null:await db.BaselineRequirements.AsNoTracking().Where(x=>x.BaselineId==effectiveBaselineId&&x.ArtifactId==artifactId).Select(x=>(Guid?)x.RevisionId).SingleOrDefaultAsync(ct);
@@ -259,7 +266,10 @@ public static class RequirementsEndpoints
             var children=await (from link in childLinks join revision in db.RequirementRevisions.AsNoTracking() on link.SourceRevisionId equals revision.Id join related in db.Requirements.AsNoTracking() on revision.ArtifactId equals related.Id select new{related.Id,displayNumber=related.BaseNumber+"."+(revision.Revision<10?"0":"")+revision.Revision,level=related.Level.ToString(),revision.Statement,type=link.Type.ToString(),link.Rationale}).ToListAsync(ct);
             var procedureEffectivity=releaseId is null?null:await TestProcedureEffectivity.ForReleaseAsync(db,artifact.ProjectId,releaseId.Value,ct);
             var isExactProcedureSnapshot=procedureEffectivity is not null&&await db.CandidateBaselines.AsNoTracking().AnyAsync(x=>x.Id==procedureEffectivity.BaselineId&&x.ReleaseId==releaseId,ct);
-            var coverageLinks=await VerificationCoverageProjection.ForRequirementRevisionsAsync(db,[current.Id],ct,isExactProcedureSnapshot,procedureEffectivity?.RevisionIds);
+            var effectiveCoverageRevisionIds = await EffectiveCoverageRevisionIdsAsync(
+                db, impactBaselineId, ladderPolicy, procedureEffectivity, ct);
+            var coverageLinks=await VerificationCoverageProjection.ForRequirementRevisionsAsync(
+                db, [current.Id], ct, isExactProcedureSnapshot, effectiveCoverageRevisionIds);
             var tests=coverageLinks.Select(x=>new
             {
                 id=x.ArtifactId,
@@ -519,6 +529,29 @@ public static class RequirementsEndpoints
             if(!store.Exists(item.StorageKey))return Results.NotFound();
             return Results.File(store.OpenRead(item.StorageKey),item.ContentType,enableRangeProcessing:true);
         });
+    }
+
+    /// <summary>
+    /// The COVERAGE side of the one typed effectivity population. Requirement coverage remains on exact
+    /// software Case revisions (and System Procedure revisions), so the coverage filter set is never the
+    /// executable Procedure set of a #726 baseline. Pre-manifest compatibility projections keep their own
+    /// coverage-derived identities.
+    /// </summary>
+    private static async Task<IReadOnlyList<Guid>?> EffectiveCoverageRevisionIdsAsync(
+        AeroLinkDbContext db, Guid? effectiveBaselineId, ILadderPolicy ladderPolicy,
+        TestProcedureEffectivityResult? effectivity, CancellationToken ct)
+    {
+        if (effectivity is null || effectiveBaselineId is null) return effectivity?.RevisionIds;
+        if (!effectivity.IsExactManifest) return effectivity.RevisionIds;
+        var procedureEnabledLevels = ladderPolicy.OrderedLevels
+            .Where(level => ladderPolicy.Definition(level).VerificationProfile?.Enables(
+                    VerificationArtifactKind.Procedure) == true
+                && ladderPolicy.Definition(level).VerificationProfile?.Enables(
+                    VerificationArtifactKind.Case) == true)
+            .Select(ladderPolicy.ProcedureLevel)
+            .ToHashSet();
+        return (await BaselineExecutableMembership.ForPopulationAsync(
+            db, effectiveBaselineId.Value, procedureEnabledLevels, ct)).CoverageRevisionIds;
     }
 
 }

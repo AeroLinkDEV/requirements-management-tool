@@ -296,7 +296,7 @@ public sealed class ProjectConfigurationApiTests : IClassFixture<SharedApiHost>
         Assert.Equal(2, activationBody.GetProperty("effectiveSteps").GetArrayLength());
         var readiness = activationBody.GetProperty("readiness");
         Assert.True(readiness.GetProperty("isReady").GetBoolean());
-        Assert.Equal(18, readiness.GetProperty("consumers").GetArrayLength());
+        Assert.Equal(LadderConsumerManifestCatalog.RequiredConsumerIds.Count, readiness.GetProperty("consumers").GetArrayLength());
         var manifestVersion = readiness.GetProperty("version").GetString();
         var manifestHash = readiness.GetProperty("hash").GetString();
         Assert.Equal(LadderConsumerManifestCatalog.VersionV2, manifestVersion);

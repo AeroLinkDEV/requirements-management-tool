@@ -114,6 +114,10 @@ await using (var scope = app.Services.CreateAsyncScope())
     {
         await scope.ServiceProvider.GetRequiredService<SoftwareVerificationCaseMigrationAuthority>().EnsureCompletedAsync();
         await scope.ServiceProvider.GetRequiredService<TestChangeRequestPrefixMigrationAuthority>().EnsureCompletedAsync();
+        // #726 is the last delivery slice: only after every execution consumer is routed through the
+        // effective-executable resolver does the governed authority activate the software Procedure tier.
+        // It is internal, idempotent, and refuses (with no partial state) if typed v2 readiness is missing.
+        await scope.ServiceProvider.GetRequiredService<SoftwareProcedureExecutionCutoverAuthority>().EnsureCompletedAsync();
     }
     if (!restoreValidationReadOnly && builder.Configuration.GetValue<bool>("DemoData:Enabled"))
     {

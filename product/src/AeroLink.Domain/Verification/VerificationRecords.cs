@@ -285,6 +285,18 @@ public sealed class BaselineTestProcedureSelection
     public Guid BaselineId { get; private set; }
     public Guid ProcedureId { get; private set; }
     public Guid RevisionId { get; private set; }
+
+    /// <summary>
+    /// Governed #726 cutover: rebinds a baseline selection from a Case artifact/revision to the exact
+    /// migration-generated Procedure artifact/revision that now executes it.
+    /// </summary>
+    public void RebindMigrationExecutable(Guid procedureId, Guid revisionId)
+    {
+        if (procedureId == Guid.Empty || revisionId == Guid.Empty)
+            throw new DomainException("A migration rebind requires an exact Procedure artifact and revision.");
+        ProcedureId = procedureId;
+        RevisionId = revisionId;
+    }
 }
 
 /// <summary>
@@ -397,4 +409,18 @@ public sealed class TestExecution
     public string EvidenceReference { get; private set; } = string.Empty;
     public DateTimeOffset ExecutedAt { get; private set; }
     public DateTimeOffset RecordedAt { get; private set; }
+
+    /// <summary>
+    /// Governed #726 cutover: rebinds an execution recorded against a Case revision to the exact
+    /// migration-generated Procedure revision that now executes it. The recorded determination, executor,
+    /// evidence reference, and timestamps are untouched — only the executable revision identity changes,
+    /// and only through the platform migration authority.
+    /// </summary>
+    public void RebindMigrationExecutable(Guid procedureRevisionId, DateTimeOffset now)
+    {
+        if (procedureRevisionId == Guid.Empty)
+            throw new DomainException("A migration rebind requires an exact Procedure revision.");
+        if (procedureRevisionId == ProcedureRevisionId) return;
+        ProcedureRevisionId = procedureRevisionId;
+    }
 }

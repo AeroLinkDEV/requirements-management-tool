@@ -35,7 +35,7 @@ const localWallTime = (instant = new Date()) => {
   const pad = (value: number) => String(value).padStart(2, '0')
   return `${instant.getFullYear()}-${pad(instant.getMonth() + 1)}-${pad(instant.getDate())}T${pad(instant.getHours())}:${pad(instant.getMinutes())}:${pad(instant.getSeconds())}`
 }
-type TestSet = { id: string; discipline: TestDiscipline; releaseId: string; version: number; artifacts: SetArtifact[]; procedures?: SetArtifact[] }
+type TestSet = { id: string; discipline: TestDiscipline; releaseId: string; version: number; artifactKind?: string; artifacts: SetArtifact[]; procedures?: SetArtifact[] }
 type Execution = {
   id: string
   artifactRevisionId: string
@@ -105,10 +105,15 @@ export default function TestResultsWorkspace({ api, projectId, releaseId, discip
   // so the page says who may do it rather than offering a control that answers 403.
   const roles = user.programs.find(program => program.programId === programId)?.roles ?? []
   const canTest = !readOnly && (user.isAdministrator || roles.includes('TestEngineer'))
-  const artifactWord = verificationArtifactWord(discipline)
-  const artifactNoun = verificationArtifactNoun(discipline)
-  const artifactSetSegment = discipline === 'System' ? 'procedures' : 'cases'
   const [sets, setSets] = useState<TestSet[]>([])
+  const [effectiveKind, setEffectiveKind] = useState<string | undefined>(undefined)
+  // #726: the test-set contract reports the EFFECTIVE executable kind for the discipline. The page uses it
+  // for the candidate endpoint, the cases/procedures mutation segment, and the labels/nouns — so software
+  // under the full Case+Procedure profile visibly searches and selects Procedures, never Cases.
+  const resolvedKind = effectiveKind ?? (discipline === 'System' ? 'Procedure' : 'Case')
+  const artifactSetSegment = resolvedKind === 'Procedure' ? 'procedures' : 'cases'
+  const artifactWord = verificationArtifactWord(discipline, resolvedKind)
+  const artifactNoun = verificationArtifactNoun(discipline, resolvedKind)
   const [candidates, setCandidates] = useState<Candidate[]>([])
   const [query, setQuery] = useState('')
   const [chosen, setChosen] = useState<string[]>([])
@@ -154,6 +159,8 @@ export default function TestResultsWorkspace({ api, projectId, releaseId, discip
       return
     }
     const body = await response.json()
+    const currentSet = (body as TestSet[]).find(x => x.discipline === discipline)
+    if (currentSet?.artifactKind) setEffectiveKind(currentSet.artifactKind)
     // The build a result is recorded against. A determination that named no build would be a statement about
     // the procedure rather than about anything that shipped.
     const builds = await fetch(`${api}/api/builds?projectId=${projectId}&releaseId=${releaseId}`)
@@ -169,7 +176,7 @@ export default function TestResultsWorkspace({ api, projectId, releaseId, discip
       artifacts: (set.artifacts ?? set.procedures ?? []).map(item => ({ ...item,
         artifactRevisionId: item.artifactRevisionId ?? item.procedureRevisionId ?? '' })) })))
     setBuildId(current => built.some((x: { id: string }) => x.id === current) ? current : built[0]?.id ?? '')
-  }, [api, projectId, releaseId])
+  }, [api, projectId, releaseId, discipline])
 
   useEffect(() => { void load() }, [load])
 
@@ -191,15 +198,18 @@ export default function TestResultsWorkspace({ api, projectId, releaseId, discip
   useEffect(() => {
     const mine = ++candidateTicket.current
     const timer = setTimeout(async () => {
+      // Do not guess the artifact kind before the authoritative effective kind arrives from the test-set
+      // contract: until then there is nothing truthful to search.
+      if (effectiveKind === undefined) return
       const scope = discipline === 'System' ? 'System' : 'Software'
-      const response = await fetch(`${api}${verificationArtifactApiRoot(scope)}?projectId=${projectId}&releaseId=${releaseId}&scope=${scope}&search=${encodeURIComponent(query)}&state=Approved&page=1&pageSize=25`)
+      const response = await fetch(`${api}${verificationArtifactApiRoot(scope, resolvedKind)}?projectId=${projectId}&releaseId=${releaseId}&scope=${scope}&search=${encodeURIComponent(query)}&state=Approved&artifactKind=${resolvedKind}&page=1&pageSize=25`)
       if (!response.ok) return
       const paged = await response.json()
       if (mine !== candidateTicket.current) return
       setCandidates(paged.items.map((x: { revisionId: string; displayNumber: string; title: string; state: string }) => x))
     }, 200)
     return () => clearTimeout(timer)
-  }, [api, projectId, releaseId, discipline, query])
+  }, [api, projectId, releaseId, discipline, query, resolvedKind, effectiveKind])
 
   const set = sets.find(x => x.discipline === discipline)
   const inSet = new Set(set?.artifacts.map(x => x.artifactRevisionId) ?? [])

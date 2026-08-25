@@ -470,15 +470,18 @@ public static class TestChangeReviewRequirementScope
         AeroLinkDbContext db, Guid projectId, Guid releaseId, Guid procedureId,
         Guid requirementRevisionId, ILadderPolicy? policy, CancellationToken ct)
     {
-        var procedureLevel = await db.TestProcedures.AsNoTracking()
-            .Where(x => x.Id == procedureId && x.ProjectId == projectId
-                && (x.Level == TestProcedureLevel.System || x.ArtifactKind == VerificationArtifactKind.Case))
-            .Select(x => (TestProcedureLevel?)x.Level)
-            .SingleOrDefaultAsync(ct);
-        if (procedureLevel is null) return false;
+        var procedure = await db.TestProcedures.AsNoTracking()
+            .Where(x => x.Id == procedureId && x.ProjectId == projectId)
+            .Select(x => new { x.Level, x.ArtifactKind }).SingleOrDefaultAsync(ct);
+        if (procedure is null
+            || (procedure.Level == TestProcedureLevel.System
+                ? procedure.ArtifactKind != VerificationArtifactKind.Procedure
+                : procedure.ArtifactKind is not (VerificationArtifactKind.Case
+                    or VerificationArtifactKind.Procedure)))
+            return false;
 
         RequirementLevel requiredLevel;
-        try { requiredLevel = (policy ?? LegacyLadderPolicy.Instance).RequirementLevelFor(procedureLevel.Value); }
+        try { requiredLevel = (policy ?? LegacyLadderPolicy.Instance).RequirementLevelFor(procedure.Level); }
         catch (DomainException) { return false; }
 
         var baselineId = await EffectiveRequirementBaselineIdAsync(db, projectId, releaseId, ct);

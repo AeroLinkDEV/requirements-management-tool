@@ -1,9 +1,9 @@
 {
   "schemaVersion": "aerolink-api-host-classification/v3",
   "totals": {
-    "classes": 99,
-    "tests": 566,
-    "knownCases": 624,
+    "classes": 100,
+    "tests": 572,
+    "knownCases": 630,
     "unknownCaseTests": 0
   },
   "summary": {
@@ -26,9 +26,9 @@
       "unknownCaseTests": 0
     },
     "reusable-host": {
-      "classes": 36,
-      "tests": 225,
-      "knownCases": 254,
+      "classes": 37,
+      "tests": 231,
+      "knownCases": 260,
       "unknownCaseTests": 0
     }
   },
@@ -840,6 +840,19 @@
       ]
     },
     {
+      "cls": "VerificationImpactApiTests",
+      "tests": 11,
+      "knownCases": 11,
+      "unknownCaseTests": 0,
+      "classification": "reusable-host",
+      "reason": "Static reuse candidate, not an implementation-ready safety finding: shared-host conversion requires fresh per-test clients, unique per-test tagged logical data, and assertions scoped to that data.",
+      "intents": [
+        "auth-policy",
+        "ef-translation",
+        "http-boundary"
+      ]
+    },
+    {
       "cls": "TestChangeRequestRegisterApiTests",
       "tests": 10,
       "knownCases": 11,
@@ -859,19 +872,6 @@
       "classification": "reusable-host",
       "reason": "Static reuse candidate, not an implementation-ready safety finding: shared-host conversion requires fresh per-test clients, unique per-test tagged logical data, and assertions scoped to that data.",
       "intents": [
-        "ef-translation",
-        "http-boundary"
-      ]
-    },
-    {
-      "cls": "VerificationImpactApiTests",
-      "tests": 8,
-      "knownCases": 8,
-      "unknownCaseTests": 0,
-      "classification": "reusable-host",
-      "reason": "Static reuse candidate, not an implementation-ready safety finding: shared-host conversion requires fresh per-test clients, unique per-test tagged logical data, and assertions scoped to that data.",
-      "intents": [
-        "auth-policy",
         "ef-translation",
         "http-boundary"
       ]
@@ -1088,6 +1088,17 @@
     },
     {
       "cls": "DeferralAndRevisionListingTests",
+      "tests": 3,
+      "knownCases": 3,
+      "unknownCaseTests": 0,
+      "classification": "reusable-host",
+      "reason": "Static reuse candidate, not an implementation-ready safety finding: shared-host conversion requires fresh per-test clients, unique per-test tagged logical data, and assertions scoped to that data.",
+      "intents": [
+        "http-boundary"
+      ]
+    },
+    {
+      "cls": "EffectiveExecutionAuthorityApiTests",
       "tests": 3,
       "knownCases": 3,
       "unknownCaseTests": 0,

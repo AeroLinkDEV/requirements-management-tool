@@ -1,4 +1,5 @@
 using AeroLink.Domain.Common;
+using AeroLink.Domain.Hierarchy;
 using AeroLink.Domain.Identity;
 using AeroLink.Domain.Verification;
 using AeroLink.Infrastructure.Persistence;
@@ -22,7 +23,8 @@ public static class BuildTestSetEndpoints
     public static IEndpointRouteBuilder MapAeroLinkBuildTestSetEndpoints(this IEndpointRouteBuilder app)
     {
         app.MapGet("/api/releases/{releaseId:guid}/test-sets", async (Guid releaseId, HttpContext http,
-            AeroLinkDbContext db, BuildTestSetService service, CancellationToken ct) =>
+            AeroLinkDbContext db, BuildTestSetService service, IProjectLadderPolicyResolver policyResolver,
+            CancellationToken ct) =>
         {
             var projectId = await db.Releases.AsNoTracking().Where(x => x.Id == releaseId)
                 .Select(x => x.ProjectId).SingleOrDefaultAsync(ct);
@@ -30,19 +32,20 @@ public static class BuildTestSetEndpoints
             if (!await http.HasProjectAccessAsync(db, projectId, ct)) return Results.Forbid();
 
             var sets = await service.EnsureForReleaseAsync(projectId, releaseId, ct);
-            return Results.Ok(await DescribeAsync(sets, releaseId, db, ct));
+            var policy = await policyResolver.ResolveAsync(projectId, ct);
+            return Results.Ok(await DescribeAsync(sets, releaseId, db, policy, ct));
         });
 
         app.MapPost("/api/releases/{releaseId:guid}/test-sets/{discipline}/{artifactRoute:regex(procedures|cases)}", async (Guid releaseId, string artifactRoute,
             TestChangeReviewDiscipline discipline, IncludeInTestSetRequest request, HttpContext http,
-            AeroLinkDbContext db, IdentityService identity, BuildTestSetService service, CancellationToken ct) =>
+            AeroLinkDbContext db, IdentityService identity, BuildTestSetService service,
+            IProjectLadderPolicyResolver policyResolver, CancellationToken ct) =>
         {
             var revisionIds = request.ArtifactRevisionIds ?? request.ProcedureRevisionIds ?? [];
             var artifactPlural = TestChangeRequestSourceEligibility.ArtifactPlural(discipline);
             var release = await db.Releases.AsNoTracking().Where(x => x.Id == releaseId)
                 .Select(x => new { x.ProjectId, x.IsReleased }).SingleOrDefaultAsync(ct);
             if (release is null) return Results.NotFound();
-            if (artifactRoute == "cases" && discipline == TestChangeReviewDiscipline.System) return Results.NotFound();
             if (release.IsReleased) return Results.Conflict(new { error = "A released build's test set is read-only." });
             if (!await CanPlanAsync(http, db, identity, release.ProjectId, ct)) return Results.Forbid();
             if (revisionIds.Length == 0)
@@ -51,8 +54,22 @@ public static class BuildTestSetEndpoints
             // Every named revision has to be an approved procedure in this Project. Selecting a draft would
             // put the build behind a procedure that nobody has agreed says the right thing, and selecting one
             // from another Project would measure this release against work that has nothing to do with it.
+            // #726: a build can only run the EFFECTIVE EXECUTABLE artifact for the discipline. With the
+            // software Procedure tier enabled that is the Procedure; Case-only software keeps its Case.
+            var policy = await policyResolver.ResolveAsync(release.ProjectId, ct);
+            var effectiveKind = EffectiveExecutableArtifact.KindFor(policy,
+                policy.RequirementLevelFor(discipline));
+            var expectedSegment = effectiveKind == VerificationArtifactKind.Procedure
+                ? "procedures" : "cases";
+            if (!string.Equals(artifactRoute, expectedSegment, StringComparison.OrdinalIgnoreCase))
+                return Results.NotFound(new
+                {
+                    error = $"The artifact route '{artifactRoute}' does not match the effective executable kind ({effectiveKind}) for this discipline."
+                });
             var reachable = await (from revision in db.TestProcedureRevisions.AsNoTracking()
-                                   join procedure in db.TestProcedures.AsNoTracking().Where(x => x.Level == TestProcedureLevel.System || x.ArtifactKind == VerificationArtifactKind.Case) on revision.ProcedureId equals procedure.Id
+                                   join procedure in db.TestProcedures.AsNoTracking()
+                                       .Where(EffectiveExecutableArtifact.ExecutablePredicate(policy))
+                                       on revision.ProcedureId equals procedure.Id
                                    where revisionIds.Contains(revision.Id)
                                          && procedure.ProjectId == release.ProjectId
                                          && revision.State == TestProcedureState.Approved
@@ -76,22 +93,32 @@ public static class BuildTestSetEndpoints
                 await db.SaveChangesAsync(ct);
                 // Says how many were new rather than how many were named. Selecting from two directions at
                 // once is expected, so "8 named, 3 added" is the honest answer and the useful one.
-                return Results.Ok(new { added, named = revisionIds.Length, set = (await DescribeAsync([set], releaseId, db, ct)).Single() });
+                return Results.Ok(new { added, named = revisionIds.Length, set = (await DescribeAsync([set], releaseId, db, policy, ct)).Single() });
             }
             catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
         });
 
         app.MapDelete("/api/releases/{releaseId:guid}/test-sets/{discipline}/{artifactRoute:regex(procedures|cases)}/{artifactRevisionId:guid}",
             async (Guid releaseId, TestChangeReviewDiscipline discipline, string artifactRoute, Guid artifactRevisionId, HttpContext http,
-                AeroLinkDbContext db, IdentityService identity, BuildTestSetService service, CancellationToken ct) =>
+                AeroLinkDbContext db, IdentityService identity, BuildTestSetService service,
+                IProjectLadderPolicyResolver policyResolver, CancellationToken ct) =>
         {
             var release = await db.Releases.AsNoTracking().Where(x => x.Id == releaseId)
                 .Select(x => new { x.ProjectId, x.IsReleased }).SingleOrDefaultAsync(ct);
             if (release is null) return Results.NotFound();
-            if (artifactRoute == "cases" && discipline == TestChangeReviewDiscipline.System) return Results.NotFound();
             if (release.IsReleased) return Results.Conflict(new { error = "A released build's test set is read-only." });
             if (!await CanPlanAsync(http, db, identity, release.ProjectId, ct)) return Results.Forbid();
 
+            var policy = await policyResolver.ResolveAsync(release.ProjectId, ct);
+            var effectiveKind = EffectiveExecutableArtifact.KindFor(policy,
+                policy.RequirementLevelFor(discipline));
+            var expectedSegment = effectiveKind == VerificationArtifactKind.Procedure
+                ? "procedures" : "cases";
+            if (!string.Equals(artifactRoute, expectedSegment, StringComparison.OrdinalIgnoreCase))
+                return Results.NotFound(new
+                {
+                    error = $"The artifact route '{artifactRoute}' does not match the effective executable kind ({effectiveKind}) for this discipline."
+                });
             var sets = await service.EnsureForReleaseAsync(release.ProjectId, releaseId, ct);
             var set = sets.SingleOrDefault(x => x.Discipline == discipline);
             if (set is null) return Results.NotFound(new { error = "That discipline has no test set on this build." });
@@ -101,7 +128,7 @@ public static class BuildTestSetEndpoints
             {
                 set.Exclude(artifactRevisionId, DateTimeOffset.UtcNow);
                 await db.SaveChangesAsync(ct);
-                return Results.Ok((await DescribeAsync([set], releaseId, db, ct)).Single());
+                return Results.Ok((await DescribeAsync([set], releaseId, db, policy, ct)).Single());
             }
             catch (DomainException ex)
             {
@@ -122,13 +149,15 @@ public static class BuildTestSetEndpoints
         http.HasProjectRoleAsync(db, identity, projectId, ct, ProgramRole.TestLead, ProgramRole.ProgramManager);
 
     private static async Task<IReadOnlyList<object>> DescribeAsync(IReadOnlyCollection<BuildTestSet> sets,
-        Guid releaseId, AeroLinkDbContext db, CancellationToken ct)
+        Guid releaseId, AeroLinkDbContext db, ILadderPolicy policy, CancellationToken ct)
     {
         var revisionIds = sets.SelectMany(x => x.Entries).Select(x => x.ProcedureRevisionId).Distinct().ToList();
         var procedures = revisionIds.Count == 0
             ? []
             : await (from revision in db.TestProcedureRevisions.AsNoTracking()
-                     join procedure in db.TestProcedures.AsNoTracking().Where(x => x.Level == TestProcedureLevel.System || x.ArtifactKind == VerificationArtifactKind.Case) on revision.ProcedureId equals procedure.Id
+                     join procedure in db.TestProcedures.AsNoTracking()
+                         .Where(EffectiveExecutableArtifact.ExecutablePredicate(policy))
+                         on revision.ProcedureId equals procedure.Id
                      where revisionIds.Contains(revision.Id)
                      select new { revision.Id, procedure.BaseNumber, revision.Revision, procedure.Level })
                 .ToListAsync(ct);
@@ -176,7 +205,8 @@ public static class BuildTestSetEndpoints
             {
                 set.Id,
                 discipline = set.Discipline.ToString(),
-                artifactKind = TestChangeRequestSourceEligibility.ArtifactKind(set.Discipline),
+                artifactKind = EffectiveExecutableArtifact.KindFor(policy,
+                    policy.RequirementLevelFor(set.Discipline)).ToString(),
                 set.ReleaseId,
                 set.Version,
                 artifacts,

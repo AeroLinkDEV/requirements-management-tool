@@ -35,7 +35,7 @@ public sealed class ImportPracticeSeeder(AeroLinkDbContext db)
 
         var program = new ProgramRecord(ProjectName, ProgramCode);
         var project = new ProjectRecord(program.Id, ProjectName, "Imported baseline rehearsal");
-        var ladder = LegacyDefaultProjectLadderFactory.Create(project.Id, DateTimeOffset.UtcNow);
+        var ladder = NewProjectLadderFactory.Create(project.Id, DateTimeOffset.UtcNow);
         db.AddRange(program, project, ladder, ProjectVerificationVocabulary.Founding(project.Id, DateTimeOffset.UtcNow));
         await db.SaveChangesAsync(ct);
         return project.Id;

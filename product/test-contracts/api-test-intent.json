@@ -1,11 +1,11 @@
 {
   "schemaVersion": "aerolink-api-test-intent/v2",
   "totals": {
-    "tests": 566,
-    "cases": 624,
-    "classes": 99,
-    "hostedTests": 553,
-    "hostedCases": 602,
+    "tests": 572,
+    "cases": 630,
+    "classes": 100,
+    "hostedTests": 559,
+    "hostedCases": 608,
     "nonHostedTests": 8,
     "nonHostedCases": 17,
     "unknownHostTests": 5,
@@ -21,16 +21,16 @@
     "http-boundary": {
       "label": "HTTP boundary: route, status, JSON shape",
       "level": "API (must stay hosted)",
-      "tests": 346,
-      "cases": 380,
+      "tests": 349,
+      "cases": 383,
       "unknownCases": 0,
-      "classes": 81
+      "classes": 82
     },
     "ef-translation": {
       "label": "EF translation / relational constraints",
       "level": "Infrastructure (needs a database, not a host)",
-      "tests": 125,
-      "cases": 136,
+      "tests": 128,
+      "cases": 139,
       "unknownCases": 0,
       "classes": 47
     },
@@ -2732,6 +2732,57 @@
       }
     },
     {
+      "cls": "EffectiveExecutionAuthorityApiTests",
+      "test": "Case_only_profile_accepts_cases_and_rejects_software_procedures",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client"
+      ],
+      "sourceLines": {
+        "start": 24,
+        "end": 43
+      }
+    },
+    {
+      "cls": "EffectiveExecutionAuthorityApiTests",
+      "test": "Full_profile_accepts_software_procedures_and_rejects_cases",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client"
+      ],
+      "sourceLines": {
+        "start": 45,
+        "end": 64
+      }
+    },
+    {
+      "cls": "EffectiveExecutionAuthorityApiTests",
+      "test": "System_candidate_inventory_accepts_the_authoritative_procedure_kind",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client"
+      ],
+      "sourceLines": {
+        "start": 66,
+        "end": 82
+      }
+    },
+    {
       "cls": "ExternalIdentityAdminApiTests",
       "test": "Administrator_can_administer_external_identity_against_the_shipped_schema",
       "kind": "Fact",
@@ -5026,8 +5077,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 158,
-        "end": 178
+        "start": 163,
+        "end": 183
       }
     },
     {
@@ -5043,8 +5094,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 365,
-        "end": 384
+        "start": 370,
+        "end": 389
       }
     },
     {
@@ -5060,8 +5111,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 337,
-        "end": 363
+        "start": 342,
+        "end": 368
       }
     },
     {
@@ -5077,8 +5128,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 310,
-        "end": 335
+        "start": 315,
+        "end": 340
       }
     },
     {
@@ -5094,8 +5145,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 287,
-        "end": 308
+        "start": 292,
+        "end": 313
       }
     },
     {
@@ -5111,8 +5162,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 465,
-        "end": 499
+        "start": 473,
+        "end": 507
       }
     },
     {
@@ -5128,8 +5179,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 209,
-        "end": 235
+        "start": 214,
+        "end": 240
       }
     },
     {
@@ -5147,7 +5198,7 @@
       ],
       "sourceLines": {
         "start": 121,
-        "end": 156
+        "end": 161
       }
     },
     {
@@ -5163,8 +5214,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 193,
-        "end": 207
+        "start": 198,
+        "end": 212
       }
     },
     {
@@ -5180,8 +5231,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 180,
-        "end": 191
+        "start": 185,
+        "end": 196
       }
     },
     {
@@ -5198,8 +5249,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 386,
-        "end": 463
+        "start": 391,
+        "end": 471
       }
     },
     {
@@ -9155,7 +9206,7 @@
       ],
       "sourceLines": {
         "start": 159,
-        "end": 209
+        "end": 214
       }
     },
     {
@@ -9190,8 +9241,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 215,
-        "end": 245
+        "start": 220,
+        "end": 250
       }
     },
     {
@@ -9337,6 +9388,24 @@
     },
     {
       "cls": "VerificationImpactApiTests",
+      "test": "Dormant_historical_procedure_revisions_are_refused_at_every_runtime_seam_through_the_api",
+      "kind": "Fact",
+      "intent": "ef-translation",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 778,
+        "end": 1018
+      }
+    },
+    {
+      "cls": "VerificationImpactApiTests",
       "test": "Exact_procedure_evidence_survives_reload_and_reopen_preserves_history",
       "kind": "Fact",
       "intent": "ef-translation",
@@ -9355,6 +9424,24 @@
     },
     {
       "cls": "VerificationImpactApiTests",
+      "test": "Missing_case_parent_is_deferred_and_never_becomes_a_procedure_row_through_the_api",
+      "kind": "Fact",
+      "intent": "ef-translation",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 619,
+        "end": 770
+      }
+    },
+    {
+      "cls": "VerificationImpactApiTests",
       "test": "Only_the_test_lead_distributes_work_and_only_verification_engineers_resolve_it",
       "kind": "Fact",
       "intent": "auth-policy",
@@ -9368,6 +9455,24 @@
       "sourceLines": {
         "start": 386,
         "end": 417
+      }
+    },
+    {
+      "cls": "VerificationImpactApiTests",
+      "test": "Resolving_a_software_procedure_with_two_case_parents_applies_coverage_to_both_through_the_api",
+      "kind": "Fact",
+      "intent": "ef-translation",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 467,
+        "end": 611
       }
     },
     {

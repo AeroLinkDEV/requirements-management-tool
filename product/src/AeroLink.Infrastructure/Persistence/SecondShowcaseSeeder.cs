@@ -160,8 +160,24 @@ public sealed class SecondShowcaseSeeder(
             throw new InvalidOperationException("The second showcase Project has more than one ladder configuration.");
         if (ladders.Count == 0)
         {
-            db.ProjectLadderConfigurations.Add(LegacyDefaultProjectLadderFactory.Create(project.Id, now));
+            // #726: every real creation seam starts from the new-project default ([Case, Procedure] software
+            // Draft), and this showcase then deliberately configures the System-to-LowLevel subset before
+            // sealing/activation — the same pre-seal removal path an owner uses.
+            var initial = NewProjectLadderFactory.Create(project.Id, now);
+            db.ProjectLadderConfigurations.Add(initial);
             await db.SaveChangesAsync(ct);
+            var edit = await ladderAuthoring.EditAsync(project.Id,
+                new ProjectLadderEditCommand(initial.Version,
+                    "Show the configured System to LowLevel ladder in the second showcase workspace.",
+                    [
+                        new(nameof(RequirementLevel.System), 1, LegacyLadderPolicy.Instance.Definition(RequirementLevel.System).Capabilities),
+                        new(nameof(RequirementLevel.LowLevel), 2, LegacyLadderPolicy.Instance.Definition(RequirementLevel.LowLevel).Capabilities),
+                    ],
+                    [new(nameof(RequirementLevel.System), nameof(RequirementLevel.LowLevel))]),
+                Actor, now.AddMinutes(1), ct);
+            if (edit.Kind != ProjectLadderEditResultKind.Success || edit.Configuration is null)
+                throw new InvalidOperationException(edit.Error ?? "The second showcase ladder could not be authored.");
+            await ActivateAsync(project.Id, edit.Configuration.Version, now, ct);
         }
 
         // Recovery-shaped like the ladder above: the second showcase can be re-run against a Project that

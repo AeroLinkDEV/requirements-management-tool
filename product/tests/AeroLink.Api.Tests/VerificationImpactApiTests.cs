@@ -457,4 +457,563 @@ public sealed class VerificationImpactApiTests
         Assert.Contains(await db.SecurityAuditEvents.AsNoTracking().ToListAsync(), audit =>
             audit.EventType == "TestChangeReviewAssigned" && audit.Target == reviewId.ToString());
     }
+
+    /// <summary>
+    /// #726 blocker 3, API path: a software Procedure can carry multiple exact Case parents, and coverage
+    /// work (resolve, reopen, re-confirm) must apply to ALL of them through the authoritative links — never
+    /// one arbitrary Case chosen by provider or insertion order, and never a TestCoverage row against the
+    /// software Procedure revision itself.
+    /// </summary>
+    [Fact]
+    public async Task Resolving_a_software_procedure_with_two_case_parents_applies_coverage_to_both_through_the_api()
+    {
+        using var factory = new AeroLinkApiFactory(testLadderPolicy: ProcedureEnabledTestPolicy.Create());
+        var now = DateTimeOffset.UtcNow;
+        Guid projectId, baselineId, requirementRevisionId, itemId, procedureId,
+            caseARevisionId, caseBRevisionId, procedureRevisionId;
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            var program = new ProgramRecord("All Parent API Program", "APA");
+            var project = new ProjectRecord(program.Id, "All Parent API Software", "All Parent API Product");
+            var release = new SoftwareRelease(project.Id, "1.0", false);
+            var baseline = new CandidateBaseline("SW-01.00", 0, project.Id, release.Id, null,
+                "Candidate", "cm.test", now);
+            var scr = new SystemChangeRequest("HLRCR-00933", 0, project.Id, release.Id,
+                "All-parent authority", "P", "A", "S", "author", now,
+                ChangeRequestType.Software, softwareLevel: RequirementLevel.HighLevel);
+            scr.AddRequirementChange("author", "HLR-00000933", 0, RequirementLevel.HighLevel,
+                RequirementChangeKind.Introduce, "The software shall sequence in all-parent builds.",
+                "All-parent fixture authority.", "Analysis", now,
+                attributesJson: "{\"derived\":true}");
+            scr.SubmitForReview("author", [new ApproverSelection("reviewer", "Reviewer")], now);
+            scr.ApproveActiveStage("reviewer", now);
+            baseline.Select(scr, "cm.test", now);
+            var engineer = new UserAccount("eng.user", "Engineer", "eng.user@example.test",
+                IdentityService.HashPassword(AeroLinkApiFactory.MemberPassword), now);
+            var cm = new UserAccount("cm.user", "Configuration Manager", "cm.user@example.test",
+                IdentityService.HashPassword(AeroLinkApiFactory.MemberPassword), now);
+            db.AddRange(program, project, release, baseline, scr, engineer, cm);
+            db.Add(new ProgramMembership(engineer.Id, program.Id, ProgramRole.TestEngineer,
+                "all-parent-api", now));
+            db.Add(new ProgramMembership(cm.Id, program.Id, ProgramRole.ConfigurationManager,
+                "all-parent-api", now));
+            await db.SaveChangesAsync();
+            await scope.ServiceProvider.GetRequiredService<VerificationImpactService>()
+                .RaiseForApprovedChangeRequestAsync(scr, now, default);
+            await db.SaveChangesAsync();
+            projectId = project.Id;
+            baselineId = baseline.Id;
+        }
+
+        using (var cmClient = factory.CreateClient())
+        {
+            await LoginAsync(cmClient, "cm.user");
+            Assert.Equal(HttpStatusCode.OK,
+                (await cmClient.PostAsJsonAsync($"/api/baselines/{baselineId}/freeze", new { })).StatusCode);
+            Assert.Equal(HttpStatusCode.OK,
+                (await cmClient.PostAsJsonAsync($"/api/baselines/{baselineId}/materialize-requirements", new { })).StatusCode);
+        }
+
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            requirementRevisionId = await db.RequirementRevisions.Select(x => x.Id).SingleAsync();
+            itemId = (await db.VerificationImpactItems.SingleAsync()).Id;
+            var caseA = new TestProcedure(projectId, "HLRTC-000933", "Parent case A",
+                "test.engineer", now, TestProcedureLevel.HighLevel);
+            var caseARevision = new TestProcedureRevision(caseA.Id, 0,
+                "Verify A", "Preconditions", "Steps", "Expected",
+                TestProcedureState.Approved, "test.engineer", now, effectiveBaselineId: baselineId,
+                parentKind: VerificationProcedureParentKind.Allocated);
+            var caseB = new TestProcedure(projectId, "HLRTC-000934", "Parent case B",
+                "test.engineer", now, TestProcedureLevel.HighLevel);
+            var caseBRevision = new TestProcedureRevision(caseB.Id, 0,
+                "Verify B", "Preconditions", "Steps", "Expected",
+                TestProcedureState.Approved, "test.engineer", now, effectiveBaselineId: baselineId,
+                parentKind: VerificationProcedureParentKind.Allocated);
+            var procedure = new TestProcedure(projectId, "HLRTP-000933", "Two-parent procedure",
+                "test.engineer", now, TestProcedureLevel.HighLevel,
+                artifactKind: VerificationArtifactKind.Procedure,
+                parentKind: VerificationProcedureParentKind.Allocated);
+            var procedureRevision = new TestProcedureRevision(procedure.Id, 0,
+                "Execute both parents", "Procedure setup", "Procedure steps", "Expected observation",
+                TestProcedureState.Draft, "test.engineer", now,
+                environmentSetup: "Setup", testData: "Data", orderedSteps: "Steps",
+                expectedObservations: "Expected", cleanup: "Cleanup", toolingAutomation: "Tooling",
+                parentKind: VerificationProcedureParentKind.Allocated);
+            db.AddRange(caseA, caseARevision, caseB, caseBRevision, procedure, procedureRevision,
+                new TestRequirementCoverage(caseARevision.Id, requirementRevisionId),
+                new TestRequirementCoverage(caseBRevision.Id, requirementRevisionId),
+                // Reversed insertion order: B is linked before A. Coverage work must never depend on it.
+                new TestCaseProcedureLink(caseBRevision.Id, procedureRevision.Id),
+                new TestCaseProcedureLink(caseARevision.Id, procedureRevision.Id),
+                new BaselineTestProcedureSelection(baselineId, caseA.Id, caseARevision.Id),
+                new BaselineTestProcedureSelection(baselineId, caseB.Id, caseBRevision.Id),
+                new BaselineTestProcedureSelection(baselineId, procedure.Id, procedureRevision.Id));
+            await db.SaveChangesAsync();
+            db.Entry(procedureRevision).Property(x => x.State).CurrentValue = TestProcedureState.Approved;
+            await db.SaveChangesAsync();
+            procedureId = procedure.Id;
+            caseARevisionId = caseARevision.Id;
+            caseBRevisionId = caseBRevision.Id;
+            procedureRevisionId = procedureRevision.Id;
+        }
+
+        using (var client = factory.CreateClient())
+        {
+            await LoginAsync(client, "eng.user");
+            using var resolved = await client.PostAsJsonAsync($"/api/verification-impact/{itemId}/resolve", new
+            {
+                outcome = "ProcedureCoverageConfirmed",
+                rationale = "The two-parent procedure executes both exact source Cases.",
+                procedureId
+            });
+            Assert.Equal(HttpStatusCode.OK, resolved.StatusCode);
+        }
+
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            Assert.Equal(2, await db.TestCoverage.AsNoTracking().CountAsync(x =>
+                x.RequirementRevisionId == requirementRevisionId && !x.IsSuspect));
+            Assert.Equal(2, await db.TestCoverage.AsNoTracking().CountAsync(x =>
+                x.ProcedureRevisionId == caseARevisionId || x.ProcedureRevisionId == caseBRevisionId));
+            Assert.Equal(0, await db.TestCoverage.AsNoTracking().CountAsync(x =>
+                x.ProcedureRevisionId == procedureRevisionId));
+        }
+
+        using (var client = factory.CreateClient())
+        {
+            await LoginAsync(client, "eng.user");
+            using var reopened = await client.PostAsJsonAsync($"/api/verification-impact/{itemId}/reopen",
+                new { rationale = "Reopen both exact parent Cases." });
+            Assert.Equal(HttpStatusCode.OK, reopened.StatusCode);
+            using var resolvedAgain = await client.PostAsJsonAsync($"/api/verification-impact/{itemId}/resolve", new
+            {
+                outcome = "ProcedureCoverageConfirmed",
+                rationale = "Re-confirmed against both exact source Cases.",
+                procedureId
+            });
+            Assert.Equal(HttpStatusCode.OK, resolvedAgain.StatusCode);
+        }
+
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            Assert.Equal(2, await db.TestCoverage.AsNoTracking().CountAsync(x =>
+                x.RequirementRevisionId == requirementRevisionId && !x.IsSuspect));
+            Assert.Equal(2, await db.TestCoverage.AsNoTracking().CountAsync(x =>
+                x.ProcedureRevisionId == caseARevisionId || x.ProcedureRevisionId == caseBRevisionId));
+            Assert.Equal(0, await db.TestCoverage.AsNoTracking().CountAsync(x =>
+                x.ProcedureRevisionId == procedureRevisionId));
+        }
+    }
+
+    /// <summary>
+    /// #726 blocker 4, API path with a missing parent: when one exact source Case has no TestCoverage row,
+    /// resolve/reopen/re-resolve confirm the parent that exists and deterministically defer the missing one
+    /// to a controlled successor — never creating a row against the software Procedure and never depending on
+    /// link insertion order.
+    /// </summary>
+    [Fact]
+    public async Task Missing_case_parent_is_deferred_and_never_becomes_a_procedure_row_through_the_api()
+    {
+        using var factory = new AeroLinkApiFactory(testLadderPolicy: ProcedureEnabledTestPolicy.Create());
+        var now = DateTimeOffset.UtcNow;
+        Guid projectId, baselineId, requirementRevisionId, itemId, procedureId,
+            caseARevisionId, caseBRevisionId, procedureRevisionId;
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            var program = new ProgramRecord("Missing Parent API Program", "MPA");
+            var project = new ProjectRecord(program.Id, "Missing Parent API Software", "Missing Parent API Product");
+            var release = new SoftwareRelease(project.Id, "1.0", false);
+            var baseline = new CandidateBaseline("SW-01.00", 0, project.Id, release.Id, null,
+                "Candidate", "cm.test", now);
+            var scr = new SystemChangeRequest("HLRCR-00934", 0, project.Id, release.Id,
+                "Missing-parent authority", "P", "A", "S", "author", now,
+                ChangeRequestType.Software, softwareLevel: RequirementLevel.HighLevel);
+            scr.AddRequirementChange("author", "HLR-00000934", 0, RequirementLevel.HighLevel,
+                RequirementChangeKind.Introduce, "The software shall sequence in missing-parent builds.",
+                "Missing-parent fixture authority.", "Analysis", now,
+                attributesJson: "{\"derived\":true}");
+            scr.SubmitForReview("author", [new ApproverSelection("reviewer", "Reviewer")], now);
+            scr.ApproveActiveStage("reviewer", now);
+            baseline.Select(scr, "cm.test", now);
+            var engineer = new UserAccount("eng.user", "Engineer", "eng.user@example.test",
+                IdentityService.HashPassword(AeroLinkApiFactory.MemberPassword), now);
+            var cm = new UserAccount("cm.user", "Configuration Manager", "cm.user@example.test",
+                IdentityService.HashPassword(AeroLinkApiFactory.MemberPassword), now);
+            db.AddRange(program, project, release, baseline, scr, engineer, cm);
+            db.Add(new ProgramMembership(engineer.Id, program.Id, ProgramRole.TestEngineer,
+                "missing-parent-api", now));
+            db.Add(new ProgramMembership(cm.Id, program.Id, ProgramRole.ConfigurationManager,
+                "missing-parent-api", now));
+            await db.SaveChangesAsync();
+            await scope.ServiceProvider.GetRequiredService<VerificationImpactService>()
+                .RaiseForApprovedChangeRequestAsync(scr, now, default);
+            await db.SaveChangesAsync();
+            projectId = project.Id;
+            baselineId = baseline.Id;
+        }
+
+        using (var cmClient = factory.CreateClient())
+        {
+            await LoginAsync(cmClient, "cm.user");
+            Assert.Equal(HttpStatusCode.OK,
+                (await cmClient.PostAsJsonAsync($"/api/baselines/{baselineId}/freeze", new { })).StatusCode);
+            Assert.Equal(HttpStatusCode.OK,
+                (await cmClient.PostAsJsonAsync($"/api/baselines/{baselineId}/materialize-requirements", new { })).StatusCode);
+        }
+
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            requirementRevisionId = await db.RequirementRevisions.Select(x => x.Id).SingleAsync();
+            itemId = (await db.VerificationImpactItems.SingleAsync()).Id;
+            var caseA = new TestProcedure(projectId, "HLRTC-000934", "Parent case A",
+                "test.engineer", now, TestProcedureLevel.HighLevel);
+            var caseARevision = new TestProcedureRevision(caseA.Id, 0,
+                "Verify A", "Preconditions", "Steps", "Expected",
+                TestProcedureState.Approved, "test.engineer", now, effectiveBaselineId: baselineId,
+                parentKind: VerificationProcedureParentKind.Allocated);
+            var caseB = new TestProcedure(projectId, "HLRTC-000935", "Parent case B",
+                "test.engineer", now, TestProcedureLevel.HighLevel);
+            var caseBRevision = new TestProcedureRevision(caseB.Id, 0,
+                "Verify B", "Preconditions", "Steps", "Expected",
+                TestProcedureState.Approved, "test.engineer", now, effectiveBaselineId: baselineId,
+                parentKind: VerificationProcedureParentKind.Derived,
+                derivedRationale: "Missing-parent fixture Case without coverage.");
+            var procedure = new TestProcedure(projectId, "HLRTP-000934", "Two-parent procedure",
+                "test.engineer", now, TestProcedureLevel.HighLevel,
+                artifactKind: VerificationArtifactKind.Procedure,
+                parentKind: VerificationProcedureParentKind.Allocated);
+            var procedureRevision = new TestProcedureRevision(procedure.Id, 0,
+                "Execute both parents", "Procedure setup", "Procedure steps", "Expected observation",
+                TestProcedureState.Draft, "test.engineer", now,
+                environmentSetup: "Setup", testData: "Data", orderedSteps: "Steps",
+                expectedObservations: "Expected", cleanup: "Cleanup", toolingAutomation: "Tooling",
+                parentKind: VerificationProcedureParentKind.Allocated);
+            db.AddRange(caseA, caseARevision, caseB, caseBRevision, procedure, procedureRevision,
+                new TestRequirementCoverage(caseARevision.Id, requirementRevisionId),
+                // Reversed insertion order: B is linked before A.
+                new TestCaseProcedureLink(caseBRevision.Id, procedureRevision.Id),
+                new TestCaseProcedureLink(caseARevision.Id, procedureRevision.Id),
+                new BaselineTestProcedureSelection(baselineId, caseA.Id, caseARevision.Id),
+                new BaselineTestProcedureSelection(baselineId, caseB.Id, caseBRevision.Id),
+                new BaselineTestProcedureSelection(baselineId, procedure.Id, procedureRevision.Id));
+            await db.SaveChangesAsync();
+            db.Entry(procedureRevision).Property(x => x.State).CurrentValue = TestProcedureState.Approved;
+            await db.SaveChangesAsync();
+            procedureId = procedure.Id;
+            caseARevisionId = caseARevision.Id;
+            caseBRevisionId = caseBRevision.Id;
+            procedureRevisionId = procedureRevision.Id;
+        }
+
+        using (var client = factory.CreateClient())
+        {
+            await LoginAsync(client, "eng.user");
+            using var resolved = await client.PostAsJsonAsync($"/api/verification-impact/{itemId}/resolve", new
+            {
+                outcome = "ProcedureCoverageConfirmed",
+                rationale = "Only parent A has an exact link; B is deferred to a controlled successor.",
+                procedureId
+            });
+            Assert.Equal(HttpStatusCode.OK, resolved.StatusCode);
+        }
+
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            var aRow = await db.TestCoverage.AsNoTracking().SingleAsync(x =>
+                x.ProcedureRevisionId == caseARevisionId
+                && x.RequirementRevisionId == requirementRevisionId);
+            Assert.False(aRow.IsSuspect);
+            Assert.Equal(0, await db.TestCoverage.AsNoTracking().CountAsync(x =>
+                x.ProcedureRevisionId == caseBRevisionId
+                && x.RequirementRevisionId == requirementRevisionId));
+            Assert.Equal(0, await db.TestCoverage.AsNoTracking().CountAsync(x =>
+                x.ProcedureRevisionId == procedureRevisionId));
+        }
+
+        using (var client = factory.CreateClient())
+        {
+            await LoginAsync(client, "eng.user");
+            using var reopened = await client.PostAsJsonAsync($"/api/verification-impact/{itemId}/reopen",
+                new { rationale = "Reopen the effective parent only." });
+            Assert.Equal(HttpStatusCode.OK, reopened.StatusCode);
+            using var resolvedAgain = await client.PostAsJsonAsync($"/api/verification-impact/{itemId}/resolve", new
+            {
+                outcome = "ProcedureCoverageConfirmed",
+                rationale = "Re-confirmed for the exact source Case that has a row.",
+                procedureId
+            });
+            Assert.Equal(HttpStatusCode.OK, resolvedAgain.StatusCode);
+        }
+
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            var aRow = await db.TestCoverage.AsNoTracking().SingleAsync(x =>
+                x.ProcedureRevisionId == caseARevisionId
+                && x.RequirementRevisionId == requirementRevisionId);
+            Assert.False(aRow.IsSuspect);
+            Assert.Equal("eng.user", aRow.ConfirmedBy);
+            Assert.Equal(0, await db.TestCoverage.AsNoTracking().CountAsync(x =>
+                x.ProcedureRevisionId == caseBRevisionId
+                && x.RequirementRevisionId == requirementRevisionId));
+            Assert.Equal(0, await db.TestCoverage.AsNoTracking().CountAsync(x =>
+                x.ProcedureRevisionId == procedureRevisionId));
+        }
+    }
+
+    /// <summary>
+    /// #726 Blocker 3, real HTTP seams: a historical migration mirror preserved in the Retired state (the
+    /// post-cutover shape for an Approved Case revision that retains an old EffectiveBaselineId but is no
+    /// longer selected) must be refused by verification-impact selection, direct BuildTestSet inclusion,
+    /// execution, and retest — while the current effective revision of the same project still works.
+    /// </summary>
+    [Fact]
+    public async Task Dormant_historical_procedure_revisions_are_refused_at_every_runtime_seam_through_the_api()
+    {
+        using var factory = new AeroLinkApiFactory(testLadderPolicy: ProcedureEnabledTestPolicy.Create());
+        var now = DateTimeOffset.UtcNow;
+        Guid projectId, releaseId, baselineId, requirementRevisionId, itemId, buildId,
+            dormantArtifactId, dormantRevisionId, currentArtifactId, currentRevisionId;
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            var program = new ProgramRecord("Dormant HTTP Program", "DHP");
+            var project = new ProjectRecord(program.Id, "Dormant HTTP Software", "Dormant HTTP Product");
+            var release = new SoftwareRelease(project.Id, "1.0", false);
+            var baseline = new CandidateBaseline("SW-01.00", 0, project.Id, release.Id, null,
+                "Candidate", "cm.test", now);
+            var scr = new SystemChangeRequest("HLRCR-00940", 0, project.Id, release.Id,
+                "Dormant HTTP authority", "P", "A", "S", "author", now,
+                ChangeRequestType.Software, softwareLevel: RequirementLevel.HighLevel);
+            scr.AddRequirementChange("author", "HLR-00000940", 0, RequirementLevel.HighLevel,
+                RequirementChangeKind.Introduce, "The software shall sequence in dormant-http builds.",
+                "Dormant HTTP fixture authority.", "Analysis", now,
+                attributesJson: "{\"derived\":true}");
+            scr.SubmitForReview("author", [new ApproverSelection("reviewer", "Reviewer")], now);
+            scr.ApproveActiveStage("reviewer", now);
+            baseline.Select(scr, "cm.test", now);
+            var engineer = new UserAccount("eng.user", "Engineer", "eng.user@example.test",
+                IdentityService.HashPassword(AeroLinkApiFactory.MemberPassword), now);
+            var cm = new UserAccount("cm.user", "Configuration Manager", "cm.user@example.test",
+                IdentityService.HashPassword(AeroLinkApiFactory.MemberPassword), now);
+            db.AddRange(program, project, release, baseline, scr, engineer, cm);
+            db.Add(new ProgramMembership(engineer.Id, program.Id, ProgramRole.TestEngineer,
+                "dormant-http", now));
+            db.Add(new ProgramMembership(engineer.Id, program.Id, ProgramRole.TestLead,
+                "dormant-http", now));
+            db.Add(new ProgramMembership(cm.Id, program.Id, ProgramRole.ConfigurationManager,
+                "dormant-http", now));
+            await db.SaveChangesAsync();
+            await scope.ServiceProvider.GetRequiredService<VerificationImpactService>()
+                .RaiseForApprovedChangeRequestAsync(scr, now, default);
+            await db.SaveChangesAsync();
+            projectId = project.Id;
+            releaseId = release.Id;
+            baselineId = baseline.Id;
+        }
+
+        using (var cmClient = factory.CreateClient())
+        {
+            await LoginAsync(cmClient, "cm.user");
+            Assert.Equal(HttpStatusCode.OK,
+                (await cmClient.PostAsJsonAsync($"/api/baselines/{baselineId}/freeze", new { })).StatusCode);
+            Assert.Equal(HttpStatusCode.OK,
+                (await cmClient.PostAsJsonAsync($"/api/baselines/{baselineId}/materialize-requirements", new { })).StatusCode);
+        }
+
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            requirementRevisionId = await db.RequirementRevisions.Select(x => x.Id).SingleAsync();
+            itemId = (await db.VerificationImpactItems.SingleAsync()).Id;
+            var build = new SoftwareBuild(projectId, releaseId, baselineId, "B-DRM",
+                "Dormant HTTP build", "cm.test", now);
+            // Case A: Approved .00 with historical EffectiveBaselineId, selected in NO current baseline —
+            // fully dormant, so its post-cutover mirror is Retired with no link and no selection.
+            var caseA = new TestProcedure(projectId, "HLRTC-000940", "Dormant case A",
+                "test.engineer", now, TestProcedureLevel.HighLevel);
+            var caseARevision = new TestProcedureRevision(caseA.Id, 0,
+                "Verify A", "Preconditions", "Steps", "Expected",
+                TestProcedureState.Approved, "test.engineer", now, effectiveBaselineId: baselineId,
+                parentKind: VerificationProcedureParentKind.Allocated);
+            // Case B: .00 selected historically, .01 is the current selection — .00 becomes a Retired
+            // mirror, .01 becomes the Approved executable mirror.
+            var caseB = new TestProcedure(projectId, "HLRTC-000941", "Current case B",
+                "test.engineer", now, TestProcedureLevel.HighLevel);
+            var caseB00 = new TestProcedureRevision(caseB.Id, 0,
+                "Verify B v1", "Preconditions", "Steps", "Expected",
+                TestProcedureState.Approved, "test.engineer", now, effectiveBaselineId: baselineId,
+                parentKind: VerificationProcedureParentKind.Allocated);
+            var caseB01 = new TestProcedureRevision(caseB.Id, 1,
+                "Verify B v2", "Preconditions v2", "Steps v2", "Expected v2",
+                TestProcedureState.Approved, "test.engineer", now.AddDays(1),
+                effectiveBaselineId: baselineId,
+                parentKind: VerificationProcedureParentKind.Allocated);
+            var dormantArtifact = new TestProcedure(projectId, "HLRTP-000940", "Dormant mirror A",
+                "aerolink-migration", now, TestProcedureLevel.HighLevel,
+                artifactKind: VerificationArtifactKind.Procedure,
+                parentKind: VerificationProcedureParentKind.Allocated);
+            var dormantRevision = new TestProcedureRevision(dormantArtifact.Id, 0,
+                "Historical mirror", "", "", "",
+                TestProcedureState.Retired, "aerolink-migration", now,
+                parentKind: VerificationProcedureParentKind.Allocated,
+                retirementRationale: "Superseded historical mirror; no executable claim.");
+            var currentArtifact = new TestProcedure(projectId, "HLRTP-000941", "Current mirror B",
+                "aerolink-migration", now, TestProcedureLevel.HighLevel,
+                artifactKind: VerificationArtifactKind.Procedure,
+                parentKind: VerificationProcedureParentKind.Allocated);
+            var retiredMirror = new TestProcedureRevision(currentArtifact.Id, 0,
+                "Historical mirror", "", "", "",
+                TestProcedureState.Retired, "aerolink-migration", now,
+                parentKind: VerificationProcedureParentKind.Allocated,
+                retirementRationale: "Superseded by .01 before the cutover.");
+            var currentRevision = new TestProcedureRevision(currentArtifact.Id, 1,
+                "Execute current case", "Procedure setup", "Procedure steps", "Expected observation",
+                TestProcedureState.Approved, "aerolink-migration", now.AddDays(1),
+                effectiveBaselineId: baselineId,
+                environmentSetup: "Setup", testData: "Data", orderedSteps: "Steps",
+                expectedObservations: "Expected", cleanup: "Cleanup", toolingAutomation: "Tooling",
+                parentKind: VerificationProcedureParentKind.Allocated);
+            db.AddRange(caseA, caseARevision, caseB, caseB00, caseB01,
+                dormantArtifact, dormantRevision, currentArtifact, retiredMirror, currentRevision, build,
+                new TestRequirementCoverage(caseARevision.Id, requirementRevisionId),
+                new TestRequirementCoverage(caseB00.Id, requirementRevisionId),
+                new TestRequirementCoverage(caseB01.Id, requirementRevisionId),
+                new TestCaseProcedureLink(caseB01.Id, currentRevision.Id),
+                new BaselineTestProcedureSelection(baselineId, currentArtifact.Id, currentRevision.Id),
+                new TestProcedureMigrationSource(projectId, caseARevision.Id,
+                    dormantArtifact.Id, dormantRevision.Id),
+                new TestProcedureMigrationSource(projectId, caseB00.Id,
+                    currentArtifact.Id, retiredMirror.Id),
+                new TestProcedureMigrationSource(projectId, caseB01.Id,
+                    currentArtifact.Id, currentRevision.Id));
+            await db.SaveChangesAsync();
+            var baseline = await db.CandidateBaselines.SingleAsync(x => x.Id == baselineId);
+            baseline.MarkTestProceduresMaterialized("cm.test", new string('b', 64), 1, now);
+            await db.SaveChangesAsync();
+            buildId = build.Id;
+            dormantArtifactId = dormantArtifact.Id;
+            dormantRevisionId = dormantRevision.Id;
+            currentArtifactId = currentArtifact.Id;
+            currentRevisionId = currentRevision.Id;
+        }
+
+        using (var client = factory.CreateClient())
+        {
+            await LoginAsync(client, "eng.user");
+
+            // Verification-impact selection: the fully dormant artifact has no Approved revision.
+            using var dormantResolve = await client.PostAsJsonAsync(
+                $"/api/verification-impact/{itemId}/resolve", new
+                {
+                    outcome = "ProcedureCoverageConfirmed",
+                    rationale = "The dormant mirror must not be selectable.",
+                    procedureId = dormantArtifactId
+                });
+            Assert.Equal(HttpStatusCode.BadRequest, dormantResolve.StatusCode);
+            // The current artifact resolves to its latest Approved revision and works.
+            using var currentResolve = await client.PostAsJsonAsync(
+                $"/api/verification-impact/{itemId}/resolve", new
+                {
+                    outcome = "ProcedureCoverageConfirmed",
+                    rationale = "The current effective revision is selectable.",
+                    procedureId = currentArtifactId
+                });
+            Assert.Equal(HttpStatusCode.OK, currentResolve.StatusCode);
+
+            // Execution: the dormant revision is refused; the current revision executes.
+            using var dormantExecution = await client.PostAsJsonAsync("/api/test-executions", new
+            {
+                projectId,
+                artifactRevisionId = dormantRevisionId,
+                softwareBuildId = buildId,
+                retestOfExecutionId = (Guid?)null,
+                outcome = "Pass",
+                configuration = "Controlled rig",
+                determination = "Must be refused.",
+                evidenceReference = "evidence/dormant-refused.json",
+                executedAt = now,
+            });
+            Assert.Equal(HttpStatusCode.BadRequest, dormantExecution.StatusCode);
+            using var currentExecution = await client.PostAsJsonAsync("/api/test-executions", new
+            {
+                projectId,
+                artifactRevisionId = currentRevisionId,
+                softwareBuildId = buildId,
+                retestOfExecutionId = (Guid?)null,
+                outcome = "Pass",
+                configuration = "Controlled rig",
+                determination = "The current revision executes.",
+                evidenceReference = "evidence/current-pass.json",
+                executedAt = now,
+            });
+            Assert.Equal(HttpStatusCode.Created, currentExecution.StatusCode);
+            var currentExecutionId = (await currentExecution.Content.ReadFromJsonAsync<JsonElement>())
+                .GetProperty("id").GetGuid();
+
+            // Retest: the dormant revision can never be the subject of a retest.
+            using var dormantRetest = await client.PostAsJsonAsync("/api/test-executions", new
+            {
+                projectId,
+                artifactRevisionId = dormantRevisionId,
+                softwareBuildId = buildId,
+                retestOfExecutionId = currentExecutionId,
+                outcome = "Pass",
+                configuration = "Controlled rig",
+                determination = "Must be refused.",
+                evidenceReference = "evidence/dormant-retest-refused.json",
+                executedAt = now,
+            });
+            Assert.Equal(HttpStatusCode.BadRequest, dormantRetest.StatusCode);
+
+            // Direct BuildTestSet inclusion: the dormant revision is refused; the current one is accepted.
+            using var dormantInclude = await client.PostAsJsonAsync(
+                $"/api/releases/{releaseId}/test-sets/HighLevelSoftware/procedures", new
+                {
+                    artifactRevisionIds = new[] { dormantRevisionId },
+                    reason = "Chosen",
+                    note = "Must be refused."
+                });
+            Assert.Equal(HttpStatusCode.BadRequest, dormantInclude.StatusCode);
+            using var currentInclude = await client.PostAsJsonAsync(
+                $"/api/releases/{releaseId}/test-sets/HighLevelSoftware/procedures", new
+                {
+                    artifactRevisionIds = new[] { currentRevisionId },
+                    reason = "Chosen",
+                    note = "The current revision belongs in the build."
+                });
+            Assert.Equal(HttpStatusCode.OK, currentInclude.StatusCode);
+        }
+
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            // Effectivity is the readiness boundary: the dormant artifact/revision is absent, the current
+            // artifact resolves to the current revision. Readiness and satisfaction therefore cannot count
+            // the historical mirror.
+            var effectivity = await TestProcedureEffectivity.ForReleaseAsync(
+                db, projectId, releaseId, default);
+            Assert.NotNull(effectivity);
+            Assert.True(effectivity.RevisionByProcedure.TryGetValue(currentArtifactId, out var effective));
+            Assert.Equal(currentRevisionId, effective);
+            Assert.False(effectivity.RevisionByProcedure.ContainsKey(dormantArtifactId));
+            Assert.Equal(0, await db.BuildTestSetEntries.AsNoTracking().CountAsync(x =>
+                x.ProcedureRevisionId == dormantRevisionId));
+            Assert.Equal(1, await db.BuildTestSetEntries.AsNoTracking().CountAsync(x =>
+                x.ProcedureRevisionId == currentRevisionId));
+            Assert.Equal(3, await db.TestProcedureMigrationSources.AsNoTracking().CountAsync(x =>
+                x.ProjectId == projectId));
+            var dormantSource = await db.TestProcedureMigrationSources.AsNoTracking()
+                .SingleAsync(x => x.GeneratedProcedureRevisionId == dormantRevisionId);
+            Assert.Equal(dormantArtifactId, dormantSource.GeneratedProcedureArtifactId);
+        }
+    }
 }

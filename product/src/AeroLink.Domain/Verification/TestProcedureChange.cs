@@ -12,7 +12,9 @@ public sealed record TestProcedureChangeDraft(string BaseNumber, int Revision, T
     string ExpectedResult, string Rationale, string DrivingRequirementRevisionIdsJson = "[]",
     string RemovedRequirementRevisionIdsJson = "[]", string CoverageChangeRationale = "",
     VerificationProcedureParentKind ParentKind = VerificationProcedureParentKind.Unspecified,
-    string ParentRevisionIdsJson = "[]", string DerivedRationale = "");
+    string ParentRevisionIdsJson = "[]", string DerivedRationale = "",
+    string EnvironmentSetup = "", string TestData = "", string OrderedSteps = "",
+    string ExpectedObservations = "", string Cleanup = "", string ToolingAutomation = "");
 
 /// <summary>
 /// One proposed change to one test procedure, carried by a test change request.
@@ -38,7 +40,9 @@ public sealed class TestProcedureChange
         string drivingRequirementRevisionIdsJson = "[]", string removedRequirementRevisionIdsJson = "[]",
         string coverageChangeRationale = "", string coverageChangedBy = "",
         VerificationProcedureParentKind parentKind = VerificationProcedureParentKind.Unspecified,
-        string parentRevisionIdsJson = "[]", string derivedRationale = "")
+        string parentRevisionIdsJson = "[]", string derivedRationale = "",
+        string environmentSetup = "", string testData = "", string orderedSteps = "",
+        string expectedObservations = "", string cleanup = "", string toolingAutomation = "")
     {
         Id = Guid.NewGuid();
         TestChangeReviewId = testChangeReviewId;
@@ -81,6 +85,12 @@ public sealed class TestProcedureChange
                 ? VerificationProcedureParentKind.Allocated
                 : VerificationProcedureParentKind.Unspecified;
         DerivedRationale = derivedRationale?.Trim() ?? "";
+        EnvironmentSetup = environmentSetup?.Trim() ?? "";
+        TestData = testData?.Trim() ?? "";
+        OrderedSteps = orderedSteps?.Trim() ?? "";
+        ExpectedObservations = expectedObservations?.Trim() ?? "";
+        Cleanup = cleanup?.Trim() ?? "";
+        ToolingAutomation = toolingAutomation?.Trim() ?? "";
     }
 
     public Guid Id { get; private set; }
@@ -131,6 +141,12 @@ public sealed class TestProcedureChange
     public string ParentRevisionIdsJson { get; private set; } = "[]";
     public string DerivedRationale { get; private set; } = "";
     public string ExactParentRevisionIdsJson => ParentRevisionIdsJson;
+    public string EnvironmentSetup { get; private set; } = string.Empty;
+    public string TestData { get; private set; } = string.Empty;
+    public string OrderedSteps { get; private set; } = string.Empty;
+    public string ExpectedObservations { get; private set; } = string.Empty;
+    public string Cleanup { get; private set; } = string.Empty;
+    public string ToolingAutomation { get; private set; } = string.Empty;
 
     private static bool HasIds(string json)
     {

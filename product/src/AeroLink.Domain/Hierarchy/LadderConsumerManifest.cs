@@ -149,6 +149,8 @@ public static class LadderConsumerManifestCatalog
         new("trace.generic-mutation", "Generic trace mutation acceptance/refusal"),
         new("release.readiness", "Release readiness trace and coverage obligations"),
         new("release.reconciliation", "Release trace carry-forward"),
+        new("verification.execution", "Execution creation and latest build-scoped result resolution"),
+        new("baseline.executable-materialization", "Baseline executable artifact selection and materialization"),
         new("controlled-editing.identity", "Controlled editing identity and check-in"),
         new("navigation.primary", "Primary navigation grouping and compatibility routes"),
     ];

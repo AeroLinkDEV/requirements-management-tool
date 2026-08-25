@@ -859,10 +859,10 @@ public static class VerificationEndpoints
             // /api/test-procedures is a bounded legacy alias for the canonical software Case route.  Dormant
             // software Procedures are authorable/inspectable through their shared service but never enter the
             // Case execution/effectivity inventory (System Procedures remain visible here).
-            var dormantProcedureInventory = string.Equals(artifactKind, nameof(VerificationArtifactKind.Procedure), StringComparison.OrdinalIgnoreCase)
+            var explicitProcedureInventory = string.Equals(artifactKind, nameof(VerificationArtifactKind.Procedure), StringComparison.OrdinalIgnoreCase)
                 && string.Equals(artifactRoute, "procedures", StringComparison.OrdinalIgnoreCase);
-            source = dormantProcedureInventory
-                ? source.Where(x => x.Level != TestProcedureLevel.System && x.ArtifactKind == VerificationArtifactKind.Procedure)
+            source = explicitProcedureInventory
+                ? source.Where(x => x.ArtifactKind == VerificationArtifactKind.Procedure)
                 : source.Where(x => x.Level == TestProcedureLevel.System || x.ArtifactKind == VerificationArtifactKind.Case);
             if (string.Equals(artifactRoute, "cases", StringComparison.OrdinalIgnoreCase))
                 source = source.Where(x => x.Level == TestProcedureLevel.HighLevel || x.Level == TestProcedureLevel.LowLevel)
@@ -1134,7 +1134,9 @@ public static class VerificationEndpoints
         // decision that asked for the procedure is settled by the materialiser, which is where the approved
         // revision now comes into existence.
 
-        app.MapPost("/api/test-executions", async (RecordTestExecutionRequest request, HttpContext http, AeroLinkDbContext db, IdentityService identity, CancellationToken ct) =>
+        app.MapPost("/api/test-executions", async (RecordTestExecutionRequest request, HttpContext http,
+            AeroLinkDbContext db, IdentityService identity, IProjectLadderPolicyResolver policyResolver,
+            CancellationToken ct) =>
         {
             if(!await http.HasProjectRoleAsync(db,identity,request.ProjectId,ct,ProgramRole.TestEngineer))return Results.Forbid();
             var artifactRevisionId = request.ArtifactRevisionId ?? request.ProcedureRevisionId;
@@ -1143,8 +1145,19 @@ public static class VerificationEndpoints
             var procedure = await db.TestProcedures.AsNoTracking().SingleAsync(x => x.Id == revision.ProcedureId, ct);
             var artifactWord = ArtifactWord(procedure.Level);
             var artifactNoun = ArtifactNoun(procedure.Level);
-            if (procedure.Level != TestProcedureLevel.System && procedure.ArtifactKind == VerificationArtifactKind.Procedure)
-                return Results.BadRequest(new { error = "Dormant software Procedures cannot be executed; execute an effective Case revision instead.", code = "dormant_procedure_not_executable" });
+            // #726: the write boundary resolves the EFFECTIVE executable kind for every submission, never
+            // only when the submitted kind happens to be a software Procedure. Case-only software accepts
+            // Cases and rejects software Procedures; the full Case+Procedure profile accepts Procedures and
+            // rejects Cases; System accepts System Procedures. Draft, Retired, cross-project, wrong-level,
+            // and non-effective identities remain refused below.
+            var ladderPolicy = await policyResolver.ResolveAsync(request.ProjectId, ct);
+            if (!EffectiveExecutableArtifact.IsExecutable(ladderPolicy, procedure.Level,
+                    procedure.ArtifactKind))
+                return Results.BadRequest(new
+                {
+                    error = $"The {artifactWord} is not the effective executable for the project's verification profile; execute the effective executable revision instead.",
+                    code = "not_effective_executable"
+                });
             if (revision.State != TestProcedureState.Approved) return Results.BadRequest(new { error = $"Only an approved {artifactWord} revision can be executed." });
             if (procedure.ProjectId != request.ProjectId) return Results.BadRequest(new { error = $"The {artifactWord} belongs to a different project." });
             Guid? softwareBuildReleaseId = null;
@@ -1311,7 +1324,6 @@ public static class VerificationEndpoints
                     || x.ReleaseId == null && x.SoftwareBuildId != null && db.SoftwareBuilds.Any(b => b.Id == x.SoftwareBuildId && b.ReleaseId == releaseId)));
             var rowsQuery = from execution in source join revision in db.TestProcedureRevisions.AsNoTracking() on execution.ProcedureRevisionId equals revision.Id
                               join procedure in db.TestProcedures.AsNoTracking()
-                                  .Where(x => x.Level == TestProcedureLevel.System || x.ArtifactKind == VerificationArtifactKind.Case)
                                   on revision.ProcedureId equals procedure.Id
                               select new { execution.Id, artifactRevisionId = revision.Id, displayNumber = procedure.BaseNumber + "." + (revision.Revision < 10 ? "0" : "") + revision.Revision,
                                   outcome = execution.Outcome.ToString(), execution.ExecutedBy, execution.Configuration, execution.Determination,

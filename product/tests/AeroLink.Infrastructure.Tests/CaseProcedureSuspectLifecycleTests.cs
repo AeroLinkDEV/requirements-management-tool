@@ -90,7 +90,8 @@ public sealed class CaseProcedureSuspectLifecycleTests
             using (db.UseSaveBoundaryPolicy(policy)) await db.SaveChangesAsync();
 
             db.AddRange(source, predecessorChange, successorChange, predecessor, caseReview, successor,
-                new BaselineTestProcedureSelection(predecessor.Id, caseArtifact.Id, caseRevision0.Id));
+                new BaselineTestProcedureSelection(predecessor.Id, caseArtifact.Id, caseRevision0.Id),
+                new BaselineTestProcedureSelection(predecessor.Id, procedureArtifact.Id, procedureRevision0.Id));
             using (db.UseSaveBoundaryPolicy(policy)) await db.SaveChangesAsync();
 
             await new TestProcedureBaselineMaterializer(db, policy)
@@ -130,6 +131,16 @@ public sealed class CaseProcedureSuspectLifecycleTests
                 ExactLinkResolutionOutcome.ExistingDownstreamRevisionRemainsValid, "test.lead",
                 "The existing Procedure revision remains valid for the revised exact Case.",
                 now.AddMinutes(4), default);
+            // #726: a discharged link still requires the exact Procedure to be selected in the build's test
+            // set and to have a latest build-scoped Pass before the coverage gate closes.
+            var set = new BuildTestSet(project.Id, release.Id,
+                TestChangeReviewDiscipline.HighLevelSoftware, now.AddMinutes(5));
+            set.Include("test.lead", procedureRevision0.Id, TestSelectionReason.Chosen, "", now.AddMinutes(5));
+            db.Add(set);
+            db.Add(new TestExecution(project.Id, procedureRevision0.Id, null, null, TestOutcome.Pass,
+                "test.engineer", "Rig A", "Human determination", "evidence/c.json",
+                now.AddMinutes(6), now.AddMinutes(6), release.Id));
+            await db.SaveChangesAsync();
             var evidence = await db.ExactLinkSuspectEvents.AsNoTracking()
                 .Where(x => x.LinkId == carried.Id).ToListAsync();
             evidence = evidence.OrderBy(x => x.OccurredAt).ToList();

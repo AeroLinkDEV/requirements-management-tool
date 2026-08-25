@@ -206,6 +206,19 @@ public sealed class VerificationImpactItem
     public Guid? ResolvedProcedureId { get; private set; }
     /// <summary>The immutable approved procedure revision selected by the decision.</summary>
     public Guid? ResolvedProcedureRevisionId { get; private set; }
+
+    /// <summary>
+    /// Governed #726 cutover: rebinds impact references from the Case artifact/revision that used to
+    /// execute to the exact migration-generated Procedure artifact/revision. Only non-null references are
+    /// moved; the decision state, rationale, and attribution are untouched.
+    /// </summary>
+    public void RebindMigrationExecutable(Guid? procedureId, Guid? resolvedProcedureId,
+        Guid? resolvedProcedureRevisionId)
+    {
+        if (procedureId is not null) ProcedureId = procedureId;
+        if (resolvedProcedureId is not null) ResolvedProcedureId = resolvedProcedureId;
+        if (resolvedProcedureRevisionId is not null) ResolvedProcedureRevisionId = resolvedProcedureRevisionId;
+    }
     /// <summary>The requirement revision a retargeted procedure now covers.</summary>
     public Guid? RetargetedRequirementRevisionId { get; private set; }
     public string ResolutionRationale { get; private set; } = "";

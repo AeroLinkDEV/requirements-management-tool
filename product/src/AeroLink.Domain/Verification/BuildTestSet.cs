@@ -146,6 +146,18 @@ public sealed class BuildTestSetEntry
     public string AddedBy { get; private set; } = "";
     public DateTimeOffset AddedAt { get; private set; }
 
+    /// <summary>
+    /// Governed #726 cutover: rebinds a test-set entry from the Case revision it used to execute to the
+    /// exact migration-generated Procedure revision. The reason, note, and planner attribution stay.
+    /// </summary>
+    internal void RebindMigrationExecutable(Guid procedureRevisionId)
+    {
+        if (procedureRevisionId == Guid.Empty)
+            throw new DomainException("A migration rebind requires an exact Procedure revision.");
+        if (procedureRevisionId == ProcedureRevisionId) return;
+        ProcedureRevisionId = procedureRevisionId;
+    }
+
     internal bool MakeMandatory(string note)
     {
         if (Reason == TestSelectionReason.ChangedRequirement) return false;

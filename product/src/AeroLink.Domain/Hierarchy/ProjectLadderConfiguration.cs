@@ -290,6 +290,26 @@ public sealed class ProjectLadderStep
         VerificationArtifactProfile.ParseKinds(EnabledArtifactKindsValue);
     [NotMapped]
     public IReadOnlyList<VerificationArtifactKind> EnabledKinds => EnabledArtifactKinds;
+
+    /// <summary>
+    /// Governed #726 cutover: enables the exact artifact kinds for this step through the platform upgrade
+    /// authority, never through a public structural-edit route. The step remains sealed; only the persisted
+    /// enabled-kinds evidence changes, and the configuration history records the upgrade.
+    /// </summary>
+    internal void ApplyPlatformUpgradeKinds(IReadOnlyList<VerificationArtifactKind> kinds)
+    {
+        var ordered = kinds.Distinct().ToArray();
+        var level = Enum.Parse<RequirementLevel>(CatalogueEntry, false);
+        var discipline = level switch
+        {
+            RequirementLevel.System => VerificationDiscipline.System,
+            RequirementLevel.HighLevel => VerificationDiscipline.HighLevelSoftware,
+            RequirementLevel.LowLevel => VerificationDiscipline.LowLevelSoftware,
+            _ => throw new DomainException($"The {level} level has no verification discipline.")
+        };
+        VerificationArtifactProfile.ValidateEnabledKinds(discipline, ordered);
+        EnabledArtifactKindsValue = VerificationArtifactProfile.SerializeKinds(ordered);
+    }
     public DateTimeOffset CreatedAt { get; private set; }
     public DateTimeOffset UpdatedAt { get; private set; }
     public long Version { get; private set; }
@@ -338,6 +358,41 @@ public static class LegacyDefaultProjectLadderFactory
             steps.Add(step);
         }
 
+        configuration.AllowedUpstream.Add(new ProjectLadderAllowedUpstream(
+            configuration.Id, projectId, steps[0].Id, steps[1].Id, now));
+        configuration.AllowedUpstream.Add(new ProjectLadderAllowedUpstream(
+            configuration.Id, projectId, steps[1].Id, steps[2].Id, now));
+        return configuration;
+    }
+}
+
+/// <summary>
+/// The post-#726 default for NEW projects: System executes its Procedure, and software defaults to the full
+/// Case + Procedure tier (the executable is the Procedure). The result is an authored NonDefault Draft so the
+/// owner can deliberately remove Procedure before sealing; the historical legacy Case-only default remains
+/// available through <see cref="LegacyDefaultProjectLadderFactory"/> for pre-#726 rows and qualification.
+/// </summary>
+public static class NewProjectLadderFactory
+{
+    public static ProjectLadderConfiguration Create(Guid projectId, DateTimeOffset now)
+    {
+        var configuration = ProjectLadderConfiguration.CreateDraft(projectId, now);
+        var steps = new List<ProjectLadderStep>();
+        foreach (var (level, position) in LegacyLadderPolicy.Instance.OrderedLevels.Select((x, i) => (x, i + 1)))
+        {
+            var catalogue = LegacyLadderPolicy.Instance.Definition(level);
+            var kinds = level switch
+            {
+                RequirementLevel.System => new[] { VerificationArtifactKind.Procedure },
+                RequirementLevel.HighLevel => new[] { VerificationArtifactKind.Case, VerificationArtifactKind.Procedure },
+                RequirementLevel.LowLevel => new[] { VerificationArtifactKind.Case, VerificationArtifactKind.Procedure },
+                _ => catalogue.VerificationProfile?.EnabledKinds.ToArray() ?? [],
+            };
+            var step = new ProjectLadderStep(configuration.Id, projectId, level, position,
+                catalogue.Capabilities, now, kinds);
+            configuration.Steps.Add(step);
+            steps.Add(step);
+        }
         configuration.AllowedUpstream.Add(new ProjectLadderAllowedUpstream(
             configuration.Id, projectId, steps[0].Id, steps[1].Id, now));
         configuration.AllowedUpstream.Add(new ProjectLadderAllowedUpstream(

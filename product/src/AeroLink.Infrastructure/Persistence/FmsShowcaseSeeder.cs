@@ -35,7 +35,7 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db, IProjectLadderPolicy
         var program = new ProgramRecord("Flight Management System Live Program", ProgramCode);
         var project = new ProjectRecord(program.Id, "FMS Product Development", "Flight Management System");
         var release15 = new SoftwareRelease(project.Id, "1.5", true); var release16 = new SoftwareRelease(project.Id, "1.6", false, release15.Id);
-        var ladder = LegacyDefaultProjectLadderFactory.Create(project.Id, start);
+        var ladder = NewProjectLadderFactory.Create(project.Id, start);
         // The showcase project carries a persisted verification-method vocabulary like any other (#701).
         var vocabulary = ProjectVerificationVocabulary.Founding(project.Id, start);
         db.AddRange(program, project, release15, release16, ladder, vocabulary); await db.SaveChangesAsync(ct);

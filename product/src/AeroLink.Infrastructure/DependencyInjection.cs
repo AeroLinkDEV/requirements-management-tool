@@ -16,6 +16,7 @@ public static class DependencyInjection
         services.AddScoped<IProjectLadderPolicyResolver, EffectiveProjectLadderPolicyResolver>();
         services.AddScoped<ProjectLadderSealAuthority>();
         services.AddScoped<ProjectLadderUpgradeAuthority>();
+        services.AddScoped<SoftwareProcedureExecutionCutoverAuthority>();
         // These are the complete stable ladder seams. Registration is intentionally explicit: the manifest is
         // a readiness inventory, not a flag, and each entry is backed by a project-effective policy route.
         var legacyRegistrations = new[]
@@ -37,15 +38,17 @@ public static class DependencyInjection
             new LadderConsumerRegistration("enterprise.schema-catalogue", "Enterprise schema/specification catalogue synchronization"),
             new LadderConsumerRegistration("release.readiness", "Release readiness policy gates"),
             new LadderConsumerRegistration("release.reconciliation", "Release trace reconciliation policy"),
+            new LadderConsumerRegistration("verification.execution", "Execution creation and latest build-scoped result resolution"),
+            new LadderConsumerRegistration("baseline.executable-materialization", "Baseline executable artifact selection and materialization"),
             new LadderConsumerRegistration("navigation.primary", "Project-ladder-aware primary navigation and surfaces"),
         };
         foreach (var registration in legacyRegistrations)
             services.AddSingleton<ILadderConsumerRegistration>(registration);
         // These declarations live beside the routed infrastructure seams. Do not infer artifact obligations from
         // the legacy string inventory: a consumer that happens to have a familiar ID is not thereby a handler for
-        // every kind or capability. Software Procedure packages route through the shared identity/review and
-        // exact Case-to-Procedure coverage seams. Controlled documents cover every package key through the
-        // same renderer/register seam; execution remains #726's gate.
+        // every kind or capability. #726 reconciles the execution seams: every effective-execution consumer
+        // declares the artifact keys and capabilities it actually handles, so the typed v2 manifest fails
+        // closed when a Procedure-capable execution consumer is absent or lacks the Procedure key.
         var systemProcedure = new VerificationArtifactKey(
             VerificationDiscipline.System, VerificationArtifactKind.Procedure);
         var highLevelCase = new VerificationArtifactKey(
@@ -77,8 +80,26 @@ public static class DependencyInjection
                 "Baseline controlled-document derivation", packageArtifactKeys,
                 VerificationArtifactCapability.ControlledDocument),
             new VerificationArtifactConsumerRegistration("release.readiness",
-                "Release readiness policy gates", currentArtifactKeys,
+                "Release readiness policy gates", packageArtifactKeys,
+                VerificationArtifactCapability.Execution | VerificationArtifactCapability.Coverage),
+            new VerificationArtifactConsumerRegistration("build.test-sets",
+                "Build verification test-set derivation and planning", packageArtifactKeys,
                 VerificationArtifactCapability.Execution),
+            new VerificationArtifactConsumerRegistration("release.reconciliation",
+                "Release trace reconciliation policy", packageArtifactKeys,
+                VerificationArtifactCapability.Execution | VerificationArtifactCapability.Coverage),
+            new VerificationArtifactConsumerRegistration("verification.execution",
+                "Execution creation, import, and latest build-scoped result resolution", packageArtifactKeys,
+                VerificationArtifactCapability.Execution),
+            new VerificationArtifactConsumerRegistration("baseline.executable-materialization",
+                "Baseline executable artifact selection and materialization", packageArtifactKeys,
+                VerificationArtifactCapability.Execution),
+            new VerificationArtifactConsumerRegistration("navigation.primary",
+                "Project-ladder-aware navigation, search, and workspace projections of effective execution",
+                packageArtifactKeys,
+                VerificationArtifactCapability.Identity | VerificationArtifactCapability.Header
+                | VerificationArtifactCapability.Revision | VerificationArtifactCapability.Lifecycle
+                | VerificationArtifactCapability.Execution),
         };
         foreach (var registration in typedRegistrations)
             services.AddSingleton(registration);

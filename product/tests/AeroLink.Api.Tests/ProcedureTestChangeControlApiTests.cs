@@ -25,8 +25,8 @@ public sealed class ProcedureTestChangeControlApiTests
     [Fact]
     public async Task A_valid_case_origin_uses_the_procedure_key_workflow_and_preserves_origin_through_revision()
     {
-        // Production activation remains fail-closed until #726. Prove the public gate first, including that
-        // a draft Procedure profile cannot make Procedure packages available on the current main-derived host.
+        // #726 activated the software Procedure tier: the public activation gate now accepts the
+        // Procedure-enabled profile, and software Procedure packages become available on the production host.
         using (var guardedFactory = new AeroLinkApiFactory())
         {
             using var guardedClient = guardedFactory.CreateClient();
@@ -36,39 +36,33 @@ public sealed class ProcedureTestChangeControlApiTests
                 $"/api/projects/{guardedFixture.ProjectId}/configuration/activate", new
                 {
                     expectedVersion = 2,
-                    reason = "Attempt to activate the dormant Procedure profile from the public API.",
+                    reason = "Activate the #726 software Procedure tier from the public API.",
                 });
             var activationBody = await activation.Content.ReadAsStringAsync();
-            Assert.Equal(HttpStatusCode.BadRequest, activation.StatusCode);
-            Assert.Contains("dormant", activationBody, StringComparison.OrdinalIgnoreCase);
+            Assert.True(activation.StatusCode == HttpStatusCode.OK,
+                $"{(int)activation.StatusCode}: {activationBody}");
+            guardedFixture = await SeedCaseSourcesAsync(guardedFactory, guardedFixture);
             using (var stateScope = guardedFactory.Services.CreateScope())
             {
                 var stateDb = stateScope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
                 var state = await stateDb.ProjectLadderConfigurations.AsNoTracking()
                     .SingleAsync(x => x.ProjectId == guardedFixture.ProjectId);
-                Assert.Equal(ProjectLadderConfigurationState.Draft, state.State);
-                Assert.Null(state.ActivationManifestVersion);
-                Assert.Null(state.ActivationManifestHash);
+                Assert.Equal(ProjectLadderConfigurationState.Active, state.State);
+                Assert.NotNull(state.ActivationManifestVersion);
+                Assert.NotNull(state.ActivationManifestHash);
             }
 
             await LoginAsync(guardedClient, "procedure.author");
-            using var activationBlocked = await guardedClient.PostAsJsonAsync(
+            using var procedurePackage = await guardedClient.PostAsJsonAsync(
                 $"/api/releases/{guardedFixture.ReleaseId}/test-change-requests", new
                 {
                     discipline = "HighLevelSoftware",
                     artifactKind = "Procedure",
-                    caseChangeIds = new[] { Guid.NewGuid() },
-                    title = "Blocked while Procedure activation is dormant",
+                    caseChangeIds = new[] { guardedFixture.HlrCaseChangeId },
+                    title = "HLR Procedure package from the activated production profile",
                 });
-            Assert.Equal(HttpStatusCode.BadRequest, activationBlocked.StatusCode);
-            Assert.Contains("not supported", await activationBlocked.Content.ReadAsStringAsync(),
-                StringComparison.OrdinalIgnoreCase);
-
-            using var dormantHistory = await guardedClient.GetAsync(
-                $"/api/history/test-change-requests?projectId={guardedFixture.ProjectId}&discipline=HighLevelSoftware&artifactKind=Procedure&page=1&pageSize=50");
-            Assert.Equal(HttpStatusCode.BadRequest, dormantHistory.StatusCode);
-            Assert.Contains("not enabled", await dormantHistory.Content.ReadAsStringAsync(),
-                StringComparison.OrdinalIgnoreCase);
+            Assert.True(procedurePackage.StatusCode == HttpStatusCode.Created,
+                $"{(int)procedurePackage.StatusCode}: {await procedurePackage.Content.ReadAsStringAsync()}");
         }
 
         // This test-only resolver represents a future governed profile solely inside this disposable API host.
@@ -122,11 +116,17 @@ public sealed class ProcedureTestChangeControlApiTests
                        preconditions = "The configured software build is available.",
                        steps = "Exercise the controlled behavior.",
                        expectedResult = "The expected behavior is observed.",
-                       rationale = "The exact Case change requires Procedure coverage.",
-                       parentKind = "Derived",
-                       parentRevisionIds = Array.Empty<Guid>(),
-                       derivedRationale = "This introductory Procedure is standalone until a Case revision is selected.",
-                   }))
+                        rationale = "The exact Case change requires Procedure coverage.",
+                        parentKind = "Derived",
+                        parentRevisionIds = Array.Empty<Guid>(),
+                        derivedRationale = "This introductory Procedure is standalone until a Case revision is selected.",
+                        environmentSetup = "The configured software build is available.",
+                        testData = "Controlled scenario data.",
+                        orderedSteps = "Exercise the controlled behavior and record observations.",
+                        expectedObservations = "The expected behavior is observed.",
+                        cleanup = "Restore the controlled fixture.",
+                        toolingAutomation = "Qualified verification runner.",
+                    }))
         {
             Assert.True(authored.IsSuccessStatusCode, await authored.Content.ReadAsStringAsync());
         }

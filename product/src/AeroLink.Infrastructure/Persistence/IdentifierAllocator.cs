@@ -78,16 +78,21 @@ public static class IdentifierAllocator
         CancellationToken ct, ILadderPolicy? policy = null,
         VerificationArtifactKind artifactKind = VerificationArtifactKind.Case)
     {
-        var prefix = artifactKind == VerificationArtifactKind.Procedure
-            ? VerificationArtifactVocabulary.Definition(new VerificationArtifactKey(
-                level switch
-                {
-                    TestProcedureLevel.System => VerificationDiscipline.System,
-                    TestProcedureLevel.HighLevel => VerificationDiscipline.HighLevelSoftware,
-                    TestProcedureLevel.LowLevel => VerificationDiscipline.LowLevelSoftware,
-                    _ => throw new DomainException($"Unknown verification artifact level: {level}.")
-                }, VerificationArtifactKind.Procedure)).ArtifactPrefix
-            : (policy ?? LadderPolicy).TestProcedurePrefix(level);
+        // The prefix is the artifact KIND's globally governed vocabulary prefix, never the profile's
+        // executable prefix: under #726 the executable for a software level is the Procedure, but an
+        // introduced Case must still receive the HLRTC/LLRTC family and a Procedure the HLRTP/LLRTP family.
+        // System has no Case vocabulary; its procedures are always Procedure-kind.
+        var effectiveKind = level == TestProcedureLevel.System
+            ? VerificationArtifactKind.Procedure
+            : artifactKind;
+        var prefix = VerificationArtifactVocabulary.Definition(new VerificationArtifactKey(
+            level switch
+            {
+                TestProcedureLevel.System => VerificationDiscipline.System,
+                TestProcedureLevel.HighLevel => VerificationDiscipline.HighLevelSoftware,
+                TestProcedureLevel.LowLevel => VerificationDiscipline.LowLevelSoftware,
+                _ => throw new DomainException($"Unknown verification artifact level: {level}.")
+            }, effectiveKind)).ArtifactPrefix;
         return Format(prefix, await ClaimAsync(db, prefix, ct));
     }
 

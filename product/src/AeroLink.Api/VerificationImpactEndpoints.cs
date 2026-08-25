@@ -49,7 +49,9 @@ public sealed record CreateTestProcedureChangeRequest(string BaseNumber, int Rev
     TestProcedureChangeKind Kind, string Title, string Objective, string Preconditions, string Steps,
     string ExpectedResult, string Rationale, Guid[]? DrivingRequirementRevisionIds = null,
     VerificationProcedureParentKind ParentKind = VerificationProcedureParentKind.Unspecified,
-    Guid[]? ParentRevisionIds = null, string? DerivedRationale = null);
+    Guid[]? ParentRevisionIds = null, string? DerivedRationale = null,
+    string? EnvironmentSetup = null, string? TestData = null, string? OrderedSteps = null,
+    string? ExpectedObservations = null, string? Cleanup = null, string? ToolingAutomation = null);
 public sealed record WriteTestChangeRequestCaseRequest(string Title, string Problem, string Analysis,
     string Solution, string? ProblemRich = null, string? AnalysisRich = null, string? SolutionRich = null,
     long? ExpectedVersion = null);
@@ -72,7 +74,9 @@ public sealed record ProposeProcedureChangeRequest(TestProcedureChangeKind Kind,
     Guid[]? DrivingRequirementRevisionIds, long? ExpectedVersion = null,
     Guid[]? RemovedRequirementRevisionIds = null, string? CoverageChangeRationale = null,
     VerificationProcedureParentKind ParentKind = VerificationProcedureParentKind.Unspecified,
-    Guid[]? ParentRevisionIds = null, string? DerivedRationale = null);
+    Guid[]? ParentRevisionIds = null, string? DerivedRationale = null,
+    string? EnvironmentSetup = null, string? TestData = null, string? OrderedSteps = null,
+    string? ExpectedObservations = null, string? Cleanup = null, string? ToolingAutomation = null);
 public sealed record ReturnTestChangeReviewRequest(string Rationale);
 public sealed record DeferTestChangeReviewRequest(string Reason);
 
@@ -1170,7 +1174,9 @@ public static class VerificationImpactEndpoints
                     request.ExpectedResult ?? "", request.Rationale ?? "",
                     JsonSerializer.Serialize(driving.Distinct()), JsonSerializer.Serialize(removed.Distinct()),
                     request.CoverageChangeRationale ?? "", parentKind,
-                    JsonSerializer.Serialize(parentIds.Distinct()), request.DerivedRationale ?? ""), now,
+                    JsonSerializer.Serialize(parentIds.Distinct()), request.DerivedRationale ?? "",
+                    request.EnvironmentSetup ?? "", request.TestData ?? "", request.OrderedSteps ?? "",
+                    request.ExpectedObservations ?? "", request.Cleanup ?? "", request.ToolingAutomation ?? ""), now,
                     policy: ladderPolicy);
                 await db.SaveChangesAsync(ct);
                 return Results.Ok(new
@@ -1723,7 +1729,13 @@ public static class VerificationImpactEndpoints
                         JsonSerializer.Serialize(change.DrivingRequirementRevisionIds ?? []),
                         ParentKind: change.ParentKind,
                         ParentRevisionIdsJson: JsonSerializer.Serialize(parentRevisionIds),
-                        DerivedRationale: change.DerivedRationale ?? ""), now, policy: ladderPolicy);
+                        DerivedRationale: change.DerivedRationale ?? "",
+                        EnvironmentSetup: change.EnvironmentSetup ?? "",
+                        TestData: change.TestData ?? "",
+                        OrderedSteps: change.OrderedSteps ?? "",
+                        ExpectedObservations: change.ExpectedObservations ?? "",
+                        Cleanup: change.Cleanup ?? "",
+                        ToolingAutomation: change.ToolingAutomation ?? ""), now, policy: ladderPolicy);
                 }
                 // DEC-102: raising the package is itself taking it on. The engineer who built it holds it,
                 // so it appears in My Work and can be worked without a meaningless "Take it on" step.
@@ -2626,7 +2638,6 @@ public static class VerificationImpactEndpoints
         var rows = await (
             from revision in db.TestProcedureRevisions.AsNoTracking()
             join procedure in db.TestProcedures.AsNoTracking()
-                .Where(x => x.Level == TestProcedureLevel.System || x.ArtifactKind == VerificationArtifactKind.Case)
                 on revision.ProcedureId equals procedure.Id
             where revisionIds.Contains(revision.Id) || procedureIds.Contains(procedure.Id)
             select new

@@ -116,6 +116,18 @@ public sealed class ControlledDocument
         ContentHash = contentHash.Trim().ToLowerInvariant();
         GeneratedAt = generatedAt;
     }
+
+    /// <summary>
+    /// Records the controlled content basis after the governed #726 execution cutover while PRESERVING the
+    /// document's original generation time (the historical snapshot is reconstructed at that instant, never
+    /// restamped).
+    /// </summary>
+    public void RecordExecutionCutoverContentBasis(string contentHash)
+    {
+        if (string.IsNullOrWhiteSpace(contentHash) || contentHash.Length != 64)
+            throw new DomainException("A cutover controlled document requires a SHA-256 content hash.");
+        ContentHash = contentHash.Trim().ToLowerInvariant();
+    }
 }
 
 /// <summary>
