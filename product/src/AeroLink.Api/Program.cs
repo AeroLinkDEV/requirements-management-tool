@@ -330,6 +330,7 @@ app.MapGet("/health/ready", async (AeroLinkDbContext db,CancellationToken ct) =>
 app.MapAuthEndpoints();
 app.MapWorkspaceEndpoints();
 app.MapProjectConfigurationEndpoints();
+app.MapAssurancePolicyEndpoints();
 app.MapVerificationVocabularyEndpoints();
 app.MapChangeRequestEndpoints();
 app.MapDownstreamAssessmentEndpoints();

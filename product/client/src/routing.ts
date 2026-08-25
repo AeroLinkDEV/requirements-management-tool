@@ -59,7 +59,7 @@ export type AppRoute = {
   savedViewId?: string;
   historyStateIntent?: HistoryStateIntent;
   historyTypeIntent?: HistoryTypeIntent;
-  projectConfigurationSection?: "ladder" | "history" | "readiness" | "approvals";
+  projectConfigurationSection?: "ladder" | "assurance" | "history" | "readiness" | "approvals";
 };
 
 const decoded = (value: string | undefined) => value ? decodeURIComponent(value) : undefined;
@@ -95,6 +95,8 @@ export function parseRoute(pathname: string, search = ""): AppRoute {
     return { view: "approvalConfiguration", discipline: "system", projectSlug: decoded(parts[1]) };
   if (parts.length === 4 && parts[0] === "projects" && parts[2] === "configuration" && parts[3] === "approvals")
     return { view: "projectConfiguration", discipline: "system", projectSlug: decoded(parts[1]), projectConfigurationSection: "approvals" };
+  if (parts.length === 4 && parts[0] === "projects" && parts[2] === "configuration" && parts[3] === "assurance")
+    return { view: "projectConfiguration", discipline: "system", projectSlug: decoded(parts[1]), projectConfigurationSection: "assurance" };
   if (parts.length === 3 && parts[0] === "projects" && parts[2] === "configuration")
     return { view: "projectConfiguration", discipline: "system", projectSlug: decoded(parts[1]) };
   if (parts[0] !== "programs" || parts[2] !== "projects" || parts[4] !== "releases")
@@ -233,6 +235,9 @@ export const projectAreaPath = (slug: string, area: keyof typeof projectAreaSegm
 
 export const projectConfigurationApprovalsPath = (slug: string) =>
   `${projectAreaPath(slug, "projectConfiguration")}/approvals`;
+
+export const projectConfigurationAssurancePath = (slug: string) =>
+  `${projectAreaPath(slug, "projectConfiguration")}/assurance`;
 
 export function routePath(context: RouteContext, view: View, discipline: Discipline = "system", artifactId?: string, artifactKind?: string, stateIntent?: HistoryStateIntent, typeIntent?: HistoryTypeIntent) {
   const root = `/programs/${context.programId}/projects/${context.projectId}/releases/${context.releaseId}`;

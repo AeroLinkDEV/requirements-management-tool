@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import type { AuthUser } from "./IdentityCenter";
 import PortalHeader from "./PortalHeader";
 import ApprovalConfigurationCenter from "./ApprovalConfigurationCenter";
+import AssurancePolicyPanel from "./AssurancePolicyPanel";
 import { apiRequest, operationError } from "./apiClient";
 import { capabilityMask } from "./projectLadder";
 import { useVerificationVocabulary } from "./verificationMethods";
@@ -50,14 +51,14 @@ function normalizeConfiguration(value: ConfigurationResponse): Configuration {
 
 export default function ProjectConfigurationCenter({ user, api, projectId, projectName, initialSection = "ladder", onBackToBuilds, onOpenApprovalConfiguration, onActivated, onSignOut }: {
   user: AuthUser; api: string; projectId: string; projectName: string; onBackToBuilds: () => void;
-  initialSection?: "ladder" | "history" | "readiness" | "approvals" | "verification";
+  initialSection?: "ladder" | "assurance" | "history" | "readiness" | "approvals" | "verification";
   onOpenApprovalConfiguration: () => void; onActivated: (configuration: Configuration) => void; onSignOut: () => void;
 }) {
   const [configuration, setConfiguration] = useState<Configuration>();
   const [steps, setSteps] = useState<Step[]>([]);
   const [relationships, setRelationships] = useState<Relationship[]>([]);
   const [reason, setReason] = useState("");
-  const [section, setSection] = useState<"ladder" | "history" | "readiness" | "approvals" | "verification">(initialSection);
+  const [section, setSection] = useState<"ladder" | "assurance" | "history" | "readiness" | "approvals" | "verification">(initialSection);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [saving, setSaving] = useState(false);
@@ -179,6 +180,7 @@ export default function ProjectConfigurationCenter({ user, api, projectId, proje
       {!configuration ? <p>Loading the stored project ladder…</p> : <div className="projectConfigurationLayout">
         <nav className="projectConfigurationRail" aria-label="Configuration sections">
           <button className={section === "ladder" ? "selected" : ""} onClick={() => setSection("ladder")}>Requirement ladder<small>{configuration.state}</small></button>
+          <button className={section === "assurance" ? "selected" : ""} onClick={() => setSection("assurance")}>Assurance policy<small>Declared posture and deviations</small></button>
           <button className={section === "history" ? "selected" : ""} onClick={() => setSection("history")}>History<small>{configuration.history.length} attributed edits</small></button>
           <button className={section === "readiness" ? "selected" : ""} onClick={() => setSection("readiness")}>Activation readiness<small>{configuration.readiness.isReady ? "Ready" : `${configuration.readiness.missingOrUnrouted.length} blockers`}</small></button>
           <button className={section === "approvals" ? "selected" : ""} onClick={() => { setSection("approvals"); onOpenApprovalConfiguration(); }}>Approval configuration<small>Nested project policy</small></button>
@@ -186,6 +188,7 @@ export default function ProjectConfigurationCenter({ user, api, projectId, proje
         </nav>
         <section className="projectConfigurationPanel">
           {section === "approvals" && <ApprovalConfigurationCenter embedded user={user} api={api} projectId={projectId} projectName={projectName} onBackToBuilds={onBackToBuilds} onSignOut={onSignOut} />}
+          {section === "assurance" && <AssurancePolicyPanel api={api} projectId={projectId} />}
           {section === "verification" && <>
             <div className="projectConfigurationPanelHeader"><div><h2>Verification methods</h2><p>The controlled vocabulary requirement authoring offers and review enforces. A change request declaring anything else is refused at submission, naming these values.</p></div><span className="projectConfigurationPill">{vocabularyDirty ? "Unsaved changes" : "Saved"}</span></div>
             {vocabularyLoading && <p>Loading the permitted verification methods…</p>}
