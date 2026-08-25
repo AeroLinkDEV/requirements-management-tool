@@ -330,13 +330,13 @@ test('Case to allocated Procedure execution chain drives release readiness', asy
   expect(new Set(documents.map((document: { level: string; artifactKind: string }) => `${document.level}:${document.artifactKind}`))).toEqual(
     new Set(['HighLevel:Case', 'HighLevel:Procedure', 'LowLevel:Case', 'LowLevel:Procedure']))
   const procedureCommentResponse = await request.post(`${apiBase}/api/test-procedures/${procedure.id}/comments`, {
-    data: { revisionId: procedureRevisionId, body: `#762 Procedure discussion ${Date.now()}`, mentions: [] },
+    data: { releaseId: workspace.release.id, revisionId: procedureRevisionId, body: `#762 Procedure discussion ${Date.now()}`, mentions: [] },
   })
   expect(procedureCommentResponse.status(), await procedureCommentResponse.text()).toBe(201)
   const procedureComment = await procedureCommentResponse.json() as { id: string }
   const procedureCommentResolved = await request.post(
     `${apiBase}/api/enterprise-requirements/comments/${procedureComment.id}/resolve`, {
-      data: { disposition: 'The exact Case-to-Procedure discussion was reviewed.' },
+      data: { releaseId: workspace.release.id, disposition: 'The exact Case-to-Procedure discussion was reviewed.' },
     })
   expect(procedureCommentResolved.status(), await procedureCommentResolved.text()).toBe(204)
 

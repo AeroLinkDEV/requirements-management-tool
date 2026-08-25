@@ -523,7 +523,7 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
     try {
       await apiRequest(`${api}${selectedArtifactApiRoot}/${selected.id}/comments`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ revisionId: selected.revisionId, body, mentions }),
+        body: JSON.stringify({ releaseId, revisionId: selected.revisionId, body, mentions }),
       })
       form.reset()
       await loadComments(selected.id)
@@ -539,7 +539,7 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
     try {
       await apiRequest(`${api}/api/enterprise-requirements/comments/${id}/resolve`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ disposition }),
+        body: JSON.stringify({ releaseId, disposition }),
       })
       await loadComments(selected.id)
     } catch (problem) { setError(operationError(problem, 'The comment could not be resolved.')) }

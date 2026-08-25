@@ -498,10 +498,14 @@ public static class VerificationEndpoints
                 return Results.BadRequest(new { error = "Discussion is unavailable for this disabled verification artifact.", code = "verification_discussion_disabled" });
             if (request.RevisionId is not null
                 && !await db.TestProcedureRevisions.AnyAsync(x => x.Id == request.RevisionId && x.ProcedureId == id, ct))
-                return Results.BadRequest(new { error = $"The comment revision is not part of this {ArtifactNoun(procedure.Level)}." });
+                return Results.BadRequest(new { error = $"The comment revision is not part of this {ArtifactNoun(procedure.Level, procedure.ArtifactKind)}." });
             if (request.ParentCommentId is not null
                 && !await db.ArtifactComments.AnyAsync(x => x.Id == request.ParentCommentId && x.ArtifactId == id, ct))
-                return Results.BadRequest(new { error = $"The parent comment is not part of this {ArtifactNoun(procedure.Level)}." });
+                return Results.BadRequest(new { error = $"The parent comment is not part of this {ArtifactNoun(procedure.Level, procedure.ArtifactKind)}." });
+            var releaseDecision = await VerificationDiscussionReleaseAuthority.ValidateAsync(db, procedure.ProjectId,
+                request.ReleaseId, request.RevisionId, id, ct);
+            if (!releaseDecision.Allowed)
+                return Results.BadRequest(new { error = releaseDecision.Error, code = releaseDecision.Code });
             try
             {
                 var actor = http.UserAccount().UserName;
@@ -701,7 +705,7 @@ public static class VerificationEndpoints
                 if (effectivity is null || !effectivity.RevisionByProcedure.TryGetValue(id, out var carriedRevisionId))
                     return Results.NotFound(new
                     {
-                        error = $"This {ArtifactNoun(procedure.Level)} is not carried by the selected build.",
+                        error = $"This {ArtifactNoun(procedure.Level, procedure.ArtifactKind)} is not carried by the selected build.",
                         code = "procedure_not_carried_by_build"
                     });
                 // A request for one exact revision is a build-effectivity assertion and must match the
@@ -709,7 +713,7 @@ public static class VerificationEndpoints
                 if (revisionId is not null && revisionId != carriedRevisionId)
                     return Results.NotFound(new
                     {
-                        error = $"The requested {ArtifactNoun(procedure.Level)} revision is not the revision the selected build carries.",
+                        error = $"The requested {ArtifactNoun(procedure.Level, procedure.ArtifactKind)} revision is not the revision the selected build carries.",
                         code = "cross_build_procedure_revision"
                     });
                 selectedRevisionId = carriedRevisionId;
@@ -1215,8 +1219,8 @@ public static class VerificationEndpoints
             if (artifactRevisionId == Guid.Empty) return Results.BadRequest(new { error = "A verification artifact revision is required." });
             var revision = await db.TestProcedureRevisions.AsNoTracking().SingleOrDefaultAsync(x => x.Id == artifactRevisionId, ct); if (revision is null) return Results.NotFound();
             var procedure = await db.TestProcedures.AsNoTracking().SingleAsync(x => x.Id == revision.ProcedureId, ct);
-            var artifactWord = ArtifactWord(procedure.Level);
-            var artifactNoun = ArtifactNoun(procedure.Level);
+            var artifactWord = ArtifactWord(procedure.Level, procedure.ArtifactKind);
+            var artifactNoun = ArtifactNoun(procedure.Level, procedure.ArtifactKind);
             // #726: the write boundary resolves the EFFECTIVE executable kind for every submission, never
             // only when the submitted kind happens to be a software Procedure. Case-only software accepts
             // Cases and rejects software Procedures; the full Case+Procedure profile accepts Procedures and
@@ -1612,11 +1616,12 @@ public static class VerificationEndpoints
     private sealed record ProcedureListItem(Guid Id, string BaseNumber, string OwnerId,
         TestProcedureLevel Level, VerificationArtifactKind ArtifactKind, DateTimeOffset CreatedAt, long Version);
 
-    private static string ArtifactWord(TestProcedureLevel level) =>
-        level == TestProcedureLevel.System ? "test procedure" : "test case";
+    private static string ArtifactWord(TestProcedureLevel level, VerificationArtifactKind kind) =>
+        level == TestProcedureLevel.System || kind == VerificationArtifactKind.Procedure
+            ? "test procedure" : "test case";
 
-    private static string ArtifactNoun(TestProcedureLevel level) =>
-        level == TestProcedureLevel.System ? "procedure" : "case";
+    private static string ArtifactNoun(TestProcedureLevel level, VerificationArtifactKind kind) =>
+        level == TestProcedureLevel.System || kind == VerificationArtifactKind.Procedure ? "procedure" : "case";
 
     private static bool ArtifactRouteAllows(string artifactRoute, TestProcedureLevel level,
         VerificationArtifactKind? kind = null) =>

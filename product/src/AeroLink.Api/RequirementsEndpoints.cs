@@ -349,20 +349,26 @@ public static class RequirementsEndpoints
             var comment = await db.ArtifactComments.SingleOrDefaultAsync(x => x.Id == id, ct);
             if (comment is null) return Results.NotFound();
             if (!await http.HasProjectAccessAsync(db, comment.ProjectId, ct)) return Results.Forbid();
-            var procedure = await db.TestProcedures.AsNoTracking()
-                .Where(x => x.Id == comment.ArtifactId && x.ArtifactKind == VerificationArtifactKind.Procedure)
-                .Select(x => new { x.Level, x.ArtifactKind }).SingleOrDefaultAsync(ct);
-            if (procedure is not null)
+            var procedure = comment.ArtifactType is "TestCase" or "TestProcedure"
+                ? await db.TestProcedures.AsNoTracking()
+                    .Where(x => x.Id == comment.ArtifactId)
+                    .Select(x => new { x.ProjectId, x.Level, x.ArtifactKind }).SingleOrDefaultAsync(ct)
+                : null;
+            if (procedure is not null && procedure.ProjectId == comment.ProjectId)
             {
                 var policy = await policyResolver.ResolveAsync(comment.ProjectId, ct);
                 var enabled = procedure.Level switch
                 {
-                    TestProcedureLevel.System => policy.VerificationProfile(RequirementLevel.System).Enables(VerificationArtifactKind.Procedure),
-                    TestProcedureLevel.HighLevel => policy.VerificationProfile(RequirementLevel.HighLevel).Enables(VerificationArtifactKind.Procedure),
-                    TestProcedureLevel.LowLevel => policy.VerificationProfile(RequirementLevel.LowLevel).Enables(VerificationArtifactKind.Procedure),
+                    TestProcedureLevel.System => policy.VerificationProfile(RequirementLevel.System).Enables(procedure.ArtifactKind),
+                    TestProcedureLevel.HighLevel => policy.VerificationProfile(RequirementLevel.HighLevel).Enables(procedure.ArtifactKind),
+                    TestProcedureLevel.LowLevel => policy.VerificationProfile(RequirementLevel.LowLevel).Enables(procedure.ArtifactKind),
                     _ => false,
                 };
                 if (!enabled) return Results.BadRequest(new { error = "Discussion is unavailable for this disabled verification artifact.", code = "verification_discussion_disabled" });
+                var releaseDecision = await VerificationDiscussionReleaseAuthority.ValidateAsync(db, comment.ProjectId,
+                    request.ReleaseId, comment.RevisionId, comment.ArtifactId, ct);
+                if (!releaseDecision.Allowed)
+                    return Results.BadRequest(new { error = releaseDecision.Error, code = releaseDecision.Code });
             }
             try
             {
