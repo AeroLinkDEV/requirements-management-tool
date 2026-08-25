@@ -1510,7 +1510,8 @@ jobs:
             fi
             echo
             describe "API test suite" "$BACKEND_API"
-            describe "Domain and infrastructure test suites" "$BACKEND_CORE"
+            describe "Domain test suite" "$BACKEND_CORE_DOMAIN"
+            describe "Infrastructure test suite" "$BACKEND_CORE_INFRASTRUCTURE"
             describe "Client lint, type-check, and build" "$CLIENT"
             describe "Operator and recovery script contracts" "$CONTRACTS"
             describe "Browser journeys" "$BROWSER"
