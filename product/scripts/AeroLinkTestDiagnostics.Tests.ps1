@@ -51,8 +51,9 @@ $count = 0
 if ($mode -eq 'fail12') { $count = 12 }
 elseif ($mode -eq 'fail3') { $count = 3 }
 for ($i = 1; $i -le $count; $i++) {
+    $markerPart = if ($env:AEROLINK_FAKE_TEST_MARKER) { " marker=$env:AEROLINK_FAKE_TEST_MARKER" } else { "" }
     $rows += "<UnitTestResult testId=""$i"" testName=""Synthetic.Tests.Case$i"" outcome=""Failed"" duration=""00:00:00.100"">" +
-        "<Output><ErrorInfo><Message>SYNTH-MSG-$i : the complete synthetic failure message body, long enough to prove nothing truncates it.</Message>" +
+        "<Output><ErrorInfo><Message>SYNTH-MSG-$i : the complete synthetic failure message body, long enough to prove nothing truncates it.$markerPart</Message>" +
         "<StackTrace>SYNTH-STACK-$i : at Synthetic.Wherever() in Synthetic.cs:line 42</StackTrace></ErrorInfo></Output></UnitTestResult>"
 }
 $trx = "<?xml version=""1.0"" encoding=""utf-8""?><TestRun><Results>$rows</Results></TestRun>"
@@ -119,11 +120,63 @@ try {
 } catch { $passThrew = $_ }
 Assert-True ($null -eq $passThrew) 'A passing synthetic suite must not be misclassified as a failure.'
 
-# 3. Unique roots: concurrent-looking invocations can never share a results directory.
+# 3. Unique roots: two invocations can never share a results directory — including two processes started
+#    in the same wall-clock second, which is why uniqueness is GUID-based rather than clock-based.
 $first = Resolve-TestDiagnosticsRoot -Label 'shard check'
-Start-Sleep -Seconds 1
 $second = Resolve-TestDiagnosticsRoot -Label 'shard check'
 Assert-True ($first -ne $second) "Two invocations must never share a results directory ($first vs $second)."
+Assert-True ($first -notlike '*$(*' ) 'Root naming sanity.'
+
+# 3b. True concurrency: two background processes invoking the helper in overlapping time must receive
+#     different directories, and each must retain its own synthetic result — the historical failure mode
+#     was same-second same-directory overwrite, which a serial sleep-based test cannot prove against.
+#     Each job's fake embeds its marker in the TRX failure messages, so an overwrite would be visible as
+#     one marker replacing the other.
+$markerJobs = @()
+foreach ($marker in @('MARKER-JOB-A', 'MARKER-JOB-B')) {
+    $markerJobs += Start-Job -ScriptBlock {
+        param($ModulePath, $FakeScript, $ShellPath, $Marker)
+        $ErrorActionPreference = 'Stop'
+        Import-Module $ModulePath -Force
+        $env:AEROLINK_FAKE_TEST_MODE = 'fail3'
+        $env:AEROLINK_FAKE_TEST_MARKER = $Marker
+        # The helper owns root selection (that is the collision-safety point), so the root is recovered
+        # from the thrown status text exactly the way the parent contract does.
+        $root = $null
+        try {
+            Invoke-TestSuiteWithDiagnostics -Label 'concurrent' -FilePath $ShellPath `
+                -Arguments @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $FakeScript) 2>&1 | Out-Null
+        } catch {
+            $thrown = "$_"
+            if ($thrown -match 'Durable test diagnostics \(concurrent\): (.+)$') { $root = $Matches[1].Trim() }
+        }
+        return $root
+    } -ArgumentList $modulePath, $fakeTestScript, $shell.Source, $marker
+}
+$concurrentRoots = @()
+foreach ($job in $markerJobs) {
+    $concurrentRoots += (Receive-Job -Job $job -Wait)
+}
+Assert-True ($concurrentRoots.Count -eq 2) "Both concurrent invocations must report a root."
+Assert-True ($concurrentRoots[0] -ne $concurrentRoots[1]) "Concurrent invocations received the same directory: $concurrentRoots"
+foreach ($entry in $concurrentRoots) {
+    $trxPath = Join-Path $entry 'concurrent.trx'
+    Assert-True (Test-Path -LiteralPath $trxPath) "Each concurrent invocation must retain its own TRX at $trxPath."
+}
+if ($concurrentRoots.Count -eq 2) {
+    [xml]$trxA = Get-Content -LiteralPath (Join-Path $concurrentRoots[0] 'concurrent.trx')
+    [xml]$trxB = Get-Content -LiteralPath (Join-Path $concurrentRoots[1] 'concurrent.trx')
+    $messagesA = ($trxA.TestRun.Results.UnitTestResult | ForEach-Object { $_.Output.ErrorInfo.Message }) -join "`n"
+    $messagesB = ($trxB.TestRun.Results.UnitTestResult | ForEach-Object { $_.Output.ErrorInfo.Message }) -join "`n"
+    Assert-True ($messagesA -like '*SYNTH-MSG-1*') 'Concurrent TRX contents must survive.'
+    Assert-True ($messagesB -like '*SYNTH-MSG-1*') 'Concurrent TRX contents must survive.'
+    # Distinct directories with each marker intact in its own TRX: neither run overwrote the other.
+    $markerA = if ($concurrentRoots[0] -match 'concurrent$') { $true } else { $false }
+    $pairIsDistinct = ($messagesA -ne $messagesB) -or ($messagesA -like '*MARKER-JOB-A*' -and $messagesB -like '*MARKER-JOB-B*') -or ($messagesA -like '*MARKER-JOB-B*' -and $messagesB -like '*MARKER-JOB-A*')
+    Assert-True $pairIsDistinct 'Each concurrent TRX must retain its own synthetic result (no overwrite).'
+    Assert-True ((Get-Item (Join-Path $concurrentRoots[0] 'concurrent.trx')).Length -gt 0) 'First concurrent TRX must be non-empty.'
+    Assert-True ((Get-Item (Join-Path $concurrentRoots[1] 'concurrent.trx')).Length -gt 0) 'Second concurrent TRX must be non-empty.'
+}
 
 # 4. A three-failure run retains exactly its three failures.
 $env:AEROLINK_FAKE_TEST_MODE = 'fail3'
@@ -144,6 +197,42 @@ if ($fail3Root) {
 
 Remove-Item Env:AEROLINK_FAKE_TEST_MODE -ErrorAction SilentlyContinue
 Remove-Item -LiteralPath $work -Recurse -Force -ErrorAction SilentlyContinue
+
+# 5. Static budget contract: every CI job that runs a blame-hang budget must keep that budget safely
+#    inside its own outer timeout, so a hung test fails and uploads evidence before the runner dies.
+#    This is the guard against the numbers drifting apart silently (see the arithmetic comments in
+#    .github/workflows/ci.yml).
+$ciPath = Join-Path $root '.github' | Join-Path -ChildPath 'workflows' | Join-Path -ChildPath 'ci.yml'
+if (-not (Test-Path -LiteralPath $ciPath)) { $ciPath = Join-Path (Get-Location) '.github/workflows/ci.yml' }
+Assert-True (Test-Path -LiteralPath $ciPath) "The CI workflow must exist at $ciPath for the budget contract."
+if (Test-Path -LiteralPath $ciPath) {
+    # The authoritative CI script-contracts lane must execute this contract: a regression contract that
+    # only runs when someone remembers to run it locally protects nothing (#756 blocker B).
+    $ciText = Get-Content -LiteralPath $ciPath -Raw
+    Assert-True ($ciText -match 'AeroLinkTestDiagnostics\.Tests\.ps1') 'The CI script-contracts lane must invoke AeroLinkTestDiagnostics.Tests.ps1; its removal would silently retire this regression contract.'
+    $lines = Get-Content -LiteralPath $ciPath
+    # Job blocks start at exactly two spaces of indentation followed by an identifier and a colon; the
+    # jobs: collection itself is at zero. Walk the file, tracking the enclosing job and the deepest
+    # timeout-minutes / blame-hang-timeout pair seen inside it.
+    $currentJob = $null
+    $jobTimeouts = @{}
+    $hangBudgets = @{}
+    foreach ($line in $lines) {
+        if ($line -match '^  ([A-Za-z][A-Za-z0-9_-]*):\s*$') { $currentJob = $Matches[1]; continue }
+        if ($null -eq $currentJob) { continue }
+        if ($line -match '^\s+timeout-minutes:\s*(\d+)') { $jobTimeouts[$currentJob] = [int]$Matches[1] }
+        if ($line -match '--blame-hang-timeout\s+(\d+)m') { $hangBudgets[$currentJob] = [int]$Matches[1] }
+    }
+    Assert-True ($hangBudgets.Count -ge 2) "Expected hang budgets on at least the API and core lanes; found $($hangBudgets.Count)."
+    foreach ($job in $hangBudgets.Keys) {
+        Assert-True ($jobTimeouts.ContainsKey($job)) "Job '$job' carries a hang budget but no outer timeout-minutes."
+        if ($jobTimeouts.ContainsKey($job)) {
+            $hang = $hangBudgets[$job]
+            $outer = $jobTimeouts[$job]
+            Assert-True (($hang + 5) -lt $outer) "Job '$job': blame-hang budget ${hang}m must leave at least five minutes of the ${outer}m outer budget for pre-test work, dump finalization, and the diagnostic upload."
+        }
+    }
+}
 
 if ($failures.Count -gt 0) {
     Write-Host 'AeroLinkTestDiagnostics contract failures:' -ForegroundColor Red

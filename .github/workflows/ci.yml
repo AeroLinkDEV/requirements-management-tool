@@ -374,10 +374,11 @@ jobs:
           # ran for eight minutes and exited clean, and the guard read zero from nothing. A structured result
           # file has a schema; console output is a presentation detail that differs by SDK, verbosity and
           # whether anything is attached to stdout.
-          # A wedged test costs nothing while every test completes; when one genuinely hangs, --blame-hang
-          # writes evidence into TestResults and fails the run instead of silently burning the job timeout.
-          # 15m is far above a shard's normal step time and well under the job's 30-minute ceiling, so the
-          # dump lands while there is still runner time to upload it.
+          # Hang-budget arithmetic (#756): the outer job budget is 30 minutes and pre-test work (build,
+          # classifier, discovery, partition) is roughly 5 minutes, so even a test hanging at the very
+          # start of a shard still has ~10 minutes of runner time after the 15-minute blame budget fires —
+          # enough for the dump, the TRX, and the failure-time upload below. The static contract in
+          # AeroLinkTestDiagnostics.Tests.ps1 asserts hang < job-timeout minus margin.
           dotnet test "$project" --configuration Release --no-build \
             --filter "$filter" --logger "console;verbosity=normal" \
             --logger "trx;LogFileName=shard.trx" --results-directory TestResults \
@@ -560,8 +561,16 @@ jobs:
           echo "All test projects under product/tests are claimed by a job."
       - name: Run the domain and infrastructure test suites
         run: |
-          dotnet test product/tests/AeroLink.Domain.Tests/AeroLink.Domain.Tests.csproj --configuration Release --no-build --logger "console;verbosity=normal" --logger "trx;LogFileName=domain.trx" --results-directory TestResults --blame-hang-timeout 15m
-          dotnet test product/tests/AeroLink.Infrastructure.Tests/AeroLink.Infrastructure.Tests.csproj --configuration Release --no-build --logger "console;verbosity=normal" --logger "trx;LogFileName=infrastructure.trx" --results-directory TestResults --blame-hang-timeout 15m
+          # Hang-budget arithmetic (#756): the outer job budget is 20 minutes. Before Infrastructure
+          # executes, this job spends roughly 130s building, ~90s on the classifier contract, ~15s on
+          # setup/guard steps, and ~110s running Domain — so Infrastructure starts with roughly 13-14
+          # minutes of runner time left. A 6-minute blame-hang budget fires early enough that the dump,
+          # the TRX, and the failure-time upload step all fit inside the remaining budget; 15m here could
+          # outlive the runner and lose the evidence exactly as #756 forbids. The static contract in
+          # AeroLinkTestDiagnostics.Tests.ps1 asserts hang < job-timeout minus margin, so these numbers
+          # cannot silently drift apart.
+          dotnet test product/tests/AeroLink.Domain.Tests/AeroLink.Domain.Tests.csproj --configuration Release --no-build --logger "console;verbosity=normal" --logger "trx;LogFileName=domain.trx" --results-directory TestResults --blame-hang-timeout 6m
+          dotnet test product/tests/AeroLink.Infrastructure.Tests/AeroLink.Infrastructure.Tests.csproj --configuration Release --no-build --logger "console;verbosity=normal" --logger "trx;LogFileName=infrastructure.trx" --results-directory TestResults --blame-hang-timeout 6m
       # Same failure-evidence contract as the API shards (#756): the raw TRX files are the authority for
       # which tests failed and why, retained on failure under a run-unique artifact name.
       - name: Upload core test diagnostics
@@ -757,6 +766,12 @@ jobs:
           $ErrorActionPreference = 'Stop'
           & ./product/scripts/Get-AeroLinkTestPlan.Tests.ps1
           if ($LASTEXITCODE -ne 0) { throw 'Windows test planner contract failed.' }
+      - name: Validate the durable test-diagnostics contract
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          & ./product/scripts/AeroLinkTestDiagnostics.Tests.ps1
+          if ($LASTEXITCODE -ne 0) { throw 'Durable test-diagnostics contract failed.' }
       - name: Mark test complete
         if: always()
         continue-on-error: true

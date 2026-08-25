@@ -28,9 +28,16 @@
 function Resolve-TestDiagnosticsRoot {
     param([Parameter(Mandatory)][string]$Label)
 
+    # Collision-proofing is GUID-based, not clock-based: two qualification processes starting the same suite
+    # within the same wall-clock second (or even the same millisecond) must never share a results directory,
+    # because New-Item -Force would silently reuse it and identically named TRX files would overwrite each
+    # other. The timestamp and PID exist for human readability and correlation; the GUID is what guarantees
+    # uniqueness.
     $slug = ConvertTo-TestDiagnosticsSlug -Label $Label
     $stamp = (Get-Date).ToUniversalTime().ToString('yyyyMMdd-HHmmss')
-    $root = Join-Path ([System.IO.Path]::GetTempPath()) (Join-Path 'aerolink-test-diagnostics' "$stamp-$slug")
+    $pidPart = $PID
+    $guidPart = [Guid]::NewGuid().ToString('N').Substring(0, 8)
+    $root = Join-Path ([System.IO.Path]::GetTempPath()) (Join-Path 'aerolink-test-diagnostics' "$stamp-$pidPart-$guidPart-$slug")
     New-Item -ItemType Directory -Path $root -Force | Out-Null
     return $root
 }
