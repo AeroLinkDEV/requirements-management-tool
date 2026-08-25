@@ -163,6 +163,8 @@ export function parseRoute(pathname: string, search = ""): AppRoute {
   if (path === "system-verification/procedures") return { ...base, view: "procedureExplorer", discipline: "systemTest" };
   if (path === "software-verification/cases" || path === "software-verification/procedures")
     return { ...base, view: "procedureExplorer", discipline: "softwareTest" };
+  if (path === "software-verification/test-artifacts")
+    return { ...base, view: "procedureExplorer", discipline: "softwareTest" };
   if (path === "system-verification/results") return { ...base, view: "testResults", discipline: "systemTest" };
   if (tail[0] === "system-verification" && tail[1] === "results" && tail[2]) return { ...base, view: "testResults", discipline: "systemTest", artifactId: decoded(tail[2]) };
   if (path === "software-verification/hlr/coverage") return { ...base, view: "testingCoverage", discipline: "softwareTest", artifactKind: verificationArtifactKind("HighLevel", query) };

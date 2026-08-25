@@ -253,7 +253,7 @@ function AppNavigation({ user, workspaces, activeId, selectedProjectId, selected
           {verificationScope==="softwareTest"
             ? <>
                 {item("Change Requests","testChangeRequests","◫","softwareTest","Software Test Change Requests")}
-                {item("Test Case Explorer","procedureExplorer","≡","softwareTest","Software Test Case Explorer")}
+                {item("Test Case/Procedure Explorer","procedureExplorer","≡","softwareTest","Software Test Case/Procedure Explorer")}
                  {ladderAllows(ladder, "HighLevel", LadderCapability.Verification) && item("HLR Test Results","testResults","▦","softwareTest","Software HLR Test Results","HighLevel")}
                  {ladderAllows(ladder, "LowLevel", LadderCapability.Verification) && item("LLR Test Results","testResults","▦","softwareTest","Software LLR Test Results","LowLevel")}
               </>
@@ -812,7 +812,7 @@ function App() {
   if ((view === "testingCoverage" || view === "testChangeRequests") && project && release)
     return inShell(
       <TestingCoverageWorkspace
-        key={discipline === "softwareTest" ? selectedArtifactKind || "HighLevel" : "System"}
+        key={discipline === "softwareTest" ? `${selectedArtifactKind || "HighLevel"}` : "System"}
         api={API}
         projectId={project.project.id}
         releaseId={release.id}
@@ -831,9 +831,8 @@ function App() {
         onOpenRequirementRevision={openRequirementRevision}
         onRaiseTestChangeRequest={() => navigate("createTestChangeRequest", discipline, undefined, selectedArtifactKind)}
         onOpenTestChangeRequest={id => navigate("testChangeRequest", discipline, id, selectedArtifactKind)}
-        onLevelChange={discipline === "softwareTest"
-          ? level => navigate("testChangeRequests", "softwareTest", undefined,
-            isVerificationProcedureKind(selectedArtifactKind) ? `${level}Procedure` : level)
+        onArtifactKeyChange={discipline === "softwareTest"
+          ? (_level, kind) => navigate("testChangeRequests", "softwareTest", undefined, kind)
           : undefined}
       />
     );
