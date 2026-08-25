@@ -39,10 +39,16 @@ public sealed class VerificationVocabularyPostgresQualificationTests
         await using var db = await ResetAtLatestAsync(connection);
 
         // Pinned by identity: the upgrade path below starts from the migration immediately before this one,
-        // and a rebased or regenerated migration must not silently change what that means.
+        // and a rebased or regenerated migration must not silently change what that means. On the integrated
+        // post-#701/#747 main, later #726 migrations sort after the vocabulary migration, so the vocabulary
+        // migration must be APPLIED with its pre-feature predecessor immediately before it, and the #726
+        // execution-cutover schema must sort last.
         var applied = await db.Database.GetAppliedMigrationsAsync();
-        Assert.Equal(FeatureMigration, applied.Last());
-        Assert.Equal(PreFeatureMigration, applied.SkipLast(1).Last());
+        var appliedList = applied.ToList();
+        var featureIndex = appliedList.IndexOf(FeatureMigration);
+        Assert.True(featureIndex > 0, "The vocabulary migration must be applied.");
+        Assert.Equal(PreFeatureMigration, appliedList[featureIndex - 1]);
+        Assert.Equal("20260825114510_AddExecutionCutoverSchema", appliedList.Last());
 
         var columns = await ColumnsAsync(db);
         Assert.Contains("project_verification_vocabularies.ProjectId", columns);
