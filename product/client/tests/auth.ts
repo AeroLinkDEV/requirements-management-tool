@@ -43,9 +43,13 @@ export async function showcaseSeed(request:APIRequestContext){
   if(prepared){cachedShowcase=JSON.parse(prepared) as ShowcaseSeed;return cachedShowcase}
   await apiLogin(request)
   // A fresh production database materializes the complete 1,250-requirement showcase plus controlled
-  // procedures, executions, evidence and upgrade records. Slower Windows runners can legitimately take
-  // longer than two minutes; the surrounding production job still has its own bounded timeout.
-  const response=await request.post(`${apiBase}/api/showcase/seed`,{timeout:240_000})
+  // procedures, executions, evidence and upgrade records — and since #724/#725/#728 the seed request also
+  // bootstraps dormant procedures, their change-control packages and controlled procedure documents, so its
+  // duration has grown toward this budget. Three production-lane runs on 2026-08-25 aborted at exactly
+  // 240s on four-core runners (issue #759) while the same seed completed earlier the same day, so the
+  // request now carries a 480s budget: still far inside the production job's own 20-minute timeout, and
+  // a genuine wedge still times out — with twice the evidence retained.
+  const response=await request.post(`${apiBase}/api/showcase/seed`,{timeout:480_000})
   const body=await response.text()
   expect(response.ok(),body).toBeTruthy()
   cachedShowcase=JSON.parse(body) as ShowcaseSeed
