@@ -276,8 +276,15 @@ test('a test change request opens onto its source changes, its requirements and 
   for (let index = 0; index < count; index++) {
     const decision = decisions.nth(index)
     await expect(decision.locator('.existingCoverage')).toHaveCount(1)
-    // One of the three honest answers — covered, suspect, none, or not yet materializable — never silence.
+    // One of the four honest answers — covered, suspect, none, or not yet materializable — never silence.
+    //
+    // The "none" wording is the product's vocabulary-aware rendering, not a generic phrase: the workspace
+    // writes "No approved {artifactWord} covers this requirement yet.", and for a System test change request
+    // that word is "test procedure". This expectation named a procedure with no discipline, which no longer
+    // matches anything the product says, and passed only while the journey happened not to reach a decision
+    // in that state. It is matched exactly rather than loosened to "No approved", so a future change to the
+    // artifact vocabulary is caught here rather than quietly accepted.
     await expect(decision.locator('.existingCoverage')).toContainText(
-      /Covered by|written against earlier wording|No approved procedure covers this requirement yet|once this build materializes its requirements/)
+      /Covered by|written against earlier wording|No approved test procedure covers this requirement yet\.|once this build materializes its requirements/)
   }
 })

@@ -4,6 +4,7 @@ import type { FormEvent } from "react";
 import { SignatureDialog } from "./IdentityCenter";
 import type { AuthUser } from "./IdentityCenter";
 import ControlledRequirementEditor from "./ControlledRequirementEditor";
+import { canDeclareVerificationMethod, decideKindChange, firstPermittedMethod, useVerificationVocabulary, verificationBlockedReason } from "./verificationMethods";
 import type {
   ControlledRequirementDraft,
   RequirementKind,
@@ -232,10 +233,12 @@ const addToIdentifier = (identifier: string | undefined, offset: number) => {
   if (!match) return identifier;
   return `${match[1]}-${(Number(match[2]) + offset).toString().padStart(6, "0")}`;
 };
+/** As in the new change request editor: the verification method comes from the project vocabulary (#701). */
 const createRequirement = (
   level: RequirementLevel,
   kind: RequirementKind,
   baseNumber = "",
+  defaultVerificationMethod = "",
 ): DraftRequirement => ({
   baseNumber,
   revision: 0,
@@ -243,7 +246,7 @@ const createRequirement = (
   kind,
   statement: "",
   rationale: "",
-  verificationMethod: level === "Interface" ? "Not applicable" : "Test",
+  verificationMethod: level === "Interface" ? "Not applicable" : defaultVerificationMethod,
   richText: "",
   attributesJson: JSON.stringify({ criticality: "Normal", owner: "" }),
   impactDispositionJson: pendingImpact,
@@ -411,6 +414,13 @@ export default function ChangeRequestWorkspace({
   const [reason, setReason] = useState("");
   const [approvalRationale, setApprovalRationale] = useState("");
   const [signing, setSigning] = useState(false);
+  // #701: a proposal added to a checked-out Draft starts on a method this project permits, exactly as in the
+  // new change request editor.
+  const verification = useVerificationVocabulary(api, scr?.projectId);
+  const defaultVerificationMethod = firstPermittedMethod(verification);
+  // As in the new change request editor: an ICD declares no method, everything else waits for the project
+  // to say what it permits rather than starting a proposal on a blank the select would not display.
+  const verificationBlocked = scr?.type !== "Interface" && !canDeclareVerificationMethod(verification);
   const [lock, setLock] = useState<EditLock>();
   const [lockStatus, setLockStatus] = useState<LockStatus>();
   const [autosaveStatus, setAutosaveStatus] = useState<"Saved" | "Unsaved" | "Saving" | "Error" | "Conflict">("Saved");
@@ -909,14 +919,24 @@ export default function ChangeRequestWorkspace({
   const addProposal = (kind: RequirementKind, level: RequirementLevel) =>
     setRequirements((items) => [
       ...items,
-      createRequirement(level, kind, kind === "Introduce" ? nextIdentifier(level) : ""),
+      createRequirement(level, kind, kind === "Introduce" ? nextIdentifier(level) : "", defaultVerificationMethod),
     ]);
 
   // What a proposal does to a requirement, changed after the card exists. Not a field update: the kind decides
   // what the identifier means, so the identity is re-derived rather than carried across. Same rule as the new
   // change request editor, and here for the same reason — an author editing a checked-out Draft changes their
   // mind about a proposal as readily as one writing it for the first time.
-  const changeRequirementKind = (index: number, kind: RequirementKind) =>
+  const changeRequirementKind = (index: number, kind: RequirementKind) => {
+    const target = requirements[index];
+    // #701: as in the new change request editor. A blank retirement becoming an Introduce or a Modify is the
+    // same act as adding a verification-bearing proposal, and is refused in the same states.
+    const decision = target
+      ? decideKindChange(verification, { level: target.level, toKind: kind, currentMethod: target.verificationMethod })
+      : ({ allowed: false, reason: "" } as const);
+    if (!decision.allowed) {
+      setError(decision.reason);
+      return;
+    }
     setRequirements((items) =>
       items.map((item, position) => {
         if (position !== index || item.kind === kind) return item;
@@ -927,9 +947,11 @@ export default function ChangeRequestWorkspace({
           revision: 0,
           statement: kind === "Retire" ? "" : item.statement,
           richText: kind === "Retire" ? "" : item.richText,
+          verificationMethod: decision.verificationMethod,
         };
       }),
     );
+  };
 
   const saveWorkingCopy = async () => {
     setError("");
@@ -1175,8 +1197,8 @@ export default function ChangeRequestWorkspace({
               <span>Add proposal</span>
               {scr.type === "System" ? (
                 <>
-                  <button type="button" disabled={!context} onClick={() => addProposal("Introduce", "System")}>+ Introduce System requirement</button>
-                  <button type="button" onClick={() => addProposal("Modify", "System")}>Modify existing</button>
+                  <button type="button" disabled={!context || verificationBlocked} onClick={() => addProposal("Introduce", "System")}>+ Introduce System requirement</button>
+                  <button type="button" disabled={verificationBlocked} onClick={() => addProposal("Modify", "System")}>Modify existing</button>
                   <button type="button" onClick={() => addProposal("Retire", "System")}>Retire existing</button>
                 </>
               ) : scr.type === "Interface" ? (
@@ -1187,14 +1209,15 @@ export default function ChangeRequestWorkspace({
                 </>
               ) : (
                 <>
-                  <button type="button" disabled={!context} onClick={() => addProposal("Introduce", "HighLevel")}>+ Introduce HLR</button>
-                  <button type="button" disabled={!context} onClick={() => addProposal("Introduce", "LowLevel")}>+ Introduce LLR</button>
-                  <button type="button" onClick={() => addProposal("Modify", "HighLevel")}>Modify existing HLR</button>
+                  <button type="button" disabled={!context || verificationBlocked} onClick={() => addProposal("Introduce", "HighLevel")}>+ Introduce HLR</button>
+                  <button type="button" disabled={!context || verificationBlocked} onClick={() => addProposal("Introduce", "LowLevel")}>+ Introduce LLR</button>
+                  <button type="button" disabled={verificationBlocked} onClick={() => addProposal("Modify", "HighLevel")}>Modify existing HLR</button>
                   <button type="button" onClick={() => addProposal("Retire", "HighLevel")}>Retire existing HLR</button>
-                  <button type="button" onClick={() => addProposal("Modify", "LowLevel")}>Modify existing LLR</button>
+                  <button type="button" disabled={verificationBlocked} onClick={() => addProposal("Modify", "LowLevel")}>Modify existing LLR</button>
                   <button type="button" onClick={() => addProposal("Retire", "LowLevel")}>Retire existing LLR</button>
                 </>
               )}
+              {verificationBlocked && <span className="proposalUnavailable" role={verification.error ? "alert" : "status"}>{verificationBlockedReason(verification)}</span>}
             </div>
             {requirements.map((item, index) => (
               <ControlledRequirementEditor
@@ -1206,6 +1229,7 @@ export default function ChangeRequestWorkspace({
                 index={index}
                 key={`${index}-${item.kind}`}
                 identityLocked={Boolean(item.baseNumber)}
+                verification={verification}
                 onChange={(key, value) => updateRequirement(index, key, value)}
                 onKindChange={(kind) => changeRequirementKind(index, kind)}
                 onRemove={() => setRequirements((items) => items.filter((_, position) => position !== index))}

@@ -148,6 +148,7 @@ public static class DependencyInjection
         services.AddScoped<BuildTestSetService>();
         services.AddScoped<IdentityService>();
         services.AddScoped<ProjectLadderAuthoringService>();
+        services.AddScoped<ProjectVerificationVocabularyService>();
         services.AddScoped<IdentitySeeder>();
         services.AddScoped<ExternalIdentityAdministrationService>();
         services.AddScoped<EnterpriseRequirementsService>();

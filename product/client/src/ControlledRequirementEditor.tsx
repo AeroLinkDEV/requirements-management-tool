@@ -2,6 +2,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { stateLabel, verificationArtifactNoun } from './presentation'
 import { RichContentEditor, RichContentView } from "./RichContent";
 import { emptyRichContent } from "./richContentModel";
+import { authoringOptions, decideKindChange, verificationBlockedReason } from "./verificationMethods";
+import type { VerificationVocabularyState } from "./verificationMethods";
 import "./ControlledRequirementEditor.css";
 
 export type RequirementLevel = "System" | "HighLevel" | "LowLevel" | "Interface";
@@ -91,6 +93,12 @@ type Props = {
    */
   onKindChange?: (kind: RequirementKind) => void;
   onRemove: () => void;
+  /**
+   * The project's permitted verification methods (#701), loaded once by the surface that owns the package.
+   * Passed in rather than fetched here because a change request holds many proposals and each one asking the
+   * server the same project-scoped question would multiply one read by the size of the package.
+   */
+  verification: VerificationVocabularyState;
 };
 
 const kindOptions: { value: RequirementKind; label: string }[] = [
@@ -127,10 +135,21 @@ export default function ControlledRequirementEditor({
   onChange,
   onKindChange,
   onRemove,
+  verification,
 }: Props) {
   const onChangeRef = useRef(onChange);
   useEffect(() => { onChangeRef.current = onChange; }, [onChange]);
   const attributes = useMemo(() => parse(item.attributesJson), [item.attributesJson]);
+  // The project's permitted verification methods (#701). Authoring offers exactly what the project
+  // declares; the value already on this change is always offered alongside them so an in-flight proposal
+  // written against an older vocabulary displays what it actually says rather than the nearest permitted word.
+  const { vocabulary, loading: vocabularyLoading, error: vocabularyError } = verification;
+  const verificationOptions = authoringOptions(vocabulary?.methods, item.verificationMethod);
+  const verificationOffVocabulary = !!item.verificationMethod && !!vocabulary
+    && !vocabulary.methods.includes(item.verificationMethod);
+  // True exactly when this card is a blank retirement that cannot yet become verification-bearing.
+  const kindChangeBlocked = !!onKindChange
+    && !decideKindChange(verification, { level: item.level, toKind: "Modify", currentMethod: item.verificationMethod }).allowed;
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<ExistingRequirement[]>([]);
   const [lookupBusy, setLookupBusy] = useState(false);
@@ -227,7 +246,10 @@ export default function ControlledRequirementEditor({
     onChange("level", selected.level);
     onChange("statement", item.kind === "Retire" ? "" : selected.statement);
     onChange("rationale", selected.rationale);
-    onChange("verificationMethod", selected.verificationMethod);
+    // A retirement declares no verification method, so it must not inherit the one the requirement it is
+    // retiring happens to carry. Copying it made a retirement look like a declaration to every reader, and
+    // pinned that spelling against vocabulary removal for no reason anybody had stated.
+    onChange("verificationMethod", item.kind === "Retire" ? "" : selected.verificationMethod);
     onChange("richText", emptyRichContent);
     // Its existing section comes with it, so choosing a requirement to modify does not quietly relocate it.
     onChange("targetSectionId", selected.currentSectionId ?? "");
@@ -472,10 +494,24 @@ export default function ControlledRequirementEditor({
                 onChange={(event) => onKindChange(event.target.value as RequirementKind)}
               >
                 {kindOptions.map((option) => (
-                  <option value={option.value} key={option.value}>{option.label}</option>
+                  <option
+                    value={option.value}
+                    key={option.value}
+                    disabled={!decideKindChange(verification, { level: item.level, toKind: option.value, currentMethod: item.verificationMethod }).allowed}
+                  >{option.label}</option>
                 ))}
               </select>
               <small id={`proposal-${index + 1}-change-type-help`}>Changing this resets the controlled identity selection above.</small>
+              {/*
+                * #701: while the project has not said what it permits, a retirement cannot become a proposal
+                * that must declare a method. The disabled option is the affordance; the parents refuse the
+                * transition inside their handlers, which is what actually holds.
+                */}
+              {kindChangeBlocked && (
+                <small role={vocabularyError ? "alert" : "status"} className="proposalUnavailable">
+                  {verificationBlockedReason(verification)}
+                </small>
+              )}
             </>
           ) : (
             <input value={item.kind} readOnly aria-readonly="true" />
@@ -544,13 +580,27 @@ export default function ControlledRequirementEditor({
                 <select
                   value={item.verificationMethod}
                   onChange={(event) => onChange("verificationMethod", event.target.value)}
-                  disabled={!identityLocked}
+                  disabled={!identityLocked || vocabularyLoading || !vocabulary}
                 >
-                  <option>Test</option>
-                  <option>Analysis</option>
-                  <option>Inspection</option>
-                  <option>Demonstration</option>
+                  {/*
+                    * A blank method needs an option of its own. Without one the select value matches nothing
+                    * and the browser falls back to displaying the first entry, so the screen showed a method
+                    * the payload did not carry and submission was refused for a field the author had been
+                    * shown a value for. The placeholder makes the displayed option equal the payload, always.
+                    */}
+                  {!item.verificationMethod && <option value="" disabled>Choose a verification method…</option>}
+                  {verificationOptions.map((method) => (
+                    <option key={method} value={method}>{method}</option>
+                  ))}
                 </select>
+                {vocabularyLoading && <small>Loading this project's permitted verification methods…</small>}
+                {!!vocabularyError && <small role="alert">{vocabularyError}</small>}
+                {!vocabularyLoading && !vocabularyError && vocabulary && vocabulary.methods.length === 0
+                  && <small role="alert">This project permits no verification methods yet. Configure them in Project Configuration before submitting.</small>}
+                {verificationOffVocabulary && <small role="alert">
+                  “{item.verificationMethod}” is not in this project's permitted vocabulary. It is shown as
+                  recorded and will be refused at submission until it is corrected.
+                </small>}
               </label>
             )}
           </div>
