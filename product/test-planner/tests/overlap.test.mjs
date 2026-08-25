@@ -208,7 +208,8 @@ test('full affected-lane jobs are identical in the comment and bounded artifact'
     pr(2, ['.github/workflows/ci.yml']),
   ])
   const expectedJobs = [...PLANNER_LANES.full.jobs]
-  assert.equal(expectedJobs.length, 10)
+  // #758 split backend-core into two parallel jobs, so the full lane carries eleven entries.
+  assert.equal(expectedJobs.length, 11)
   assert.ok(expectedJobs.length <= OVERLAP_LIMITS.maxJobsPerAffectedLane)
   assert.deepEqual(overlaps[0].affectedLanes[0].jobs, expectedJobs)
   const report = buildReport({ overlaps, analysisComplete: true })
