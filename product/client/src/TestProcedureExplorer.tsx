@@ -16,17 +16,14 @@ import './RequirementsWorkspace.css'
 import './TestingCoverageWorkspace.css'
 import './TestProcedureExplorer.css'
 import { LadderCapability, ladderAllows, ladderEnablesArtifactKind } from './projectLadder'
-import type { ProjectLadderProjection } from './projectLadder'
+import type { LadderLevel, ProjectLadderProjection } from './projectLadder'
 import ExactLinkLifecyclePanel from './ExactLinkLifecyclePanel'
-
-// Historical Case contract vocabulary retained for the shared shell boundary: discipline === 'System' ? 'System Test Procedure Explorer' : 'Software Test Case Explorer'.
-// Shared state control contract: aria-label={`${currentArtifactShortWord} state`} remains the semantic pattern.
-const procedureCompatibilityApiRoot = ['/api', 'test-procedures'].join('/')
 
 type Procedure = {
   id: string
   version?: number
   revisionId: string
+  revision?: number
   displayNumber: string
   title: string
   titleIsExact?: boolean
@@ -102,6 +99,14 @@ type TraceRequirement = {
   coverageState: 'Confirmed' | 'Suspect'
   isSuspect: boolean
 }
+type TraceCaseParent = {
+  linkId: string
+  caseRevisionId: string
+  displayNumber?: string
+  title?: string
+  state: string
+  outcome?: string
+}
 type TraceProvenance = {
   changeRequest: string; package: string; subjectDisplayNumber: string; action: string; isLegacy?: boolean
 }
@@ -123,6 +128,7 @@ type ProcedureTrace = {
   package?: string
   provenanceNote?: string
   requirements: TraceRequirement[]
+  caseParents?: TraceCaseParent[]
   provenance: TraceProvenance[]
   build?: { releaseId: string; effectiveBaselineId: string; requirementBaselineId?: string; isExactManifest: boolean }
 }
@@ -179,9 +185,8 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
   ladder: ProjectLadderProjection | null
 }) {
   const opening = useRef(typeof location !== 'undefined' ? new URLSearchParams(location.search) : new URLSearchParams()).current
-  // #762: software Procedures are first-class post-#726. Both Cases and Procedures share one combined
-  // Explorer with an artifact-kind filter; the old false binary is gone. The artifact
-  // kind filter defaults to "all" so the page communicates the full Case → Procedure model immediately.
+  // Cases and Procedures share one combined Explorer with an artifact-kind filter. The filter defaults to
+  // the complete inventory so the page communicates the controlled Case -> Procedure model immediately.
   const [artifactKindFilter, setArtifactKindFilter] = useState<'all' | 'Case' | 'Procedure'>(() => {
     const pathKind = typeof location !== 'undefined' && location.pathname.endsWith('/procedures') ? 'procedure' : typeof location !== 'undefined' && location.pathname.endsWith('/cases') ? 'case' : ''
     const kind = opening.get('artifactKind')?.toLowerCase() || pathKind
@@ -190,8 +195,6 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
     return 'all'
   })
   const isSystemScope = discipline === 'System'
-  const caseEnabled = isSystemScope || ladderEnablesArtifactKind(ladder, 'HighLevel', 'Case') || ladderEnablesArtifactKind(ladder, 'LowLevel', 'Case')
-  const procedureEnabled = isSystemScope || ladderEnablesArtifactKind(ladder, 'HighLevel', 'Procedure') || ladderEnablesArtifactKind(ladder, 'LowLevel', 'Procedure')
   const currentArtifactWord = isSystemScope ? verificationArtifactWord('System') : artifactKindFilter === 'Case' ? verificationArtifactWord('HighLevel', 'Case') : artifactKindFilter === 'Procedure' ? verificationArtifactWord('HighLevel', 'Procedure') : 'test artifact'
   const currentArtifactShortWord = verificationArtifactNoun(isSystemScope ? 'System' : 'HighLevel', artifactKindFilter === 'all' ? 'Case' : artifactKindFilter).toLowerCase()
   const currentArtifactDisplayWord = artifactKindFilter === 'all' && !isSystemScope ? 'test artifact' : currentArtifactShortWord
@@ -211,6 +214,9 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
   // — and the requirement trace's "Open test procedure" — keep working.
   const [level, setLevel] = useState<ProcedureLevel>(() =>
     validLevel(queryValue(opening, 'Level') ?? initialLevel ?? null, discipline, ladder))
+  const enabledSoftwareLevels = level === 'HighLevel' ? ['HighLevel'] : level === 'LowLevel' ? ['LowLevel'] : ['HighLevel', 'LowLevel']
+  const caseEnabled = isSystemScope || enabledSoftwareLevels.some(item => ladderEnablesArtifactKind(ladder, item as LadderLevel, 'Case'))
+  const procedureEnabled = isSystemScope || enabledSoftwareLevels.some(item => ladderEnablesArtifactKind(ladder, item as LadderLevel, 'Procedure'))
   const procedureDocumentTargets = configuredProcedureTargetsFor(ladder, discipline, level,
     artifactKindFilter === 'all' ? undefined : artifactKindFilter)
   const procedureDocumentsEnabled = procedureDocumentTargets.length > 0
@@ -235,6 +241,8 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
   const appliedInitialView = useRef(false)
   const lastDiscreteState = useRef<string | null>(null)
   const [selectedId, setSelectedId] = useState(queryValue(opening, 'Id') ?? '')
+  const [selectedRevisionId, setSelectedRevisionId] = useState(queryValue(opening, 'RevisionId') ?? '')
+  const [selectedDisplayNumber, setSelectedDisplayNumber] = useState(queryValue(opening) ?? '')
   const [tab, setTab] = useState<Tab>(() => {
     const seeded = queryValue(opening, 'Tab')
     return seeded === 'trace' || seeded === 'history' || seeded === 'discussion' ? seeded : 'details'
@@ -301,7 +309,7 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
   const mutateView = async (view: SavedView, method: 'PUT' | 'DELETE', body?: unknown) => {
     setError('')
     try {
-      await apiRequest(`${api}${procedureCompatibilityApiRoot}/views/${view.id}`, {
+      await apiRequest(`${api}/api/test-cases/views/${view.id}`, {
         method,
         ...(body === undefined ? {} : { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }),
       })
@@ -351,7 +359,7 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
     const fields = new FormData(event.currentTarget)
     setError('')
     try {
-      await apiRequest(`${api}${procedureCompatibilityApiRoot}/views`, {
+      await apiRequest(`${api}/api/test-cases/views`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -383,12 +391,12 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
     const before = params.toString()
     const apply = (key: string, value: string) => { if (value) params.set(key, value); else params.delete(key) }
     if (discipline !== 'System') {
-      for (const suffix of ['', 'State', 'Outcome', 'Level', 'Page', 'Rows', 'Document', 'Section', 'View']) {
+      for (const suffix of ['', 'State', 'Outcome', 'Level', 'Page', 'Rows', 'Document', 'Section', 'View', 'Id', 'RevisionId', 'Tab']) {
         params.delete(`procedure${suffix}`)
         params.delete(`case${suffix}`)
       }
     }
-    apply(queryKey(), query)
+    apply(queryKey(), selectedId ? selectedDisplayNumber : query)
     if (discipline !== 'System') apply('artifactKind', artifactKindFilter === 'all' ? '' : artifactKindFilter)
     apply(queryKey('State'), procedureState)
     apply(queryKey('Outcome'), procedureOutcome)
@@ -398,6 +406,9 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
     apply(queryKey('Document'), documentId)
     apply(queryKey('Section'), sectionId)
     apply(queryKey('View'), viewId)
+    apply(queryKey('Id'), selectedId)
+    apply(queryKey('RevisionId'), selectedRevisionId)
+    apply(queryKey('Tab'), tab === 'details' ? '' : tab)
     // Seeded from what the address already says, so the reader's first change after a reload still earns a
     // history entry rather than being mistaken for arrival.
     const discrete = `${level}|${artifactKindFilter}|${procedureState}|${procedureOutcome}|${page}|${pageSize}|${documentId}|${sectionId}|${viewId}`
@@ -412,7 +423,7 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
     // window.history explicitly: this component has its own `history` — the revision history of a procedure —
     // and the bare name resolves to that, which throws rather than navigating.
     if (push) window.history.pushState({}, '', next); else window.history.replaceState({}, '', next)
-  }, [discipline, level, query, artifactKindFilter, procedureState, procedureOutcome, page, pageSize, documentId, sectionId, viewId, queryKey])
+  }, [discipline, level, query, artifactKindFilter, procedureState, procedureOutcome, page, pageSize, documentId, sectionId, viewId, selectedId, selectedDisplayNumber, selectedRevisionId, tab, queryKey])
 
   // The browser's own navigation must move the list, not just the address bar.
   useEffect(() => {
@@ -430,6 +441,8 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
       setSectionId(queryValue(params, 'Section') ?? '')
       setViewId(queryValue(params, 'View') ?? '')
       setSelectedId(queryValue(params, 'Id') ?? '')
+      setSelectedRevisionId(queryValue(params, 'RevisionId') ?? '')
+      setSelectedDisplayNumber(queryValue(params) ?? '')
       const seeded = queryValue(params, 'Tab')
       setTab(seeded === 'trace' || seeded === 'history' || seeded === 'discussion' ? seeded : 'details')
     }
@@ -444,7 +457,8 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
   // Keyed on the page rather than the derived array, so the identity stays stable between renders. The
   // history and discussion effects watch this object, and a fresh one every render would refetch forever.
   const selected = useMemo(() => data?.items.find(x => x.id === selectedId), [data, selectedId])
-  const selectedArtifactApiRoot = selected?.artifactKind === 'Case' ? '/api/test-cases' : procedureCompatibilityApiRoot
+  const selectedArtifactApiRoot = verificationArtifactApiRoot(isSystemScope ? 'System' : 'Software', selected?.artifactKind)
+  const selectedRevision = selectedRevisionId || selected?.revisionId || ''
   const selectedIsProcedure = selected?.artifactKind === 'Procedure'
   const selectedArtifactWord = selectedIsProcedure ? 'test procedure' : 'test case'
   const selectedArtifactShortWord = selectedIsProcedure ? 'procedure' : 'case'
@@ -457,12 +471,12 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
     void (async () => {
       try {
         const response = await fetch(
-           `${api}${selectedArtifactApiRoot}/${selected.id}/history?releaseId=${releaseId}&revisionId=${selected.revisionId}`)
+           `${api}${selectedArtifactApiRoot}/${selected.id}/history?releaseId=${releaseId}&revisionId=${selectedRevision}`)
         if (response.ok && active) setHistory(await response.json())
       } catch { if (active) setHistory(undefined) }
     })()
     return () => { active = false }
-  }, [api, selectedArtifactApiRoot, releaseId, selected, tab])
+  }, [api, selectedArtifactApiRoot, releaseId, selected, selectedRevision, tab])
 
   // Loaded when the tab is opened rather than with the list, like history: a reader browsing procedures does
   // not need every trace fetched on their behalf. The server projection is authoritative, naming the exact
@@ -474,13 +488,13 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
     void (async () => {
       try {
         const response = await fetch(
-           `${api}${selectedArtifactApiRoot}/${selected.id}/trace?releaseId=${releaseId}&revisionId=${selected.revisionId}`)
+           `${api}${selectedArtifactApiRoot}/${selected.id}/trace?releaseId=${releaseId}&revisionId=${selectedRevision}`)
         if (response.ok && active) setTrace(await response.json())
         else if (active) setTraceError(true)
       } catch { if (active) setTraceError(true) }
     })()
     return () => { active = false }
-  }, [api, selectedArtifactApiRoot, releaseId, selected, tab])
+  }, [api, selectedArtifactApiRoot, releaseId, selected, selectedRevision, tab])
 
   const loadComments = useCallback(async (procedureId: string) => {
     try {
@@ -555,11 +569,15 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
   const suspect = coverage?.items.filter(item => item.disposition === 'Suspect') ?? []
 
   const open = (procedure: Procedure) => {
-    setSelectedId(procedure.id); setTab('details'); setHistory(undefined); setTrace(undefined); setTraceError(false)
+    setSelectedId(procedure.id); setSelectedRevisionId(procedure.revisionId); setTab('details'); setHistory(undefined); setTrace(undefined); setTraceError(false)
     const params = new URLSearchParams(location.search)
     if (discipline !== 'System')
       for (const suffix of ['', 'Id', 'RevisionId', 'Tab']) params.delete(`procedure${suffix}`)
-    params.set(queryKey(), procedure.displayNumber)
+    const exactDisplayNumber = procedure.displayNumber.includes('.')
+      ? procedure.displayNumber
+      : `${procedure.displayNumber}.${String(procedure.revision ?? 0).padStart(2, '0')}`
+    setSelectedDisplayNumber(exactDisplayNumber)
+    params.set(queryKey(), exactDisplayNumber)
     params.set(queryKey('Id'), procedure.id)
     params.set(queryKey('RevisionId'), procedure.revisionId)
     params.delete(queryKey('Tab'))
@@ -567,6 +585,8 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
   }
   const close = () => {
     setSelectedId('')
+    setSelectedRevisionId('')
+    setSelectedDisplayNumber('')
     const params = new URLSearchParams(location.search)
     for (const suffix of ['Id', 'RevisionId', 'Tab']) {
       params.delete(queryKey(suffix))
@@ -945,10 +965,8 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
 
           {tab === 'trace' && (
             <div className="inspectorBody">
-              {/* The other direction from a requirement's trace: a requirement shows what derives from it, a
-                  procedure shows what it exists to verify. The server projection names the exact revision this
-                  build carries and every exact requirement revision it verifies, with its Confirmed or Suspect
-                  coverage state and the TCR/change provenance that produced the procedure revision. */}
+              {/* A Case traces to the requirements it verifies. A software Procedure traces to its exact Case
+                  parents and their Case <-> Procedure lifecycle; System remains the direct requirement trace. */}
               {trace ? (
                 <>
                   <div className="traceRevisionIdentity">
@@ -968,15 +986,33 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
                     <p className="traceProvenance">Produced by {trace.package}</p>
                   )}
                   {trace.provenanceNote && <p className="inspectorNote warn">{trace.provenanceNote}</p>}
-                  <p className="inspectorNote">
-                    This {selectedArtifactShortWord} verifies {trace.requirements.length} requirement{trace.requirements.length === 1 ? '' : 's'}.
-                  </p>
-                  {trace.requirements.length === 0 ? (
+                  {selectedIsProcedure && selected.level !== 'System' ? (
+                    trace.caseParents?.length ? <>
+                      <p className="inspectorNote">This Procedure runs against {trace.caseParents.length} exact Case parent{trace.caseParents.length === 1 ? '' : 's'}.</p>
+                      <ul className="traceRequirements" aria-label="Exact Case parents">
+                        {trace.caseParents.map(parent => <li key={parent.linkId} className="traceRequirement">
+                          <div className="traceRequirementHead">
+                            <b>{parent.displayNumber ?? parent.caseRevisionId}</b>
+                            <span>Case</span>
+                            <i className="traceCoverageBadge confirmed">{parent.state}</i>
+                          </div>
+                          {parent.title && <p>{parent.title}</p>}
+                          <small>Exact Case revision {parent.caseRevisionId}</small>
+                          {parent.outcome && <small>Disposition: {parent.outcome}</small>}
+                          <ExactLinkLifecyclePanel api={api} routeRoot="case-procedure-links"
+                            linkId={parent.linkId} initialState={parent.state} />
+                        </li>)}
+                      </ul>
+                    </> : <p className="inspectorNote warn">No exact Case parent is linked to this Procedure revision.</p>
+                  ) : trace.requirements.length === 0 ? (
                     <p className="inspectorNote warn">
                       Nothing is verified by {trace.displayNumber}. Either it has not been linked yet, or the
                       requirement it was written against has been retired.
                     </p>
-                  ) : (
+                  ) : <>
+                    <p className="inspectorNote">
+                      This Case verifies {trace.requirements.length} requirement{trace.requirements.length === 1 ? '' : 's'}.
+                    </p>
                     <ul className="traceRequirements">
                       {trace.requirements.map(item => (
                         <li key={item.revisionId}
@@ -997,7 +1033,7 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
                         </li>
                       ))}
                     </ul>
-                  )}
+                  </>}
                 </>
               ) : traceError ? (
                 <p className="inspectorNote warn">The trace for this {selectedArtifactShortWord} revision could not be loaded.</p>

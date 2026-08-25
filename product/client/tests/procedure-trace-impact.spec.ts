@@ -151,7 +151,7 @@ test('a software HLR trace navigates to the exact software requirement revision'
   await selectProgram(page, 'Flight Management System Live Program')
   await openNavigationGroup(page, 'ASSURANCE')
   await page.getByRole('button', { name: 'Software' }).last().click()
-  await page.getByRole('link', { name: 'Software Test Case Explorer' }).click()
+  await page.getByRole('link', { name: 'Test Case/Procedure Explorer' }).click()
   await expect(page).toHaveURL(/software-verification\/cases$/, { timeout: 30_000 })
   await expect(page.getByLabel('Level filter')).toHaveValue('HighLevel')
 

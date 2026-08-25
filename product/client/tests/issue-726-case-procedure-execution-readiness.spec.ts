@@ -277,6 +277,60 @@ test('Case to allocated Procedure execution chain drives release readiness', asy
   expect(procedure.displayNumber).toMatch(/^HLRTP-\d{6}\.\d{2}$/)
   const procedureRevisionId = procedure.revisionId as string
 
+  // #762 API boundary: this activated Case + Procedure profile exposes one globally sorted mixed inventory,
+  // while the historical procedure alias remains a Case compatibility surface until Procedure is explicit.
+  const mixedResponse = await request.get(
+    `${apiBase}/api/verification-artifacts?projectId=${workspace.project.id}&releaseId=${workspace.release.id}` +
+    '&scope=Software&sort=owner&page=1&pageSize=200')
+  expect(mixedResponse.ok(), await mixedResponse.text()).toBeTruthy()
+  const mixed = await mixedResponse.json()
+  expect(new Set(mixed.items.map((item: { artifactKind: string }) => item.artifactKind))).toEqual(new Set(['Case', 'Procedure']))
+  expect(mixed.totalPages).toBe(Math.ceil(mixed.totalCount / mixed.pageSize))
+  const mixedPageOneResponse = await request.get(
+    `${apiBase}/api/verification-artifacts?projectId=${workspace.project.id}&releaseId=${workspace.release.id}` +
+    '&scope=Software&sort=owner&page=1&pageSize=1')
+  const mixedPageTwoResponse = await request.get(
+    `${apiBase}/api/verification-artifacts?projectId=${workspace.project.id}&releaseId=${workspace.release.id}` +
+    '&scope=Software&sort=owner&page=2&pageSize=1')
+  expect(mixedPageOneResponse.ok(), await mixedPageOneResponse.text()).toBeTruthy()
+  expect(mixedPageTwoResponse.ok(), await mixedPageTwoResponse.text()).toBeTruthy()
+  const mixedPageOne = await mixedPageOneResponse.json()
+  const mixedPageTwo = await mixedPageTwoResponse.json()
+  expect(mixedPageOne.totalPages).toBe(Math.ceil(mixedPageOne.totalCount / mixedPageOne.pageSize))
+  expect(mixedPageOne.items[0].id).not.toBe(mixedPageTwo.items[0].id)
+  expect(`${mixedPageOne.items[0].ownerId}\u0000${mixedPageOne.items[0].displayNumber}` <= `${mixedPageTwo.items[0].ownerId}\u0000${mixedPageTwo.items[0].displayNumber}`).toBeTruthy()
+  const compatibility = await request.get(
+    `${apiBase}/api/test-procedures?projectId=${workspace.project.id}&releaseId=${workspace.release.id}&scope=Software&page=1&pageSize=200`)
+  expect(compatibility.ok(), await compatibility.text()).toBeTruthy()
+  expect((await compatibility.json()).items.every((item: { artifactKind: string }) => item.artifactKind === 'Case')).toBeTruthy()
+  const procedureOnly = await request.get(
+    `${apiBase}/api/test-procedures?projectId=${workspace.project.id}&releaseId=${workspace.release.id}&scope=Software&artifactKind=Procedure&page=1&pageSize=200`)
+  expect(procedureOnly.ok(), await procedureOnly.text()).toBeTruthy()
+  expect((await procedureOnly.json()).items.every((item: { artifactKind: string }) => item.artifactKind === 'Procedure')).toBeTruthy()
+  const procedureTrace = await request.get(
+    `${apiBase}/api/test-procedures/${procedure.id}/trace?releaseId=${workspace.release.id}&revisionId=${procedureRevisionId}`)
+  expect(procedureTrace.ok(), await procedureTrace.text()).toBeTruthy()
+  const trace = await procedureTrace.json()
+  expect(trace.artifactKind).toBe('Procedure')
+  expect(trace.requirements).toHaveLength(0)
+  expect(trace.caseParents.some((parent: { caseRevisionId: string }) => parent.caseRevisionId === caseRevisionId)).toBeTruthy()
+  const configuredDocuments = await request.get(
+    `${apiBase}/api/projects/${workspace.project.id}/test-artifacts?scope=Software`)
+  expect(configuredDocuments.ok(), await configuredDocuments.text()).toBeTruthy()
+  const documents = await configuredDocuments.json()
+  expect(new Set(documents.map((document: { level: string; artifactKind: string }) => `${document.level}:${document.artifactKind}`))).toEqual(
+    new Set(['HighLevel:Case', 'HighLevel:Procedure', 'LowLevel:Case', 'LowLevel:Procedure']))
+  const procedureCommentResponse = await request.post(`${apiBase}/api/test-procedures/${procedure.id}/comments`, {
+    data: { revisionId: procedureRevisionId, body: `#762 Procedure discussion ${Date.now()}`, mentions: [] },
+  })
+  expect(procedureCommentResponse.status(), await procedureCommentResponse.text()).toBe(201)
+  const procedureComment = await procedureCommentResponse.json() as { id: string }
+  const procedureCommentResolved = await request.post(
+    `${apiBase}/api/enterprise-requirements/comments/${procedureComment.id}/resolve`, {
+      data: { disposition: 'The exact Case-to-Procedure discussion was reviewed.' },
+    })
+  expect(procedureCommentResolved.status(), await procedureCommentResolved.text()).toBe(204)
+
   // 5. Campaign + build scope + BuildTestSet selection.
   const campaignResponse = await request.post(`${apiBase}/api/release-campaigns`, {
     data: {

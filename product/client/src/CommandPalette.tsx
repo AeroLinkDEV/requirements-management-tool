@@ -25,7 +25,7 @@ const commandDefinitions:{label:string;view:View;discipline:Discipline;detail:st
   {label:'System Test Results',view:'testResults',discipline:'systemTest',detail:'What this build runs, and the determinations recorded against it',icon:'▦'},
   {label:'Software HLR Test Change Requests',view:'testChangeRequests',discipline:'softwareTest',artifactKind:'HighLevel',detail:'The HLRTCCRs controlling high-level software test cases',icon:'◫'},
   {label:'Software HLR Downstream Assessments',view:'testingCoverage',discipline:'softwareTest',artifactKind:'HighLevel',detail:'Approved changes waiting for an HLRTCCR conclusion',icon:'⊞'},
-  {label:'Software Test Case Explorer',view:'procedureExplorer',discipline:'softwareTest',detail:'Browse controlled HLR and LLR test cases and what this build covers',icon:'≡'},
+  {label:'Test Case/Procedure Explorer',view:'procedureExplorer',discipline:'softwareTest',detail:'Browse controlled HLR and LLR Cases, Procedures, and their exact chain',icon:'≡'},
   {label:'Software HLR Test Results',view:'testResults',discipline:'softwareTest',artifactKind:'HighLevel',detail:'High-level software test set and recorded determinations',icon:'▦'},
   {label:'Software LLR Test Change Requests',view:'testChangeRequests',discipline:'softwareTest',artifactKind:'LowLevel',detail:'The LLRTCCRs controlling low-level software test cases',icon:'◫'},
   {label:'Software LLR Downstream Assessments',view:'testingCoverage',discipline:'softwareTest',artifactKind:'LowLevel',detail:'Approved changes waiting for an LLRTCCR conclusion',icon:'⊞'},

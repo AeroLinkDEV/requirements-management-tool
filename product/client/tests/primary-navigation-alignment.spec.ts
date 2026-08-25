@@ -34,7 +34,7 @@ test('primary navigation separates generated data, managed documents, code and p
   await expect(verification.getByRole('link',{name:'System Test Results'})).toBeVisible()
   await expect(verification.getByRole('link',{name:'Generated System Verification Documents'})).toBeVisible()
   await verification.getByRole('group',{name:'Verification scope'}).getByRole('button',{name:'Software'}).click()
-  for(const name of['Software Test Change Requests','Software Test Case Explorer','Software HLR Test Results','Software LLR Test Results','Generated Software Verification Documents'])await expect(verification.getByRole('link',{name})).toBeVisible()
+  for(const name of['Software Test Change Requests','Test Case/Procedure Explorer','Software HLR Test Results','Software LLR Test Results','Generated Software Verification Documents'])await expect(verification.getByRole('link',{name})).toBeVisible()
   await expect(verification.getByRole('link',{name:/Downstream Assessments/})).toHaveCount(0)
 
   await reports.click()

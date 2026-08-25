@@ -13,7 +13,7 @@ import { login } from './auth'
 const openExplorer = async (page: import('@playwright/test').Page, branch: string) => {
   const root = new URL(page.url()).pathname.replace(/\/[^/]*$/, '')
   await page.goto(new URL(`${root}/${branch}/cases`, page.url()).toString(), { waitUntil: 'load' })
-  await expect(page.getByRole('heading', { name: 'Software Test Case Explorer', level: 1 })).toBeVisible({ timeout: 30_000 })
+  await expect(page.getByRole('heading', { name: 'Software Test Case/Procedure Explorer', level: 1 })).toBeVisible({ timeout: 30_000 })
   return root
 }
 
@@ -56,7 +56,7 @@ test('the Explorer groups Cases by the document they are written into', async ({
   await expect(rail.getByRole('button', { name: /All cases/ })).toBeVisible()
 })
 
-test('a Case-only profile does not present dormant software Procedure documents', async ({ page }) => {
+test('a Case-only profile does not present disabled software Procedure documents', async ({ page }) => {
   test.setTimeout(180_000)
   await page.setViewportSize({ width: 1600, height: 900 })
   await login(page)
@@ -66,7 +66,7 @@ test('a Case-only profile does not present dormant software Procedure documents'
   await expect(page.getByRole('heading', { name: 'Software Procedure Explorer', level: 1 }))
     .toBeVisible({ timeout: 30_000 })
 
-  // The dormant library remains inspectable, but a Case-only effective profile owns no Procedure register
+  // Historical Procedure rows do not override the Case-only effective profile, which owns no Procedure register
   // or generated-document action. Showing HLRTPD/LLRTPD here would assert activation that has not happened.
   await expect(page.getByRole('navigation', { name: 'test procedure documents' })).toHaveCount(0)
   await expect(page.locator('.documentOutputs')).toHaveCount(0)
@@ -175,7 +175,7 @@ test('rows and the document selection survive a reload', async ({ page }) => {
 
   // A filtered worklist that does not survive a reload is a worklist somebody has to rebuild by hand.
   await page.reload({ waitUntil: 'load' })
-  await expect(page.getByRole('heading', { name: 'Software Test Case Explorer', level: 1 })).toBeVisible({ timeout: 30_000 })
+  await expect(page.getByRole('heading', { name: 'Software Test Case/Procedure Explorer', level: 1 })).toBeVisible({ timeout: 30_000 })
   await expect(page.getByLabel('Rows per page')).toHaveValue('50')
   await expect(page.locator(`[data-document="${documentNumber}"]`)).toHaveAttribute('aria-pressed', 'true')
 })
@@ -269,7 +269,7 @@ test('the Explorer names the software workspace and opens on its first configure
   await login(page)
   await openExplorer(page, 'software-verification')
 
-  await expect(page.getByRole('heading', { name: 'Software Test Case Explorer', level: 1 })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Software Test Case/Procedure Explorer', level: 1 })).toBeVisible()
   await expect(page.getByLabel('Level filter')).toHaveValue('HighLevel')
   await expect(page.getByLabel('Level filter')).toContainText('All software test cases')
   await expect(page.getByLabel('Level filter')).toContainText('Software LLR')

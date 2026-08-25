@@ -743,6 +743,29 @@ public static class VerificationEndpoints
                 })
                 .SingleAsync(ct);
 
+            var caseLinks = procedure.ArtifactKind == VerificationArtifactKind.Procedure && procedure.Level != TestProcedureLevel.System
+                ? await db.TestCaseProcedureLinks.AsNoTracking()
+                    .Where(x => x.ProcedureRevisionId == selectedRevisionIdValue).ToListAsync(ct)
+                : [];
+            var caseRevisionIds = caseLinks.Select(x => x.CaseRevisionId).Distinct().ToList();
+            var caseRevisions = caseRevisionIds.Count == 0
+                ? []
+                : await (from caseRevision in db.TestProcedureRevisions.AsNoTracking()
+                         join caseArtifact in db.TestProcedures.AsNoTracking() on caseRevision.ProcedureId equals caseArtifact.Id
+                         where caseRevisionIds.Contains(caseRevision.Id)
+                         select new { caseRevision.Id, caseRevision.ProcedureId, caseArtifact.BaseNumber, caseRevision.Revision })
+                    .ToListAsync(ct);
+            var caseTitles = caseRevisionIds.Count == 0
+                ? new Dictionary<Guid, TestProcedureRevisionTitleSnapshot>()
+                : await TestProcedureRevisionTitleProjection.ForRevisionsAsync(db, caseRevisionIds, ct);
+            var caseLifecycleIds = caseLinks.Where(x => x.ExactLinkSuspectLifecycleId is not null)
+                .Select(x => x.ExactLinkSuspectLifecycleId!.Value).Distinct().ToList();
+            var caseLifecycles = caseLifecycleIds.Count == 0
+                ? new Dictionary<Guid, ExactLinkSuspectLifecycle>()
+                : await db.ExactLinkSuspectLifecycles.AsNoTracking()
+                    .Where(x => caseLifecycleIds.Contains(x.Id) && x.LinkKind == ExactLinkKind.CaseProcedure)
+                    .ToDictionaryAsync(x => x.Id, ct);
+
             // The exact coverage rows this revision owns, joined to the exact requirement revisions they
             // name. Nothing here is derived from counts, display strings or project-global latest records.
             var covered = await (from link in db.TestCoverage.AsNoTracking()
@@ -803,6 +826,28 @@ public static class VerificationEndpoints
                 })
                 .OrderBy(x => x.DisplayNumber)
                 .ToList();
+            var softwareProcedureRequirements = procedure.ArtifactKind == VerificationArtifactKind.Procedure
+                && procedure.Level != TestProcedureLevel.System
+                    ? (object)Array.Empty<object>()
+                    : requirements;
+            var caseParents = caseLinks.Select(link =>
+            {
+                var parent = caseRevisions.SingleOrDefault(x => x.Id == link.CaseRevisionId);
+                var title = caseTitles.TryGetValue(link.CaseRevisionId, out var parentTitle) ? parentTitle.Title : null;
+                var lifecycle = link.ExactLinkSuspectLifecycleId is Guid lifecycleId
+                    && caseLifecycles.TryGetValue(lifecycleId, out var parentLifecycle)
+                    ? parentLifecycle
+                    : null;
+                return new
+                {
+                    linkId = link.Id,
+                    caseRevisionId = link.CaseRevisionId,
+                    displayNumber = parent is null ? null : $"{parent.BaseNumber}.{parent.Revision:D2}",
+                    title,
+                    state = lifecycle?.State.ToString() ?? "Confirmed",
+                    outcome = lifecycle?.Outcome?.ToString(),
+                };
+            }).OrderBy(x => x.displayNumber).ToList();
 
             return Results.Ok(new
             {
@@ -824,7 +869,8 @@ public static class VerificationEndpoints
                 revision.SourceTestChangeRequestId,
                 package = provenance.Package,
                 provenanceNote = provenance.Note,
-                requirements,
+                requirements = softwareProcedureRequirements,
+                caseParents,
                 provenance = provenance.Drivers.Select(driver => new
                 {
                     changeRequest = driver.ChangeRequest,
@@ -874,12 +920,12 @@ public static class VerificationEndpoints
             // The effective profile is the authority for both level and kind. Historical rows must not leak into
             // a combined inventory merely because the aggregate still contains them.
             var legacyRoute = artifactRoute switch { "test-procedures" => "procedures", "test-cases" => "cases", _ => artifactRoute };
+            var legacyProcedureAlias = string.Equals(legacyRoute, "procedures", StringComparison.OrdinalIgnoreCase)
+                && string.IsNullOrWhiteSpace(artifactKind);
             var requestedKind = Enum.TryParse<VerificationArtifactKind>(artifactKind, true, out var parsedKind)
                 ? (VerificationArtifactKind?)parsedKind
                 : string.Equals(legacyRoute, "cases", StringComparison.OrdinalIgnoreCase)
                     ? VerificationArtifactKind.Case
-                    : string.Equals(legacyRoute, "procedures", StringComparison.OrdinalIgnoreCase)
-                        ? VerificationArtifactKind.Procedure
                     : string.Equals(scope, "System", StringComparison.OrdinalIgnoreCase)
                         ? VerificationArtifactKind.Procedure
                         : null;
@@ -889,6 +935,9 @@ public static class VerificationEndpoints
                 || (x.Level == TestProcedureLevel.LowLevel && ((x.ArtifactKind == VerificationArtifactKind.Case && lowCaseEnabled) || (x.ArtifactKind == VerificationArtifactKind.Procedure && lowProcedureEnabled))));
             if (requestedKind is not null)
                 source = source.Where(x => x.ArtifactKind == requestedKind.Value);
+            else if (legacyProcedureAlias)
+                source = source.Where(x => (x.Level == TestProcedureLevel.System && x.ArtifactKind == VerificationArtifactKind.Procedure)
+                    || (x.Level != TestProcedureLevel.System && x.ArtifactKind == VerificationArtifactKind.Case));
             Dictionary<Guid, Guid>? scopedRevisions = null;
             if(releaseId is not null)
             {

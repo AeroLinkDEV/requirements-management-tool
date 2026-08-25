@@ -37,9 +37,6 @@ import "./ExperiencePolish.css";
 import "./People.css";
 import "./CohesionPass.css";
 
-// Historical Case contract vocabulary remains documented here while the live software destination is the
-// combined Test Case/Procedure Explorer (the former Software Test Case Explorer route stays compatible).
-
 /**
  * Each workspace is fetched the first time somebody opens it, rather than every time anybody signs in.
  *
@@ -553,10 +550,11 @@ function App() {
   // Opening a verification artifact named on a requirement's trace lands in the shared Explorer, which is where
   // the Case or Procedure is read. It used to land on the coverage page, because that page carried the library;
   // that library moved, and a link into a surface that no longer exists is worse than no link.
-  const openVerificationProcedure=(artifact?:{artifactId?:string;procedureId?:string;revisionId?:string;displayNumber?:string;level?:string})=>{
+  const openVerificationProcedure=(artifact?:{artifactId?:string;procedureId?:string;revisionId?:string;displayNumber?:string;level?:string;artifactKind?:string})=>{
     const area:Discipline=artifact?.level==="System"?"systemTest":"softwareTest";
-    setView("procedureExplorer");setDiscipline(area);setSelectedArtifactId("");setSelectedArtifactKind(artifact?.level??"");setRequirementRevisionId("");
-    if(context){const path=routePath(context,"procedureExplorer",area,undefined,artifact?.level);const params=new URLSearchParams();const prefix=area==="systemTest"?"procedure":"case";if(artifact?.displayNumber)params.set(prefix,artifact.displayNumber);const artifactId=artifact?.artifactId ?? artifact?.procedureId;if(artifactId)params.set(`${prefix}Id`,artifactId);if(artifact?.revisionId)params.set(`${prefix}RevisionId`,artifact.revisionId);history.pushState({},"",`${path}${params.size?`?${params}`:""}`)}
+    const kind = artifact?.artifactKind === "Procedure" ? "Procedure" : artifact?.artifactKind === "Case" ? "Case" : undefined;
+    setView("procedureExplorer");setDiscipline(area);setSelectedArtifactId("");setSelectedArtifactKind(kind ?? artifact?.level ?? "");setRequirementRevisionId("");
+    if(context){const path=routePath(context,"procedureExplorer",area,undefined,artifact?.level);const params=new URLSearchParams();const prefix=area==="systemTest"?"procedure":kind === "Procedure" ? "procedure" : "case";if(artifact?.displayNumber)params.set(prefix,artifact.displayNumber);const artifactId=artifact?.artifactId ?? artifact?.procedureId;if(artifactId)params.set(`${prefix}Id`,artifactId);if(artifact?.revisionId)params.set(`${prefix}RevisionId`,artifact.revisionId);if(area === "softwareTest" && artifact?.level)params.set("artifactLevel", artifact.level);if(area === "softwareTest" && kind)params.set("artifactKind", kind);history.pushState({},"",`${path}${params.size?`?${params}`:""}`)}
   };
   // The inverse of the procedure deep link: a procedure trace names an exact requirement revision, and the
   // Requirements Explorer must open that exact revision rather than whichever revision is newest now.

@@ -29,9 +29,9 @@ test("the procedure workspace pages, filters and deep-links instead of rendering
   // dropped — this is now the only place procedures are browsed, so it had to be the most capable one.
   await page.getByRole("button", { name: /Search & navigate/ }).click();
   const palette = page.getByRole("dialog", { name: "Quick navigation" });
-  await palette.getByPlaceholder(/Search pages/).fill("Software Test Case Explorer");
-  await palette.getByRole("link", { name: /Software Test Case Explorer/ }).click();
-  await expect(page.getByRole("heading", { name: "Software Test Case Explorer" })).toBeVisible({ timeout: 30_000 });
+  await palette.getByPlaceholder(/Search pages/).fill("Test Case/Procedure Explorer");
+  await palette.getByRole("link", { name: /Test Case\/Procedure Explorer/ }).click();
+  await expect(page.getByRole("heading", { name: "Software Test Case/Procedure Explorer" })).toBeVisible({ timeout: 30_000 });
 
   // The whole point: hundreds of records, a bounded number of them on the page.
   const rows = page.locator(".procedureRow");

@@ -115,25 +115,26 @@ test('the Software Explorer opens on HLR and can move to the configured LLR leve
   await openNavigationGroup(page, 'ASSURANCE')
   await page.getByRole('button', { name: 'Software' }).last().click()
 
-  await page.getByRole('link', { name: 'Software Test Case Explorer' }).click()
-  await expect(page).toHaveURL(/software-verification\/cases$/, { timeout: 30_000 })
-  await expect(page.getByText('CONTROLLED TEST CASES / READ-ONLY EXPLORER')).toBeVisible()
-  await expect(page.getByLabel('Level filter')).toHaveValue('HighLevel')
-  await expect(page.locator('.pager')).toContainText('of 160', { timeout: 30_000 })
-  const rail = page.getByRole('navigation', { name: 'test case documents' })
-  await expect(rail.locator('[data-document^="HLRTD-"]')).toHaveCount(1, { timeout: 30_000 })
-  await expect(rail.locator('[data-document^="LLRTD-"]')).toHaveCount(1, { timeout: 30_000 })
-  await expect(page.locator('.procedureList')).not.toContainText('LLRTC-')
+  await page.getByRole('link', { name: 'Test Case/Procedure Explorer' }).click()
+  await expect(page).toHaveURL(/software-verification\/test-artifacts$/, { timeout: 30_000 })
+  await expect(page.getByText('CONTROLLED TEST ARTIFACTS / READ-ONLY EXPLORER')).toBeVisible()
+  await expect(page.getByLabel('Level filter')).toHaveValue('Software')
+  await expect(page.getByLabel('Artifact filter')).toHaveValue('all')
+  const documentRail = page.getByRole('navigation', { name: 'test artifact documents' })
+  await expect(documentRail).toHaveCount(1)
+  // The showcase is intentionally Case-only; the activated Case + Procedure profile is covered by #726.
+  await expect(documentRail.locator('.railDocument')).toHaveCount(2)
+  await expect(documentRail.getByRole('button', { name: /HLR.*Case|HLR.*Procedure|LLR.*Case|LLR.*Procedure/ }).first()).toBeVisible()
 
   await page.getByLabel('Level filter').selectOption('LowLevel')
-  await expect(page).toHaveURL(/caseLevel=LowLevel/, { timeout: 30_000 })
+  await expect(page).toHaveURL(/artifactLevel=LowLevel/, { timeout: 30_000 })
   await expect(page.getByLabel('Level filter')).toHaveValue('LowLevel')
   await expect(page.locator('.pager')).toContainText('of 280', { timeout: 30_000 })
   await expect(page.locator('.procedureList')).not.toContainText('HLRTC-')
   await expect(page.getByRole('tablist', { name: 'Test case views' })).toHaveCount(0)
 })
 
-test('the shared Explorer deep-link can inspect dormant software Procedures without build surfaces', async ({ page }) => {
+test('the shared Explorer deep-link can inspect active software Procedures with exact Case parents', async ({ page }) => {
   test.setTimeout(180_000)
   let relationshipState = 'Suspect'
   let relationshipOutcome: string | undefined
@@ -142,13 +143,20 @@ test('the shared Explorer deep-link can inspect dormant software Procedures with
     occurredAt: '2026-08-23T00:00:00Z', rationale: 'The exact Case revision changed.',
   }]
   await login(page, 'admin', { openProject: false })
+  await page.route('**/api/projects/*/configuration', async route => {
+    await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ effectiveSteps: [
+      { catalogueEntry: 'System', capabilities: 2, enabledArtifactKinds: ['Procedure'] },
+      { catalogueEntry: 'HighLevel', capabilities: 7, enabledArtifactKinds: ['Case', 'Procedure'] },
+      { catalogueEntry: 'LowLevel', capabilities: 7, enabledArtifactKinds: ['Case', 'Procedure'] },
+    ] }) })
+  })
   await selectProgram(page, 'Flight Management System Live Program')
   await openNavigationGroup(page, 'ASSURANCE')
   await page.getByRole('button', { name: 'Software' }).last().click()
-  await page.getByRole('link', { name: 'Software Test Case Explorer' }).click()
-  await expect(page).toHaveURL(/software-verification\/cases/, { timeout: 30_000 })
+  await page.getByRole('link', { name: 'Test Case/Procedure Explorer' }).click()
+  await expect(page).toHaveURL(/software-verification\/test-artifacts/, { timeout: 30_000 })
 
-  await page.route('**/api/test-procedures?*', async route => {
+  await page.route('**/api/verification-artifacts?*', async route => {
     const requestUrl = new URL(route.request().url())
     if (requestUrl.searchParams.get('artifactKind') !== 'Procedure') return route.continue()
     await route.fulfill({
@@ -156,8 +164,8 @@ test('the shared Explorer deep-link can inspect dormant software Procedures with
       body: JSON.stringify({
         page: 1, pageSize: 25, totalCount: 1, totalPages: 1, views: [],
         items: [{
-          id: 'dormant-procedure', revisionId: 'dormant-revision', displayNumber: 'HLRTP-000001.00',
-          title: 'Dormant procedural verification', state: 'Draft', requirementCount: 0, parentCount: 2,
+          id: 'active-procedure', revisionId: 'active-revision', displayNumber: 'HLRTP-000001.00',
+          title: 'Active procedural verification', state: 'Draft', requirementCount: 0, parentCount: 2,
           ownerId: 'test.engineer', level: 'HighLevel', artifactKind: 'Procedure',
           objective: 'Demonstrate the procedure', preconditions: 'Environment is available',
           steps: 'Follow the ordered procedure', expectedResult: 'Expected observation recorded',
@@ -168,16 +176,16 @@ test('the shared Explorer deep-link can inspect dormant software Procedures with
       }),
     })
   })
-  await page.route('**/api/test-procedures/dormant-procedure/history*', async route => {
+  await page.route('**/api/test-procedures/active-procedure/history*', async route => {
     await route.fulfill({
       contentType: 'application/json',
       body: JSON.stringify({
-        artifactId: 'dormant-procedure', artifactKind: 'Procedure', id: 'dormant-procedure',
-        baseNumber: 'HLRTP-000001', title: 'Dormant procedural verification', level: 'HighLevel',
-        ownerId: 'test.engineer', createdAt: '2026-08-23T00:00:00Z', selectedRevisionId: 'dormant-revision',
+        artifactId: 'active-procedure', artifactKind: 'Procedure', id: 'active-procedure',
+        baseNumber: 'HLRTP-000001', title: 'Active procedural verification', level: 'HighLevel',
+        ownerId: 'test.engineer', createdAt: '2026-08-23T00:00:00Z', selectedRevisionId: 'active-revision',
         revisions: [{
-          id: 'dormant-revision', displayNumber: 'HLRTP-000001.00', revision: 0,
-          title: 'Dormant procedural verification', state: 'Draft', authorId: 'test.engineer',
+          id: 'active-revision', displayNumber: 'HLRTP-000001.00', revision: 0,
+          title: 'Active procedural verification', state: 'Draft', authorId: 'test.engineer',
           createdAt: '2026-08-23T00:00:00Z', objective: 'Demonstrate the procedure', preconditions: '',
           steps: '', expectedResult: '', environmentSetup: 'Bench setup', testData: 'Known data',
           orderedSteps: '1. Execute', expectedObservations: 'Expected result', cleanup: 'Restore bench',
@@ -215,28 +223,29 @@ test('the shared Explorer deep-link can inspect dormant software Procedures with
       linkId: 'case-procedure-link', state: relationshipState, outcome: relationshipOutcome,
     }) })
   })
-  await page.route('**/api/test-procedures/dormant-procedure/comments', async route => {
+  await page.route('**/api/test-procedures/active-procedure/comments', async route => {
     await route.fulfill({
       contentType: 'application/json',
       body: JSON.stringify([{
-        id: 'dormant-comment', revisionId: 'dormant-revision', body: 'Existing read-only discussion',
+        id: 'active-comment', revisionId: 'active-revision', body: 'Existing active discussion',
         state: 'Open', createdBy: 'test.engineer', createdAt: '2026-08-23T00:00:00Z'
       }]),
     })
   })
-  const dormantUrl = new URL(page.url().replace('/cases', '/procedures'))
-  dormantUrl.searchParams.set('artifactKind', 'Procedure')
-  await page.goto(dormantUrl.toString())
-  await expect(page.getByRole('heading', { name: 'Software Procedure Explorer' })).toBeVisible({ timeout: 30_000 })
-  await expect(page).toHaveURL(/software-verification\/procedures.*artifactKind=Procedure/)
+  const procedureUrl = new URL(page.url())
+  procedureUrl.searchParams.set('artifactKind', 'Procedure')
+  await page.goto(procedureUrl.toString())
+  await expect(page.getByRole('heading', { name: 'Software Test Case/Procedure Explorer' })).toBeVisible({ timeout: 30_000 })
+  await expect(page).toHaveURL(/software-verification\/test-artifacts.*artifactKind=Procedure/)
   await expect(page.getByRole('button', { name: 'Advanced' })).toHaveCount(0)
-  await expect(page.getByRole('navigation', { name: 'test procedure documents' })).toHaveCount(0)
-  await expect(page.locator('.procedureList')).toContainText('Exact Case parents')
+  await expect(page.getByRole('navigation', { name: 'test procedure documents' })).toHaveCount(1)
+  await expect(page.locator('.procedureRow')).toContainText('Procedure')
   await expect(page.locator('.procedureRow')).toContainText('HLRTP-000001.00')
   await page.locator('.procedureRow').click()
   await expect(page.getByText('Environment / setup')).toBeVisible()
   await page.getByRole('button', { name: 'History' }).click()
   await expect(page.getByText('Allocated · 2 exact Case parents')).toBeVisible()
+  await expect(page.getByText(/Exact Case case-b/)).toBeVisible()
   await expect(page.getByLabel('Exact link lifecycle Suspect')).toBeVisible()
   await page.getByPlaceholder('Record why this exact relationship is under assessment.')
     .fill('Assess the carried exact Case relationship.')
@@ -248,10 +257,8 @@ test('the shared Explorer deep-link can inspect dormant software Procedures with
   await expect(page.getByLabel('Exact link lifecycle Closed')).toContainText(/Existing Downstream Revision Remains Valid/i)
   await expect(page.getByLabel('Exact link lifecycle Closed')).toContainText('baseline.materializer')
   await page.getByRole('button', { name: /^Discussion/ }).click()
-  await expect(page.locator('.discussionPane')).toContainText('read-only for dormant software Procedures')
-  await expect(page.locator('.discussionPane textarea')).toHaveCount(0)
-  await expect(page.getByRole('button', { name: 'Add comment' })).toHaveCount(0)
-  await expect(page.getByRole('button', { name: 'Resolve / disposition' })).toHaveCount(0)
+  await expect(page.locator('.discussionPane textarea')).toHaveCount(1)
+  await expect(page.getByRole('button', { name: 'Add comment' })).toHaveCount(1)
 })
 
 /**

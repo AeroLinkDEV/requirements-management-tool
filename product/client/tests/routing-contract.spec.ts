@@ -130,7 +130,7 @@ test('each verification page round-trips, and a results route may carry a proble
     { view: 'testingCoverage', discipline: 'systemTest', kind: undefined, path: 'system-verification/coverage' },
     { view: 'procedureExplorer', discipline: 'systemTest', kind: undefined, path: 'system-verification/procedures' },
     { view: 'testResults', discipline: 'systemTest', kind: undefined, path: 'system-verification/results' },
-    { view: 'procedureExplorer', discipline: 'softwareTest', kind: undefined, path: 'software-verification/cases' },
+    { view: 'procedureExplorer', discipline: 'softwareTest', kind: undefined, path: 'software-verification/test-artifacts' },
     { view: 'testingCoverage', discipline: 'softwareTest', kind: 'HighLevel', path: 'software-verification/hlr/coverage' },
     { view: 'testResults', discipline: 'softwareTest', kind: 'HighLevel', path: 'software-verification/hlr/results' },
     { view: 'testingCoverage', discipline: 'softwareTest', kind: 'LowLevel', path: 'software-verification/llr/coverage' },
@@ -153,9 +153,9 @@ test('each verification page round-trips, and a results route may carry a proble
   expect(parseRoute('/programs/program-a/projects/project-a/releases/release-a/software-verification/llr/cases'))
     .toMatchObject({ view: 'procedureExplorer', discipline: 'softwareTest', artifactKind: 'LowLevel' })
   expect(parseRoute('/programs/program-a/projects/project-a/releases/release-a/software-verification/hlr/procedures'))
-    .toMatchObject({ view: 'procedureExplorer', discipline: 'softwareTest', artifactKind: 'HighLevel' })
+    .toMatchObject({ view: 'procedureExplorer', discipline: 'softwareTest', artifactKind: 'HighLevelProcedure' })
   expect(parseRoute('/programs/program-a/projects/project-a/releases/release-a/software-verification/llr/procedures'))
-    .toMatchObject({ view: 'procedureExplorer', discipline: 'softwareTest', artifactKind: 'LowLevel' })
+    .toMatchObject({ view: 'procedureExplorer', discipline: 'softwareTest', artifactKind: 'LowLevelProcedure' })
   expect(parseRoute('/programs/program-a/projects/project-a/releases/release-a/software-verification/cases'))
     .toMatchObject({ view: 'procedureExplorer', discipline: 'softwareTest' })
   expect(parseRoute('/programs/program-a/projects/project-a/releases/release-a/software-verification/procedures'))
