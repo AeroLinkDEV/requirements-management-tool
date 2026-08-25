@@ -18,7 +18,7 @@ async function getArtifacts(request: Parameters<typeof apiLogin>[0], path: strin
   return await response.json() as { items: Artifact[]; totalCount: number; totalPages: number; page: number; pageSize: number }
 }
 
-test('profile-driven verification aliases and release-scoped paging stay deterministic', async ({ request }) => {
+test('profile-driven verification aliases and globally sorted neutral paging stay deterministic', async ({ request }) => {
   await apiLogin(request)
   const showcase = await showcaseSeed(request)
   const query = `projectId=${showcase.projectId}&releaseId=${showcase.activeReleaseId}&scope=Software`
@@ -81,15 +81,6 @@ test('profile-driven verification aliases and release-scoped paging stay determi
   const sectionFiltered = await getArtifacts(request, `/api/verification-artifacts?${query}&sectionId=${document!.sections[0].id}&page=1&pageSize=200`)
   expect(sectionFiltered.totalCount).toBeLessThanOrEqual(documentFiltered.totalCount)
 
-  // The generic showcase is intentionally Case-only; active Procedure discussion and the full four-key rail
-  // are asserted on the activated Case + Procedure fixture in issue-726-case-procedure-execution-readiness.
-  const commentResponse = await request.post(`${apiBase}/api/test-procedures/${sampleCase.id}/comments`, {
-    data: { revisionId: sampleCase.revisionId, body: `#762 discussion ${Date.now()}`, mentions: [] },
-  })
-  expect(commentResponse.status(), await commentResponse.text()).toBe(201)
-  const comment = await commentResponse.json() as { id: string }
-  const resolved = await request.post(`${apiBase}/api/enterprise-requirements/comments/${comment.id}/resolve`, {
-    data: { disposition: 'The exact Procedure discussion was reviewed.' },
-  })
-  expect(resolved.status(), await resolved.text()).toBe(204)
+  // The generic showcase is intentionally Case-only; Procedure discussion and the full four-key rail are
+  // asserted on the activated Case + Procedure fixture in issue-726-case-procedure-execution-readiness.
 })

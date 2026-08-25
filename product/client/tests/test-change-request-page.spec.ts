@@ -123,14 +123,35 @@ test('a seeded software Procedure package uses the shared shell, exact origin, w
   await expect(page.getByText('HLRTP-000700.00', { exact: true })).toBeVisible()
   await expect(page.getByText('Controlled test procedure authoring', { exact: true })).toBeVisible()
 
-  // Procedure work starts from an exact Case change/assessment, so the shared register must not route a
-  // Procedure user into the Case-only manual creator. A stale/direct create URL is fail-closed as well.
+  // Procedure work starts from an exact Case change/assessment, and the shared creator now supplies that
+  // origin without changing the Case package path.
+  let procedureCreateBody: Record<string, unknown> | undefined
+  await page.route('**/api/releases/*/test-change-request-sources*', async route => {
+    const url = new URL(route.request().url())
+    if (url.searchParams.get('artifactKind') !== 'Procedure') return route.continue()
+    await fulfill(route, [{ sourceKind: 'CaseChange', sourceId: '72500000-0000-0000-0000-000000000010',
+      displayNumber: 'LLRTC-000738.01', title: 'LLR Case change origin', state: 'Approved', selectable: true }])
+  })
+  await page.route('**/api/releases/*/test-change-requests', async route => {
+    procedureCreateBody = route.request().postDataJSON() as Record<string, unknown>
+    await fulfill(route, { id: packageId, displayNumber: 'LLRTPCR-000725.00' }, 201)
+  })
   await page.goto(current.origin + root + '/software-verification/llr/change-requests?kind=Procedure', { waitUntil: 'load' })
   await expect(page.getByRole('heading', { name: 'Software Procedure Change Requests', level: 1 })).toBeVisible()
-  await expect(page.getByRole('button', { name: /New .*Test Change Request/ })).toHaveCount(0)
   await page.goto(current.origin + root + '/software-verification/llr/change-requests/new?kind=Procedure', { waitUntil: 'load' })
-  await expect(page.getByRole('heading', { name: 'Procedure packages require an exact Case origin', level: 1 })).toBeVisible()
-  await expect(page.getByRole('heading', { name: 'New Test Change Request', level: 1 })).toHaveCount(0)
+  await expect(page.getByRole('heading', { name: 'Create LLR Test Change Request', level: 1 })).toBeVisible()
+  await expect(page.getByText('Eligible LLR Case origins for this Procedure package')).toBeVisible()
+  await page.locator('label').filter({ hasText: 'LLRTC-000738.01' }).getByRole('radio').check()
+  const editor = page.locator('[data-tcr-editor]')
+  await editor.getByLabel('Title').fill('LLR Procedure package from exact Case origin')
+  for (const field of ['Problem', 'Analysis', 'Solution'])
+    await editor.getByLabel(field).fill(`${field} for an exact LLR Procedure package.`)
+  await page.getByRole('button', { name: 'Raise LLRTPCR' }).click()
+  await expect.poll(() => procedureCreateBody).toBeTruthy()
+  expect(procedureCreateBody?.artifactKind).toBe('Procedure')
+  expect(procedureCreateBody?.caseChangeIds).toEqual(['72500000-0000-0000-0000-000000000010'])
+  expect(procedureCreateBody).not.toHaveProperty('changeRequestIds')
+  expect(procedureCreateBody).not.toHaveProperty('problemReportIds')
 })
 
 test('the page carries the same sections the requirements change request page carries', async ({ page }) => {

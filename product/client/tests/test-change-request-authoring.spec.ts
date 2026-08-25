@@ -79,7 +79,7 @@ test('an engineer raises a System test change request with its case from the Cha
 
   // A page, not a pop-up: raising a package is the same act as raising a change request, and its counterpart
   // has always been a page.
-  await page.getByRole('button', { name: '+ New System Test Change Request' }).click()
+  await page.getByRole('button', { name: '+ New System Test Procedure Change Request' }).click()
   const editor = page.locator('[data-tcr-editor]')
   await expect(page.getByRole('heading', { name: 'Create System Test Change Request', level: 1 })).toBeVisible({ timeout: 30_000 })
   await expect(page).toHaveURL(/\/system-verification\/change-requests\/new$/)
@@ -151,7 +151,7 @@ test('released builds offer no new test change request action', async ({ page, r
     `/programs/${seeded.workspace.program.id}/projects/${seeded.workspace.project.id}/releases/${seeded.workspace.release.id}/system-verification/coverage`,
     { waitUntil: 'load' })
   await expect(page.getByRole('heading', { name: 'Downstream Assessments' })).toBeVisible({ timeout: 30_000 })
-  await expect(page.getByRole('button', { name: /New System Test Change Request/ })).toHaveCount(0)
+  await expect(page.getByRole('button', { name: /New System Test (Case|Procedure) Change Request/ })).toHaveCount(0)
 })
 
 test('HLR and LLR Change Requests pages offer their own creation actions', async ({ page, request }) => {
@@ -164,12 +164,12 @@ test('HLR and LLR Change Requests pages offer their own creation actions', async
 
   await page.getByRole('link', { name: 'Software Test Change Requests' }).click()
   await expect(page.getByRole('heading', { name: 'Software Test Change Requests' })).toBeVisible({ timeout: 30_000 })
-  await expect(page.getByRole('button', { name: '+ New HLR Test Change Request' })).toBeVisible()
+  await expect(page.getByRole('button', { name: '+ New HLR Test Case Change Request' })).toBeVisible()
 
   await page.getByRole('tab', { name: 'LLR' }).click()
-  await expect(page.getByRole('button', { name: '+ New LLR Test Change Request' })).toBeVisible()
+  await expect(page.getByRole('button', { name: '+ New LLR Test Case Change Request' })).toBeVisible()
 
   await page.getByRole('button', { name: 'System', exact: true }).last().click()
   await page.getByRole('link', { name: 'System Test Change Requests' }).click()
-  await expect(page.getByRole('button', { name: '+ New System Test Change Request' })).toBeVisible()
+  await expect(page.getByRole('button', { name: '+ New System Test Procedure Change Request' })).toBeVisible()
 })

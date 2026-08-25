@@ -236,6 +236,20 @@ export const isVerificationProcedureKind = (artifactKind?: string) => {
   return normalized === 'procedure' || normalized.endsWith('procedure')
 }
 
+/** Parse the exact route key (`HighLevel`, `HighLevelProcedure`, etc.) once for every client surface. */
+export type VerificationArtifactLevel = 'System' | 'HighLevel' | 'LowLevel'
+export const verificationArtifactLevel = (artifactKind?: string): VerificationArtifactLevel | undefined => {
+  const normalized = (artifactKind ?? '').replace(/[-_\s]/g, '').toLowerCase()
+  if (normalized === 'system' || normalized === 'systemtest') return 'System'
+  if (normalized.includes('lowlevel') || normalized === 'llr' || normalized === 'llrsoftware') return 'LowLevel'
+  if (normalized.includes('highlevel') || normalized === 'hlr' || normalized === 'hlrsoftware') return 'HighLevel'
+  return undefined
+}
+
+/** Convert a raw tab kind to the route key while preserving the legacy Case key. */
+export const verificationArtifactRouteKey = (level: Exclude<VerificationArtifactLevel, 'System'>,
+  kind: 'Case' | 'Procedure') => kind === 'Procedure' ? `${level}Procedure` : level
+
 export const verificationArtifactNoun = (level?: string, artifactKind?: string) => {
   return level === 'System' || isVerificationProcedureKind(artifactKind)
     ? 'Procedure' : legacyVerificationArtifactNoun(level)

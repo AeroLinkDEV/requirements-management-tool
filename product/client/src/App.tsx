@@ -1,7 +1,7 @@
 import { lazy, Suspense, useCallback, useEffect, useState } from "react";
 import type { ComponentType, FormEvent } from "react";
 import CommandPalette from "./CommandPalette";
-import { isVerificationProcedureKind, officialBuildName } from "./presentation";
+import { officialBuildName, verificationArtifactLevel, verificationArtifactRouteKey } from "./presentation";
 import ExperienceControls from "./ExperienceControls";
 import type { MotionPreference, WorkspaceDensity } from "./ExperienceControls";
 import { projectAreaPath, projectConfigurationApprovalsPath, projectConfigurationAssurancePath, projectSlugOf, readRoute, routePath } from "./routing";
@@ -634,7 +634,9 @@ function App() {
    const policyDependentView = !["projects", "builds", "baselineImports", "personnel", "approvalConfiguration", "projectConfiguration"].includes(view);
    if (project && policyDependentView && !ladder)
      return inShell(<main className="artifactState"><div><span>!</span><h1>Project ladder unavailable</h1><p>{ladderError || "Loading the stored project ladder before opening level-specific workspaces…"}</p>{ladderError && <button onClick={() => setLadderAttempt(value => value + 1)}>Retry</button>}</div></main>);
-   const selectedLevel = selectedArtifactKind === "HighLevel" || selectedArtifactKind === "LowLevel" || selectedArtifactKind === "Interface" ? selectedArtifactKind : undefined;
+   const selectedLevel = selectedArtifactKind === "Interface"
+     ? selectedArtifactKind
+     : verificationArtifactLevel(selectedArtifactKind);
    const scopedLevelAllowed = (scope: "system" | "software" | "systemTest" | "softwareTest", capability?: number) => {
      if (scope === "system" || scope === "systemTest") return ladderAllows(ladder, "System", capability);
      return selectedLevel ? ladderAllows(ladder, selectedLevel, capability) : ladderHasAny(ladder, ["HighLevel", "LowLevel"], capability);
@@ -834,7 +836,7 @@ function App() {
         onOpenTestChangeRequest={id => navigate("testChangeRequest", discipline, id, selectedArtifactKind)}
         onArtifactKeyChange={discipline === "softwareTest"
           ? (level, kind) => navigate("testChangeRequests", "softwareTest", undefined,
-            kind.toLowerCase().includes("level") ? kind : `${level}${kind}`)
+            verificationArtifactRouteKey(level, kind === "Procedure" ? "Procedure" : "Case"))
           : undefined}
       />
     );
@@ -857,26 +859,8 @@ function App() {
       />
     );
 
-  // Procedure packages are raised only from an exact Case assessment/change origin. The shared editor
-  // cannot truthfully supply that origin, so a stale/direct Procedure create URL fails closed rather than
-  // silently creating a Case package under a Procedure-looking route. #727 owns the assessment raiser.
-  if (view === "createTestChangeRequest" && project && release && isVerificationProcedureKind(selectedArtifactKind))
-    return inShell(
-      <main className="historyPage">
-        <header className="historyHeader">
-          <div>
-            <p className="eyebrow">SOFTWARE PROCEDURE CHANGE CONTROL / BUILD {release.version}</p>
-            <h1>Procedure packages require an exact Case origin</h1>
-            <p>Procedure change-control packages are raised from a resolved Case change or assessment. No manual Case-only creation is available here.</p>
-          </div>
-          <button type="button" className="recordBuild"
-            onClick={() => navigate("testChangeRequests", discipline, undefined, selectedArtifactKind)}>
-            Back to Procedure change requests
-          </button>
-        </header>
-      </main>
-    );
-  // Raising a Case package is a page, exactly as raising a change request is.
+  // Case and Procedure packages share one authoring page; the exact artifact key controls its origin picker
+  // and the server remains authoritative for the package identity.
   if (view === "createTestChangeRequest" && project && release)
     return inShell(
       <TestChangeRequestEditor
@@ -886,8 +870,9 @@ function App() {
         releaseId={release.id}
         releaseVersion={release.version}
         discipline={discipline === "softwareTest"
-          ? (selectedArtifactKind === "LowLevel" ? "LowLevelSoftware" : "HighLevelSoftware")
+          ? (verificationArtifactLevel(selectedArtifactKind) === "LowLevel" ? "LowLevelSoftware" : "HighLevelSoftware")
           : "System"}
+        artifactKind={selectedArtifactKind}
         onCancel={() => navigate("testChangeRequests", discipline, undefined, selectedArtifactKind)}
         // Lands on the package it just raised, the way saving a change-request draft opens the draft.
         onRaised={(id) => navigate("testChangeRequests", discipline, id, selectedArtifactKind)}
@@ -901,7 +886,7 @@ function App() {
         projectId={project.project.id}
         releaseId={release.id}
         discipline={discipline === "softwareTest"
-          ? (selectedArtifactKind === "LowLevel" ? "LowLevelSoftware" : "HighLevelSoftware")
+          ? (verificationArtifactLevel(selectedArtifactKind) === "LowLevel" ? "LowLevelSoftware" : "HighLevelSoftware")
           : "System"}
         buildName={`Build ${release.version}`}
         readOnly={release.isReleased}

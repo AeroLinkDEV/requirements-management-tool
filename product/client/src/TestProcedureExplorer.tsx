@@ -188,7 +188,9 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
   // Cases and Procedures share one combined Explorer with an artifact-kind filter. The filter defaults to
   // the complete inventory so the page communicates the controlled Case -> Procedure model immediately.
   const [artifactKindFilter, setArtifactKindFilter] = useState<'all' | 'Case' | 'Procedure'>(() => {
-    const pathKind = typeof location !== 'undefined' && location.pathname.endsWith('/procedures') ? 'procedure' : typeof location !== 'undefined' && location.pathname.endsWith('/cases') ? 'case' : ''
+    // The neutral/legacy Case route has always opened the combined inventory; only the explicit Procedure
+    // route carries a kind intent. Callers that need a Case-only list use the filter in the address.
+    const pathKind = typeof location !== 'undefined' && location.pathname.endsWith('/procedures') ? 'procedure' : ''
     const kind = opening.get('artifactKind')?.toLowerCase() || pathKind
     if (kind === 'procedure') return 'Procedure'
     if (kind === 'case') return 'Case'

@@ -108,8 +108,11 @@ const missingCaseFields = (request: TestChangeRequest) => [
   ['Title', request.title], ['Problem', request.problem],
   ['Analysis', request.analysis], ['Solution', request.solution],
 ].filter(([, value]) => !value?.trim()).map(([name]) => name)
-const tcrNewLabel = (discipline: TestDiscipline) =>
-  discipline === 'System' ? 'System' : discipline === 'HighLevelSoftware' ? 'HLR' : 'LLR'
+const tcrNewLabel = (discipline: TestDiscipline, artifactKind?: string) => {
+  if (discipline === 'System') return 'System Test Procedure'
+  const level = discipline === 'HighLevelSoftware' ? 'HLR' : 'LLR'
+  return `${level} Test ${isVerificationProcedureKind(artifactKind) ? 'Procedure' : 'Case'}`
+}
 const artifactWord = (discipline: TestDiscipline, artifactKind?: string) => verificationArtifactWord(
   discipline === 'System' ? 'System' : discipline === 'HighLevelSoftware' ? 'HighLevel' : 'LowLevel', artifactKind)
 
@@ -334,7 +337,7 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, re
       recordClientOperationFailure('verification.coverage.load', new Error(`HTTP ${coverageResponse.status}`))
       setError('The requirement coverage for this build could not be read.')
     }
-  }, [api, projectId, releaseId, discipline, artifactKind])
+  }, [api, projectId, releaseId, discipline])
 
   useEffect(() => { void load() }, [load])
 
@@ -614,7 +617,7 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, re
         </div>
         {canCreate && (
           <button type="button" className="recordBuild" onClick={onRaiseTestChangeRequest}>
-            + New {tcrNewLabel(discipline)} Test Change Request
+            + New {tcrNewLabel(discipline, artifactKind)} Change Request
           </button>
         )}
       </header>
@@ -625,11 +628,7 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, re
             const levelLabel = level === 'HighLevel' ? 'HLR' : 'LLR'
             const kinds = (ladder.effectiveSteps.find(s => s.catalogueEntry === level)?.enabledArtifactKinds ?? [])
               .filter(kind => kind.toLowerCase() === 'case' || kind.toLowerCase() === 'procedure')
-            if (kinds.length === 0) return [<button key={level} type="button" role="tab"
-              aria-selected={discipline === (level === 'HighLevel' ? 'HighLevelSoftware' : 'LowLevelSoftware')}
-              onClick={() => onArtifactKeyChange(level, 'Case')}>
-              <b>{levelLabel}</b><span>Test cases</span>
-            </button>]
+            if (kinds.length === 0) return []
             return kinds.map(kind => {
               const isProc = kind.toLowerCase() === 'procedure'
               const selectedKind = isVerificationProcedureKind(artifactKind) ? 'Procedure' : 'Case'
@@ -638,7 +637,7 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, re
               const noun = verificationArtifactNoun(level, isProc ? `${level}Procedure` : level)
               return <button key={`${level}-${kind}`} type="button" role="tab" aria-selected={isSelected}
                 aria-current={isSelected ? 'page' : undefined}
-                onClick={() => onArtifactKeyChange(level, isProc ? `${level}Procedure` : level)}>
+                onClick={() => onArtifactKeyChange(level, isProc ? 'Procedure' : 'Case')}>
                 <b>{levelLabel}</b><span>Test {noun.toLowerCase()}s</span>
               </button>
             })
