@@ -138,6 +138,28 @@ public static class ControlledProcedureDocumentSnapshotProjection
                 // A newer Draft is proposed work, not controlled effectivity. Ignore it while selecting the
                 // generation-time revision; a later Retired revision remains eligible and therefore suppresses
                 // the procedure when the final Approved-only filter is applied.
+                //
+                // This bounds CreatedAt but reads the revision's CURRENT State. That is sound only because a
+                // revision never transitions: TestProcedureBaselineMaterializer constructs it already Approved
+                // or Retired, so approval and creation are the same event and CreatedAt is the approval time.
+                // If a state transition were ever introduced, a revision approved after this document was
+                // generated could be admitted into it and the document's identity would silently change.
+                //
+                // Nothing in the schema enforces that — there is no approval timestamp to check against — so
+                // the invariant rests on product code never writing State after construction, whether through
+                // the domain or around it via an EF bulk update, the change tracker, or raw SQL.
+                //
+                // LegacyControlledProcedureDocumentSnapshotTests
+                // .A_verification_revision_state_is_fixed_at_construction_so_CreatedAt_is_its_approval_time
+                // pins the domain surface by reflection and greps the product tree for common spellings of
+                // those three routes. That grep is a tripwire, not a proof. It is meant to catch the likely
+                // accident — a backfill copied from a neighbouring migration — and it will not catch a
+                // determined rewrite; reflection is out of scope entirely. The invariant is therefore
+                // maintained by review, with the test as a backstop rather than a guarantee.
+                //
+                // If that test fails, or a reviewer finds a write it cannot see, the answer is to give
+                // revisions a real approval timestamp and make this reconstruction fail closed against it —
+                // not to weaken the assertion.
                 .Where(x => x.CreatedAt <= generatedAt && x.State != TestProcedureState.Draft)
                 .GroupBy(x => x.ProcedureId)
                 .Select(group => group.OrderByDescending(x => x.Revision).First())
