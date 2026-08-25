@@ -212,7 +212,7 @@ this phase.
 - The run-level totals are explicitly a **sourced-families subtotal**: `countsModel.sourcedFamilies`
   counts distinct families with structured counts, `sourcedJobInstances` counts the job instances behind
   them, `missingFamilies` lists every selected test family (group + instance) without structured counts,
-  and `totalIsPartial` is true whenever one exists. The taxonomy includes backend-api, backend-core,
+  and `totalIsPartial` is true whenever one exists. The taxonomy includes backend-api, backend-core-domain / backend-core-infrastructure,
   browser-pr, browser-production, browser-full, metrics-tooling, script-contracts, and postgresql-smoke;
   script-contracts and postgresql-smoke have no structured test runner and are listed as missing rather
   than silently excluded.

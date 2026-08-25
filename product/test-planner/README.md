@@ -78,7 +78,7 @@ node product/test-planner/tools/plan.mjs --files product/client/src/App.tsx prod
 ```
 
 The workflow calls `tools/classify-ci.mjs` and publishes planner version/hash, the fallback reason and unknown
-paths, selected and skipped jobs, and each job's condition/reason in the gate summary. The authoritative backend-core
+paths, selected and skipped jobs, and each job's condition/reason in the gate summary. The authoritative backend-core-domain / backend-core-infrastructure
 contract invocation is directory-driven, so every `product/test-contracts/tests/*.test.mjs` file runs.
 
 ## Safe timing protocol

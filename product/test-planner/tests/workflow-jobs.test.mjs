@@ -22,7 +22,7 @@ function ids(rows) {
 test('changed-area planning defaults provenance to the conservative full-test posture', () => {
   const plan = selectJobs(workflow, fullClassification, { event: 'pull_request' })
   const selected = ids(plan.selected)
-  for (const job of ['backend-api', 'backend-core', 'client', 'script-contracts', 'postgresql-smoke']) {
+  for (const job of ['backend-api', 'backend-core-domain', 'backend-core-infrastructure', 'client', 'script-contracts', 'postgresql-smoke']) {
     assert.ok(selected.has(job), `${job} remains selected when no trusted provenance decision is supplied`)
   }
 })
@@ -34,7 +34,7 @@ test('an explicit provenanced main-push model skips exactly the redundant produc
   const provenancedSelected = ids(provenanced.selected)
   const provenancedSkipped = ids(provenanced.skipped)
 
-  for (const job of ['backend-api', 'backend-core', 'client', 'script-contracts', 'postgresql-smoke']) {
+  for (const job of ['backend-api', 'backend-core-domain', 'backend-core-infrastructure', 'client', 'script-contracts', 'postgresql-smoke']) {
     assert.ok(ordinarySelected.has(job), `${job} normally runs on main`)
     assert.ok(provenancedSkipped.has(job), `${job} skips only after an explicit trusted decision`)
     assert.ok(!provenancedSelected.has(job), `${job} is not simultaneously selected`)

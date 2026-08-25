@@ -424,7 +424,7 @@ export function aggregateFragments({ fragments, missing = [], runMeta = null }) 
   // Test families are modelled separately from the sourced subtotal: a selected test-bearing job without
   // structured counts is listed, and the totals are never presented as the full run total.
   const TEST_FAMILY_GROUPS = new Set([
-    'backend-api', 'backend-core', 'browser-pr', 'browser-production', 'browser-full',
+    'backend-api', 'backend-core-domain', 'backend-core-infrastructure', 'browser-pr', 'browser-production', 'browser-full',
     'metrics-tooling', 'script-contracts', 'postgresql-smoke',
   ])
   const missingFamilies = []

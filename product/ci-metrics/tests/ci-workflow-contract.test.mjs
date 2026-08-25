@@ -150,10 +150,12 @@ test('metrics-report waits for every independently selected producer', () => {
 
 test('every applicable test-bearing job is wired to structured counts', () => {
   const jobs = jobBodies(workflowLines())
-  const core = jobs['backend-core'].join('\n')
-  assert.match(core, /METRICS_COUNTS_SOURCE:\s*trx/)
-  assert.match(core, /domain\.trx/)
-  assert.match(core, /infrastructure\.trx/)
+  const domain = jobs['backend-core-domain'].join('\n')
+  assert.match(domain, /METRICS_COUNTS_SOURCE:\s*trx/)
+  assert.match(domain, /domain\.trx/)
+  const infrastructure = jobs['backend-core-infrastructure'].join('\n')
+  assert.match(infrastructure, /METRICS_COUNTS_SOURCE:\s*trx/)
+  assert.match(infrastructure, /infrastructure\.trx/)
 
   for (const job of ['browser-pr', 'browser-production', 'browser-full']) {
     const body = jobs[job].join('\n')

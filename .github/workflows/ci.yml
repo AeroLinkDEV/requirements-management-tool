@@ -468,24 +468,29 @@ jobs:
           if-no-files-found: ignore
           retention-days: 30
 
-  backend-core:
-    name: Domain and infrastructure test suites
+  # backend-core used to run Domain and Infrastructure sequentially and had become the push-main critical
+  # path as the Infrastructure suite grew (#587 forensics: test step 263s -> 645s over four days). The two
+  # suites now run in parallel jobs with identical test selection; only the scheduling topology changed.
+  # The fast contracts and the project guard live on the domain job so the heavier infrastructure job stays
+  # as lean as its suite allows.
+  backend-core-domain:
+    name: Domain test suite
     needs: changes
     if: needs.changes.outputs.post_merge_skip != 'true' && needs.changes.outputs.docs_only != 'true' && needs.changes.outputs.backend == 'true'
     runs-on: windows-latest
     timeout-minutes: 20
     env:
-      METRICS_JOB_ID: backend-core
-      METRICS_JOB_NAME: Domain and infrastructure test suites
+      METRICS_JOB_ID: backend-core-domain
+      METRICS_JOB_NAME: Domain test suite
     steps:
       - name: Capture job start
         continue-on-error: true
         shell: bash
         run: |
-          echo "METRICS_TIMING_FILE=${{ runner.temp }}/ci-metrics/timing-backend-core.json" >> "$GITHUB_ENV"
-          echo "METRICS_FRAGMENT_PATH=${{ runner.temp }}/ci-metrics/fragment-backend-core.json" >> "$GITHUB_ENV"
+          echo "METRICS_TIMING_FILE=${{ runner.temp }}/ci-metrics/timing-backend-core-domain.json" >> "$GITHUB_ENV"
+          echo "METRICS_FRAGMENT_PATH=${{ runner.temp }}/ci-metrics/fragment-backend-core-domain.json" >> "$GITHUB_ENV"
           mkdir -p "${{ runner.temp }}/ci-metrics"
-          printf '{"name":"job-start","at":%s}\n' "$(date +%s%3N)" >> "${{ runner.temp }}/ci-metrics/timing-backend-core.json"
+          printf '{"name":"job-start","at":%s}\n' "$(date +%s%3N)" >> "${{ runner.temp }}/ci-metrics/timing-backend-core-domain.json"
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Install .NET 10
@@ -508,13 +513,13 @@ jobs:
         run: node "${{ github.workspace }}/product/ci-metrics/bin/mark.mjs" setup-end
       # Naming the assemblies individually is what makes them splittable, and it introduces the one failure
       # mode the old `dotnet test <solution>` could not have: a new test project that no job runs. It would
-      # still build, so nothing would fail — the suite would simply be invisible, which is the most expensive
+      # still build, so nothing would fail - the suite would simply be invisible, which is the most expensive
       # kind of green. This refuses to pass in that state rather than leaving it to be noticed.
-      # Static analysis of the endpoint sources, so it needs no API host — and it belongs in a job the gate
+      # Static analysis of the endpoint sources, so it needs no API host - and it belongs in a job the gate
       # can actually fail on. `metrics-tooling` is deliberately excluded from the gate's failure list so a
       # reporting bug cannot redden a correct product gate, which makes it the wrong home for a contract that
-      # must block: a guard that only reports is the silent-green pattern it exists to prevent. `backend-core`
-      # is in that list and runs precisely when backend sources change.
+      # must block: a guard that only reports is the silent-green pattern it exists to prevent. This job is
+      # in that list and runs precisely when backend sources change.
       - name: Install Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
@@ -559,25 +564,18 @@ jobs:
             exit 1
           fi
           echo "All test projects under product/tests are claimed by a job."
-      - name: Run the domain and infrastructure test suites
+      # Hang-budget arithmetic (#756): the outer job budget is 20 minutes and pre-test work (build,
+      # contracts, guard) is roughly 5 minutes, so the 6-minute blame budget leaves wide margin for dump
+      # finalization and the failure-time upload. The static contract in
+      # AeroLinkTestDiagnostics.Tests.ps1 asserts hang < job-timeout minus margin.
+      - name: Run the domain test suite
         run: |
-          # Hang-budget arithmetic (#756): the outer job budget is 20 minutes. Before Infrastructure
-          # executes, this job spends roughly 130s building, ~90s on the classifier contract, ~15s on
-          # setup/guard steps, and ~110s running Domain — so Infrastructure starts with roughly 13-14
-          # minutes of runner time left. A 6-minute blame-hang budget fires early enough that the dump,
-          # the TRX, and the failure-time upload step all fit inside the remaining budget; 15m here could
-          # outlive the runner and lose the evidence exactly as #756 forbids. The static contract in
-          # AeroLinkTestDiagnostics.Tests.ps1 asserts hang < job-timeout minus margin, so these numbers
-          # cannot silently drift apart.
           dotnet test product/tests/AeroLink.Domain.Tests/AeroLink.Domain.Tests.csproj --configuration Release --no-build --logger "console;verbosity=normal" --logger "trx;LogFileName=domain.trx" --results-directory TestResults --blame-hang-timeout 6m
-          dotnet test product/tests/AeroLink.Infrastructure.Tests/AeroLink.Infrastructure.Tests.csproj --configuration Release --no-build --logger "console;verbosity=normal" --logger "trx;LogFileName=infrastructure.trx" --results-directory TestResults --blame-hang-timeout 6m
-      # Same failure-evidence contract as the API shards (#756): the raw TRX files are the authority for
-      # which tests failed and why, retained on failure under a run-unique artifact name.
-      - name: Upload core test diagnostics
+      - name: Upload domain test diagnostics
         if: failure() || cancelled()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: core-test-diagnostics-${{ github.run_attempt }}
+          name: domain-test-diagnostics-${{ github.run_attempt }}
           path: ${{ github.workspace }}/TestResults/
           if-no-files-found: ignore
           retention-days: 30
@@ -592,7 +590,7 @@ jobs:
           METRICS_JOB_RESULT: ${{ job.status }}
           METRICS_NEEDS: changes
           METRICS_COUNTS_SOURCE: trx
-          METRICS_TRX_PATH: ${{ github.workspace }}/TestResults/domain.trx,${{ github.workspace }}/TestResults/infrastructure.trx
+          METRICS_TRX_PATH: ${{ github.workspace }}/TestResults/domain.trx
           METRICS_CLASS_DOCS_ONLY: ${{ needs.changes.outputs.docs_only }}
           METRICS_CLASS_BACKEND: ${{ needs.changes.outputs.backend }}
           METRICS_CLASS_CLIENT: ${{ needs.changes.outputs.client }}
@@ -605,7 +603,93 @@ jobs:
         continue-on-error: true
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: ci-metrics-fragment-backend-core-${{ github.run_attempt }}
+          name: ci-metrics-fragment-backend-core-domain-${{ github.run_attempt }}
+          path: ${{ env.METRICS_FRAGMENT_PATH }}
+          if-no-files-found: ignore
+          retention-days: 30
+
+  backend-core-infrastructure:
+    name: Infrastructure test suite
+    needs: changes
+    if: needs.changes.outputs.post_merge_skip != 'true' && needs.changes.outputs.docs_only != 'true' && needs.changes.outputs.backend == 'true'
+    runs-on: windows-latest
+    timeout-minutes: 20
+    env:
+      METRICS_JOB_ID: backend-core-infrastructure
+      METRICS_JOB_NAME: Infrastructure test suite
+    steps:
+      - name: Capture job start
+        continue-on-error: true
+        shell: bash
+        run: |
+          echo "METRICS_TIMING_FILE=${{ runner.temp }}/ci-metrics/timing-backend-core-infrastructure.json" >> "$GITHUB_ENV"
+          echo "METRICS_FRAGMENT_PATH=${{ runner.temp }}/ci-metrics/fragment-backend-core-infrastructure.json" >> "$GITHUB_ENV"
+          mkdir -p "${{ runner.temp }}/ci-metrics"
+          printf '{"name":"job-start","at":%s}\n' "$(date +%s%3N)" >> "${{ runner.temp }}/ci-metrics/timing-backend-core-infrastructure.json"
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install .NET 10
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v5.2.0
+        with:
+          dotnet-version: 10.0.x
+      - name: Cache NuGet packages
+        id: nuget
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.nuget/packages
+          key: nuget-${{ runner.os }}-${{ hashFiles('product/**/*.csproj', 'product/**/*.props', 'product/**/*.targets') }}
+          restore-keys: nuget-${{ runner.os }}-
+      - name: Restore and build the solution
+        run: |
+          dotnet restore product/AeroLink.slnx
+          dotnet build product/AeroLink.slnx --configuration Release --no-restore
+      - name: Mark setup complete
+        continue-on-error: true
+        run: node "${{ github.workspace }}/product/ci-metrics/bin/mark.mjs" setup-end
+      - name: Install Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+      # Hang-budget arithmetic (#756): the outer job budget is 20 minutes and pre-test work (build, setup)
+      # is roughly 3 minutes, so the 6-minute blame budget leaves wide margin for dump finalization and the
+      # failure-time upload even with the suite at its current ~8-11 minutes. The static contract in
+      # AeroLinkTestDiagnostics.Tests.ps1 asserts hang < job-timeout minus margin.
+      - name: Run the infrastructure test suite
+        run: |
+          dotnet test product/tests/AeroLink.Infrastructure.Tests/AeroLink.Infrastructure.Tests.csproj --configuration Release --no-build --logger "console;verbosity=normal" --logger "trx;LogFileName=infrastructure.trx" --results-directory TestResults --blame-hang-timeout 6m
+      - name: Upload infrastructure test diagnostics
+        if: failure() || cancelled()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: infrastructure-test-diagnostics-${{ github.run_attempt }}
+          path: ${{ github.workspace }}/TestResults/
+          if-no-files-found: ignore
+          retention-days: 30
+      - name: Mark test complete
+        if: always()
+        continue-on-error: true
+        run: node "${{ github.workspace }}/product/ci-metrics/bin/mark.mjs" test-end
+      - name: Write metrics fragment
+        if: always()
+        continue-on-error: true
+        env:
+          METRICS_JOB_RESULT: ${{ job.status }}
+          METRICS_NEEDS: changes
+          METRICS_COUNTS_SOURCE: trx
+          METRICS_TRX_PATH: ${{ github.workspace }}/TestResults/infrastructure.trx
+          METRICS_CLASS_DOCS_ONLY: ${{ needs.changes.outputs.docs_only }}
+          METRICS_CLASS_BACKEND: ${{ needs.changes.outputs.backend }}
+          METRICS_CLASS_CLIENT: ${{ needs.changes.outputs.client }}
+          METRICS_CLASS_BROWSER: ${{ needs.changes.outputs.browser }}
+          METRICS_CLASS_POSTGRESQL: ${{ needs.changes.outputs.postgresql }}
+          METRICS_CACHE_NUGET: ${{ steps.nuget.outputs.cache-hit }}
+        run: node "${{ github.workspace }}/product/ci-metrics/bin/write-fragment.mjs"
+      - name: Upload metrics fragment
+        if: always()
+        continue-on-error: true
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ci-metrics-fragment-backend-core-infrastructure-${{ github.run_attempt }}
           path: ${{ env.METRICS_FRAGMENT_PATH }}
           if-no-files-found: ignore
           retention-days: 30
@@ -1360,7 +1444,7 @@ jobs:
   gate:
     name: Full Product evidence aggregate
     if: always()
-    needs: [changes, backend-api, backend-core, client, script-contracts, browser-pr, browser-production, postgresql-smoke, metrics-tooling]
+    needs: [changes, backend-api, backend-core-domain, backend-core-infrastructure, client, script-contracts, browser-pr, browser-production, postgresql-smoke, metrics-tooling]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     env:
@@ -1378,7 +1462,8 @@ jobs:
       - name: Summarise and enforce
         env:
           BACKEND_API: ${{ needs.backend-api.result }}
-          BACKEND_CORE: ${{ needs.backend-core.result }}
+          BACKEND_CORE_DOMAIN: ${{ needs.backend-core-domain.result }}
+          BACKEND_CORE_INFRASTRUCTURE: ${{ needs.backend-core-infrastructure.result }}
           CLIENT: ${{ needs.client.result }}
           CONTRACTS: ${{ needs.script-contracts.result }}
           BROWSER: ${{ needs.browser-pr.result }}
@@ -1425,7 +1510,8 @@ jobs:
             fi
             echo
             describe "API test suite" "$BACKEND_API"
-            describe "Domain and infrastructure test suites" "$BACKEND_CORE"
+            describe "Domain test suite" "$BACKEND_CORE_DOMAIN"
+            describe "Infrastructure test suite" "$BACKEND_CORE_INFRASTRUCTURE"
             describe "Client lint, type-check, and build" "$CLIENT"
             describe "Operator and recovery script contracts" "$CONTRACTS"
             describe "Browser journeys" "$BROWSER"
@@ -1444,7 +1530,7 @@ jobs:
           # than relying on this job's own dependency behaviour, which treats a skipped dependency as a reason
           # to skip and would take this reporter down with it.
           failed=""
-          for pair in "backend-api:$BACKEND_API" "backend-core:$BACKEND_CORE" "client:$CLIENT" "script-contracts:$CONTRACTS" "browser-pr:$BROWSER" "browser-production:$PRODUCTION" "postgresql-smoke:$POSTGRESQL"; do
+          for pair in "backend-api:$BACKEND_API" "backend-core-domain:$BACKEND_CORE_DOMAIN" "backend-core-infrastructure:$BACKEND_CORE_INFRASTRUCTURE" "client:$CLIENT" "script-contracts:$CONTRACTS" "browser-pr:$BROWSER" "browser-production:$PRODUCTION" "postgresql-smoke:$POSTGRESQL"; do
             name="${pair%%:*}"
             result="${pair#*:}"
             case "$result" in
@@ -1486,7 +1572,7 @@ jobs:
           # in a way that is invisible — a job gated on `pull_request` silently disappears in a queue.
           if [ "$EVENT_NAME" = "merge_group" ] && [ "$DOCS_ONLY" != "true" ]; then
             missing=""
-            for pair in "backend-api:$BACKEND_API" "backend-core:$BACKEND_CORE" "client:$CLIENT" "script-contracts:$CONTRACTS" "browser-pr:$BROWSER" "browser-production:$PRODUCTION"; do
+            for pair in "backend-api:$BACKEND_API" "backend-core-domain:$BACKEND_CORE_DOMAIN" "backend-core-infrastructure:$BACKEND_CORE_INFRASTRUCTURE" "client:$CLIENT" "script-contracts:$CONTRACTS" "browser-pr:$BROWSER" "browser-production:$PRODUCTION"; do
               name="${pair%%:*}"
               result="${pair#*:}"
               [ "$result" = "success" ] || missing="$missing $name"
@@ -1514,7 +1600,7 @@ jobs:
         run: |
           needs="changes,metrics-tooling"
           if [ "${{ needs.changes.outputs.post_merge_skip }}" != "true" ]; then
-            if [ "${{ needs.changes.outputs.backend }}" = "true" ]; then needs="$needs,backend-api,backend-core"; fi
+            if [ "${{ needs.changes.outputs.backend }}" = "true" ]; then needs="$needs,backend-api,backend-core-domain,backend-core-infrastructure"; fi
             if [ "${{ needs.changes.outputs.client }}" = "true" ]; then needs="$needs,client"; fi
             if [ "${{ needs.changes.outputs.docs_only }}" != "true" ]; then needs="$needs,script-contracts"; fi
           fi
