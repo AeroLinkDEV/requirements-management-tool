@@ -1,6 +1,7 @@
 using System.Net;
 using AeroLink.Domain.Baselines;
 using AeroLink.Domain.ChangeControl;
+using AeroLink.Domain.Common;
 using AeroLink.Domain.Hierarchy;
 using AeroLink.Domain.Identity;
 using AeroLink.Domain.Programs;
@@ -980,6 +981,17 @@ public sealed class SoftwareProcedureExecutionCutoverPostgresQualificationTests
             Assert.Equal(1, recovery.ProjectsUpgraded);
             Assert.Equal(1, recovery.ProceduresGenerated);
             Assert.Equal(1, await retryDb.RollbackCleanupFailureEvidences.AsNoTracking().CountAsync());
+            // Application/SQLite-mirror immutability holds on PostgreSQL through EF as well: a later
+            // successful startup never makes the historical cleanup failure mutable.
+            retryDb.ChangeTracker.Clear();
+            var committedEvidence = await retryDb.RollbackCleanupFailureEvidences.SingleAsync();
+            SetPrivateEvidence(committedEvidence, nameof(RollbackCleanupFailureEvidence.TotalKeys), 99);
+            await Assert.ThrowsAsync<DomainException>(() => retryDb.SaveChangesAsync());
+            retryDb.ChangeTracker.Clear();
+            committedEvidence = await retryDb.RollbackCleanupFailureEvidences.SingleAsync();
+            retryDb.RollbackCleanupFailureEvidences.Remove(committedEvidence);
+            await Assert.ThrowsAsync<DomainException>(() => retryDb.SaveChangesAsync());
+            Assert.Equal(1, await retryDb.RollbackCleanupFailureEvidences.AsNoTracking().CountAsync());
         }
         finally
         {
@@ -988,7 +1000,7 @@ public sealed class SoftwareProcedureExecutionCutoverPostgresQualificationTests
     }
 
     [DisposablePostgresFact]
-    public async Task Provenance_and_migration_sources_reject_invalid_raw_sql_on_postgres()
+    public async Task Provenance_and_migration_sources_reject_invalid_raw_sql_with_the_intended_guard_on_postgres()
     {
         var server = ValidateQualificationConnection(
             Environment.GetEnvironmentVariable("AEROLINK_MIGRATIONS_CONNECTION")!);
@@ -1004,6 +1016,45 @@ public sealed class SoftwareProcedureExecutionCutoverPostgresQualificationTests
 
         var now = DateTimeOffset.UtcNow;
         var tag = Guid.NewGuid().ToString("N")[..8];
+        var projectId = seed.ProjectId;
+        var baselineId = seed.BaselineId;
+
+        // ---- Unused but otherwise valid identities for the attacks. None may appear in the controlled
+        // tables, so no unique index can reject an attack before the intended FK/trigger guard runs. ----
+        var unusedCaseA = new TestProcedure(projectId, "HLRTC-909001", "Unused case",
+            "test.engineer", now, TestProcedureLevel.HighLevel);
+        var unusedCaseARevision = new TestProcedureRevision(unusedCaseA.Id, 0,
+            "Unused", "P", "S", "E", TestProcedureState.Approved, "test.engineer", now,
+            parentKind: VerificationProcedureParentKind.Derived,
+            derivedRationale: "Unused integrity fixture case.");
+        var unusedProcedureA1 = new TestProcedure(projectId, "HLRTP-909002", "Unused procedure one",
+            "test.engineer", now, TestProcedureLevel.HighLevel,
+            artifactKind: VerificationArtifactKind.Procedure,
+            parentKind: VerificationProcedureParentKind.Derived);
+        var unusedProcedureA1Revision = new TestProcedureRevision(unusedProcedureA1.Id, 0,
+            "Unused one", "PS", "SS", "E", TestProcedureState.Draft, "test.engineer", now,
+            environmentSetup: "Setup", testData: "Data", orderedSteps: "Steps",
+            expectedObservations: "Expected", cleanup: "Cleanup", toolingAutomation: "Tooling",
+            parentKind: VerificationProcedureParentKind.Derived,
+            derivedRationale: "Unused integrity fixture procedure one.");
+        var unusedProcedureA2 = new TestProcedure(projectId, "HLRTP-909003", "Unused procedure two",
+            "test.engineer", now, TestProcedureLevel.HighLevel,
+            artifactKind: VerificationArtifactKind.Procedure,
+            parentKind: VerificationProcedureParentKind.Derived);
+        var unusedProcedureA2Revision = new TestProcedureRevision(unusedProcedureA2.Id, 0,
+            "Unused two", "PS", "SS", "E", TestProcedureState.Draft, "test.engineer", now,
+            environmentSetup: "Setup", testData: "Data", orderedSteps: "Steps",
+            expectedObservations: "Expected", cleanup: "Cleanup", toolingAutomation: "Tooling",
+            parentKind: VerificationProcedureParentKind.Derived,
+            derivedRationale: "Unused integrity fixture procedure two.");
+        db.AddRange(unusedCaseA, unusedCaseARevision, unusedProcedureA1, unusedProcedureA1Revision,
+            unusedProcedureA2, unusedProcedureA2Revision);
+        await db.SaveChangesAsync();
+        db.Entry(unusedProcedureA1Revision).Property(x => x.State).CurrentValue = TestProcedureState.Approved;
+        db.Entry(unusedProcedureA2Revision).Property(x => x.State).CurrentValue = TestProcedureState.Approved;
+        await db.SaveChangesAsync();
+
+        // ---- Foreign project (deliberately configured NonDefault ACTIVE, never cutover-eligible). ----
         var foreignProgram = new ProgramRecord("Foreign Program", $"FRG{tag}");
         var foreignProject = new ProjectRecord(foreignProgram.Id, "Foreign Software", "Foreign Product");
         var foreignRelease = new SoftwareRelease(foreignProject.Id, "1.0", false);
@@ -1011,9 +1062,6 @@ public sealed class SoftwareProcedureExecutionCutoverPostgresQualificationTests
             "Foreign candidate", "cm.test", now);
         db.AddRange(foreignProgram, foreignProject, foreignRelease, foreignBaseline);
         await db.SaveChangesAsync();
-        // Build the foreign project's deliberately configured NonDefault ACTIVE ladder through the real
-        // domain flow BEFORE adding verification content, so the save-boundary auto-seal no-ops instead of
-        // sealing a LegacyDefault ladder that the cutover would later treat as eligible.
         var foreignConfiguration = ProjectLadderConfiguration.CreateDraft(foreignProject.Id, now);
         var foreignSteps = new List<ProjectLadderStep>();
         foreach (var (level, position) in LegacyLadderPolicy.Instance.OrderedLevels.Select((x, i) => (x, i + 1)))
@@ -1038,15 +1086,14 @@ public sealed class SoftwareProcedureExecutionCutoverPostgresQualificationTests
         foreignConfiguration.Activate("project.owner", now, LadderConsumerManifestCatalog.VersionV2,
             new string('0', 64));
         await db.SaveChangesAsync();
-        var foreignCase = new TestProcedure(foreignProject.Id, $"HLRTC-{Random.Shared.Next(100000, 999999)}",
+        var foreignCase = new TestProcedure(foreignProject.Id, "HLRTC-909101",
             "Foreign case", "test.engineer", now, TestProcedureLevel.HighLevel);
         var foreignCaseRevision = new TestProcedureRevision(foreignCase.Id, 0,
             "Foreign", "P", "S", "E", TestProcedureState.Approved, "test.engineer", now,
             parentKind: VerificationProcedureParentKind.Derived,
             derivedRationale: "Foreign fixture case.");
-        var foreignProcedure = new TestProcedure(foreignProject.Id,
-            $"HLRTP-{Random.Shared.Next(100000, 999999)}", "Foreign procedure",
-            "test.engineer", now, TestProcedureLevel.HighLevel,
+        var foreignProcedure = new TestProcedure(foreignProject.Id, "HLRTP-909102",
+            "Foreign procedure", "test.engineer", now, TestProcedureLevel.HighLevel,
             artifactKind: VerificationArtifactKind.Procedure,
             parentKind: VerificationProcedureParentKind.Derived);
         var foreignProcedureRevision = new TestProcedureRevision(foreignProcedure.Id, 0,
@@ -1057,30 +1104,43 @@ public sealed class SoftwareProcedureExecutionCutoverPostgresQualificationTests
             derivedRationale: "Foreign fixture procedure.");
         db.AddRange(foreignCase, foreignCaseRevision, foreignProcedure, foreignProcedureRevision);
         await db.SaveChangesAsync();
-        // The Draft-0 header shape is saved first; approval is a second attributed step, exactly like the
-        // product's authoring path.
         db.Entry(foreignProcedureRevision).Property(x => x.State).CurrentValue = TestProcedureState.Approved;
         await db.SaveChangesAsync();
 
-        var projectId = seed.ProjectId;
-        var baselineId = seed.BaselineId;
-        var manifestEvent = await db.BaselineEvents.AsNoTracking()
-            .SingleAsync(x => x.BaselineId == baselineId
-                && x.EventType == "ExecutionCutoverManifestMigrated");
+        // ---- Committed controlled rows + cleanup evidence to protect. ----
+        var provenanceRow = await db.BaselineExecutionCutoverProvenances.AsNoTracking().FirstAsync();
+        var source = await db.TestProcedureMigrationSources.AsNoTracking().FirstAsync();
+        var cleanupOperationId = Guid.NewGuid();
+        var cleanupKeys = new[] { "aa/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-key1.bin",
+            "bb/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-key2.bin" };
+        await new SoftwareProcedureExecutionCutoverAuthority(db, legacy, typed)
+            .RecordCleanupFailureEvidenceAsync(cleanupOperationId, cleanupKeys, default);
+        var cleanupRow = await db.RollbackCleanupFailureEvidences.AsNoTracking().SingleAsync();
+
+        var controlledSourceRevisionIds = await db.TestProcedureMigrationSources.AsNoTracking()
+            .Select(x => x.SourceCaseRevisionId).ToListAsync();
+        var controlledGeneratedRevisionIds = await db.TestProcedureMigrationSources.AsNoTracking()
+            .Select(x => x.GeneratedProcedureRevisionId).ToListAsync();
+        var controlledGeneratedArtifactIds = await db.TestProcedureMigrationSources.AsNoTracking()
+            .Select(x => x.GeneratedProcedureArtifactId).ToListAsync();
+        Assert.DoesNotContain(unusedCaseARevision.Id, controlledSourceRevisionIds);
+        Assert.DoesNotContain(unusedProcedureA1Revision.Id, controlledGeneratedRevisionIds);
+        Assert.DoesNotContain(unusedProcedureA2Revision.Id, controlledGeneratedRevisionIds);
+        Assert.DoesNotContain(unusedProcedureA1.Id, controlledGeneratedArtifactIds);
+        Assert.DoesNotContain(unusedProcedureA2.Id, controlledGeneratedArtifactIds);
+        Assert.DoesNotContain(foreignCaseRevision.Id, controlledSourceRevisionIds);
+        Assert.DoesNotContain(foreignProcedure.Id, controlledGeneratedArtifactIds);
+
         var createdEvent = await db.BaselineEvents.AsNoTracking()
             .Where(x => x.BaselineId == baselineId && x.EventType == "CandidateBaselineCreated")
             .Select(x => x.Id).SingleAsync();
-        var foreignEvent = await db.BaselineEvents.AsNoTracking()
-            .Where(x => x.BaselineId == foreignBaseline.Id)
-            .OrderBy(x => x.OccurredAt).Select(x => x.Id).FirstAsync();
-        var provenanceRow = await db.BaselineExecutionCutoverProvenances.AsNoTracking().FirstAsync();
-        var source = await db.TestProcedureMigrationSources.AsNoTracking().FirstAsync();
-        var caseArtifactId = await db.TestProcedures.AsNoTracking()
-            .Where(x => x.ProjectId == projectId && x.ArtifactKind == VerificationArtifactKind.Case)
-            .Select(x => x.Id).SingleAsync();
-        var generatedProcedureId = source.GeneratedProcedureArtifactId;
-        var generatedRevisionId = source.GeneratedProcedureRevisionId;
-        var sourceCaseRevisionId = source.SourceCaseRevisionId;
+        // A foreign-baseline event of the CORRECT manifest type: the event-kind trigger passes and the
+        // composite same-baseline FK is the guard that must fire.
+        var foreignEvent = Guid.NewGuid();
+        await db.Database.ExecuteSqlRawAsync(
+            "INSERT INTO baseline_events (\"Id\",\"BaselineId\",\"EventType\",\"ActorId\",\"Detail\",\"OccurredAt\") " +
+            "VALUES ({0},{1},'ExecutionCutoverManifestMigrated','aerolink-migration','synthetic foreign manifest',{2})",
+            foreignEvent, foreignBaseline.Id, now);
         var missing = Guid.NewGuid();
 
         const string provenanceColumns =
@@ -1088,70 +1148,125 @@ public sealed class SoftwareProcedureExecutionCutoverPostgresQualificationTests
         const string sourceColumns =
             "(\"Id\",\"ProjectId\",\"SourceCaseRevisionId\",\"GeneratedProcedureArtifactId\",\"GeneratedProcedureRevisionId\")";
         const string sixtyFourA = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+        const string artifactFk = "FK_test_procedure_migration_sources_test_procedures_GeneratedP~";
+        const string revisionFk = "FK_test_procedure_migration_sources_test_procedure_revisions_G~";
+        const string sourceFk = "FK_test_procedure_migration_sources_test_procedure_revisions_S~";
+        const string compositeFk = "FK_test_procedure_migration_sources_test_procedure_revisions_~1";
+        const string eventCompositeFk = "FK_baseline_execution_cutover_provenance_baseline_events_Basel~";
+        const string immutableMessage =
+            "Execution cutover provenance and migration sources are immutable historical evidence";
+        const string sourceKindMessage =
+            "Migration source Case revision must be a software Case in the stated project";
+        const string generatedKindMessage =
+            "Migration generated artifact must be a Procedure in the stated project";
+        const string eventKindMessage =
+            "Execution cutover provenance must reference an ExecutionCutoverManifestMigrated event of the same baseline";
 
-        async Task<PostgresException> Refuse(string sql, params object[] parameters) =>
-            await Assert.ThrowsAsync<PostgresException>(() =>
+        async Task<PostgresException> RefuseExpected(string sql, string sqlState,
+            string? constraintName = null, string? message = null, params object[] parameters)
+        {
+            var exception = await Assert.ThrowsAsync<PostgresException>(() =>
                 db.Database.ExecuteSqlRawAsync(sql, parameters));
+            // A unique-index rejection (23505) would prove nothing about the FK/trigger guard.
+            Assert.NotEqual("23505", exception.SqlState);
+            Assert.Equal(sqlState, exception.SqlState);
+            if (constraintName is not null)
+                Assert.Equal(constraintName, exception.ConstraintName);
+            if (message is not null)
+                Assert.Contains(message, exception.MessageText ?? exception.Message ?? "",
+                    StringComparison.OrdinalIgnoreCase);
+            return exception;
+        }
 
-        // Baseline provenance: nonexistent event, event from another baseline, and wrong-type same-baseline
-        // event are all refused; committed rows are immutable.
-        await Refuse($"INSERT INTO baseline_execution_cutover_provenance {provenanceColumns} " +
+        // ---- Provenance INSERT guards. ----
+        await RefuseExpected($"INSERT INTO baseline_execution_cutover_provenance {provenanceColumns} " +
             "VALUES ({0},{1},{2},99,1,{3},1,'case:attack')",
-            Guid.NewGuid(), baselineId, missing, sixtyFourA);
-        await Refuse($"INSERT INTO baseline_execution_cutover_provenance {provenanceColumns} " +
+            "23503", eventCompositeFk, null, Guid.NewGuid(), baselineId, missing, sixtyFourA);
+        await RefuseExpected($"INSERT INTO baseline_execution_cutover_provenance {provenanceColumns} " +
             "VALUES ({0},{1},{2},99,1,{3},1,'case:attack')",
-            Guid.NewGuid(), baselineId, foreignEvent, sixtyFourA);
-        await Refuse($"INSERT INTO baseline_execution_cutover_provenance {provenanceColumns} " +
+            "23503", eventCompositeFk, null, Guid.NewGuid(), baselineId, foreignEvent, sixtyFourA);
+        await RefuseExpected($"INSERT INTO baseline_execution_cutover_provenance {provenanceColumns} " +
             "VALUES ({0},{1},{2},99,1,{3},1,'case:attack')",
-            Guid.NewGuid(), baselineId, createdEvent, sixtyFourA);
-        await Refuse("UPDATE baseline_execution_cutover_provenance SET \"TotalMappings\" = 99 WHERE \"Id\" = {0}",
-            provenanceRow.Id);
-        await Refuse("DELETE FROM baseline_execution_cutover_provenance WHERE \"Id\" = {0}", provenanceRow.Id);
+            "P0001", null, eventKindMessage, Guid.NewGuid(), baselineId, createdEvent, sixtyFourA);
 
-        // Migration sources: nonexistent identities, wrong-kind source/generated, generated revision owned by
-        // a different artifact, cross-project mappings, project mismatches, and mutation are all refused.
-        await Refuse($"INSERT INTO test_procedure_migration_sources {sourceColumns} " +
+        // ---- Migration-source INSERT guards (unused identities: no unique index can fire first). ----
+        await RefuseExpected($"INSERT INTO test_procedure_migration_sources {sourceColumns} " +
             "VALUES ({0},{1},{2},{3},{4})",
-            Guid.NewGuid(), projectId, missing, generatedProcedureId, generatedRevisionId);
-        await Refuse($"INSERT INTO test_procedure_migration_sources {sourceColumns} " +
+            "23503", sourceFk, null,
+            Guid.NewGuid(), projectId, missing, unusedProcedureA1.Id, unusedProcedureA1Revision.Id);
+        await RefuseExpected($"INSERT INTO test_procedure_migration_sources {sourceColumns} " +
             "VALUES ({0},{1},{2},{3},{4})",
-            Guid.NewGuid(), projectId, sourceCaseRevisionId, missing, generatedRevisionId);
-        await Refuse($"INSERT INTO test_procedure_migration_sources {sourceColumns} " +
+            "23503", artifactFk, null,
+            Guid.NewGuid(), projectId, unusedCaseARevision.Id, missing, unusedProcedureA1Revision.Id);
+        await RefuseExpected($"INSERT INTO test_procedure_migration_sources {sourceColumns} " +
             "VALUES ({0},{1},{2},{3},{4})",
-            Guid.NewGuid(), projectId, sourceCaseRevisionId, generatedProcedureId, missing);
-        // Source points at a Procedure revision, not a Case revision.
-        await Refuse($"INSERT INTO test_procedure_migration_sources {sourceColumns} " +
+            "23503", revisionFk, null,
+            Guid.NewGuid(), projectId, unusedCaseARevision.Id, unusedProcedureA1.Id, missing);
+        await RefuseExpected($"INSERT INTO test_procedure_migration_sources {sourceColumns} " +
             "VALUES ({0},{1},{2},{3},{4})",
-            Guid.NewGuid(), projectId, generatedRevisionId, generatedProcedureId, generatedRevisionId);
-        // Generated identity points at a Case artifact.
-        await Refuse($"INSERT INTO test_procedure_migration_sources {sourceColumns} " +
+            "P0001", null, sourceKindMessage,
+            Guid.NewGuid(), projectId, unusedProcedureA1Revision.Id, unusedProcedureA1.Id,
+            unusedProcedureA1Revision.Id);
+        await RefuseExpected($"INSERT INTO test_procedure_migration_sources {sourceColumns} " +
             "VALUES ({0},{1},{2},{3},{4})",
-            Guid.NewGuid(), projectId, sourceCaseRevisionId, caseArtifactId, sourceCaseRevisionId);
-        // Generated revision belongs to a different artifact.
-        await Refuse($"INSERT INTO test_procedure_migration_sources {sourceColumns} " +
+            "P0001", null, generatedKindMessage,
+            Guid.NewGuid(), projectId, unusedCaseARevision.Id, unusedCaseA.Id, unusedCaseARevision.Id);
+        await RefuseExpected($"INSERT INTO test_procedure_migration_sources {sourceColumns} " +
             "VALUES ({0},{1},{2},{3},{4})",
-            Guid.NewGuid(), projectId, sourceCaseRevisionId, generatedProcedureId, foreignProcedureRevision.Id);
-        // Cross-project source.
-        await Refuse($"INSERT INTO test_procedure_migration_sources {sourceColumns} " +
+            "23503", compositeFk, null,
+            Guid.NewGuid(), projectId, unusedCaseARevision.Id, unusedProcedureA1.Id,
+            unusedProcedureA2Revision.Id);
+        await RefuseExpected($"INSERT INTO test_procedure_migration_sources {sourceColumns} " +
             "VALUES ({0},{1},{2},{3},{4})",
-            Guid.NewGuid(), projectId, foreignCaseRevision.Id, generatedProcedureId, generatedRevisionId);
-        // Cross-project generated artifact.
-        await Refuse($"INSERT INTO test_procedure_migration_sources {sourceColumns} " +
+            "P0001", null, sourceKindMessage,
+            Guid.NewGuid(), projectId, foreignCaseRevision.Id, unusedProcedureA1.Id,
+            unusedProcedureA1Revision.Id);
+        await RefuseExpected($"INSERT INTO test_procedure_migration_sources {sourceColumns} " +
             "VALUES ({0},{1},{2},{3},{4})",
-            Guid.NewGuid(), projectId, sourceCaseRevisionId, foreignProcedure.Id, foreignProcedureRevision.Id);
-        // ProjectId disagrees with the mapped records.
-        await Refuse($"INSERT INTO test_procedure_migration_sources {sourceColumns} " +
+            "P0001", null, generatedKindMessage,
+            Guid.NewGuid(), projectId, unusedCaseARevision.Id, foreignProcedure.Id,
+            foreignProcedureRevision.Id);
+        await RefuseExpected($"INSERT INTO test_procedure_migration_sources {sourceColumns} " +
             "VALUES ({0},{1},{2},{3},{4})",
-            Guid.NewGuid(), foreignProject.Id, sourceCaseRevisionId, generatedProcedureId, generatedRevisionId);
-        await Refuse("UPDATE test_procedure_migration_sources SET \"ProjectId\" = {0} WHERE \"Id\" = {1}",
-            foreignProject.Id, source.Id);
-        await Refuse("DELETE FROM test_procedure_migration_sources WHERE \"Id\" = {0}", source.Id);
+            "P0001", null, sourceKindMessage,
+            Guid.NewGuid(), foreignProject.Id, unusedCaseARevision.Id, unusedProcedureA1.Id,
+            unusedProcedureA1Revision.Id);
 
-        // Valid cutover data is untouched, idempotent, and recoverable.
+        // ---- UPDATE/DELETE immutability guards. ----
+        await RefuseExpected("UPDATE baseline_execution_cutover_provenance SET \"TotalMappings\" = 99 " +
+            "WHERE \"Id\" = {0}", "P0001", null, immutableMessage, provenanceRow.Id);
+        await RefuseExpected("DELETE FROM baseline_execution_cutover_provenance WHERE \"Id\" = {0}",
+            "P0001", null, immutableMessage, provenanceRow.Id);
+        // A self-assignment UPDATE passes the semantic integrity trigger and is refused ONLY by the
+        // immutability trigger; a semantic change would be refused by the integrity trigger first.
+        await RefuseExpected("UPDATE test_procedure_migration_sources SET \"ProjectId\" = \"ProjectId\" " +
+            "WHERE \"Id\" = {0}", "P0001", null, immutableMessage, source.Id);
+        await RefuseExpected("DELETE FROM test_procedure_migration_sources WHERE \"Id\" = {0}",
+            "P0001", null, immutableMessage, source.Id);
+        await RefuseExpected("UPDATE rollback_cleanup_failure_evidence SET \"TotalKeys\" = 99 WHERE \"Id\" = {0}",
+            "P0001", null, immutableMessage, cleanupRow.Id);
+        await RefuseExpected("DELETE FROM rollback_cleanup_failure_evidence WHERE \"Id\" = {0}",
+            "P0001", null, immutableMessage, cleanupRow.Id);
+
+        // ---- Every controlled table is byte-for-byte unchanged after the attacks. ----
         Assert.Equal(1, await db.TestProcedureMigrationSources.AsNoTracking().CountAsync(x =>
             x.ProjectId == projectId));
         Assert.Equal(1, await db.BaselineExecutionCutoverProvenances.AsNoTracking()
             .CountAsync(x => x.BaselineId == baselineId));
+        Assert.Equal(1, await db.RollbackCleanupFailureEvidences.AsNoTracking().CountAsync());
+        var survivingSource = await db.TestProcedureMigrationSources.AsNoTracking().SingleAsync();
+        Assert.Equal(source.Id, survivingSource.Id);
+        Assert.Equal(source.SourceCaseRevisionId, survivingSource.SourceCaseRevisionId);
+        Assert.Equal(source.GeneratedProcedureArtifactId, survivingSource.GeneratedProcedureArtifactId);
+        Assert.Equal(source.GeneratedProcedureRevisionId, survivingSource.GeneratedProcedureRevisionId);
+        var survivingProvenance = await db.BaselineExecutionCutoverProvenances.AsNoTracking().SingleAsync();
+        Assert.Equal(provenanceRow.Id, survivingProvenance.Id);
+        Assert.Equal(provenanceRow.Content, survivingProvenance.Content);
+        var survivingCleanup = await db.RollbackCleanupFailureEvidences.AsNoTracking().SingleAsync();
+        Assert.Equal(cleanupRow.Id, survivingCleanup.Id);
+        Assert.Equal(cleanupRow.Content, survivingCleanup.Content);
+
+        // ---- Valid cutover data is untouched, idempotent, and recoverable. ----
         db.ChangeTracker.Clear();
         var marker = await db.GovernedMigrationCompletions
             .SingleAsync(x => x.Marker == "VerificationExecutionCutover.SoftwareProcedures.v1");
@@ -1353,6 +1468,11 @@ public sealed class SoftwareProcedureExecutionCutoverPostgresQualificationTests
         typeof(ProjectLadderConfiguration).GetProperty(propertyName)!
             .GetSetMethod(nonPublic: true)!
             .Invoke(configuration, [value]);
+
+    private static void SetPrivateEvidence(object target, string propertyName, object? value) =>
+        target.GetType().GetProperty(propertyName)!
+            .GetSetMethod(nonPublic: true)!
+            .Invoke(target, [value]);
 
     private static async Task EnsureDatabaseAsync(string connection, string databaseName)
     {

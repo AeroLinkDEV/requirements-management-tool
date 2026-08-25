@@ -2011,31 +2011,39 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
         var trackedRevisions = ChangeTracker.Entries<TestProcedureRevision>()
             .Where(x => x.State != EntityState.Deleted)
             .ToDictionary(x => x.Entity.Id, x => x.Entity);
-        var provenance = ChangeTracker.Entries<BaselineExecutionCutoverProvenance>()
-            .Where(x => x.State is EntityState.Added or EntityState.Modified)
-            .Select(x => x.Entity).ToList();
-        foreach (var row in provenance)
+        var provenance = ChangeTracker.Entries<BaselineExecutionCutoverProvenance>().ToList();
+        foreach (var entry in provenance)
         {
-            BaselineEvent? entry = trackedEvents.GetValueOrDefault(row.EventId);
-            if (entry is null)
-                entry = await BaselineEvents.AsNoTracking()
+            // Controlled provenance is immutable historical evidence: an application/SQLite write must fail
+            // exactly like the PostgreSQL BEFORE UPDATE/DELETE triggers.
+            if (entry.State is EntityState.Modified or EntityState.Deleted)
+                throw new DomainException(
+                    "Execution cutover provenance is immutable historical evidence; it cannot be modified or deleted.");
+            if (entry.State != EntityState.Added) continue;
+            var row = entry.Entity;
+            BaselineEvent? linkedEvent = trackedEvents.GetValueOrDefault(row.EventId);
+            if (linkedEvent is null)
+                linkedEvent = await BaselineEvents.AsNoTracking()
                     .SingleOrDefaultAsync(x => x.Id == row.EventId, ct);
-            if (entry is null)
+            if (linkedEvent is null)
                 throw new DomainException(
                     "Execution cutover provenance must reference an existing baseline event.");
-            if (entry.BaselineId != row.BaselineId)
+            if (linkedEvent.BaselineId != row.BaselineId)
                 throw new DomainException(
                     "Execution cutover provenance event must belong to the same baseline as the provenance row.");
-            if (entry.EventType != "ExecutionCutoverManifestMigrated")
+            if (linkedEvent.EventType != "ExecutionCutoverManifestMigrated")
                 throw new DomainException(
                     "Execution cutover provenance must reference an ExecutionCutoverManifestMigrated summary event.");
         }
 
-        var sources = ChangeTracker.Entries<TestProcedureMigrationSource>()
-            .Where(x => x.State is EntityState.Added or EntityState.Modified)
-            .Select(x => x.Entity).ToList();
-        foreach (var source in sources)
+        var sources = ChangeTracker.Entries<TestProcedureMigrationSource>().ToList();
+        foreach (var entry in sources)
         {
+            if (entry.State is EntityState.Modified or EntityState.Deleted)
+                throw new DomainException(
+                    "Procedure migration sources are immutable historical evidence; they cannot be modified or deleted.");
+            if (entry.State != EntityState.Added) continue;
+            var source = entry.Entity;
             var sourceRevision = trackedRevisions.GetValueOrDefault(source.SourceCaseRevisionId);
             TestProcedure? sourceOwner = null;
             if (sourceRevision is not null)
@@ -2080,6 +2088,16 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
             if (generatedRevision.ProcedureId != source.GeneratedProcedureArtifactId)
                 throw new DomainException(
                     "A Procedure migration source generated revision must belong to its generated artifact.");
+        }
+
+        var cleanupEvidence = ChangeTracker.Entries<RollbackCleanupFailureEvidence>().ToList();
+        foreach (var entry in cleanupEvidence)
+        {
+            // A later successful startup never erases the historical fact that cleanup failed: the evidence
+            // is immutable controlled reconciliation evidence in the application and at the database.
+            if (entry.State is EntityState.Modified or EntityState.Deleted)
+                throw new DomainException(
+                    "Rollback cleanup failure evidence is immutable historical evidence; it cannot be modified or deleted.");
         }
     }
 

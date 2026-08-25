@@ -1,5 +1,6 @@
 using AeroLink.Domain.Baselines;
 using AeroLink.Domain.ChangeControl;
+using AeroLink.Domain.Common;
 using AeroLink.Domain.Hierarchy;
 using AeroLink.Domain.Identity;
 using AeroLink.Domain.Programs;
@@ -2435,6 +2436,168 @@ public sealed class SoftwareProcedureExecutionCutoverTests
         {
             try { Directory.Delete(evidenceRoot, recursive: true); } catch (IOException) { }
         }
+    }
+
+    [Fact]
+    public async Task Provenance_sources_and_cleanup_evidence_are_immutable_at_the_sqlite_save_boundary()
+    {
+        var options = new DbContextOptionsBuilder<AeroLinkDbContext>().UseSqlite("Data Source=:memory:").Options;
+        var db = new AeroLinkDbContext(options);
+        await db.Database.OpenConnectionAsync();
+        await db.Database.EnsureCreatedAsync();
+        var evidenceRoot = Path.Combine(Path.GetTempPath(), $"aerolink-726-sqlite-immutable-{Guid.NewGuid():N}");
+        var files = new EvidenceFileStore(evidenceRoot);
+        try
+        {
+            var seed = await SeedSignedDocumentProjectAsync(db, files, "810001", materialized: true);
+            var now = DateTimeOffset.UtcNow;
+            var (legacy, typed) = FullRegistrations();
+            var generator = new ControlledOutputGenerator(db, new RichContentPublisher(db, files),
+                policyResolver: new EffectiveProjectLadderPolicyResolver(db));
+            await new SoftwareProcedureExecutionCutoverAuthority(db, legacy, typed,
+                allowSqliteExecution: true, generator: generator, files: files).EnsureCompletedAsync();
+
+            // An unused but otherwise valid same-project Procedure pair, so the source-retarget attack is
+            // completely valid at the reference level and must be refused only by immutability.
+            var unusedProcedure = new TestProcedure(seed.ProjectId, "HLRTP-000899",
+                "Unused procedure", "test.engineer", now, TestProcedureLevel.HighLevel,
+                artifactKind: VerificationArtifactKind.Procedure,
+                parentKind: VerificationProcedureParentKind.Derived);
+            var unusedRevision = new TestProcedureRevision(unusedProcedure.Id, 0,
+                "Unused", "PS", "SS", "E", TestProcedureState.Draft, "test.engineer", now,
+                environmentSetup: "Setup", testData: "Data", orderedSteps: "Steps",
+                expectedObservations: "Expected", cleanup: "Cleanup", toolingAutomation: "Tooling",
+                parentKind: VerificationProcedureParentKind.Derived,
+                derivedRationale: "Unused fixture procedure.");
+            db.AddRange(unusedProcedure, unusedRevision);
+            await db.SaveChangesAsync();
+            db.Entry(unusedRevision).Property(x => x.State).CurrentValue = TestProcedureState.Approved;
+            await db.SaveChangesAsync();
+
+            // Cleanup evidence to mutate/delete.
+            var cleanupContext = new AeroLinkDbContext(
+                new DbContextOptionsBuilder<AeroLinkDbContext>().UseSqlite(db.Database.GetDbConnection()).Options);
+            var evidenceAuthority = new SoftwareProcedureExecutionCutoverAuthority(cleanupContext, legacy, typed,
+                allowSqliteExecution: true);
+            var operationId = Guid.NewGuid();
+            var evidenceKeys = new[] { "aa/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-key1.bin",
+                "bb/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-key2.bin" };
+            await evidenceAuthority.RecordCleanupFailureEvidenceAsync(operationId, evidenceKeys, default);
+
+            var otherEventId = await db.BaselineEvents.AsNoTracking()
+                .Where(x => x.BaselineId == seed.BaselineId && x.EventType == "CandidateBaselineCreated")
+                .Select(x => x.Id).SingleAsync();
+
+            async Task RefuseAsync(Func<Task> action, string message) =>
+                Assert.Contains(message, (await Assert.ThrowsAsync<DomainException>(action)).Message);
+
+            // Provenance: content/totals rewrite, retarget to another valid same-baseline event, delete.
+            db.ChangeTracker.Clear();
+            var provenance = await db.BaselineExecutionCutoverProvenances.SingleAsync();
+            SetPrivate(provenance, nameof(BaselineExecutionCutoverProvenance.TotalMappings), 99);
+            await RefuseAsync(async () => await db.SaveChangesAsync(), "immutable historical evidence");
+            db.ChangeTracker.Clear();
+            provenance = await db.BaselineExecutionCutoverProvenances.SingleAsync();
+            SetPrivate(provenance, nameof(BaselineExecutionCutoverProvenance.EventId), otherEventId);
+            await RefuseAsync(async () => await db.SaveChangesAsync(), "immutable historical evidence");
+            db.ChangeTracker.Clear();
+            provenance = await db.BaselineExecutionCutoverProvenances.SingleAsync();
+            db.BaselineExecutionCutoverProvenances.Remove(provenance);
+            await RefuseAsync(async () => await db.SaveChangesAsync(), "immutable historical evidence");
+
+            // Migration source: retarget to another completely valid same-project pair, then delete.
+            db.ChangeTracker.Clear();
+            var source = await db.TestProcedureMigrationSources.SingleAsync();
+            SetPrivate(source, nameof(TestProcedureMigrationSource.GeneratedProcedureArtifactId),
+                unusedProcedure.Id);
+            SetPrivate(source, nameof(TestProcedureMigrationSource.GeneratedProcedureRevisionId),
+                unusedRevision.Id);
+            await RefuseAsync(async () => await db.SaveChangesAsync(), "immutable historical evidence");
+            db.ChangeTracker.Clear();
+            source = await db.TestProcedureMigrationSources.SingleAsync();
+            db.TestProcedureMigrationSources.Remove(source);
+            await RefuseAsync(async () => await db.SaveChangesAsync(), "immutable historical evidence");
+
+            // Cleanup evidence: rewrite and delete are refused even though a later startup succeeded.
+            db.ChangeTracker.Clear();
+            var evidence = await db.RollbackCleanupFailureEvidences.SingleAsync();
+            SetPrivate(evidence, nameof(RollbackCleanupFailureEvidence.TotalKeys), 99);
+            await RefuseAsync(async () => await db.SaveChangesAsync(), "immutable historical evidence");
+            db.ChangeTracker.Clear();
+            evidence = await db.RollbackCleanupFailureEvidences.SingleAsync();
+            db.RollbackCleanupFailureEvidences.Remove(evidence);
+            await RefuseAsync(async () => await db.SaveChangesAsync(), "immutable historical evidence");
+
+            // The controlled records remain exactly as committed.
+            Assert.Equal(1, await db.BaselineExecutionCutoverProvenances.AsNoTracking().CountAsync());
+            Assert.Equal(1, await db.TestProcedureMigrationSources.AsNoTracking().CountAsync());
+            Assert.Equal(1, await db.RollbackCleanupFailureEvidences.AsNoTracking().CountAsync());
+        }
+        finally
+        {
+            try { Directory.Delete(evidenceRoot, recursive: true); } catch (IOException) { }
+        }
+    }
+
+    [Fact]
+    public async Task Rollback_cleanup_failure_evidence_multi_chunk_is_bounded_complete_idempotent_and_immutable()
+    {
+        await using var connection = new Microsoft.Data.Sqlite.SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        var db = new AeroLinkDbContext(
+            new DbContextOptionsBuilder<AeroLinkDbContext>().UseSqlite(connection).Options);
+        await db.Database.EnsureCreatedAsync();
+        var (legacy, typed) = FullRegistrations();
+        var authority = new SoftwareProcedureExecutionCutoverAuthority(db, legacy, typed,
+            allowSqliteExecution: true);
+        var keys = Enumerable.Range(0, 25)
+            .Select(_ => $"{Guid.NewGuid():N}"[..2] + "/" + Guid.NewGuid().ToString("N")
+                + "-" + Guid.NewGuid().ToString("N") + ".bin")
+            .ToArray();
+        var operationId = Guid.NewGuid();
+        await authority.RecordCleanupFailureEvidenceAsync(operationId, keys, default);
+
+        var rows = await db.RollbackCleanupFailureEvidences.AsNoTracking()
+            .OrderBy(x => x.Sequence).ToListAsync();
+        Assert.Equal(3, rows.Count);
+        Assert.Equal([0, 1, 2], rows.Select(x => x.Sequence).ToArray());
+        Assert.All(rows, row => Assert.True(row.Content.Length <= 1500));
+        Assert.All(rows, row => Assert.Equal(25, row.TotalKeys));
+        Assert.Equal(25, rows.Sum(row => row.EntryCount));
+        var recovered = rows.SelectMany(row => row.Content.Split(';')).ToList();
+        Assert.Equal(25, recovered.Count);
+        Assert.Equal(25, recovered.Distinct().Count());
+        var expectedKeys = keys.OrderBy(x => x, StringComparer.Ordinal).ToArray();
+        var sortedRecovered = recovered.OrderBy(x => x, StringComparer.Ordinal).ToArray();
+        Assert.Equal(expectedKeys, sortedRecovered);
+        var expectedHash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(
+            Encoding.UTF8.GetBytes(string.Join(";", expectedKeys)))).ToLowerInvariant();
+        Assert.All(rows, row => Assert.Equal(expectedHash, row.CanonicalAggregateHash));
+        var summary = await db.SecurityAuditEvents.AsNoTracking().SingleAsync(x =>
+            x.EventType == SoftwareProcedureExecutionCutoverAuthority.MigrationMarker
+                + ".OrphanedRenditionCleanupFailed");
+        Assert.Contains("\"keys\":25", summary.Detail);
+        Assert.Contains("\"chunks\":3", summary.Detail);
+        Assert.Contains(expectedHash, summary.Detail);
+        Assert.True(summary.Detail.Length < 4000);
+
+        // Retry of the same operation adds no rows and no summary event.
+        await authority.RecordCleanupFailureEvidenceAsync(operationId, keys, default);
+        Assert.Equal(3, await db.RollbackCleanupFailureEvidences.AsNoTracking().CountAsync());
+        Assert.Equal(1, await db.SecurityAuditEvents.AsNoTracking().CountAsync(x =>
+            x.EventType == SoftwareProcedureExecutionCutoverAuthority.MigrationMarker
+                + ".OrphanedRenditionCleanupFailed"));
+
+        // Application immutability protects the committed chunks.
+        db.ChangeTracker.Clear();
+        var row = await db.RollbackCleanupFailureEvidences.SingleAsync(x => x.Sequence == 0);
+        SetPrivate(row, nameof(RollbackCleanupFailureEvidence.EntryCount), 1);
+        await Assert.ThrowsAsync<DomainException>(() => db.SaveChangesAsync());
+        db.ChangeTracker.Clear();
+        row = await db.RollbackCleanupFailureEvidences.SingleAsync(x => x.Sequence == 0);
+        db.RollbackCleanupFailureEvidences.Remove(row);
+        await Assert.ThrowsAsync<DomainException>(() => db.SaveChangesAsync());
+        Assert.Equal(3, await db.RollbackCleanupFailureEvidences.AsNoTracking().CountAsync());
     }
 
     private sealed class ClaimSaveFailingInterceptor : SaveChangesInterceptor

@@ -87,6 +87,17 @@ namespace AeroLink.Infrastructure.Persistence.Migrations
                 principalColumn: "Id",
                 onDelete: ReferentialAction.Restrict);
 
+            // Creation order is deliberate: PostgreSQL reports the FIRST violated FK per row, so ordering the
+            // artifact, revision, source, then composite FKs lets each raw-SQL attack exercise its intended
+            // guard deterministically (artifact -> revision -> source -> ownership composite).
+            migrationBuilder.AddForeignKey(
+                name: "FK_test_procedure_migration_sources_test_procedures_GeneratedP~",
+                table: "test_procedure_migration_sources",
+                column: "GeneratedProcedureArtifactId",
+                principalTable: "test_procedures",
+                principalColumn: "Id",
+                onDelete: ReferentialAction.Restrict);
+
             migrationBuilder.AddForeignKey(
                 name: "FK_test_procedure_migration_sources_test_procedure_revisions_G~",
                 table: "test_procedure_migration_sources",
@@ -111,14 +122,6 @@ namespace AeroLink.Infrastructure.Persistence.Migrations
                 principalColumns: new[] { "ProcedureId", "Id" },
                 onDelete: ReferentialAction.Restrict);
 
-            migrationBuilder.AddForeignKey(
-                name: "FK_test_procedure_migration_sources_test_procedures_GeneratedP~",
-                table: "test_procedure_migration_sources",
-                column: "GeneratedProcedureArtifactId",
-                principalTable: "test_procedures",
-                principalColumn: "Id",
-                onDelete: ReferentialAction.Restrict);
-
             // PostgreSQL-only triggers: ordinary foreign keys cannot express artifact kind, project ownership,
             // same-aggregate event type, or immutability. These make the controlled provenance fail closed at
             // the database boundary for raw SQL and every other persistence seam.
@@ -137,6 +140,10 @@ namespace AeroLink.Infrastructure.Persistence.Migrations
                     BEFORE UPDATE OR DELETE ON test_procedure_migration_sources
                     FOR EACH ROW EXECUTE FUNCTION aerolink_refuse_provenance_mutation();
 
+                CREATE TRIGGER refuse_cleanup_evidence_mutation
+                    BEFORE UPDATE OR DELETE ON rollback_cleanup_failure_evidence
+                    FOR EACH ROW EXECUTE FUNCTION aerolink_refuse_provenance_mutation();
+
                 CREATE OR REPLACE FUNCTION aerolink_enforce_provenance_event_kind() RETURNS trigger AS $$
                 DECLARE
                     event_type text;
@@ -144,7 +151,10 @@ namespace AeroLink.Infrastructure.Persistence.Migrations
                     SELECT e."EventType" INTO event_type
                     FROM baseline_events e
                     WHERE e."Id" = NEW."EventId";
-                    IF event_type IS NULL OR event_type <> 'ExecutionCutoverManifestMigrated' THEN
+                    -- Existence and same-baseline linkage are the composite foreign key's job; the trigger
+                    -- only enforces the event TYPE on an event that exists, so a missing or cross-baseline
+                    -- event is reported by its intended FK rather than masked here.
+                    IF event_type IS NOT NULL AND event_type <> 'ExecutionCutoverManifestMigrated' THEN
                         RAISE EXCEPTION 'Execution cutover provenance must reference an ExecutionCutoverManifestMigrated event of the same baseline';
                     END IF;
                     RETURN NEW;
@@ -168,19 +178,21 @@ namespace AeroLink.Infrastructure.Persistence.Migrations
                     FROM test_procedure_revisions r
                     JOIN test_procedures p ON p."Id" = r."ProcedureId"
                     WHERE r."Id" = NEW."SourceCaseRevisionId";
-                    IF source_kind IS NULL
-                        OR source_kind <> 'Case'
+                    -- Existence is the foreign keys' job; the trigger only enforces semantics on rows that
+                    -- exist, so a missing identity is reported by its intended FK rather than masked here.
+                    IF source_kind IS NOT NULL
+                        AND (source_kind <> 'Case'
                         OR source_level = 'System'
-                        OR source_project <> NEW."ProjectId" THEN
+                        OR source_project <> NEW."ProjectId") THEN
                         RAISE EXCEPTION 'Migration source Case revision must be a software Case in the stated project';
                     END IF;
                     SELECT p."ArtifactKind", p."ProjectId"
                     INTO generated_kind, generated_project
                     FROM test_procedures p
                     WHERE p."Id" = NEW."GeneratedProcedureArtifactId";
-                    IF generated_kind IS NULL
-                        OR generated_kind <> 'Procedure'
-                        OR generated_project <> NEW."ProjectId" THEN
+                    IF generated_kind IS NOT NULL
+                        AND (generated_kind <> 'Procedure'
+                        OR generated_project <> NEW."ProjectId") THEN
                         RAISE EXCEPTION 'Migration generated artifact must be a Procedure in the stated project';
                     END IF;
                     RETURN NEW;
@@ -199,6 +211,7 @@ namespace AeroLink.Infrastructure.Persistence.Migrations
             migrationBuilder.Sql("""
                 DROP TRIGGER IF EXISTS enforce_migration_source_integrity ON test_procedure_migration_sources;
                 DROP TRIGGER IF EXISTS refuse_migration_source_mutation ON test_procedure_migration_sources;
+                DROP TRIGGER IF EXISTS refuse_cleanup_evidence_mutation ON rollback_cleanup_failure_evidence;
                 DROP TRIGGER IF EXISTS enforce_provenance_event_kind ON baseline_execution_cutover_provenance;
                 DROP TRIGGER IF EXISTS refuse_baseline_provenance_mutation ON baseline_execution_cutover_provenance;
                 DROP FUNCTION IF EXISTS aerolink_enforce_migration_source_integrity();
