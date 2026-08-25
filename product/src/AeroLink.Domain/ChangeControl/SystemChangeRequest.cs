@@ -3,6 +3,7 @@ using System.Text;
 using System.Text.Json;
 using AeroLink.Domain.Common;
 using AeroLink.Domain.Hierarchy;
+using AeroLink.Domain.Requirements;
 
 namespace AeroLink.Domain.ChangeControl;
 
@@ -388,10 +389,15 @@ public sealed class SystemChangeRequest
 
     public ReviewCycle SubmitForReview(string actorId, IReadOnlyList<ApproverSelection> approvers,
         DateTimeOffset now, ReviewMode mode = ReviewMode.Sequential, ReviewWorkflowSpecification? workflow = null,
-        bool administratorAuthority = false, ILadderPolicy? ladderPolicy = null)
+        bool administratorAuthority = false, ILadderPolicy? ladderPolicy = null,
+        VerificationMethodPolicy? verificationPolicy = null)
     {
         EnsureAuthor(actorId, administratorAuthority);
         EnsureDraft();
+        // Before anything mutates. A refused submission must leave the package byte-identical — same
+        // snapshot contract version, same review cycles, same declared methods — because an author whose
+        // vocabulary check failed still has the draft they had a moment ago.
+        ValidateVerificationVocabulary(verificationPolicy, ladderPolicy);
         if (SnapshotContractVersion < CurrentSnapshotContractVersion && !_allowLegacyHistoricalSubmission)
             SnapshotContractVersion = CurrentSnapshotContractVersion;
         ValidateReadyForReview(ladderPolicy);
@@ -667,6 +673,55 @@ public sealed class SystemChangeRequest
         Audit("TargetReleaseChanged", actorId,
             $"Moved {DisplayNumber} from release {prior} to {targetReleaseId}: {reason.Trim()}"
             + (wasApproved ? " Returned to Draft; approvals do not carry into another build." : string.Empty), now);
+    }
+
+    /// <summary>
+    /// The #701 vocabulary boundary: no requirement crosses into review declaring a verification method the
+    /// project does not permit.
+    ///
+    /// Enforced here because this is the authoritative transition. Before it, a draft is a working record an
+    /// author is still writing and controlled editing deliberately tolerates half-finished fields; after it,
+    /// approvers sign the package, generated documents render the declared method verbatim, and auditors
+    /// filter on it. A value refused here is named rather than corrected: re-spelling "test" as "Test" would
+    /// be the product deciding two engineering terms mean the same thing and rewriting the author's
+    /// declaration on the way to a signature. Nothing about this method changes the draft.
+    ///
+    /// Which changes carry a method is answered by the effective ladder, not by naming levels here. A level
+    /// without <see cref="LevelCapabilities.HasVerification"/> — Interface today — has no verification
+    /// artifact at all and its changes carry the product's "Not applicable" sentinel; holding those to a
+    /// method vocabulary would demand a verification declaration from the one requirement kind that has
+    /// none. Retirements are exempt for the same reason they are exempt from needing a statement: nothing is
+    /// being declared, only withdrawn.
+    ///
+    /// A null <paramref name="verificationPolicy"/> means no project vocabulary reached this seam — seeders
+    /// and focused domain tests that construct aggregates directly. It disables the check rather than
+    /// substituting a default set, deliberately: a conventional fallback would be a second source of truth
+    /// for what a project permits, invisible to the configuration screen and to the reconciliation report.
+    /// The API always resolves the project's persisted vocabulary before submitting.
+    /// </summary>
+    private void ValidateVerificationVocabulary(VerificationMethodPolicy? verificationPolicy,
+        ILadderPolicy? ladderPolicy)
+    {
+        if (verificationPolicy is null) return;
+        var policy = ladderPolicy ?? LegacyLadderPolicy.Instance;
+        foreach (var change in _requirementChanges)
+        {
+            if (change.Kind == RequirementChangeKind.Retire) continue;
+            // A level the project ladder does not configure at all is not this rule's business:
+            // ValidateReadyForReview below names it in the terms the author needs. Asking a resolved policy
+            // for a capability it has no definition for would replace that message with a ladder-lookup one.
+            if (!policy.OrderedLevels.Contains(change.Level)) continue;
+            if (!policy.HasVerification(change.Level)) continue;
+            if (verificationPolicy.IsPermitted(change.VerificationMethod)) continue;
+            var identity = string.IsNullOrWhiteSpace(change.DisplayNumber)
+                ? $"A new {change.Level} requirement"
+                : change.DisplayNumber;
+            var declared = string.IsNullOrWhiteSpace(change.VerificationMethod)
+                ? "declares no verification method"
+                : $"declares the verification method '{change.VerificationMethod}', which is not";
+            throw new DomainException(
+                $"{identity} {declared} in this project's permitted vocabulary. Permitted verification methods: {verificationPolicy.DescribePermitted()}.");
+        }
     }
 
     private void ValidateReadyForReview(ILadderPolicy? ladderPolicy = null)

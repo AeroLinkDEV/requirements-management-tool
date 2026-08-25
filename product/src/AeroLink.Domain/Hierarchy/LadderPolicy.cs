@@ -219,6 +219,9 @@ public interface ILadderPolicy
     bool TryParseRequirementLevel(string? value, out RequirementLevel level);
     bool AcceptsChangeRequest(ChangeRequestType type, RequirementLevel level);
     bool IsDownstreamTarget(RequirementLevel level);
+    /// <summary>Whether a level declares a verification method at all; #701 enforces the project vocabulary
+    /// only where it does, so Interface and Customer keep their existing non-applicable semantics.</summary>
+    bool HasVerification(RequirementLevel level);
     bool HasCodeTraceability(RequirementLevel level);
 }
 
@@ -486,6 +489,7 @@ public sealed class LegacyLadderPolicy : ILadderPolicy, ILegacyLadderCompatibili
         return Relationships.Any(x => x.Child == level);
     }
 
+    public bool HasVerification(RequirementLevel level) => Definition(level).Has(LevelCapabilities.HasVerification);
     public bool HasCodeTraceability(RequirementLevel level) => Definition(level).Has(LevelCapabilities.HasCodeTraceability);
 
     private static DomainException Unknown<T>(T value) => new($"Unknown ladder policy value: {value}.");
@@ -673,6 +677,7 @@ public class ResolvedProjectLadderPolicy : ILadderPolicy
             && definition.ChangeRequest?.Type == type;
     }
     public bool IsDownstreamTarget(RequirementLevel level) => Definition(level) is not null && relationships.Any(x => x.Child == level);
+    public bool HasVerification(RequirementLevel level) => Definition(level).Has(LevelCapabilities.HasVerification);
     public bool HasCodeTraceability(RequirementLevel level) => Definition(level).Has(LevelCapabilities.HasCodeTraceability);
 }
 

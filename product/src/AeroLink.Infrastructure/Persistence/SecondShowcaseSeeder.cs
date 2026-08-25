@@ -164,6 +164,14 @@ public sealed class SecondShowcaseSeeder(
             await db.SaveChangesAsync(ct);
         }
 
+        // Recovery-shaped like the ladder above: the second showcase can be re-run against a Project that
+        // already carries a vocabulary, so presence is checked rather than assumed (#701).
+        if (!await db.ProjectVerificationVocabularies.AnyAsync(x => x.ProjectId == project.Id, ct))
+        {
+            db.ProjectVerificationVocabularies.Add(ProjectVerificationVocabulary.Founding(project.Id, now));
+            await db.SaveChangesAsync(ct);
+        }
+
         return (program.Id, project.Id, release.Id);
     }
 

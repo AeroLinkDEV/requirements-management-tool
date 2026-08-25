@@ -1,5 +1,6 @@
 using AeroLink.Domain.Hierarchy;
 using AeroLink.Domain.Programs;
+using AeroLink.Domain.Requirements;
 using Microsoft.EntityFrameworkCore;
 
 namespace AeroLink.Infrastructure.Persistence;
@@ -35,7 +36,7 @@ public sealed class ImportPracticeSeeder(AeroLinkDbContext db)
         var program = new ProgramRecord(ProjectName, ProgramCode);
         var project = new ProjectRecord(program.Id, ProjectName, "Imported baseline rehearsal");
         var ladder = LegacyDefaultProjectLadderFactory.Create(project.Id, DateTimeOffset.UtcNow);
-        db.AddRange(program, project, ladder);
+        db.AddRange(program, project, ladder, ProjectVerificationVocabulary.Founding(project.Id, DateTimeOffset.UtcNow));
         await db.SaveChangesAsync(ct);
         return project.Id;
     }

@@ -95,7 +95,12 @@ public static class WorkspaceEndpoints
                 var project = new ProjectRecord(program.Id, request.ProjectName, request.SoftwareProduct);
                 var release = new SoftwareRelease(project.Id, request.InitialRelease, request.InitialReleaseIsReleased);
                 var ladder = LegacyDefaultProjectLadderFactory.Create(project.Id, DateTimeOffset.UtcNow);
-                db.AddRange(program, project, release, ladder);
+                // A project is born carrying its verification-method vocabulary (#701), in the same unit of
+                // work as the project row. Authoring needs the permitted set from the first requirement
+                // onward, and a project that had to acquire one later would spend that window accepting the
+                // uncontrolled free text the issue exists to stop.
+                var vocabulary = ProjectVerificationVocabulary.Founding(project.Id, DateTimeOffset.UtcNow);
+                db.AddRange(program, project, release, ladder, vocabulary);
                 var actor = http.UserAccount(); db.ProgramMemberships.Add(new ProgramMembership(actor.Id, program.Id, ProgramRole.Administrator, actor.UserName, DateTimeOffset.UtcNow));
                 await db.SaveChangesAsync(ct);
                 // Every Project has its three test procedure documents from the moment it exists. The startup

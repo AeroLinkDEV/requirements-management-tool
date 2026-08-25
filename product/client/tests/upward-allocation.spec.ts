@@ -104,10 +104,25 @@ test('modifying an HLR hydrates its exact parent and preserves an engineer repla
   await requirementSearch.fill(existing.baseNumber)
   await page.locator('.proposalLookupResults button').filter({hasText:existing.displayNumber}).first().click()
 
-  const existingParent=page.locator('.controlledEditor .roleCloud button').filter({hasText:/SYSR-\d{6}\.\d{2}/}).first()
-  await expect(existingParent).toBeVisible()
-  await existingParent.click()
-  await expect(page.locator('.controlledEditor .roleCloud button').filter({hasText:/SYSR-\d{6}\.\d{2}/})).toHaveCount(0)
+  // Every current exact System parent is cleared, not just the first one.
+  //
+  // An HLR may legitimately be allocated to more than one System requirement, and a preceding journey can
+  // leave the one this journey selects carrying two. Removing `.first()` and then asserting none remain was
+  // an assumption about how many parents the fixture happened to have, so the journey failed on the arithmetic
+  // rather than on anything it is about. Counted down one removal at a time, waiting for the count to drop
+  // after each, so a slow re-render cannot make the next click land on a chip that has already gone.
+  const existingParents=page.locator('.controlledEditor .roleCloud button').filter({hasText:/SYSR-\d{6}\.\d{2}/})
+  // Waited on before it is counted: `count()` answers immediately, so asking before the hydrated parents have
+  // rendered reads zero and fails on the journey's own precondition rather than on anything it is testing.
+  await expect(existingParents.first()).toBeVisible()
+  let remainingParents=await existingParents.count()
+  expect(remainingParents,'the HLR being modified should carry at least one current exact upward allocation').toBeGreaterThan(0)
+  while(remainingParents>0){
+    await existingParents.first().click()
+    await expect(existingParents).toHaveCount(remainingParents-1)
+    remainingParents-=1
+  }
+  await expect(existingParents).toHaveCount(0)
 
   const upstreamSearch=page.getByLabel('Find upstream requirement 1')
   await upstreamSearch.fill(replacement.displayNumber.replace(/\.\d{2}$/,''))
