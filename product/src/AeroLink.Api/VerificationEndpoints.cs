@@ -859,10 +859,10 @@ public static class VerificationEndpoints
             // /api/test-procedures is a bounded legacy alias for the canonical software Case route.  Dormant
             // software Procedures are authorable/inspectable through their shared service but never enter the
             // Case execution/effectivity inventory (System Procedures remain visible here).
-            var dormantProcedureInventory = string.Equals(artifactKind, nameof(VerificationArtifactKind.Procedure), StringComparison.OrdinalIgnoreCase)
+            var explicitProcedureInventory = string.Equals(artifactKind, nameof(VerificationArtifactKind.Procedure), StringComparison.OrdinalIgnoreCase)
                 && string.Equals(artifactRoute, "procedures", StringComparison.OrdinalIgnoreCase);
-            source = dormantProcedureInventory
-                ? source.Where(x => x.Level != TestProcedureLevel.System && x.ArtifactKind == VerificationArtifactKind.Procedure)
+            source = explicitProcedureInventory
+                ? source.Where(x => x.ArtifactKind == VerificationArtifactKind.Procedure)
                 : source.Where(x => x.Level == TestProcedureLevel.System || x.ArtifactKind == VerificationArtifactKind.Case);
             if (string.Equals(artifactRoute, "cases", StringComparison.OrdinalIgnoreCase))
                 source = source.Where(x => x.Level == TestProcedureLevel.HighLevel || x.Level == TestProcedureLevel.LowLevel)

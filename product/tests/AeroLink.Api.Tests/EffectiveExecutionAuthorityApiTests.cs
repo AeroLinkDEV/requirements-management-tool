@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.Http.Json;
+using System.Text.Json;
 using AeroLink.Domain.Baselines;
 using AeroLink.Domain.ChangeControl;
 using AeroLink.Domain.Hierarchy;
@@ -62,6 +63,24 @@ public sealed class EffectiveExecutionAuthorityApiTests
             StringComparison.OrdinalIgnoreCase);
     }
 
+    [Fact]
+    public async Task System_candidate_inventory_accepts_the_authoritative_procedure_kind()
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var client = factory.CreateClient();
+        var seed = await SeedAsync(factory);
+        await LoginAsync(client, "execution.author");
+
+        using var response = await client.GetAsync(
+            $"/api/test-procedures?projectId={seed.ProjectId}&releaseId={seed.ReleaseId}" +
+            "&scope=System&state=Approved&artifactKind=Procedure&page=1&pageSize=25");
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var body = await response.Content.ReadFromJsonAsync<JsonElement>();
+        var item = Assert.Single(body.GetProperty("items").EnumerateArray());
+        Assert.Equal(seed.SystemRevisionId, item.GetProperty("revisionId").GetGuid());
+        Assert.Equal("Procedure", item.GetProperty("artifactKind").GetString());
+    }
+
     private static async Task<HttpResponseMessage> PostExecutionAsync(HttpClient client, Guid projectId,
         Guid buildId, Guid revisionId) =>
         await client.PostAsJsonAsync("/api/test-executions", new
@@ -87,7 +106,7 @@ public sealed class EffectiveExecutionAuthorityApiTests
         Assert.True(response.IsSuccessStatusCode, await response.Content.ReadAsStringAsync());
     }
 
-    private sealed record Seed(Guid ProjectId, Guid BuildId, Guid CaseRevisionId,
+    private sealed record Seed(Guid ProjectId, Guid ReleaseId, Guid BuildId, Guid CaseRevisionId,
         Guid SystemRevisionId, Guid SoftwareProcedureRevisionId);
 
     private static async Task<Seed> SeedAsync(AeroLinkApiFactory factory)
@@ -156,6 +175,7 @@ public sealed class EffectiveExecutionAuthorityApiTests
             "Execution authority build", "cm.test", now);
         db.Add(build);
         await db.SaveChangesAsync();
-        return new Seed(project.Id, build.Id, caseRevision.Id, systemRevision.Id, softwareRevision.Id);
+        return new Seed(project.Id, release.Id, build.Id, caseRevision.Id, systemRevision.Id,
+            softwareRevision.Id);
     }
 }
