@@ -263,6 +263,7 @@
       "coveredBy": [
         "AdministratorChangeRequestApiTests",
         "ApprovalConfigurationApiTests",
+        "AssurancePolicyApiTests",
         "AuthoredSectionTests",
         "AuthoringTracedImpactTests",
         "BaselineImportApiTests",
@@ -1728,7 +1729,9 @@
       "method": "POST",
       "path": "/api/release-campaigns",
       "file": "ReleaseCampaignEndpoints.cs",
-      "coveredBy": []
+      "coveredBy": [
+        "AssurancePolicyApiTests"
+      ]
     },
     {
       "method": "POST",
@@ -2301,6 +2304,14 @@
       "file": "ApprovalConfigurationEndpoints.cs",
       "coveredBy": [
         "ApprovalConfigurationApiTests"
+      ]
+    },
+    {
+      "method": "PUT",
+      "path": "/api/projects/{projectId:guid}/assurance-policy",
+      "file": "AssurancePolicyEndpoints.cs",
+      "coveredBy": [
+        "AssurancePolicyApiTests"
       ]
     },
     {

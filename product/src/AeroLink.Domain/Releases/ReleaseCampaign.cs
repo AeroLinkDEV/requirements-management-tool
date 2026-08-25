@@ -12,10 +12,12 @@ public sealed class ReleaseCampaign
     private readonly List<ReleaseCampaignEvent> _events = [];
     private readonly List<ReleaseApproval> _approvals = [];
     private ReleaseCampaign() { }
-    public ReleaseCampaign(Guid projectId, Guid releaseId, Guid baselineId, string name, string ownerId, DateTimeOffset now)
+    public ReleaseCampaign(Guid projectId, Guid releaseId, Guid baselineId, string name, string ownerId, DateTimeOffset now,
+        Guid? assurancePolicyVersionId = null)
     {
         if (string.IsNullOrWhiteSpace(name) || string.IsNullOrWhiteSpace(ownerId)) throw new DomainException("Campaign name and owner are required.");
         Id = Guid.NewGuid(); ProjectId = projectId; ReleaseId = releaseId; BaselineId = baselineId; Name = name.Trim(); OwnerId = ownerId.Trim(); State = ReleaseCampaignState.Planning; CreatedAt = now; UpdatedAt = now;
+        AssurancePolicyVersionId = assurancePolicyVersionId;
         Event("CampaignCreated", ownerId, $"Created release campaign {Name}.", now);
     }
     public Guid Id { get; private set; }
@@ -31,6 +33,16 @@ public sealed class ReleaseCampaign
     public DateTimeOffset UpdatedAt { get; private set; }
     public DateTimeOffset? ReleasedAt { get; private set; }
     public string? ReleaseHash { get; private set; }
+    /// <summary>
+    /// The assurance policy version this campaign began under, captured once at creation.
+    ///
+    /// This is what makes a policy change prospective. Readiness is evaluated against this version rather
+    /// than against whatever the project's policy says today, so relaxing a lever cannot retroactively make
+    /// an in-flight release look ready, and tightening one cannot retroactively make it look unready. Null on
+    /// every campaign that predates the feature, which resolves to the AeroLink recommendations — the rules
+    /// those campaigns were actually run under.
+    /// </summary>
+    public Guid? AssurancePolicyVersionId { get; private set; }
     public IReadOnlyCollection<ReleaseCampaignEvent> Events => _events.AsReadOnly();
     public IReadOnlyCollection<ReleaseApproval> Approvals => _approvals.AsReadOnly();
     public void StartVerification(string actorId, DateTimeOffset now)

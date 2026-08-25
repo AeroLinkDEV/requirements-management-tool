@@ -85,7 +85,6 @@
     "POST /api/quality/evidence-index",
     "POST /api/quality/objectives",
     "POST /api/quality/waivers",
-    "POST /api/release-campaigns",
     "POST /api/release-campaigns/{}/reconcile-lifecycle-links",
     "POST /api/release-campaigns/{}/release",
     "POST /api/release-campaigns/{}/review",

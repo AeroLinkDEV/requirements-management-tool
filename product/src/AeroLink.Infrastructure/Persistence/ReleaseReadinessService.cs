@@ -1,3 +1,4 @@
+using AeroLink.Domain.Assurance;
 using AeroLink.Domain.Baselines;
 using AeroLink.Domain.ChangeControl;
 using AeroLink.Domain.Hierarchy;
@@ -22,7 +23,8 @@ public sealed record ReadinessGate(
 public sealed record ReleaseReadiness(int Percent, bool ReadyForRelease, IReadOnlyList<ReadinessGate> Gates);
 
 public sealed class ReleaseReadinessService(AeroLinkDbContext db, ILadderPolicy? policy = null,
-    IProjectLadderPolicyResolver? policyResolver = null)
+    IProjectLadderPolicyResolver? policyResolver = null,
+    IProjectAssurancePolicyResolver? assuranceResolver = null)
 {
     private readonly ILadderPolicy fallbackPolicy = policy ?? LegacyLadderPolicy.Instance;
     public async Task<ReleaseReadiness> CalculateAsync(Guid campaignId, CancellationToken ct)
@@ -31,6 +33,14 @@ public sealed class ReleaseReadinessService(AeroLinkDbContext db, ILadderPolicy?
         var ladderPolicy = policyResolver is null
             ? fallbackPolicy
             : await policyResolver.ResolveAsync(campaign.ProjectId, ct);
+        // The campaign's own snapshot, never the project's current policy. A campaign that began under one
+        // policy is judged by that policy for its whole life, which is what makes a later policy change
+        // prospective rather than a re-interpretation of work already under way.
+        var assurance = assuranceResolver is null
+            ? ResolvedAssurancePolicy.Recommended
+            : campaign.AssurancePolicyVersionId is { } snapshotId
+                ? await assuranceResolver.ResolveVersionAsync(snapshotId, ct)
+                : ResolvedAssurancePolicy.Recommended;
         var configuredLevels = ladderPolicy.OrderedLevels.ToArray();
         var configuredDisciplines = configuredLevels
             .Where(level => ladderPolicy.Definition(level).Verification is not null)
@@ -127,8 +137,14 @@ public sealed class ReleaseReadinessService(AeroLinkDbContext db, ILadderPolicy?
         var problemWaivers = await db.ReadinessWaivers.AsNoTracking().Where(x => x.ProjectId == campaign.ProjectId
             && x.BlockerType == "ProblemReportReleaseBlocker").ToListAsync(ct);
         var waiverDecisionAt = DateTimeOffset.UtcNow;
-        var problemBlockers = allProblemBlockers.Where(report =>
-            !problemWaivers.Any(waiver => waiver.IsActiveFor(report, waiverDecisionAt))).ToList();
+        // A project may refuse waivers outright, which is stricter than the AeroLink recommendation and
+        // therefore needs no deviation. Refusing them here rather than at the waiver-creation endpoint is
+        // deliberate: an existing waiver stays on the record as the attributable decision somebody took, and
+        // simply stops suppressing its blocker.
+        var waiversAccepted = assurance.Value(AssurancePolicyLever.ProblemReportWaiverAcceptance)
+            == AssuranceLeverValue.WaiversAccepted;
+        var problemBlockers = allProblemBlockers.Where(report => !waiversAccepted
+            || !problemWaivers.Any(waiver => waiver.IsActiveFor(report, waiverDecisionAt))).ToList();
         // Every requirement this release introduced or modified raised a verification impact item when its
         // change request was approved. Each one carries an owed decision: a procedure that covers it, or a
         // recorded confirmation that no test is required. A release with no requirement changes raises none,
@@ -206,7 +222,11 @@ public sealed class ReleaseReadinessService(AeroLinkDbContext db, ILadderPolicy?
         var gates = new List<ReadinessGate>
         {
             new("change_control","Change requests integrated",!changeControlConfigured || (requests.Count > 0 && integrated == requests.Count),integrated,requests.Count,$"{requests.Count-integrated} non-deferred change request records remain outside the candidate baseline.","Approve and select every included change, or formally defer it."),
-            new("impact_disposition","Impact analysis dispositioned",!changeControlConfigured || (impacts.Count > 0 && disposed == impacts.Count),disposed,impacts.Count,$"{impacts.Count-disposed} impact findings remain pending.","Disposition requirement, trace, verification, and document impacts."),
+            assurance.Requires(AssurancePolicyLever.ChangeImpactDispositionBeforeRelease)
+                ? new("impact_disposition","Impact analysis dispositioned",!changeControlConfigured || (impacts.Count > 0 && disposed == impacts.Count),disposed,impacts.Count,$"{impacts.Count-disposed} impact findings remain pending.","Disposition requirement, trace, verification, and document impacts.")
+                : RelaxedByPolicy("impact_disposition", "Impact analysis dispositioned",
+                    AssurancePolicyLever.ChangeImpactDispositionBeforeRelease, assurance,
+                    $"{impacts.Count-disposed} impact finding(s) remain pending."),
             new("baseline","Requirement baseline materialized",baseline.State is CandidateBaselineState.Frozen or CandidateBaselineState.Released && baseline.RequirementsMaterializedAt is not null,baseline.RequirementsMaterializedAt is null?0:1,1,"The release needs an exact frozen and materialized requirement set.","Freeze the candidate and materialize its requirements."),
             new("verification_impact","Verification impact decided",impactDecided == verificationImpacts.Count,impactDecided,verificationImpacts.Count,undecided.Count==0?"Every new, modified, and orphaned requirement in this release has a recorded verification decision.":$"{undecided.Count} changed requirement(s) await a verification decision: {string.Join(", ",undecided.Take(3).Select(x=>x.SubjectDisplayNumber))}.","Assign each item to a test engineer, then record an approved verification artifact or a confirmation that no test is required."),
             new("test_change_reviews","Test change requests approved",
@@ -228,7 +248,13 @@ public sealed class ReleaseReadinessService(AeroLinkDbContext db, ILadderPolicy?
                         ? "Inspect the selected changes and materialized manifest; a releasable baseline must contain an effective requirement population."
                         : "Resolve orphan and suspect trace links.")
                 : WaitingForMaterializedBaseline("traceability", "Trace network complete"),
-            baselineMaterialized
+            !assurance.Requires(AssurancePolicyLever.RequirementCoverageBeforeRelease)
+                ? RelaxedByPolicy("coverage", "Requirement coverage complete",
+                    AssurancePolicyLever.RequirementCoverageBeforeRelease, assurance,
+                    baselineMaterialized
+                        ? $"{Math.Max(0, coverageMembers.Count - coveredIds.Count)} effective requirement revision(s) have no settled coverage and {unsatisfiedCaseProcedureCount} exact Case-to-Procedure obligation(s) remain unsatisfied."
+                        : "The requirement baseline is not materialized, so coverage has not been evaluated.")
+                : baselineMaterialized
                 ? new("coverage","Requirement coverage complete",(coverageMembers.Count == 0 || coveredIds.Count == coverageMembers.Count) && unsatisfiedCaseProcedureCount == 0,coveredIds.Count,coverageMembers.Count + unsatisfiedCaseProcedureCount,
                     coverageMembers.Count == 0
                         ? (unsatisfiedCaseProcedureCount == 0
@@ -263,7 +289,13 @@ public sealed class ReleaseReadinessService(AeroLinkDbContext db, ILadderPolicy?
                         ? "Choose the verification artifacts this build must run — those covering what changed, and any area worth re-exercising."
                         : "Record a determination for every verification artifact in the set. Testing beyond it continues after release.")
                 : WaitingForMaterializedBaseline("verification", "Selected test set has results"),
-            baselineMaterialized
+            !assurance.Requires(AssurancePolicyLever.TestEvidenceBeforeRelease)
+                ? RelaxedByPolicy("evidence", "Selected test set results carry evidence",
+                    AssurancePolicyLever.TestEvidenceBeforeRelease, assurance,
+                    baselineMaterialized
+                        ? $"{Math.Max(0, selectedRevisionIds.Count - selectedEvidenced)} result(s) in the selected test set lack checksummed evidence."
+                        : "The requirement baseline is not materialized, so the selected test set has not been evaluated.")
+                : baselineMaterialized
                 ? new("evidence","Selected test set results carry evidence",
                     selectedRevisionIds.Count == 0 ? nothingToTest : selectedEvidenced == selectedRevisionIds.Count,
                     selectedEvidenced,selectedRevisionIds.Count,
@@ -274,7 +306,14 @@ public sealed class ReleaseReadinessService(AeroLinkDbContext db, ILadderPolicy?
                         : $"{selectedRevisionIds.Count-selectedEvidenced} result(s) in the selected test set lack checksummed evidence.",
                     "Attach the evidence package for every result in the selected test set.")
                 : WaitingForMaterializedBaseline("evidence", "Selected test set results carry evidence"),
-            new("problem_reports","Problem-report blockers resolved",problemBlockers.Count==0,0,problemBlockers.Count,problemBlockers.Count==0?"No unwaived controlled problem reports block this release.":$"{problemBlockers.Count} unwaived problem report blocker(s) remain: {string.Join(", ",problemBlockers.Take(3).Select(x=>x.DisplayNumber))}.","Resolve, formally disposition, or record an attributable waiver for every release-blocking problem report."),
+            new("problem_reports","Problem-report blockers resolved",problemBlockers.Count==0,0,problemBlockers.Count,
+                problemBlockers.Count==0
+                    ? (waiversAccepted ? "No unwaived controlled problem reports block this release." : "No controlled problem reports block this release.")
+                    : $"{problemBlockers.Count} problem report blocker(s) remain: {string.Join(", ",problemBlockers.Take(3).Select(x=>x.DisplayNumber))}."
+                        + (waiversAccepted ? "" : " The project's assurance policy refuses readiness waivers, so an active waiver does not suppress its blocker."),
+                waiversAccepted
+                    ? "Resolve, formally disposition, or record an attributable waiver for every release-blocking problem report."
+                    : "Resolve or formally disposition every release-blocking problem report. This project's assurance policy does not accept readiness waivers."),
             new("documents","Controlled outputs generated",
                 configuredDocs.Select(x=>x.Type).Distinct().Count() == configuredDocumentTypes.Count
                 && configuredDocumentTypes.All(type => configuredDocs.Any(x => x.Type == type)),
@@ -285,6 +324,25 @@ public sealed class ReleaseReadinessService(AeroLinkDbContext db, ILadderPolicy?
         };
         var percent = (int)Math.Round(gates.Average(x => x.Total == 0 ? (x.Complete ? 100 : 0) : Math.Min(100, x.Completed * 100d / x.Total)));
         return new(percent, gates.All(x => x.Complete), gates);
+    }
+
+    /// <summary>
+    /// A gate the project's recorded assurance policy has deliberately relaxed.
+    ///
+    /// It reports complete, because the project's selection is what AeroLink enforces — but it says so in
+    /// those words and names the lever, rather than presenting the obligation as satisfied. What the gate
+    /// would have found is still reported, so a reader can see exactly what was let through.
+    /// </summary>
+    private static ReadinessGate RelaxedByPolicy(string code, string name, AssurancePolicyLever lever,
+        ResolvedAssurancePolicy assurance, string wouldHaveFound)
+    {
+        var definition = AssurancePolicyCatalogue.Definition(lever);
+        var selected = definition.Option(assurance.Value(lever)).Name;
+        return new(code, name, true, 0, 0,
+            $"Not required by this release's assurance policy snapshot: {definition.Name} is set to '{selected}'. {wouldHaveFound}",
+            "No action is owed at this gate. The approved deviation, its rationale and its approver are recorded under "
+            + "Project configuration → Assurance policy.",
+            "RelaxedByPolicy");
     }
 
     private static ReadinessGate WaitingForMaterializedBaseline(string code, string name) =>

@@ -1,3 +1,4 @@
+using AeroLink.Domain.Assurance;
 using AeroLink.Infrastructure.Notifications;
 using AeroLink.Domain.Contracts;
 using AeroLink.Infrastructure.Persistence;
@@ -14,6 +15,7 @@ public static class DependencyInjection
     public static IServiceCollection AddAeroLinkInfrastructure(this IServiceCollection services, IConfiguration configuration)
     {
         services.AddScoped<IProjectLadderPolicyResolver, EffectiveProjectLadderPolicyResolver>();
+        services.AddScoped<IProjectAssurancePolicyResolver, EffectiveProjectAssurancePolicyResolver>();
         services.AddScoped<ProjectLadderSealAuthority>();
         services.AddScoped<ProjectLadderUpgradeAuthority>();
         services.AddScoped<SoftwareProcedureExecutionCutoverAuthority>();
@@ -169,6 +171,7 @@ public static class DependencyInjection
         services.AddScoped<BuildTestSetService>();
         services.AddScoped<IdentityService>();
         services.AddScoped<ProjectLadderAuthoringService>();
+        services.AddScoped<ProjectAssurancePolicyService>();
         services.AddScoped<ProjectVerificationVocabularyService>();
         services.AddScoped<IdentitySeeder>();
         services.AddScoped<ExternalIdentityAdministrationService>();
