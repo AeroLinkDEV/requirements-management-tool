@@ -50,55 +50,68 @@ public sealed class LegacyControlledProcedureDocumentSnapshotTests
         // invariant was being violated. Product source is therefore scanned for those routes as well. Tests
         // may still use them to construct states the domain cannot express; product code may not.
         //
-        // This scan is a tripwire, not a proof. It matches the spellings this repository actually uses, and a
-        // determined rewrite can evade any textual check. It exists so the common accidents fail loudly; the
-        // invariant itself still rests on review. See the note at the reconstruction site, which states what
-        // is and is not covered rather than claiming the routes are closed.
+        // This scan is a tripwire, not a proof: a determined rewrite evades any textual check, and reflection
+        // and CurrentValues["State"] are deliberately out of scope. It exists so the likely accident — a
+        // backfill copy-pasted from the migration next door — fails loudly. The invariant itself rests on
+        // review. The note at the reconstruction site says the same thing; keep the two in agreement.
         var patterns = new[]
         {
             // EF bulk update, via either the DbSet property or Set<TestProcedureRevision>().
-            @"TestProcedureRevision[\s\S]{0,600}?SetProperty\s*\([^)]*\.State\b",
-            // Change-tracker / Entry write, whatever the entry variable is called.
-            @"(?:Entry\s*\(|Entries\s*<\s*TestProcedureRevision\s*>)[\s\S]{0,400}?Property\s*\([^)]*\.State\b[\s\S]{0,120}?CurrentValue\s*=",
-            // Raw SQL or a migration UPDATE assigning the column. The tempered SET..State span stops at
-            // WHERE so that a legitimate "SET SomethingElse ... WHERE State = ..." is not flagged.
-            @"UPDATE\s+""?test_procedure_revisions""?[\s\S]{0,400}?SET((?!WHERE)[\s\S]){0,300}?""?State""?\s*=",
+            @"TestProcedureRevision[\s\S]{0,2000}?SetProperty\s*\([^)]*\.State\b",
+            // Change-tracker / Entry write, whatever the entry variable is called, by lambda or by name.
+            @"(?:Entry\s*\(|Entries\s*<\s*TestProcedureRevision\s*>)[\s\S]{0,600}?(?:Property\s*\([^)]*(?:\.State\b|""State"")|CurrentValues\s*\[\s*""State""\s*\])[\s\S]{0,160}?=",
+            // Raw SQL or a migration UPDATE assigning the column, with or without schema qualification.
+            // The tempered SET..State span stops at WHERE so a legitimate
+            // SET "SomethingElse" = x ... WHERE "State" = y is not flagged.
+            @"UPDATE\s+(?:""?\w+""?\s*\.\s*)?""?test_procedure_revisions""?[\s\S]{0,400}?SET((?!WHERE)[\s\S]){0,300}?""?State""?\s*=",
         };
-        var sourceRoot = ProductSourceRoot();
-        var prefix = sourceRoot.TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
+        var scanRoot = ProductScanRoot();
+        var prefix = scanRoot.TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
         var offenders = new List<string>();
-        foreach (var file in Directory.EnumerateFiles(sourceRoot, "*.cs", SearchOption.AllDirectories))
+        var scanned = 0;
+        foreach (var file in Directory.EnumerateFiles(scanRoot, "*.cs", SearchOption.AllDirectories))
         {
-            // Scope the build-output filter to the path BELOW product/src: a clone living under any directory
-            // named bin or obj would otherwise skip every file and pass vacuously.
+            // Scope the build-output filter to the path BELOW product: a clone living under any directory
+            // named bin or obj would otherwise skip every file and pass vacuously. "tests" is excluded
+            // because test code may legitimately construct states the domain cannot express.
             var relative = file.StartsWith(prefix, StringComparison.OrdinalIgnoreCase) ? file[prefix.Length..] : file;
             var segments = relative.Split(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-            if (segments.Contains("bin") || segments.Contains("obj")) continue;
-            // C# escapes a quote inside a verbatim string by doubling it, so SQL embedded in a migration
-            // reads UPDATE ""test_procedure_revisions"" in the source text. Collapse that first, or the SQL
-            // pattern silently misses every migration — which is exactly where a legacy backfill would live.
-            var text = File.ReadAllText(file).Replace("\"\"", "\"");
+            if (segments.Contains("bin") || segments.Contains("obj") || segments.Contains("tests")) continue;
+            // Both ways C# embeds a quote in a string literal have to be collapsed before the SQL pattern
+            // can see the column name. A verbatim string doubles it (UPDATE ""test_procedure_revisions"");
+            // a regular string escapes it (UPDATE \"test_procedure_revisions\"). The escaped form is the one
+            // this repository overwhelmingly uses in migrations, so missing it would miss almost every site
+            // where a legacy state backfill would plausibly be written.
+            var text = File.ReadAllText(file).Replace("\\\"", "\"").Replace("\"\"", "\"");
+            scanned++;
             foreach (var pattern in patterns)
             {
-                if (!System.Text.RegularExpressions.Regex.IsMatch(text, pattern)) continue;
+                if (!System.Text.RegularExpressions.Regex.IsMatch(text, pattern,
+                        System.Text.RegularExpressions.RegexOptions.IgnoreCase)) continue;
                 offenders.Add(relative);
                 break;
             }
         }
+        // Guard against the scan silently inspecting nothing.
+        Assert.True(scanned > 100, $"Expected to scan the product source tree, but only saw {scanned} files.");
         Assert.Empty(offenders);
     }
 
-    /// <summary>Locates product/src by walking up from the test assembly, so the scan is path-independent.</summary>
-    private static string ProductSourceRoot()
+    /// <summary>
+    /// Locates product/ by walking up from the test assembly, so the scan is path-independent. The whole
+    /// product tree is scanned, not just src: AeroLink.Scale and AeroLink.DocumentConnector ship too and
+    /// reference AeroLinkDbContext. product/tests is skipped by the caller.
+    /// </summary>
+    private static string ProductScanRoot()
     {
         var directory = new DirectoryInfo(AppContext.BaseDirectory);
         while (directory is not null)
         {
-            var candidate = Path.Combine(directory.FullName, "product", "src");
-            if (Directory.Exists(candidate)) return candidate;
+            var candidate = Path.Combine(directory.FullName, "product");
+            if (Directory.Exists(Path.Combine(candidate, "src"))) return candidate;
             directory = directory.Parent;
         }
-        throw new InvalidOperationException("Could not locate product/src from the test assembly location.");
+        throw new InvalidOperationException("Could not locate the product tree from the test assembly location.");
     }
 
     [Fact]

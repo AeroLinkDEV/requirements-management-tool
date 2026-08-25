@@ -151,10 +151,11 @@ public static class ControlledProcedureDocumentSnapshotProjection
                 //
                 // LegacyControlledProcedureDocumentSnapshotTests
                 // .A_verification_revision_state_is_fixed_at_construction_so_CreatedAt_is_its_approval_time
-                // pins the domain surface by reflection and greps product source for the spellings of those
-                // three routes that this repository actually uses. That grep is a tripwire, not a proof: it
-                // will catch the likely accident and will not catch a determined rewrite, so the invariant is
-                // ultimately maintained by review rather than by the test.
+                // pins the domain surface by reflection and greps the product tree for common spellings of
+                // those three routes. That grep is a tripwire, not a proof. It is meant to catch the likely
+                // accident — a backfill copied from a neighbouring migration — and it will not catch a
+                // determined rewrite; reflection is out of scope entirely. The invariant is therefore
+                // maintained by review, with the test as a backstop rather than a guarantee.
                 //
                 // If that test fails, or a reviewer finds a write it cannot see, the answer is to give
                 // revisions a real approval timestamp and make this reconstruction fail closed against it —
