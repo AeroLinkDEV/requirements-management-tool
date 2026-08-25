@@ -15,7 +15,7 @@ import {
 } from "./IdentityCenter";
 import type { AuthUser } from "./IdentityCenter";
 import { PersonAvatar } from "./People";
-import { LadderCapability, ladderAllows, ladderHasAny } from "./projectLadder";
+import { LadderCapability, ladderAllows, ladderEnablesArtifactKind, ladderHasAny } from "./projectLadder";
 import type { LadderLevel, ProjectLadderProjection } from "./projectLadder";
 import ProjectsLanding from "./ProjectsLanding";
 import SoftwareBuildsLanding from "./SoftwareBuildsLanding";
@@ -620,7 +620,7 @@ function App() {
    if(view==="projectConfiguration"&&project)return <ProjectConfigurationCenter user={user} api={API} projectId={project.project.id} projectName={project.project.name} initialSection={projectConfigurationSection} onBackToBuilds={()=>{setView("builds");history.pushState({},"",openProjectBuildsPath)}} onOpenApprovalConfiguration={()=>showProjectConfiguration("approvals")} onActivated={value=>{setLadder({effectiveSteps:value.effectiveSteps.map(step=>({...step,catalogueEntry:step.catalogueEntry as LadderLevel}))});setLadderError("");}} onSignOut={signOut}/>;
    const navigation=<AppNavigation user={user} workspaces={workspaces} activeId={activeId} selectedProjectId={project?.project.id??selectedProjectId} selectedReleaseId={release?.id??selectedReleaseId} view={view} discipline={discipline} artifactKind={selectedArtifactKind} context={context} projectWide={view==="managedDocuments"} density={density} ladder={ladder} onNavigate={navigate} onSearch={()=>setPaletteOpen(true)} onDisplay={()=>setDisplayOpen(true)} onExitBuild={exitBuild} onSignOut={signOut}/>;
   const labels:Record<View,string>={projects:"Projects",builds:"Software Builds",baselineImports:"Imported Baselines",personnel:"Personnel",approvalConfiguration:"Approval Configuration",projectConfiguration:"Project Configuration",dashboard:"Command Center",createSystemScr:"New System SRCR",createSoftwareChange:"New Software Change Request",createInterfaceChange:"New Interface / ICD Change Request",scr:"Change Request",baselines:"Baselines",history:"Change Requests",requirements:"Requirements Explorer",verification:"Verification",testingCoverage:"Test Coverage",testChangeRequests:"Change Requests",testChangeRequest:"Test Change Request",createTestChangeRequest:"New Test Change Request",procedureExplorer:"Test Procedure Explorer",testResults:"Test Results",documents:"Generated Documents",managedDocuments:"Documentation Center",code:"Code",problemReports:"Problem Reports",lifecycle:"Digital Thread",release:"Release Readiness",releaseImpact:"Change Impact Review",releaseDecision:"Release Evidence & Decision",releaseOperations:"Release Operations",planning:"Product Versions",mywork:"My Work",admin:"Administration",enterprise:"System Operations",integrations:"Integration Command Center",reviewWorkflows:"Review Workflows",artifact:"Artifact",notFound:"Not Found"};
-  const scopedLabel=view==="history"?`${discipline==="software"?"Software":"System"} ${labels[view]}`:view==="scr"?`${discipline==="software"?"Software":"System"} ${labels[view]}`:view==="requirements"?`${discipline==="software"?"Software":"System"} ${labels[view]}`:view==="verification"?`${discipline==="softwareTest"?"Software":"System"} Verification`:view==="procedureExplorer"?`${discipline==="softwareTest"?"Software Test Case":"System Test Procedure"} Explorer`:labels[view];
+  const scopedLabel=view==="history"?`${discipline==="software"?"Software":"System"} ${labels[view]}`:view==="scr"?`${discipline==="software"?"Software":"System"} ${labels[view]}`:view==="requirements"?`${discipline==="software"?"Software":"System"} ${labels[view]}`:view==="verification"?`${discipline==="softwareTest"?"Software":"System"} Verification`:view==="procedureExplorer"?`${discipline==="softwareTest"?"Software Test Case/Procedure":"System Test Procedure"} Explorer`:labels[view];
   const copyLink=async()=>{try{await navigator.clipboard.writeText(location.href);setToast('Link copied to clipboard')}catch{setToast('This browser blocked clipboard access')}};
   const contextBar=<div className="contextBar"><nav aria-label="Breadcrumb"><span title={active?.program.name}>{active?.program.name}</span><b aria-hidden="true">›</b><span title={project?.project.name}>{project?.project.name}</span><b aria-hidden="true">›</b>{view!=="managedDocuments"&&<><span>Build {release?.version}</span><b aria-hidden="true">›</b></>}<strong>{scopedLabel}</strong></nav><div className="contextActions"><span className="contextReleaseState">{view==="managedDocuments"?"Project-wide":release?.isReleased?"Released · read-only":"In work"}</span><button aria-label="Copy link to this page" onClick={copyLink}>Copy link</button></div></div>;
    const palette=context?<CommandPalette api={API} context={context} ladder={ladder} open={paletteOpen} onClose={()=>setPaletteOpen(false)} onNavigate={navigate}/>:null;
@@ -641,6 +641,23 @@ function App() {
      if (scope === "system" || scope === "systemTest") return ladderAllows(ladder, "System", capability);
      return selectedLevel ? ladderAllows(ladder, selectedLevel, capability) : ladderHasAny(ladder, ["HighLevel", "LowLevel"], capability);
    };
+   const exactVerificationAllowed = (scope: "systemTest" | "softwareTest") => {
+     if (scope === "systemTest")
+       return ladderAllows(ladder, "System", LadderCapability.Verification)
+         && ladderEnablesArtifactKind(ladder, "System", "Procedure");
+     if (!selectedArtifactKind)
+       return ["HighLevel", "LowLevel"].some(level => ladderAllows(ladder, level as LadderLevel, LadderCapability.Verification)
+         && (ladderEnablesArtifactKind(ladder, level as LadderLevel, "Case")
+           || ladderEnablesArtifactKind(ladder, level as LadderLevel, "Procedure")));
+     if (selectedArtifactKind.toLowerCase() === "case" || selectedArtifactKind.toLowerCase() === "procedure")
+       return ["HighLevel", "LowLevel"].some(level => ladderAllows(ladder, level as LadderLevel, LadderCapability.Verification)
+         && ladderEnablesArtifactKind(ladder, level as LadderLevel, selectedArtifactKind));
+     const level = verificationArtifactLevel(selectedArtifactKind);
+     if (!level || level === "System") return false;
+     const kind = selectedArtifactKind.toLowerCase().includes("procedure") ? "Procedure" : "Case";
+     return ladderAllows(ladder, level, LadderCapability.Verification)
+       && ladderEnablesArtifactKind(ladder, level, kind);
+   };
    const viewAllowed = !ladder || (
      view === "history" || view === "scr" ? scopedLevelAllowed(discipline, LadderCapability.ChangeControl) :
      view === "requirements" ? scopedLevelAllowed(discipline) :
@@ -648,7 +665,8 @@ function App() {
      view === "createSoftwareChange" ? scopedLevelAllowed("software", LadderCapability.ChangeControl) :
      view === "createInterfaceChange" ? ladderAllows(ladder, "Interface", LadderCapability.ChangeControl) :
      ["verification", "testingCoverage", "testChangeRequests", "testChangeRequest", "createTestChangeRequest", "procedureExplorer", "testResults"].includes(view)
-       ? scopedLevelAllowed(discipline, LadderCapability.Verification) :
+       ? scopedLevelAllowed(discipline, LadderCapability.Verification)
+         && (discipline === "softwareTest" || discipline === "systemTest" ? exactVerificationAllowed(discipline) : true) :
      view === "documents" ? scopedLevelAllowed(discipline, discipline === "systemTest" || discipline === "softwareTest" ? LadderCapability.Verification : LadderCapability.RequirementsDocument) :
      view === "code" ? ladderHasAny(ladder, ["System", "HighLevel", "LowLevel"], LadderCapability.CodeTraceability) : true
    );

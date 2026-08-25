@@ -2214,6 +2214,7 @@
       "path": "/api/workspaces",
       "file": "WorkspaceEndpoints.cs",
       "coveredBy": [
+        "ProcedureDiscussionApiTests",
         "SecurityHardeningTests",
         "TestProcedureDocumentApiTests",
         "VerificationVocabularyApiTests"

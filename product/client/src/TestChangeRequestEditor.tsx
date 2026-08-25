@@ -108,6 +108,7 @@ export default function TestChangeRequestEditor({
 }) {
   const label = labelFor(discipline)
   const procedurePackage = discipline !== 'System' && isVerificationProcedureKind(artifactKind)
+  const procedureVocabulary = discipline === 'System' || procedurePackage
   const level = levelFor(discipline)
   const acronym = testChangeRequestAcronym(level, procedurePackage ? 'Procedure' : 'Case')
   const artifactWord = verificationArtifactWord(level, procedurePackage ? 'Procedure' : 'Case')
@@ -267,7 +268,7 @@ export default function TestChangeRequestEditor({
       <header className="editorHeading">
         <div>
           <p className="eyebrow">VERIFICATION CHANGE CONTROL / NEW {acronym}</p>
-          <h1>Create {label} Test Change Request</h1>
+          <h1>Create {label} Test {procedureVocabulary ? 'Procedure' : 'Case'} Change Request</h1>
           <p>Build the engineering case and name the {artifactWord} work for Build {releaseVersion}.</p>
         </div>
         <span className="draftChip">DRAFT</span>
@@ -355,8 +356,9 @@ export default function TestChangeRequestEditor({
 
           {!hasDriver && (
             <p className="tcrDriverHint">
-              Name at least one driver — an approved {label} change request above, or a Problem Report. A
-              package has to say what concluded the test work was required.
+              {procedurePackage
+                ? `Select exactly one eligible ${label} Case origin above. A Procedure package must carry the Case change or resolved Case assessment that required this work.`
+                : `Name at least one driver — an approved ${label} change request above, or a Problem Report. A package has to say what concluded the test work was required.`}
             </p>
           )}
         </section>

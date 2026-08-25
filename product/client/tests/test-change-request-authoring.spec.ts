@@ -81,7 +81,7 @@ test('an engineer raises a System test change request with its case from the Cha
   // has always been a page.
   await page.getByRole('button', { name: '+ New System Test Procedure Change Request' }).click()
   const editor = page.locator('[data-tcr-editor]')
-  await expect(page.getByRole('heading', { name: 'Create System Test Change Request', level: 1 })).toBeVisible({ timeout: 30_000 })
+  await expect(page.getByRole('heading', { name: 'Create System Test Procedure Change Request', level: 1 })).toBeVisible({ timeout: 30_000 })
   await expect(page).toHaveURL(/\/system-verification\/change-requests\/new$/)
   // The same two numbered stages the requirements editor shows. Addressed as headings, because each stage
   // name appears twice on the page — once in the progress rail and once on the card it points at.

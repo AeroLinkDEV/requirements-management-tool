@@ -1840,6 +1840,19 @@ public static class VerificationImpactEndpoints
             // picker never offers a historical or cross-level origin that the server will reject.
             if (artifactKind == VerificationArtifactKind.Procedure && discipline != TestChangeReviewDiscipline.System)
             {
+                try
+                {
+                    _ = ladderPolicy.VerificationArtifact(new VerificationArtifactKey(
+                        VerificationArtifactProfile.ToNeutral(discipline), VerificationArtifactKind.Procedure));
+                }
+                catch (DomainException)
+                {
+                    return Results.BadRequest(new
+                    {
+                        error = "The selected Procedure artifact is not enabled by the active project profile.",
+                        code = "verification_artifact_disabled"
+                    });
+                }
                 var consumedOrigins = db.TestChangeReviews.AsNoTracking()
                     .Where(x => x.ProjectId == release.ProjectId && x.ReleaseId == releaseId
                         && x.Discipline == discipline && x.ArtifactKind == VerificationArtifactKind.Procedure

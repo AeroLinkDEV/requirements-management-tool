@@ -374,10 +374,10 @@ test('Case to allocated Procedure execution chain drives release readiness', asy
     'HLRTest cases', 'HLRTest procedures', 'LLRTest cases', 'LLRTest procedures',
   ])
   for (const [name, path, cta, heading] of [
-    ['HLR Test cases', '/software-verification/hlr/change-requests', '+ New HLR Test Case Change Request', 'Create HLR Test Change Request'],
-    ['HLR Test procedures', '/software-verification/hlr/change-requests?kind=Procedure', '+ New HLR Test Procedure Change Request', 'Create HLR Test Change Request'],
-    ['LLR Test cases', '/software-verification/llr/change-requests', '+ New LLR Test Case Change Request', 'Create LLR Test Change Request'],
-    ['LLR Test procedures', '/software-verification/llr/change-requests?kind=Procedure', '+ New LLR Test Procedure Change Request', 'Create LLR Test Change Request'],
+    ['HLR Test cases', '/software-verification/hlr/change-requests', '+ New HLR Test Case Change Request', 'Create HLR Test Case Change Request'],
+    ['HLR Test procedures', '/software-verification/hlr/change-requests?kind=Procedure', '+ New HLR Test Procedure Change Request', 'Create HLR Test Procedure Change Request'],
+    ['LLR Test cases', '/software-verification/llr/change-requests', '+ New LLR Test Case Change Request', 'Create LLR Test Case Change Request'],
+    ['LLR Test procedures', '/software-verification/llr/change-requests?kind=Procedure', '+ New LLR Test Procedure Change Request', 'Create LLR Test Procedure Change Request'],
   ] as const) {
     await page.getByRole('tab', { name }).click()
     await expect(page).toHaveURL(new RegExp(`${path.replace(/[?]/g, '\\?')}$`))
@@ -392,7 +392,7 @@ test('Case to allocated Procedure execution chain drives release readiness', asy
     await expect(page.getByRole('tab', { name })).toHaveAttribute('aria-selected', 'true')
   }
   await page.goForward()
-  await expect(page.getByRole('heading', { name: /Create (HLR|LLR) Test Change Request/, level: 1 })).toBeVisible()
+  await expect(page.getByRole('heading', { name: /Create (HLR|LLR) Test (Case|Procedure) Change Request/, level: 1 })).toBeVisible()
   await page.goto(`${root}/software-verification/hlr/change-requests`)
   // Exercise all four shared-editor contracts against the activated fixture. The package mutation itself is
   // already proven above for the real HLR Case and HLR Procedure packages; these isolated UI submissions
@@ -416,7 +416,7 @@ test('Case to allocated Procedure execution chain drives release readiness', asy
   for (const [level, kind] of [['hlr', 'Case'], ['hlr', 'Procedure'], ['llr', 'Case'], ['llr', 'Procedure']] as const) {
     const procedureKind = kind === 'Procedure'
     await page.goto(`${root}/software-verification/${level}/change-requests/new${procedureKind ? '?kind=Procedure' : ''}`)
-    await expect(page.getByRole('heading', { name: `Create ${level === 'hlr' ? 'HLR' : 'LLR'} Test Change Request`, level: 1 })).toBeVisible()
+    await expect(page.getByRole('heading', { name: `Create ${level === 'hlr' ? 'HLR' : 'LLR'} Test ${kind} Change Request`, level: 1 })).toBeVisible()
     const source = page.locator('label').filter({ hasText: procedureKind ? 'Exact Case change origin' : 'Approved Case change source' }).first()
     await expect(source).toBeVisible()
     await source.locator('input').check()
@@ -442,8 +442,12 @@ test('Case to allocated Procedure execution chain drives release readiness', asy
   await page.goto(`${root}/software-verification/test-artifacts`)
   await expect(page.getByRole('heading', { name: 'Software Test Case/Procedure Explorer', level: 1 })).toBeVisible({ timeout: 30_000 })
   await expect(page.getByLabel('Artifact filter')).toHaveValue('all')
-  await expect(page.locator('.procedureRow').filter({ hasText: /Case/ })).toHaveCount(1, { timeout: 30_000 })
-  await expect(page.locator('.procedureRow').filter({ hasText: /Procedure/ })).toHaveCount(1, { timeout: 30_000 })
+  const caseExplorerRow = page.locator('.procedureRow').filter({ hasText: /Case/ })
+  const procedureExplorerRow = page.locator('.procedureRow').filter({ hasText: /Procedure/ })
+  await expect(caseExplorerRow).toHaveCount(1, { timeout: 30_000 })
+  await expect(procedureExplorerRow).toHaveCount(1, { timeout: 30_000 })
+  await expect(caseExplorerRow.locator('span').nth(2)).toHaveText('1')
+  await expect(procedureExplorerRow.locator('span').nth(2)).toHaveText('1')
   for (const documentNumber of ['HLRTD', 'HLRTPD', 'LLRTD', 'LLRTPD'])
     await expect(page.locator(`[data-document^="${documentNumber}-"]`)).toBeVisible()
   await page.getByLabel('Artifact filter').selectOption('Procedure')

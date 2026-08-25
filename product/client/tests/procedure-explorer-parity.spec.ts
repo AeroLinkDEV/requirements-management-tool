@@ -14,6 +14,7 @@ const openExplorer = async (page: import('@playwright/test').Page, branch: strin
   const root = new URL(page.url()).pathname.replace(/\/[^/]*$/, '')
   await page.goto(new URL(`${root}/${branch}/cases`, page.url()).toString(), { waitUntil: 'load' })
   await expect(page.getByRole('heading', { name: 'Software Test Case/Procedure Explorer', level: 1 })).toBeVisible({ timeout: 30_000 })
+  await expect(page.getByLabel('Artifact filter')).toHaveValue('Case')
   return root
 }
 
@@ -53,7 +54,7 @@ test('the Explorer groups Cases by the document they are written into', async ({
   await expect(rail.locator('[data-document]')).toHaveCount(2, { timeout: 30_000 })
   await expect(rail.locator('[data-document^="HLRTD-"]')).toHaveCount(1)
   await expect(rail.locator('[data-document^="LLRTD-"]')).toHaveCount(1)
-  await expect(rail.getByRole('button', { name: /All cases/ })).toBeVisible()
+  await expect(rail.getByRole('button', { name: /All (test )?cases/i })).toBeVisible()
 })
 
 test('a Case-only profile does not present disabled software Procedure documents', async ({ page }) => {
@@ -63,14 +64,69 @@ test('a Case-only profile does not present disabled software Procedure documents
   const root = new URL(page.url()).pathname.replace(/\/[^/]*$/, '')
   await page.goto(new URL(`${root}/software-verification/cases?artifactKind=Procedure`, page.url()).toString(),
     { waitUntil: 'load' })
-  await expect(page.getByRole('heading', { name: 'Software Procedure Explorer', level: 1 }))
+  await expect(page.getByRole('heading', { name: 'Software Test Case/Procedure Explorer', level: 1 }))
     .toBeVisible({ timeout: 30_000 })
+  await expect(page.getByLabel('Artifact filter')).toHaveValue('Case')
 
   // Historical Procedure rows do not override the Case-only effective profile, which owns no Procedure register
   // or generated-document action. Showing HLRTPD/LLRTPD here would assert activation that has not happened.
   await expect(page.getByRole('navigation', { name: 'test procedure documents' })).toHaveCount(0)
   await expect(page.locator('.documentOutputs')).toHaveCount(0)
   await expect(page.getByText(/HLRTPD|LLRTPD/)).toHaveCount(0)
+})
+
+test('a Case-only profile refuses a direct disabled Procedure change route but keeps Case routes usable', async ({ page }) => {
+  test.setTimeout(180_000)
+  await page.route('**/api/projects/*/configuration', async route => {
+    const response = await route.fetch()
+    const configuration = await response.json()
+    configuration.effectiveSteps = configuration.effectiveSteps.map((step: { catalogueEntry: string }) => ({
+      ...step,
+      enabledArtifactKinds: step.catalogueEntry === 'System' ? ['Procedure'] : ['Case'],
+    }))
+    await route.fulfill({ response, json: configuration })
+  })
+  await login(page)
+  const root = new URL(page.url()).pathname.replace(/\/[^/]*$/, '')
+  await page.goto(new URL(`${root}/software-verification/hlr/change-requests?kind=Procedure`, page.url()).toString(), { waitUntil: 'load' })
+  await expect(page.getByRole('heading', { name: 'Workspace unavailable', level: 1 })).toBeVisible({ timeout: 30_000 })
+  await page.goto(new URL(`${root}/software-verification/hlr/change-requests`, page.url()).toString(), { waitUntil: 'load' })
+  await expect(page.getByRole('heading', { name: 'Software Test Change Requests', level: 1 })).toBeVisible({ timeout: 30_000 })
+})
+
+test('saved Explorer views apply legacy Case, explicit all, and explicit Procedure kinds', async ({ page }) => {
+  test.setTimeout(180_000)
+  await page.route('**/api/projects/*/configuration', async route => {
+    const response = await route.fetch()
+    const configuration = await response.json()
+    configuration.effectiveSteps = configuration.effectiveSteps.map((step: { catalogueEntry: string }) => ({
+      ...step,
+      enabledArtifactKinds: step.catalogueEntry === 'System' ? ['Procedure'] : ['Case', 'Procedure'],
+    }))
+    await route.fulfill({ response, json: configuration })
+  })
+  await page.route('**/api/verification-artifacts?*', async route => {
+    const response = await route.fetch()
+    const body = await response.json()
+    body.views = [
+      { id: 'legacy-case-view', name: 'Legacy cases', queryJson: '{"level":"Software"}', columnsJson: '[]', isShared: false, owned: false },
+      { id: 'all-artifacts-view', name: 'All artifacts', queryJson: '{"artifactKind":"all","level":"Software"}', columnsJson: '[]', isShared: false, owned: false },
+      { id: 'procedure-view', name: 'Procedures', queryJson: '{"artifactKind":"Procedure","level":"Software"}', columnsJson: '[]', isShared: false, owned: false },
+    ]
+    await route.fulfill({ response, json: body })
+  })
+  await login(page)
+  const root = new URL(page.url()).pathname.replace(/\/[^/]*$/, '')
+  await page.goto(new URL(`${root}/software-verification/test-artifacts`, page.url()).toString(), { waitUntil: 'load' })
+  await expect(page.getByRole('heading', { name: 'Software Test Case/Procedure Explorer', level: 1 })).toBeVisible({ timeout: 30_000 })
+  const views = page.getByRole('region', { name: 'Saved views' })
+  await views.locator('summary').click()
+  await views.locator('[data-saved-view="Legacy cases"]').click()
+  await expect(page.getByLabel('Artifact filter')).toHaveValue('Case')
+  await views.locator('[data-saved-view="All artifacts"]').click()
+  await expect(page.getByLabel('Artifact filter')).toHaveValue('all')
+  await views.locator('[data-saved-view="Procedures"]').click()
+  await expect(page.getByLabel('Artifact filter')).toHaveValue('Procedure')
 })
 
 test('a Procedure-enabled profile adds distinct HLRTPD and LLRTPD actions in the shared Document Center', async ({ page }) => {

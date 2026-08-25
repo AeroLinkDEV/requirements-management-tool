@@ -39,6 +39,15 @@ test('a package opens on its own page, not in a drawer', async ({ page }) => {
 test('a seeded software Procedure package uses the shared shell, exact origin, workflow, and Procedure library', async ({ page }) => {
   test.setTimeout(120_000)
   await page.setViewportSize({ width: 1600, height: 900 })
+  await page.route('**/api/projects/*/configuration', async route => {
+    const response = await route.fetch()
+    const configuration = await response.json()
+    configuration.effectiveSteps = configuration.effectiveSteps.map((step: { catalogueEntry: string }) => ({
+      ...step,
+      enabledArtifactKinds: step.catalogueEntry === 'System' ? ['Procedure'] : ['Case', 'Procedure'],
+    }))
+    await route.fulfill({ response, json: configuration })
+  })
   await login(page)
   const current = new URL(page.url())
   const parts = current.pathname.split('/').filter(Boolean)
@@ -139,7 +148,7 @@ test('a seeded software Procedure package uses the shared shell, exact origin, w
   await page.goto(current.origin + root + '/software-verification/llr/change-requests?kind=Procedure', { waitUntil: 'load' })
   await expect(page.getByRole('heading', { name: 'Software Procedure Change Requests', level: 1 })).toBeVisible()
   await page.goto(current.origin + root + '/software-verification/llr/change-requests/new?kind=Procedure', { waitUntil: 'load' })
-  await expect(page.getByRole('heading', { name: 'Create LLR Test Change Request', level: 1 })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Create LLR Test Procedure Change Request', level: 1 })).toBeVisible()
   await expect(page.getByText('Eligible LLR Case origins for this Procedure package')).toBeVisible()
   await page.locator('label').filter({ hasText: 'LLRTC-000738.01' }).getByRole('radio').check()
   const editor = page.locator('[data-tcr-editor]')
