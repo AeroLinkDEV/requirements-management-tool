@@ -1,11 +1,11 @@
 {
   "schemaVersion": "aerolink-api-test-intent/v2",
   "totals": {
-    "tests": 583,
-    "cases": 641,
+    "tests": 586,
+    "cases": 644,
     "classes": 101,
-    "hostedTests": 570,
-    "hostedCases": 619,
+    "hostedTests": 573,
+    "hostedCases": 622,
     "nonHostedTests": 8,
     "nonHostedCases": 17,
     "unknownHostTests": 5,
@@ -21,8 +21,8 @@
     "http-boundary": {
       "label": "HTTP boundary: route, status, JSON shape",
       "level": "API (must stay hosted)",
-      "tests": 358,
-      "cases": 392,
+      "tests": 361,
+      "cases": 395,
       "unknownCases": 0,
       "classes": 83
     },
@@ -4813,6 +4813,40 @@
     },
     {
       "cls": "ProblemReportCheckoutApiTests",
+      "test": "A_project_member_who_does_not_own_the_report_can_correct_it_in_Verifying",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client"
+      ],
+      "sourceLines": {
+        "start": 314,
+        "end": 347
+      }
+    },
+    {
+      "cls": "ProblemReportCheckoutApiTests",
+      "test": "A_second_member_is_refused_while_somebody_else_holds_the_lease",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client"
+      ],
+      "sourceLines": {
+        "start": 353,
+        "end": 382
+      }
+    },
+    {
+      "cls": "ProblemReportCheckoutApiTests",
       "test": "An_open_report_is_checked_out_edited_and_checked_in_like_every_other_controlled_record",
       "kind": "Fact",
       "intent": "http-boundary",
@@ -4860,6 +4894,23 @@
       "sourceLines": {
         "start": 226,
         "end": 265
+      }
+    },
+    {
+      "cls": "ProblemReportCheckoutApiTests",
+      "test": "Only_Software_Quality_is_offered_the_revive_on_a_rejected_report",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client"
+      ],
+      "sourceLines": {
+        "start": 388,
+        "end": 427
       }
     },
     {

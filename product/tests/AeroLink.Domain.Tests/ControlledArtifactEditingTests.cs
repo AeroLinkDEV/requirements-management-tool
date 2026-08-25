@@ -77,4 +77,22 @@ public sealed class ControlledArtifactEditingTests
         Assert.False(ControlledArtifactEditPolicies.TryResolve("TestProcedureRevision", out _));
         Assert.Throws<DomainException>(() => ControlledArtifactEditPolicies.Resolve("TestProcedure"));
     }
+
+    /// <summary>
+    /// The Problem Report is the only family a Project member may edit without an engineering role, and
+    /// this is the guard that it stays the only one. Both the checkout endpoint and the check-in engine
+    /// read this flag, so a second <c>false</c> added here would open that record to anybody with read
+    /// access to the Project — the correct answer for a Problem Report, which the whole project works on
+    /// together, and the wrong one for a change request, a specification or a baseline.
+    /// </summary>
+    [Fact]
+    public void Only_the_Problem_Report_may_be_edited_without_an_engineering_role()
+    {
+        var ungoverned = ControlledArtifactEditPolicies.All
+            .Where(policy => !policy.RequiresEngineeringRole)
+            .Select(policy => policy.Family)
+            .ToArray();
+
+        Assert.Equal([ControlledArtifactFamily.ProblemReport], ungoverned);
+    }
 }

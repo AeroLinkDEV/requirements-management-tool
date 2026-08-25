@@ -115,7 +115,7 @@ public static class ControlledEditingEndpoints
         if (artifact.GoverningAuthorId is not null && !actor.IsAdministrator &&
             !string.Equals(artifact.GoverningAuthorId, actor.UserName, StringComparison.OrdinalIgnoreCase))
             return Results.Forbid();
-        if (!await http.HasProjectRoleAsync(db, identity, artifact.ProjectId, ct,
+        if (policy.RequiresEngineeringRole && !await http.HasProjectRoleAsync(db, identity, artifact.ProjectId, ct,
                 ProgramRole.Engineer, ProgramRole.TestEngineer, ProgramRole.ConfigurationManager, ProgramRole.ProgramManager))
             return Results.Forbid();
         if (!policy.IsEditableState(artifact.State))
@@ -407,16 +407,22 @@ public static class ControlledEditingEndpoints
             case ControlledArtifactFamily.ProblemReport:
             {
                 var item = await db.ProblemReports.AsNoTracking().SingleOrDefaultAsync(x => x.Id == artifactId, ct);
-                // The responsible engineer governs the record, so a checkout is refused up front to anybody
-                // whose check-in the aggregate would refuse anyway. Offering a lease that cannot be
-                // completed is worse than refusing it.
+                // Deliberately ungoverned, unlike every other family here. A Problem Report is not one
+                // engineer's document: it is the record a project works on together, and the person who
+                // can correct it is rarely the person it happens to be assigned to. Naming the responsible
+                // engineer as its governing author refused a checkout up front to everybody else, so a
+                // report in Verifying offered no way in to the tester who found the mistake in it.
+                //
+                // Project access is the whole requirement now. The exclusive lease still makes it one
+                // person at a time, and every check-in names its actor in the ProblemReportRevision chain
+                // with a full snapshot and hash — so widening who may edit widens who appears in the
+                // record rather than weakening it.
                 //
                 // No audit aggregate: AuditEvent.AggregateId is a foreign key to a change request, and a
-                // Problem Report's controlled history is its own ProblemReportRevision chain, which the
-                // adapter writes on check-in.
+                // Problem Report's controlled history is that same revision chain, which the adapter
+                // writes on check-in.
                 return item is null ? null : new(item.ProjectId, item.State.ToString(), null,
-                    ProblemReportControlledEditingAdapter.Snapshot(item), "ProblemReport",
-                    GoverningAuthorId: item.ResponsibleEngineerId);
+                    ProblemReportControlledEditingAdapter.Snapshot(item), "ProblemReport");
             }
             case ControlledArtifactFamily.ConfigurationChangeSet:
             {

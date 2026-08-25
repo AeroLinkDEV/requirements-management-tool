@@ -25,3 +25,7 @@
 .prCheckoutFoot .quiet{padding:10px 13px;border:1px solid #cbd8e5;border-radius:8px;background:#fff;color:#42607d;font-weight:700}
 .prCheckoutFoot .primaryAction{width:auto;margin-top:0}
 .prCheckoutState{position:relative;width:min(520px,100%);padding:29px;border-radius:16px;background:#fff;box-shadow:0 20px 70px #0004}
+
+/* The reopen a finished report is revived through. Distinct from Check out & edit because it is a
+   controlled lifecycle transition, not a lease. */
+.prReviveButton{border-color:#d8b98a;background:#fffaf1;color:#8a6118}

@@ -62,18 +62,24 @@ public sealed class ControlledEditingCheckInEngine(
                 "The controlled edit session belongs to another user.", ControlledCheckInStatus.Forbidden,
                 null, null, transaction, ct);
 
+        // The family is resolved before authority is judged, because the family decides what authority
+        // means: every controlled record here needs an engineering role to check in, except the Problem
+        // Report, which asks only for access to the Project. Checkout already reads the same flag, and
+        // the two have to agree — a lease that can be taken but never checked in is worse than a refusal.
+        var known = ControlledArtifactEditPolicies.TryResolve(session.ArtifactType, out var policy);
+
         var programId = await db.Projects.Where(x => x.Id == session.ProjectId)
             .Select(x => (Guid?)x.ProgramId).SingleOrDefaultAsync(ct);
         var hasProjectAccess = programId is not null &&
             (actor.IsAdministrator || actor.Programs.Any(x => x.ProgramId == programId));
+        var needsEngineeringRole = !known || policy.RequiresEngineeringRole;
         if (!hasProjectAccess || programId is null ||
-            !await HasEditingAuthorityAsync(actor, programId.Value, now, ct))
+            (needsEngineeringRole && !await HasEditingAuthorityAsync(actor, programId.Value, now, ct)))
             return await RejectAsync(session, actor.UserName, now, "project_authorization_required",
                 "The user is not authorized to check in controlled content for this project.",
                 ControlledCheckInStatus.Forbidden, null, null, transaction, ct);
 
-        if (!ControlledArtifactEditPolicies.TryResolve(session.ArtifactType, out var policy) ||
-            !_adapters.TryGetValue(policy.Family, out var adapter))
+        if (!known || !_adapters.TryGetValue(policy.Family, out var adapter))
             return await RejectAsync(session, actor.UserName, now, "check_in_adapter_missing",
                 "No controlled check-in adapter is registered for this artifact family.",
                 ControlledCheckInStatus.Conflict, null, null, transaction, ct);
@@ -791,7 +797,10 @@ public sealed class ProblemReportControlledEditingAdapter(AeroLinkDbContext db) 
             throw new DomainException("The controlled problem-report identity cannot change.");
         var fromState = ProblemReportTransitionPolicy.Canonical(item.State);
         var wasAwaitingClosure = fromState == ProblemReportState.WaitingForSqaToClose;
-        item.UpdateDetails(administratorAuthority ? item.ResponsibleEngineerId : actor,
+        // The actor is whoever checked in, always. This used to substitute the responsible engineer
+        // under administrator authority, purely to get past an owner check that UpdateDetails no longer
+        // makes — leaving it would credit a correction to somebody who did not make it.
+        item.UpdateDetails(actor,
             draft.Title ?? "", draft.Problem ?? "", draft.ProblemRich ?? "",
             draft.AdditionalInformation ?? "", draft.AdditionalInformationRich ?? "", draft.Analysis ?? "",
             draft.RootCause ?? "", draft.CorrectiveAction ?? "", draft.SystemAircraftImpact ?? "",

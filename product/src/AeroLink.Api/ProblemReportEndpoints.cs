@@ -255,12 +255,22 @@ public static class ProblemReportEndpoints
         var canRecoverOwner = !ownerAuthority.Eligible && !actor.IsAdministrator
             && await HasProblemReportOwnerRecoveryAuthorityAsync(actor.Id, programId, db, ct);
         var duplicateDiagnostic = await new ProblemReportDuplicateDispositionPolicy(db).DiagnoseAsync(report, ct);
+        var transitions = await AvailableTransitionsAsync(report, actor, db, identity, ct);
+        // Reviving a finished report is the existing reopen, not a new authority: Closed → Verifying and
+        // Rejected → Draft are the only edges out of a terminal state, both are SQA-only, and both already
+        // demand a rationale. So the answer to "may this person revive it" is whether that one edge came
+        // back available. Deriving it here rather than in the browser keeps one authority for the question.
+        var reviveTarget = ReviveTarget(report.State);
+        var canRevive = reviveTarget is not null
+            && transitions.Any(transition => string.Equals(transition.State, reviveTarget, StringComparison.Ordinal));
         return Results.Ok(Detail(report, await LinkViewsAsync(report, links, db, ct), revisions,
             candidates.OrderByDescending(x => x.ReportRevision).ThenByDescending(x => x.Sequence),
             new
             {
                 canApproveSqaClosure,
-                availableTransitions = await AvailableTransitionsAsync(report, actor, db, identity, ct),
+                availableTransitions = transitions,
+                canRevive,
+                reviveTargetState = canRevive ? reviveTarget : null,
                 canApproveReleaseWaiver,
                 releaseWaiverAuthority = waiverAuthority,
                 ownerEligible = ownerAuthority.Eligible,
@@ -789,12 +799,16 @@ public static class ProblemReportEndpoints
         }
     }
 
-    private static async Task<IReadOnlyList<object>> AvailableTransitionsAsync(ProblemReport report,
+    /// <summary>One available lifecycle edge. Typed rather than anonymous so the capability projection
+    /// can ask which edges came back without reflecting over the response it is about to serialize.</summary>
+    private sealed record TransitionOption(string State, bool RequiresRationale);
+
+    private static async Task<IReadOnlyList<TransitionOption>> AvailableTransitionsAsync(ProblemReport report,
         AuthenticatedUser actor, AeroLinkDbContext db, IdentityService identity, CancellationToken ct)
     {
         var sccb = await HasSccbOpeningAuthorityAsync(report, actor, db, identity, ct);
         var sqa = await HasCurrentSqaClosureAuthorityAsync(report, actor, db, identity, ct);
-        var transitions = new List<object>();
+        var transitions = new List<TransitionOption>();
         foreach (var target in ProblemReportTransitionPolicy.AllowedTargets(report.State))
         {
             var permitted = ProblemReportTransitionPolicy.IsSccbOpening(report.State, target) ? sccb
@@ -805,10 +819,26 @@ public static class ProblemReportEndpoints
                     || string.Equals(actor.UserName, report.ResponsibleEngineerId, StringComparison.OrdinalIgnoreCase)))
                 permitted = false;
             if (permitted)
-                transitions.Add(new { state = target.ToString(), requiresRationale = ProblemReportTransitionPolicy.RequiresRationale(report.State, target) });
+                transitions.Add(new TransitionOption(target.ToString(),
+                    ProblemReportTransitionPolicy.RequiresRationale(report.State, target)));
         }
         return transitions;
     }
+
+    /// <summary>
+    /// The state a finished report is revived into, or null when it is not finished. Closed work resumes
+    /// at Verifying because the correction it describes was already made and only its evidence is in
+    /// question; a rejected report goes back to Draft because the judgement being undone is that there
+    /// was anything to do at all. Both edges already exist in the transition policy — this only names
+    /// them so one gesture can offer the reopen and the editor together.
+    /// </summary>
+    private static string? ReviveTarget(ProblemReportState state) =>
+        ProblemReportTransitionPolicy.Canonical(state) switch
+        {
+            ProblemReportState.Closed => nameof(ProblemReportState.Verifying),
+            ProblemReportState.Rejected => nameof(ProblemReportState.Draft),
+            _ => null,
+        };
 
     private static async Task<ProblemReportOwnerStatus> ProblemReportOwnerStatusAsync(string userName,
         Guid programId, AeroLinkDbContext db, CancellationToken ct)
