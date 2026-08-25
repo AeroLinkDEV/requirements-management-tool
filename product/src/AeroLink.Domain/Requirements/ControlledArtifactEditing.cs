@@ -32,7 +32,13 @@ public sealed record ControlledArtifactEditPolicy(
     int MinimumLeaseMinutes,
     int MaximumLeaseMinutes,
     IReadOnlySet<string> EditableStates,
-    IReadOnlySet<string> Aliases)
+    IReadOnlySet<string> Aliases,
+    /// <summary>
+    /// Whether checking this family out requires an engineering role on the Project, over and above
+    /// access to it. True everywhere except the Problem Report, which is the one family whose whole
+    /// point is that the project works on it together — see the entry below for why.
+    /// </summary>
+    bool RequiresEngineeringRole = true)
 {
     public int NormalizeLease(int? requestedMinutes)
     {
@@ -70,9 +76,17 @@ public static class ControlledArtifactEditPolicies
         // A Problem Report is editable in every state except the ones that end it. It is the record most
         // likely to need correcting while the work it describes is in flight. Closed and Rejected are
         // read-only; the lifecycle transition endpoints are the route back.
+        //
+        // It is also the only family that asks for no role beyond access to the Project. Every other
+        // record here belongs to the discipline that authors it, but a Problem Report is raised by
+        // whoever hit the problem and corrected by whoever knows better — a tester who finds a wrong
+        // root cause on somebody else's report should be able to fix it, not file a second report
+        // saying so. The exclusive lease still admits one person at a time, and the revision chain
+        // still names whoever checked in.
         new(ControlledArtifactFamily.ProblemReport, "ProblemReport", true, 15, 2, 120,
             Set("Draft", "ReadyForSccb", "Open", "Implementing", "Verifying", "WaitingForSqaToClose"),
-            Set("ProblemReport", "PR")),
+            Set("ProblemReport", "PR"),
+            RequiresEngineeringRole: false),
         new(ControlledArtifactFamily.ConfigurationChangeSet, "ConfigurationChangeSet", true, 15, 2, 120,
             Set("Draft", "InWork", "Conflict"), Set("ConfigurationChangeSet", "ChangeSet")),
         // Editable only as a Draft, exactly like the change request it mirrors: once a package is in review
