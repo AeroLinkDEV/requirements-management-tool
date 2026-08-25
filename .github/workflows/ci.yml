@@ -374,9 +374,14 @@ jobs:
           # ran for eight minutes and exited clean, and the guard read zero from nothing. A structured result
           # file has a schema; console output is a presentation detail that differs by SDK, verbosity and
           # whether anything is attached to stdout.
+          # A wedged test costs nothing while every test completes; when one genuinely hangs, --blame-hang
+          # writes evidence into TestResults and fails the run instead of silently burning the job timeout.
+          # 15m is far above a shard's normal step time and well under the job's 30-minute ceiling, so the
+          # dump lands while there is still runner time to upload it.
           dotnet test "$project" --configuration Release --no-build \
             --filter "$filter" --logger "console;verbosity=normal" \
-            --logger "trx;LogFileName=shard.trx" --results-directory TestResults
+            --logger "trx;LogFileName=shard.trx" --results-directory TestResults \
+            --blame-hang-timeout 15m
 
           # `~` is a substring match, so a class whose name is a prefix of another would quietly pull in tests
           # from both, and a malformed filter would quietly run fewer. Neither fails on its own. Comparing what
@@ -392,6 +397,19 @@ jobs:
             exit 1
           fi
           echo "Shard ${{ matrix.shard }} ran exactly the $expected tests it selected."
+      # The raw TRX is the failure-evidence authority: full per-test identities, messages and stacks. The
+      # aggregated telemetry above is a summary and must never be the only surviving record (#756). Uploaded
+      # on failure (and on cancellation after the test step), named per shard and run attempt so parallel
+      # shards and reruns cannot overwrite one another. The suites' credentials are synthetic test values;
+      # artifacts live only in this repository's private CI store with bounded retention.
+      - name: Upload API test diagnostics
+        if: failure() || canceled()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: api-test-diagnostics-${{ matrix.shard }}-${{ github.run_attempt }}
+          path: ${{ github.workspace }}/TestResults/
+          if-no-files-found: ignore
+          retention-days: 30
       - name: Mark test complete
         if: always()
         continue-on-error: true
@@ -542,8 +560,18 @@ jobs:
           echo "All test projects under product/tests are claimed by a job."
       - name: Run the domain and infrastructure test suites
         run: |
-          dotnet test product/tests/AeroLink.Domain.Tests/AeroLink.Domain.Tests.csproj --configuration Release --no-build --logger "console;verbosity=normal" --logger "trx;LogFileName=domain.trx" --results-directory TestResults
-          dotnet test product/tests/AeroLink.Infrastructure.Tests/AeroLink.Infrastructure.Tests.csproj --configuration Release --no-build --logger "console;verbosity=normal" --logger "trx;LogFileName=infrastructure.trx" --results-directory TestResults
+          dotnet test product/tests/AeroLink.Domain.Tests/AeroLink.Domain.Tests.csproj --configuration Release --no-build --logger "console;verbosity=normal" --logger "trx;LogFileName=domain.trx" --results-directory TestResults --blame-hang-timeout 15m
+          dotnet test product/tests/AeroLink.Infrastructure.Tests/AeroLink.Infrastructure.Tests.csproj --configuration Release --no-build --logger "console;verbosity=normal" --logger "trx;LogFileName=infrastructure.trx" --results-directory TestResults --blame-hang-timeout 15m
+      # Same failure-evidence contract as the API shards (#756): the raw TRX files are the authority for
+      # which tests failed and why, retained on failure under a run-unique artifact name.
+      - name: Upload core test diagnostics
+        if: failure() || canceled()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: core-test-diagnostics-${{ github.run_attempt }}
+          path: ${{ github.workspace }}/TestResults/
+          if-no-files-found: ignore
+          retention-days: 30
       - name: Mark test complete
         if: always()
         continue-on-error: true
