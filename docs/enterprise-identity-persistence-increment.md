@@ -3,7 +3,8 @@
 > **Historical increment record.** This file documents the persistence foundation delivered at that point.
 > Later work added explicit Program role, session, and delegation lifecycles. See
 > [Security and Identity Model](../SECURITY_AND_IDENTITY_MODEL.md) and the
-> [current handoff](../CURRENT_PRODUCT_HANDOFF_2026-08-10.md); federated sign-in and SCIM remain deployment/provider work.
+> [current product state](../PROJECT_STATE.md); the former 2026-08-10 restart handoff is retained in the
+> [historical archive](archive/CURRENT_PRODUCT_HANDOFF_2026-08-10.md). Federated sign-in and SCIM remain deployment/provider work.
 
 ## Objective
 
