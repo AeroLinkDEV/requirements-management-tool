@@ -1303,3 +1303,57 @@ html .withdrawAction:disabled { cursor: not-allowed; opacity: .5; }
 
 .rebaseRequiredNotice b { font: 800 13px Manrope, sans-serif; }
 .rebaseRequiredNotice span { font: 500 13px/1.5 Manrope, sans-serif; }
+
+/* The upstream answer is controlled content, but it should read as one compact authoring decision rather
+   than another full page stage. Exact identifiers and both build identities remain visible at every step. */
+.upstreamAnswerEditor {
+  display: grid;
+  gap: 12px;
+  margin-top: 18px;
+  padding: 18px;
+  border: 1px solid #dce5eb;
+  border-radius: 10px;
+  background: #f8fbfc;
+}
+
+.upstreamAnswerEditor label { display: grid; gap: 6px; color: #42566b; font: 700 13px Manrope, sans-serif; }
+.upstreamAnswerEditor label:has(input[type="checkbox"]) { display: flex; align-items: center; gap: 8px; }
+.upstreamCandidateList { display: grid; gap: 7px; max-height: 240px; overflow: auto; }
+.upstreamCandidateList button {
+  min-height: 38px;
+  padding: 8px 11px;
+  border: 1px solid #d7e1e8;
+  border-radius: 8px;
+  background: white;
+  color: #31475d;
+  text-align: left;
+  cursor: pointer;
+}
+.upstreamCandidateList button:hover { border-color: #8facbf; background: #f3f8fa; }
+.upstreamDraftRow {
+  display: grid;
+  grid-template-columns: minmax(210px, .8fr) minmax(260px, 1.2fr) auto;
+  gap: 10px;
+  align-items: center;
+  padding: 10px;
+  border: 1px solid #d7e1e8;
+  border-radius: 8px;
+  background: white;
+}
+.upstreamDraftRow b { display: grid; gap: 3px; color: #263b50; }
+.upstreamDraftRow small { color: #65778a; font-weight: 500; }
+.inheritedTraceAnswer { padding: 12px 14px; border-left: 4px solid #64879c; background: #edf5f8; color: #314b5d; }
+.inheritedTraceAnswer p { margin: 6px 0; }
+.upstreamReferenceList { display: grid; gap: 9px; }
+.upstreamReference { padding: 12px 14px; border: 1px solid #dde5eb; border-radius: 8px; background: #fbfcfd; }
+.upstreamReference > div { display: flex; justify-content: space-between; gap: 12px; }
+.upstreamReference span, .upstreamReference small { color: #65778a; font-size: 12px; }
+.upstreamReference p { margin: 7px 0; color: #3f5265; }
+.traceHistory { margin-top: 12px; }
+.traceHistory summary { cursor: pointer; color: #41596e; font-weight: 800; }
+.traceHistory .snapshotNote { display: grid; gap: 5px; margin-top: 9px; }
+
+@media (max-width: 760px) {
+  .upstreamDraftRow { grid-template-columns: 1fr; }
+  .upstreamReference > div { flex-direction: column; }
+}

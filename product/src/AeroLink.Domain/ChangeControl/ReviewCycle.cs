@@ -70,18 +70,22 @@ public sealed class ReviewCycle
 
     /// <summary>A review of a change request.</summary>
     internal ReviewCycle(Guid changeRequestId, int sequence, string snapshotHash, IReadOnlyList<ApproverSelection> approvers,
-        DateTimeOffset now, ReviewMode mode = ReviewMode.Sequential, ReviewWorkflowSpecification? workflow = null)
-        : this(changeRequestId, null, sequence, snapshotHash, approvers, now, mode, workflow) { }
+        DateTimeOffset now, ReviewMode mode = ReviewMode.Sequential, ReviewWorkflowSpecification? workflow = null,
+        int snapshotContractVersion = 0, string snapshotJson = "")
+        : this(changeRequestId, null, sequence, snapshotHash, approvers, now, mode, workflow,
+            snapshotContractVersion, snapshotJson) { }
 
     /// <summary>A review of a test change request. Same mechanism, different subject.</summary>
     internal static ReviewCycle ForTestChangeRequest(Guid testChangeReviewId, int sequence, string snapshotHash,
         IReadOnlyList<ApproverSelection> approvers, DateTimeOffset now,
-        ReviewMode mode = ReviewMode.Sequential, ReviewWorkflowSpecification? workflow = null) =>
-        new(null, testChangeReviewId, sequence, snapshotHash, approvers, now, mode, workflow);
+        ReviewMode mode = ReviewMode.Sequential, ReviewWorkflowSpecification? workflow = null,
+        int snapshotContractVersion = 0, string snapshotJson = "") =>
+        new(null, testChangeReviewId, sequence, snapshotHash, approvers, now, mode, workflow,
+            snapshotContractVersion, snapshotJson);
 
     private ReviewCycle(Guid? changeRequestId, Guid? testChangeReviewId, int sequence, string snapshotHash,
         IReadOnlyList<ApproverSelection> approvers, DateTimeOffset now, ReviewMode mode,
-        ReviewWorkflowSpecification? workflow)
+        ReviewWorkflowSpecification? workflow, int snapshotContractVersion, string snapshotJson)
     {
         // Exactly one owner. Both would make "what is this a review of" ambiguous; neither would make it
         // unanswerable, and the cycle would outlive anything that could explain it.
@@ -99,6 +103,8 @@ public sealed class ReviewCycle
         ChangeRequestId = changeRequestId;
         Sequence = sequence;
         SnapshotHash = snapshotHash;
+        SnapshotContractVersion = snapshotContractVersion;
+        SnapshotJson = snapshotJson ?? string.Empty;
         // The procedure's own mode wins when there is one. A team that recorded a sequential board does not
         // want an author choosing parallel at submission.
         Mode = workflow?.Mode ?? mode;
@@ -138,6 +144,8 @@ public sealed class ReviewCycle
     public Guid OwnerId => ChangeRequestId ?? TestChangeReviewId!.Value;
     public int Sequence { get; private set; }
     public string SnapshotHash { get; private set; } = string.Empty;
+    public int SnapshotContractVersion { get; private set; }
+    public string SnapshotJson { get; private set; } = string.Empty;
     public ReviewMode Mode { get; private set; }
     public Guid? WorkflowId { get; private set; }
     public Guid? WorkflowLogicalId { get; private set; }

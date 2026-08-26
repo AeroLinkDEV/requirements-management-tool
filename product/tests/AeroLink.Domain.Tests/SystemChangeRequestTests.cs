@@ -41,6 +41,66 @@ public sealed class SystemChangeRequestTests
     }
 
     [Fact]
+    public void V2_requirement_snapshot_hash_remains_a_fixed_historical_contract()
+    {
+        var project = Guid.Parse("11111111-1111-1111-1111-111111111111");
+        var release = Guid.Parse("22222222-2222-2222-2222-222222222222");
+        var upstream = Guid.Parse("33333333-3333-3333-3333-333333333333");
+        var scr = new SystemChangeRequest("HLRCR-01049", 0, project, release,
+            "Legacy exact-parent package", "Problem", "Analysis", "Solution", "author", Now,
+            ChangeRequestType.Software, softwareLevel: RequirementLevel.HighLevel);
+        scr.AddRequirementChange("author", "HLR-00002375", 0, RequirementLevel.HighLevel,
+            RequirementChangeKind.Introduce, "The software shall preserve the selected route.",
+            "The legacy package used the authored profile marker.", "Test", Now,
+            attributesJson: "{\"derived\":true}", proposedUpstreamRevisionIdsJson: $"[\"{upstream}\"]");
+
+        // The v2 row is historical data that predates the upstream trace material. This deliberately uses
+        // reflection only in the regression fixture because production rows are versioned by persistence.
+        typeof(SystemChangeRequest).GetProperty(nameof(SystemChangeRequest.SnapshotContractVersion))!
+            .SetValue(scr, 2);
+        var cycle = scr.SubmitForReview("author", Approvers(), Now);
+
+        Assert.Equal("f650bde1bedf4e214676c4ac5f4be0fc542cee125eb0387d311cc595068b2846", cycle.SnapshotHash);
+        Assert.Equal(2, scr.SnapshotContractVersion);
+    }
+
+    [Fact]
+    public void Upstream_rationale_revision_replaces_immutable_link_and_records_history()
+    {
+        var scr = CreateDraftWithRequirement();
+        var upstreamId = Guid.NewGuid();
+        var buildId = Guid.NewGuid();
+        scr.AddUpstreamLink("author", upstreamId, "SRCR-00001.00", buildId, "1.0",
+            "The system contract owns this behavior.", Now);
+        var original = Assert.Single(scr.UpstreamLinks);
+
+        scr.ChangeUpstreamLinkRationale("author", original.Id, "The reviewed system contract still owns it.", Now.AddMinutes(1));
+
+        var replacement = Assert.Single(scr.UpstreamLinks);
+        Assert.NotEqual(original.Id, replacement.Id);
+        Assert.Equal(upstreamId, replacement.UpstreamChangeRequestId);
+        Assert.Equal("The reviewed system contract still owns it.", replacement.Rationale);
+        Assert.Contains(scr.UpstreamHistory, x => x.Action == "Changed" && x.Rationale == replacement.Rationale);
+    }
+
+    [Fact]
+    public void Resolved_trace_review_boundary_requires_answer_for_non_root_and_freezes_evidence()
+    {
+        var scr = CreateDraftWithRequirement();
+        var evidence = new ChangeRequestTraceReviewEvidence(false, []);
+        var refusal = Assert.Throws<DomainException>(() => scr.SubmitForReviewWithResolvedTrace(
+            "author", Approvers(), Now, traceEvidence: evidence));
+        Assert.Contains("upstream change request", refusal.Message, StringComparison.OrdinalIgnoreCase);
+
+        scr.SetNoUpstreamRationale("author", "This system-level change has no configured upstream.", Now);
+        var cycle = scr.SubmitForReviewWithResolvedTrace("author", Approvers(), Now,
+            traceEvidence: evidence);
+        Assert.Equal(3, cycle.SnapshotContractVersion);
+        Assert.Contains("isTopOfLadder", cycle.SnapshotJson, StringComparison.Ordinal);
+        Assert.NotEmpty(cycle.SnapshotHash);
+    }
+
+    [Fact]
     public void Change_requests_use_five_digits_and_software_builds_use_the_official_name()
     {
         Assert.Equal("SRCR-00039.00", ArtifactNumber.Display("SRCR-00039", 0));
@@ -270,6 +330,32 @@ public sealed class SystemChangeRequestTests
         Assert.Equal(2, next.Revision);
         Assert.Equal("SRCR-01049.02", next.DisplayNumber);
         Assert.Single(next.RequirementChanges);
+    }
+
+    [Fact]
+    public void Successor_affirmation_materializes_inherited_upstream_answer()
+    {
+        var scr = CreateDraftWithRequirement();
+        var upstreamId = Guid.NewGuid();
+        var buildId = Guid.NewGuid();
+        scr.AddUpstreamLink("author", upstreamId, "SYSR-000024.00", buildId, "1.0",
+            "The predecessor system contract remains the source.", Now.AddMinutes(1));
+        scr.SubmitForReview("author", Approvers(), Now.AddMinutes(2));
+        scr.ApproveActiveStage("systems", Now.AddMinutes(3));
+        scr.ApproveActiveStage("software", Now.AddMinutes(4));
+        scr.ApproveActiveStage("verification", Now.AddMinutes(5));
+        var next = scr.StartNextRevision("author", Now.AddHours(1), targetReleaseIsReleased: false);
+
+        Assert.Empty(next.UpstreamLinks);
+        Assert.False(next.UpstreamAnswerAffirmed);
+        next.AffirmInheritedUpstreamAnswer("author", Now.AddHours(1).AddMinutes(1));
+
+        var affirmed = Assert.Single(next.UpstreamLinks);
+        Assert.Equal(upstreamId, affirmed.UpstreamChangeRequestId);
+        Assert.Equal("The predecessor system contract remains the source.", affirmed.Rationale);
+        Assert.True(next.UpstreamAnswerAffirmed);
+        Assert.Equal("author", next.UpstreamAnswerAffirmedBy);
+        Assert.Contains(next.UpstreamHistory, x => x.Action == "InheritedAffirmed");
     }
 
     /// <summary>

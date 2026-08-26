@@ -66,6 +66,8 @@ public sealed class ChangeRequestRepository(AeroLinkDbContext db) : IChangeReque
             // would succeed, nothing would error, and a reviewer's writing would simply never appear.
             .Include(x => x.ReviewCycles).ThenInclude(x => x.Comments)
             .Include(x => x.AuditEvents)
+            .Include(x => x.UpstreamLinks)
+            .Include(x => x.UpstreamHistory)
             .SingleOrDefaultAsync(x => x.Id == id, cancellationToken);
 
     public Task AddAsync(SystemChangeRequest scr, CancellationToken cancellationToken) =>

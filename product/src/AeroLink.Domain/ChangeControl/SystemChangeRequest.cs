@@ -31,10 +31,12 @@ public static class ChangeRequestNumbering
 
 public sealed class SystemChangeRequest
 {
-    public const int CurrentSnapshotContractVersion = 2;
+    public const int CurrentSnapshotContractVersion = 3;
     private readonly List<RequirementChange> _requirementChanges = [];
     private readonly List<ReviewCycle> _reviewCycles = [];
     private readonly List<AuditEvent> _auditEvents = [];
+    private readonly List<ChangeRequestUpstreamLink> _upstreamLinks = [];
+    private readonly List<ChangeRequestUpstreamHistory> _upstreamHistory = [];
     // Not persisted. Only the clean historical showcase seed may use this one-shot compatibility path;
     // migrated v1 drafts re-entering review must upgrade to the current exact-parent contract.
     private bool _allowLegacyHistoricalSubmission;
@@ -147,10 +149,171 @@ public sealed class SystemChangeRequest
     public long Version { get; private set; } = 1;
     /// <summary>Version of the canonical signed snapshot bytes; legacy rows remain on version 1.</summary>
     public int SnapshotContractVersion { get; private set; } = CurrentSnapshotContractVersion;
+    public string? NoUpstreamRationale { get; private set; }
+    public string? NoUpstreamStatedBy { get; private set; }
+    public DateTimeOffset? NoUpstreamStatedAt { get; private set; }
+    /// <summary>Serialized predecessor answer shown as inherited context until the successor author acts.</summary>
+    public string? InheritedUpstreamContextJson { get; private set; }
+    public Guid? InheritedFromChangeRequestId { get; private set; }
+    public DateTimeOffset? InheritedAt { get; private set; }
+    public bool UpstreamAnswerAffirmed { get; private set; }
+    public string? UpstreamAnswerAffirmedBy { get; private set; }
+    public DateTimeOffset? UpstreamAnswerAffirmedAt { get; private set; }
     public IReadOnlyCollection<RequirementChange> RequirementChanges => _requirementChanges.AsReadOnly();
     public IReadOnlyCollection<ReviewCycle> ReviewCycles => _reviewCycles.AsReadOnly();
     public IReadOnlyCollection<AuditEvent> AuditEvents => _auditEvents.AsReadOnly();
+    public IReadOnlyCollection<ChangeRequestUpstreamLink> UpstreamLinks => _upstreamLinks.AsReadOnly();
+    public IReadOnlyCollection<ChangeRequestUpstreamHistory> UpstreamHistory => _upstreamHistory.AsReadOnly();
     public ReviewCycle? ActiveReviewCycle => _reviewCycles.LastOrDefault(x => x.State == ReviewCycleState.Active);
+
+    public void AddUpstreamLink(string actorId, Guid upstreamChangeRequestId, string upstreamDisplayNumber,
+        Guid upstreamBuildId, string upstreamBuildVersion, string rationale, DateTimeOffset now,
+        bool replaceNoUpstream = false, bool administratorAuthority = false)
+    {
+        EnsureAuthor(actorId, administratorAuthority);
+        EnsureDraft();
+        if (_upstreamLinks.Any(x => x.UpstreamChangeRequestId == upstreamChangeRequestId))
+            throw new DomainException("That upstream change request is already linked.");
+        if (NoUpstreamRationale is not null && !replaceNoUpstream)
+            throw new DomainException("Remove the authored no-upstream answer before naming an upstream change request.");
+        if (replaceNoUpstream)
+        {
+            RecordNoUpstreamHistory("NoUpstreamReplaced", actorId, now);
+            NoUpstreamRationale = null; NoUpstreamStatedBy = null; NoUpstreamStatedAt = null;
+        }
+        var link = new ChangeRequestUpstreamLink(Id, upstreamChangeRequestId, upstreamDisplayNumber,
+            upstreamBuildId, upstreamBuildVersion, rationale, actorId, now);
+        _upstreamLinks.Add(link);
+        InheritedUpstreamContextJson = null; InheritedFromChangeRequestId = null; InheritedAt = null;
+        UpstreamAnswerAffirmed = true; UpstreamAnswerAffirmedBy = actorId; UpstreamAnswerAffirmedAt = now;
+        _upstreamHistory.Add(new ChangeRequestUpstreamHistory(Id, "Added", link.Id, link.UpstreamChangeRequestId,
+            link.UpstreamDisplayNumber, link.UpstreamBuildId, link.UpstreamBuildVersion, link.Rationale, actorId, now));
+        SnapshotContractVersion = CurrentSnapshotContractVersion;
+        UpdatedAt = now; Version++;
+        Audit("UpstreamChangeRequestLinked", actorId, $"Linked exact upstream {link.UpstreamDisplayNumber}.", now);
+    }
+
+    public void RemoveUpstreamLink(string actorId, Guid linkId, string reason, DateTimeOffset now,
+        bool administratorAuthority = false)
+    {
+        EnsureAuthor(actorId, administratorAuthority); EnsureDraft();
+        if (string.IsNullOrWhiteSpace(reason)) throw new DomainException("A reason is required to remove an upstream link.");
+        var link = _upstreamLinks.SingleOrDefault(x => x.Id == linkId)
+            ?? throw new DomainException("That upstream link is not part of this change request.");
+        _upstreamLinks.Remove(link);
+        _upstreamHistory.Add(new ChangeRequestUpstreamHistory(Id, "Removed", link.Id, link.UpstreamChangeRequestId,
+            link.UpstreamDisplayNumber, link.UpstreamBuildId, link.UpstreamBuildVersion, reason, actorId, now));
+        SnapshotContractVersion = CurrentSnapshotContractVersion; UpdatedAt = now; Version++;
+        Audit("UpstreamChangeRequestUnlinked", actorId, $"Removed exact upstream {link.UpstreamDisplayNumber}: {reason.Trim()}", now);
+    }
+
+    public void ChangeUpstreamLinkRationale(string actorId, Guid linkId, string rationale, DateTimeOffset now,
+        bool administratorAuthority = false)
+    {
+        EnsureAuthor(actorId, administratorAuthority); EnsureDraft();
+        var link = _upstreamLinks.SingleOrDefault(x => x.Id == linkId)
+            ?? throw new DomainException("That upstream link is not part of this change request.");
+        if (string.IsNullOrWhiteSpace(rationale)) throw new DomainException("An upstream rationale is required.");
+        // Link identity is immutable evidence. A rationale revision therefore replaces the current row and
+        // appends history, rather than mutating the signed identity a review may already have captured.
+        _upstreamLinks.Remove(link);
+        var replacement = new ChangeRequestUpstreamLink(Id, link.UpstreamChangeRequestId,
+            link.UpstreamDisplayNumber, link.UpstreamBuildId, link.UpstreamBuildVersion,
+            rationale, actorId, now);
+        _upstreamLinks.Add(replacement);
+        _upstreamHistory.Add(new ChangeRequestUpstreamHistory(Id, "Changed", link.Id, link.UpstreamChangeRequestId,
+            link.UpstreamDisplayNumber, link.UpstreamBuildId, link.UpstreamBuildVersion, replacement.Rationale, actorId, now));
+        SnapshotContractVersion = CurrentSnapshotContractVersion; UpdatedAt = now; Version++;
+        Audit("UpstreamChangeRequestRationaleChanged", actorId, $"Changed the rationale for exact upstream {link.UpstreamDisplayNumber}.", now);
+    }
+
+    public void SetNoUpstreamRationale(string actorId, string rationale, DateTimeOffset now,
+        bool replaceNamedLinks = false, bool administratorAuthority = false)
+    {
+        EnsureAuthor(actorId, administratorAuthority); EnsureDraft();
+        if (string.IsNullOrWhiteSpace(rationale)) throw new DomainException("A no-upstream rationale is required.");
+        if (_upstreamLinks.Count != 0 && !replaceNamedLinks)
+            throw new DomainException("Remove the named upstream change requests before stating that no upstream applies.");
+        if (_upstreamLinks.Count != 0)
+        {
+            foreach (var link in _upstreamLinks)
+                _upstreamHistory.Add(new ChangeRequestUpstreamHistory(Id, "NoUpstreamReplaced", link.Id, link.UpstreamChangeRequestId,
+                    link.UpstreamDisplayNumber, link.UpstreamBuildId, link.UpstreamBuildVersion, rationale, actorId, now));
+            _upstreamLinks.Clear();
+        }
+        NoUpstreamRationale = rationale.Trim(); NoUpstreamStatedBy = actorId; NoUpstreamStatedAt = now;
+        InheritedUpstreamContextJson = null; InheritedFromChangeRequestId = null; InheritedAt = null;
+        UpstreamAnswerAffirmed = true; UpstreamAnswerAffirmedBy = actorId; UpstreamAnswerAffirmedAt = now;
+        SnapshotContractVersion = CurrentSnapshotContractVersion; UpdatedAt = now; Version++;
+        Audit("NoUpstreamAnswerRecorded", actorId, $"Recorded no-upstream rationale: {NoUpstreamRationale}", now);
+    }
+
+    public void ClearNoUpstreamRationale(string actorId, string reason, DateTimeOffset now,
+        bool administratorAuthority = false)
+    {
+        EnsureAuthor(actorId, administratorAuthority); EnsureDraft();
+        if (NoUpstreamRationale is null) throw new DomainException("This change request has no authored no-upstream answer.");
+        if (string.IsNullOrWhiteSpace(reason)) throw new DomainException("A reason is required to change the no-upstream answer.");
+        RecordNoUpstreamHistory("Removed", actorId, now, reason);
+        NoUpstreamRationale = null; NoUpstreamStatedBy = null; NoUpstreamStatedAt = null;
+        UpstreamAnswerAffirmed = false; UpstreamAnswerAffirmedBy = null; UpstreamAnswerAffirmedAt = null;
+        SnapshotContractVersion = CurrentSnapshotContractVersion; UpdatedAt = now; Version++;
+        Audit("NoUpstreamAnswerRemoved", actorId, reason.Trim(), now);
+    }
+
+    public void AffirmInheritedUpstreamAnswer(string actorId, DateTimeOffset now,
+        bool administratorAuthority = false)
+    {
+        EnsureAuthor(actorId, administratorAuthority); EnsureDraft();
+        if (string.IsNullOrWhiteSpace(InheritedUpstreamContextJson))
+            throw new DomainException("There is no inherited upstream answer to affirm.");
+        if (UpstreamAnswerAffirmed) throw new DomainException("The inherited upstream answer is already affirmed.");
+        try
+        {
+            using var document = JsonDocument.Parse(InheritedUpstreamContextJson);
+            if (TryGetJsonProperty(document.RootElement, "links", "Links", out var links))
+                foreach (var item in links.EnumerateArray())
+                {
+                    var upstreamChangeRequestId = GetJsonProperty(item, "upstreamChangeRequestId", "UpstreamChangeRequestId").GetGuid();
+                    var upstreamDisplayNumber = GetJsonProperty(item, "upstreamDisplayNumber", "UpstreamDisplayNumber").GetString() ?? "";
+                    var upstreamBuildId = GetJsonProperty(item, "upstreamBuildId", "UpstreamBuildId").GetGuid();
+                    var upstreamBuildVersion = GetJsonProperty(item, "upstreamBuildVersion", "UpstreamBuildVersion").GetString() ?? "";
+                    var rationale = GetJsonProperty(item, "rationale", "Rationale").GetString() ?? "";
+                    var link = new ChangeRequestUpstreamLink(Id,
+                        upstreamChangeRequestId, upstreamDisplayNumber, upstreamBuildId, upstreamBuildVersion,
+                        rationale, actorId, now);
+                    _upstreamLinks.Add(link);
+                    _upstreamHistory.Add(new ChangeRequestUpstreamHistory(Id, "InheritedAffirmed", link.Id,
+                        link.UpstreamChangeRequestId, link.UpstreamDisplayNumber, link.UpstreamBuildId,
+                        link.UpstreamBuildVersion, link.Rationale, actorId, now));
+                }
+            if (TryGetJsonProperty(document.RootElement, "noUpstreamRationale", "NoUpstreamRationale", out var noUpstream)
+                && noUpstream.ValueKind == JsonValueKind.String && !string.IsNullOrWhiteSpace(noUpstream.GetString()))
+            {
+                NoUpstreamRationale = noUpstream.GetString()!.Trim();
+                NoUpstreamStatedBy = actorId;
+                NoUpstreamStatedAt = now;
+            }
+        }
+        catch (Exception ex) when (ex is JsonException or KeyNotFoundException or FormatException)
+        {
+            throw new DomainException("The inherited upstream answer is malformed and cannot be affirmed.");
+        }
+        UpstreamAnswerAffirmed = true; UpstreamAnswerAffirmedBy = actorId; UpstreamAnswerAffirmedAt = now;
+        SnapshotContractVersion = CurrentSnapshotContractVersion; UpdatedAt = now; Version++;
+        Audit("InheritedUpstreamAnswerAffirmed", actorId, "Affirmed the predecessor upstream answer for this revision.", now);
+    }
+
+    private static bool TryGetJsonProperty(JsonElement element, string camelName, string pascalName, out JsonElement value) =>
+        element.TryGetProperty(camelName, out value) || element.TryGetProperty(pascalName, out value);
+
+    private static JsonElement GetJsonProperty(JsonElement element, string camelName, string pascalName) =>
+        TryGetJsonProperty(element, camelName, pascalName, out var value)
+            ? value
+            : throw new KeyNotFoundException($"Missing inherited upstream property '{camelName}'.");
+
+    private void RecordNoUpstreamHistory(string action, string actorId, DateTimeOffset now, string? rationale = null) =>
+        _upstreamHistory.Add(new ChangeRequestUpstreamHistory(Id, action, null, null, "", null, "", rationale ?? NoUpstreamRationale ?? "", actorId, now));
 
     /// <summary>
     /// System change requests govern System requirements. Software change requests govern HLRs and LLRs.
@@ -390,7 +553,28 @@ public sealed class SystemChangeRequest
     public ReviewCycle SubmitForReview(string actorId, IReadOnlyList<ApproverSelection> approvers,
         DateTimeOffset now, ReviewMode mode = ReviewMode.Sequential, ReviewWorkflowSpecification? workflow = null,
         bool administratorAuthority = false, ILadderPolicy? ladderPolicy = null,
-        VerificationMethodPolicy? verificationPolicy = null)
+        VerificationMethodPolicy? verificationPolicy = null,
+        ChangeRequestTraceReviewEvidence? traceEvidence = null)
+        => SubmitForReviewCore(actorId, approvers, now, mode, workflow, administratorAuthority,
+            ladderPolicy, verificationPolicy, traceEvidence, allowUnresolvedTraceSeed: true);
+
+    /// <summary>
+    /// Authoritative review boundary used by the API after it resolves the effective ladder and assessment
+    /// evidence. Unlike the legacy/seed compatibility overload, this path fails closed when evidence is absent.
+    /// </summary>
+    public ReviewCycle SubmitForReviewWithResolvedTrace(string actorId, IReadOnlyList<ApproverSelection> approvers,
+        DateTimeOffset now, ReviewMode mode = ReviewMode.Sequential, ReviewWorkflowSpecification? workflow = null,
+        bool administratorAuthority = false, ILadderPolicy? ladderPolicy = null,
+        VerificationMethodPolicy? verificationPolicy = null,
+        ChangeRequestTraceReviewEvidence? traceEvidence = null)
+        => SubmitForReviewCore(actorId, approvers, now, mode, workflow, administratorAuthority,
+            ladderPolicy, verificationPolicy, traceEvidence, allowUnresolvedTraceSeed: false);
+
+    private ReviewCycle SubmitForReviewCore(string actorId, IReadOnlyList<ApproverSelection> approvers,
+        DateTimeOffset now, ReviewMode mode, ReviewWorkflowSpecification? workflow,
+        bool administratorAuthority, ILadderPolicy? ladderPolicy,
+        VerificationMethodPolicy? verificationPolicy, ChangeRequestTraceReviewEvidence? traceEvidence,
+        bool allowUnresolvedTraceSeed)
     {
         EnsureAuthor(actorId, administratorAuthority);
         EnsureDraft();
@@ -398,10 +582,16 @@ public sealed class SystemChangeRequest
         // snapshot contract version, same review cycles, same declared methods — because an author whose
         // vocabulary check failed still has the draft they had a moment ago.
         ValidateVerificationVocabulary(verificationPolicy, ladderPolicy);
-        if (SnapshotContractVersion < CurrentSnapshotContractVersion && !_allowLegacyHistoricalSubmission)
+        // Existing review cycles keep their own v1/v2 byte contract. A live Draft entering the current
+        // authoritative boundary must, however, freeze its new trace facts under v3. The old overload is an
+        // explicit seed/history seam and is the only path allowed to preserve an older contract for a new
+        // cycle; the API always uses SubmitForReviewWithResolvedTrace.
+        if (SnapshotContractVersion < CurrentSnapshotContractVersion && !allowUnresolvedTraceSeed
+            && !_allowLegacyHistoricalSubmission)
             SnapshotContractVersion = CurrentSnapshotContractVersion;
-        ValidateReadyForReview(ladderPolicy);
-        var cycle = new ReviewCycle(Id, _reviewCycles.Count + 1, ComputeSnapshotHash(), approvers, now, mode, workflow);
+        ValidateReadyForReview(ladderPolicy, traceEvidence, allowUnresolvedTraceSeed);
+        var cycle = new ReviewCycle(Id, _reviewCycles.Count + 1, ComputeSnapshotHash(traceEvidence), approvers, now, mode, workflow,
+            SnapshotContractVersion, BuildTraceSnapshotJson(traceEvidence));
         _reviewCycles.Add(cycle);
         _allowLegacyHistoricalSubmission = false;
         // Offering it to approvers is the author saying they have dealt with whatever a reopen left them, so
@@ -527,7 +717,8 @@ public sealed class SystemChangeRequest
             throw new DomainException("At least one corrected approver is required.");
         var prior = ActiveReviewCycle!;
         prior.Cancel(reason, now);
-        var replacement = new ReviewCycle(Id, _reviewCycles.Count + 1, prior.SnapshotHash, correctedApprovers, now, prior.Mode, workflow);
+        var replacement = new ReviewCycle(Id, _reviewCycles.Count + 1, prior.SnapshotHash, correctedApprovers, now, prior.Mode, workflow,
+            prior.SnapshotContractVersion, prior.SnapshotJson);
         _reviewCycles.Add(replacement);
         UpdatedAt = now;
         Audit("ReviewCancelledAndRestarted", actorId,
@@ -564,6 +755,25 @@ public sealed class SystemChangeRequest
                 item.Statement, item.Rationale, item.VerificationMethod, now, item.RichText, item.AttributesJson, item.ImpactDispositionJson,
                 item.TargetSectionId, administratorAuthority, item.ProposedUpstreamRevisionIdsJson,
                 ladderPolicy: ladderPolicy);
+        if (_upstreamLinks.Count != 0 || NoUpstreamRationale is not null)
+        {
+            next.InheritedUpstreamContextJson = JsonSerializer.Serialize(new
+            {
+                links = _upstreamLinks.OrderBy(x => x.UpstreamDisplayNumber).Select(x => new
+                {
+                    x.UpstreamChangeRequestId, x.UpstreamDisplayNumber, x.UpstreamBuildId,
+                    x.UpstreamBuildVersion, x.Rationale
+                }),
+                noUpstreamRationale = NoUpstreamRationale,
+                statedBy = NoUpstreamStatedBy,
+                statedAt = NoUpstreamStatedAt,
+            });
+            next.InheritedFromChangeRequestId = Id;
+            next.InheritedAt = now;
+            next.UpstreamAnswerAffirmed = false;
+            next.Audit("UpstreamAnswerInherited", actorId,
+                $"Inherited the predecessor upstream answer from {DisplayNumber}; the successor author must affirm or change it before review.", now);
+        }
         return next;
     }
 
@@ -724,7 +934,8 @@ public sealed class SystemChangeRequest
         }
     }
 
-    private void ValidateReadyForReview(ILadderPolicy? ladderPolicy = null)
+    private void ValidateReadyForReview(ILadderPolicy? ladderPolicy = null,
+        ChangeRequestTraceReviewEvidence? traceEvidence = null, bool allowUnresolvedTraceSeed = false)
     {
         if (string.IsNullOrWhiteSpace(Problem) || string.IsNullOrWhiteSpace(Analysis) || string.IsNullOrWhiteSpace(Solution))
             throw new DomainException("Problem, Analysis, and Solution are required before review.");
@@ -753,6 +964,22 @@ public sealed class SystemChangeRequest
                     derived ? ExactParentClassification.Derived : ExactParentClassification.Allocated,
                     proposed, derived ? item.Rationale : "", "requirement revision");
         }
+        if (traceEvidence is { DerivedUpstreamLinks.Count: > 0 } && !string.IsNullOrWhiteSpace(NoUpstreamRationale))
+            throw new DomainException("An assessment-derived upstream edge cannot be combined with a no-upstream answer.");
+        if (_upstreamLinks.Count > 0 && !string.IsNullOrWhiteSpace(NoUpstreamRationale))
+            throw new DomainException("Named upstream change requests cannot be combined with a no-upstream answer.");
+        if (traceEvidence is not null && !traceEvidence.IsTopOfLadder
+            && _upstreamLinks.Count == 0 && string.IsNullOrWhiteSpace(NoUpstreamRationale)
+            && traceEvidence.DerivedUpstreamLinks.Count == 0)
+            throw new DomainException("Name at least one upstream change request or state why no upstream change request applies before review.");
+        // Direct aggregate construction is retained for historical seed fixtures that have no persistence
+        // boundary from which to resolve ladder evidence. The live API always supplies the resolved object;
+        // a current-contract submission with a resolved policy may not omit it.
+        if (SnapshotContractVersion >= CurrentSnapshotContractVersion && traceEvidence is null
+            && !_allowLegacyHistoricalSubmission && !allowUnresolvedTraceSeed)
+            throw new DomainException("The server must resolve the effective ladder and upstream trace before review.");
+        if (!string.IsNullOrWhiteSpace(InheritedUpstreamContextJson) && !UpstreamAnswerAffirmed)
+            throw new DomainException("The inherited upstream answer must be explicitly affirmed or changed before review.");
     }
 
     private static IReadOnlyList<RequirementLevel> ParentLevels(ILadderPolicy? policy, RequirementLevel child)
@@ -817,21 +1044,66 @@ public sealed class SystemChangeRequest
         }
     }
 
-    private string ComputeSnapshotHash()
+    private string ComputeSnapshotHash(ChangeRequestTraceReviewEvidence? traceEvidence = null)
     {
         // The rich forms are in the hash in their own right. Two different structures can reduce to the same
         // readable text — a table and a list of lines, say — and hashing only the projection would let the
         // thing an approver actually looked at change underneath a recorded signature.
         var changes = _requirementChanges.OrderBy(x => x.DisplayNumber).Select(x =>
-            SnapshotContractVersion < CurrentSnapshotContractVersion
+            SnapshotContractVersion == 1
                 ? $"{x.DisplayNumber}:{x.Level}:{x.Kind}:{x.Statement}:{x.Rationale}:{x.VerificationMethod}:{x.RichText}:{x.AttributesJson}:{x.ImpactDispositionJson}:{x.ProposedUpstreamRevisionIdsJson}"
                 : $"{x.DisplayNumber}:{x.Level}:{x.Kind}:{x.Statement}:{x.Rationale}:{x.VerificationMethod}:{x.RichText}:{x.AttributesJson}:{x.ImpactDispositionJson}:" +
                   $"{(RequirementAuthoringJson.IsDerived(x.AttributesJson) ? "Derived" : ProposedParentIds(x.ProposedUpstreamRevisionIdsJson, x.DisplayNumber).Count > 0 ? "Allocated" : "Unspecified")}:" +
                   $"{(RequirementAuthoringJson.IsDerived(x.AttributesJson) ? x.Rationale : string.Empty)}:" +
                   $"{string.Join(",", ProposedParentIds(x.ProposedUpstreamRevisionIdsJson, x.DisplayNumber).OrderBy(id => id))}");
+        var trace = SnapshotContractVersion < 3 ? "" : string.Join(";",
+            _upstreamLinks.OrderBy(x => x.UpstreamChangeRequestId).Select(x =>
+                $"{x.UpstreamChangeRequestId}:{x.UpstreamBuildId}:{x.UpstreamBuildVersion}:{x.Rationale}:{x.ActorId}:{x.StatedAt:O}"));
+        var inherited = SnapshotContractVersion < 3 ? "" : InheritedUpstreamContextJson ?? "";
+        var noUpstream = SnapshotContractVersion < 3 ? "" :
+            $"{NoUpstreamRationale}:{NoUpstreamStatedBy}:{NoUpstreamStatedAt:O}:{UpstreamAnswerAffirmed}:{UpstreamAnswerAffirmedBy}:{UpstreamAnswerAffirmedAt:O}";
+        var derived = SnapshotContractVersion < 3 || traceEvidence is null ? "" : string.Join(";",
+            traceEvidence.DerivedUpstreamLinks.OrderBy(x => x.UpstreamChangeRequestId).ThenBy(x => x.AssessmentLinkId)
+                .Select(x => $"{x.UpstreamChangeRequestId}:{x.AssessmentId}:{x.AssessmentLinkId}:{x.BuildId}:{x.UpstreamDisplayNumber}"));
+        if (SnapshotContractVersion < 3)
+        {
+            // v1 and v2 are historical byte contracts. Their hashes must remain exactly reproducible after
+            // the v3 trace material was introduced, including the original field count and separators.
+            var historicalContent = string.Join("|", DisplayNumber, Title, Problem, Analysis, Solution,
+                ProblemRich, AnalysisRich, SolutionRich, string.Join(";", changes));
+            return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(historicalContent))).ToLowerInvariant();
+        }
+        var frozenTraceSnapshot = BuildTraceSnapshotJson(traceEvidence);
         var content = string.Join("|", DisplayNumber, Title, Problem, Analysis, Solution,
-            ProblemRich, AnalysisRich, SolutionRich, string.Join(";", changes));
+            ProblemRich, AnalysisRich, SolutionRich, string.Join(";", changes), trace, inherited, noUpstream, derived,
+            frozenTraceSnapshot);
         return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(content))).ToLowerInvariant();
+    }
+
+    private string BuildTraceSnapshotJson(ChangeRequestTraceReviewEvidence? evidence)
+    {
+        if (SnapshotContractVersion < 3) return string.Empty;
+        return JsonSerializer.Serialize(new
+        {
+            contractVersion = SnapshotContractVersion,
+            authoredLinks = _upstreamLinks.OrderBy(x => x.UpstreamChangeRequestId).Select(x => new
+            {
+                x.Id, x.UpstreamChangeRequestId, x.UpstreamDisplayNumber, x.UpstreamBuildId,
+                x.UpstreamBuildVersion, x.Rationale, x.ActorId, x.StatedAt
+            }),
+            noUpstreamRationale = NoUpstreamRationale,
+            noUpstreamStatedBy = NoUpstreamStatedBy,
+            noUpstreamStatedAt = NoUpstreamStatedAt,
+            inheritedFromChangeRequestId = InheritedFromChangeRequestId,
+            inheritedUpstreamContextJson = InheritedUpstreamContextJson,
+            inheritedAnswerAffirmed = UpstreamAnswerAffirmed,
+            inheritedAnswerAffirmedBy = UpstreamAnswerAffirmedBy,
+            inheritedAnswerAffirmedAt = UpstreamAnswerAffirmedAt,
+            derivedLinks = (evidence?.DerivedUpstreamLinks ?? [])
+                .OrderBy(x => x.UpstreamChangeRequestId).ThenBy(x => x.AssessmentLinkId)
+                .ThenBy(x => x.AssessmentId).ToArray(),
+            isTopOfLadder = evidence?.IsTopOfLadder ?? false,
+        });
     }
 
     private void Audit(string type, string actor, string detail, DateTimeOffset now) =>
