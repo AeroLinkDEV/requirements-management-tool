@@ -4,9 +4,9 @@ This catalog is the authoritative capability inventory. Feature identifiers are 
 
 Implementation status is tracked against acceptance outcomes, not feature titles. **This catalog is the
 capability inventory, not the status record** — for current status, supported routes, and current boundaries
-read [PROJECT_STATE.md](PROJECT_STATE.md) and current GitHub state. The former
-[AeroLink 3 implementation scorecard](docs/archive/AEROLINK_3_IMPLEMENTATION_STATUS.md) and
-[2026-08-10 handoff](docs/archive/CURRENT_PRODUCT_HANDOFF_2026-08-10.md) are retained as historical checkpoints.
+read [PROJECT_STATE.md](../../PROJECT_STATE.md) and current GitHub state. The former
+[AeroLink 3 implementation scorecard](../archive/AEROLINK_3_IMPLEMENTATION_STATUS.md) and
+[2026-08-10 handoff](../archive/CURRENT_PRODUCT_HANDOFF_2026-08-10.md) are retained as historical checkpoints.
 A capability listed here may be implemented but deliberately not exposed; the catalog is not authority to
 reconnect dormant modules. The paragraph below is a 2026-07-18 snapshot retained for history and is not maintained.
 
@@ -171,6 +171,6 @@ Vendor-specific mappings and customer-specific connector contracts remain deploy
 ## Catalog Rules
 
 - New features require a new stable identifier and a recorded scope decision.
-- A feature may move phases only with rationale in [DECISIONS_AND_OPEN_QUESTIONS.md](DECISIONS_AND_OPEN_QUESTIONS.md).
+- A feature may move phases only with rationale in [DECISIONS_AND_OPEN_QUESTIONS.md](../../DECISIONS_AND_OPEN_QUESTIONS.md).
 - Acceptance outcomes describe observable behavior; implementation design belongs in later documents.
 - Phase 1-3 features define the first complete system-level slice. Phase 4 and later do not block its validation unless a foundation would make them impossible.
