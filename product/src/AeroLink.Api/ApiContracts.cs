@@ -86,7 +86,7 @@ record CreateSchemaFieldRequest(string Key,string Label,SchemaFieldType Type,boo
 record CreateSpecificationRequest(Guid ProjectId,string DocumentNumber,string Title,string Level,string Description);
 record CreateSectionRequest(Guid? ParentId,int Position,string Heading);
 record CreateCommentRequest(Guid? RevisionId,Guid? ParentCommentId,string Body,List<string>? Mentions);
-/// <summary>A remark on a test procedure. No mention routing yet — the conversation exists first.</summary>
+/// <summary>A remark on a verification artifact; mentions route to the attributable discussion notifications.</summary>
 record CreateProcedureCommentRequest(Guid? RevisionId, Guid? ParentCommentId, string Body, List<string>? Mentions,
     Guid? ReleaseId = null);
 record CreateDormantProcedureRequest(Guid ProjectId, TestProcedureLevel Level, string Title,

@@ -88,7 +88,7 @@ type ProcedureDocument = {
   sections: { id: string; heading: string; position: number; artifactCount: number; procedureCount?: number }[]
 }
 type Comment = {
-  id: string; body: string; state: string; createdBy: string; createdAt: string; disposition?: string
+  id: string; revisionId?: string; body: string; state: string; createdBy: string; createdAt: string; disposition?: string
 }
 type TraceRequirement = {
   id: string
@@ -1109,9 +1109,12 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
                   </div>
                   <p>{comment.body}</p>
                   {comment.disposition && <small>Disposition: {comment.disposition}</small>}
+                  {!comment.revisionId && (
+                    <small className="inspectorNote">Historical comment has no exact revision context; it is read-only.</small>
+                  )}
                   <footer>
                     <i>{stateLabel(comment.state)}</i>
-                    {comment.state === 'Open' && !released && (
+                    {comment.revisionId && comment.state === 'Open' && !released && (
                       <button onClick={() => void resolveComment(comment.id)}>Resolve / disposition</button>
                     )}
                   </footer>

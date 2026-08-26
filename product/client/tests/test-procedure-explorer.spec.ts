@@ -229,6 +229,9 @@ test('the shared Explorer deep-link can inspect active software Procedures with 
       body: JSON.stringify([{
         id: 'active-comment', revisionId: 'active-revision', body: 'Existing active discussion',
         state: 'Open', createdBy: 'test.engineer', createdAt: '2026-08-23T00:00:00Z'
+      }, {
+        id: 'legacy-comment', body: 'Historical discussion without revision context',
+        state: 'Open', createdBy: 'test.engineer', createdAt: '2026-08-22T00:00:00Z'
       }]),
     })
   })
@@ -259,6 +262,9 @@ test('the shared Explorer deep-link can inspect active software Procedures with 
   await page.getByRole('button', { name: /^Discussion/ }).click()
   await expect(page.locator('.discussionPane textarea')).toHaveCount(1)
   await expect(page.getByRole('button', { name: 'Add comment' })).toHaveCount(1)
+  const historicalComment = page.locator('.discussionPane article').filter({ hasText: 'Historical discussion without revision context' })
+  await expect(historicalComment).toContainText('Historical comment has no exact revision context; it is read-only.')
+  await expect(historicalComment.getByRole('button', { name: 'Resolve / disposition' })).toHaveCount(0)
 })
 
 /**
