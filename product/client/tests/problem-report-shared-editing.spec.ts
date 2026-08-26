@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test'
-import { chooseCategory, login, selectProgram } from './auth'
+import { chooseCategory, login, selectProgram, writeRichField } from './auth'
 
 /**
  * A Problem Report is the record a Project works on together, and the person who can correct it is rarely
@@ -31,12 +31,15 @@ test('a Project member who does not own a Verifying Problem Report can still cor
   await raise.getByLabel('Title').fill(title)
   await raise.getByRole('group', { name: 'Add content to Problem Description' })
     .getByRole('button', { name: 'Paragraph' }).click()
-  await raise.getByLabel('Problem Description paragraph 1')
+  await raise.getByRole('textbox', { name: 'Problem Description paragraph 1' })
     .fill('The disconnect tone follows the disconnect by about a second.')
   await chooseCategory(raise, 'Code Issue — Functional Impact')
   await raise.getByRole('button', { name: 'Save Draft PR' }).click()
   await expect(page.locator('.prState')).toHaveText('Draft')
   await page.locator('.prFlow').getByRole('button', { name: 'Ready for SCCB →', exact: true }).click()
+  // Asserted here so a refused transition is reported where it happened, rather than as a button that
+  // never appears three steps later.
+  await expect(page.locator('.prState')).toHaveText('Ready for SCCB', { timeout: 30_000 })
 
   // Opening is SCCB authority, which the owner does not hold, so it is a different person again.
   const open = async (userName: string) => {
@@ -63,7 +66,7 @@ test('a Project member who does not own a Verifying Problem Report can still cor
   await page.getByRole('button', { name: 'Check out & edit' }).click()
   const editor = page.getByRole('dialog', { name: /^Edit PR-/ })
   await expect(editor).toBeVisible({ timeout: 30_000 })
-  await editor.getByLabel('Root cause').fill(rootCause)
+  await writeRichField(editor, 'Root cause', rootCause)
   await editor.getByRole('button', { name: 'Check in' }).click()
   await expect(page.getByText(rootCause)).toBeVisible({ timeout: 30_000 })
 

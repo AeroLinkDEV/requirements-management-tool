@@ -7,6 +7,7 @@ import {
   writeBlocks,
   type RichBlock,
 } from "./richContentModel";
+import { RichParagraphEditor, RichParagraphView } from "./RichParagraph";
 import "./RichContent.css";
 
 /**
@@ -24,7 +25,7 @@ export function RichContentView({ api, value, empty }: { api: string; value: str
   return (
     <div className="richContentView">
       {blocks.map((block, index) => {
-        if (block.type === "paragraph") return <p key={index}>{block.text}</p>;
+        if (block.type === "paragraph") return <p key={index}><RichParagraphView block={block} /></p>;
         if (block.type === "symbol")
           return (
             <blockquote key={index}>
@@ -190,12 +191,11 @@ export function RichContentEditor({ api, projectId, value, label, placeholder, d
             </div>
 
             {block.type === "paragraph" && (
-              <textarea
-                aria-label={`${label} paragraph ${index + 1}`}
-                value={block.text}
+              <RichParagraphEditor
+                block={block}
+                label={`${label} paragraph ${index + 1}`}
                 disabled={disabled}
-                placeholder="State the requirement, the analysis, or the context."
-                onChange={(event) => replace(index, { ...block, text: event.target.value })}
+                onChange={(next) => replace(index, next)}
               />
             )}
 

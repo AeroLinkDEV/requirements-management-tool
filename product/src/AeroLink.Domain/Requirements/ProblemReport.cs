@@ -160,6 +160,25 @@ public sealed class ProblemReportLink
     private static string Required(string? value, string error) => string.IsNullOrWhiteSpace(value) ? throw new DomainException(error) : value.Trim();
 }
 
+/// <summary>
+/// The authored companions to a Problem Report's narrative fields, and the two investigation fields the
+/// editor can now reach.
+///
+/// A record rather than nine more parameters on UpdateDetails: they are all strings, and nine adjacent
+/// string parameters is a transposition the compiler cannot see. Null means "not supplied" for Effects
+/// and Containment, which lets a caller that does not show them leave them alone.
+/// </summary>
+public sealed record ProblemReportNarrative(
+    string? AnalysisRich = null,
+    string? RootCauseRich = null,
+    string? WorkaroundRich = null,
+    string? CorrectiveActionRich = null,
+    string? SystemAircraftImpactRich = null,
+    string? Effects = null,
+    string? EffectsRich = null,
+    string? Containment = null,
+    string? ContainmentRich = null);
+
 public sealed class ProblemReport
 {
     private ProblemReport() { }
@@ -197,6 +216,14 @@ public sealed class ProblemReport
     public string Title { get; private set; } = "";
     public string Problem { get; private set; } = "";
     public string Analysis { get; private set; } = "";
+    /// <summary>
+    /// The authored form of <see cref="Analysis"/>. Every narrative field on this record carries a plain
+    /// column and a rich one, exactly as Problem and ProblemRich always have: the plain value stays the
+    /// single source for search, the generated documents and any reader that cannot render structure, and
+    /// the rich one holds what the author actually wrote. Empty means nothing structured was authored —
+    /// the plain value is then the whole truth, and is what the record shows.
+    /// </summary>
+    public string AnalysisRich { get; private set; } = "";
     public string ReportedBy { get; private set; } = "";
     public string ResponsibleEngineerId { get; private set; } = "";
     public Guid? TargetReleaseId { get; private set; }
@@ -204,6 +231,7 @@ public sealed class ProblemReport
     public string AdditionalInformation { get; private set; } = "";
     public string AdditionalInformationRich { get; private set; } = "";
     public string SystemAircraftImpact { get; private set; } = "";
+    public string SystemAircraftImpactRich { get; private set; } = "";
     /// <summary>
     /// What kind of problem this is. Null only while a Draft is still being written — the
     /// Draft to Ready-for-SCCB transition refuses until it is answered, so nothing reaches review
@@ -218,6 +246,7 @@ public sealed class ProblemReport
     public ProblemReportCategoryProvenance? CategoryProvenance { get; private set; }
     /// <summary>What can be done in the meantime, if anything. Empty means none has been recorded.</summary>
     public string Workaround { get; private set; } = "";
+    public string WorkaroundRich { get; private set; } = "";
     public string ImpactAssessmentJson { get; private set; } = "{}";
     public string Classification { get; private set; } = "";
     public ProblemReportSeverity Severity { get; private set; }
@@ -225,9 +254,13 @@ public sealed class ProblemReport
     public string Origin { get; private set; } = "";
     public string AffectedConfiguration { get; private set; } = "";
     public string RootCause { get; private set; } = "";
+    public string RootCauseRich { get; private set; } = "";
     public string Effects { get; private set; } = "";
+    public string EffectsRich { get; private set; } = "";
     public string Containment { get; private set; } = "";
+    public string ContainmentRich { get; private set; } = "";
     public string CorrectiveAction { get; private set; } = "";
+    public string CorrectiveActionRich { get; private set; } = "";
     public ProblemReportDisposition? Disposition { get; private set; }
     public string DispositionRationale { get; private set; } = "";
     public Guid? ResolutionVerificationExecutionId { get; private set; }
@@ -266,7 +299,8 @@ public sealed class ProblemReport
         string additionalInformation, string additionalInformationRich, string analysis, string rootCause,
         string correctiveAction, string systemAircraftImpact, string impactAssessmentJson,
         ProblemReportSeverity severity, ProblemReportPriority priority, DateTimeOffset now,
-        ProblemReportCategory? category = null, string? workaround = null)
+        ProblemReportCategory? category = null, string? workaround = null,
+        ProblemReportNarrative? narrative = null)
     {
         Required(actor, "A problem-report correction actor is required."); EnsureEditable(); InvalidateClosureVerificationForChange();
         // Choosing a category on the form is a person's judgement, which is what the migration's was not.
@@ -277,8 +311,50 @@ public sealed class ProblemReport
         ProblemRich = problemRich?.Trim() ?? ""; AdditionalInformation = additionalInformation?.Trim() ?? "";
         AdditionalInformationRich = additionalInformationRich?.Trim() ?? ""; Analysis = analysis?.Trim() ?? "";
         RootCause = rootCause?.Trim() ?? ""; CorrectiveAction = correctiveAction?.Trim() ?? "";
-        SystemAircraftImpact = systemAircraftImpact?.Trim() ?? ""; ImpactAssessmentJson = ValidImpactJson(impactAssessmentJson); Touch(now);
+        SystemAircraftImpact = systemAircraftImpact?.Trim() ?? ""; ImpactAssessmentJson = ValidImpactJson(impactAssessmentJson);
+        // Effects and Containment are authored here as well as through BeginInvestigation. They are part
+        // of the record a person is looking at, and a field the editor shows but cannot save would be
+        // worse than one it hides.
+        if (narrative is { } authored)
+        {
+            AnalysisRich = authored.AnalysisRich?.Trim() ?? "";
+            RootCauseRich = authored.RootCauseRich?.Trim() ?? "";
+            WorkaroundRich = authored.WorkaroundRich?.Trim() ?? "";
+            CorrectiveActionRich = authored.CorrectiveActionRich?.Trim() ?? "";
+            SystemAircraftImpactRich = authored.SystemAircraftImpactRich?.Trim() ?? "";
+            if (authored.Effects is not null) Effects = authored.Effects.Trim();
+            if (authored.EffectsRich is not null) EffectsRich = authored.EffectsRich.Trim();
+            if (authored.Containment is not null) Containment = authored.Containment.Trim();
+            if (authored.ContainmentRich is not null) ContainmentRich = authored.ContainmentRich.Trim();
+        }
+        Touch(now);
         Severity = severity; Priority = priority;
+    }
+
+    /// <summary>
+    /// Applies the authored fields supplied when the report was raised.
+    ///
+    /// Separate from the constructor because the constructor's job is identity and lifecycle, and separate
+    /// from UpdateDetails because there is no editor lease here and nothing to invalidate — the record is
+    /// one instant old. It writes the same fields UpdateDetails writes, so a report raised whole and one
+    /// corrected later obey one set of rules.
+    /// </summary>
+    public void AuthorOnCreate(ProblemReportNarrative narrative, string? rootCause, string? correctiveAction,
+        string? workaround, DateTimeOffset now)
+    {
+        if (rootCause is not null) RootCause = rootCause.Trim();
+        if (correctiveAction is not null) CorrectiveAction = correctiveAction.Trim();
+        if (workaround is not null) Workaround = workaround.Trim();
+        AnalysisRich = narrative.AnalysisRich?.Trim() ?? "";
+        RootCauseRich = narrative.RootCauseRich?.Trim() ?? "";
+        WorkaroundRich = narrative.WorkaroundRich?.Trim() ?? "";
+        CorrectiveActionRich = narrative.CorrectiveActionRich?.Trim() ?? "";
+        SystemAircraftImpactRich = narrative.SystemAircraftImpactRich?.Trim() ?? "";
+        if (narrative.Effects is not null) Effects = narrative.Effects.Trim();
+        if (narrative.EffectsRich is not null) EffectsRich = narrative.EffectsRich.Trim();
+        if (narrative.Containment is not null) Containment = narrative.Containment.Trim();
+        if (narrative.ContainmentRich is not null) ContainmentRich = narrative.ContainmentRich.Trim();
+        Touch(now);
     }
 
     public void Reassign(string actor, string responsibleEngineerId, DateTimeOffset now, bool supervisoryRecovery = false)

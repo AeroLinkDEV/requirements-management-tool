@@ -4,6 +4,7 @@ import { useDebouncedSave } from './autosave'
 import { RichContentEditor } from './RichContent'
 import { emptyRichContent, fromPlainText, toPlainText } from './richContentModel'
 import ProblemReportCategoryPicker from './ProblemReportCategoryPicker'
+import { PROBLEM_REPORT_NARRATIVE as NARRATIVE } from './problemReportFields'
 
 type Session = { id: string; version: number; expiresAt: string; draftJson: string }
 type Report = { id: string; displayNumber: string }
@@ -32,11 +33,13 @@ type Editable = {
   title: string
   problemRich: string
   additionalInformationRich: string
-  analysis: string
-  rootCause: string
-  correctiveAction: string
-  systemAircraftImpact: string
-  workaround: string
+  analysisRich: string
+  rootCauseRich: string
+  effectsRich: string
+  containmentRich: string
+  correctiveActionRich: string
+  systemAircraftImpactRich: string
+  workaroundRich: string
   category: string
   severity: string
   priority: string
@@ -86,6 +89,14 @@ export default function ControlledProblemReportEditor({ api, projectId, report, 
   const [status, setStatus] = useState('Acquiring lease…')
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
+  const [savedAt, setSavedAt] = useState('')
+  // The working copy exactly as the checkout returned it. This is what "changed" is measured against.
+  const baseline = useRef<string>('')
+  // The working copy as of the last recovery snapshot. Deliberately separate from the baseline: these are
+  // two different facts and conflating them is why the save state read wrongly at first. After pressing
+  // Save there is nothing *unsaved*, but there is still something *uncommitted* — the snapshot is not the
+  // record — so the indicator must go quiet while the check-in control stays offered.
+  const [savedSnapshot, setSavedSnapshot] = useState('')
   // Everything the server sent, including fields this form does not show. Check-in writes the whole working
   // copy back, so a field dropped here would be a field silently erased.
   const workingCopy = useRef<Record<string, unknown>>({})
@@ -101,11 +112,12 @@ export default function ControlledProblemReportEditor({ api, projectId, report, 
     problemRich: value.problemRich,
     additionalInformation: toPlainText(value.additionalInformationRich),
     additionalInformationRich: value.additionalInformationRich,
-    analysis: value.analysis,
-    rootCause: value.rootCause,
-    correctiveAction: value.correctiveAction,
-    systemAircraftImpact: value.systemAircraftImpact,
-    workaround: value.workaround,
+    // Each rich field writes its plain projection alongside, because the plain column is what search,
+    // the generated documents and every reader that cannot show structure actually read.
+    ...Object.fromEntries(NARRATIVE.flatMap(field => [
+      [field.key, value[field.key]],
+      [field.plain, toPlainText(value[field.key])],
+    ])),
     // Written back as the bare name. The working copy was handed the resolved object the detail
     // response sends, and the check-in engine reads either shape.
     category: value.category || null,
@@ -130,11 +142,12 @@ export default function ControlledProblemReportEditor({ api, projectId, report, 
           title: String(recovered.title ?? ''),
           problemRich: (recovered.problemRich as string) || fromPlainText(String(recovered.problem ?? '')) || emptyRichContent,
           additionalInformationRich: (recovered.additionalInformationRich as string) || fromPlainText(String(recovered.additionalInformation ?? '')) || emptyRichContent,
-          analysis: String(recovered.analysis ?? ''),
-          rootCause: String(recovered.rootCause ?? ''),
-          correctiveAction: String(recovered.correctiveAction ?? ''),
-          systemAircraftImpact: String(recovered.systemAircraftImpact ?? ''),
-          workaround: String(recovered.workaround ?? ''),
+          ...Object.fromEntries(NARRATIVE.map(field => [
+            field.key,
+            // A field authored before it could hold structure has only its plain value, and that is
+            // adopted rather than shown as empty — the record is not blank, it just predates the editor.
+            (recovered[field.key] as string) || fromPlainText(String(recovered[field.plain] ?? '')) || emptyRichContent,
+          ])) as Pick<Editable, (typeof NARRATIVE)[number]['key']>,
           category: categoryOf(recovered.category),
           severity: String(recovered.severity ?? 'Major'),
           priority: String(recovered.priority ?? 'High'),
@@ -143,6 +156,8 @@ export default function ControlledProblemReportEditor({ api, projectId, report, 
         sessionRef.current = value
         draftRef.current = value.draftJson
         lastSavedRef.current = value.draftJson
+        baseline.current = serialize(editable)
+        setSavedSnapshot(baseline.current)
         setSession(value); setDraft(editable); setStatus('Checked out')
       } catch { if (live) { setError('The server recovery snapshot could not be opened.'); setStatus('Snapshot error') } }
     })()
@@ -173,7 +188,10 @@ export default function ControlledProblemReportEditor({ api, projectId, report, 
     finally { savingRef.current = false }
   }, [api])
 
-  useDebouncedSave(draftRef.current, async () => { await autosave() }, { delaySeconds: 1, maximumSeconds: 10, enabled: !!session })
+  useDebouncedSave(draftRef.current, async () => {
+    const pending = draft ? serialize(draft) : ''
+    if (await autosave()) { setSavedSnapshot(pending); setSavedAt(new Date().toLocaleTimeString()) }
+  }, { delaySeconds: 1, maximumSeconds: 10, enabled: !!session })
 
   useEffect(() => {
     if (!session?.id) return
@@ -227,17 +245,45 @@ export default function ControlledProblemReportEditor({ api, projectId, report, 
     onClose()
   }
 
+  /**
+   * Whether anything has changed since the checkout, compared against the working copy the server handed
+   * back rather than against the last autosave — otherwise pressing Save would make the record look
+   * unchanged while an uncommitted edit was still sitting in the session.
+   */
+  const serialized = draft ? serialize(draft) : ''
+  /** Changed since checkout — that is, there is something a check-in would commit. */
+  const dirty = !!draft && serialized !== baseline.current
+  /** Changed since the last recovery snapshot — that is, there is something a Save would write. */
+  const unsaved = !!draft && serialized !== savedSnapshot
+
+  /** Writes the recovery snapshot now. The controlled record is untouched until check-in. */
+  const saveOnly = async () => {
+    const pending = serialized
+    setBusy(true); setError('')
+    const saved = await autosave()
+    setBusy(false)
+    if (!saved) return
+    setSavedSnapshot(pending)
+    setSavedAt(new Date().toLocaleTimeString())
+  }
+
   const set = <K extends keyof Editable>(key: K, value: Editable[K]) =>
     setDraft(current => current ? { ...current, [key]: value } : current)
 
   return <div className="prModal" role="dialog" aria-label={`Edit ${report.displayNumber}`}>
     {!draft
       ? <section className="prCheckoutState"><button type="button" className="close" aria-label="Close" onClick={onClose}>×</button><p>{report.displayNumber}</p><h2>{status}</h2>{error && <div className="workspaceError" role="alert">{error}</div>}</section>
-      : <form onSubmit={checkIn}>
-        <button type="button" className="close" aria-label="Close" onClick={() => void discard()}>×</button>
-        <p>{report.displayNumber} · CONTROLLED DRAFT / EXCLUSIVE LEASE</p>
-        <h2>Edit Problem Report details</h2>
-        <div className="prCheckoutMeta"><span>{status}</span><small>Lease expires {session ? new Date(session.expiresAt).toLocaleTimeString() : '—'}</small></div>
+      : <form onSubmit={checkIn} className="prWholeRecord">
+        <header className="prEditorHead">
+          {/* Named for what it does. It discards the checkout, exactly like the footer control, and two
+              buttons in one dialog both announcing themselves as "Close" left a screen-reader user unable
+              to tell the dismiss from the one that keeps the work. */}
+          <button type="button" className="close" aria-label="Discard checkout and close" onClick={() => void discard()}>×</button>
+          <p>{report.displayNumber} · CONTROLLED DRAFT / EXCLUSIVE LEASE</p>
+          <h2>Edit Problem Report</h2>
+          <div className="prCheckoutMeta"><span>{status}</span><small>Lease expires {session ? new Date(session.expiresAt).toLocaleTimeString() : '—'}</small></div>
+        </header>
+        <div className="prEditorBody">
         {error && <div className="workspaceError" role="alert">{error}</div>}
         <label>Title<input required value={draft.title} onChange={event => set('title', event.target.value)} /></label>
         <RichContentEditor api={api} projectId={projectId} label="Problem Description" value={draft.problemRich} onChange={value => set('problemRich', value)} />
@@ -246,20 +292,31 @@ export default function ControlledProblemReportEditor({ api, projectId, report, 
           <label>Severity<select value={draft.severity} onChange={event => set('severity', event.target.value)}>{['Critical', 'High', 'Major', 'Minor', 'Trivial'].map(x => <option key={x}>{x}</option>)}</select></label>
           <label>Priority<select value={draft.priority} onChange={event => set('priority', event.target.value)}>{['Urgent', 'High', 'Normal', 'Low'].map(x => <option key={x}>{x}</option>)}</select></label>
         </div>
-        <label>Analysis<textarea value={draft.analysis} onChange={event => set('analysis', event.target.value)} /></label>
         <label>Category<ProblemReportCategoryPicker api={api} value={draft.category} required onChange={value => set('category', value)} /></label>
-        <label>Root cause<textarea value={draft.rootCause} onChange={event => set('rootCause', event.target.value)} /></label>
-        {/* What can be done in the meantime. Empty is a real answer — it means none has been found. */}
-        <label>Workaround<textarea value={draft.workaround} onChange={event => set('workaround', event.target.value)} /></label>
-        <label>Corrective-action narrative<textarea value={draft.correctiveAction} onChange={event => set('correctiveAction', event.target.value)} /></label>
-        <label>System / aircraft impact<textarea value={draft.systemAircraftImpact} onChange={event => set('systemAircraftImpact', event.target.value)} /></label>
+        {NARRATIVE.map(field =>
+          <RichContentEditor key={field.key} api={api} projectId={projectId} label={field.label}
+            value={draft[field.key]} onChange={value => set(field.key, value)} />)}
         <fieldset className="prImpactEditor"><legend>Impact matrix</legend>{impactFields.map(([key, label]) =>
-          <label key={key}>{label}<select value={draft.impacts[key] ?? 'Unknown'} onChange={event => set('impacts', { ...draft.impacts, [key]: event.target.value })}>{['Unknown', 'No', 'Yes'].map(value => <option key={value}>{value}</option>)}</select></label>)}
+          <label key={key}>{label}<select aria-label={label} value={draft.impacts[key] ?? 'Unknown'} onChange={event => set('impacts', { ...draft.impacts, [key]: event.target.value })}>{['Unknown', 'No', 'Yes'].map(value => <option key={value}>{value}</option>)}</select></label>)}
         </fieldset>
-        <div className="prCheckoutFoot">
-          <button type="button" className="quiet" disabled={busy} onClick={() => void discard()}>Discard checkout</button>
-          <button className="primaryAction" disabled={busy}>{busy ? 'Checking in…' : 'Check in'}</button>
         </div>
+        {/* Three controls, and one of them changes what it is.
+            Discard throws away everything since checkout. Save writes the recovery snapshot the autosave
+            already writes and keeps the window open — the controlled record, its version and its hash
+            change once, on check-in, so one editing session is one entry in History. Close becomes
+            "Save and check in" the moment anything has actually changed, because a window that offers to
+            commit when there is nothing to commit teaches people to ignore it. */}
+        <footer className="prCheckoutFoot">
+          <button type="button" className="danger" disabled={busy} onClick={() => void discard()}>Discard checkout</button>
+          <span className="prFootSpacer" />
+          {unsaved
+            ? <span className="prDirty">● Unsaved changes</span>
+            : savedAt && <span className="prSaved">✓ Saved {savedAt}</span>}
+          <button type="button" className="quiet" disabled={busy || !unsaved} onClick={() => void saveOnly()}>Save</button>
+          {dirty
+            ? <button className="primaryAction" disabled={busy}>{busy ? 'Checking in…' : 'Save and check in'}</button>
+            : <button type="button" className="quiet" disabled={busy} onClick={() => void discard()}>Close</button>}
+        </footer>
       </form>}
   </div>
 }

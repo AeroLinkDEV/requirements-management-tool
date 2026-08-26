@@ -172,6 +172,29 @@ export async function firstSectionId(request: APIRequestContext, projectId: stri
  * vocabulary somebody is shown changes and not merely when an identifier is renamed.
  */
 export async function chooseCategory(scope: Locator | Page, label: string) {
-  await scope.locator('.catCurrent').first().click()
-  await scope.getByRole('option', { name: label, exact: false }).first().click()
+  const picker = scope.locator('.catPicker').first()
+  await picker.locator('.catCurrent').click()
+  // Scoped to the picker's own menu. Every <option> of every <select> on the form carries the option
+  // role too — the impact matrix alone contributes two dozen — so an unscoped role query is ambiguous,
+  // and .first() then depends on DOM order rather than on what was asked for.
+  await picker.locator('.catMenu').getByRole('option', { name: label, exact: false }).first().click()
+  // Proven, not assumed: a silent no-op here surfaces much later as a lifecycle button that never appears.
+  await expect(picker.locator('.catCurrent')).toContainText(label)
+}
+
+/**
+ * Writes into a rich authored field.
+ *
+ * Every Problem Report narrative field holds structure now, so it is a block editor rather than a
+ * textarea: a paragraph has to exist before there is anywhere to type. Adding one and filling it is what
+ * a person does, and doing it here keeps that detail out of every journey that just wants to say what
+ * the field contains.
+ */
+export async function writeRichField(scope: Locator | Page, label: string, text: string) {
+  const body = scope.getByRole("textbox", { name: `${label} paragraph 1` })
+  // A field that already holds content has its paragraph; adding another would leave an empty one behind.
+  if (await body.count() === 0)
+    await scope.getByRole("group", { name: `Add content to ${label}` })
+      .getByRole("button", { name: "Paragraph", exact: true }).click()
+  await body.fill(text)
 }

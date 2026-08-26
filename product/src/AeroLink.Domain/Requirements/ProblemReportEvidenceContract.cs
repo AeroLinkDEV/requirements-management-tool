@@ -23,6 +23,7 @@ public sealed record ProblemReportEvidenceSnapshot
     public required string Title { get; init; }
     public required string Problem { get; init; }
     public required string Analysis { get; init; }
+    public required string AnalysisRich { get; init; }
     public required string ReportedBy { get; init; }
     public required string ResponsibleEngineerId { get; init; }
     public required Guid? TargetReleaseId { get; init; }
@@ -30,9 +31,11 @@ public sealed record ProblemReportEvidenceSnapshot
     public required string AdditionalInformation { get; init; }
     public required string AdditionalInformationRich { get; init; }
     public required string SystemAircraftImpact { get; init; }
+    public required string SystemAircraftImpactRich { get; init; }
     public required string? Category { get; init; }
     public required string? CategoryProvenance { get; init; }
     public required string Workaround { get; init; }
+    public required string WorkaroundRich { get; init; }
     public required string ImpactAssessmentJson { get; init; }
     public required string Classification { get; init; }
     public required string Severity { get; init; }
@@ -40,9 +43,13 @@ public sealed record ProblemReportEvidenceSnapshot
     public required string Origin { get; init; }
     public required string AffectedConfiguration { get; init; }
     public required string RootCause { get; init; }
+    public required string RootCauseRich { get; init; }
     public required string Effects { get; init; }
+    public required string EffectsRich { get; init; }
     public required string Containment { get; init; }
+    public required string ContainmentRich { get; init; }
     public required string CorrectiveAction { get; init; }
+    public required string CorrectiveActionRich { get; init; }
     public required string? Disposition { get; init; }
     public required string DispositionRationale { get; init; }
     public required Guid? ResolutionVerificationExecutionId { get; init; }
@@ -68,7 +75,9 @@ public static class ProblemReportEvidenceContract
     // schema 0. Version 2 is the first shared, complete Problem Report evidence contract. Version 3 retires
     // the four-kind Type in favour of the nine-category vocabulary and records how each value was arrived at,
     // so a schema-2 snapshot and a schema-3 snapshot of the same report are not comparable field for field.
-    public const int SchemaVersion = 3;
+    // Version 4 adds the authored companion to every narrative field. A schema-3 snapshot committed only
+    // the plain projection of an analysis or a root cause, so the two are not comparable field for field.
+    public const int SchemaVersion = 4;
 
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -86,6 +95,7 @@ public static class ProblemReportEvidenceContract
         Title = report.Title,
         Problem = report.Problem,
         Analysis = report.Analysis,
+        AnalysisRich = report.AnalysisRich,
         ReportedBy = report.ReportedBy,
         ResponsibleEngineerId = report.ResponsibleEngineerId,
         TargetReleaseId = report.TargetReleaseId,
@@ -93,9 +103,11 @@ public static class ProblemReportEvidenceContract
         AdditionalInformation = report.AdditionalInformation,
         AdditionalInformationRich = report.AdditionalInformationRich,
         SystemAircraftImpact = report.SystemAircraftImpact,
+        SystemAircraftImpactRich = report.SystemAircraftImpactRich,
         Category = report.Category?.ToString(),
         CategoryProvenance = report.CategoryProvenance?.ToString(),
         Workaround = report.Workaround,
+        WorkaroundRich = report.WorkaroundRich,
         ImpactAssessmentJson = report.ImpactAssessmentJson,
         Classification = report.Classification,
         Severity = report.Severity.ToString(),
@@ -103,9 +115,13 @@ public static class ProblemReportEvidenceContract
         Origin = report.Origin,
         AffectedConfiguration = report.AffectedConfiguration,
         RootCause = report.RootCause,
+        RootCauseRich = report.RootCauseRich,
         Effects = report.Effects,
+        EffectsRich = report.EffectsRich,
         Containment = report.Containment,
+        ContainmentRich = report.ContainmentRich,
         CorrectiveAction = report.CorrectiveAction,
+        CorrectiveActionRich = report.CorrectiveActionRich,
         Disposition = report.Disposition?.ToString(),
         DispositionRationale = report.DispositionRationale,
         ResolutionVerificationExecutionId = report.ResolutionVerificationExecutionId,

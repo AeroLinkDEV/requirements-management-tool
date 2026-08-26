@@ -112,6 +112,11 @@ public sealed class RichContentPublisher(AeroLinkDbContext db, EvidenceFileStore
                         writer.WriteString("target", block.Target);
                         break;
                     default:
+                        // Deliberately the plain projection, without the paragraph's emphasis. A generated
+                        // Word document and PDF cannot render runs yet, and Text is their exact
+                        // concatenation — so a published document says everything the record says, just
+                        // without the bold. Teaching the renderers about runs is a separate change; until
+                        // then this omission is stated rather than silent.
                         writer.WriteString("type", "paragraph");
                         writer.WriteString("text", block.Text);
                         break;
