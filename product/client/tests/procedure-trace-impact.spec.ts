@@ -152,8 +152,12 @@ test('a software HLR trace navigates to the exact software requirement revision'
   await openNavigationGroup(page, 'ASSURANCE')
   await page.getByRole('button', { name: 'Software' }).last().click()
   await page.getByRole('link', { name: 'Test Case/Procedure Explorer' }).click()
-  await expect(page).toHaveURL(/software-verification\/cases$/, { timeout: 30_000 })
+  await expect(page).toHaveURL(/software-verification\/test-artifacts$/, { timeout: 30_000 })
+  await page.getByLabel('Level filter').selectOption('HighLevel')
+  await page.getByLabel('Artifact filter').selectOption('Case')
+  await expect(page).toHaveURL(/artifactLevel=HighLevel.*artifactKind=Case/, { timeout: 30_000 })
   await expect(page.getByLabel('Level filter')).toHaveValue('HighLevel')
+  await expect(page.getByLabel('Artifact filter')).toHaveValue('Case')
 
   await page.getByLabel('Find a case').fill('HLRTC-000001')
   const row = page.locator('.procedureRow').filter({ hasText: 'HLRTC-000001' }).first()

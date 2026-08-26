@@ -1009,16 +1009,16 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
                         </li>)}
                       </ul>
                     </> : <p className="inspectorNote warn">No exact Case parent is linked to this Procedure revision.</p>
-                  ) : trace.requirements.length === 0 ? (
-                    <p className="inspectorNote warn">
-                      Nothing is verified by {trace.displayNumber}. Either it has not been linked yet, or the
-                      requirement it was written against has been retired.
-                    </p>
                   ) : <>
                     <p className="inspectorNote">
-                      This Case verifies {trace.requirements.length} requirement{trace.requirements.length === 1 ? '' : 's'}.
+                      This {trace.level === 'System' ? 'procedure' : 'Case'} verifies {trace.requirements.length} requirement{trace.requirements.length === 1 ? '' : 's'}.
                     </p>
-                    <ul className="traceRequirements">
+                    {trace.requirements.length === 0 ? (
+                      <p className="inspectorNote warn">
+                        Nothing is verified by {trace.displayNumber}. Either it has not been linked yet, or the
+                        requirement it was written against has been retired.
+                      </p>
+                    ) : <ul className="traceRequirements">
                       {trace.requirements.map(item => (
                         <li key={item.revisionId}
                           className={`traceRequirement${item.coverageState === 'Suspect' ? ' suspect' : ''}`}>
@@ -1037,7 +1037,7 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
                           </button>
                         </li>
                       ))}
-                    </ul>
+                    </ul>}
                   </>}
                 </>
               ) : traceError ? (
