@@ -1,10 +1,11 @@
 # Source Material Traceability
 
-> **Source-disposition record.** The root `.docx` files are retained, unmodified historical inputs. This
-> trace explains how their ideas entered the product definition; labels such as **First slice**, **Later**,
-> and **Open** reflect the decision point when this trace was written and are not a current backlog. Use
-> [Project State](PROJECT_STATE.md) for delivered behavior and current boundaries; the former
-> [2026-08-10 handoff](docs/archive/CURRENT_PRODUCT_HANDOFF_2026-08-10.md) is retained as historical restart context.
+> **Source-disposition record.** The original `.docx` inputs are retained unmodified under
+> [`original-inputs/`](original-inputs/). This trace explains how their ideas entered the product definition;
+> labels such as **First slice**, **Later**, and **Open** reflect the decision point when this trace was written
+> and are not a current backlog. Use [Project State](../../PROJECT_STATE.md) for delivered behavior and current
+> boundaries; the former [2026-08-10 handoff](../archive/CURRENT_PRODUCT_HANDOFF_2026-08-10.md) is retained as
+> historical restart context.
 
 This document records how substantive ideas from the supplied source files were dispositioned. It is a product-intent trace, not a line-by-line legal comparison.
 
@@ -17,12 +18,12 @@ Disposition values:
 - **Open:** Preserved as a question requiring stakeholder input.
 - **Corrected:** Retained with clarified terminology or behavior.
 
-## `Project Vision.docx`
+## [`Project Vision.docx`](original-inputs/Project%20Vision.docx)
 
 | Source Intent | Disposition | Authoritative Destination |
 | --- | --- | --- |
-| Web tool covering much of the system/software development-assurance V | Corrected | [PROJECT_VISION.md](PROJECT_VISION.md): lifecycle-data platform with explicit exclusions and no “complete lifecycle” claim |
-| Capture and change system requirements; generate revised system requirements document | First slice | [SYSTEM_LEVEL_WORKFLOW.md](SYSTEM_LEVEL_WORKFLOW.md), Sections 3-5 |
+| Web tool covering much of the system/software development-assurance V | Corrected | [PROJECT_VISION.md](../product-definition/PROJECT_VISION.md): lifecycle-data platform with explicit exclusions and no “complete lifecycle” claim |
+| Capture and change system requirements; generate revised system requirements document | First slice | [SYSTEM_LEVEL_WORKFLOW.md](../product-definition/SYSTEM_LEVEL_WORKFLOW.md), Sections 3-5 |
 | Human review and approval of requirements and documents | Corrected/First slice | Requirement changes are reviewed within the complete SRCR package; controlled documents have their own review/approval workflow |
 | HLRs linked to system requirements; derived requirements; software requirements document | Delivered | Features SW-001/SW-002; exact upward allocation and controlled HLR documents are implemented |
 | LLRs linked to HLRs or derived | Delivered | Feature SW-001; LLR scope and exact HLR allocation are implemented |
@@ -32,9 +33,9 @@ Disposition values:
 | PR management as a possible module with lifecycle and broad linkages | Delivered MVP | Features PR-001/PR-002 and DEC-087; the agreed lifecycle, fields, filters, corrective actions, test evidence, and independent closure are delivered |
 | Full traceability document | Accepted incrementally | System traceability in Phase 3; complete system/software traceability after Phase 4 |
 | All produced documents as PDF | Corrected/Open | Controlled PDF is the intended output direction; exact document formats and reproducibility definition remain OQ-012 |
-| Multiple programs, 150+ concurrent users, on-premises, username/password, admin portal | Accepted | [PROJECT_VISION.md](PROJECT_VISION.md), [QUALITY_ATTRIBUTES.md](QUALITY_ATTRIBUTES.md), features PF-001-PF-004 |
+| Multiple programs, 150+ concurrent users, on-premises, username/password, admin portal | Accepted | [PROJECT_VISION.md](../product-definition/PROJECT_VISION.md), [QUALITY_ATTRIBUTES.md](../product-definition/QUALITY_ATTRIBUTES.md), features PF-001-PF-004 |
 
-## `System Level.docx`
+## [`System Level.docx`](original-inputs/System%20Level.docx)
 
 | Source Intent | Disposition | Authoritative Destination |
 | --- | --- | --- |
@@ -60,7 +61,7 @@ Disposition values:
 | Test suite such as real or simulated engine | Open/First-slice candidate | Feature ST-003; semantics in OQ-007 |
 | System tests linked to PRs and evidence | Delivered incrementally | TCR and execution evidence can remain in the PR causal thread; broader PR policy remains later |
 
-## `Software Level.docx`
+## [`Software Level.docx`](original-inputs/Software%20Level.docx)
 
 | Source Intent | Disposition | Authoritative Destination |
 | --- | --- | --- |
@@ -70,7 +71,7 @@ Disposition values:
 | Unique HLR/LLR identities, derived status, PR links, and tests | Delivered incrementally | Features SW-001/SW-003 and PR-002; exact-revision traces and build isolation are enforced |
 | Repeated system-level material | Consolidated | Disposition is captured in the `System Level.docx` table above |
 
-## `PR Details.docx`
+## [`PR Details.docx`](original-inputs/PR%20Details.docx)
 
 | Source Intent | Disposition | Authoritative Destination |
 | --- | --- | --- |
@@ -80,21 +81,21 @@ Disposition values:
 | PRs link broadly across requirements, tests, changes, and releases | Delivered incrementally | Feature PR-002; change request/TCR selection, corrective actions, and test evidence are implemented |
 | PR-driven impact analysis is crucial | Delivered incrementally | Feature PR-002; requirement change remains downstream of a PR, not an automatic PR creator |
 
-## `Things I dont Need Tool to do.docx`
+## [`Things I dont Need Tool to do.docx`](original-inputs/Things%20I%20dont%20Need%20Tool%20to%20do.docx)
 
 | Source Intent | Disposition | Authoritative Destination |
 | --- | --- | --- |
-| No plans and standards management | Excluded now | [SCOPE_AND_BOUNDARIES.md](SCOPE_AND_BOUNDARIES.md) |
+| No plans and standards management | Excluded now | [SCOPE_AND_BOUNDARIES.md](../product-definition/SCOPE_AND_BOUNDARIES.md) |
 | No architecture, design, or implementation management | Excluded now | Scope boundaries; later external references may be considered |
 | Tool qualification not necessary | Excluded now | DEC-003 and scope boundaries |
 | No AI now; revisit later | Excluded now/Later | Feature AI-001 and future roadmap |
 
-## `Initial Response from Chatgpt.docx`
+## [`Initial Response from Chatgpt.docx`](original-inputs/Initial%20Response%20from%20Chatgpt.docx)
 
 | Source Theme | Disposition | Authoritative Destination |
 | --- | --- | --- |
 | Product is feasible but production assurance is much harder than a prototype | Accepted | Production ambition, phased roadmap, and quality attributes |
-| System level should be distinguished from DO-178 software scope | Corrected | Standards posture in [PROJECT_VISION.md](PROJECT_VISION.md) |
+| System level should be distinguished from DO-178 software scope | Corrected | Standards posture in [PROJECT_VISION.md](../product-definition/PROJECT_VISION.md) |
 | Database/artifact platform rather than document master | Accepted | DEC-005 and Product Principle 1 |
 | Stable identities, immutable revisions, typed links, baselines, audit, controlled documents | Accepted | Domain glossary and Product Principles 2-11 |
 | Review independence, quorum, signatures, comments, and separate artifact/baseline approval | Corrected/Open | The author selects an ordered approval sequence and unanimous sequential approval is required; future approvers may be replaced, while a wrong completed approver forces cancellation/restart. Independence and approval ceremony remain OQ-004/OQ-005 |
