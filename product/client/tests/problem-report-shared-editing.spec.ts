@@ -37,6 +37,9 @@ test('a Project member who does not own a Verifying Problem Report can still cor
   await raise.getByRole('button', { name: 'Save Draft PR' }).click()
   await expect(page.locator('.prState')).toHaveText('Draft')
   await page.locator('.prFlow').getByRole('button', { name: 'Ready for SCCB →', exact: true }).click()
+  // Asserted here so a refused transition is reported where it happened, rather than as a button that
+  // never appears three steps later.
+  await expect(page.locator('.prState')).toHaveText('Ready for SCCB', { timeout: 30_000 })
 
   // Opening is SCCB authority, which the owner does not hold, so it is a different person again.
   const open = async (userName: string) => {
