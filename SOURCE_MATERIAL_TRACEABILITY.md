@@ -3,8 +3,8 @@
 > **Source-disposition record.** The root `.docx` files are retained, unmodified historical inputs. This
 > trace explains how their ideas entered the product definition; labels such as **First slice**, **Later**,
 > and **Open** reflect the decision point when this trace was written and are not a current backlog. Use
-> [Project State](PROJECT_STATE.md) and the [current handoff](CURRENT_PRODUCT_HANDOFF_2026-08-10.md) for
-> delivered behavior and current boundaries.
+> [Project State](PROJECT_STATE.md) for delivered behavior and current boundaries; the former
+> [2026-08-10 handoff](docs/archive/CURRENT_PRODUCT_HANDOFF_2026-08-10.md) is retained as historical restart context.
 
 This document records how substantive ideas from the supplied source files were dispositioned. It is a product-intent trace, not a line-by-line legal comparison.
 
