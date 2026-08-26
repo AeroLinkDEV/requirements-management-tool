@@ -98,6 +98,7 @@ test('a procedure says who wrote it and what drove each revision', async ({ page
   // Every revision, newest first, each saying who wrote it — a name, not an account handle.
   const revisions = inspector.locator('.revisionList li')
   await expect(revisions.first()).toBeVisible({ timeout: 30_000 })
+  await expect(inspector).not.toContainText(/exact Case parent/)
   await expect(revisions.first()).toContainText('written by')
   await expect(revisions.first()).toContainText(/SYSTP-000001\.\d{2}/)
   await expect(revisions.first().locator('.personName')).toBeVisible()

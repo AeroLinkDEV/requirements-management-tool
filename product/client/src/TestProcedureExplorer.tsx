@@ -463,6 +463,7 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
   const selectedArtifactApiRoot = verificationArtifactApiRoot(isSystemScope ? 'System' : 'Software', selected?.artifactKind)
   const selectedRevision = selectedRevisionId || selected?.revisionId || ''
   const selectedIsProcedure = selected?.artifactKind === 'Procedure'
+  const selectedIsSoftwareProcedure = selectedIsProcedure && !isSystemScope
   const selectedArtifactWord = selectedIsProcedure ? 'test procedure' : 'test case'
   const selectedArtifactShortWord = selectedIsProcedure ? 'procedure' : 'case'
 
@@ -1068,11 +1069,11 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
                     {revision.provenanceNote && (
                       <span className="inspectorNote warn">{revision.provenanceNote}</span>
                     )}
-                    {<span className="revisionDriver">
+                    {selectedIsSoftwareProcedure && <span className="revisionDriver">
                       {revision.parentKind ?? 'Unspecified'} · {revision.caseRevisionIds?.length ?? 0} exact Case parent{revision.caseRevisionIds?.length === 1 ? '' : 's'}
                       {revision.derivedRationale ? ` · ${revision.derivedRationale}` : ''}
                     </span>}
-                    {selectedIsProcedure && revision.caseParents?.map(parent =>
+                    {selectedIsSoftwareProcedure && revision.caseParents?.map(parent =>
                       <div key={parent.linkId}>
                         <span className="revisionDriver">
                           Exact Case {parent.caseRevisionId} · relationship {parent.state}
