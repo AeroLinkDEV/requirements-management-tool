@@ -162,9 +162,19 @@ public sealed class ProblemReportLinkServiceTests
             Assert.False(string.IsNullOrWhiteSpace(item.ArtifactType));
             Assert.True(ProblemReportRelationshipPolicy.Matches(item.Relationship, item.ArtifactType));
         });
-        Assert.Equal(7, ProblemReportRelationshipPolicy.Definitions.Count(item => item.IsControlled));
+        Assert.Equal(8, ProblemReportRelationshipPolicy.Definitions.Count(item => item.IsControlled));
         Assert.True(ProblemReportRelationshipPolicy.IsGenericContextPair("Requirement", ProblemReportRelationshipPolicy.AffectedRequirement));
         Assert.False(ProblemReportRelationshipPolicy.IsGenericContextPair("ChangeRequest", ProblemReportRelationshipPolicy.ApprovedCorrectiveAction));
+        // Relating two Problem Reports is controlled and belongs to its own workflow. The generic links
+        // endpoint must not be able to forge it, which is the whole reason it is in this registry.
+        Assert.False(ProblemReportRelationshipPolicy.IsGenericContextPair("ProblemReport", ProblemReportRelationshipPolicy.RelatedProblemReport));
+        Assert.Throws<DomainException>(() => ProblemReportRelationshipPolicy.CreateGenericContext(Guid.NewGuid(),
+            "ProblemReport", Guid.NewGuid(), ProblemReportRelationshipPolicy.RelatedProblemReport,
+            "actor", DateTimeOffset.UtcNow));
+        // ... and no other workflow may produce it either.
+        Assert.Throws<DomainException>(() => ProblemReportRelationshipPolicy.CreateControlled(Guid.NewGuid(),
+            "ProblemReport", Guid.NewGuid(), ProblemReportRelationshipPolicy.RelatedProblemReport,
+            ProblemReportRelationshipProducer.DispositionWorkflow, "actor", DateTimeOffset.UtcNow));
         Assert.Throws<DomainException>(() => ProblemReportRelationshipPolicy.CreateControlled(Guid.NewGuid(),
             "TestExecution", Guid.NewGuid(), ProblemReportRelationshipPolicy.ResolutionVerification,
             ProblemReportRelationshipProducer.ChangeRequestWorkflow, "actor", DateTimeOffset.UtcNow));

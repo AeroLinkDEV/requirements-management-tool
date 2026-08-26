@@ -46,6 +46,8 @@ public static class ProblemReportEndpoints
         group.MapPost("/{id:guid}/release-waiver", ApproveReleaseWaiverAsync);
         group.MapPost("/{id:guid}/release-waiver/{waiverId:guid}/revoke", RevokeReleaseWaiverAsync);
         group.MapPost("/{id:guid}/links", LinkAsync);
+        group.MapPost("/{id:guid}/related", LinkRelatedAsync);
+        group.MapDelete("/{id:guid}/related/{relatedId:guid}", UnlinkRelatedAsync);
         group.MapGet("/{id:guid}/closure-package", ClosurePackageAsync);
         return app;
     }
@@ -301,6 +303,7 @@ public static class ProblemReportEndpoints
             && await HasProblemReportOwnerRecoveryAuthorityAsync(actor.Id, programId, db, ct);
         var duplicateDiagnostic = await new ProblemReportDuplicateDispositionPolicy(db).DiagnoseAsync(report, ct);
         var impactAreas = await new ProblemReportImpactProjection(db).BuildAsync(report, links, ct);
+        var relatedReports = await RelatedReportsAsync(report, links, db, ct);
         var transitions = await AvailableTransitionsAsync(report, actor, db, identity, ct);
         // Reviving a finished report is the existing reopen, not a new authority: Closed → Verifying and
         // Rejected → Draft are the only edges out of a terminal state, both are SQA-only, and both already
@@ -312,6 +315,7 @@ public static class ProblemReportEndpoints
         return Results.Ok(Detail(report, await LinkViewsAsync(report, links, db, ct), revisions,
             candidates.OrderByDescending(x => x.ReportRevision).ThenByDescending(x => x.Sequence),
             impactAreas: impactAreas,
+            relatedReports: relatedReports,
             new
             {
                 canApproveSqaClosure,
@@ -602,6 +606,118 @@ public static class ProblemReportEndpoints
             { waiver.Revoke(user.UserName, request.Reason, decisionAt); return Task.CompletedTask; });
     }
 
+    /// <summary>
+    /// Links two Problem Reports that belong together.
+    ///
+    /// Written on both records in one transaction, because a relationship that only one side knows about
+    /// is a relationship the other side's reader will never find — and the reason to record it at all is
+    /// that somebody looking at either report should see the other.
+    ///
+    /// Deliberately not reachable through the generic links endpoint: this is a controlled relationship
+    /// with its own producer, exactly like the duplicate disposition beside it.
+    /// </summary>
+    private static async Task<IResult> LinkRelatedAsync(Guid id, RelatedProblemReportRequest request,
+        HttpContext http, AeroLinkDbContext db, CancellationToken ct)
+    {
+        if (id == request.RelatedProblemReportId)
+            return Results.BadRequest(new { error = "A Problem Report cannot be related to itself.", code = "pr_related_self" });
+
+        await using var transaction = await db.Database.BeginTransactionAsync(IsolationLevel.Serializable, ct);
+        var report = await db.ProblemReports.SingleOrDefaultAsync(x => x.Id == id, ct);
+        if (report is null) return Results.NotFound();
+        if (!await http.HasProjectAccessAsync(db, report.ProjectId, ct)) return Results.Forbid();
+        if (request.ExpectedVersion is not null && request.ExpectedVersion != report.Version)
+            return Results.Conflict(new { error = "This problem report changed after it was opened. Refresh before continuing.", code = "stale_version", currentVersion = report.Version });
+
+        var related = await db.ProblemReports.SingleOrDefaultAsync(x => x.Id == request.RelatedProblemReportId, ct);
+        // Same Project, like the duplicate disposition. A relationship reaching across Projects would be
+        // visible to people who cannot open half of it, and nobody has asked for one.
+        if (related is null || related.ProjectId != report.ProjectId)
+            return Results.BadRequest(new { error = "The related Problem Report must exist in this Project.", code = "pr_related_not_in_project" });
+
+        if (await db.ProblemReportLinks.AnyAsync(link => link.ProblemReportId == report.Id
+                && link.ArtifactType == "ProblemReport" && link.ArtifactId == related.Id
+                && link.Relationship == ProblemReportRelationshipPolicy.RelatedProblemReport, ct))
+            return Results.Conflict(new { error = "These Problem Reports are already related.", code = "pr_related_duplicate" });
+
+        try
+        {
+            var now = DateTimeOffset.UtcNow;
+            var actor = http.UserAccount();
+            // Both sides are a controlled relationship change, so a closure candidate pending on either
+            // report is invalidated: its reviewed basis no longer describes what the record links to.
+            foreach (var (subject, other) in new[] { (report, related), (related, report) })
+            {
+                var fromState = ProblemReportTransitionPolicy.Canonical(subject.State);
+                var invalidated = subject.PrepareControlledRelationshipChange(actor.UserName, now);
+                db.ProblemReportLinks.Add(ProblemReportRelationshipPolicy.CreateControlled(subject.Id,
+                    "ProblemReport", other.Id, ProblemReportRelationshipPolicy.RelatedProblemReport,
+                    ProblemReportRelationshipProducer.RelatedProblemReportWorkflow, actor.UserName, now));
+                var toState = ProblemReportTransitionPolicy.Canonical(subject.State);
+                var rationale = invalidated
+                    ? "Relating another Problem Report invalidated the prior closure evidence."
+                    : null;
+                AddRevision(db, subject, "RelatedProblemReportLinked", actor.UserName, now,
+                    detail: $"Related to {other.DisplayNumber}.",
+                    fromState: fromState, toState: toState, rationale: rationale);
+                if (invalidated)
+                    await new ProblemReportClosureCandidateService(db).InvalidatePendingAsync(subject, actor.UserName,
+                        "RelatedProblemReportLinked", now, ct, fromState, toState, rationale);
+            }
+            await db.SaveChangesAsync(ct);
+            await transaction.CommitAsync(ct);
+            return Results.Created($"/api/problem-reports/{id}/related/{related.Id}",
+                new { relatedProblemReportId = related.Id, related.DisplayNumber, version = report.Version });
+        }
+        catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
+    }
+
+    /// <summary>Removes both halves, because a one-sided removal would leave the other report asserting a
+    /// relationship that no longer exists.</summary>
+    private static async Task<IResult> UnlinkRelatedAsync(Guid id, Guid relatedId, HttpContext http,
+        AeroLinkDbContext db, CancellationToken ct)
+    {
+        await using var transaction = await db.Database.BeginTransactionAsync(IsolationLevel.Serializable, ct);
+        var report = await db.ProblemReports.SingleOrDefaultAsync(x => x.Id == id, ct);
+        if (report is null) return Results.NotFound();
+        if (!await http.HasProjectAccessAsync(db, report.ProjectId, ct)) return Results.Forbid();
+        var related = await db.ProblemReports.SingleOrDefaultAsync(x => x.Id == relatedId, ct);
+        if (related is null || related.ProjectId != report.ProjectId) return Results.NotFound();
+
+        var links = await db.ProblemReportLinks.Where(link =>
+            link.ArtifactType == "ProblemReport"
+            && link.Relationship == ProblemReportRelationshipPolicy.RelatedProblemReport
+            && ((link.ProblemReportId == id && link.ArtifactId == relatedId)
+                || (link.ProblemReportId == relatedId && link.ArtifactId == id))).ToListAsync(ct);
+        if (links.Count == 0) return Results.NotFound();
+
+        try
+        {
+            var now = DateTimeOffset.UtcNow;
+            var actor = http.UserAccount();
+            db.ProblemReportLinks.RemoveRange(links);
+            foreach (var (subject, other) in new[] { (report, related), (related, report) })
+            {
+                var fromState = ProblemReportTransitionPolicy.Canonical(subject.State);
+                var invalidated = subject.PrepareControlledRelationshipChange(actor.UserName, now);
+                var toState = ProblemReportTransitionPolicy.Canonical(subject.State);
+                var rationale = invalidated
+                    ? "Removing a related Problem Report invalidated the prior closure evidence."
+                    : null;
+                AddRevision(db, subject, "RelatedProblemReportUnlinked", actor.UserName, now,
+                    detail: $"No longer related to {other.DisplayNumber}.",
+                    fromState: fromState, toState: toState, rationale: rationale);
+                if (invalidated)
+                    await new ProblemReportClosureCandidateService(db).InvalidatePendingAsync(subject, actor.UserName,
+                        "RelatedProblemReportUnlinked", now, ct, fromState, toState, rationale);
+            }
+            await db.SaveChangesAsync(ct);
+            await transaction.CommitAsync(ct);
+            return Results.Ok(new { relatedProblemReportId = relatedId, version = report.Version });
+        }
+        catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
+    }
+
     private static async Task<IResult> LinkAsync(Guid id, LinkRequest request, HttpContext http, AeroLinkDbContext db, CancellationToken ct)
     {
         var report = await db.ProblemReports.SingleOrDefaultAsync(x => x.Id == id, ct); if (report is null) return Results.NotFound();
@@ -771,6 +887,7 @@ public static class ProblemReportEndpoints
         IEnumerable<ProblemReportRevision> revisions,
         IEnumerable<ProblemReportClosureCandidate>? closureCandidates = null,
         IReadOnlyList<ProblemReportImpactArea>? impactAreas = null,
+        IReadOnlyList<object>? relatedReports = null,
         object? capabilities = null,
         IEnumerable<ReadinessWaiver>? releaseWaivers = null,
         ProblemReportDuplicateDiagnostic? duplicateDiagnostic = null)
@@ -786,7 +903,8 @@ public static class ProblemReportEndpoints
             // Each slot arrives complete — identifier, live state and target build. A response carrying only
             // ids would force the browser into a follow-up call per artifact, and the states it showed
             // would then be read at different instants from one another.
-            impactAreas = impactAreas ?? [], links = materializedLinks.Select(LinkResponse), approvedCorrectiveActions, testEvidence, closureCandidates = (closureCandidates ?? []).Select(CandidateResponse), revisions = revisions.Select(x => new { x.Id, x.Revision, x.EventType, x.Actor, x.Detail, rationale = string.IsNullOrWhiteSpace(x.Rationale) ? x.Detail : x.Rationale, x.FromState, x.ToState, x.EvidenceJson, x.EventSchemaVersion, x.SnapshotSchemaVersion, x.SnapshotHash, x.SnapshotJson, x.OccurredAt }) };
+            impactAreas = impactAreas ?? [],
+            relatedReports = relatedReports ?? [], links = materializedLinks.Select(LinkResponse), approvedCorrectiveActions, testEvidence, closureCandidates = (closureCandidates ?? []).Select(CandidateResponse), revisions = revisions.Select(x => new { x.Id, x.Revision, x.EventType, x.Actor, x.Detail, rationale = string.IsNullOrWhiteSpace(x.Rationale) ? x.Detail : x.Rationale, x.FromState, x.ToState, x.EvidenceJson, x.EventSchemaVersion, x.SnapshotSchemaVersion, x.SnapshotHash, x.SnapshotJson, x.OccurredAt }) };
     }
 
     private static object WaiverResponse(ReadinessWaiver item, ProblemReport report, DateTimeOffset now) => new
@@ -962,6 +1080,34 @@ public static class ProblemReportEndpoints
             definition.Meaning,
             provenance = report.CategoryProvenance?.ToString(),
         };
+    }
+
+    /// <summary>
+    /// The Problem Reports related to this one, each with the live state a reader needs to know whether
+    /// it still matters. One query for the whole set rather than one per link.
+    /// </summary>
+    private static async Task<IReadOnlyList<object>> RelatedReportsAsync(ProblemReport report,
+        IReadOnlyList<ProblemReportLink> links, AeroLinkDbContext db, CancellationToken ct)
+    {
+        var relatedIds = links
+            .Where(link => link.ArtifactType == "ProblemReport"
+                && link.Relationship == ProblemReportRelationshipPolicy.RelatedProblemReport)
+            .Select(link => link.ArtifactId).Distinct().ToList();
+        if (relatedIds.Count == 0) return [];
+        var releases = await db.Releases.AsNoTracking().Where(item => item.ProjectId == report.ProjectId)
+            .ToDictionaryAsync(item => item.Id, item => item.Version, ct);
+        return (await db.ProblemReports.AsNoTracking().Where(item => relatedIds.Contains(item.Id))
+                .OrderBy(item => item.NumberSequence).ToListAsync(ct))
+            .Select(item => (object)new
+            {
+                item.Id,
+                item.DisplayNumber,
+                item.Title,
+                state = ProblemReportTransitionPolicy.Canonical(item.State).ToString(),
+                severity = item.Severity.ToString(),
+                item.ReportedBy,
+                targetBuild = item.TargetReleaseId is { } releaseId && releases.TryGetValue(releaseId, out var version) ? version : "",
+            }).ToList();
     }
 
     private static object LinkResponse(ProblemReportLinkView link) => new { link.ArtifactType, link.ArtifactId, link.Identifier, link.Relationship, link.AddedBy, link.AddedAt };
@@ -1143,6 +1289,7 @@ public static class ProblemReportEndpoints
     private sealed record ClosureApprovalRequest(long? ExpectedVersion);
     private sealed record DispositionRequest(long? ExpectedVersion, ProblemReportDisposition Disposition, string Rationale, Guid? DuplicateOfId);
     private sealed record ReopenRequest(long? ExpectedVersion, string Rationale);
+    private sealed record RelatedProblemReportRequest(Guid RelatedProblemReportId, long? ExpectedVersion = null);
     private sealed record BlockerRequest(long? ExpectedVersion, bool IsReleaseBlocker, string? WaiverRationale);
     private sealed record ReleaseWaiverRequest(long? ExpectedVersion, string Rationale, DateTimeOffset ExpiresAt);
     private sealed record RevokeReleaseWaiverRequest(long? ExpectedVersion, string Reason);

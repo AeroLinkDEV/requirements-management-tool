@@ -81,6 +81,14 @@
     },
     {
       "method": "DELETE",
+      "path": "/api/problem-reports/{id:guid}/related/{relatedId:guid}",
+      "file": "ProblemReportEndpoints.cs",
+      "coveredBy": [
+        "ProblemReportRelatedApiTests"
+      ]
+    },
+    {
+      "method": "DELETE",
       "path": "/api/projects/{projectId:guid}/personnel/{userId:guid}/roles/{role}",
       "file": "PersonnelEndpoints.cs",
       "coveredBy": [
@@ -1375,7 +1383,8 @@
         "ProblemReportDispositionApiTests",
         "ProblemReportDuplicateDispositionApiTests",
         "ProblemReportImpactEvidenceApiTests",
-        "ProblemReportOwnerAuthorityApiTests"
+        "ProblemReportOwnerAuthorityApiTests",
+        "ProblemReportRelatedApiTests"
       ]
     },
     {
@@ -1427,7 +1436,8 @@
       "path": "/api/problem-reports/{id:guid}/links",
       "file": "ProblemReportEndpoints.cs",
       "coveredBy": [
-        "ProblemReportApiTests"
+        "ProblemReportApiTests",
+        "ProblemReportRelatedApiTests"
       ]
     },
     {
@@ -1449,6 +1459,14 @@
         "ProblemReportCategoryApiTests",
         "ProblemReportCheckoutApiTests",
         "ProblemReportOwnerAuthorityApiTests"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/problem-reports/{id:guid}/related",
+      "file": "ProblemReportEndpoints.cs",
+      "coveredBy": [
+        "ProblemReportRelatedApiTests"
       ]
     },
     {

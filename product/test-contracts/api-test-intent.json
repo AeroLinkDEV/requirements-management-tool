@@ -1,11 +1,11 @@
 {
   "schemaVersion": "aerolink-api-test-intent/v2",
   "totals": {
-    "tests": 598,
-    "cases": 656,
-    "classes": 103,
-    "hostedTests": 585,
-    "hostedCases": 634,
+    "tests": 605,
+    "cases": 663,
+    "classes": 104,
+    "hostedTests": 592,
+    "hostedCases": 641,
     "nonHostedTests": 8,
     "nonHostedCases": 17,
     "unknownHostTests": 5,
@@ -21,10 +21,10 @@
     "http-boundary": {
       "label": "HTTP boundary: route, status, JSON shape",
       "level": "API (must stay hosted)",
-      "tests": 372,
-      "cases": 406,
+      "tests": 379,
+      "cases": 413,
       "unknownCases": 0,
-      "classes": 85
+      "classes": 86
     },
     "ef-translation": {
       "label": "EF translation / relational constraints",
@@ -5271,6 +5271,125 @@
       "sourceLines": {
         "start": 23,
         "end": 79
+      }
+    },
+    {
+      "cls": "ProblemReportRelatedApiTests",
+      "test": "A_report_cannot_be_related_to_itself",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client"
+      ],
+      "sourceLines": {
+        "start": 98,
+        "end": 113
+      }
+    },
+    {
+      "cls": "ProblemReportRelatedApiTests",
+      "test": "A_report_in_another_Project_cannot_be_related",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client"
+      ],
+      "sourceLines": {
+        "start": 119,
+        "end": 136
+      }
+    },
+    {
+      "cls": "ProblemReportRelatedApiTests",
+      "test": "Both_records_carry_the_relationship_in_their_immutable_history",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client"
+      ],
+      "sourceLines": {
+        "start": 192,
+        "end": 215
+      }
+    },
+    {
+      "cls": "ProblemReportRelatedApiTests",
+      "test": "Relating_two_reports_is_recorded_on_both_of_them",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client"
+      ],
+      "sourceLines": {
+        "start": 50,
+        "end": 73
+      }
+    },
+    {
+      "cls": "ProblemReportRelatedApiTests",
+      "test": "The_generic_links_endpoint_cannot_forge_the_relationship",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client"
+      ],
+      "sourceLines": {
+        "start": 168,
+        "end": 190
+      }
+    },
+    {
+      "cls": "ProblemReportRelatedApiTests",
+      "test": "The_same_pair_cannot_be_related_twice",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client"
+      ],
+      "sourceLines": {
+        "start": 138,
+        "end": 162
+      }
+    },
+    {
+      "cls": "ProblemReportRelatedApiTests",
+      "test": "Unlinking_removes_the_relationship_from_both_records",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client"
+      ],
+      "sourceLines": {
+        "start": 75,
+        "end": 96
       }
     },
     {
