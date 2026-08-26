@@ -16,8 +16,9 @@ This roadmap is capability-driven, not calendar-driven. Each phase ends with evi
 | Enterprise maturity program | MVP program closed 2026-08-01; provider/deployment-specific boundaries remain conditional |
 
 The phase goals and exit evidence below are retained as the definition of what each phase had to
-prove. Live status is in [AEROLINK_3_IMPLEMENTATION_STATUS.md](AEROLINK_3_IMPLEMENTATION_STATUS.md)
-and [PROJECT_STATE.md](PROJECT_STATE.md); this roadmap is not the status record.
+prove. Live product status is in [PROJECT_STATE.md](PROJECT_STATE.md) and GitHub Issues; the former
+[AeroLink 3 implementation scorecard](docs/archive/AEROLINK_3_IMPLEMENTATION_STATUS.md) is retained as a
+historical checkpoint. This roadmap is not the status record.
 
 ## Phase 0: Documentation and Domain Validation
 
@@ -134,8 +135,9 @@ The current application now includes a complete first vertical increment for dur
 That recommendation is historical. Subsequent increments delivered universal controlled-editing foundations,
 email outbox delivery, broad search/filtering, verification/retest/release journeys, build-scoped verification,
 controlled Test Change Requests, downstream assessments, identity lifecycle administration, and exact software
-upward allocation. Current continuation starts from a reproduced need and the
-[current handoff](CURRENT_PRODUCT_HANDOFF_2026-08-10.md), not this old next-increment sentence.
+upward allocation. Current continuation starts from [PROJECT_STATE.md](PROJECT_STATE.md), current GitHub state,
+and a reproduced need. The former [2026-08-10 handoff](docs/archive/CURRENT_PRODUCT_HANDOFF_2026-08-10.md)
+is historical restart context, not a live continuation instruction.
 
 ### 2026-07-18 Requirements Explorer boundary delivered
 
@@ -151,8 +153,9 @@ The market benchmark in [ENTERPRISE_REQUIREMENTS_MANAGEMENT_BENCHMARK.md](ENTERP
 
 The Enterprise Requirements Workspace was recommended as the next implementation at the time of that
 benchmark, and has since been delivered along with the Open Digital Thread and much of the product-line
-configuration work. The current program and its per-workstream status are in
-[AEROLINK_3_IMPLEMENTATION_STATUS.md](AEROLINK_3_IMPLEMENTATION_STATUS.md).
+configuration work. Current state is maintained in [PROJECT_STATE.md](PROJECT_STATE.md) and GitHub Issues;
+the former [AeroLink 3 implementation scorecard](docs/archive/AEROLINK_3_IMPLEMENTATION_STATUS.md) remains
+available as historical program evidence.
 
 ## Phase 5: PR Management and Integrations
 
