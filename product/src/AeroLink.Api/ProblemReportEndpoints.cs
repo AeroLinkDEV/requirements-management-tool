@@ -300,6 +300,7 @@ public static class ProblemReportEndpoints
         var canRecoverOwner = !ownerAuthority.Eligible && !actor.IsAdministrator
             && await HasProblemReportOwnerRecoveryAuthorityAsync(actor.Id, programId, db, ct);
         var duplicateDiagnostic = await new ProblemReportDuplicateDispositionPolicy(db).DiagnoseAsync(report, ct);
+        var impactAreas = await new ProblemReportImpactProjection(db).BuildAsync(report, links, ct);
         var transitions = await AvailableTransitionsAsync(report, actor, db, identity, ct);
         // Reviving a finished report is the existing reopen, not a new authority: Closed → Verifying and
         // Rejected → Draft are the only edges out of a terminal state, both are SQA-only, and both already
@@ -310,6 +311,7 @@ public static class ProblemReportEndpoints
             && transitions.Any(transition => string.Equals(transition.State, reviveTarget, StringComparison.Ordinal));
         return Results.Ok(Detail(report, await LinkViewsAsync(report, links, db, ct), revisions,
             candidates.OrderByDescending(x => x.ReportRevision).ThenByDescending(x => x.Sequence),
+            impactAreas: impactAreas,
             new
             {
                 canApproveSqaClosure,
@@ -768,6 +770,7 @@ public static class ProblemReportEndpoints
     private static object Detail(ProblemReport x, IEnumerable<ProblemReportLinkView> links,
         IEnumerable<ProblemReportRevision> revisions,
         IEnumerable<ProblemReportClosureCandidate>? closureCandidates = null,
+        IReadOnlyList<ProblemReportImpactArea>? impactAreas = null,
         object? capabilities = null,
         IEnumerable<ReadinessWaiver>? releaseWaivers = null,
         ProblemReportDuplicateDiagnostic? duplicateDiagnostic = null)
@@ -779,7 +782,11 @@ public static class ProblemReportEndpoints
             && link.ArtifactId == x.ResolutionVerificationExecutionId).Select(LinkResponse).ToList();
         var now = DateTimeOffset.UtcNow; var waiverHistory = (releaseWaivers ?? []).ToList();
         var activeWaiver = waiverHistory.FirstOrDefault(item => item.IsActiveFor(x, now));
-        return new { x.Id, x.ProjectId, x.ReportNumber, x.Revision, x.DisplayNumber, x.Title, x.Problem, x.ProblemRich, x.AdditionalInformation, x.AdditionalInformationRich, x.Analysis, x.ReportedBy, x.ResponsibleEngineerId, x.TargetReleaseId, x.Classification, severity = x.Severity.ToString(), priority = x.Priority.ToString(), x.Origin, x.AffectedConfiguration, x.RootCause, x.RootCauseRich, x.Effects, x.EffectsRich, x.Containment, x.ContainmentRich, x.CorrectiveAction, x.CorrectiveActionRich, x.Workaround, x.WorkaroundRich, x.AnalysisRich, category = CategoryResponse(x), x.SystemAircraftImpact, x.SystemAircraftImpactRich, x.ImpactAssessmentJson, disposition = x.Disposition?.ToString(), x.DispositionRationale, x.ResolutionVerificationExecutionId, x.ClosureApprovedByName, x.ClosureApprovedAt, x.IsReleaseBlocker, x.ReleaseBlockerVersion, waived = activeWaiver is not null, activeReleaseWaiver = activeWaiver is null ? null : WaiverResponse(activeWaiver, x, now), releaseWaivers = waiverHistory.Select(item => WaiverResponse(item, x, now)), legacyWaiver = string.IsNullOrWhiteSpace(x.WaiverRationale) ? null : new { provenance = "LegacyUnverified", rationale = x.WaiverRationale, x.WaivedBy, x.WaivedAt }, state = ProblemReportTransitionPolicy.Canonical(x.State).ToString(), x.CreatedAt, x.UpdatedAt, x.Version, snapshotHash = x.CanonicalHash(), snapshotSchemaVersion = ProblemReportEvidenceContract.SchemaVersion, capabilities, duplicateDiagnostic, links = materializedLinks.Select(LinkResponse), approvedCorrectiveActions, testEvidence, closureCandidates = (closureCandidates ?? []).Select(CandidateResponse), revisions = revisions.Select(x => new { x.Id, x.Revision, x.EventType, x.Actor, x.Detail, rationale = string.IsNullOrWhiteSpace(x.Rationale) ? x.Detail : x.Rationale, x.FromState, x.ToState, x.EvidenceJson, x.EventSchemaVersion, x.SnapshotSchemaVersion, x.SnapshotHash, x.SnapshotJson, x.OccurredAt }) };
+        return new { x.Id, x.ProjectId, x.ReportNumber, x.Revision, x.DisplayNumber, x.Title, x.Problem, x.ProblemRich, x.AdditionalInformation, x.AdditionalInformationRich, x.Analysis, x.ReportedBy, x.ResponsibleEngineerId, x.TargetReleaseId, x.Classification, severity = x.Severity.ToString(), priority = x.Priority.ToString(), x.Origin, x.AffectedConfiguration, x.RootCause, x.RootCauseRich, x.Effects, x.EffectsRich, x.Containment, x.ContainmentRich, x.CorrectiveAction, x.CorrectiveActionRich, x.Workaround, x.WorkaroundRich, x.AnalysisRich, category = CategoryResponse(x), x.SystemAircraftImpact, x.SystemAircraftImpactRich, x.ImpactAssessmentJson, disposition = x.Disposition?.ToString(), x.DispositionRationale, x.ResolutionVerificationExecutionId, x.ClosureApprovedByName, x.ClosureApprovedAt, x.IsReleaseBlocker, x.ReleaseBlockerVersion, waived = activeWaiver is not null, activeReleaseWaiver = activeWaiver is null ? null : WaiverResponse(activeWaiver, x, now), releaseWaivers = waiverHistory.Select(item => WaiverResponse(item, x, now)), legacyWaiver = string.IsNullOrWhiteSpace(x.WaiverRationale) ? null : new { provenance = "LegacyUnverified", rationale = x.WaiverRationale, x.WaivedBy, x.WaivedAt }, state = ProblemReportTransitionPolicy.Canonical(x.State).ToString(), x.CreatedAt, x.UpdatedAt, x.Version, snapshotHash = x.CanonicalHash(), snapshotSchemaVersion = ProblemReportEvidenceContract.SchemaVersion, capabilities, duplicateDiagnostic,
+            // Each slot arrives complete — identifier, live state and target build. A response carrying only
+            // ids would force the browser into a follow-up call per artifact, and the states it showed
+            // would then be read at different instants from one another.
+            impactAreas = impactAreas ?? [], links = materializedLinks.Select(LinkResponse), approvedCorrectiveActions, testEvidence, closureCandidates = (closureCandidates ?? []).Select(CandidateResponse), revisions = revisions.Select(x => new { x.Id, x.Revision, x.EventType, x.Actor, x.Detail, rationale = string.IsNullOrWhiteSpace(x.Rationale) ? x.Detail : x.Rationale, x.FromState, x.ToState, x.EvidenceJson, x.EventSchemaVersion, x.SnapshotSchemaVersion, x.SnapshotHash, x.SnapshotJson, x.OccurredAt }) };
     }
 
     private static object WaiverResponse(ReadinessWaiver item, ProblemReport report, DateTimeOffset now) => new

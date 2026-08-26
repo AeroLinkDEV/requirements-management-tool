@@ -587,6 +587,7 @@
         "AuthoringTracedImpactTests",
         "BuildScopedWorkspaceApiTests",
         "ChangeAuthoringInvariantApiTests",
+        "ProblemReportImpactEvidenceApiTests",
         "ProgramRoleAuthorityApiTests",
         "ProjectConfigurationApiTests",
         "SoftwareChangeRequestLevelHistoryTests",
@@ -1373,6 +1374,7 @@
         "ProblemReportCheckoutApiTests",
         "ProblemReportDispositionApiTests",
         "ProblemReportDuplicateDispositionApiTests",
+        "ProblemReportImpactEvidenceApiTests",
         "ProblemReportOwnerAuthorityApiTests"
       ]
     },

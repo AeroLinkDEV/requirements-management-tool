@@ -73,6 +73,7 @@ test('Problem Report ownership offers only accountable Program authority and the
 
   await login(page)
   await page.getByRole('link', { name: 'Problem Reports' }).click()
+  await page.getByLabel('Search').fill(title)
   await page.locator('.prList').getByText(title).click()
   await page.locator('.prAdmin').getByText('Reassign or change target build').click()
   const picker = page.locator('.prAdmin').getByLabel('Assigned user')

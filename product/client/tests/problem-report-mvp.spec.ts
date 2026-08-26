@@ -28,8 +28,10 @@ test('an engineer creates a structured Draft PR and advances it through the SCCB
   await expect(page.getByText('RAISED BY', { exact: true })).toBeVisible()
   await expect(page.getByText('ASSIGNED USER', { exact: true })).toBeVisible()
   await expect(page.getByText('TARGET BUILD', { exact: true })).toBeVisible()
-  await expect(page.locator('.prImpactGrid').getByText('System requirements')).toBeVisible()
-  await expect(page.locator('.prImpactGrid').getByText('Yes', { exact: true })).toHaveCount(3)
+  const impact = page.getByRole('region', { name: 'Impact and linked evidence' })
+  await expect(impact.locator('.impactRow').filter({ hasText: 'System requirements' })).toBeVisible()
+  // The three areas answered Yes, each beside the area it answers rather than in a separate grid.
+  await expect(impact.locator('.impactPill.yes')).toHaveCount(3)
 
   await page.locator('.prFlow').getByRole('button', { name: 'Ready for SCCB →', exact: true }).click()
   await expect(page.locator('.prState')).toHaveText('Ready for SCCB')
