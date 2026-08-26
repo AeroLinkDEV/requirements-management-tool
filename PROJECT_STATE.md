@@ -1,672 +1,286 @@
-# Project State — Start Here
+# AeroLink project state — start here
 
-**Last updated: 2026-08-10.**
+**Last materially reconciled: 2026-08-26.**
 
-This is the orientation record for anyone — human or model — picking up AeroLink. It answers *what
-exists, what is true today, what is deliberately not being built, and where to start*. Every other
-document in this repository is either a durable definition or a historical record; this one describes
-the present.
+**Product checkpoint used for this snapshot:** protected `main` at `0947b9c9cf4e85b1b7ac4bb898f09d6a148d4d13`, after PR #774 merged. That SHA is a checkpoint, not a promise that live `main` will not move. Always refresh GitHub before starting work.
 
-When work changes the state of the project, update this file in the same change.
+This is the single living product-level orientation record for AeroLink. It answers what the product is, what architecture is currently supported, what remains intentionally outside its claims, and where authoritative detail lives.
+
+Do **not** use a dated handoff, old audit report, or historical issue count as a substitute for this file plus current GitHub state.
 
 ## What AeroLink is
 
-An on-premises aerospace development assurance platform: the authoritative record for controlled
-requirements and the evidence chain around them. It manages system requirements, software HLRs and
-LLRs, change requests, review and approval workflows, immutable baselines, generated controlled documents,
-Word-authored managed documents, test procedures, externally produced results and evidence, typed traceability,
-release campaigns, and a complete audit trail.
+AeroLink is an on-premises aerospace requirements-management and development-assurance platform. It is intended to provide a defensible controlled record across requirements, change, review/signature, exact traceability, verification, results/evidence, Problem Reports, baselines, documents, and release readiness.
 
-It exists to answer questions that are normally scattered across documents, spreadsheets and people:
-*what exact requirement revision was approved for this release, which change authorized it, what
-verifies it, what failed, who approved it, and can this document be reproduced years later?*
+It exists to make questions such as these answerable from controlled data rather than scattered documents/spreadsheets/memory:
 
-Read [PROJECT_VISION.md](PROJECT_VISION.md) for the full statement and
-[PRODUCT_PRINCIPLES.md](PRODUCT_PRINCIPLES.md) for the fifteen behavioral rules that constrain every
-design decision.
+- Which exact requirement revision belongs to this build?
+- Which approved change authorized it?
+- What exact upstream/downstream revisions does it trace to?
+- Which Test Case verifies it?
+- Which executable Test Procedure implements that Case?
+- What was executed, against which controlled revision, and what evidence/result was retained?
+- Which Problem Report or change package explains an issue?
+- Who reviewed/approved a controlled package, under what frozen workflow/snapshot?
+- Can the controlled document/evidence package be reproduced later?
 
 ## What AeroLink is not
 
-These are settled boundaries, not gaps awaiting work. They come from the original product brief and
-are recorded in [SCOPE_AND_BOUNDARIES.md](SCOPE_AND_BOUNDARIES.md).
-
-- **No certification, compliance, or tool-qualification claim.** The product is *informed by* ARP4754
-  and DO-178 concepts and terminology. It does not claim to satisfy their objectives, and it is not a
-  qualified tool. Never add language that implies otherwise.
-- **No AI.** This is a hard delivery rule of the current program, not an oversight. No suggestion,
-  scoring, generative, or assistant capability ships. It may be reconsidered as an explicitly
-  governed, human-controlled future capability; it is not in scope now.
-- **No structured plans or standards content management.** AeroLink may control externally authored Word plans
-  as files, revisions, approvals, and released renditions; it does not replace Word or interpret their prose.
-- **No architecture, design, or source-code management, and not a Git host.**
-- **No automated test execution.** Tests run in external environments; AeroLink controls the
-  procedures and captures or imports the results and evidence.
-- **No deferral for test procedures.** Change requests can be put away for another day; procedures
-  cannot. A requirement that is new or modified in the build being worked on is assumed to need
-  coverage, so the procedures verifying it cannot be shelved while it ships — deferring one would
-  remove coverage from a requirement still in the build and record it as ordinary planning. The
-  deferral that matters happens one level up, on the change request, and verification work already
-  follows its change request. See [DEC-058](DECISIONS_AND_OPEN_QUESTIONS.md).
-- **Not a document editor.** Requirements and verification publications remain generated outputs of controlled
-  data. For a Managed Document, the checked-in Word file is the controlled source and AeroLink is its storage,
-  revision, review, and release authority; Microsoft Word remains the editor and AeroLink does not interpret the
-  document prose as structured lifecycle data.
-
-## Repository layout
-
-| Path | What it is |
-| --- | --- |
-| `product/` | **The application.** This is the only software in the repository. |
-| `product/src/AeroLink.Domain` | Lifecycle rules and invariants. Domain logic lives here, not in controllers. |
-| `product/src/AeroLink.Infrastructure` | EF Core persistence, provider selection, migrations. |
-| `product/src/AeroLink.Api` | HTTP boundary. |
-| `product/client` | React + TypeScript user interface. |
-| `product/tests`, `product/client/tests` | Backend test projects and Playwright browser journeys. |
-| `design/mockups`, `docs/mockups` | North-star visual concepts. Reference material, not specifications. |
-| Root `*.md` | Authoritative product definition. See the index in [README.md](README.md). |
-| Root `*.docx` | The original supplied briefs, retained unmodified for provenance. |
-| Root `*.bat` | Windows operator entry points for start, stop, backup, daily backup scheduling, restore, diagnostics. |
-
-A `showcase/` directory previously held a Phase 0.5 static-data prototype. It was retired on
-2026-07-24 — see DEC-046. The product application is now the single demonstrable artifact.
-
-## Technology
-
-React and TypeScript client; ASP.NET Core on .NET 10 with Entity Framework Core; PostgreSQL for real
-use; SQLite for isolated tests and disposable local runs. A modular monolith with explicit domain,
-infrastructure and API boundaries. See [product/docs/ARCHITECTURE.md](product/docs/ARCHITECTURE.md).
-
-## What is built and working
-
-The full controlled chain runs end to end:
-
-change request authoring with server-leased exclusive checkout and autosave recovery → sequential *and*
-parallel author-selected/configured approval sequences with frozen snapshot hashes → stage-authorized
-electronic signatures over immutable snapshots → candidate baseline assembly with SHA-256 freeze →
-deterministic baseline materialization → generated SYSRD/SWRD and test-procedure documents in DOCX and PDF
-with approval provenance and document control → versioned test procedures → external execution import with
-evidence and immutable retest chains → typed, version-aware traceability with suspect links and impact
-analysis → a verification-impact queue that raises test work when an approved change alters what must be
-verified → a governed release campaign with computed readiness gates and ordered release approval.
-
-Password re-confirmation and a distinct signature meaning are implemented on qualified SRCR and TCR approval
-paths. Configured TCR stages preserve their frozen authority; the no-workflow fallback also requires current
-Approver authority. PR #408 closed #398 without rewriting historical signatures.
-
-Around that core: enterprise requirements workspace, configurable artifact schemas, saved views and
-structured queries, governed bulk operations, visual redlines, CSV/XLSX onboarding that lands in a
-Draft SRCR rather than bypassing approval, ReqIF 1.2 round trip, a versioned REST API with scoped
-service identities, webhooks with HMAC signing and dead-letter replay, OSLC RM, product-line libraries
-and variants, backup with integrity manifests, a current-user automatic daily backup schedule, and isolated
-restore drills.
-
-Delivered since, and not to be omitted when describing the product: **email notification of required
-approvals** through an outbox over the existing in-app notification record; **rich authored content** —
-tables, figures and symbols stored as structure rather than markup, so nothing ever becomes HTML — in
-requirement statements and change-request narrative, reproduced in the generated DOCX and PDF; **configurable
-review workflows**, where a project records who signs a change request, in what authority and in what order,
-versioned and never edited in place; a **Jira connector** with field mapping and link-back; and **approved
-document templates that decide what a generated document contains**, rather than being numbered and approved
-while a generator ignored them.
-
-The Aug. 7–8 increment added the API-served production client, production-build browser qualification, direct
-verification surfaces named **Change Requests**, **Test Procedure Explorer**, and **Test Results**, and
-first-class manual Test Change Requests. A manual TCR may cover several approved source Change Requests, carries
-its own rich engineering case and Problem Reports, preserves moved verification-impact history, and executes a
-configured sequential or parallel review workflow. New review cycles use a canonical versioned JSON snapshot of
-the governed package; source/link/impact mutations and submission share optimistic concurrency and deterministic
-true-collision tests.
-
-Change control reads as two facts rather than one. **Allocation** says which build a change request is going
-into, or that it is **deferred** — put away for another day with the state it had reached remembered, so a
-signed-off change on the shelf is distinguishable from an unwritten one, and reinstating returns it exactly
-there. **State** says how far it has got: Draft, In review, Approved, Incorporated once the build ships, and
-Superseded once a later revision exists. The last two are derived from the release and from the revision set
-rather than stored, so neither can disagree with reality. Listings show each change request's newest revision
-with its superseded history one click away (DEC-056). A released build takes no new change requests and no
-revisions of old ones (DEC-055, DEC-054).
-
-Authoring says where a requirement goes and what the traces already know. An author chooses the specification
-section a proposed requirement belongs in, applied at materialization — introduced requirements land there and
-modified ones move (DEC-057). The proposal may show a read-only live trace of the requirements derived from this
-one and the procedures that verify it. The author does not disposition downstream trace, verification,
-document, baseline/build, collaboration or lifecycle consequences; the engineers who consume and triage the
-change make those decisions in their governed workspaces (DEC-071, which supersedes DEC-059 and the
-impact-disposition portion of DEC-062).
-
-Software Drafts retain their HLR or LLR workspace even before the first requirement proposal exists. Test Change Requests are build-scoped controlled packages with explicit identifiers, truthful totals, and
-preserved superseded history. Problem Reports are **Project-scoped** controlled records: the same queue, detail
-and controlled-editing surface is available from every build, while target build remains an explicit report
-attribute/filter (DEC-089). Downstream assessment evidence is read before the engineer records a
-conclusion, and Release Readiness exposes every candidate change through a searchable selector rather than
-choosing one implicitly. Controlled dialogs are viewport-bound at any scroll depth.
-
-Documents are offered where the requirements are read, not only on the Digital Thread. The build decides which:
-the approved controlled document for a released build, or a draft at the revision the released document will
-carry, generated from the released baseline plus every approved change and stamped DRAFT on every page — never
-stored, because a controlled record of content that is still moving is a record of nothing.
-
-Identity: local accounts, Program-scoped roles, sessions, MFA with recovery codes, mandatory
-temporary-password rotation, scoped service accounts, and security audit. Administrators can see and revoke
-individual current role grants, distinguish global system administration from Program Administrator authority,
-identify the current session, revoke other sessions, and govern time-bounded delegations without deleting
-expired or revoked history.
-
-Software change control now governs both directions of allocation. Approval raises a downstream assessment
-owned by the consuming discipline: System to HLR, then HLR to LLR. Before approval, an HLR proposal selects
-current System revisions from the target build and an LLR selects current HLR revisions, or the author records
-an explicit derived exception with rationale. Exact selected revision IDs are reviewed, retained through
-checkout and change-request revisioning, and materialized as immutable `AllocatedFrom` traces.
-
-Draft authoring separates two deliberate actions. **Save Draft** persists incomplete work without issuing
-empty records or pretending it is review-ready; **Save and check in** applies the controlled working copy and
-closes its edit session. HLR and LLR histories, requirement pickers, and procedure inventories stay isolated,
-while exact controlled references remain searchable and navigable. A modified software requirement hydrates
-its existing exact upstream revisions, including historical revisions no longer active in the current baseline,
-without widening the current-build candidate search.
-
-Downstream assessments now read as engineering decisions rather than storage states: pending, in progress, in
-review, complete with no impact, complete with controlled impact, change required with a Draft change request pending, or
-superseded, always labelled HLR or LLR. A deep-linked assessment drawer shows the source SRCR and its complete
-change case, changed requirements, and the current downward trace. An engineer may record no impact, link a
-level-compatible Draft change request, or create the correct HLR/LLR Draft directly; the new Draft is linked automatically,
-and a failed link remains visible and retryable without losing the saved Draft.
-
-Each queue row carries one control, "Open assessment", whatever state the assessment is in; the drawer offers
-only the actions that state permits. Both conclusions appear in exactly one state — claimed and undecided.
-Wherever a conclusion exists it is stated with its author, its rationale and, once approved, its approver.
-Correcting a wrong conclusion is its own act: **Reopen assessment** takes a stated reason, returns the
-assessment to undecided, detaches any linked Draft change request without changing the change requests themselves, and keeps the withdrawn
-conclusion — outcome, author, rationale, approver and detached numbers — in the drawer's withdrawn-conclusions
-record. An unapproved conclusion is the assigned engineer's to withdraw; an approved one takes Approver
-authority; an assessment in review is returned rather than withdrawn behind its approver (DEC-090).
-
-Verification impact: approving a change request raises an item for every requirement it introduces or
-modifies, and for any procedure a retirement leaves covering nothing. A Test Lead distributes items;
-a Test Engineer resolves each one by naming an approved procedure, by recording that no test is required — a
-requirement the author declared verifiable by analysis still needs that confirmation — or by recording that a
-procedure must be written and does not exist yet. That third answer is an answer and never verification: it
-settles the `verification_impact` gate, because somebody has looked and decided, and deliberately does not
-settle coverage, so the release keeps waiting until the required TCR procedure work is approved and materialized. Procedure work is authored as an Introduce/Modify/Retire proposal inside the governed Test Change Request,
-pre-linked to the exact requirement change/revision scope. There is no separate procedure-level approval path:
-the TCR review approves the governed package, and materialization creates the controlled procedure revision and
-coverage changes. `NewProcedureRequired` is an explicit engineering decision and may settle the impact-planning
-gate, but it never settles coverage until approved TCR procedure work actually materializes.
-Undecided items hold the `verification_impact` release-readiness gate, so they block release approval; they
-deliberately do **not** block the baseline freeze, because freezing and materializing is what creates the
-requirement revisions a procedure is written against. "Decided" means a qualified engineer recorded an explicit verification-impact outcome. It says nothing
-about whether required procedure changes have been approved/materialized or whether any procedure has been executed.
-
-A test change request opens as a workbench: the record itself is the disclosure, and it shows its source
-change requests, who holds it, its linked Problem Reports, and one decision per requirement carrying the
-coverage that requirement already has — covered with its procedures named, suspect with the procedure that
-must be reconfirmed or replaced named, none, or not yet knowable because the build has not materialised its
-requirements. Suspect is stated before "no procedure", because a reader who sees "covered" stops looking and
-that is the case most likely to be answered wrongly.
-
-A manually raised TCR adds a controlled Title / Problem / Analysis / Solution case and may claim several
-approved source changes. Folded source assessments' impact items move to the surviving package with identity,
-assignment, decision, attribution, and history retained; unfold restores a fresh actionable assessment. Review
-cycles expose active/pending/completed stages, freeze the applicable workflow and authority, and retain prior
-cycles after return and resubmission. New automatic packages use the current engineering-case contract and
-cannot be submitted empty; historical packages retain their recorded legacy contract and evidence.
-
-Coverage is a question the requirements workspace can now answer. A **coverage-state filter** builds a worklist
-of what is Covered, Suspect or Uncovered, and every row carries its state; the suspect and uncovered ones are
-buttons that open the verification trace rather than labels that only read. Covered means one thing everywhere —
-the link is not suspect, the procedure revision it names is approved, and that procedure has no revision still in
-flight — because the release readiness gate, the workspace filter and the trace panel now read one predicate
-(DEC-067). They did not: the gate applied all three conditions while the trace panel counted "confirmed tests"
-from the suspect flag alone, so a requirement could show a confirmed test beside a row that called it suspect.
-
-The showcase covered all 1,250 of its requirements and so could never demonstrate the product finding a gap. One
-FMS 1.6 work item now puts an approved System procedure back into revision, making the two requirements it covers
-suspect while released FMS 1.5 is left exactly as it was. **No uncovered requirement is seeded** — reaching one
-would need either a released baseline that failed its own coverage gate or a materialized FMS 1.6, and both are
-worse than the missing state. Uncovered appears the moment somebody materializes 1.6 (DEC-068).
-
-Materialization is where the loop closes, because it is the first moment requirement revisions exist. Each
-item binds to the exact revision its change produced; coverage on a modified requirement carries forward
-onto the new revision marked **suspect**; a decision that named a procedure becomes the real coverage link,
-clearing the suspect flag rather than duplicating it; and a procedure a retirement left covering nothing
-raises its own item. **Suspect coverage is not coverage**: the `coverage` readiness gate counts only
-confirmed links, so a requirement cannot reach release on the strength of a procedure written against its
-previous wording.
-
-Procedure proposals are constrained to the TCR's governed source/build scope. Modify preserves exact retained
-coverage and records governed additions/removals with rationale; materialization applies the approved final set.
-
-**Bringing in a program that already exists elsewhere** is a separate act from proposing a change (DEC-093).
-The five-gate import surface records an externally sourced release and the provenance intended to distinguish
-it from a baseline this product built: source system and version, source baseline
-name and date, extract file name, size and SHA-256, who took the extract and when. Five gates run in order
-and none can be skipped — Source, Analyse, Map, Reconcile, Accept — and a named person accepts. The page
-states what that signature asserts beside what it never asserts: that these requirements were reviewed or
-approved here. Every source identifier survives as a searchable record joined to its controlled requirement
-by a provenance link, and an object the source retired before the imported baseline is recorded so a
-reference to it can be answered while joining nothing. Reading the file itself is not built: the gates are
-driven by structured input, which is what makes them exercisable before a parser exists.
-
-Presentation: one design system across every surface — a 12px readability floor, four radii, one type
-scale, one focus treatment — with **comfortable and compact information density** expressed as spacing
-tokens applied through the workspace shell, and **WCAG 2.2 AA as a commitment**: 4.5:1 body contrast,
-3:1 large text, and 24x24 minimum target sizes, all measured on rendered pixels by
-`product/client/tests/accessibility-contrast.spec.ts` and `design-system.spec.ts` in both densities.
-
-## Current product flow and visible surface
-
-Authentication no longer drops a user into an implicit FMS workspace. The supported path is
-**Projects → FMS Product Development → Software Builds → build-scoped workspace** (DEC-070).
-`SW-01.50` (informally Build 1.5) is released and read-only; `SW-01.60` (informally Build 1.6) is in work and
-editable. Baseline and software build are one product concept. Changing build requires leaving the
-workspace through **Back to Software Builds**. There is no in-workspace build switcher, and a released build
-does not show a completion percentage.
-
-Inside a build, System and Software remain separate engineering areas. The Command Center summarizes System,
-Software and Verification work. System change creation is direct; Software creation first asks HLR or LLR.
-Change history, requirements, search and verification are scoped to the active build, and historical evidence
-is labelled with its originating build without changing workspace context.
-
-Problem Reports are active and Project scoped: one Problem Report database per Project, identical whichever
-build the reader is standing in, with the target build an attribute of the record and an explicit filter a
-user may choose rather than one the workspace applies (DEC-089, superseding the build-scoping half of
-DEC-085 and DEC-087). They carry the agreed Draft-to-Closed
-lifecycle, progressive rich fields, immutable raised-by/date, auditable owner/target-build changes, structured
-impact decisions, AND filters, and an internal History tab. A report is corrected under the same exclusive
-server lease as every other controlled record — **Check out & edit**, autosave, check in, discard, and a
-named holder while somebody else has it — in every state except Closed and the terminal dispositions, where
-reopening is the route back. Each check-in lands in the report's own History as `Details Checked In` with its
-actor and time (DEC-091). Their center supports durable detail links and
-links forward to SRCRs, HLRCRs, LLRCRs, every TCR discipline, requirements, procedures, executions/evidence, documents,
-and releases where those records exist. Every change-request type can select one or more driving PRs; approved
-engineering changes are projected back as corrective actions, and only results selected to support closure
-are projected as test evidence. Product Versions and the old Change Request Software Builds view remain dormant. Candidate Baselines is an explicit Configuration Management surface at `/baselines`; the old `/release-planning` route remains retired. Lifecycle Decision
-Room remains visible.
-
-Procedures covering requirements introduced or modified by the active build are automatically included as
-mandatory changed-requirement tests. They cannot be removed from the build test set, and the exact-revision
-result/evidence gates prevent release until they pass with evidence.
-
-Verification is three pages per discipline rather than one overloaded workspace. **Change Requests** answers
-"what approved change affects this discipline's tests, what package carries the answer, and what procedure work
-is being proposed/reviewed" — downstream test assessments, verification-impact decisions, automatic/manual Test
-Change Requests, source folding, Problem Reports, procedure-change proposals, assignment, and staged review.
-**Test Procedure Explorer** answers "what controlled procedures does this build carry, what is their exact
-history, and what do they verify". **Test Results** answers "what does this build have to run, and what happened
-when it was run" — the build test set, recorded determinations with evidence, run history, retests, and the
-corrective action a Problem Report sends somebody here to perform. System has one trio; software has separate
-HLR and LLR trios because the work is planned, done, and approved separately.
-
-Explorer lists, search, detail, History, Trace & impact, coverage, test sets, execution records, generated
-documents, and release-review manifests project the title of the exact carried procedure revision. Introduce
-and Modify take that immutable title from the producing TCR snapshot; Retire preserves the predecessor title;
-legacy rows use an explicit deterministic compatibility label rather than today's mutable catalog title.
-List search, universal procedure/execution search and Modify/Retire target search use that same authoritative
-title projection, so discarded Retire proposal text cannot become searchable history. History and Trace share
-one provenance projection anchored to `TestProcedureRevision.SourceTestChangeRequestId`: the exact TCR revision
-remains primary, while every folded source retains its own exact CR identity. Legacy builds that predate exact
-procedure manifests are established through the explicit Configuration Manager bootstrap delivered by #364;
-the recorded snapshot is migration provenance, not reconstructed historical precision.
-
-Primary navigation mirrors that work: **Requirements** owns change requests, requirements, requirements
-documents, and Digital Thread; **Verification** owns the direct Change Requests, Test Procedure Explorer, Test
-Results, and verification-document destinations; **Code**, **Documentation Center**, and **Problem Reports** are
-standalone destinations in that order. Documentation Center controls Word-authored lifecycle documents without
-replacing Word. Code records exact LLR-revision-to-GitLab-merge pointers without hosting source, and released
-Build 1.5 is read-only. Legacy verification chooser/deep-link URLs remain supported where explicitly retained,
-but no redundant generic Verification workspace defines the current surface. Legitimate assurance role names
-and production-assurance terminology are unchanged.
-
-A build's test work is scoped by a **Build Test Set** — one per build per discipline, a working list rather
-than a controlled artefact, recording who put each procedure in it and why (changed requirement, coverage
-area, corrective action, or simply chosen). The release gates measure that set. The older
-"evidence required before release" flag on an individual decision no longer has a control that sets it; it
-survives server-side only as one of the inputs that seeds a new set (DEC-073 superseded by DEC-076).
-
-Approved changes still create System, Software HLR and/or Software LLR test assessments. A controlled TCR is
-allocated when the assessment concludes that procedure work is required; it may also be raised manually when
-several approved source changes are best tested as one package. TCRs have their own numbers/revisions, rich case,
-Problem Reports, exact source identities, governed impact decisions, staged review cycles, and successor history.
-
-The restart-ready description, exact qualified `main`, audit findings and safe next sequence are in
-[CURRENT_PRODUCT_HANDOFF_2026-08-10.md](CURRENT_PRODUCT_HANDOFF_2026-08-10.md).
-
-## The demonstration dataset
-
-`FMSLIVE` is a deterministic, production-shaped program built through the same domain and persistence
-rules as any user-created program — not a mock data layer. Enabled by `DemoData:Enabled`, disabled by
-default in production configuration.
-
-Released **FMS 1.5** baseline: 150 system requirements, 400 HLRs, 700 LLRs, 1,250 effective revisions,
-30 SRCRs, 44 HLRCRs and 55 LLRCRs, 1,100 typed traces, 515 procedures, 520 executions including retained retests, 6
-controlled documents, 1 released build. **FMS 1.6** is derived from it and deliberately in work, with
-persistent controlled work spread across approved, in-review, draft and deferred states. Its counts evolve as
-realistic engineering qualification adds records; they are not a fixed seed-data contract.
-
-The tool never auto-creates or auto-approves a successor release. Details in
-[FMS_LIVE_SHOWCASE_DATASET.md](FMS_LIVE_SHOWCASE_DATASET.md).
-
-## Where delivery stands
-
-The original AeroLink 3.0 implementation program and its review follow-ups have been reconciled. The August
-verification/procedure-control audit sequence is also closed: #417–#424, #442, #364, #365 and #367 are complete
-and merged. The audited product checkpoint immediately before this documentation-only closeout is
-`af8760a6ad17b6266a770fb8c0beb2b67eaf3c90` after #367. Replacement draft PR #443 was closed as superseded by
-merged #444, leaving no orphan open PR from the sequence.
-
-The current GitHub product backlog at this checkpoint contains one open issue: #332, completing the durable
-controlled outcome and representative-extract qualification for bringing an existing program in as an imported
-baseline. Deployment-owned work remains bounded by real customer/provider/topology decisions rather than being
-simulated in repository code.
-
-Per-workstream status is in [AEROLINK_3_IMPLEMENTATION_STATUS.md](AEROLINK_3_IMPLEMENTATION_STATUS.md). Its
-vocabulary distinguishes **MVP delivered**, **deferred by decision**, **deployment-owned**, and real focused
-backlog from an unqualified claim that every enterprise deployment capability is complete.
-
-**[PRODUCT_REVIEW_2026_07_26.md](PRODUCT_REVIEW_2026_07_26.md)** and the dated handoffs remain historical review
-records. Closed findings are not rewritten out of those records; current status lives here and in the current
-handoff.
-
-## Known limitations — state these accurately
-
-Understating these is a product-integrity failure, not a marketing choice.
-
-- **The current product backlog is #332.** The imported-baseline five-gate workflow and provenance records
-  exist, but the accepted import does not yet materialize the complete immutable controlled requirement
-  baseline, exact membership and source-identity relationships required by that issue, and representative
-  extract/parser qualification is still required.
-- **Legacy procedure manifests are established explicitly, never invented silently.** The #364 Configuration
-  Manager bootstrap records one exact migration snapshot with actor/time/rule/count/hash and then normal
-  successor carry-forward applies. It does not claim to reconstruct every historical build's exact procedure
-  manifest.
-- **Candidate Baselines is live Configuration Management, not a dormant legacy page.** `/baselines` is the
-  supported surface and includes legacy procedure-manifest bootstrap. `/release-planning` remains retired.
-
-- **The scale claim is 150 simultaneous *database clients* and 50,000 requirements on one workstation,**
-  with zero failures. This is **not** 150 rendered browser sessions on production topology, and must never
-  be described as such. The HTTP path has since been measured too — the `session-load` harness signs in 150
-  real authenticated sessions — and that measurement is what found the sign-in limiter refusing 121 of 150
-  users. But per-page latency was measured from 10 to 50 concurrent sessions, and one query still caps the
-  requirements workspace, so the *claim* does not change. Say "database clients", and say the HTTP path is
-  measured but the user number is not yet supported. See
-  [product/docs/SCALE_FOUNDATION.md](product/docs/SCALE_FOUNDATION.md) and the path to 150 users in
-  [CAPABILITY_ROADMAP.md](CAPABILITY_ROADMAP.md), which is costed and deliberately not started.
-- **Email delivery exists but no mail server is configured.** An outbox writes a delivery row in the same
-  transaction as the domain change and a background dispatcher sends it over the organization's SMTP relay.
-  With no relay configured, deliveries stay Pending and inspectable rather than being dropped. Nothing has
-  been proved against a real relay, so treat "notifications reach people by email" as built and unexercised.
-  This removed the hard dependency that self-service account recovery was blocked on.
-- **Production deployment is not complete.** TLS, certificate and secret management, reverse-proxy
-  topology, scheduled off-device backups, monitoring, retention enforcement and an independent
-  security review remain organization-specific work. See
-  [SECURITY_AND_IDENTITY_MODEL.md](SECURITY_AND_IDENTITY_MODEL.md).
-- **Demonstration credentials are non-production** and must be replaced before any operational use.
-- **An imported baseline is not yet a controlled requirement baseline.** The five import gates are exercisable,
-  but Accept currently creates only the released release/provenance record; it does not create controlled
-  requirement revisions, exact candidate-baseline membership, or source-identity links. Nothing yet parses a
-  DOORS or ReqIF extract: structured input is used and the hash/size are operator-supplied. #332 remains open
-  for both the durable controlled outcome and representative-extract qualification.
-The client has **no external runtime dependency**: it makes no network request outside its own origin,
-and has been verified to start with all external requests blocked. Keep it that way — a CDN reference
-in the client contradicts the on-premises posture and, as the resolved case below showed, can block
-first paint for seconds on a restricted network. See DEC-047.
-
-## How to run it
-
-PostgreSQL must be installed once on a new machine — `product\scripts\Setup-Postgres.ps1`, which downloads
-roughly 360 MB from `enterprisedb.com`. Neither launcher does this, and on a restricted network it is the
-step most likely to fail.
-
-**To demonstrate AeroLink, or to see what a deployment serves:** `START_AEROLINK_PRODUCTION.bat`. It builds
-the client and serves it from the API on one origin at `http://127.0.0.1:5080` — one process, one port, no
-CORS. This is the on-premises shape and the only path that runs the built client (DEC-052).
-
-**To work on AeroLink:** `START_AEROLINK.bat`, which runs the Vite **dev** server on `http://127.0.0.1:5173`
-against the API on 5080. `STOP_AEROLINK.bat`, `AEROLINK_DIAGNOSTICS.bat`, `BACKUP_AEROLINK.bat`,
-`VERIFY_AEROLINK_BACKUP.bat` and `RESTORE_AEROLINK.bat` cover the rest. Full procedures in
-[product/docs/OPERATIONS.md](product/docs/OPERATIONS.md); developer path and test commands in
-[product/README.md](product/README.md).
-
-Both launchers wait on `/health/ready`, which opens a database connection. They previously waited on
-`/health`, which answers "is the process listening" and is true with no database at all.
-
-The browser journeys run on Linux, macOS and Windows: `cd product/client && npx playwright test`, after
-`npx playwright install chromium` once. They were Windows-only until the Playwright configuration stopped
-launching its servers through a PowerShell prologue. Set `AEROLINK_E2E_SKIP_BUILD=true` to reuse an
-already-built API and cut about a minute per run.
-
-`npm run test:production` runs a separate set of journeys against the **built** client served by the API.
-Everything else serves the client with `vite dev`, which is a different artifact — unbundled modules with
-stylesheets injected as they evaluate, rather than chunked code and one extracted, hashed stylesheet. Expect
-it to catch things the dev journeys structurally cannot. It now performs protected writes immediately after
-deep-linked sign-in, verifies the resulting System SRCR and immutable verification result through the API, and
-fault-injects network and conflict responses to prove that failed writes preserve input and create no record
-(DEC-061).
-
-CI runs the dev journeys and the production journeys according to changed-area classification, plus scheduled
-coverage. The required reporter states exactly which jobs ran and refuses a pass that validated nothing. The
-Windows gate runs backend, client lint/type-check/build, and product journeys; PostgreSQL migration/bootstrap
-runs against disposable infrastructure when selected.
-
-Local demonstration identities (`admin`, `systems.author`, `software.author`, `systems.reviewer`,
-`release.manager`) share a local-only password documented in `product/README.md`. Production
-deployment uses the one-time protected administrator bootstrap instead.
-
-Requirement proposal metadata is now one durable server contract (DEC-062). Initial change request creation preserves
-schema-allowed `owner`, `criticality`, and future configured attributes while recomputing the server-owned
-`derived` flag. Exact section placement survives create, detail, checkout/check-in, review and baseline
-materialization; stale section identifiers are rejected with a repair instruction. Administrators can identify
-legacy authored-attribute gaps through `/api/authoring/attribute-gaps`. DEC-071 supersedes the former
-five-area author-impact requirement: review and downstream lifecycle operations no longer block on those
-fields, and integrity checkpoints do not treat their absence as a violation.
-
-Change-request context and review attribution are also controlled facts (DEC-063). Detail links now encode
-System or Software and self-correct old generic or mismatched links from the authorized record. Search, My Work,
-notifications and Jira preserve the same discipline. Each approval step retains the canonical selected account,
-display name, workflow stage and resolved Program authority; the review UI no longer substitutes a showcase
-person, while the actual signing account remains separate immutable signature evidence.
-
-Authenticated mutation attribution is server-owned (DEC-064). Browser request contracts no longer accept
-caller-selected author, actor, owner, recorder, or executor values; durable provenance comes from the
-authenticated session or service principal. Operations diagnostics are credentialless and session-free by
-default, with an explicitly optional scoped-service probe for authentication capability.
-
-Administrator recovery authority is also server-owned (DEC-065). An administrator with Project access may
-complete the original author's Draft/deferred workflow or create an approved record's successor without
-becoming that record's author. State, release and concurrency guards remain unchanged; durable audit, attachment
-and controlled-editing evidence identifies the administrator as the actual actor. The rule and browser journey
-are shared by System and Software change requests.
-
-Test-procedure applicability begins at exact baseline materialization (DEC-066). Before that lifecycle point,
-new procedure authoring is disabled with the reason and the governed materialization prerequisite; the former Product Versions surface remains unexposed; Candidate Baselines is now the explicit `/baselines` Configuration Management surface, while `/release-planning` remains retired. Existing inherited
-procedures remain tied to their predecessor revisions and change-impact work remains planned rather than
-counted as coverage. Release readiness exposes traceability, coverage, verification, and evidence as
-`WaitingForPrerequisite` with `baseline` as their dependency. Once materialized they become evaluated gates;
-an empty effective population remains an explicit HOLD, not a successful or waiting `0/0`.
-
-## How this project governs itself
-
-AeroLink is developed under the same discipline it sells. Respect it — these conventions are the
-reason the document set can be trusted.
-
-- **Markdown in Git is authoritative.** Generated Word or PDF copies are snapshots, not sources.
-- **Decisions are append-only.** Recorded in
-  [DECISIONS_AND_OPEN_QUESTIONS.md](DECISIONS_AND_OPEN_QUESTIONS.md) as `DEC-nnn`. If a decision
-  changes, add a superseding decision and retain the original. Never edit a decision's meaning in place
-  and never silently change it in another document.
-- **Capabilities get stable identifiers** in [FEATURE_CATALOG.md](FEATURE_CATALOG.md). Identifiers are
-  never reused.
-- **Scope changes are recorded**, not made quietly.
-- **Normative language is deliberate**: **must** is mandatory, **should** is preferred, **may** is
-  optional.
-- **Deferrals are written down** with reason, resume trigger and excluded acceptance criteria — see
-  Workstream 4 for the worked example.
-
-## Lessons this project has already paid for
-
-- **A green gate is not evidence a capability is reachable.** An identity migration was authored
-  without the attributes Entity Framework needs to discover it, so it never ran; the tables existed
-  only inside a hand-written test fixture, and every endpoint depending on them would have failed at
-  runtime. Every test passed, because no test and no smoke step ever called those endpoints. Guard
-  tests now fail the build if a migration is undiscoverable or the model drifts from its snapshot.
-  When adding a capability, ask what would fail if it were entirely absent — and make sure something
-  does.
-- **Migrations must be generated, not hand-authored.** Set `AEROLINK_MIGRATIONS_CONNECTION` to a disposable
-  PostgreSQL connection first (design-time EF fails closed and never defaults to the persistent database; see
-  `product/docs/OPERATIONS.md`), then run
-  `dotnet ef migrations add <Name> --project src/AeroLink.Infrastructure --startup-project src/AeroLink.Api --output-dir Persistence/Migrations`.
-  Entities must also be mapped in `AeroLinkDbContext`, because the non-PostgreSQL path builds its
-  schema from the model rather than from migrations.
-- **Generated is not the same as correct — read every migration before running it.** EF scaffolds a new
-  non-nullable string column with `defaultValue: ""`. Where that column holds an enum converted with
-  `HasConversion<string>()`, `""` is not a member name and *every existing row fails to materialize* — a
-  total outage of that entity from a migration that looks routine. It was caught twice in one day. The same
-  habit catches a table rename scaffolded as `DropTable` plus `CreateTable`, which silently deletes the data.
-- **Test a performance hypothesis before shipping the fix for it.** A plausible explanation for CI sign-in
-  timeouts — that Entity Framework builds its model on the first query, after the readiness probe has already
-  reported ready — was implemented and then measured at 167 ms against 170 ms. Identity seeding had already
-  warmed the model. The change was deleted rather than shipped with a rationale that had just been disproven.
-- **A green test suite is not a look at the page.** Four defects in one day passed every assertion and were
-  found only by rendering the page and reading it: provenance dates shifted a day for anyone west of UTC, a
-  CSS specificity collision stacked every checkbox above its label, two cards wore the same icon, and a grid
-  showed a block of divider colour where its last row wrapped short. Screenshot a changed surface.
-- **Prefer deferring honestly over building speculatively.** Workstream 4's remainder was deferred
-  because nothing in it had a real user yet. Recording that is better than a silent backlog.
-- **A test can pass by racing past the thing it checks.** The readability journey asserted that no text
-  on the change-request surface renders below 12px, and it passed for months while the page in fact
-  rendered 9px initials and an 11px lifecycle chip — it sampled the page before those rows appeared.
-  Making the client faster removed the race and the assertion started failing, correctly. When a test
-  starts failing after an unrelated performance change, suspect the test was never really exercising
-  its subject.
-- **A suite that cannot run where the work happens does not run.** The browser journeys launched both
-  their servers through a PowerShell prologue, so they were Windows-only: they could not be executed on a
-  Linux development machine at all, and CI paid the Windows rate to run them. Two real defects sat behind
-  that wall — a flexbox row that overflowed the page and a release gate wired to the wrong transition —
-  and neither was findable locally. The config now passes configuration through `webServer.env` and the
-  same suite runs on either platform. Before trusting a gate, check that you can run it yourself.
-- **A gate belongs on the transition the workflow can actually satisfy.** The verification-impact queue
-  was first wired to block *baseline freeze*. Freezing and then materializing is what creates the
-  requirement revisions a test engineer needs before a procedure can exist, so the gate withheld the test
-  team's own inputs and deadlocked the release. It is now the `verification_impact` readiness gate on
-  release approval, which is what was actually asked for. The gate also shipped with no test of its own;
-  an existing journey caught it, and only once that journey could run.
-- **Auditing default states is auditing the easy case.** The design contract was checked on each surface
-  as it first rendered. A surface can be contained at rest and overflow the moment a panel opens — the
-  requirements workspace did exactly that — and a queue with no rows in it hides every colour its rows
-  use. Two contrast failures on My Work appeared only once other journeys had created work items. Audits
-  now cover both densities, an opened inspector, and populated surfaces.
-- **Density is spacing, not type.** Compact reduced body text to 14px, and every unstyled `<small>` — at
-  the user agent's 0.8333em — silently fell from 12.5px to 11.67px, under the readability floor. The
-  floor had never been measured in compact because nothing exercised compact. Relative font sizes make a
-  floor unpredictable; pin the element instead of trusting inheritance.
-- **A method nothing calls is a claim nothing keeps.** The verification feature shipped with
-  `LinkRequirementRevision`, `CarriedForward`, `MarkSuspect` and `ConfirmStillValid` fully written, tested
-  at the domain level, and never called from production code. The documentation described suspect
-  carry-forward as product behaviour while no code path produced a suspect link. Domain tests pass happily
-  against methods no caller reaches; before believing a capability exists, follow it from an endpoint.
-- **Look for the mechanism that already exists before adding one.** Release reconciliation had been
-  carrying coverage forward across baselines for as long as it existed — silently, and unmarked, which
-  asserted that a procedure written against previous wording still verified the new one. Adding a second,
-  safer carry-forward simply produced two mechanisms; the fix was to delete the unmarked one. A failing
-  test in an unrelated area is often the first sign that the behaviour you are adding is already there.
-- **An on-premises product must be measured on a hostile network, not a good one.** The client fetched
-  its webfonts from a public CDN. On a fast connection this was invisible; when the request hung rather
-  than failing fast — the normal behaviour of a firewall that drops packets instead of rejecting them —
-  first paint took 12,994 ms instead of 147 ms. Fixed by self-hosting (DEC-047). Before shipping
-  anything that loads a resource, ask what happens when that resource is unreachable *slowly*.
-- **A benchmark measures what it drives, not what it is named after.** The scale harness had always
-  reported 150 concurrent clients, and the documentation was careful to call them *database* clients —
-  correctly, because the harness issued EF queries straight at PostgreSQL. Nobody had driven the HTTP
-  path. Doing so found that sign-in refused 121 of 150 users, because the rate limiter partitioned on
-  network address and an on-premises site reaches the product through one proxy: the product denied
-  service to its own users, and no database-level measurement could ever have shown it. When a number is
-  quoted in a unit, check that something actually measures that unit.
-- **A read that writes will be slow, and the cost hides in a method that looks idempotent.** The
-  requirements explorer called a project-wide backfill on every GET. It was correct, it was idempotent,
-  and it loaded every requirement, revision, profile and specification node in the project before
-  returning fifty rows — nine seconds a page at fifty thousand requirements. "Idempotent" says nothing
-  about what it costs to discover there is nothing to do. The first guard was itself a join through
-  fifty thousand rows and barely helped; the fix was to make the check one indexed count.
-- **The control existed; the thing it controlled did not.** Document templates were numbered, approved by
-  a named person, versioned, and hashed at approval — and their body was JSON that no generator ever
-  opened. Every ceremony was real and none of it changed a document. The same shape appeared twice more
-  in one week: a rich-text field nothing rendered, and an attachment vault reachable only from a screen
-  nobody working on a change request would open. Before building a control, check whether the last one is
-  wired to anything.
-- **A rule that wins by being loaded last is a rule with no owner.** Splitting the client so each workspace
-  arrives when somebody opens it also moves its stylesheet, which then lands after everything already on the
-  page. Twenty row and card families immediately lost their density spacing, because Density.css set
-  `padding-block` and each component set `padding` — identical specificity, decided purely by order, and the
-  order had been an accident of the module graph. The same shape appeared twice more: two unrelated forms
-  sharing the class `.buildForm`, and a setup-form rule imposing its grid placement on every error box in the
-  product. None of the three was caused by the split; the split only removed the accident that had been
-  hiding them. Before relying on a rule, ask what makes it win — and if the answer is "it happens to be last",
-  it will stop being last.
-- **Verify the mechanism, not just the failure.** The contrast audit began failing on a colour that had been
-  wrong all along; the split had merely changed the timing enough for the element to be on screen when the
-  audit sampled. Running the same test on an untouched checkout is what separated "I broke this" from "this
-  was always broken" — two findings that look identical and need opposite responses.
-- **A gate that cannot run on the deployment platform is not a gate for that platform.** The journeys were
-  freed from Windows so they could run on Linux, and every check that could observe a Windows-only failure
-  stayed on Linux with them. `RichContent.tsx` and `richContent.ts` differ only in case: two modules on
-  Linux, one file on Windows, so `npm run build` and `npm run typecheck` failed on the platform this product
-  is deployed to, for as long as both files existed. The Windows job ran only `npx playwright test`, and
-  Playwright serves the journeys through `vite dev`, which transpiles each file without checking types — so
-  the one job on the right platform was structurally incapable of seeing it. Moving a suite to where it runs
-  easily is not the same as covering where the product runs.
-- **Running a thing is not the same as running the thing you ship.** Every gate, both launchers and every
-  journey served the client with `vite dev`. The production bundle was compiled on every pull request and
-  never once rendered in a browser, on any platform — while the demonstration brief named a dry run from a
-  production build as the one preparation that could not be skipped. It was not untested; the environment
-  did not exist. Its first four runs found a page that scrolled sideways, an 11px label under the readability
-  floor, and a content security policy that blocked eight self-hosted typefaces. Ask what artifact the gate
-  is actually exercising, and whether anybody ships that one.
-- **A hardcoded list of surfaces stops being a list of surfaces.** The design audit named twelve. Review
-  Procedures and New Change Request arrived later and were never added, so neither had ever been measured,
-  and both were breaking the contract. The production journey reads the navigation instead — it cannot go
-  stale, because the product tells it what exists. Prefer enumerating the thing over describing it.
-- **A fixture that changes what other tests find is not an isolated fixture.** The showcase's verification gap
-  was first seeded on `SYSTP-000001`. Procedures are dealt requirements round-robin, so that procedure covers
-  `SYSR-000001` and is therefore the first approved procedure any test looking for one discovers. Putting it
-  into revision — the whole point of the fixture — removed it from the covering-procedure list and broke a
-  journey that had nothing to do with the change. Demonstration data is shared mutable state; before changing a
-  record in it, ask which gates find that record by searching rather than by name.
-- **Adding a column costs the columns already there.** The coverage state needed a sixth column in the
-  requirements table. Measured against an untouched checkout, the heading went from 35.8px to 52.6px and the row
-  from 94.8px to 119.6px, because the narrower statement track pushed both onto a second line — one fewer
-  requirement visible per screen. Nothing failed; the design contract passed throughout. A dense table has no
-  spare width, so the cost of a new column is paid by the existing ones whether or not anybody measures it.
-- **Specificity is the other way a rule loses.** `.richFileInput` set a visually-hidden control to one pixel
-  and lost to `.controlledEditor input { width: 100% }` — (0,1,0) against (0,1,1) — so the input rendered at
-  1160px and pushed the page 106px off screen. The cascade lesson above is about load order; this is the same
-  failure through the other mechanism, and the same fix applies. When a rule matters, make it win on purpose.
-
-- **The exact head is the merge authority.** The August procedure-control sequence repeatedly refreshed `main`,
-  reviewed the exact candidate head and waited for the required aggregate gate. A green older head is useful
-  evidence, not permission to merge a different tree.
-- **Provider-sensitive display logic belongs after SQL-safe projection.** `/api/baselines/predecessors` worked
-  only after primitives were materialized before display formatting/ordering, avoiding SQLite/provider
-  translation assumptions in a production browser route.
-- **A native option can exist without being Playwright-visible.** The stale-target regression originally used
-  `toBeVisible()` on an `<option>` and failed while repeatedly locating the correct option. Existence/count is
-  the correct assertion for membership in a native select.
-- **Replacement work must close the thing it replaced.** #444 fixed #442, but draft #443 remained an open PR
-  until closeout explicitly marked it superseded. Repository hygiene is part of a truthful clean baseline.
-- **Use identical-head reruns to distinguish a flake from a product change.** The #364 browser shard timing
-  failure was retried without changing the commit and passed; the first failure remains evidence, and merge
-  still waited for the required aggregate to be green.
-
-# Current implementation checkpoint — 2026-08-10
-
-The audited product checkpoint immediately before this documentation-only closeout is
-`af8760a6ad17b6266a770fb8c0beb2b67eaf3c90`. It includes the API-served production client, direct verification
-navigation, first-class manual TCRs, bounded server-search authoring pickers, exact procedure effectivity and
-revision titles, immutable procedure-document/provenance hardening, exact execution/evidence build authority,
-controlled TCR supersession history, explicit legacy procedure-manifest bootstrap, and controlled Modify/Retire
-target selection with stale-conflict/reselection behavior.
-
-The completed August closeout sequence includes #417–#424, #442, #365, #364 and #367. #442 merged through
-replacement PR #444; superseded draft #443 was then closed without merge. Current GitHub product work at the
-audited checkpoint is **#332 only**. See
-[CURRENT_PRODUCT_HANDOFF_2026-08-10.md](CURRENT_PRODUCT_HANDOFF_2026-08-10.md) for exact merge/qualification
-evidence, what works, what remains intentionally constrained, and the safe restart sequence.
+These are deliberate boundaries unless an accepted decision changes them:
+
+- **No certification, compliance, or tool-qualification claim.** AeroLink uses aerospace development-assurance concepts/terminology but does not claim that use of the product satisfies certification objectives.
+- **No AI product capability.** AI-assisted product behavior is outside the current governed product scope.
+- **Not a source-code repository or architecture/design-management replacement.** AeroLink can link to external engineering artifacts but does not become Git or a software design tool.
+- **Not a generic document editor.** Structured controlled artifacts are authoritative; generated documents are controlled views. Managed Word documents remain authored in Word while AeroLink controls their revision/review/release record.
+- **No automated test-bench execution.** Tests execute in external environments. AeroLink controls Test Cases/Procedures, execution records, results, evidence, retest history, and readiness.
+- **No destructive rewrite of approved/released history through normal product workflows.** Historical controlled identity and evidence remain explainable.
+
+See [SCOPE_AND_BOUNDARIES.md](SCOPE_AND_BOUNDARIES.md) and [DECISIONS_AND_OPEN_QUESTIONS.md](DECISIONS_AND_OPEN_QUESTIONS.md) for the durable boundary/decision records while the documentation reorganization is in progress.
+
+## Current technology and repository shape
+
+- React + TypeScript client.
+- ASP.NET Core / .NET application and API.
+- Entity Framework Core persistence.
+- PostgreSQL for real local/on-premises operation.
+- SQLite and disposable PostgreSQL infrastructure for isolated automated qualification where appropriate.
+- Modular-monolith organization with explicit Domain, Infrastructure, API, and client boundaries.
+
+The application under `product/` is the single demonstrable software product. The earlier static showcase is historical/reference material.
+
+See [product/docs/ARCHITECTURE.md](product/docs/ARCHITECTURE.md).
+
+## Current requirements architecture
+
+The normal software-oriented lifecycle is:
+
+```text
+System Requirement
+    ↓
+High-Level Software Requirement (HLR)
+    ↓
+Low-Level Software Requirement (LLR)
+```
+
+Exact revision identity and build/baseline membership matter. A current/latest project revision is not automatically the revision carried by a particular released/in-work build.
+
+HLR proposals allocate to exact applicable System revisions, and LLR proposals allocate to exact applicable HLR revisions unless a governed derived classification/rationale applies. Downstream assessments are explicit controlled engineering work rather than browser-only notifications.
+
+## Current verification architecture
+
+The overloaded “software test procedure” model was replaced by an explicit Case → Procedure architecture through the #720 programme and related work (#722, #724, #725, #727, #728, #726), then surfaced as the normal user experience by #762 / PR #767.
+
+### System
+
+```text
+System Requirement
+    ↓
+System Test Procedure (SYSTP)
+    ↓
+Execution / Result / Evidence
+```
+
+System remains a one-tier Procedure verification model.
+
+### Software HLR
+
+```text
+HLR Requirement
+    ↓
+HLR Test Case (HLRTC)
+    ↓
+HLR Test Procedure (HLRTP)
+    ↓
+Execution / Result / Evidence
+```
+
+### Software LLR
+
+```text
+LLR Requirement
+    ↓
+LLR Test Case (LLRTC)
+    ↓
+LLR Test Procedure (LLRTP)
+    ↓
+Execution / Result / Evidence
+```
+
+For a software verification profile configured as `[Case, Procedure]`, the Procedure is the executable artifact. A deliberately configured `[Case]` profile remains valid and the Case remains executable there.
+
+The ordinary Software verification UI is profile-aware rather than FMS-hard-coded. Full-profile projects expose HLR/LLR Case and Procedure change-control contexts and a unified build-scoped Test Case/Procedure Explorer. Case-only or partial profiles expose only their configured artifact keys.
+
+### Controlled software verification identities
+
+| Level | Artifact | Artifact prefix | Change Request | Controlled document |
+| --- | --- | --- | --- | --- |
+| HLR | Test Case | `HLRTC` | `HLRTCCR` | `HLRTD` |
+| HLR | Test Procedure | `HLRTP` | `HLRTPCR` | `HLRTPD` |
+| LLR | Test Case | `LLRTC` | `LLRTCCR` | `LLRTD` |
+| LLR | Test Procedure | `LLRTP` | `LLRTPCR` | `LLRTPD` |
+
+`HLRTD` and `LLRTD` are deliberate retained controlled Case-document identities. They are not cosmetic names to “clean up” without a governed historical-identity migration.
+
+## Verification change control
+
+Verification work is controlled through Test Change Requests (TCRs), downstream assessments, exact artifact revisions, controlled review workflows, and build-scoped materialization.
+
+The vertical software chain is important:
+
+```text
+Requirement change
+    ↓
+Case assessment / Case change
+    ↓
+Procedure assessment / Procedure change
+```
+
+A Procedure is not made to directly own Requirement coverage merely to simplify a UI. Requirement coverage belongs to the Case layer and rolls downstream through exact Case ↔ Procedure relationships.
+
+Approved verification changes materialize into controlled revisions and exact build membership. Execution/readiness uses the carried exact executable artifact, not a project-global “latest” revision.
+
+## Change requests, reviews, and controlled editing
+
+AeroLink supports governed System/HLR/LLR change requests and Test Change Requests with:
+
+- explicit controlled identifiers/revisions;
+- Draft authoring and controlled checkout/edit/check-in where applicable;
+- source/current-build scope;
+- rich engineering narrative;
+- exact allocation/trace references;
+- configurable sequential/parallel review workflows with frozen stage/authority/version context;
+- attributable approvals/signatures over controlled snapshots;
+- preserved returned/superseded history;
+- separation between approval and actual build/release inclusion.
+
+Approved work does not become silently rewritten because a later revision exists.
+
+## Problem Reports
+
+Problem Reports are **Project-scoped controlled records**. Target build is an explicit attribute/filter rather than the record's ownership boundary.
+
+The #765 improvement programme delivered a substantially richer Problem Report workflow through phase 6 / PR #774, including:
+
+- correction/editing by appropriate Project members while preserving exclusive lease/history behavior;
+- a meaningful fixed category vocabulary with provenance for migrated classifications;
+- structured rich authored content and inline emphasis without storing arbitrary executable markup;
+- a larger whole-record create/edit experience with explicit Save vs Save-and-check-in semantics;
+- impact/evidence improvements;
+- controlled symmetric same-Project “Related Problem Reports” relationships visible from either report, with history and closure-candidate invalidation.
+
+Problem Reports can drive governed change work; requirements changes do not manufacture a Problem Report merely because a change exists.
+
+## Baselines, builds, and release control
+
+AeroLink separates several facts that must not collapse into one:
+
+- a controlled revision being approved;
+- that revision being selected/carried by a particular build/baseline;
+- verification obligations for that exact carried configuration;
+- the release campaign becoming ready;
+- the authorized human release decision.
+
+Released baselines/builds remain immutable. Successor/in-work builds are explicitly assembled under user/configuration authority; AeroLink does not silently create or approve later product baselines.
+
+Exact manifests/effectivity are authoritative for what a build carries.
+
+## FMS live showcase context
+
+The FMS Product Development dataset remains the principal deterministic live demonstration context.
+
+- Build/version 1.5 is the released immutable predecessor.
+- Build/version 1.6 is the active in-work successor used to demonstrate current controlled development.
+- The effective software verification profile supports the full HLR/LLR Case → Procedure model.
+
+The showcase is synthetic demonstration data. It must not be confused with live customer/company controlled engineering data.
+
+See [FMS_LIVE_SHOWCASE_DATASET.md](FMS_LIVE_SHOWCASE_DATASET.md) and [FMS_1_6_RELEASE_CAMPAIGN.md](FMS_1_6_RELEASE_CAMPAIGN.md) while those files remain at root during the documentation reorganization.
+
+## Documents and publications
+
+AeroLink supports controlled generated publications over structured artifacts and a Managed Documentation Center for externally authored Word documents.
+
+Generated outputs are derived from controlled data/templates/effectivity and carry provenance rather than becoming independent masters. Managed Word documents retain their controlled DOCX/PDF candidates/revisions while Word remains the authoring application.
+
+See [CONTROLLED_DOCUMENT_PUBLICATION_STANDARD.md](CONTROLLED_DOCUMENT_PUBLICATION_STANDARD.md) and [product/docs/MANAGED_DOCUMENTATION_CENTER.md](product/docs/MANAGED_DOCUMENTATION_CENTER.md).
+
+## Identity, security, and audit
+
+The product includes local identity/session controls, scoped roles/administration, MFA/recovery support, delegations, secure approval/signature behavior, and security/audit records appropriate to the current on-premises product foundation.
+
+Deployment-specific federation/provider/TLS/monitoring/service-objective work remains dependent on a real deployment/customer contract where documented.
+
+See [SECURITY_AND_IDENTITY_MODEL.md](SECURITY_AND_IDENTITY_MODEL.md).
+
+## Interchange and integrations
+
+AeroLink includes governed import/export/interchange foundations such as CSV/XLSX onboarding, ReqIF-related workflows, versioned API behavior, service identities, webhooks/integration foundations, and external-system linking. Interchange must preserve provenance and must not bypass controlled change/review merely because data arrived from another tool.
+
+## Operations and recovery
+
+The repository provides stable Windows root launchers for development, production-style local operation, shared/remote demo modes, backup, restore validation, diagnostics, and related operator actions.
+
+Those root launchers are intentionally treated as compatibility surfaces; their real logic generally delegates into `product/scripts`.
+
+The normal persistent developer/demo PostgreSQL database uses port **54329** and is not disposable qualification state.
+
+See [product/docs/OPERATIONS.md](product/docs/OPERATIONS.md) and [docs/REMOTE_DEMO_OPERATOR.md](docs/REMOTE_DEMO_OPERATOR.md).
+
+## Testing and quality gates
+
+AeroLink has substantial Domain, Infrastructure, API, browser, production-browser, PostgreSQL, operator/recovery, and generated-contract coverage.
+
+The repository uses:
+
+- fast/advisory development feedback;
+- a merge-ready full Product quality gate on the exact candidate SHA;
+- changed-area/test-planning logic shared between local and CI workflows;
+- sharded API/browser work where measurement justified it;
+- durable failure diagnostics and exact-SHA provenance expectations.
+
+Do not change CI topology from intuition alone. Read [product/docs/BROWSER_AND_BACKEND_FEEDBACK_TIME.md](product/docs/BROWSER_AND_BACKEND_FEEDBACK_TIME.md) first.
+
+## Important current boundaries / limitations
+
+- No certification/tool-qualification claim.
+- No AI product feature.
+- No automatic external test execution.
+- Deployment-owned services such as customer TLS/reverse proxy, real SMTP/provider qualification, protected off-device backup storage, external monitoring/alerting, customer RPO/RTO/SLOs, and identity-provider contracts remain deployment-specific where not otherwise implemented.
+- Scale/performance claims must match measured evidence; do not turn database-client or synthetic-harness evidence into a broader browser-user claim.
+- Legacy information is not given fabricated historical precision merely because today's schema is richer.
+
+## Recent major architectural milestones
+
+This is intentionally short. For the narrative history, use [docs/PROJECT_HISTORY.md](docs/PROJECT_HISTORY.md).
+
+- System-level controlled lifecycle and released-baseline foundation.
+- Software HLR/LLR controlled requirements and downward assessment model.
+- First-class verification/TCR/results/evidence workspaces and build-scoped readiness.
+- August audit/remediation hardening of exact history/effectivity/stale selection.
+- Measured testing-efficiency/CI and concurrent-agent safety improvements.
+- #720–#728 Case → Procedure software verification architecture.
+- #762 / PR #767 unified normal Case/Procedure software UX.
+- #765 phases 1–6 culminating in PR #774 richer Project-scoped Problem Reports and Related Problem Reports.
+- #778 repository knowledge/hygiene programme.
+
+## Live backlog and active work
+
+**GitHub Issues are the live backlog authority.**
+
+This file deliberately does not say “there are N open issues” or “issue X is the only open issue”; those statements age immediately. Refresh GitHub when deciding what remains to be done.
+
+## Where to go next
+
+- Repository/operator front door: [README.md](README.md)
+- Coding-agent safety: [AGENTS.md](AGENTS.md)
+- Accepted decisions/open questions: [DECISIONS_AND_OPEN_QUESTIONS.md](DECISIONS_AND_OPEN_QUESTIONS.md)
+- Documentation map: [docs/README.md](docs/README.md)
+- Major history: [docs/PROJECT_HISTORY.md](docs/PROJECT_HISTORY.md)
+- Lessons learned: [docs/ENGINEERING_LESSONS.md](docs/ENGINEERING_LESSONS.md)
+- Technical architecture: [product/docs/ARCHITECTURE.md](product/docs/ARCHITECTURE.md)
+- Operations/recovery: [product/docs/OPERATIONS.md](product/docs/OPERATIONS.md)
+- Merge workflow: [product/docs/MERGING.md](product/docs/MERGING.md)
+- CI feedback-time evidence: [product/docs/BROWSER_AND_BACKEND_FEEDBACK_TIME.md](product/docs/BROWSER_AND_BACKEND_FEEDBACK_TIME.md)
+- Live scoped work: GitHub Issues/PRs
+
+When product architecture materially changes, update this file in the same PR. Do not turn it into a chronological handoff; put history in `docs/PROJECT_HISTORY.md` and active work in GitHub.
