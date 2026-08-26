@@ -172,6 +172,12 @@ export async function firstSectionId(request: APIRequestContext, projectId: stri
  * vocabulary somebody is shown changes and not merely when an identifier is renamed.
  */
 export async function chooseCategory(scope: Locator | Page, label: string) {
-  await scope.locator('.catCurrent').first().click()
-  await scope.getByRole('option', { name: label, exact: false }).first().click()
+  const picker = scope.locator('.catPicker').first()
+  await picker.locator('.catCurrent').click()
+  // Scoped to the picker's own menu. Every <option> of every <select> on the form carries the option
+  // role too — the impact matrix alone contributes two dozen — so an unscoped role query is ambiguous,
+  // and .first() then depends on DOM order rather than on what was asked for.
+  await picker.locator('.catMenu').getByRole('option', { name: label, exact: false }).first().click()
+  // Proven, not assumed: a silent no-op here surfaces much later as a lifecycle button that never appears.
+  await expect(picker.locator('.catCurrent')).toContainText(label)
 }

@@ -52,7 +52,7 @@ test("engineer analyzes impact and creates a rich controlled requirement proposa
   // Supporting content opens holding the statement as one paragraph, so there is something to edit rather
   // than an empty box the author has to work out how to start.
   await supporting
-    .locator("textarea")
+    .locator(".richParagraphBody")
     .fill("Preserve deterministic sequencing and verify the affected route mode.");
   await supporting.getByRole("button", { name: "Table", exact: true }).click();
   await supporting.getByLabel("Column 1 heading").fill("Mode");

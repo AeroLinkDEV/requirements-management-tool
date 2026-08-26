@@ -13,6 +13,24 @@ namespace AeroLink.Domain.Content;
 public enum RichBlockKind { Paragraph, Table, Image, Symbol, Reference }
 
 /// <summary>
+/// A span of paragraph text carrying its emphasis.
+///
+/// Typed data, never markup. A run says "this text is bold"; it does not say "&lt;b&gt;". Nothing in this
+/// model can produce a string a browser would execute, which is the property the whole content design
+/// exists to keep — see <see cref="RichContent"/>.
+///
+/// The four marks are the ones an engineer reaches for when writing a requirement or an analysis, and the
+/// set is closed for the same reason the block kinds are: every one has a defined rendering in the
+/// workspace, and a mark that rendered in one place and not another would let a controlled document
+/// disagree with the record it was generated from.
+/// </summary>
+public sealed record RichRun(string Text, bool Bold = false, bool Italic = false, bool Underline = false, bool Code = false)
+{
+    /// <summary>Whether this run carries any emphasis at all. A plain run is not written out.</summary>
+    public bool IsPlain => !Bold && !Italic && !Underline && !Code;
+}
+
+/// <summary>
 /// One authored block. A record rather than a class because a block has no identity and no lifecycle — it
 /// is content, and the artifact that holds it is what is controlled.
 /// </summary>
@@ -23,7 +41,14 @@ public sealed record RichBlock(
     Guid? AttachmentId = null,
     string Alt = "",
     string Caption = "",
-    string Target = "");
+    string Target = "",
+    /// <summary>
+    /// The emphasis within a paragraph, or null where there is none. <see cref="Text"/> is always the
+    /// concatenation of the run texts and remains the single source for every reader that has no way to
+    /// show emphasis — search, the plain projection, the generated Word document and PDF. That invariant
+    /// is restored on read rather than trusted, so a hand-edited record cannot make the two disagree.
+    /// </summary>
+    IReadOnlyList<RichRun>? Runs = null);
 
 /// <summary>
 /// Authored rich content: an ordered list of blocks, stored as canonical JSON.
@@ -48,6 +73,13 @@ public static class RichContent
     public const int MaximumTextLength = 20_000;
     public const int MaximumTableRows = 200;
     public const int MaximumTableColumns = 20;
+
+    /// <summary>
+    /// A paragraph's emphasis is capped independently of its length. Runs are bounded by how often the
+    /// emphasis changes rather than by how much was written, and a record whose every character is its own
+    /// run is not authored content — it is a payload.
+    /// </summary>
+    public const int MaximumRunsPerParagraph = 500;
 
     /// <summary>
     /// Reads stored content. Content written before this model existed is plain text; it is adopted as a
@@ -157,11 +189,18 @@ public static class RichContent
         Read(stored).Where(x => x.Kind == RichBlockKind.Image && x.AttachmentId is not null)
             .Select(x => x.AttachmentId!.Value).Distinct().ToList();
 
-    /// <summary>True when the content carries anything a plain field could not have carried.</summary>
+    /// <summary>
+    /// True when the content carries anything a plain field could not have carried.
+    ///
+    /// Emphasis counts. A single formatted paragraph is still one paragraph, so without this a plain-text
+    /// editor would claim the content and write the emphasis away on the next keystroke.
+    /// </summary>
     public static bool HasStructure(string? stored)
     {
         var blocks = Read(stored);
-        return blocks.Count > 1 || blocks.Any(x => x.Kind is not RichBlockKind.Paragraph);
+        return blocks.Count > 1
+            || blocks.Any(x => x.Kind is not RichBlockKind.Paragraph)
+            || blocks.Any(x => x.Runs is { Count: > 0 });
     }
 
     public static string FromPlainText(string? text) =>
@@ -183,8 +222,20 @@ public static class RichContent
         switch (kind)
         {
             case RichBlockKind.Paragraph:
-                block = new RichBlock(kind, Cap(Text(element, "text")));
-                return true;
+                {
+                    // Runs, where present, are authoritative for the text: the concatenation is recomputed
+                    // rather than taken from the stored "text", so content whose two halves disagree — hand
+                    // edited, or written by an older client — is repaired towards what the author actually
+                    // marked up rather than silently rendering one thing and searching another.
+                    var runs = ReadRuns(element, out var authoredText, out var runsError);
+                    if (runsError.Length > 0) { error = runsError; return false; }
+                    // Where a runs array was present at all, its concatenation is the text — even when
+                    // every run turned out to be plain and the emphasis itself is dropped. Falling back to
+                    // the stored "text" there would erase the paragraph of any client that sends runs as
+                    // the authority and leaves the projection for the server to compute.
+                    block = new RichBlock(kind, Cap(authoredText ?? Text(element, "text")), Runs: runs);
+                    return true;
+                }
 
             case RichBlockKind.Symbol:
                 block = new RichBlock(kind, Cap(Text(element, "value", Text(element, "text"))));
@@ -258,6 +309,23 @@ public static class RichContent
                 {
                     case RichBlockKind.Paragraph:
                         writer.WriteString("text", block.Text);
+                        // Omitted entirely when nothing is emphasised, so unformatted content is byte-for-byte
+                        // what it was before runs existed and no stored record changes shape without cause.
+                        if (block.Runs is { Count: > 0 })
+                        {
+                            writer.WriteStartArray("runs");
+                            foreach (var run in block.Runs)
+                            {
+                                writer.WriteStartObject();
+                                writer.WriteString("text", run.Text);
+                                if (run.Bold) writer.WriteBoolean("bold", true);
+                                if (run.Italic) writer.WriteBoolean("italic", true);
+                                if (run.Underline) writer.WriteBoolean("underline", true);
+                                if (run.Code) writer.WriteBoolean("code", true);
+                                writer.WriteEndObject();
+                            }
+                            writer.WriteEndArray();
+                        }
                         break;
                     case RichBlockKind.Symbol:
                         writer.WriteString("value", block.Text);
@@ -290,6 +358,48 @@ public static class RichContent
         }
         return Encoding.UTF8.GetString(buffer.ToArray());
     }
+
+    /// <summary>
+    /// Reads a paragraph's runs, or null when it has none. Plain runs are dropped and adjacent runs sharing
+    /// the same marks are merged, so one canonical spelling exists for any given piece of formatted text
+    /// and a record's hash does not depend on how the editor happened to split it.
+    /// </summary>
+    private static IReadOnlyList<RichRun>? ReadRuns(JsonElement element, out string? authoredText, out string error)
+    {
+        error = "";
+        authoredText = null;
+        if (!element.TryGetProperty("runs", out var runs)) return null;
+        if (runs.ValueKind != JsonValueKind.Array) { error = "Paragraph emphasis must be a list of runs."; return null; }
+        if (runs.GetArrayLength() > MaximumRunsPerParagraph)
+        {
+            error = $"A paragraph is limited to {MaximumRunsPerParagraph} runs of emphasis.";
+            return null;
+        }
+
+        var parsed = new List<RichRun>();
+        foreach (var run in runs.EnumerateArray())
+        {
+            if (run.ValueKind != JsonValueKind.Object) { error = "Each run of emphasis must be an object."; return null; }
+            var text = Text(run, "text");
+            if (text.Length == 0) continue;
+            var value = new RichRun(text, Flag(run, "bold"), Flag(run, "italic"), Flag(run, "underline"), Flag(run, "code"));
+            if (parsed.Count > 0 && SameMarks(parsed[^1], value))
+                parsed[^1] = parsed[^1] with { Text = parsed[^1].Text + value.Text };
+            else parsed.Add(value);
+        }
+
+        authoredText = string.Concat(parsed.Select(run => run.Text));
+        // Nothing emphasised is the same as no runs at all, and is stored that way — but the text the runs
+        // spelled out is still the paragraph, and is returned above.
+        return parsed.Count == 0 || parsed.All(run => run.IsPlain) ? null : parsed;
+    }
+
+    private static bool SameMarks(RichRun left, RichRun right) =>
+        left.Bold == right.Bold && left.Italic == right.Italic
+        && left.Underline == right.Underline && left.Code == right.Code;
+
+    private static bool Flag(JsonElement element, string name) =>
+        element.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.True;
 
     private static string Text(JsonElement element, string name, string fallback = "") =>
         element.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.String

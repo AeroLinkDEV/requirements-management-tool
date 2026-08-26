@@ -92,3 +92,30 @@ html input.richFileInput { position: absolute; width: 1px; height: 1px; overflow
 }
 .richTableButtons button:hover:not(:disabled) { background: #eef2f7; }
 .richTableNote { margin: 0; font-size: 11px; color: var(--ink-500); }
+
+/* Emphasis inside a paragraph. The body is contenteditable, so it has to look and behave like the
+   textarea it replaced — same box, same growth, same focus ring — or the field reads as a different
+   kind of control depending on whether anyone has formatted anything in it. */
+.richParagraphEditor { display: grid; gap: 6px; }
+.richMarks { display: flex; gap: 4px; }
+.richMarks button {
+  min-width: 30px; padding: 3px 7px; border: 1px solid #d6e1ec; border-radius: 6px;
+  background: #fff; color: #4a5f7a; font-size: 12px; font-weight: 700; line-height: 1.5; cursor: pointer;
+}
+.richMarks button:nth-child(2) { font-style: italic; }
+.richMarks button:nth-child(3) { text-decoration: underline; }
+.richMarks button:nth-child(4) { font-family: ui-monospace, "Cascadia Mono", Consolas, monospace; font-size: 11px; }
+.richMarks button.on { border-color: #16766f; background: #e4f2f0; color: #0f5751; }
+.richMarks button:disabled { opacity: .5; cursor: not-allowed; }
+.richMarks button:focus-visible, .richParagraphBody:focus-visible { outline: 2px solid #16766f; outline-offset: 1px; }
+
+.richParagraphBody {
+  min-height: 74px; padding: 9px 11px; border: 1px solid #cdd9e6; border-radius: 8px;
+  background: #fff; color: #1b344f; font: inherit; font-size: 13px; line-height: 1.55;
+  white-space: pre-wrap; overflow-wrap: anywhere;
+}
+.richParagraphBody:empty::before { content: attr(data-placeholder); color: #8fa0b4; }
+.richParagraphBody code, .richContentView code {
+  padding: 1px 4px; border-radius: 4px; background: #eef2f7;
+  font-family: ui-monospace, "Cascadia Mono", Consolas, monospace; font-size: .92em;
+}

@@ -254,7 +254,7 @@ export default function ControlledProblemReportEditor({ api, projectId, report, 
         <label>Corrective-action narrative<textarea value={draft.correctiveAction} onChange={event => set('correctiveAction', event.target.value)} /></label>
         <label>System / aircraft impact<textarea value={draft.systemAircraftImpact} onChange={event => set('systemAircraftImpact', event.target.value)} /></label>
         <fieldset className="prImpactEditor"><legend>Impact matrix</legend>{impactFields.map(([key, label]) =>
-          <label key={key}>{label}<select value={draft.impacts[key] ?? 'Unknown'} onChange={event => set('impacts', { ...draft.impacts, [key]: event.target.value })}>{['Unknown', 'No', 'Yes'].map(value => <option key={value}>{value}</option>)}</select></label>)}
+          <label key={key}>{label}<select aria-label={label} value={draft.impacts[key] ?? 'Unknown'} onChange={event => set('impacts', { ...draft.impacts, [key]: event.target.value })}>{['Unknown', 'No', 'Yes'].map(value => <option key={value}>{value}</option>)}</select></label>)}
         </fieldset>
         <div className="prCheckoutFoot">
           <button type="button" className="quiet" disabled={busy} onClick={() => void discard()}>Discard checkout</button>
