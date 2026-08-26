@@ -1,5 +1,6 @@
 import { useState, type ReactNode } from 'react'
-import { changeRequestAllocation, changeRequestState, identityInitials, identityLabel } from './presentation'
+import { changeRequestAllocation, changeRequestState } from './presentation'
+import { PersonName } from './People'
 import './HistoryExplorer.css'
 
 /**
@@ -105,7 +106,11 @@ export default function ChangeRequestRegister({
         <small>
           {row.changeCount} {changeNoun}
           {row.authorId
-            ? <> · <span className="personMeta"><i>{identityInitials(row.authorId)}</i>{identityLabel(row.authorId)}</span></>
+            // Authorship is accountability, so the register names the person the way the detail surface does
+            // — PersonName resolves seeded accounts to a person and falls back to the account name for
+            // anyone else. The role stays visible but secondary; the initials chip used here before rendered
+            // "SR · Systems Requirements Author", which attributed controlled work to a role.
+            ? <> · <span className="personMeta"><PersonName userName={row.authorId} withRole /></span></>
             // Most packages exist because an assessment concluded test work was required. Saying so is more
             // use than a name nobody chose.
             : <> · <span className="personMeta raisedAutomatically">Raised by assessment</span></>}
