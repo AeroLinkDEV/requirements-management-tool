@@ -21,6 +21,8 @@ const scriptContractNames = [
   'AeroLinkRemoteDemo.Tests.ps1',
   'AeroLinkRemoteDemoRecovery.Tests.ps1',
   'Get-AeroLinkTestPlan.Tests.ps1',
+  'Test-RepositoryLayout.ps1',
+  'Test-RepositoryLayout.Tests.ps1',
 ]
 const ownedProcessProject = join(repoRoot, 'product/test-planner/tools/OwnedProcess/OwnedProcess.csproj')
 const ownedProcessSource = readFileSync(join(repoRoot, 'product/test-planner/tools/OwnedProcess/Program.cs'), 'utf8')
@@ -48,6 +50,18 @@ test('Full mode reaches script contracts and the isolated PostgreSQL boundary on
   assert.match(full, /Get-DisposableDockerCommand/)
   assert.match(wrapper, /function Get-DisposableDockerCommand/)
   assert.doesNotMatch(full, /Start-Postgres|54329/)
+})
+
+test('the always-running Windows changes job executes the repository layout guard and its regression contract', () => {
+  const workflow = readFileSync(join(repoRoot, '.github/workflows/ci.yml'), 'utf8')
+  const changesStart = workflow.indexOf('\n  changes:')
+  const warmCacheStart = workflow.indexOf('\n  warm-chromium-cache:', changesStart)
+  assert.ok(changesStart >= 0 && warmCacheStart > changesStart, 'the changes job must remain identifiable')
+  const changesJob = workflow.slice(changesStart, warmCacheStart)
+  assert.match(changesJob, /Test-RepositoryLayout\.ps1/)
+  assert.match(changesJob, /Test-RepositoryLayout\.Tests\.ps1/)
+  assert.match(changesJob, /Repository layout guard failed/)
+  assert.match(changesJob, /Repository layout regression contract failed/)
 })
 
 test('disposable PostgreSQL commands are uniquely labeled, loopback-bound, and owner-checked before cleanup', () => {

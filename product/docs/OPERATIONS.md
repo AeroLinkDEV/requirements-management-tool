@@ -22,6 +22,39 @@ Use `STOP_AEROLINK.bat` for a controlled stop. The script only stops listeners w
 
 Logs are under `product/.local/logs`. The authoritative database is `aerolink`; controlled evidence is under `%LOCALAPPDATA%\AeroLink\evidence`.
 
+### Root Windows launcher inventory
+
+The root launchers are deliberate operator compatibility surfaces. There are **15 root `.bat` launchers and
+zero root `.cmd` launchers**; the only `.cmd` implementation is `product/scripts/launch.cmd`. Their contents and
+paths are intentionally unchanged. A launcher may be a very small wrapper, but its exact path can be held by a
+Task Scheduler task, desktop shortcut, remote-demo recovery configuration, or another Windows machine that Git
+cannot discover. Moving one for cosmetic root cleanup has no meaningful benefit and is not safe without a
+separately proven transition plan.
+
+| Root entry point | Purpose / classification | Implementation and delegation | Repository callers and documentation | External-path risk and final disposition |
+| --- | --- | --- | --- | --- |
+| `AEROLINK_DIAGNOSTICS.bat` | Diagnostics | `product/scripts/Get-AeroLinkDiagnostics.ps1` | `README.md`; this document; historical delivery report | Operator shortcut/task risk is not enumerable from Git; keep stable root entry point. |
+| `AEROLINK_REMOTE_DEMO_STATUS.bat` | Protected remote-demo status | `product/scripts/AeroLinkRemoteDemo.ps1 -Action Status` | `docs/REMOTE_DEMO_OPERATOR.md` | Remote operator shortcut/recovery risk; keep stable root entry point. |
+| `BACKUP_AEROLINK.bat` | Backup/recovery | `product/scripts/Backup-AeroLink.ps1` | `README.md`, this document, Managed Documentation; scheduled runner calls the PowerShell script directly | Backup automation and operator shortcuts may retain the path; keep stable root entry point. |
+| `CONFIGURE_AEROLINK_REMOTE_DEMO.bat` | Protected remote-demo scheduled recovery setup | `product/scripts/AeroLinkRemoteDemo.ps1 -Action Configure` with forwarded action/arguments | `docs/REMOTE_DEMO_OPERATOR.md`; remote-demo module error guidance | Recovery setup instructions may be copied to another host; keep stable root entry point. |
+| `INSTALL_AEROLINK_DOCUMENT_CONNECTOR.bat` | Connector/install/setup | `product/scripts/Install-AeroLinkDocumentConnector.ps1` | This document; `MANAGED_DOCUMENTATION_CENTER.md` | Per-user installation instructions and shortcuts may retain the path; keep stable root entry point. |
+| `RESTORE_AEROLINK.bat` | Backup/recovery and isolated restore validation | `product/scripts/Restore-AeroLink.ps1 -BackupArchive ... -TargetDatabase ...` | This document; usage text; historical delivery report | Recovery runbooks and desktop shortcuts may retain the path; keep stable root entry point. |
+| `SCHEDULE_AEROLINK_BACKUP.bat` | Backup scheduler configuration | `product/scripts/Configure-AeroLinkBackupSchedule.ps1` | This document; historical handoffs | The installed task invokes `Invoke-AeroLinkScheduledBackup.ps1` directly, but operator setup paths remain externally visible; keep stable root entry point. |
+| `START_AEROLINK_PRODUCTION.bat` | Production-style local/demo run | Sets `AEROLINK_SCRIPT=Start-AeroLinkProduction.ps1` and calls `product/scripts/launch.cmd` | `README.md`, this document, product/client README, showcase brief, DEC-052 | Desktop shortcuts and demonstration machines can target the exact path; keep stable root entry point. |
+| `START_AEROLINK_REMOTE_DEMO.bat` | Protected remote demo start | `product/scripts/AeroLinkRemoteDemo.ps1 -Action Start` | `README.md`; `docs/REMOTE_DEMO_OPERATOR.md` | Remote-demo operator shortcuts can target the exact path; recovery task calls the PowerShell implementation directly; keep stable root entry point. |
+| `START_AEROLINK_SHARED.bat` | Opt-in trusted-LAN demo | Sets `AEROLINK_SCRIPT=Start-AeroLinkProduction.ps1`, adds `-Shared`, and calls `product/scripts/launch.cmd` | `README.md`, product README, DEC-053, production launcher guidance | Shared-demo hosts and shortcuts may retain the path; keep stable root entry point. |
+| `START_AEROLINK.bat` | Day-to-day development | Sets `AEROLINK_SCRIPT=Start-AeroLink.ps1` and calls `product/scripts/launch.cmd` | `README.md`, this document, product/client README, smoke test and API guidance | The dated #783 host audit observed a desktop shortcut targeting this exact path; keep stable root entry point. |
+| `STOP_AEROLINK_REMOTE_DEMO.bat` | Protected remote-demo stop | `product/scripts/AeroLinkRemoteDemo.ps1 -Action Stop -IncludeLocalStack` | `docs/REMOTE_DEMO_OPERATOR.md` | Recovery runbooks and operator shortcuts may retain the path; keep stable root entry point. |
+| `STOP_AEROLINK.bat` | Controlled local stop | `product/scripts/Stop-AeroLink.ps1` | `README.md`, this document, product README | Desktop/operator shutdown shortcuts may retain the path; keep stable root entry point. |
+| `TEST_AEROLINK_CHANGED.bat` | Developer/testing changed-area planner | `product/scripts/Get-AeroLinkTestPlan.ps1` | `product/test-planner/README.md`; planner contract | Developer shortcuts and team runbooks may retain the path; keep stable root entry point. |
+| `VERIFY_AEROLINK_BACKUP.bat` | Backup verification | `product/scripts/Verify-AeroLinkBackup.ps1` | This document; historical delivery report | Scheduled runner calls the PowerShell implementation directly, but recovery runbooks may retain this wrapper; keep stable root entry point. |
+
+There are no launcher-to-launcher calls among the root files. The three start wrappers delegate to
+`product/scripts/launch.cmd`; the backup scheduler and remote-demo recovery tasks call their PowerShell runners
+directly. In the dated 2026-08-26 #783 read-only host audit, a desktop shortcut was observed targeting
+`START_AEROLINK.bat`; the scheduled tasks pointed directly to their deeper PowerShell runners. These observations
+confirm compatibility risk but do not expose credentials or claim to cover other machines.
+
 ## Microsoft Word desktop connector
 
 Run `INSTALL_AEROLINK_DOCUMENT_CONNECTOR.bat` once for each Windows user who edits managed documents. It

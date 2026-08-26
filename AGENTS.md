@@ -105,19 +105,30 @@ Any launcher-path change requires an explicit dependency audit and appropriate c
 
 ## Documentation discipline
 
-Use one home for each kind of knowledge:
+Use one home for each kind of knowledge; keep active work out of repository prose:
 
 - **Current product truth:** `PROJECT_STATE.md`.
-- **Accepted product decisions:** `DECISIONS_AND_OPEN_QUESTIONS.md`.
-- **Live backlog/findings:** GitHub Issues.
+- **Accepted long-lived product decisions:** `DECISIONS_AND_OPEN_QUESTIONS.md` (append a superseding decision; do not rewrite history).
+- **Live backlog/findings:** GitHub Issues; Pull Requests own implementation, review, and merge state.
 - **Agent/repository safety:** `AGENTS.md`.
-- **Durable product/reference/showcase/provenance docs:** `docs/`.
-- **Implementation/architecture/operations/testing docs:** `product/docs/`.
-- **Durable lessons learned:** `docs/ENGINEERING_LESSONS.md`.
+- **Durable lessons:** `docs/ENGINEERING_LESSONS.md`.
 - **Milestone history:** `docs/PROJECT_HISTORY.md`.
-- **Historical handoffs/audits/status snapshots:** [`docs/archive/`](docs/archive/README.md).
+- **Durable product definition:** `docs/product-definition/`.
+- **Reference material:** `docs/reference/`.
+- **Showcase guidance/data:** `docs/showcase/`.
+- **Source provenance:** `docs/provenance/`.
+- **Historical handoffs/audits/status snapshots/work logs:** `docs/archive/`.
+- **Implementation/architecture/operations/testing docs:** `product/docs/`.
 
-Do not create a new root-level dated handoff or audit report as a parallel source of truth. Turn actionable findings into GitHub issues; capture lasting lessons in the lessons document; retain historical reports in the archive.
+The repository-layout guard is `powershell.exe -NoProfile -ExecutionPolicy Bypass -File product/scripts/Test-RepositoryLayout.ps1`;
+its maintained-current Markdown link scope is intentionally documented in that script and excludes the historical
+archive contents except for the archive index. Run it after documentation changes. Do not create a new root narrative,
+dated handoff, audit dump, status snapshot, agent work log, or report without a deliberate current-authority or
+compatibility reason, an allow-list update, and a passing guard. Historical material must remain discoverable but must
+never be presented as current authority. Do not duplicate mutable product architecture in model-specific instruction
+files; `CLAUDE.md` is a thin adapter to this contract. Do not hard-code volatile issue counts or backlog claims in
+current documentation. Turn actionable findings into GitHub Issues; capture lasting lessons in the lessons document;
+retain historical reports in the archive.
 
 Update `PROJECT_STATE.md` in the same PR when a change materially alters product architecture, supported lifecycle, important user-visible authority, or a major product boundary. Do not update it for every small bug fix.
 

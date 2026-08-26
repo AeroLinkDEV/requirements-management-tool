@@ -30,6 +30,10 @@ The root `.bat` files are deliberate Windows operator entry points. Their real i
 | Complete backup | [`BACKUP_AEROLINK.bat`](BACKUP_AEROLINK.bat) |
 | Diagnostics | [`AEROLINK_DIAGNOSTICS.bat`](AEROLINK_DIAGNOSTICS.bat) |
 
+The complete 15-entry launcher inventory, including backup/recovery, remote-demo, connector, scheduler,
+testing, delegation, and external-path compatibility facts, is maintained in the
+[Root Windows launcher inventory](product/docs/OPERATIONS.md#root-windows-launcher-inventory).
+
 **Shared-LAN warning:** `START_AEROLINK_SHARED.bat` deliberately listens on all network interfaces so another machine can reach the same persistent demonstration instance. It is intended for a trusted local network only: the demonstration environment uses known/demo credentials and ordinary HTTP, so traffic is not transport-encrypted. Do not expose this shared mode directly to an untrusted network or the public Internet. For remote demonstration, use the protected remote-demo launcher/policy instead.
 
 For the full startup/recovery/backup/operator surface, see [Operations and recovery](product/docs/OPERATIONS.md). For protected remote-demo setup and status/recovery commands, see [Remote demo operator](docs/REMOTE_DEMO_OPERATOR.md).

@@ -308,6 +308,8 @@ function Invoke-ScriptContractSuite {
         'AeroLinkRemoteDemo.Tests.ps1',
         'AeroLinkRemoteDemoRecovery.Tests.ps1',
         'Get-AeroLinkTestPlan.Tests.ps1',
+        'Test-RepositoryLayout.ps1',
+        'Test-RepositoryLayout.Tests.ps1',
         'AeroLinkTestDiagnostics.Tests.ps1'
     )) {
         Invoke-CheckedPowerShellScript (Join-Path $repositoryRoot "product/scripts/$scriptName")
