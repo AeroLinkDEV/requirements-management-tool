@@ -8,8 +8,8 @@ This document turns the AeroLink concept mockups into guiding product direction.
 > workspace build; target build is an explicit record attribute/filter (DEC-089). Product Versions remains
 > dormant. Candidate Baselines is now a supported Configuration Management surface at `/baselines`, while the
 > old `/release-planning` route remains retired. Treat the mockups below as inspiration, not instructions to
-> restore retired dashboard elements. See [PROJECT_STATE.md](PROJECT_STATE.md) for current product truth; the
-> former [2026-08-10 handoff](docs/archive/CURRENT_PRODUCT_HANDOFF_2026-08-10.md) is historical restart context.
+> restore retired dashboard elements. See [PROJECT_STATE.md](../../PROJECT_STATE.md) for current product truth; the
+> former [2026-08-10 handoff](../archive/CURRENT_PRODUCT_HANDOFF_2026-08-10.md) is historical restart context.
 
 ## Experience Vision
 
@@ -27,29 +27,29 @@ The product should feel like calm mission control for controlled lifecycle data:
 
 ### Portfolio and Release Dashboard
 
-![AeroLink dashboard concept](design/mockups/dashboard-concept.png)
+![AeroLink dashboard concept](../../design/mockups/dashboard-concept.png)
 
 This is the primary north-star dashboard. It combines release readiness, controlled-requirement status, open SRCRs, traceability completeness, baseline readiness, recent activity, and items needing review.
 
 ### SRCR Review and Impact Analysis
 
-![AeroLink SRCR review concept](design/mockups/scr-review-concept.png)
+![AeroLink SRCR review concept](../../design/mockups/scr-review-concept.png)
 
 This screen demonstrates the intended relationship among revision comparison, review workflow, named reviewers, affected tests, suspect links, and approval actions.
 
 ### Interactive Traceability Explorer
 
-![AeroLink traceability concept](design/mockups/traceability-concept.png)
+![AeroLink traceability concept](../../design/mockups/traceability-concept.png)
 
 This screen demonstrates traceability as a navigable answer rather than only a static matrix. Users can inspect typed links, exact revisions, completion state, suspect relationships, and provenance in context.
 
 ### Immutable Test Evidence
 
-![AeroLink test evidence concept](design/mockups/test-evidence-concept.png)
+![AeroLink test evidence concept](../../design/mockups/test-evidence-concept.png)
 
 This screen demonstrates test procedure/execution separation, configuration capture, evidence integrity, review, and a failure-to-retest timeline that never erases the earlier result.
 
-The complete manager-facing narrative is available in [the AeroLink concept deck](outputs/AeroLink_Manager_Concept_Deck.pptx).
+The complete manager-facing narrative is available in [the AeroLink concept deck](../../outputs/AeroLink_Manager_Concept_Deck.pptx).
 
 ## Dashboard Audiences
 
@@ -200,4 +200,4 @@ A presenter can:
 
 The purpose is to validate desirability, workflow comprehension, terminology, information architecture, and stakeholder alignment—not to prove technical feasibility or production readiness.
 
-The canonical fictional scenario and presentation flow are defined in [SHOWCASE_STORY_FMS_3_3.md](SHOWCASE_STORY_FMS_3_3.md).
+The canonical fictional scenario and presentation flow are defined in [SHOWCASE_STORY_FMS_3_3.md](../archive/SHOWCASE_STORY_FMS_3_3.md).
