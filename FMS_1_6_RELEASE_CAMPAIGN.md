@@ -5,7 +5,8 @@
 > Management destination at `/baselines`, including legacy procedure-manifest bootstrap and candidate work; the
 > broader release-campaign workbench remains only partially exposed and `/release-planning` remains retired.
 > Seed-state counts are initial conditions only; live engineering work persists independently. See
-> [the current handoff](CURRENT_PRODUCT_HANDOFF_2026-08-10.md).
+> [PROJECT_STATE.md](PROJECT_STATE.md) for current product truth; the former
+> [2026-08-10 handoff](docs/archive/CURRENT_PRODUCT_HANDOFF_2026-08-10.md) is historical restart context.
 
 ## Repeatable user-controlled release progression
 
