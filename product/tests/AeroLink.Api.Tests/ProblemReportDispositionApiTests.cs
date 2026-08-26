@@ -66,7 +66,7 @@ public sealed class ProblemReportDispositionApiTests
     private static async Task<ReportRef> CreateDraftAsync(HttpClient client, Guid projectId, Guid releaseId, string title)
     {
         using var created = await client.PostAsJsonAsync("/api/problem-reports", new
-        {
+        { category = "CodeFunctional",
             projectId, releaseId, title, problem = "A controlled disposition is required."
         });
         created.EnsureSuccessStatusCode();

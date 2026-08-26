@@ -18,7 +18,7 @@ async function transition(request: APIRequestContext, report: ReportRef, targetS
 async function createReport(request: APIRequestContext, projectId: string, releaseId: string,
   title: string): Promise<ReportRef> {
   const created = await request.post(`${apiBase}/api/problem-reports`, { data: {
-    projectId,
+    category: 'CodeFunctional', projectId,
     releaseId,
     title,
     problem: 'A controlled engineering conclusion is required for this observed condition.',

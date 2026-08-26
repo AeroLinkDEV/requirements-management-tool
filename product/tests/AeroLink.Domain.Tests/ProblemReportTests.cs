@@ -46,7 +46,7 @@ public sealed class ProblemReportTests
         report.UpdateDetails("verification.engineer", report.Title, report.Problem, "", "", "", "Revised analysis",
             "Revised root cause", "Revised corrective action", "Revised aircraft impact", "{}",
             ProblemReportSeverity.Critical, ProblemReportPriority.Urgent, Now.AddMinutes(1),
-            ProblemReportType.Code, "Use the guarded operating mode.");
+            ProblemReportCategory.CodeFunctional, "Use the guarded operating mode.");
 
         Assert.Equal(ProblemReportState.Verifying, report.State);
         Assert.Null(report.ResolutionVerificationExecutionId);
@@ -167,18 +167,23 @@ public sealed class ProblemReportTests
     [Fact]
     public void A_report_is_unclassified_until_somebody_says_what_kind_of_problem_it_is()
     {
-        var report = NewReport();
+        // Raised without one, unlike the shared fixture, because that is the state under test here.
+        var report = new ProblemReport(ProjectId, "PR-00002", "Unexpected navigation reset",
+            "Unit reset while airborne.", "", "verification.engineer", Now);
 
-        // Every report raised before the field existed is genuinely unclassified, so that is what it says
-        // rather than guessing at the nearest kind.
-        Assert.Equal(ProblemReportType.Other, report.Type);
+        // A Draft nobody has classified says so, rather than defaulting to a category that would read as
+        // an answer somebody gave.
+        Assert.Null(report.Category);
+        Assert.Null(report.CategoryProvenance);
         Assert.Equal("", report.Workaround);
 
         report.UpdateDetails("verification.engineer", report.Title, report.Problem, "", "", "", "", "", "", "", "{}",
             report.Severity, report.Priority, Now.AddMinutes(1),
-            ProblemReportType.Documentation, "Fly the approach manually until the database is reissued.");
+            ProblemReportCategory.RequirementsDocumentation, "Fly the approach manually until the database is reissued.");
 
-        Assert.Equal(ProblemReportType.Documentation, report.Type);
+        Assert.Equal(ProblemReportCategory.RequirementsDocumentation, report.Category);
+        // Choosing one on the form is a person's judgement, and the record says so from then on.
+        Assert.Equal(ProblemReportCategoryProvenance.Selected, report.CategoryProvenance);
         Assert.Equal("Fly the approach manually until the database is reissued.", report.Workaround);
     }
 
@@ -197,7 +202,10 @@ public sealed class ProblemReportTests
         Assert.Contains("\"Code\":\"No\"", report.ImpactAssessmentJson);
     }
 
-    private static ProblemReport NewReport() => new(ProjectId, "PR-00001", "Unexpected navigation reset", "Unit reset while airborne.", "", "verification.engineer", Now, "Verification failure", ProblemReportSeverity.High, ProblemReportPriority.Urgent, "Test execution", "Build 1.6.0");
+    // Classified where it is raised, because almost every test here walks the report past Ready for SCCB
+    // and that transition refuses an unclassified Draft. ProblemReportCategoryTests covers the unclassified
+    // case on its own fixture.
+    private static ProblemReport NewReport() => new(ProjectId, "PR-00001", "Unexpected navigation reset", "Unit reset while airborne.", "", "verification.engineer", Now, "Verification failure", ProblemReportSeverity.High, ProblemReportPriority.Urgent, "Test execution", "Build 1.6.0", category: ProblemReportCategory.CodeFunctional);
     private static ProblemReport ReadyForClosure()
     {
         var report = NewReport(); report.ReadyForSccb("verification.engineer", Now); report.OpenBySccb("change.board", Now); report.BeginInvestigation("verification.engineer", "Reproduced", "Timeout race", "Reset", "Guard", Now); report.ProposeResolution("verification.engineer", "Serialize command", Now); report.RecordResolutionVerification("verification.engineer", Guid.NewGuid(), Now); return report;

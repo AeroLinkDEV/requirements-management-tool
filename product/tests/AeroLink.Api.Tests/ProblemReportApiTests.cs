@@ -32,7 +32,7 @@ public sealed class ProblemReportApiTests
             projectId = project.Id; requirementId = requirement.Id; otherRequirementId = otherRequirement.Id;
         }
         using var created = await client.PostAsJsonAsync("/api/problem-reports", new
-        {
+        { category = "CodeFunctional",
             projectId, title = "Controlled relationship forgery", problem = "A generic caller can forge evidence."
         });
         var report = await created.Content.ReadFromJsonAsync<JsonElement>();
@@ -156,7 +156,7 @@ public sealed class ProblemReportApiTests
         for (var index = 1; index <= 12; index++)
         {
             using var created = await client.PostAsJsonAsync("/api/problem-reports", new
-            {
+            { category = "CodeFunctional",
                 projectId, releaseId, title = $"Queue report {index}", problem = $"Observed anomaly {index}."
             });
             Assert.Equal(HttpStatusCode.Created, created.StatusCode);
@@ -183,7 +183,7 @@ public sealed class ProblemReportApiTests
             db.AddRange(program, project, release); await db.SaveChangesAsync(); projectId = project.Id; releaseId = release.Id;
         }
         using var created = await client.PostAsJsonAsync("/api/problem-reports", new
-        {
+        { category = "CodeFunctional",
             projectId, releaseId, title = "Intermittent position disagreement", problem = "The alert clears before the disagreement ends.",
             problemRich = "{\"blocks\":[{\"type\":\"paragraph\",\"text\":\"The alert clears before the disagreement ends.\"}]}",
             additionalInformation = "Observed during three approaches.", additionalInformationRich = "{\"blocks\":[]}",
@@ -303,7 +303,7 @@ public sealed class ProblemReportApiTests
             projectId = project.Id; releaseId = release.Id;
         }
         using var createdReport = await client.PostAsJsonAsync("/api/problem-reports", new
-        {
+        { category = "CodeFunctional",
             projectId, releaseId, title = "Position source disagreement", problem = "Sources disagree during approach."
         });
         Assert.Equal(HttpStatusCode.Created, createdReport.StatusCode);
@@ -339,7 +339,7 @@ public sealed class ProblemReportApiTests
         using var factory = new AeroLinkApiFactory(); using var client = factory.CreateClient(); await BootstrapAndLoginAsync(client);
         var projectId = await SeedProjectAsync(factory);
 
-        using var created = await client.PostAsJsonAsync("/api/problem-reports", new { projectId, title = "Unexpected reset", problem = "The unit resets during a route update.", analysis = "", classification = "Verification failure", severity = "High", priority = "Urgent", origin = "Test execution", affectedConfiguration = "Build 1.6.0" });
+        using var created = await client.PostAsJsonAsync("/api/problem-reports", new { category = "CodeFunctional", projectId, title = "Unexpected reset", problem = "The unit resets during a route update.", analysis = "", classification = "Verification failure", severity = "High", priority = "Urgent", origin = "Test execution", affectedConfiguration = "Build 1.6.0" });
         Assert.Equal(HttpStatusCode.Created, created.StatusCode); var report = await created.Content.ReadFromJsonAsync<JsonElement>();
         var id = report.GetProperty("id").GetGuid();
 
@@ -373,7 +373,7 @@ public sealed class ProblemReportApiTests
         await BootstrapAndLoginAsync(client);
         var projectId = await SeedProjectAsync(factory);
         using var created = await client.PostAsJsonAsync("/api/problem-reports", new
-        {
+        { category = "CodeFunctional",
             projectId, title = "Transition policy", problem = "The lifecycle edge must be server-authorized."
         });
         var createdBody = await created.Content.ReadFromJsonAsync<JsonElement>();
@@ -438,7 +438,7 @@ public sealed class ProblemReportApiTests
             var now = DateTimeOffset.UtcNow;
             var report = new ProblemReport(projectId, "PR-AUTO-0001", "Automatic invalidation",
                 "A closure basis must not silently disappear.", "", "admin", now,
-                responsibleEngineerId: "admin");
+                responsibleEngineerId: "admin", category: ProblemReportCategory.CodeFunctional);
             report.ReadyForSccb("admin", now.AddMinutes(1));
             report.OpenBySccb("admin", now.AddMinutes(2));
             report.BeginInvestigation("admin", "Analysis", "Cause", "Effect", "", now.AddMinutes(3));
@@ -476,7 +476,7 @@ public sealed class ProblemReportApiTests
             var now = DateTimeOffset.UtcNow;
             var report = new ProblemReport(projectId, "PR-LEGACY-CLOSED", "Historical closure",
                 "This report closed before frozen packages existed.", "", "admin", now,
-                responsibleEngineerId: "admin");
+                responsibleEngineerId: "admin", category: ProblemReportCategory.CodeFunctional);
             report.ReadyForSccb("admin", now.AddMinutes(1));
             report.OpenBySccb("sccb", now.AddMinutes(2));
             report.BeginInvestigation("admin", "Analysis", "Cause", "Effect", "", now.AddMinutes(3));
@@ -498,7 +498,7 @@ public sealed class ProblemReportApiTests
     {
         using var factory = new AeroLinkApiFactory(); using var client = factory.CreateClient(); await BootstrapAndLoginAsync(client);
         var projectId = await SeedProjectAsync(factory);
-        using var created = await client.PostAsJsonAsync("/api/problem-reports", new { projectId, title = "Critical data loss", problem = "Unexpected data loss observed.", classification = "Software anomaly", severity = "Critical", priority = "Urgent", origin = "Manual report" });
+        using var created = await client.PostAsJsonAsync("/api/problem-reports", new { category = "CodeFunctional", projectId, title = "Critical data loss", problem = "Unexpected data loss observed.", classification = "Software anomaly", severity = "Critical", priority = "Urgent", origin = "Manual report" });
         var id = (await created.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetGuid();
         using var detailResponse = await client.GetAsync($"/api/problem-reports/{id}"); var detailText = await detailResponse.Content.ReadAsStringAsync(); Assert.True(detailResponse.IsSuccessStatusCode, detailText); var detail = JsonDocument.Parse(detailText).RootElement; var version = detail.GetProperty("version").GetInt64();
         using var blocked = await client.PostAsJsonAsync($"/api/problem-reports/{id}/blocker", new { expectedVersion = version, isReleaseBlocker = true, waiverRationale = "" });
@@ -513,7 +513,7 @@ public sealed class ProblemReportApiTests
     {
         using var factory = new AeroLinkApiFactory(); using var client = factory.CreateClient(); await BootstrapAndLoginAsync(client);
         var projectId = await SeedProjectAsync(factory);
-        using var created = await client.PostAsJsonAsync("/api/problem-reports", new { projectId, title = "Navigation data corruption", problem = "Route data becomes inconsistent after reset.", classification = "Software anomaly", severity = "Critical", priority = "Urgent", origin = "Manual report" });
+        using var created = await client.PostAsJsonAsync("/api/problem-reports", new { category = "CodeFunctional", projectId, title = "Navigation data corruption", problem = "Route data becomes inconsistent after reset.", classification = "Software anomaly", severity = "Critical", priority = "Urgent", origin = "Manual report" });
         var id = (await created.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetGuid();
 
         var results = await client.GetFromJsonAsync<JsonElement>($"/api/search?projectId={projectId}&query=corruption");
@@ -528,7 +528,7 @@ public sealed class ProblemReportApiTests
     {
         using var factory = new AeroLinkApiFactory(); using var client = factory.CreateClient(); await BootstrapAndLoginAsync(client);
         var projectId = await SeedProjectAsync(factory);
-        using var created = await client.PostAsJsonAsync("/api/problem-reports", new { projectId, title = "Searchable identity", problem = "The displayed identifier must be searchable." });
+        using var created = await client.PostAsJsonAsync("/api/problem-reports", new { category = "CodeFunctional", projectId, title = "Searchable identity", problem = "The displayed identifier must be searchable." });
         var createdBody = await created.Content.ReadFromJsonAsync<JsonElement>();
         var displayNumber = createdBody.GetProperty("displayNumber").GetString()!;
 

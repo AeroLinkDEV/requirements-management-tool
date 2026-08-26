@@ -3,6 +3,7 @@ import type { FormEvent } from 'react'
 import { useDebouncedSave } from './autosave'
 import { RichContentEditor } from './RichContent'
 import { emptyRichContent, fromPlainText, toPlainText } from './richContentModel'
+import ProblemReportCategoryPicker from './ProblemReportCategoryPicker'
 
 type Session = { id: string; version: number; expiresAt: string; draftJson: string }
 type Report = { id: string; displayNumber: string }
@@ -36,7 +37,7 @@ type Editable = {
   correctiveAction: string
   systemAircraftImpact: string
   workaround: string
-  type: string
+  category: string
   severity: string
   priority: string
   impacts: Record<string, string>
@@ -64,6 +65,13 @@ const checkout = (api: string, reportId: string) => {
   flights.set(key, request)
   void request.finally(() => flights.delete(key))
   return request
+}
+
+/** The working copy carries the category as the resolved object the record sends, or as a bare name. */
+const categoryOf = (value: unknown): string => {
+  if (typeof value === 'string') return value
+  if (value && typeof value === 'object' && 'value' in value) return String((value as { value: unknown }).value ?? '')
+  return ''
 }
 
 const impactsFrom = (value: unknown, fields: readonly (readonly [string, string])[]) => {
@@ -98,7 +106,9 @@ export default function ControlledProblemReportEditor({ api, projectId, report, 
     correctiveAction: value.correctiveAction,
     systemAircraftImpact: value.systemAircraftImpact,
     workaround: value.workaround,
-    type: value.type,
+    // Written back as the bare name. The working copy was handed the resolved object the detail
+    // response sends, and the check-in engine reads either shape.
+    category: value.category || null,
     impactAssessmentJson: JSON.stringify(value.impacts),
     severity: value.severity,
     priority: value.priority,
@@ -125,7 +135,7 @@ export default function ControlledProblemReportEditor({ api, projectId, report, 
           correctiveAction: String(recovered.correctiveAction ?? ''),
           systemAircraftImpact: String(recovered.systemAircraftImpact ?? ''),
           workaround: String(recovered.workaround ?? ''),
-          type: String(recovered.type ?? 'Other'),
+          category: categoryOf(recovered.category),
           severity: String(recovered.severity ?? 'Major'),
           priority: String(recovered.priority ?? 'High'),
           impacts: impactsFrom(recovered.impactAssessmentJson, impactFields),
@@ -237,9 +247,7 @@ export default function ControlledProblemReportEditor({ api, projectId, report, 
           <label>Priority<select value={draft.priority} onChange={event => set('priority', event.target.value)}>{['Urgent', 'High', 'Normal', 'Low'].map(x => <option key={x}>{x}</option>)}</select></label>
         </div>
         <label>Analysis<textarea value={draft.analysis} onChange={event => set('analysis', event.target.value)} /></label>
-        <label>Type<select value={draft.type} onChange={event => set('type', event.target.value)}>
-          {['Documentation', 'Code', 'Test', 'Other'].map(value => <option key={value}>{value}</option>)}
-        </select></label>
+        <label>Category<ProblemReportCategoryPicker api={api} value={draft.category} required onChange={value => set('category', value)} /></label>
         <label>Root cause<textarea value={draft.rootCause} onChange={event => set('rootCause', event.target.value)} /></label>
         {/* What can be done in the meantime. Empty is a real answer — it means none has been found. */}
         <label>Workaround<textarea value={draft.workaround} onChange={event => set('workaround', event.target.value)} /></label>

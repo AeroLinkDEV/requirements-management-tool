@@ -52,7 +52,7 @@ async function seedWorkspace(request: import('@playwright/test').APIRequestConte
 
   const reportResponse = await request.post(`${apiBase}/api/problem-reports`, {
     data: {
-      projectId: workspace.project.id,
+      category: 'CodeFunctional', projectId: workspace.project.id,
       releaseId: workspace.release.id,
       title: `TCR driving report ${suffix}`,
       problem: 'The observed behavior disagrees with the approved plan.',

@@ -29,3 +29,6 @@
 /* The reopen a finished report is revived through. Distinct from Check out & edit because it is a
    controlled lifecycle transition, not a lease. */
 .prReviveButton{border-color:#d8b98a;background:#fffaf1;color:#8a6118}
+
+.prIdentityCategory .catTile{margin:5px 0}
+.prNoCategory{display:block;margin:5px 0;color:#8090a4;font-size:13px;font-style:italic;font-weight:400}

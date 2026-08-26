@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test'
-import { login, selectProgram } from './auth'
+import { chooseCategory, login, selectProgram } from './auth'
 
 test('an engineer creates a structured Draft PR and advances it through the SCCB workbench', async ({ page }) => {
   test.setTimeout(240_000)
@@ -19,6 +19,8 @@ test('an engineer creates a structured Draft PR and advances it through the SCCB
   await dialog.getByLabel('System requirements').selectOption('Yes')
   await dialog.getByLabel('Code').selectOption('Yes')
   await dialog.getByLabel('Tests').selectOption('Yes')
+  // A Draft may be saved unclassified, but it cannot reach the SCCB that way.
+  await chooseCategory(dialog, 'Code Issue — Functional Impact')
   await dialog.getByRole('button', { name: 'Save Draft PR' }).click()
 
   await expect(page.getByRole('heading', { name: title })).toBeVisible()
@@ -75,6 +77,8 @@ test('an Open Problem Report is checked out, corrected, and the correction survi
   await dialog.getByLabel('Title').fill(`Autopilot disconnect tone lags ${stamp}`)
   await dialog.getByRole('group', { name: 'Add content to Problem Description' }).getByRole('button', { name: 'Paragraph' }).click()
   await dialog.getByLabel('Problem Description paragraph 1').fill('The tone follows the disconnect by about a second.')
+  // A Draft may be unclassified, but it cannot reach the SCCB that way.
+  await chooseCategory(dialog, 'Code Issue — Functional Impact')
   await dialog.getByRole('button', { name: 'Save Draft PR' }).click()
   await expect(page.locator('.prState')).toHaveText('Draft')
 
@@ -103,13 +107,17 @@ test('an Open Problem Report is checked out, corrected, and the correction survi
   const workaround = `Use the redundant aural channel until build ${stamp} is released.`
   // Only these controlled values change. The evidence must bind the values themselves, not merely the
   // aggregate version increment caused by check-in.
-  await editor.getByLabel('Type').selectOption('Code')
+  await chooseCategory(editor, 'Code Issue — Non-Functional Impact')
   await editor.getByLabel('Workaround').fill(workaround)
   await editor.getByRole('button', { name: 'Check in' }).click()
   await expect(editor).toHaveCount(0, { timeout: 30_000 })
 
   await expect(page.getByRole('heading', { name: `Autopilot disconnect tone lags ${stamp}` })).toBeVisible({ timeout: 30_000 })
-  await expect(page.locator('.prIdentity').getByText('Code', { exact: true })).toBeVisible()
+  // The record shows the category chosen at check-in: its code, its name, and — because a person chose
+  // it — no "derived" marker.
+  await expect(page.locator('.prIdentityCategory')).toContainText('32')
+  await expect(page.locator('.prIdentityCategory')).toContainText('Code Issue — Non-Functional Impact')
+  await expect(page.locator('.prIdentityCategory .catDerived')).toHaveCount(0)
   // The lifecycle did not move because the record was corrected.
   await expect(page.locator('.prState')).toHaveText('Open')
 
@@ -119,7 +127,9 @@ test('an Open Problem Report is checked out, corrected, and the correction survi
   await expect(page.getByText(workaround)).toBeVisible()
   await page.getByRole('button', { name: /History/ }).click()
   const checkIn = page.locator('.prTimeline article').filter({ hasText: 'Details Checked In' })
-  await expect(checkIn).toContainText('Snapshot schema 2')
-  await expect(checkIn).toContainText('Type Code')
+  // Schema 3 retired the four-kind Type for the category vocabulary and added how the value was arrived
+  // at, so a schema-2 snapshot and a schema-3 one are not comparable field for field.
+  await expect(checkIn).toContainText('Snapshot schema 3')
+  await expect(checkIn).toContainText('Category CodeNonFunctional')
   await expect(checkIn).toContainText(`Workaround ${workaround}`)
 })

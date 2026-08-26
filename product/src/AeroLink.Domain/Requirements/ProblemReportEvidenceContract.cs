@@ -30,7 +30,8 @@ public sealed record ProblemReportEvidenceSnapshot
     public required string AdditionalInformation { get; init; }
     public required string AdditionalInformationRich { get; init; }
     public required string SystemAircraftImpact { get; init; }
-    public required string Type { get; init; }
+    public required string? Category { get; init; }
+    public required string? CategoryProvenance { get; init; }
     public required string Workaround { get; init; }
     public required string ImpactAssessmentJson { get; init; }
     public required string Classification { get; init; }
@@ -64,8 +65,10 @@ public static class ProblemReportEvidenceContract
     public const string Contract = "aerolink.problem-report-evidence";
 
     // Version 1 was the independently maintained closure-review projection. Unversioned lifecycle rows are
-    // schema 0. Version 2 is the first shared, complete Problem Report evidence contract.
-    public const int SchemaVersion = 2;
+    // schema 0. Version 2 is the first shared, complete Problem Report evidence contract. Version 3 retires
+    // the four-kind Type in favour of the nine-category vocabulary and records how each value was arrived at,
+    // so a schema-2 snapshot and a schema-3 snapshot of the same report are not comparable field for field.
+    public const int SchemaVersion = 3;
 
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -90,7 +93,8 @@ public static class ProblemReportEvidenceContract
         AdditionalInformation = report.AdditionalInformation,
         AdditionalInformationRich = report.AdditionalInformationRich,
         SystemAircraftImpact = report.SystemAircraftImpact,
-        Type = report.Type.ToString(),
+        Category = report.Category?.ToString(),
+        CategoryProvenance = report.CategoryProvenance?.ToString(),
         Workaround = report.Workaround,
         ImpactAssessmentJson = report.ImpactAssessmentJson,
         Classification = report.Classification,

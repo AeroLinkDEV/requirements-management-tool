@@ -33,20 +33,37 @@ public sealed class ProblemReportEvidenceContractTests
     }
 
     [Fact]
-    public void Type_and_workaround_each_change_the_content_commitment_without_a_version_change()
+    public void Category_and_workaround_each_change_the_content_commitment_without_a_version_change()
     {
         var snapshot = ProblemReportEvidenceContract.Create(NewReport());
 
-        var typeChange = snapshot with { Type = ProblemReportType.Code.ToString() };
+        var categoryChange = snapshot with { Category = ProblemReportCategory.CodeFunctional.ToString() };
         var workaroundChange = snapshot with { Workaround = "Use redundant input until correction is released." };
 
-        Assert.Equal(snapshot.Version, typeChange.Version);
+        Assert.Equal(snapshot.Version, categoryChange.Version);
         Assert.Equal(snapshot.Version, workaroundChange.Version);
-        Assert.NotEqual(ProblemReportEvidenceContract.Hash(snapshot), ProblemReportEvidenceContract.Hash(typeChange));
+        Assert.NotEqual(ProblemReportEvidenceContract.Hash(snapshot), ProblemReportEvidenceContract.Hash(categoryChange));
         Assert.NotEqual(ProblemReportEvidenceContract.Hash(snapshot), ProblemReportEvidenceContract.Hash(workaroundChange));
-        Assert.Contains("\"type\":\"Code\"", ProblemReportEvidenceContract.Serialize(typeChange));
+        Assert.Contains("\"category\":\"CodeFunctional\"", ProblemReportEvidenceContract.Serialize(categoryChange));
         Assert.Contains("\"workaround\":\"Use redundant input until correction is released.\"",
             ProblemReportEvidenceContract.Serialize(workaroundChange));
+    }
+
+    /// <summary>
+    /// How the category was arrived at is committed evidence in its own right, not a display hint. A report
+    /// the migration classified and a report a person classified are different records even when they name
+    /// the same category, and the hash has to be able to tell them apart.
+    /// </summary>
+    [Fact]
+    public void Category_provenance_is_committed_separately_from_the_category()
+    {
+        var derived = ProblemReportEvidenceContract.Create(NewReport())
+            with { Category = ProblemReportCategory.CodeFunctional.ToString(),
+                   CategoryProvenance = ProblemReportCategoryProvenance.MigrationDerived.ToString() };
+        var selected = derived with { CategoryProvenance = ProblemReportCategoryProvenance.Selected.ToString() };
+
+        Assert.NotEqual(ProblemReportEvidenceContract.Hash(derived), ProblemReportEvidenceContract.Hash(selected));
+        Assert.Contains("\"categoryProvenance\":\"MigrationDerived\"", ProblemReportEvidenceContract.Serialize(derived));
     }
 
     [Fact]

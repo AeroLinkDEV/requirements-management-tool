@@ -1,11 +1,11 @@
 {
   "schemaVersion": "aerolink-api-test-intent/v2",
   "totals": {
-    "tests": 586,
-    "cases": 644,
-    "classes": 101,
-    "hostedTests": 573,
-    "hostedCases": 622,
+    "tests": 592,
+    "cases": 650,
+    "classes": 102,
+    "hostedTests": 579,
+    "hostedCases": 628,
     "nonHostedTests": 8,
     "nonHostedCases": 17,
     "unknownHostTests": 5,
@@ -21,10 +21,10 @@
     "http-boundary": {
       "label": "HTTP boundary: route, status, JSON shape",
       "level": "API (must stay hosted)",
-      "tests": 361,
-      "cases": 395,
+      "tests": 367,
+      "cases": 401,
       "unknownCases": 0,
-      "classes": 83
+      "classes": 84
     },
     "ef-translation": {
       "label": "EF translation / relational constraints",
@@ -4792,6 +4792,108 @@
       "sourceLines": {
         "start": 511,
         "end": 524
+      }
+    },
+    {
+      "cls": "ProblemReportCategoryApiTests",
+      "test": "A_classified_Draft_reaches_the_SCCB",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client"
+      ],
+      "sourceLines": {
+        "start": 112,
+        "end": 127
+      }
+    },
+    {
+      "cls": "ProblemReportCategoryApiTests",
+      "test": "A_raised_report_carries_its_category_resolved_and_marked_as_chosen",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client"
+      ],
+      "sourceLines": {
+        "start": 69,
+        "end": 84
+      }
+    },
+    {
+      "cls": "ProblemReportCategoryApiTests",
+      "test": "A_retired_kind_is_refused_rather_than_guessed_at",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client"
+      ],
+      "sourceLines": {
+        "start": 160,
+        "end": 170
+      }
+    },
+    {
+      "cls": "ProblemReportCategoryApiTests",
+      "test": "An_unclassified_Draft_is_refused_at_the_SCCB_with_a_reason_that_names_the_field",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client"
+      ],
+      "sourceLines": {
+        "start": 90,
+        "end": 110
+      }
+    },
+    {
+      "cls": "ProblemReportCategoryApiTests",
+      "test": "The_queue_filters_by_a_category_and_by_its_whole_family",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client"
+      ],
+      "sourceLines": {
+        "start": 129,
+        "end": 154
+      }
+    },
+    {
+      "cls": "ProblemReportCategoryApiTests",
+      "test": "The_vocabulary_is_served_whole_so_the_browser_never_spells_a_meaning_of_its_own",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client"
+      ],
+      "sourceLines": {
+        "start": 45,
+        "end": 67
       }
     },
     {

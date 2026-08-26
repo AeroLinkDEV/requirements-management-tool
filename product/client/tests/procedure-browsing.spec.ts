@@ -5,8 +5,8 @@ import { apiBase, apiLogin, login, selectProgram } from "./auth";
  * The verification workspace rendered every procedure it was given. The software side holds 440 of them, so
  * finding one meant scrolling past the rest, and the client received far more than it could show.
  *
- * Software is driven deliberately rather than the smaller System inventory. The configured HLR level opens
- * first while the broad API count still proves the showcase carries both software levels at useful volume.
+ * Software is driven deliberately rather than the smaller System inventory. The combined Explorer opens broad,
+ * then this Case-specific scenario selects HLR explicitly before asserting its historical showcase volume.
  */
 test("the procedure workspace pages, filters and deep-links instead of rendering everything", async ({ page, request }) => {
   test.setTimeout(240_000);
@@ -32,6 +32,11 @@ test("the procedure workspace pages, filters and deep-links instead of rendering
   await palette.getByPlaceholder(/Search pages/).fill("Test Case/Procedure Explorer");
   await palette.getByRole("link", { name: /Test Case\/Procedure Explorer/ }).click();
   await expect(page.getByRole("heading", { name: "Software Test Case/Procedure Explorer" })).toBeVisible({ timeout: 30_000 });
+
+  await page.getByLabel("Artifact filter").selectOption("Case");
+  await expect(page).toHaveURL(/artifactKind=Case/, { timeout: 30_000 });
+  await page.getByLabel("Level filter").selectOption("HighLevel");
+  await expect(page).toHaveURL(/artifactLevel=HighLevel/, { timeout: 30_000 });
 
   // The whole point: hundreds of records, a bounded number of them on the page.
   const rows = page.locator(".procedureRow");
