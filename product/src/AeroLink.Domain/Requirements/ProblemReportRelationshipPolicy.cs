@@ -8,6 +8,7 @@ public enum ProblemReportRelationshipProducer
     TestChangeRequestWorkflow,
     ResolutionVerificationWorkflow,
     DispositionWorkflow,
+    RelatedProblemReportWorkflow,
     GenericContextWorkflow,
 }
 
@@ -24,6 +25,21 @@ public static class ProblemReportRelationshipPolicy
     public const string VerificationForProblem = "VerificationForProblem";
     public const string ResolutionVerification = "ResolutionVerification";
     public const string DuplicateOf = "DuplicateOf";
+
+    /// <summary>
+    /// Two Problem Reports that belong together — a shared cause, a shared correction, a fix that cannot
+    /// land without the other.
+    ///
+    /// Deliberately symmetric and deliberately unlabelled beyond "related". A directed relationship
+    /// asserts which report is the parent, and that is a judgement nobody has been asked to make yet;
+    /// naming a kind now would mean inventing an answer and storing it. Directed kinds can arrive later
+    /// as additional definitions here, and the rows written today stay true when they do — a related pair
+    /// is still a related pair once somebody can also say one drives the other.
+    ///
+    /// Controlled, and produced only by its own workflow: the generic links endpoint must not be able to
+    /// forge one, which is exactly what DuplicateOf beside it is protected from.
+    /// </summary>
+    public const string RelatedProblemReport = "RelatedProblemReport";
     public const string AffectedRequirement = "AffectedRequirement";
 
     public static IReadOnlyList<ProblemReportRelationshipDefinition> Definitions { get; } =
@@ -35,6 +51,7 @@ public static class ProblemReportRelationshipPolicy
         new(VerificationForProblem, "TestChangeRequest", ProblemReportRelationshipProducer.TestChangeRequestWorkflow, true),
         new(ResolutionVerification, "TestExecution", ProblemReportRelationshipProducer.ResolutionVerificationWorkflow, true),
         new(DuplicateOf, "ProblemReport", ProblemReportRelationshipProducer.DispositionWorkflow, true),
+        new(RelatedProblemReport, "ProblemReport", ProblemReportRelationshipProducer.RelatedProblemReportWorkflow, true),
         new(AffectedRequirement, "Requirement", ProblemReportRelationshipProducer.GenericContextWorkflow, false),
     ];
 

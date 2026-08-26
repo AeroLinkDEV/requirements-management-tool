@@ -47,7 +47,7 @@ test('a PR links to change requests and System TCRs without changing its lifecyc
   const changeRequestId = new URL(page.url()).pathname.split('/').at(-1)!
   await page.locator('.artifactReferenceCard').filter({hasText:report.displayNumber}).click()
   await expect(page).toHaveURL(new RegExp(`/problem-reports/${report.id}$`))
-  await expect(page.getByRole('heading',{name:'Problem Reports'})).toBeVisible()
+  await expect(page.getByRole('heading',{name:'Problem Reports',exact:true})).toBeVisible()
   await expect(page.getByRole('heading',{name:title})).toBeVisible()
   await page.goBack()
   await expect(page).toHaveURL(new RegExp(`/systems/change-requests/${changeRequestId}$`))
@@ -91,7 +91,7 @@ test('a PR links to change requests and System TCRs without changing its lifecyc
     item.problemReports?.some(linked => linked.id === report.id))).toBeTruthy()
 
   await page.goto(new URL(`${root}/problem-reports`, page.url()).toString(), { waitUntil: 'load' })
-  await expect(page.getByRole('heading', { name: 'Problem Reports' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Problem Reports', exact: true })).toBeVisible()
   await page.getByRole('button', { name: new RegExp(report.displayNumber.replace('.', '\\.')) }).click()
   const panel = page.getByRole('region', { name: 'Impact and linked evidence' })
   await expect(panel).toContainText('Proposed Corrective Action')
@@ -104,7 +104,7 @@ test('a PR links to change requests and System TCRs without changing its lifecyc
   await expect(page).toHaveURL(new RegExp(`/systems/change-requests/${changeRequestId}$`))
   await page.goto(new URL(`${root}/problem-reports/${report.id}`, page.url()).toString(), { waitUntil: 'load' })
   await page.reload({ waitUntil: 'load' })
-  await expect(page.getByRole('heading', { name: 'Problem Reports' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Problem Reports', exact: true })).toBeVisible()
   await expect(page.getByRole('region', { name: 'Impact and linked evidence' }))
     .toContainText('Proposed Corrective Action')
   await expect(page.getByRole('region', { name: 'Impact and linked evidence' }))

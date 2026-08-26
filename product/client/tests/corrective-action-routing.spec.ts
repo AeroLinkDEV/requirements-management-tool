@@ -119,7 +119,7 @@ test("a corrective action opens the discipline, report and procedure it belongs 
     else expect(target).toEqual(expect.objectContaining({ available: false, verificationCode: 'pr_verification_scope_unknown' }))
   }
   await page.goto(new URL(root + "/problem-reports", page.url()).toString(), { waitUntil: "load" })
-  await expect(page.getByRole("heading", { name: "Problem Reports" })).toBeVisible({ timeout: 30_000 })
+  await expect(page.getByRole("heading", { name: "Problem Reports", exact: true })).toBeVisible({ timeout: 30_000 })
   // The queue is Project-wide and paginated, and neighbouring journeys raise their own reports. Discover the
   // exact raised records through the search surface instead of assuming they sit on the first page.
   const queueSearch = page.getByLabel('Search')
@@ -128,10 +128,10 @@ test("a corrective action opens the discipline, report and procedure it belongs 
   await queueSearch.fill(software.report.displayNumber)
   await expect(page.getByRole("button", { name: new RegExp(software.report.displayNumber.replace('.', '\\.')) })).toBeVisible()
   await page.reload({ waitUntil: "load" })
-  await expect(page.getByRole("heading", { name: "Problem Reports" })).toBeVisible()
+  await expect(page.getByRole("heading", { name: "Problem Reports", exact: true })).toBeVisible()
   const historicalRoot = root.replace(/\/releases\/[^/]+$/, `/releases/${historicalReleaseId}`)
   await page.goto(new URL(historicalRoot + "/problem-reports", page.url()).toString(), { waitUntil: "load" })
-  await expect(page.getByRole("heading", { name: "Problem Reports" })).toBeVisible({ timeout: 30_000 })
+  await expect(page.getByRole("heading", { name: "Problem Reports", exact: true })).toBeVisible({ timeout: 30_000 })
   await expect(page.getByRole("button", { name: "+ Record problem" })).toBeVisible()
   const historicalSearch = page.getByLabel('Search')
   await historicalSearch.fill(system.report.displayNumber)
