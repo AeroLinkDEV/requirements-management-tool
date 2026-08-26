@@ -1,11 +1,11 @@
 {
   "schemaVersion": "aerolink-api-test-intent/v2",
   "totals": {
-    "tests": 591,
-    "cases": 649,
+    "tests": 592,
+    "cases": 650,
     "classes": 102,
-    "hostedTests": 578,
-    "hostedCases": 627,
+    "hostedTests": 579,
+    "hostedCases": 628,
     "nonHostedTests": 8,
     "nonHostedCases": 17,
     "unknownHostTests": 5,
@@ -21,8 +21,8 @@
     "http-boundary": {
       "label": "HTTP boundary: route, status, JSON shape",
       "level": "API (must stay hosted)",
-      "tests": 366,
-      "cases": 400,
+      "tests": 367,
+      "cases": 401,
       "unknownCases": 0,
       "classes": 84
     },
@@ -5744,8 +5744,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 22,
-        "end": 59
+        "start": 24,
+        "end": 65
       }
     },
     {
@@ -5761,26 +5761,27 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 61,
-        "end": 71
+        "start": 67,
+        "end": 77
       }
     },
     {
       "cls": "ProcedureDiscussionApiTests",
-      "test": "Dormant_software_procedure_discussion_mutations_are_refused_without_notifications",
+      "test": "Enabled_software_procedure_discussion_mutates_and_disabled_historical_procedure_is_refused",
       "kind": "Fact",
       "intent": "ef-translation",
       "cases": 1,
       "caseEvidence": "Fact",
       "hosted": "hosted",
       "hostEvidence": [
+        "factory-construction",
         "showcase-factory",
         "factory-client",
         "factory-services"
       ],
       "sourceLines": {
-        "start": 73,
-        "end": 150
+        "start": 79,
+        "end": 293
       }
     },
     {
@@ -5853,6 +5854,22 @@
     },
     {
       "cls": "ProcedureSavedViewApiTests",
+      "test": "A_combined_kind_view_is_stored_and_a_legacy_missing_kind_view_remains_compatible",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction"
+      ],
+      "sourceLines": {
+        "start": 81,
+        "end": 101
+      }
+    },
+    {
+      "cls": "ProcedureSavedViewApiTests",
       "test": "A_repeat_name_is_refused_rather_than_creating_a_second_view_nobody_can_tell_apart",
       "kind": "Fact",
       "intent": "http-boundary",
@@ -5863,8 +5880,8 @@
         "factory-construction"
       ],
       "sourceLines": {
-        "start": 108,
-        "end": 124
+        "start": 130,
+        "end": 146
       }
     },
     {
@@ -5895,8 +5912,8 @@
         "factory-construction"
       ],
       "sourceLines": {
-        "start": 179,
-        "end": 191
+        "start": 201,
+        "end": 213
       }
     },
     {
@@ -5911,8 +5928,8 @@
         "factory-construction"
       ],
       "sourceLines": {
-        "start": 81,
-        "end": 106
+        "start": 103,
+        "end": 128
       }
     },
     {
@@ -5927,8 +5944,8 @@
         "factory-construction"
       ],
       "sourceLines": {
-        "start": 126,
-        "end": 157
+        "start": 148,
+        "end": 179
       }
     },
     {
@@ -5943,8 +5960,8 @@
         "factory-construction"
       ],
       "sourceLines": {
-        "start": 160,
-        "end": 177
+        "start": 182,
+        "end": 199
       }
     },
     {
@@ -9387,7 +9404,7 @@
     },
     {
       "cls": "TestProcedureAuthoringApiTests",
-      "test": "Dormant_software_procedure_uses_shared_authoring_and_history_without_a_tcr",
+      "test": "Enabled_software_procedure_uses_shared_authoring_and_history_without_a_tcr",
       "kind": "Fact",
       "intent": "http-boundary",
       "cases": 1,
@@ -9399,7 +9416,7 @@
       ],
       "sourceLines": {
         "start": 815,
-        "end": 914
+        "end": 916
       }
     },
     {

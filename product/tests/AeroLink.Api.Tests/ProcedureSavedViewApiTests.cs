@@ -78,6 +78,28 @@ public sealed class ProcedureSavedViewApiTests
         Assert.Contains("\"outcome\":\"Blocked\"", view.GetProperty("queryJson").GetString());
     }
 
+    [Fact]
+    public async Task A_combined_kind_view_is_stored_and_a_legacy_missing_kind_view_remains_compatible()
+    {
+        await using var factory = new AeroLinkApiFactory();
+        var seeded = await SeedAsync(factory);
+        using var client = await SignInAsync(factory, Member);
+
+        var combined = await client.PostAsJsonAsync("/api/test-procedures/views",
+            Create(seeded.ProjectId, "All artifacts", """{"artifactKind":"all","level":"Software"}"""));
+        Assert.Equal(HttpStatusCode.Created, combined.StatusCode);
+
+        var legacy = await client.PostAsJsonAsync("/api/test-procedures/views",
+            Create(seeded.ProjectId, "Legacy cases", """{"level":"Software"}"""));
+        Assert.Equal(HttpStatusCode.Created, legacy.StatusCode);
+        var listed = await client.GetFromJsonAsync<JsonElement>(
+            $"/api/test-procedures?projectId={seeded.ProjectId}&pageSize=10");
+        var views = listed.GetProperty("views").EnumerateArray().ToDictionary(
+            view => view.GetProperty("name").GetString()!, view => view.GetProperty("queryJson").GetString()!);
+        Assert.Contains("\"artifactKind\":\"all\"", views["All artifacts"]);
+        Assert.DoesNotContain("artifactKind", views["Legacy cases"], StringComparison.OrdinalIgnoreCase);
+    }
+
     [Theory]
     // A requirements field on a procedure view would be saved and then quietly do nothing.
     [InlineData("""{"verification":"Test"}""", """["identifier"]""")]

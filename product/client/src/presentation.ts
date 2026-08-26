@@ -236,6 +236,20 @@ export const isVerificationProcedureKind = (artifactKind?: string) => {
   return normalized === 'procedure' || normalized.endsWith('procedure')
 }
 
+/** Parse the exact route key (`HighLevel`, `HighLevelProcedure`, etc.) once for every client surface. */
+export type VerificationArtifactLevel = 'System' | 'HighLevel' | 'LowLevel'
+export const verificationArtifactLevel = (artifactKind?: string): VerificationArtifactLevel | undefined => {
+  const normalized = (artifactKind ?? '').replace(/[-_\s]/g, '').toLowerCase()
+  if (normalized === 'system' || normalized === 'systemtest') return 'System'
+  if (normalized.includes('lowlevel') || normalized === 'llr' || normalized === 'llrsoftware') return 'LowLevel'
+  if (normalized.includes('highlevel') || normalized === 'hlr' || normalized === 'hlrsoftware') return 'HighLevel'
+  return undefined
+}
+
+/** Convert a raw tab kind to the route key while preserving the legacy Case key. */
+export const verificationArtifactRouteKey = (level: Exclude<VerificationArtifactLevel, 'System'>,
+  kind: 'Case' | 'Procedure') => kind === 'Procedure' ? `${level}Procedure` : level
+
 export const verificationArtifactNoun = (level?: string, artifactKind?: string) => {
   return level === 'System' || isVerificationProcedureKind(artifactKind)
     ? 'Procedure' : legacyVerificationArtifactNoun(level)
@@ -327,7 +341,12 @@ export const configuredProcedureTargetsFor = (
   scope: 'System' | 'Software',
   level?: string,
   artifactKind?: string,
-): DocumentTarget[] => procedureTargetsFor(scope, level, artifactKind).filter(target => {
+): DocumentTarget[] => {
+  const candidates = artifactKind
+    ? procedureTargetsFor(scope, level, artifactKind)
+    : [...procedureTargetsFor(scope, level, 'Case'), ...procedureTargetsFor(scope, level, 'Procedure')]
+  const unique = candidates.filter((target, index, all) => all.findIndex(item => item.type === target.type) === index)
+  return unique.filter(target => {
   const key: { level: LadderLevel; kind: 'Case' | 'Procedure' } = target.type === 'SystemTestProcedures'
     ? { level: 'System', kind: 'Procedure' }
     : target.type === 'HighLevelTestProcedures'
@@ -337,8 +356,9 @@ export const configuredProcedureTargetsFor = (
         : target.type === 'HighLevelTestCases'
           ? { level: 'HighLevel', kind: 'Case' }
           : { level: 'LowLevel', kind: 'Case' }
-  return ladderEnablesArtifactKind(ladder, key.level, key.kind)
-})
+    return ladderEnablesArtifactKind(ladder, key.level, key.kind)
+  })
+}
 
 export const targetsFor = (scope: 'System' | 'Software', level?: string): DocumentTarget[] => {
   if (scope === 'System') return [{ type: 'Sysrd', label: documentTypeLabels.Sysrd }]

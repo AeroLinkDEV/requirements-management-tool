@@ -16,7 +16,7 @@ public static class TestProcedureDocumentEndpoints
 {
     public static void MapTestProcedureDocumentEndpoints(this WebApplication app)
     {
-        app.MapGet("/api/projects/{projectId:guid}/{artifactRoute:regex(test-procedure-documents|test-case-documents)}", async (Guid projectId,
+        app.MapGet("/api/projects/{projectId:guid}/{artifactRoute:regex(test-procedure-documents|test-case-documents|test-artifacts)}", async (Guid projectId,
             string artifactRoute, string? scope, HttpContext http, AeroLinkDbContext db, IProjectLadderPolicyResolver policyResolver, CancellationToken ct) =>
         {
             if (!await http.HasProjectAccessAsync(db, projectId, ct)) return Results.Forbid();
@@ -25,7 +25,9 @@ public static class TestProcedureDocumentEndpoints
                 .Where(level => level.VerificationProfile is not null)
                 .Select(level => level.VerificationProfile!)
                 .ToArray();
-            var requestedKeys = artifactRoute == "test-case-documents"
+            var requestedKeys = artifactRoute == "test-artifacts"
+                ? profiles.SelectMany(profile => profile.Definitions).Select(definition => definition.Key).ToHashSet()
+                : artifactRoute == "test-case-documents"
                 ? profiles.SelectMany(profile => profile.Definitions)
                     .Where(definition => definition.Kind == VerificationArtifactKind.Case)
                     .Select(definition => definition.Key).ToHashSet()

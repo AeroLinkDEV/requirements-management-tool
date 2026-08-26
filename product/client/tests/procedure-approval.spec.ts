@@ -18,7 +18,7 @@ test('an unapproved procedure revision cannot have an execution recorded against
   const showcase = await showcaseSeed(request)
 
   const draftsResponse = await request.get(
-    `${apiBase}/api/test-procedures?projectId=${showcase.projectId}&state=Draft&page=1&pageSize=1`)
+    `${apiBase}/api/test-procedures?projectId=${showcase.projectId}&artifactKind=Procedure&state=Draft&page=1&pageSize=1`)
   expect(draftsResponse.ok(), await draftsResponse.text()).toBeTruthy()
   const drafts = await draftsResponse.json()
   // The build carries an unapproved procedure revision. If it ever stops carrying one this fails loudly
@@ -47,7 +47,7 @@ test('an unapproved procedure revision cannot have an execution recorded against
   // And an approved one is accepted, so the refusal above is the state talking rather than the endpoint
   // refusing everything.
   const approvedResponse = await request.get(
-    `${apiBase}/api/test-procedures?projectId=${showcase.projectId}&state=Approved&page=1&pageSize=1`)
+    `${apiBase}/api/test-procedures?projectId=${showcase.projectId}&artifactKind=Procedure&state=Approved&page=1&pageSize=1`)
   expect(approvedResponse.ok(), await approvedResponse.text()).toBeTruthy()
   const approved = (await approvedResponse.json()).items[0]
   expect(approved.state).toBe('Approved')

@@ -185,6 +185,15 @@ test('Case to allocated Procedure execution chain drives release readiness', asy
       },
     })
   expect(caseApprove.ok(), await caseApprove.text()).toBeTruthy()
+  const procedureSourcesResponse = await request.get(
+    `${apiBase}/api/releases/${workspace.release.id}/test-change-request-sources` +
+    '?discipline=HighLevelSoftware&artifactKind=Procedure')
+  expect(procedureSourcesResponse.ok(), await procedureSourcesResponse.text()).toBeTruthy()
+  const procedureSources = await procedureSourcesResponse.json() as Array<{
+    sourceKind: string; sourceId: string; displayNumber: string; selectable: boolean
+  }>
+  expect(procedureSources.some(source => source.sourceKind === 'CaseChange'
+    && source.sourceId === caseChange.id && source.selectable)).toBeTruthy()
   const caseSelected = await request.post(`${apiBase}/api/baselines/${baseline.id}/test-change-requests`, {
     data: { testChangeRequestId: caseReview.id },
   })
@@ -277,6 +286,60 @@ test('Case to allocated Procedure execution chain drives release readiness', asy
   expect(procedure.displayNumber).toMatch(/^HLRTP-\d{6}\.\d{2}$/)
   const procedureRevisionId = procedure.revisionId as string
 
+  // #762 API boundary: this activated Case + Procedure profile exposes one globally sorted mixed inventory,
+  // while the historical procedure alias remains a Case compatibility surface until Procedure is explicit.
+  const mixedResponse = await request.get(
+    `${apiBase}/api/verification-artifacts?projectId=${workspace.project.id}&releaseId=${workspace.release.id}` +
+    '&scope=Software&sort=owner&page=1&pageSize=200')
+  expect(mixedResponse.ok(), await mixedResponse.text()).toBeTruthy()
+  const mixed = await mixedResponse.json()
+  expect(new Set(mixed.items.map((item: { artifactKind: string }) => item.artifactKind))).toEqual(new Set(['Case', 'Procedure']))
+  expect(mixed.totalPages).toBe(Math.ceil(mixed.totalCount / mixed.pageSize))
+  const mixedPageOneResponse = await request.get(
+    `${apiBase}/api/verification-artifacts?projectId=${workspace.project.id}&releaseId=${workspace.release.id}` +
+    '&scope=Software&sort=owner&page=1&pageSize=1')
+  const mixedPageTwoResponse = await request.get(
+    `${apiBase}/api/verification-artifacts?projectId=${workspace.project.id}&releaseId=${workspace.release.id}` +
+    '&scope=Software&sort=owner&page=2&pageSize=1')
+  expect(mixedPageOneResponse.ok(), await mixedPageOneResponse.text()).toBeTruthy()
+  expect(mixedPageTwoResponse.ok(), await mixedPageTwoResponse.text()).toBeTruthy()
+  const mixedPageOne = await mixedPageOneResponse.json()
+  const mixedPageTwo = await mixedPageTwoResponse.json()
+  expect(mixedPageOne.totalPages).toBe(Math.ceil(mixedPageOne.totalCount / mixedPageOne.pageSize))
+  expect(mixedPageOne.items[0].id).not.toBe(mixedPageTwo.items[0].id)
+  expect(`${mixedPageOne.items[0].ownerId}\u0000${mixedPageOne.items[0].displayNumber}` <= `${mixedPageTwo.items[0].ownerId}\u0000${mixedPageTwo.items[0].displayNumber}`).toBeTruthy()
+  const compatibility = await request.get(
+    `${apiBase}/api/test-procedures?projectId=${workspace.project.id}&releaseId=${workspace.release.id}&scope=Software&page=1&pageSize=200`)
+  expect(compatibility.ok(), await compatibility.text()).toBeTruthy()
+  expect((await compatibility.json()).items.every((item: { artifactKind: string }) => item.artifactKind === 'Case')).toBeTruthy()
+  const procedureOnly = await request.get(
+    `${apiBase}/api/test-procedures?projectId=${workspace.project.id}&releaseId=${workspace.release.id}&scope=Software&artifactKind=Procedure&page=1&pageSize=200`)
+  expect(procedureOnly.ok(), await procedureOnly.text()).toBeTruthy()
+  expect((await procedureOnly.json()).items.every((item: { artifactKind: string }) => item.artifactKind === 'Procedure')).toBeTruthy()
+  const procedureTrace = await request.get(
+    `${apiBase}/api/test-procedures/${procedure.id}/trace?releaseId=${workspace.release.id}&revisionId=${procedureRevisionId}`)
+  expect(procedureTrace.ok(), await procedureTrace.text()).toBeTruthy()
+  const trace = await procedureTrace.json()
+  expect(trace.artifactKind).toBe('Procedure')
+  expect(trace.requirements).toHaveLength(0)
+  expect(trace.caseParents.some((parent: { caseRevisionId: string }) => parent.caseRevisionId === caseRevisionId)).toBeTruthy()
+  const configuredDocuments = await request.get(
+    `${apiBase}/api/projects/${workspace.project.id}/test-artifacts?scope=Software`)
+  expect(configuredDocuments.ok(), await configuredDocuments.text()).toBeTruthy()
+  const documents = await configuredDocuments.json()
+  expect(new Set(documents.map((document: { level: string; artifactKind: string }) => `${document.level}:${document.artifactKind}`))).toEqual(
+    new Set(['HighLevel:Case', 'HighLevel:Procedure', 'LowLevel:Case', 'LowLevel:Procedure']))
+  const procedureCommentResponse = await request.post(`${apiBase}/api/test-procedures/${procedure.id}/comments`, {
+    data: { releaseId: workspace.release.id, revisionId: procedureRevisionId, body: `#762 Procedure discussion ${Date.now()}`, mentions: [] },
+  })
+  expect(procedureCommentResponse.status(), await procedureCommentResponse.text()).toBe(201)
+  const procedureComment = await procedureCommentResponse.json() as { id: string }
+  const procedureCommentResolved = await request.post(
+    `${apiBase}/api/enterprise-requirements/comments/${procedureComment.id}/resolve`, {
+      data: { releaseId: workspace.release.id, disposition: 'The exact Case-to-Procedure discussion was reviewed.' },
+    })
+  expect(procedureCommentResolved.status(), await procedureCommentResolved.text()).toBe(204)
+
   // 5. Campaign + build scope + BuildTestSet selection.
   const campaignResponse = await request.post(`${apiBase}/api/release-campaigns`, {
     data: {
@@ -301,6 +364,101 @@ test('Case to allocated Procedure execution chain drives release readiness', asy
   //    selects Procedures — this would fail if the UI still hard-coded the Case segment.
   await login(page, 'admin', { openProject: false })
   const root = `/programs/${workspace.program.id}/projects/${workspace.project.id}/releases/${workspace.release.id}`
+  // #762 full-profile navigation contract: the activated ladder exposes four exact ordered package keys.
+  // Each tab keeps its raw kind separate from the route key, so Case retains the legacy level URL while
+  // Procedure carries the explicit kind query. The CTA and destination must name the selected artifact.
+  await page.goto(`${root}/software-verification/hlr/change-requests`)
+  const packageTabs = page.getByRole('tab')
+  await expect(packageTabs).toHaveCount(4, { timeout: 30_000 })
+  expect((await packageTabs.allTextContents()).map(text => text.replace(/\s+/g, ' ').trim())).toEqual([
+    'HLRTest cases', 'HLRTest procedures', 'LLRTest cases', 'LLRTest procedures',
+  ])
+  for (const [name, path, cta, heading] of [
+    ['HLR Test cases', '/software-verification/hlr/change-requests', '+ New HLR Test Case Change Request', 'Create HLR Test Case Change Request'],
+    ['HLR Test procedures', '/software-verification/hlr/change-requests?kind=Procedure', '+ New HLR Test Procedure Change Request', 'Create HLR Test Procedure Change Request'],
+    ['LLR Test cases', '/software-verification/llr/change-requests', '+ New LLR Test Case Change Request', 'Create LLR Test Case Change Request'],
+    ['LLR Test procedures', '/software-verification/llr/change-requests?kind=Procedure', '+ New LLR Test Procedure Change Request', 'Create LLR Test Procedure Change Request'],
+  ] as const) {
+    await page.getByRole('tab', { name }).click()
+    await expect(page).toHaveURL(new RegExp(`${path.replace(/[?]/g, '\\?')}$`))
+    await expect(page.getByRole('button', { name: cta })).toBeVisible()
+    await page.reload()
+    await expect(page.getByRole('tab', { name })).toHaveAttribute('aria-selected', 'true')
+    await expect(page.getByRole('button', { name: cta })).toBeVisible()
+    await page.getByRole('button', { name: cta }).click()
+    await expect(page).toHaveURL(new RegExp(`${path.split('/change-requests')[0]}/change-requests/new${name.includes('procedures') ? '\\?kind=Procedure' : ''}$`))
+    await expect(page.getByRole('heading', { name: heading, level: 1 })).toBeVisible()
+    await page.goBack()
+    await expect(page.getByRole('tab', { name })).toHaveAttribute('aria-selected', 'true')
+  }
+  await page.goForward()
+  await expect(page.getByRole('heading', { name: /Create (HLR|LLR) Test (Case|Procedure) Change Request/, level: 1 })).toBeVisible()
+  await page.goto(`${root}/software-verification/hlr/change-requests`)
+  // Exercise all four shared-editor contracts against the activated fixture. The package mutation itself is
+  // already proven above for the real HLR Case and HLR Procedure packages; these isolated UI submissions
+  // ensure the LLR paths also send their exact kind/origin fields without creating duplicate governed rows.
+  const editorSubmissions: Record<string, unknown>[] = []
+  await page.route('**/api/releases/*/test-change-request-sources*', async route => {
+    const url = new URL(route.request().url())
+    const llr = url.searchParams.get('discipline') === 'LowLevelSoftware'
+    const procedureKind = url.searchParams.get('artifactKind') === 'Procedure'
+    const sourceId = `${llr ? 'LLR' : 'HLR'}-source-${procedureKind ? 'procedure' : 'case'}`
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(procedureKind
+      ? [{ sourceKind: 'CaseChange', sourceId, displayNumber: `${llr ? 'LLRTC' : 'HLRTC'}-000762.00`,
+          title: 'Exact Case change origin', state: 'Approved', selectable: true }]
+      : [{ changeRequestId: sourceId, displayNumber: `${llr ? 'LLRCR' : 'HLRCR'}-000762.00`,
+          title: 'Approved Case change source', state: 'Approved', selectable: true }]) })
+  })
+  await page.route('**/api/releases/*/test-change-requests', async route => {
+    editorSubmissions.push(route.request().postDataJSON() as Record<string, unknown>)
+    await route.fulfill({ status: 201, contentType: 'application/json', body: JSON.stringify({ id: `editor-${editorSubmissions.length}`, displayNumber: 'EDITOR-000762.00' }) })
+  })
+  for (const [level, kind] of [['hlr', 'Case'], ['hlr', 'Procedure'], ['llr', 'Case'], ['llr', 'Procedure']] as const) {
+    const procedureKind = kind === 'Procedure'
+    await page.goto(`${root}/software-verification/${level}/change-requests/new${procedureKind ? '?kind=Procedure' : ''}`)
+    await expect(page.getByRole('heading', { name: `Create ${level === 'hlr' ? 'HLR' : 'LLR'} Test ${kind} Change Request`, level: 1 })).toBeVisible()
+    const source = page.locator('label').filter({ hasText: procedureKind ? 'Exact Case change origin' : 'Approved Case change source' }).first()
+    await expect(source).toBeVisible()
+    await source.locator('input').check()
+    const editor = page.locator('[data-tcr-editor]')
+    await editor.getByLabel('Title').fill(`${level.toUpperCase()} ${kind} editor contract`)
+    for (const field of ['Problem', 'Analysis', 'Solution'])
+      await editor.getByLabel(field).fill(`${field} for ${level} ${kind}.`)
+    const raise = page.getByRole('button', { name: `Raise ${procedureKind ? level === 'hlr' ? 'HLRTPCR' : 'LLRTPCR' : level === 'hlr' ? 'HLRTCCR' : 'LLRTCCR'}` })
+    await expect(raise).toBeEnabled()
+    await raise.click()
+    await expect.poll(() => editorSubmissions.length).toBe(editorSubmissions.length + 1)
+  }
+  expect(editorSubmissions).toHaveLength(4)
+  expect(editorSubmissions.filter(body => body.artifactKind === 'Procedure')).toHaveLength(2)
+  expect(editorSubmissions.filter(body => body.artifactKind !== 'Procedure' && body.changeRequestIds)).toHaveLength(2)
+  for (const body of editorSubmissions.filter(item => item.artifactKind === 'Procedure')) {
+    expect(body.caseChangeIds).toHaveLength(1)
+    expect(body).not.toHaveProperty('changeRequestIds')
+    expect(body).not.toHaveProperty('problemReportIds')
+  }
+  // The same activated fixture proves the combined Explorer: mixed rows and badges, all four configured
+  // document rails, exact kind/level filters, search, and the Procedure inspector's Case-parent trace.
+  await page.goto(`${root}/software-verification/test-artifacts`)
+  await expect(page.getByRole('heading', { name: 'Software Test Case/Procedure Explorer', level: 1 })).toBeVisible({ timeout: 30_000 })
+  await expect(page.getByLabel('Artifact filter')).toHaveValue('all')
+  const caseExplorerRow = page.locator('.procedureRow').filter({ hasText: /Case/ })
+  const procedureExplorerRow = page.locator('.procedureRow').filter({ hasText: /Procedure/ })
+  await expect(caseExplorerRow).toHaveCount(1, { timeout: 30_000 })
+  await expect(procedureExplorerRow).toHaveCount(1, { timeout: 30_000 })
+  await expect(caseExplorerRow.locator('span').nth(2)).toHaveText('1')
+  await expect(procedureExplorerRow.locator('span').nth(2)).toHaveText('1')
+  for (const documentNumber of ['HLRTD', 'HLRTPD', 'LLRTD', 'LLRTPD'])
+    await expect(page.locator(`[data-document^="${documentNumber}-"]`)).toBeVisible()
+  await page.getByLabel('Artifact filter').selectOption('Procedure')
+  await expect(page.locator('.procedureRow')).toHaveCount(1)
+  await page.getByLabel('Level filter').selectOption('HighLevel')
+  await expect(page.locator('.procedureRow')).toHaveCount(1)
+  await page.getByLabel('Find a procedure').fill(procedure.displayNumber)
+  await expect(page.locator('[data-procedure]').filter({ hasText: procedure.displayNumber })).toBeVisible()
+  await page.locator('[data-procedure]').filter({ hasText: procedure.displayNumber }).getByRole('button').click()
+  await page.getByRole('button', { name: 'Trace & impact' }).click()
+  await expect(page.getByRole('list', { name: 'Exact Case parents' })).toContainText(exactCase.displayNumber)
   await page.goto(`${root}/software-verification/hlr/results`)
   await expect(page.getByRole('heading', { name: 'Test Results' })).toBeVisible({ timeout: 30_000 })
   await page.getByLabel('Find an approved procedure').fill(`${label} sequencing procedure`)

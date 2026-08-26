@@ -86,8 +86,9 @@ record CreateSchemaFieldRequest(string Key,string Label,SchemaFieldType Type,boo
 record CreateSpecificationRequest(Guid ProjectId,string DocumentNumber,string Title,string Level,string Description);
 record CreateSectionRequest(Guid? ParentId,int Position,string Heading);
 record CreateCommentRequest(Guid? RevisionId,Guid? ParentCommentId,string Body,List<string>? Mentions);
-/// <summary>A remark on a test procedure. No mention routing yet — the conversation exists first.</summary>
-record CreateProcedureCommentRequest(Guid? RevisionId, Guid? ParentCommentId, string Body, List<string>? Mentions);
+/// <summary>A remark on a verification artifact; mentions route to the attributable discussion notifications.</summary>
+record CreateProcedureCommentRequest(Guid? RevisionId, Guid? ParentCommentId, string Body, List<string>? Mentions,
+    Guid? ReleaseId = null);
 record CreateDormantProcedureRequest(Guid ProjectId, TestProcedureLevel Level, string Title,
     string EnvironmentSetup, string TestData, string OrderedSteps, string ExpectedObservations,
     string Cleanup, string ToolingAutomation, VerificationProcedureParentKind ParentKind,
@@ -98,7 +99,7 @@ record ReviseDormantProcedureRequest(string EnvironmentSetup, string TestData, s
     VerificationProcedureParentKind ParentKind, Guid[]? CaseRevisionIds = null, string? DerivedRationale = null,
     string Objective = "Procedure execution", string Preconditions = "", long? ExpectedVersion = null);
 record RetireDormantProcedureRequest(string Rationale, long? ExpectedVersion = null);
-record ResolveCommentRequest(string? Disposition);
+record ResolveCommentRequest(string? Disposition, Guid? ReleaseId = null);
 record CreateSavedViewRequest(Guid ProjectId,string Name,string QueryJson,string ColumnsJson,bool IsShared);
 record UpdateSavedViewRequest(string? Name,string? QueryJson,string? ColumnsJson,bool? IsShared);
 record BulkRequirementRequest(Guid ProjectId,List<Guid> ArtifactIds,string Tag,Guid? SpecificationId,Guid? SectionId);

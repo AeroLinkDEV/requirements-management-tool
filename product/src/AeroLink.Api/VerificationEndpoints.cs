@@ -1,4 +1,5 @@
 using AeroLink.Domain.Common;
+using AeroLink.Domain.ChangeControl;
 using AeroLink.Domain.Hierarchy;
 using AeroLink.Domain.Identity;
 using AeroLink.Domain.Releases;
@@ -480,24 +481,31 @@ public static class VerificationEndpoints
         });
 
         app.MapPost("/api/test-{artifactRoute:regex(procedures|cases)}/{id:guid}/comments", async (string artifactRoute, Guid id, CreateProcedureCommentRequest request,
-            HttpContext http, AeroLinkDbContext db, CancellationToken ct) =>
+            HttpContext http, AeroLinkDbContext db, IProjectLadderPolicyResolver policyResolver, CancellationToken ct) =>
         {
             var procedure = await db.TestProcedures.AsNoTracking().SingleOrDefaultAsync(x => x.Id == id, ct);
             if (procedure is null || !ArtifactRouteAllows(artifactRoute, procedure.Level, procedure.ArtifactKind)) return Results.NotFound();
             if (!await http.HasProjectAccessAsync(db, procedure.ProjectId, ct)) return Results.Forbid();
-            if (procedure.ArtifactKind == VerificationArtifactKind.Procedure
-                && procedure.Level != TestProcedureLevel.System)
-                return Results.BadRequest(new
-                {
-                    error = "Dormant software Procedures are read-only; discussion mutation is unavailable.",
-                    code = "dormant_procedure_discussion_read_only"
-                });
+            var policy = await policyResolver.ResolveAsync(procedure.ProjectId, ct);
+            var discussionEnabled = procedure.Level switch
+            {
+                TestProcedureLevel.System => policy.VerificationProfile(RequirementLevel.System).Enables(VerificationArtifactKind.Procedure),
+                TestProcedureLevel.HighLevel => policy.VerificationProfile(RequirementLevel.HighLevel).Enables(procedure.ArtifactKind),
+                TestProcedureLevel.LowLevel => policy.VerificationProfile(RequirementLevel.LowLevel).Enables(procedure.ArtifactKind),
+                _ => false,
+            };
+            if (!discussionEnabled)
+                return Results.BadRequest(new { error = "Discussion is unavailable for this disabled verification artifact.", code = "verification_discussion_disabled" });
             if (request.RevisionId is not null
                 && !await db.TestProcedureRevisions.AnyAsync(x => x.Id == request.RevisionId && x.ProcedureId == id, ct))
-                return Results.BadRequest(new { error = $"The comment revision is not part of this {ArtifactNoun(procedure.Level)}." });
+                return Results.BadRequest(new { error = $"The comment revision is not part of this {ArtifactNoun(procedure.Level, procedure.ArtifactKind)}." });
             if (request.ParentCommentId is not null
                 && !await db.ArtifactComments.AnyAsync(x => x.Id == request.ParentCommentId && x.ArtifactId == id, ct))
-                return Results.BadRequest(new { error = $"The parent comment is not part of this {ArtifactNoun(procedure.Level)}." });
+                return Results.BadRequest(new { error = $"The parent comment is not part of this {ArtifactNoun(procedure.Level, procedure.ArtifactKind)}." });
+            var releaseDecision = await VerificationDiscussionReleaseAuthority.ValidateAsync(db, procedure.ProjectId,
+                request.ReleaseId, request.RevisionId, id, ct);
+            if (!releaseDecision.Allowed)
+                return Results.BadRequest(new { error = releaseDecision.Error, code = releaseDecision.Code });
             try
             {
                 var actor = http.UserAccount().UserName;
@@ -697,7 +705,7 @@ public static class VerificationEndpoints
                 if (effectivity is null || !effectivity.RevisionByProcedure.TryGetValue(id, out var carriedRevisionId))
                     return Results.NotFound(new
                     {
-                        error = $"This {ArtifactNoun(procedure.Level)} is not carried by the selected build.",
+                        error = $"This {ArtifactNoun(procedure.Level, procedure.ArtifactKind)} is not carried by the selected build.",
                         code = "procedure_not_carried_by_build"
                     });
                 // A request for one exact revision is a build-effectivity assertion and must match the
@@ -705,7 +713,7 @@ public static class VerificationEndpoints
                 if (revisionId is not null && revisionId != carriedRevisionId)
                     return Results.NotFound(new
                     {
-                        error = $"The requested {ArtifactNoun(procedure.Level)} revision is not the revision the selected build carries.",
+                        error = $"The requested {ArtifactNoun(procedure.Level, procedure.ArtifactKind)} revision is not the revision the selected build carries.",
                         code = "cross_build_procedure_revision"
                     });
                 selectedRevisionId = carriedRevisionId;
@@ -738,6 +746,29 @@ public static class VerificationEndpoints
                     x.Id, x.Revision, x.State, x.AuthorId, x.CreatedAt, x.SourceTestChangeRequestId
                 })
                 .SingleAsync(ct);
+
+            var caseLinks = procedure.ArtifactKind == VerificationArtifactKind.Procedure && procedure.Level != TestProcedureLevel.System
+                ? await db.TestCaseProcedureLinks.AsNoTracking()
+                    .Where(x => x.ProcedureRevisionId == selectedRevisionIdValue).ToListAsync(ct)
+                : [];
+            var caseRevisionIds = caseLinks.Select(x => x.CaseRevisionId).Distinct().ToList();
+            var caseRevisions = caseRevisionIds.Count == 0
+                ? []
+                : await (from caseRevision in db.TestProcedureRevisions.AsNoTracking()
+                         join caseArtifact in db.TestProcedures.AsNoTracking() on caseRevision.ProcedureId equals caseArtifact.Id
+                         where caseRevisionIds.Contains(caseRevision.Id)
+                         select new { caseRevision.Id, caseRevision.ProcedureId, caseArtifact.BaseNumber, caseRevision.Revision })
+                    .ToListAsync(ct);
+            var caseTitles = caseRevisionIds.Count == 0
+                ? new Dictionary<Guid, TestProcedureRevisionTitleSnapshot>()
+                : await TestProcedureRevisionTitleProjection.ForRevisionsAsync(db, caseRevisionIds, ct);
+            var caseLifecycleIds = caseLinks.Where(x => x.ExactLinkSuspectLifecycleId is not null)
+                .Select(x => x.ExactLinkSuspectLifecycleId!.Value).Distinct().ToList();
+            var caseLifecycles = caseLifecycleIds.Count == 0
+                ? new Dictionary<Guid, ExactLinkSuspectLifecycle>()
+                : await db.ExactLinkSuspectLifecycles.AsNoTracking()
+                    .Where(x => caseLifecycleIds.Contains(x.Id) && x.LinkKind == ExactLinkKind.CaseProcedure)
+                    .ToDictionaryAsync(x => x.Id, ct);
 
             // The exact coverage rows this revision owns, joined to the exact requirement revisions they
             // name. Nothing here is derived from counts, display strings or project-global latest records.
@@ -799,6 +830,28 @@ public static class VerificationEndpoints
                 })
                 .OrderBy(x => x.DisplayNumber)
                 .ToList();
+            var softwareProcedureRequirements = procedure.ArtifactKind == VerificationArtifactKind.Procedure
+                && procedure.Level != TestProcedureLevel.System
+                    ? (object)Array.Empty<object>()
+                    : requirements;
+            var caseParents = caseLinks.Select(link =>
+            {
+                var parent = caseRevisions.SingleOrDefault(x => x.Id == link.CaseRevisionId);
+                var title = caseTitles.TryGetValue(link.CaseRevisionId, out var parentTitle) ? parentTitle.Title : null;
+                var lifecycle = link.ExactLinkSuspectLifecycleId is Guid lifecycleId
+                    && caseLifecycles.TryGetValue(lifecycleId, out var parentLifecycle)
+                    ? parentLifecycle
+                    : null;
+                return new
+                {
+                    linkId = link.Id,
+                    caseRevisionId = link.CaseRevisionId,
+                    displayNumber = parent is null ? null : $"{parent.BaseNumber}.{parent.Revision:D2}",
+                    title,
+                    state = lifecycle?.State.ToString() ?? "Confirmed",
+                    outcome = lifecycle?.Outcome?.ToString(),
+                };
+            }).OrderBy(x => x.displayNumber).ToList();
 
             return Results.Ok(new
             {
@@ -820,7 +873,8 @@ public static class VerificationEndpoints
                 revision.SourceTestChangeRequestId,
                 package = provenance.Package,
                 provenanceNote = provenance.Note,
-                requirements,
+                requirements = softwareProcedureRequirements,
+                caseParents,
                 provenance = provenance.Drivers.Select(driver => new
                 {
                     changeRequest = driver.ChangeRequest,
@@ -839,7 +893,7 @@ public static class VerificationEndpoints
         // The workspace rendered every procedure it was given — 440 cards on the software side — with no
         // search, filter or page. This returns a bounded page and the total, and every predicate below runs
         // in the database, because a page of twenty-five that costs a full table read is not paging.
-        app.MapGet("/api/test-{artifactRoute:regex(procedures|cases)}", async (string artifactRoute, Guid projectId, Guid? releaseId, string? search, string? scope, string? state,
+        app.MapGet("/api/{artifactRoute:regex(test-procedures|test-cases|verification-artifacts)}", async (string artifactRoute, Guid projectId, Guid? releaseId, string? search, string? scope, string? state,
             string? owner, string? outcome, Guid? requirementRevisionId, string? sort, int? page, int? pageSize, string? ids,
             Guid? documentId, Guid? sectionId, string? artifactKind,
             HttpContext http, AeroLinkDbContext db, IProjectLadderPolicyResolver policyResolver, CancellationToken ct) =>
@@ -850,23 +904,44 @@ public static class VerificationEndpoints
             var allowedProcedureLevels = ladderPolicy.OrderedLevels
                 .Where(level => ladderPolicy.Definition(level).Verification is not null)
                 .Select(level => ladderPolicy.ProcedureLevel(level)).ToArray();
+            var enabledKeys = ladderPolicy.Definitions
+                .Where(level => level.VerificationProfile is not null)
+                .SelectMany(level => level.VerificationProfile!.Definitions)
+                .Select(definition => definition.Key)
+                .ToHashSet();
+            var systemCaseEnabled = enabledKeys.Contains(new VerificationArtifactKey(VerificationDiscipline.System, VerificationArtifactKind.Case));
+            var systemProcedureEnabled = enabledKeys.Contains(new VerificationArtifactKey(VerificationDiscipline.System, VerificationArtifactKind.Procedure));
+            var highCaseEnabled = enabledKeys.Contains(new VerificationArtifactKey(VerificationDiscipline.HighLevelSoftware, VerificationArtifactKind.Case));
+            var highProcedureEnabled = enabledKeys.Contains(new VerificationArtifactKey(VerificationDiscipline.HighLevelSoftware, VerificationArtifactKind.Procedure));
+            var lowCaseEnabled = enabledKeys.Contains(new VerificationArtifactKey(VerificationDiscipline.LowLevelSoftware, VerificationArtifactKind.Case));
+            var lowProcedureEnabled = enabledKeys.Contains(new VerificationArtifactKey(VerificationDiscipline.LowLevelSoftware, VerificationArtifactKind.Procedure));
             var currentPage = Math.Max(1, page ?? 1);
             var size = Math.Clamp(pageSize ?? 25, 1, 200);
             var source = db.TestProcedures.AsNoTracking().Where(x => x.ProjectId == projectId);
             source = allowedProcedureLevels.Length == 0
                 ? source.Where(_ => false)
                 : source.Where(x => allowedProcedureLevels.Contains(x.Level));
-            // /api/test-procedures is a bounded legacy alias for the canonical software Case route.  Dormant
-            // software Procedures are authorable/inspectable through their shared service but never enter the
-            // Case execution/effectivity inventory (System Procedures remain visible here).
-            var explicitProcedureInventory = string.Equals(artifactKind, nameof(VerificationArtifactKind.Procedure), StringComparison.OrdinalIgnoreCase)
-                && string.Equals(artifactRoute, "procedures", StringComparison.OrdinalIgnoreCase);
-            source = explicitProcedureInventory
-                ? source.Where(x => x.ArtifactKind == VerificationArtifactKind.Procedure)
-                : source.Where(x => x.Level == TestProcedureLevel.System || x.ArtifactKind == VerificationArtifactKind.Case);
-            if (string.Equals(artifactRoute, "cases", StringComparison.OrdinalIgnoreCase))
-                source = source.Where(x => x.Level == TestProcedureLevel.HighLevel || x.Level == TestProcedureLevel.LowLevel)
-                    .Where(x => x.ArtifactKind == VerificationArtifactKind.Case);
+            // The effective profile is the authority for both level and kind. Historical rows must not leak into
+            // a combined inventory merely because the aggregate still contains them.
+            var legacyRoute = artifactRoute switch { "test-procedures" => "procedures", "test-cases" => "cases", _ => artifactRoute };
+            var legacyProcedureAlias = string.Equals(legacyRoute, "procedures", StringComparison.OrdinalIgnoreCase)
+                && string.IsNullOrWhiteSpace(artifactKind);
+            var requestedKind = Enum.TryParse<VerificationArtifactKind>(artifactKind, true, out var parsedKind)
+                ? (VerificationArtifactKind?)parsedKind
+                : string.Equals(legacyRoute, "cases", StringComparison.OrdinalIgnoreCase)
+                    ? VerificationArtifactKind.Case
+                    : string.Equals(scope, "System", StringComparison.OrdinalIgnoreCase)
+                        ? VerificationArtifactKind.Procedure
+                        : null;
+            source = source.Where(x =>
+                (x.Level == TestProcedureLevel.System && ((x.ArtifactKind == VerificationArtifactKind.Case && systemCaseEnabled) || (x.ArtifactKind == VerificationArtifactKind.Procedure && systemProcedureEnabled)))
+                || (x.Level == TestProcedureLevel.HighLevel && ((x.ArtifactKind == VerificationArtifactKind.Case && highCaseEnabled) || (x.ArtifactKind == VerificationArtifactKind.Procedure && highProcedureEnabled)))
+                || (x.Level == TestProcedureLevel.LowLevel && ((x.ArtifactKind == VerificationArtifactKind.Case && lowCaseEnabled) || (x.ArtifactKind == VerificationArtifactKind.Procedure && lowProcedureEnabled))));
+            if (requestedKind is not null)
+                source = source.Where(x => x.ArtifactKind == requestedKind.Value);
+            else if (legacyProcedureAlias)
+                source = source.Where(x => (x.Level == TestProcedureLevel.System && x.ArtifactKind == VerificationArtifactKind.Procedure)
+                    || (x.Level != TestProcedureLevel.System && x.ArtifactKind == VerificationArtifactKind.Case));
             Dictionary<Guid, Guid>? scopedRevisions = null;
             if(releaseId is not null)
             {
@@ -1027,8 +1102,9 @@ public static class VerificationEndpoints
             var titles = await TestProcedureRevisionTitleProjection.ForRevisionsAsync(db, selectedRevisionIds, ct);
             var coverage = await db.TestCoverage.AsNoTracking().Where(x => selectedRevisionIds.Contains(x.ProcedureRevisionId)).ToListAsync(ct);
             var executions = await db.TestExecutions.AsNoTracking().Where(x => selectedRevisionIds.Contains(x.ProcedureRevisionId)).ToListAsync(ct);
+            // Keep the order produced by the server-side page (including requested sort). Reordering here by
+            // BaseNumber would make page boundaries lie whenever owner/level/title sorting was requested.
             var projected = all
-                .OrderBy(x => x.BaseNumber).ThenBy(x => x.BaseNumber)
                 .Select(x => { var latest = scopedRevisions is not null && scopedRevisions.TryGetValue(x.Id, out var selectedRevisionId)
                         ? revisions.SingleOrDefault(r => r.Id == selectedRevisionId)
                         : revisions.Where(r => r.ProcedureId == x.Id).OrderByDescending(r => r.Revision).FirstOrDefault();
@@ -1143,8 +1219,8 @@ public static class VerificationEndpoints
             if (artifactRevisionId == Guid.Empty) return Results.BadRequest(new { error = "A verification artifact revision is required." });
             var revision = await db.TestProcedureRevisions.AsNoTracking().SingleOrDefaultAsync(x => x.Id == artifactRevisionId, ct); if (revision is null) return Results.NotFound();
             var procedure = await db.TestProcedures.AsNoTracking().SingleAsync(x => x.Id == revision.ProcedureId, ct);
-            var artifactWord = ArtifactWord(procedure.Level);
-            var artifactNoun = ArtifactNoun(procedure.Level);
+            var artifactWord = ArtifactWord(procedure.Level, procedure.ArtifactKind);
+            var artifactNoun = ArtifactNoun(procedure.Level, procedure.ArtifactKind);
             // #726: the write boundary resolves the EFFECTIVE executable kind for every submission, never
             // only when the submitted kind happens to be a software Procedure. Case-only software accepts
             // Cases and rejects software Procedures; the full Case+Procedure profile accepts Procedures and
@@ -1540,11 +1616,12 @@ public static class VerificationEndpoints
     private sealed record ProcedureListItem(Guid Id, string BaseNumber, string OwnerId,
         TestProcedureLevel Level, VerificationArtifactKind ArtifactKind, DateTimeOffset CreatedAt, long Version);
 
-    private static string ArtifactWord(TestProcedureLevel level) =>
-        level == TestProcedureLevel.System ? "test procedure" : "test case";
+    private static string ArtifactWord(TestProcedureLevel level, VerificationArtifactKind kind) =>
+        level == TestProcedureLevel.System || kind == VerificationArtifactKind.Procedure
+            ? "test procedure" : "test case";
 
-    private static string ArtifactNoun(TestProcedureLevel level) =>
-        level == TestProcedureLevel.System ? "procedure" : "case";
+    private static string ArtifactNoun(TestProcedureLevel level, VerificationArtifactKind kind) =>
+        level == TestProcedureLevel.System || kind == VerificationArtifactKind.Procedure ? "procedure" : "case";
 
     private static bool ArtifactRouteAllows(string artifactRoute, TestProcedureLevel level,
         VerificationArtifactKind? kind = null) =>
