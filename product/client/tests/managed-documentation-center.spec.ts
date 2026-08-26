@@ -8,7 +8,7 @@ test('controlled relationship links use canonical targets and exact browser rout
   await apiLogin(request, 'software.author')
   // Keep this relationship-only fixture outside build-targeted PR queues so it cannot perturb
   // their independently paged first-page assertions when the full browser suite shares a seed.
-  const reportResponse=await request.post(`${apiBase}/api/problem-reports`,{data:{projectId:showcase.projectId,title:`Document relationship target ${Date.now()}`,problem:'Prove canonical Problem Report navigation.'}})
+  const reportResponse=await request.post(`${apiBase}/api/problem-reports`,{data:{category: 'CodeFunctional', projectId:showcase.projectId,title:`Document relationship target ${Date.now()}`,problem:'Prove canonical Problem Report navigation.'}})
   expect(reportResponse.ok(),await reportResponse.text()).toBeTruthy()
   const report=await reportResponse.json()
   const documentsResponse=await request.get(`${apiBase}/api/managed-documents?projectId=${showcase.projectId}`)

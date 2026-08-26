@@ -16,6 +16,9 @@ public static class ProblemReportEndpoints
         var group = app.MapGroup("/api/problem-reports");
         group.MapGet("", ListAsync);
         group.MapGet("/dashboard", DashboardAsync);
+        // The vocabulary is served rather than duplicated in the browser. Nine meanings written out twice
+        // is nine chances for the picker to explain a category differently from the record.
+        group.MapGet("/categories", CategoriesAsync);
         group.MapGet("/linked/{artifactType}/{artifactId:guid}", LinkedAsync);
         group.MapPost("", CreateAsync);
         group.MapPost("/from-test-execution/{executionId:guid}", CreateFromFailureAsync);
@@ -58,7 +61,8 @@ public static class ProblemReportEndpoints
             var now = DateTimeOffset.UtcNow; var actor = http.UserAccount();
             var item = new ProblemReport(request.ProjectId, await IdentifierAllocator.NextProblemReportAsync(db, ct), request.Title, request.Problem, request.Analysis ?? "", actor.UserName, now,
                 request.Classification ?? "Software anomaly", request.Severity ?? ProblemReportSeverity.Major, request.Priority ?? ProblemReportPriority.Normal, request.Origin ?? "Manual report", request.AffectedConfiguration ?? "",
-                request.ReleaseId, actor.UserName, request.ProblemRich ?? "", request.AdditionalInformation ?? "", request.AdditionalInformationRich ?? "", request.SystemAircraftImpact ?? "", request.ImpactAssessmentJson ?? "{}");
+                request.ReleaseId, actor.UserName, request.ProblemRich ?? "", request.AdditionalInformation ?? "", request.AdditionalInformationRich ?? "", request.SystemAircraftImpact ?? "", request.ImpactAssessmentJson ?? "{}",
+                request.Category);
             db.ProblemReports.Add(item);
             if (request.ReleaseId is not null)
                 db.ProblemReportLinks.Add(ProblemReportRelationshipPolicy.CreateControlled(item.Id, "Release", request.ReleaseId.Value,
@@ -89,7 +93,12 @@ public static class ProblemReportEndpoints
                 return Results.BadRequest(new { error = "The selected build does not belong to this project." });
             var item = new ProblemReport(execution.ProjectId, await IdentifierAllocator.NextProblemReportAsync(db, ct), request.Title ?? $"Failed execution {execution.Id.ToString()[..8]}", request.Problem ?? execution.Determination,
                 request.Analysis ?? "Created from failed verification execution.", actor.UserName, now, request.Classification ?? "Verification failure", request.Severity ?? ProblemReportSeverity.Major,
-                request.Priority ?? ProblemReportPriority.High, "Test execution", request.AffectedConfiguration ?? execution.Configuration, releaseId, actor.UserName);
+                request.Priority ?? ProblemReportPriority.High, "Test execution", request.AffectedConfiguration ?? execution.Configuration, releaseId, actor.UserName,
+                // Deliberately unclassified unless the caller says otherwise. A failed execution means the
+                // code is wrong or the test is wrong, and which of those it is — 3x against 5x — is exactly
+                // the judgement nobody has made yet at the moment the failure is recorded. The Draft to
+                // Ready-for-SCCB gate asks for it once somebody has looked.
+                category: request.Category);
             db.ProblemReports.Add(item); db.ProblemReportLinks.Add(ProblemReportRelationshipPolicy.CreateControlled(item.Id, "TestExecution", execution.Id,
                 ProblemReportRelationshipPolicy.OriginatingFailure, ProblemReportRelationshipProducer.FailureCreationWorkflow, actor.UserName, now));
             if (releaseId is not null)
@@ -104,7 +113,25 @@ public static class ProblemReportEndpoints
         catch (DbUpdateException) { return Results.Conflict(new { error = "A problem report number was allocated concurrently. Retry the create request.", code = "number_allocation_conflict" }); }
     }
 
-    private static async Task<IResult> ListAsync(Guid projectId, Guid? targetReleaseId, bool? targetUnassigned, string? search, ProblemReportState? state, ProblemReportSeverity? severity, ProblemReportPriority? priority, string? owner, bool? blockersOnly, ProblemReportType? type, int? page, int? pageSize, HttpContext http, AeroLinkDbContext db, CancellationToken ct)
+    /// <summary>
+    /// The controlled category vocabulary. Fixed and identical on every Project, so this needs no Project
+    /// scope and no authority beyond being signed in — it describes what the words mean, not what any
+    /// record says.
+    /// </summary>
+    private static IResult CategoriesAsync() => Results.Ok(new
+    {
+        families = ProblemReportCategoryVocabulary.Families,
+        categories = ProblemReportCategoryVocabulary.Definitions.Select(definition => new
+        {
+            value = definition.Category.ToString(),
+            definition.Code,
+            definition.Family,
+            definition.Label,
+            definition.Meaning,
+        }),
+    });
+
+    private static async Task<IResult> ListAsync(Guid projectId, Guid? targetReleaseId, bool? targetUnassigned, string? search, ProblemReportState? state, ProblemReportSeverity? severity, ProblemReportPriority? priority, string? owner, bool? blockersOnly, ProblemReportCategory? category, string? categoryFamily, int? page, int? pageSize, HttpContext http, AeroLinkDbContext db, CancellationToken ct)
     {
         if (!await http.HasProjectAccessAsync(db, projectId, ct)) return Results.Forbid();
         if (targetReleaseId is not null && targetUnassigned == true)
@@ -124,7 +151,18 @@ public static class ProblemReportEndpoints
         if (state is not null) query = query.Where(x => x.State == state);
         if (severity is not null) query = query.Where(x => x.Severity == severity);
         if (priority is not null) query = query.Where(x => x.Priority == priority);
-        if (type is not null) query = query.Where(x => x.Type == type);
+        if (category is not null) query = query.Where(x => x.Category == category);
+        // Narrowing to a family is one click for "every code defect", which is the question people
+        // actually ask. The family lives in the vocabulary, not the database, so it is resolved to the
+        // categories it covers and applied as a set — there is no family column to drift out of step.
+        if (!string.IsNullOrWhiteSpace(categoryFamily))
+        {
+            var members = ProblemReportCategoryVocabulary.Definitions
+                .Where(definition => string.Equals(definition.Family, categoryFamily.Trim(), StringComparison.OrdinalIgnoreCase))
+                .Select(definition => (ProblemReportCategory?)definition.Category).ToList();
+            if (members.Count == 0) return Results.BadRequest(new { error = $"'{categoryFamily}' is not a Problem Report category family.", code = "pr_category_family_unknown" });
+            query = query.Where(x => members.Contains(x.Category));
+        }
         if (!string.IsNullOrWhiteSpace(owner)) { var normalizedOwner = owner.Trim().ToLower(); query = query.Where(x => x.ResponsibleEngineerId.ToLower().Contains(normalizedOwner)); }
         if (blockersOnly == true) query = query.Where(x => x.IsReleaseBlocker);
         if (!string.IsNullOrWhiteSpace(search))
@@ -719,7 +757,7 @@ public static class ProblemReportEndpoints
         _ => artifactType.Trim()
     };
 
-    private static object Summary(ProblemReport x, bool waived = false) => new { x.Id, x.ReportNumber, x.Revision, x.DisplayNumber, x.Title, state = ProblemReportTransitionPolicy.Canonical(x.State).ToString(), severity = x.Severity.ToString(), priority = x.Priority.ToString(), type = x.Type.ToString(), x.Classification, x.ReportedBy, x.ResponsibleEngineerId, x.TargetReleaseId, x.IsReleaseBlocker, waived, x.UpdatedAt, x.Version };
+    private static object Summary(ProblemReport x, bool waived = false) => new { x.Id, x.ReportNumber, x.Revision, x.DisplayNumber, x.Title, state = ProblemReportTransitionPolicy.Canonical(x.State).ToString(), severity = x.Severity.ToString(), priority = x.Priority.ToString(), category = CategoryResponse(x), x.Classification, x.ReportedBy, x.ResponsibleEngineerId, x.TargetReleaseId, x.IsReleaseBlocker, waived, x.UpdatedAt, x.Version };
     private static object Detail(ProblemReport x, IEnumerable<ProblemReportLinkView> links,
         IEnumerable<ProblemReportRevision> revisions,
         IEnumerable<ProblemReportClosureCandidate>? closureCandidates = null,
@@ -734,7 +772,7 @@ public static class ProblemReportEndpoints
             && link.ArtifactId == x.ResolutionVerificationExecutionId).Select(LinkResponse).ToList();
         var now = DateTimeOffset.UtcNow; var waiverHistory = (releaseWaivers ?? []).ToList();
         var activeWaiver = waiverHistory.FirstOrDefault(item => item.IsActiveFor(x, now));
-        return new { x.Id, x.ProjectId, x.ReportNumber, x.Revision, x.DisplayNumber, x.Title, x.Problem, x.ProblemRich, x.AdditionalInformation, x.AdditionalInformationRich, x.Analysis, x.ReportedBy, x.ResponsibleEngineerId, x.TargetReleaseId, x.Classification, severity = x.Severity.ToString(), priority = x.Priority.ToString(), x.Origin, x.AffectedConfiguration, x.RootCause, x.Effects, x.CorrectiveAction, x.Workaround, type = x.Type.ToString(), x.SystemAircraftImpact, x.ImpactAssessmentJson, disposition = x.Disposition?.ToString(), x.DispositionRationale, x.ResolutionVerificationExecutionId, x.ClosureApprovedByName, x.ClosureApprovedAt, x.IsReleaseBlocker, x.ReleaseBlockerVersion, waived = activeWaiver is not null, activeReleaseWaiver = activeWaiver is null ? null : WaiverResponse(activeWaiver, x, now), releaseWaivers = waiverHistory.Select(item => WaiverResponse(item, x, now)), legacyWaiver = string.IsNullOrWhiteSpace(x.WaiverRationale) ? null : new { provenance = "LegacyUnverified", rationale = x.WaiverRationale, x.WaivedBy, x.WaivedAt }, state = ProblemReportTransitionPolicy.Canonical(x.State).ToString(), x.CreatedAt, x.UpdatedAt, x.Version, snapshotHash = x.CanonicalHash(), snapshotSchemaVersion = ProblemReportEvidenceContract.SchemaVersion, capabilities, duplicateDiagnostic, links = materializedLinks.Select(LinkResponse), approvedCorrectiveActions, testEvidence, closureCandidates = (closureCandidates ?? []).Select(CandidateResponse), revisions = revisions.Select(x => new { x.Id, x.Revision, x.EventType, x.Actor, x.Detail, rationale = string.IsNullOrWhiteSpace(x.Rationale) ? x.Detail : x.Rationale, x.FromState, x.ToState, x.EvidenceJson, x.EventSchemaVersion, x.SnapshotSchemaVersion, x.SnapshotHash, x.SnapshotJson, x.OccurredAt }) };
+        return new { x.Id, x.ProjectId, x.ReportNumber, x.Revision, x.DisplayNumber, x.Title, x.Problem, x.ProblemRich, x.AdditionalInformation, x.AdditionalInformationRich, x.Analysis, x.ReportedBy, x.ResponsibleEngineerId, x.TargetReleaseId, x.Classification, severity = x.Severity.ToString(), priority = x.Priority.ToString(), x.Origin, x.AffectedConfiguration, x.RootCause, x.Effects, x.CorrectiveAction, x.Workaround, category = CategoryResponse(x), x.SystemAircraftImpact, x.ImpactAssessmentJson, disposition = x.Disposition?.ToString(), x.DispositionRationale, x.ResolutionVerificationExecutionId, x.ClosureApprovedByName, x.ClosureApprovedAt, x.IsReleaseBlocker, x.ReleaseBlockerVersion, waived = activeWaiver is not null, activeReleaseWaiver = activeWaiver is null ? null : WaiverResponse(activeWaiver, x, now), releaseWaivers = waiverHistory.Select(item => WaiverResponse(item, x, now)), legacyWaiver = string.IsNullOrWhiteSpace(x.WaiverRationale) ? null : new { provenance = "LegacyUnverified", rationale = x.WaiverRationale, x.WaivedBy, x.WaivedAt }, state = ProblemReportTransitionPolicy.Canonical(x.State).ToString(), x.CreatedAt, x.UpdatedAt, x.Version, snapshotHash = x.CanonicalHash(), snapshotSchemaVersion = ProblemReportEvidenceContract.SchemaVersion, capabilities, duplicateDiagnostic, links = materializedLinks.Select(LinkResponse), approvedCorrectiveActions, testEvidence, closureCandidates = (closureCandidates ?? []).Select(CandidateResponse), revisions = revisions.Select(x => new { x.Id, x.Revision, x.EventType, x.Actor, x.Detail, rationale = string.IsNullOrWhiteSpace(x.Rationale) ? x.Detail : x.Rationale, x.FromState, x.ToState, x.EvidenceJson, x.EventSchemaVersion, x.SnapshotSchemaVersion, x.SnapshotHash, x.SnapshotJson, x.OccurredAt }) };
     }
 
     private static object WaiverResponse(ReadinessWaiver item, ProblemReport report, DateTimeOffset now) => new
@@ -890,6 +928,26 @@ public static class ProblemReportEndpoints
                 ? authority.GetString() : null;
         }
         catch (JsonException) { return null; }
+    }
+
+    /// <summary>
+    /// The category as the browser needs it: the stored name, its two-digit code, its family, its label,
+    /// and how the value got there. Null when a Draft has not been classified yet, which is a real answer
+    /// and is rendered as one rather than as a blank.
+    /// </summary>
+    private static object? CategoryResponse(ProblemReport report)
+    {
+        if (report.Category is not { } category) return null;
+        var definition = ProblemReportCategoryVocabulary.Of(category);
+        return new
+        {
+            value = category.ToString(),
+            definition.Code,
+            definition.Family,
+            definition.Label,
+            definition.Meaning,
+            provenance = report.CategoryProvenance?.ToString(),
+        };
     }
 
     private static object LinkResponse(ProblemReportLinkView link) => new { link.ArtifactType, link.ArtifactId, link.Identifier, link.Relationship, link.AddedBy, link.AddedAt };
@@ -1053,8 +1111,9 @@ public static class ProblemReportEndpoints
     }
 
     private sealed record ProblemReportLinkView(string ArtifactType, Guid ArtifactId, string? Identifier, string Relationship, string AddedBy, DateTimeOffset AddedAt, bool TrustedControlledEvidence);
-    private sealed record CreateProblemReportRequest(Guid ProjectId, Guid? ReleaseId, string Title, string Problem, string? ProblemRich, string? AdditionalInformation, string? AdditionalInformationRich, string? Analysis, string? Classification, ProblemReportSeverity? Severity, ProblemReportPriority? Priority, string? Origin, string? AffectedConfiguration, string? SystemAircraftImpact, string? ImpactAssessmentJson);
-    private sealed record CreateProblemReportFromExecutionRequest(Guid? ReleaseId, string? Title, string? Problem, string? Analysis, string? Classification, ProblemReportSeverity? Severity, ProblemReportPriority? Priority, string? AffectedConfiguration);
+    private sealed record CreateProblemReportRequest(Guid ProjectId, Guid? ReleaseId, string Title, string Problem, string? ProblemRich, string? AdditionalInformation, string? AdditionalInformationRich, string? Analysis, string? Classification, ProblemReportSeverity? Severity, ProblemReportPriority? Priority, string? Origin, string? AffectedConfiguration, string? SystemAircraftImpact, string? ImpactAssessmentJson,
+        ProblemReportCategory? Category = null);
+    private sealed record CreateProblemReportFromExecutionRequest(Guid? ReleaseId, string? Title, string? Problem, string? Analysis, string? Classification, ProblemReportSeverity? Severity, ProblemReportPriority? Priority, string? AffectedConfiguration, ProblemReportCategory? Category = null);
     private sealed record InvestigationRequest(long? ExpectedVersion, string Analysis, string? RootCause, string? Effects, string? Containment);
     private sealed record ResolutionRequest(long? ExpectedVersion, string CorrectiveAction);
     private sealed record VerificationRequest(long? ExpectedVersion, Guid TestExecutionId);

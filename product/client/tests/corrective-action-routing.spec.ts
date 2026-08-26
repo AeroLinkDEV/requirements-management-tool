@@ -35,7 +35,7 @@ async function raiseReport(page: Page, projectId: string, releaseId: string, sco
   if (execution) {
     // Raised from a failure: the discipline and the procedure both come from the execution.
     const created = await page.request.post(`${apiBase}/api/problem-reports/from-test-execution/${execution.id}`, {
-      data: { releaseId, title: `${scope} corrective routing ${Date.now()}` },
+      data: { releaseId, title: `${scope} corrective routing ${Date.now()}`, category: 'CodeFunctional' },
     });
     expect(created.ok(), `raising the ${scope} report: ${created.status()}`).toBe(true);
     report = await created.json();
@@ -51,7 +51,7 @@ async function raiseReport(page: Page, projectId: string, releaseId: string, sco
     expect(requirement, `the showcase must hold a ${scope} requirement`).toBeTruthy();
 
     const created = await page.request.post(`${apiBase}/api/problem-reports`, {
-      data: { projectId, releaseId, title: `${scope} corrective routing ${Date.now()}`, problem: "Raised by hand for corrective routing." },
+      data: { category: 'CodeFunctional', projectId, releaseId, title: `${scope} corrective routing ${Date.now()}`, problem: "Raised by hand for corrective routing." },
     });
     expect(created.ok(), `raising the ${scope} report: ${created.status()}`).toBe(true);
     report = await created.json();

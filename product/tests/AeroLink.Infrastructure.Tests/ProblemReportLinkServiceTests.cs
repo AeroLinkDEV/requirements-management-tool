@@ -27,7 +27,7 @@ public sealed class ProblemReportLinkServiceTests
             var release = new SoftwareRelease(project.Id, "1.6", false);
             var report = new ProblemReport(project.Id, "PR-00458", "Automatic implementation",
                 "The draft correction is the only implementation basis.", "", "engineer", now,
-                targetReleaseId: release.Id);
+                targetReleaseId: release.Id, category: ProblemReportCategory.CodeFunctional);
             report.ReadyForSccb("engineer", now.AddMinutes(1));
             report.OpenBySccb("sccb", now.AddMinutes(2));
             var change = new SystemChangeRequest("SRCR-00458", 0, project.Id, release.Id,
@@ -73,7 +73,7 @@ public sealed class ProblemReportLinkServiceTests
             ProblemReport OpenReport(string number, string title)
             {
                 var item = new ProblemReport(project.Id, number, title, "Controlled anomaly.", "", "engineer",
-                    now, targetReleaseId: release.Id);
+                    now, targetReleaseId: release.Id, category: ProblemReportCategory.CodeFunctional);
                 item.ReadyForSccb("engineer", now.AddMinutes(1));
                 item.OpenBySccb("sccb", now.AddMinutes(2));
                 return item;
@@ -189,7 +189,7 @@ public sealed class ProblemReportLinkServiceTests
             var release = new SoftwareRelease(project.Id, "1.6", false);
             var otherRelease = new SoftwareRelease(project.Id, "1.7", false);
             var report = new ProblemReport(project.Id, "PR-00001", "Position disagreement",
-                "Sources disagree during approach.", "", "quality.engineer", now);
+                "Sources disagree during approach.", "", "quality.engineer", now, category: ProblemReportCategory.CodeFunctional);
             var scr = new SystemChangeRequest("LLRCR-00001", 0, project.Id, release.Id,
                 "Correct source selection", "P", "A", "S", "software.engineer", now,
                 ChangeRequestType.Software, softwareLevel: RequirementLevel.LowLevel);
@@ -197,7 +197,7 @@ public sealed class ProblemReportLinkServiceTests
                 RequirementChangeKind.Modify, "The software shall reject a stale position source.",
                 "Correct the reported disagreement.", "Test", now, attributesJson: "{\"derived\":true}");
             var replacement = new ProblemReport(project.Id, "PR-00002", "Replacement trace",
-                "The original selection was incorrect.", "", "quality.engineer", now);
+                "The original selection was incorrect.", "", "quality.engineer", now, category: ProblemReportCategory.CodeFunctional);
             db.AddRange(program, project, release, otherRelease, report, replacement, scr);
             db.ProblemReportLinks.Add(new ProblemReportLink(report.Id, "Release", release.Id,
                 "BuildScope", "quality.engineer", now));
@@ -256,7 +256,7 @@ public sealed class ProblemReportLinkServiceTests
             var project = new ProjectRecord(program.Id, "FMS", "FMS");
             var release = new SoftwareRelease(project.Id, "1.6", false);
             var report = new ProblemReport(project.Id, "PR-00461", "Closure link basis",
-                "The corrective link set must stay exact.", "", "engineer", now, targetReleaseId: release.Id);
+                "The corrective link set must stay exact.", "", "engineer", now, targetReleaseId: release.Id, category: ProblemReportCategory.CodeFunctional);
             report.ReadyForSccb("engineer", now.AddMinutes(1));
             report.OpenBySccb("sccb", now.AddMinutes(2));
             report.BeginInvestigation("engineer", "Analysis", "Cause", "Effect", "", now.AddMinutes(3));
@@ -307,7 +307,7 @@ public sealed class ProblemReportLinkServiceTests
             var project = new ProjectRecord(program.Id, "FMS", "FMS");
             var release = new SoftwareRelease(project.Id, "1.6", false);
             var report = new ProblemReport(project.Id, "PR-00451", "Frozen closure",
-                "Closed relationships must not drift.", "", "engineer", now, targetReleaseId: release.Id);
+                "Closed relationships must not drift.", "", "engineer", now, targetReleaseId: release.Id, category: ProblemReportCategory.CodeFunctional);
             report.ReadyForSccb("engineer", now.AddMinutes(1));
             report.OpenBySccb("sccb", now.AddMinutes(2));
             report.BeginInvestigation("engineer", "Analysis", "Cause", "Effect", "", now.AddMinutes(3));

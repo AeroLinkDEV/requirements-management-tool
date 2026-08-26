@@ -156,7 +156,7 @@ public sealed class ProblemReportOwnerAuthorityApiTests
     private static async Task<(Guid Id, long Version)> CreateAsync(HttpClient client, Guid projectId)
     {
         using var response = await client.PostAsJsonAsync("/api/problem-reports", new
-        {
+        { category = "CodeFunctional",
             projectId,
             title = "Accountable owner authority",
             problem = "A controlled record must never be assigned outside its Program authority."

@@ -216,7 +216,7 @@ public sealed class ProblemReportDuplicateDispositionApiTests
     private static async Task<(Guid Id, long Version)> CreateAsync(HttpClient client, Guid projectId, string title)
     {
         using var response = await client.PostAsJsonAsync("/api/problem-reports", new
-        {
+        { category = "CodeFunctional",
             projectId,
             title,
             problem = "A controlled anomaly requires an exact canonical duplicate decision.",

@@ -660,8 +660,11 @@ public sealed class ProblemReportVerificationApiTests
 
     private static ProblemReport Report(Guid projectId, Guid releaseId, string number, DateTimeOffset now,
         string reportedBy = "admin", string responsibleEngineerId = "admin") =>
+        // Classified where it is raised: these fixtures all walk past Ready for SCCB, which refuses an
+        // unclassified Draft.
         new(projectId, number, "Verification chain", "Closure must use corrective evidence.", "", reportedBy, now,
-            targetReleaseId: releaseId, responsibleEngineerId: responsibleEngineerId);
+            targetReleaseId: releaseId, responsibleEngineerId: responsibleEngineerId,
+            category: ProblemReportCategory.CodeFunctional);
 
     private static void ProgressToVerifying(ProblemReport report, DateTimeOffset now)
     {

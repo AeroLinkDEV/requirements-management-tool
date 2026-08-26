@@ -28,7 +28,7 @@ test('quality assurance and the Problem Report center display the same active-wo
 
   const create = async (title: string) => {
     const response = await request.post(`${apiBase}/api/problem-reports`, { data: {
-      projectId, releaseId, title, problem: `${title} requires an attributable lifecycle decision.`,
+      category: 'CodeFunctional', projectId, releaseId, title, problem: `${title} requires an attributable lifecycle decision.`,
     } })
     expect(response.ok(), await response.text()).toBeTruthy()
     return await response.json()

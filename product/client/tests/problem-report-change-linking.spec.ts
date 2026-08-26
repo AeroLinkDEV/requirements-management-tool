@@ -14,7 +14,7 @@ test('a PR links to change requests and System TCRs without changing its lifecyc
 
   const title = `PR-driven alert correction ${Date.now()}`
   const createdReport = await page.request.post(`${apiBase}/api/problem-reports`, {
-    data: { projectId, releaseId, title, problem: 'The alert clears while the disagreement is still present.' },
+    data: { category: 'CodeFunctional', projectId, releaseId, title, problem: 'The alert clears while the disagreement is still present.' },
   })
   expect(createdReport.ok(), await createdReport.text()).toBeTruthy()
   const report = await createdReport.json()

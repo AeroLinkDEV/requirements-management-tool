@@ -17,7 +17,7 @@ test('Problem Reports remain workable and explicitly target-filtered from every 
 
   const targeted = await request.post(`${apiBase}/api/problem-reports`, {
     data: {
-      projectId: showcase.projectId,
+      category: 'CodeFunctional', projectId: showcase.projectId,
       releaseId: showcase.activeReleaseId,
       title,
       problem: 'Raised against Build 1.6 and corrected while the browser stands in Build 1.5.',
@@ -27,7 +27,7 @@ test('Problem Reports remain workable and explicitly target-filtered from every 
   const targetedId = (await targeted.json()).id as string
   const unassigned = await request.post(`${apiBase}/api/problem-reports`, {
     data: {
-      projectId: showcase.projectId,
+      category: 'CodeFunctional', projectId: showcase.projectId,
       title: unassignedTitle,
       problem: 'No target build has been selected for this Project-scoped report.',
     },

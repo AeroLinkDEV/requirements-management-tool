@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test'
-import { login, selectProgram } from './auth'
+import { chooseCategory, login, selectProgram } from './auth'
 
 /**
  * A Problem Report is the record a Project works on together, and the person who can correct it is rarely
@@ -33,6 +33,7 @@ test('a Project member who does not own a Verifying Problem Report can still cor
     .getByRole('button', { name: 'Paragraph' }).click()
   await raise.getByLabel('Problem Description paragraph 1')
     .fill('The disconnect tone follows the disconnect by about a second.')
+  await chooseCategory(raise, 'Code Issue — Functional Impact')
   await raise.getByRole('button', { name: 'Save Draft PR' }).click()
   await expect(page.locator('.prState')).toHaveText('Draft')
   await page.locator('.prFlow').getByRole('button', { name: 'Ready for SCCB →', exact: true }).click()
