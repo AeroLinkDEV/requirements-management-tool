@@ -115,7 +115,7 @@ Use one home for each kind of knowledge:
 - **Implementation/architecture/operations/testing docs:** `product/docs/`.
 - **Durable lessons learned:** `docs/ENGINEERING_LESSONS.md`.
 - **Milestone history:** `docs/PROJECT_HISTORY.md`.
-- **Historical handoffs/audits/status snapshots:** `docs/archive/` once the archive migration is complete.
+- **Historical handoffs/audits/status snapshots:** [`docs/archive/`](docs/archive/README.md).
 
 Do not create a new root-level dated handoff or audit report as a parallel source of truth. Turn actionable findings into GitHub issues; capture lasting lessons in the lessons document; retain historical reports in the archive.
 
