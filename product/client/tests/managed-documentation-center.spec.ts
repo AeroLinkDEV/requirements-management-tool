@@ -411,3 +411,33 @@ test('Documentation Center back navigation retains a non-showcase Project across
   await page.getByRole('button', { name: 'Imported baselines' }).click()
   await expect(page).toHaveURL(new RegExp(`/projects/review-back-project-${suffix}/imported-baselines$`))
 })
+
+test('the status filter shows human state labels while querying exact enum values', async ({ page, request }) => {
+  const showcase = await showcaseSeed(request)
+  await apiLogin(request, 'software.author')
+  const response = await request.get(`${apiBase}/api/managed-documents?projectId=${showcase.projectId}&pageSize=100`)
+  expect(response.ok(), await response.text()).toBeTruthy()
+  const fixture = (await response.json()).items[0]
+  expect(fixture).toBeTruthy()
+
+  // The inventory is mocked so the exact query string can be asserted, but the document id stays real
+  // because the register auto-opens the first item's detail through the unmocked API.
+  const queriedStates: (string | null)[] = []
+  await page.route('**/api/managed-documents?*', async route => {
+    queriedStates.push(new URL(route.request().url()).searchParams.get('state'))
+    await route.fulfill({ json: { totalCount: 1, pageSize: 50, hasMore: false, nextCursor: null, items: [fixture] } })
+  })
+
+  await login(page, 'software.author', { openProject: false })
+  await page.goto(`/programs/${showcase.programId}/projects/${showcase.projectId}/documentation-center`)
+  await expect(page.locator('.mdList').getByText(fixture.title)).toBeVisible()
+
+  const status = page.getByLabel('Status')
+  await expect(status.locator('option')).toHaveText(['All', 'Draft', 'In review', 'Returned', 'Released'])
+  expect(await status.locator('option').evaluateAll(options => options.map(option => (option as HTMLOptionElement).value)))
+    .toEqual(['', 'Draft', 'InReview', 'Returned', 'Released'])
+
+  await status.selectOption({ label: 'In review' })
+  await expect.poll(() => queriedStates.at(-1)).toBe('InReview')
+  await expect(page.locator('.mdList').getByText(fixture.title)).toBeVisible()
+})
