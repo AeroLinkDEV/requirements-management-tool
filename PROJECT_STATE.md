@@ -35,7 +35,7 @@ These are deliberate boundaries unless an accepted decision changes them:
 - **No automated test-bench execution.** Tests execute in external environments. AeroLink controls Test Cases/Procedures, execution records, results, evidence, retest history, and readiness.
 - **No destructive rewrite of approved/released history through normal product workflows.** Historical controlled identity and evidence remain explainable.
 
-See [SCOPE_AND_BOUNDARIES.md](SCOPE_AND_BOUNDARIES.md) and [DECISIONS_AND_OPEN_QUESTIONS.md](DECISIONS_AND_OPEN_QUESTIONS.md) for the durable boundary/decision records while the documentation reorganization is in progress.
+See [Scope and Boundaries](docs/product-definition/SCOPE_AND_BOUNDARIES.md) and [Decisions and Open Questions](DECISIONS_AND_OPEN_QUESTIONS.md) for the durable boundary/decision records.
 
 ## Current technology and repository shape
 
@@ -194,7 +194,7 @@ The FMS Product Development dataset remains the principal deterministic live dem
 
 The showcase is synthetic demonstration data. It must not be confused with live customer/company controlled engineering data.
 
-See [FMS_LIVE_SHOWCASE_DATASET.md](FMS_LIVE_SHOWCASE_DATASET.md) and [FMS_1_6_RELEASE_CAMPAIGN.md](FMS_1_6_RELEASE_CAMPAIGN.md) while those files remain at root during the documentation reorganization.
+See [FMS Live Showcase Dataset](docs/showcase/FMS_LIVE_SHOWCASE_DATASET.md) and [FMS 1.6 Release Campaign](docs/showcase/FMS_1_6_RELEASE_CAMPAIGN.md).
 
 ## Documents and publications
 
@@ -202,7 +202,7 @@ AeroLink supports controlled generated publications over structured artifacts an
 
 Generated outputs are derived from controlled data/templates/effectivity and carry provenance rather than becoming independent masters. Managed Word documents retain their controlled DOCX/PDF candidates/revisions while Word remains the authoring application.
 
-See [CONTROLLED_DOCUMENT_PUBLICATION_STANDARD.md](CONTROLLED_DOCUMENT_PUBLICATION_STANDARD.md) and [product/docs/MANAGED_DOCUMENTATION_CENTER.md](product/docs/MANAGED_DOCUMENTATION_CENTER.md).
+See [Controlled Document Publication Standard](docs/product-definition/CONTROLLED_DOCUMENT_PUBLICATION_STANDARD.md) and [product/docs/MANAGED_DOCUMENTATION_CENTER.md](product/docs/MANAGED_DOCUMENTATION_CENTER.md).
 
 ## Identity, security, and audit
 
@@ -210,7 +210,7 @@ The product includes local identity/session controls, scoped roles/administratio
 
 Deployment-specific federation/provider/TLS/monitoring/service-objective work remains dependent on a real deployment/customer contract where documented.
 
-See [SECURITY_AND_IDENTITY_MODEL.md](SECURITY_AND_IDENTITY_MODEL.md).
+See [Security and Identity Model](docs/product-definition/SECURITY_AND_IDENTITY_MODEL.md).
 
 ## Interchange and integrations
 
@@ -275,6 +275,10 @@ This file deliberately does not say “there are N open issues” or “issue X 
 - Coding-agent safety: [AGENTS.md](AGENTS.md)
 - Accepted decisions/open questions: [DECISIONS_AND_OPEN_QUESTIONS.md](DECISIONS_AND_OPEN_QUESTIONS.md)
 - Documentation map: [docs/README.md](docs/README.md)
+- Durable product definition: [docs/product-definition/](docs/product-definition/README.md)
+- Reference material: [docs/reference/](docs/reference/README.md)
+- FMS showcase guidance: [docs/showcase/](docs/showcase/README.md)
+- Source provenance: [docs/provenance/](docs/provenance/README.md)
 - Major history: [docs/PROJECT_HISTORY.md](docs/PROJECT_HISTORY.md)
 - Lessons learned: [docs/ENGINEERING_LESSONS.md](docs/ENGINEERING_LESSONS.md)
 - Technical architecture: [product/docs/ARCHITECTURE.md](product/docs/ARCHITECTURE.md)
