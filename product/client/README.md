@@ -3,10 +3,10 @@
 This directory contains the React/TypeScript client for AeroLink. It is not a standalone template project:
 product behavior, routes, authority, and persistence come from the ASP.NET Core API under `product/src`.
 
-For product orientation, read [PROJECT_STATE.md](../../PROJECT_STATE.md) and the
-[current handoff](../../CURRENT_PRODUCT_HANDOFF_2026-08-10.md). For application startup, deployment-shaped
-demonstration, PostgreSQL setup, and complete validation commands, read the
-[product README](../README.md).
+For product orientation, read [PROJECT_STATE.md](../../PROJECT_STATE.md). The former 2026-08-10 restart
+handoff is retained only as [historical archive context](../../docs/archive/CURRENT_PRODUCT_HANDOFF_2026-08-10.md).
+For application startup, deployment-shaped demonstration, PostgreSQL setup, and complete validation commands,
+read the [product README](../README.md).
 
 ## Supported development loop
 
