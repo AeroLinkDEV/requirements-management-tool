@@ -8,6 +8,8 @@ The files below were moved from repository root by issue #781 after the canonica
 
 Three small compatibility-pointer files — `PROJECT_STATE.md`, `DECISIONS_AND_OPEN_QUESTIONS.md`, and `FEATURE_CATALOG.md` — are **not archived snapshots**. They exist only so historical documents that originally linked to those living root files by filename still resolve after the move. Each pointer redirects explicitly to the maintained root authority.
 
+One tiny root compatibility redirect remains at `CURRENT_PRODUCT_HANDOFF_2026-07-29.md`. The authoritative append-only decision log contains a historical filename-relative link to that checkpoint; the redirect preserves that accepted-decision reference without copying the handoff back to root or rewriting the decision record. It is explicitly non-authoritative and points here. This is the only deliberate dated root compatibility exception in #781.
+
 | Document | Historical checkpoint / original role | Status now | Current authority | Still useful for |
 | --- | --- | --- | --- | --- |
 | [`PRODUCT_REVIEW_2026_07_26.md`](PRODUCT_REVIEW_2026_07_26.md) | 2026-07-26 product review | Historical review | `PROJECT_STATE.md`, decisions, GitHub | Early product assessment and gaps |
