@@ -11,8 +11,30 @@
  * cannot drift apart.
  */
 
+/**
+ * A span of paragraph text carrying its emphasis.
+ *
+ * Typed data, never markup. A run says "this text is bold"; it does not say `<b>`. Nothing here can
+ * produce a string a browser would execute — the editor reads the DOM as a tree and maps node types to
+ * these flags, and the viewer renders them back as React elements, so every character still reaches the
+ * page as an escaped text node.
+ */
+export type RichRun = {
+  text: string;
+  bold?: true;
+  italic?: true;
+  underline?: true;
+  code?: true;
+};
+
 export type RichBlock =
-  | { type: "paragraph"; text: string }
+  /**
+   * `text` is always the concatenation of `runs`, and stays the single source for every reader that
+   * cannot show emphasis — word counts, summaries, search, and the generated Word and PDF documents.
+   * `runs` is absent when nothing is emphasised, so unformatted content is stored exactly as it was
+   * before emphasis existed.
+   */
+  | { type: "paragraph"; text: string; runs?: RichRun[] }
   | { type: "table"; caption?: string; rows: string[][] }
   | { type: "image"; attachmentId: string; alt?: string; caption?: string }
   | { type: "symbol"; value: string }
@@ -51,13 +73,64 @@ function normalizeLegacyHtml(value: string): RichBlock[] | undefined {
     .map(text => ({ type: "paragraph", text }) as RichBlock);
 }
 
+const RUN_MARKS = ["bold", "italic", "underline", "code"] as const;
+
+const sameMarks = (left: RichRun, right: RichRun) =>
+  RUN_MARKS.every((mark) => Boolean(left[mark]) === Boolean(right[mark]));
+
+const isPlainRun = (run: RichRun) => RUN_MARKS.every((mark) => !run[mark]);
+
+/**
+ * Normalises a paragraph's runs: empty runs dropped, adjacent runs with the same marks merged, and the
+ * whole thing discarded when nothing is emphasised. One canonical spelling for any given piece of
+ * formatted text, so a record does not change shape according to how the editor happened to split it.
+ */
+export function normalizeRuns(runs: RichRun[] | undefined): RichRun[] | undefined {
+  if (!runs?.length) return undefined;
+  const merged: RichRun[] = [];
+  for (const run of runs) {
+    if (!run?.text) continue;
+    const marks: RichRun = { text: run.text };
+    for (const mark of RUN_MARKS) if (run[mark]) marks[mark] = true;
+    const last = merged[merged.length - 1];
+    if (last && sameMarks(last, marks)) last.text += marks.text;
+    else merged.push(marks);
+  }
+  return merged.length === 0 || merged.every(isPlainRun) ? undefined : merged;
+}
+
+/** The runs of a paragraph, always — an unformatted paragraph reads as one plain run. */
+export function runsOf(block: Extract<RichBlock, { type: "paragraph" }>): RichRun[] {
+  return block.runs?.length ? block.runs : [{ text: block.text }];
+}
+
+/** Builds a paragraph from runs, keeping `text` as their concatenation. */
+export function paragraphOf(runs: RichRun[]): Extract<RichBlock, { type: "paragraph" }> {
+  const normalized = normalizeRuns(runs);
+  const text = (normalized ?? runs).map((run) => run.text).join("");
+  return normalized ? { type: "paragraph", text, runs: normalized } : { type: "paragraph", text };
+}
+
+/**
+ * Restores the paragraph invariant on read. Where runs are present they are authoritative and `text` is
+ * recomputed from them, so content whose two halves disagree — hand edited, or written by an older
+ * client — is repaired towards what the author actually marked up rather than rendering one thing and
+ * searching another.
+ */
+function normalizeBlock(block: RichBlock): RichBlock {
+  if (block.type !== "paragraph") return block;
+  const runs = normalizeRuns(block.runs);
+  if (!runs) return block.runs ? { type: "paragraph", text: block.text } : block;
+  return { type: "paragraph", text: runs.map((run) => run.text).join(""), runs };
+}
+
 export function readBlocks(stored: string | undefined | null): RichBlock[] {
   const value = (stored ?? "").trim();
   if (!value) return [];
   if (!value.startsWith("{")) return normalizeLegacyHtml(value) ?? [{ type: "paragraph", text: value }];
   try {
     const parsed = JSON.parse(value) as { blocks?: RichBlock[] };
-    return Array.isArray(parsed.blocks) ? parsed.blocks : [{ type: "paragraph", text: value }];
+    return Array.isArray(parsed.blocks) ? parsed.blocks.map(normalizeBlock) : [{ type: "paragraph", text: value }];
   } catch {
     return [{ type: "paragraph", text: value }];
   }
@@ -98,10 +171,18 @@ export function toPlainText(stored: string | undefined | null): string {
     .trim();
 }
 
-/** True when the content carries anything a plain field could not have carried. */
+/**
+ * True when the content carries anything a plain field could not have carried.
+ *
+ * Emphasis counts. A single formatted paragraph is still one paragraph, so without this the plain
+ * textarea in RichCaseField would claim the field and `fromPlainText` would write the emphasis away on
+ * the author's next keystroke.
+ */
 export function hasStructure(stored: string | undefined | null): boolean {
   const blocks = readBlocks(stored);
-  return blocks.length > 1 || blocks.some((block) => block.type !== "paragraph");
+  return blocks.length > 1
+    || blocks.some((block) => block.type !== "paragraph")
+    || blocks.some((block) => block.type === "paragraph" && !!block.runs?.length);
 }
 
 /**
