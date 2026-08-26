@@ -9302,7 +9302,7 @@
     },
     {
       "cls": "TestProcedureAuthoringApiTests",
-      "test": "Dormant_software_procedure_uses_shared_authoring_and_history_without_a_tcr",
+      "test": "Enabled_software_procedure_uses_shared_authoring_and_history_without_a_tcr",
       "kind": "Fact",
       "intent": "http-boundary",
       "cases": 1,
@@ -9314,7 +9314,7 @@
       ],
       "sourceLines": {
         "start": 815,
-        "end": 914
+        "end": 916
       }
     },
     {
