@@ -4,7 +4,7 @@
 **Qualified product checkpoint:** `main` at `af8760a6ad17b6266a770fb8c0beb2b67eaf3c90` after the August procedure-control closeout through #367
 
 This is the current scorecard for the long-lived
-[AeroLink 3.0 completion contract](AEROLINK_3_ENTERPRISE_LIFECYCLE_COMPLETION.md). The contract describes the
+[AeroLink 3.0 completion contract](../../AEROLINK_3_ENTERPRISE_LIFECYCLE_COMPLETION.md). The contract describes the
 full enterprise ambition; this file describes what the repository truthfully delivers now. Detailed restart
 context is in [CURRENT_PRODUCT_HANDOFF_2026-08-10.md](CURRENT_PRODUCT_HANDOFF_2026-08-10.md).
 
