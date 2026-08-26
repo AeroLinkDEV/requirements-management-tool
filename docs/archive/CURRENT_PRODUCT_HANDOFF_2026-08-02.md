@@ -154,7 +154,7 @@ are locked, then restart through `product/scripts/Start-AeroLink.ps1` so readine
 ## Deliberate boundaries and next work
 
 - AeroLink is not a Git host and does not manage source code. The delivered
-  [LLR-to-code traceability MVP](LLR_TO_CODE_TRACEABILITY_PROPOSAL.md) records exact approved LLR-to-GitLab merge
+  [LLR-to-code traceability MVP](../../LLR_TO_CODE_TRACEABILITY_PROPOSAL.md) records exact approved LLR-to-GitLab merge
   pointers without importing code or claiming a merge satisfies the requirement.
 - Fine-grained permission expansion and rule-based requirement-quality checks remain unimplemented product
   choices, not hidden features.
