@@ -8,8 +8,8 @@ This document turns the AeroLink concept mockups into guiding product direction.
 > workspace build; target build is an explicit record attribute/filter (DEC-089). Product Versions remains
 > dormant. Candidate Baselines is now a supported Configuration Management surface at `/baselines`, while the
 > old `/release-planning` route remains retired. Treat the mockups below as inspiration, not instructions to
-> restore retired dashboard elements. See
-> [CURRENT_PRODUCT_HANDOFF_2026-08-10.md](CURRENT_PRODUCT_HANDOFF_2026-08-10.md).
+> restore retired dashboard elements. See [PROJECT_STATE.md](PROJECT_STATE.md) for current product truth; the
+> former [2026-08-10 handoff](docs/archive/CURRENT_PRODUCT_HANDOFF_2026-08-10.md) is historical restart context.
 
 ## Experience Vision
 
