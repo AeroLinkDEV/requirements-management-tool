@@ -23,6 +23,12 @@ function Require-Directory([string]$RelativePath) {
     $path = Join-Path $RepositoryRoot ($RelativePath -replace '/', '\')
     if (-not (Test-Path -LiteralPath $path -PathType Container)) { Fail "Required documentation home is missing: $RelativePath" }
 }
+function Test-RepositoryContainment([string]$CandidatePath) {
+    $fullPath = [IO.Path]::GetFullPath($CandidatePath)
+    $rootWithSeparator = $RepositoryRoot.TrimEnd('\', '/') + [IO.Path]::DirectorySeparatorChar
+    return [string]::Equals($fullPath, $RepositoryRoot, [StringComparison]::OrdinalIgnoreCase) -or
+        $fullPath.StartsWith($rootWithSeparator, [StringComparison]::OrdinalIgnoreCase)
+}
 
 # The five canonical root files, nine intentionally retained relocation shims, and conventional GitHub
 # community files are the complete root Markdown allow-list. New narrative belongs under docs/ or product/docs.
@@ -74,9 +80,14 @@ foreach ($entry in $compatibilityShims.GetEnumerator()) {
     $targetLinkFound = $false
     foreach ($match in [regex]::Matches($shimText, '\[[^\]]*\]\(([^)]+)\)')) {
         $rawTarget = ($match.Groups[1].Value.Trim() -split '#', 2)[0].Trim('<>')
-        if (-not $rawTarget -or $rawTarget -match '^(?i:https?|mailto|data):' -or $rawTarget.StartsWith('#')) { continue }
+        if (-not $rawTarget -or $rawTarget.StartsWith('#')) { continue }
         try { $rawTarget = [Uri]::UnescapeDataString($rawTarget) } catch { continue }
+        if ($rawTarget -match '^(?i:https?|mailto|data):') { continue }
         $candidateTarget = [IO.Path]::GetFullPath((Join-Path (Split-Path $shimPath) ($rawTarget -replace '/', '\')))
+        if (-not (Test-RepositoryContainment $candidateTarget)) {
+            Fail "Compatibility shim $($entry.Key) links outside the repository: $rawTarget"
+            continue
+        }
         if ($candidateTarget -eq $targetFull) { $targetLinkFound = $true; break }
     }
     if (-not $targetLinkFound) { Fail "Compatibility shim $($entry.Key) does not link to its declared target: $($entry.Value)" }
@@ -100,11 +111,16 @@ foreach ($path in $maintainedMarkdown | Select-Object -Unique) {
     $text = [IO.File]::ReadAllText($source)
     foreach ($match in [regex]::Matches($text, '\[[^\]]*\]\(([^)]+)\)')) {
         $raw = $match.Groups[1].Value.Trim()
-        if (-not $raw -or $raw -match '^(?i:https?|mailto|data):' -or $raw.StartsWith('#')) { continue }
+        if (-not $raw -or $raw.StartsWith('#')) { continue }
         $target = ($raw -split '#', 2)[0].Trim('<>')
         if (-not $target) { continue }
         try { $target = [Uri]::UnescapeDataString($target) } catch { Fail "Invalid URI escape in $path`: $raw"; continue }
+        if ($target -match '^(?i:https?|mailto|data):') { continue }
         $resolved = [IO.Path]::GetFullPath((Join-Path (Split-Path $source) ($target -replace '/', '\')))
+        if (-not (Test-RepositoryContainment $resolved)) {
+            Fail "Maintained Markdown link escapes the repository in $path`: $raw"
+            continue
+        }
         if (-not (Test-Path -LiteralPath $resolved)) { Fail "Broken maintained Markdown link in $path`: $raw" }
     }
 }
@@ -116,8 +132,24 @@ foreach ($sourceName in @('README.md', 'PROJECT_STATE.md')) {
     if (-not (Test-Path -LiteralPath $source -PathType Leaf)) { continue }
     $text = [IO.File]::ReadAllText($source)
     foreach ($match in [regex]::Matches($text, '\[[^\]]*\]\(([^)]+)\)')) {
-        $target = ($match.Groups[1].Value.Trim() -split '#', 2)[0].Trim('<>')
-        if ($target -match '(?i)(?:^|/)docs/archive/(?!README\.md(?:$|#))') {
+        $rawTarget = $match.Groups[1].Value.Trim()
+        if (-not $rawTarget -or $rawTarget.StartsWith('#')) { continue }
+        $target = ($rawTarget -split '#', 2)[0].Trim('<>')
+        if (-not $target) { continue }
+        try { $target = [Uri]::UnescapeDataString($target) } catch { Fail "Invalid URI escape in $sourceName`: $rawTarget"; continue }
+        if ($target -match '^(?i:https?|mailto|data):') { continue }
+        $resolved = [IO.Path]::GetFullPath((Join-Path (Split-Path $source) ($target -replace '/', '\')))
+        if (-not (Test-RepositoryContainment $resolved)) {
+            Fail "$sourceName contains a link outside the repository: $rawTarget"
+            continue
+        }
+        $rootWithSeparator = $RepositoryRoot.TrimEnd('\', '/') + [IO.Path]::DirectorySeparatorChar
+        $repositoryRelativeTarget = if ([string]::Equals($resolved, $RepositoryRoot, [StringComparison]::OrdinalIgnoreCase)) {
+            ''
+        } else {
+            $resolved.Substring($rootWithSeparator.Length).Replace('\', '/')
+        }
+        if ($repositoryRelativeTarget -match '(?i)^docs/archive/(?!README\.md$)') {
             Fail "$sourceName must not link directly to an archived record as current authority: $target"
         }
     }
