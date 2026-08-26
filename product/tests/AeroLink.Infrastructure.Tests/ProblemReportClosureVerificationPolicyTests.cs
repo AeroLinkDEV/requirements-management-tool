@@ -45,7 +45,7 @@ public sealed class ProblemReportClosureVerificationPolicyTests
             var failure = new TestExecution(project.Id, revision0.Id, originBuild.Id, null, TestOutcome.Fail,
                 "test", "Rig", "Failed", "controlled://failure", start, start, originRelease.Id);
             var report = new ProblemReport(project.Id, "PR-09500", "Failure", "Problem", "", "engineer", start.AddMinutes(1),
-                targetReleaseId: targetRelease.Id, responsibleEngineerId: "engineer");
+                targetReleaseId: targetRelease.Id, responsibleEngineerId: "engineer", category: ProblemReportCategory.CodeFunctional);
             report.ReadyForSccb("engineer", start.AddMinutes(2));
             report.OpenBySccb("sccb", start.AddMinutes(3));
             report.BeginInvestigation("engineer", "Analysis", "Cause", "Effect", "", start.AddMinutes(4));
@@ -53,7 +53,7 @@ public sealed class ProblemReportClosureVerificationPolicyTests
             var successor = new TestExecution(project.Id, revision1.Id, targetBuild.Id, failure.Id, TestOutcome.Pass,
                 "test", "Rig", "Passed", "controlled://successor", start.AddMinutes(6), start.AddMinutes(6), targetRelease.Id);
             var manual = new ProblemReport(project.Id, "PR-09501", "Manual", "Problem", "", "engineer", start.AddMinutes(1),
-                targetReleaseId: targetRelease.Id, responsibleEngineerId: "engineer");
+                targetReleaseId: targetRelease.Id, responsibleEngineerId: "engineer", category: ProblemReportCategory.CodeFunctional);
             manual.ReadyForSccb("engineer", start.AddMinutes(2));
             manual.OpenBySccb("sccb", start.AddMinutes(3));
             manual.BeginInvestigation("engineer", "Analysis", "Cause", "Effect", "", start.AddMinutes(4));

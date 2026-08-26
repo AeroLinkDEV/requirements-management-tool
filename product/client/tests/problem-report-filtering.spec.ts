@@ -18,7 +18,7 @@ test('the queue filters as the search is typed, with no refresh to press', async
   for (const title of [`${distinctive} annunciation defect`, `Unrelated defect ${Date.now()}`]) {
     const raised = await request.post(`${apiBase}/api/problem-reports`, {
       data: {
-        projectId: showcase.projectId,
+        category: 'CodeFunctional', projectId: showcase.projectId,
         releaseId: showcase.activeReleaseId,
         title,
         problem: 'Raised so this journey owns the records it filters.',
@@ -60,12 +60,12 @@ test('the queue can be narrowed to one kind of problem', async ({ page, request 
   await expect(page.getByRole('heading', { name: 'Problem Report queue' })).toBeVisible({ timeout: 30_000 })
   await expect(page.locator('.prList button').first()).toBeVisible({ timeout: 30_000 })
 
-  // Every report predating the field is honestly unclassified, so this is where they all are.
-  await page.getByLabel('Type').selectOption('Other')
+  // The two records above are the ones this journey owns, and they are the ones it filters to.
+  await page.getByLabel('Category', { exact: true }).selectOption('CodeFunctional')
   await page.getByRole('button', { name: 'Apply filters' }).click()
   await expect(page.locator('.prList button').first()).toBeVisible({ timeout: 30_000 })
 
-  await page.getByLabel('Type').selectOption('Documentation')
+  await page.getByLabel('Category', { exact: true }).selectOption('EnvironmentTooling')
   await page.getByRole('button', { name: 'Apply filters' }).click()
   await expect(page.locator('.prEmpty')).toBeVisible({ timeout: 30_000 })
   await expect(page.getByText('No Problem Reports match these filters.')).toBeVisible()

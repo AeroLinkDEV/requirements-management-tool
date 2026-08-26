@@ -3,7 +3,7 @@ import { apiBase, apiLogin, login } from './auth'
 
 async function createReport(request: APIRequestContext, projectId: string, releaseId: string, title: string) {
   const response = await request.post(`${apiBase}/api/problem-reports`, { data: {
-    projectId, releaseId, title, problem: `${title} belongs to the Project-scale paging qualification set.`,
+    category: 'CodeFunctional', projectId, releaseId, title, problem: `${title} belongs to the Project-scale paging qualification set.`,
   } })
   expect(response.ok(), await response.text()).toBeTruthy()
   return await response.json() as { id: string; displayNumber: string }
@@ -71,7 +71,7 @@ test('the Project queue and build picker reach every Problem Report beyond their
 
   await filters.getByLabel('Status').selectOption('Draft')
   await filters.getByLabel('Target build').selectOption(releaseId)
-  await filters.getByLabel('Type').selectOption('Other')
+  await filters.getByLabel('Category', { exact: true }).selectOption('CodeFunctional')
   await filters.getByLabel('Severity').selectOption('Major')
   await filters.getByLabel('Priority').selectOption('Normal')
   await filters.getByLabel('Assigned user').fill('admin')
@@ -83,7 +83,7 @@ test('the Project queue and build picker reach every Problem Report beyond their
     && url.searchParams.get('pageSize') === '10'
     && url.searchParams.get('targetReleaseId') === releaseId
     && url.searchParams.get('state') === 'Draft'
-    && url.searchParams.get('type') === 'Other'
+    && url.searchParams.get('category') === 'CodeFunctional'
     && url.searchParams.get('severity') === 'Major'
     && url.searchParams.get('priority') === 'Normal'
     && url.searchParams.get('owner') === 'admin')).toBeTruthy()

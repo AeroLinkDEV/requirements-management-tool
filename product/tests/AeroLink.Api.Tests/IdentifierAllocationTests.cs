@@ -66,7 +66,7 @@ public sealed class IdentifierAllocationTests
 
         // A problem report created through the API seeds the PR sequence; deleting the sequence row leaves the
         // database exactly as an upgrade from before this table would find it.
-        using var created = await client.PostAsJsonAsync("/api/problem-reports", new { projectId, title = "Unexpected reset", problem = "The unit resets during a route update.", analysis = "", classification = "Verification failure", severity = "High", priority = "Urgent", origin = "Test execution", affectedConfiguration = "Build 1.6.0" });
+        using var created = await client.PostAsJsonAsync("/api/problem-reports", new { category = "CodeFunctional", projectId, title = "Unexpected reset", problem = "The unit resets during a route update.", analysis = "", classification = "Verification failure", severity = "High", priority = "Urgent", origin = "Test execution", affectedConfiguration = "Build 1.6.0" });
         Assert.Equal(HttpStatusCode.Created, created.StatusCode);
 
         using var scope = factory.Services.CreateScope();
@@ -84,7 +84,7 @@ public sealed class IdentifierAllocationTests
         using var client = factory.CreateClient();
         await BootstrapAndLoginAsync(client);
         var projectId = await SeedProjectAsync(factory);
-        using var report = await client.PostAsJsonAsync("/api/problem-reports", new { projectId, title = "Attachment host", problem = "The unit resets during a route update.", analysis = "", classification = "Verification failure", severity = "High", priority = "Urgent", origin = "Test execution", affectedConfiguration = "Build 1.6.0" });
+        using var report = await client.PostAsJsonAsync("/api/problem-reports", new { category = "CodeFunctional", projectId, title = "Attachment host", problem = "The unit resets during a route update.", analysis = "", classification = "Verification failure", severity = "High", priority = "Urgent", origin = "Test execution", affectedConfiguration = "Build 1.6.0" });
         Assert.Equal(HttpStatusCode.Created, report.StatusCode);
         var artifactId = (await report.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetGuid();
         var logicalId = Guid.NewGuid();
@@ -147,7 +147,7 @@ public sealed class IdentifierAllocationTests
         var projectId = await SeedProjectAsync(factory);
 
         var posts = Enumerable.Range(0, 8).Select(index => client.PostAsJsonAsync("/api/problem-reports",
-            new { projectId, title = $"Concurrent finding {index}", problem = "The unit resets during a route update.", analysis = "", classification = "Verification failure", severity = "High", priority = "Urgent", origin = "Test execution", affectedConfiguration = "Build 1.6.0" })).ToList();
+            new { category = "CodeFunctional", projectId, title = $"Concurrent finding {index}", problem = "The unit resets during a route update.", analysis = "", classification = "Verification failure", severity = "High", priority = "Urgent", origin = "Test execution", affectedConfiguration = "Build 1.6.0" })).ToList();
         var responses = await Task.WhenAll(posts);
 
         foreach (var response in responses) Assert.Equal(HttpStatusCode.Created, response.StatusCode);

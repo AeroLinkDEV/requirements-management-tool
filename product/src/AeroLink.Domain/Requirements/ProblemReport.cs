@@ -9,14 +9,10 @@ public enum ProblemReportState
 
 public enum ProblemReportSeverity { Critical, High, Major, Minor, Trivial }
 
-/// <summary>
-/// What kind of thing is wrong, so a queue can be filtered down to the work one discipline owns.
-///
-/// Stored by name, so adding a kind later is a code change and not a data migration. <c>Other</c> exists
-/// because every report predating this field is genuinely unclassified, and because a report that fits none
-/// of the named kinds has to go somewhere other than the nearest wrong answer.
-/// </summary>
-public enum ProblemReportType { Documentation, Code, Test, Other }
+// ProblemReportType — Documentation, Code, Test, Other — was retired by the category vocabulary in
+// ProblemReportCategory.cs. It is gone rather than deprecated in place: every retained record was mapped
+// onto the nine categories by migration and carries the provenance of that mapping, so there is no reading
+// of the old value left to preserve and nothing that should still be able to write one.
 public enum ProblemReportPriority { Urgent, High, Normal, Low }
 public enum ProblemReportDisposition { Fixed, Duplicate, CannotReproduce, NoFaultFound, Deferred, AcceptedRisk, Rejected }
 public enum ProblemReportClosureCandidateState { Pending, Invalidated, Approved, LegacyUnavailable }
@@ -171,7 +167,8 @@ public sealed class ProblemReport
         string classification = "Software anomaly", ProblemReportSeverity severity = ProblemReportSeverity.Major, ProblemReportPriority priority = ProblemReportPriority.Normal,
         string origin = "Test execution", string affectedConfiguration = "", Guid? targetReleaseId = null,
         string? responsibleEngineerId = null, string problemRich = "", string additionalInformation = "",
-        string additionalInformationRich = "", string systemAircraftImpact = "", string impactAssessmentJson = "{}")
+        string additionalInformationRich = "", string systemAircraftImpact = "", string impactAssessmentJson = "{}",
+        ProblemReportCategory? category = null)
     {
         if (projectId == Guid.Empty) throw new DomainException("A problem-report project is required.");
         Id = Guid.NewGuid(); ProjectId = projectId; ReportNumber = Required(reportNumber, "A problem-report number is required.");
@@ -184,6 +181,10 @@ public sealed class ProblemReport
         ProblemRich = problemRich?.Trim() ?? ""; AdditionalInformation = additionalInformation?.Trim() ?? "";
         AdditionalInformationRich = additionalInformationRich?.Trim() ?? ""; SystemAircraftImpact = systemAircraftImpact?.Trim() ?? "";
         ImpactAssessmentJson = ValidImpactJson(impactAssessmentJson);
+        // Optional here on purpose. A report is raised the moment somebody hits the problem, and demanding
+        // the classification first is how a Task Driver never gets written down at all; the Draft to
+        // Ready-for-SCCB transition is where it becomes mandatory.
+        if (category is not null) { Category = category.Value; CategoryProvenance = ProblemReportCategoryProvenance.Selected; }
         State = ProblemReportState.Draft; CreatedAt = UpdatedAt = now; Version = 1;
     }
 
@@ -203,8 +204,18 @@ public sealed class ProblemReport
     public string AdditionalInformation { get; private set; } = "";
     public string AdditionalInformationRich { get; private set; } = "";
     public string SystemAircraftImpact { get; private set; } = "";
-    /// <summary>Which discipline's problem this is, for filtering the queue.</summary>
-    public ProblemReportType Type { get; private set; } = ProblemReportType.Other;
+    /// <summary>
+    /// What kind of problem this is. Null only while a Draft is still being written — the
+    /// Draft to Ready-for-SCCB transition refuses until it is answered, so nothing reaches review
+    /// unclassified. Every report retained from before the vocabulary existed was given one by migration.
+    /// </summary>
+    public ProblemReportCategory? Category { get; private set; }
+
+    /// <summary>
+    /// Whether <see cref="Category"/> was chosen by a person or assigned by the migration. Null exactly
+    /// when the category is. See <see cref="ProblemReportCategoryProvenance"/> for why this is recorded.
+    /// </summary>
+    public ProblemReportCategoryProvenance? CategoryProvenance { get; private set; }
     /// <summary>What can be done in the meantime, if anything. Empty means none has been recorded.</summary>
     public string Workaround { get; private set; } = "";
     public string ImpactAssessmentJson { get; private set; } = "{}";
@@ -255,10 +266,12 @@ public sealed class ProblemReport
         string additionalInformation, string additionalInformationRich, string analysis, string rootCause,
         string correctiveAction, string systemAircraftImpact, string impactAssessmentJson,
         ProblemReportSeverity severity, ProblemReportPriority priority, DateTimeOffset now,
-        ProblemReportType? type = null, string? workaround = null)
+        ProblemReportCategory? category = null, string? workaround = null)
     {
         Required(actor, "A problem-report correction actor is required."); EnsureEditable(); InvalidateClosureVerificationForChange();
-        if (type is not null) Type = type.Value;
+        // Choosing a category on the form is a person's judgement, which is what the migration's was not.
+        // Once somebody has answered, the record stops describing the value as derived and never goes back.
+        if (category is not null) { Category = category.Value; CategoryProvenance = ProblemReportCategoryProvenance.Selected; }
         if (workaround is not null) Workaround = workaround.Trim();
         Title = Required(title, "A problem-report title is required."); Problem = Required(problem, "A problem statement is required.");
         ProblemRich = problemRich?.Trim() ?? ""; AdditionalInformation = additionalInformation?.Trim() ?? "";
@@ -404,6 +417,13 @@ public sealed class ProblemReport
         if (ProblemReportTransitionPolicy.RequiresRationale(source, target))
             rationale = Required(rationale, "A rationale is required for rejection and backward Problem Report transitions.");
         else rationale = rationale?.Trim();
+        // A Draft may be unclassified — that is what a Draft is for. Leaving one is where the category
+        // becomes mandatory, because SCCB is being asked to decide what to do about a problem, and what
+        // kind of problem it is changes the answer. Rejecting an unclassified Draft outright stays
+        // available: refusing to let somebody close a report they have already judged worthless would
+        // only strand it.
+        if (source == ProblemReportState.Draft && target == ProblemReportState.ReadyForSccb && Category is null)
+            throw new DomainException("Choose a category before sending this Problem Report to the SCCB.");
 
         if (target == ProblemReportState.Rejected)
         {

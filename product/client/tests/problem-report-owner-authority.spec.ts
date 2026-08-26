@@ -64,7 +64,7 @@ test('Problem Report ownership offers only accountable Program authority and the
   await createProgramMember(recoveryName, recoveryDisplay, showcase.programId, 'SoftwareEngineer')
 
   const created = await request.post(`${apiBase}/api/problem-reports`, { data: {
-    projectId: showcase.projectId,
+    category: 'CodeFunctional', projectId: showcase.projectId,
     releaseId: showcase.activeReleaseId,
     title,
     problem: 'The responsible engineer must be accountable inside the report Program.',

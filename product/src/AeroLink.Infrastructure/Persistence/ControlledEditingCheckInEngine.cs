@@ -805,7 +805,7 @@ public sealed class ProblemReportControlledEditingAdapter(AeroLinkDbContext db) 
             draft.AdditionalInformation ?? "", draft.AdditionalInformationRich ?? "", draft.Analysis ?? "",
             draft.RootCause ?? "", draft.CorrectiveAction ?? "", draft.SystemAircraftImpact ?? "",
             draft.ImpactAssessmentJson ?? "", ParseEnum(draft.Severity, item.Severity), ParseEnum(draft.Priority, item.Priority), now,
-            ParseEnum(draft.Type, item.Type), draft.Workaround);
+            ParseCategory(draft.Category, item.Category), draft.Workaround);
         var toState = ProblemReportTransitionPolicy.Canonical(item.State);
         var lifecycleRationale = fromState != toState
             ? "Controlled detail correction invalidated the prior closure evidence and returned the report to Verifying."
@@ -819,11 +819,30 @@ public sealed class ProblemReportControlledEditingAdapter(AeroLinkDbContext db) 
     }
     private static T ParseEnum<T>(string? value, T fallback) where T : struct, Enum =>
         Enum.TryParse<T>(value, ignoreCase: true, out var parsed) ? parsed : fallback;
+
+    /// <summary>
+    /// Reads the category back out of the working copy, which carries it as the object the detail
+    /// response sends rather than a bare string — the editor round-trips whatever it was handed. A value
+    /// that cannot be read keeps what the record already had: an unreadable field is not an instruction
+    /// to erase a controlled one.
+    /// </summary>
+    private static ProblemReportCategory? ParseCategory(JsonElement? draft, ProblemReportCategory? fallback)
+    {
+        if (draft is not { } element) return fallback;
+        var text = element.ValueKind switch
+        {
+            JsonValueKind.String => element.GetString(),
+            JsonValueKind.Object => element.TryGetProperty("value", out var value) ? value.GetString() : null,
+            JsonValueKind.Null => null,
+            _ => null,
+        };
+        return ProblemReportCategoryVocabulary.TryParse(text, out var parsed) ? parsed : fallback;
+    }
     private sealed record ProblemDraft(Guid Id, Guid ProjectId, string? ReportNumber, string? Title, string? Problem,
         string? ProblemRich, string? AdditionalInformation, string? AdditionalInformationRich, string? Analysis,
         string? RootCause, string? CorrectiveAction, string? SystemAircraftImpact, string? ImpactAssessmentJson,
         string? Severity, string? Priority, string? ReportedBy, string? ResponsibleEngineerId, string? State, long Version,
-        string? Type = null, string? Workaround = null);
+        JsonElement? Category = null, string? Workaround = null);
 }
 
 public sealed class ConfigurationChangeSetControlledEditingAdapter(AeroLinkDbContext db) : IControlledEditingAdapter

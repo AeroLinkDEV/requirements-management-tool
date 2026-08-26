@@ -150,7 +150,7 @@ public sealed class BuildScopedWorkspaceApiTests
         await SignInAsync(client);
 
         using var created = await client.PostAsJsonAsync("/api/problem-reports", new
-        {
+        { category = "CodeFunctional",
             projectId = seeded.ProjectId,
             releaseId = seeded.InWorkId,
             title = "RAISED-AGAINST-ONE-SIX anomaly",
@@ -161,7 +161,7 @@ public sealed class BuildScopedWorkspaceApiTests
         var reportId = createdReport.GetProperty("id").GetGuid();
         var reportVersion = createdReport.GetProperty("version").GetInt64();
         using var unassignedCreated = await client.PostAsJsonAsync("/api/problem-reports", new
-        {
+        { category = "CodeFunctional",
             projectId = seeded.ProjectId,
             title = "UNASSIGNED-PROJECT anomaly",
             problem = "An anomaly whose target build has not been assigned."

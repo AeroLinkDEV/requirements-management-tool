@@ -3,7 +3,7 @@ import { apiBase, apiLogin, login } from './auth'
 
 async function createReport(request: APIRequestContext, projectId: string, releaseId: string, title: string) {
   const response = await request.post(`${apiBase}/api/problem-reports`, { data: {
-    projectId, releaseId, title, problem: `${title} must be corrected under controlled configuration.`,
+    category: 'CodeFunctional', projectId, releaseId, title, problem: `${title} must be corrected under controlled configuration.`,
   } })
   expect(response.ok(), await response.text()).toBeTruthy()
   return await response.json() as { id: string; displayNumber: string; version: number }

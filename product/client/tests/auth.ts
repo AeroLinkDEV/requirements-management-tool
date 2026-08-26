@@ -1,5 +1,5 @@
 import { expect } from '@playwright/test'
-import type { APIRequestContext, Page } from '@playwright/test'
+import type { APIRequestContext, Locator, Page } from '@playwright/test'
 export const apiBase=process.env.AEROLINK_E2E_API_BASE??'http://127.0.0.1:5082'
 
 export type ShowcaseSeed = {
@@ -163,4 +163,15 @@ export async function firstSectionId(request: APIRequestContext, projectId: stri
   // created moments ago by a journey has no sections yet. There is nothing to choose and nothing to send;
   // the API asks for a section only where sections exist.
   return sections.length ? (sections[0].id as string) : undefined
+}
+
+/**
+ * Chooses a Problem Report category in the picker that replaced the four-kind select.
+ *
+ * Driven by the label a person actually reads rather than the enum name, so a spec fails when the
+ * vocabulary somebody is shown changes and not merely when an identifier is renamed.
+ */
+export async function chooseCategory(scope: Locator | Page, label: string) {
+  await scope.locator('.catCurrent').first().click()
+  await scope.getByRole('option', { name: label, exact: false }).first().click()
 }

@@ -71,7 +71,7 @@ public sealed class ProblemReportCheckoutApiTests
     private static async Task<Guid> RaiseAsync(HttpClient client, Guid projectId, Guid releaseId)
     {
         using var created = await client.PostAsJsonAsync("/api/problem-reports", new
-        {
+        { category = "CodeFunctional",
             projectId, releaseId, title = "Autopilot disconnect tone is late",
             problem = "The tone follows the disconnect by roughly a second.",
             problemRich = "{\"blocks\":[]}", additionalInformation = "Reported by two crews.",
