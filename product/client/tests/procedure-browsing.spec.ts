@@ -47,7 +47,7 @@ test("the procedure workspace pages, filters and deep-links instead of rendering
 
   // Filtering narrows the set and the count, and is reflected in the address.
   await page.getByLabel("Case state").selectOption("Approved");
-  await expect(page).toHaveURL(/caseState=Approved/, { timeout: 30_000 });
+  await expect(page).toHaveURL(/artifactState=Approved/, { timeout: 30_000 });
   const approvedTotal = (await (await page.request.get(
     `${apiBase}/api/test-cases?projectId=${projectId}&scope=HighLevelSoftware&state=Approved&pageSize=1`)).json()).totalCount;
   await expect(page.locator(".pager")).toContainText(`of ${approvedTotal.toLocaleString()}`, { timeout: 30_000 });
@@ -60,13 +60,13 @@ test("the procedure workspace pages, filters and deep-links instead of rendering
   // Paging is reachable, moves the list, and is in the address.
   const firstNumber = await rows.first().locator("b").first().textContent();
   await page.getByRole("button", { name: /Next/ }).click();
-  await expect(page).toHaveURL(/casePage=2/, { timeout: 30_000 });
+  await expect(page).toHaveURL(/artifactPage=2/, { timeout: 30_000 });
   await expect(rows.first().locator("b").first()).not.toHaveText(firstNumber ?? "", { timeout: 30_000 });
 
   // Back returns to the previous page of the same filtered list rather than leaving it. Choosing a page is
   // somewhere the reader went; typing in the search box is not, which is why only one of them pushes.
   await page.goBack();
-  await expect(page).not.toHaveURL(/casePage=2/, { timeout: 30_000 });
+  await expect(page).not.toHaveURL(/artifactPage=2/, { timeout: 30_000 });
   await expect(page.getByLabel("Case state")).toHaveValue("Approved", { timeout: 30_000 });
   await expect(rows.first().locator("b").first()).toHaveText(firstNumber ?? "", { timeout: 30_000 });
 
