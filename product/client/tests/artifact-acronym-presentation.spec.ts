@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test'
-import { artifactAcronym, artifactTypeLabel, configuredProcedureTargetsFor, documentTypeLabel, isVerificationProcedureKind, procedureTargetsFor, targetsFor, testChangeRequestAcronym, testChangeReviewWorkflowSubject, verificationArtifactApiRoot, verificationArtifactNoun } from '../src/presentation'
+import { artifactAcronym, artifactTypeLabel, configuredProcedureTargetsFor, documentTypeLabel, isVerificationProcedureKind, procedureTargetsFor, targetsFor, testChangeRequestAcronym, testChangeReviewWorkflowSubject, verificationArtifactApiRoot, verificationArtifactLevel, verificationArtifactNoun, verificationArtifactRouteKey } from '../src/presentation'
 
 test('numbered artifacts keep their canonical uppercase acronym in presentation', () => {
   const examples = [
@@ -52,6 +52,9 @@ test('composite HLR and LLR Procedure route kinds share the Procedure vocabulary
     expect(verificationArtifactApiRoot('softwareTest', kind)).toBe('/api/test-procedures')
     expect(testChangeRequestAcronym(level, kind)).toBe(acronym)
     expect(testChangeReviewWorkflowSubject(level, kind)).toBe(subject)
+    expect(verificationArtifactLevel(kind)).toBe(level)
+    expect(verificationArtifactRouteKey(level, 'Procedure')).toBe(kind)
+    expect(verificationArtifactRouteKey(level, 'Case')).toBe(level)
   }
 })
 
@@ -62,7 +65,7 @@ test('configured verification document targets are filtered by each exact level 
     { catalogueEntry: 'LowLevel' as const, capabilities: 2, enabledArtifactKinds: ['Case'] },
   ] }
   expect(configuredProcedureTargetsFor(ladder, 'Software').map(target => target.type)).toEqual([
-    'HighLevelTestCases', 'LowLevelTestCases',
+    'HighLevelTestCases', 'LowLevelTestCases', 'HighLevelTestProcedures',
   ])
   expect(configuredProcedureTargetsFor(ladder, 'Software', undefined, 'Procedure')
     .map(target => target.type)).toEqual(['HighLevelTestProcedures'])

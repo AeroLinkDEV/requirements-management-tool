@@ -1,7 +1,7 @@
 import { lazy, Suspense, useCallback, useEffect, useState } from "react";
 import type { ComponentType, FormEvent } from "react";
 import CommandPalette from "./CommandPalette";
-import { isVerificationProcedureKind, officialBuildName } from "./presentation";
+import { officialBuildName, verificationArtifactLevel, verificationArtifactRouteKey } from "./presentation";
 import ExperienceControls from "./ExperienceControls";
 import type { MotionPreference, WorkspaceDensity } from "./ExperienceControls";
 import { projectAreaPath, projectConfigurationApprovalsPath, projectConfigurationAssurancePath, projectSlugOf, readRoute, routePath } from "./routing";
@@ -15,7 +15,7 @@ import {
 } from "./IdentityCenter";
 import type { AuthUser } from "./IdentityCenter";
 import { PersonAvatar } from "./People";
-import { LadderCapability, ladderAllows, ladderHasAny } from "./projectLadder";
+import { LadderCapability, ladderAllows, ladderEnablesArtifactKind, ladderHasAny } from "./projectLadder";
 import type { LadderLevel, ProjectLadderProjection } from "./projectLadder";
 import ProjectsLanding from "./ProjectsLanding";
 import SoftwareBuildsLanding from "./SoftwareBuildsLanding";
@@ -253,7 +253,7 @@ function AppNavigation({ user, workspaces, activeId, selectedProjectId, selected
           {verificationScope==="softwareTest"
             ? <>
                 {item("Change Requests","testChangeRequests","◫","softwareTest","Software Test Change Requests")}
-                {item("Test Case Explorer","procedureExplorer","≡","softwareTest","Software Test Case Explorer")}
+                {item("Test Case/Procedure Explorer","procedureExplorer","≡","softwareTest","Software Test Case/Procedure Explorer")}
                  {ladderAllows(ladder, "HighLevel", LadderCapability.Verification) && item("HLR Test Results","testResults","▦","softwareTest","Software HLR Test Results","HighLevel")}
                  {ladderAllows(ladder, "LowLevel", LadderCapability.Verification) && item("LLR Test Results","testResults","▦","softwareTest","Software LLR Test Results","LowLevel")}
               </>
@@ -550,10 +550,11 @@ function App() {
   // Opening a verification artifact named on a requirement's trace lands in the shared Explorer, which is where
   // the Case or Procedure is read. It used to land on the coverage page, because that page carried the library;
   // that library moved, and a link into a surface that no longer exists is worse than no link.
-  const openVerificationProcedure=(artifact?:{artifactId?:string;procedureId?:string;revisionId?:string;displayNumber?:string;level?:string})=>{
+  const openVerificationProcedure=(artifact?:{artifactId?:string;procedureId?:string;revisionId?:string;displayNumber?:string;level?:string;artifactKind?:string})=>{
     const area:Discipline=artifact?.level==="System"?"systemTest":"softwareTest";
-    setView("procedureExplorer");setDiscipline(area);setSelectedArtifactId("");setSelectedArtifactKind(artifact?.level??"");setRequirementRevisionId("");
-    if(context){const path=routePath(context,"procedureExplorer",area,undefined,artifact?.level);const params=new URLSearchParams();const prefix=area==="systemTest"?"procedure":"case";if(artifact?.displayNumber)params.set(prefix,artifact.displayNumber);const artifactId=artifact?.artifactId ?? artifact?.procedureId;if(artifactId)params.set(`${prefix}Id`,artifactId);if(artifact?.revisionId)params.set(`${prefix}RevisionId`,artifact.revisionId);history.pushState({},"",`${path}${params.size?`?${params}`:""}`)}
+    const kind = artifact?.artifactKind === "Procedure" ? "Procedure" : artifact?.artifactKind === "Case" ? "Case" : undefined;
+    setView("procedureExplorer");setDiscipline(area);setSelectedArtifactId("");setSelectedArtifactKind(kind ?? artifact?.level ?? "");setRequirementRevisionId("");
+    if(context){const path=routePath(context,"procedureExplorer",area,undefined,artifact?.level);const params=new URLSearchParams();const prefix=area==="systemTest"?"procedure":kind === "Procedure" ? "procedure" : "case";if(artifact?.displayNumber)params.set(prefix,artifact.displayNumber);const artifactId=artifact?.artifactId ?? artifact?.procedureId;if(artifactId)params.set(`${prefix}Id`,artifactId);if(artifact?.revisionId)params.set(`${prefix}RevisionId`,artifact.revisionId);if(area === "softwareTest" && artifact?.level)params.set("artifactLevel", artifact.level);if(area === "softwareTest" && kind)params.set("artifactKind", kind);history.pushState({},"",`${path}${params.size?`?${params}`:""}`)}
   };
   // The inverse of the procedure deep link: a procedure trace names an exact requirement revision, and the
   // Requirements Explorer must open that exact revision rather than whichever revision is newest now.
@@ -619,7 +620,7 @@ function App() {
    if(view==="projectConfiguration"&&project)return <ProjectConfigurationCenter user={user} api={API} projectId={project.project.id} projectName={project.project.name} initialSection={projectConfigurationSection} onBackToBuilds={()=>{setView("builds");history.pushState({},"",openProjectBuildsPath)}} onOpenApprovalConfiguration={()=>showProjectConfiguration("approvals")} onActivated={value=>{setLadder({effectiveSteps:value.effectiveSteps.map(step=>({...step,catalogueEntry:step.catalogueEntry as LadderLevel}))});setLadderError("");}} onSignOut={signOut}/>;
    const navigation=<AppNavigation user={user} workspaces={workspaces} activeId={activeId} selectedProjectId={project?.project.id??selectedProjectId} selectedReleaseId={release?.id??selectedReleaseId} view={view} discipline={discipline} artifactKind={selectedArtifactKind} context={context} projectWide={view==="managedDocuments"} density={density} ladder={ladder} onNavigate={navigate} onSearch={()=>setPaletteOpen(true)} onDisplay={()=>setDisplayOpen(true)} onExitBuild={exitBuild} onSignOut={signOut}/>;
   const labels:Record<View,string>={projects:"Projects",builds:"Software Builds",baselineImports:"Imported Baselines",personnel:"Personnel",approvalConfiguration:"Approval Configuration",projectConfiguration:"Project Configuration",dashboard:"Command Center",createSystemScr:"New System SRCR",createSoftwareChange:"New Software Change Request",createInterfaceChange:"New Interface / ICD Change Request",scr:"Change Request",baselines:"Baselines",history:"Change Requests",requirements:"Requirements Explorer",verification:"Verification",testingCoverage:"Test Coverage",testChangeRequests:"Change Requests",testChangeRequest:"Test Change Request",createTestChangeRequest:"New Test Change Request",procedureExplorer:"Test Procedure Explorer",testResults:"Test Results",documents:"Generated Documents",managedDocuments:"Documentation Center",code:"Code",problemReports:"Problem Reports",lifecycle:"Digital Thread",release:"Release Readiness",releaseImpact:"Change Impact Review",releaseDecision:"Release Evidence & Decision",releaseOperations:"Release Operations",planning:"Product Versions",mywork:"My Work",admin:"Administration",enterprise:"System Operations",integrations:"Integration Command Center",reviewWorkflows:"Review Workflows",artifact:"Artifact",notFound:"Not Found"};
-  const scopedLabel=view==="history"?`${discipline==="software"?"Software":"System"} ${labels[view]}`:view==="scr"?`${discipline==="software"?"Software":"System"} ${labels[view]}`:view==="requirements"?`${discipline==="software"?"Software":"System"} ${labels[view]}`:view==="verification"?`${discipline==="softwareTest"?"Software":"System"} Verification`:view==="procedureExplorer"?`${discipline==="softwareTest"?"Software Test Case":"System Test Procedure"} Explorer`:labels[view];
+  const scopedLabel=view==="history"?`${discipline==="software"?"Software":"System"} ${labels[view]}`:view==="scr"?`${discipline==="software"?"Software":"System"} ${labels[view]}`:view==="requirements"?`${discipline==="software"?"Software":"System"} ${labels[view]}`:view==="verification"?`${discipline==="softwareTest"?"Software":"System"} Verification`:view==="procedureExplorer"?`${discipline==="softwareTest"?"Software Test Case/Procedure":"System Test Procedure"} Explorer`:labels[view];
   const copyLink=async()=>{try{await navigator.clipboard.writeText(location.href);setToast('Link copied to clipboard')}catch{setToast('This browser blocked clipboard access')}};
   const contextBar=<div className="contextBar"><nav aria-label="Breadcrumb"><span title={active?.program.name}>{active?.program.name}</span><b aria-hidden="true">›</b><span title={project?.project.name}>{project?.project.name}</span><b aria-hidden="true">›</b>{view!=="managedDocuments"&&<><span>Build {release?.version}</span><b aria-hidden="true">›</b></>}<strong>{scopedLabel}</strong></nav><div className="contextActions"><span className="contextReleaseState">{view==="managedDocuments"?"Project-wide":release?.isReleased?"Released · read-only":"In work"}</span><button aria-label="Copy link to this page" onClick={copyLink}>Copy link</button></div></div>;
    const palette=context?<CommandPalette api={API} context={context} ladder={ladder} open={paletteOpen} onClose={()=>setPaletteOpen(false)} onNavigate={navigate}/>:null;
@@ -633,10 +634,29 @@ function App() {
    const policyDependentView = !["projects", "builds", "baselineImports", "personnel", "approvalConfiguration", "projectConfiguration"].includes(view);
    if (project && policyDependentView && !ladder)
      return inShell(<main className="artifactState"><div><span>!</span><h1>Project ladder unavailable</h1><p>{ladderError || "Loading the stored project ladder before opening level-specific workspaces…"}</p>{ladderError && <button onClick={() => setLadderAttempt(value => value + 1)}>Retry</button>}</div></main>);
-   const selectedLevel = selectedArtifactKind === "HighLevel" || selectedArtifactKind === "LowLevel" || selectedArtifactKind === "Interface" ? selectedArtifactKind : undefined;
+   const selectedLevel = selectedArtifactKind === "Interface"
+     ? selectedArtifactKind
+     : verificationArtifactLevel(selectedArtifactKind);
    const scopedLevelAllowed = (scope: "system" | "software" | "systemTest" | "softwareTest", capability?: number) => {
      if (scope === "system" || scope === "systemTest") return ladderAllows(ladder, "System", capability);
      return selectedLevel ? ladderAllows(ladder, selectedLevel, capability) : ladderHasAny(ladder, ["HighLevel", "LowLevel"], capability);
+   };
+   const exactVerificationAllowed = (scope: "systemTest" | "softwareTest") => {
+     if (scope === "systemTest")
+       return ladderAllows(ladder, "System", LadderCapability.Verification)
+         && ladderEnablesArtifactKind(ladder, "System", "Procedure");
+     if (!selectedArtifactKind)
+       return ["HighLevel", "LowLevel"].some(level => ladderAllows(ladder, level as LadderLevel, LadderCapability.Verification)
+         && (ladderEnablesArtifactKind(ladder, level as LadderLevel, "Case")
+           || ladderEnablesArtifactKind(ladder, level as LadderLevel, "Procedure")));
+     if (selectedArtifactKind.toLowerCase() === "case" || selectedArtifactKind.toLowerCase() === "procedure")
+       return ["HighLevel", "LowLevel"].some(level => ladderAllows(ladder, level as LadderLevel, LadderCapability.Verification)
+         && ladderEnablesArtifactKind(ladder, level as LadderLevel, selectedArtifactKind));
+     const level = verificationArtifactLevel(selectedArtifactKind);
+     if (!level || level === "System") return false;
+     const kind = selectedArtifactKind.toLowerCase().includes("procedure") ? "Procedure" : "Case";
+     return ladderAllows(ladder, level, LadderCapability.Verification)
+       && ladderEnablesArtifactKind(ladder, level, kind);
    };
    const viewAllowed = !ladder || (
      view === "history" || view === "scr" ? scopedLevelAllowed(discipline, LadderCapability.ChangeControl) :
@@ -645,7 +665,8 @@ function App() {
      view === "createSoftwareChange" ? scopedLevelAllowed("software", LadderCapability.ChangeControl) :
      view === "createInterfaceChange" ? ladderAllows(ladder, "Interface", LadderCapability.ChangeControl) :
      ["verification", "testingCoverage", "testChangeRequests", "testChangeRequest", "createTestChangeRequest", "procedureExplorer", "testResults"].includes(view)
-       ? scopedLevelAllowed(discipline, LadderCapability.Verification) :
+       ? scopedLevelAllowed(discipline, LadderCapability.Verification)
+         && (discipline === "softwareTest" || discipline === "systemTest" ? exactVerificationAllowed(discipline) : true) :
      view === "documents" ? scopedLevelAllowed(discipline, discipline === "systemTest" || discipline === "softwareTest" ? LadderCapability.Verification : LadderCapability.RequirementsDocument) :
      view === "code" ? ladderHasAny(ladder, ["System", "HighLevel", "LowLevel"], LadderCapability.CodeTraceability) : true
    );
@@ -796,8 +817,8 @@ function App() {
         projectId={project.project.id}
         releaseId={release.id}
         discipline={discipline === "softwareTest" ? "Software" : "System"}
-        initialLevel={discipline === "softwareTest" && (selectedArtifactKind === "HighLevel" || selectedArtifactKind === "LowLevel")
-          ? selectedArtifactKind
+        initialLevel={discipline === "softwareTest" && (selectedArtifactKind.toLowerCase().includes("highlevel") || selectedArtifactKind.toLowerCase().includes("lowlevel"))
+          ? (selectedArtifactKind.toLowerCase().includes("lowlevel") ? "LowLevel" : "HighLevel")
           : undefined}
         buildName={`Build ${release.version}`}
          releaseVersion={release.version}
@@ -812,7 +833,7 @@ function App() {
   if ((view === "testingCoverage" || view === "testChangeRequests") && project && release)
     return inShell(
       <TestingCoverageWorkspace
-        key={discipline === "softwareTest" ? selectedArtifactKind || "HighLevel" : "System"}
+        key={discipline === "softwareTest" ? `${selectedArtifactKind || "HighLevel"}` : "System"}
         api={API}
         projectId={project.project.id}
         releaseId={release.id}
@@ -831,9 +852,9 @@ function App() {
         onOpenRequirementRevision={openRequirementRevision}
         onRaiseTestChangeRequest={() => navigate("createTestChangeRequest", discipline, undefined, selectedArtifactKind)}
         onOpenTestChangeRequest={id => navigate("testChangeRequest", discipline, id, selectedArtifactKind)}
-        onLevelChange={discipline === "softwareTest"
-          ? level => navigate("testChangeRequests", "softwareTest", undefined,
-            isVerificationProcedureKind(selectedArtifactKind) ? `${level}Procedure` : level)
+        onArtifactKeyChange={discipline === "softwareTest"
+          ? (level, kind) => navigate("testChangeRequests", "softwareTest", undefined,
+            verificationArtifactRouteKey(level, kind === "Procedure" ? "Procedure" : "Case"))
           : undefined}
       />
     );
@@ -856,26 +877,8 @@ function App() {
       />
     );
 
-  // Procedure packages are raised only from an exact Case assessment/change origin. The shared editor
-  // cannot truthfully supply that origin, so a stale/direct Procedure create URL fails closed rather than
-  // silently creating a Case package under a Procedure-looking route. #727 owns the assessment raiser.
-  if (view === "createTestChangeRequest" && project && release && isVerificationProcedureKind(selectedArtifactKind))
-    return inShell(
-      <main className="historyPage">
-        <header className="historyHeader">
-          <div>
-            <p className="eyebrow">SOFTWARE PROCEDURE CHANGE CONTROL / BUILD {release.version}</p>
-            <h1>Procedure packages require an exact Case origin</h1>
-            <p>Procedure change-control packages are raised from a resolved Case change or assessment. No manual Case-only creation is available here.</p>
-          </div>
-          <button type="button" className="recordBuild"
-            onClick={() => navigate("testChangeRequests", discipline, undefined, selectedArtifactKind)}>
-            Back to Procedure change requests
-          </button>
-        </header>
-      </main>
-    );
-  // Raising a Case package is a page, exactly as raising a change request is.
+  // Case and Procedure packages share one authoring page; the exact artifact key controls its origin picker
+  // and the server remains authoritative for the package identity.
   if (view === "createTestChangeRequest" && project && release)
     return inShell(
       <TestChangeRequestEditor
@@ -885,8 +888,9 @@ function App() {
         releaseId={release.id}
         releaseVersion={release.version}
         discipline={discipline === "softwareTest"
-          ? (selectedArtifactKind === "LowLevel" ? "LowLevelSoftware" : "HighLevelSoftware")
+          ? (verificationArtifactLevel(selectedArtifactKind) === "LowLevel" ? "LowLevelSoftware" : "HighLevelSoftware")
           : "System"}
+        artifactKind={selectedArtifactKind}
         onCancel={() => navigate("testChangeRequests", discipline, undefined, selectedArtifactKind)}
         // Lands on the package it just raised, the way saving a change-request draft opens the draft.
         onRaised={(id) => navigate("testChangeRequests", discipline, id, selectedArtifactKind)}
@@ -900,7 +904,7 @@ function App() {
         projectId={project.project.id}
         releaseId={release.id}
         discipline={discipline === "softwareTest"
-          ? (selectedArtifactKind === "LowLevel" ? "LowLevelSoftware" : "HighLevelSoftware")
+          ? (verificationArtifactLevel(selectedArtifactKind) === "LowLevel" ? "LowLevelSoftware" : "HighLevelSoftware")
           : "System"}
         buildName={`Build ${release.version}`}
         readOnly={release.isReleased}

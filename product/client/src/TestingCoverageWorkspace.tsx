@@ -11,7 +11,7 @@ import { isControlledTestChangeRequest, reviewsVisibleInCurrentRelease, successo
 import type { TestDiscipline } from './TestResultsWorkspace'
 import { LadderCapability, ladderAllows } from './projectLadder'
 import type { ProjectLadderProjection } from './projectLadder'
-import { isVerificationProcedureKind, testChangeRequestAcronym, testChangeReviewWorkflowSubject, verificationArtifactApiRoot, verificationArtifactChangeSegment, verificationArtifactWord } from './presentation'
+import { isVerificationProcedureKind, testChangeRequestAcronym, testChangeReviewWorkflowSubject, verificationArtifactApiRoot, verificationArtifactChangeSegment, verificationArtifactNoun, verificationArtifactWord } from './presentation'
 import './DownstreamAssessmentQueue.css'
 import './HistoryExplorer.css'
 import './TestingCoverageWorkspace.css'
@@ -108,8 +108,11 @@ const missingCaseFields = (request: TestChangeRequest) => [
   ['Title', request.title], ['Problem', request.problem],
   ['Analysis', request.analysis], ['Solution', request.solution],
 ].filter(([, value]) => !value?.trim()).map(([name]) => name)
-const tcrNewLabel = (discipline: TestDiscipline) =>
-  discipline === 'System' ? 'System' : discipline === 'HighLevelSoftware' ? 'HLR' : 'LLR'
+const tcrNewLabel = (discipline: TestDiscipline, artifactKind?: string) => {
+  if (discipline === 'System') return 'System Test Procedure'
+  const level = discipline === 'HighLevelSoftware' ? 'HLR' : 'LLR'
+  return `${level} Test ${isVerificationProcedureKind(artifactKind) ? 'Procedure' : 'Case'}`
+}
 const artifactWord = (discipline: TestDiscipline, artifactKind?: string) => verificationArtifactWord(
   discipline === 'System' ? 'System' : discipline === 'HighLevelSoftware' ? 'HighLevel' : 'LowLevel', artifactKind)
 
@@ -175,7 +178,7 @@ function ExistingCoverage({ item, coverage, artifactWord }: { item: ImpactItem; 
  * change request is approved, so nothing goes unnoticed; an engineer can also raise one deliberately when a
  * set of changes is best tested together.
  */
-export default function TestingCoverageWorkspace({ api, projectId, releaseId, releases, discipline, buildName, readOnly, programId, user, initialReviewId, onBack, onOpenRequirementRevision, onRaiseTestChangeRequest, onOpenTestChangeRequest, onLevelChange, ladder, artifactKind }: {
+export default function TestingCoverageWorkspace({ api, projectId, releaseId, releases, discipline, buildName, readOnly, programId, user, initialReviewId, onBack, onOpenRequirementRevision, onRaiseTestChangeRequest, onOpenTestChangeRequest, onArtifactKeyChange, ladder, artifactKind }: {
   api: string
   projectId: string
   releaseId: string
@@ -191,7 +194,7 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, re
   /// Opens the authoring page. Raising a package is a page, exactly as raising a change request is.
   onRaiseTestChangeRequest: () => void
   onOpenTestChangeRequest: (id: string) => void
-  onLevelChange?: (level: SoftwareVerificationLevel) => void
+  onArtifactKeyChange?: (level: SoftwareVerificationLevel, kind: string) => void
   ladder: ProjectLadderProjection | null
   artifactKind?: string
 }) {
@@ -323,7 +326,7 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, re
     }
     if (nextRequests) {
       setRequests(nextRequests.items ?? [])
-      setCanCreate(Boolean(nextRequests.canCreate) && !isVerificationProcedureKind(artifactKind))
+        setCanCreate(Boolean(nextRequests.canCreate))
     }
     if (nextImpact) setImpact(nextImpact)
     if (!requestResponse.ok) {
@@ -334,7 +337,7 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, re
       recordClientOperationFailure('verification.coverage.load', new Error(`HTTP ${coverageResponse.status}`))
       setError('The requirement coverage for this build could not be read.')
     }
-  }, [api, projectId, releaseId, discipline, artifactKind])
+  }, [api, projectId, releaseId, discipline])
 
   useEffect(() => { void load() }, [load])
 
@@ -614,22 +617,31 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, re
         </div>
         {canCreate && (
           <button type="button" className="recordBuild" onClick={onRaiseTestChangeRequest}>
-            + New {tcrNewLabel(discipline)} Test Change Request
+            + New {tcrNewLabel(discipline, artifactKind)} Change Request
           </button>
         )}
       </header>
-      {discipline !== 'System' && onLevelChange && (
-        <nav className="softwareLevelTabs" role="tablist" aria-label="Software verification level">
-          {ladderAllows(ladder, 'HighLevel', LadderCapability.Verification) && <button type="button" role="tab" aria-selected={discipline === 'HighLevelSoftware'}
-            aria-current={discipline === 'HighLevelSoftware' ? 'page' : undefined}
-            onClick={() => onLevelChange('HighLevel')}>
-            <b>HLR</b><span>High-level test cases</span>
-          </button>}
-          {ladderAllows(ladder, 'LowLevel', LadderCapability.Verification) && <button type="button" role="tab" aria-selected={discipline === 'LowLevelSoftware'}
-            aria-current={discipline === 'LowLevelSoftware' ? 'page' : undefined}
-            onClick={() => onLevelChange('LowLevel')}>
-            <b>LLR</b><span>Low-level test cases</span>
-          </button>}
+      {discipline !== 'System' && onArtifactKeyChange && ladder && (
+        <nav className="softwareLevelTabs" role="tablist" aria-label="Software verification artifact">
+          {(['HighLevel', 'LowLevel'] as const).flatMap(level => {
+            if (!ladderAllows(ladder, level, LadderCapability.Verification)) return []
+            const levelLabel = level === 'HighLevel' ? 'HLR' : 'LLR'
+            const kinds = (ladder.effectiveSteps.find(s => s.catalogueEntry === level)?.enabledArtifactKinds ?? [])
+              .filter(kind => kind.toLowerCase() === 'case' || kind.toLowerCase() === 'procedure')
+            if (kinds.length === 0) return []
+            return kinds.map(kind => {
+              const isProc = kind.toLowerCase() === 'procedure'
+              const selectedKind = isVerificationProcedureKind(artifactKind) ? 'Procedure' : 'Case'
+              const isSelected = discipline === (level === 'HighLevel' ? 'HighLevelSoftware' : 'LowLevelSoftware')
+                && selectedKind === (isProc ? 'Procedure' : 'Case')
+              const noun = verificationArtifactNoun(level, isProc ? `${level}Procedure` : level)
+              return <button key={`${level}-${kind}`} type="button" role="tab" aria-selected={isSelected}
+                aria-current={isSelected ? 'page' : undefined}
+                onClick={() => onArtifactKeyChange(level, isProc ? 'Procedure' : 'Case')}>
+                <b>{levelLabel}</b><span>Test {noun.toLowerCase()}s</span>
+              </button>
+            })
+          })}
         </nav>
       )}
       {error && <div className="workspaceError" role="alert" aria-live="assertive">{error}</div>}

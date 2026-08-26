@@ -5,8 +5,8 @@ import { apiBase, apiLogin, login, selectProgram } from "./auth";
  * The verification workspace rendered every procedure it was given. The software side holds 440 of them, so
  * finding one meant scrolling past the rest, and the client received far more than it could show.
  *
- * Software is driven deliberately rather than the smaller System inventory. The configured HLR level opens
- * first while the broad API count still proves the showcase carries both software levels at useful volume.
+ * Software is driven deliberately rather than the smaller System inventory. The combined Explorer opens broad,
+ * then this Case-specific scenario selects HLR explicitly before asserting its historical showcase volume.
  */
 test("the procedure workspace pages, filters and deep-links instead of rendering everything", async ({ page, request }) => {
   test.setTimeout(240_000);
@@ -29,9 +29,14 @@ test("the procedure workspace pages, filters and deep-links instead of rendering
   // dropped — this is now the only place procedures are browsed, so it had to be the most capable one.
   await page.getByRole("button", { name: /Search & navigate/ }).click();
   const palette = page.getByRole("dialog", { name: "Quick navigation" });
-  await palette.getByPlaceholder(/Search pages/).fill("Software Test Case Explorer");
-  await palette.getByRole("link", { name: /Software Test Case Explorer/ }).click();
-  await expect(page.getByRole("heading", { name: "Software Test Case Explorer" })).toBeVisible({ timeout: 30_000 });
+  await palette.getByPlaceholder(/Search pages/).fill("Test Case/Procedure Explorer");
+  await palette.getByRole("link", { name: /Test Case\/Procedure Explorer/ }).click();
+  await expect(page.getByRole("heading", { name: "Software Test Case/Procedure Explorer" })).toBeVisible({ timeout: 30_000 });
+
+  await page.getByLabel("Artifact filter").selectOption("Case");
+  await expect(page).toHaveURL(/artifactKind=Case/, { timeout: 30_000 });
+  await page.getByLabel("Level filter").selectOption("HighLevel");
+  await expect(page).toHaveURL(/artifactLevel=HighLevel/, { timeout: 30_000 });
 
   // The whole point: hundreds of records, a bounded number of them on the page.
   const rows = page.locator(".procedureRow");
@@ -42,7 +47,7 @@ test("the procedure workspace pages, filters and deep-links instead of rendering
 
   // Filtering narrows the set and the count, and is reflected in the address.
   await page.getByLabel("Case state").selectOption("Approved");
-  await expect(page).toHaveURL(/caseState=Approved/, { timeout: 30_000 });
+  await expect(page).toHaveURL(/artifactState=Approved/, { timeout: 30_000 });
   const approvedTotal = (await (await page.request.get(
     `${apiBase}/api/test-cases?projectId=${projectId}&scope=HighLevelSoftware&state=Approved&pageSize=1`)).json()).totalCount;
   await expect(page.locator(".pager")).toContainText(`of ${approvedTotal.toLocaleString()}`, { timeout: 30_000 });
@@ -55,13 +60,13 @@ test("the procedure workspace pages, filters and deep-links instead of rendering
   // Paging is reachable, moves the list, and is in the address.
   const firstNumber = await rows.first().locator("b").first().textContent();
   await page.getByRole("button", { name: /Next/ }).click();
-  await expect(page).toHaveURL(/casePage=2/, { timeout: 30_000 });
+  await expect(page).toHaveURL(/artifactPage=2/, { timeout: 30_000 });
   await expect(rows.first().locator("b").first()).not.toHaveText(firstNumber ?? "", { timeout: 30_000 });
 
   // Back returns to the previous page of the same filtered list rather than leaving it. Choosing a page is
   // somewhere the reader went; typing in the search box is not, which is why only one of them pushes.
   await page.goBack();
-  await expect(page).not.toHaveURL(/casePage=2/, { timeout: 30_000 });
+  await expect(page).not.toHaveURL(/artifactPage=2/, { timeout: 30_000 });
   await expect(page.getByLabel("Case state")).toHaveValue("Approved", { timeout: 30_000 });
   await expect(rows.first().locator("b").first()).toHaveText(firstNumber ?? "", { timeout: 30_000 });
 

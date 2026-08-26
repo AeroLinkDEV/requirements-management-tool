@@ -153,7 +153,7 @@ test('verification actions follow authority in the selected Program',async({page
     const materialized=await request.post(`${apiBase}/api/baselines/${target.baselineId}/materialize-test-procedures`,{data:{}})
     expect(materialized.ok(),await materialized.text()).toBeTruthy()
 
-    const proceduresResponse=await request.get(`${apiBase}/api/test-procedures?projectId=${workspace.project.id}&search=${encodeURIComponent(title)}&page=1&pageSize=1`)
+    const proceduresResponse=await request.get(`${apiBase}/api/test-procedures?projectId=${workspace.project.id}&artifactKind=Procedure&search=${encodeURIComponent(title)}&page=1&pageSize=1`)
     expect(proceduresResponse.ok(),await proceduresResponse.text()).toBeTruthy()
     const procedure=(await proceduresResponse.json()).items[0]
     expect(procedure,'materialisation produced no procedure').toBeTruthy()

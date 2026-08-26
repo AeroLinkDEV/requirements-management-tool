@@ -23,11 +23,15 @@ public static class ProcedureSavedViewContract
 
     /// <summary>Query fields the Explorer can actually apply. Anything else is rejected rather than kept.</summary>
     private static readonly HashSet<string> Fields = new(StringComparer.OrdinalIgnoreCase)
-    { "version", "search", "level", "state", "outcome", "documentId", "sectionId" };
+    { "version", "search", "level", "artifactKind", "state", "outcome", "documentId", "sectionId" };
 
     /// <summary>The combined software scope and the three exact procedure levels the Explorer can apply.</summary>
     private static readonly HashSet<string> Levels = new(StringComparer.OrdinalIgnoreCase)
     { "System", "Software", "HighLevel", "LowLevel" };
+
+    /// <summary>The combined software inventory and its two exact artifact kinds.</summary>
+    private static readonly HashSet<string> ArtifactKinds = new(StringComparer.OrdinalIgnoreCase)
+    { "all", "Case", "Procedure" };
 
     /// <summary>
     /// Procedure states as the list endpoint names them, plus the empty string for "any". Kept here rather
@@ -73,6 +77,8 @@ public static class ProcedureSavedViewContract
             var text = value.ToString();
             if (string.Equals(key, "level", StringComparison.OrdinalIgnoreCase) && !Levels.Contains(text))
                 return Invalid($"'{text}' is not a verification artifact level.");
+            if (string.Equals(key, "artifactKind", StringComparison.OrdinalIgnoreCase) && !ArtifactKinds.Contains(text))
+                return Invalid($"'{text}' is not a verification artifact kind.");
             if (string.Equals(key, "state", StringComparison.OrdinalIgnoreCase) && !States.Contains(text))
                 return Invalid($"'{text}' is not a verification artifact state.");
             if (string.Equals(key, "outcome", StringComparison.OrdinalIgnoreCase) && !Outcomes.Contains(text))

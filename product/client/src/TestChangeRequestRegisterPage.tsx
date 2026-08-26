@@ -76,7 +76,7 @@ export default function TestChangeRequestRegisterPage({
   const [rows, setRows] = useState<TestChangeRequestRow[]>([])
   const activeRelease = releases.find(x => x.id === activeReleaseId)
   const artifactNoun = verificationArtifactNoun(discipline, artifactKind)
-  const procedurePackage = discipline !== 'System' && isVerificationProcedureKind(artifactKind)
+  const procedurePackage = discipline === 'System' || isVerificationProcedureKind(artifactKind)
   const registerTitle = procedurePackage
     ? disciplineLabel(discipline) + ' Procedure Change Requests'
     : disciplineLabel(discipline) + ' Test Change Requests'
@@ -140,8 +140,10 @@ export default function TestChangeRequestRegisterPage({
           ? `Released ${disciplineLabel(discipline)} test change history owned by Build ${activeRelease.version}.`
           : `Active and deferred ${disciplineLabel(discipline)} test change requests owned by Build ${activeRelease?.version}.`}</p>
       </div>
-      {!activeRelease?.isReleased && onCreate && !procedurePackage && (
-        <button className="recordBuild" onClick={onCreate}>+ New {disciplineLabel(discipline)} Test Change Request</button>
+      {!activeRelease?.isReleased && onCreate && (
+        <button className="recordBuild" onClick={onCreate}>
+          + New {disciplineLabel(discipline)} Test {procedurePackage ? 'Procedure' : 'Case'} Change Request
+        </button>
       )}
     </header>
 

@@ -55,7 +55,7 @@ test('the software Case contract is neutral at the API seam and keeps old aliase
   assert.match(lifecycleClient, /key=\{test\.artifactRevisionId\}/)
 })
 
-test('the client renders software verification as Cases through shared vocabulary helpers', () => {
+test('the client renders the combined software Case/Procedure explorer through shared vocabulary helpers', () => {
   const presentation = read('product', 'client', 'src', 'presentation.ts')
   const explorer = read('product', 'client', 'src', 'TestProcedureExplorer.tsx')
   const coverage = read('product', 'client', 'src', 'TestingCoverageWorkspace.tsx')
@@ -80,17 +80,17 @@ test('the client renders software verification as Cases through shared vocabular
   assert.match(presentation, /HLRTD: documentTypeLabels\.HighLevelTestCases/)
   assert.match(presentation, /LLRTD: documentTypeLabels\.LowLevelTestCases/)
   assert.match(explorer, /verificationArtifactWord/)
-  assert.match(explorer, /aria-label=\{`\$\{currentArtifactShortWord\} state`\}/)
-  assert.match(explorer, /discipline === 'System' \? 'System Test Procedure Explorer' : 'Software Test Case Explorer'/)
-  assert.match(explorer, /currentArtifactShortWord = verificationArtifactNoun/)
+  assert.match(explorer, /aria-label=\{`\$\{currentArtifactDisplayWord\} state`\}/)
+  assert.match(explorer, /Software Test Case\/Procedure Explorer/)
+  assert.match(explorer, /const currentArtifactShortWord = verificationArtifactNoun/)
   assert.match(presentation, /level === 'System' \? 'Procedure' : 'Case'/)
   assert.match(presentation, /`test \$\{verificationArtifactNoun\(level\)\.toLowerCase\(\)\}`/)
   assert.match(coverage, /The \{currentArtifactWord\} library moved with them/)
   assert.match(coverage, /resolvedArtifact/)
   assert.match(coverage, /artifactId: chosen/)
   assert.doesNotMatch(coverage, /'approved procedure'/)
-  assert.match(app, /Software Test Case Explorer/)
-  assert.match(app, /prefix=area==="systemTest"\?"procedure":"case"/)
+  assert.match(app, /Test Case\/Procedure Explorer/)
+  assert.match(app, /prefix=area==="systemTest"\?"procedure":kind === "Procedure" \? "procedure" : "case"/)
   assert.match(routing, /software-verification\/cases/)
   assert.match(routing, /path === "software-verification\/procedures"/)
   for (const source of [explorer, coverage, results, changePage, changeWorkspace, changeEditor]) {

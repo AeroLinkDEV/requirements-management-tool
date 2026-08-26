@@ -22,10 +22,7 @@ const targets = (discipline: Discipline, ladder: ProjectLadderProjection | null)
     ];
   if (discipline === "systemTest")
     return configuredProcedureTargetsFor(ladder, "System");
-  return [
-    ...configuredProcedureTargetsFor(ladder, "Software"),
-    ...configuredProcedureTargetsFor(ladder, "Software", undefined, "Procedure"),
-  ];
+  return configuredProcedureTargetsFor(ladder, "Software");
 };
 
 export default function DocumentCenter({ api, projectId, release, discipline, ladder, onBack }: Props) {

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import { PersonName } from './People'
 import { apiRequest, operationError } from './apiClient'
-import { configuredProcedureTargetsFor, stateLabel, verificationArtifactApiRoot, verificationArtifactDocumentApiRoot, verificationArtifactNoun, verificationArtifactWord } from './presentation'
+import { configuredProcedureTargetsFor, stateLabel, verificationArtifactApiRoot, verificationArtifactNoun, verificationArtifactWord } from './presentation'
 import DocumentActions from './DocumentActions'
 import { loadCoverage, type Coverage } from './verificationCoverage'
 import {
@@ -15,14 +15,15 @@ import {
 import './RequirementsWorkspace.css'
 import './TestingCoverageWorkspace.css'
 import './TestProcedureExplorer.css'
-import { LadderCapability, ladderAllows } from './projectLadder'
-import type { ProjectLadderProjection } from './projectLadder'
+import { LadderCapability, ladderAllows, ladderEnablesArtifactKind } from './projectLadder'
+import type { LadderLevel, ProjectLadderProjection } from './projectLadder'
 import ExactLinkLifecyclePanel from './ExactLinkLifecyclePanel'
 
 type Procedure = {
   id: string
   version?: number
   revisionId: string
+  revision?: number
   displayNumber: string
   title: string
   titleIsExact?: boolean
@@ -50,6 +51,8 @@ type Procedure = {
   /// The most recent run's outcome, already projected by the listing endpoint.
   lastOutcome?: string
   lastExecutedAt?: string
+  artifactKind?: 'Case' | 'Procedure'
+  artifactLabel?: string
 }
 type Revision = {
   id: string; displayNumber: string; revision: number; title: string
@@ -85,7 +88,7 @@ type ProcedureDocument = {
   sections: { id: string; heading: string; position: number; artifactCount: number; procedureCount?: number }[]
 }
 type Comment = {
-  id: string; body: string; state: string; createdBy: string; createdAt: string; disposition?: string
+  id: string; revisionId?: string; body: string; state: string; createdBy: string; createdAt: string; disposition?: string
 }
 type TraceRequirement = {
   id: string
@@ -95,6 +98,14 @@ type TraceRequirement = {
   statement: string
   coverageState: 'Confirmed' | 'Suspect'
   isSuspect: boolean
+}
+type TraceCaseParent = {
+  linkId: string
+  caseRevisionId: string
+  displayNumber?: string
+  title?: string
+  state: string
+  outcome?: string
 }
 type TraceProvenance = {
   changeRequest: string; package: string; subjectDisplayNumber: string; action: string; isLegacy?: boolean
@@ -117,6 +128,7 @@ type ProcedureTrace = {
   package?: string
   provenanceNote?: string
   requirements: TraceRequirement[]
+  caseParents?: TraceCaseParent[]
   provenance: TraceProvenance[]
   build?: { releaseId: string; effectiveBaselineId: string; requirementBaselineId?: string; isExactManifest: boolean }
 }
@@ -142,6 +154,7 @@ const disciplineLabel = (discipline: ProcedureScope) => discipline === 'System' 
 const procedureLevelLabel = (level: Procedure['level']) =>
   level === 'HighLevel' ? 'HLR' : level === 'LowLevel' ? 'LLR' : 'System'
 const validLevel = (value: string | null, discipline: ProcedureScope, ladder: ProjectLadderProjection | null): ProcedureLevel => {
+  if (discipline === 'Software' && (!value || value === 'Software')) return 'Software'
   if (discipline === 'Software' && value === 'HighLevel' && ladderAllows(ladder, 'HighLevel', LadderCapability.Verification)) return value
   if (discipline === 'Software' && value === 'LowLevel' && ladderAllows(ladder, 'LowLevel', LadderCapability.Verification)) return value
   if (discipline === 'Software' && ladderAllows(ladder, 'HighLevel', LadderCapability.Verification)) return 'HighLevel'
@@ -172,23 +185,30 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
   ladder: ProjectLadderProjection | null
 }) {
   const opening = useRef(typeof location !== 'undefined' ? new URLSearchParams(location.search) : new URLSearchParams()).current
-  // The same explorer can inspect the dormant software-Procedure register through an explicit deep-link
-  // query. It deliberately has no release/effectivity context: a dormant Procedure is not a build artifact.
-  const dormantProcedureMode = discipline === 'Software'
-    && opening.get('artifactKind')?.toLowerCase() === 'procedure'
-  const currentArtifactWord = dormantProcedureMode ? 'test procedure' : verificationArtifactWord(discipline === 'System' ? 'System' : 'HighLevel')
-  // The explorer has two copy contracts: its compact filters/counts retain the historic short noun,
-  // while document and table landmarks name the full controlled artifact. Keeping both explicit avoids
-  // changing System's established "Procedure state" copy when software moves from Procedure to Case.
-  const currentArtifactShortWord = verificationArtifactNoun(discipline === 'System' || dormantProcedureMode ? 'System' : 'HighLevel').toLowerCase()
-  const currentArtifactShortPlural = `${currentArtifactShortWord}s`
-  const currentArtifactPlural = `${currentArtifactWord}s`
-  const currentArtifactNoun = (level?: string) => dormantProcedureMode ? 'Procedure' : verificationArtifactNoun(level === 'System' ? 'System' : 'HighLevel')
-  const artifactApiRoot = verificationArtifactApiRoot(discipline, dormantProcedureMode ? 'Procedure' : undefined)
+  // Cases and Procedures share one combined Explorer with an artifact-kind filter. The filter defaults to
+  // the complete inventory so the page communicates the controlled Case -> Procedure model immediately.
+  const [artifactKindFilter, setArtifactKindFilter] = useState<'all' | 'Case' | 'Procedure'>(() => {
+    // The neutral Explorer route opens the combined inventory, while the legacy Case and Procedure routes
+    // retain their original kind intent for links already in circulation.
+    const pathKind = typeof location !== 'undefined' && location.pathname.endsWith('/procedures')
+      ? 'procedure' : typeof location !== 'undefined' && location.pathname.endsWith('/cases') ? 'case' : ''
+    const kind = opening.get('artifactKind')?.toLowerCase() || pathKind
+    if (kind === 'procedure') return 'Procedure'
+    if (kind === 'case') return 'Case'
+    return 'all'
+  })
+  const isSystemScope = discipline === 'System'
+  const currentArtifactWord = isSystemScope ? verificationArtifactWord('System') : artifactKindFilter === 'Case' ? verificationArtifactWord('HighLevel', 'Case') : artifactKindFilter === 'Procedure' ? verificationArtifactWord('HighLevel', 'Procedure') : 'test artifact'
+  const currentArtifactShortWord = verificationArtifactNoun(isSystemScope ? 'System' : 'HighLevel', artifactKindFilter === 'all' ? 'Case' : artifactKindFilter).toLowerCase()
+  const currentArtifactDisplayWord = artifactKindFilter === 'all' && !isSystemScope ? 'test artifact' : currentArtifactShortWord
+  const currentArtifactShortPlural = isSystemScope ? 'procedures' : artifactKindFilter === 'Case' ? 'test cases' : artifactKindFilter === 'Procedure' ? 'test procedures' : 'test artifacts'
+  const currentArtifactPlural = isSystemScope ? 'test procedures' : artifactKindFilter === 'Case' ? 'test cases' : artifactKindFilter === 'Procedure' ? 'test procedures' : 'test artifacts'
+  const currentArtifactNoun = () => isSystemScope ? 'Procedure' : artifactKindFilter === 'Case' ? 'Case' : artifactKindFilter === 'Procedure' ? 'Procedure' : 'Test Artifact'
+  const artifactApiRoot = isSystemScope ? verificationArtifactApiRoot(discipline) : '/api/verification-artifacts'
   const queryKey = useCallback((suffix = '') =>
-    `${discipline === 'System' || dormantProcedureMode ? 'procedure' : 'case'}${suffix}`, [discipline, dormantProcedureMode])
+    `${isSystemScope ? 'procedure' : 'artifact'}${suffix}`, [isSystemScope])
   const queryValue = useCallback((params: URLSearchParams, suffix = '') =>
-    params.get(queryKey(suffix)) ?? (discipline === 'System' ? null : params.get(`procedure${suffix}`)),
+    params.get(queryKey(suffix)) ?? (discipline === 'System' ? null : params.get(`procedure${suffix}`) ?? params.get(`case${suffix}`)),
   [discipline, queryKey])
   const [data, setData] = useState<Page>()
   // Seeded from the address, so a link to one procedure opens on that procedure rather than on page one of
@@ -197,9 +217,16 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
   // — and the requirement trace's "Open test procedure" — keep working.
   const [level, setLevel] = useState<ProcedureLevel>(() =>
     validLevel(queryValue(opening, 'Level') ?? initialLevel ?? null, discipline, ladder))
+  const enabledSoftwareLevels = level === 'HighLevel' ? ['HighLevel'] : level === 'LowLevel' ? ['LowLevel'] : ['HighLevel', 'LowLevel']
+  const caseEnabled = isSystemScope || enabledSoftwareLevels.some(item => ladderEnablesArtifactKind(ladder, item as LadderLevel, 'Case'))
+  const procedureEnabled = isSystemScope || enabledSoftwareLevels.some(item => ladderEnablesArtifactKind(ladder, item as LadderLevel, 'Procedure'))
   const procedureDocumentTargets = configuredProcedureTargetsFor(ladder, discipline, level,
-    dormantProcedureMode ? 'Procedure' : undefined)
+    artifactKindFilter === 'all' ? undefined : artifactKindFilter)
   const procedureDocumentsEnabled = procedureDocumentTargets.length > 0
+  useEffect(() => {
+    if (artifactKindFilter === 'Procedure' && !procedureEnabled) setArtifactKindFilter(caseEnabled ? 'Case' : 'all')
+    if (artifactKindFilter === 'Case' && !caseEnabled) setArtifactKindFilter(procedureEnabled ? 'Procedure' : 'all')
+  }, [artifactKindFilter, caseEnabled, procedureEnabled])
   const [query, setQuery] = useState(queryValue(opening) ?? '')
   const [procedureState, setProcedureState] = useState(queryValue(opening, 'State') ?? '')
   const [procedureOutcome, setProcedureOutcome] = useState(queryValue(opening, 'Outcome') ?? '')
@@ -217,6 +244,8 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
   const appliedInitialView = useRef(false)
   const lastDiscreteState = useRef<string | null>(null)
   const [selectedId, setSelectedId] = useState(queryValue(opening, 'Id') ?? '')
+  const [selectedRevisionId, setSelectedRevisionId] = useState(queryValue(opening, 'RevisionId') ?? '')
+  const [selectedDisplayNumber, setSelectedDisplayNumber] = useState(queryValue(opening) ?? '')
   const [tab, setTab] = useState<Tab>(() => {
     const seeded = queryValue(opening, 'Tab')
     return seeded === 'trace' || seeded === 'history' || seeded === 'discussion' ? seeded : 'details'
@@ -247,7 +276,8 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
     setError('')
     try {
       const response = await fetch(
-        `${api}${artifactApiRoot}?projectId=${projectId}${dormantProcedureMode ? '&artifactKind=Procedure' : `&releaseId=${releaseId}`}&scope=${scope}` +
+        `${api}${artifactApiRoot}?projectId=${projectId}&releaseId=${releaseId}&scope=${scope}` +
+        (artifactKindFilter === 'all' ? '' : `&artifactKind=${artifactKindFilter}`) +
         `&search=${encodeURIComponent(query)}&state=${procedureState}&outcome=${procedureOutcome}` +
         (documentId ? `&documentId=${documentId}` : '') +
         (sectionId ? `&sectionId=${sectionId}` : '') +
@@ -260,19 +290,18 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
       if (mine !== listTicket.current) return
       setError(operationError(problem, `The ${currentArtifactWord} library could not be loaded.`))
     }
-  }, [api, artifactApiRoot, dormantProcedureMode, projectId, releaseId, scope, query, procedureState, procedureOutcome, page, pageSize, documentId, sectionId, currentArtifactWord])
+  }, [api, artifactApiRoot, artifactKindFilter, projectId, releaseId, scope, query, procedureState, procedureOutcome, page, pageSize, documentId, sectionId, currentArtifactWord])
 
   // The documents this discipline's procedures are written into. Read once per project and scope: the rail
   // is structure, not a result set, and re-reading it on every keystroke would make it flicker.
   useEffect(() => {
     let active = true
-    fetch(`${api}/api/projects/${projectId}/${verificationArtifactDocumentApiRoot(discipline,
-      dormantProcedureMode ? 'Procedure' : undefined)}?scope=${discipline}`)
+    fetch(`${api}/api/projects/${projectId}/${isSystemScope ? 'test-procedure-documents' : 'test-artifacts'}?scope=${discipline}`)
       .then(response => response.ok ? response.json() : [])
       .then((value: ProcedureDocument[]) => { if (active) setDocuments(value) })
       .catch(() => { if (active) setDocuments([]) })
     return () => { active = false }
-  }, [api, projectId, discipline, dormantProcedureMode])
+  }, [api, projectId, discipline, isSystemScope])
   useEffect(() => { void load() }, [load])
 
   /**
@@ -283,7 +312,7 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
   const mutateView = async (view: SavedView, method: 'PUT' | 'DELETE', body?: unknown) => {
     setError('')
     try {
-      await apiRequest(`${api}${artifactApiRoot}/views/${view.id}`, {
+      await apiRequest(`${api}/api/test-cases/views/${view.id}`, {
         method,
         ...(body === undefined ? {} : { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }),
       })
@@ -308,9 +337,10 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
       setQuery(saved.search || '')
       setProcedureState(saved.state || '')
       setProcedureOutcome(saved.outcome || '')
-      setLevel(validLevel(saved.level || null, discipline, ladder))
-      setDocumentId(saved.documentId || '')
-      setSectionId(saved.sectionId || '')
+       setLevel(validLevel(saved.level || null, discipline, ladder))
+       setDocumentId(saved.documentId || '')
+       setSectionId(saved.sectionId || '')
+      setArtifactKindFilter(saved.artifactKind === 'Procedure' ? 'Procedure' : saved.artifactKind === 'all' ? 'all' : 'Case')
       setViewId(view.id)
       setPage(1)
     } catch {
@@ -332,7 +362,7 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
     const fields = new FormData(event.currentTarget)
     setError('')
     try {
-      await apiRequest(`${api}${artifactApiRoot}/views`, {
+      await apiRequest(`${api}/api/test-cases/views`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -346,6 +376,7 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
             level,
             documentId,
             sectionId,
+            artifactKind: artifactKindFilter,
           }),
           columnsJson: '["identifier","level","verifies","latestResult","state"]',
         }),
@@ -362,10 +393,14 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
     const params = new URLSearchParams(location.search)
     const before = params.toString()
     const apply = (key: string, value: string) => { if (value) params.set(key, value); else params.delete(key) }
-    if (discipline !== 'System')
-      for (const suffix of ['', 'State', 'Outcome', 'Level', 'Page', 'Rows', 'Document', 'Section', 'View'])
+    if (discipline !== 'System') {
+      for (const suffix of ['', 'State', 'Outcome', 'Level', 'Page', 'Rows', 'Document', 'Section', 'View', 'Id', 'RevisionId', 'Tab']) {
         params.delete(`procedure${suffix}`)
-    apply(queryKey(), query)
+        params.delete(`case${suffix}`)
+      }
+    }
+    apply(queryKey(), selectedId ? selectedDisplayNumber : query)
+    if (discipline !== 'System') apply('artifactKind', artifactKindFilter === 'all' ? '' : artifactKindFilter)
     apply(queryKey('State'), procedureState)
     apply(queryKey('Outcome'), procedureOutcome)
     apply(queryKey('Level'), level === discipline ? '' : level)
@@ -374,9 +409,12 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
     apply(queryKey('Document'), documentId)
     apply(queryKey('Section'), sectionId)
     apply(queryKey('View'), viewId)
+    apply(queryKey('Id'), selectedId)
+    apply(queryKey('RevisionId'), selectedRevisionId)
+    apply(queryKey('Tab'), tab === 'details' ? '' : tab)
     // Seeded from what the address already says, so the reader's first change after a reload still earns a
     // history entry rather than being mistaken for arrival.
-    const discrete = `${level}|${procedureState}|${procedureOutcome}|${page}|${pageSize}|${documentId}|${sectionId}|${viewId}`
+    const discrete = `${level}|${artifactKindFilter}|${procedureState}|${procedureOutcome}|${page}|${pageSize}|${documentId}|${sectionId}|${viewId}`
     if (lastDiscreteState.current === null) lastDiscreteState.current = discrete
     if (params.toString() === before) return
     const next = `${location.pathname}${params.toString() ? `?${params}` : ''}`
@@ -388,7 +426,7 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
     // window.history explicitly: this component has its own `history` — the revision history of a procedure —
     // and the bare name resolves to that, which throws rather than navigating.
     if (push) window.history.pushState({}, '', next); else window.history.replaceState({}, '', next)
-  }, [discipline, level, query, procedureState, procedureOutcome, page, pageSize, documentId, sectionId, viewId, queryKey])
+  }, [discipline, level, query, artifactKindFilter, procedureState, procedureOutcome, page, pageSize, documentId, sectionId, viewId, selectedId, selectedDisplayNumber, selectedRevisionId, tab, queryKey])
 
   // The browser's own navigation must move the list, not just the address bar.
   useEffect(() => {
@@ -397,6 +435,8 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
       setQuery(queryValue(params) ?? '')
       setProcedureState(queryValue(params, 'State') ?? '')
       setProcedureOutcome(queryValue(params, 'Outcome') ?? '')
+      const kind = params.get('artifactKind')?.toLowerCase()
+      setArtifactKindFilter(kind === 'case' ? 'Case' : kind === 'procedure' ? 'Procedure' : 'all')
       setLevel(validLevel(queryValue(params, 'Level'), discipline, ladder))
       setPage(Number(queryValue(params, 'Page') ?? '1') || 1)
       setPageSize(Number(queryValue(params, 'Rows') ?? '25') || 25)
@@ -404,6 +444,8 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
       setSectionId(queryValue(params, 'Section') ?? '')
       setViewId(queryValue(params, 'View') ?? '')
       setSelectedId(queryValue(params, 'Id') ?? '')
+      setSelectedRevisionId(queryValue(params, 'RevisionId') ?? '')
+      setSelectedDisplayNumber(queryValue(params) ?? '')
       const seeded = queryValue(params, 'Tab')
       setTab(seeded === 'trace' || seeded === 'history' || seeded === 'discussion' ? seeded : 'details')
     }
@@ -418,6 +460,12 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
   // Keyed on the page rather than the derived array, so the identity stays stable between renders. The
   // history and discussion effects watch this object, and a fresh one every render would refetch forever.
   const selected = useMemo(() => data?.items.find(x => x.id === selectedId), [data, selectedId])
+  const selectedArtifactApiRoot = verificationArtifactApiRoot(isSystemScope ? 'System' : 'Software', selected?.artifactKind)
+  const selectedRevision = selectedRevisionId || selected?.revisionId || ''
+  const selectedIsProcedure = selected?.artifactKind === 'Procedure'
+  const selectedIsSoftwareProcedure = selectedIsProcedure && !isSystemScope
+  const selectedArtifactWord = selectedIsProcedure ? 'test procedure' : 'test case'
+  const selectedArtifactShortWord = selectedIsProcedure ? 'procedure' : 'case'
 
   // Loaded when the tab is opened rather than with the list. A reader browsing forty procedures does not need
   // forty revision histories fetched on their behalf.
@@ -427,12 +475,12 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
     void (async () => {
       try {
         const response = await fetch(
-          `${api}${artifactApiRoot}/${selected.id}/history?${dormantProcedureMode ? '' : `releaseId=${releaseId}&`}revisionId=${selected.revisionId}`)
+           `${api}${selectedArtifactApiRoot}/${selected.id}/history?releaseId=${releaseId}&revisionId=${selectedRevision}`)
         if (response.ok && active) setHistory(await response.json())
       } catch { if (active) setHistory(undefined) }
     })()
     return () => { active = false }
-  }, [api, artifactApiRoot, dormantProcedureMode, releaseId, selected, tab])
+  }, [api, selectedArtifactApiRoot, releaseId, selected, selectedRevision, tab])
 
   // Loaded when the tab is opened rather than with the list, like history: a reader browsing procedures does
   // not need every trace fetched on their behalf. The server projection is authoritative, naming the exact
@@ -444,20 +492,20 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
     void (async () => {
       try {
         const response = await fetch(
-          `${api}${artifactApiRoot}/${selected.id}/trace?${dormantProcedureMode ? '' : `releaseId=${releaseId}&`}revisionId=${selected.revisionId}`)
+           `${api}${selectedArtifactApiRoot}/${selected.id}/trace?releaseId=${releaseId}&revisionId=${selectedRevision}`)
         if (response.ok && active) setTrace(await response.json())
         else if (active) setTraceError(true)
       } catch { if (active) setTraceError(true) }
     })()
     return () => { active = false }
-  }, [api, artifactApiRoot, dormantProcedureMode, releaseId, selected, tab])
+  }, [api, selectedArtifactApiRoot, releaseId, selected, selectedRevision, tab])
 
   const loadComments = useCallback(async (procedureId: string) => {
     try {
-      const response = await fetch(`${api}${artifactApiRoot}/${procedureId}/comments`)
+      const response = await fetch(`${api}${selectedArtifactApiRoot}/${procedureId}/comments`)
       if (response.ok) setComments(await response.json())
     } catch { setComments([]) }
-  }, [api, artifactApiRoot])
+  }, [api, selectedArtifactApiRoot])
   // On selection rather than on opening the tab, because the tab wears the count. A number fetched only once
   // somebody looks is a number that is wrong until they do.
   useEffect(() => {
@@ -474,9 +522,9 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
     const mentions = [...body.matchAll(/@([a-z0-9._-]+)/gi)].map(match => match[1])
     setError('')
     try {
-      await apiRequest(`${api}${artifactApiRoot}/${selected.id}/comments`, {
+      await apiRequest(`${api}${selectedArtifactApiRoot}/${selected.id}/comments`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ revisionId: selected.revisionId, body, mentions }),
+        body: JSON.stringify({ releaseId, revisionId: selected.revisionId, body, mentions }),
       })
       form.reset()
       await loadComments(selected.id)
@@ -492,7 +540,7 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
     try {
       await apiRequest(`${api}/api/enterprise-requirements/comments/${id}/resolve`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ disposition }),
+        body: JSON.stringify({ releaseId, disposition }),
       })
       await loadComments(selected.id)
     } catch (problem) { setError(operationError(problem, 'The comment could not be resolved.')) }
@@ -506,10 +554,10 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
     setCoverage(undefined)
     setCoverageRead(false)
     setShowAllCoverage(false)
-  }, [api, projectId, releaseId, scope, dormantProcedureMode])
+  }, [api, projectId, releaseId, scope, artifactKindFilter])
 
   useEffect(() => {
-    if (dormantProcedureMode || !showAdvanced || coverageRead) return
+    if ((!isSystemScope && artifactKindFilter !== 'Case') || !showAdvanced || coverageRead) return
     let active = true
     void (async () => {
       const { coverage: next, failed } = await loadCoverage(api, projectId, releaseId, scope)
@@ -519,17 +567,21 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
       if (failed) setError('The requirement coverage for this build could not be read.')
     })()
     return () => { active = false }
-  }, [api, projectId, releaseId, scope, showAdvanced, coverageRead, dormantProcedureMode])
+  }, [api, projectId, releaseId, scope, showAdvanced, coverageRead, artifactKindFilter, isSystemScope])
 
   const uncovered = coverage?.items.filter(item => item.disposition === 'Uncovered') ?? []
   const suspect = coverage?.items.filter(item => item.disposition === 'Suspect') ?? []
 
   const open = (procedure: Procedure) => {
-    setSelectedId(procedure.id); setTab('details'); setHistory(undefined); setTrace(undefined); setTraceError(false)
+    setSelectedId(procedure.id); setSelectedRevisionId(procedure.revisionId); setTab('details'); setHistory(undefined); setTrace(undefined); setTraceError(false)
     const params = new URLSearchParams(location.search)
     if (discipline !== 'System')
       for (const suffix of ['', 'Id', 'RevisionId', 'Tab']) params.delete(`procedure${suffix}`)
-    params.set(queryKey(), procedure.displayNumber)
+    const exactDisplayNumber = procedure.displayNumber.includes('.')
+      ? procedure.displayNumber
+      : `${procedure.displayNumber}.${String(procedure.revision ?? 0).padStart(2, '0')}`
+    setSelectedDisplayNumber(exactDisplayNumber)
+    params.set(queryKey(), exactDisplayNumber)
     params.set(queryKey('Id'), procedure.id)
     params.set(queryKey('RevisionId'), procedure.revisionId)
     params.delete(queryKey('Tab'))
@@ -537,6 +589,8 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
   }
   const close = () => {
     setSelectedId('')
+    setSelectedRevisionId('')
+    setSelectedDisplayNumber('')
     const params = new URLSearchParams(location.search)
     for (const suffix of ['Id', 'RevisionId', 'Tab']) {
       params.delete(queryKey(suffix))
@@ -560,7 +614,7 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
     <ControlledArtifactExplorerHeader
       back={onBack ? { label: 'Command Center', onClick: onBack } : undefined}
       eyebrow={`CONTROLLED ${currentArtifactPlural.toUpperCase()} / READ-ONLY EXPLORER`}
-      title={dormantProcedureMode ? 'Software Procedure Explorer' : discipline === 'System' ? 'System Test Procedure Explorer' : 'Software Test Case Explorer'}
+      title={discipline === 'System' ? 'System Test Procedure Explorer' : 'Software Test Case/Procedure Explorer'}
     />
     {error && <div className="workspaceError" role="alert">{error}</div>}
 
@@ -586,7 +640,7 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
           are carried by `aria-label`, so nothing is lost to a screen reader or to a test. */}
       <div className="reqSearch procedureFind">
         <span>⌕</span>
-        <input aria-label={`Find a ${currentArtifactShortWord}`} value={query}
+        <input aria-label={`Find a ${currentArtifactDisplayWord}`} value={query}
           onChange={event => { setQuery(event.target.value); setPage(1) }}
           placeholder="Search any identifier fragment or title…" />
         {/* The count belongs on the search, where the requirements Explorer puts it: a filtered list whose
@@ -603,9 +657,15 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
           <option value="Software">All software {currentArtifactPlural}</option>
            {ladderAllows(ladder, 'HighLevel', LadderCapability.Verification) && <option value="HighLevel">Software HLR</option>}
            {ladderAllows(ladder, 'LowLevel', LadderCapability.Verification) && <option value="LowLevel">Software LLR</option>}
-        </select>
+       </select>
       )}
-      <select aria-label={`${currentArtifactShortWord} state`} value={procedureState}
+      {discipline === 'Software' && <select aria-label="Artifact filter" value={artifactKindFilter}
+        onChange={event => { setArtifactKindFilter(event.target.value as 'all' | 'Case' | 'Procedure'); setDocumentId(''); setSectionId(''); setPage(1) }}>
+        <option value="all">All test artifacts</option>
+        {caseEnabled && <option value="Case">Test cases</option>}
+        {procedureEnabled && <option value="Procedure">Test procedures</option>}
+      </select>}
+      <select aria-label={`${currentArtifactDisplayWord} state`} value={procedureState}
         onChange={event => { setProcedureState(event.target.value); setPage(1) }}>
         <option value="">All states</option>
         <option value="Draft">Draft</option>
@@ -619,15 +679,15 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
         <option value="Fail">Fail</option>
         <option value="Blocked">Blocked</option>
       </select>
-      {!dormantProcedureMode && <button type="button" className={showAdvanced ? 'advanced active' : 'advanced'}
+      {(isSystemScope || artifactKindFilter === 'Case') && <button type="button" className={showAdvanced ? 'advanced active' : 'advanced'}
         aria-expanded={showAdvanced} onClick={() => setShowAdvanced(current => !current)}>
         Advanced
       </button>}
       <button type="button" className="clear"
-        disabled={level === discipline && !query && !procedureState && !procedureOutcome && !documentId && !sectionId && !viewId}
+         disabled={level === discipline && artifactKindFilter === 'all' && !query && !procedureState && !procedureOutcome && !documentId && !sectionId && !viewId}
         onClick={() => {
           setViewId('')
-          setQuery(''); setProcedureState(''); setProcedureOutcome('')
+           setQuery(''); setProcedureState(''); setProcedureOutcome(''); setArtifactKindFilter('all')
           setLevel(discipline)
           setDocumentId(''); setSectionId(''); setPage(1)
         }}>
@@ -644,10 +704,10 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
       </label>
     </section>
 
-    {!dormantProcedureMode && showAdvanced && <div className="explorerCoverage" aria-label={`Advanced ${currentArtifactShortWord} coverage`}>
+      {(isSystemScope || artifactKindFilter === 'Case') && showAdvanced && <div className="explorerCoverage" aria-label={`Advanced ${currentArtifactDisplayWord} coverage`}>
       <section className="coverageSummary" aria-label="Coverage summary">
         <article><b>{coverage?.total ?? 0}</b><span>Requirements</span></article>
-        <article><b>{coverage?.covered ?? 0}</b><span>With a {currentArtifactShortWord}</span></article>
+        <article><b>{coverage?.covered ?? 0}</b><span>With a {currentArtifactDisplayWord}</span></article>
         <article className={uncovered.length ? 'attention' : ''}><b>{uncovered.length}</b><span>With none</span></article>
         <article className={suspect.length ? 'attention' : ''}><b>{suspect.length}</b><span>Suspect coverage</span></article>
       </section>
@@ -655,10 +715,10 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
       {(uncovered.length > 0 || suspect.length > 0) && <section className="coverageCard">
         <div className="cardTitle">
           <h2>Requirements needing attention</h2>
-          <p>A requirement with no {currentArtifactShortWord} cannot be verified, and coverage carried across a change nobody reconfirmed does not count.</p>
+          <p>A requirement with no {currentArtifactDisplayWord} cannot be verified, and coverage carried across a change nobody reconfirmed does not count.</p>
         </div>
         {uncovered.slice(0, 25).map(item => <article className="coverageRow attention" key={item.revisionId}>
-          <div><b>{item.displayNumber}</b><i>No {currentArtifactShortWord}</i></div>
+          <div><b>{item.displayNumber}</b><i>No {currentArtifactDisplayWord}</i></div>
           <p>{item.statement}</p>
         </article>)}
         {suspect.slice(0, 25).map(item => <article className="coverageRow attention" key={`suspect-${item.revisionId}`}>
@@ -684,7 +744,7 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
               <i>{item.verified ? 'Verified'
                 : item.coveredBy.some(procedure => procedure.coverageState === 'Suspect') ? 'Suspect'
                 : item.covered ? 'Covered'
-                : `No ${currentArtifactShortWord}`}</i>
+                : `No ${currentArtifactDisplayWord}`}</i>
             </div>
             <p>{item.statement}</p>
             {item.coveredBy.length > 0 && <small>
@@ -731,7 +791,7 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
           </div>
         ))}
         {documents.length === 0 && (
-          <p className="railEmpty">No {currentArtifactShortWord} document for this discipline yet.</p>
+          <p className="railEmpty">No {currentArtifactDisplayWord} document for this discipline yet.</p>
         )}
       </nav>}
 
@@ -814,14 +874,15 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
         </div>
         {procedures.length === 0
           ? <p className="procedureEmpty">{query || procedureState || procedureOutcome || documentId || sectionId
-            ? `No ${currentArtifactShortWord} matches that. Clear the search or the filters to see the rest.`
+            ? `No ${currentArtifactDisplayWord} matches that. Clear the search or the filters to see the rest.`
             : `This build has no controlled ${disciplineLabel(discipline).toLowerCase()} ${currentArtifactPlural} yet.`}</p>
           : (
             <div className="reqTable procedureList" role="table" aria-label={`Controlled ${currentArtifactPlural}`}>
               <div className="reqTableHead" role="row">
                 <span role="columnheader">Identifier &amp; title</span>
-                <span role="columnheader">Level</span>
-                <span role="columnheader">{dormantProcedureMode ? 'Exact Case parents' : 'Verifies'}</span>
+                 <span role="columnheader">Artifact</span>
+                 <span role="columnheader">Level</span>
+                <span role="columnheader">Parent / Verifies</span>
                 <span role="columnheader">Latest result</span>
                 <span role="columnheader">State</span>
                 <span role="columnheader">Discussion</span>
@@ -841,8 +902,11 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
                         <b>{procedure.displayNumber}</b>
                         <p>{procedure.title}</p>
                       </button>
+                    <span className={`artifactBadge ${procedure.artifactKind?.toLowerCase() ?? 'unknown'}`}>{procedure.artifactLabel ?? procedure.artifactKind ?? 'Artifact'}</span>
                     <span>{procedureLevelLabel(procedure.level)}</span>
-                    <span>{dormantProcedureMode ? (procedure.parentCount ?? 0) : procedure.requirementCount}</span>
+                    <span>{procedure.artifactKind === 'Procedure' && procedure.level !== 'System'
+                      ? procedure.parentCount ?? 0
+                      : procedure.requirementCount ?? 0}</span>
                     <span>{procedure.lastOutcome ?? 'Not run'}</span>
                     <i className={procedure.state.toLowerCase()}>{stateLabel(procedure.state)}</i>
                     <span>○ 0</span>
@@ -865,9 +929,9 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
       </section>
 
       {selected ? <ControlledArtifactInspector
-        artifactType={`${procedureLevelLabel(selected.level).toUpperCase()} ${currentArtifactWord.toUpperCase()}`}
+        artifactType={`${procedureLevelLabel(selected.level).toUpperCase()} ${selectedArtifactWord.toUpperCase()}`}
         displayNumber={selected.displayNumber}
-        closeLabel={`Close ${currentArtifactShortWord} detail`}
+         closeLabel={`Close ${selectedArtifactShortWord} detail`}
         onClose={close}
         tabs={[
           { id: 'details', label: 'Overview' },
@@ -882,14 +946,14 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
           {tab === 'details' && (
             <div className="inspectorBody">
               {selected.titleNote && <p className="inspectorNote warn">{selected.titleNote}</p>}
-              <h3>{currentArtifactNoun(selected.level)} title</h3>
+               <h3>{selectedIsProcedure ? 'Procedure' : 'Case'} title</h3>
               <div className="richRequirement">{selected.title}</div>
               <dl className="procedureCase">
                 <dt>Objective</dt><dd>{selected.objective || 'Not recorded'}</dd>
                 <dt>Preconditions</dt><dd>{selected.preconditions || 'None'}</dd>
                 <dt>Steps</dt><dd>{selected.steps || 'Not recorded'}</dd>
                 <dt>Expected result</dt><dd>{selected.expectedResult || 'Not recorded'}</dd>
-                {dormantProcedureMode && <>
+                {selectedIsProcedure && <>
                   <dt>Environment / setup</dt><dd>{selected.environmentSetup || 'Not recorded'}</dd>
                   <dt>Test data</dt><dd>{selected.testData || 'Not recorded'}</dd>
                   <dt>Ordered executable steps</dt><dd>{selected.orderedSteps || 'Not recorded'}</dd>
@@ -907,10 +971,8 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
 
           {tab === 'trace' && (
             <div className="inspectorBody">
-              {/* The other direction from a requirement's trace: a requirement shows what derives from it, a
-                  procedure shows what it exists to verify. The server projection names the exact revision this
-                  build carries and every exact requirement revision it verifies, with its Confirmed or Suspect
-                  coverage state and the TCR/change provenance that produced the procedure revision. */}
+              {/* A Case traces to the requirements it verifies. A software Procedure traces to its exact Case
+                  parents and their Case <-> Procedure lifecycle; System remains the direct requirement trace. */}
               {trace ? (
                 <>
                   <div className="traceRevisionIdentity">
@@ -930,16 +992,34 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
                     <p className="traceProvenance">Produced by {trace.package}</p>
                   )}
                   {trace.provenanceNote && <p className="inspectorNote warn">{trace.provenanceNote}</p>}
-                  <p className="inspectorNote">
-                    This {currentArtifactShortWord} verifies {trace.requirements.length} requirement{trace.requirements.length === 1 ? '' : 's'}.
-                  </p>
-                  {trace.requirements.length === 0 ? (
-                    <p className="inspectorNote warn">
-                      Nothing is verified by {trace.displayNumber}. Either it has not been linked yet, or the
-                      requirement it was written against has been retired.
+                  {selectedIsProcedure && selected.level !== 'System' ? (
+                    trace.caseParents?.length ? <>
+                      <p className="inspectorNote">This Procedure runs against {trace.caseParents.length} exact Case parent{trace.caseParents.length === 1 ? '' : 's'}.</p>
+                      <ul className="traceRequirements" aria-label="Exact Case parents">
+                        {trace.caseParents.map(parent => <li key={parent.linkId} className="traceRequirement">
+                          <div className="traceRequirementHead">
+                            <b>{parent.displayNumber ?? parent.caseRevisionId}</b>
+                            <span>Case</span>
+                            <i className="traceCoverageBadge confirmed">{parent.state}</i>
+                          </div>
+                          {parent.title && <p>{parent.title}</p>}
+                          <small>Exact Case revision {parent.caseRevisionId}</small>
+                          {parent.outcome && <small>Disposition: {parent.outcome}</small>}
+                          <ExactLinkLifecyclePanel api={api} routeRoot="case-procedure-links"
+                            linkId={parent.linkId} initialState={parent.state} />
+                        </li>)}
+                      </ul>
+                    </> : <p className="inspectorNote warn">No exact Case parent is linked to this Procedure revision.</p>
+                  ) : <>
+                    <p className="inspectorNote">
+                      This {trace.level === 'System' ? 'procedure' : 'Case'} verifies {trace.requirements.length} requirement{trace.requirements.length === 1 ? '' : 's'}.
                     </p>
-                  ) : (
-                    <ul className="traceRequirements">
+                    {trace.requirements.length === 0 ? (
+                      <p className="inspectorNote warn">
+                        Nothing is verified by {trace.displayNumber}. Either it has not been linked yet, or the
+                        requirement it was written against has been retired.
+                      </p>
+                    ) : <ul className="traceRequirements">
                       {trace.requirements.map(item => (
                         <li key={item.revisionId}
                           className={`traceRequirement${item.coverageState === 'Suspect' ? ' suspect' : ''}`}>
@@ -958,11 +1038,11 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
                           </button>
                         </li>
                       ))}
-                    </ul>
-                  )}
+                    </ul>}
+                  </>}
                 </>
               ) : traceError ? (
-                <p className="inspectorNote warn">The trace for this {currentArtifactShortWord} revision could not be loaded.</p>
+                <p className="inspectorNote warn">The trace for this {selectedArtifactShortWord} revision could not be loaded.</p>
               ) : (
                 <p className="inspectorNote">Loading trace…</p>
               )}
@@ -989,11 +1069,11 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
                     {revision.provenanceNote && (
                       <span className="inspectorNote warn">{revision.provenanceNote}</span>
                     )}
-                    {dormantProcedureMode && <span className="revisionDriver">
+                    {selectedIsSoftwareProcedure && <span className="revisionDriver">
                       {revision.parentKind ?? 'Unspecified'} · {revision.caseRevisionIds?.length ?? 0} exact Case parent{revision.caseRevisionIds?.length === 1 ? '' : 's'}
                       {revision.derivedRationale ? ` · ${revision.derivedRationale}` : ''}
                     </span>}
-                    {dormantProcedureMode && revision.caseParents?.map(parent =>
+                    {selectedIsSoftwareProcedure && revision.caseParents?.map(parent =>
                       <div key={parent.linkId}>
                         <span className="revisionDriver">
                           Exact Case {parent.caseRevisionId} · relationship {parent.state}
@@ -1015,9 +1095,7 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
 
           {tab === 'discussion' && (
             <div className="inspectorBody discussionPane">
-              {dormantProcedureMode ? <div className="traceEmpty">
-                <span>Discussion is read-only for dormant software Procedures.</span>
-              </div> : !released ? <form onSubmit={addComment}>
+              {!released ? <form onSubmit={addComment}>
                 <textarea name="body" required
                   placeholder="Add an attributable comment. Use @username to mention someone." />
                 <div className="commentFoot"><button>Add comment</button></div>
@@ -1032,9 +1110,12 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
                   </div>
                   <p>{comment.body}</p>
                   {comment.disposition && <small>Disposition: {comment.disposition}</small>}
+                  {!comment.revisionId && (
+                    <small className="inspectorNote">Historical comment has no exact revision context; it is read-only.</small>
+                  )}
                   <footer>
                     <i>{stateLabel(comment.state)}</i>
-                    {comment.state === 'Open' && !released && !dormantProcedureMode && (
+                    {comment.revisionId && comment.state === 'Open' && !released && (
                       <button onClick={() => void resolveComment(comment.id)}>Resolve / disposition</button>
                     )}
                   </footer>
@@ -1043,7 +1124,7 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
             </div>
           )}
       </ControlledArtifactInspector> : <ControlledArtifactInspectorEmpty
-        title={currentArtifactNoun(discipline === 'System' ? 'System' : 'HighLevel')}
+        title={currentArtifactNoun()}
         description={`Choose a controlled ${currentArtifactWord} to review its overview, trace, history, and discussion.`}
       />}
     </ControlledArtifactExplorerLayout>

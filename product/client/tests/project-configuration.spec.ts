@@ -75,7 +75,7 @@ test('Project configuration authors and activates a disposable graph, records hi
   await verification.getByRole('button', { name: 'Software' }).click()
   await expect(verification.getByRole('link', { name: 'Software LLR Test Results' })).toBeVisible()
   await expect(verification.getByRole('link', { name: 'Software HLR Test Results' })).toHaveCount(0)
-  await expect(verification.getByRole('link', { name: 'Software Test Case Explorer' })).toBeVisible()
+  await expect(verification.getByRole('link', { name: 'Test Case/Procedure Explorer' })).toBeVisible()
 
   let removedLevelProcedureRequests = 0
   page.on('request', request => {

@@ -6,7 +6,7 @@ import { fromPlainText, toPlainText } from './richContentModel'
 import ControlledProcedureEditor from './ControlledProcedureEditor'
 import { apiRequest, operationError } from './apiClient'
 import type { TestDiscipline } from './TestResultsWorkspace'
-import { verificationArtifactNoun, verificationArtifactWord } from './presentation'
+import { isVerificationProcedureKind, testChangeRequestAcronym, verificationArtifactNoun, verificationArtifactWord } from './presentation'
 import './ChangeRequestEditor.css'
 
 /**
@@ -22,7 +22,10 @@ import './ChangeRequestEditor.css'
  */
 
 type SourceChoice = {
-  changeRequestId: string
+  /** Legacy Case source identity; Procedure sources use sourceId/sourceKind. */
+  changeRequestId?: string
+  sourceId: string
+  sourceKind: 'ChangeRequest' | 'CaseChange' | 'CaseAssessment'
   displayNumber: string
   title: string
   state: string
@@ -49,8 +52,6 @@ type ProcedureChangeDraft = {
 
 const labelFor = (discipline: TestDiscipline) =>
   discipline === 'System' ? 'System' : discipline === 'HighLevelSoftware' ? 'HLR' : 'LLR'
-const acronymFor = (discipline: TestDiscipline) =>
-  discipline === 'System' ? 'SYSTPCR' : discipline === 'HighLevelSoftware' ? 'HLRTCCR' : 'LLRTCCR'
 const levelFor = (discipline: TestDiscipline) =>
   discipline === 'System' ? 'System' : discipline === 'HighLevelSoftware' ? 'HighLevel' : 'LowLevel'
 
@@ -91,6 +92,7 @@ export default function TestChangeRequestEditor({
   releaseId,
   releaseVersion,
   discipline,
+  artifactKind,
   onCancel,
   onRaised,
 }: {
@@ -100,13 +102,17 @@ export default function TestChangeRequestEditor({
   releaseId: string
   releaseVersion: string
   discipline: TestDiscipline
+  artifactKind?: string
   onCancel: () => void
   onRaised: (id: string, displayNumber: string) => void
 }) {
   const label = labelFor(discipline)
-  const acronym = acronymFor(discipline)
-  const artifactWord = verificationArtifactWord(discipline)
-  const artifactNoun = verificationArtifactNoun(discipline)
+  const procedurePackage = discipline !== 'System' && isVerificationProcedureKind(artifactKind)
+  const procedureVocabulary = discipline === 'System' || procedurePackage
+  const level = levelFor(discipline)
+  const acronym = testChangeRequestAcronym(level, procedurePackage ? 'Procedure' : 'Case')
+  const artifactWord = verificationArtifactWord(level, procedurePackage ? 'Procedure' : 'Case')
+  const artifactNoun = verificationArtifactNoun(level, procedurePackage ? 'Procedure' : 'Case')
 
   const [title, setTitle] = useState('')
   const [problemRich, setProblemRich] = useState(fromPlainText(''))
@@ -163,21 +169,28 @@ export default function TestChangeRequestEditor({
   const load = useCallback(async () => {
     try {
       setLoadError('')
-      setChoices(await apiRequest<SourceChoice[]>(
-        `${api}/api/releases/${releaseId}/test-change-request-sources?discipline=${discipline}`))
+      const response = await apiRequest<Array<SourceChoice & { sourceId?: string; sourceKind?: SourceChoice['sourceKind'] }>>(
+        `${api}/api/releases/${releaseId}/test-change-request-sources?discipline=${discipline}` +
+        (procedurePackage ? '&artifactKind=Procedure' : ''))
+      setChoices(response.map(choice => ({
+        ...choice,
+        sourceId: choice.sourceId ?? choice.changeRequestId ?? '',
+        sourceKind: choice.sourceKind ?? 'ChangeRequest',
+      })))
     } catch (failure) {
       setLoadError(operationError(failure, 'The changes this package could answer for could not be loaded.'))
     }
-  }, [api, discipline, releaseId])
+  }, [api, discipline, procedurePackage, releaseId])
 
   useEffect(() => { void load() }, [load])
 
-  const toggle = (id: string) =>
-    setSelected(current => current.includes(id) ? current.filter(value => value !== id) : [...current, id])
+  const toggle = (id: string) => setSelected(current => procedurePackage
+    ? current[0] === id ? [] : [id]
+    : current.includes(id) ? current.filter(value => value !== id) : [...current, id])
 
   // A package must say what concluded the work was required, and either kind of driver says it: an approved
   // change at this package's own level, or a Problem Report (DEC-113).
-  const hasDriver = selected.length > 0 || problemReportIds.length > 0
+  const hasDriver = procedurePackage ? selected.length === 1 : selected.length > 0 || problemReportIds.length > 0
   const caseComplete = useMemo(() =>
     title.trim().length > 0
     && toPlainText(problemRich).trim().length > 0
@@ -196,35 +209,49 @@ export default function TestChangeRequestEditor({
     setBusy(true)
     setError('')
     try {
+      const payload = procedurePackage
+        ? {
+          discipline,
+          artifactKind: 'Procedure',
+          ...(choices.find(choice => choice.sourceId === selected[0])?.sourceKind === 'CaseAssessment'
+            ? { caseAssessmentIds: selected }
+            : { caseChangeIds: selected }),
+          title: title.trim(),
+          problem: toPlainText(problemRich),
+          analysis: toPlainText(analysisRich),
+          solution: toPlainText(solutionRich),
+          problemRich,
+          analysisRich,
+          solutionRich,
+          artifactChanges: procedureChanges.map(draft => ({
+            baseNumber: draft.baseNumber.trim(), revision: draft.revision, level: levelFor(discipline), kind: draft.kind,
+            title: draft.title.trim(), objective: draft.objective.trim(), preconditions: draft.preconditions.trim(),
+            steps: draft.steps.trim(), expectedResult: draft.expectedResult.trim(), rationale: draft.rationale.trim(),
+          })),
+        }
+        : {
+          discipline,
+          changeRequestIds: selected,
+          problemReportIds,
+          title: title.trim(),
+          problem: toPlainText(problemRich),
+          analysis: toPlainText(analysisRich),
+          solution: toPlainText(solutionRich),
+          problemRich,
+          analysisRich,
+          solutionRich,
+          artifactChanges: procedureChanges.map(draft => ({
+            baseNumber: draft.baseNumber.trim(), revision: draft.revision, level: levelFor(discipline), kind: draft.kind,
+            title: draft.title.trim(), objective: draft.objective.trim(), preconditions: draft.preconditions.trim(),
+            steps: draft.steps.trim(), expectedResult: draft.expectedResult.trim(), rationale: draft.rationale.trim(),
+          })),
+        }
       const result = await apiRequest<{ id: string; displayNumber: string }>(
         `${api}/api/releases/${releaseId}/test-change-requests`,
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            discipline,
-            changeRequestIds: selected,
-            problemReportIds,
-            title: title.trim(),
-            problem: toPlainText(problemRich),
-            analysis: toPlainText(analysisRich),
-            solution: toPlainText(solutionRich),
-            problemRich,
-            analysisRich,
-            solutionRich,
-            artifactChanges: procedureChanges.map(draft => ({
-              baseNumber: draft.baseNumber.trim(),
-              revision: draft.revision,
-              level: levelFor(discipline),
-              kind: draft.kind,
-              title: draft.title.trim(),
-              objective: draft.objective.trim(),
-              preconditions: draft.preconditions.trim(),
-              steps: draft.steps.trim(),
-              expectedResult: draft.expectedResult.trim(),
-              rationale: draft.rationale.trim(),
-            })),
-          }),
+          body: JSON.stringify(payload),
         })
       onRaised(result.id, result.displayNumber)
     } catch (failure) {
@@ -241,7 +268,7 @@ export default function TestChangeRequestEditor({
       <header className="editorHeading">
         <div>
           <p className="eyebrow">VERIFICATION CHANGE CONTROL / NEW {acronym}</p>
-          <h1>Create {label} Test Change Request</h1>
+          <h1>Create {label} Test {procedureVocabulary ? 'Procedure' : 'Case'} Change Request</h1>
           <p>Build the engineering case and name the {artifactWord} work for Build {releaseVersion}.</p>
         </div>
         <span className="draftChip">DRAFT</span>
@@ -307,31 +334,31 @@ export default function TestChangeRequestEditor({
           </div>
 
           <fieldset className="tcrSourceChoices">
-            <legend>Approved {label} changes this package answers for</legend>
+            <legend>{procedurePackage ? `Eligible ${label} Case origins for this Procedure package` : `Approved ${label} changes this package answers for`}</legend>
             {choices.length === 0
               ? <p className="drawerEmpty">
-                  No approved {label} change requests in this build. A {label} {artifactNoun.toLowerCase()} verifies {label}{' '}
-                  requirements, so only {label} changes can drive this package — changes at other levels are
-                  not offered.
+                  No eligible {procedurePackage ? `${label} Case changes or resolved Case assessments` : `${label} change requests`} in this build.
                 </p>
               : choices.map(choice => (
-                <label key={choice.changeRequestId} className={choice.selectable ? '' : 'tcrSourceUnavailable'}>
-                  <input type="checkbox" checked={selected.includes(choice.changeRequestId)}
-                    disabled={!choice.selectable} onChange={() => toggle(choice.changeRequestId)} />
+                <label key={choice.sourceId} className={choice.selectable ? '' : 'tcrSourceUnavailable'}>
+                  <input type={procedurePackage ? 'radio' : 'checkbox'} name={procedurePackage ? 'procedureOrigin' : undefined}
+                    checked={selected.includes(choice.sourceId)}
+                    disabled={!choice.selectable} onChange={() => toggle(choice.sourceId)} />
                   <span><b>{choice.displayNumber}</b> {choice.title} <i>{choice.state}</i>
                     {!choice.selectable && choice.reason && <small>{choice.reason}</small>}</span>
                 </label>
               ))}
           </fieldset>
 
-          <ProblemReportPicker api={api} projectId={projectId} scope="target-build" releaseId={releaseId}
+          {!procedurePackage && <ProblemReportPicker api={api} projectId={projectId} scope="target-build" releaseId={releaseId}
             selected={problemReportIds} onChange={setProblemReportIds}
-            legend={`Problem Reports driving this ${label} TCR`} />
+            legend={`Problem Reports driving this ${label} TCR`} />}
 
           {!hasDriver && (
             <p className="tcrDriverHint">
-              Name at least one driver — an approved {label} change request above, or a Problem Report. A
-              package has to say what concluded the test work was required.
+              {procedurePackage
+                ? `Select exactly one eligible ${label} Case origin above. A Procedure package must carry the Case change or resolved Case assessment that required this work.`
+                : `Name at least one driver — an approved ${label} change request above, or a Problem Report. A package has to say what concluded the test work was required.`}
             </p>
           )}
         </section>
@@ -363,7 +390,7 @@ export default function TestChangeRequestEditor({
             <button type="button" onClick={() => addProposal("Retire")}>Retire existing</button>
             {/* The common case, one click instead of a hunt: the procedures that already verify what the
                 selected changes touched, brought in as Modify proposals to re-align. */}
-            {selected.length > 0 && (
+            {!procedurePackage && selected.length > 0 && (
               <button type="button" className="suggestCoverage" onClick={() => void suggestCoverage()}>
                 Add the {artifactNoun.toLowerCase()}s these changes affect
               </button>

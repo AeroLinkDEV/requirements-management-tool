@@ -1824,7 +1824,7 @@ public static class VerificationImpactEndpoints
         /// before submission why an approved change cannot be added — already assessed, already claimed, or
         /// not eligible for this build. No cross-project information is exposed.
         app.MapGet("/api/releases/{releaseId:guid}/test-change-request-sources", async (Guid releaseId,
-            TestChangeReviewDiscipline discipline, HttpContext http, AeroLinkDbContext db,
+            TestChangeReviewDiscipline discipline, VerificationArtifactKind? artifactKind, HttpContext http, AeroLinkDbContext db,
             IProjectLadderPolicyResolver policyResolver, CancellationToken ct) =>
         {
             var release = await db.Releases.AsNoTracking().Where(x => x.Id == releaseId)
@@ -1834,6 +1834,81 @@ public static class VerificationImpactEndpoints
             if (!await http.HasProjectAccessAsync(db, release.ProjectId, ct)) return Results.Forbid();
             try { _ = ladderPolicy.RequirementLevelFor(discipline); }
             catch (DomainException) { return Results.BadRequest(new { error = "The test-change discipline is not supported." }); }
+
+            // A software Procedure package is raised from exactly one governed Case origin. Keep this
+            // projection on the same release/project/discipline boundary as the mutation endpoint so the
+            // picker never offers a historical or cross-level origin that the server will reject.
+            if (artifactKind == VerificationArtifactKind.Procedure && discipline != TestChangeReviewDiscipline.System)
+            {
+                try
+                {
+                    _ = ladderPolicy.VerificationArtifact(new VerificationArtifactKey(
+                        VerificationArtifactProfile.ToNeutral(discipline), VerificationArtifactKind.Procedure));
+                }
+                catch (DomainException)
+                {
+                    return Results.BadRequest(new
+                    {
+                        error = "The selected Procedure artifact is not enabled by the active project profile.",
+                        code = "verification_artifact_disabled"
+                    });
+                }
+                var consumedOrigins = db.TestChangeReviews.AsNoTracking()
+                    .Where(x => x.ProjectId == release.ProjectId && x.ReleaseId == releaseId
+                        && x.Discipline == discipline && x.ArtifactKind == VerificationArtifactKind.Procedure
+                        && x.State != TestChangeReviewState.Superseded)
+                    .Select(x => x.OriginReferenceId);
+                var effectiveBaselineId = await TestChangeReviewRequirementScope.EffectiveRequirementBaselineIdAsync(
+                    db, release.ProjectId, releaseId, ct);
+                var caseChanges = await (from change in db.Set<TestProcedureChange>().AsNoTracking()
+                                         join review in db.TestChangeReviews.AsNoTracking()
+                                             on change.TestChangeReviewId equals review.Id
+                                         where review.ProjectId == release.ProjectId && review.ReleaseId == releaseId
+                                             && review.Discipline == discipline
+                                             && review.ArtifactKind == VerificationArtifactKind.Case
+                                             && review.State == TestChangeReviewState.Approved
+                                             && review.Outcome == TestChangeReviewOutcome.ChangeRequired
+                                             && change.BaseNumber != ""
+                                             && !consumedOrigins.Contains(change.Id)
+                                         select new
+                                         {
+                                             sourceKind = TestChangeReviewOriginKind.CaseChange.ToString(),
+                                             sourceId = change.Id,
+                                             displayNumber = change.BaseNumber + "." + (change.Revision < 10 ? "0" : "") + change.Revision,
+                                             title = change.Title,
+                                             state = review.State.ToString(),
+                                             selectable = true,
+                                             reason = (string?)null
+                                         }).ToListAsync(ct);
+                var caseAssessments = await (from item in db.VerificationImpactItems.AsNoTracking()
+                                             join review in db.TestChangeReviews.AsNoTracking()
+                                                 on item.TestChangeReviewId equals review.Id
+                                             where item.ProjectId == release.ProjectId && item.ReleaseId == releaseId
+                                                 && review.Discipline == discipline
+                                                 && review.ArtifactKind == VerificationArtifactKind.Case
+                                                 && review.State != TestChangeReviewState.Superseded
+                                                 && item.State == VerificationImpactState.Resolved
+                                                 && item.Outcome == VerificationImpactOutcome.NewProcedureRequired
+                                                 && item.ProcedureChangeAction == TestProcedureChangeAction.CreateNew
+                                                 && item.RequirementRevisionId != null
+                                                 && effectiveBaselineId != null
+                                                 && db.BaselineRequirements.AsNoTracking().Any(baselineRequirement =>
+                                                     baselineRequirement.BaselineId == effectiveBaselineId
+                                                     && baselineRequirement.RevisionId == item.RequirementRevisionId)
+                                                 && !consumedOrigins.Contains(item.Id)
+                                             select new
+                                             {
+                                                 sourceKind = TestChangeReviewOriginKind.CaseAssessment.ToString(),
+                                                 sourceId = item.Id,
+                                                 displayNumber = item.SubjectDisplayNumber,
+                                                 title = review.Title,
+                                                 state = item.State.ToString(),
+                                                 selectable = true,
+                                                 reason = (string?)null
+                                             }).ToListAsync(ct);
+                return Results.Ok(caseChanges.Concat(caseAssessments)
+                    .OrderBy(x => x.displayNumber, StringComparer.OrdinalIgnoreCase));
+            }
 
             // Level-filtered before anything else: offering a change the package could never answer for is
             // not a selectable option that happens to be wrong, it is a wrong answer presented as a choice.

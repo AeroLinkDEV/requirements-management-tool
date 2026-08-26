@@ -90,7 +90,7 @@
 .reqCommand .clear {
   border: 0;
   background: transparent;
-  color: #748398;
+  color: var(--ink-700);
 }
 .modeSwitch {
   display: flex;
