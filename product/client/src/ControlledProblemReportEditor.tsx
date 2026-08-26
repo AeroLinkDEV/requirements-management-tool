@@ -162,7 +162,9 @@ export default function ControlledProblemReportEditor({ api, projectId, report, 
       } catch { if (live) { setError('The server recovery snapshot could not be opened.'); setStatus('Snapshot error') } }
     })()
     return () => { live = false }
-  }, [api, impactFields, report.id])
+    // serialize is memoized with no dependencies of its own, so naming it here costs nothing and keeps
+    // the checkout from re-running on anything but a genuinely different report.
+  }, [api, impactFields, report.id, serialize])
 
   const autosave = useCallback(async (): Promise<Session | undefined> => {
     const current = sessionRef.current

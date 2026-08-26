@@ -1,0 +1,67 @@
+/* Impact answers and the evidence that arrived under them.
+
+   The row is the unit: the area, its answer, and whatever is linked there, on one line of sight. That
+   adjacency is the whole point — the three things this replaces were correct and in three places. */
+
+.prImpactPanel { margin-top: 18px; padding: 17px; border: 1px solid #e0e8f0; border-radius: 12px; }
+.prImpactPanelHead { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+.prImpactPanelHead h3 { margin: 0; font-size: 16px; }
+.prImpactPanelHead span { color: #6b798c; font-size: 12px; }
+.prImpactNarrative { margin: 8px 0 14px; color: #4a5c73; font-size: 13px; line-height: 1.5; }
+
+.impactRows { display: grid; gap: 9px; }
+.impactRow {
+  display: grid; grid-template-columns: 190px 118px minmax(0, 1fr); gap: 14px; align-items: start;
+  padding: 12px; border: 1px solid #e2e9f1; border-left-width: 3px; border-radius: 9px; background: #fff;
+}
+.impactRow.yes { border-left-color: #2f66bd; }
+.impactRow.unknown { border-left-color: #d7951c; }
+.impactRow.no { border-left-color: #dfe7ef; }
+
+.impactName b { display: block; font-size: 13.5px; color: #1f3853; }
+.impactName small { display: block; margin-top: 2px; color: #8b9ab0; font-size: 11.5px; }
+
+.impactPill {
+  display: inline-block; padding: 3px 9px; border-radius: 999px;
+  font-size: 11px; font-weight: 700; white-space: nowrap;
+}
+.impactPill.yes { background: #e7effb; color: #2f66bd; }
+.impactPill.no { background: #eef2f7; color: #5f7086; }
+.impactPill.unknown { background: #fdf1dc; color: #96600a; }
+
+.impactSlot { display: grid; gap: 7px; min-width: 0; }
+
+.impactArtifact {
+  display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 11px; align-items: center;
+  width: 100%; padding: 9px 11px; border: 1px solid #e8eef5; border-radius: 7px;
+  background: #f8fbfd; color: inherit; font: inherit; text-align: left;
+}
+button.impactArtifact { cursor: pointer; }
+button.impactArtifact:hover, button.impactArtifact:focus-visible { background: #eef5fb; border-color: #cfdeec; }
+button.impactArtifact:focus-visible { outline: 2px solid #16766f; outline-offset: 1px; }
+.impactArtifact.readOnly { background: #fbfcfd; }
+.impactArtifact > i {
+  display: grid; place-items: center; width: 30px; height: 26px; border-radius: 6px;
+  background: #e6f3f1; color: #16756d; font-size: 10px; font-style: normal; font-weight: 800;
+}
+.impactArtifact b { display: block; font-size: 12.5px; font-weight: 650; color: #1f3853; }
+.impactArtifact small { display: block; margin-top: 1px; color: #6b798c; font-size: 11.5px; }
+.impactState { display: flex; flex-wrap: wrap; gap: 5px; justify-content: flex-end; }
+.impactState em {
+  padding: 2px 7px; border-radius: 999px; background: #eef2f7; color: #55677f;
+  font-size: 10.5px; font-style: normal; font-weight: 700; white-space: nowrap;
+}
+.impactState em.yes { background: #e3f2ec; color: #17705a; }
+.impactState em.build { background: #f2f5f8; color: #5f7086; }
+
+.impactMismatch {
+  margin: 0; padding: 9px 11px; border-radius: 7px; background: #fdf1dc; color: #7a4e08;
+  font-size: 12px; line-height: 1.5;
+}
+.impactMismatch b { color: #96600a; }
+.impactEmpty { margin: 0; padding: 9px 11px; border: 1px dashed #dfe7ef; border-radius: 7px; color: #8b9ab0; font-size: 12px; font-style: italic; }
+
+@media (max-width: 900px) {
+  .impactRow { grid-template-columns: 1fr; gap: 8px; }
+  .impactState { justify-content: flex-start; }
+}

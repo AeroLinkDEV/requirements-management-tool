@@ -1,11 +1,11 @@
 {
   "schemaVersion": "aerolink-api-test-intent/v2",
   "totals": {
-    "tests": 592,
-    "cases": 650,
-    "classes": 102,
-    "hostedTests": 579,
-    "hostedCases": 628,
+    "tests": 598,
+    "cases": 656,
+    "classes": 103,
+    "hostedTests": 585,
+    "hostedCases": 634,
     "nonHostedTests": 8,
     "nonHostedCases": 17,
     "unknownHostTests": 5,
@@ -21,18 +21,18 @@
     "http-boundary": {
       "label": "HTTP boundary: route, status, JSON shape",
       "level": "API (must stay hosted)",
-      "tests": 367,
-      "cases": 401,
+      "tests": 372,
+      "cases": 406,
       "unknownCases": 0,
-      "classes": 84
+      "classes": 85
     },
     "ef-translation": {
       "label": "EF translation / relational constraints",
       "level": "Infrastructure (needs a database, not a host)",
-      "tests": 129,
-      "cases": 140,
+      "tests": 130,
+      "cases": 141,
       "unknownCases": 0,
-      "classes": 48
+      "classes": 49
     },
     "auth-policy": {
       "label": "Authentication / authorization wiring",
@@ -5116,6 +5116,109 @@
       "sourceLines": {
         "start": 167,
         "end": 201
+      }
+    },
+    {
+      "cls": "ProblemReportImpactEvidenceApiTests",
+      "test": "A_change_request_naming_the_report_appears_under_the_area_it_changes",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client"
+      ],
+      "sourceLines": {
+        "start": 92,
+        "end": 123
+      }
+    },
+    {
+      "cls": "ProblemReportImpactEvidenceApiTests",
+      "test": "A_linked_change_request_moving_state_changes_what_the_report_says",
+      "kind": "Fact",
+      "intent": "ef-translation",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 188,
+        "end": 220
+      }
+    },
+    {
+      "cls": "ProblemReportImpactEvidenceApiTests",
+      "test": "An_area_whose_answer_and_evidence_agree_carries_no_advisory",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client"
+      ],
+      "sourceLines": {
+        "start": 158,
+        "end": 182
+      }
+    },
+    {
+      "cls": "ProblemReportImpactEvidenceApiTests",
+      "test": "An_unanswered_area_reads_as_unknown_rather_than_as_not_impacted",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client"
+      ],
+      "sourceLines": {
+        "start": 71,
+        "end": 85
+      }
+    },
+    {
+      "cls": "ProblemReportImpactEvidenceApiTests",
+      "test": "Every_assessed_area_is_reported_and_only_some_of_them_can_carry_artifacts",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client"
+      ],
+      "sourceLines": {
+        "start": 50,
+        "end": 69
+      }
+    },
+    {
+      "cls": "ProblemReportImpactEvidenceApiTests",
+      "test": "Evidence_under_a_not_impacted_answer_is_shown_and_the_disagreement_is_named",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client"
+      ],
+      "sourceLines": {
+        "start": 130,
+        "end": 156
       }
     },
     {

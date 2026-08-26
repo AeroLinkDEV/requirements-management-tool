@@ -1,9 +1,9 @@
 {
   "schemaVersion": "aerolink-api-host-classification/v3",
   "totals": {
-    "classes": 102,
-    "tests": 592,
-    "knownCases": 650,
+    "classes": 103,
+    "tests": 598,
+    "knownCases": 656,
     "unknownCaseTests": 0
   },
   "summary": {
@@ -26,9 +26,9 @@
       "unknownCaseTests": 0
     },
     "reusable-host": {
-      "classes": 38,
-      "tests": 238,
-      "knownCases": 267,
+      "classes": 39,
+      "tests": 244,
+      "knownCases": 273,
       "unknownCaseTests": 0
     }
   },
@@ -944,6 +944,18 @@
       "classification": "reusable-host",
       "reason": "Static reuse candidate, not an implementation-ready safety finding: shared-host conversion requires fresh per-test clients, unique per-test tagged logical data, and assertions scoped to that data.",
       "intents": [
+        "http-boundary"
+      ]
+    },
+    {
+      "cls": "ProblemReportImpactEvidenceApiTests",
+      "tests": 6,
+      "knownCases": 6,
+      "unknownCaseTests": 0,
+      "classification": "reusable-host",
+      "reason": "Static reuse candidate, not an implementation-ready safety finding: shared-host conversion requires fresh per-test clients, unique per-test tagged logical data, and assertions scoped to that data.",
+      "intents": [
+        "ef-translation",
         "http-boundary"
       ]
     },
