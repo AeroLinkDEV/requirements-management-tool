@@ -11,7 +11,7 @@ New to the repository — human or coding agent?
 1. **[PROJECT_STATE.md](PROJECT_STATE.md)** — what AeroLink is and does now.
 2. **[AGENTS.md](AGENTS.md)** — how to work safely in this repository.
 3. **[DECISIONS_AND_OPEN_QUESTIONS.md](DECISIONS_AND_OPEN_QUESTIONS.md)** — authoritative accepted product decisions.
-4. **[docs/README.md](docs/README.md)** — documentation map, project history, lessons, reference, showcase, provenance, and archive structure.
+4. **[docs/README.md](docs/README.md)** — documentation map, project history, lessons, product definition, reference, showcase, provenance, and archive structure.
 5. **GitHub Issues** — live backlog and scoped implementation contracts. Do not infer current backlog state from a dated handoff.
 
 Historical handoffs and audit reports are retained in the indexed [`docs/archive/`](docs/archive/README.md) as evidence of earlier checkpoints, but they are not current product authority.
@@ -57,11 +57,17 @@ For the full startup/recovery/backup/operator surface, see [Operations and recov
 | `product/client` | React/TypeScript client and Playwright journeys |
 | `product/tests` | Backend/domain/infrastructure/API tests |
 | `product/docs/` | Architecture, operations, testing/CI, implementation documentation |
-| `docs/` | Durable product/project knowledge, history, reference, showcase, provenance, archive |
+| `docs/product-definition/` | Durable product intent, principles, scope, vocabulary and capability contracts |
+| `docs/reference/` | Technical/market/roadmap reference material |
+| `docs/showcase/` | Maintained synthetic demonstration guidance and datasets |
+| `docs/provenance/` | Source-intent trace and immutable original inputs |
+| `docs/archive/` | Historical handoffs, audits, retired reports and delivery evidence |
 | `design/mockups`, `docs/mockups` | North-star/reference visual material |
 | root `.bat`/`.cmd` | Stable Windows operator entry points |
 
 The retired Phase 0.5 static showcase is historical; the application under `product/` is the demonstrable product.
+
+A few tiny root `.md` files are **relocation compatibility pointers**, not product-definition copies. They preserve filename-relative references in the append-only accepted decision log and other established paths while the canonical content lives under `docs/`. Do not add new root narrative documents by analogy with those shims.
 
 ## Current product shape
 
@@ -103,7 +109,10 @@ Use one home for each kind of information:
 - accepted product decisions → `DECISIONS_AND_OPEN_QUESTIONS.md`;
 - live work/findings → GitHub Issues;
 - repository/agent safety → `AGENTS.md`;
-- durable project/product knowledge → `docs/`;
+- durable product definition → `docs/product-definition/`;
+- technical/market/roadmap reference → `docs/reference/`;
+- synthetic demonstration guidance/data → `docs/showcase/`;
+- original source inputs and intent trace → `docs/provenance/`;
 - implementation/operations/testing docs → `product/docs/`;
 - historical handoffs/audits → indexed [`docs/archive/`](docs/archive/README.md).
 
