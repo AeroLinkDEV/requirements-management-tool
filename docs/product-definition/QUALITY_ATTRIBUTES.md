@@ -88,7 +88,7 @@ Long-running generation and analysis work should not block ordinary interactive 
 The product should begin as a modular system with clear domain boundaries and controlled migrations.
 This document deliberately does not mandate a language, framework, database, or deployment packaging;
 the stack was chosen separately and is recorded in
-[product/docs/ARCHITECTURE.md](product/docs/ARCHITECTURE.md).
+[product/docs/ARCHITECTURE.md](../../product/docs/ARCHITECTURE.md).
 
 Maintainability requires:
 
