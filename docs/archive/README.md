@@ -6,6 +6,8 @@ For current product truth, use [`../../PROJECT_STATE.md`](../../PROJECT_STATE.md
 
 The files below were moved from repository root by issue #781 after the canonical front door was established by #780 / PR #784. Their historical contents are intentionally preserved. Keeping the archive flat avoids gratuitous folder depth and preserves links among historical records that already referred to one another by filename.
 
+Three small compatibility-pointer files — `PROJECT_STATE.md`, `DECISIONS_AND_OPEN_QUESTIONS.md`, and `FEATURE_CATALOG.md` — are **not archived snapshots**. They exist only so historical documents that originally linked to those living root files by filename still resolve after the move. Each pointer redirects explicitly to the maintained root authority.
+
 | Document | Historical checkpoint / original role | Status now | Current authority | Still useful for |
 | --- | --- | --- | --- | --- |
 | [`PRODUCT_REVIEW_2026_07_26.md`](PRODUCT_REVIEW_2026_07_26.md) | 2026-07-26 product review | Historical review | `PROJECT_STATE.md`, decisions, GitHub | Early product assessment and gaps |
