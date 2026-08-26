@@ -76,4 +76,4 @@ The product direction succeeds when qualified users can establish and demonstrat
 8. upward and downward traceability is complete; and
 9. every material action is attributable and auditable.
 
-See [SYSTEM_LEVEL_WORKFLOW.md](SYSTEM_LEVEL_WORKFLOW.md) for the first-slice behavior and [RELEASE_ROADMAP.md](RELEASE_ROADMAP.md) for the delivery sequence.
+See [SYSTEM_LEVEL_WORKFLOW.md](SYSTEM_LEVEL_WORKFLOW.md) for the first-slice behavior and [RELEASE_ROADMAP.md](../reference/RELEASE_ROADMAP.md) for the delivery sequence.

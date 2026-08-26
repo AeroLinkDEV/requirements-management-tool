@@ -4,11 +4,11 @@ This directory preserves dated handoffs, completed audits, superseded status sna
 
 For current product truth, use [`../../PROJECT_STATE.md`](../../PROJECT_STATE.md). For accepted decisions, use [`../../DECISIONS_AND_OPEN_QUESTIONS.md`](../../DECISIONS_AND_OPEN_QUESTIONS.md). For active work and current status, use GitHub Issues and Pull Requests.
 
-The files below were moved from repository root by issue #781 after the canonical front door was established by #780 / PR #784. Their historical contents are intentionally preserved. Keeping the archive flat avoids gratuitous folder depth and preserves links among historical records that already referred to one another by filename.
+The original archive set was moved from repository root by issue #781 after the canonical front door was established by #780 / PR #784. Issue #782 added several further records whose remaining value is historical rather than durable product definition. Historical contents are intentionally preserved. Keeping the archive flat avoids gratuitous folder depth and preserves links among historical records that already referred to one another by filename.
 
-Three small compatibility-pointer files — `PROJECT_STATE.md`, `DECISIONS_AND_OPEN_QUESTIONS.md`, and `FEATURE_CATALOG.md` — are **not archived snapshots**. They exist only so historical documents that originally linked to those living root files by filename still resolve after the move. Each pointer redirects explicitly to the maintained root authority.
+Three small compatibility-pointer files — `PROJECT_STATE.md`, `DECISIONS_AND_OPEN_QUESTIONS.md`, and `FEATURE_CATALOG.md` — are **not archived snapshots**. They exist only so historical documents that originally linked to those living files by filename still resolve after reorganization. Each pointer redirects explicitly to the maintained authority.
 
-One tiny root compatibility redirect remains at `CURRENT_PRODUCT_HANDOFF_2026-07-29.md`. The authoritative append-only decision log contains a historical filename-relative link to that checkpoint; the redirect preserves that accepted-decision reference without copying the handoff back to root or rewriting the decision record. It is explicitly non-authoritative and points here. This is the only deliberate dated root compatibility exception in #781.
+One tiny root compatibility redirect remains at `CURRENT_PRODUCT_HANDOFF_2026-07-29.md`. The authoritative append-only decision log contains a historical filename-relative link to that checkpoint; the redirect preserves that accepted-decision reference without copying the handoff back to root or rewriting the decision record. It is explicitly non-authoritative and points here. This is the only deliberate dated root compatibility exception established by #781.
 
 | Document | Historical checkpoint / original role | Status now | Current authority | Still useful for |
 | --- | --- | --- | --- | --- |
@@ -29,6 +29,11 @@ One tiny root compatibility redirect remains at `CURRENT_PRODUCT_HANDOFF_2026-07
 | [`CURRENT_PRODUCT_HANDOFF_2026-08-10.md`](CURRENT_PRODUCT_HANDOFF_2026-08-10.md) | 2026-08-10 former current restart snapshot | Historical handoff | `PROJECT_STATE.md` | #364/#365/#367-era qualification and restart context |
 | [`AEROLINK_3_IMPLEMENTATION_STATUS.md`](AEROLINK_3_IMPLEMENTATION_STATUS.md) | 2026-08-10 AeroLink 3 implementation scorecard | Superseded status snapshot | `PROJECT_STATE.md`, GitHub Issues | Enterprise-program checkpoint and evidence links |
 | [`MASSIVE_ENTERPRISE_UPDATE_REPORT.md`](MASSIVE_ENTERPRISE_UPDATE_REPORT.md) | Completed enterprise delivery report | Historical delivery report | Current code/tests, `PROJECT_STATE.md` | Delivered-increment provenance and original validation record |
+| [`SHOWCASE_STORY_FMS_3_3.md`](SHOWCASE_STORY_FMS_3_3.md) | Phase 0.5 FMS 3.3 static-prototype story | Retired showcase narrative | `docs/showcase/FMS_LIVE_SHOWCASE_DATASET.md`, current product | Original workflow story and prototype rationale |
+| [`SHOWCASE_USABILITY_REFRESH_REPORT.md`](SHOWCASE_USABILITY_REFRESH_REPORT.md) | Completed showcase-to-product usability refresh report | Historical delivery/report | Current client/code and `PROJECT_STATE.md` | Visual transition evidence and original usability findings |
+| [`AUGUST_2_AFTERNOON_OBSERVATION_RECONCILIATION.md`](AUGUST_2_AFTERNOON_OBSERVATION_RECONCILIATION.md) | 2026-08-02 observation-to-delivery reconciliation | Historical implementation audit | Current code/tests and GitHub | Trace of observation disposition into issues/PRs |
+| [`aerolink-3-issue-35-acceptance.md`](aerolink-3-issue-35-acceptance.md) | Acceptance record for completed AeroLink 3 issue #35 | Historical acceptance evidence | Current code/tests | Exact acceptance context for that increment |
+| [`enterprise-identity-persistence-increment.md`](enterprise-identity-persistence-increment.md) | Enterprise identity persistence increment record | Historical implementation record | Current identity model/code/tests | Design/implementation provenance for the increment |
 
 ## Archive rules
 

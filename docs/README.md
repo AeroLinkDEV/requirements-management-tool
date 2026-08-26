@@ -31,25 +31,36 @@ For the current product, do **not** begin with a dated handoff or old audit repo
 
 ### Durable product definition
 
-The repository-hygiene program is organizing long-lived product-definition material under `docs/product-definition/`. Until that move is complete, some authoritative product-definition files remain at repository root. Follow links from `PROJECT_STATE.md`/README and do not infer authority from path alone during the transition.
+[`product-definition/`](product-definition/README.md) contains long-lived product intent, principles, scope/boundaries, domain vocabulary, capability contracts, workflow definitions, security/identity direction, controlled-publication policy, and design direction.
 
-### Reference, showcase, and provenance
+Its contents can remain authoritative as product-definition records without being live status records. Current delivered behavior still comes from `PROJECT_STATE.md`, accepted decisions, current code/tests, and GitHub state.
 
-The hygiene program is establishing:
+### Reference material
 
-- `docs/reference/` for durable reference/benchmark material;
-- `docs/showcase/` for FMS showcase data/story material;
-- `docs/provenance/` for source-material traceability and immutable original inputs.
+[`reference/`](reference/README.md) contains durable technical overview, historical market/enterprise benchmark material, and retained roadmap/phase evidence. These records are useful context but are not the live backlog.
 
-Some of these files remain at repository root until their references and runtime dependencies have been audited.
+### Showcase material
+
+[`showcase/`](showcase/README.md) contains the maintained synthetic FMS demonstration guidance and dataset/release-campaign contracts. The retired static-prototype story and completed historical usability reports live in the archive.
+
+### Provenance
+
+[`provenance/`](provenance/README.md) contains source-material traceability and the byte-preserved original Word inputs under `provenance/original-inputs/`. Original inputs are historical provenance, not current product specifications.
 
 ### Historical records
 
-[`archive/`](archive/README.md) contains dated handoffs, completed audits, superseded status snapshots, agent work logs, and other useful history removed from the repository front door. Archived content is evidence of what was believed/delivered at a point in time; it is **not** current product authority. The archive index records each document's former role, current authority, and why the historical record remains useful.
+[`archive/`](archive/README.md) contains dated handoffs, completed audits, superseded status snapshots, agent work logs, retired showcase records, completed acceptance/increment reports, and other useful history removed from the repository front door. Archived content is evidence of what was believed/delivered at a point in time; it is **not** current product authority.
+
+### Visual reference
+
+- [`mockups/`](mockups/) — retained visual/mockup reference material.
+- [`overview-video/`](overview-video/) — overview-video assets/material.
 
 ### Implementation and operations
 
 Use [`../product/docs/`](../product/docs/) for documentation that is tightly coupled to the application, including architecture, operations/recovery, merging, CI feedback time, managed documentation, scale/testing, and other implementation contracts.
+
+`REMOTE_DEMO_OPERATOR.md` remains at the top of `docs/` for now because it is an operator-facing path whose compatibility is being audited separately with the Windows launchers in #783.
 
 ## Authority rule
 
@@ -65,8 +76,11 @@ When a historical document disagrees with current code/accepted decisions, do no
 | Repository/agent safety | `AGENTS.md` |
 | Durable lesson learned | `docs/ENGINEERING_LESSONS.md` |
 | Major historical milestone | `docs/PROJECT_HISTORY.md` |
-| Product/reference/showcase/provenance knowledge | `docs/` |
+| Durable product definition | `docs/product-definition/` |
+| Technical/market/roadmap reference | `docs/reference/` |
+| Synthetic demonstration guidance/data | `docs/showcase/` |
+| Original source inputs / intent trace | `docs/provenance/` |
 | App architecture/operations/testing | `product/docs/` |
-| Dated handoff/audit/status snapshot | `docs/archive/` |
+| Dated handoff/audit/status/retired report | `docs/archive/` |
 
 Do not create a new root-level dated handoff as a second current-state system.

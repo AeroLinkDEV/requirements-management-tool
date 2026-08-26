@@ -18,7 +18,7 @@ Phase 0 delivered a reviewed, internally consistent Markdown product-definition 
 
 Phase 0 itself contained no application code, database schema, user-interface design, or
 technology-stack decision. Those followed after the baseline was approved, and the stack is now
-recorded in [product/docs/ARCHITECTURE.md](product/docs/ARCHITECTURE.md).
+recorded in [product/docs/ARCHITECTURE.md](../../product/docs/ARCHITECTURE.md).
 
 ## First Product Slice: System Level — delivered
 
@@ -51,7 +51,7 @@ software verification artifacts, deeper release and configuration management, an
 integrations. Enterprise identity integration is partially delivered with its remainder formally
 deferred (see the Workstream 4 decision record in
 [AEROLINK_3_ENTERPRISE_LIFECYCLE_COMPLETION.md](AEROLINK_3_ENTERPRISE_LIFECYCLE_COMPLETION.md)).
-Current status always lives in [PROJECT_STATE.md](PROJECT_STATE.md), not here.
+Current status always lives in [PROJECT_STATE.md](../../PROJECT_STATE.md), not here.
 
 The planned product direction preserved space for:
 
@@ -100,4 +100,4 @@ The following are not part of Phase 0 or the first product slice:
   from exact approved LLR revisions to GitLab merges, or a justified no-code disposition. Repository browsing,
   code editing/review, branch management, and GitLab enforcement remain out of scope.
 
-Scope changes must be recorded in [DECISIONS_AND_OPEN_QUESTIONS.md](DECISIONS_AND_OPEN_QUESTIONS.md) and reflected in [FEATURE_CATALOG.md](FEATURE_CATALOG.md).
+Scope changes must be recorded in [DECISIONS_AND_OPEN_QUESTIONS.md](../../DECISIONS_AND_OPEN_QUESTIONS.md) and reflected in [FEATURE_CATALOG.md](FEATURE_CATALOG.md).

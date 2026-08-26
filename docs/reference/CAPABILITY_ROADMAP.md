@@ -12,8 +12,8 @@ Items are numbered as they were in the analysis, so the numbering is not sequent
 > for each System/HLR/LLR discipline. Test procedures change only through controlled TCRs. Candidate Baselines
 > is a supported Configuration Management surface at `/baselines`, including the explicit legacy
 > procedure-manifest bootstrap delivered by #364; `/release-planning` remains retired. Current product truth
-> and backlog authority are [PROJECT_STATE.md](PROJECT_STATE.md) and GitHub Issues; the former
-> [2026-08-10 handoff](docs/archive/CURRENT_PRODUCT_HANDOFF_2026-08-10.md) is historical restart context.
+> and backlog authority are [PROJECT_STATE.md](../../PROJECT_STATE.md) and GitHub Issues; the former
+> [2026-08-10 handoff](../archive/CURRENT_PRODUCT_HANDOFF_2026-08-10.md) is historical restart context.
 >
 > **Historical surface checkpoint — 2026-08-06.** Verification is now Testing Coverage, Test Procedure Explorer
 > and Test Results for each
@@ -21,7 +21,7 @@ Items are numbered as they were in the analysis, so the numbering is not sequent
 > prospective upward allocation are delivered. Non-authoritative Concurrency and count-only IntegrityScan
 > simulations are retired. Problem Reports are now active and build scoped under DEC-085; Product Versions and
 > Candidate Baselines remain dormant product surfaces. See
-> [CURRENT_PRODUCT_HANDOFF_2026-08-02.md](docs/archive/CURRENT_PRODUCT_HANDOFF_2026-08-02.md) before treating
+> [CURRENT_PRODUCT_HANDOFF_2026-08-02.md](../archive/CURRENT_PRODUCT_HANDOFF_2026-08-02.md) before treating
 > any older item below as current UI direction or active backlog.
 
 > **Historical surface checkpoint — 2026-08-08.** Verification is now Change Requests, Test Procedure Explorer
@@ -29,7 +29,7 @@ Items are numbered as they were in the analysis, so the numbering is not sequent
 > first-class authored package with Title/Problem/Analysis/Solution, source change requests and Problem
 > Report links (Stage 4). Test procedures are changed only through a Test Change Request (DEC-103):
 > universal controlled editing offers no procedure path and there is no procedure-level approver. See
-> [CURRENT_PRODUCT_HANDOFF_2026-08-06.md](docs/archive/CURRENT_PRODUCT_HANDOFF_2026-08-06.md) before treating
+> [CURRENT_PRODUCT_HANDOFF_2026-08-06.md](../archive/CURRENT_PRODUCT_HANDOFF_2026-08-06.md) before treating
 > any older item below as current UI direction or active backlog.
 
 ## Accepted, in build order

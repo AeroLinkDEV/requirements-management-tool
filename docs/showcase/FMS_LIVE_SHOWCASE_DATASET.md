@@ -3,8 +3,8 @@
 > **Dataset contract, reconciled 2026-08-01.** Exact released Build 1.5 counts remain deterministic. Build
 > 1.6 values below describe the initial idempotent seed; the persistent demonstration database now also
 > contains legitimate engineering records created through live workflows. Present-tense seed descriptions
-> below should be read as initial conditions. See [PROJECT_STATE.md](PROJECT_STATE.md) for the current product
-> checkpoint; the former [2026-08-10 handoff](docs/archive/CURRENT_PRODUCT_HANDOFF_2026-08-10.md) is retained
+> below should be read as initial conditions. See [PROJECT_STATE.md](../../PROJECT_STATE.md) for the current product
+> checkpoint; the former [2026-08-10 handoff](../archive/CURRENT_PRODUCT_HANDOFF_2026-08-10.md) is retained
 > as historical restart context.
 
 ## Purpose

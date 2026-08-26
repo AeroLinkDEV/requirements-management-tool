@@ -55,7 +55,7 @@ These must be rehearsed verbatim, because precision is the whole argument with t
 
 - **Is it certified or qualified?** No. AeroLink is *informed by* ARP4754 and DO-178 concepts and
   terminology, claims neither compliance nor tool qualification, and the repository says so in
-  `SCOPE_AND_BOUNDARIES.md`.
+  [Scope and Boundaries](../product-definition/SCOPE_AND_BOUNDARIES.md).
 - **Does it scale?** Proven at the database layer: 150 simultaneous database clients and 50,000
   requirements on one workstation with zero failures. That is **not** 150 rendered browser sessions on
   production topology, and must never be described as such.
@@ -89,7 +89,7 @@ Identity federation is not worked before the demonstration. Pull request #53 was
 token and signature validation, key rotation — none of which can be specified or shown responsibly without a
 live identity provider and deployment contract.
 The deferral is recorded in **DEC-051**, and in full in the Workstream 4 decision record in
-`AEROLINK_3_ENTERPRISE_LIFECYCLE_COMPLETION.md`. Its trigger to resume is the first commitment to deploy
+[AEROLINK_3_ENTERPRISE_LIFECYCLE_COMPLETION.md](../product-definition/AEROLINK_3_ENTERPRISE_LIFECYCLE_COMPLETION.md). Its trigger to resume is the first commitment to deploy
 AeroLink for an organization authenticating against its own directory. That commitment has not been made.
 
 If the trigger is met, create a new focused branch from current `main`; do not revive the historical draft.

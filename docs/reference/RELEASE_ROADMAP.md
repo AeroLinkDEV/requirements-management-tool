@@ -16,8 +16,8 @@ This roadmap is capability-driven, not calendar-driven. Each phase ends with evi
 | Enterprise maturity program | MVP program closed 2026-08-01; provider/deployment-specific boundaries remain conditional |
 
 The phase goals and exit evidence below are retained as the definition of what each phase had to
-prove. Live product status is in [PROJECT_STATE.md](PROJECT_STATE.md) and GitHub Issues; the former
-[AeroLink 3 implementation scorecard](docs/archive/AEROLINK_3_IMPLEMENTATION_STATUS.md) is retained as a
+prove. Live product status is in [PROJECT_STATE.md](../../PROJECT_STATE.md) and GitHub Issues; the former
+[AeroLink 3 implementation scorecard](../archive/AEROLINK_3_IMPLEMENTATION_STATUS.md) is retained as a
 historical checkpoint. This roadmap is not the status record.
 
 ## Phase 0: Documentation and Domain Validation
@@ -50,7 +50,7 @@ product exceeded it. Demonstrations now use the application with the `FMSLIVE` d
 
 Capabilities:
 
-- a polished static-data web experience based on [DESIGN_VISION_AND_DASHBOARDS.md](DESIGN_VISION_AND_DASHBOARDS.md);
+- a polished static-data web experience based on [DESIGN_VISION_AND_DASHBOARDS.md](../product-definition/DESIGN_VISION_AND_DASHBOARDS.md);
 - manager and engineer dashboard modes;
 - a coherent dashboard -> SRCR -> requirement revision -> impact -> baseline -> test evidence -> traceability story;
 - simulated filters, drill-downs, review states, evidence, and provenance; and
@@ -135,8 +135,8 @@ The current application now includes a complete first vertical increment for dur
 That recommendation is historical. Subsequent increments delivered universal controlled-editing foundations,
 email outbox delivery, broad search/filtering, verification/retest/release journeys, build-scoped verification,
 controlled Test Change Requests, downstream assessments, identity lifecycle administration, and exact software
-upward allocation. Current continuation starts from [PROJECT_STATE.md](PROJECT_STATE.md), current GitHub state,
-and a reproduced need. The former [2026-08-10 handoff](docs/archive/CURRENT_PRODUCT_HANDOFF_2026-08-10.md)
+upward allocation. Current continuation starts from [PROJECT_STATE.md](../../PROJECT_STATE.md), current GitHub state,
+and a reproduced need. The former [2026-08-10 handoff](../archive/CURRENT_PRODUCT_HANDOFF_2026-08-10.md)
 is historical restart context, not a live continuation instruction.
 
 ### 2026-07-18 Requirements Explorer boundary delivered
@@ -153,8 +153,8 @@ The market benchmark in [ENTERPRISE_REQUIREMENTS_MANAGEMENT_BENCHMARK.md](ENTERP
 
 The Enterprise Requirements Workspace was recommended as the next implementation at the time of that
 benchmark, and has since been delivered along with the Open Digital Thread and much of the product-line
-configuration work. Current state is maintained in [PROJECT_STATE.md](PROJECT_STATE.md) and GitHub Issues;
-the former [AeroLink 3 implementation scorecard](docs/archive/AEROLINK_3_IMPLEMENTATION_STATUS.md) remains
+configuration work. Current state is maintained in [PROJECT_STATE.md](../../PROJECT_STATE.md) and GitHub Issues;
+the former [AeroLink 3 implementation scorecard](../archive/AEROLINK_3_IMPLEMENTATION_STATUS.md) remains
 available as historical program evidence.
 
 ## Phase 5: PR Management and Integrations
@@ -171,7 +171,7 @@ configuration records.
 
 Status as of 2026-07-24. The deferred items are deferred **by decision**, not merely unscheduled — see
 the Workstream 4 decision record in
-[AEROLINK_3_ENTERPRISE_LIFECYCLE_COMPLETION.md](AEROLINK_3_ENTERPRISE_LIFECYCLE_COMPLETION.md) for the
+[AEROLINK_3_ENTERPRISE_LIFECYCLE_COMPLETION.md](../product-definition/AEROLINK_3_ENTERPRISE_LIFECYCLE_COMPLETION.md) for the
 reason, the trigger to resume, and the order to resume in.
 
 - [x] require temporary-password rotation at first sign-in — **delivered**; rotation is enforced before
@@ -196,4 +196,4 @@ AI may be considered only after the artifact, revision, workflow, traceability, 
 - Passing a phase is an evidence decision, not simply completion of a feature checklist.
 - Later-phase needs may inform extensibility but cannot inflate earlier scope without a recorded decision.
 - Dates, staffing, and technology choices will be planned after the Phase 0 baseline.
-- Production readiness also requires the quality gates in [QUALITY_ATTRIBUTES.md](QUALITY_ATTRIBUTES.md), scaled appropriately by phase.
+- Production readiness also requires the quality gates in [QUALITY_ATTRIBUTES.md](../product-definition/QUALITY_ATTRIBUTES.md), scaled appropriately by phase.
