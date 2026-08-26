@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test'
-import { apiBase, apiLogin, login, showcaseSeed } from './auth'
+import { apiBase, apiLogin, login, showcaseSeed, writeRichField } from './auth'
 
 test('Problem Report ownership offers only accountable Program authority and the new owner can work immediately', async ({ page, request }) => {
   test.setTimeout(180_000)
@@ -98,7 +98,7 @@ test('Problem Report ownership offers only accountable Program authority and the
   await page.getByRole('button', { name: 'Check out & edit' }).click()
   const editor = page.getByRole('dialog', { name: /^Edit PR-/ })
   await expect(editor).toBeVisible({ timeout: 30_000 })
-  await editor.getByLabel('Workaround').fill(workaround)
+  await writeRichField(editor, 'Workaround', workaround)
   await editor.getByRole('button', { name: 'Check in' }).click()
   await expect(page.getByText(workaround)).toBeVisible({ timeout: 30_000 })
 

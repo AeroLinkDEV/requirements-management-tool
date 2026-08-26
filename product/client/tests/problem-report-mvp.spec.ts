@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test'
-import { chooseCategory, login, selectProgram } from './auth'
+import { chooseCategory, login, selectProgram, writeRichField } from './auth'
 
 test('an engineer creates a structured Draft PR and advances it through the SCCB workbench', async ({ page }) => {
   test.setTimeout(240_000)
@@ -14,8 +14,7 @@ test('an engineer creates a structured Draft PR and advances it through the SCCB
   await dialog.getByLabel('Title').fill(title)
   await dialog.getByRole('group', { name: 'Add content to Problem Description' }).getByRole('button', { name: 'Paragraph' }).click()
   await dialog.getByRole('textbox', { name: 'Problem Description paragraph 1' }).fill('The disagreement alert clears while the source mismatch is still present.')
-  await dialog.getByText('Additional information and impact').click()
-  await dialog.getByLabel('System / aircraft impact').fill('The flight crew can lose annunciation of a persistent navigation-source disagreement.')
+  await writeRichField(dialog, 'System / aircraft impact', 'The flight crew can lose annunciation of a persistent navigation-source disagreement.')
   await dialog.getByLabel('System requirements').selectOption('Yes')
   // Exact: the emphasis toolbar has an "Inline code" button, and a substring match claims both.
   await dialog.getByLabel('Code', { exact: true }).selectOption('Yes')
@@ -109,7 +108,7 @@ test('an Open Problem Report is checked out, corrected, and the correction survi
   // Only these controlled values change. The evidence must bind the values themselves, not merely the
   // aggregate version increment caused by check-in.
   await chooseCategory(editor, 'Code Issue — Non-Functional Impact')
-  await editor.getByLabel('Workaround').fill(workaround)
+  await writeRichField(editor, 'Workaround', workaround)
   await editor.getByRole('button', { name: 'Check in' }).click()
   await expect(editor).toHaveCount(0, { timeout: 30_000 })
 
@@ -129,8 +128,9 @@ test('an Open Problem Report is checked out, corrected, and the correction survi
   await page.getByRole('button', { name: /History/ }).click()
   const checkIn = page.locator('.prTimeline article').filter({ hasText: 'Details Checked In' })
   // Schema 3 retired the four-kind Type for the category vocabulary and added how the value was arrived
-  // at, so a schema-2 snapshot and a schema-3 one are not comparable field for field.
-  await expect(checkIn).toContainText('Snapshot schema 3')
+  // at; schema 4 added the authored companion to every narrative field. Each step makes the snapshot
+  // incomparable field for field with the one before it, which is what the version is for.
+  await expect(checkIn).toContainText('Snapshot schema 4')
   await expect(checkIn).toContainText('Category CodeNonFunctional')
   await expect(checkIn).toContainText(`Workaround ${workaround}`)
 })

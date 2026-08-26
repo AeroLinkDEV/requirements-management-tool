@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 import type { Page } from "@playwright/test";
-import { apiBase, apiLogin, login, selectProgram } from "./auth";
+import { apiBase, apiLogin, login, selectProgram, writeRichField } from "./auth";
 
 /**
  * "Record a passing successor execution" navigated to the generic System Verification workspace carrying
@@ -207,8 +207,8 @@ test("a corrective action opens Test Results, names the report, and survives a r
   await expect(page.locator('.prState')).toHaveText('Waiting for SQA to Close', { timeout: 30_000 })
   await page.getByRole('button', { name: 'Check out & edit' }).click()
   const editor = page.getByRole('dialog', { name: /^Edit PR-/ })
-  await editor.getByLabel('Corrective-action narrative').fill('The corrected scheduler and guard are both required before closure.')
-  await editor.getByLabel('Root cause', { exact: true }).fill('The scheduler and missing guard combined to produce the failure.')
+  await writeRichField(editor, 'Corrective-action narrative', 'The corrected scheduler and guard are both required before closure.')
+  await writeRichField(editor, 'Root cause', 'The scheduler and missing guard combined to produce the failure.')
   await editor.getByRole('button', { name: 'Check in' }).click()
   await expect(editor).toHaveCount(0, { timeout: 30_000 })
   await expect(page.locator('.prState')).toHaveText('Verifying')

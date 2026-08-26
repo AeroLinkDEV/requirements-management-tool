@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test'
-import { apiBase, apiLogin, login, showcaseSeed } from './auth'
+import { apiBase, apiLogin, login, showcaseSeed, writeRichField } from './auth'
 
 /**
  * DEC-089: one Project-scoped Problem Report database, with build target as an explicit filter rather than
@@ -78,7 +78,7 @@ test('Problem Reports remain workable and explicitly target-filtered from every 
   await page.getByRole('button', { name: 'Check out & edit' }).click()
   const editor = page.getByRole('dialog', { name: /^Edit PR-/ })
   await expect(editor).toBeVisible({ timeout: 30_000 })
-  await editor.getByLabel('Workaround').fill(workaround)
+  await writeRichField(editor, 'Workaround', workaround)
   await editor.getByRole('button', { name: 'Check in' }).click()
   await expect(editor).toHaveCount(0, { timeout: 30_000 })
   await expect(page.getByText(workaround)).toBeVisible({ timeout: 30_000 })

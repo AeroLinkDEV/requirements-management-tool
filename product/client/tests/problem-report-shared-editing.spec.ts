@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test'
-import { chooseCategory, login, selectProgram } from './auth'
+import { chooseCategory, login, selectProgram, writeRichField } from './auth'
 
 /**
  * A Problem Report is the record a Project works on together, and the person who can correct it is rarely
@@ -66,7 +66,7 @@ test('a Project member who does not own a Verifying Problem Report can still cor
   await page.getByRole('button', { name: 'Check out & edit' }).click()
   const editor = page.getByRole('dialog', { name: /^Edit PR-/ })
   await expect(editor).toBeVisible({ timeout: 30_000 })
-  await editor.getByLabel('Root cause').fill(rootCause)
+  await writeRichField(editor, 'Root cause', rootCause)
   await editor.getByRole('button', { name: 'Check in' }).click()
   await expect(page.getByText(rootCause)).toBeVisible({ timeout: 30_000 })
 

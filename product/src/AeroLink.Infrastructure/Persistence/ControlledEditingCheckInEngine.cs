@@ -805,7 +805,10 @@ public sealed class ProblemReportControlledEditingAdapter(AeroLinkDbContext db) 
             draft.AdditionalInformation ?? "", draft.AdditionalInformationRich ?? "", draft.Analysis ?? "",
             draft.RootCause ?? "", draft.CorrectiveAction ?? "", draft.SystemAircraftImpact ?? "",
             draft.ImpactAssessmentJson ?? "", ParseEnum(draft.Severity, item.Severity), ParseEnum(draft.Priority, item.Priority), now,
-            ParseCategory(draft.Category, item.Category), draft.Workaround);
+            ParseCategory(draft.Category, item.Category), draft.Workaround,
+            new ProblemReportNarrative(draft.AnalysisRich, draft.RootCauseRich, draft.WorkaroundRich,
+                draft.CorrectiveActionRich, draft.SystemAircraftImpactRich,
+                draft.Effects, draft.EffectsRich, draft.Containment, draft.ContainmentRich));
         var toState = ProblemReportTransitionPolicy.Canonical(item.State);
         var lifecycleRationale = fromState != toState
             ? "Controlled detail correction invalidated the prior closure evidence and returned the report to Verifying."
@@ -842,7 +845,11 @@ public sealed class ProblemReportControlledEditingAdapter(AeroLinkDbContext db) 
         string? ProblemRich, string? AdditionalInformation, string? AdditionalInformationRich, string? Analysis,
         string? RootCause, string? CorrectiveAction, string? SystemAircraftImpact, string? ImpactAssessmentJson,
         string? Severity, string? Priority, string? ReportedBy, string? ResponsibleEngineerId, string? State, long Version,
-        JsonElement? Category = null, string? Workaround = null);
+        JsonElement? Category = null, string? Workaround = null,
+        string? AnalysisRich = null, string? RootCauseRich = null, string? WorkaroundRich = null,
+        string? CorrectiveActionRich = null, string? SystemAircraftImpactRich = null,
+        string? Effects = null, string? EffectsRich = null,
+        string? Containment = null, string? ContainmentRich = null);
 }
 
 public sealed class ConfigurationChangeSetControlledEditingAdapter(AeroLinkDbContext db) : IControlledEditingAdapter
