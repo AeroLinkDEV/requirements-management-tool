@@ -86,6 +86,17 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+      # The repository-layout guard is intentionally in the always-running Windows classifier job. A docs-only
+      # change skips product and script-contract jobs, but it must still prove that the current front door,
+      # archive taxonomy and maintained links remain valid.
+      - name: Validate repository layout and documentation links
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          & ./product/scripts/Test-RepositoryLayout.ps1
+          if ($LASTEXITCODE -ne 0) { throw 'Repository layout guard failed.' }
+          & ./product/scripts/Test-RepositoryLayout.Tests.ps1
+          if ($LASTEXITCODE -ne 0) { throw 'Repository layout regression contract failed.' }
       - name: Resolve already-validated main tree
         id: provenance
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'

@@ -19,17 +19,7 @@ Do not treat this file as an independent product-architecture authority. Mutable
 - Refresh GitHub immediately before merge/rebase decisions rather than relying on old handoffs or branch counts.
 - Keep PRs focused. Put unrelated findings into their own GitHub issues.
 
-## Product-truth reminder
-
-Current software verification can include the explicit Case → Procedure ladder:
-
-```text
-HLR Requirement → HLR Test Case → HLR Test Procedure → Execution/Result/Evidence
-LLR Requirement → LLR Test Case → LLR Test Procedure → Execution/Result/Evidence
-```
-
-System verification remains a one-tier Procedure model. Software profiles are configuration-driven and may intentionally be Case-only.
-
-If this summary ever disagrees with `PROJECT_STATE.md`, the current code/accepted decisions and `PROJECT_STATE.md` win; update/remove this summary rather than creating competing truth.
-
-For the detailed safety rules, migration guidance, CI/testing contracts, controlled-history invariants, documentation discipline, and never-do list, use [`AGENTS.md`](AGENTS.md).
+For current product behavior, accepted decisions, repository taxonomy, launcher compatibility, migration guidance,
+controlled-history invariants, documentation guardrails, and the never-do list, use [`PROJECT_STATE.md`](PROJECT_STATE.md),
+[`DECISIONS_AND_OPEN_QUESTIONS.md`](DECISIONS_AND_OPEN_QUESTIONS.md), and [`AGENTS.md`](AGENTS.md). Do not copy mutable
+product architecture into this model-specific adapter.

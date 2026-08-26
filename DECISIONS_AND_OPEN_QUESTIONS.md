@@ -1982,6 +1982,30 @@ Future entries use:
   - Carried on the `/api/test-procedures` list response rather than fetched separately, as the requirements
     workspace carries its own.
 
+### DEC-116 - One Repository Knowledge Authority Model
+
+- **Date:** 2026-08-26
+- **Status:** Accepted
+- **Decision:** AeroLink uses one explicit repository knowledge authority model: `PROJECT_STATE.md` is the
+  current product truth; this append-only log is the authority for accepted long-lived decisions; GitHub Issues
+  own the live backlog and findings, while Pull Requests own implementation, review, and merge state; `AGENTS.md`
+  is the repository operating contract;
+  `docs/` holds durable product definition, reference, showcase, provenance, lessons and history; `docs/archive/`
+  holds historical handoffs, audits, reports and work logs; and `product/docs/` holds implementation and operator
+  documentation. `CLAUDE.md` and other model-specific instruction files are thin adapters and must not duplicate
+  mutable product architecture or current status. Root compatibility shims remain only where an established path
+  requires them and are never current authority.
+- **Rationale:** Valuable records had accumulated under several names and locations, making a dated handoff or
+  compatibility redirect easy to mistake for the current product state. A machine-checked taxonomy and a single
+  authority per kind of knowledge preserve discoverability without allowing historical evidence to become live
+  guidance. A repository-layout guard enforces the root allow-list and maintained-document link boundary.
+- **Consequences:** New active findings go to GitHub Issues, current product changes update `PROJECT_STATE.md` when
+  material, accepted decisions are appended here, durable lessons go to `docs/ENGINEERING_LESSONS.md`, and
+  historical records go to `docs/archive/`. New root narrative requires an explicit compatibility/current-authority
+  reason and a guard update. This supersedes **DEC-084 only to the extent that DEC-084 treated the newest dated
+  handoff as a current-state authority**; the qualified repository, current code/tests, `PROJECT_STATE.md`, and
+  live GitHub state remain authoritative, while the dated handoff remains historical evidence.
+
 ## Lessons Learned
 
 Findings that cost real time, recorded so they cost it once. These are about how the work is done rather than

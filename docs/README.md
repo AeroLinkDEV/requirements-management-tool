@@ -60,11 +60,31 @@ Its contents can remain authoritative as product-definition records without bein
 
 Use [`../product/docs/`](../product/docs/) for documentation that is tightly coupled to the application, including architecture, operations/recovery, merging, CI feedback time, managed documentation, scale/testing, and other implementation contracts.
 
-`REMOTE_DEMO_OPERATOR.md` remains at the top of `docs/` for now because it is an operator-facing path whose compatibility is being audited separately with the Windows launchers in #783.
+`REMOTE_DEMO_OPERATOR.md` remains at the top of `docs/` as a stable operator-facing path tied to the protected
+remote-demo launchers. The #783 launcher audit confirmed that preserving this established path is safer than a
+cosmetic move.
 
 ## Authority rule
 
 When a historical document disagrees with current code/accepted decisions, do not “average” the two. Refresh current `main`, consult the decision log and current scoped issue, and treat the historical record as history.
+
+## Repository-layout guard
+
+Run `powershell.exe -NoProfile -ExecutionPolicy Bypass -File product/scripts/Test-RepositoryLayout.ps1` after
+documentation changes. It enforces the five canonical root files, the explicit root compatibility/community-file
+allow-list, the documentation taxonomy, the 15 stable Windows launcher paths, and relative links in the maintained
+current-document set. Link checking URI-decodes local targets and ignores external, mail, data, and anchor-only links.
+The historical files under `docs/archive/` are intentionally outside that maintained-content link sweep except for
+`docs/archive/README.md`; the archive index may link to individual historical records. Current `README.md` and
+`PROJECT_STATE.md` may link to the archive index but must not present an individual archived handoff or audit as
+current authority.
+
+Do not add a new root narrative Markdown file by analogy with an existing compatibility shim. New root narrative is
+permitted only for an explicit current-authority or compatibility reason, with the guard allow-list and this taxonomy
+remaining truthful. Active findings belong in GitHub Issues; accepted long-lived decisions belong in the append-only
+decision log; current product truth belongs in `PROJECT_STATE.md`; durable lessons/history/product-definition/reference/
+showcase/provenance belong in their existing `docs/*` homes; implementation and operator documentation belongs in
+`product/docs/`. Historical records remain discoverable in `docs/archive/` but are never current authority.
 
 ## Where new information belongs
 
