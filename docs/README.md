@@ -45,7 +45,7 @@ Some of these files remain at repository root until their references and runtime
 
 ### Historical records
 
-`docs/archive/` will contain dated handoffs, completed audits, superseded status snapshots, and other useful history. Archived content is evidence of what was believed/delivered at a point in time; it is **not** current product authority.
+[`archive/`](archive/README.md) contains dated handoffs, completed audits, superseded status snapshots, agent work logs, and other useful history removed from the repository front door. Archived content is evidence of what was believed/delivered at a point in time; it is **not** current product authority. The archive index records each document's former role, current authority, and why the historical record remains useful.
 
 ### Implementation and operations
 

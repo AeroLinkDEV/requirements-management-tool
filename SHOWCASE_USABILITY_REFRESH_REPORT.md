@@ -10,7 +10,8 @@ Status: delivered and validated on 2026-07-13.
 > **Navigation and dashboard details below are also historical.** PRs #166–#168 later introduced Projects
 > and Software Builds landing pages, a three-way System/Software/Verification Command Center, and deliberately
 > hid Problem Reports, Product Versions, Candidate Baselines and the Change Request Software Builds view.
-> Current behavior is in [CURRENT_PRODUCT_HANDOFF_2026-08-10.md](CURRENT_PRODUCT_HANDOFF_2026-08-10.md).
+> Current product truth is in [PROJECT_STATE.md](PROJECT_STATE.md); the former
+> [2026-08-10 handoff](docs/archive/CURRENT_PRODUCT_HANDOFF_2026-08-10.md) is historical restart context.
 
 ## Outcome
 

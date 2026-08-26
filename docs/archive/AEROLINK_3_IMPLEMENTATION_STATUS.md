@@ -1,10 +1,12 @@
 # AeroLink 3.0 - implementation status
 
+> **ARCHIVED / SUPERSEDED.** This scorecard is preserved as the 10 August 2026 implementation checkpoint. It does not describe the repository's current delivered state today. Use [`../../PROJECT_STATE.md`](../../PROJECT_STATE.md) and current GitHub Issues/PRs for present product truth. The historical wording is intentionally retained after this notice.
+
 **Status date:** 2026-08-10
 **Qualified product checkpoint:** `main` at `af8760a6ad17b6266a770fb8c0beb2b67eaf3c90` after the August procedure-control closeout through #367
 
 This is the current scorecard for the long-lived
-[AeroLink 3.0 completion contract](AEROLINK_3_ENTERPRISE_LIFECYCLE_COMPLETION.md). The contract describes the
+[AeroLink 3.0 completion contract](../../AEROLINK_3_ENTERPRISE_LIFECYCLE_COMPLETION.md). The contract describes the
 full enterprise ambition; this file describes what the repository truthfully delivers now. Detailed restart
 context is in [CURRENT_PRODUCT_HANDOFF_2026-08-10.md](CURRENT_PRODUCT_HANDOFF_2026-08-10.md).
 

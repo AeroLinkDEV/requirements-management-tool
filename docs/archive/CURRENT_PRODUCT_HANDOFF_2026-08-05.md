@@ -62,7 +62,7 @@ Assigned user; the queue filters as you type with no Refresh button.
 
 ## Findings worth carrying forward
 
-The durable ones are recorded as [LES-001 to LES-005](DECISIONS_AND_OPEN_QUESTIONS.md#lessons-learned).
+The durable ones are recorded as [LES-001 to LES-005](../../DECISIONS_AND_OPEN_QUESTIONS.md#lessons-learned).
 In short:
 
 - **A new `/api` route inherits middleware guards by prefix match.** `/api/baseline-imports` matched

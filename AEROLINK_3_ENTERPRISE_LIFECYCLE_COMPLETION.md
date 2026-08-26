@@ -12,9 +12,9 @@ AeroLink 3.0 completes the remaining enterprise lifecycle capabilities without i
 > controlled Test Change Request (DEC-103); Candidate Baselines is a supported Configuration Management route at
 > `/baselines`, including explicit legacy procedure-manifest bootstrap (#364), while `/release-planning` and the
 > redundant Product Versions surface remain retired/dormant. Do not infer current backlog or current UI exposure
-> from an older workstream sentence below. See
-> [AEROLINK_3_IMPLEMENTATION_STATUS.md](AEROLINK_3_IMPLEMENTATION_STATUS.md) and
-> [CURRENT_PRODUCT_HANDOFF_2026-08-10.md](CURRENT_PRODUCT_HANDOFF_2026-08-10.md).
+> from an older workstream sentence below. Use [PROJECT_STATE.md](PROJECT_STATE.md) and current GitHub state for
+> present product truth. The former [AeroLink 3 implementation scorecard](docs/archive/AEROLINK_3_IMPLEMENTATION_STATUS.md)
+> and [2026-08-10 handoff](docs/archive/CURRENT_PRODUCT_HANDOFF_2026-08-10.md) are retained as historical checkpoints.
 
 ## Non-negotiable delivery rules
 

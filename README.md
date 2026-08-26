@@ -14,7 +14,7 @@ New to the repository — human or coding agent?
 4. **[docs/README.md](docs/README.md)** — documentation map, project history, lessons, reference, showcase, provenance, and archive structure.
 5. **GitHub Issues** — live backlog and scoped implementation contracts. Do not infer current backlog state from a dated handoff.
 
-Historical handoffs and audit reports are retained as evidence of earlier checkpoints, but they are not current product authority.
+Historical handoffs and audit reports are retained in the indexed [`docs/archive/`](docs/archive/README.md) as evidence of earlier checkpoints, but they are not current product authority.
 
 ## Common Windows launchers
 
@@ -105,6 +105,6 @@ Use one home for each kind of information:
 - repository/agent safety → `AGENTS.md`;
 - durable project/product knowledge → `docs/`;
 - implementation/operations/testing docs → `product/docs/`;
-- historical handoffs/audits → indexed archive under `docs/archive/` as the hygiene migration proceeds.
+- historical handoffs/audits → indexed [`docs/archive/`](docs/archive/README.md).
 
 See [docs/README.md](docs/README.md) for the full documentation map.

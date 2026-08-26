@@ -78,7 +78,7 @@ itself as Draft. Final SQA authorization releases the exact recorded hashes.
 - `StartNextRevision` originally collided with a unique index that omitted the revision. The index now includes
   `Revision`, matching the change-request model.
 - The test-procedure materializer originally had no caller. It now has controlled API and UI entry points; see
-  [LES-006](DECISIONS_AND_OPEN_QUESTIONS.md#les-006---a-capability-with-no-caller-is-not-delivered).
+  [LES-006](../../DECISIONS_AND_OPEN_QUESTIONS.md#les-006---a-capability-with-no-caller-is-not-delivered).
 - A procedure-authoring dialog taller than the viewport did not scroll. Real-screen testing found and corrected
   it.
 - Managed-document review steps were initially updated instead of inserted in PostgreSQL, an author could also

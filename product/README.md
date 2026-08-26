@@ -5,8 +5,8 @@ comes from the actual API and persistence layer. The former `showcase/` prototyp
 2026-07-24 (DEC-046); design reference now lives in `design/mockups` and
 [DESIGN_VISION_AND_DASHBOARDS.md](../DESIGN_VISION_AND_DASHBOARDS.md).
 
-For project-wide orientation, start at [PROJECT_STATE.md](../PROJECT_STATE.md), then read the
-[current product handoff](../CURRENT_PRODUCT_HANDOFF_2026-08-10.md).
+For project-wide orientation, start at [PROJECT_STATE.md](../PROJECT_STATE.md). The former 2026-08-10
+restart handoff is retained only as [historical archive context](../docs/archive/CURRENT_PRODUCT_HANDOFF_2026-08-10.md).
 
 ## Current vertical slice
 

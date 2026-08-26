@@ -142,7 +142,7 @@ HTTP 200 and `/health/ready` returned HTTP 200 with PostgreSQL connected.
 
 ## Documentation authority and history
 
-- Start at [README.md](README.md), then [PROJECT_STATE.md](PROJECT_STATE.md), then this handoff.
+- Start at [README.md](../../README.md), then [PROJECT_STATE.md](PROJECT_STATE.md), then this handoff.
 - Root `.docx` files are preserved original source inputs. They are not current product specifications and are
   intentionally not edited as implementation changes land.
 - Dated handoffs, reviews, acceptance notes, mockup notes, and update reports are historical evidence. Their

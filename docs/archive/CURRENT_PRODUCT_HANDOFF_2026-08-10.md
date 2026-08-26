@@ -1,5 +1,7 @@
 # AeroLink current product handoff — 10 August 2026
 
+> **ARCHIVED / SUPERSEDED.** This file is preserved as the 10 August 2026 restart checkpoint. It is not current operating guidance today. Use [`../../PROJECT_STATE.md`](../../PROJECT_STATE.md) for current product truth and refresh GitHub Issues/PRs before acting on backlog, branch, SHA, or route claims below. The historical wording is intentionally retained after this notice.
+
 This is the current restart point after the August procedure-control remediation and close-out sequence. It supersedes the 9 August handoff **as current operating guidance**. Older dated handoffs remain historical records and must not be rewritten to look current.
 
 A dated SHA in this file is an audited checkpoint, not a permanent claim about the live branch. Always refresh GitHub before starting work. GitHub `main` is the source of truth.
