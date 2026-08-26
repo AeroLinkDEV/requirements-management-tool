@@ -904,7 +904,7 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
                       </button>
                     <span className={`artifactBadge ${procedure.artifactKind?.toLowerCase() ?? 'unknown'}`}>{procedure.artifactLabel ?? procedure.artifactKind ?? 'Artifact'}</span>
                     <span>{procedureLevelLabel(procedure.level)}</span>
-                    <span>{procedure.artifactKind === 'Procedure'
+                    <span>{procedure.artifactKind === 'Procedure' && procedure.level !== 'System'
                       ? procedure.parentCount ?? 0
                       : procedure.requirementCount ?? 0}</span>
                     <span>{procedure.lastOutcome ?? 'Not run'}</span>

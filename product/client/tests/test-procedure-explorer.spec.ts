@@ -69,6 +69,32 @@ test('a procedure opens onto the same four-tab inspector a requirement does', as
   await expect(reopened.locator('.discussionPane article').last()).toContainText('Rig log attached.')
 })
 
+test('System Procedure rows retain their requirement coverage count', async ({ page }) => {
+  test.setTimeout(120_000)
+  await login(page, 'admin')
+  await page.route('**/api/test-procedures?*', async route => {
+    const requestUrl = new URL(route.request().url())
+    if (requestUrl.searchParams.get('scope') !== 'System') return route.continue()
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({
+        page: 1, pageSize: 25, totalCount: 1, totalPages: 1, views: [],
+        items: [{
+          id: 'system-procedure', revisionId: 'system-procedure-revision', displayNumber: 'SYSTP-999999.00',
+          title: 'System coverage count regression', state: 'Approved', requirementCount: 3, parentCount: 99,
+          ownerId: 'test.engineer', level: 'System', artifactKind: 'Procedure',
+        }],
+      }),
+    })
+  })
+  await openNavigationGroup(page, 'ASSURANCE')
+  await page.getByRole('link', { name: 'System Test Procedure Explorer' }).click()
+
+  const row = page.locator('.procedureRow').first()
+  await expect(row).toBeVisible({ timeout: 30_000 })
+  await expect(row.locator('span').nth(2)).toHaveText('3')
+})
+
 /**
  * Who wrote a procedure, and what made them change it.
  *
