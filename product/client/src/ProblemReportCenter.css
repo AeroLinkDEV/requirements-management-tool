@@ -32,3 +32,41 @@
 
 .prIdentityCategory .catTile{margin:5px 0}
 .prNoCategory{display:block;margin:5px 0;color:#8090a4;font-size:13px;font-style:italic;font-weight:400}
+
+/* The whole record, at a width that can hold it.
+
+   Both entry points now show every field a Problem Report has, which is more than a 720px column can
+   carry without the author scrolling past three-quarters of it before they reach anything they came for.
+   1080px is 50% wider; the header and footer stay put so the lease, the save state and the three controls
+   are never scrolled away from the field being typed into. */
+.prModal form.prWholeRecord,
+.prModal form.prCreateWhole { width: min(1080px, 96vw); max-height: 92vh; }
+/* Only the editor is a head/body/foot grid; the create form is one scrolling column. */
+.prModal form.prWholeRecord {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  padding: 0;
+  overflow: hidden;
+}
+.prModal form.prCreateWhole { overflow-y: auto; }
+.prEditorHead, .prEditorFoot { padding: 20px 28px 14px; background: #fff; }
+.prEditorHead { border-bottom: 1px solid #e4ebf3; }
+.prEditorHead h2 { margin: 6px 0 12px; }
+.prEditorBody { padding: 18px 28px 22px; overflow-y: auto; display: grid; gap: 2px; }
+.prWholeRecord .prCheckoutFoot, .prCreateWhole .prCreateFoot {
+  padding: 14px 28px; border-top: 1px solid #e4ebf3; background: #f8fbfd; margin-top: 0;
+}
+.prFootSpacer { flex: 1 1 auto; }
+.prCheckoutFoot .danger { padding: 10px 13px; border: 1px solid #d9a7ad; border-radius: 8px; background: #fff; color: #a93744; font-weight: 700; }
+.prDirty { color: #96600a; font-size: 12px; font-weight: 700; }
+.prSaved { color: #17705a; font-size: 12px; font-weight: 700; }
+.prCheckoutFoot button:disabled { opacity: .55; cursor: not-allowed; }
+
+/* Fields grow with what is typed into them rather than sitting at a fixed height. */
+.prModal .prEditorBody textarea, .prModal form.prCreateWhole textarea { min-height: 74px; }
+.prEditorBody .richEditor, .prCreateWhole .richEditor { margin-bottom: 4px; }
+
+@media (max-width: 900px) {
+  .prModal form.prWholeRecord, .prModal form.prCreateWhole { width: 100%; max-height: 100vh; }
+  .prEditorHead, .prEditorBody, .prWholeRecord .prCheckoutFoot, .prCreateWhole .prCreateFoot { padding-left: 18px; padding-right: 18px; }
+}
