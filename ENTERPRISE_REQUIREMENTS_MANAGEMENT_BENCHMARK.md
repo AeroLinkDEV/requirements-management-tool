@@ -6,8 +6,9 @@
 
 > **Historical market benchmark.** This comparison and its gap analysis are a 2026-07-12 planning input,
 > not the current implementation scorecard. Several listed gaps were delivered in later increments. Use
-> [AeroLink 3 Implementation Status](AEROLINK_3_IMPLEMENTATION_STATUS.md) and the
-> [current handoff](CURRENT_PRODUCT_HANDOFF_2026-08-10.md) for present claims and deliberate boundaries.
+> [PROJECT_STATE.md](PROJECT_STATE.md) and current GitHub state for present claims and deliberate boundaries;
+> the former [AeroLink 3 implementation scorecard](docs/archive/AEROLINK_3_IMPLEMENTATION_STATUS.md) and
+> [2026-08-10 handoff](docs/archive/CURRENT_PRODUCT_HANDOFF_2026-08-10.md) are historical checkpoints.
 
 ## Executive finding
 
