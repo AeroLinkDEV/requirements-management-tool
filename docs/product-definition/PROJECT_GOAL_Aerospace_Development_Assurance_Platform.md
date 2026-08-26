@@ -55,6 +55,6 @@ foundational documents were baselined — was satisfied before implementation st
 AeroLink is now a working application. The first system-level slice is proven, the software level and
 enterprise maturity work have followed, and delivery is tracked as the AeroLink 3.0 program.
 
-For the current state, read [PROJECT_STATE.md](PROJECT_STATE.md). The goal, first slice, product
+For the current state, read [PROJECT_STATE.md](../../PROJECT_STATE.md). The goal, first slice, product
 direction, and core rules stated above remain the authoritative statement of intent and have not
 changed.
