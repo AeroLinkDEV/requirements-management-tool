@@ -30,6 +30,29 @@ function Test-RepositoryContainment([string]$CandidatePath) {
         $fullPath.StartsWith($rootWithSeparator, [StringComparison]::OrdinalIgnoreCase)
 }
 
+# Repository policy applies to files Git can admit as repository content. Explicitly ignored, untracked
+# scratch files remain local working-copy state; tracked files still receive the full policy even when
+# their names also match an ignore pattern. Disposable non-Git fixtures are checked as plain directories.
+$gitExecutable = $null
+$gitTopLevel = $null
+$gitCommand = Get-Command git.exe -ErrorAction SilentlyContinue
+if (-not $gitCommand) { $gitCommand = Get-Command git -ErrorAction SilentlyContinue }
+if ($gitCommand -and (Test-Path -LiteralPath (Join-Path $RepositoryRoot '.git'))) {
+    $topLevelOutput = @(& $gitCommand.Source -C $RepositoryRoot rev-parse --show-toplevel 2>$null)
+    if ($LASTEXITCODE -eq 0 -and $topLevelOutput.Count -gt 0) {
+        $candidateTopLevel = [IO.Path]::GetFullPath(([string]$topLevelOutput[0]).Trim())
+        if ([string]::Equals($candidateTopLevel.TrimEnd('\', '/'), $RepositoryRoot.TrimEnd('\', '/'), [StringComparison]::OrdinalIgnoreCase)) {
+            $gitExecutable = $gitCommand.Source
+            $gitTopLevel = $candidateTopLevel
+        }
+    }
+}
+function Test-GitIgnoredRootFile([string]$Name) {
+    if (-not $gitExecutable -or -not $gitTopLevel) { return $false }
+    & $gitExecutable -C $RepositoryRoot check-ignore --quiet -- $Name 2>$null
+    return $LASTEXITCODE -eq 0
+}
+
 # The five canonical root files, nine intentionally retained relocation shims, and conventional GitHub
 # community files are the complete root Markdown allow-list. New narrative belongs under docs/ or product/docs.
 $canonicalRootMarkdown = @(
@@ -55,7 +78,11 @@ Require-File 'docs/README.md'
 Require-File 'docs/archive/README.md'
 foreach ($path in @('docs/product-definition', 'docs/reference', 'docs/showcase', 'docs/provenance', 'docs/archive')) { Require-Directory $path }
 
-$rootMarkdown = @(Get-ChildItem -LiteralPath $RepositoryRoot -File -Filter '*.md' | ForEach-Object Name)
+$rootMarkdown = @(
+    Get-ChildItem -LiteralPath $RepositoryRoot -File -Filter '*.md' |
+        Where-Object { -not (Test-GitIgnoredRootFile $_.Name) } |
+        ForEach-Object Name
+)
 foreach ($name in $rootMarkdown) {
     if ($name -notin $allowedRootMarkdown) {
         if ($name -match '(?i)^CURRENT_PRODUCT_HANDOFF_\d{4}-\d{2}-\d{2}\.md$') {
