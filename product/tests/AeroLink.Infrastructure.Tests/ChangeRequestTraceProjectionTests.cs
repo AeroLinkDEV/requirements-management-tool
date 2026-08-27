@@ -271,7 +271,11 @@ public sealed class ChangeRequestTraceProjectionTests
         var result = await ChangeRequestTraceProjection.ForChangeRequestAsync(
             fixture.Db, fixture.Project.Id, root.Id, LegacyLadderPolicy.Instance, CancellationToken.None);
         Assert.NotNull(result);
-        Assert.Contains(result!.Nodes, x => x.Kind == "RequirementRevision" && x.Id == externalRevision.Id);
+        var exactRequirementNode = Assert.Single(result!.Nodes,
+            x => x.Kind == "RequirementRevision" && x.Id == requirementRevision.Id);
+        Assert.Equal(requirement.Id, exactRequirementNode.ArtifactId);
+        Assert.Equal(baseline.Id, exactRequirementNode.EffectiveBaselineId);
+        Assert.Contains(result.Nodes, x => x.Kind == "RequirementRevision" && x.Id == externalRevision.Id);
         Assert.Contains(result.Nodes, x => x.Kind == "CodeTraceability" && x.Id == code.Id);
         Assert.Contains(result.Edges, x => x.FromId == externalRevision.Id && x.ToId == code.Id
             && x.Relation == "RequirementCodeEvidence");

@@ -86,7 +86,6 @@ function ChangeRequestThread({
     && Boolean(activeBaselineId) && node.effectiveBaselineId === activeBaselineId
     && node.artifactId && trace.edges.some(edge => edge.fromId === detail.id
       && edge.toId === node.id && edge.relation === "OwnsRequirementRevision"));
-  const connectedEdges = trace.edges.filter(edge => edge.fromId === detail.id || edge.toId === detail.id);
 
   return <section className="crDigitalThread" aria-label={`Digital Thread for ${detail.displayNumber}`}>
     <header className="crDigitalThreadHeader">
@@ -117,7 +116,7 @@ function ChangeRequestThread({
         </article>)}
       </div>
       <div className="crEdgeList" aria-label="Trace provenance">
-        {connectedEdges.length ? connectedEdges.map(edge => <article key={`${edge.fromKind}-${edge.fromId}-${edge.toKind}-${edge.toId}-${edge.relation}`}>
+        {trace.edges.length ? trace.edges.map(edge => <article key={`${edge.fromKind}-${edge.fromId}-${edge.toKind}-${edge.toId}-${edge.relation}`}>
           <b>{relationLabel(edge.relation)}</b><span>{edge.fromId} → {edge.toId}</span>
           <div>{edge.provenance.map(fact => <em key={`${fact.kind}-${fact.sourceId ?? "none"}`}>{provenanceLabel(fact.kind)}</em>)}</div>
         </article>) : <p className="crUnavailable">No connected change-request edges are present in the server projection.</p>}
@@ -195,7 +194,7 @@ export default function LifecycleExplorer({ api, projectId, activeReleaseId, rel
         const detail = await detailResponse.json() as ChangeRequestDetail;
         const trace = await traceResponse.json() as ChangeRequestTrace;
         const buildContext = await contextResponse.json() as { effectiveBaselineId?: string };
-        if (detail.projectId !== projectId || detail.targetReleaseId !== activeReleaseId
+        if (detail.id !== initialArtifactId || detail.projectId !== projectId || detail.targetReleaseId !== activeReleaseId
           || trace.projectId !== projectId || trace.rootArtifactId !== initialArtifactId
           || trace.rootArtifactKind !== "ChangeRequest")
           throw new Error("This change request is unavailable in the selected Project or build.");
@@ -206,7 +205,12 @@ export default function LifecycleExplorer({ api, projectId, activeReleaseId, rel
         let exactPath: CompletePath | undefined;
         if (materialized && buildContext.effectiveBaselineId) {
           const pathResponse = await fetch(`${api}/api/traceability/path?projectId=${projectId}&baselineId=${buildContext.effectiveBaselineId}&requirementRevisionId=${materialized.id}`);
-          if (pathResponse.ok) exactPath = await pathResponse.json() as CompletePath;
+          if (pathResponse.ok) {
+            const candidatePath = await pathResponse.json() as CompletePath;
+            if (candidatePath.baselineId === buildContext.effectiveBaselineId
+              && candidatePath.focusRevisionId === materialized.id)
+              exactPath = candidatePath;
+          }
         }
         setChangeRequest(detail);
         setChangeRequestTrace(trace);
