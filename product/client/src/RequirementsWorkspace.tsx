@@ -219,6 +219,17 @@ export default function RequirementsWorkspace({
   const appliedInitialView = useRef(false);
   const autoSelected = useRef(false);
   const loadGeneration = useRef(0);
+  // Inspector fetches answer for one requirement, and a slower earlier read must never replace a newer
+  // one: open() assigns the selected requirement before its responses arrive, so the comment form can be
+  // used while that requirement's own detail and comment requests are still in flight — and a successful
+  // comment POST starts a newer comment read whose result the still-pending pre-create read must not
+  // overwrite (the "successful comment disappeared" defect). Each state stream therefore carries a
+  // monotonic intent token plus the requirement the intent was issued for; a response may only assign
+  // state when it is still the latest intent and still matches the requirement being shown.
+  const detailIntent = useRef(0);
+  const detailTarget = useRef<string | undefined>(undefined);
+  const commentIntent = useRef(0);
+  const commentTarget = useRef<string | undefined>(undefined);
   const [data, setData] = useState<Workspace>(),
     [loading, setLoading] = useState(true),
     [search, setSearch] = useState(""),
@@ -358,23 +369,39 @@ export default function RequirementsWorkspace({
     return () => clearTimeout(timer);
   }, [load]);
   const loadComments = async (artifactId: string) => {
+    const intent = ++commentIntent.current;
     const response = await fetch(
       `${api}/api/enterprise-requirements/${artifactId}/comments`,
     );
-    if (response.ok) setComments(await response.json());
+    if (
+      response.ok &&
+      intent === commentIntent.current &&
+      commentTarget.current === artifactId
+    )
+      setComments(await response.json());
   };
   const open = useCallback(async (item: Requirement) => {
     setDeepLinkMissing(false);
     setSelected(item);
     setInspectorTab("details");
+    // Issuing an intent for this requirement retires every pending fetch of the same streams — including
+    // this requirement's own earlier in-flight comment read, which a successful addComment would otherwise
+    // race against.
+    const detailRequest = ++detailIntent.current;
+    const commentRequest = ++commentIntent.current;
+    detailTarget.current = item.id;
+    commentTarget.current = item.id;
     const [a, b, c] = await Promise.all([
       fetch(`${api}/api/enterprise-requirements/${item.id}${release?.id ? `?releaseId=${release.id}` : ""}`),
       fetch(`${api}/api/enterprise-requirements/${item.id}/comments`),
       fetch(`${api}/api/enterprise-requirements/${item.id}/impact${release?.id ? `?releaseId=${release.id}` : ""}`),
     ]);
-    if (a.ok) setDetail(await a.json());
-    if (b.ok) setComments(await b.json());
-    if (c.ok) setImpact(await c.json());
+    if (a.ok && detailRequest === detailIntent.current && detailTarget.current === item.id)
+      setDetail(await a.json());
+    if (b.ok && commentRequest === commentIntent.current && commentTarget.current === item.id)
+      setComments(await b.json());
+    if (c.ok && detailRequest === detailIntent.current && detailTarget.current === item.id)
+      setImpact(await c.json());
   }, [api, release?.id]);
   useEffect(() => {
     if (
@@ -392,6 +419,10 @@ export default function RequirementsWorkspace({
     if (!initialArtifactId || selected?.id === initialArtifactId) return;
     let cancelled = false;
     setDeepLinkMissing(false);
+    const detailRequest = ++detailIntent.current;
+    const commentRequest = ++commentIntent.current;
+    detailTarget.current = initialArtifactId;
+    commentTarget.current = initialArtifactId;
     (async () => {
       const [detailResponse, commentsResponse, impactResponse] = await Promise.all([
         fetch(`${api}/api/enterprise-requirements/${initialArtifactId}${release?.id ? `?releaseId=${release.id}` : ""}`),
@@ -419,6 +450,9 @@ export default function RequirementsWorkspace({
       }
       const latest = requested ?? value.history[0];
       if (!latest || cancelled) return;
+      // A newer selection has taken over while this deep link was in flight; it owns the detail, the
+      // selection and the inspector, so this response retires without moving any of them.
+      if (detailRequest !== detailIntent.current || detailTarget.current !== initialArtifactId) return;
       const item: Requirement = {
         id: value.id,
         baseNumber: value.baseNumber,
@@ -447,8 +481,20 @@ export default function RequirementsWorkspace({
       setDetail(value);
       setSelected(item);
       setInspectorTab("details");
-      if (commentsResponse.ok) setComments(await commentsResponse.json());
-      if (impactResponse.ok) setImpact(await impactResponse.json());
+      if (
+        commentsResponse.ok &&
+        !cancelled &&
+        commentRequest === commentIntent.current &&
+        commentTarget.current === initialArtifactId
+      )
+        setComments(await commentsResponse.json());
+      if (
+        impactResponse.ok &&
+        !cancelled &&
+        detailRequest === detailIntent.current &&
+        detailTarget.current === initialArtifactId
+      )
+        setImpact(await impactResponse.json());
     })();
     return () => {
       cancelled = true;
