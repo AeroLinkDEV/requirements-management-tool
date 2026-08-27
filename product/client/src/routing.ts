@@ -59,6 +59,7 @@ export type AppRoute = {
   savedViewId?: string;
   historyStateIntent?: HistoryStateIntent;
   historyTypeIntent?: HistoryTypeIntent;
+  historySelectionId?: string;
   projectConfigurationSection?: "ladder" | "assurance" | "history" | "readiness" | "approvals";
 };
 
@@ -107,9 +108,9 @@ export function parseRoute(pathname: string, search = ""): AppRoute {
   const path = tail.join("/");
   if (!path || path === "command-center") return { ...base, view: "dashboard", discipline: "system" };
   if (path === "my-work") return { ...base, view: "mywork", discipline: "system" };
-  if (path === "systems/change-requests") return { ...base, view: "history", discipline: "system", historyStateIntent: historyStateIntent(query.get("state")), historyTypeIntent: query.get("type") === "All" ? "All" : "System" };
-  if (path === "software/change-requests") return { ...base, view: "history", discipline: "software", artifactId: query.get("assessment") || undefined, artifactKind: query.get("level") === "LLR" ? "LowLevel" : "HighLevel", historyStateIntent: historyStateIntent(query.get("state")), historyTypeIntent: query.get("type") === "All" ? "All" : "Software" };
-  if (path === "interfaces/change-requests") return { ...base, view: "history", discipline: "system", historyStateIntent: historyStateIntent(query.get("state")), historyTypeIntent: "Interface" };
+  if (path === "systems/change-requests") return { ...base, view: "history", discipline: "system", historySelectionId: query.get("selection") || undefined, historyStateIntent: historyStateIntent(query.get("state")), historyTypeIntent: query.get("type") === "All" ? "All" : "System" };
+  if (path === "software/change-requests") return { ...base, view: "history", discipline: "software", artifactId: query.get("assessment") || undefined, artifactKind: query.get("level") === "LLR" ? "LowLevel" : "HighLevel", historySelectionId: query.get("selection") || undefined, historyStateIntent: historyStateIntent(query.get("state")), historyTypeIntent: query.get("type") === "All" ? "All" : "Software" };
+  if (path === "interfaces/change-requests") return { ...base, view: "history", discipline: "system", historySelectionId: query.get("selection") || undefined, historyStateIntent: historyStateIntent(query.get("state")), historyTypeIntent: "Interface" };
   if (path === "systems/change-requests/new") return { ...base, view: "createSystemScr", discipline: "system", artifactId: query.get("requirement") || undefined };
   if (path === "software/change-requests/new") return { ...base, view: "createSoftwareChange", discipline: "software", artifactId: query.get("requirement") || undefined, artifactKind: query.get("level") === "HLR" ? "HighLevel" : query.get("level") === "LLR" ? "LowLevel" : undefined };
   if (path === "interfaces/change-requests/new") return { ...base, view: "createInterfaceChange", discipline: "system", artifactId: query.get("requirement") || undefined, artifactKind: "Interface" };
@@ -241,7 +242,7 @@ export const projectConfigurationApprovalsPath = (slug: string) =>
 export const projectConfigurationAssurancePath = (slug: string) =>
   `${projectAreaPath(slug, "projectConfiguration")}/assurance`;
 
-export function routePath(context: RouteContext, view: View, discipline: Discipline = "system", artifactId?: string, artifactKind?: string, stateIntent?: HistoryStateIntent, typeIntent?: HistoryTypeIntent) {
+export function routePath(context: RouteContext, view: View, discipline: Discipline = "system", artifactId?: string, artifactKind?: string, stateIntent?: HistoryStateIntent, typeIntent?: HistoryTypeIntent, selectionId?: string) {
   const root = `/programs/${context.programId}/projects/${context.projectId}/releases/${context.releaseId}`;
   const historyPath = (scope: "systems" | "software" | "interfaces") => {
     const path = `${root}/${scope}/change-requests`;
@@ -250,6 +251,7 @@ export function routePath(context: RouteContext, view: View, discipline: Discipl
     if (typeIntent === "All") query.set("type", "All");
     if (scope === "software") query.set("level", artifactKind === "LowLevel" ? "LLR" : "HLR");
     if (scope === "software" && artifactId) query.set("assessment", artifactId);
+    if (selectionId) query.set("selection", selectionId);
     return query.size ? `${path}?${query}` : path;
   };
   switch (view) {

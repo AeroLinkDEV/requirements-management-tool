@@ -313,6 +313,7 @@ function App() {
     [dashboardLoading,setDashboardLoading]=useState(true),
     [historyStateIntent,setHistoryStateIntent]=useState<HistoryStateIntent|undefined>(initialRoute.historyStateIntent),
     [historyTypeIntent,setHistoryTypeIntent]=useState<HistoryTypeIntent|undefined>(initialRoute.historyTypeIntent),
+    [historySelectionId,setHistorySelectionId]=useState(initialRoute.historySelectionId ?? ""),
     [projectConfigurationSection,setProjectConfigurationSection]=useState<"ladder"|"assurance"|"history"|"readiness"|"approvals">(initialRoute.projectConfigurationSection??"ladder"),
     [discipline,setDiscipline]=useState<Discipline>(initialRoute.discipline),
     [view, setView] = useState<View>(initialRoute.view);
@@ -391,7 +392,7 @@ function App() {
     if (release && release.id !== selectedReleaseId)
       setSelectedReleaseId(release.id);
   }, [release, selectedReleaseId]);
-  useEffect(()=>{const handler=()=>{const route=readRoute();setView(route.view);setDiscipline(route.discipline);setHistoryStateIntent(route.historyStateIntent);setHistoryTypeIntent(route.historyTypeIntent);setProjectConfigurationSection(route.projectConfigurationSection??"ladder");if(route.programId)setActiveId(route.programId);if(route.projectId)setSelectedProjectId(route.projectId);if(route.releaseId)setSelectedReleaseId(route.releaseId);setSelectedArtifactId(route.artifactId??"");setSelectedArtifactKind(route.artifactKind??"");setRequirementRevisionId(route.requirementRevisionId??"");setSelectedScrId(route.view==="scr"?route.artifactId??"":"")};addEventListener("popstate",handler);return()=>removeEventListener("popstate",handler)},[]);
+  useEffect(()=>{const handler=()=>{const route=readRoute();setView(route.view);setDiscipline(route.discipline);setHistoryStateIntent(route.historyStateIntent);setHistoryTypeIntent(route.historyTypeIntent);setHistorySelectionId(route.historySelectionId??"");setProjectConfigurationSection(route.projectConfigurationSection??"ladder");if(route.programId)setActiveId(route.programId);if(route.projectId)setSelectedProjectId(route.projectId);if(route.releaseId)setSelectedReleaseId(route.releaseId);setSelectedArtifactId(route.artifactId??"");setSelectedArtifactKind(route.artifactKind??"");setRequirementRevisionId(route.requirementRevisionId??"");setSelectedScrId(route.view==="scr"?route.artifactId??"":"")};addEventListener("popstate",handler);return()=>removeEventListener("popstate",handler)},[]);
   const paletteShortcutEnabled = !!context && !projectLevelViews.includes(view);
   useEffect(()=>{const handler=(event:KeyboardEvent)=>{if(paletteShortcutEnabled&&(event.ctrlKey||event.metaKey)&&event.key.toLowerCase()==="k"){event.preventDefault();setPaletteOpen(true)}if(event.key==="Escape"){setPaletteOpen(false);setDisplayOpen(false)}};addEventListener("keydown",handler);return()=>removeEventListener("keydown",handler)},[paletteShortcutEnabled]);
   useEffect(()=>{document.documentElement.dataset.density=density;localStorage.setItem('aerolink-density',density)},[density]);
@@ -770,14 +771,17 @@ function App() {
          scope={historyTypeIntent === "Interface" ? "Interface" : discipline === "software" ? "Software" : "System"}
          ladder={ladder}
          initialSoftwareLevel={selectedArtifactKind === "LowLevel" ? "LowLevel" : "HighLevel"}
-        initialAssessmentId={selectedArtifactId||undefined}
+         initialAssessmentId={selectedArtifactId||undefined}
+        initialSelectionId={historySelectionId||undefined}
         initialStateIntent={historyStateIntent}
         onSoftwareLevelChange={(level)=>{
           setSelectedArtifactId("");
           setSelectedArtifactKind(level);
           if(context)history.pushState({},"",routePath(context,"history","software",undefined,level,historyStateIntent,historyTypeIntent));
         }}
-        onAssessmentSelected={(id)=>{setSelectedArtifactId(id??"");if(context)history.pushState({},"",routePath(context,"history",discipline === "software" ? "software" : "system",id,selectedArtifactKind,historyStateIntent,historyTypeIntent))}}
+        onAssessmentSelected={(id)=>{setSelectedArtifactId(id??"");if(context)history.pushState({},"",routePath(context,"history",discipline === "software" ? "software" : "system",id,selectedArtifactKind,historyStateIntent,historyTypeIntent,historySelectionId||undefined))}}
+        registerHref={id=>context ? routePath(context,"scr",discipline === "software" ? "software" : "system",id,historyTypeIntent === "Interface" ? "Interface" : undefined) : "#"}
+        onSelectionChange={id=>{setHistorySelectionId(id??"");if(context)history.pushState({},"",routePath(context,"history",discipline === "software" ? "software" : "system",selectedArtifactId||undefined,selectedArtifactKind,historyStateIntent,historyTypeIntent,id||undefined))}}
         onStateIntentChange={(stateIntent)=>{
           setHistoryStateIntent(stateIntent);
           if(context)history.replaceState({},"",routePath(context,"history",discipline,undefined,selectedArtifactKind,stateIntent,historyTypeIntent));
@@ -855,6 +859,7 @@ function App() {
         onOpenRequirementRevision={openRequirementRevision}
         onRaiseTestChangeRequest={() => navigate("createTestChangeRequest", discipline, undefined, selectedArtifactKind)}
         onOpenTestChangeRequest={id => navigate("testChangeRequest", discipline, id, selectedArtifactKind)}
+        registerHref={id => context ? routePath(context, "testChangeRequest", discipline, id, selectedArtifactKind) : "#"}
         onArtifactKeyChange={discipline === "softwareTest"
           ? (level, kind) => navigate("testChangeRequests", "softwareTest", undefined,
             verificationArtifactRouteKey(level, kind === "Procedure" ? "Procedure" : "Case"))

@@ -48,6 +48,7 @@ test('capture the product surfaces used by the overview video', async ({ page })
   await page.goto(new URL(root + '/systems/change-requests', page.url()).toString(), { waitUntil: 'load' })
   await page.waitForTimeout(2200)
   await page.locator('.historyRow').first().click()
+  await page.getByRole('link', { name: 'Open change request →' }).click()
   await shot('change-request-detail')
 
   // The two pages a build's verification work splits into, each addressable in its own right.

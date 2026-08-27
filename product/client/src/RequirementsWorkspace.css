@@ -1066,6 +1066,8 @@ button.coverageState:hover {
   color: #2d7a72;
 }
 .impactLaunch {
+  display: block;
+  box-sizing: border-box;
   width: 100%;
   border: 0;
   background: #102f4d;
@@ -1075,6 +1077,8 @@ button.coverageState:hover {
   margin-top: 9px;
   font-size: 12px;
   font-weight: 750;
+  text-align: center;
+  text-decoration: none;
 }
 .impactLaunch:hover {
   background: #164468;

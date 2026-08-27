@@ -29,6 +29,7 @@ test('a package opens on its own page, not in a drawer', async ({ page }) => {
   await expect(row).toBeVisible({ timeout: 30_000 })
   const number = (await row.getAttribute('data-register-row'))!
   await row.click()
+  await page.getByRole('link', { name: 'Open change request →' }).click()
 
   // A page, addressed by the package — not an overlay on the page you were already on.
   await expect(page).toHaveURL(/\/system-verification\/change-requests\/[0-9a-f-]{36}$/, { timeout: 30_000 })
@@ -118,6 +119,7 @@ test('a seeded software Procedure package uses the shared shell, exact origin, w
   await page.goto(current.origin + root + '/software-verification/hlr/change-requests?kind=Procedure', { waitUntil: 'load' })
   await expect(page.getByRole('heading', { name: 'Software Procedure Change Requests', level: 1 })).toBeVisible()
   await page.locator('[data-register-row]').first().click()
+  await page.getByRole('link', { name: 'Open change request →' }).click()
   await expect(page.getByRole('heading', { name: 'Procedure impact', level: 2 })).toBeVisible()
   await expect(page.getByText('Case change', { exact: true })).toBeVisible()
   await expect(page.getByText('HLRTC-000738.01', { exact: true })).toBeVisible()
@@ -169,6 +171,7 @@ test('the page carries the same sections the requirements change request page ca
   await login(page)
   await openRegister(page)
   await page.locator('[data-register-row]').first().click()
+  await page.getByRole('link', { name: 'Open change request →' }).click()
   await expect(page.getByText(/TEST CHANGE CONTROL \//)).toBeVisible({ timeout: 30_000 })
 
   for (const section of ['Change case', 'Raised from', 'Supporting files', 'Procedure impact', 'Control status']) {
@@ -194,6 +197,7 @@ test('check out and edit uses the same full-page two-stage authoring flow as a r
   await openRegister(page)
   await page.getByLabel('Lifecycle state filter').selectOption('Draft')
   await page.locator('[data-register-row]').first().click()
+  await page.getByRole('link', { name: 'Open change request →' }).click()
   const exactUrl = page.url()
 
   await page.getByRole('button', { name: 'Check out & edit' }).click()
@@ -230,6 +234,7 @@ test('the shared authoring page checks in and reopens the persisted test change 
   await openRegister(page)
   await page.getByLabel('Lifecycle state filter').selectOption('Draft')
   await page.locator('[data-register-row]').first().click()
+  await page.getByRole('link', { name: 'Open change request →' }).click()
 
   const title = `Verification parity check-in ${Date.now()}`
   await page.getByRole('button', { name: 'Check out & edit' }).click()

@@ -55,7 +55,7 @@ const disciplineLabel = (discipline: TestDiscipline) =>
   discipline === 'System' ? 'System' : discipline === 'HighLevelSoftware' ? 'HLR' : 'LLR'
 
 export default function TestChangeRequestRegisterPage({
-  api, projectId, releases, activeReleaseId, discipline, artifactKind, onBack, onOpen, onCreate, embedded = false,
+  api, projectId, releases, activeReleaseId, discipline, artifactKind, registerHref, onBack, onOpen, onCreate, embedded = false,
 }: {
   api: string
   projectId: string
@@ -63,6 +63,7 @@ export default function TestChangeRequestRegisterPage({
   activeReleaseId: string
   discipline: TestDiscipline
   artifactKind?: string
+  registerHref: (id: string) => string
   onBack?: () => void
   onOpen: (id: string) => void
   onCreate?: () => void
@@ -74,6 +75,19 @@ export default function TestChangeRequestRegisterPage({
   const [totalCount, setTotalCount] = useState(0)
   const [totalPages, setTotalPages] = useState(1)
   const [rows, setRows] = useState<TestChangeRequestRow[]>([])
+  const [selectedId, setSelectedId] = useState(() => new URLSearchParams(location.search).get('selection') ?? '')
+  useEffect(() => {
+    const onPopState = () => setSelectedId(new URLSearchParams(location.search).get('selection') ?? '')
+    addEventListener('popstate', onPopState)
+    return () => removeEventListener('popstate', onPopState)
+  }, [])
+  const select = (id?: string) => {
+    setSelectedId(id ?? '')
+    const url = new URL(location.href)
+    if (id) url.searchParams.set('selection', id)
+    else url.searchParams.delete('selection')
+    history.pushState({}, '', url)
+  }
   const activeRelease = releases.find(x => x.id === activeReleaseId)
   const artifactNoun = verificationArtifactNoun(discipline, artifactKind)
   const procedurePackage = discipline === 'System' || isVerificationProcedureKind(artifactKind)
@@ -126,7 +140,7 @@ export default function TestChangeRequestRegisterPage({
     query={query} onQueryChange={value => { setQuery(value); setPage(1) }}
     stateIntent={stateIntent} onStateIntentChange={value => { setStateIntent(value); setPage(1) }}
     stateOptions={stateOptions}
-    onOpen={onOpen} onLoadRevisions={loadRevisions} />
+    onOpen={onOpen} onSelect={select} selectedId={selectedId} registerHref={registerHref} inspector={{api,kind:'TestChangeRequest',releaseVersion:activeRelease?.version}} onLoadRevisions={loadRevisions} />
 
   if (embedded) return register
 

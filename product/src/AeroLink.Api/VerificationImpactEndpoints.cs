@@ -527,6 +527,35 @@ public static class VerificationImpactEndpoints
             catch (DomainException problem) { return Results.BadRequest(new { error = problem.Message }); }
         });
 
+        // The register inspector uses the same server-owned CR projection for a TCR entry point. A TCR may
+        // have several exact CR claims; the projection is rooted at the originating CR and already includes
+        // the TCR edge and any additional claims in one bounded read. TCRs with no CR origin remain an honest
+        // no-trace result rather than having the client infer a relationship from display text.
+        app.MapGet("/api/test-change-reviews/{id:guid}/trace", async (Guid id, HttpContext http,
+            AeroLinkDbContext db, IProjectLadderPolicyResolver policyResolver, CancellationToken ct) =>
+        {
+            var review = await db.TestChangeReviews.AsNoTracking()
+                .Where(x => x.Id == id)
+                .Select(x => new { x.ProjectId, x.ChangeRequestId })
+                .SingleOrDefaultAsync(ct);
+            if (review is null) return Results.NotFound();
+            if (!await http.HasProjectAccessAsync(db, review.ProjectId, ct)) return Results.Forbid();
+            var rootId = review.ChangeRequestId ?? await db.TestChangeRequestClaims.AsNoTracking()
+                .Where(x => x.TestChangeReviewId == id)
+                .OrderBy(x => x.Id)
+                .Select(x => (Guid?)x.ChangeRequestId)
+                .FirstOrDefaultAsync(ct);
+            if (rootId is null)
+                return Results.Ok(new { projectId = review.ProjectId, rootChangeRequestId = id,
+                    nodes = Array.Empty<object>(), edges = Array.Empty<object>(),
+                    state = new { upstream = "Unknown", downstream = "Unknown", overall = "Unknown",
+                        isTopOfLadder = false, warnings = new[] { "This TCR has no originating change request trace." } } });
+            var policy = await policyResolver.ResolveAsync(review.ProjectId, ct);
+            var projection = await ChangeRequestTraceProjection.ForChangeRequestAsync(db, review.ProjectId,
+                rootId.Value, policy, ct);
+            return projection is null ? Results.NotFound() : Results.Ok(projection);
+        });
+
         // The procedure decisions a test change request carries — what the workspace reads and writes, and the
         // test-side counterpart of the requirement changes a change request carries.
         app.MapGet("/api/test-change-reviews/{id:guid}/{artifactRoute:regex(procedure-changes|case-changes)}", async (Guid id, string artifactRoute,

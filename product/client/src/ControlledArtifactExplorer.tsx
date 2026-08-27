@@ -78,10 +78,13 @@ export function ControlledArtifactInspector({
       </div>
       <button type="button" className="inspectorClose" aria-label={closeLabel} onClick={onClose}>×</button>
     </div>
-    <div className="inspectorTabs">
+    <div className="inspectorTabs" role="tablist" aria-label={`${displayNumber} detail sections`}>
       {tabs.map(tab => <button
         type="button"
         key={tab.id}
+        role="tab"
+        aria-selected={activeTab === tab.id}
+        tabIndex={activeTab === tab.id ? 0 : -1}
         className={activeTab === tab.id ? 'active' : ''}
         onClick={() => onTab(tab.id)}
       >{tab.label}</button>)}

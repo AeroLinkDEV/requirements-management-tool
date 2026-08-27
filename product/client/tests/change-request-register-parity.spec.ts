@@ -56,6 +56,14 @@ test('the requirements register keeps its shape on the shared component', async 
   const row = page.locator('.historyRow.allocation').first()
   await expect(row).toBeVisible({ timeout: 30_000 })
   await expect(row).toContainText('requirement changes')
+  await expect(row).toHaveAttribute('href', /systems\/change-requests\/[0-9a-f-]{36}$/)
+  await row.click()
+  await expect(row).toHaveAttribute('aria-selected', 'true')
+  await expect(page.getByRole('complementary', { name: /detail$/ })).toBeVisible()
+  await expect(page.getByRole('link', { name: 'Open change request →' })).toBeVisible()
+  await expect(page.getByRole('tab', { name: 'Trace & impact' })).toBeVisible()
+  await expect(page.getByRole('tab', { name: 'History' })).toBeVisible()
+  await expect(page.getByRole('tab', { name: 'Discussion' })).toBeVisible()
 })
 
 test('the verification register is the same register over test change requests', async ({ page }) => {
@@ -72,6 +80,10 @@ test('the verification register is the same register over test change requests',
   // the requirements row puts the same fact.
   await expect(row).toContainText('Procedure changes')
   await expect(page.locator('[data-register-row]').first()).toBeVisible()
+  await expect(page.locator('[data-register-row]').first()).toHaveAttribute('href', /system-verification\/change-requests\/[0-9a-f-]{36}$/)
+  await page.locator('[data-register-row]').first().click()
+  await expect(page.locator('[data-register-row]').first()).toHaveAttribute('aria-selected', 'true')
+  await expect(page.getByRole('link', { name: 'Open change request →' })).toBeVisible()
 })
 
 test('the verification register searches and filters like the requirements one', async ({ page }) => {

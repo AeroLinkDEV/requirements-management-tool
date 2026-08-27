@@ -1,6 +1,7 @@
-import { useState, type ReactNode } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import { changeRequestAllocation, changeRequestState } from './presentation'
 import { PersonName } from './People'
+import ChangeRequestInspector from './ChangeRequestInspector'
 import './HistoryExplorer.css'
 
 /**
@@ -56,16 +57,24 @@ type Props = {
   onStateIntentChange: (intent: string) => void
   stateOptions: { value: string; label: string }[]
   onOpen: (id: string) => void
+  onSelect?: (id: string) => void
+  selectedId?: string
+  registerHref: (id: string) => string
+  inspector?: { api: string; kind: 'ChangeRequest' | 'TestChangeRequest'; releaseVersion?: string }
   /** Earlier revisions of one record, fetched only when the reader asks to see them. */
   onLoadRevisions: (row: RegisterRow) => Promise<RegisterRow[]>
 }
 
 export default function ChangeRequestRegister({
   changeNoun, recordNoun, contextLabel, activeRelease, releases, rows, totalCount, page, totalPages,
-  onPageChange, query, onQueryChange, stateIntent, onStateIntentChange, stateOptions, onOpen, onLoadRevisions,
+  onPageChange, query, onQueryChange, stateIntent, onStateIntentChange, stateOptions, onOpen, onSelect, selectedId,
+  registerHref, inspector, onLoadRevisions,
 }: Props) {
   const [expanded, setExpanded] = useState<Record<string, RegisterRow[] | 'loading'>>({})
   const [error, setError] = useState('')
+  const [internalSelectedId, setInternalSelectedId] = useState(selectedId ?? '')
+  useEffect(() => setInternalSelectedId(selectedId ?? ''), [selectedId])
+  const select = (id: string) => { setInternalSelectedId(id); onSelect?.(id) }
 
   const stateLabelFor = (value: string) => stateOptions.find(x => x.value === value)?.label ?? value
 
@@ -97,8 +106,24 @@ export default function ChangeRequestRegister({
   })
 
   const rowMarkup = (row: RegisterRow, superseded = false) => (
-    <button className={superseded ? 'historyRow allocation superseded' : 'historyRow allocation'}
-      key={row.id} data-register-row={row.displayNumber} onClick={() => onOpen(row.id)}>
+    <a className={`${superseded ? 'historyRow allocation superseded' : 'historyRow allocation'}${internalSelectedId === row.id ? ' selected' : ''}`}
+      key={row.id} data-register-row={row.displayNumber} data-register-id={row.id}
+      data-selected={internalSelectedId === row.id ? 'true' : 'false'}
+      aria-current={internalSelectedId === row.id ? 'true' : undefined}
+      aria-selected={internalSelectedId === row.id}
+      href={registerHref(row.id)}
+      onClick={event => {
+        // A primary click is selection, not navigation. The real href remains available for middle/Ctrl-click
+        // and for assistive technology users; the inspector's explicit Open control is the intentional opener.
+        if (event.button === 0 && !event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey) {
+          event.preventDefault(); select(row.id)
+        }
+      }}
+      onKeyDown={event => {
+        if (event.key === ' ' || event.key === 'Spacebar') { event.preventDefault(); select(row.id) }
+        if (event.key === 'Enter') { event.preventDefault(); select(row.id) }
+      }}
+      onDoubleClick={event => { if (!event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey) { event.preventDefault(); onOpen(row.id) } }}>
       <div>
         <b>{row.displayNumber}</b>
         {row.badge}
@@ -122,7 +147,7 @@ export default function ChangeRequestRegister({
       <i className={`historyState ${(superseded ? 'superseded' : row.state).toLowerCase()}`}
         data-state={superseded ? 'Superseded' : row.state}>{changeRequestState(facts(row, superseded))}</i>
       <time>{new Date(row.updatedAt).toLocaleString()}</time>
-    </button>
+    </a>
   )
 
   const emptyState = query
@@ -160,7 +185,8 @@ export default function ChangeRequestRegister({
         aria-label={`Clear ${stateLabelFor(stateIntent)} lifecycle filter`}>Clear filter ×</button>
     </div>}
 
-    <section className="historyTable">
+    <section className={inspector ? 'registerInspectorLayout' : undefined}>
+    <div className="historyTable">
       <div className="tableHead allocation">
         <span>Change request revision</span><span>Build allocation</span><span>State</span><span>Last activity</span>
       </div>
@@ -182,6 +208,10 @@ export default function ChangeRequestRegister({
         <span>Page {page} of {totalPages} · {totalCount} records</span>
         <button type="button" disabled={page >= totalPages} onClick={() => onPageChange(Math.min(totalPages, page + 1))}>Next →</button>
       </div>}
+    </div>
+    {inspector && internalSelectedId
+      ? <ChangeRequestInspector api={inspector.api} id={internalSelectedId} kind={inspector.kind} href={registerHref(internalSelectedId)} releaseVersion={inspector.releaseVersion} onClose={() => { setInternalSelectedId(''); onSelect?.('') }} onOpen={onOpen} />
+      : inspector ? <div className="registerInspectorEmpty"><div className="procedureInspectorEmpty"><span aria-hidden="true">≡</span><b>Select a change request</b><p>Choose a row to inspect its controlled revision, trace, history, and discussion.</p></div></div> : null}
     </section>
   </>
 }

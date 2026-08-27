@@ -180,6 +180,7 @@ test('a frozen build refuses a withdrawal, says what reopening costs, and the wo
   await expect(page.locator('.historyTable')).toBeVisible({ timeout: 30_000 })
 
   await page.locator('[data-register-row]', { hasText: `WITHDRAW-REOPEN oceanic annunciation ${suffix}` }).click()
+  await page.getByRole('link', { name: 'Open change request →' }).click()
   await expect(page.getByRole('button', { name: 'Withdraw' })).toBeVisible({ timeout: 30_000 })
   page.once('dialog', (dialog) => dialog.accept('Superseded by a better approach.'))
   await page.getByRole('button', { name: 'Withdraw' }).click()
@@ -210,6 +211,7 @@ test('a frozen build refuses a withdrawal, says what reopening costs, and the wo
   await page.getByRole('link', { name: 'Change Requests' }).click()
   await expect(page.locator('.historyTable')).toBeVisible({ timeout: 30_000 })
   await page.locator('[data-register-row]', { hasText: `WITHDRAW-REOPEN dependent tightening ${suffix}` }).click()
+  await page.getByRole('link', { name: 'Open change request →' }).click()
   await expect(page.getByTestId('rebase-required')).toContainText('was reopened', { timeout: 30_000 })
   await expect(page.getByTestId('rebase-required')).toContainText(requirementNumber)
 
@@ -218,6 +220,7 @@ test('a frozen build refuses a withdrawal, says what reopening costs, and the wo
   await page.getByRole('link', { name: 'Change Requests' }).click()
   await expect(page.locator('.historyTable')).toBeVisible({ timeout: 30_000 })
   await page.locator('[data-register-row]', { hasText: `WITHDRAW-REOPEN oceanic annunciation ${suffix}` }).click()
+  await page.getByRole('link', { name: 'Open change request →' }).click()
   page.once('dialog', (dialog) => dialog.accept('Superseded by a better approach.'))
   await page.getByRole('button', { name: 'Withdraw' }).click()
   await expect(page.locator('[data-state]').first()).toHaveAttribute('data-state', 'Withdrawn', { timeout: 30_000 })
