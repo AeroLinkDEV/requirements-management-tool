@@ -76,6 +76,27 @@ type History = {
 type SavedView = { id: string; name: string; queryJson: string; columnsJson: string; isShared: boolean; owned: boolean }
 /** `views` is optional because the empty-build reply is a different object; read it through `savedViews`. */
 type Page = { page: number; pageSize: number; totalCount: number; totalPages: number; views?: SavedView[]; items: Procedure[] }
+/** Stable hand-off contract for App: the selected exact artifact stays a verification concern. */
+export type TestArtifactChangeContext = {
+  mode: 'new' | 'existing'
+  projectId: string
+  releaseId: string
+  artifactId: string
+  artifactRevisionId: string
+  artifactKind: 'Case' | 'Procedure'
+  displayNumber: string
+  testChangeReviewId?: string
+  proposalId?: string
+}
+type TestChangeCandidate = {
+  id: string; displayNumber: string; title: string; state: string; outcome: string
+  artifactKey: string; version: number; eligible: boolean; reasonCode?: string; reason?: string
+  existingProposalId?: string
+}
+type TestChangeCandidatePage = {
+  artifactKey: string; artifactDisplayNumber: string; page: number; pageSize: number
+  totalCount: number; totalPages: number; items: TestChangeCandidate[]
+}
 /// The document a discipline's procedures are written into, and the sections inside it.
 type ProcedureDocument = {
   id: string
@@ -174,13 +195,15 @@ const validLevel = (value: string | null, discipline: ProcedureScope, ladder: Pr
  * to be verified.
  */
 export default function TestProcedureExplorer({ api, projectId, releaseId, discipline, buildName, releaseVersion,
-  released, onBack, onOpenRequirementRevision, initialLevel, ladder }: {
+  released, onBack, onOpenRequirementRevision, onOpenTestChangeRequest, initialLevel, ladder }: {
   api: string; projectId: string; releaseId: string; discipline: ProcedureScope; buildName: string
   /** The build's own version, which the document actions name. `buildName` is the display label, not this. */
   releaseVersion: string
   released: boolean
   onBack?: () => void
   onOpenRequirementRevision: (requirement: { id: string; revisionId: string; level: string }) => void
+  /** App owns navigation to the TCR workspace; this component owns exact artifact selection and proposal choice. */
+  onOpenTestChangeRequest?: (context: TestArtifactChangeContext) => void
   initialLevel?: 'HighLevel' | 'LowLevel'
   ladder: ProjectLadderProjection | null
 }) {
@@ -259,6 +282,12 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
   const [coverage, setCoverage] = useState<Coverage>()
   const [coverageRead, setCoverageRead] = useState(false)
   const [showAllCoverage, setShowAllCoverage] = useState(false)
+  const [proposalOpen, setProposalOpen] = useState(false)
+  const [proposalSearch, setProposalSearch] = useState('')
+  const [proposalCandidates, setProposalCandidates] = useState<TestChangeCandidatePage>()
+  const [proposalBusy, setProposalBusy] = useState(false)
+  const proposalTriggerRef = useRef<HTMLButtonElement>(null)
+  const proposalWasOpen = useRef(false)
 
   const scope = scopeOf(discipline, level)
   // A page at a time, at the requirements explorer's own default. A build holds hundreds of procedures, and
@@ -586,6 +615,68 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
     params.set(queryKey('RevisionId'), procedure.revisionId)
     params.delete(queryKey('Tab'))
     window.history.replaceState({}, '', `${location.pathname}?${params}`)
+  }
+
+  const proposalContext = useMemo(() => selected ? {
+    projectId, releaseId, artifactId: selected.id, artifactRevisionId: selected.revisionId,
+    artifactKind: selected.artifactKind === 'Procedure' || discipline === 'System' ? 'Procedure' as const : 'Case' as const,
+    displayNumber: selected.displayNumber,
+  } : undefined, [discipline, projectId, releaseId, selected])
+  const openProposal = () => {
+    if (!selected || released) return
+    setProposalSearch('')
+    setProposalCandidates(undefined)
+    setProposalOpen(true)
+  }
+  const loadProposalCandidates = useCallback(async () => {
+    if (!proposalOpen || !proposalContext) return
+    try {
+      const params = new URLSearchParams({ projectId, releaseId, artifactRevisionId: proposalContext.artifactRevisionId, page: '1', pageSize: '25' })
+      if (proposalSearch.trim()) params.set('search', proposalSearch.trim())
+      const response = await fetch(`${api}/api/verification-artifacts/${proposalContext.artifactId}/test-change-request-candidates?${params}`)
+      if (!response.ok) throw new Error(String(response.status))
+      setProposalCandidates(await response.json())
+    } catch (problem) {
+      setError(operationError(problem, 'Eligible Test Change Requests could not be loaded.'))
+      setProposalCandidates(undefined)
+    }
+  }, [api, projectId, releaseId, proposalOpen, proposalContext, proposalSearch])
+  useEffect(() => { void loadProposalCandidates() }, [loadProposalCandidates])
+  useEffect(() => {
+    if (proposalOpen) {
+      proposalWasOpen.current = true
+      const frame = window.requestAnimationFrame(() => {
+        const dialog = document.querySelector<HTMLElement>('[aria-labelledby="test-change-dialog-title"]')
+        dialog?.querySelector<HTMLElement>('button, input, [tabindex]:not([tabindex="-1"])')?.focus()
+      })
+      return () => window.cancelAnimationFrame(frame)
+    }
+    if (proposalWasOpen.current) {
+      proposalWasOpen.current = false
+      proposalTriggerRef.current?.focus()
+    }
+  }, [proposalOpen])
+  const selectProposal = async (candidate: TestChangeCandidate) => {
+    if (!proposalContext) return
+    if (!candidate.eligible && candidate.existingProposalId) {
+      onOpenTestChangeRequest?.({ ...proposalContext, mode: 'existing', testChangeReviewId: candidate.id, proposalId: candidate.existingProposalId })
+      setProposalOpen(false)
+      return
+    }
+    if (!candidate.eligible) return
+    setProposalBusy(true)
+    setError('')
+    try {
+      const response = await apiRequest<{ testChangeReviewId: string; proposalId: string }>(`${api}/api/verification-artifacts/${proposalContext.artifactId}/test-change-request-proposal`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ projectId, releaseId, artifactRevisionId: proposalContext.artifactRevisionId,
+          testChangeReviewId: candidate.id, expectedVersion: candidate.version }),
+      })
+      onOpenTestChangeRequest?.({ ...proposalContext, mode: 'existing', testChangeReviewId: response.testChangeReviewId, proposalId: response.proposalId })
+      setProposalOpen(false)
+    } catch (problem) {
+      setError(operationError(problem, 'The test artifact could not be added to that Draft. Refresh and try again.'))
+    } finally { setProposalBusy(false) }
   }
   const close = () => {
     setSelectedId('')
@@ -946,6 +1037,58 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
           {tab === 'details' && (
             <div className="inspectorBody">
               {selected.titleNote && <p className="inspectorNote warn">{selected.titleNote}</p>}
+              {!released
+                ? <button type="button" className="impactLaunch" ref={proposalTriggerRef} onClick={openProposal}>
+                    Propose test change →
+                  </button>
+                : <p className="changeBoundaryNote"><b>Read-only historical record — {buildName}</b><br />Exit this workspace and select an in-work build to propose a test change.</p>}
+              {proposalOpen && proposalContext && (
+                  <section className="artifactChangeDialog" role="dialog" aria-modal="true"
+                  aria-labelledby="test-change-dialog-title" onKeyDown={event => {
+                    if (event.key === 'Escape' && !proposalBusy) {
+                      event.preventDefault()
+                      setProposalOpen(false)
+                    }
+                  }}>
+                  <div className="artifactChangeDialogHead">
+                    <div>
+                      <span className="eyebrow">VERIFICATION CHANGE CONTROL</span>
+                      <h3 id="test-change-dialog-title">Propose {proposalContext.displayNumber}</h3>
+                    </div>
+                    <button type="button" className="quiet" onClick={() => setProposalOpen(false)}>Close</button>
+                  </div>
+                  <p>Choose a Test Change Request. The selected exact {proposalContext.artifactKind.toLowerCase()} revision remains unchanged.</p>
+                  <div className="artifactChangeDialogActions">
+                    <button type="button" onClick={() => {
+                      onOpenTestChangeRequest?.({ ...proposalContext, mode: 'new' })
+                      setProposalOpen(false)
+                    }}>
+                      Raise new Test Change Request
+                    </button>
+                    <label>Find an existing Draft
+                      <input aria-label="Find an existing Test Change Request" value={proposalSearch}
+                        onChange={event => setProposalSearch(event.target.value)} placeholder="Identifier or title" />
+                    </label>
+                  </div>
+                  {!proposalCandidates
+                    ? <p className="inspectorNote">Loading Test Change Request candidates…</p>
+                    : proposalCandidates.items.length === 0
+                      ? <p className="inspectorNote">No Test Change Requests match that search.</p>
+                      : <ul className="artifactChangeCandidateList" aria-label="Test Change Request candidates">
+                        {proposalCandidates.items.map(candidate => <li key={candidate.id}>
+                          <div>
+                            <b>{candidate.displayNumber}</b><span>{candidate.title || 'Untitled Test Change Request'}</span>
+                            <small>{candidate.state} · {candidate.artifactKey}</small>
+                            {!candidate.eligible && <p className="inspectorNote warn">{candidate.reason}</p>}
+                          </div>
+                          <button type="button" disabled={proposalBusy || (!candidate.eligible && !candidate.existingProposalId)}
+                            onClick={() => void selectProposal(candidate)}>
+                            {candidate.existingProposalId ? 'Open existing proposal' : 'Add exact revision'}
+                          </button>
+                        </li>)}
+                      </ul>}
+                </section>
+              )}
                <h3>{selectedIsProcedure ? 'Procedure' : 'Case'} title</h3>
               <div className="richRequirement">{selected.title}</div>
               <dl className="procedureCase">

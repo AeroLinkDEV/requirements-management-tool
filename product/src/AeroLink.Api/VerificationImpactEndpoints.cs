@@ -80,6 +80,13 @@ public sealed record ProposeProcedureChangeRequest(TestProcedureChangeKind Kind,
 public sealed record ReturnTestChangeReviewRequest(string Rationale);
 public sealed record DeferTestChangeReviewRequest(string Reason);
 
+/// <summary>
+/// The exact controlled verification revision selected in the Case/Procedure Explorer.  The server resolves
+/// the artifact key, content and current build effectivity; callers cannot submit a browser-shaped proposal.
+/// </summary>
+public sealed record ProposeVerificationArtifactRequest(Guid ProjectId, Guid ReleaseId, Guid ArtifactRevisionId,
+    Guid? TestChangeReviewId = null, string? Rationale = null, long ExpectedVersion = 0);
+
 /// <summary>The one lifecycle contract shared by every route that offers or accepts a TCR source.</summary>
 internal static class TestChangeRequestSourceEligibility
 {
@@ -736,6 +743,268 @@ public static class VerificationImpactEndpoints
                 artifactChanges,
                 procedureChanges = artifactChanges // compatibility alias
             });
+        });
+
+        // Phase 5B: the Explorer's verification-specific proposal seam.  This is deliberately adjacent to
+        // the existing TCR authoring routes and uses the same TestChangeReview.AddProcedureChange domain
+        // operation.  A selected revision is never accepted as client-authored content: the server resolves
+        // its exact current build row and copies the authoritative body into a Modify proposal.
+        app.MapGet("/api/verification-artifacts/{artifactId:guid}/test-change-request-candidates", async (
+            Guid artifactId, Guid projectId, Guid releaseId, Guid artifactRevisionId, string? search,
+            int? page, int? pageSize, HttpContext http, AeroLinkDbContext db,
+            IProjectLadderPolicyResolver policyResolver, IdentityService identity, CancellationToken ct) =>
+        {
+            var release = await db.Releases.AsNoTracking().Where(x => x.Id == releaseId)
+                .Select(x => new { x.ProjectId, x.IsReleased }).SingleOrDefaultAsync(ct);
+            if (release is null || release.ProjectId != projectId) return Results.NotFound();
+            if (!await http.HasProjectAccessAsync(db, projectId, ct)) return Results.Forbid();
+            var selected = await db.TestProcedures.AsNoTracking()
+                .Where(x => x.Id == artifactId && x.ProjectId == projectId)
+                .Join(db.TestProcedureRevisions.AsNoTracking().Where(x => x.Id == artifactRevisionId),
+                    procedure => procedure.Id, revision => revision.ProcedureId,
+                    (procedure, revision) => new { procedure.ArtifactKind, procedure.Level, procedure.BaseNumber,
+                        revision.Id, revision.Revision, revision.State, revision.ParentKind })
+                .SingleOrDefaultAsync(ct);
+            if (selected is null) return Results.NotFound();
+            var key = new VerificationArtifactKey(
+                selected.Level == TestProcedureLevel.System ? VerificationDiscipline.System
+                    : selected.Level == TestProcedureLevel.HighLevel ? VerificationDiscipline.HighLevelSoftware
+                    : VerificationDiscipline.LowLevelSoftware,
+                selected.ArtifactKind);
+            var ladder = await policyResolver.ResolveAsync(projectId, ct);
+            try { _ = ladder.VerificationArtifact(key); }
+            catch (DomainException) { return Results.BadRequest(new { error = "The selected verification artifact key is not configured for this Project.", code = "artifact_key_not_configured" }); }
+            var effectivity = await TestProcedureEffectivity.ForReleaseAsync(db, projectId, releaseId, ct);
+            var current = effectivity?.RevisionByProcedure.TryGetValue(artifactId, out var carried) == true ? carried : Guid.Empty;
+            var exactCurrent = current == artifactRevisionId;
+            var actor = http.UserAccount().UserName;
+            var isTestLead = await http.HasProjectRoleAsync(db, identity, projectId, ct, ProgramRole.TestLead);
+            var mayAuthor = isTestLead || await http.HasProjectRoleAsync(db, identity, projectId, ct, ProgramRole.TestEngineer);
+            var currentPage = Math.Max(1, page ?? 1);
+            var size = Math.Clamp(pageSize ?? 25, 1, 50);
+            var candidates = db.TestChangeReviews.AsNoTracking()
+                .Include(x => x.ProcedureChanges)
+                .Where(x => x.ProjectId == projectId);
+            if (!string.IsNullOrWhiteSpace(search))
+            {
+                var q = search.Trim().ToLower();
+                candidates = candidates.Where(x => x.BaseNumber.ToLower().Contains(q) || x.Title.ToLower().Contains(q));
+            }
+            var total = await candidates.CountAsync(ct);
+            // Keep ordering provider-neutral: SQLite cannot translate DateTimeOffset ORDER BY, while the
+            // display identity is a stable controlled ordering for this bounded picker.
+            var reviews = await candidates.OrderBy(x => x.BaseNumber).ThenBy(x => x.Revision).ThenBy(x => x.Id)
+                .Skip((currentPage - 1) * size).Take(size).ToListAsync(ct);
+            var reviewIds = reviews.Select(x => x.Id).ToList();
+            var now = DateTimeOffset.UtcNow;
+            var activeSessions = await db.ArtifactEditSessions.AsNoTracking()
+                .Where(x => reviewIds.Contains(x.ArtifactId) && x.ArtifactType == "TestChangeRequest"
+                    && x.IsExclusive && x.State == EditSessionState.Active)
+                .ToListAsync(ct);
+            var items = reviews.Select(review =>
+            {
+                string? reasonCode = null;
+                string? reason = null;
+                if (!exactCurrent || release.IsReleased)
+                { reasonCode = release.IsReleased ? "released_build" : "artifact_revision_not_current"; reason = release.IsReleased ? "Released builds are read-only." : "The selected revision is not the exact revision carried by this build."; }
+                else if (review.ReleaseId != releaseId)
+                { reasonCode = "different_build"; reason = "This Test Change Request targets a different build."; }
+                else if (review.ArtifactKey != key)
+                { reasonCode = "wrong_artifact_key"; reason = $"This Test Change Request targets {review.ArtifactKey}, not {key}."; }
+                else if (review.State != TestChangeReviewState.Draft)
+                { reasonCode = "lifecycle_state"; reason = $"{review.State} Test Change Requests cannot accept new proposals."; }
+                else if (review.Outcome != TestChangeReviewOutcome.ChangeRequired)
+                { reasonCode = "test_work_not_required"; reason = "Record that test work is required before adding a proposal."; }
+                else if (!mayAuthor)
+                { reasonCode = "authority"; reason = "Test Engineer or Test Lead authority is required."; }
+                else if (review.AssignedEngineerId is not null && !isTestLead
+                    && !string.Equals(review.AssignedEngineerId, actor, StringComparison.OrdinalIgnoreCase))
+                { reasonCode = "assigned_work_holder"; reason = $"This Draft is assigned to {review.AssignedEngineerId}."; }
+                else if (activeSessions.Any(x => x.ArtifactId == review.Id && x.ExpiresAt > now))
+                { reasonCode = "active_edit_session"; reason = "This Draft is checked out for controlled editing; close the edit session before adding a proposal."; }
+                else if (review.ProcedureChanges.Any(x => x.BaseNumber == selected.BaseNumber))
+                { reasonCode = "already_contains_artifact"; reason = $"This Draft already contains a proposal for {selected.BaseNumber}."; }
+                var existingProposal = review.ProcedureChanges.FirstOrDefault(x => x.BaseNumber == selected.BaseNumber);
+                return new
+                {
+                    review.Id, review.DisplayNumber, review.Title, state = review.State.ToString(),
+                    outcome = review.Outcome.ToString(), artifactKey = review.ArtifactKey.ToString(),
+                    review.Version, eligible = reasonCode is null, reasonCode, reason,
+                    existingProposalId = existingProposal?.Id
+                };
+            }).ToList();
+            return Results.Ok(new
+            {
+                projectId, releaseId, artifactId, artifactRevisionId,
+                artifactKey = key.ToString(), artifactDisplayNumber = $"{selected.BaseNumber}.{selected.Revision:D2}",
+                page = currentPage, pageSize = size, totalCount = total,
+                totalPages = (int)Math.Ceiling(total / (double)size), items
+            });
+        });
+
+        app.MapPost("/api/verification-artifacts/{artifactId:guid}/test-change-request-proposal", async (
+            Guid artifactId, ProposeVerificationArtifactRequest request, HttpContext http, AeroLinkDbContext db,
+            IdentityService identity, IProjectLadderPolicyResolver policyResolver, CancellationToken ct) =>
+        {
+            var release = await db.Releases.AsNoTracking().Where(x => x.Id == request.ReleaseId)
+                .Select(x => new { x.ProjectId, x.IsReleased }).SingleOrDefaultAsync(ct);
+            if (release is null || release.ProjectId != request.ProjectId) return Results.NotFound();
+            if (!await http.HasProjectAccessAsync(db, request.ProjectId, ct)) return Results.Forbid();
+            if (release.IsReleased) return Results.Conflict(new { error = "Released builds are read-only.", code = "released_build" });
+            var reviewId = request.TestChangeReviewId;
+            if (reviewId is null) return Results.BadRequest(new { error = "Choose an existing Test Change Request Draft, or use the new Test Change Request action.", code = "tcr_selection_required" });
+            var review = await db.TestChangeReviews.Include(x => x.ProcedureChanges).Include(x => x.ReviewCycles)
+                .SingleOrDefaultAsync(x => x.Id == reviewId.Value, ct);
+            if (review is null) return Results.NotFound();
+            var ladder = await policyResolver.ResolveAsync(request.ProjectId, ct);
+            var refusal = await RefuseUnlessAuthoredBy(review, http, db, identity, ct);
+            if (refusal is not null) return refusal;
+            if (review.ProjectId != request.ProjectId || review.ReleaseId != request.ReleaseId)
+                return Results.BadRequest(new { error = "The selected Test Change Request targets another Project or build.", code = "tcr_scope_mismatch" });
+            if (review.State != TestChangeReviewState.Draft)
+                return Results.Conflict(new { error = $"{review.DisplayNumber} is {review.State} and cannot accept a proposal.", code = "tcr_not_draft" });
+            if (request.ExpectedVersion != review.Version)
+                return Results.Conflict(new { error = "This Test Change Request changed after it was opened. Refresh and try again.", code = "stale_version" });
+            if (request.ExpectedVersion <= 0)
+                return Results.Conflict(new { error = "Refresh the selected Test Change Request and provide its current version before proposing.", code = "stale_version" });
+            var activeSession = (await db.ArtifactEditSessions.AsNoTracking()
+                .Where(x => x.ArtifactId == review.Id && x.ArtifactType == "TestChangeRequest"
+                    && x.IsExclusive && x.State == EditSessionState.Active).ToListAsync(ct))
+                .FirstOrDefault(x => x.ExpiresAt > DateTimeOffset.UtcNow);
+            if (activeSession is not null)
+                return Results.Conflict(new { error = "This Test Change Request has an active controlled edit session. Close the edit session before adding a proposal.", code = "active_edit_session", holder = activeSession.UserName });
+            var selected = await db.TestProcedures
+                .Where(x => x.Id == artifactId && x.ProjectId == request.ProjectId)
+                .Join(db.TestProcedureRevisions.Where(x => x.Id == request.ArtifactRevisionId),
+                    procedure => procedure.Id, revision => revision.ProcedureId,
+                    (procedure, revision) => new { procedure.ArtifactKind, procedure.Level, procedure.BaseNumber,
+                        procedure.Id, RevisionId = revision.Id, revision.Revision, revision.Objective, revision.Preconditions,
+                        revision.Steps, revision.ExpectedResult, revision.EnvironmentSetup, revision.TestData,
+                        revision.OrderedSteps, revision.ExpectedObservations, revision.Cleanup, revision.ToolingAutomation,
+                        revision.ParentKind, revision.DerivedRationale }).SingleOrDefaultAsync(ct);
+            if (selected is null) return Results.NotFound();
+            var key = new VerificationArtifactKey(
+                selected.Level == TestProcedureLevel.System ? VerificationDiscipline.System
+                    : selected.Level == TestProcedureLevel.HighLevel ? VerificationDiscipline.HighLevelSoftware
+                    : VerificationDiscipline.LowLevelSoftware,
+                selected.ArtifactKind);
+            if (review.ArtifactKey != key)
+                return Results.BadRequest(new { error = "The Test Change Request discipline and Case/Procedure kind do not match the selected artifact.", code = "wrong_artifact_key" });
+            var effectivity = await TestProcedureEffectivity.ForReleaseAsync(db, request.ProjectId, request.ReleaseId, ct);
+            if (effectivity?.RevisionByProcedure.TryGetValue(artifactId, out var carriedRevisionId) != true
+                || carriedRevisionId != request.ArtifactRevisionId)
+                return Results.Conflict(new { error = "The selected revision is no longer the exact revision carried by this build. Refresh and reselect it.", code = "artifact_revision_not_current" });
+            if (review.Outcome != TestChangeReviewOutcome.ChangeRequired)
+                return Results.BadRequest(new { error = "Record that test work is required before proposing an artifact change.", code = "test_work_not_required" });
+            var existingProposal = review.ProcedureChanges.FirstOrDefault(x => x.BaseNumber == selected.BaseNumber);
+            if (existingProposal is not null)
+                return Results.Ok(new
+                {
+                    mode = "existing", testChangeReviewId = review.Id, review.DisplayNumber,
+                    proposalId = existingProposal.Id, proposalDisplayNumber = existingProposal.DisplayNumber,
+                    existingProposal.Revision, artifactId, artifactRevisionId = selected.RevisionId,
+                    duplicate = true
+                });
+            try
+            {
+                var isSoftwareProcedure = selected.ArtifactKind == VerificationArtifactKind.Procedure
+                    && selected.Level != TestProcedureLevel.System;
+                var parentIds = Array.Empty<Guid>();
+                if (isSoftwareProcedure && selected.ParentKind != VerificationProcedureParentKind.Derived)
+                    parentIds = await db.TestCaseProcedureLinks.AsNoTracking()
+                        .Where(x => x.ProcedureRevisionId == selected.RevisionId)
+                        .Select(x => x.CaseRevisionId).Distinct().ToArrayAsync(ct);
+                var effectiveBaselineId = await TestChangeReviewRequirementScope
+                    .EffectiveRequirementBaselineIdAsync(db, request.ProjectId, request.ReleaseId, ct);
+                var effectiveRequirementIds = effectiveBaselineId is Guid baselineId
+                    ? (await db.BaselineRequirements.AsNoTracking()
+                        .Where(x => x.BaselineId == baselineId).Select(x => x.RevisionId).ToListAsync(ct)).ToHashSet()
+                    : [];
+                var drivingIds = isSoftwareProcedure ? Array.Empty<Guid>() : await db.TestCoverage.AsNoTracking()
+                    .Where(x => x.ProcedureRevisionId == selected.RevisionId && !x.IsSuspect
+                        && effectiveRequirementIds.Contains(x.RequirementRevisionId))
+                    .Select(x => x.RequirementRevisionId).Distinct().ToArrayAsync(ct);
+                if (!isSoftwareProcedure)
+                {
+                    // This is the server-resolved equivalent of the existing Modify route's full successor
+                    // selection.  The Explorer never accepts a browser-supplied coverage list, so the exact
+                    // current, non-suspect coverage becomes the retained successor set.
+                    var known = await (from revision in db.RequirementRevisions.AsNoTracking()
+                                       join artifact in db.Requirements.AsNoTracking() on revision.ArtifactId equals artifact.Id
+                                       where drivingIds.Contains(revision.Id)
+                                       select new { revision.Id, artifact.ProjectId, artifact.Level })
+                        .ToDictionaryAsync(x => x.Id, ct);
+                    var wanted = ApiMap.RequirementLevelFor(review.ProcedureLevel(ladder), ladder);
+                    foreach (var drivingId in drivingIds)
+                    {
+                        if (!known.TryGetValue(drivingId, out var requirement))
+                            return Results.BadRequest(new { error = $"Requirement revision {drivingId} does not exist.", code = "requirement_revision_not_found" });
+                        if (requirement.ProjectId != request.ProjectId)
+                            return Results.BadRequest(new { error = $"Requirement revision {drivingId} belongs to another project.", code = "requirement_revision_project_mismatch" });
+                        if (requirement.Level != wanted)
+                            return Results.BadRequest(new { error = $"Requirement revision {drivingId} is a {requirement.Level} requirement, which a {review.Discipline} Procedure does not verify.", code = "requirement_revision_level_mismatch" });
+                    }
+                    var governed = await TestChangeReviewRequirementScope.ForReviewAsync(db, review, null, ct, ladder);
+                    var governedIds = governed.Select(x => x.RevisionId).ToHashSet();
+                    var outside = drivingIds.FirstOrDefault(x => !governedIds.Contains(x));
+                    if (outside != Guid.Empty)
+                        return Results.BadRequest(new { error = $"Requirement revision {outside} is outside this Test Change Request's governed package/build scope.", code = "requirement_revision_outside_tcr_scope" });
+                    parentIds = drivingIds;
+                }
+                if (isSoftwareProcedure && selected.ParentKind != VerificationProcedureParentKind.Derived)
+                {
+                    var carriedCaseIds = effectivity.RevisionIds.ToHashSet();
+                    var knownCaseIds = await (from revision in db.TestProcedureRevisions.AsNoTracking()
+                                              join procedure in db.TestProcedures.AsNoTracking() on revision.ProcedureId equals procedure.Id
+                                              where parentIds.Contains(revision.Id) && procedure.ProjectId == request.ProjectId
+                                                  && procedure.ArtifactKind == VerificationArtifactKind.Case
+                                                  && procedure.Level == selected.Level
+                                              select revision.Id).ToListAsync(ct);
+                    var missingCase = parentIds.FirstOrDefault(x => !carriedCaseIds.Contains(x) || !knownCaseIds.Contains(x));
+                    if (missingCase != Guid.Empty)
+                        return Results.BadRequest(new { error = $"Case revision {missingCase} is not an exact Case parent selected by this Project and build.", code = "case_parent_out_of_scope" });
+                }
+                if (isSoftwareProcedure)
+                    ExactParentSelectionPolicy.Validate(
+                        VerificationProcedureParentPolicy.Classification(selected.ParentKind), parentIds,
+                        selected.DerivedRationale, "software Procedure");
+                var parentKind = isSoftwareProcedure
+                    ? selected.ParentKind
+                    : selected.ParentKind == VerificationProcedureParentKind.Derived
+                        ? VerificationProcedureParentKind.Derived
+                        : parentIds.Length > 0
+                            ? VerificationProcedureParentKind.Allocated
+                            : VerificationProcedureParentKind.Unspecified;
+                if (!isSoftwareProcedure && parentKind != VerificationProcedureParentKind.Derived && parentIds.Length == 0)
+                    return Results.BadRequest(new
+                    {
+                        error = "A modified Procedure must retain or add at least one exact requirement revision. Retire the Procedure instead if it verifies nothing in this build.",
+                        code = "procedure_final_coverage_required"
+                    });
+                var title = (await TestProcedureRevisionTitleProjection.ForRevisionsAsync(db, [selected.RevisionId], ct))[selected.RevisionId].Title;
+                var actor = http.UserAccount().UserName;
+                var change = review.AddProcedureChange(actor, new TestProcedureChangeDraft(
+                    selected.BaseNumber, selected.Revision + 1, review.ProcedureLevel(ladder),
+                    TestProcedureChangeKind.Modify, title, selected.Objective, selected.Preconditions, selected.Steps,
+                    selected.ExpectedResult, string.IsNullOrWhiteSpace(request.Rationale)
+                        ? $"Modify the exact {selected.BaseNumber}.{selected.Revision:D2} selected in the Test Case/Procedure Explorer."
+                        : request.Rationale,
+                    JsonSerializer.Serialize(drivingIds), "[]", "", parentKind,
+                    JsonSerializer.Serialize(parentIds), selected.DerivedRationale,
+                    selected.EnvironmentSetup, selected.TestData, selected.OrderedSteps,
+                    selected.ExpectedObservations, selected.Cleanup, selected.ToolingAutomation),
+                    DateTimeOffset.UtcNow, policy: ladder);
+                await db.SaveChangesAsync(ct);
+                return Results.Ok(new
+                {
+                    mode = "existing", testChangeReviewId = review.Id, review.DisplayNumber,
+                    proposalId = change.Id, proposalDisplayNumber = change.DisplayNumber, change.Revision,
+                    artifactId, artifactRevisionId = selected.RevisionId, duplicate = false
+                });
+            }
+            catch (DbUpdateConcurrencyException)
+            { return Results.Conflict(new { error = "This Test Change Request changed after it was opened. Refresh and try again.", code = "stale_version" }); }
+            catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
         });
 
         // The searchable Modify/Retire picker: the exact procedure universe the selected build's manifest

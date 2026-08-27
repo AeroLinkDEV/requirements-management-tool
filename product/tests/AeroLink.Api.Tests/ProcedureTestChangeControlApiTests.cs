@@ -1,10 +1,12 @@
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
+using AeroLink.Domain.Baselines;
 using AeroLink.Domain.ChangeControl;
 using AeroLink.Domain.Hierarchy;
 using AeroLink.Domain.Identity;
 using AeroLink.Domain.Programs;
+using AeroLink.Domain.Requirements;
 using AeroLink.Domain.Verification;
 using AeroLink.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
@@ -21,6 +23,159 @@ namespace AeroLink.Api.Tests;
 public sealed class ProcedureTestChangeControlApiTests
 {
     private sealed record Fixture(Guid ProjectId, Guid ReleaseId, Guid HlrCaseChangeId, Guid LlrCaseChangeId);
+    private sealed record ExplorerFixture(Guid ProjectId, Guid ReleaseId, Guid ArtifactId, Guid RevisionId,
+        Guid LaterRevisionId, Guid RequirementRevisionId, Guid ReviewId, long ReviewVersion);
+
+    [Fact]
+    public async Task Verification_explorer_proposal_route_is_bound_to_the_test_change_api()
+    {
+        // Boundary characterization for the Explorer seam. A nonexistent release fails closed before any
+        // artifact or TCR lookup; the route must remain an API route rather than becoming a client-only claim.
+        using var factory = new AeroLinkApiFactory();
+        using var client = factory.CreateClient();
+        await SeedAsync(factory);
+        await LoginAsync(client, "procedure.author");
+        using var response = await client.PostAsJsonAsync(
+            $"/api/verification-artifacts/{Guid.NewGuid()}/test-change-request-proposal", new
+            {
+                projectId = Guid.NewGuid(), releaseId = Guid.NewGuid(), artifactRevisionId = Guid.NewGuid(),
+                testChangeReviewId = Guid.NewGuid(), expectedVersion = 1L,
+            });
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task Verification_explorer_enforces_exact_effectivity_version_session_assignment_and_duplicate_rules()
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var client = factory.CreateClient();
+        var fixture = await SeedExplorerScenarioAsync(factory);
+        await LoginAsync(client, "procedure.author");
+
+        using var candidateResponse = await client.GetAsync(
+            $"/api/verification-artifacts/{fixture.ArtifactId}/test-change-request-candidates"
+            + $"?projectId={fixture.ProjectId}&releaseId={fixture.ReleaseId}&artifactRevisionId={fixture.RevisionId}");
+        var candidateBody = await candidateResponse.Content.ReadAsStringAsync();
+        Assert.True(candidateResponse.IsSuccessStatusCode, $"{(int)candidateResponse.StatusCode}: {candidateBody}");
+        using var candidateDocument = JsonDocument.Parse(candidateBody);
+        var candidates = candidateDocument.RootElement;
+        var candidate = Assert.Single(candidates.GetProperty("items").EnumerateArray(),
+            x => x.GetProperty("id").GetGuid() == fixture.ReviewId);
+        Assert.True(candidate.GetProperty("eligible").GetBoolean());
+        Assert.Equal("System:Procedure", candidate.GetProperty("artifactKey").GetString());
+        Assert.Equal(fixture.ReviewVersion, candidate.GetProperty("version").GetInt64());
+
+        // The mutation requires the candidate version; an omitted/default token cannot bypass concurrency.
+        using (var missingVersion = await client.PostAsJsonAsync(
+                   $"/api/verification-artifacts/{fixture.ArtifactId}/test-change-request-proposal", new
+                   {
+                       projectId = fixture.ProjectId, releaseId = fixture.ReleaseId,
+                       artifactRevisionId = fixture.RevisionId, testChangeReviewId = fixture.ReviewId,
+                       expectedVersion = 0L,
+                   }))
+        {
+            Assert.Equal(HttpStatusCode.Conflict, missingVersion.StatusCode);
+            Assert.Contains("stale_version", await missingVersion.Content.ReadAsStringAsync(),
+                StringComparison.OrdinalIgnoreCase);
+        }
+
+        // A different revision row is not interchangeable with the exact revision carried by the build.
+        using (var wrongRevision = await client.PostAsJsonAsync(
+                   $"/api/verification-artifacts/{fixture.ArtifactId}/test-change-request-proposal", new
+                   {
+                       projectId = fixture.ProjectId, releaseId = fixture.ReleaseId,
+                       artifactRevisionId = fixture.LaterRevisionId, testChangeReviewId = fixture.ReviewId,
+                       expectedVersion = fixture.ReviewVersion,
+                   }))
+        {
+            Assert.Equal(HttpStatusCode.Conflict, wrongRevision.StatusCode);
+            Assert.Contains("artifact_revision_not_current", await wrongRevision.Content.ReadAsStringAsync(),
+                StringComparison.OrdinalIgnoreCase);
+        }
+
+        // An active whole-draft controlled-edit session is refused even to its owner: direct AddProcedureChange
+        // cannot update that session's snapshot and would be erased by a later check-in.
+        await AddActiveReviewEditSessionAsync(factory, fixture, "procedure.author");
+        using (var checkedOut = await client.PostAsJsonAsync(
+                   $"/api/verification-artifacts/{fixture.ArtifactId}/test-change-request-proposal", new
+                   {
+                       projectId = fixture.ProjectId, releaseId = fixture.ReleaseId,
+                       artifactRevisionId = fixture.RevisionId, testChangeReviewId = fixture.ReviewId,
+                       expectedVersion = fixture.ReviewVersion,
+                   }))
+        {
+            Assert.Equal(HttpStatusCode.Conflict, checkedOut.StatusCode);
+            Assert.Contains("active_edit_session", await checkedOut.Content.ReadAsStringAsync(),
+                StringComparison.OrdinalIgnoreCase);
+        }
+        await CloseReviewEditSessionAsync(factory, fixture.ReviewId);
+
+        using (var authored = await client.PostAsJsonAsync(
+                   $"/api/verification-artifacts/{fixture.ArtifactId}/test-change-request-proposal", new
+                   {
+                       projectId = fixture.ProjectId, releaseId = fixture.ReleaseId,
+                       artifactRevisionId = fixture.RevisionId, testChangeReviewId = fixture.ReviewId,
+                       expectedVersion = fixture.ReviewVersion,
+                       rationale = "Modify the exact System Procedure selected in the explorer.",
+                   }))
+        {
+            var body = await authored.Content.ReadAsStringAsync();
+            Assert.True(authored.StatusCode == HttpStatusCode.OK, $"{(int)authored.StatusCode}: {body}");
+            using var json = JsonDocument.Parse(body);
+            Assert.False(json.RootElement.GetProperty("duplicate").GetBoolean());
+            Assert.Equal(fixture.ReviewId, json.RootElement.GetProperty("testChangeReviewId").GetGuid());
+        }
+
+        long currentVersion;
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            var review = await db.TestChangeReviews.AsNoTracking().Include(x => x.ProcedureChanges)
+                .SingleAsync(x => x.Id == fixture.ReviewId);
+            currentVersion = review.Version;
+            Assert.Single(review.ProcedureChanges);
+            Assert.Equal(TestProcedureChangeKind.Modify, review.ProcedureChanges.Single().Kind);
+            Assert.Equal("SYSTP-786001", review.ProcedureChanges.Single().BaseNumber);
+            Assert.Equal(1, review.ProcedureChanges.Single().Revision);
+            Assert.Equal(fixture.RevisionId, await db.TestProcedureRevisions.AsNoTracking()
+                .Where(x => x.Id == fixture.RevisionId).Select(x => x.Id).SingleAsync());
+        }
+
+        // Repeating the same selection opens the already-created proposal instead of creating a second one.
+        using (var duplicate = await client.PostAsJsonAsync(
+                   $"/api/verification-artifacts/{fixture.ArtifactId}/test-change-request-proposal", new
+                   {
+                       projectId = fixture.ProjectId, releaseId = fixture.ReleaseId,
+                       artifactRevisionId = fixture.RevisionId, testChangeReviewId = fixture.ReviewId,
+                       expectedVersion = currentVersion,
+                   }))
+        {
+            var body = await duplicate.Content.ReadAsStringAsync();
+            Assert.Equal(HttpStatusCode.OK, duplicate.StatusCode);
+            using var json = JsonDocument.Parse(body);
+            Assert.True(json.RootElement.GetProperty("duplicate").GetBoolean());
+        }
+
+        // The candidate list explains a Draft held by another assigned work-holder rather than offering it.
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            var assigned = await db.TestChangeReviews.SingleAsync(x => x.Id == fixture.ReviewId);
+            assigned.Assign("procedure.author", "another.engineer", DateTimeOffset.UtcNow);
+            await db.SaveChangesAsync();
+        }
+        using var reassignedResponse = await client.GetAsync(
+            $"/api/verification-artifacts/{fixture.ArtifactId}/test-change-request-candidates"
+            + $"?projectId={fixture.ProjectId}&releaseId={fixture.ReleaseId}&artifactRevisionId={fixture.RevisionId}");
+        var reassignedBody = await reassignedResponse.Content.ReadAsStringAsync();
+        Assert.True(reassignedResponse.IsSuccessStatusCode, $"{(int)reassignedResponse.StatusCode}: {reassignedBody}");
+        using var reassignedDocument = JsonDocument.Parse(reassignedBody);
+        var reassignedCandidates = reassignedDocument.RootElement;
+        var reassigned = Assert.Single(reassignedCandidates.GetProperty("items").EnumerateArray(),
+            x => x.GetProperty("id").GetGuid() == fixture.ReviewId);
+        Assert.False(reassigned.GetProperty("eligible").GetBoolean());
+        Assert.Equal("assigned_work_holder", reassigned.GetProperty("reasonCode").GetString());
+    }
 
     [Fact]
     public async Task A_valid_case_origin_uses_the_procedure_key_workflow_and_preserves_origin_through_revision()
@@ -265,6 +420,85 @@ public sealed class ProcedureTestChangeControlApiTests
         var verifyDb = verifyScope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
         Assert.Equal(VerificationImpactState.Resolved,
             (await verifyDb.VerificationImpactItems.AsNoTracking().SingleAsync(x => x.Id == assessmentId)).State);
+    }
+
+    private static async Task<ExplorerFixture> SeedExplorerScenarioAsync(AeroLinkApiFactory factory)
+    {
+        var fixture = await SeedAsync(factory);
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+        var now = DateTimeOffset.UtcNow;
+        var project = await db.Projects.SingleAsync(x => x.Id == fixture.ProjectId);
+        var release = await db.Releases.SingleAsync(x => x.Id == fixture.ReleaseId);
+        var source = new SystemChangeRequest("SRCR-786001", 0, project.Id, release.Id,
+            "Explorer source", "Problem", "Analysis", "Solution", "procedure.author", now);
+        source.AddRequirementChange(actorId: "procedure.author", baseNumber: "SYSR-786001", revision: 0,
+            level: RequirementLevel.System, kind: RequirementChangeKind.Introduce,
+            statement: "The system shall preserve exact verification identity.", rationale: "Explorer qualification",
+            verificationMethod: "Test", now: now);
+        source.SubmitForReview("procedure.author", [new ApproverSelection("procedure.reviewer", "Reviewer")], now);
+        source.ApproveActiveStage("procedure.reviewer", now);
+
+        var baseline = new CandidateBaseline("SW-78.60", 0, project.Id, release.Id, null,
+            "Explorer qualification build", "procedure.author", now);
+        baseline.Select(source, "procedure.author", now);
+        baseline.Freeze("procedure.author", now);
+        baseline.MarkRequirementsMaterialized("procedure.author", new string('a', 64), 1, now);
+        baseline.MarkTestProceduresMaterialized("procedure.author", new string('b', 64), 1, now);
+
+        var requirement = new RequirementArtifact(project.Id, "SYSR-786001", RequirementLevel.System, now);
+        var requirementRevision = new RequirementRevision(requirement.Id, 0,
+            "The system shall preserve exact verification identity.", "Explorer qualification", "Test",
+            RequirementRevisionState.Active, source.Id, baseline.Id, now);
+        var artifact = new TestProcedure(project.Id, "SYSTP-786001", "Explorer exact System Procedure",
+            "procedure.author", now, TestProcedureLevel.System);
+        var revision = new TestProcedureRevision(artifact.Id, 0, "Verify exact identity", "Use the qualified build",
+            "Exercise the exact selected behavior", "The exact behavior is observed.", TestProcedureState.Approved,
+            "procedure.author", now, effectiveBaselineId: baseline.Id,
+            parentKind: VerificationProcedureParentKind.Allocated);
+        var laterRevision = new TestProcedureRevision(artifact.Id, 1, "Later identity", "Use the later build",
+            "Exercise the later behavior", "The later behavior is observed.", TestProcedureState.Draft,
+            "procedure.author", now.AddSeconds(1));
+        var key = new VerificationArtifactKey(VerificationDiscipline.System, VerificationArtifactKind.Procedure);
+        var review = new TestChangeReview(project.Id, release.Id, source.Id, key, source.DisplayNumber, now,
+            "SYSTPCR-786001", authorId: "procedure.author");
+        review.RecordTestChangeRequired("procedure.author", now);
+        var impact = VerificationImpactItem.ForIntroducedRequirement(project.Id, release.Id, source.Id, review.Id,
+            source.RequirementChanges.Single().Id, source.RequirementChanges.Single().DisplayNumber, "Test", now);
+        impact.LinkRequirementRevision(requirementRevision.Id, now);
+
+        db.AddRange(source, baseline, requirement, requirementRevision, artifact, revision, laterRevision, review, impact);
+        db.BaselineRequirements.Add(new BaselineRequirementSelection(baseline.Id, requirement.Id,
+            requirementRevision.Id));
+        db.BaselineTestProcedures.Add(new BaselineTestProcedureSelection(baseline.Id, artifact.Id, revision.Id));
+        db.TestCoverage.Add(new TestRequirementCoverage(revision.Id, requirementRevision.Id));
+        await db.SaveChangesAsync();
+        return new(project.Id, release.Id, artifact.Id, revision.Id, laterRevision.Id, requirementRevision.Id,
+            review.Id, review.Version);
+    }
+
+    private static async Task AddActiveReviewEditSessionAsync(AeroLinkApiFactory factory, ExplorerFixture fixture,
+        string actor)
+    {
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+        var now = DateTimeOffset.UtcNow;
+        var snapshot = "{}";
+        var hash = EnterpriseRequirementsService.Hash(System.Text.Encoding.UTF8.GetBytes(snapshot));
+        db.ArtifactEditSessions.Add(new ArtifactEditSession(fixture.ProjectId, "TestChangeRequest",
+            fixture.ReviewId, null, hash, snapshot, actor, now, true, 15));
+        await db.SaveChangesAsync();
+    }
+
+    private static async Task CloseReviewEditSessionAsync(AeroLinkApiFactory factory, Guid reviewId)
+    {
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+        var session = await db.ArtifactEditSessions.SingleAsync(x => x.ArtifactId == reviewId
+            && x.ArtifactType == "TestChangeRequest" && x.State == EditSessionState.Active);
+        session.Close(EditSessionState.Committed, session.Version, DateTimeOffset.UtcNow, "procedure.author",
+            "Explorer API qualification");
+        await db.SaveChangesAsync();
     }
 
     private static async Task<Fixture> SeedAsync(AeroLinkApiFactory factory)
