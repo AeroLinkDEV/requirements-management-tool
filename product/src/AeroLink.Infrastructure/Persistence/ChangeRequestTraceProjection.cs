@@ -19,7 +19,9 @@ public sealed record ChangeRequestTraceNode(
     Guid? BuildId,
     string? BuildVersion,
     int? Revision,
-    string? Level);
+    string? Level,
+    Guid? ArtifactId = null,
+    Guid? EffectiveBaselineId = null);
 
 /// <summary>One provenance fact carried by a composed trace edge.</summary>
 public sealed record ChangeRequestTraceProvenance(
@@ -365,7 +367,7 @@ public static class ChangeRequestTraceProjection
                                            where artifact.ProjectId == projectId
                                            select new { revision.Id, revision.ArtifactId, artifact.BaseNumber,
                                                revision.Revision, revision.Statement, artifact.Level,
-                                               revision.SourceChangeRequestId }).ToListAsync(ct);
+                                               revision.SourceChangeRequestId, revision.EffectiveBaselineId }).ToListAsync(ct);
         var allRequirementLinks = await db.RequirementTraces.AsNoTracking()
             .Where(x => x.ProjectId == projectId
                 && (x.ExactLinkSuspectLifecycleId == null
@@ -382,7 +384,8 @@ public static class ChangeRequestTraceProjection
         {
             nodes[("RequirementRevision", requirement.Id)] = new(requirement.Id, "RequirementRevision",
                 Display(requirement.BaseNumber, requirement.Revision), requirement.Statement, null, projectId,
-                null, null, requirement.Revision, requirement.Level.ToString());
+                null, null, requirement.Revision, requirement.Level.ToString(), requirement.ArtifactId,
+                requirement.EffectiveBaselineId);
             if (requirement.SourceChangeRequestId is Guid sourceId && byCr.ContainsKey(sourceId))
             {
                 var edge = new EdgeBuilder(sourceId, "ChangeRequest", requirement.Id,

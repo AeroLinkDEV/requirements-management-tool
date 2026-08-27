@@ -126,6 +126,17 @@ test('legacy context-free change-request routes remain loadable until detail can
     .toMatchObject({ view: 'scr', discipline: 'system', artifactId: 'legacy-a' })
 })
 
+test('Change Request Digital Thread routes use an explicit stable-ID kind', () => {
+  const address = routePath(context, 'lifecycle', 'system', 'cr-a', 'change-request')
+  expect(address).toBe('/programs/program-a/projects/project-a/releases/release-a/traceability/change-requests/cr-a')
+  expect(parseRoute(address)).toMatchObject({
+    view: 'lifecycle', discipline: 'system', artifactId: 'cr-a', artifactKind: 'change-request',
+  })
+  expect(routePath(context, 'lifecycle', 'system', 'requirement-a')).toBe(
+    '/programs/program-a/projects/project-a/releases/release-a/traceability/requirement-a',
+  )
+})
+
 test('Documentation Center has a canonical Project route while legacy build routes remain readable', () => {
   const canonical = '/programs/program-a/projects/project-a/documentation-center'
   expect(routePath(context, 'managedDocuments')).toBe(canonical)

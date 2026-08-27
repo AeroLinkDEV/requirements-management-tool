@@ -248,6 +248,7 @@ type Props = {
   onOpenRequirement: (id: string, level: RequirementLevel) => void;
   onOpenProblemReport: (id: string) => void;
   onDisciplineResolved: (discipline: "system" | "software", changeRequestType?: "Interface") => void;
+  digitalThreadHref?: string;
   /**
    * The project's builds, so this record's own target can be resolved once it loads. Without them the rail
    * can only report the stored state, and "Selected for baseline" is the one wording nobody wants to read.
@@ -464,6 +465,7 @@ export default function ChangeRequestWorkspace({
   onOpenRequirement,
   onOpenProblemReport,
   onDisciplineResolved,
+  digitalThreadHref,
   releases,
 }: Props) {
   const [scr, setScr] = useState<ChangeRequestDetail>();
@@ -1515,6 +1517,9 @@ export default function ChangeRequestWorkspace({
             )}
             <ControlledChangeCaseCard
               actions={<>
+                {digitalThreadHref && (
+                  <a className="outline" href={digitalThreadHref}>Open Digital Thread →</a>
+                )}
                 {scr.state === "Draft" && isAuthor && (
                   <button className="outline" type="button" disabled={busy || Boolean(lockStatus?.locked && !lockStatus.mine)} onClick={beginEdit}>
                     {busy ? "Checking lock…" : lockStatus?.locked && !lockStatus.mine ? `Read only · ${personLabel(lockStatus.holder)}` : "Check out & edit"}

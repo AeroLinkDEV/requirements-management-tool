@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { apiLogin, login, openNavigationGroup, selectProgram } from "./auth";
+import { apiBase, apiLogin, login, openNavigationGroup, selectProgram, showcaseSeed } from "./auth";
 
 /**
  * "Open complete Digital Thread" navigated to the thread and then focused whichever requirement happened to
@@ -40,4 +40,34 @@ test("opening the Digital Thread from a requirement focuses that requirement and
   expect(url).toContain("/traceability");
   await page.reload({ waitUntil: "load" });
   await expect(page.locator(".digitalThreadStage header b").first()).toHaveText(/^SYSR-000011\./);
+});
+
+test("a change request opens its stable-ID Digital Thread with proposal truth separate from baseline", async ({
+  page,
+  request,
+  }, testInfo) => {
+  test.setTimeout(180_000);
+  const showcase = await showcaseSeed(request);
+  await apiLogin(request);
+  await login(page, "admin", { openProject: false });
+  const response = await request.get(`${apiBase}/api/change-requests?projectId=${showcase.projectId}&releaseId=${showcase.activeReleaseId}&page=1&pageSize=200`);
+  expect(response.ok(), await response.text()).toBeTruthy();
+  const listed = await response.json() as { items: { id: string; requirementCount: number }[] };
+  const candidate = listed.items.find(item => item.requirementCount > 0);
+  expect(candidate, "The showcase must contain a requirement-bearing change request").toBeTruthy();
+  const detailResponse = await request.get(`${apiBase}/api/change-requests/${candidate!.id}`);
+  expect(detailResponse.ok(), await detailResponse.text()).toBeTruthy();
+  const detail = await detailResponse.json() as { displayNumber: string; requirementChanges: { displayNumber: string }[] };
+  await page.goto(new URL(`/programs/${showcase.programId}/projects/${showcase.projectId}/releases/${showcase.activeReleaseId}/traceability/change-requests/${candidate!.id}`, page.url()).toString(), { waitUntil: "load" });
+  await expect(page.getByRole("heading", { name: "Digital Thread · Change Request" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Change request chain" })).toBeVisible();
+  await expect(page.getByText(detail.displayNumber, { exact: true }).first()).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Proposed requirement changes" })).toBeVisible();
+  await expect(page.getByText(detail.requirementChanges[0].displayNumber, { exact: true })).toBeVisible();
+  await expect(page.getByText(/not materialized requirement revisions/i)).toBeVisible();
+  await page.screenshot({ path: testInfo.outputPath("cr-thread-normal.png"), fullPage: true });
+  await page.setViewportSize({ width: 900, height: 900 });
+  await page.screenshot({ path: testInfo.outputPath("cr-thread-narrow.png"), fullPage: true });
+  await page.reload({ waitUntil: "load" });
+  await expect(page.getByRole("heading", { name: "Change request chain" })).toBeVisible();
 });
