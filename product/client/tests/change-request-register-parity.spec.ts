@@ -68,7 +68,7 @@ test('the requirements register keeps its shape on the shared component', async 
   await testInfo.attach('requirements-register-normal', { body: await page.screenshot(), contentType: 'image/png' })
 })
 
-test('requirements register preserves deep-link history, native links, and authoritative trace facts', async ({ page }) => {
+test('requirements register preserves deep-link history, native links, and authoritative trace facts', async ({ page }, testInfo) => {
   test.setTimeout(180_000)
   await page.setViewportSize({ width: 1600, height: 900 })
   await login(page)
@@ -108,10 +108,12 @@ test('requirements register preserves deep-link history, native links, and autho
   await page.getByRole('tab', { name: 'Trace & impact' }).click()
   const inspector = page.getByRole('complementary', { name: /detail$/ })
   await expect(inspector).toContainText('Answered')
+  await expect(inspector).toContainText('Selected for baseline')
   await expect(inspector).toContainText('AssessmentDerived')
   await expect(inspector).toContainText('AuthorStated')
   await expect(inspector).toContainText('Complete the downstream review before approval.')
   await expect(inspector).toContainText(/exact revision \d+/)
+  await testInfo.attach('requirements-trace-impact', { body: await page.screenshot({ fullPage: true }), contentType: 'image/png' })
   const afterAssessment = await assessment.boundingBox()
   const afterRegister = await register.boundingBox()
   expect(afterAssessment?.x).toBe(beforeAssessment?.x)

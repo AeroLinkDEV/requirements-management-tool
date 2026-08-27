@@ -508,6 +508,14 @@ button.coverageState:hover {
 .controlledBanner span {
   color: #5e736d;
 }
+.traceRequirementHead {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.traceRequirementHead b { color: #17314f; font-size: 13px; }
+.traceRequirementHead span { color: #5c6878; font-size: 12px; }
 .inspectorBody h3 {
   font-size: 12px;
   text-transform: uppercase;

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { ControlledArtifactInspector } from './ControlledArtifactExplorer'
 import { PersonName } from './People'
+import { stateLabel } from './presentation'
 import './RequirementsWorkspace.css'
 
 type TraceNode = {
@@ -150,7 +151,7 @@ export default function ChangeRequestInspector({
   return <ControlledArtifactInspector
     artifactType={kind === 'ChangeRequest' ? 'CHANGE REQUEST' : 'TEST CHANGE REQUEST'}
     displayNumber={detail.displayNumber}
-    subtitle={`${detail.state} · exact revision ${detail.revision}`}
+    subtitle={`${stateLabel(detail.state)} · exact revision ${detail.revision}`}
     closeLabel="Close change request inspector"
     onClose={onClose}
     tabs={tabs}
@@ -166,7 +167,7 @@ export default function ChangeRequestInspector({
       <p className="changeBoundaryNote">Exact controlled revision {detail.displayNumber}. Opening the record uses its Project and build authorization.</p>
       <h3>Title</h3><div className="richRequirement">{detail.title || 'Not written up yet'}</div>
       <dl>
-        <div><dt>State</dt><dd>{detail.state}</dd></div>
+        <div><dt>State</dt><dd>{stateLabel(detail.state)}</dd></div>
         <div><dt>Revision</dt><dd>{detail.displayNumber} · {detail.revision}</dd></div>
         {detail.authorId && <div><dt>Author</dt><dd><PersonName userName={detail.authorId} /></dd></div>}
         {detail.originKind && <div><dt>Origin</dt><dd>{detail.originKind}{detail.originDisplayIdentity ? ` · ${detail.originDisplayIdentity}` : ''}</dd></div>}
@@ -176,7 +177,7 @@ export default function ChangeRequestInspector({
     </div>}
 
     {tab === 'trace' && <div className="inspectorBody traceInspector">
-      {trace?.state && <div className="traceSummary"><article><b>{trace.state.upstream}</b><span>upstream</span></article><article><b>{trace.state.downstream}</b><span>downstream</span></article><article><b>{trace.state.overall}</b><span>overall</span></article></div>}
+      {trace?.state && <div className="traceSummary"><article><b>{stateLabel(trace.state.upstream)}</b><span>upstream</span></article><article><b>{stateLabel(trace.state.downstream)}</b><span>downstream</span></article><article><b>{stateLabel(trace.state.overall)}</b><span>overall</span></article></div>}
       {trace?.state?.warnings?.map(warning => <p className="inspectorNote warn" key={warning}>{warning}</p>)}
       <h3>Upstream</h3>
       {upstream.length ? upstream.map(edge => { const otherId = edge.toId === rootId ? edge.fromId : edge.toId; const otherKind = edge.toId === rootId ? edge.fromKind : edge.toKind; const node = nodeById.get(otherId); return <TraceEdgeCard key={`${edge.fromId}-${edge.toId}-${edge.relation}`} edge={edge} node={node} otherKind={otherKind} /> }) : <div className="traceEmpty"><span>No upstream change request is recorded.</span></div>}
@@ -200,5 +201,5 @@ export default function ChangeRequestInspector({
 }
 
 function TraceEdgeCard({ edge, node, otherKind }: { edge: TraceEdge; node?: TraceNode; otherKind: string }) {
-  return <article className="traceRelation"><div className="traceRequirementHead"><b>{node ? nodeLabel(node) : 'Exact connected artifact'}</b><span>{node?.kind ?? otherKind}</span></div><p>{node?.title || 'Exact connected controlled artifact'}</p>{node?.state && <small>{node.state}{node.level ? ` · ${node.level}` : ''}</small>}<div className="traceProvenance">{edge.provenance.map((fact, index) => <span key={`${fact.kind}-${index}`}><b>{fact.kind === 'AssessmentDerived' ? 'AssessmentDerived' : fact.kind === 'AuthorStated' ? 'AuthorStated' : fact.kind}</b>{fact.isLive === false ? ' · historical' : ' · live'}{fact.rationale ? ` · ${fact.rationale}` : ''}{fact.status ? ` · ${fact.status}` : ''}</span>)}</div></article>
+  return <article className="traceRelation"><div className="traceRequirementHead"><b>{node ? nodeLabel(node) : 'Exact connected artifact'}</b><span>{node?.kind ?? otherKind}</span></div><p>{node?.title || 'Exact connected controlled artifact'}</p>{node?.state && <small>{stateLabel(node.state)}{node.level ? ` · ${node.level}` : ''}</small>}<div className="traceProvenance">{edge.provenance.map((fact, index) => <span key={`${fact.kind}-${index}`}><b>{fact.kind === 'AssessmentDerived' ? 'AssessmentDerived' : fact.kind === 'AuthorStated' ? 'AuthorStated' : fact.kind}</b>{fact.isLive === false ? ' · historical' : ' · live'}{fact.rationale ? ` · ${fact.rationale}` : ''}{fact.status ? ` · ${fact.status}` : ''}</span>)}</div></article>
 }
