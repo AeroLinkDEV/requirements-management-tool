@@ -33,6 +33,8 @@ test("engineer analyzes impact and creates a rich controlled requirement proposa
   await page
     .getByRole("button", { name: "Propose controlled change →" })
     .click();
+  await page.getByRole("dialog", { name: "Choose a change request" })
+    .getByRole("button", { name: /Start a new Draft change request/ }).click();
   await expect(page.getByText("Started from Requirements Explorer")).toBeVisible();
   await expect(page.locator('input[value*="SYSR-000150"]').first()).toBeVisible();
   await page.getByLabel("Problem", { exact: true }).fill("The selected controlled behavior requires an attributable update.");

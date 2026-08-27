@@ -1,11 +1,11 @@
 {
   "schemaVersion": "aerolink-api-test-intent/v2",
   "totals": {
-    "tests": 624,
-    "cases": 682,
-    "classes": 107,
-    "hostedTests": 605,
-    "hostedCases": 654,
+    "tests": 629,
+    "cases": 687,
+    "classes": 108,
+    "hostedTests": 610,
+    "hostedCases": 659,
     "nonHostedTests": 14,
     "nonHostedCases": 23,
     "unknownHostTests": 5,
@@ -21,18 +21,18 @@
     "http-boundary": {
       "label": "HTTP boundary: route, status, JSON shape",
       "level": "API (must stay hosted)",
-      "tests": 388,
-      "cases": 422,
+      "tests": 390,
+      "cases": 424,
       "unknownCases": 0,
-      "classes": 88
+      "classes": 89
     },
     "ef-translation": {
       "label": "EF translation / relational constraints",
       "level": "Infrastructure (needs a database, not a host)",
-      "tests": 132,
-      "cases": 143,
+      "tests": 135,
+      "cases": 146,
       "unknownCases": 0,
-      "classes": 51
+      "classes": 52
     },
     "auth-policy": {
       "label": "Authentication / authorization wiring",
@@ -7725,6 +7725,94 @@
       "sourceLines": {
         "start": 111,
         "end": 126
+      }
+    },
+    {
+      "cls": "RequirementProposalOptionsApiTests",
+      "test": "Existing_draft_rejects_a_stale_expected_version_after_the_draft_changes",
+      "kind": "Fact",
+      "intent": "ef-translation",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 146,
+        "end": 170
+      }
+    },
+    {
+      "cls": "RequirementProposalOptionsApiTests",
+      "test": "Existing_draft_requires_the_exact_current_requirement_revision",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client"
+      ],
+      "sourceLines": {
+        "start": 125,
+        "end": 144
+      }
+    },
+    {
+      "cls": "RequirementProposalOptionsApiTests",
+      "test": "Existing_draft_with_active_checkout_is_ineligible_even_for_the_checkout_owner",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client"
+      ],
+      "sourceLines": {
+        "start": 94,
+        "end": 123
+      }
+    },
+    {
+      "cls": "RequirementProposalOptionsApiTests",
+      "test": "Existing_proposal_revalidates_draft_lifecycle_and_released_build_truth",
+      "kind": "Fact",
+      "intent": "ef-translation",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 172,
+        "end": 210
+      }
+    },
+    {
+      "cls": "RequirementProposalOptionsApiTests",
+      "test": "Options_use_the_selected_build_revision_and_existing_draft_proposal_is_idempotent",
+      "kind": "Fact",
+      "intent": "ef-translation",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 17,
+        "end": 92
       }
     },
     {

@@ -56,6 +56,8 @@ export type AppRoute = {
   /// The exact requirement revision a procedure trace deep link opens. Immutable, so a trace that names a
   /// requirement revision keeps naming it after later revisions exist.
   requirementRevisionId?: string;
+  /// The exact requirement proposal a Requirements Explorer action should focus in the Draft.
+  requirementProposalId?: string;
   savedViewId?: string;
   historyStateIntent?: HistoryStateIntent;
   historyTypeIntent?: HistoryTypeIntent;
@@ -115,12 +117,12 @@ export function parseRoute(pathname: string, search = ""): AppRoute {
   if (path === "systems/change-requests/new") return { ...base, view: "createSystemScr", discipline: "system", artifactId: query.get("requirement") || undefined };
   if (path === "software/change-requests/new") return { ...base, view: "createSoftwareChange", discipline: "software", artifactId: query.get("requirement") || undefined, artifactKind: query.get("level") === "HLR" ? "HighLevel" : query.get("level") === "LLR" ? "LowLevel" : undefined };
   if (path === "interfaces/change-requests/new") return { ...base, view: "createInterfaceChange", discipline: "system", artifactId: query.get("requirement") || undefined, artifactKind: "Interface" };
-  if (tail[0] === "interfaces" && tail[1] === "change-requests" && tail[2]) return { ...base, view: "scr", discipline: "system", artifactId: decoded(tail[2]), artifactKind: "Interface" };
-  if (tail[0] === "systems" && tail[1] === "change-requests" && tail[2]) return { ...base, view: "scr", discipline: "system", artifactId: decoded(tail[2]) };
-  if (tail[0] === "software" && tail[1] === "change-requests" && tail[2]) return { ...base, view: "scr", discipline: "software", artifactId: decoded(tail[2]) };
+  if (tail[0] === "interfaces" && tail[1] === "change-requests" && tail[2]) return { ...base, view: "scr", discipline: "system", artifactId: decoded(tail[2]), artifactKind: "Interface", requirementProposalId: query.get("proposalId") || undefined };
+  if (tail[0] === "systems" && tail[1] === "change-requests" && tail[2]) return { ...base, view: "scr", discipline: "system", artifactId: decoded(tail[2]), requirementProposalId: query.get("proposalId") || undefined };
+  if (tail[0] === "software" && tail[1] === "change-requests" && tail[2]) return { ...base, view: "scr", discipline: "software", artifactId: decoded(tail[2]), requirementProposalId: query.get("proposalId") || undefined };
   // Compatibility for links created before typed change-request routes existed. The detail view replaces this
   // with the canonical typed path after the authorized record reveals its type.
-  if (tail[0] === "change-requests" && tail[1]) return { ...base, view: "scr", discipline: "system", artifactId: decoded(tail[1]) };
+  if (tail[0] === "change-requests" && tail[1]) return { ...base, view: "scr", discipline: "system", artifactId: decoded(tail[1]), requirementProposalId: query.get("proposalId") || undefined };
   if (path === "systems/requirements") return { ...base, view: "requirements", discipline: "system", savedViewId: query.get("view") || undefined, requirementRevisionId: query.get("requirementRevisionId") || undefined };
   if (path === "software/requirements") return { ...base, view: "requirements", discipline: "software", savedViewId: query.get("view") || undefined, requirementRevisionId: query.get("requirementRevisionId") || undefined };
   if (path === "systems/documents") return { ...base, view: "documents", discipline: "system" };

@@ -292,14 +292,202 @@ public static class RequirementsEndpoints
             return Results.Ok(new{artifact.Id,artifact.BaseNumber,currentRevision=current.Revision,requirementRevisionId=current.Id,displayNumber=artifact.BaseNumber+"."+(current.Revision<10?"0":"")+current.Revision,parents,children,tests,baselines,builds,documents,activeChanges,openComments,openAssignments,categories});
         });
 
-        app.MapPost("/api/enterprise-requirements/{artifactId:guid}/propose",async(Guid artifactId,ProposeRequirementChangeRequest request,HttpContext http,AeroLinkDbContext db,IChangeRequestRepository repository,IdentityService identity,IProjectLadderPolicyResolver policyResolver,CancellationToken ct)=>
+        app.MapGet("/api/enterprise-requirements/{artifactId:guid}/propose-options", async (Guid artifactId,
+            Guid targetReleaseId, string? search, HttpContext http, AeroLinkDbContext db,
+            IdentityService identity, IProjectLadderPolicyResolver policyResolver, CancellationToken ct) =>
         {
-            var artifact=await db.Requirements.AsNoTracking().SingleOrDefaultAsync(x=>x.Id==artifactId,ct);if(artifact is null)return Results.NotFound();if(request.Kind is not (RequirementChangeKind.Modify or RequirementChangeKind.Retire))return Results.BadRequest(new{error="An existing requirement can only be modified or retired."});if(!await http.HasProjectRoleAsync(db,identity,artifact.ProjectId,ct,ProgramRole.Engineer))return Results.Forbid();var ladderPolicy=await policyResolver.ResolveAsync(artifact.ProjectId,ct);if(!await db.Releases.AnyAsync(x=>x.Id==request.TargetReleaseId&&x.ProjectId==artifact.ProjectId&&!x.IsReleased,ct))return Results.BadRequest(new{error="Select an unreleased target release from this Project."});
-            var principal=http.UserAccount();var actor=principal.UserName;var current=await db.RequirementRevisions.AsNoTracking().Where(x=>x.ArtifactId==artifactId).OrderByDescending(x=>x.Revision).FirstAsync(ct);var profile=await db.RequirementRevisionProfiles.AsNoTracking().SingleOrDefaultAsync(x=>x.RevisionId==current.Id,ct);SystemChangeRequest scr;
-            if(request.ExistingScrId is not null){var existing=await repository.GetAsync(request.ExistingScrId.Value,ct);if(existing is null)return Results.NotFound(new{error="The selected Draft change request was not found."});scr=existing;if(scr.ProjectId!=artifact.ProjectId||scr.TargetReleaseId!=request.TargetReleaseId)return Results.BadRequest(new{error="The selected change request has a different Project or release."});}
-            else{var binding=ladderPolicy.Definition(artifact.Level).ChangeRequest;if(binding is null||!ladderPolicy.AcceptsChangeRequest(binding.Type,binding.SoftwareLevel,artifact.Level))return Results.BadRequest(new{error=$"The configured project ladder does not allow {artifact.Level} change control."});var type=binding.Type;var softwareLevel=binding.SoftwareLevel;var number=await IdentifierAllocator.NextChangeRequestAsync(db,type,softwareLevel,ct,ladderPolicy);scr=new SystemChangeRequest(number,0,artifact.ProjectId,request.TargetReleaseId,string.IsNullOrWhiteSpace(request.Title)?$"{request.Kind} {artifact.BaseNumber}":request.Title,$"A controlled change is proposed for {artifact.BaseNumber}.",$"Assess parent/child traceability, verification coverage, specifications, software builds, and open collaboration for {artifact.BaseNumber}.",$"Implement the approved {request.Kind.ToString().ToLowerInvariant()} through this exact {number[..number.IndexOf('-')]} revision.",actor,DateTimeOffset.UtcNow,type,softwareLevel:softwareLevel,ladderPolicy:ladderPolicy);await repository.AddAsync(scr,ct);}
-            if(scr.AuthorId!=actor&&!principal.IsAdministrator)return Results.Forbid();if(scr.State!=ChangeRequestState.Draft)return Results.BadRequest(new{error="Requirement proposals can be added only to a Draft change request."});if(scr.RequirementChanges.Any(x=>x.BaseNumber==artifact.BaseNumber))return Results.Conflict(new{error="This Draft already contains a proposal for the selected requirement."});var dispositions=JsonSerializer.Serialize(new{trace="Pending",verification="Pending",documents="Pending",baseline="Pending",collaboration="Pending"});scr.AddRequirementChange(actor,artifact.BaseNumber,current.Revision+1,artifact.Level,request.Kind,request.Kind==RequirementChangeKind.Retire?"":current.Statement,current.Rationale,current.VerificationMethod,DateTimeOffset.UtcNow,profile?.RichText??current.Statement,profile?.AttributesJson??"{}",dispositions,administratorAuthority:principal.IsAdministrator,ladderPolicy:ladderPolicy);
-            if(!await db.ArtifactWatches.AnyAsync(x=>x.ArtifactId==artifactId&&x.UserName==actor,ct))db.ArtifactWatches.Add(new(artifact.ProjectId,"Requirement",artifactId,actor,actor,DateTimeOffset.UtcNow));try{await repository.SaveAsync(ct);}catch(DbUpdateException){return Results.Conflict(new{error="Another controlled change was created concurrently. Refresh and retry."});}return Results.Created($"/api/change-requests/{scr.Id}",new{scr.Id,scr.DisplayNumber,scr.Title});
+            var artifact = await db.Requirements.AsNoTracking().SingleOrDefaultAsync(x => x.Id == artifactId, ct);
+            if (artifact is null) return Results.NotFound();
+            if (!await http.HasProjectRoleAsync(db, identity, artifact.ProjectId, ct, ProgramRole.Engineer))
+                return Results.Forbid();
+
+            var ladderPolicy = await policyResolver.ResolveAsync(artifact.ProjectId, ct);
+            var targetRelease = await db.Releases.AsNoTracking()
+                .Where(x => x.Id == targetReleaseId && x.ProjectId == artifact.ProjectId)
+                .Select(x => new { x.Id, x.Version, x.IsReleased }).SingleOrDefaultAsync(ct);
+            if (targetRelease is null)
+                return Results.BadRequest(new { error = "Select a build from this Project." });
+
+            var current = await CurrentRequirementRevisionAsync(db, artifact, targetReleaseId, ct);
+            if (current is null)
+                return Results.BadRequest(new { error = "This requirement is not active in the selected build.", code = "requirement_not_carried_by_build" });
+            var binding = ladderPolicy.Definition(artifact.Level).ChangeRequest;
+            var bindingValid = binding is not null
+                && ladderPolicy.AcceptsChangeRequest(binding.Type, binding.SoftwareLevel, artifact.Level);
+            var actor = http.UserAccount();
+            var now = DateTimeOffset.UtcNow;
+            var sessions = await db.ArtifactEditSessions.AsNoTracking()
+                .Where(x => x.ProjectId == artifact.ProjectId && (x.ArtifactType == "ChangeRequest" || x.ArtifactType == "SCR")
+                    && x.IsExclusive && x.State == EditSessionState.Active)
+                .ToListAsync(ct);
+            var query = db.SystemChangeRequests.AsNoTracking()
+                .Include(x => x.RequirementChanges)
+                .Where(x => x.ProjectId == artifact.ProjectId);
+            if (!string.IsNullOrWhiteSpace(search))
+            {
+                var term = search.Trim().ToLowerInvariant();
+                query = query.Where(x => x.BaseNumber.ToLower().Contains(term)
+                    || x.Title.ToLower().Contains(term));
+            }
+            var drafts = await query.OrderBy(x => x.BaseNumber).ThenByDescending(x => x.Revision)
+                .Take(100).ToListAsync(ct);
+            var rows = drafts.Select(scr =>
+            {
+                var session = sessions.FirstOrDefault(x => x.ArtifactId == scr.Id && x.ExpiresAt > now);
+                var sameBinding = bindingValid && ladderPolicy.AcceptsChangeRequest(scr.Type, scr.SoftwareLevel, artifact.Level);
+                var duplicate = scr.RequirementChanges.Any(x => string.Equals(x.BaseNumber, artifact.BaseNumber, StringComparison.OrdinalIgnoreCase));
+                var existingProposalId = scr.RequirementChanges
+                    .Where(x => string.Equals(x.BaseNumber, artifact.BaseNumber, StringComparison.OrdinalIgnoreCase))
+                    .Select(x => (Guid?)x.Id).FirstOrDefault();
+                var eligible = !targetRelease.IsReleased && sameBinding && scr.TargetReleaseId == targetReleaseId
+                    && scr.State == ChangeRequestState.Draft
+                    && (scr.AuthorId.Equals(actor.UserName, StringComparison.OrdinalIgnoreCase) || actor.IsAdministrator)
+                    && !duplicate && session is null;
+                string? reason = eligible ? null
+                    : targetRelease.IsReleased ? $"Build {targetRelease.Version} is released and read-only."
+                    : scr.TargetReleaseId != targetReleaseId ? "This Draft belongs to a different build."
+                    : !sameBinding ? $"This Draft is not bound to the {artifact.Level} requirement level."
+                    : scr.State != ChangeRequestState.Draft ? $"This change request is {scr.State}, not Draft."
+                    : !(scr.AuthorId.Equals(actor.UserName, StringComparison.OrdinalIgnoreCase) || actor.IsAdministrator) ? "Only the Draft author or an administrator can add a proposal."
+                    : duplicate ? "This Draft already contains the selected requirement."
+                    : session is not null ? $"This Draft is checked out by {session.UserName}; finish or discard that edit before adding a proposal."
+                    : "This Draft is not eligible for a requirement proposal.";
+                return new
+                {
+                    id = scr.Id, scr.BaseNumber, scr.Revision, displayNumber = scr.DisplayNumber, scr.Title,
+                    state = scr.State.ToString(), scr.TargetReleaseId, scr.Type,
+                    softwareLevel = scr.SoftwareLevel?.ToString(), scr.Version,
+                    requirementCount = scr.RequirementChanges.Count, eligible, reason, existingProposalId,
+                    heldBy = session?.UserName, heldByCurrentUser = session?.UserName.Equals(actor.UserName, StringComparison.OrdinalIgnoreCase) == true
+                };
+            }).ToList();
+            return Results.Ok(new
+            {
+                requirement = new { artifact.Id, artifact.BaseNumber, level = artifact.Level.ToString(),
+                    revisionId = current.Id, revision = current.Revision, displayNumber = $"{artifact.BaseNumber}.{current.Revision:D2}" },
+                targetRelease, drafts = rows
+            });
+        });
+
+        app.MapPost("/api/enterprise-requirements/{artifactId:guid}/propose", async (Guid artifactId,
+            ProposeRequirementChangeRequest request, HttpContext http, AeroLinkDbContext db,
+            IChangeRequestRepository repository, IdentityService identity,
+            IProjectLadderPolicyResolver policyResolver, CancellationToken ct) =>
+        {
+            var artifact = await db.Requirements.AsNoTracking().SingleOrDefaultAsync(x => x.Id == artifactId, ct);
+            if (artifact is null) return Results.NotFound();
+            if (request.Kind is not (RequirementChangeKind.Modify or RequirementChangeKind.Retire))
+                return Results.BadRequest(new { error = "An existing requirement can only be modified or retired." });
+            var principal = http.UserAccount();
+            if (!await http.HasProjectRoleAsync(db, identity, artifact.ProjectId, ct, ProgramRole.Engineer))
+                return Results.Forbid();
+            var ladderPolicy = await policyResolver.ResolveAsync(artifact.ProjectId, ct);
+            var targetRelease = await db.Releases.AsNoTracking()
+                .Where(x => x.Id == request.TargetReleaseId && x.ProjectId == artifact.ProjectId)
+                .Select(x => new { x.Id, x.Version, x.IsReleased }).SingleOrDefaultAsync(ct);
+            if (targetRelease is null)
+                return Results.BadRequest(new { error = "Select a build from this Project." });
+            if (targetRelease.IsReleased)
+                return Results.BadRequest(new { error = $"Build {targetRelease.Version} is released and read-only.", code = "released_build_read_only" });
+
+            var current = await CurrentRequirementRevisionAsync(db, artifact, request.TargetReleaseId, ct);
+            if (current is null)
+                return Results.BadRequest(new { error = "This requirement is not active in the selected build.", code = "requirement_not_carried_by_build" });
+            if (request.RequirementRevisionId is Guid expectedRevision && expectedRevision != current.Id)
+                return Results.Conflict(new { error = "This requirement changed in the selected build. Refresh and select it again.", code = "stale_requirement_revision", currentRevisionId = current.Id });
+            var binding = ladderPolicy.Definition(artifact.Level).ChangeRequest;
+            if (binding is null || !ladderPolicy.AcceptsChangeRequest(binding.Type, binding.SoftwareLevel, artifact.Level))
+                return Results.BadRequest(new { error = $"The configured project ladder does not allow {artifact.Level} change control.", code = "change_control_disabled" });
+
+            var actor = principal.UserName;
+            var now = DateTimeOffset.UtcNow;
+            SystemChangeRequest scr;
+            if (request.ExistingScrId is Guid existingId)
+            {
+                var loadedScr = await repository.GetAsync(existingId, ct);
+                if (loadedScr is null)
+                    return Results.NotFound(new { error = "The selected Draft change request was not found.", code = "change_request_not_found" });
+                scr = loadedScr;
+                if (scr.ProjectId != artifact.ProjectId)
+                    return Results.BadRequest(new { error = "The selected change request belongs to a different Project.", code = "project_mismatch" });
+                if (scr.TargetReleaseId != request.TargetReleaseId)
+                    return Results.BadRequest(new { error = "The selected change request has a different build.", code = "build_mismatch" });
+                if (scr.Type != binding.Type || scr.SoftwareLevel != binding.SoftwareLevel)
+                    return Results.BadRequest(new { error = $"The selected change request is not bound to the {artifact.Level} requirement level.", code = "level_binding_mismatch" });
+                if (scr.State != ChangeRequestState.Draft)
+                    return Results.BadRequest(new { error = "Requirement proposals can be added only to a Draft change request.", code = "draft_required" });
+                if (scr.AuthorId != actor && !principal.IsAdministrator)
+                    return Results.Forbid();
+                if (request.RequirementRevisionId is not Guid requestedRevisionId || requestedRevisionId != current.Id)
+                    return Results.Conflict(new { error = "This requirement changed in the selected build. Refresh and select the exact current revision.", code = "stale_requirement_revision", currentRevisionId = current.Id });
+                // A whole-draft checkout can overwrite an aggregate mutation when it checks in its
+                // stale snapshot. This remains incompatible even when the checkout belongs to the
+                // current user; finish or discard every active exclusive session first.
+                var activeSessions = await db.ArtifactEditSessions
+                    .Where(x => x.ArtifactId == scr.Id && (x.ArtifactType == "ChangeRequest" || x.ArtifactType == "SCR")
+                        && x.IsExclusive && x.State == EditSessionState.Active)
+                    .ToListAsync(ct);
+                foreach (var expired in activeSessions.Where(x => x.ExpiresAt <= now)) expired.Expire(now);
+                var active = activeSessions.FirstOrDefault(x => x.State == EditSessionState.Active);
+                if (active is not null)
+                    return Results.Conflict(new { error = $"This Draft is checked out by {active.UserName}; finish or discard that edit before adding a proposal.", code = "active_edit_session", holder = active.UserName, active.ExpiresAt });
+                var existingProposal = scr.RequirementChanges.FirstOrDefault(x =>
+                    string.Equals(x.BaseNumber, artifact.BaseNumber, StringComparison.OrdinalIgnoreCase));
+                // Retrying a successful browser request after a lost response must reopen the exact proposal
+                // rather than turning the retry into a misleading stale-version error. This is idempotent only
+                // for the same authoritative requirement revision and operation kind; an older proposal still
+                // needs deliberate refresh/reselection.
+                if (existingProposal is not null && existingProposal.Revision == current.Revision + 1
+                    && existingProposal.Kind == request.Kind)
+                    return Results.Ok(new
+                    {
+                        scr.Id, scr.DisplayNumber, scr.Title, scr.Version, proposalId = existingProposal.Id,
+                        requirementRevisionId = current.Id, requirementDisplayNumber = $"{artifact.BaseNumber}.{current.Revision:D2}",
+                        duplicate = true
+                    });
+                if (request.ExpectedVersion is null || scr.Version != request.ExpectedVersion)
+                    return Results.Conflict(new { error = "This Draft changed after it was loaded. Refresh before adding the requirement.", code = "stale_version", currentVersion = scr.Version });
+            }
+            else
+            {
+                var number = await IdentifierAllocator.NextChangeRequestAsync(db, binding.Type, binding.SoftwareLevel, ct, ladderPolicy);
+                scr = new SystemChangeRequest(number, 0, artifact.ProjectId, request.TargetReleaseId,
+                    string.IsNullOrWhiteSpace(request.Title) ? $"{request.Kind} {artifact.BaseNumber}" : request.Title,
+                    $"A controlled change is proposed for {artifact.BaseNumber}.",
+                    $"Assess parent/child traceability, verification coverage, specifications, software builds, and open collaboration for {artifact.BaseNumber}.",
+                    $"Implement the approved {request.Kind.ToString().ToLowerInvariant()} through this exact {number[..number.IndexOf('-')]} revision.",
+                    actor, now, binding.Type, softwareLevel: binding.SoftwareLevel, ladderPolicy: ladderPolicy);
+                await repository.AddAsync(scr, ct);
+            }
+
+            if (scr.RequirementChanges.Any(x => string.Equals(x.BaseNumber, artifact.BaseNumber, StringComparison.OrdinalIgnoreCase)))
+                return Results.Conflict(new { error = "This Draft already contains a proposal for the selected requirement.", code = "duplicate_requirement_proposal" });
+            var profile = await db.RequirementRevisionProfiles.AsNoTracking().SingleOrDefaultAsync(x => x.RevisionId == current.Id, ct);
+            var dispositions = RequirementAuthoringJson.PendingImpactDispositions;
+            try
+            {
+                var change = scr.AddRequirementChange(actor, artifact.BaseNumber, current.Revision + 1, artifact.Level,
+                    request.Kind, request.Kind == RequirementChangeKind.Retire ? "" : current.Statement,
+                    current.Rationale, current.VerificationMethod, now, profile?.RichText ?? current.Statement,
+                    profile?.AttributesJson ?? "{}", dispositions, administratorAuthority: principal.IsAdministrator,
+                    ladderPolicy: ladderPolicy);
+                if (!await db.ArtifactWatches.AnyAsync(x => x.ArtifactId == artifactId && x.UserName == actor, ct))
+                    db.ArtifactWatches.Add(new(artifact.ProjectId, "Requirement", artifactId, actor, actor, now));
+                await repository.SaveAsync(ct);
+                return Results.Created($"/api/change-requests/{scr.Id}", new
+                {
+                    scr.Id, scr.DisplayNumber, scr.Title, scr.Version, proposalId = change.Id,
+                    requirementRevisionId = current.Id, requirementDisplayNumber = $"{artifact.BaseNumber}.{current.Revision:D2}"
+                });
+            }
+            catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
+            catch (DbUpdateConcurrencyException)
+            {
+                var currentValues = await db.Entry(scr).GetDatabaseValuesAsync(ct);
+                var currentVersion = currentValues?.GetValue<long>(nameof(SystemChangeRequest.Version));
+                return Results.Conflict(new { error = "This Draft changed after it was loaded. Refresh before adding the requirement.", code = "stale_version", currentVersion });
+            }
+            catch (DbUpdateException) { return Results.Conflict(new { error = "Another controlled change was created concurrently. Refresh and retry.", code = "concurrent_change" }); }
         });
 
         app.MapPost("/api/enterprise-requirements/schemas",async(CreateArtifactSchemaRequest request,HttpContext http,AeroLinkDbContext db,IdentityService identity,IProjectLadderPolicyResolver policyResolver,CancellationToken ct)=>
@@ -562,6 +750,27 @@ public static class RequirementsEndpoints
             if(!store.Exists(item.StorageKey))return Results.NotFound();
             return Results.File(store.OpenRead(item.StorageKey),item.ContentType,enableRangeProcessing:true);
         });
+    }
+
+    private static async Task<RequirementRevision?> CurrentRequirementRevisionAsync(
+        AeroLinkDbContext db, RequirementArtifact artifact, Guid releaseId, CancellationToken ct)
+    {
+        var baselineId = await BuildScope.EffectiveBaselineAsync(db, artifact.ProjectId, releaseId, ct);
+        if (baselineId is Guid effectiveBaselineId)
+        {
+            var revisionId = await db.BaselineRequirements.AsNoTracking()
+                .Where(x => x.BaselineId == effectiveBaselineId && x.ArtifactId == artifact.Id)
+                .Select(x => (Guid?)x.RevisionId).SingleOrDefaultAsync(ct);
+            return revisionId is null
+                ? null
+                : await db.RequirementRevisions.AsNoTracking()
+                    .SingleOrDefaultAsync(x => x.Id == revisionId && x.ArtifactId == artifact.Id
+                        && x.State == RequirementRevisionState.Active, ct);
+        }
+
+        // A project-latest revision is not evidence that this build carries that revision. Until the
+        // selected build has an authoritative materialized baseline, the proposal operation must fail closed.
+        return null;
     }
 
     /// <summary>

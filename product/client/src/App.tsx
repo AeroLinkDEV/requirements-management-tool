@@ -304,6 +304,7 @@ function App() {
     [selectedArtifactId,setSelectedArtifactId]=useState(initialRoute.artifactId ?? ""),
     [selectedArtifactKind,setSelectedArtifactKind]=useState(initialRoute.artifactKind ?? ""),
     [requirementRevisionId,setRequirementRevisionId]=useState(initialRoute.requirementRevisionId ?? ""),
+    [requirementProposalId,setRequirementProposalId]=useState(initialRoute.requirementProposalId ?? ""),
     [paletteOpen,setPaletteOpen]=useState(false),
     [displayOpen,setDisplayOpen]=useState(false),
     [density,setDensity]=useState<WorkspaceDensity>(()=>(localStorage.getItem('aerolink-density')==='compact'?'compact':'comfortable')),
@@ -393,7 +394,7 @@ function App() {
     if (release && release.id !== selectedReleaseId)
       setSelectedReleaseId(release.id);
   }, [release, selectedReleaseId]);
-  useEffect(()=>{const handler=()=>{const route=readRoute();setView(route.view);setDiscipline(route.discipline);setHistoryStateIntent(route.historyStateIntent);setHistoryTypeIntent(route.historyTypeIntent);setHistorySelectionId(route.historySelectionId??"");setTestChangeRequestSelectionId(route.testChangeRequestSelectionId??"");setProjectConfigurationSection(route.projectConfigurationSection??"ladder");if(route.programId)setActiveId(route.programId);if(route.projectId)setSelectedProjectId(route.projectId);if(route.releaseId)setSelectedReleaseId(route.releaseId);setSelectedArtifactId(route.artifactId??"");setSelectedArtifactKind(route.artifactKind??"");setRequirementRevisionId(route.requirementRevisionId??"");setSelectedScrId(route.view==="scr"?route.artifactId??"":"")};addEventListener("popstate",handler);return()=>removeEventListener("popstate",handler)},[]);
+  useEffect(()=>{const handler=()=>{const route=readRoute();setView(route.view);setDiscipline(route.discipline);setHistoryStateIntent(route.historyStateIntent);setHistoryTypeIntent(route.historyTypeIntent);setHistorySelectionId(route.historySelectionId??"");setTestChangeRequestSelectionId(route.testChangeRequestSelectionId??"");setProjectConfigurationSection(route.projectConfigurationSection??"ladder");if(route.programId)setActiveId(route.programId);if(route.projectId)setSelectedProjectId(route.projectId);if(route.releaseId)setSelectedReleaseId(route.releaseId);setSelectedArtifactId(route.artifactId??"");setSelectedArtifactKind(route.artifactKind??"");setRequirementRevisionId(route.requirementRevisionId??"");setRequirementProposalId(route.requirementProposalId??"");setSelectedScrId(route.view==="scr"?route.artifactId??"":"")};addEventListener("popstate",handler);return()=>removeEventListener("popstate",handler)},[]);
   const paletteShortcutEnabled = !!context && !projectLevelViews.includes(view);
   useEffect(()=>{const handler=(event:KeyboardEvent)=>{if(paletteShortcutEnabled&&(event.ctrlKey||event.metaKey)&&event.key.toLowerCase()==="k"){event.preventDefault();setPaletteOpen(true)}if(event.key==="Escape"){setPaletteOpen(false);setDisplayOpen(false)}};addEventListener("keydown",handler);return()=>removeEventListener("keydown",handler)},[paletteShortcutEnabled]);
   useEffect(()=>{document.documentElement.dataset.density=density;localStorage.setItem('aerolink-density',density)},[density]);
@@ -524,6 +525,7 @@ function App() {
   // `/systems/change-requests/undefined` survived: it looked like a misclick.
   const viewsRequiringArtifact:View[]=["scr","testChangeRequest"];
   const navigate=(target:View,area:Discipline=discipline,artifactId?:string,artifactKind?:string,replace=false,stateIntent?:HistoryStateIntent,typeIntent?:HistoryTypeIntent)=>{
+    setRequirementProposalId("");
     if(viewsRequiringArtifact.includes(target)&&!artifactId){
       // Refused rather than half-performed. Reporting it and staying put is honest; pushing a route that
       // cannot resolve is not.
@@ -537,15 +539,23 @@ function App() {
   // the in-work build would present a released, frozen record inside a context that says it can be edited.
   // Everything the reader uses to judge that — the breadcrumb, the active-build chip, the read-only banner —
   // is derived from the release in the route.
-  const openChangeRequest=(id?:string,owningReleaseId?:string|null)=>{
+  const openChangeRequest=(id?:string,owningReleaseId?:string|null,proposalId?:string)=>{
     if(!id){navigate("scr",discipline,undefined);return}
     const owned=owningReleaseId&&owningReleaseId!==selectedReleaseId
       ? project?.releases.find(x=>x.id===owningReleaseId)
       : undefined;
-    if(!owned){navigate("scr",discipline,id);return}
+    if(!owned){
+      navigate("scr",discipline,id);
+      setRequirementProposalId(proposalId ?? "");
+      if (context && proposalId) {
+        const path = routePath(context, "scr", discipline, id);
+        history.replaceState({}, "", `${path}?proposalId=${encodeURIComponent(proposalId)}`);
+      }
+      return;
+    }
     setSelectedReleaseId(owned.id);
-    setView("scr");setDiscipline(discipline);setSelectedScrId(id);setSelectedArtifactId(id);setSelectedArtifactKind("");setRequirementRevisionId("");
-    if(context)history.pushState({},"",routePath({...context,releaseId:owned.id},"scr",discipline,id));
+    setView("scr");setDiscipline(discipline);setSelectedScrId(id);setSelectedArtifactId(id);setSelectedArtifactKind("");setRequirementRevisionId("");setRequirementProposalId(proposalId ?? "");
+    if(context){const path=routePath({...context,releaseId:owned.id},"scr",discipline,id);history.pushState({},"",proposalId ? `${path}?proposalId=${encodeURIComponent(proposalId)}` : path);}
   };
   const linkPendingAssessment=async(changeRequestId:string)=>{
     if(!pendingAssessmentLink)return true
@@ -736,6 +746,7 @@ function App() {
       <>{pendingAssessmentLink?.changeRequestId===selectedScrId&&<section className="assessmentLinkRecovery" role="alert"><div><b>Downstream assessment link needs attention</b><span>This Draft is saved. Retry its link to the {pendingAssessmentLink.sourceNumber} assessment.</span></div><button type="button" onClick={async()=>{if(await linkPendingAssessment(selectedScrId))setToast(`Draft linked to the ${pendingAssessmentLink.sourceNumber} downstream assessment.`);else setToast('The downstream assessment link still could not be recorded.')}}>Retry assessment link</button></section>}<ChangeRequestWorkspace
         api={API}
         changeRequestId={selectedScrId}
+        initialRequirementProposalId={requirementProposalId || undefined}
         user={user}
         onBack={() => navigate("history", discipline, undefined, undefined, false, undefined, historyTypeIntent)}
         onChanged={loadData}
@@ -746,7 +757,10 @@ function App() {
         onDisciplineResolved={(resolved,changeRequestType) => {
           if (resolved !== discipline) setDiscipline(resolved);
           if (changeRequestType === "Interface") setHistoryTypeIntent("Interface");
-          if (context) history.replaceState({}, "", routePath(context, "scr", resolved, selectedScrId, changeRequestType));
+          if (context) {
+            const path = routePath(context, "scr", resolved, selectedScrId, changeRequestType);
+            history.replaceState({}, "", requirementProposalId ? `${path}?proposalId=${encodeURIComponent(requirementProposalId)}` : path);
+          }
         }}
         releases={release ? [release] : []}
       /></>

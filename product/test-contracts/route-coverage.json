@@ -348,6 +348,7 @@
         "RemoveRequirementChangeTests",
         "ReopenBaselineConsequencesApiTests",
         "RequirementFilterExactnessApiTests",
+        "RequirementProposalOptionsApiTests",
         "RestartReviewApiTests",
         "ReviewCommentApiTests",
         "ReviewLinkOutlivedCycleTests",
@@ -789,6 +790,7 @@
         "ProblemReportApiTests",
         "ProblemReportCheckoutApiTests",
         "ProblemReportVerificationApiTests",
+        "RequirementProposalOptionsApiTests",
         "TestChangeRequestRegisterApiTests"
       ]
     },
@@ -1036,7 +1038,9 @@
       "method": "POST",
       "path": "/api/enterprise-requirements/{artifactId:guid}/propose",
       "file": "RequirementsEndpoints.cs",
-      "coveredBy": []
+      "coveredBy": [
+        "RequirementProposalOptionsApiTests"
+      ]
     },
     {
       "method": "POST",

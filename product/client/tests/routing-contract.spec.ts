@@ -22,6 +22,7 @@ test('change-request route generation and parsing preserve both engineering disc
   expect(system).toBe('/programs/program-a/projects/project-a/releases/release-a/systems/change-requests/scr-a')
   expect(software).toBe('/programs/program-a/projects/project-a/releases/release-a/software/change-requests/swcr-a')
   expect(parseRoute(system)).toMatchObject({ view: 'scr', discipline: 'system', artifactId: 'scr-a' })
+  expect(parseRoute(`${system}?proposalId=proposal-a`)).toMatchObject({ view: 'scr', requirementProposalId: 'proposal-a' })
   expect(parseRoute(software)).toMatchObject({ view: 'scr', discipline: 'software', artifactId: 'swcr-a' })
   expect(artifactPath(context, 'change-request', 'swcr-a', 'software')).toBe(software)
 })
