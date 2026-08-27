@@ -178,7 +178,7 @@ function ExistingCoverage({ item, coverage, artifactWord }: { item: ImpactItem; 
  * change request is approved, so nothing goes unnoticed; an engineer can also raise one deliberately when a
  * set of changes is best tested together.
  */
-export default function TestingCoverageWorkspace({ api, projectId, releaseId, releases, discipline, buildName, readOnly, programId, user, initialReviewId, onBack, onOpenRequirementRevision, onRaiseTestChangeRequest, onOpenTestChangeRequest, onArtifactKeyChange, ladder, artifactKind }: {
+export default function TestingCoverageWorkspace({ api, projectId, releaseId, releases, discipline, buildName, readOnly, programId, user, initialReviewId, initialRegisterSelectionId, onRegisterSelectionChange, onBack, onOpenRequirementRevision, onRaiseTestChangeRequest, onOpenTestChangeRequest, registerHref, onArtifactKeyChange, ladder, artifactKind }: {
   api: string
   projectId: string
   releaseId: string
@@ -189,11 +189,14 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, re
   programId: string
   user: AuthUser
   initialReviewId?: string
+  initialRegisterSelectionId?: string
+  onRegisterSelectionChange?: (id?: string) => void
   onBack?: () => void
   onOpenRequirementRevision: (requirement: { id: string; revisionId: string; level: string }) => void
   /// Opens the authoring page. Raising a package is a page, exactly as raising a change request is.
   onRaiseTestChangeRequest: () => void
   onOpenTestChangeRequest: (id: string) => void
+  registerHref: (id: string) => string
   onArtifactKeyChange?: (level: SoftwareVerificationLevel, kind: string) => void
   ladder: ProjectLadderProjection | null
   artifactKind?: string
@@ -745,6 +748,9 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, re
         discipline={discipline}
         artifactKind={artifactKind}
         onOpen={onOpenTestChangeRequest}
+        registerHref={registerHref}
+        selectedId={initialRegisterSelectionId}
+        onSelect={onRegisterSelectionChange}
         embedded
       />
       {/* What Open assessment opens. Everything that used to sit on the row lives here, which is where the

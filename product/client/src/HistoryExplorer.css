@@ -194,6 +194,37 @@
   border-top: 0;
 }
 
+.registerInspectorLayout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(320px, 420px);
+  align-items: stretch;
+  gap: 0;
+}
+.registerInspectorLayout > .historyTable { min-width: 0; }
+.registerInspectorLayout > .requirementInspector {
+  min-width: 0;
+  min-height: 320px;
+  border: 1px solid #dfe5ec;
+  border-left: 0;
+  background: white;
+}
+
+/* ControlledArtifactInspectorEmpty is shared by both register consumers. Keep its presentation here so the
+   register's empty inspector remains centered even when the procedure explorer stylesheet is not loaded. */
+.registerInspectorLayout > .requirementInspector .procedureInspectorEmpty {
+  min-height: 320px;
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: 8px;
+  padding: 32px;
+  text-align: center;
+  color: var(--ink-500);
+}
+.registerInspectorLayout > .requirementInspector .procedureInspectorEmpty > span { font-size: 28px; color: var(--teal-700); }
+.registerInspectorLayout > .requirementInspector .procedureInspectorEmpty b { color: var(--ink-900); font: var(--weight-bold) var(--text-md) var(--font-display); }
+.registerInspectorLayout > .requirementInspector .procedureInspectorEmpty p { max-width: 240px; margin: 0; font-size: var(--text-sm); line-height: 1.5; }
+
 .tableHead,
 .historyRow {
   display: grid;
@@ -220,10 +251,22 @@
   background: white;
   padding: 16px 20px;
   color: #27364e;
+  text-decoration: none;
 }
 
 .historyRow:hover {
   background: #f7fbfb;
+}
+
+.historyRow.selected {
+  background: #eef8f6;
+  box-shadow: inset 4px 0 #1a8a85;
+}
+.historyRow:focus-visible,
+.revisionToggle:focus-visible,
+.historyPager button:focus-visible {
+  outline: 3px solid #f0b34c;
+  outline-offset: -3px;
 }
 
 .historyRow b {
@@ -549,7 +592,21 @@
   padding-top: 140px;
 }
 
-@media (max-width: 1100px) {
+/* At 1280px the shared register still has to reserve room for four readable columns. Stack the inspector before
+   the table is squeezed into one-word cells; the side-by-side presentation remains available at 1440px and up. */
+@media (max-width: 1360px) {
+  .registerInspectorLayout { grid-template-columns: minmax(0, 1fr); }
+  .registerInspectorLayout > .requirementInspector {
+    position: static;
+    top: auto;
+    right: auto;
+    bottom: auto;
+    width: auto;
+    z-index: auto;
+    box-shadow: none;
+    border-left: 1px solid #dfe5ec;
+    border-top: 0;
+  }
   .buildForm {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
@@ -601,6 +658,10 @@
   .tableHead {
     display: none;
   }
+}
+
+@media (max-width: 750px) {
+  .registerInspectorLayout > .requirementInspector { width: 100%; }
 }
 
 @media (max-width: 640px) {

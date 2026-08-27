@@ -21,6 +21,7 @@ test("a long unbroken audit value wraps instead of taking the page sideways", as
   await page.getByRole("link", { name: "Change Requests" }).click();
 
   await page.locator(".historyRow").first().click();
+  await page.getByRole('link', { name: 'Open change request →' }).click();
   const auditRow = page.locator(".auditRow").first();
   await expect(auditRow).toBeVisible();
 

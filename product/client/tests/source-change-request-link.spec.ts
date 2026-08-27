@@ -80,7 +80,7 @@ test('the source change request named on a requirement revision opens that chang
   await page.getByRole('button', { name: new RegExp(requirement.baseNumber) }).first().click()
   const inspector = page.locator('.requirementInspector')
   await expect(inspector).toBeVisible({ timeout: 30_000 })
-  await inspector.getByRole('button', { name: 'History' }).click()
+  await inspector.getByRole('tab', { name: 'History' }).click()
 
   const sourceLink = inspector.getByRole('button', { name: revision.sourceScr })
   await expect(sourceLink).toBeVisible({ timeout: 30_000 })

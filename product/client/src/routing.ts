@@ -59,6 +59,8 @@ export type AppRoute = {
   savedViewId?: string;
   historyStateIntent?: HistoryStateIntent;
   historyTypeIntent?: HistoryTypeIntent;
+  historySelectionId?: string;
+  testChangeRequestSelectionId?: string;
   projectConfigurationSection?: "ladder" | "assurance" | "history" | "readiness" | "approvals";
 };
 
@@ -107,9 +109,9 @@ export function parseRoute(pathname: string, search = ""): AppRoute {
   const path = tail.join("/");
   if (!path || path === "command-center") return { ...base, view: "dashboard", discipline: "system" };
   if (path === "my-work") return { ...base, view: "mywork", discipline: "system" };
-  if (path === "systems/change-requests") return { ...base, view: "history", discipline: "system", historyStateIntent: historyStateIntent(query.get("state")), historyTypeIntent: query.get("type") === "All" ? "All" : "System" };
-  if (path === "software/change-requests") return { ...base, view: "history", discipline: "software", artifactId: query.get("assessment") || undefined, artifactKind: query.get("level") === "LLR" ? "LowLevel" : "HighLevel", historyStateIntent: historyStateIntent(query.get("state")), historyTypeIntent: query.get("type") === "All" ? "All" : "Software" };
-  if (path === "interfaces/change-requests") return { ...base, view: "history", discipline: "system", historyStateIntent: historyStateIntent(query.get("state")), historyTypeIntent: "Interface" };
+  if (path === "systems/change-requests") return { ...base, view: "history", discipline: "system", historySelectionId: query.get("selection") || undefined, historyStateIntent: historyStateIntent(query.get("state")), historyTypeIntent: query.get("type") === "All" ? "All" : "System" };
+  if (path === "software/change-requests") return { ...base, view: "history", discipline: "software", artifactId: query.get("assessment") || undefined, artifactKind: query.get("level") === "LLR" ? "LowLevel" : "HighLevel", historySelectionId: query.get("selection") || undefined, historyStateIntent: historyStateIntent(query.get("state")), historyTypeIntent: query.get("type") === "All" ? "All" : "Software" };
+  if (path === "interfaces/change-requests") return { ...base, view: "history", discipline: "system", historySelectionId: query.get("selection") || undefined, historyStateIntent: historyStateIntent(query.get("state")), historyTypeIntent: "Interface" };
   if (path === "systems/change-requests/new") return { ...base, view: "createSystemScr", discipline: "system", artifactId: query.get("requirement") || undefined };
   if (path === "software/change-requests/new") return { ...base, view: "createSoftwareChange", discipline: "software", artifactId: query.get("requirement") || undefined, artifactKind: query.get("level") === "HLR" ? "HighLevel" : query.get("level") === "LLR" ? "LowLevel" : undefined };
   if (path === "interfaces/change-requests/new") return { ...base, view: "createInterfaceChange", discipline: "system", artifactId: query.get("requirement") || undefined, artifactKind: "Interface" };
@@ -149,11 +151,11 @@ export function parseRoute(pathname: string, search = ""): AppRoute {
   // The register, which is a page of its own here as it is on the requirements side. Declared after the
   // `/new` routes above so raising one is not read as a package whose id happens to be "new".
   if (path === "system-verification/change-requests")
-    return { ...base, view: "testChangeRequests", discipline: "systemTest" };
+    return { ...base, view: "testChangeRequests", discipline: "systemTest", testChangeRequestSelectionId: query.get("selection") || undefined };
   if (path === "software-verification/hlr/change-requests")
-    return { ...base, view: "testChangeRequests", discipline: "softwareTest", artifactKind: verificationArtifactKind("HighLevel", query) };
+    return { ...base, view: "testChangeRequests", discipline: "softwareTest", artifactKind: verificationArtifactKind("HighLevel", query), testChangeRequestSelectionId: query.get("selection") || undefined };
   if (path === "software-verification/llr/change-requests")
-    return { ...base, view: "testChangeRequests", discipline: "softwareTest", artifactKind: verificationArtifactKind("LowLevel", query) };
+    return { ...base, view: "testChangeRequests", discipline: "softwareTest", artifactKind: verificationArtifactKind("LowLevel", query), testChangeRequestSelectionId: query.get("selection") || undefined };
   if (tail[0] === "system-verification" && tail[1] === "change-requests" && tail[2])
     return { ...base, view: "testChangeRequest", discipline: "systemTest", artifactId: decoded(tail[2]) };
   if (tail[0] === "software-verification" && tail[1] === "hlr" && tail[2] === "change-requests" && tail[3])
@@ -241,7 +243,7 @@ export const projectConfigurationApprovalsPath = (slug: string) =>
 export const projectConfigurationAssurancePath = (slug: string) =>
   `${projectAreaPath(slug, "projectConfiguration")}/assurance`;
 
-export function routePath(context: RouteContext, view: View, discipline: Discipline = "system", artifactId?: string, artifactKind?: string, stateIntent?: HistoryStateIntent, typeIntent?: HistoryTypeIntent) {
+export function routePath(context: RouteContext, view: View, discipline: Discipline = "system", artifactId?: string, artifactKind?: string, stateIntent?: HistoryStateIntent, typeIntent?: HistoryTypeIntent, selectionId?: string) {
   const root = `/programs/${context.programId}/projects/${context.projectId}/releases/${context.releaseId}`;
   const historyPath = (scope: "systems" | "software" | "interfaces") => {
     const path = `${root}/${scope}/change-requests`;
@@ -250,6 +252,7 @@ export function routePath(context: RouteContext, view: View, discipline: Discipl
     if (typeIntent === "All") query.set("type", "All");
     if (scope === "software") query.set("level", artifactKind === "LowLevel" ? "LLR" : "HLR");
     if (scope === "software" && artifactId) query.set("assessment", artifactId);
+    if (selectionId) query.set("selection", selectionId);
     return query.size ? `${path}?${query}` : path;
   };
   switch (view) {
@@ -279,7 +282,13 @@ export function routePath(context: RouteContext, view: View, discipline: Discipl
     case "requirements": return artifactId ? `${root}/requirements/${artifactId}?discipline=${discipline === "software" ? "software" : "system"}` : `${root}/${discipline === "software" ? "software" : "systems"}/requirements`;
     case "verification": return `${root}/${discipline === "softwareTest" ? "software" : "system"}-verification`;
     case "testingCoverage": return `${root}/${verificationBranch(discipline, artifactKind)}/coverage${artifactId ? `/${encodeURIComponent(artifactId)}` : ""}${verificationKindSuffix(artifactKind)}`;
-    case "testChangeRequests": return `${root}/${verificationBranch(discipline, artifactKind)}/change-requests${verificationKindSuffix(artifactKind)}`;
+    case "testChangeRequests": {
+      const path = `${root}/${verificationBranch(discipline, artifactKind)}/change-requests`;
+      const query = new URLSearchParams();
+      if (artifactKind?.toLowerCase().includes("procedure")) query.set("kind", "Procedure");
+      if (selectionId) query.set("selection", selectionId);
+      return `${path}${query.size ? `?${query}` : ""}`;
+    }
     case "testChangeRequest": return `${root}/${verificationBranch(discipline, artifactKind)}/change-requests/${encodeURIComponent(artifactId ?? "")}${verificationKindSuffix(artifactKind)}`;
     case "createTestChangeRequest": return `${root}/${verificationBranch(discipline, artifactKind)}/change-requests/new${verificationKindSuffix(artifactKind)}`;
     case "procedureExplorer": return discipline === "softwareTest"

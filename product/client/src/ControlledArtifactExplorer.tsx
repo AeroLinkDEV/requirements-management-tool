@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react'
+import { useId, useRef, type KeyboardEvent, type ReactNode } from 'react'
 
 /**
  * The canonical controlled-artifact explorer frame.
@@ -69,6 +69,20 @@ export function ControlledArtifactInspector({
   onTab: (id: string) => void
   children: ReactNode
 }) {
+  const tabRefs = useRef<Record<string, HTMLButtonElement | null>>({})
+  const panelId = useId()
+  const moveTab = (event: KeyboardEvent<HTMLButtonElement>, currentId: string) => {
+    const index = tabs.findIndex(tab => tab.id === currentId)
+    if (index < 0) return
+    const nextIndex = event.key === 'ArrowRight' ? (index + 1) % tabs.length
+      : event.key === 'ArrowLeft' ? (index - 1 + tabs.length) % tabs.length
+        : event.key === 'Home' ? 0 : event.key === 'End' ? tabs.length - 1 : -1
+    if (nextIndex < 0 || nextIndex === index) return
+    event.preventDefault()
+    const next = tabs[nextIndex]
+    onTab(next.id)
+    requestAnimationFrame(() => tabRefs.current[next.id]?.focus())
+  }
   return <aside className="requirementInspector" aria-label={`${displayNumber} detail`}>
     <div className="inspectorTop">
       <div>
@@ -78,15 +92,24 @@ export function ControlledArtifactInspector({
       </div>
       <button type="button" className="inspectorClose" aria-label={closeLabel} onClick={onClose}>×</button>
     </div>
-    <div className="inspectorTabs">
+    <div className="inspectorTabs" role="tablist" aria-label={`${displayNumber} detail sections`}>
       {tabs.map(tab => <button
         type="button"
         key={tab.id}
+        id={`${panelId}-tab-${tab.id}`}
+        role="tab"
+        aria-selected={activeTab === tab.id}
+        aria-controls={`${panelId}-panel`}
+        tabIndex={activeTab === tab.id ? 0 : -1}
+        ref={button => { tabRefs.current[tab.id] = button }}
         className={activeTab === tab.id ? 'active' : ''}
         onClick={() => onTab(tab.id)}
+        onKeyDown={event => moveTab(event, tab.id)}
       >{tab.label}</button>)}
     </div>
-    {children}
+    <div id={`${panelId}-panel`} role="tabpanel" aria-labelledby={`${panelId}-tab-${activeTab}`} tabIndex={-1}>
+      {children}
+    </div>
   </aside>
 }
 

@@ -24,7 +24,7 @@ test('Trace & impact lists the exact requirements and opens the exact requiremen
 
   const inspector = page.locator('.requirementInspector')
   await expect(inspector).toBeVisible({ timeout: 30_000 })
-  await inspector.getByRole('button', { name: 'Trace & impact' }).click()
+  await inspector.getByRole('tab', { name: 'Trace & impact' }).click()
 
   // The tab is part of the address, so the same trace can be reopened directly.
   await expect(page).toHaveURL(/procedureTab=trace/, { timeout: 30_000 })
@@ -71,7 +71,7 @@ test('a released build keeps its exact procedure revision trace across refresh',
 
   const inspector = page.locator('.requirementInspector')
   await expect(inspector).toBeVisible({ timeout: 30_000 })
-  await inspector.getByRole('button', { name: 'Trace & impact' }).click()
+  await inspector.getByRole('tab', { name: 'Trace & impact' }).click()
   await expect(inspector.locator('.traceRevisionIdentity')).toContainText('SYSTP-000001.00', { timeout: 30_000 })
   await expect(inspector.locator('.traceRequirement')).toHaveCount(2, { timeout: 30_000 })
   await expect(inspector.locator('.traceRequirement').first()).toContainText('Confirmed')
@@ -139,7 +139,7 @@ test('zero coverage stays explicit and truthful in Trace & impact', async ({ pag
     },
   )
 
-  await page.locator('.requirementInspector').getByRole('button', { name: 'Trace & impact' }).click()
+  await page.locator('.requirementInspector').getByRole('tab', { name: 'Trace & impact' }).click()
   const inspector = page.locator('.requirementInspector')
   await expect(inspector).toContainText('This procedure verifies 0 requirements.')
   await expect(inspector).toContainText(/Nothing is verified by SYSTP-000001\.00/)
@@ -166,7 +166,7 @@ test('a software HLR trace navigates to the exact software requirement revision'
 
   const inspector = page.locator('.requirementInspector')
   await expect(inspector).toBeVisible({ timeout: 30_000 })
-  await inspector.getByRole('button', { name: 'Trace & impact' }).click()
+  await inspector.getByRole('tab', { name: 'Trace & impact' }).click()
   const rows = inspector.locator('.traceRequirement')
   await expect(rows.first()).toBeVisible({ timeout: 30_000 })
 
@@ -201,7 +201,7 @@ test('an exact requirement deep link fails closed instead of substituting the la
   await row.click()
   const inspector = page.locator('.requirementInspector')
   await expect(inspector).toBeVisible({ timeout: 30_000 })
-  await inspector.getByRole('button', { name: 'Trace & impact' }).click()
+  await inspector.getByRole('tab', { name: 'Trace & impact' }).click()
   const rows = inspector.locator('.traceRequirement')
   await expect(rows).toHaveCount(2, { timeout: 30_000 })
   const revisionIds = await rows.evaluateAll(nodes =>

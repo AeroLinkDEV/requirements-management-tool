@@ -59,6 +59,10 @@ test('software change history routes preserve the selected HLR or LLR level', ()
   expect(assessment).toContain('level=HLR')
   expect(assessment).toContain('assessment=assessment-a')
   expect(parseRoute(assessment)).toMatchObject({view:'history',artifactKind:'HighLevel',artifactId:'assessment-a'})
+  const selected = `${assessment}&selection=cr-a`
+  expect(parseRoute(selected)).toMatchObject({view:'history', historySelectionId:'cr-a'})
+  expect(routePath(context, 'history', 'software', 'assessment-a', 'HighLevel', undefined, 'Software', 'cr-a'))
+    .toContain('selection=cr-a')
 })
 
 test('problem reports and configuration baselines are active while retired product-version pages reject direct navigation', () => {
@@ -100,6 +104,21 @@ test('HLR and LLR Procedure TCR routes round-trip through their level branch and
       artifactId: id,
     })
   }
+})
+
+test('TCR register selection is stable, typed, and omitted when context changes', () => {
+  const selected = routePath(context, 'testChangeRequests', 'softwareTest', undefined, 'HighLevelProcedure', undefined, undefined, 'tcr-a')
+  expect(selected).toContain('/software-verification/hlr/change-requests?kind=Procedure&selection=tcr-a')
+  expect(parseRoute(selected)).toMatchObject({
+    view: 'testChangeRequests', discipline: 'softwareTest', artifactKind: 'HighLevelProcedure',
+    testChangeRequestSelectionId: 'tcr-a',
+  })
+  const changedLevel = routePath(context, 'testChangeRequests', 'softwareTest', undefined, 'LowLevel')
+  expect(changedLevel).not.toContain('selection=')
+  expect(parseRoute(changedLevel).testChangeRequestSelectionId).toBeUndefined()
+  const requirements = routePath(context, 'history', 'software', undefined, 'LowLevel')
+  expect(requirements).not.toContain('selection=')
+  expect(parseRoute(`${requirements}&selection=cr-a`).historySelectionId).toBe('cr-a')
 })
 
 test('legacy context-free change-request routes remain loadable until detail canonicalizes them', () => {

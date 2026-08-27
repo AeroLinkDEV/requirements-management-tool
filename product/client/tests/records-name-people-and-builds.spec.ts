@@ -99,6 +99,7 @@ test('an allocated change says which build it went into', async ({ page }) => {
   const allocated = page.locator('.historyRow').first()
   await expect(allocated).toBeVisible({ timeout: 30_000 })
   await allocated.click()
+  await page.getByRole('link', { name: 'Open change request →' }).click()
 
   const history = page.getByRole('heading', { name: 'Audit history' }).locator('../../..')
   await expect(history).toBeVisible({ timeout: 30_000 })

@@ -313,6 +313,8 @@ function App() {
     [dashboardLoading,setDashboardLoading]=useState(true),
     [historyStateIntent,setHistoryStateIntent]=useState<HistoryStateIntent|undefined>(initialRoute.historyStateIntent),
     [historyTypeIntent,setHistoryTypeIntent]=useState<HistoryTypeIntent|undefined>(initialRoute.historyTypeIntent),
+    [historySelectionId,setHistorySelectionId]=useState(initialRoute.historySelectionId ?? ""),
+    [testChangeRequestSelectionId,setTestChangeRequestSelectionId]=useState(initialRoute.testChangeRequestSelectionId ?? ""),
     [projectConfigurationSection,setProjectConfigurationSection]=useState<"ladder"|"assurance"|"history"|"readiness"|"approvals">(initialRoute.projectConfigurationSection??"ladder"),
     [discipline,setDiscipline]=useState<Discipline>(initialRoute.discipline),
     [view, setView] = useState<View>(initialRoute.view);
@@ -391,7 +393,7 @@ function App() {
     if (release && release.id !== selectedReleaseId)
       setSelectedReleaseId(release.id);
   }, [release, selectedReleaseId]);
-  useEffect(()=>{const handler=()=>{const route=readRoute();setView(route.view);setDiscipline(route.discipline);setHistoryStateIntent(route.historyStateIntent);setHistoryTypeIntent(route.historyTypeIntent);setProjectConfigurationSection(route.projectConfigurationSection??"ladder");if(route.programId)setActiveId(route.programId);if(route.projectId)setSelectedProjectId(route.projectId);if(route.releaseId)setSelectedReleaseId(route.releaseId);setSelectedArtifactId(route.artifactId??"");setSelectedArtifactKind(route.artifactKind??"");setRequirementRevisionId(route.requirementRevisionId??"");setSelectedScrId(route.view==="scr"?route.artifactId??"":"")};addEventListener("popstate",handler);return()=>removeEventListener("popstate",handler)},[]);
+  useEffect(()=>{const handler=()=>{const route=readRoute();setView(route.view);setDiscipline(route.discipline);setHistoryStateIntent(route.historyStateIntent);setHistoryTypeIntent(route.historyTypeIntent);setHistorySelectionId(route.historySelectionId??"");setTestChangeRequestSelectionId(route.testChangeRequestSelectionId??"");setProjectConfigurationSection(route.projectConfigurationSection??"ladder");if(route.programId)setActiveId(route.programId);if(route.projectId)setSelectedProjectId(route.projectId);if(route.releaseId)setSelectedReleaseId(route.releaseId);setSelectedArtifactId(route.artifactId??"");setSelectedArtifactKind(route.artifactKind??"");setRequirementRevisionId(route.requirementRevisionId??"");setSelectedScrId(route.view==="scr"?route.artifactId??"":"")};addEventListener("popstate",handler);return()=>removeEventListener("popstate",handler)},[]);
   const paletteShortcutEnabled = !!context && !projectLevelViews.includes(view);
   useEffect(()=>{const handler=(event:KeyboardEvent)=>{if(paletteShortcutEnabled&&(event.ctrlKey||event.metaKey)&&event.key.toLowerCase()==="k"){event.preventDefault();setPaletteOpen(true)}if(event.key==="Escape"){setPaletteOpen(false);setDisplayOpen(false)}};addEventListener("keydown",handler);return()=>removeEventListener("keydown",handler)},[paletteShortcutEnabled]);
   useEffect(()=>{document.documentElement.dataset.density=density;localStorage.setItem('aerolink-density',density)},[density]);
@@ -529,7 +531,7 @@ function App() {
       setToast("That link is missing its destination, so nothing was opened. This is a defect — please report it.");
       return;
     }
-    const nextStateIntent=target==="history"?stateIntent:undefined,nextTypeIntent=target==="history"?(typeIntent??(artifactKind==="Interface"?"Interface":area==="software"?"Software":"System")):undefined;setView(target);setDiscipline(area);setHistoryStateIntent(nextStateIntent);setHistoryTypeIntent(nextTypeIntent);setSelectedArtifactId(artifactId??"");setSelectedArtifactKind(artifactKind??"");setRequirementRevisionId("");setSelectedScrId(target==="scr"?artifactId??"":["scr"].includes(target)?selectedScrId:"");const navigationContext=context??(target==="managedDocuments"&&active&&project?{programId:active.program.id,projectId:project.project.id,releaseId:""}:undefined);if(navigationContext){const path=routePath(navigationContext,target,area,artifactId,artifactKind,nextStateIntent,nextTypeIntent);history[replace?"replaceState":"pushState"]({},"",path)}};
+    const nextStateIntent=target==="history"?stateIntent:undefined,nextTypeIntent=target==="history"?(typeIntent??(artifactKind==="Interface"?"Interface":area==="software"?"Software":"System")):undefined;setView(target);setDiscipline(area);setHistoryStateIntent(nextStateIntent);setHistoryTypeIntent(nextTypeIntent);setHistorySelectionId("");setTestChangeRequestSelectionId("");setSelectedArtifactId(artifactId??"");setSelectedArtifactKind(artifactKind??"");setRequirementRevisionId("");setSelectedScrId(target==="scr"?artifactId??"":["scr"].includes(target)?selectedScrId:"");const navigationContext=context??(target==="managedDocuments"&&active&&project?{programId:active.program.id,projectId:project.project.id,releaseId:""}:undefined);if(navigationContext){const path=routePath(navigationContext,target,area,artifactId,artifactKind,nextStateIntent,nextTypeIntent);history[replace?"replaceState":"pushState"]({},"",path)}};
   // Opens a change request in the build that owns it rather than the one that happens to be selected. A
   // historical revision's source change request belongs to an earlier build by definition, so routing it into
   // the in-work build would present a released, frozen record inside a context that says it can be edited.
@@ -770,16 +772,21 @@ function App() {
          scope={historyTypeIntent === "Interface" ? "Interface" : discipline === "software" ? "Software" : "System"}
          ladder={ladder}
          initialSoftwareLevel={selectedArtifactKind === "LowLevel" ? "LowLevel" : "HighLevel"}
-        initialAssessmentId={selectedArtifactId||undefined}
+         initialAssessmentId={selectedArtifactId||undefined}
+        initialSelectionId={historySelectionId||undefined}
         initialStateIntent={historyStateIntent}
         onSoftwareLevelChange={(level)=>{
           setSelectedArtifactId("");
           setSelectedArtifactKind(level);
+          setHistorySelectionId("");
           if(context)history.pushState({},"",routePath(context,"history","software",undefined,level,historyStateIntent,historyTypeIntent));
         }}
-        onAssessmentSelected={(id)=>{setSelectedArtifactId(id??"");if(context)history.pushState({},"",routePath(context,"history",discipline === "software" ? "software" : "system",id,selectedArtifactKind,historyStateIntent,historyTypeIntent))}}
+        onAssessmentSelected={(id)=>{setSelectedArtifactId(id??"");setHistorySelectionId("");if(context)history.pushState({},"",routePath(context,"history",discipline === "software" ? "software" : "system",id,selectedArtifactKind,historyStateIntent,historyTypeIntent))}}
+        registerHref={id=>context ? routePath(context,"scr",discipline === "software" ? "software" : "system",id,historyTypeIntent === "Interface" ? "Interface" : undefined) : "#"}
+        onSelectionChange={id=>{setHistorySelectionId(id??"");if(context)history.pushState({},"",routePath(context,"history",discipline === "software" ? "software" : "system",selectedArtifactId||undefined,selectedArtifactKind,historyStateIntent,historyTypeIntent,id||undefined))}}
         onStateIntentChange={(stateIntent)=>{
           setHistoryStateIntent(stateIntent);
+          setHistorySelectionId("");
           if(context)history.replaceState({},"",routePath(context,"history",discipline,undefined,selectedArtifactKind,stateIntent,historyTypeIntent));
         }}
         onBack={() => navigate("dashboard")}
@@ -851,10 +858,16 @@ function App() {
          user={user}
          ladder={ladder}
          initialReviewId={selectedArtifactId}
+         initialRegisterSelectionId={testChangeRequestSelectionId || undefined}
         onBack={() => navigate("dashboard")}
         onOpenRequirementRevision={openRequirementRevision}
         onRaiseTestChangeRequest={() => navigate("createTestChangeRequest", discipline, undefined, selectedArtifactKind)}
         onOpenTestChangeRequest={id => navigate("testChangeRequest", discipline, id, selectedArtifactKind)}
+        registerHref={id => context ? routePath(context, "testChangeRequest", discipline, id, selectedArtifactKind) : "#"}
+        onRegisterSelectionChange={id => {
+          setTestChangeRequestSelectionId(id ?? "")
+          if (context) history.pushState({}, "", routePath(context, "testChangeRequests", discipline, undefined, selectedArtifactKind, undefined, undefined, id || undefined))
+        }}
         onArtifactKeyChange={discipline === "softwareTest"
           ? (level, kind) => navigate("testChangeRequests", "softwareTest", undefined,
             verificationArtifactRouteKey(level, kind === "Procedure" ? "Procedure" : "Case"))

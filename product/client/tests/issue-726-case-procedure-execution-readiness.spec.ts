@@ -458,7 +458,7 @@ test('Case to allocated Procedure execution chain drives release readiness', asy
   await page.getByLabel('Find a procedure').fill(procedure.displayNumber)
   await expect(page.locator('[data-procedure]').filter({ hasText: procedure.displayNumber })).toBeVisible()
   await page.locator('[data-procedure]').filter({ hasText: procedure.displayNumber }).getByRole('button').click()
-  await page.getByRole('button', { name: 'Trace & impact' }).click()
+  await page.getByRole('tab', { name: 'Trace & impact' }).click()
   await expect(page.getByRole('list', { name: 'Exact Case parents' })).toContainText(exactCase.displayNumber)
   await page.goto(`${root}/software-verification/hlr/results`)
   await expect(page.getByRole('heading', { name: 'Test Results' })).toBeVisible({ timeout: 30_000 })

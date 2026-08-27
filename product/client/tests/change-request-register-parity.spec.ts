@@ -44,7 +44,7 @@ const assertRegisterShape = async (page: Page) => {
   }
 }
 
-test('the requirements register keeps its shape on the shared component', async ({ page }) => {
+test('the requirements register keeps its shape on the shared component', async ({ page }, testInfo) => {
   test.setTimeout(180_000)
   await page.setViewportSize({ width: 1600, height: 900 })
   await login(page)
@@ -56,9 +56,174 @@ test('the requirements register keeps its shape on the shared component', async 
   const row = page.locator('.historyRow.allocation').first()
   await expect(row).toBeVisible({ timeout: 30_000 })
   await expect(row).toContainText('requirement changes')
+  await expect(row).toHaveAttribute('href', /systems\/change-requests\/[0-9a-f-]{36}$/)
+  await row.click()
+  await expect(row).toHaveAttribute('aria-current', 'true')
+  await expect(row).toBeFocused()
+  await expect(page.getByRole('complementary', { name: /detail$/ })).toBeVisible()
+  await expect(page.getByRole('link', { name: 'Open change request →' })).toBeVisible()
+  await expect(page.getByRole('tab', { name: 'Trace & impact' })).toBeVisible()
+  await expect(page.getByRole('tab', { name: 'History' })).toBeVisible()
+  await expect(page.getByRole('tab', { name: 'Discussion' })).toBeVisible()
+  await testInfo.attach('requirements-register-normal', { body: await page.screenshot(), contentType: 'image/png' })
 })
 
-test('the verification register is the same register over test change requests', async ({ page }) => {
+test('requirements register preserves deep-link history, native links, and authoritative trace facts', async ({ page }, testInfo) => {
+  test.setTimeout(180_000)
+  await page.setViewportSize({ width: 1600, height: 900 })
+  await login(page)
+  await openFrom(page, 'systems/change-requests')
+  await expect(page.getByRole('heading', { name: 'System Change Requests', level: 1 })).toBeVisible({ timeout: 30_000 })
+  const row = page.locator('.historyRow.allocation').first()
+  await expect(row).toBeVisible({ timeout: 30_000 })
+  const rootId = await row.getAttribute('data-register-id')
+  expect(rootId).toMatch(/^[0-9a-f-]{36}$/)
+  const routeParts = new URL(page.url()).pathname.match(/\/projects\/([^/]+)\/releases\/([^/]+)/)
+  expect(routeParts).not.toBeNull()
+  const projectId = routeParts![1]
+  const releaseId = routeParts![2]
+  await page.route('**/api/change-requests/*/trace', async route => {
+    const parentId = '11111111-1111-4111-8111-111111111111'
+    const tcrId = '22222222-2222-4222-8222-222222222222'
+    await route.fulfill({ json: {
+      projectId, rootChangeRequestId: rootId,
+      rootArtifactId: rootId, rootArtifactKind: 'ChangeRequest',
+      nodes: [
+        { id: rootId, kind: 'ChangeRequest', projectId, buildId: releaseId, displayNumber: 'SRCR-ROOT.03', title: 'Selected root', state: 'Draft', revision: 3 },
+        { id: parentId, kind: 'ChangeRequest', projectId, buildId: releaseId, displayNumber: 'SRCR-PARENT.01', title: 'Author-stated parent', state: 'Approved', revision: 1 },
+        { id: tcrId, kind: 'TestChangeRequest', projectId, buildId: releaseId, displayNumber: 'SYSTPCR-ROOT.00', title: 'Assessment-derived verification impact', state: 'Draft', revision: 0 },
+      ],
+      edges: [
+        { fromId: rootId, fromKind: 'ChangeRequest', toId: parentId, toKind: 'ChangeRequest', relation: 'Upstream', provenance: [{ kind: 'AuthorStated', sourceId: parentId, rationale: 'Controlled parent rationale.' }] },
+        { fromId: rootId, fromKind: 'ChangeRequest', toId: tcrId, toKind: 'TestChangeRequest', relation: 'CoveredByTestChangeRequest', provenance: [{ kind: 'AssessmentDerived', sourceId: tcrId, status: 'Change required.' }] },
+      ],
+      state: { upstream: 'Answered', downstream: 'ChangeRequired', overall: 'ActionRequired', isTopOfLadder: false, warnings: ['Complete the downstream review before approval.'] },
+    } })
+  })
+  const assessment = page.getByRole('heading', { name: 'Downstream change assessments' })
+  const register = page.locator('.historyTools')
+  await expect(assessment).toBeVisible({ timeout: 30_000 })
+  await expect(register).toBeVisible({ timeout: 30_000 })
+  const beforeAssessment = await assessment.boundingBox()
+  const beforeRegister = await register.boundingBox()
+  await row.click()
+  await expect(page).toHaveURL(/systems\/change-requests\?[^#]*selection=[0-9a-f-]{36}/)
+  await expect(page.getByRole('link', { name: 'Open change request →' })).toBeVisible()
+  await page.getByRole('tab', { name: 'Trace & impact' }).click()
+  const inspector = page.getByRole('complementary', { name: /detail$/ })
+  await expect(inspector).toContainText('Answered')
+  await expect(inspector).toContainText('Selected for baseline')
+  await expect(inspector).toContainText('AssessmentDerived')
+  await expect(inspector).toContainText('AuthorStated')
+  await expect(inspector).toContainText('Complete the downstream review before approval.')
+  await expect(inspector).toContainText(/exact revision \d+/)
+  await testInfo.attach('requirements-trace-impact', { body: await page.screenshot({ fullPage: true }), contentType: 'image/png' })
+  const afterAssessment = await assessment.boundingBox()
+  const afterRegister = await register.boundingBox()
+  expect(afterAssessment?.x).toBe(beforeAssessment?.x)
+  expect(afterAssessment?.y).toBe(beforeAssessment?.y)
+  expect(afterAssessment?.width).toBe(beforeAssessment?.width)
+  expect(afterRegister?.x).toBe(beforeRegister?.x)
+  expect(afterRegister?.y).toBe(beforeRegister?.y)
+  expect(afterRegister?.width).toBe(beforeRegister?.width)
+  await page.reload()
+  await expect(page.getByRole('tab', { name: 'Trace & impact' })).toBeVisible({ timeout: 30_000 })
+  await page.goBack()
+  await expect(page.getByText('Select a change request')).toBeVisible()
+  await page.goForward()
+  await expect(page.getByRole('link', { name: 'Open change request →' })).toBeVisible()
+})
+
+test('register row double-click opens, explicit open works, and modified click retains native href', async ({ page }) => {
+  test.setTimeout(180_000)
+  await login(page)
+  await openFrom(page, 'systems/change-requests')
+  await expect(page.getByRole('heading', { name: 'System Change Requests', level: 1 })).toBeVisible({ timeout: 30_000 })
+  const row = page.locator('.historyRow.allocation').first()
+  await expect(row).toBeVisible({ timeout: 30_000 })
+  const href = await row.getAttribute('href')
+  expect(href).toMatch(/systems\/change-requests\/[0-9a-f-]{36}$/)
+  const expectedUrl = new URL(href!, page.url()).toString()
+  const [opened] = await Promise.all([
+    page.context().waitForEvent('page', { timeout: 30_000 }),
+    row.click({ button: 'middle' }),
+  ])
+  await expect(opened).toHaveURL(expectedUrl)
+  await opened.close()
+  await expect(page).toHaveURL(/systems\/change-requests$/)
+  await row.dblclick()
+  await expect(page).toHaveURL(/systems\/change-requests\/[0-9a-f-]{36}$/)
+  await page.goBack()
+  await expect(page).toHaveURL(/systems\/change-requests\?[^#]*selection=[0-9a-f-]{36}$/)
+  await page.goBack()
+  await expect(page).toHaveURL(/systems\/change-requests$/)
+  await expect(page.getByText('Select a change request')).toBeVisible()
+  await expect(row).toBeVisible({ timeout: 30_000 })
+  await row.click()
+  await page.getByRole('link', { name: 'Open change request →' }).click()
+  await expect(page).toHaveURL(/systems\/change-requests\/[0-9a-f-]{36}$/)
+})
+
+test('requirements selection fails closed when the detail is outside the active register scope', async ({ page }) => {
+  test.setTimeout(180_000)
+  await login(page)
+  await openFrom(page, 'systems/change-requests')
+  await expect(page.getByRole('heading', { name: 'System Change Requests', level: 1 })).toBeVisible({ timeout: 30_000 })
+  const row = page.locator('.historyRow.allocation').first()
+  await expect(row).toBeVisible({ timeout: 30_000 })
+  await page.route('**/api/change-requests/*', async route => {
+    const pathname = new URL(route.request().url()).pathname
+    if (!/\/api\/change-requests\/[0-9a-f-]{36}$/i.test(pathname)) return route.continue()
+    const response = await route.fetch()
+    if (!response.ok()) return route.fulfill({ response })
+    const detail = await response.json()
+    await route.fulfill({ response, json: { ...detail, targetReleaseId: '00000000-0000-4000-8000-000000000000' } })
+  })
+  await row.click()
+  await expect(page.getByRole('heading', { name: 'Unavailable' })).toBeVisible({ timeout: 30_000 })
+  await expect(page.getByText('outside the current Project, build, or register')).toBeVisible()
+})
+
+test('requirements inspector distinguishes discussion failure from an empty discussion', async ({ page }) => {
+  test.setTimeout(180_000)
+  await login(page)
+  await openFrom(page, 'systems/change-requests')
+  await expect(page.getByRole('heading', { name: 'System Change Requests', level: 1 })).toBeVisible({ timeout: 30_000 })
+  await page.route('**/api/change-requests/*/review-comments', route => route.fulfill({ status: 503, body: 'discussion unavailable' }))
+  const row = page.locator('.historyRow.allocation').first()
+  await expect(row).toBeVisible({ timeout: 30_000 })
+  await row.click()
+  await page.getByRole('tab', { name: 'Discussion' }).click()
+  await expect(page.getByText('Discussion is unavailable for this controlled record.')).toBeVisible({ timeout: 30_000 })
+  await expect(page.getByText('No review discussion is recorded for this change request.')).toHaveCount(0)
+})
+
+test('register keeps rows readable and stacks the inspector at a supported 1280px width', async ({ page }, testInfo) => {
+  test.setTimeout(180_000)
+  await page.setViewportSize({ width: 1280, height: 900 })
+  await login(page)
+  await openFrom(page, 'systems/change-requests')
+  await expect(page.getByRole('heading', { name: 'System Change Requests', level: 1 })).toBeVisible({ timeout: 30_000 })
+  const row = page.locator('.historyRow.allocation').first()
+  await expect(row).toBeVisible({ timeout: 30_000 })
+  await row.click()
+  const layout = page.locator('.registerInspectorLayout')
+  const table = page.locator('.registerInspectorLayout > .historyTable')
+  const inspector = page.locator('.registerInspectorLayout > .requirementInspector')
+  await expect(inspector).toBeVisible()
+  await expect(page.getByRole('link', { name: 'Open change request →' })).toBeVisible()
+  const columns = await layout.evaluate(element => getComputedStyle(element).gridTemplateColumns.trim().split(/\s+/))
+  expect(columns).toHaveLength(1)
+  const rowBox = await row.boundingBox()
+  expect(rowBox?.width).toBeGreaterThan(800)
+  const tableBox = await table.boundingBox()
+  const inspectorBox = await inspector.boundingBox()
+  expect(inspectorBox?.y).toBeGreaterThanOrEqual((tableBox?.y ?? 0) + (tableBox?.height ?? 0) - 2)
+  await expect(row).toContainText('requirement changes')
+  await testInfo.attach('requirements-register-1280-stacked', { body: await page.screenshot({ fullPage: true }), contentType: 'image/png' })
+})
+
+test('the verification register is the same register over test change requests', async ({ page }, testInfo) => {
   test.setTimeout(180_000)
   await page.setViewportSize({ width: 1600, height: 900 })
   await login(page)
@@ -72,6 +237,39 @@ test('the verification register is the same register over test change requests',
   // the requirements row puts the same fact.
   await expect(row).toContainText('Procedure changes')
   await expect(page.locator('[data-register-row]').first()).toBeVisible()
+  await expect(page.locator('[data-register-row]').first()).toHaveAttribute('href', /system-verification\/change-requests\/[0-9a-f-]{36}$/)
+  await page.locator('[data-register-row]').first().click()
+  await expect(page.locator('[data-register-row]').first()).toHaveAttribute('aria-current', 'true')
+  await expect(page.getByRole('link', { name: 'Open change request →' })).toBeVisible()
+  await testInfo.attach('verification-register-normal', { body: await page.screenshot(), contentType: 'image/png' })
+})
+
+test('shared register supports keyboard selection, empty state, tab navigation, and narrow layout', async ({ page }, testInfo) => {
+  test.setTimeout(180_000)
+  await page.setViewportSize({ width: 920, height: 900 })
+  await login(page)
+  await openFrom(page, 'systems/change-requests')
+  await expect(page.getByRole('heading', { name: 'System Change Requests', level: 1 })).toBeVisible({ timeout: 30_000 })
+  const rows = page.locator('.historyRow.allocation')
+  await expect(rows.first()).toBeVisible({ timeout: 30_000 })
+  await rows.first().focus()
+  await page.keyboard.press('Enter')
+  await expect(rows.first()).toHaveAttribute('aria-current', 'true')
+  if (await rows.count() > 1) {
+    await rows.nth(1).focus()
+    await page.keyboard.press('Space')
+    await expect(rows.nth(1)).toHaveAttribute('aria-current', 'true')
+    await expect(rows.first()).not.toHaveAttribute('aria-current', 'true')
+  }
+  await page.getByRole('tab', { name: 'Overview' }).focus()
+  await page.keyboard.press('ArrowRight')
+  await expect(page.getByRole('tab', { name: 'Trace & impact' })).toHaveAttribute('aria-selected', 'true')
+  await page.keyboard.press('End')
+  await expect(page.getByRole('tab', { name: 'Discussion' })).toHaveAttribute('aria-selected', 'true')
+  await page.getByRole('button', { name: 'Close change request inspector' }).click()
+  await expect(page.getByRole('complementary', { name: /change request detail$/ })).toBeVisible()
+  await expect(page.getByText('Select a change request')).toBeVisible()
+  await testInfo.attach('requirements-register-narrow', { body: await page.screenshot(), contentType: 'image/png' })
 })
 
 test('the verification register searches and filters like the requirements one', async ({ page }) => {

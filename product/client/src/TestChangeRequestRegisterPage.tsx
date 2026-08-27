@@ -55,7 +55,7 @@ const disciplineLabel = (discipline: TestDiscipline) =>
   discipline === 'System' ? 'System' : discipline === 'HighLevelSoftware' ? 'HLR' : 'LLR'
 
 export default function TestChangeRequestRegisterPage({
-  api, projectId, releases, activeReleaseId, discipline, artifactKind, onBack, onOpen, onCreate, embedded = false,
+  api, projectId, releases, activeReleaseId, discipline, artifactKind, registerHref, selectedId, onSelect, onBack, onOpen, onCreate, embedded = false,
 }: {
   api: string
   projectId: string
@@ -63,6 +63,9 @@ export default function TestChangeRequestRegisterPage({
   activeReleaseId: string
   discipline: TestDiscipline
   artifactKind?: string
+  registerHref: (id: string) => string
+  selectedId?: string
+  onSelect?: (id?: string) => void
   onBack?: () => void
   onOpen: (id: string) => void
   onCreate?: () => void
@@ -126,7 +129,7 @@ export default function TestChangeRequestRegisterPage({
     query={query} onQueryChange={value => { setQuery(value); setPage(1) }}
     stateIntent={stateIntent} onStateIntentChange={value => { setStateIntent(value); setPage(1) }}
     stateOptions={stateOptions}
-    onOpen={onOpen} onLoadRevisions={loadRevisions} />
+    onOpen={onOpen} onSelect={onSelect} selectedId={selectedId} registerHref={registerHref} inspector={{api,kind:'TestChangeRequest',projectId,releaseId:activeReleaseId,registerType:artifactKind ? (isVerificationProcedureKind(artifactKind) ? 'Procedure' : 'Case') : undefined}} onLoadRevisions={loadRevisions} />
 
   if (embedded) return register
 

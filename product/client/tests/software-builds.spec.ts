@@ -91,7 +91,7 @@ test('released Build 1.5 is a durable read-only workspace and exits explicitly',
   await page.getByRole('link', { name: 'System Requirements Explorer' }).click()
   await page.getByLabel('Search requirements').fill('SYSR-000001')
   await page.getByRole('button', { name: /SYSR-000001\.00/ }).first().click()
-  await page.getByRole('button', { name: 'Trace & impact' }).click()
+  await page.getByRole('tab', { name: 'Trace & impact' }).click()
   // Opening a procedure named on a requirement's trace lands in the Test Procedure Explorer, which is where a
   // procedure is read. It used to open a record dialog on the coverage page, which carried a procedure
   // library; the library moved and the link followed it rather than being left pointing at nothing.
@@ -103,7 +103,7 @@ test('released Build 1.5 is a durable read-only workspace and exits explicitly',
   await expect(inspector).toContainText('Objective')
   // Released, so nothing here writes: the procedure is readable and there is no editor to reach.
   await expect(page.getByRole('button', { name: 'Check out & edit' })).toHaveCount(0)
-  await inspector.getByRole('button', { name: 'History' }).click()
+  await inspector.getByRole('tab', { name: 'History' }).click()
   await expect(inspector.locator('.revisionList li').first()).toContainText('SYSTP-000001')
   const procedureUrl = page.url()
   await page.reload()
@@ -146,7 +146,7 @@ test('Build 1.6 keeps editing capability, scopes search, and labels predecessor 
   await openNavigationGroup(page, 'SYSTEMS ENGINEERING')
   await page.getByRole('link', { name: 'System Requirements Explorer' }).click()
   await expect(page.getByRole('heading', { name: 'System Requirements Explorer' })).toBeVisible()
-  await page.getByRole('button', { name: /History/ }).click()
+  await page.getByRole('tab', { name: /History/ }).click()
   await expect(page.getByText('Historical version — Build 1.5').first()).toBeVisible()
   await expect(page.getByLabel('Active build 1.6')).toBeVisible()
 

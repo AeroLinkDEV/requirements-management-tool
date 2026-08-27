@@ -68,7 +68,9 @@ public sealed record ChangeRequestTraceProjectionResult(
     Guid RootChangeRequestId,
     IReadOnlyList<ChangeRequestTraceNode> Nodes,
     IReadOnlyList<ChangeRequestTraceEdge> Edges,
-    ChangeRequestTraceState State);
+    ChangeRequestTraceState? State,
+    Guid? RootArtifactId = null,
+    string? RootArtifactKind = null);
 
 /// <summary>
 /// Read authority for the Phase 2 composed change-request trace.
@@ -109,9 +111,14 @@ public static class ChangeRequestTraceProjection
         AeroLinkDbContext db, Guid projectId, Guid rootChangeRequestId, ILadderPolicy policy,
         CancellationToken ct)
     {
-        var projection = await BuildAsync(db, projectId, [rootChangeRequestId], policy, ct);
+        var projection = await BuildAsync(db, projectId, rootChangeRequestId, "ChangeRequest", policy, ct);
         return projection;
     }
+
+    /// <summary>Projects one exact Test Change Request root through the same composed, bounded graph.</summary>
+    public static Task<ChangeRequestTraceProjectionResult?> ForTestChangeReviewAsync(
+        AeroLinkDbContext db, Guid projectId, Guid rootTestChangeReviewId, ILadderPolicy policy,
+        CancellationToken ct) => BuildAsync(db, projectId, rootTestChangeReviewId, "TestChangeRequest", policy, ct);
 
     /// <summary>
     /// Computes register state for a page in bounded set-based queries. The caller supplies only rows from one
@@ -134,7 +141,7 @@ public static class ChangeRequestTraceProjection
     }
 
     private static async Task<ChangeRequestTraceProjectionResult?> BuildAsync(
-        AeroLinkDbContext db, Guid projectId, IReadOnlyCollection<Guid> roots, ILadderPolicy policy,
+        AeroLinkDbContext db, Guid projectId, Guid rootId, string rootKind, ILadderPolicy policy,
         CancellationToken ct)
     {
         var allCr = await db.SystemChangeRequests.AsNoTracking()
@@ -144,8 +151,8 @@ public static class ChangeRequestTraceProjection
                 x.InheritedUpstreamContextJson, x.UpstreamAnswerAffirmed))
             .ToListAsync(ct);
         var byCr = allCr.ToDictionary(x => x.Id);
-        var root = roots.FirstOrDefault(x => byCr.ContainsKey(x));
-        if (root == Guid.Empty) return null;
+        var rootCr = rootKind == "ChangeRequest" && byCr.ContainsKey(rootId) ? rootId : Guid.Empty;
+        if (rootKind == "ChangeRequest" && rootCr == Guid.Empty) return null;
 
         var authored = await (from link in db.ChangeRequestUpstreamLinks.AsNoTracking()
                               join child in db.SystemChangeRequests.AsNoTracking()
@@ -273,6 +280,15 @@ public static class ChangeRequestTraceProjection
             .Select(x => new { x.TestChangeReviewId, x.ChangeRequestId, x.Id })
             .ToListAsync(ct);
         var tcrById = reviewRows.ToDictionary(x => x.Id);
+        if (rootKind == "TestChangeRequest" && !tcrById.ContainsKey(rootId)) return null;
+        if (rootKind == "TestChangeRequest")
+        {
+            var rootTcr = tcrById[rootId];
+            nodes[("TestChangeRequest", rootTcr.Id)] = new(rootTcr.Id, "TestChangeRequest",
+                Display(rootTcr.BaseNumber, rootTcr.Revision), rootTcr.Title, rootTcr.State.ToString(), projectId,
+                rootTcr.ReleaseId, releases.GetValueOrDefault(rootTcr.ReleaseId), rootTcr.Revision,
+                rootTcr.ArtifactKind.ToString());
+        }
         var tcrEdgeKeys = new HashSet<(Guid, Guid, string)>();
         void AddTcrSource(Guid crId, Guid tcrId, string kind, Guid? sourceId = null, Guid? procedureRevisionId = null)
         {
@@ -412,7 +428,7 @@ public static class ChangeRequestTraceProjection
         foreach (var edge in typedEdges)
             Connect((edge.FromKind, edge.FromId), (edge.ToKind, edge.ToId));
         var visited = new HashSet<(string Kind, Guid Id)>();
-        var pending = new Stack<(string Kind, Guid Id)>([("ChangeRequest", root)]);
+        var pending = new Stack<(string Kind, Guid Id)>([(rootKind, rootId)]);
         while (pending.Count > 0)
         {
             var current = pending.Pop();
@@ -421,7 +437,7 @@ public static class ChangeRequestTraceProjection
         }
         var stateRows = byCr.Values.Where(x => visited.Contains(("ChangeRequest", x.Id))).ToList();
         var states = await ComputeStatesAsync(db, projectId, stateRows, policy, ct);
-        var state = states[root];
+        var state = rootKind == "ChangeRequest" ? states[rootCr] : null;
         var edges = typedEdges.Where(x => visited.Contains((x.FromKind, x.FromId))
                 && visited.Contains((x.ToKind, x.ToId)))
             .GroupBy(x => (x.FromId, x.FromKind, x.ToId, x.ToKind, x.Relation))
@@ -430,9 +446,10 @@ public static class ChangeRequestTraceProjection
                     .Distinct().OrderBy(x => x.Kind).ThenBy(x => x.SourceId).ToList()))
             .OrderBy(x => x.FromKind).ThenBy(x => x.FromId).ThenBy(x => x.ToKind).ThenBy(x => x.ToId)
             .ThenBy(x => x.Relation).ToList();
-        return new(projectId, root,
+        return new(projectId, rootKind == "ChangeRequest" ? rootCr : Guid.Empty,
             nodes.Where(x => visited.Contains(x.Key)).Select(x => x.Value)
-                .OrderBy(x => x.Kind).ThenBy(x => x.DisplayNumber).ThenBy(x => x.Id).ToList(), edges, state);
+                .OrderBy(x => x.Kind).ThenBy(x => x.DisplayNumber).ThenBy(x => x.Id).ToList(), edges, state,
+            rootId, rootKind);
     }
 
     private static async Task<IReadOnlyDictionary<Guid, ChangeRequestTraceState>> ComputeStatesAsync(

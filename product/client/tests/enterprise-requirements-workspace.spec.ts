@@ -46,7 +46,7 @@ test("requirements stay read-only while controlled proposals and imports move in
   await expect(page.getByText(/SYSR-000150\.\d{2}/)).toBeVisible();
   await page.getByText(/SYSR-000150\.\d{2}/).click();
   await expect(page.getByText("Controlled revision")).toHaveCount(0);
-  await page.getByRole("button", { name: /Discussion/ }).click();
+  await page.getByRole("tab", { name: /Discussion/ }).click();
   await page
     .getByPlaceholder(
       "Add an attributable comment. Use @username to mention someone.",
@@ -59,9 +59,9 @@ test("requirements stay read-only while controlled proposals and imports move in
   await expect(page.getByText("Workspace tools", { exact: true })).toHaveCount(0);
   await page.getByLabel("Search requirements").fill("SYSR-000150");
   await page.getByRole("button", { name: /SYSR-000150\.\d{2}/ }).first().click();
-  await page.getByRole("button", { name: "Trace & impact" }).click();
+  await page.getByRole("tab", { name: "Trace & impact" }).click();
   await expect(page.getByRole("button", { name: "Open complete Digital Thread →" })).toBeVisible();
-  await page.getByRole("button", { name: "Overview" }).click();
+  await page.getByRole("tab", { name: "Overview" }).click();
   await page.getByRole("button", { name: "Propose controlled change →" }).click();
   await expect(page.getByRole("heading", { name: "Create System Change Request" })).toBeVisible();
   await expect(page.getByText("Started from Requirements Explorer")).toBeVisible();
