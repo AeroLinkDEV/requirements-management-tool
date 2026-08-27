@@ -1,11 +1,11 @@
 {
   "schemaVersion": "aerolink-api-test-intent/v2",
   "totals": {
-    "tests": 610,
-    "cases": 668,
+    "tests": 611,
+    "cases": 669,
     "classes": 105,
-    "hostedTests": 597,
-    "hostedCases": 646,
+    "hostedTests": 598,
+    "hostedCases": 647,
     "nonHostedTests": 8,
     "nonHostedCases": 17,
     "unknownHostTests": 5,
@@ -37,8 +37,8 @@
     "auth-policy": {
       "label": "Authentication / authorization wiring",
       "level": "API (must stay hosted)",
-      "tests": 62,
-      "cases": 66,
+      "tests": 63,
+      "cases": 67,
       "unknownCases": 0,
       "classes": 41
     },
@@ -1902,8 +1902,26 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 321,
-        "end": 351
+        "start": 414,
+        "end": 444
+      }
+    },
+    {
+      "cls": "ChangeRequestUpstreamTraceApiTests",
+      "test": "Composed_trace_is_exact_folded_and_project_scoped",
+      "kind": "Fact",
+      "intent": "auth-policy",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "shared-host-fixture",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 349,
+        "end": 387
       }
     },
     {
@@ -1921,7 +1939,7 @@
       ],
       "sourceLines": {
         "start": 248,
-        "end": 304
+        "end": 347
       }
     },
     {
@@ -1938,8 +1956,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 306,
-        "end": 319
+        "start": 389,
+        "end": 412
       }
     },
     {

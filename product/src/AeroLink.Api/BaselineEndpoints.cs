@@ -33,8 +33,10 @@ public static class BaselineEndpoints
         // revisions — .00 superseded by .01 is one piece of work read twice, and showing both puts the stale copy
         // in the reader's way. Nothing is hidden: every collapsed row carries its revision count and expands.
         app.MapGet("/api/history/change-requests", async (Guid projectId, string? search, Guid? releaseId, Guid? baselineId, Guid? buildId, ChangeRequestType? type, RequirementLevel? level, string? state,
-            string? baseNumber, int page, int pageSize, AeroLinkDbContext db, CancellationToken ct) =>
+            string? baseNumber, int page, int pageSize, HttpContext http, AeroLinkDbContext db,
+            IProjectLadderPolicyResolver policyResolver, CancellationToken ct) =>
         {
+            if (!await http.HasProjectAccessAsync(db, projectId, ct)) return Results.Forbid();
             page = Math.Max(1, page == 0 ? 1 : page); pageSize = Math.Clamp(pageSize == 0 ? 50 : pageSize, 1, 200);
             var source = db.SystemChangeRequests.AsNoTracking().Where(x => x.ProjectId == projectId);
             if (type is not null) source = source.Where(x => x.Type == type);
@@ -74,7 +76,14 @@ public static class BaselineEndpoints
                     hasHighLevelChanges = x.RequirementChanges.Any(change => change.Level == RequirementLevel.HighLevel),
                     hasLowLevelChanges = x.RequirementChanges.Any(change => change.Level == RequirementLevel.LowLevel),
                     revisionCount = db.SystemChangeRequests.Count(other => other.ProjectId == projectId && other.BaseNumber == x.BaseNumber) }).ToListAsync(ct);
-            return Results.Ok(new { page, pageSize, totalCount = total, totalPages = (int)Math.Ceiling(total / (double)pageSize), items });
+            var policy = await policyResolver.ResolveAsync(projectId, ct);
+            var traceStates = await ChangeRequestTraceProjection.StatesAsync(db, projectId,
+                items.Select(x => x.Id).ToArray(), policy, ct);
+            return Results.Ok(new { page, pageSize, totalCount = total, totalPages = (int)Math.Ceiling(total / (double)pageSize),
+                items = items.Select(x => new { x.Id, x.displayNumber, x.BaseNumber, x.Revision, x.Title, x.state,
+                    x.deferredFromState, x.AuthorId, x.TargetReleaseId, x.softwareLevel, x.requirementCount,
+                    x.CreatedAt, x.UpdatedAt, x.hasHighLevelChanges, x.hasLowLevelChanges, x.revisionCount,
+                    traceState = traceStates.GetValueOrDefault(x.Id) }) });
         });
 
         // The verification twin of the endpoint above, deliberately next to it: the two registers are meant to
