@@ -44,7 +44,7 @@ const assertRegisterShape = async (page: Page) => {
   }
 }
 
-test('the requirements register keeps its shape on the shared component', async ({ page }) => {
+test('the requirements register keeps its shape on the shared component', async ({ page }, testInfo) => {
   test.setTimeout(180_000)
   await page.setViewportSize({ width: 1600, height: 900 })
   await login(page)
@@ -58,15 +58,17 @@ test('the requirements register keeps its shape on the shared component', async 
   await expect(row).toContainText('requirement changes')
   await expect(row).toHaveAttribute('href', /systems\/change-requests\/[0-9a-f-]{36}$/)
   await row.click()
-  await expect(row).toHaveAttribute('aria-selected', 'true')
+  await expect(row).toHaveAttribute('aria-current', 'true')
+  await expect(row).toBeFocused()
   await expect(page.getByRole('complementary', { name: /detail$/ })).toBeVisible()
   await expect(page.getByRole('link', { name: 'Open change request →' })).toBeVisible()
   await expect(page.getByRole('tab', { name: 'Trace & impact' })).toBeVisible()
   await expect(page.getByRole('tab', { name: 'History' })).toBeVisible()
   await expect(page.getByRole('tab', { name: 'Discussion' })).toBeVisible()
+  await testInfo.attach('requirements-register-normal', { body: await page.screenshot(), contentType: 'image/png' })
 })
 
-test('the verification register is the same register over test change requests', async ({ page }) => {
+test('the verification register is the same register over test change requests', async ({ page }, testInfo) => {
   test.setTimeout(180_000)
   await page.setViewportSize({ width: 1600, height: 900 })
   await login(page)
@@ -82,8 +84,37 @@ test('the verification register is the same register over test change requests',
   await expect(page.locator('[data-register-row]').first()).toBeVisible()
   await expect(page.locator('[data-register-row]').first()).toHaveAttribute('href', /system-verification\/change-requests\/[0-9a-f-]{36}$/)
   await page.locator('[data-register-row]').first().click()
-  await expect(page.locator('[data-register-row]').first()).toHaveAttribute('aria-selected', 'true')
+  await expect(page.locator('[data-register-row]').first()).toHaveAttribute('aria-current', 'true')
   await expect(page.getByRole('link', { name: 'Open change request →' })).toBeVisible()
+  await testInfo.attach('verification-register-normal', { body: await page.screenshot(), contentType: 'image/png' })
+})
+
+test('shared register supports keyboard selection, empty state, tab navigation, and narrow layout', async ({ page }, testInfo) => {
+  test.setTimeout(180_000)
+  await page.setViewportSize({ width: 920, height: 900 })
+  await login(page)
+  await openFrom(page, 'systems/change-requests')
+  await expect(page.getByRole('heading', { name: 'System Change Requests', level: 1 })).toBeVisible({ timeout: 30_000 })
+  const rows = page.locator('.historyRow.allocation')
+  await expect(rows.first()).toBeVisible({ timeout: 30_000 })
+  await rows.first().focus()
+  await page.keyboard.press('Enter')
+  await expect(rows.first()).toHaveAttribute('aria-current', 'true')
+  if (await rows.count() > 1) {
+    await rows.nth(1).focus()
+    await page.keyboard.press('Space')
+    await expect(rows.nth(1)).toHaveAttribute('aria-current', 'true')
+    await expect(rows.first()).not.toHaveAttribute('aria-current', 'true')
+  }
+  await page.getByRole('tab', { name: 'Overview' }).focus()
+  await page.keyboard.press('ArrowRight')
+  await expect(page.getByRole('tab', { name: 'Trace & impact' })).toHaveAttribute('aria-selected', 'true')
+  await page.keyboard.press('End')
+  await expect(page.getByRole('tab', { name: 'Discussion' })).toHaveAttribute('aria-selected', 'true')
+  await page.getByRole('button', { name: 'Close change request inspector' }).click()
+  await expect(page.getByRole('complementary', { name: /change request detail$/ })).toBeVisible()
+  await expect(page.getByText('Select a change request')).toBeVisible()
+  await testInfo.attach('requirements-register-narrow', { body: await page.screenshot(), contentType: 'image/png' })
 })
 
 test('the verification register searches and filters like the requirements one', async ({ page }) => {

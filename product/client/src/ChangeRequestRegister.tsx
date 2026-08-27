@@ -2,6 +2,7 @@ import { useEffect, useState, type ReactNode } from 'react'
 import { changeRequestAllocation, changeRequestState } from './presentation'
 import { PersonName } from './People'
 import ChangeRequestInspector from './ChangeRequestInspector'
+import { ControlledArtifactInspectorEmpty } from './ControlledArtifactExplorer'
 import './HistoryExplorer.css'
 
 /**
@@ -110,7 +111,6 @@ export default function ChangeRequestRegister({
       key={row.id} data-register-row={row.displayNumber} data-register-id={row.id}
       data-selected={internalSelectedId === row.id ? 'true' : 'false'}
       aria-current={internalSelectedId === row.id ? 'true' : undefined}
-      aria-selected={internalSelectedId === row.id}
       href={registerHref(row.id)}
       onClick={event => {
         // A primary click is selection, not navigation. The real href remains available for middle/Ctrl-click
@@ -120,8 +120,8 @@ export default function ChangeRequestRegister({
         }
       }}
       onKeyDown={event => {
-        if (event.key === ' ' || event.key === 'Spacebar') { event.preventDefault(); select(row.id) }
-        if (event.key === 'Enter') { event.preventDefault(); select(row.id) }
+        if (!event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey && (event.key === ' ' || event.key === 'Spacebar')) { event.preventDefault(); select(row.id) }
+        if (!event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey && event.key === 'Enter') { event.preventDefault(); select(row.id) }
       }}
       onDoubleClick={event => { if (!event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey) { event.preventDefault(); onOpen(row.id) } }}>
       <div>
@@ -211,7 +211,7 @@ export default function ChangeRequestRegister({
     </div>
     {inspector && internalSelectedId
       ? <ChangeRequestInspector api={inspector.api} id={internalSelectedId} kind={inspector.kind} href={registerHref(internalSelectedId)} releaseVersion={inspector.releaseVersion} onClose={() => { setInternalSelectedId(''); onSelect?.('') }} onOpen={onOpen} />
-      : inspector ? <div className="registerInspectorEmpty"><div className="procedureInspectorEmpty"><span aria-hidden="true">≡</span><b>Select a change request</b><p>Choose a row to inspect its controlled revision, trace, history, and discussion.</p></div></div> : null}
+      : inspector ? <ControlledArtifactInspectorEmpty title="change request" description="Choose a row to inspect its controlled revision, trace, history, and discussion." /> : null}
     </section>
   </>
 }

@@ -51,6 +51,27 @@ public sealed class ChangeRequestTraceProjectionTests
         Assert.DoesNotContain(result.Nodes, x => x.Id == unrelated.Id && x.Kind == "ChangeRequest");
         Assert.DoesNotContain(result.Nodes, x => x.Id == problemTcr.Id && x.Kind == "TestChangeRequest");
         Assert.All(result.Nodes.Where(x => x.Kind == "ChangeRequest"), x => Assert.NotEqual(unrelated.Id, x.Id));
+
+        var selectedTcr = await ChangeRequestTraceProjection.ForTestChangeReviewAsync(
+            fixture.Db, fixture.Project.Id, tcr.Id, LegacyLadderPolicy.Instance, CancellationToken.None);
+        Assert.NotNull(selectedTcr);
+        Assert.Equal(tcr.Id, selectedTcr!.RootArtifactId);
+        Assert.Equal("TestChangeRequest", selectedTcr.RootArtifactKind);
+        Assert.Equal(Guid.Empty, selectedTcr.RootChangeRequestId);
+        Assert.Contains(selectedTcr.Nodes, x => x.Kind == "TestChangeRequest" && x.Id == tcr.Id);
+        Assert.Contains(selectedTcr.Nodes, x => x.Kind == "ChangeRequest" && x.Id == root.Id);
+        Assert.Contains(selectedTcr.Nodes, x => x.Kind == "ChangeRequest" && x.Id == additional.Id);
+        Assert.Contains(selectedTcr.Edges, x => x.FromId == root.Id && x.ToId == tcr.Id);
+        Assert.Contains(selectedTcr.Edges, x => x.FromId == additional.Id && x.ToId == tcr.Id);
+
+        var standalone = await ChangeRequestTraceProjection.ForTestChangeReviewAsync(
+            fixture.Db, fixture.Project.Id, problemTcr.Id, LegacyLadderPolicy.Instance, CancellationToken.None);
+        Assert.NotNull(standalone);
+        Assert.Equal(problemTcr.Id, standalone!.RootArtifactId);
+        Assert.Equal("TestChangeRequest", standalone.RootArtifactKind);
+        Assert.Null(standalone.State);
+        Assert.Single(standalone.Nodes, x => x.Kind == "TestChangeRequest" && x.Id == problemTcr.Id);
+        Assert.Empty(standalone.Edges);
     }
 
     [Fact]
