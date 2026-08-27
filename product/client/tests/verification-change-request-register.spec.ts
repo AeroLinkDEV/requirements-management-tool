@@ -90,6 +90,10 @@ test('verification register selection is a stable URL state through refresh and 
   await expect(assessmentHeading).toBeVisible({ timeout: 30_000 })
   await expect(register).toBeVisible({ timeout: 30_000 })
   await expect(page.getByText('Loading assessments…', { exact: true })).toHaveCount(0, { timeout: 30_000 })
+  // The verification workspace owns this queue and does not expose the requirements queue's loading marker;
+  // wait for its data-backed empty/result state before measuring document coordinates.
+  await expect(page.locator('.downstreamAssessment').first().or(page.locator('.coverageEmpty')))
+    .toBeVisible({ timeout: 30_000 })
   const beforeAssessment = await documentBox(assessmentHeading)
   const beforeRegister = await documentBox(register)
   await row.click()
@@ -109,4 +113,26 @@ test('verification register selection is a stable URL state through refresh and 
   await expect(page.getByText('Select a change request')).toBeVisible()
   await page.goForward()
   await expect(page.getByRole('link', { name: 'Open change request →' })).toBeVisible()
+})
+
+test('verification selection fails closed when the TCR detail belongs to another build', async ({ page }) => {
+  test.setTimeout(180_000)
+  await page.setViewportSize({ width: 1440, height: 900 })
+  const root = await enterBuild(page)
+  await openRegister(page, root, 'system-verification', 'System Test Change Requests')
+  const row = page.locator('[data-register-row]').first()
+  await expect(row).toBeVisible({ timeout: 30_000 })
+  await page.route('**/api/test-change-reviews/**', async route => {
+    const pathname = new URL(route.request().url()).pathname
+    if (!/\/api\/test-change-reviews\/[0-9a-f-]{36}(\/trace|\/(case-changes|procedure-changes))$/i.test(pathname)) return route.continue()
+    const response = await route.fetch()
+    if (!response.ok()) return route.fulfill({ response })
+    const detail = await response.json()
+    await route.fulfill({ response, json: pathname.endsWith('/trace')
+      ? { ...detail, projectId: '00000000-0000-4000-8000-000000000000' }
+      : { ...detail, releaseId: '00000000-0000-4000-8000-000000000000' } })
+  })
+  await row.click()
+  await expect(page.getByRole('heading', { name: 'Unavailable' })).toBeVisible({ timeout: 30_000 })
+  await expect(page.getByText('outside the current Project, build, or register')).toBeVisible()
 })

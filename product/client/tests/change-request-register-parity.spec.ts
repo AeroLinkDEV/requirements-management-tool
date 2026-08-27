@@ -78,16 +78,20 @@ test('requirements register preserves deep-link history, native links, and autho
   await expect(row).toBeVisible({ timeout: 30_000 })
   const rootId = await row.getAttribute('data-register-id')
   expect(rootId).toMatch(/^[0-9a-f-]{36}$/)
+  const routeParts = new URL(page.url()).pathname.match(/\/projects\/([^/]+)\/releases\/([^/]+)/)
+  expect(routeParts).not.toBeNull()
+  const projectId = routeParts![1]
+  const releaseId = routeParts![2]
   await page.route('**/api/change-requests/*/trace', async route => {
     const parentId = '11111111-1111-4111-8111-111111111111'
     const tcrId = '22222222-2222-4222-8222-222222222222'
     await route.fulfill({ json: {
-      projectId: '33333333-3333-4333-8333-333333333333', rootChangeRequestId: rootId,
+      projectId, rootChangeRequestId: rootId,
       rootArtifactId: rootId, rootArtifactKind: 'ChangeRequest',
       nodes: [
-        { id: rootId, kind: 'ChangeRequest', displayNumber: 'SRCR-ROOT.03', title: 'Selected root', state: 'Draft', revision: 3 },
-        { id: parentId, kind: 'ChangeRequest', displayNumber: 'SRCR-PARENT.01', title: 'Author-stated parent', state: 'Approved', revision: 1 },
-        { id: tcrId, kind: 'TestChangeRequest', displayNumber: 'SYSTPCR-ROOT.00', title: 'Assessment-derived verification impact', state: 'Draft', revision: 0 },
+        { id: rootId, kind: 'ChangeRequest', projectId, buildId: releaseId, displayNumber: 'SRCR-ROOT.03', title: 'Selected root', state: 'Draft', revision: 3 },
+        { id: parentId, kind: 'ChangeRequest', projectId, buildId: releaseId, displayNumber: 'SRCR-PARENT.01', title: 'Author-stated parent', state: 'Approved', revision: 1 },
+        { id: tcrId, kind: 'TestChangeRequest', projectId, buildId: releaseId, displayNumber: 'SYSTPCR-ROOT.00', title: 'Assessment-derived verification impact', state: 'Draft', revision: 0 },
       ],
       edges: [
         { fromId: rootId, fromKind: 'ChangeRequest', toId: parentId, toKind: 'ChangeRequest', relation: 'Upstream', provenance: [{ kind: 'AuthorStated', sourceId: parentId, rationale: 'Controlled parent rationale.' }] },
@@ -150,10 +154,48 @@ test('register row double-click opens, explicit open works, and modified click r
   await row.dblclick()
   await expect(page).toHaveURL(/systems\/change-requests\/[0-9a-f-]{36}$/)
   await page.goBack()
+  await expect(page).toHaveURL(/systems\/change-requests\?[^#]*selection=[0-9a-f-]{36}$/)
+  await page.goBack()
+  await expect(page).toHaveURL(/systems\/change-requests$/)
+  await expect(page.getByText('Select a change request')).toBeVisible()
   await expect(row).toBeVisible({ timeout: 30_000 })
   await row.click()
   await page.getByRole('link', { name: 'Open change request →' }).click()
   await expect(page).toHaveURL(/systems\/change-requests\/[0-9a-f-]{36}$/)
+})
+
+test('requirements selection fails closed when the detail is outside the active register scope', async ({ page }) => {
+  test.setTimeout(180_000)
+  await login(page)
+  await openFrom(page, 'systems/change-requests')
+  await expect(page.getByRole('heading', { name: 'System Change Requests', level: 1 })).toBeVisible({ timeout: 30_000 })
+  const row = page.locator('.historyRow.allocation').first()
+  await expect(row).toBeVisible({ timeout: 30_000 })
+  await page.route('**/api/change-requests/*', async route => {
+    const pathname = new URL(route.request().url()).pathname
+    if (!/\/api\/change-requests\/[0-9a-f-]{36}$/i.test(pathname)) return route.continue()
+    const response = await route.fetch()
+    if (!response.ok()) return route.fulfill({ response })
+    const detail = await response.json()
+    await route.fulfill({ response, json: { ...detail, targetReleaseId: '00000000-0000-4000-8000-000000000000' } })
+  })
+  await row.click()
+  await expect(page.getByRole('heading', { name: 'Unavailable' })).toBeVisible({ timeout: 30_000 })
+  await expect(page.getByText('outside the current Project, build, or register')).toBeVisible()
+})
+
+test('requirements inspector distinguishes discussion failure from an empty discussion', async ({ page }) => {
+  test.setTimeout(180_000)
+  await login(page)
+  await openFrom(page, 'systems/change-requests')
+  await expect(page.getByRole('heading', { name: 'System Change Requests', level: 1 })).toBeVisible({ timeout: 30_000 })
+  await page.route('**/api/change-requests/*/review-comments', route => route.fulfill({ status: 503, body: 'discussion unavailable' }))
+  const row = page.locator('.historyRow.allocation').first()
+  await expect(row).toBeVisible({ timeout: 30_000 })
+  await row.click()
+  await page.getByRole('tab', { name: 'Discussion' }).click()
+  await expect(page.getByText('Discussion is unavailable for this controlled record.')).toBeVisible({ timeout: 30_000 })
+  await expect(page.getByText('No review discussion is recorded for this change request.')).toHaveCount(0)
 })
 
 test('register keeps rows readable and stacks the inspector at a supported 1280px width', async ({ page }, testInfo) => {

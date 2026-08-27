@@ -99,7 +99,7 @@ export default function HistoryExplorer({api,projectId,releases,activeReleaseId,
    onStateIntentChange={value=>changeStateIntent(value?value as HistoryStateIntent:undefined)}
    stateOptions={registerStateOptions}
    onOpen={onOpenScr} onSelect={onSelectionChange} selectedId={initialSelectionId}
-   registerHref={registerHref} inspector={{api,kind:'ChangeRequest'}}
+   registerHref={registerHref} inspector={{api,kind:'ChangeRequest',projectId,releaseId:activeReleaseId,registerType:scope}}
    onLoadRevisions={loadRevisions}/>}
  </main>
 }

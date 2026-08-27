@@ -718,6 +718,7 @@ public static class VerificationImpactEndpoints
                 artifactTargets,
                 procedureTargets = artifactTargets, // compatibility alias
                 review.Id, review.DisplayNumber, review.BaseNumber, review.Revision,
+                review.ProjectId, releaseId = review.ReleaseId,
                 discipline = review.Discipline.ToString(), state = review.State.ToString(),
                 originKind = review.OriginKind.ToString(), originReferenceId = review.OriginReferenceId,
                 originDisplayLabel = originDisplay.Label, originDisplayIdentity = originDisplay.Identity,

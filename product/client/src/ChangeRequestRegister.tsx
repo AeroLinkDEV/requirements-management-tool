@@ -61,7 +61,7 @@ type Props = {
   onSelect?: (id: string) => void
   selectedId?: string
   registerHref: (id: string) => string
-  inspector?: { api: string; kind: 'ChangeRequest' | 'TestChangeRequest' }
+  inspector?: { api: string; kind: 'ChangeRequest' | 'TestChangeRequest'; projectId: string; releaseId: string; registerType?: string }
   /** Earlier revisions of one record, fetched only when the reader asks to see them. */
   onLoadRevisions: (row: RegisterRow) => Promise<RegisterRow[]>
 }
@@ -75,7 +75,11 @@ export default function ChangeRequestRegister({
   const [error, setError] = useState('')
   const [internalSelectedId, setInternalSelectedId] = useState(selectedId ?? '')
   useEffect(() => setInternalSelectedId(selectedId ?? ''), [selectedId])
-  const select = (id: string) => { setInternalSelectedId(id); onSelect?.(id) }
+  const select = (id: string) => {
+    if (internalSelectedId === id) return
+    setInternalSelectedId(id)
+    onSelect?.(id)
+  }
 
   const stateLabelFor = (value: string) => stateOptions.find(x => x.value === value)?.label ?? value
 
@@ -210,7 +214,7 @@ export default function ChangeRequestRegister({
       </div>}
     </div>
     {inspector && internalSelectedId
-      ? <ChangeRequestInspector api={inspector.api} id={internalSelectedId} kind={inspector.kind} href={registerHref(internalSelectedId)} onClose={() => { setInternalSelectedId(''); onSelect?.('') }} onOpen={onOpen} />
+      ? <ChangeRequestInspector api={inspector.api} id={internalSelectedId} kind={inspector.kind} projectId={inspector.projectId} releaseId={inspector.releaseId} registerType={inspector.registerType} href={registerHref(internalSelectedId)} onClose={() => { setInternalSelectedId(''); onSelect?.('') }} onOpen={onOpen} />
       : inspector ? <ControlledArtifactInspectorEmpty title="change request" description="Choose a row to inspect its controlled revision, trace, history, and discussion." /> : null}
     </section>
   </>
