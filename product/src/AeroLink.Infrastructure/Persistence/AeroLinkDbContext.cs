@@ -127,6 +127,8 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
     public DbSet<MfaRecoveryCode> MfaRecoveryCodes => Set<MfaRecoveryCode>();
     public DbSet<RoleDelegation> RoleDelegations => Set<RoleDelegation>();
     public DbSet<ProjectRoleBackup> ProjectRoleBackups => Set<ProjectRoleBackup>();
+    public DbSet<ProjectLeadershipAssignment> ProjectLeadershipAssignments => Set<ProjectLeadershipAssignment>();
+    public DbSet<ProjectLeadershipBackup> ProjectLeadershipBackups => Set<ProjectLeadershipBackup>();
     public DbSet<ElectronicSignature> ElectronicSignatures => Set<ElectronicSignature>();
     public DbSet<SecurityAuditEvent> SecurityAuditEvents => Set<SecurityAuditEvent>();
     public DbSet<RollbackCleanupFailureEvidence> RollbackCleanupFailureEvidences =>
@@ -1448,6 +1450,32 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
             // One standing backup per role per project, among those still standing.
             b.HasIndex(x => new { x.ProgramId, x.Role }).IsUnique().HasFilter("\"RemovedAt\" IS NULL");
             b.HasIndex(x => new { x.ProgramId, x.BackupUserId, x.RemovedAt });
+            b.HasOne<UserAccount>().WithMany().HasForeignKey(x => x.BackupUserId).OnDelete(DeleteBehavior.Restrict);
+            b.HasOne<ProgramRecord>().WithMany().HasForeignKey(x => x.ProgramId).OnDelete(DeleteBehavior.Restrict);
+        });
+        // The eight #816 Project Leadership positions. One active primary and one active standing backup per
+        // program per position, enforced here at the database layer — the same partial-index pattern the
+        // role backups above already proved, with history rows excluded from the uniqueness so replacements
+        // and removals remain readable.
+        modelBuilder.Entity<ProjectLeadershipAssignment>(b =>
+        {
+            b.ToTable("project_leadership_assignments"); b.HasKey(x => x.Id);
+            b.Property(x => x.Position).HasConversion<string>().HasMaxLength(40);
+            b.Property(x => x.AssignedBy).HasMaxLength(100).IsRequired();
+            b.Property(x => x.EndedBy).HasMaxLength(100);
+            b.HasIndex(x => new { x.ProgramId, x.Position }).IsUnique().HasFilter("\"EndedAt\" IS NULL");
+            b.HasIndex(x => new { x.HolderUserId, x.EndedAt });
+            b.HasOne<UserAccount>().WithMany().HasForeignKey(x => x.HolderUserId).OnDelete(DeleteBehavior.Restrict);
+            b.HasOne<ProgramRecord>().WithMany().HasForeignKey(x => x.ProgramId).OnDelete(DeleteBehavior.Restrict);
+        });
+        modelBuilder.Entity<ProjectLeadershipBackup>(b =>
+        {
+            b.ToTable("project_leadership_backups"); b.HasKey(x => x.Id);
+            b.Property(x => x.Position).HasConversion<string>().HasMaxLength(40);
+            b.Property(x => x.NamedBy).HasMaxLength(100).IsRequired();
+            b.Property(x => x.RemovedBy).HasMaxLength(100);
+            b.HasIndex(x => new { x.ProgramId, x.Position }).IsUnique().HasFilter("\"RemovedAt\" IS NULL");
+            b.HasIndex(x => new { x.BackupUserId, x.RemovedAt });
             b.HasOne<UserAccount>().WithMany().HasForeignKey(x => x.BackupUserId).OnDelete(DeleteBehavior.Restrict);
             b.HasOne<ProgramRecord>().WithMany().HasForeignKey(x => x.ProgramId).OnDelete(DeleteBehavior.Restrict);
         });

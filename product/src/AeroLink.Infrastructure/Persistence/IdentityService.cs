@@ -59,6 +59,7 @@ public sealed class IdentityService(AeroLinkDbContext db, IDataProtectionProvide
         // an engineer, and every place that asks for Engineer has to accept them.
         var accepted = ProgramRoleAuthority.Satisfying(role).Select(x => x.ToString()).ToList();
         if (user.Programs.Any(x => x.ProgramId == programId && x.Roles.Any(accepted.Contains))) return true;
+        if (await HoldsLeadershipDemandAsync(user.Id, programId, role, ct)) return true;
         if (await IsStandingBackupAsync(user.Id, programId, role, ct)) return true;
         var delegations = await db.RoleDelegations.AsNoTracking().Where(x => x.ProgramId == programId && x.DelegateUserId == user.Id && x.Role == role && x.RevokedAt == null).ToListAsync(ct);
         return delegations.Any(x => x.StartsAt <= now && x.EndsAt > now);
@@ -91,9 +92,61 @@ public sealed class IdentityService(AeroLinkDbContext db, IDataProtectionProvide
         // from live authorization paths, so a rule applied to only one of them is a rule that holds by luck.
         var accepted = ProgramRoleAuthority.Satisfying(role);
         if (await db.ProgramMemberships.AsNoTracking().AnyAsync(x => x.UserId == userId && x.ProgramId == programId && x.EndedAt == null && accepted.Contains(x.Role), ct)) return true;
+        if (await HoldsLeadershipDemandAsync(userId, programId, role, ct)) return true;
         if (await IsStandingBackupAsync(userId, programId, role, ct)) return true;
         var delegations = await db.RoleDelegations.AsNoTracking().Where(x => x.ProgramId == programId && x.DelegateUserId == userId && x.Role == role && x.RevokedAt == null).ToListAsync(ct);
         return delegations.Any(x => x.StartsAt <= now && x.EndsAt > now);
+    }
+
+    /// <summary>
+    /// Whether an active Project Leadership assignment or standing backup makes this person answer the
+    /// demanded role — the #816 central rule, consulted by both HasRoleAsync paths.
+    ///
+    /// Holding the Project Engineering Lead or a discipline-lead membership used to be what carried these
+    /// authorities; under the leadership model the elevation is a separate persisted fact, so the check
+    /// runs here instead of in the membership set. Fail-closed on every axis: the assignment or backup
+    /// designation must be active, the account active, the person a current member of the program, and
+    /// they must still hold the base role the position requires. Any of those lapses and the authority is
+    /// gone, however recent the designation is.
+    /// </summary>
+    private async Task<bool> HoldsLeadershipDemandAsync(Guid userId, Guid programId, ProgramRole demanded, CancellationToken ct)
+    {
+        var accepted = ProgramRoleAuthority.Satisfying(demanded);
+        var primary = await db.ProjectLeadershipAssignments.AsNoTracking()
+            .Where(x => x.ProgramId == programId && x.HolderUserId == userId && x.EndedAt == null)
+            .Select(x => x.Position).ToListAsync(ct);
+        var backing = await db.ProjectLeadershipBackups.AsNoTracking()
+            .Where(x => x.ProgramId == programId && x.BackupUserId == userId && x.RemovedAt == null)
+            .Select(x => x.Position).ToListAsync(ct);
+        if (primary.Count == 0 && backing.Count == 0) return false;
+
+        var held = primary.Select(p => (Position: p, Demands: ProjectLeadership.SatisfyingDemands(p)))
+            .Concat(backing.Select(p => (Position: p, Demands: ProjectLeadership.SatisfyingDemands(p))))
+            .ToList();
+        if (!held.Any(x => x.Demands.Contains(demanded) || accepted.Any(x.Demands.Contains))) return false;
+
+        // The authority travels with the position only while its eligibility still holds: an active
+        // account and a current membership carrying the position's required base role.
+        if (await db.UserAccounts.AsNoTracking().AnyAsync(x => x.Id == userId && x.State != AccountState.Active, ct)) return false;
+        var requiredRoles = held.Select(x => ProjectLeadership.RequiredBaseRole(x.Position)).Distinct().ToList();
+        return await db.ProgramMemberships.AsNoTracking()
+            .AnyAsync(x => x.UserId == userId && x.ProgramId == programId && x.EndedAt == null && requiredRoles.Contains(x.Role), ct);
+    }
+
+    /// <summary>
+    /// The Project Leadership positions this person currently answers, whether as primary or as standing
+    /// backup — the projection Personnel, workflow candidate resolution and Team Work should read instead
+    /// of scanning singular memberships.
+    /// </summary>
+    public async Task<IReadOnlyList<(ProjectLeadershipPosition Position, bool AsPrimary)>> HeldLeadershipPositionsAsync(Guid userId, Guid programId, CancellationToken ct)
+    {
+        var primaries = await db.ProjectLeadershipAssignments.AsNoTracking()
+            .Where(x => x.ProgramId == programId && x.HolderUserId == userId && x.EndedAt == null)
+            .Select(x => x.Position).ToListAsync(ct);
+        var backups = await db.ProjectLeadershipBackups.AsNoTracking()
+            .Where(x => x.ProgramId == programId && x.BackupUserId == userId && x.RemovedAt == null)
+            .Select(x => x.Position).ToListAsync(ct);
+        return primaries.Select(x => (x, true)).Concat(backups.Select(x => (x, false))).ToList();
     }
     private async Task<AuthenticatedUser> MapAsync(UserAccount user, DateTimeOffset now, CancellationToken ct)
     {

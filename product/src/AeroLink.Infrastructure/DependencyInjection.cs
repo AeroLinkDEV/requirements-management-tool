@@ -158,6 +158,8 @@ public static class DependencyInjection
         services.AddScoped<RichContentPublisher>();
         services.AddScoped<ControlledOutputGenerator>();
         services.AddScoped<SoftwareVerificationCaseMigrationAuthority>();
+        services.AddScoped<ProjectLeadershipService>();
+        services.AddScoped<ProjectLeadershipMigrationAuthority>();
         services.AddScoped<TestChangeRequestPrefixMigrationAuthority>();
         services.AddScoped<DraftDocumentGenerator>();
         services.AddScoped<VariantConfigurationProjectionService>();

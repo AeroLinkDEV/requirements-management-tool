@@ -33,6 +33,8 @@ public static class AdministrationEndpoints
         {
             var actor = http.UserAccount(); if (!actor.IsAdministrator) return Results.Forbid(); if (!await db.UserAccounts.AnyAsync(x => x.Id == id, ct) || !await db.Programs.AnyAsync(x => x.Id == request.ProgramId, ct)) return Results.NotFound();
             if (await db.ProgramMemberships.AnyAsync(x => x.UserId == id && x.ProgramId == request.ProgramId && x.Role == request.Role && x.EndedAt == null, ct)) return Results.Conflict(new { error = "That Program role is already assigned." });
+            // #816: ProjectEngineeringLead is retired; no new grants may resurrect a parallel accountability.
+            if (request.Role == ProgramRole.ProjectEngineeringLead) return Results.Conflict(new { error = "Project Engineering Lead is retired. Assign the Project Engineer leadership position instead." });
             if (SingularProgramRoles.IsSingular(request.Role) && await db.ProgramMemberships.AnyAsync(x => x.ProgramId == request.ProgramId && x.Role == request.Role && x.EndedAt == null, ct))
                 return Results.Conflict(new { error = $"{request.Role} is held by one person per project. End the current holder's role before assigning it." });
             db.ProgramMemberships.Add(new(id, request.ProgramId, request.Role, actor.UserName, DateTimeOffset.UtcNow));
