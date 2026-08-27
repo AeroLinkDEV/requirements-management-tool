@@ -73,7 +73,7 @@ test("a change request opens its stable-ID Digital Thread with exact chain, prov
   const downstreamId = "44444444-4444-4444-8444-444444444444";
   const historicalId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
   trace.nodes.push(
-    { id: exactRevisionId, kind: "RequirementRevision", displayNumber: "HLR-999901.01", title: "Materialized exact requirement", state: null, projectId: showcase.projectId, buildId: null, buildVersion: null, revision: 1, level: "HighLevel", artifactId: exactArtifactId, effectiveBaselineId: buildContext.effectiveBaselineId },
+    { id: exactRevisionId, kind: "RequirementRevision", displayNumber: "HLR-999901.01", title: "Materialized exact requirement", state: null, projectId: showcase.projectId, buildId: null, buildVersion: null, revision: 1, level: "HighLevel", artifactId: exactArtifactId, baselineMembershipIds: [buildContext.effectiveBaselineId] },
     { id: upstreamId, kind: "ChangeRequest", displayNumber: "SRCR-999900.00", title: "Upstream chain node", state: "Approved", projectId: showcase.projectId, buildId: showcase.activeReleaseId, buildVersion: "1.6", revision: 0, level: "System" },
     { id: downstreamId, kind: "ChangeRequest", displayNumber: "HLRCR-999902.00", title: "Downstream chain node", state: "Draft", projectId: showcase.projectId, buildId: showcase.activeReleaseId, buildVersion: "1.6", revision: 0, level: "HighLevel" },
     { id: historicalId, kind: "ChangeRequest", displayNumber: "SRCR-999903.00", title: "Historical multi-hop node", state: "Approved", projectId: showcase.projectId, buildId: showcase.activeReleaseId, buildVersion: "1.6", revision: 0, level: "System" },
@@ -142,4 +142,36 @@ test("a mismatched CR detail fails closed without showing unrelated Digital Thre
   await page.goto(new URL(`/programs/${showcase.programId}/projects/${showcase.projectId}/releases/${showcase.activeReleaseId}/traceability/change-requests/${id}`, page.url()).toString(), { waitUntil: "load" });
   await expect(page.getByRole("alert")).toContainText(/unavailable in the selected Project or build/i);
   await expect(page.getByRole("heading", { name: "Change request chain" })).toHaveCount(0);
+});
+
+test("an invalid baseline path response stays unavailable and exposes retry", async ({ page, request }) => {
+  test.setTimeout(180_000);
+  const showcase = await showcaseSeed(request);
+  await apiLogin(request);
+  await login(page, "admin", { openProject: false });
+  const listResponse = await request.get(`${apiBase}/api/change-requests?projectId=${showcase.projectId}&releaseId=${showcase.activeReleaseId}&page=1&pageSize=200`);
+  expect(listResponse.ok(), await listResponse.text()).toBeTruthy();
+  const listed = await listResponse.json() as { items: { id: string; requirementCount: number }[] };
+  const candidate = listed.items.find(item => item.requirementCount > 0);
+  expect(candidate, "The showcase must contain a requirement-bearing change request").toBeTruthy();
+  const contextResponse = await request.get(`${apiBase}/api/build-context?projectId=${showcase.projectId}&releaseId=${showcase.activeReleaseId}`);
+  expect(contextResponse.ok(), await contextResponse.text()).toBeTruthy();
+  const context = await contextResponse.json() as { effectiveBaselineId: string };
+  const traceResponse = await request.get(`${apiBase}/api/change-requests/${candidate!.id}/trace`);
+  expect(traceResponse.ok(), await traceResponse.text()).toBeTruthy();
+  const trace = await traceResponse.json() as { nodes: object[]; edges: object[]; projectId: string; rootArtifactId: string; rootArtifactKind: string };
+  const revisionId = "11111111-1111-4111-8111-111111111111";
+  const artifactId = "22222222-2222-4222-8222-222222222222";
+  trace.nodes.push({ id: revisionId, kind: "RequirementRevision", displayNumber: "HLR-999901.01", title: "Materialized exact requirement", state: null, projectId: showcase.projectId, buildId: null, buildVersion: null, revision: 1, level: "HighLevel", artifactId, baselineMembershipIds: [context.effectiveBaselineId] });
+  trace.edges.push({ fromId: candidate!.id, fromKind: "ChangeRequest", toId: revisionId, toKind: "RequirementRevision", relation: "OwnsRequirementRevision", provenance: [{ kind: "RequirementRevisionSource", sourceId: candidate!.id }] });
+  await page.route(`**/api/change-requests/${candidate!.id}/trace`, route => route.fulfill({ json: trace }));
+  await page.route("**/api/traceability/path?*", route => route.fulfill({ status: 200, json: {
+    baselineId: "99999999-9999-4999-8999-999999999999", focusRevisionId: revisionId,
+    baseline: { displayNumber: "SW-INVALID.00", name: "Mismatched path fixture" }, nodes: [],
+  }}));
+  await page.goto(new URL(`/programs/${showcase.programId}/projects/${showcase.projectId}/releases/${showcase.activeReleaseId}/traceability/change-requests/${candidate!.id}`, page.url()).toString(), { waitUntil: "load" });
+  await expect(page.getByRole("heading", { name: "Change request chain" })).toBeVisible();
+  await expect(page.getByRole("alert")).toContainText(/did not match the selected revision/i);
+  await expect(page.getByRole("alert").getByRole("button", { name: "Retry" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Existing baseline-exact requirement path" })).toHaveCount(0);
 });

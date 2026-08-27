@@ -31,7 +31,7 @@ type ChangeRequestDetail = {
 type ChangeRequestTraceNode = {
   id: string; kind: string; displayNumber: string; title?: string | null; state?: string | null;
   projectId?: string | null; buildId?: string | null; buildVersion?: string | null; revision?: number | null;
-  level?: string | null; artifactId?: string | null; effectiveBaselineId?: string | null;
+  level?: string | null; artifactId?: string | null; baselineMembershipIds?: string[] | null;
 };
 type ChangeRequestTraceEdge = {
   fromId: string; fromKind: string; toId: string; toKind: string; relation: string;
@@ -73,17 +73,21 @@ function ChangeRequestThread({
   trace,
   activeBaselineId,
   exactPath,
+  exactPathError,
+  onRetry,
   requirementHref,
 }: {
   detail: ChangeRequestDetail;
   trace: ChangeRequestTrace;
   activeBaselineId?: string;
   exactPath?: CompletePath;
+  exactPathError?: string;
+  onRetry: () => void;
   requirementHref?: (artifactId: string) => string;
 }) {
   const root = trace.nodes.find(node => node.kind === "ChangeRequest" && node.id === detail.id);
   const materialized = trace.nodes.filter(node => node.kind === "RequirementRevision"
-    && Boolean(activeBaselineId) && node.effectiveBaselineId === activeBaselineId
+    && Boolean(activeBaselineId) && activeBaselineId !== undefined && node.baselineMembershipIds?.includes(activeBaselineId)
     && node.artifactId && trace.edges.some(edge => edge.fromId === detail.id
       && edge.toId === node.id && edge.relation === "OwnsRequirementRevision"));
 
@@ -140,6 +144,7 @@ function ChangeRequestThread({
       <div className="crSectionHeading"><div><p className="eyebrow">BASELINE-EXACT CONTENT</p><h3 id="cr-materialized-heading">Materialized requirement revisions</h3></div></div>
       {materialized.length && requirementHref ? <div className="crMaterializedGrid">{materialized.map(node => <article key={node.id}><b>{node.displayNumber}</b><span>{node.id}</span><a href={requirementHref(node.artifactId!)}>Open exact requirement thread →</a></article>)}</div>
         : <p className="crUnavailable">No requirement revision carried by this change request is materialized in the active baseline. Proposed content remains outside the baseline-exact thread.</p>}
+      {exactPathError && <div className="crUnavailable" role="alert"><span>{exactPathError}</span><button type="button" onClick={onRetry}>Retry</button></div>}
       {exactPath && <section className="crBaselinePath" aria-labelledby="cr-baseline-path-heading">
         <h4 id="cr-baseline-path-heading">Existing baseline-exact requirement path</h4>
         <div className="completeThreadPath" role="list" aria-label="Existing baseline-exact requirement path">
@@ -178,12 +183,14 @@ export default function LifecycleExplorer({ api, projectId, activeReleaseId, rel
   const [changeRequest, setChangeRequest] = useState<ChangeRequestDetail>();
   const [changeRequestTrace, setChangeRequestTrace] = useState<ChangeRequestTrace>();
   const [changeRequestBaselineId, setChangeRequestBaselineId] = useState<string>();
+  const [changeRequestPathError, setChangeRequestPathError] = useState<string>();
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
       if (isChangeRequestRoute && initialArtifactId) {
         setChangeRequest(undefined); setChangeRequestTrace(undefined); setChangeRequestBaselineId(undefined);
+        setCompletePath(undefined); setChangeRequestPathError(undefined);
         const [detailResponse, traceResponse, contextResponse] = await Promise.all([
           fetch(`${api}/api/change-requests/${initialArtifactId}`),
           fetch(`${api}/api/change-requests/${initialArtifactId}/trace`),
@@ -199,23 +206,27 @@ export default function LifecycleExplorer({ api, projectId, activeReleaseId, rel
           || trace.rootArtifactKind !== "ChangeRequest")
           throw new Error("This change request is unavailable in the selected Project or build.");
         const materialized = trace.nodes.find(node => node.kind === "RequirementRevision"
-          && node.effectiveBaselineId === buildContext.effectiveBaselineId && node.artifactId
+          && node.baselineMembershipIds?.includes(buildContext.effectiveBaselineId ?? "") && node.artifactId
           && trace.edges.some(edge => edge.fromId === initialArtifactId && edge.toId === node.id
             && edge.relation === "OwnsRequirementRevision"));
         let exactPath: CompletePath | undefined;
+        let exactPathError: string | undefined;
         if (materialized && buildContext.effectiveBaselineId) {
           const pathResponse = await fetch(`${api}/api/traceability/path?projectId=${projectId}&baselineId=${buildContext.effectiveBaselineId}&requirementRevisionId=${materialized.id}`);
-          if (pathResponse.ok) {
+          if (!pathResponse.ok) exactPathError = "The exact baseline requirement path is unavailable. Retry to verify the controlled path.";
+          else {
             const candidatePath = await pathResponse.json() as CompletePath;
-            if (candidatePath.baselineId === buildContext.effectiveBaselineId
-              && candidatePath.focusRevisionId === materialized.id)
-              exactPath = candidatePath;
+            if (candidatePath.baselineId !== buildContext.effectiveBaselineId
+              || candidatePath.focusRevisionId !== materialized.id)
+              exactPathError = "The exact baseline requirement path did not match the selected revision. Retry to verify the controlled path.";
+            else exactPath = candidatePath;
           }
         }
         setChangeRequest(detail);
         setChangeRequestTrace(trace);
         setChangeRequestBaselineId(buildContext.effectiveBaselineId);
         setCompletePath(exactPath);
+        setChangeRequestPathError(exactPathError);
         setBaselines([]); setDocuments([]); setTraces([]); setFocusId("");
         setError("");
         return;
@@ -389,7 +400,7 @@ export default function LifecycleExplorer({ api, projectId, activeReleaseId, rel
 
       {tab === "thread" ? isChangeRequestRoute ? (
         changeRequest && changeRequestTrace
-          ? <ChangeRequestThread detail={changeRequest} trace={changeRequestTrace} activeBaselineId={changeRequestBaselineId} exactPath={completePath} requirementHref={requirementHref} />
+          ? <ChangeRequestThread detail={changeRequest} trace={changeRequestTrace} activeBaselineId={changeRequestBaselineId} exactPath={completePath} exactPathError={changeRequestPathError} onRetry={load} requirementHref={requirementHref} />
           : <section className="traceEmpty"><b>Change request thread unavailable</b><p>The selected controlled record could not be resolved in this Project and build.</p></section>
       ) : <>
         <section className="traceTools">
