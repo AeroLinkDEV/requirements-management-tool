@@ -1,6 +1,25 @@
 import { expect, test } from "@playwright/test";
 import { apiLogin, login, openNavigationGroup, selectProgram } from "./auth";
 
+test("requirements explorer shows truthful access-aware counts", async ({
+  page,
+  request,
+}) => {
+  test.setTimeout(120_000);
+  await apiLogin(request);
+  await login(page, 'admin', { openProject: false });
+  await selectProgram(page,"Flight Management System Live Program");
+  await openNavigationGroup(page,"SYSTEMS ENGINEERING");
+  await page.getByRole("link", { name: "System Requirements Explorer" }).click();
+  await expect(
+    page.getByRole("heading", { name: "System Requirements Explorer" }),
+  ).toBeVisible();
+  await expect(page.getByRole("status", {
+    name: /Loading controlled requirements/,
+  })).toBeHidden();
+  await expect(page.locator(".confidence")).toContainText("Live counts · respects your access");
+});
+
 test("requirements stay read-only while controlled proposals and imports move into Changes", async ({
   page,
   request,
@@ -21,7 +40,6 @@ test("requirements stay read-only while controlled proposals and imports move in
   });
   await expect(loadingState).toBeHidden();
   await expect(page.getByText("150 requirements")).toBeVisible();
-  await expect(page.locator(".confidence")).toContainText("Live counts · respects your access");
 
   await page.getByLabel("Search requirements").fill("SYSR-000150");
   await expect(page.getByText(/SYSR-000150\.\d{2}/)).toBeVisible();
