@@ -1020,6 +1020,11 @@ public sealed class ProblemReportControlledEditingAdapter(AeroLinkDbContext db) 
         var lifecycleRationale = fromState != toState
             ? "Controlled detail correction invalidated the prior closure evidence and returned the report to Verifying."
             : null;
+        // No `actorDisplayName` here, deliberately. Check-in reaches this through IControlledEditingAdapter,
+        // which carries the actor as a bare handle several layers up, so capturing a name would mean widening
+        // a shared editing interface used by every controlled artifact — well outside #776. The event
+        // therefore captures nothing and renders as the login handle, which is the honest answer rather than
+        // a name resolved from today's directory. Tracked as follow-up.
         db.ProblemReportRevisions.Add(new ProblemReportRevision(item.Id, item.Revision, "DetailsCheckedIn",
             actor, item.CanonicalHash(), EvidenceSnapshot(item), now,
             detail: lifecycleRationale, fromState: fromState.ToString(), toState: toState.ToString(), rationale: lifecycleRationale));

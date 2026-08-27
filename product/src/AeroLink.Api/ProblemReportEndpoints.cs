@@ -248,13 +248,19 @@ public static class ProblemReportEndpoints
             && x.BlockerType == "ProblemReportReleaseBlocker").ToListAsync(ct);
         bool IsWaived(ProblemReport report) => waiverRows.Any(waiver => waiver.IsActiveFor(report, now));
         var active = reports.Where(x => ProblemReportLifecycle.IsActiveWork(x.State)).ToList();
+        // The attention list is the only part of this response that names people, and it is already capped
+        // at twelve rows — so it is materialised first and named with one lookup rather than none.
+        var attentionRows = active.OrderByDescending(x => x.IsReleaseBlocker).ThenByDescending(x => x.Severity)
+            .ThenBy(x => x.CreatedAt).Take(12).ToList();
+        var attentionNames = await DirectoryIdentityProjection.DisplayNamesAsync(db,
+            attentionRows.SelectMany(x => new[] { x.ReportedBy, x.ResponsibleEngineerId }), ct);
         return Results.Ok(new
         {
             generatedAt = DateTimeOffset.UtcNow,
             summary = new { total = reports.Count, active = active.Count, closureAwaitingApproval = reports.Count(x => x.State == ProblemReportState.WaitingForSqaToClose), closed = reports.Count(x => x.State == ProblemReportState.Closed), releaseBlockers = reports.Count(x => x.IsReleaseBlocker && !IsWaived(x)), waivedBlockers = reports.Count(x => x.IsReleaseBlocker && IsWaived(x)) },
             bySeverity = reports.GroupBy(x => x.Severity).OrderBy(x => x.Key).Select(x => new { severity = x.Key.ToString(), count = x.Count() }),
             byState = reports.GroupBy(x => x.State).OrderBy(x => x.Key).Select(x => new { state = x.Key.ToString(), count = x.Count() }),
-            attention = active.OrderByDescending(x => x.IsReleaseBlocker).ThenByDescending(x => x.Severity).ThenBy(x => x.CreatedAt).Take(12).Select(x => Summary(x, IsWaived(x)))
+            attention = attentionRows.Select(x => Summary(x, IsWaived(x), attentionNames))
         });
     }
 
@@ -273,7 +279,9 @@ public static class ProblemReportEndpoints
         var links = await db.ProblemReportLinks.AsNoTracking().Where(x => x.ArtifactType == canonicalType && x.ArtifactId == artifactId).ToListAsync(ct);
         var ids = links.Select(x => x.ProblemReportId).Distinct().ToList(); var reports = await db.ProblemReports.AsNoTracking().Where(x => ids.Contains(x.Id)).ToListAsync(ct);
         var permitted = new List<ProblemReport>(); foreach (var report in reports) if (await http.HasProjectAccessAsync(db, report.ProjectId, ct)) permitted.Add(report);
-        return Results.Ok(permitted.Select(x => Summary(x)));
+        var linkedNames = await DirectoryIdentityProjection.DisplayNamesAsync(db,
+            permitted.SelectMany(x => new[] { x.ReportedBy, x.ResponsibleEngineerId }), ct);
+        return Results.Ok(permitted.Select(x => Summary(x, false, linkedNames)));
     }
 
     private static async Task<IResult> DetailAsync(Guid id, HttpContext http, AeroLinkDbContext db,
@@ -546,7 +554,9 @@ public static class ProblemReportEndpoints
         if (!await http.HasProjectAccessAsync(db, report.ProjectId, ct)) return Results.Forbid();
         var candidates = await new ProblemReportDuplicateDispositionPolicy(db)
             .EligibleTargetsAsync(report, search, 50, ct);
-        return Results.Ok(new { items = candidates.Select(item => Summary(item)), totalCount = candidates.Count });
+        var candidateNames = await DirectoryIdentityProjection.DisplayNamesAsync(db,
+            candidates.SelectMany(item => new[] { item.ReportedBy, item.ResponsibleEngineerId }), ct);
+        return Results.Ok(new { items = candidates.Select(item => Summary(item, false, candidateNames)), totalCount = candidates.Count });
     }
     private static async Task<IResult> ReopenAsync(Guid id, ReopenRequest request, HttpContext http, AeroLinkDbContext db, IdentityService identity, CancellationToken ct)
     {

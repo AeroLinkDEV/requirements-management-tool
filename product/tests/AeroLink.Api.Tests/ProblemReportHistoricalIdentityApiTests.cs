@@ -33,6 +33,10 @@ public sealed class ProblemReportHistoricalIdentityApiTests
     private const string RenamedEngineerName = "Jordan Tremblay";
     private const string OwnerHandle = "dynamic.owner.02";
     private const string OwnerName = "Priya Raman";
+    // Deliberately a different person from the owner: if the two live fields were ever wired to each other's
+    // handle, identical fixtures would hide it.
+    private const string ReporterHandle = "dynamic.reporter.03";
+    private const string ReporterName = "Sam Okafor";
 
     [Fact]
     public async Task A_non_seeded_account_is_named_in_the_audit_trail_and_keeps_its_handle()
@@ -89,6 +93,9 @@ public sealed class ProblemReportHistoricalIdentityApiTests
 
         var before = await DetailAsync(client, reportId);
         Assert.Equal(OwnerName, before.GetProperty("responsibleEngineerDisplayName").GetString());
+        // The reporter is a different person, so a swap between the two fields would show up here.
+        Assert.Equal(ReporterName, before.GetProperty("reportedByDisplayName").GetString());
+        Assert.Equal(ReporterHandle, before.GetProperty("reportedBy").GetString());
 
         await RenameAsync(factory, OwnerHandle, "Priya Raman-Osei");
 
@@ -142,18 +149,61 @@ public sealed class ProblemReportHistoricalIdentityApiTests
         await AddHistoryAsync(factory, longReport, 60);
         await SignInAsync(client, EngineerHandle);
 
-        // Counted as a difference rather than an absolute: the request pipeline reads user_accounts to
-        // resolve the session and its roles, so an absolute number would measure authentication rather than
-        // this projection. What must hold is that thirty times the history costs no extra identity query.
         commands.Clear();
-        Assert.Equal(2, Revisions(await DetailAsync(client, shortReport)).Length);
+        var shortDetail = await DetailAsync(client, shortReport);
+        Assert.Equal(2, Revisions(shortDetail).Length);
         var shortLookups = AccountQueries(commands);
 
         commands.Clear();
-        Assert.Equal(60, Revisions(await DetailAsync(client, longReport)).Length);
+        var longDetail = await DetailAsync(client, longReport);
+        Assert.Equal(60, Revisions(longDetail).Length);
         var longLookups = AccountQueries(commands);
 
+        // Asserted first, so this test cannot pass by the projection simply not running: with the change
+        // reverted there is no directory query at all, both counts collapse to the constant authentication
+        // cost, and a bare equality would still hold. Naming has to actually have happened.
+        Assert.Equal(OwnerName, longDetail.GetProperty("responsibleEngineerDisplayName").GetString());
+        Assert.All(Revisions(longDetail),
+            revision => Assert.Equal(EngineerName, revision.GetProperty("actorDisplayName").GetString()));
+
+        // Thirty times the history, and not one extra identity query: #777 was raised about the per-row shape.
         Assert.Equal(shortLookups, longLookups);
+    }
+
+    [Fact]
+    public async Task A_page_of_the_register_names_its_people_in_one_lookup()
+    {
+        var commands = new ProblemReportPagingCommandInterceptor();
+        using var factory = new AeroLinkApiFactory(commandInterceptor: commands);
+        using var client = factory.CreateClient();
+        var (projectId, _) = await SeedAsync(factory);
+        for (var index = 0; index < 12; index++)
+            await RaiseReportAsync(factory, projectId, $"PR-778{index:D2}");
+        await SignInAsync(client, EngineerHandle);
+
+        commands.Clear();
+        var oneRow = await client.GetFromJsonAsync<JsonElement>(
+            $"/api/problem-reports?projectId={projectId}&page=1&pageSize=1");
+        var oneRowLookups = AccountQueries(commands);
+
+        commands.Clear();
+        var page = await client.GetFromJsonAsync<JsonElement>(
+            $"/api/problem-reports?projectId={projectId}&page=1&pageSize=12");
+        var fullPageLookups = AccountQueries(commands);
+
+        var rows = page.GetProperty("items").EnumerateArray().ToArray();
+        Assert.Equal(12, rows.Length);
+        // Every row is named, and both live fields are named independently of each other.
+        Assert.All(rows, row =>
+        {
+            Assert.Equal(OwnerName, row.GetProperty("responsibleEngineerDisplayName").GetString());
+            Assert.Equal(ReporterName, row.GetProperty("reportedByDisplayName").GetString());
+        });
+        Assert.Single(oneRow.GetProperty("items").EnumerateArray());
+
+        // Twelve rows cost what one row costs. This is the exact shape #777 was about, on the surface that
+        // renders a person per row.
+        Assert.Equal(oneRowLookups, fullPageLookups);
     }
 
     private static int AccountQueries(ProblemReportPagingCommandInterceptor commands) =>
@@ -181,8 +231,10 @@ public sealed class ProblemReportHistoricalIdentityApiTests
         var registry = File.ReadAllText(RegistryPath());
         Assert.DoesNotContain(EngineerHandle, registry, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain(OwnerHandle, registry, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain(ReporterHandle, registry, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain(EngineerName, registry, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain(OwnerName, registry, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain(ReporterName, registry, StringComparison.OrdinalIgnoreCase);
     }
 
     private static string RegistryPath()
@@ -234,8 +286,8 @@ public sealed class ProblemReportHistoricalIdentityApiTests
         using var scope = factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
         var report = new ProblemReport(projectId, number, "Display adapter drops annunciation",
-            "Observed on a warm restart of the display unit.", "", OwnerHandle, DateTimeOffset.UtcNow,
-            category: ProblemReportCategory.CodeFunctional);
+            "Observed on a warm restart of the display unit.", "", ReporterHandle, DateTimeOffset.UtcNow,
+            responsibleEngineerId: OwnerHandle, category: ProblemReportCategory.CodeFunctional);
         db.ProblemReports.Add(report);
         await db.SaveChangesAsync();
         return report.Id;
@@ -255,11 +307,14 @@ public sealed class ProblemReportHistoricalIdentityApiTests
             IdentityService.HashPassword(AeroLinkApiFactory.MemberPassword), now);
         var owner = new UserAccount(OwnerHandle, OwnerName, $"{OwnerHandle}@example.test",
             IdentityService.HashPassword(AeroLinkApiFactory.MemberPassword), now);
-        db.AddRange(engineer, owner);
+        var reporter = new UserAccount(ReporterHandle, ReporterName, $"{ReporterHandle}@example.test",
+            IdentityService.HashPassword(AeroLinkApiFactory.MemberPassword), now);
+        db.AddRange(engineer, owner, reporter);
         db.AddRange(
             new ProgramMembership(engineer.Id, program.Id, ProgramRole.Engineer, "test.setup", now),
             new ProgramMembership(engineer.Id, program.Id, ProgramRole.SoftwareQualityAnalyst, "test.setup", now),
-            new ProgramMembership(owner.Id, program.Id, ProgramRole.Engineer, "test.setup", now));
+            new ProgramMembership(owner.Id, program.Id, ProgramRole.Engineer, "test.setup", now),
+            new ProgramMembership(reporter.Id, program.Id, ProgramRole.Engineer, "test.setup", now));
         await db.SaveChangesAsync();
         return (project.Id, program.Id);
     }

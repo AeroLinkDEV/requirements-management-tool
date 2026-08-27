@@ -43,15 +43,20 @@ public static class DirectoryIdentityProjection
     public static async Task<IReadOnlyDictionary<string, string>> DisplayNamesAsync(
         AeroLinkDbContext db, IEnumerable<string?> userNames, CancellationToken ct)
     {
+        // Lower-cased before the query, not after. `UserAccount` normalises its handle on construction
+        // (IdentityRecords.cs), but the handles stored on a controlled record are only trimmed — so a record
+        // carrying "Quality.Analyst" would miss an ordinal IN match against the stored "quality.analyst" and
+        // silently render as a handle. Comparing lower-cased values against the already-lower-cased column
+        // keeps the match total without wrapping the column in a function.
         var wanted = userNames
             .Where(x => !string.IsNullOrWhiteSpace(x))
-            .Select(x => x!.Trim())
-            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Select(x => x!.Trim().ToLowerInvariant())
+            .Distinct(StringComparer.Ordinal)
             .ToList();
         if (wanted.Count == 0) return new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
-        // Materialised, then keyed in memory: the provider comparison for the IN clause is ordinal, while the
-        // dictionary a caller reads from must match handles the same way the rest of the product does.
+        // Materialised, then keyed case-insensitively so a caller can look up whichever casing its record
+        // happens to carry.
         var accounts = await db.UserAccounts.AsNoTracking()
             .Where(x => wanted.Contains(x.UserName))
             .Select(x => new { x.UserName, x.DisplayName })
