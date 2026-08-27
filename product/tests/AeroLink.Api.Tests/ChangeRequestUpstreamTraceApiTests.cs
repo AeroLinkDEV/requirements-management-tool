@@ -317,6 +317,18 @@ public sealed class ChangeRequestUpstreamTraceApiTests : IClassFixture<SharedApi
         var reopeningId = reopening.GetProperty("id").GetGuid();
         Assert.Equal("The engineering assessment is being corrected.", reopening.GetProperty("reason").GetString());
         Assert.Equal(fixture.Author, reopening.GetProperty("actorId").GetString());
+        // A later authoritative reopening must not overwrite the first reopening correlated to this frozen
+        // review cycle. The projection selects the earliest record at/after cycle start, deterministically.
+        using (var scope = _host.Factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            db.DownstreamAssessmentReopenings.Add(new DownstreamAssessmentReopening(
+                fixture.AssessmentId!.Value, DownstreamAssessmentState.Open,
+                DownstreamAssessmentOutcome.ChangeRequestsLinked, "", fixture.Author, null, null, null,
+                Array.Empty<string>(), "A later correction record.", fixture.Author,
+                reopening.GetProperty("occurredAt").GetDateTimeOffset().AddMinutes(1)));
+            await db.SaveChangesAsync();
+        }
         var after = await client.GetFromJsonAsync<JsonElement>(
             $"/api/change-requests/{fixture.ChildId}/upstream-candidates?limit=25");
         Assert.Empty(after.GetProperty("derivedEdges").EnumerateArray());

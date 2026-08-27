@@ -2,6 +2,7 @@ using System.Text.Json;
 using AeroLink.Domain.ChangeControl;
 using AeroLink.Domain.Hierarchy;
 using AeroLink.Domain.Requirements;
+using AeroLink.Domain.Traceability;
 using AeroLink.Domain.Verification;
 using Microsoft.EntityFrameworkCore;
 
@@ -82,6 +83,8 @@ public static class ChangeRequestTraceProjection
     private sealed record CrRow(Guid Id, Guid ProjectId, Guid TargetReleaseId, string BaseNumber, int Revision,
         string Title, ChangeRequestState State, ChangeRequestType Type, RequirementLevel? SoftwareLevel,
         string? NoUpstreamRationale, string? InheritedUpstreamContextJson, bool UpstreamAnswerAffirmed);
+    private sealed record CrIdentity(Guid ProjectId, Guid TargetReleaseId, ChangeRequestType Type,
+        RequirementLevel? SoftwareLevel, ChangeRequestState State);
     private sealed record PairKey(Guid ChildId, Guid ParentId);
     private sealed class EdgeBuilder(Guid fromId, string fromKind, Guid toId, string toKind, string relation)
     {
@@ -160,14 +163,17 @@ public static class ChangeRequestTraceProjection
                                      && assessment.State != DownstreamAssessmentState.Superseded
                                  select new
                                  {
-                                     assessment.Id, assessment.ReleaseId, assessment.State, assessment.Outcome,
+                                     assessment.Id, assessment.ProjectId, assessment.ReleaseId, assessment.State,
+                                     assessment.Outcome, assessment.TargetLevel,
                                      assessment.SourceChangeRequestId, LinkId = link.Id,
                                      ChildId = link.ChangeRequestId
                                  }).ToListAsync(ct);
         authored = authored.Where(x => byCr.ContainsKey(x.ChangeRequestId)
             && byCr.ContainsKey(x.UpstreamChangeRequestId)).ToList();
-        assessments = assessments.Where(x => byCr.ContainsKey(x.SourceChangeRequestId)
-            && byCr.ContainsKey(x.ChildId)).ToList();
+        assessments = assessments.Where(x => byCr.TryGetValue(x.SourceChangeRequestId, out var source)
+            && byCr.TryGetValue(x.ChildId, out var child)
+            && IsCurrentAssessmentEdge(x.ProjectId, x.State, x.ReleaseId, x.TargetLevel,
+                Identity(source), Identity(child), policy)).ToList();
         var releases = await db.Releases.AsNoTracking().Where(x => x.ProjectId == projectId)
             .ToDictionaryAsync(x => x.Id, x => x.Version, ct);
         var reopenings = await (from reopening in db.DownstreamAssessmentReopenings.AsNoTracking()
@@ -181,7 +187,7 @@ public static class ChangeRequestTraceProjection
                                 }).ToListAsync(ct);
         var reopeningByAssessment = reopenings
             .GroupBy(x => x.AssessmentId)
-            .ToDictionary(x => x.Key, x => x.OrderByDescending(y => y.OccurredAt).ThenBy(y => y.Id).ToList());
+            .ToDictionary(x => x.Key, x => x.OrderBy(y => y.OccurredAt).ThenBy(y => y.Id).ToList());
         var frozenCycles = await (from cycle in db.ReviewCycles.AsNoTracking()
                                   join change in db.SystemChangeRequests.AsNoTracking()
                                       on cycle.ChangeRequestId equals change.Id
@@ -345,8 +351,16 @@ public static class ChangeRequestTraceProjection
                                                revision.Revision, revision.Statement, artifact.Level,
                                                revision.SourceChangeRequestId }).ToListAsync(ct);
         var allRequirementLinks = await db.RequirementTraces.AsNoTracking()
-            .Where(x => x.ProjectId == projectId)
-            .Select(x => new { x.Id, x.SourceRevisionId, x.TargetRevisionId, x.Type })
+            .Where(x => x.ProjectId == projectId
+                && (x.ExactLinkSuspectLifecycleId == null
+                    || db.ExactLinkSuspectLifecycles.Any(lifecycle =>
+                        lifecycle.Id == x.ExactLinkSuspectLifecycleId
+                        && lifecycle.ProjectId == projectId
+                        && lifecycle.LinkKind == ExactLinkKind.RequirementTrace
+                        && lifecycle.LinkId == x.Id
+                        && lifecycle.State == ExactLinkLifecycleState.Closed)))
+            .Select(x => new { x.Id, x.SourceRevisionId, x.TargetRevisionId, x.Type,
+                x.ExactLinkSuspectLifecycleId })
             .ToListAsync(ct);
         foreach (var requirement in requirementRevisions)
         {
@@ -438,7 +452,8 @@ public static class ChangeRequestTraceProjection
                 && (ids.Contains(x.SourceChangeRequestId)
                     || db.DownstreamAssessmentChangeRequestLinks.Any(link => link.AssessmentId == x.Id
                         && ids.Contains(link.ChangeRequestId))))
-            .Select(x => new { x.Id, x.SourceChangeRequestId, x.State, x.Outcome, x.ReleaseId })
+            .Select(x => new { x.Id, x.ProjectId, x.SourceChangeRequestId, x.State, x.Outcome,
+                x.ReleaseId, x.TargetLevel })
             .ToListAsync(ct);
         var assessmentIds = assessments.Select(x => x.Id).ToHashSet();
         var assessmentLinks = await db.DownstreamAssessmentChangeRequestLinks.AsNoTracking()
@@ -447,10 +462,20 @@ public static class ChangeRequestTraceProjection
             .ToListAsync(ct);
         var assessmentById = assessments.ToDictionary(x => x.Id);
         var targetIds = assessmentLinks.Select(x => x.ChildId).Distinct().ToList();
-        var targets = await db.SystemChangeRequests.AsNoTracking()
-            .Where(x => x.ProjectId == projectId && targetIds.Contains(x.Id))
-            .Select(x => new { x.Id, x.BaseNumber, x.Revision, x.State }).ToListAsync(ct);
+        var identityIds = assessments.Select(x => x.SourceChangeRequestId).Concat(targetIds).Distinct().ToList();
+        var identities = await db.SystemChangeRequests.AsNoTracking()
+            .Where(x => x.ProjectId == projectId && identityIds.Contains(x.Id))
+            .Select(x => new { x.Id, x.ProjectId, x.TargetReleaseId, x.Type, x.SoftwareLevel,
+                x.BaseNumber, x.Revision, x.State }).ToListAsync(ct);
+        var targets = identities.Where(x => targetIds.Contains(x.Id)).ToList();
         var targetById = targets.ToDictionary(x => x.Id);
+        var sourceIds = assessments.Select(x => x.SourceChangeRequestId).Distinct().ToList();
+        var sourceById = identities.Where(x => sourceIds.Contains(x.Id)).ToDictionary(x => x.Id,
+            x => new CrIdentity(x.ProjectId, x.TargetReleaseId, x.Type, x.SoftwareLevel, x.State));
+        foreach (var row in rows)
+            sourceById[row.Id] = Identity(row);
+        var targetIdentityById = targets.ToDictionary(x => x.Id,
+            x => new CrIdentity(x.ProjectId, x.TargetReleaseId, x.Type, x.SoftwareLevel, x.State));
         var targetBaseNumbers = targets.Select(x => x.BaseNumber).Distinct().ToList();
         var latestTargetRevision = await db.SystemChangeRequests.AsNoTracking()
             .Where(x => x.ProjectId == projectId && targetBaseNumbers.Contains(x.BaseNumber))
@@ -476,8 +501,10 @@ public static class ChangeRequestTraceProjection
             var rowLinks = links.Where(x => x.ChangeRequestId == row.Id).ToList();
             var derivedAnswer = assessmentLinks.Any(x => x.ChildId == row.Id
                 && assessmentById.TryGetValue(x.Id, out var assessment)
-                && assessment.ReleaseId == row.TargetReleaseId
-                && assessment.State != DownstreamAssessmentState.Superseded);
+                && sourceById.TryGetValue(assessment.SourceChangeRequestId, out var source)
+                && targetIdentityById.TryGetValue(x.ChildId, out var child)
+                && IsCurrentAssessmentEdge(assessment.ProjectId, assessment.State, assessment.ReleaseId, assessment.TargetLevel,
+                    source, child, policy));
             var authoredAnswer = rowLinks.Count > 0 || !string.IsNullOrWhiteSpace(row.NoUpstreamRationale)
                 || row.InheritedUpstreamContextJson is not null && row.UpstreamAnswerAffirmed;
             var frozenAnswer = frozenAnswers.GetValueOrDefault(row.Id);
@@ -500,18 +527,23 @@ public static class ChangeRequestTraceProjection
                     var downstreamStates = current.Select(assessment =>
                     {
                         var targetsForAssessment = assessmentLinks.Where(x => x.Id == assessment.Id)
-                            .Select(x => targetById.GetValueOrDefault(x.ChildId)).Where(x => x is not null).ToList();
+                            .Where(x => targetIdentityById.TryGetValue(x.ChildId, out var target)
+                                && sourceById.TryGetValue(assessment.SourceChangeRequestId, out var source)
+                                && IsCurrentAssessmentEdge(assessment.ProjectId, assessment.State, assessment.ReleaseId,
+                                    assessment.TargetLevel, source, target, policy))
+                            .Select(x => targetById.GetValueOrDefault(x.ChildId)).Where(x => x is not null)
+                            .Select(x => x!).ToList();
                         if (assessment.Outcome == DownstreamAssessmentOutcome.Pending) return (State: "Pending", Warning: (string?)"Downstream assessment is pending.");
                         if (assessment.Outcome == DownstreamAssessmentOutcome.ChangeRequired && targetsForAssessment.Count == 0)
                             return (State: "ActionGap", Warning: (string?)"Downstream change is required but no change request is linked.");
                         if (assessment.Outcome == DownstreamAssessmentOutcome.NoChangeRequired)
                             return assessment.State == DownstreamAssessmentState.Approved
                                 ? (State: "Satisfied", Warning: (string?)null) : (State: "ApprovalPending", Warning: "Downstream no-change answer is awaiting approval.");
-                        var viableTargets = targetsForAssessment.Where(x => x!.State != ChangeRequestState.Withdrawn
+                        var viableTargets = targetsForAssessment.Where(x => x.State != ChangeRequestState.Withdrawn
                             && latestTargetRevision.GetValueOrDefault(x.BaseNumber) == x.Revision).ToList();
                         if (viableTargets.Count == 0)
                             return (State: "ActionGap", Warning: (string?)"Linked downstream change request is no longer viable.");
-                        if (viableTargets.Any(x => x!.State == ChangeRequestState.Deferred))
+                        if (viableTargets.Any(x => x.State == ChangeRequestState.Deferred))
                             return (State: "Deferred", Warning: (string?)"Linked downstream change request is deferred.");
                         return (State: "Linked", Warning: (string?)null);
                     }).ToList();
@@ -537,6 +569,30 @@ public static class ChangeRequestTraceProjection
         if (row.SoftwareLevel is not null) return row.SoftwareLevel;
         return null;
     }
+
+    private static CrIdentity Identity(CrRow row) =>
+        new(row.ProjectId, row.TargetReleaseId, row.Type, row.SoftwareLevel, row.State);
+
+    private static bool IsCurrentAssessmentEdge(Guid projectId, DownstreamAssessmentState assessmentState,
+        Guid assessmentReleaseId,
+        RequirementLevel assessmentTargetLevel, CrIdentity source, CrIdentity child, ILadderPolicy policy)
+    {
+        if (assessmentState == DownstreamAssessmentState.Superseded
+            || source.ProjectId != projectId || child.ProjectId != projectId)
+            return false;
+        var sourceLevel = ChangeRequestLevel(source.Type, source.SoftwareLevel);
+        var childLevel = ChangeRequestLevel(child.Type, child.SoftwareLevel);
+        return sourceLevel is not null && childLevel is not null
+            && assessmentReleaseId == child.TargetReleaseId
+            && source.TargetReleaseId == child.TargetReleaseId
+            && assessmentTargetLevel == childLevel
+            && policy.ParentLevels(childLevel.Value).Contains(sourceLevel.Value);
+    }
+
+    private static RequirementLevel? ChangeRequestLevel(ChangeRequestType type, RequirementLevel? softwareLevel) =>
+        type == ChangeRequestType.System ? RequirementLevel.System
+        : type == ChangeRequestType.Interface ? RequirementLevel.Interface
+        : type == ChangeRequestType.Software ? softwareLevel : null;
 
     private static string Display(string baseNumber, int revision) =>
         string.IsNullOrWhiteSpace(baseNumber) ? $".{revision:D2}" : $"{baseNumber}.{revision:D2}";

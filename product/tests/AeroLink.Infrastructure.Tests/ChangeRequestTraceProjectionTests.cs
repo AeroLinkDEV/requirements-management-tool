@@ -59,17 +59,20 @@ public sealed class ChangeRequestTraceProjectionTests
         await using var fixture = await Fixture.CreateAsync();
         var source = new SystemChangeRequest("SRCR-07865", 0, fixture.Project.Id, fixture.Release.Id,
             "Upstream", "P", "A", "S", "author", fixture.Now);
-        var child = new SystemChangeRequest("SRCR-07866", 0, fixture.Project.Id, fixture.Release.Id,
-            "Downstream", "P", "A", "S", "author", fixture.Now);
-        var assessment = new DownstreamChangeAssessment(fixture.Project.Id, fixture.Release.Id, child.Id,
-            child.DisplayNumber, RequirementLevel.HighLevel, fixture.Now);
+        var child = new SystemChangeRequest("HLRCR-07866", 0, fixture.Project.Id, fixture.Release.Id,
+            "Downstream", "P", "A", "S", "author", fixture.Now,
+            ChangeRequestType.Software, softwareLevel: RequirementLevel.HighLevel);
+        var assessment = new DownstreamChangeAssessment(fixture.Project.Id, fixture.Release.Id, source.Id,
+            source.DisplayNumber, RequirementLevel.HighLevel, fixture.Now);
         assessment.Assign("author", "author", fixture.Now);
         assessment.RecordChangeRequired("author", fixture.Now);
-        assessment.LinkChangeRequest("author", source.Id, source.DisplayNumber, fixture.Now);
+        assessment.LinkChangeRequest("author", child.Id, child.DisplayNumber, fixture.Now);
         fixture.Db.AddRange(source, child, assessment);
         await fixture.Db.SaveChangesAsync();
         await fixture.Db.Database.ExecuteSqlInterpolatedAsync(
             $"UPDATE downstream_change_assessments SET State = {DownstreamAssessmentState.Superseded.ToString()} WHERE Id = {assessment.Id}");
+        await fixture.Db.Database.ExecuteSqlInterpolatedAsync(
+            $"UPDATE system_change_requests SET State = {ChangeRequestState.Approved.ToString()} WHERE Id = {child.Id}");
         fixture.Db.ChangeTracker.Clear();
 
         var result = await ChangeRequestTraceProjection.ForChangeRequestAsync(
@@ -78,6 +81,145 @@ public sealed class ChangeRequestTraceProjectionTests
         Assert.NotNull(result);
         Assert.DoesNotContain(result!.Edges, x => x.Provenance.Any(p => p.Kind == "AssessmentDerived"));
         Assert.DoesNotContain(result.Nodes, x => x.Kind == "ChangeRequest" && x.Id == source.Id);
+        var state = (await ChangeRequestTraceProjection.StatesAsync(fixture.Db, fixture.Project.Id,
+            [child.Id], LegacyLadderPolicy.Instance, CancellationToken.None))[child.Id];
+        Assert.Equal("UpstreamGap", state.Upstream);
+    }
+
+    [Fact]
+    public async Task Assessment_edges_require_current_effective_direct_parent_and_build()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var earlierRelease = new SoftwareRelease(fixture.Project.Id, "0.9", false);
+        var child = new SystemChangeRequest("HLRCR-07870", 0, fixture.Project.Id, fixture.Release.Id,
+            "Current HLR", "P", "A", "S", "author", fixture.Now,
+            ChangeRequestType.Software, softwareLevel: RequirementLevel.HighLevel);
+        var wrongTargetLevel = new SystemChangeRequest("SRCR-07871", 0, fixture.Project.Id,
+            fixture.Release.Id, "Wrong target level source", "P", "A", "S", "author", fixture.Now);
+        var wrongDirectParent = new SystemChangeRequest("HLRCR-07872", 0, fixture.Project.Id,
+            fixture.Release.Id, "Wrong direct parent source", "P", "A", "S", "author", fixture.Now,
+            ChangeRequestType.Software, softwareLevel: RequirementLevel.HighLevel);
+        var earlierSource = new SystemChangeRequest("SRCR-07873", 0, fixture.Project.Id,
+            earlierRelease.Id, "Earlier source", "P", "A", "S", "author", fixture.Now);
+        DownstreamChangeAssessment Assessment(SystemChangeRequest source, Guid releaseId,
+            RequirementLevel targetLevel)
+        {
+            var assessment = new DownstreamChangeAssessment(fixture.Project.Id, releaseId, source.Id,
+                source.DisplayNumber, targetLevel, fixture.Now);
+            assessment.Assign("author", "author", fixture.Now);
+            assessment.RecordChangeRequired("author", fixture.Now);
+            assessment.LinkChangeRequest("author", child.Id, child.DisplayNumber, fixture.Now);
+            return assessment;
+        }
+        var mismatchedLevel = Assessment(wrongTargetLevel, fixture.Release.Id, RequirementLevel.LowLevel);
+        var wrongParent = Assessment(wrongDirectParent, fixture.Release.Id, RequirementLevel.HighLevel);
+        var wrongBuild = Assessment(earlierSource, earlierRelease.Id, RequirementLevel.HighLevel);
+        fixture.Db.AddRange(earlierRelease, child, wrongTargetLevel, wrongDirectParent, earlierSource,
+            mismatchedLevel, wrongParent, wrongBuild);
+        await fixture.Db.SaveChangesAsync();
+        await fixture.Db.Database.ExecuteSqlInterpolatedAsync(
+            $"UPDATE system_change_requests SET State = {ChangeRequestState.Approved.ToString()} WHERE Id = {child.Id}");
+        fixture.Db.ChangeTracker.Clear();
+
+        var result = await ChangeRequestTraceProjection.ForChangeRequestAsync(
+            fixture.Db, fixture.Project.Id, child.Id, LegacyLadderPolicy.Instance, CancellationToken.None);
+        var state = (await ChangeRequestTraceProjection.StatesAsync(fixture.Db, fixture.Project.Id,
+            [child.Id], LegacyLadderPolicy.Instance, CancellationToken.None))[child.Id];
+
+        Assert.NotNull(result);
+        Assert.DoesNotContain(result!.Edges, x => x.Provenance.Any(p => p.Kind == "AssessmentDerived"));
+        Assert.DoesNotContain(result.Nodes, x => x.Id == wrongTargetLevel.Id || x.Id == wrongDirectParent.Id
+            || x.Id == earlierSource.Id);
+        Assert.Equal("UpstreamGap", state.Upstream);
+    }
+
+    [Fact]
+    public async Task Requirement_trace_walk_ignores_open_suspect_lifecycle_but_includes_closed()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var root = new SystemChangeRequest("SRCR-07874", 0, fixture.Project.Id, fixture.Release.Id,
+            "Requirement trace root", "P", "A", "S", "author", fixture.Now);
+        var baseline = new CandidateBaseline("SW-07874", 0, fixture.Project.Id, fixture.Release.Id, null,
+            "Trace lifecycle baseline", "author", fixture.Now);
+        var baselineImport = new BaselineImport(fixture.Project.Id, "Legacy", "1", "Imported trace", fixture.Now,
+            "trace.json", new string('a', 64), 1, ImportedArtifactKinds.Requirements, "author", fixture.Now,
+            "author", fixture.Now);
+        var sourceArtifact = new RequirementArtifact(fixture.Project.Id, "SYSR-07874", RequirementLevel.System,
+            fixture.Now);
+        var sourceRevision = new RequirementRevision(sourceArtifact.Id, 0, "Source requirement", "Rationale",
+            "Test", RequirementRevisionState.Active, root.Id, baseline.Id, fixture.Now);
+        var suspectArtifact = new RequirementArtifact(fixture.Project.Id, "SYSR-07875", RequirementLevel.System,
+            fixture.Now);
+        var suspectRevision = RequirementRevision.FromExternalSourcePackage(suspectArtifact.Id, 0,
+            "Suspect target", "Imported", RequirementRevisionState.Active, baselineImport.Id,
+            baseline.Id, fixture.Now);
+        var closedArtifact = new RequirementArtifact(fixture.Project.Id, "SYSR-07876", RequirementLevel.System,
+            fixture.Now);
+        var closedRevision = RequirementRevision.FromExternalSourcePackage(closedArtifact.Id, 0,
+            "Closed target", "Imported", RequirementRevisionState.Active, baselineImport.Id,
+            baseline.Id, fixture.Now);
+        var acknowledgedArtifact = new RequirementArtifact(fixture.Project.Id, "SYSR-07877", RequirementLevel.System,
+            fixture.Now);
+        var acknowledgedRevision = RequirementRevision.FromExternalSourcePackage(acknowledgedArtifact.Id, 0,
+            "Acknowledged target", "Imported", RequirementRevisionState.Active, baselineImport.Id,
+            baseline.Id, fixture.Now);
+        var changeRequiredArtifact = new RequirementArtifact(fixture.Project.Id, "SYSR-07878", RequirementLevel.System,
+            fixture.Now);
+        var changeRequiredRevision = RequirementRevision.FromExternalSourcePackage(changeRequiredArtifact.Id, 0,
+            "Change-required target", "Imported", RequirementRevisionState.Active, baselineImport.Id,
+            baseline.Id, fixture.Now);
+        var suspectLink = new RequirementTraceLink(fixture.Project.Id, sourceRevision.Id, suspectRevision.Id,
+            RequirementTraceType.DerivedFrom, "Open suspect", fixture.Now);
+        var closedLink = new RequirementTraceLink(fixture.Project.Id, sourceRevision.Id, closedRevision.Id,
+            RequirementTraceType.DerivedFrom, "Closed suspect", fixture.Now);
+        var suspectLifecycle = ExactLinkSuspectLifecycle.Raise(fixture.Project.Id, ExactLinkKind.RequirementTrace,
+            suspectLink.Id, ExactLinkLifecycleCauseKind.ExternalBaselineImport, null, baselineImport.Id,
+            "author", "The imported source changed.", fixture.Now);
+        suspectLink.AttachExactLinkLifecycle(suspectLifecycle.Id);
+        var closedLifecycle = ExactLinkSuspectLifecycle.Raise(fixture.Project.Id, ExactLinkKind.RequirementTrace,
+            closedLink.Id, ExactLinkLifecycleCauseKind.ExternalBaselineImport, null, baselineImport.Id,
+            "author", "The imported source changed.", fixture.Now);
+        closedLifecycle.RecordResolution(ExactLinkResolutionOutcome.NoDownstreamChangeRequired,
+            "author", "Reviewed exact imported source.", fixture.Now);
+        closedLink.AttachExactLinkLifecycle(closedLifecycle.Id);
+        var acknowledgedLink = new RequirementTraceLink(fixture.Project.Id, sourceRevision.Id,
+            acknowledgedRevision.Id, RequirementTraceType.DerivedFrom, "Acknowledged suspect", fixture.Now);
+        var acknowledgedLifecycle = ExactLinkSuspectLifecycle.Raise(fixture.Project.Id,
+            ExactLinkKind.RequirementTrace, acknowledgedLink.Id, ExactLinkLifecycleCauseKind.ExternalBaselineImport,
+            null, baselineImport.Id, "author", "The imported source changed.", fixture.Now);
+        acknowledgedLifecycle.Acknowledge("author", "Acknowledged for investigation.", fixture.Now);
+        acknowledgedLink.AttachExactLinkLifecycle(acknowledgedLifecycle.Id);
+        var changeRequiredLink = new RequirementTraceLink(fixture.Project.Id, sourceRevision.Id,
+            changeRequiredRevision.Id, RequirementTraceType.DerivedFrom, "Change required suspect", fixture.Now);
+        var changeRequiredLifecycle = ExactLinkSuspectLifecycle.Raise(fixture.Project.Id,
+            ExactLinkKind.RequirementTrace, changeRequiredLink.Id, ExactLinkLifecycleCauseKind.ExternalBaselineImport,
+            null, baselineImport.Id, "author", "The imported source changed.", fixture.Now);
+        changeRequiredLifecycle.RecordResolution(
+            ExactLinkResolutionOutcome.DownstreamChangeRequiredNotYetApproved, "author",
+            "A downstream change is required.", fixture.Now);
+        changeRequiredLink.AttachExactLinkLifecycle(changeRequiredLifecycle.Id);
+        var excludedCode = new CodeTraceabilityRecord(fixture.Project.Id, fixture.Release.Id, suspectArtifact.Id,
+            suspectRevision.Id, CodeTraceDisposition.NoCodeChangeRequired, "", "", "", "", "", null,
+            "No code change is required for the excluded suspect revision.", false, "author", fixture.Now);
+        fixture.Db.AddRange(root, baseline, baselineImport, sourceArtifact, sourceRevision, suspectArtifact,
+            suspectRevision, closedArtifact, closedRevision, acknowledgedArtifact, acknowledgedRevision,
+            changeRequiredArtifact, changeRequiredRevision, suspectLink, suspectLifecycle, closedLink,
+            closedLifecycle, acknowledgedLink, acknowledgedLifecycle, changeRequiredLink, changeRequiredLifecycle,
+            excludedCode);
+        await fixture.Db.SaveChangesAsync();
+
+        var result = await ChangeRequestTraceProjection.ForChangeRequestAsync(
+            fixture.Db, fixture.Project.Id, root.Id, LegacyLadderPolicy.Instance, CancellationToken.None);
+
+        Assert.NotNull(result);
+        Assert.Contains(result!.Nodes, x => x.Id == closedRevision.Id);
+        Assert.DoesNotContain(result.Nodes, x => x.Id == suspectRevision.Id);
+        Assert.Contains(result.Edges, x => x.Relation == "RequirementTrace"
+            && x.ToId == closedRevision.Id);
+        Assert.DoesNotContain(result.Edges, x => x.Relation == "RequirementTrace"
+            && x.ToId == suspectRevision.Id);
+        Assert.DoesNotContain(result.Nodes, x => x.Id == acknowledgedRevision.Id || x.Id == changeRequiredRevision.Id
+            || x.Id == excludedCode.Id);
     }
 
     [Fact]
@@ -273,8 +415,9 @@ public sealed class ChangeRequestTraceProjectionTests
         await using var fixture = await Fixture.CreateAsync();
         var first = new SystemChangeRequest("SRCR-08100", 0, fixture.Project.Id, fixture.Release.Id,
             "First", "P", "A", "S", "author", fixture.Now);
-        var second = new SystemChangeRequest("SRCR-08101", 0, fixture.Project.Id, fixture.Release.Id,
-            "Second", "P", "A", "S", "author", fixture.Now);
+        var second = new SystemChangeRequest("HLRCR-08101", 0, fixture.Project.Id, fixture.Release.Id,
+            "Second", "P", "A", "S", "author", fixture.Now, ChangeRequestType.Software,
+            softwareLevel: RequirementLevel.HighLevel);
         var third = new SystemChangeRequest("SRCR-08102", 0, fixture.Project.Id, fixture.Release.Id,
             "Third", "P", "A", "S", "author", fixture.Now);
         fixture.Db.AddRange(first, second, third);
