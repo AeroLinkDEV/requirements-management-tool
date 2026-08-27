@@ -155,3 +155,77 @@ test('every surface meets WCAG 2.2 AA contrast in both densities', async ({ page
   const pairs = [...byPair.entries()].map(([pair, where]) => `${pair}  —  ${where.size} surface(s): ${[...where].slice(0, 3).join(', ')}`)
   expect(pairs, `WCAG 2.2 AA contrast failures, ${pairs.length} distinct colour pair(s):\n  ${pairs.join('\n  ')}`).toEqual([])
 })
+
+test('Change Request author role metadata meets WCAG body-text contrast', async ({ page, request }) => {
+  test.setTimeout(180_000)
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await apiLogin(request)
+  await login(page, 'admin', { openProject: false })
+  await selectProgram(page, 'Flight Management System Live Program')
+
+  const releaseId = page.url().match(/\/releases\/([^/]+)/)?.[1]
+  expect(releaseId, 'active release route segment').toBeTruthy()
+  const fixture = {
+    id: 'contrast-fixture', baseNumber: 'SRCR-792000', revision: 1, displayNumber: 'SRCR-792000',
+    title: 'Contrast fixture with a seeded author role', state: 'Draft', deferredFromState: null,
+    authorId: 'systems.author', targetReleaseId: releaseId!, requirementCount: 1,
+    hasHighLevelChanges: false, hasLowLevelChanges: false, updatedAt: '2026-08-26T10:15:00Z', revisionCount: 1,
+  }
+  await page.route('**/api/history/change-requests*', route => route.fulfill({
+    json: { items: [fixture], totalCount: 1, totalPages: 1, pageSize: 50 },
+  }))
+
+  const root = new URL(page.url()).pathname.replace(/\/[^/]*$/, '')
+  for (const density of ['comfortable', 'compact'] as const) {
+    await page.evaluate(value => localStorage.setItem('aerolink-density', value), density)
+    await page.reload({ waitUntil: 'load' })
+    await expect.poll(() => page.evaluate(() => document.documentElement.dataset.density), { timeout: 10_000 })
+      .toBe(density)
+    await page.goto(new URL(`${root}/systems/change-requests`, page.url()).toString(), { waitUntil: 'load' })
+    await surfacePainted(page)
+    await layoutSettled(page)
+
+    const role = page.locator('[data-register-row="SRCR-792000"] .personName > small')
+    await expect(role).toHaveText(' · Systems Lead', { timeout: 30_000 })
+
+    const measurement = await role.evaluate(element => {
+      const parse = (value: string): [number, number, number] => {
+        const parts = value.match(/[\d.]+/g)
+        if (!parts || parts.length < 3) throw new Error(`Unable to parse colour ${value}`)
+        return [Number(parts[0]), Number(parts[1]), Number(parts[2])]
+      }
+      const luminance = ([r, g, b]: [number, number, number]) => {
+        const channel = (raw: number) => {
+          const c = raw / 255
+          return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4
+        }
+        return 0.2126 * channel(r) + 0.7152 * channel(g) + 0.0722 * channel(b)
+      }
+      const foregroundStyle = getComputedStyle(element)
+      const foreground = parse(foregroundStyle.color)
+      let node: Element | null = element
+      let background: [number, number, number] | undefined
+      while (node) {
+        const colour = getComputedStyle(node).backgroundColor
+        if (colour !== 'rgba(0, 0, 0, 0)') {
+          background = parse(colour)
+          break
+        }
+        node = node.parentElement
+      }
+      if (!background) throw new Error('No opaque background found')
+      const values = [luminance(foreground), luminance(background)].sort((a, b) => b - a)
+      return {
+        foreground: foregroundStyle.color,
+        background: getComputedStyle(node!).backgroundColor,
+        ratio: (values[0] + 0.05) / (values[1] + 0.05),
+        fontSize: foregroundStyle.fontSize,
+        fontWeight: foregroundStyle.fontWeight,
+      }
+    })
+    console.log(`${density} Change Request role metadata contrast: ${measurement.foreground} on ${measurement.background} = ${measurement.ratio.toFixed(2)}:1`)
+    expect(measurement.fontSize).toBe('12px')
+    expect(measurement.fontWeight).toBe('400')
+    expect(measurement.ratio, `WCAG 2.2 AA requires 4.5:1 for 12px/400 body text in ${density} density`).toBeGreaterThanOrEqual(4.5)
+  }
+})
