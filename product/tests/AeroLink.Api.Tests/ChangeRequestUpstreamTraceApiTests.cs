@@ -338,6 +338,8 @@ public sealed class ChangeRequestUpstreamTraceApiTests : IClassFixture<SharedApi
         Assert.Equal("The engineering assessment is being corrected.",
             frozenEvidence.GetProperty("reopeningReason").GetString());
         Assert.Equal(fixture.Author, frozenEvidence.GetProperty("reopenedBy").GetString());
+        Assert.Equal(reopening.GetProperty("occurredAt").GetDateTimeOffset(),
+            frozenEvidence.GetProperty("reopenedAt").GetDateTimeOffset());
         Assert.Equal("ChangeRequestsLinked", frozenEvidence.GetProperty("previousOutcome").GetString());
         Assert.Equal("Open", frozenEvidence.GetProperty("previousState").GetString());
         Assert.Equal("Frozen review evidence; assessment was reopened/corrected.",
