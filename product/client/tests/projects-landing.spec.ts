@@ -15,10 +15,13 @@ test('successful login opens the accessible Projects selector before the current
   await expect(page.getByRole('link', { name: 'Open FMS Product Development' })).toBeVisible()
   await expect(page.getByRole('link', { name: 'Open DOORS Import Practice' })).toBeVisible()
   const sampleProjects = page.locator('details.sampleProjectsSection')
+  const sampleToggle = sampleProjects.locator('summary')
   await expect(sampleProjects).not.toHaveAttribute('open', '')
   await expect(sampleProjects.getByText('9 examples', { exact: true })).toBeVisible()
   await expect(sampleProjects.getByText('GPS Receiver Modernization')).not.toBeVisible()
-  await sampleProjects.getByRole('button', { name: /Sample projects/ }).click()
+  await sampleToggle.focus()
+  await expect(sampleToggle).toBeFocused()
+  await sampleToggle.press('Enter')
   await expect(sampleProjects).toHaveAttribute('open', '')
   await expect(sampleProjects.getByText('GPS Receiver Modernization')).toBeVisible()
   await expect(page.locator('[data-project-card]:visible')).toHaveCount(12)
@@ -69,7 +72,7 @@ test('the project grid collapses cleanly without horizontal scrolling', async ({
   expect(dimensions.documentWidth).toBe(dimensions.viewportWidth)
   expect(dimensions.columns).toBe(1)
   const sampleProjects = page.locator('details.sampleProjectsSection')
-  await sampleProjects.getByRole('button', { name: /Sample projects/ }).click()
+  await sampleProjects.locator('summary').press('Enter')
   await expect(page.locator('[data-project-card]:visible')).toHaveCount(12)
   const expandedDimensions = await page.evaluate(() => ({
     documentWidth: document.documentElement.scrollWidth,
