@@ -1,4 +1,9 @@
 #Requires -Version 5.1
+[CmdletBinding()]
+param(
+    [string]$RepositoryRoot
+)
+
 <#
     Regression coverage for the repository layout/documentation guard.
 
@@ -8,7 +13,11 @@
 #>
 $ErrorActionPreference = 'Stop'
 $scriptPath = Join-Path $PSScriptRoot 'Test-RepositoryLayout.ps1'
-$root = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
+$root = if ($RepositoryRoot) {
+    (Resolve-Path -LiteralPath $RepositoryRoot -ErrorAction Stop).Path
+} else {
+    (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
+}
 $tempRoot = Join-Path ([IO.Path]::GetTempPath()) ('aerolink-layout-contract-' + [Guid]::NewGuid().ToString('N'))
 $failures = [System.Collections.Generic.List[string]]::new()
 
@@ -34,22 +43,41 @@ function Invoke-GuardInChild([string]$RepositoryRoot) {
     return [pscustomobject]@{ ExitCode = $process.ExitCode; Output = $output }
 }
 
-function New-LegitimateFixture([string]$Name) {
+function Get-TrackedRootFileNames {
+    param(
+        [Parameter(Mandatory)][string]$SourceRoot,
+        [Parameter(Mandatory)][string]$Pattern
+    )
+
+    $trackedPaths = @(& git -C $SourceRoot ls-files -- $Pattern)
+    if ($LASTEXITCODE -ne 0) { throw "Unable to enumerate tracked fixture inputs from $SourceRoot." }
+    return @($trackedPaths |
+        Where-Object { ($_ -replace '\\', '/') -notmatch '/' } |
+        ForEach-Object { [IO.Path]::GetFileName($_) } |
+        Sort-Object -Unique)
+}
+
+function New-LegitimateFixture {
+    param(
+        [Parameter(Mandatory)][string]$Name,
+        [string]$SourceRoot = $root
+    )
+
     $fixture = Join-Path $tempRoot $Name
     New-Item -ItemType Directory -Path $fixture -Force | Out-Null
-    foreach ($name in @(Get-ChildItem -LiteralPath $root -File -Filter '*.md' | ForEach-Object Name)) {
-        Copy-Item -LiteralPath (Join-Path $root $name) -Destination $fixture -Force
+    foreach ($name in @(Get-TrackedRootFileNames -SourceRoot $SourceRoot -Pattern '*.md')) {
+        Copy-Item -LiteralPath (Join-Path $SourceRoot $name) -Destination $fixture -Force
     }
-    foreach ($name in @(Get-ChildItem -LiteralPath $root -File -Filter '*.bat' | ForEach-Object Name)) {
-        Copy-Item -LiteralPath (Join-Path $root $name) -Destination $fixture -Force
+    foreach ($name in @(Get-TrackedRootFileNames -SourceRoot $SourceRoot -Pattern '*.bat')) {
+        Copy-Item -LiteralPath (Join-Path $SourceRoot $name) -Destination $fixture -Force
     }
-    Copy-Item -LiteralPath (Join-Path $root 'docs') -Destination $fixture -Recurse -Force
+    Copy-Item -LiteralPath (Join-Path $SourceRoot 'docs') -Destination $fixture -Recurse -Force
     foreach ($directory in @('design', 'outputs')) {
-        Copy-Item -LiteralPath (Join-Path $root $directory) -Destination $fixture -Recurse -Force
+        Copy-Item -LiteralPath (Join-Path $SourceRoot $directory) -Destination $fixture -Recurse -Force
     }
     New-Item -ItemType Directory -Path (Join-Path $fixture 'product') -Force | Out-Null
-    Copy-Item -LiteralPath (Join-Path $root 'product\README.md') -Destination (Join-Path $fixture 'product') -Force
-    Copy-Item -LiteralPath (Join-Path $root 'product\docs') -Destination (Join-Path $fixture 'product') -Recurse -Force
+    Copy-Item -LiteralPath (Join-Path $SourceRoot 'product\README.md') -Destination (Join-Path $fixture 'product') -Force
+    Copy-Item -LiteralPath (Join-Path $SourceRoot 'product\docs') -Destination (Join-Path $fixture 'product') -Recurse -Force
     # A conventional community file is allowed without becoming a product-authority document.
     Set-Content -LiteralPath (Join-Path $fixture 'CONTRIBUTING.md') -Value '# Contributing`r`n' -Encoding UTF8
     return $fixture
@@ -64,6 +92,21 @@ try {
     $legitimate = New-LegitimateFixture 'legitimate'
     $fixtureResult = Invoke-GuardInChild $legitimate
     Assert-True ($fixtureResult.ExitCode -eq 0) "A legitimate fixture with a community file must pass: $($fixtureResult.Output)"
+
+    $sourceWithIgnoredScratch = New-LegitimateFixture 'source-with-ignored-scratch'
+    Set-Content -LiteralPath (Join-Path $sourceWithIgnoredScratch '.gitignore') -Value @('HANDOFF-*.md', 'PR-BODY-*.md') -Encoding UTF8
+    & git -C $sourceWithIgnoredScratch init --quiet
+    Assert-True ($LASTEXITCODE -eq 0) 'The ignored-source fixture must initialize as a Git worktree.'
+    & git -C $sourceWithIgnoredScratch -c core.autocrlf=false add .
+    Assert-True ($LASTEXITCODE -eq 0) 'The ignored-source fixture must stage its legitimate repository inputs.'
+    Set-Content -LiteralPath (Join-Path $sourceWithIgnoredScratch 'HANDOFF-LOCAL.md') -Value '# local scratch handoff' -Encoding UTF8
+    Set-Content -LiteralPath (Join-Path $sourceWithIgnoredScratch 'PR-BODY-LOCAL.md') -Value '# local pull request body' -Encoding UTF8
+
+    $filteredFixture = New-LegitimateFixture -Name 'filtered-ignored-source' -SourceRoot $sourceWithIgnoredScratch
+    Assert-True (-not (Test-Path -LiteralPath (Join-Path $filteredFixture 'HANDOFF-LOCAL.md'))) 'Ignored source handoffs must not leak into constructed fixtures.'
+    Assert-True (-not (Test-Path -LiteralPath (Join-Path $filteredFixture 'PR-BODY-LOCAL.md'))) 'Ignored source pull-request bodies must not leak into constructed fixtures.'
+    $filteredFixtureResult = Invoke-GuardInChild $filteredFixture
+    Assert-True ($filteredFixtureResult.ExitCode -eq 0) "A legitimate fixture constructed from a worktree with ignored scratch must pass: $($filteredFixtureResult.Output)"
 
     $ignoredScratch = New-LegitimateFixture 'ignored-local-scratch'
     Set-Content -LiteralPath (Join-Path $ignoredScratch '.gitignore') -Value 'HANDOFF-*.md' -Encoding UTF8
@@ -110,5 +153,5 @@ if ($failures.Count -gt 0) {
     Write-Host "Repository layout regression contract FAILED ($($failures.Count) failure(s))." -ForegroundColor Red
     exit 1
 }
-Write-Host 'Repository layout regression contract passed (actual tree, legitimate and ignored-local fixtures, and nine negative fixtures).' -ForegroundColor Green
+Write-Host 'Repository layout regression contract passed (actual tree, legitimate, ignored-source and ignored-local fixtures, and nine negative fixtures).' -ForegroundColor Green
 exit 0
