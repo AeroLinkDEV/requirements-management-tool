@@ -172,7 +172,7 @@ public static class ChangeRequestTraceProjection
             && byCr.ContainsKey(x.UpstreamChangeRequestId)).ToList();
         assessments = assessments.Where(x => byCr.TryGetValue(x.SourceChangeRequestId, out var source)
             && byCr.TryGetValue(x.ChildId, out var child)
-            && IsCurrentAssessmentEdge(x.ProjectId, x.ReleaseId, x.TargetLevel,
+            && IsCurrentAssessmentEdge(x.ProjectId, x.State, x.ReleaseId, x.TargetLevel,
                 Identity(source), Identity(child), policy)).ToList();
         var releases = await db.Releases.AsNoTracking().Where(x => x.ProjectId == projectId)
             .ToDictionaryAsync(x => x.Id, x => x.Version, ct);
@@ -503,7 +503,7 @@ public static class ChangeRequestTraceProjection
                 && assessmentById.TryGetValue(x.Id, out var assessment)
                 && sourceById.TryGetValue(assessment.SourceChangeRequestId, out var source)
                 && targetIdentityById.TryGetValue(x.ChildId, out var child)
-                && IsCurrentAssessmentEdge(assessment.ProjectId, assessment.ReleaseId, assessment.TargetLevel,
+                && IsCurrentAssessmentEdge(assessment.ProjectId, assessment.State, assessment.ReleaseId, assessment.TargetLevel,
                     source, child, policy));
             var authoredAnswer = rowLinks.Count > 0 || !string.IsNullOrWhiteSpace(row.NoUpstreamRationale)
                 || row.InheritedUpstreamContextJson is not null && row.UpstreamAnswerAffirmed;
@@ -529,7 +529,7 @@ public static class ChangeRequestTraceProjection
                         var targetsForAssessment = assessmentLinks.Where(x => x.Id == assessment.Id)
                             .Where(x => targetIdentityById.TryGetValue(x.ChildId, out var target)
                                 && sourceById.TryGetValue(assessment.SourceChangeRequestId, out var source)
-                                && IsCurrentAssessmentEdge(assessment.ProjectId, assessment.ReleaseId,
+                                && IsCurrentAssessmentEdge(assessment.ProjectId, assessment.State, assessment.ReleaseId,
                                     assessment.TargetLevel, source, target, policy))
                             .Select(x => targetById.GetValueOrDefault(x.ChildId)).Where(x => x is not null)
                             .Select(x => x!).ToList();
@@ -573,10 +573,12 @@ public static class ChangeRequestTraceProjection
     private static CrIdentity Identity(CrRow row) =>
         new(row.ProjectId, row.TargetReleaseId, row.Type, row.SoftwareLevel, row.State);
 
-    private static bool IsCurrentAssessmentEdge(Guid projectId, Guid assessmentReleaseId,
+    private static bool IsCurrentAssessmentEdge(Guid projectId, DownstreamAssessmentState assessmentState,
+        Guid assessmentReleaseId,
         RequirementLevel assessmentTargetLevel, CrIdentity source, CrIdentity child, ILadderPolicy policy)
     {
-        if (source.ProjectId != projectId || child.ProjectId != projectId)
+        if (assessmentState == DownstreamAssessmentState.Superseded
+            || source.ProjectId != projectId || child.ProjectId != projectId)
             return false;
         var sourceLevel = ChangeRequestLevel(source.Type, source.SoftwareLevel);
         var childLevel = ChangeRequestLevel(child.Type, child.SoftwareLevel);

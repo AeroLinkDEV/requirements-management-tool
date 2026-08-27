@@ -59,17 +59,20 @@ public sealed class ChangeRequestTraceProjectionTests
         await using var fixture = await Fixture.CreateAsync();
         var source = new SystemChangeRequest("SRCR-07865", 0, fixture.Project.Id, fixture.Release.Id,
             "Upstream", "P", "A", "S", "author", fixture.Now);
-        var child = new SystemChangeRequest("SRCR-07866", 0, fixture.Project.Id, fixture.Release.Id,
-            "Downstream", "P", "A", "S", "author", fixture.Now);
-        var assessment = new DownstreamChangeAssessment(fixture.Project.Id, fixture.Release.Id, child.Id,
-            child.DisplayNumber, RequirementLevel.HighLevel, fixture.Now);
+        var child = new SystemChangeRequest("HLRCR-07866", 0, fixture.Project.Id, fixture.Release.Id,
+            "Downstream", "P", "A", "S", "author", fixture.Now,
+            ChangeRequestType.Software, softwareLevel: RequirementLevel.HighLevel);
+        var assessment = new DownstreamChangeAssessment(fixture.Project.Id, fixture.Release.Id, source.Id,
+            source.DisplayNumber, RequirementLevel.HighLevel, fixture.Now);
         assessment.Assign("author", "author", fixture.Now);
         assessment.RecordChangeRequired("author", fixture.Now);
-        assessment.LinkChangeRequest("author", source.Id, source.DisplayNumber, fixture.Now);
+        assessment.LinkChangeRequest("author", child.Id, child.DisplayNumber, fixture.Now);
         fixture.Db.AddRange(source, child, assessment);
         await fixture.Db.SaveChangesAsync();
         await fixture.Db.Database.ExecuteSqlInterpolatedAsync(
             $"UPDATE downstream_change_assessments SET State = {DownstreamAssessmentState.Superseded.ToString()} WHERE Id = {assessment.Id}");
+        await fixture.Db.Database.ExecuteSqlInterpolatedAsync(
+            $"UPDATE system_change_requests SET State = {ChangeRequestState.Approved.ToString()} WHERE Id = {child.Id}");
         fixture.Db.ChangeTracker.Clear();
 
         var result = await ChangeRequestTraceProjection.ForChangeRequestAsync(
@@ -78,6 +81,9 @@ public sealed class ChangeRequestTraceProjectionTests
         Assert.NotNull(result);
         Assert.DoesNotContain(result!.Edges, x => x.Provenance.Any(p => p.Kind == "AssessmentDerived"));
         Assert.DoesNotContain(result.Nodes, x => x.Kind == "ChangeRequest" && x.Id == source.Id);
+        var state = (await ChangeRequestTraceProjection.StatesAsync(fixture.Db, fixture.Project.Id,
+            [child.Id], LegacyLadderPolicy.Instance, CancellationToken.None))[child.Id];
+        Assert.Equal("UpstreamGap", state.Upstream);
     }
 
     [Fact]
