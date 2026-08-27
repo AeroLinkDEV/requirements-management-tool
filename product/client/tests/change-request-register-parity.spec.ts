@@ -137,11 +137,12 @@ test('register row double-click opens, explicit open works, and modified click r
   await expect(row).toBeVisible({ timeout: 30_000 })
   const href = await row.getAttribute('href')
   expect(href).toMatch(/systems\/change-requests\/[0-9a-f-]{36}$/)
+  const expectedUrl = new URL(href!, page.url()).toString()
   const [opened] = await Promise.all([
-    page.waitForEvent('popup', { timeout: 30_000 }),
-    row.click({ modifiers: ['Control'] }),
+    page.context().waitForEvent('page', { timeout: 30_000 }),
+    row.click({ button: 'middle' }),
   ])
-  await expect(opened).toHaveURL(/systems\/change-requests\/[0-9a-f-]{36}$/)
+  await expect(opened).toHaveURL(expectedUrl)
   await opened.close()
   await expect(page).toHaveURL(/systems\/change-requests$/)
   await row.dblclick()
@@ -151,6 +152,30 @@ test('register row double-click opens, explicit open works, and modified click r
   await row.click()
   await page.getByRole('link', { name: 'Open change request →' }).click()
   await expect(page).toHaveURL(/systems\/change-requests\/[0-9a-f-]{36}$/)
+})
+
+test('register keeps rows readable and stacks the inspector at a supported 1280px width', async ({ page }, testInfo) => {
+  test.setTimeout(180_000)
+  await page.setViewportSize({ width: 1280, height: 900 })
+  await login(page)
+  await openFrom(page, 'systems/change-requests')
+  await expect(page.getByRole('heading', { name: 'System Change Requests', level: 1 })).toBeVisible({ timeout: 30_000 })
+  const row = page.locator('.historyRow.allocation').first()
+  await expect(row).toBeVisible({ timeout: 30_000 })
+  await row.click()
+  const layout = page.locator('.registerInspectorLayout')
+  const table = page.locator('.registerInspectorLayout > .historyTable')
+  const inspector = page.locator('.registerInspectorLayout > .requirementInspector')
+  await expect(inspector).toBeVisible()
+  const columns = await layout.evaluate(element => getComputedStyle(element).gridTemplateColumns.trim().split(/\s+/))
+  expect(columns).toHaveLength(1)
+  const rowBox = await row.boundingBox()
+  expect(rowBox?.width).toBeGreaterThan(800)
+  const tableBox = await table.boundingBox()
+  const inspectorBox = await inspector.boundingBox()
+  expect(inspectorBox?.y).toBeGreaterThanOrEqual((tableBox?.y ?? 0) + (tableBox?.height ?? 0) - 2)
+  await expect(row).toContainText('requirement changes')
+  await testInfo.attach('requirements-register-1280-stacked', { body: await page.screenshot({ fullPage: true }), contentType: 'image/png' })
 })
 
 test('the verification register is the same register over test change requests', async ({ page }, testInfo) => {

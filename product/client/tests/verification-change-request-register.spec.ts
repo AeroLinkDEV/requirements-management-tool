@@ -1,5 +1,10 @@
-import { expect, test } from '@playwright/test'
+import { expect, test, type Locator } from '@playwright/test'
 import { login } from './auth'
+
+const documentBox = async (locator: Locator) => locator.evaluate(element => {
+  const rect = element.getBoundingClientRect()
+  return { x: rect.left + window.scrollX, y: rect.top + window.scrollY, width: rect.width, height: rect.height }
+})
 
 /**
  * The verification Change Requests page lists the change requests it controls.
@@ -84,19 +89,20 @@ test('verification register selection is a stable URL state through refresh and 
   const register = page.locator('.historyTools')
   await expect(assessmentHeading).toBeVisible({ timeout: 30_000 })
   await expect(register).toBeVisible({ timeout: 30_000 })
-  const beforeAssessment = await assessmentHeading.boundingBox()
-  const beforeRegister = await register.boundingBox()
+  await expect(page.getByText('Loading assessments…', { exact: true })).toHaveCount(0, { timeout: 30_000 })
+  const beforeAssessment = await documentBox(assessmentHeading)
+  const beforeRegister = await documentBox(register)
   await row.click()
   await expect(page).toHaveURL(/system-verification\/change-requests\?[^#]*selection=[0-9a-f-]{36}/)
   await expect(page.getByRole('link', { name: 'Open change request →' })).toBeVisible()
-  const afterAssessment = await assessmentHeading.boundingBox()
-  const afterRegister = await register.boundingBox()
-  expect(afterAssessment?.x).toBe(beforeAssessment?.x)
-  expect(afterAssessment?.y).toBe(beforeAssessment?.y)
-  expect(afterAssessment?.width).toBe(beforeAssessment?.width)
-  expect(afterRegister?.x).toBe(beforeRegister?.x)
-  expect(afterRegister?.y).toBe(beforeRegister?.y)
-  expect(afterRegister?.width).toBe(beforeRegister?.width)
+  const afterAssessment = await documentBox(assessmentHeading)
+  const afterRegister = await documentBox(register)
+  expect(afterAssessment.x).toBe(beforeAssessment.x)
+  expect(afterAssessment.y).toBe(beforeAssessment.y)
+  expect(afterAssessment.width).toBe(beforeAssessment.width)
+  expect(afterRegister.x).toBe(beforeRegister.x)
+  expect(afterRegister.y).toBe(beforeRegister.y)
+  expect(afterRegister.width).toBe(beforeRegister.width)
   await page.reload()
   await expect(page.getByRole('link', { name: 'Open change request →' })).toBeVisible({ timeout: 30_000 })
   await page.goBack()
