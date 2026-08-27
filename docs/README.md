@@ -77,7 +77,8 @@ current-document set. Link checking URI-decodes local targets and ignores extern
 The historical files under `docs/archive/` are intentionally outside that maintained-content link sweep except for
 `docs/archive/README.md`; the archive index may link to individual historical records. Current `README.md` and
 `PROJECT_STATE.md` may link to the archive index but must not present an individual archived handoff or audit as
-current authority.
+current authority. In a Git worktree, explicitly ignored and untracked local scratch files are outside repository
+layout policy; a tracked file remains subject to the guard even when its name matches an ignore pattern.
 
 Do not add a new root narrative Markdown file by analogy with an existing compatibility shim. New root narrative is
 permitted only for an explicit current-authority or compatibility reason, with the guard allow-list and this taxonomy

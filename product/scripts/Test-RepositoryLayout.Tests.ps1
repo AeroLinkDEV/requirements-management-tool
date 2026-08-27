@@ -65,6 +65,24 @@ try {
     $fixtureResult = Invoke-GuardInChild $legitimate
     Assert-True ($fixtureResult.ExitCode -eq 0) "A legitimate fixture with a community file must pass: $($fixtureResult.Output)"
 
+    $ignoredScratch = New-LegitimateFixture 'ignored-local-scratch'
+    Set-Content -LiteralPath (Join-Path $ignoredScratch '.gitignore') -Value 'HANDOFF-*.md' -Encoding UTF8
+    Set-Content -LiteralPath (Join-Path $ignoredScratch 'HANDOFF-LOCAL.md') -Value '# local scratch handoff' -Encoding UTF8
+    & git -C $ignoredScratch init --quiet
+    Assert-True ($LASTEXITCODE -eq 0) 'The ignored local scratch fixture must initialize as a Git worktree.'
+    $ignoredScratchResult = Invoke-GuardInChild $ignoredScratch
+    Assert-True ($ignoredScratchResult.ExitCode -eq 0) "An explicitly Git-ignored local scratch file must not become repository-layout content: $($ignoredScratchResult.Output)"
+
+    $trackedIgnoredScratch = New-LegitimateFixture 'tracked-ignored-scratch'
+    Set-Content -LiteralPath (Join-Path $trackedIgnoredScratch '.gitignore') -Value 'HANDOFF-*.md' -Encoding UTF8
+    Set-Content -LiteralPath (Join-Path $trackedIgnoredScratch 'HANDOFF-LOCAL.md') -Value '# tracked handoff' -Encoding UTF8
+    & git -C $trackedIgnoredScratch init --quiet
+    & git -C $trackedIgnoredScratch add --force HANDOFF-LOCAL.md
+    Assert-True ($LASTEXITCODE -eq 0) 'The tracked ignored-name fixture must stage its prohibited file.'
+    $trackedIgnoredResult = Invoke-GuardInChild $trackedIgnoredScratch
+    Assert-True ($trackedIgnoredResult.ExitCode -ne 0) "A tracked file must remain subject to layout policy even when its name matches .gitignore: $($trackedIgnoredResult.Output)"
+    Assert-True ($trackedIgnoredResult.Output -match 'Historical narrative') "The tracked ignored-name fixture must explain its failure: $($trackedIgnoredResult.Output)"
+
     $cases = @(
         @{ Name = 'dated handoff'; Setup = { param($path) Set-Content -LiteralPath (Join-Path $path 'CURRENT_PRODUCT_HANDOFF_2026-08-27.md') -Value '# historical handoff' -Encoding UTF8 }; Pattern = 'Dated handoff|Historical narrative' },
         @{ Name = 'missing canonical file'; Setup = { param($path) Remove-Item -LiteralPath (Join-Path $path 'PROJECT_STATE.md') -Force }; Pattern = 'Required file is missing: PROJECT_STATE.md' },
@@ -92,5 +110,5 @@ if ($failures.Count -gt 0) {
     Write-Host "Repository layout regression contract FAILED ($($failures.Count) failure(s))." -ForegroundColor Red
     exit 1
 }
-Write-Host 'Repository layout regression contract passed (actual tree, legitimate fixture, and eight negative fixtures).' -ForegroundColor Green
+Write-Host 'Repository layout regression contract passed (actual tree, legitimate and ignored-local fixtures, and nine negative fixtures).' -ForegroundColor Green
 exit 0
