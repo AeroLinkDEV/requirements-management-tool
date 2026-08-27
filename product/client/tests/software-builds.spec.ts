@@ -16,7 +16,17 @@ test('Command Center renders the build-scoped software verification population',
 
   await login(page)
   const rows = page.locator('.verificationTriageRows article')
-  for (const [index, summary] of [dashboard.verification.system, dashboard.verification.hlr, dashboard.verification.llr].entries()) {
+  const verificationSummaries = [
+    ['System', dashboard.verification.system],
+    ['Software HLR', dashboard.verification.hlr],
+    ['Software LLR', dashboard.verification.llr],
+  ] as const
+  const expectedRows = verificationSummaries.filter(([, summary]) =>
+    Object.values(summary).some(value => value !== 0),
+  )
+  await expect(rows).toHaveCount(expectedRows.length)
+  expect(await rows.locator('b').allTextContents()).toEqual(expectedRows.map(([label]) => label))
+  for (const [index, [, summary]] of expectedRows.entries()) {
     await expect(rows.nth(index)).toContainText(`${summary.triagedChangeRequests} of ${summary.totalChangeRequests} change requests triaged`)
     await expect(rows.nth(index).locator('strong')).toHaveText(String(summary.openDecisions))
     await expect(rows.nth(index)).toContainText(`${summary.resolvedDecisions} resolved`)

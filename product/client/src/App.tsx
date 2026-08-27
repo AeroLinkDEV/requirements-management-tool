@@ -1100,7 +1100,17 @@ function App() {
       {summary.deferred>0&&<button className="dashboardDeferred" onClick={()=>openChanges(area,"Deferred")}><b>{summary.deferred}</b><span>Deferred changes remain visible in Build {release?.version}</span><em>Open →</em></button>}
     </section>;
   const verificationRow=(label:string,summary:VerificationMetrics)=>
-    <article><div><b>{label}</b><span>{summary.triagedChangeRequests} of {summary.totalChangeRequests} change requests triaged</span></div><strong>{summary.openDecisions}</strong><small>open decision{summary.openDecisions===1?"":"s"}</small><em>{summary.resolvedDecisions} resolved</em></article>;
+    <article key={label}><div><b>{label}</b><span>{summary.triagedChangeRequests} of {summary.totalChangeRequests} change requests triaged</span></div><strong>{summary.openDecisions}</strong><small>open decision{summary.openDecisions===1?"":"s"}</small><em>{summary.resolvedDecisions} resolved</em></article>;
+  const verificationRows = [
+    ["System", metrics.verification.system],
+    ["Software HLR", metrics.verification.hlr],
+    ["Software LLR", metrics.verification.llr],
+  ] as const;
+  const hasVerificationWork = (summary: VerificationMetrics) =>
+    summary.totalChangeRequests !== 0
+    || summary.triagedChangeRequests !== 0
+    || summary.openDecisions !== 0
+    || summary.resolvedDecisions !== 0;
   return (
     <div className="shell">
       {navigation}
@@ -1137,9 +1147,7 @@ function App() {
               <header><div><span>VERIFICATION</span><h2>Change triage</h2></div><i>V&amp;V</i></header>
               <p className="verificationIntro">Engineering impact decisions for change requests in Build {release?.version}. Verification design remains in the Verification workspace.</p>
               <div className="verificationTriageRows">
-                {verificationRow("System",metrics.verification.system)}
-                {verificationRow("Software HLR",metrics.verification.hlr)}
-                {verificationRow("Software LLR",metrics.verification.llr)}
+                {verificationRows.filter(([, summary]) => hasVerificationWork(summary)).map(([label, summary]) => verificationRow(label, summary))}
               </div>
               <button className="verificationOpen" onClick={()=>navigate("verification","systemTest")}>Open Verification →</button>
             </section>
