@@ -63,9 +63,7 @@ test('the project grid collapses cleanly without horizontal scrolling', async ({
     columns: new Set(
       [...document.querySelectorAll('[data-project-card]')]
         .filter(card => card.getClientRects().length > 0)
-        .map(card =>
-        Math.round(card.getBoundingClientRect().left),
-        ),
+        .map(card => Math.round(card.getBoundingClientRect().left)),
     ).size,
   }))
   expect(dimensions.documentWidth).toBe(dimensions.viewportWidth)
@@ -79,9 +77,7 @@ test('the project grid collapses cleanly without horizontal scrolling', async ({
     columns: new Set(
       [...document.querySelectorAll('[data-project-card]')]
         .filter(card => card.getClientRects().length > 0)
-        .map(card =>
-        Math.round(card.getBoundingClientRect().left),
-        ),
+        .map(card => Math.round(card.getBoundingClientRect().left)),
     ).size,
   }))
   expect(expandedDimensions.documentWidth).toBe(expandedDimensions.viewportWidth)
