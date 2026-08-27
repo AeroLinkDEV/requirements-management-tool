@@ -66,7 +66,7 @@ test("a successful comment stays visible after creation and across a reselect", 
 
   await openExplorer(page);
   await selectRequirement(page, "SYSR-000150");
-  await page.getByRole("button", { name: /Discussion/ }).click();
+  await page.getByRole("tab", { name: /Discussion/ }).click();
   await page
     .getByPlaceholder("Add an attributable comment. Use @username to mention someone.")
     .fill(commentText);
@@ -76,14 +76,14 @@ test("a successful comment stays visible after creation and across a reselect", 
   await expect(comment).toBeVisible({ timeout: 30_000 });
   // Controlled attribution stays server-authoritative and rendered.
   await expect(comment.locator("b")).toHaveText("admin");
-  await expect(page.getByRole("button", { name: /Discussion/ })).toContainText("1");
+  await expect(page.getByRole("tab", { name: /Discussion/ })).toContainText("1");
 
   // The surrounding workspace settles — including reopening the inspector, which refetches everything.
   await page.getByRole("button", { name: "Close requirement inspector" }).click();
   await selectRequirement(page, "SYSR-000150");
-  await page.getByRole("button", { name: /Discussion/ }).click();
+  await page.getByRole("tab", { name: /Discussion/ }).click();
   await expect(comment).toBeVisible({ timeout: 30_000 });
-  await expect(page.getByRole("button", { name: /Discussion/ })).toContainText("1");
+  await expect(page.getByRole("tab", { name: /Discussion/ })).toContainText("1");
 });
 
 test("an older in-flight comment read cannot overwrite a successful creation", async ({ page, request }) => {
@@ -105,7 +105,7 @@ test("an older in-flight comment read cannot overwrite a successful creation", a
   await expect(held).resolves.toContain(`/${autoSelected.id}/comments`);
   await selectRequirement(page, "SYSR-000150");
 
-  await page.getByRole("button", { name: /Discussion/ }).click();
+  await page.getByRole("tab", { name: /Discussion/ }).click();
   await page
     .getByPlaceholder("Add an attributable comment. Use @username to mention someone.")
     .fill(commentText);
@@ -161,12 +161,12 @@ test("a stale read for a previously selected requirement cannot leak onto the cu
   // While the first requirement's comment read is held, move to a different requirement entirely.
   await selectRequirement(page, "SYSR-000002");
   await page.waitForTimeout(500);
-  await page.getByRole("button", { name: /Discussion/ }).click();
-  await expect(page.getByRole("button", { name: /Discussion/ })).toContainText("0", { timeout: 30_000 });
+  await page.getByRole("tab", { name: /Discussion/ }).click();
+  await expect(page.getByRole("tab", { name: /Discussion/ })).toContainText("0", { timeout: 30_000 });
 
   // Release the first requirement's stale read and prove no cross-requirement leakage.
   releaseStaleRead();
   await page.waitForTimeout(300);
   await expect(page.getByText(commentOnA)).toHaveCount(0);
-  await expect(page.getByRole("button", { name: /Discussion/ })).toContainText("0");
+  await expect(page.getByRole("tab", { name: /Discussion/ })).toContainText("0");
 });
