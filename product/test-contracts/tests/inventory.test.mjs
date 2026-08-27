@@ -318,7 +318,7 @@ test('host classification CLI distinguishes known cases from unknown-case method
     ], { encoding: 'utf8' })
     assert.match(output, /classification\s+classes\s+methods\s+known cases\s+unknown-case methods\s+share of methods/)
      assert.match(output, /reusable-host\s+42\s+264\s+293\s+0\s+41\.9%/)
-     assert.match(output, /fresh-host\s+42\s+235\s+264\s+0\s+37\.4%/)
+     assert.match(output, /fresh-host\s+42\s+235\s+264\s+0\s+37\.3%/)
      assert.match(output, /Remaining reuse headroom:\s+42 classes, 264 methods, 293 known cases/)
   } finally {
     rmSync(temporaryDirectory, { recursive: true, force: true })
