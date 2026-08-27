@@ -1,15 +1,15 @@
 {
   "schemaVersion": "aerolink-api-test-intent/v2",
   "totals": {
-    "tests": 630,
-    "cases": 688,
-    "classes": 108,
-    "hostedTests": 611,
-    "hostedCases": 660,
+    "tests": 638,
+    "cases": 696,
+    "classes": 109,
+    "hostedTests": 618,
+    "hostedCases": 667,
     "nonHostedTests": 14,
     "nonHostedCases": 23,
-    "unknownHostTests": 5,
-    "unknownHostCases": 5,
+    "unknownHostTests": 6,
+    "unknownHostCases": 6,
     "hostedCandidateTests": 14,
     "hostedCandidateCases": 14,
     "unknownCandidateTests": 3,
@@ -21,10 +21,10 @@
     "http-boundary": {
       "label": "HTTP boundary: route, status, JSON shape",
       "level": "API (must stay hosted)",
-      "tests": 391,
-      "cases": 425,
+      "tests": 398,
+      "cases": 432,
       "unknownCases": 0,
-      "classes": 89
+      "classes": 90
     },
     "ef-translation": {
       "label": "EF translation / relational constraints",
@@ -53,10 +53,10 @@
     "filesystem": {
       "label": "Filesystem / evidence-root behaviour",
       "level": "API or Infrastructure (must stay hosted)",
-      "tests": 10,
-      "cases": 10,
+      "tests": 11,
+      "cases": 11,
       "unknownCases": 0,
-      "classes": 6
+      "classes": 7
     },
     "startup-config": {
       "label": "Startup, hosting and configuration",
@@ -5308,6 +5308,141 @@
       "sourceLines": {
         "start": 167,
         "end": 201
+      }
+    },
+    {
+      "cls": "ProblemReportHistoricalIdentityApiTests",
+      "test": "A_closure_invalidation_event_names_its_actor_even_without_a_session_supplied_name",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 226,
+        "end": 258
+      }
+    },
+    {
+      "cls": "ProblemReportHistoricalIdentityApiTests",
+      "test": "A_directory_rename_does_not_rewrite_what_a_past_event_says",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client"
+      ],
+      "sourceLines": {
+        "start": 62,
+        "end": 83
+      }
+    },
+    {
+      "cls": "ProblemReportHistoricalIdentityApiTests",
+      "test": "A_live_assignment_does_follow_the_directory",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client"
+      ],
+      "sourceLines": {
+        "start": 85,
+        "end": 107
+      }
+    },
+    {
+      "cls": "ProblemReportHistoricalIdentityApiTests",
+      "test": "A_non_seeded_account_is_named_in_the_audit_trail_and_keeps_its_handle",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client"
+      ],
+      "sourceLines": {
+        "start": 41,
+        "end": 60
+      }
+    },
+    {
+      "cls": "ProblemReportHistoricalIdentityApiTests",
+      "test": "A_page_of_the_register_names_its_people_in_one_lookup",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client"
+      ],
+      "sourceLines": {
+        "start": 173,
+        "end": 207
+      }
+    },
+    {
+      "cls": "ProblemReportHistoricalIdentityApiTests",
+      "test": "An_event_recorded_before_names_were_captured_still_reads_as_its_handle",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 109,
+        "end": 137
+      }
+    },
+    {
+      "cls": "ProblemReportHistoricalIdentityApiTests",
+      "test": "Naming_the_actors_does_not_scale_with_the_length_of_the_history",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client"
+      ],
+      "sourceLines": {
+        "start": 139,
+        "end": 171
+      }
+    },
+    {
+      "cls": "ProblemReportHistoricalIdentityApiTests",
+      "test": "Non_seeded_accounts_are_not_in_the_demo_registry",
+      "kind": "Fact",
+      "intent": "filesystem",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "unknown",
+      "hostEvidence": [],
+      "sourceLines": {
+        "start": 260,
+        "end": 272
       }
     },
     {

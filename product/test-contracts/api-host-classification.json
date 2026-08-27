@@ -1,9 +1,9 @@
 {
   "schemaVersion": "aerolink-api-host-classification/v3",
   "totals": {
-    "classes": 108,
-    "tests": 630,
-    "knownCases": 688,
+    "classes": 109,
+    "tests": 638,
+    "knownCases": 696,
     "unknownCaseTests": 0
   },
   "summary": {
@@ -14,9 +14,9 @@
       "unknownCaseTests": 0
     },
     "fresh-host": {
-      "classes": 42,
-      "tests": 235,
-      "knownCases": 264,
+      "classes": 43,
+      "tests": 243,
+      "knownCases": 272,
       "unknownCaseTests": 0
     },
     "migration-candidate": {
@@ -404,6 +404,18 @@
       "intents": [
         "auth-policy",
         "ef-translation",
+        "http-boundary"
+      ]
+    },
+    {
+      "cls": "ProblemReportHistoricalIdentityApiTests",
+      "tests": 8,
+      "knownCases": 8,
+      "unknownCaseTests": 0,
+      "classification": "fresh-host",
+      "reason": "Customizes host state (interceptor-or-fault-injection); sharing could change the subject or leak configuration.",
+      "intents": [
+        "filesystem",
         "http-boundary"
       ]
     },
