@@ -6,10 +6,14 @@ For current product truth, use [`../../PROJECT_STATE.md`](../../PROJECT_STATE.md
 
 The original archive set was moved from repository root by issue #781 after the canonical front door was established by #780 / PR #784. Issue #782 added several further records whose remaining value is historical rather than durable product definition. Historical contents are intentionally preserved. Keeping the archive flat avoids gratuitous folder depth and preserves links among historical records that already referred to one another by filename.
 
-Three small compatibility-pointer files **inside `docs/archive/`** — `PROJECT_STATE.md`,
-`DECISIONS_AND_OPEN_QUESTIONS.md`, and `FEATURE_CATALOG.md` — are **not archived snapshots**. They preserve
-historical archive-local links and redirect explicitly to the maintained authority. They are distinct from the nine
-root relocation shims, which preserve established root-relative links while their canonical content lives elsewhere.
+Four small compatibility-pointer files **inside `docs/archive/`** —
+[`PROJECT_STATE.md`](PROJECT_STATE.md),
+[`DECISIONS_AND_OPEN_QUESTIONS.md`](DECISIONS_AND_OPEN_QUESTIONS.md),
+[`FEATURE_CATALOG.md`](FEATURE_CATALOG.md), and
+[`AEROLINK_3_ENTERPRISE_LIFECYCLE_COMPLETION.md`](AEROLINK_3_ENTERPRISE_LIFECYCLE_COMPLETION.md) — are **not archived snapshots**.
+They preserve historical archive-local links and redirect explicitly to the maintained authority. They are distinct
+from the nine root relocation shims, which preserve established root-relative links while their canonical content
+lives elsewhere.
 
 One tiny root compatibility redirect remains at `CURRENT_PRODUCT_HANDOFF_2026-07-29.md`. The authoritative append-only decision log contains a historical filename-relative link to that checkpoint; the redirect preserves that accepted-decision reference without copying the handoff back to root or rewriting the decision record. It is explicitly non-authoritative and points here. This is the only deliberate dated root compatibility exception established by #781.
 
