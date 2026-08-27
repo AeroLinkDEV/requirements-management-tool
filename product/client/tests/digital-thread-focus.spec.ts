@@ -29,7 +29,7 @@ test("opening the Digital Thread from a requirement focuses that requirement and
   await expect(row).toBeVisible();
   await row.click();
 
-  await page.getByRole("button", { name: /Trace/ }).click();
+  await page.getByRole("tab", { name: /Trace/ }).click();
   await page.getByRole("button", { name: /Open complete Digital Thread/ }).click();
 
   const focused = page.locator(".digitalThreadStage header b").first();

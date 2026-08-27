@@ -146,7 +146,7 @@ test('Build 1.6 keeps editing capability, scopes search, and labels predecessor 
   await openNavigationGroup(page, 'SYSTEMS ENGINEERING')
   await page.getByRole('link', { name: 'System Requirements Explorer' }).click()
   await expect(page.getByRole('heading', { name: 'System Requirements Explorer' })).toBeVisible()
-  await page.getByRole('button', { name: /History/ }).click()
+  await page.getByRole('tab', { name: /History/ }).click()
   await expect(page.getByText('Historical version — Build 1.5').first()).toBeVisible()
   await expect(page.getByLabel('Active build 1.6')).toBeVisible()
 
