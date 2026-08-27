@@ -74,7 +74,8 @@ test('Software Draft keeps downstream impact with consuming engineers before an 
   await page.getByRole('button',{name:'Save HLRCR Draft'}).click()
 
   await expect(page.getByRole('heading',{name:'Control software authoring readiness'})).toBeVisible()
-  await expect(page.getByRole('button',{name:'Configure & Submit Review'})).toBeVisible()
+  await expect(page.getByRole('button',{name:'Configure & Submit Review'})).toHaveCount(0)
+  await expect(page.getByText('Draft needs authoring')).toBeVisible()
   await page.getByRole('button',{name:'Check out & edit'}).click()
   await expect(page.getByRole('button',{name:'Modify existing HLR'})).toBeVisible()
   await expect(page.getByRole('button',{name:'Retire existing HLR'})).toBeVisible()
@@ -83,6 +84,7 @@ test('Software Draft keeps downstream impact with consuming engineers before an 
   await expect(page.getByRole('textbox',{name:'Author',exact:true})).toHaveValue('software.author')
   await expect(page.getByText('Known downstream context',{exact:true})).toBeVisible()
   await expect(page.locator('.editorColumns aside select')).toHaveCount(0)
+  await page.getByLabel('No upstream change-request rationale').fill('This derived software change has no direct upstream change request in the controlled authoring journey.')
   await page.getByLabel('Title').fill('Control software authoring readiness updated')
   const checkIn=page.getByRole('button',{name:'Save & check in'})
   await expect(checkIn).toBeEnabled({timeout:30_000})

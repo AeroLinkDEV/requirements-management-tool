@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test'
-import { apiBase, apiLogin, firstSectionId, login } from './auth'
+import { apiBase, apiLogin, authorNoUpstreamAnswer, firstSectionId, login } from './auth'
 
 /**
  * #726 UI acceptance: a new project defaults to the Case + Procedure tier, an exact allocated software
@@ -67,8 +67,9 @@ test('Case to allocated Procedure execution chain drives release readiness', asy
   })
   expect(draftResponse.ok(), await draftResponse.text()).toBeTruthy()
   const scr = await draftResponse.json()
+  const scrReady = await authorNoUpstreamAnswer(request, scr.id, 'This derived HLR has no direct upstream change request in the isolated #726 project.')
   const scrSubmit = await request.post(`${apiBase}/api/change-requests/${scr.id}/submit`, {
-    data: { approvers: [{ userId: 'admin', name: 'Ignored' }] },
+    data: { expectedVersion: scrReady.version, approvers: [{ userId: 'admin', name: 'Ignored' }] },
   })
   expect(scrSubmit.ok(), await scrSubmit.text()).toBeTruthy()
   const scrApprove = await request.post(`${apiBase}/api/change-requests/${scr.id}/approve`, {

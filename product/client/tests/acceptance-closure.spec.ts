@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test'
-import { apiBase, apiLogin, firstSectionId } from './auth'
+import { apiBase, apiLogin, authorNoUpstreamAnswer, firstSectionId } from './auth'
 
 const completeImpacts=JSON.stringify({trace:'Not Affected',verification:'Not Affected',documents:'Not Affected',baseline:'Not Affected',collaboration:'Not Affected'})
 
@@ -48,7 +48,8 @@ test('acceptance closure proves governed revisioning, direct review work, public
 
  const reviewDraftResponse=await request.post(`${apiBase}/api/change-request-drafts`,{data:{projectId:project.id,targetReleaseId:active.id,type:'Software',title:'Sequential activation acceptance',problem:'Ordered authority must be proven',analysis:'Only the current reviewer may act',solution:'Exercise two controlled stages',requirementChanges:[{level:'HighLevel',kind:'Introduce',targetSectionId:hlrSection,statement:'The software shall activate one sequential reviewer at a time.',rationale:'Architecture-derived control prevents out-of-order approval.',verificationMethod:'Test',impactDispositionJson:completeImpacts,isDerived:true}]}})
  const reviewDraft=await reviewDraftResponse.json()
- const sequentialResponse=await request.post(`${apiBase}/api/change-requests/${reviewDraft.id}/submit`,{data:{expectedVersion:reviewDraft.version,mode:'Sequential',approvers:[{userId:'systems.reviewer',name:'Systems Engineer'},{userId:'assurance.reviewer',name:'Development Assurance Reviewer'}]}})
+ const reviewDraftReady=await authorNoUpstreamAnswer(request,reviewDraft.id,'This derived software change has no direct upstream change request in the acceptance fixture.')
+ const sequentialResponse=await request.post(`${apiBase}/api/change-requests/${reviewDraft.id}/submit`,{data:{expectedVersion:reviewDraftReady.version,mode:'Sequential',approvers:[{userId:'systems.reviewer',name:'Systems Engineer'},{userId:'assurance.reviewer',name:'Development Assurance Reviewer'}]}})
  expect(sequentialResponse.ok(),await sequentialResponse.text()).toBeTruthy()
  const sequential=await sequentialResponse.json()
  expect(sequential.reviewCycles.at(-1).steps.map((x:any)=>x.state)).toEqual(['Active','Pending'])
@@ -71,7 +72,8 @@ test('acceptance closure proves governed revisioning, direct review work, public
  expect(returnedDraft.revision).toBe(reviewDraft.revision)
 
  const parallelDraft=await (await request.post(`${apiBase}/api/change-request-drafts`,{data:{projectId:project.id,targetReleaseId:active.id,type:'Software',title:'Parallel unanimity acceptance',problem:'Independent reviews must run concurrently',analysis:'Both signatures remain mandatory',solution:'Activate all parallel reviewers',requirementChanges:[{level:'LowLevel',kind:'Introduce',targetSectionId:llrSection,statement:'The component shall require unanimous parallel review.',rationale:'Architecture-derived independent assurance.',verificationMethod:'Inspection',impactDispositionJson:completeImpacts,isDerived:true}]}})).json()
- const parallelResponse=await request.post(`${apiBase}/api/change-requests/${parallelDraft.id}/submit`,{data:{expectedVersion:parallelDraft.version,mode:'Parallel',approvers:[{userId:'systems.reviewer',name:'Systems Engineer'},{userId:'assurance.reviewer',name:'Development Assurance Reviewer'}]}})
+ const parallelDraftReady=await authorNoUpstreamAnswer(request,parallelDraft.id,'This derived software change has no direct upstream change request in the acceptance fixture.')
+ const parallelResponse=await request.post(`${apiBase}/api/change-requests/${parallelDraft.id}/submit`,{data:{expectedVersion:parallelDraftReady.version,mode:'Parallel',approvers:[{userId:'systems.reviewer',name:'Systems Engineer'},{userId:'assurance.reviewer',name:'Development Assurance Reviewer'}]}})
  expect(parallelResponse.ok(),await parallelResponse.text()).toBeTruthy()
  expect((await parallelResponse.json()).reviewCycles.at(-1).steps.map((x:any)=>x.state)).toEqual(['Active','Active'])
  const [parallelQueue1,parallelQueue2]=await Promise.all([r1.get(`${apiBase}/api/enterprise-requirements/work-queue?projectId=${project.id}`).then(x=>x.json()),r2.get(`${apiBase}/api/enterprise-requirements/work-queue?projectId=${project.id}`).then(x=>x.json())])
@@ -97,7 +99,8 @@ test('acceptance closure proves governed revisioning, direct review work, public
  expect(draft.authorId).toBe('admin')
  expect(draft.requirementChanges[0].displayNumber).toMatch(/^HLR-\d{6}\.00$/)
 
- const submitted=await request.post(`${apiBase}/api/change-requests/${draft.id}/submit`,{data:{expectedVersion:draft.version,mode:'Sequential',approvers:[{userId:'systems.reviewer',name:'Systems Engineer'}]}})
+ const draftReady=await authorNoUpstreamAnswer(request,draft.id,'This derived software change has no direct upstream change request in the acceptance fixture.')
+ const submitted=await request.post(`${apiBase}/api/change-requests/${draft.id}/submit`,{data:{expectedVersion:draftReady.version,mode:'Sequential',approvers:[{userId:'systems.reviewer',name:'Systems Engineer'}]}})
  expect(submitted.ok(),await submitted.text()).toBeTruthy()
  const inReview=await submitted.json()
  expect(inReview.state).toBe('InReview')

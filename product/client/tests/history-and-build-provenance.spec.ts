@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test'
-import { apiBase, apiLogin, firstSectionId, login, openNavigationGroup, selectProgram } from './auth'
+import { apiBase, apiLogin, authorNoUpstreamAnswer, firstSectionId, login, openNavigationGroup, selectProgram } from './auth'
 
 const completeImpacts=JSON.stringify({trace:'Not Affected',verification:'Not Affected',documents:'Not Affected',baseline:'Not Affected',collaboration:'Not Affected'})
 
@@ -13,12 +13,20 @@ test('searches scoped change history while dormant build management stays unreac
     projectId: workspace.project.id, targetReleaseId: workspace.release.id, type: 'Software', title: 'Introduce round robin routing', problem: 'Routing is unavailable', analysis: 'A new function is required', solution: 'Implement round robin routing',
     requirementChanges: [{ level: 'HighLevel', kind: 'Introduce', targetSectionId: await firstSectionId(request, workspace.project.id, 'HighLevel'), statement: 'The software shall provide round robin routing.', rationale: 'The new function is derived from the software architecture for this isolated lifecycle fixture.', verificationMethod: 'Test', impactDispositionJson:completeImpacts, isDerived:true }],
   } }); expect(scrResponse.ok()).toBeTruthy(); const scr = await scrResponse.json()
-  await request.post(`${apiBase}/api/change-requests/${scr.id}/submit`, { data: { approvers: [{ userId: 'admin', name: 'AeroLink Administrator' }] } })
-  await request.post(`${apiBase}/api/change-requests/${scr.id}/approve`, { data: { password: 'AeroLink!2026', meaning: 'Approved for test baseline assembly.' } })
-  const baseline = await (await request.post(`${apiBase}/api/baselines`, { data: { baseNumber: 'SW-03.30', revision: 0, projectId: workspace.project.id, releaseId: workspace.release.id, name: 'FMS 3.3 exact manifest', actorId: 'cm' } })).json()
-  await request.post(`${apiBase}/api/baselines/${baseline.id}/selections`, { data: { changeRequestId: scr.id, actorId: 'cm' } })
-  await request.post(`${apiBase}/api/baselines/${baseline.id}/freeze`, { data: { actorId: 'cm' } })
-  await request.post(`${apiBase}/api/baselines/${baseline.id}/materialize-requirements`, { data: { actorId: 'cm' } })
+  const scrReady = await authorNoUpstreamAnswer(request, scr.id, 'This derived software change has no direct upstream change request in the history fixture.')
+  const submit = await request.post(`${apiBase}/api/change-requests/${scr.id}/submit`, { data: { expectedVersion: scrReady.version, approvers: [{ userId: 'admin', name: 'AeroLink Administrator' }] } })
+  expect(submit.ok(), await submit.text()).toBeTruthy()
+  const approve = await request.post(`${apiBase}/api/change-requests/${scr.id}/approve`, { data: { password: 'AeroLink!2026', meaning: 'Approved for test baseline assembly.' } })
+  expect(approve.ok(), await approve.text()).toBeTruthy()
+  const baselineResponse = await request.post(`${apiBase}/api/baselines`, { data: { baseNumber: 'SW-03.30', revision: 0, projectId: workspace.project.id, releaseId: workspace.release.id, name: 'FMS 3.3 exact manifest', actorId: 'cm' } })
+  expect(baselineResponse.ok(), await baselineResponse.text()).toBeTruthy()
+  const baseline = await baselineResponse.json()
+  const selection = await request.post(`${apiBase}/api/baselines/${baseline.id}/selections`, { data: { changeRequestId: scr.id, actorId: 'cm' } })
+  expect(selection.ok(), await selection.text()).toBeTruthy()
+  const freeze = await request.post(`${apiBase}/api/baselines/${baseline.id}/freeze`, { data: { actorId: 'cm' } })
+  expect(freeze.ok(), await freeze.text()).toBeTruthy()
+  const materialize = await request.post(`${apiBase}/api/baselines/${baseline.id}/materialize-requirements`, { data: { actorId: 'cm' } })
+  expect(materialize.ok(), await materialize.text()).toBeTruthy()
   const historyResponse = await request.get(`${apiBase}/api/history/change-requests?projectId=${workspace.project.id}&page=1&pageSize=50`)
   const historyBody = await historyResponse.text(); expect(historyResponse.status(), historyBody).toBe(200); expect(JSON.parse(historyBody).totalCount).toBe(1)
 

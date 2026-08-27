@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test'
-import { apiBase, apiLogin, firstSectionId, login, openNewSoftwareChangeRequest, showcaseSeed } from './auth'
+import { apiBase, apiLogin, authorNoUpstreamAnswer, firstSectionId, login, openNewSoftwareChangeRequest, showcaseSeed } from './auth'
 
 const completeImpacts = JSON.stringify({ trace: 'Not Affected', verification: 'Not Affected', documents: 'Not Affected', baseline: 'Not Affected', collaboration: 'Not Affected' })
 
@@ -40,7 +40,8 @@ test('software proposals govern exact build-scoped upward allocations and derive
   const missingResponse = await draft(`Missing upward allocation ${Date.now()}`, [proposal()])
   expect(missingResponse.status(), await missingResponse.text()).toBe(201)
   const missing = await missingResponse.json()
-  const missingSubmit = await submit(missing.id, missing.version)
+  const missingReady = await authorNoUpstreamAnswer(request, missing.id, 'This software proposal has no direct upstream change request; its missing requirement allocation is intentional for this validation.')
+  const missingSubmit = await submit(missing.id, missingReady.version)
   expect(missingSubmit.status()).toBe(400)
   expect(await missingSubmit.text()).toContain('at least one current upstream requirement')
 
@@ -54,13 +55,15 @@ test('software proposals govern exact build-scoped upward allocations and derive
   expect(singleResponse.status(), await singleResponse.text()).toBe(201)
   const single = await singleResponse.json()
   expect(single.requirementChanges[0].upstreamRevisionIds).toEqual([systems[0].revisionId])
-  expect((await submit(single.id, single.version)).ok()).toBeTruthy()
+  const singleReady = await authorNoUpstreamAnswer(request, single.id, 'This software proposal is allocated to a System requirement, not to an upstream change request.')
+  expect((await submit(single.id, singleReady.version)).ok()).toBeTruthy()
 
   const manyResponse = await draft(`Many-parent upward allocation ${Date.now()}`, [proposal({ upstreamRevisionIds: [systems[0].revisionId, systems[1].revisionId] })])
   expect(manyResponse.status(), await manyResponse.text()).toBe(201)
   const many = await manyResponse.json()
   expect(many.requirementChanges[0].upstreamRevisionIds).toHaveLength(2)
-  expect((await submit(many.id, many.version)).ok()).toBeTruthy()
+  const manyReady = await authorNoUpstreamAnswer(request, many.id, 'This software proposal is allocated to System requirements, not to an upstream change request.')
+  expect((await submit(many.id, manyReady.version)).ok()).toBeTruthy()
 
   const derivedResponse = await draft(`Derived exception ${Date.now()}`, [proposal({
     isDerived: true, upstreamRevisionIds: [],
@@ -68,7 +71,8 @@ test('software proposals govern exact build-scoped upward allocations and derive
   })])
   expect(derivedResponse.status(), await derivedResponse.text()).toBe(201)
   const derived = await derivedResponse.json()
-  expect((await submit(derived.id, derived.version)).ok()).toBeTruthy()
+  const derivedReady = await authorNoUpstreamAnswer(request, derived.id, 'This derived software exception has no direct upstream change request.')
+  expect((await submit(derived.id, derivedReady.version)).ok()).toBeTruthy()
 })
 
 test('an engineer can search, select, and explicitly replace an upward allocation with a derived exception', async ({ page }) => {
