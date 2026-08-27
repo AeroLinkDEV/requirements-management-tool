@@ -21,6 +21,7 @@ test("requirements stay read-only while controlled proposals and imports move in
   });
   await expect(loadingState).toBeHidden();
   await expect(page.getByText("150 requirements")).toBeVisible();
+  await expect(page.locator(".confidence")).toContainText("Live counts · respects your access");
 
   await page.getByLabel("Search requirements").fill("SYSR-000150");
   await expect(page.getByText(/SYSR-000150\.\d{2}/)).toBeVisible();

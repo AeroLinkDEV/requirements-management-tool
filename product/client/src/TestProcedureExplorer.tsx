@@ -869,7 +869,7 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
             </span>
           </div>
           <div className="confidence">
-            <i /> Permission-aware · Live index
+            <i /> Live counts · respects your access
           </div>
         </div>
         {procedures.length === 0

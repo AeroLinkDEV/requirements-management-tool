@@ -345,7 +345,7 @@ test('the result summary says how many Cases answer and where in them you are', 
   await expect(summary).toContainText('cases')
   // Where you are in the results, which the count in the search box could never say.
   await expect(summary).toContainText(/Page \d+ of \d+ · exact current revisions/)
-  await expect(summary).toContainText('Permission-aware · Live index')
+  await expect(summary).toContainText('Live counts · respects your access')
 })
 
 test('the filters read as one row rather than a stack of captioned fields', async ({ page }) => {
