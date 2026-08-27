@@ -1,13 +1,13 @@
 {
   "schemaVersion": "aerolink-api-test-intent/v2",
   "totals": {
-    "tests": 612,
-    "cases": 670,
-    "classes": 105,
+    "tests": 618,
+    "cases": 676,
+    "classes": 106,
     "hostedTests": 599,
     "hostedCases": 648,
-    "nonHostedTests": 8,
-    "nonHostedCases": 17,
+    "nonHostedTests": 14,
+    "nonHostedCases": 23,
     "unknownHostTests": 5,
     "unknownHostCases": 5,
     "hostedCandidateTests": 14,
@@ -29,10 +29,10 @@
     "ef-translation": {
       "label": "EF translation / relational constraints",
       "level": "Infrastructure (needs a database, not a host)",
-      "tests": 130,
-      "cases": 141,
+      "tests": 131,
+      "cases": 142,
       "unknownCases": 0,
-      "classes": 49
+      "classes": 50
     },
     "auth-policy": {
       "label": "Authentication / authorization wiring",
@@ -45,10 +45,10 @@
     "in-process-logic": {
       "label": "In-process logic with no HTTP and no client",
       "level": "Domain or Infrastructure (migration candidate)",
-      "tests": 17,
-      "cases": 17,
+      "tests": 22,
+      "cases": 22,
       "unknownCases": 0,
-      "classes": 8
+      "classes": 9
     },
     "filesystem": {
       "label": "Filesystem / evidence-root behaviour",
@@ -3778,6 +3778,90 @@
       "sourceLines": {
         "start": 16,
         "end": 110
+      }
+    },
+    {
+      "cls": "ManagedDocumentReviewAuthorityCharacterizationTests",
+      "test": "A_delegation_of_an_accepted_role_is_honored_within_its_interval",
+      "kind": "Fact",
+      "intent": "in-process-logic",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "not-hosted",
+      "hostEvidence": [],
+      "sourceLines": {
+        "start": 125,
+        "end": 140
+      }
+    },
+    {
+      "cls": "ManagedDocumentReviewAuthorityCharacterizationTests",
+      "test": "A_program_administrator_membership_substitutes_when_no_accepted_role_matches",
+      "kind": "Fact",
+      "intent": "in-process-logic",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "not-hosted",
+      "hostEvidence": [],
+      "sourceLines": {
+        "start": 113,
+        "end": 123
+      }
+    },
+    {
+      "cls": "ManagedDocumentReviewAuthorityCharacterizationTests",
+      "test": "A_standing_backup_requires_a_current_membership_and_an_active_designation",
+      "kind": "Fact",
+      "intent": "ef-translation",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "not-hosted",
+      "hostEvidence": [],
+      "sourceLines": {
+        "start": 150,
+        "end": 187
+      }
+    },
+    {
+      "cls": "ManagedDocumentReviewAuthorityCharacterizationTests",
+      "test": "The_final_set_excludes_the_engineering_leadership_roles",
+      "kind": "Fact",
+      "intent": "in-process-logic",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "not-hosted",
+      "hostEvidence": [],
+      "sourceLines": {
+        "start": 89,
+        "end": 111
+      }
+    },
+    {
+      "cls": "ManagedDocumentReviewAuthorityCharacterizationTests",
+      "test": "The_technical_set_accepts_the_engineering_leadership_and_control_roles",
+      "kind": "Fact",
+      "intent": "in-process-logic",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "not-hosted",
+      "hostEvidence": [],
+      "sourceLines": {
+        "start": 51,
+        "end": 66
+      }
+    },
+    {
+      "cls": "ManagedDocumentReviewAuthorityCharacterizationTests",
+      "test": "The_technical_set_rejects_non_review_authorities",
+      "kind": "Fact",
+      "intent": "in-process-logic",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "not-hosted",
+      "hostEvidence": [],
+      "sourceLines": {
+        "start": 68,
+        "end": 82
       }
     },
     {

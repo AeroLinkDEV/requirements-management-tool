@@ -7,6 +7,12 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <!-- Characterization tests pin the authority-resolution seams this assembly owns (#816 Slice 1).
+         Test-only visibility; no runtime surface change. -->
+    <InternalsVisibleTo Include="AeroLink.Api.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\AeroLink.ConnectorProtocol\AeroLink.ConnectorProtocol.csproj" />
     <ProjectReference Include="..\AeroLink.Domain\AeroLink.Domain.csproj" />
     <ProjectReference Include="..\AeroLink.Infrastructure\AeroLink.Infrastructure.csproj" />
