@@ -129,7 +129,7 @@ export default function TestChangeRequestRegisterPage({
     query={query} onQueryChange={value => { setQuery(value); setPage(1) }}
     stateIntent={stateIntent} onStateIntentChange={value => { setStateIntent(value); setPage(1) }}
     stateOptions={stateOptions}
-    onOpen={onOpen} onSelect={onSelect} selectedId={selectedId} registerHref={registerHref} inspector={{api,kind:'TestChangeRequest',releaseVersion:activeRelease?.version}} onLoadRevisions={loadRevisions} />
+    onOpen={onOpen} onSelect={onSelect} selectedId={selectedId} registerHref={registerHref} inspector={{api,kind:'TestChangeRequest'}} onLoadRevisions={loadRevisions} />
 
   if (embedded) return register
 

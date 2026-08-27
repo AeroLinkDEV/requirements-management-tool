@@ -68,6 +68,87 @@ test('the requirements register keeps its shape on the shared component', async 
   await testInfo.attach('requirements-register-normal', { body: await page.screenshot(), contentType: 'image/png' })
 })
 
+test('requirements register preserves deep-link history, native links, and authoritative trace facts', async ({ page }) => {
+  test.setTimeout(180_000)
+  await page.setViewportSize({ width: 1600, height: 900 })
+  await login(page)
+  await openFrom(page, 'systems/change-requests')
+  await expect(page.getByRole('heading', { name: 'System Change Requests', level: 1 })).toBeVisible({ timeout: 30_000 })
+  const row = page.locator('.historyRow.allocation').first()
+  await expect(row).toBeVisible({ timeout: 30_000 })
+  const rootId = await row.getAttribute('data-register-id')
+  expect(rootId).toMatch(/^[0-9a-f-]{36}$/)
+  await page.route('**/api/change-requests/*/trace', async route => {
+    const parentId = '11111111-1111-4111-8111-111111111111'
+    const tcrId = '22222222-2222-4222-8222-222222222222'
+    await route.fulfill({ json: {
+      projectId: '33333333-3333-4333-8333-333333333333', rootChangeRequestId: rootId,
+      rootArtifactId: rootId, rootArtifactKind: 'ChangeRequest',
+      nodes: [
+        { id: rootId, kind: 'ChangeRequest', displayNumber: 'SRCR-ROOT.03', title: 'Selected root', state: 'Draft', revision: 3 },
+        { id: parentId, kind: 'ChangeRequest', displayNumber: 'SRCR-PARENT.01', title: 'Author-stated parent', state: 'Approved', revision: 1 },
+        { id: tcrId, kind: 'TestChangeRequest', displayNumber: 'SYSTPCR-ROOT.00', title: 'Assessment-derived verification impact', state: 'Draft', revision: 0 },
+      ],
+      edges: [
+        { fromId: rootId, fromKind: 'ChangeRequest', toId: parentId, toKind: 'ChangeRequest', relation: 'Upstream', provenance: [{ kind: 'AuthorStated', sourceId: parentId, rationale: 'Controlled parent rationale.' }] },
+        { fromId: rootId, fromKind: 'ChangeRequest', toId: tcrId, toKind: 'TestChangeRequest', relation: 'CoveredByTestChangeRequest', provenance: [{ kind: 'AssessmentDerived', sourceId: tcrId, status: 'Change required.' }] },
+      ],
+      state: { upstream: 'Answered', downstream: 'ChangeRequired', overall: 'ActionRequired', isTopOfLadder: false, warnings: ['Complete the downstream review before approval.'] },
+    } })
+  })
+  const assessment = page.getByRole('heading', { name: 'Downstream Assessments' })
+  const register = page.locator('.historyTools')
+  const beforeAssessment = await assessment.boundingBox()
+  const beforeRegister = await register.boundingBox()
+  await row.click()
+  await expect(page).toHaveURL(/systems\/change-requests\?[^#]*selection=[0-9a-f-]{36}/)
+  await expect(page.getByRole('link', { name: 'Open change request →' })).toBeVisible()
+  await page.getByRole('tab', { name: 'Trace & impact' }).click()
+  const inspector = page.getByRole('complementary', { name: /detail$/ })
+  await expect(inspector).toContainText('Answered')
+  await expect(inspector).toContainText('AssessmentDerived')
+  await expect(inspector).toContainText('AuthorStated')
+  await expect(inspector).toContainText('Complete the downstream review before approval.')
+  await expect(inspector).toContainText(/exact revision \d+/)
+  const afterAssessment = await assessment.boundingBox()
+  const afterRegister = await register.boundingBox()
+  expect(afterAssessment?.x).toBe(beforeAssessment?.x)
+  expect(afterAssessment?.y).toBe(beforeAssessment?.y)
+  expect(afterAssessment?.width).toBe(beforeAssessment?.width)
+  expect(afterRegister?.x).toBe(beforeRegister?.x)
+  expect(afterRegister?.y).toBe(beforeRegister?.y)
+  expect(afterRegister?.width).toBe(beforeRegister?.width)
+  await page.reload()
+  await expect(page.getByRole('tab', { name: 'Trace & impact' })).toBeVisible({ timeout: 30_000 })
+  await page.goBack()
+  await expect(page.getByText('Select a change request')).toBeVisible()
+  await page.goForward()
+  await expect(page.getByRole('link', { name: 'Open change request →' })).toBeVisible()
+})
+
+test('register row double-click opens, explicit open works, and modified click retains native href', async ({ page }) => {
+  test.setTimeout(180_000)
+  await login(page)
+  await openFrom(page, 'systems/change-requests')
+  await expect(page.getByRole('heading', { name: 'System Change Requests', level: 1 })).toBeVisible({ timeout: 30_000 })
+  const row = page.locator('.historyRow.allocation').first()
+  await expect(row).toBeVisible({ timeout: 30_000 })
+  const href = await row.getAttribute('href')
+  expect(href).toMatch(/systems\/change-requests\/[0-9a-f-]{36}$/)
+  const popup = page.waitForEvent('popup')
+  await row.click({ modifiers: ['Control'] })
+  const opened = await popup
+  await expect(opened).toHaveURL(/systems\/change-requests\/[0-9a-f-]{36}$/)
+  await opened.close()
+  await row.dblclick()
+  await expect(page).toHaveURL(/systems\/change-requests\/[0-9a-f-]{36}$/)
+  await page.goBack()
+  await expect(row).toBeVisible({ timeout: 30_000 })
+  await row.click()
+  await page.getByRole('link', { name: 'Open change request →' }).click()
+  await expect(page).toHaveURL(/systems\/change-requests\/[0-9a-f-]{36}$/)
+})
+
 test('the verification register is the same register over test change requests', async ({ page }, testInfo) => {
   test.setTimeout(180_000)
   await page.setViewportSize({ width: 1600, height: 900 })

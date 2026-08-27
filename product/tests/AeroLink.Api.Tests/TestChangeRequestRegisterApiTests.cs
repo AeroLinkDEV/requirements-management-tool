@@ -24,7 +24,7 @@ public sealed class TestChangeRequestRegisterApiTests
 {
     private const string Member = "register.engineer";
 
-    private sealed record Seeded(Guid ProjectId, Guid ReleaseId, Guid TcrId);
+    private sealed record Seeded(Guid ProjectId, Guid ReleaseId, Guid TcrId, string Outsider);
 
     private static async Task<Seeded> SeedAsync(AeroLinkApiFactory factory)
     {
@@ -38,7 +38,10 @@ public sealed class TestChangeRequestRegisterApiTests
 
         var account = new UserAccount(Member, Member, $"{Member}@example.test",
             IdentityService.HashPassword(AeroLinkApiFactory.MemberPassword), now);
-        db.Add(account);
+        var outsider = $"register.outsider.{Guid.NewGuid():N}";
+        var outsiderAccount = new UserAccount(outsider, outsider, $"{outsider}@example.test",
+            IdentityService.HashPassword(AeroLinkApiFactory.MemberPassword), now);
+        db.AddRange(account, outsiderAccount);
         db.Add(new ProgramMembership(account.Id, program.Id, ProgramRole.TestEngineer, "test.setup", now));
 
         // Real change requests, because a package's origin is a foreign key rather than a label.
@@ -105,14 +108,17 @@ public sealed class TestChangeRequestRegisterApiTests
 
         db.AddRange(first, second, software, pendingSoftware, lowLevel, mismatchedPrefix, open, legacy);
         await db.SaveChangesAsync();
-        return new(project.Id, release.Id, second.Id);
+        return new(project.Id, release.Id, second.Id, outsider);
     }
 
     private static async Task<HttpClient> SignInAsync(AeroLinkApiFactory factory)
+        => await SignInAsync(factory, Member);
+
+    private static async Task<HttpClient> SignInAsync(AeroLinkApiFactory factory, string userName)
     {
         var client = factory.CreateClient();
         var login = await client.PostAsJsonAsync("/api/auth/login",
-            new { userName = Member, password = AeroLinkApiFactory.MemberPassword });
+            new { userName, password = AeroLinkApiFactory.MemberPassword });
         Assert.Equal(HttpStatusCode.OK, login.StatusCode);
         await SecurityBoundaryTests.AuthorizeMutationsAsync(client);
         return client;
@@ -147,6 +153,9 @@ public sealed class TestChangeRequestRegisterApiTests
         using var unauthenticated = factory.CreateClient();
         using var refused = await unauthenticated.GetAsync($"/api/test-change-reviews/{seeded.TcrId}/trace");
         Assert.True(refused.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden);
+        using var outsider = await SignInAsync(factory, seeded.Outsider);
+        using var memberRefused = await outsider.GetAsync($"/api/test-change-reviews/{seeded.TcrId}/trace");
+        Assert.Equal(HttpStatusCode.Forbidden, memberRefused.StatusCode);
     }
 
     [Fact]

@@ -531,7 +531,7 @@ function App() {
       setToast("That link is missing its destination, so nothing was opened. This is a defect — please report it.");
       return;
     }
-    const nextStateIntent=target==="history"?stateIntent:undefined,nextTypeIntent=target==="history"?(typeIntent??(artifactKind==="Interface"?"Interface":area==="software"?"Software":"System")):undefined;setView(target);setDiscipline(area);setHistoryStateIntent(nextStateIntent);setHistoryTypeIntent(nextTypeIntent);setTestChangeRequestSelectionId(target==="testChangeRequests"?testChangeRequestSelectionId:"");setSelectedArtifactId(artifactId??"");setSelectedArtifactKind(artifactKind??"");setRequirementRevisionId("");setSelectedScrId(target==="scr"?artifactId??"":["scr"].includes(target)?selectedScrId:"");const navigationContext=context??(target==="managedDocuments"&&active&&project?{programId:active.program.id,projectId:project.project.id,releaseId:""}:undefined);if(navigationContext){const path=routePath(navigationContext,target,area,artifactId,artifactKind,nextStateIntent,nextTypeIntent);history[replace?"replaceState":"pushState"]({},"",path)}};
+    const nextStateIntent=target==="history"?stateIntent:undefined,nextTypeIntent=target==="history"?(typeIntent??(artifactKind==="Interface"?"Interface":area==="software"?"Software":"System")):undefined;setView(target);setDiscipline(area);setHistoryStateIntent(nextStateIntent);setHistoryTypeIntent(nextTypeIntent);setHistorySelectionId("");setTestChangeRequestSelectionId("");setSelectedArtifactId(artifactId??"");setSelectedArtifactKind(artifactKind??"");setRequirementRevisionId("");setSelectedScrId(target==="scr"?artifactId??"":["scr"].includes(target)?selectedScrId:"");const navigationContext=context??(target==="managedDocuments"&&active&&project?{programId:active.program.id,projectId:project.project.id,releaseId:""}:undefined);if(navigationContext){const path=routePath(navigationContext,target,area,artifactId,artifactKind,nextStateIntent,nextTypeIntent);history[replace?"replaceState":"pushState"]({},"",path)}};
   // Opens a change request in the build that owns it rather than the one that happens to be selected. A
   // historical revision's source change request belongs to an earlier build by definition, so routing it into
   // the in-work build would present a released, frozen record inside a context that says it can be edited.
@@ -778,13 +778,15 @@ function App() {
         onSoftwareLevelChange={(level)=>{
           setSelectedArtifactId("");
           setSelectedArtifactKind(level);
+          setHistorySelectionId("");
           if(context)history.pushState({},"",routePath(context,"history","software",undefined,level,historyStateIntent,historyTypeIntent));
         }}
-        onAssessmentSelected={(id)=>{setSelectedArtifactId(id??"");if(context)history.pushState({},"",routePath(context,"history",discipline === "software" ? "software" : "system",id,selectedArtifactKind,historyStateIntent,historyTypeIntent,historySelectionId||undefined))}}
+        onAssessmentSelected={(id)=>{setSelectedArtifactId(id??"");setHistorySelectionId("");if(context)history.pushState({},"",routePath(context,"history",discipline === "software" ? "software" : "system",id,selectedArtifactKind,historyStateIntent,historyTypeIntent))}}
         registerHref={id=>context ? routePath(context,"scr",discipline === "software" ? "software" : "system",id,historyTypeIntent === "Interface" ? "Interface" : undefined) : "#"}
         onSelectionChange={id=>{setHistorySelectionId(id??"");if(context)history.pushState({},"",routePath(context,"history",discipline === "software" ? "software" : "system",selectedArtifactId||undefined,selectedArtifactKind,historyStateIntent,historyTypeIntent,id||undefined))}}
         onStateIntentChange={(stateIntent)=>{
           setHistoryStateIntent(stateIntent);
+          setHistorySelectionId("");
           if(context)history.replaceState({},"",routePath(context,"history",discipline,undefined,selectedArtifactKind,stateIntent,historyTypeIntent));
         }}
         onBack={() => navigate("dashboard")}

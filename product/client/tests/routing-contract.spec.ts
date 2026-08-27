@@ -106,6 +106,21 @@ test('HLR and LLR Procedure TCR routes round-trip through their level branch and
   }
 })
 
+test('TCR register selection is stable, typed, and omitted when context changes', () => {
+  const selected = routePath(context, 'testChangeRequests', 'softwareTest', undefined, 'HighLevelProcedure', undefined, undefined, 'tcr-a')
+  expect(selected).toContain('/software-verification/hlr/change-requests?kind=Procedure&selection=tcr-a')
+  expect(parseRoute(selected)).toMatchObject({
+    view: 'testChangeRequests', discipline: 'softwareTest', artifactKind: 'HighLevelProcedure',
+    testChangeRequestSelectionId: 'tcr-a',
+  })
+  const changedLevel = routePath(context, 'testChangeRequests', 'softwareTest', undefined, 'LowLevel')
+  expect(changedLevel).not.toContain('selection=')
+  expect(parseRoute(changedLevel).testChangeRequestSelectionId).toBeUndefined()
+  const requirements = routePath(context, 'history', 'software', undefined, 'LowLevel')
+  expect(requirements).not.toContain('selection=')
+  expect(parseRoute(`${requirements}&selection=cr-a`).historySelectionId).toBe('cr-a')
+})
+
 test('legacy context-free change-request routes remain loadable until detail canonicalizes them', () => {
   expect(parseRoute('/programs/program-a/projects/project-a/releases/release-a/change-requests/legacy-a'))
     .toMatchObject({ view: 'scr', discipline: 'system', artifactId: 'legacy-a' })

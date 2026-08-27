@@ -74,13 +74,12 @@ const tabs = [
 const nodeLabel = (node: TraceNode) => `${node.displayNumber}${node.revision == null ? '' : ` · revision ${node.revision}`}`
 
 export default function ChangeRequestInspector({
-  api, id, kind, href, releaseVersion, onClose, onOpen,
+  api, id, kind, href, onClose, onOpen,
 }: {
   api: string
   id: string
   kind: 'ChangeRequest' | 'TestChangeRequest'
   href: string
-  releaseVersion?: string
   onClose: () => void
   onOpen: (id: string) => void
 }) {
@@ -151,7 +150,7 @@ export default function ChangeRequestInspector({
   return <ControlledArtifactInspector
     artifactType={kind === 'ChangeRequest' ? 'CHANGE REQUEST' : 'TEST CHANGE REQUEST'}
     displayNumber={detail.displayNumber}
-    subtitle={`${detail.state} · exact revision ${detail.revision}${releaseVersion ? ` · Build ${releaseVersion}` : ''}`}
+    subtitle={`${detail.state} · exact revision ${detail.revision}`}
     closeLabel="Close change request inspector"
     onClose={onClose}
     tabs={tabs}
