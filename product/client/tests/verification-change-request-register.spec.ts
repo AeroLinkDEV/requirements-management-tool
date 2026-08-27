@@ -82,6 +82,8 @@ test('verification register selection is a stable URL state through refresh and 
   await expect(row).toBeVisible({ timeout: 30_000 })
   const assessmentHeading = page.getByRole('heading', { name: 'Downstream Assessments' })
   const register = page.locator('.historyTools')
+  await expect(assessmentHeading).toBeVisible({ timeout: 30_000 })
+  await expect(register).toBeVisible({ timeout: 30_000 })
   const beforeAssessment = await assessmentHeading.boundingBox()
   const beforeRegister = await register.boundingBox()
   await row.click()

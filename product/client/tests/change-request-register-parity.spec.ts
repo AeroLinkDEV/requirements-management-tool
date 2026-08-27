@@ -96,8 +96,10 @@ test('requirements register preserves deep-link history, native links, and autho
       state: { upstream: 'Answered', downstream: 'ChangeRequired', overall: 'ActionRequired', isTopOfLadder: false, warnings: ['Complete the downstream review before approval.'] },
     } })
   })
-  const assessment = page.getByRole('heading', { name: 'Downstream Assessments' })
+  const assessment = page.getByRole('heading', { name: 'Downstream change assessments' })
   const register = page.locator('.historyTools')
+  await expect(assessment).toBeVisible({ timeout: 30_000 })
+  await expect(register).toBeVisible({ timeout: 30_000 })
   const beforeAssessment = await assessment.boundingBox()
   const beforeRegister = await register.boundingBox()
   await row.click()
@@ -135,11 +137,13 @@ test('register row double-click opens, explicit open works, and modified click r
   await expect(row).toBeVisible({ timeout: 30_000 })
   const href = await row.getAttribute('href')
   expect(href).toMatch(/systems\/change-requests\/[0-9a-f-]{36}$/)
-  const popup = page.waitForEvent('popup')
-  await row.click({ modifiers: ['Control'] })
-  const opened = await popup
+  const [opened] = await Promise.all([
+    page.waitForEvent('popup', { timeout: 30_000 }),
+    row.click({ modifiers: ['Control'] }),
+  ])
   await expect(opened).toHaveURL(/systems\/change-requests\/[0-9a-f-]{36}$/)
   await opened.close()
+  await expect(page).toHaveURL(/systems\/change-requests$/)
   await row.dblclick()
   await expect(page).toHaveURL(/systems\/change-requests\/[0-9a-f-]{36}$/)
   await page.goBack()
