@@ -31,22 +31,22 @@ test('a procedure opens onto the same four-tab inspector a requirement does', as
 
   // The same four, in the same order, from the same stylesheet.
   for (const tab of ['Overview', 'Trace & impact', 'History']) {
-    await expect(inspector.getByRole('button', { name: tab })).toBeVisible()
+    await expect(inspector.getByRole('tab', { name: tab })).toBeVisible()
   }
-  await expect(inspector.getByRole('button', { name: /^Discussion/ })).toBeVisible()
+  await expect(inspector.getByRole('tab', { name: /^Discussion/ })).toBeVisible()
 
   await expect(inspector.getByText('Objective', { exact: true })).toBeVisible()
 
   // Trace runs the other way from a requirement's: a procedure shows what it exists to verify.
-  await inspector.getByRole('button', { name: 'Trace & impact' }).click()
+  await inspector.getByRole('tab', { name: 'Trace & impact' }).click()
   await expect(inspector).toContainText('verifies')
 
-  await inspector.getByRole('button', { name: 'History' }).click()
+  await inspector.getByRole('tab', { name: 'History' }).click()
   await expect(inspector.locator('.revisionList li').first()).toBeVisible({ timeout: 30_000 })
 
   // Discussion is the requirement pane's own form and article markup, so what is asserted below is what would
   // hold on a requirement: an attributable comment that can then be dispositioned.
-  await inspector.getByRole('button', { name: /^Discussion/ }).click()
+  await inspector.getByRole('tab', { name: /^Discussion/ }).click()
   const comments = inspector.locator('.discussionPane article')
   const saidBefore = await comments.count()
   await inspector.locator('.discussionPane textarea').fill('Confirmed against the oceanic rig on the 6th.')
@@ -59,7 +59,7 @@ test('a procedure opens onto the same four-tab inspector a requirement does', as
   await expect(page.getByRole('heading', { name: 'Test Procedure Explorer' })).toBeVisible({ timeout: 30_000 })
   await page.locator('.procedureRow').filter({ hasText: number }).first().click()
   const reopened = page.getByRole('complementary', { name: new RegExp(`${number.replace('.', '\\.')} detail`) })
-  await reopened.getByRole('button', { name: /^Discussion/ }).click()
+  await reopened.getByRole('tab', { name: /^Discussion/ }).click()
   const reloaded = reopened.locator('.discussionPane article').last()
   await expect(reloaded).toContainText('Confirmed against the oceanic rig on the 6th.', { timeout: 30_000 })
 
@@ -119,7 +119,7 @@ test('a procedure says who wrote it and what drove each revision', async ({ page
 
   const inspector = page.locator('.requirementInspector')
   await expect(inspector).toBeVisible({ timeout: 30_000 })
-  await inspector.getByRole('button', { name: 'History' }).click()
+  await inspector.getByRole('tab', { name: 'History' }).click()
 
   // Every revision, newest first, each saying who wrote it — a name, not an account handle.
   const revisions = inspector.locator('.revisionList li')
@@ -273,7 +273,7 @@ test('the shared Explorer deep-link can inspect active software Procedures with 
   await expect(page.locator('.procedureRow')).toContainText('HLRTP-000001.00')
   await page.locator('.procedureRow').click()
   await expect(page.getByText('Environment / setup')).toBeVisible()
-  await page.getByRole('button', { name: 'History' }).click()
+  await page.getByRole('tab', { name: 'History' }).click()
   await expect(page.getByText('Allocated · 2 exact Case parents')).toBeVisible()
   await expect(page.getByText(/Exact Case case-b/)).toBeVisible()
   await expect(page.getByLabel('Exact link lifecycle Suspect')).toBeVisible()
@@ -286,7 +286,7 @@ test('the shared Explorer deep-link can inspect active software Procedures with 
   await page.getByRole('button', { name: 'Record resolution' }).click()
   await expect(page.getByLabel('Exact link lifecycle Closed')).toContainText(/Existing Downstream Revision Remains Valid/i)
   await expect(page.getByLabel('Exact link lifecycle Closed')).toContainText('baseline.materializer')
-  await page.getByRole('button', { name: /^Discussion/ }).click()
+  await page.getByRole('tab', { name: /^Discussion/ }).click()
   await expect(page.locator('.discussionPane textarea')).toHaveCount(1)
   await expect(page.getByRole('button', { name: 'Add comment' })).toHaveCount(1)
   const historicalComment = page.locator('.discussionPane article').filter({ hasText: 'Historical discussion without revision context' })
@@ -347,6 +347,6 @@ test('released Build 1.5 procedures remain readable without create or edit actio
   await expect(inspector).toContainText('Objective')
   await expect(page.getByRole('button', { name: 'Check out & edit' })).toHaveCount(0)
   // A released build is read-only, so its procedures cannot be discussed either.
-  await inspector.getByRole('button', { name: /^Discussion/ }).click()
+  await inspector.getByRole('tab', { name: /^Discussion/ }).click()
   await expect(inspector.locator('.discussionPane textarea')).toHaveCount(0)
 })
