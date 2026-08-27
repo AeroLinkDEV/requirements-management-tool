@@ -108,6 +108,67 @@ body:has(.projectsPage) { min-width: 0; }
   gap: 18px;
 }
 
+.projectsSections {
+  display: flex;
+  flex-direction: column;
+  gap: 26px;
+}
+
+.projectsPrimaryGrid {
+  grid-template-columns: minmax(280px, 1fr);
+  max-width: 390px;
+}
+
+.projectUtilitySection {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.projectUtilitySection h2 {
+  margin: 0;
+  color: var(--ink-500);
+  font: 700 12px/1.2 var(--font-body);
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+
+.projectUtilitySection .projectsGrid,
+.projectsCreateGrid {
+  grid-template-columns: minmax(280px, 390px);
+}
+
+.sampleProjectsSection {
+  border-top: 1px solid #dce3ea;
+  border-bottom: 1px solid #dce3ea;
+}
+
+.sampleProjectsSection summary {
+  min-height: 62px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  cursor: pointer;
+  list-style: none;
+  color: var(--ink-900);
+}
+
+.sampleProjectsSection summary::-webkit-details-marker { display: none; }
+.sampleProjectsSection summary::before {
+  content: "▸";
+  color: #527087;
+  font-size: 18px;
+  transition: transform 160ms ease;
+}
+.sampleProjectsSection[open] summary::before { transform: rotate(90deg); }
+.sampleProjectsSection summary > span:first-of-type { flex: 1; display: flex; flex-direction: column; gap: 4px; }
+.sampleProjectsSection summary strong { font: 700 15px/1.2 var(--font-display); }
+.sampleProjectsSection summary small { color: var(--ink-500); font-size: 13px; }
+.sampleProjectsCount { color: var(--ink-500); font-size: 12px; white-space: nowrap; }
+.sampleProjectsSection summary:focus-visible { outline: 3px solid #1b8ecb; outline-offset: 3px; border-radius: 4px; }
+.sampleProjectsSection .projectsGrid { padding: 0 0 20px; }
+
 .projectCard {
   min-width: 0;
   min-height: 210px;
@@ -268,9 +329,13 @@ body:has(.projectsPage) { min-width: 0; }
   .projectsMain { padding: 26px 18px 42px; }
   .projectsMain > header h1 { font-size: 29px; }
   .projectsGrid { grid-template-columns: 1fr; }
+  .projectsPrimaryGrid,
+  .projectUtilitySection .projectsGrid,
+  .projectsCreateGrid { grid-template-columns: 1fr; max-width: none; }
   .projectCard { min-height: 196px; }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .activeProjectCard { transition: none; }
+  .activeProjectCard,
+  .sampleProjectsSection summary::before { transition: none; }
 }
