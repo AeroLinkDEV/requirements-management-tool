@@ -10,7 +10,8 @@ test('successful login opens the accessible Projects selector before the current
   await expect(page.getByText('Select a project to continue.')).toBeVisible()
 
   const cards = page.locator('[data-project-card]')
-  await expect(cards).toHaveCount(3)
+  await expect(cards).toHaveCount(12)
+  await expect(page.locator('[data-project-card]:visible')).toHaveCount(3)
   await expect(page.getByRole('link', { name: 'Open FMS Product Development' })).toBeVisible()
   await expect(page.getByRole('link', { name: 'Open DOORS Import Practice' })).toBeVisible()
   const sampleProjects = page.locator('details.sampleProjectsSection')
@@ -20,7 +21,7 @@ test('successful login opens the accessible Projects selector before the current
   await sampleProjects.getByRole('button', { name: /Sample projects/ }).click()
   await expect(sampleProjects).toHaveAttribute('open', '')
   await expect(sampleProjects.getByText('GPS Receiver Modernization')).toBeVisible()
-  await expect(cards).toHaveCount(12)
+  await expect(page.locator('[data-project-card]:visible')).toHaveCount(12)
   if (process.env.AEROLINK_PROJECTS_SCREENSHOT) {
     await page.screenshot({ path: process.env.AEROLINK_PROJECTS_SCREENSHOT, fullPage: true })
   }
@@ -54,7 +55,8 @@ test('the project grid collapses cleanly without horizontal scrolling', async ({
   await page.setViewportSize({ width: 390, height: 844 })
   await login(page, 'admin', { openProject: false })
 
-  await expect(page.locator('[data-project-card]')).toHaveCount(3)
+  await expect(page.locator('[data-project-card]')).toHaveCount(12)
+  await expect(page.locator('[data-project-card]:visible')).toHaveCount(3)
   const dimensions = await page.evaluate(() => ({
     documentWidth: document.documentElement.scrollWidth,
     viewportWidth: document.documentElement.clientWidth,
@@ -68,7 +70,7 @@ test('the project grid collapses cleanly without horizontal scrolling', async ({
   expect(dimensions.columns).toBe(1)
   const sampleProjects = page.locator('details.sampleProjectsSection')
   await sampleProjects.getByRole('button', { name: /Sample projects/ }).click()
-  await expect(page.locator('[data-project-card]')).toHaveCount(12)
+  await expect(page.locator('[data-project-card]:visible')).toHaveCount(12)
   const expandedDimensions = await page.evaluate(() => ({
     documentWidth: document.documentElement.scrollWidth,
     viewportWidth: document.documentElement.clientWidth,
