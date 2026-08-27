@@ -285,6 +285,7 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
   const [proposalOpen, setProposalOpen] = useState(false)
   const [proposalSearch, setProposalSearch] = useState('')
   const [proposalCandidates, setProposalCandidates] = useState<TestChangeCandidatePage>()
+  const [proposalPage, setProposalPage] = useState(1)
   const [proposalBusy, setProposalBusy] = useState(false)
   const proposalTriggerRef = useRef<HTMLButtonElement>(null)
   const proposalWasOpen = useRef(false)
@@ -625,13 +626,15 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
   const openProposal = () => {
     if (!selected || released) return
     setProposalSearch('')
+    setProposalPage(1)
     setProposalCandidates(undefined)
     setProposalOpen(true)
   }
   const loadProposalCandidates = useCallback(async () => {
     if (!proposalOpen || !proposalContext) return
     try {
-      const params = new URLSearchParams({ projectId, releaseId, artifactRevisionId: proposalContext.artifactRevisionId, page: '1', pageSize: '25' })
+      const params = new URLSearchParams({ projectId, releaseId, artifactRevisionId: proposalContext.artifactRevisionId,
+        page: String(proposalPage), pageSize: '25' })
       if (proposalSearch.trim()) params.set('search', proposalSearch.trim())
       const response = await fetch(`${api}/api/verification-artifacts/${proposalContext.artifactId}/test-change-request-candidates?${params}`)
       if (!response.ok) throw new Error(String(response.status))
@@ -640,22 +643,29 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
       setError(operationError(problem, 'Eligible Test Change Requests could not be loaded.'))
       setProposalCandidates(undefined)
     }
-  }, [api, projectId, releaseId, proposalOpen, proposalContext, proposalSearch])
+  }, [api, projectId, releaseId, proposalOpen, proposalContext, proposalSearch, proposalPage])
   useEffect(() => { void loadProposalCandidates() }, [loadProposalCandidates])
   useEffect(() => {
     if (proposalOpen) {
       proposalWasOpen.current = true
+      const dismiss = (event: KeyboardEvent) => {
+        if (event.key === 'Escape' && !proposalBusy) {
+          event.preventDefault()
+          setProposalOpen(false)
+        }
+      }
+      window.addEventListener('keydown', dismiss)
       const frame = window.requestAnimationFrame(() => {
         const dialog = document.querySelector<HTMLElement>('[aria-labelledby="test-change-dialog-title"]')
         dialog?.querySelector<HTMLElement>('button, input, [tabindex]:not([tabindex="-1"])')?.focus()
       })
-      return () => window.cancelAnimationFrame(frame)
+      return () => { window.cancelAnimationFrame(frame); window.removeEventListener('keydown', dismiss) }
     }
     if (proposalWasOpen.current) {
       proposalWasOpen.current = false
       proposalTriggerRef.current?.focus()
     }
-  }, [proposalOpen])
+  }, [proposalBusy, proposalOpen])
   const selectProposal = async (candidate: TestChangeCandidate) => {
     if (!proposalContext) return
     if (!candidate.eligible && candidate.existingProposalId) {
@@ -1087,6 +1097,15 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
                           </button>
                         </li>)}
                       </ul>}
+                  {proposalCandidates && proposalCandidates.totalPages > 1 && (
+                    <nav className="pager artifactChangeCandidatePager" aria-label="Test Change Request candidate pages">
+                      <button type="button" disabled={proposalBusy || proposalPage <= 1}
+                        onClick={() => setProposalPage(value => Math.max(1, value - 1))}>← Previous</button>
+                      <span>Page {proposalCandidates.page} of {proposalCandidates.totalPages} · {proposalCandidates.totalCount} total</span>
+                      <button type="button" disabled={proposalBusy || proposalPage >= proposalCandidates.totalPages}
+                        onClick={() => setProposalPage(value => Math.min(proposalCandidates.totalPages, value + 1))}>Next →</button>
+                    </nav>
+                  )}
                 </section>
               )}
                <h3>{selectedIsProcedure ? 'Procedure' : 'Case'} title</h3>

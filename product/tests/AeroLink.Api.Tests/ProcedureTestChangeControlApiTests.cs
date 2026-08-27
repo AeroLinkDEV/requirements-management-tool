@@ -7,6 +7,7 @@ using AeroLink.Domain.Hierarchy;
 using AeroLink.Domain.Identity;
 using AeroLink.Domain.Programs;
 using AeroLink.Domain.Requirements;
+using AeroLink.Domain.Traceability;
 using AeroLink.Domain.Verification;
 using AeroLink.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
@@ -25,6 +26,9 @@ public sealed class ProcedureTestChangeControlApiTests
     private sealed record Fixture(Guid ProjectId, Guid ReleaseId, Guid HlrCaseChangeId, Guid LlrCaseChangeId);
     private sealed record ExplorerFixture(Guid ProjectId, Guid ReleaseId, Guid ArtifactId, Guid RevisionId,
         Guid LaterRevisionId, Guid RequirementRevisionId, Guid ReviewId, long ReviewVersion);
+    private sealed record VerificationMutationFixture(Guid ProjectId, Guid ReleaseId, Guid CaseId,
+        Guid CaseRevisionId, Guid ProcedureId, Guid ProcedureRevisionId, Guid CaseReviewId,
+        long CaseReviewVersion, Guid ProcedureReviewId, long ProcedureReviewVersion);
 
     [Fact]
     public async Task Verification_explorer_proposal_route_is_bound_to_the_test_change_api()
@@ -422,6 +426,73 @@ public sealed class ProcedureTestChangeControlApiTests
             (await verifyDb.VerificationImpactItems.AsNoTracking().SingleAsync(x => x.Id == assessmentId)).State);
     }
 
+    [Fact]
+    public async Task Verification_explorer_mutates_exact_case_and_software_procedure_parents_and_rejects_wrong_kind()
+    {
+        using var factory = new AeroLinkApiFactory(testLadderPolicy: ProcedureEnabledTestPolicy.Create());
+        using var client = factory.CreateClient();
+        var fixture = await SeedVerificationMutationScenarioAsync(factory);
+        await LoginAsync(client, "procedure.author");
+
+        using (var caseMutation = await client.PostAsJsonAsync(
+                   $"/api/verification-artifacts/{fixture.CaseId}/test-change-request-proposal", new
+                   {
+                       projectId = fixture.ProjectId, releaseId = fixture.ReleaseId,
+                       artifactRevisionId = fixture.CaseRevisionId, testChangeReviewId = fixture.CaseReviewId,
+                       expectedVersion = fixture.CaseReviewVersion,
+                       rationale = "Modify the exact software Case selected by this build.",
+                   }))
+        {
+            var body = await caseMutation.Content.ReadAsStringAsync();
+            Assert.Equal(HttpStatusCode.OK, caseMutation.StatusCode);
+            using var json = JsonDocument.Parse(body);
+            Assert.False(json.RootElement.GetProperty("duplicate").GetBoolean());
+            Assert.Equal(fixture.CaseReviewId, json.RootElement.GetProperty("testChangeReviewId").GetGuid());
+        }
+
+        using (var procedureMutation = await client.PostAsJsonAsync(
+                   $"/api/verification-artifacts/{fixture.ProcedureId}/test-change-request-proposal", new
+                   {
+                       projectId = fixture.ProjectId, releaseId = fixture.ReleaseId,
+                       artifactRevisionId = fixture.ProcedureRevisionId, testChangeReviewId = fixture.ProcedureReviewId,
+                       expectedVersion = fixture.ProcedureReviewVersion,
+                   }))
+        {
+            var body = await procedureMutation.Content.ReadAsStringAsync();
+            Assert.Equal(HttpStatusCode.OK, procedureMutation.StatusCode);
+            using var json = JsonDocument.Parse(body);
+            Assert.False(json.RootElement.GetProperty("duplicate").GetBoolean());
+        }
+
+        using (var wrongKind = await client.PostAsJsonAsync(
+                   $"/api/verification-artifacts/{fixture.CaseId}/test-change-request-proposal", new
+                   {
+                       projectId = fixture.ProjectId, releaseId = fixture.ReleaseId,
+                       artifactRevisionId = fixture.CaseRevisionId, testChangeReviewId = fixture.ProcedureReviewId,
+                       expectedVersion = fixture.ProcedureReviewVersion + 1,
+                   }))
+        {
+            Assert.Equal(HttpStatusCode.BadRequest, wrongKind.StatusCode);
+            Assert.Contains("wrong_artifact_key", await wrongKind.Content.ReadAsStringAsync(),
+                StringComparison.OrdinalIgnoreCase);
+        }
+
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+        var caseChange = await db.Set<TestProcedureChange>().AsNoTracking()
+            .SingleAsync(x => x.TestChangeReviewId == fixture.CaseReviewId);
+        Assert.Equal(TestProcedureChangeKind.Modify, caseChange.Kind);
+        Assert.Equal(1, caseChange.Revision);
+        Assert.Equal(fixture.CaseId, await db.TestProcedures.AsNoTracking()
+            .Where(x => x.Id == fixture.CaseId).Select(x => x.Id).SingleAsync());
+        var procedureChange = await db.Set<TestProcedureChange>().AsNoTracking()
+            .SingleAsync(x => x.TestChangeReviewId == fixture.ProcedureReviewId);
+        Assert.Equal(TestProcedureChangeKind.Modify, procedureChange.Kind);
+        Assert.Equal(1, procedureChange.Revision);
+        using var parents = JsonDocument.Parse(procedureChange.ParentRevisionIdsJson);
+        Assert.Equal(fixture.CaseRevisionId, Assert.Single(parents.RootElement.EnumerateArray()).GetGuid());
+    }
+
     private static async Task<ExplorerFixture> SeedExplorerScenarioAsync(AeroLinkApiFactory factory)
     {
         var fixture = await SeedAsync(factory);
@@ -475,6 +546,96 @@ public sealed class ProcedureTestChangeControlApiTests
         await db.SaveChangesAsync();
         return new(project.Id, release.Id, artifact.Id, revision.Id, laterRevision.Id, requirementRevision.Id,
             review.Id, review.Version);
+    }
+
+    private static async Task<VerificationMutationFixture> SeedVerificationMutationScenarioAsync(
+        AeroLinkApiFactory factory)
+    {
+        var fixture = await SeedAsync(factory);
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+        var now = DateTimeOffset.UtcNow;
+        var baseline = new CandidateBaseline("SW-78.61", 0, fixture.ProjectId, fixture.ReleaseId, null,
+            "Software verification mutation build", "procedure.author", now);
+        var systemSource = new SystemChangeRequest("SRCR-786101", 0, fixture.ProjectId, fixture.ReleaseId,
+            "System verification mutation parent", "Problem", "Analysis", "Solution", "procedure.author", now);
+        var systemRequirement = new RequirementArtifact(fixture.ProjectId, "SYSR-786101", RequirementLevel.System, now);
+        var systemRequirementRevision = new RequirementRevision(systemRequirement.Id, 0,
+            "The system shall provide the software verification parent.", "Mutation qualification", "Test",
+            RequirementRevisionState.Active, systemSource.Id, baseline.Id, now);
+        systemSource.AddRequirementChange("procedure.author", "SYSR-786101", 0, RequirementLevel.System,
+            RequirementChangeKind.Introduce, systemRequirementRevision.Statement, "Mutation qualification", "Test", now);
+        systemSource.SubmitForReview("procedure.author", [new ApproverSelection("procedure.reviewer", "Reviewer")], now);
+        systemSource.ApproveActiveStage("procedure.reviewer", now);
+        var source = new SystemChangeRequest("HLRCR-786101", 0, fixture.ProjectId, fixture.ReleaseId,
+            "Software verification mutation source", "Problem", "Analysis", "Solution", "procedure.author", now,
+            ChangeRequestType.Software, softwareLevel: RequirementLevel.HighLevel);
+        source.SetNoUpstreamRationale("procedure.author", "The controlled System parent is represented by the exact requirement link.", now);
+        source.AddRequirementChange("procedure.author", "HLRR-786101", 0, RequirementLevel.HighLevel,
+            RequirementChangeKind.Introduce, "The software shall preserve exact verification identity.",
+            "Mutation qualification", "Test", now, proposedUpstreamRevisionIdsJson:
+                JsonSerializer.Serialize(new[] { systemRequirementRevision.Id }));
+        source.SubmitForReview("procedure.author", [new ApproverSelection("procedure.reviewer", "Reviewer")], now);
+        source.ApproveActiveStage("procedure.reviewer", now);
+        baseline.Select(systemSource, "procedure.author", now);
+        baseline.Select(source, "procedure.author", now);
+        baseline.Freeze("procedure.author", now);
+        baseline.MarkRequirementsMaterialized("procedure.author", new string('c', 64), 1, now);
+        baseline.MarkTestProceduresMaterialized("procedure.author", new string('d', 64), 2, now);
+        var requirement = new RequirementArtifact(fixture.ProjectId, "HLRR-786101", RequirementLevel.HighLevel, now);
+        var requirementRevision = new RequirementRevision(requirement.Id, 0,
+            "The software shall preserve exact verification identity.", "Mutation qualification", "Test",
+            RequirementRevisionState.Active, source.Id, baseline.Id, now, RequirementParentKind.Allocated,
+            parentRevisionIds: [systemRequirementRevision.Id]);
+        var caseArtifact = new TestProcedure(fixture.ProjectId, "HLRTC-786101", "Exact HLR Case",
+            "procedure.author", now, TestProcedureLevel.HighLevel);
+        var caseRevision = new TestProcedureRevision(caseArtifact.Id, 0, "Verify the exact Case",
+            "The software build is available", "Exercise the exact Case", "The Case passes",
+            TestProcedureState.Approved, "procedure.author", now, effectiveBaselineId: baseline.Id,
+            parentKind: VerificationProcedureParentKind.Allocated);
+        var caseKey = new VerificationArtifactKey(VerificationDiscipline.HighLevelSoftware,
+            VerificationArtifactKind.Case);
+        var procedureKey = new VerificationArtifactKey(VerificationDiscipline.HighLevelSoftware,
+            VerificationArtifactKind.Procedure);
+        var caseReview = new TestChangeReview(fixture.ProjectId, fixture.ReleaseId, source.Id, caseKey,
+            source.DisplayNumber, now, "HLRTCCR-786101", authorId: "procedure.author");
+        caseReview.RecordTestChangeRequired("procedure.author", now);
+        var procedureReview = new TestChangeReview(fixture.ProjectId, fixture.ReleaseId, source.Id, procedureKey,
+            source.DisplayNumber, now, "HLRTPCR-786101", authorId: "procedure.author");
+        procedureReview.RecordTestChangeRequired("procedure.author", now);
+        var procedureArtifact = new TestProcedure(fixture.ProjectId, "HLRTP-786101", "Exact HLR Procedure",
+            "procedure.author", now, TestProcedureLevel.HighLevel,
+            artifactKind: VerificationArtifactKind.Procedure,
+            parentKind: VerificationProcedureParentKind.Allocated);
+        var procedureRevision = new TestProcedureRevision(procedureArtifact.Id, 0,
+            "Execute the exact Procedure", "The software build is available", "Execute the Procedure",
+            "The expected behavior is observed", TestProcedureState.Approved, "procedure.author", now,
+            sourceTestChangeRequestId: procedureReview.Id,
+            effectiveBaselineId: baseline.Id, environmentSetup: "Qualified setup", testData: "Controlled data",
+            orderedSteps: "Execute", expectedObservations: "Observed", cleanup: "Restore",
+            toolingAutomation: "Qualified runner", parentKind: VerificationProcedureParentKind.Allocated);
+        var caseImpact = VerificationImpactItem.ForIntroducedRequirement(fixture.ProjectId, fixture.ReleaseId,
+            source.Id, caseReview.Id, source.RequirementChanges.Single().Id,
+            source.RequirementChanges.Single().DisplayNumber, "Test", now);
+        caseImpact.LinkRequirementRevision(requirementRevision.Id, now);
+        var procedureImpact = VerificationImpactItem.ForIntroducedRequirement(fixture.ProjectId, fixture.ReleaseId,
+            source.Id, procedureReview.Id, source.RequirementChanges.Single().Id,
+            source.RequirementChanges.Single().DisplayNumber, "Test", now);
+        procedureImpact.LinkRequirementRevision(requirementRevision.Id, now);
+        db.AddRange(systemSource, systemRequirement, systemRequirementRevision, source, baseline, requirement, requirementRevision, caseArtifact, caseRevision,
+            procedureArtifact, procedureRevision, caseReview, procedureReview, caseImpact, procedureImpact,
+            new BaselineRequirementSelection(baseline.Id, systemRequirement.Id, systemRequirementRevision.Id),
+            new BaselineRequirementSelection(baseline.Id, requirement.Id, requirementRevision.Id),
+            new BaselineTestProcedureSelection(baseline.Id, caseArtifact.Id, caseRevision.Id),
+            new BaselineTestProcedureSelection(baseline.Id, procedureArtifact.Id, procedureRevision.Id),
+            new TestRequirementCoverage(caseRevision.Id, requirementRevision.Id),
+            new RequirementTraceLink(fixture.ProjectId, requirementRevision.Id, systemRequirementRevision.Id,
+                RequirementTraceType.AllocatedFrom, "Allocated to the exact System requirement parent.", now),
+            new TestCaseProcedureLink(caseRevision.Id, procedureRevision.Id));
+        await db.SaveChangesAsync();
+        return new(fixture.ProjectId, fixture.ReleaseId, caseArtifact.Id, caseRevision.Id,
+            procedureArtifact.Id, procedureRevision.Id, caseReview.Id, caseReview.Version,
+            procedureReview.Id, procedureReview.Version);
     }
 
     private static async Task AddActiveReviewEditSessionAsync(AeroLinkApiFactory factory, ExplorerFixture fixture,

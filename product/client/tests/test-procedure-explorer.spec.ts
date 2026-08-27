@@ -1,6 +1,37 @@
 import { expect, test } from '@playwright/test'
 import { login, openNavigationGroup, selectProgram } from './auth'
 
+const browserFixtureWorkspaces = [{
+  program: { id: 'program-786', name: 'FMS Product Development', code: 'FMS' },
+  projects: [{
+    project: { id: 'project-786', name: 'FMS Product Development', softwareProduct: 'FMS' },
+    releases: [
+      { id: 'release-16', version: '1.6', isReleased: false },
+      { id: 'release-15', version: '1.5', isReleased: true },
+    ],
+  }],
+}]
+
+async function useBrowserFixture(page: import('@playwright/test').Page) {
+  await page.route('**/api/workspaces', route => route.fulfill({ contentType: 'application/json', body: JSON.stringify(browserFixtureWorkspaces) }))
+  await page.route('**/api/projects/project-786/configuration', route => route.fulfill({ contentType: 'application/json', body: JSON.stringify({
+    effectiveSteps: [
+      { catalogueEntry: 'System', capabilities: 15, enabledArtifactKinds: ['Procedure'] },
+      { catalogueEntry: 'HighLevel', capabilities: 15, enabledArtifactKinds: ['Case', 'Procedure'] },
+      { catalogueEntry: 'LowLevel', capabilities: 15, enabledArtifactKinds: ['Case', 'Procedure'] },
+    ],
+  }) }))
+  await page.route('**/api/dashboard?*', route => route.fulfill({ contentType: 'application/json', body: JSON.stringify({
+    system: { total: 0, draft: 0, inReview: 0, approved: 0, deferred: 0 },
+    software: { total: 0, draft: 0, inReview: 0, approved: 0, deferred: 0 },
+    verification: {
+      system: { totalChangeRequests: 0, triagedChangeRequests: 0, openDecisions: 0, resolvedDecisions: 0 },
+      hlr: { totalChangeRequests: 0, triagedChangeRequests: 0, openDecisions: 0, resolvedDecisions: 0 },
+      llr: { totalChangeRequests: 0, triagedChangeRequests: 0, openDecisions: 0, resolvedDecisions: 0 },
+    },
+  }) }))
+}
+
 /**
  * Browsing controlled procedures the way requirements are browsed.
  *
@@ -137,7 +168,7 @@ test('a procedure says who wrote it and what drove each revision', async ({ page
  */
 test('the Software Explorer opens on all artifacts and can move to the configured LLR level', async ({ page }) => {
   test.setTimeout(180_000)
-  await login(page, 'admin', { openProject: false })
+  await login(page, 'admin')
   await selectProgram(page, 'Flight Management System Live Program')
   await openNavigationGroup(page, 'ASSURANCE')
   await page.getByRole('button', { name: 'Software' }).last().click()
@@ -169,7 +200,7 @@ test('the shared Explorer deep-link can inspect active software Procedures with 
     id: 'raised-event', type: 'Raised', actorId: 'baseline.materializer',
     occurredAt: '2026-08-23T00:00:00Z', rationale: 'The exact Case revision changed.',
   }]
-  await login(page, 'admin', { openProject: false })
+  await login(page, 'admin')
   await page.route('**/api/projects/*/configuration', async route => {
     await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ effectiveSteps: [
       { catalogueEntry: 'System', capabilities: 2, enabledArtifactKinds: ['Procedure'] },
@@ -353,6 +384,7 @@ test('released Build 1.5 procedures remain readable without create or edit actio
 
 test('the Procedure explorer change chooser is exact, bounded, and keyboard dismissible', async ({ page }) => {
   test.setTimeout(120_000)
+  await useBrowserFixture(page)
   await login(page, 'admin')
   await page.route('**/api/test-procedures?*', async route => {
     const url = new URL(route.request().url())
@@ -381,16 +413,22 @@ test('the Procedure explorer change chooser is exact, bounded, and keyboard dism
     }) })
     return route.continue()
   })
+  const candidatePages: string[] = []
   await page.route('**/api/verification-artifacts/system-explorer-action/test-change-request-candidates*', async route => {
-    await route.fulfill({ contentType: 'application/json', body: JSON.stringify({
-      artifactKey: 'System:Procedure', artifactDisplayNumber: 'SYSTP-786001.00', page: 1, pageSize: 25,
-      totalCount: 2, totalPages: 1, items: [
-        { id: 'tcr-procedure', displayNumber: 'SYSTPCR-786001.00', title: 'Eligible System Draft',
+    const requestedPage = new URL(route.request().url()).searchParams.get('page') ?? '1'
+    candidatePages.push(requestedPage)
+    const items = requestedPage === '2'
+      ? [{ id: 'tcr-page-two', displayNumber: 'SYSTPCR-786099.00', title: 'Second page Draft',
+          state: 'Draft', outcome: 'ChangeRequired', artifactKey: 'System:Procedure', version: 1, eligible: false,
+          reason: 'A later eligible candidate is outside this page.' }]
+      : [{ id: 'tcr-procedure', displayNumber: 'SYSTPCR-786001.00', title: 'Eligible System Draft',
           state: 'Draft', outcome: 'ChangeRequired', artifactKey: 'System:Procedure', version: 4, eligible: true },
         { id: 'tcr-case-kind', displayNumber: 'HLRTCCR-786002.00', title: 'Wrong verification kind',
           state: 'Draft', outcome: 'ChangeRequired', artifactKey: 'HighLevelSoftware:Case', version: 2,
-          eligible: false, reason: 'This Draft targets a Case, not a Procedure.' },
-      ],
+          eligible: false, reason: 'This Draft targets a Case, not a Procedure.' }]
+    await route.fulfill({ contentType: 'application/json', body: JSON.stringify({
+      artifactKey: 'System:Procedure', artifactDisplayNumber: 'SYSTP-786001.00', page: Number(requestedPage), pageSize: 25,
+      totalCount: 26, totalPages: 2, items,
     }) })
   })
   let posted: Record<string, unknown> | undefined
@@ -414,6 +452,13 @@ test('the Procedure explorer change chooser is exact, bounded, and keyboard dism
   await expect(dialog).toContainText('SYSTP-786001.00')
   await expect(dialog).toContainText('Wrong verification kind')
   await expect(dialog.locator('li').filter({ hasText: 'Wrong verification kind' }).getByRole('button')).toBeDisabled()
+  await expect(dialog.getByRole('navigation', { name: 'Test Change Request candidate pages' })).toContainText('Page 1 of 2 · 26 total')
+  await dialog.getByRole('button', { name: 'Next →' }).click()
+  await expect(dialog).toContainText('Second page Draft')
+  await expect(dialog.getByRole('navigation', { name: 'Test Change Request candidate pages' })).toContainText('Page 2 of 2 · 26 total')
+  await expect.poll(() => candidatePages.at(-1)).toBe('2')
+  await dialog.getByRole('button', { name: '← Previous' }).click()
+  await expect(dialog).toContainText('Eligible System Draft')
   await page.keyboard.press('Escape')
   await expect(dialog).toHaveCount(0)
   await expect(trigger).toBeFocused()
@@ -429,7 +474,8 @@ test('the Procedure explorer change chooser is exact, bounded, and keyboard dism
 
 test('the combined Explorer carries Case identity into the verification change chooser', async ({ page }) => {
   test.setTimeout(120_000)
-  await login(page, 'admin', { openProject: false })
+  await useBrowserFixture(page)
+  await login(page, 'admin')
   await page.route('**/api/verification-artifacts?*', async route => {
     await route.fulfill({ contentType: 'application/json', body: JSON.stringify({
       page: 1, pageSize: 25, totalCount: 1, totalPages: 1, views: [],
