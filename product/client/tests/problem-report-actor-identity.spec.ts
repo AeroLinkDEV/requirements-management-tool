@@ -48,9 +48,11 @@ test('a Problem Report history names an actor the demo registry does not contain
   const entry = page.locator('.prTimeline article').filter({ hasText: 'Draft → Ready for SCCB' }).first()
   await expect(entry).toBeVisible()
 
-  // The person, not the credentials they signed in with.
-  await expect(entry.getByText('AeroLink Administrator')).toBeVisible()
-  await expect(entry).not.toContainText('admin')
+  // The person, not the credentials they signed in with. Asserted on the name element itself rather than
+  // as "the word admin is absent from the entry": "Administrator" contains "admin" case-insensitively, so a
+  // substring check passes only by the accident of Playwright's case sensitivity.
+  const actor = entry.locator('.personName').first()
+  await expect(actor).toHaveText('AeroLink Administrator')
   // And the account stays reachable for anyone reconciling this event against the identity provider. The
   // handle is never traded away for the name; both travel together.
   await expect(entry.locator('.personName').first()).toHaveAttribute('title', 'admin')

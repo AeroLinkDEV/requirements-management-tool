@@ -9,8 +9,16 @@ using Microsoft.EntityFrameworkCore;
 /// <list type="bullet">
 /// <item><description>
 /// <b>Current identity</b> — who holds an assignment <i>now</i>. A Problem Report's responsible engineer is
-/// this: the field is mutable, it answers "who is on this today", and it should follow the directory. If the
-/// person is renamed, the correct answer changes with them. That is what this class is for.
+/// the clear case: <c>Reassign</c> moves it, it answers "who is on this today", and if that person is renamed
+/// the correct answer changes with them. That is what this class is for.
+///
+/// <c>ReportedBy</c> is resolved through here too, and it is the less clear case: it is set once and never
+/// reassigned, so it is arguably an attribution rather than an assignment. It is resolved live deliberately —
+/// no name was ever captured against it, so the alternative is showing a handle — but the consequence should
+/// be understood: after a rename, the record's "raised by" reads the new name while the frozen
+/// <c>ProblemReportCreated</c> event beside it still reads the old one. The event is the audit fact and does
+/// not move. Capturing a name against <c>ReportedBy</c> at creation would remove the divergence and is the
+/// right long-term answer.
 /// </description></item>
 /// <item><description>
 /// <b>Historical identity</b> — who did something, once, in an immutable event. That name must be captured
