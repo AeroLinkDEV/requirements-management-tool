@@ -71,7 +71,8 @@ public sealed class ProblemReportClosureCandidateService(AeroLinkDbContext db)
 
     public async Task<ProblemReportClosureCandidate?> InvalidatePendingAsync(ProblemReport report,
         string actor, string reason, DateTimeOffset now, CancellationToken ct,
-        ProblemReportState? fromState = null, ProblemReportState? toState = null, string? rationale = null)
+        ProblemReportState? fromState = null, ProblemReportState? toState = null, string? rationale = null,
+        string? actorDisplayName = null)
     {
         var candidate = await db.ProblemReportClosureCandidates.SingleOrDefaultAsync(item =>
             item.ProblemReportId == report.Id && item.State == ProblemReportClosureCandidateState.Pending, ct);
@@ -85,7 +86,8 @@ public sealed class ProblemReportClosureCandidateService(AeroLinkDbContext db)
         db.ProblemReportRevisions.Add(new ProblemReportRevision(report.Id, report.Revision,
             "ClosureVerificationInvalidatedByChange", actor, report.CanonicalHash(),
             ProblemReportControlledEditingAdapter.EvidenceSnapshot(report), now,
-            detail: reason, fromState: source.ToString(), toState: target.ToString(), rationale: transitionRationale));
+            detail: reason, fromState: source.ToString(), toState: target.ToString(), rationale: transitionRationale,
+            actorDisplayName: actorDisplayName));
         return candidate;
     }
 

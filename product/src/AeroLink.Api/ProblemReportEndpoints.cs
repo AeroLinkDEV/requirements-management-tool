@@ -408,7 +408,7 @@ public static class ProblemReportEndpoints
                 fromState: fromState, toState: targetState, rationale: relationshipRationale, actorDisplayName: actor.DisplayName);
             if (wasAwaitingClosure)
                 await new ProblemReportClosureCandidateService(db).InvalidatePendingAsync(report, actor.UserName,
-                    "TargetBuildChanged", now, ct, fromState, targetState, relationshipRationale);
+                    "TargetBuildChanged", now, ct, fromState, targetState, relationshipRationale, actorDisplayName: actor.DisplayName);
             await db.SaveChangesAsync(ct);
             return Results.Ok(new { id = report.Id, displayNumber = report.DisplayNumber, state = ProblemReportTransitionPolicy.Canonical(report.State).ToString(), version = report.Version, snapshotHash = report.CanonicalHash() });
         }
@@ -671,7 +671,7 @@ public static class ProblemReportEndpoints
                     fromState: fromState, toState: toState, rationale: rationale, actorDisplayName: actor.DisplayName);
                 if (invalidated)
                     await new ProblemReportClosureCandidateService(db).InvalidatePendingAsync(subject, actor.UserName,
-                        "RelatedProblemReportLinked", now, ct, fromState, toState, rationale);
+                        "RelatedProblemReportLinked", now, ct, fromState, toState, rationale, actorDisplayName: actor.DisplayName);
             }
             await db.SaveChangesAsync(ct);
             await transaction.CommitAsync(ct);
@@ -718,7 +718,7 @@ public static class ProblemReportEndpoints
                     fromState: fromState, toState: toState, rationale: rationale, actorDisplayName: actor.DisplayName);
                 if (invalidated)
                     await new ProblemReportClosureCandidateService(db).InvalidatePendingAsync(subject, actor.UserName,
-                        "RelatedProblemReportUnlinked", now, ct, fromState, toState, rationale);
+                        "RelatedProblemReportUnlinked", now, ct, fromState, toState, rationale, actorDisplayName: actor.DisplayName);
             }
             await db.SaveChangesAsync(ct);
             await transaction.CommitAsync(ct);
@@ -755,7 +755,7 @@ public static class ProblemReportEndpoints
                 fromState: fromState, toState: targetState, rationale: relationshipRationale, actorDisplayName: actor.DisplayName);
             if (wasAwaitingClosure)
                 await new ProblemReportClosureCandidateService(db).InvalidatePendingAsync(report, actor.UserName,
-                    "ContextArtifactLinked", now, ct, fromState, targetState, relationshipRationale);
+                    "ContextArtifactLinked", now, ct, fromState, targetState, relationshipRationale, actorDisplayName: actor.DisplayName);
             await db.SaveChangesAsync(ct); return Results.Created($"/api/problem-reports/{id}/links/{request.ArtifactId}", new { artifactType = canonicalType, request.ArtifactId, relationship, version = report.Version });
         }
         catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
@@ -825,7 +825,7 @@ public static class ProblemReportEndpoints
                 fromState, toState, transitionRationale, actorDisplayName: actor.DisplayName);
             if (wasAwaitingClosure && report.ResolutionVerificationExecutionId is null)
                 await new ProblemReportClosureCandidateService(db).InvalidatePendingAsync(report, actor.UserName,
-                    eventType, now, ct, fromState, toState, transitionRationale);
+                    eventType, now, ct, fromState, toState, transitionRationale, actorDisplayName: actor.DisplayName);
             if (afterMutation is not null) await afterMutation(report, actor, now, createdLink, revision, ct);
             await db.SaveChangesAsync(ct); return Results.Ok(new { id = report.Id, displayNumber = report.DisplayNumber, state = ProblemReportTransitionPolicy.Canonical(report.State).ToString(), version = report.Version, snapshotHash = report.CanonicalHash() });
         }
