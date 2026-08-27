@@ -323,7 +323,6 @@
         "ProblemReportActiveMetricApiTests",
         "ProblemReportApiTests",
         "ProblemReportCheckoutApiTests",
-        "ProblemReportHistoricalIdentityApiTests",
         "ProblemReportOwnerAuthorityApiTests",
         "ProblemReportPagingApiTests",
         "ProblemReportVerificationApiTests",

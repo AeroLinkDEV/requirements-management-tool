@@ -16,6 +16,11 @@ namespace AeroLink.Infrastructure.Persistence.Migrations
     ///
     /// The column sits beside the evidence snapshot rather than inside it, so every historical
     /// <c>SnapshotHash</c> continues to recompute exactly as it was written.
+    ///
+    /// Regenerated after #824 landed <c>AddProjectLeadership</c>. The first scaffold carried an earlier
+    /// timestamp than that migration, so it would have sorted before one already applied elsewhere while
+    /// running after it, and its snapshot had never seen the project-leadership model. Re-scaffolding gives
+    /// it a later timestamp and a snapshot of the merged model. The two touch no common table.
     /// </summary>
     public partial class AddProblemReportRevisionActorDisplayName : Migration
     {
