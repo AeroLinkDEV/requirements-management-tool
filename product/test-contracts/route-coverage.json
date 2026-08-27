@@ -90,6 +90,14 @@
     },
     {
       "method": "DELETE",
+      "path": "/api/projects/{projectId:guid}/leadership/{position}/backup",
+      "file": "ProjectLeadershipEndpoints.cs",
+      "coveredBy": [
+        "ProjectLeadershipApiTests"
+      ]
+    },
+    {
+      "method": "DELETE",
       "path": "/api/projects/{projectId:guid}/personnel/{userId:guid}/roles/{role}",
       "file": "PersonnelEndpoints.cs",
       "coveredBy": [
@@ -332,6 +340,7 @@
         "ProductionRoutingTests",
         "ProgramRoleAuthorityApiTests",
         "ProjectConfigurationApiTests",
+        "ProjectLeadershipApiTests",
         "ProjectPersonnelApiTests",
         "RebaseRequirementChangeTests",
         "ReleaseCampaignExactIntentApiTests",
@@ -1678,9 +1687,26 @@
     },
     {
       "method": "POST",
+      "path": "/api/projects/{projectId:guid}/leadership/{position}/backup",
+      "file": "ProjectLeadershipEndpoints.cs",
+      "coveredBy": [
+        "ProjectLeadershipApiTests"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/projects/{projectId:guid}/leadership/{position}/primary",
+      "file": "ProjectLeadershipEndpoints.cs",
+      "coveredBy": [
+        "ProjectLeadershipApiTests"
+      ]
+    },
+    {
+      "method": "POST",
       "path": "/api/projects/{projectId:guid}/personnel",
       "file": "PersonnelEndpoints.cs",
       "coveredBy": [
+        "ProjectLeadershipApiTests",
         "ProjectPersonnelApiTests"
       ]
     },
@@ -2358,6 +2384,14 @@
         "ProcedureTestChangeControlApiTests",
         "ProjectConfigurationApiTests",
         "VerificationVocabularyApiTests"
+      ]
+    },
+    {
+      "method": "PUT",
+      "path": "/api/projects/{projectId:guid}/leadership/{position}/backup",
+      "file": "ProjectLeadershipEndpoints.cs",
+      "coveredBy": [
+        "ProjectLeadershipApiTests"
       ]
     },
     {

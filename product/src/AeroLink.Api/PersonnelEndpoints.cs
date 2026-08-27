@@ -123,6 +123,10 @@ public static class PersonnelEndpoints
             // with the global account, so nobody can promote themselves out of the authority they were given.
             if (request.Role == ProgramRole.Administrator && !actor.IsAdministrator)
                 return Results.Forbid();
+            // #816: ProjectEngineeringLead is retired. Historical rows stay readable, but no new grant may
+            // resurrect a parallel accountability the Project Engineer leadership position now owns.
+            if (request.Role == ProgramRole.ProjectEngineeringLead)
+                return Results.Conflict(new { error = "Project Engineering Lead is retired. Assign the Project Engineer leadership position instead." });
             var programId = await ProgramOfAsync(db, projectId, ct);
             if (programId is null) return Results.NotFound();
             if (!await db.UserAccounts.AnyAsync(x => x.Id == request.UserId && x.State == AccountState.Active, ct))

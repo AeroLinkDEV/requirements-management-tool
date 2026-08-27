@@ -113,6 +113,9 @@ await using (var scope = app.Services.CreateAsyncScope())
     if (!restoreValidationReadOnly && db.Database.IsNpgsql())
     {
         await scope.ServiceProvider.GetRequiredService<SoftwareVerificationCaseMigrationAuthority>().EnsureCompletedAsync();
+        // #816: legacy singular memberships become the first Project Leadership assignments, with the
+        // fail-closed Project Engineer / Project Engineering Lead conflict check this authority owns.
+        await scope.ServiceProvider.GetRequiredService<ProjectLeadershipMigrationAuthority>().EnsureCompletedAsync();
         await scope.ServiceProvider.GetRequiredService<TestChangeRequestPrefixMigrationAuthority>().EnsureCompletedAsync();
         // #726 is the last delivery slice: only after every execution consumer is routed through the
         // effective-executable resolver does the governed authority activate the software Procedure tier.
@@ -345,6 +348,7 @@ app.MapManagedDocumentEndpoints();
 app.MapEditSessionEndpoints();
 app.MapAdministrationEndpoints();
 app.MapPersonnelEndpoints();
+app.MapProjectLeadershipEndpoints();
 app.MapApprovalConfigurationEndpoints();
 app.MapTestProcedureDocumentEndpoints();
 

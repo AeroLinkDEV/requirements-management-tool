@@ -1,11 +1,11 @@
 {
   "schemaVersion": "aerolink-api-test-intent/v2",
   "totals": {
-    "tests": 618,
-    "cases": 676,
-    "classes": 106,
-    "hostedTests": 599,
-    "hostedCases": 648,
+    "tests": 624,
+    "cases": 682,
+    "classes": 107,
+    "hostedTests": 605,
+    "hostedCases": 654,
     "nonHostedTests": 14,
     "nonHostedCases": 23,
     "unknownHostTests": 5,
@@ -21,18 +21,18 @@
     "http-boundary": {
       "label": "HTTP boundary: route, status, JSON shape",
       "level": "API (must stay hosted)",
-      "tests": 383,
-      "cases": 417,
+      "tests": 388,
+      "cases": 422,
       "unknownCases": 0,
-      "classes": 87
+      "classes": 88
     },
     "ef-translation": {
       "label": "EF translation / relational constraints",
       "level": "Infrastructure (needs a database, not a host)",
-      "tests": 131,
-      "cases": 142,
+      "tests": 132,
+      "cases": 143,
       "unknownCases": 0,
-      "classes": 50
+      "classes": 51
     },
     "auth-policy": {
       "label": "Authentication / authorization wiring",
@@ -6741,6 +6741,114 @@
       "sourceLines": {
         "start": 260,
         "end": 330
+      }
+    },
+    {
+      "cls": "ProjectLeadershipApiTests",
+      "test": "A_replacement_is_atomic_and_the_previous_holder_loses_the_authority",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "shared-host-fixture",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 102,
+        "end": 123
+      }
+    },
+    {
+      "cls": "ProjectLeadershipApiTests",
+      "test": "A_standing_backup_answers_the_same_demands_until_the_designation_is_removed",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "shared-host-fixture",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 125,
+        "end": 159
+      }
+    },
+    {
+      "cls": "ProjectLeadershipApiTests",
+      "test": "Assignment_requires_the_base_role_and_activation_grants_the_leadership_authority",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "shared-host-fixture",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 79,
+        "end": 100
+      }
+    },
+    {
+      "cls": "ProjectLeadershipApiTests",
+      "test": "Promoting_the_backup_ends_the_designation_atomically",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "shared-host-fixture",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 161,
+        "end": 184
+      }
+    },
+    {
+      "cls": "ProjectLeadershipApiTests",
+      "test": "The_project_engineer_position_carries_the_retired_leads_review_authority",
+      "kind": "Fact",
+      "intent": "ef-translation",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "shared-host-fixture",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 199,
+        "end": 234
+      }
+    },
+    {
+      "cls": "ProjectLeadershipApiTests",
+      "test": "The_retired_project_engineering_lead_cannot_be_newly_granted",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "shared-host-fixture",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 186,
+        "end": 197
       }
     },
     {
