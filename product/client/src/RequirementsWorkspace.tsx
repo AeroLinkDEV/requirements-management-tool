@@ -1051,7 +1051,7 @@ export default function RequirementsWorkspace({
               </span>
             </div>
             <div className="confidence">
-              <i /> Permission-aware · Live index
+              <i /> Live counts · respects your access
             </div>
           </div>
           {!data && loading ? (
