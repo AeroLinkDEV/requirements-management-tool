@@ -211,6 +211,7 @@ test('register keeps rows readable and stacks the inspector at a supported 1280p
   const table = page.locator('.registerInspectorLayout > .historyTable')
   const inspector = page.locator('.registerInspectorLayout > .requirementInspector')
   await expect(inspector).toBeVisible()
+  await expect(page.getByRole('link', { name: 'Open change request →' })).toBeVisible()
   const columns = await layout.evaluate(element => getComputedStyle(element).gridTemplateColumns.trim().split(/\s+/))
   expect(columns).toHaveLength(1)
   const rowBox = await row.boundingBox()

@@ -90,10 +90,9 @@ test('verification register selection is a stable URL state through refresh and 
   await expect(assessmentHeading).toBeVisible({ timeout: 30_000 })
   await expect(register).toBeVisible({ timeout: 30_000 })
   await expect(page.getByText('Loading assessments…', { exact: true })).toHaveCount(0, { timeout: 30_000 })
-  // The verification workspace owns this queue and does not expose the requirements queue's loading marker;
-  // wait for its data-backed empty/result state before measuring document coordinates.
-  await expect(page.locator('.downstreamAssessment').first().or(page.locator('.coverageEmpty')))
-    .toBeVisible({ timeout: 30_000 })
+  // This seeded system build has a real assessment queue. Wait for the successful response to materialize
+  // before measuring document coordinates; the synchronous loading placeholder is not a stable layout.
+  await expect(page.locator('.downstreamAssessment').first()).toBeVisible({ timeout: 30_000 })
   const beforeAssessment = await documentBox(assessmentHeading)
   const beforeRegister = await documentBox(register)
   await row.click()

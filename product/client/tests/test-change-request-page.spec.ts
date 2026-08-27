@@ -254,6 +254,7 @@ test('the controlled publication is offered from the package', async ({ page }) 
   await login(page)
   await openRegister(page)
   await page.locator('[data-register-row]').first().click()
+  await page.getByRole('link', { name: 'Open change request →' }).click()
   await expect(page.getByText(/TEST CHANGE CONTROL \//)).toBeVisible({ timeout: 30_000 })
 
   // An approver reading a package outside the product needed the document a change request has always had.
@@ -275,6 +276,7 @@ test('a draft package can be put away and taken back off the shelf', async ({ pa
   const row = page.locator('[data-register-row]').first()
   await expect(row).toBeVisible({ timeout: 30_000 })
   await row.click()
+  await page.getByRole('link', { name: 'Open change request →' }).click()
   await expect(page.getByText(/TEST CHANGE CONTROL \//)).toBeVisible({ timeout: 30_000 })
 
   page.once('dialog', dialog => dialog.accept('Dropped from this build.'))
