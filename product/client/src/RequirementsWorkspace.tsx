@@ -154,6 +154,29 @@ type Impact = {
   documents: ImpactItem[];
   activeChanges: (ImpactItem & { kind?: string; proposedRevision?: number })[];
 };
+type ProposalOption = {
+  id: string;
+  baseNumber: string;
+  revision: number;
+  displayNumber: string;
+  title: string;
+  state: string;
+  targetReleaseId: string;
+  type: string;
+  softwareLevel?: string | null;
+  version: number;
+  requirementCount: number;
+  eligible: boolean;
+  existingProposalId?: string | null;
+  reason?: string | null;
+  heldBy?: string | null;
+  heldByCurrentUser?: boolean;
+};
+type ProposalOptions = {
+  requirement: { id: string; baseNumber: string; level: string; revisionId: string; revision: number; displayNumber: string };
+  targetRelease: { id: string; version: string; isReleased: boolean };
+  drafts: ProposalOption[];
+};
 type Comment = {
   id: string;
   parentCommentId?: string;
@@ -183,7 +206,7 @@ type Props = {
   initialRevisionId?: string;
   onBack: () => void;
   /** The owning build travels with the identifier so a change request opens in its own context. */
-  onOpenScr: (id: string, owningReleaseId?: string | null) => void;
+  onOpenScr: (id: string, owningReleaseId?: string | null, proposalId?: string) => void;
   onProposeChange: (requirementId: string, level?: Requirement["level"]) => void;
   onOpenRequirement: (id: string) => void;
   onCloseRequirement: () => void;
@@ -218,6 +241,8 @@ export default function RequirementsWorkspace({
 }: Props) {
   const appliedInitialView = useRef(false);
   const autoSelected = useRef(false);
+  const proposalTrigger = useRef<HTMLButtonElement>(null);
+  const proposalSearchInput = useRef<HTMLInputElement>(null);
   const loadGeneration = useRef(0);
   // Inspector fetches answer for one requirement, and a slower earlier read must never replace a newer
   // one: open() assigns the selected requirement before its responses arrive, so the comment form can be
@@ -267,7 +292,13 @@ export default function RequirementsWorkspace({
       verificationChanged: boolean;
       fromVerification: string;
       toVerification: string;
-    }>();
+    }>(),
+    [proposalTarget, setProposalTarget] = useState<Requirement>(),
+    [proposalSearch, setProposalSearch] = useState(""),
+    [proposalOptions, setProposalOptions] = useState<ProposalOptions>(),
+    [proposalLoading, setProposalLoading] = useState(false),
+    [proposalSaving, setProposalSaving] = useState(false),
+    [proposalError, setProposalError] = useState("");
   useEffect(() => {
     autoSelected.current = false;
     setLevel(scope);
@@ -277,6 +308,31 @@ export default function RequirementsWorkspace({
     setSelected(undefined);
     setDeepLinkMissing(false);
   }, [scope]);
+  useEffect(() => {
+    if (!proposalTarget || !release) return;
+    let cancelled = false;
+    setProposalLoading(true);
+    setProposalError("");
+    const query = new URLSearchParams({ targetReleaseId: release.id });
+    if (proposalSearch.trim()) query.set("search", proposalSearch.trim());
+    fetch(`${api}/api/enterprise-requirements/${proposalTarget.id}/propose-options?${query}`)
+      .then(async (response) => {
+        if (!response.ok) {
+          const body = (await response.json().catch(() => ({}))) as { error?: string };
+          throw new Error(body.error || "Eligible change requests could not be loaded.");
+        }
+        return response.json() as Promise<ProposalOptions>;
+      })
+      .then((value) => { if (!cancelled) setProposalOptions(value); })
+      .catch((reason: unknown) => {
+        if (!cancelled) setProposalError(reason instanceof Error ? reason.message : "Eligible change requests could not be loaded.");
+      })
+      .finally(() => { if (!cancelled) setProposalLoading(false); });
+    return () => { cancelled = true; };
+  }, [api, proposalSearch, proposalTarget, release]);
+  useEffect(() => {
+    if (proposalTarget) requestAnimationFrame(() => proposalSearchInput.current?.focus());
+  }, [proposalTarget]);
   const params = useMemo(() => {
     const p = new URLSearchParams({
       projectId,
@@ -749,6 +805,47 @@ export default function RequirementsWorkspace({
         target.type === "SwrdHighLevel"
           ? ladderAllows(ladder, "HighLevel", LadderCapability.RequirementsDocument)
           : ladderAllows(ladder, "LowLevel", LadderCapability.RequirementsDocument));
+  const addToExistingDraft = async (draft: ProposalOption) => {
+    if (!proposalTarget || !release || !proposalOptions) return;
+    if (draft.existingProposalId) {
+      setProposalTarget(undefined);
+      setProposalOptions(undefined);
+      setProposalError("");
+      onOpenScr(draft.id, release.id, draft.existingProposalId);
+      return;
+    }
+    setProposalSaving(true);
+    setProposalError("");
+    try {
+      const result = await apiRequest<{ id: string; proposalId: string; duplicate?: boolean }>(
+        `${api}/api/enterprise-requirements/${proposalTarget.id}/propose`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            targetReleaseId: release.id,
+            kind: "Modify",
+            existingScrId: draft.id,
+            requirementRevisionId: proposalOptions.requirement.revisionId,
+            expectedVersion: draft.version,
+          }),
+        },
+      );
+      setProposalTarget(undefined);
+      setProposalOptions(undefined);
+      onOpenScr(result.id, release.id, result.proposalId);
+    } catch (reason) {
+      recordClientOperationFailure("enterprise.requirement.propose-existing", reason);
+      setProposalError(operationError(reason, "The Draft could not accept this requirement. Refresh and try again."));
+      setProposalSaving(false);
+    }
+  };
+  const closeProposalChooser = () => {
+    setProposalTarget(undefined);
+    setProposalOptions(undefined);
+    setProposalError("");
+    requestAnimationFrame(() => proposalTrigger.current?.focus());
+  };
   return (
     <main className="reqWorkspace">
       <ControlledArtifactExplorerHeader
@@ -1284,7 +1381,7 @@ export default function RequirementsWorkspace({
               <div className="inspectorBody">
                 {release?.isReleased
                   ? <p className="changeBoundaryNote"><b>Read-only historical record — Build {release.version}</b><br/>Exit this workspace and select an in-work build to propose a change.</p>
-                  : <><button className="impactLaunch" onClick={() => onProposeChange(selected.id, selected.level)}>Propose controlled change →</button><p className="changeBoundaryNote">Opens a new Draft change request in Changes. This authoritative revision remains unchanged.</p></>}
+                  : <><button ref={proposalTrigger} className="impactLaunch" onClick={() => setProposalTarget(selected)}>Propose controlled change →</button><p className="changeBoundaryNote">Choose a new Draft change request or add a Modify proposal to an existing eligible Draft. This authoritative revision remains unchanged.</p></>}
                 <h3>Requirement statement</h3>
                 <div className="richRequirement">{selected.statement}</div>
                 <dl>
@@ -1438,6 +1535,92 @@ export default function RequirementsWorkspace({
           </ControlledArtifactInspector>
         )}
       </ControlledArtifactExplorerLayout>
+      {proposalTarget && (
+        <div
+          className="reqModal proposalModal"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="proposalModalTitle"
+          onKeyDown={(event) => {
+            if (event.key === "Escape" && !proposalSaving) {
+              closeProposalChooser();
+            }
+          }}
+        >
+          <div>
+            <button
+              type="button"
+              className="modalClose"
+              aria-label="Close change proposal chooser"
+              disabled={proposalSaving}
+              onClick={closeProposalChooser}
+            >
+              ×
+            </button>
+            <p className="eyebrow">CONTROLLED CHANGE / REQUIREMENT {proposalTarget.displayNumber}</p>
+            <h2 id="proposalModalTitle">Choose a change request</h2>
+            <p>
+              Start a new Draft, or add a Modify proposal to an eligible Draft. The authoritative requirement
+              revision remains unchanged.
+            </p>
+            <button
+              type="button"
+              className="impactLaunch proposalNew"
+              disabled={proposalSaving}
+              onClick={() => {
+                closeProposalChooser();
+                onProposeChange(proposalTarget.id, proposalTarget.level);
+              }}
+            >
+              Start a new Draft change request →
+            </button>
+            <label className="proposalSearch">
+              <span>Find an existing Draft</span>
+              <input
+                type="search"
+                ref={proposalSearchInput}
+                value={proposalSearch}
+                aria-label="Search existing Draft change requests"
+                placeholder="Search by number or title"
+                onChange={(event) => setProposalSearch(event.target.value)}
+                disabled={proposalSaving}
+              />
+            </label>
+            {proposalLoading && <p className="proposalStatus" role="status">Checking eligible Drafts…</p>}
+            {proposalError && <p className="proposalError" role="alert">{proposalError}</p>}
+            {!proposalLoading && !proposalError && !release && (
+              <p className="proposalStatus">Select an in-work build before adding a proposal to an existing Draft.</p>
+            )}
+            {!proposalLoading && !proposalError && release && proposalOptions && (
+              <>
+                <p className="proposalSource">
+                  Exact source: <b>{proposalOptions.requirement.displayNumber}</b> in Build {proposalOptions.targetRelease.version}
+                </p>
+                <div className="proposalOptions" aria-label="Existing Draft change requests">
+                  {proposalOptions.drafts.length === 0 ? (
+                    <p className="proposalStatus">No matching Drafts were found.</p>
+                  ) : proposalOptions.drafts.map((draft) => (
+                    <article key={draft.id} className={draft.eligible ? "proposalOption eligible" : "proposalOption"}>
+                      <div>
+                        <b>{draft.displayNumber}</b>
+                        <span>{draft.title} · {draft.requirementCount} requirement{draft.requirementCount === 1 ? "" : "s"}</span>
+                      </div>
+                      <small>{draft.eligible ? "Eligible Draft" : draft.reason}</small>
+                      <button
+                        type="button"
+                        disabled={(!draft.eligible && !draft.existingProposalId) || proposalSaving}
+                        onClick={() => void addToExistingDraft(draft)}
+                      >
+                        {proposalSaving ? "Opening…" : draft.existingProposalId ? "Open existing proposal →" : "Add Modify proposal →"}
+                      </button>
+                    </article>
+                  ))}
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      )}
       {showSave && (
         <div className="reqModal">
           <form onSubmit={saveView}>

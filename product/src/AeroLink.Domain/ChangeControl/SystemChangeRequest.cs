@@ -346,7 +346,12 @@ public sealed class SystemChangeRequest
             richText, attributesJson, impactDispositionJson, targetSectionId, proposedUpstreamRevisionIdsJson);
         _requirementChanges.Add(change);
         SnapshotContractVersion = CurrentSnapshotContractVersion;
+        // Requirement proposals are aggregate mutations, including when an existing Draft is extended from
+        // the Requirements Explorer. Advancing the optimistic-concurrency version here makes two concurrent
+        // proposal additions a real one-winner operation instead of allowing both callers to pass the same
+        // expected version and silently overwrite each other's intent.
         UpdatedAt = now;
+        Version++;
         Audit("RequirementChangeAdded", actorId,
             $"Added {change.Kind} {(string.IsNullOrWhiteSpace(change.DisplayNumber) ? "for a requirement not yet chosen" : change.DisplayNumber)}" +
             (RequirementAuthoringJson.IsDerived(change.AttributesJson) ? " as a derived requirement with a documented rationale." : "."), now);

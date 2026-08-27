@@ -209,6 +209,10 @@
   border: 1px solid #dfe6eb;
   border-radius: 8px;
 }
+.requirementView:focus-visible {
+  outline: 3px solid #3b75cd;
+  outline-offset: 2px;
+}
 
 button.requirementView.artifactReferenceCard {
   display: block;

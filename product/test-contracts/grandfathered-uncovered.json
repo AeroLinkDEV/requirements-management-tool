@@ -41,7 +41,6 @@
     "POST /api/enterprise-requirements/specifications/{}/sections",
     "POST /api/enterprise-requirements/{}/assignments",
     "POST /api/enterprise-requirements/{}/comments",
-    "POST /api/enterprise-requirements/{}/propose",
     "POST /api/enterprise-requirements/{}/watch",
     "POST /api/integrations/checkpoints/{}/replay",
     "POST /api/integrations/connectors",

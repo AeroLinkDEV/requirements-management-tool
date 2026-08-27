@@ -245,6 +245,8 @@ type Props = {
   onBack: () => void;
   onChanged: () => Promise<void>;
   onOpenScr: (id: string) => void;
+  /** Exact proposal selected from the Requirements Explorer, when navigation came from that chooser. */
+  initialRequirementProposalId?: string;
   onOpenRequirement: (id: string, level: RequirementLevel) => void;
   onOpenProblemReport: (id: string) => void;
   onDisciplineResolved: (discipline: "system" | "software", changeRequestType?: "Interface") => void;
@@ -462,6 +464,7 @@ export default function ChangeRequestWorkspace({
   onBack,
   onChanged,
   onOpenScr,
+  initialRequirementProposalId,
   onOpenRequirement,
   onOpenProblemReport,
   onDisciplineResolved,
@@ -575,6 +578,14 @@ export default function ChangeRequestWorkspace({
   useEffect(() => {
     void load();
   }, [load]);
+
+  useEffect(() => {
+    if (!scr || !initialRequirementProposalId) return;
+    const proposal = document.getElementById(`requirement-proposal-${initialRequirementProposalId}`);
+    if (!proposal) return;
+    proposal.scrollIntoView({ block: "center" });
+    (proposal as HTMLElement).focus({ preventScroll: true });
+  }, [initialRequirementProposalId, scr]);
 
   useEffect(() => {
     if (!scr) return;
@@ -1653,7 +1664,7 @@ export default function ChangeRequestWorkspace({
               <div className="workspaceTitle"><div><h2>Requirement impact</h2><p>{scr.requirementChanges.length} proposed controlled change{scr.requirementChanges.length === 1 ? "" : "s"}</p></div></div>
               {scr.requirementChanges.map((item) => {
                 return (
-                  <article className="requirementView" key={item.id}>
+                  <article className="requirementView" id={`requirement-proposal-${item.id}`} key={item.id} tabIndex={-1}>
                     <div><b>{item.displayNumber}</b><span>{changeKindLabel(item.kind)}</span></div>
                     <p>{item.kind === "Retire" && !item.statement ? "Requirement will be retired." : item.statement}</p>
                     {item.level !== "System" && (

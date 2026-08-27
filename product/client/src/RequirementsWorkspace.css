@@ -815,6 +815,20 @@ button.coverageState:hover {
   color: #4f6072 !important;
   font-size: 20px !important;
 }
+.proposalModal > div { width: min(700px, 94vw); }
+.proposalNew { width: 100%; margin: 8px 0 16px; }
+.proposalSearch { margin: 0 0 12px !important; }
+.proposalSearch span { color: #53657a; }
+.proposalSource { border-left: 3px solid #2ca17c; background: #edf8f4; padding: 9px 11px; }
+.proposalStatus { margin: 13px 0; color: #657385; }
+.proposalError { border-left: 3px solid #c45151; background: #fff1f1; padding: 9px 11px; color: #8e3030 !important; }
+.proposalOptions { display: grid; gap: 8px; max-height: 44vh; overflow: auto; }
+.proposalOption { border: 1px solid #dfe5eb; border-radius: 10px; padding: 11px; display: grid; gap: 7px; }
+.proposalOption.eligible { border-color: #a9d8c8; background: #fbfefd; }
+.proposalOption > div { display: flex; justify-content: space-between; gap: 12px; align-items: baseline; }
+.proposalOption > div b { color: #17314f; }
+.proposalOption > div span, .proposalOption small { color: #6b7888; font-size: 12px; }
+.proposalOption button { justify-self: start; }
 .importModal > div {
   width: min(850px, 94vw);
 }
