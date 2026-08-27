@@ -83,11 +83,27 @@ public sealed class ProblemReportClosureCandidateService(AeroLinkDbContext db)
         var transitionRationale = rationale?.Trim();
         if (source != target && string.IsNullOrWhiteSpace(transitionRationale))
             transitionRationale = reason;
+        // Callers that hold the authenticated session pass the name straight in. The rest — the controlled
+        // check-in engine and the link service, both of which carry the actor as a bare handle several layers
+        // up — get it read here instead, once, at the moment the event is written.
+        //
+        // Reading it here is still capture, not live resolution: the value is frozen onto the immutable row
+        // and never consulted again, so it means the same thing as the session-supplied one. What it must not
+        // become is a lookup on the *read* path, which is what would let a later rename rewrite this event.
+        var capturedName = actorDisplayName;
+        if (string.IsNullOrWhiteSpace(capturedName))
+        {
+            var handle = actor.Trim().ToLowerInvariant();
+            capturedName = await db.UserAccounts.AsNoTracking()
+                .Where(account => account.UserName == handle)
+                .Select(account => account.DisplayName)
+                .SingleOrDefaultAsync(ct);
+        }
         db.ProblemReportRevisions.Add(new ProblemReportRevision(report.Id, report.Revision,
             "ClosureVerificationInvalidatedByChange", actor, report.CanonicalHash(),
             ProblemReportControlledEditingAdapter.EvidenceSnapshot(report), now,
             detail: reason, fromState: source.ToString(), toState: target.ToString(), rationale: transitionRationale,
-            actorDisplayName: actorDisplayName));
+            actorDisplayName: capturedName));
         return candidate;
     }
 

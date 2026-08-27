@@ -224,6 +224,40 @@ public sealed class ProblemReportHistoricalIdentityApiTests
     }
 
     [Fact]
+    public async Task A_closure_invalidation_event_names_its_actor_even_without_a_session_supplied_name()
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var client = factory.CreateClient();
+        var (projectId, _) = await SeedAsync(factory);
+        var reportId = await RaiseReportAsync(factory, projectId);
+
+        // Written the way the controlled check-in engine and the link service write it: a bare handle, no
+        // session-supplied name. The service must still capture one rather than leaving the event nameless.
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            var report = await db.ProblemReports.SingleAsync(x => x.Id == reportId);
+            db.ProblemReportClosureCandidates.Add(new ProblemReportClosureCandidate(report.Id, report.Revision,
+                1, 1, report.Version, ProblemReportControlledEditingAdapter.EvidenceSnapshot(report),
+                new string('a', 64), Guid.NewGuid(), "{}", new string('b', 64), "{}", new string('c', 64),
+                new string('d', 64), EngineerHandle, DateTimeOffset.UtcNow,
+                ProblemReportEvidenceContract.SchemaVersion));
+            await db.SaveChangesAsync();
+
+            await new ProblemReportClosureCandidateService(db).InvalidatePendingAsync(report, EngineerHandle,
+                "DetailsCheckedIn", DateTimeOffset.UtcNow, CancellationToken.None);
+            await db.SaveChangesAsync();
+        }
+
+        await SignInAsync(client, EngineerHandle);
+        var invalidation = Revisions(await DetailAsync(client, reportId))
+            .Single(x => x.GetProperty("eventType").GetString() == "ClosureVerificationInvalidatedByChange");
+
+        Assert.Equal(EngineerName, invalidation.GetProperty("actorDisplayName").GetString());
+        Assert.Equal(EngineerHandle, invalidation.GetProperty("actor").GetString());
+    }
+
+    [Fact]
     public void Non_seeded_accounts_are_not_in_the_demo_registry()
     {
         // Guards the fix the issue rules out: making the demo registry bigger would make these tests pass
