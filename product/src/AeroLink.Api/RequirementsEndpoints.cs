@@ -336,9 +336,16 @@ public static class RequirementsEndpoints
                 var session = sessions.FirstOrDefault(x => x.ArtifactId == scr.Id && x.ExpiresAt > now);
                 var sameBinding = bindingValid && ladderPolicy.AcceptsChangeRequest(scr.Type, scr.SoftwareLevel, artifact.Level);
                 var duplicate = scr.RequirementChanges.Any(x => string.Equals(x.BaseNumber, artifact.BaseNumber, StringComparison.OrdinalIgnoreCase));
-                var existingProposalId = scr.RequirementChanges
-                    .Where(x => string.Equals(x.BaseNumber, artifact.BaseNumber, StringComparison.OrdinalIgnoreCase))
-                    .Select(x => (Guid?)x.Id).FirstOrDefault();
+                var existingProposal = scr.RequirementChanges.FirstOrDefault(x =>
+                    string.Equals(x.BaseNumber, artifact.BaseNumber, StringComparison.OrdinalIgnoreCase));
+                // Only advertise an open-existing action when POST would certify the same operation as an
+                // idempotent retry. A Retire proposal, or a Modify proposal based on another revision, must
+                // remain a truthful ineligible row rather than becoming a UI shortcut around POST validation.
+                var existingProposalId = existingProposal is not null
+                    && existingProposal.Kind == RequirementChangeKind.Modify
+                    && existingProposal.Revision == current.Revision + 1
+                    ? existingProposal.Id
+                    : (Guid?)null;
                 var eligible = !targetRelease.IsReleased && sameBinding && scr.TargetReleaseId == targetReleaseId
                     && scr.State == ChangeRequestState.Draft
                     && (scr.AuthorId.Equals(actor.UserName, StringComparison.OrdinalIgnoreCase) || actor.IsAdministrator)
@@ -349,6 +356,7 @@ public static class RequirementsEndpoints
                     : !sameBinding ? $"This Draft is not bound to the {artifact.Level} requirement level."
                     : scr.State != ChangeRequestState.Draft ? $"This change request is {scr.State}, not Draft."
                     : !(scr.AuthorId.Equals(actor.UserName, StringComparison.OrdinalIgnoreCase) || actor.IsAdministrator) ? "Only the Draft author or an administrator can add a proposal."
+                    : duplicate && existingProposalId is null ? "This Draft already contains a non-reopenable proposal for another change operation or requirement revision."
                     : duplicate ? "This Draft already contains the selected requirement."
                     : session is not null ? $"This Draft is checked out by {session.UserName}; finish or discard that edit before adding a proposal."
                     : "This Draft is not eligible for a requirement proposal.";

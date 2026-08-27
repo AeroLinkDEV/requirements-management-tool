@@ -99,22 +99,45 @@ test("requirements explorer chooser opens an eligible Draft and preserves keyboa
   const project = workspace.projects[0];
   const release = project.releases.find((item: { isReleased: boolean }) => !item.isReleased);
   const csrf = await (await request.get(`${apiBase}/api/auth/csrf`)).json();
-  const draftResponse = await request.post(`${apiBase}/api/change-request-drafts`, {
-    headers: { "X-AeroLink-CSRF": csrf.token },
+  const createDraft = async (title: string) => {
+    const response = await request.post(`${apiBase}/api/change-request-drafts`, {
+      headers: { "X-AeroLink-CSRF": csrf.token },
+      data: {
+        baseNumber: "",
+        projectId: project.project.id,
+        targetReleaseId: release.id,
+        title,
+        problem: "The selected requirement needs a controlled proposal.",
+        analysis: "The exact build revision and downstream impact will be assessed.",
+        solution: "Add the proposal to this Draft.",
+        requirementChanges: [],
+        type: "System",
+      },
+    });
+    expect(response.ok(), await response.text()).toBeTruthy();
+    return await response.json() as { id: string; title: string };
+  };
+  const draft = await createDraft(`Explorer chooser Draft ${Date.now()}`);
+  const retireDraft = await createDraft(`Explorer retire proposal ${Date.now()}`);
+  const requirementWorkspace = await (await request.get(
+    `${apiBase}/api/enterprise-requirements/workspace?projectId=${project.project.id}&releaseId=${release.id}&level=System&search=SYSR-000150&page=1&pageSize=25`,
+  )).json();
+  const requirement = requirementWorkspace.items.find((item: { baseNumber: string }) => item.baseNumber === "SYSR-000150");
+  const proposalOptions = await (await request.get(
+    `${apiBase}/api/enterprise-requirements/${requirement.id}/propose-options?targetReleaseId=${release.id}`,
+  )).json();
+  const retireDetail = await (await request.get(`${apiBase}/api/change-requests/${retireDraft.id}`)).json();
+  const retireProposal = await request.post(`${apiBase}/api/enterprise-requirements/${requirement.id}/propose`, {
+    headers: { "Content-Type": "application/json", "X-AeroLink-CSRF": csrf.token },
     data: {
-      baseNumber: "",
-      projectId: project.project.id,
       targetReleaseId: release.id,
-      title: `Explorer chooser Draft ${Date.now()}`,
-      problem: "The selected requirement needs a controlled proposal.",
-      analysis: "The exact build revision and downstream impact will be assessed.",
-      solution: "Add the proposal to this Draft.",
-      requirementChanges: [],
-      type: "System",
+      kind: "Retire",
+      existingScrId: retireDraft.id,
+      requirementRevisionId: proposalOptions.requirement.revisionId,
+      expectedVersion: retireDetail.version,
     },
   });
-  expect(draftResponse.ok(), await draftResponse.text()).toBeTruthy();
-  const draft = await draftResponse.json() as { id: string; title: string };
+  expect(retireProposal.ok(), await retireProposal.text()).toBeTruthy();
 
   await login(page, "admin", { openProject: false });
   await selectProgram(page, "Flight Management System Live Program");
@@ -136,6 +159,11 @@ test("requirements explorer chooser opens an eligible Draft and preserves keyboa
 
   await trigger.click();
   await expect(chooser.getByText(/Exact source:/)).toBeVisible();
+  await chooser.getByLabel("Search existing Draft change requests").fill(retireDraft.title);
+  const retireRow = chooser.locator("article").filter({ hasText: retireDraft.title });
+  await expect(retireRow).toContainText("non-reopenable");
+  await expect(retireRow.getByRole("button", { name: /Open existing proposal/ })).toHaveCount(0);
+  await expect(retireRow.getByRole("button")).toBeDisabled();
   await chooser.getByLabel("Search existing Draft change requests").fill(draft.title);
   await expect(chooser.getByText(draft.title)).toBeVisible();
   await chooser.getByRole("button", { name: /Add Modify proposal/ }).click();

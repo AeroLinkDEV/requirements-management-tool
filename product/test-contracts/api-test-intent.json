@@ -1,11 +1,11 @@
 {
   "schemaVersion": "aerolink-api-test-intent/v2",
   "totals": {
-    "tests": 629,
-    "cases": 687,
+    "tests": 630,
+    "cases": 688,
     "classes": 108,
-    "hostedTests": 610,
-    "hostedCases": 659,
+    "hostedTests": 611,
+    "hostedCases": 660,
     "nonHostedTests": 14,
     "nonHostedCases": 23,
     "unknownHostTests": 5,
@@ -21,8 +21,8 @@
     "http-boundary": {
       "label": "HTTP boundary: route, status, JSON shape",
       "level": "API (must stay hosted)",
-      "tests": 390,
-      "cases": 424,
+      "tests": 391,
+      "cases": 425,
       "unknownCases": 0,
       "classes": 89
     },
@@ -7795,6 +7795,23 @@
       "sourceLines": {
         "start": 172,
         "end": 210
+      }
+    },
+    {
+      "cls": "RequirementProposalOptionsApiTests",
+      "test": "Existing_retire_or_stale_modify_proposals_are_not_advertised_as_reopenable",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client"
+      ],
+      "sourceLines": {
+        "start": 212,
+        "end": 250
       }
     },
     {

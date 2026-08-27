@@ -209,6 +209,46 @@ public sealed class RequirementProposalOptionsApiTests
         }
     }
 
+    [Fact]
+    public async Task Existing_retire_or_stale_modify_proposals_are_not_advertised_as_reopenable()
+    {
+        foreach (var (kind, revision) in new[]
+        {
+            (RequirementChangeKind.Retire, 1),
+            (RequirementChangeKind.Modify, 7),
+        })
+        {
+            using var factory = new AeroLinkApiFactory();
+            using var client = factory.CreateClient();
+            var seeded = await SeedAsync(factory);
+            var version = await AddExistingProposalAsync(factory, seeded, kind, revision);
+            await SignInAsync(client);
+
+            using var optionsResponse = await client.GetAsync(
+                $"/api/enterprise-requirements/{seeded.RequirementId}/propose-options?targetReleaseId={seeded.ReleaseId}");
+            Assert.Equal(HttpStatusCode.OK, optionsResponse.StatusCode);
+            var options = await optionsResponse.Content.ReadFromJsonAsync<JsonElement>();
+            var row = Assert.Single(options.GetProperty("drafts").EnumerateArray(),
+                x => x.GetProperty("id").GetGuid() == seeded.DraftId);
+            Assert.False(row.GetProperty("eligible").GetBoolean());
+            Assert.True(row.GetProperty("existingProposalId").ValueKind is JsonValueKind.Null);
+            Assert.Contains("non-reopenable", row.GetProperty("reason").GetString(), StringComparison.OrdinalIgnoreCase);
+
+            using var proposal = await client.PostAsJsonAsync(
+                $"/api/enterprise-requirements/{seeded.RequirementId}/propose",
+                new
+                {
+                    targetReleaseId = seeded.ReleaseId,
+                    kind = "Modify",
+                    existingScrId = seeded.DraftId,
+                    requirementRevisionId = seeded.SelectedRevisionId,
+                    expectedVersion = version,
+                });
+            Assert.Equal(HttpStatusCode.Conflict, proposal.StatusCode);
+            Assert.Contains("duplicate_requirement_proposal", await proposal.Content.ReadAsStringAsync());
+        }
+    }
+
     private static async Task<Seeded> SeedAsync(AeroLinkApiFactory factory)
     {
         using var scope = factory.Services.CreateScope();
@@ -262,6 +302,21 @@ public sealed class RequirementProposalOptionsApiTests
             requirementRevisionId = seeded.SelectedRevisionId,
             expectedVersion = seeded.DraftVersion,
         });
+
+    private static async Task<long> AddExistingProposalAsync(AeroLinkApiFactory factory, Seeded seeded,
+        RequirementChangeKind kind, int revision)
+    {
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+        var draft = await db.SystemChangeRequests.Include(x => x.RequirementChanges)
+            .SingleAsync(x => x.Id == seeded.DraftId);
+        var now = DateTimeOffset.UtcNow;
+        draft.AddRequirementChange("proposal.author", "SYSR-078001", revision, RequirementLevel.System, kind,
+            kind == RequirementChangeKind.Retire ? "" : "A stale or non-reopenable proposal.",
+            "Existing proposal test", "Inspection", now);
+        await db.SaveChangesAsync();
+        return draft.Version;
+    }
 
     private sealed record Seeded(Guid ProjectId, Guid ReleaseId, Guid RequirementId, Guid SelectedRevisionId,
         int SelectedRevision, Guid DraftId, long DraftVersion, Guid WrongBuildDraftId);
