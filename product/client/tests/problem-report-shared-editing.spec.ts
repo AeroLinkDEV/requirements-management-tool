@@ -51,6 +51,11 @@ test('a Project member who does not own a Verifying Problem Report can still cor
     await expect(page.getByRole('heading', { name: title })).toBeVisible({ timeout: 30_000 })
   }
   await open('systems.lead')
+  // Prove the freshly opened record has settled on its true current state before acting on it. Every other
+  // transition in this journey asserts its precondition first; this one used to click straight away, so a
+  // detail view still catching up across the identity switch could race a click that fired anyway, leaving
+  // the DOM stale while the server moved on (the #793 signature).
+  await expect(page.locator('.prState')).toHaveText('Ready for SCCB', { timeout: 30_000 })
   await page.locator('.prFlow').getByRole('button', { name: 'Open →', exact: true }).click()
   await expect(page.locator('.prState')).toHaveText('Open')
   await page.locator('.prFlow').getByRole('button', { name: 'Start implementing →', exact: true }).click()
