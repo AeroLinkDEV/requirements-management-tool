@@ -299,12 +299,24 @@ public sealed class ChangeRequestUpstreamTraceApiTests : IClassFixture<SharedApi
             .Select(x => x.GetProperty("kind").GetString()).ToHashSet();
         Assert.Contains("AssessmentDerived", provenanceKinds);
         Assert.Contains("FrozenReviewEvidence", provenanceKinds);
+        var frozenBeforeReopen = Assert.Single(dualPair.GetProperty("provenance").EnumerateArray(), provenance =>
+            provenance.GetProperty("kind").GetString() == "FrozenReviewEvidence");
+        Assert.Equal("Frozen review evidence; live assessment remains present.",
+            frozenBeforeReopen.GetProperty("status").GetString());
 
         using var reopened = await client.PostAsJsonAsync(
             $"/api/downstream-assessments/{fixture.AssessmentId}/reopen",
             new { reason = "The engineering assessment is being corrected." });
         var reopenBody = await reopened.Content.ReadAsStringAsync();
         Assert.True(reopened.StatusCode == HttpStatusCode.OK, reopenBody);
+        var assessmentAfterReopen = await client.GetFromJsonAsync<JsonElement>(
+            $"/api/downstream-assessments?projectId={fixture.ProjectId}&releaseId={fixture.CurrentReleaseId}");
+        var reopening = Assert.Single(assessmentAfterReopen.EnumerateArray(), assessment =>
+                assessment.GetProperty("id").GetGuid() == fixture.AssessmentId)
+            .GetProperty("reopenings").EnumerateArray().Single();
+        var reopeningId = reopening.GetProperty("id").GetGuid();
+        Assert.Equal("The engineering assessment is being corrected.", reopening.GetProperty("reason").GetString());
+        Assert.Equal(fixture.Author, reopening.GetProperty("actorId").GetString());
         var after = await client.GetFromJsonAsync<JsonElement>(
             $"/api/change-requests/{fixture.ChildId}/upstream-candidates?limit=25");
         Assert.Empty(after.GetProperty("derivedEdges").EnumerateArray());
@@ -322,8 +334,14 @@ public sealed class ChangeRequestUpstreamTraceApiTests : IClassFixture<SharedApi
             provenance.GetProperty("kind").GetString() == "FrozenReviewEvidence");
         Assert.False(frozenEvidence.GetProperty("isLive").GetBoolean());
         Assert.Equal(fixture.AssessmentLinkId, frozenEvidence.GetProperty("sourceId").GetGuid());
-        Assert.Contains("no longer present in the live assessment", frozenEvidence.GetProperty("status").GetString(),
-            StringComparison.Ordinal);
+        Assert.Equal(reopeningId, frozenEvidence.GetProperty("reopeningId").GetGuid());
+        Assert.Equal("The engineering assessment is being corrected.",
+            frozenEvidence.GetProperty("reopeningReason").GetString());
+        Assert.Equal(fixture.Author, frozenEvidence.GetProperty("reopenedBy").GetString());
+        Assert.Equal("ChangeRequestsLinked", frozenEvidence.GetProperty("previousOutcome").GetString());
+        Assert.Equal("Open", frozenEvidence.GetProperty("previousState").GetString());
+        Assert.Equal("Frozen review evidence; assessment was reopened/corrected.",
+            frozenEvidence.GetProperty("status").GetString());
     }
 
     [Fact]

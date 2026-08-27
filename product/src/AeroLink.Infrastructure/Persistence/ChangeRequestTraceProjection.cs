@@ -35,7 +35,13 @@ public sealed record ChangeRequestTraceProvenance(
     Guid? UpstreamBuildId = null,
     string? UpstreamBuildVersion = null,
     Guid? BuildId = null,
-    string? BuildVersion = null);
+    string? BuildVersion = null,
+    Guid? ReopeningId = null,
+    string? ReopeningReason = null,
+    string? ReopenedBy = null,
+    DateTimeOffset? ReopenedAt = null,
+    string? PreviousState = null,
+    string? PreviousOutcome = null);
 
 /// <summary>
 /// A typed edge in the composed trace. Change-request pairs are folded by exact identity, so a historical
@@ -151,6 +157,7 @@ public static class ChangeRequestTraceProjection
                                  join link in db.DownstreamAssessmentChangeRequestLinks.AsNoTracking()
                                      on assessment.Id equals link.AssessmentId
                                  where assessment.ProjectId == projectId
+                                     && assessment.State != DownstreamAssessmentState.Superseded
                                  select new
                                  {
                                      assessment.Id, assessment.ReleaseId, assessment.State, assessment.Outcome,
@@ -163,12 +170,24 @@ public static class ChangeRequestTraceProjection
             && byCr.ContainsKey(x.ChildId)).ToList();
         var releases = await db.Releases.AsNoTracking().Where(x => x.ProjectId == projectId)
             .ToDictionaryAsync(x => x.Id, x => x.Version, ct);
+        var reopenings = await (from reopening in db.DownstreamAssessmentReopenings.AsNoTracking()
+                                join assessment in db.DownstreamChangeAssessments.AsNoTracking()
+                                    on reopening.AssessmentId equals assessment.Id
+                                where assessment.ProjectId == projectId
+                                select new
+                                {
+                                    reopening.Id, reopening.AssessmentId, reopening.Reason, reopening.ActorId,
+                                    reopening.OccurredAt, reopening.PreviousState, reopening.PreviousOutcome
+                                }).ToListAsync(ct);
+        var reopeningByAssessment = reopenings
+            .GroupBy(x => x.AssessmentId)
+            .ToDictionary(x => x.Key, x => x.OrderByDescending(y => y.OccurredAt).ThenBy(y => y.Id).ToList());
         var frozenCycles = await (from cycle in db.ReviewCycles.AsNoTracking()
                                   join change in db.SystemChangeRequests.AsNoTracking()
                                       on cycle.ChangeRequestId equals change.Id
                                   where change.ProjectId == projectId
                                   select new { ChangeRequestId = cycle.ChangeRequestId!.Value,
-                                      cycle.SnapshotContractVersion, cycle.SnapshotJson })
+                                      cycle.StartedAt, cycle.SnapshotContractVersion, cycle.SnapshotJson })
             .ToListAsync(ct);
 
         // A relation row is the traversal authority. Walk both directions over the exact CR identities and
@@ -196,22 +215,34 @@ public static class ChangeRequestTraceProjection
         foreach (var cycle in frozenCycles.Where(x => byCr.ContainsKey(x.ChangeRequestId)
                      && x.SnapshotContractVersion >= 3))
             foreach (var frozen in ParseFrozenTrace(cycle.SnapshotJson))
+            {
+                var reopening = frozen.AssessmentId is Guid assessmentId
+                    && reopeningByAssessment.TryGetValue(assessmentId, out var recordedReopenings)
+                    ? recordedReopenings.FirstOrDefault(x => x.OccurredAt >= cycle.StartedAt)
+                    : null;
+                var liveAssessment = frozen.AssessmentId is Guid liveAssessmentId
+                    && assessments.Any(x => x.Id == liveAssessmentId);
                 AddPair(cycle.ChangeRequestId, frozen.UpstreamId,
                     new(frozen.Kind, frozen.SourceId,
                         frozen.AssessmentId, frozen.AssessmentLinkId, IsLive: false,
                         Status: frozen.Kind == "FrozenReviewEvidence"
-                            ? frozen.AssessmentId is not null
-                                && assessments.Any(x => x.Id == frozen.AssessmentId.Value
-                                    && x.State != DownstreamAssessmentState.Superseded)
-                                ? "Frozen review evidence; live assessment remains present."
-                                : "Frozen review evidence; no longer present in the live assessment (reopened/corrected)."
+                            ? reopening is not null
+                                ? "Frozen review evidence; assessment was reopened/corrected."
+                                : liveAssessment
+                                    ? "Frozen review evidence; live assessment remains present."
+                                    : "Frozen review evidence retained; no reopening record is present."
                             : authored.Any(x => x.Id == frozen.SourceId)
                                 ? "Frozen author-stated evidence; live authored link remains present."
                                 : "Frozen author-stated evidence; live authored link was removed or replaced.",
                         Rationale: frozen.Rationale, ActorId: frozen.ActorId, StatedAt: frozen.StatedAt,
                         UpstreamBuildId: frozen.UpstreamBuildId, UpstreamBuildVersion: frozen.UpstreamBuildVersion,
                         BuildId: frozen.BuildId,
-                        BuildVersion: frozen.BuildId is Guid buildId ? releases.GetValueOrDefault(buildId) : null));
+                        BuildVersion: frozen.BuildId is Guid buildId ? releases.GetValueOrDefault(buildId) : null,
+                        ReopeningId: reopening?.Id, ReopeningReason: reopening?.Reason,
+                        ReopenedBy: reopening?.ActorId, ReopenedAt: reopening?.OccurredAt,
+                        PreviousState: reopening?.PreviousState.ToString(),
+                        PreviousOutcome: reopening?.PreviousOutcome.ToString()));
+            }
 
         var nodes = new Dictionary<(string Kind, Guid Id), ChangeRequestTraceNode>();
         foreach (var id in byCr.Keys.OrderBy(x => x))
