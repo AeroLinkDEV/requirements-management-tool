@@ -1584,7 +1584,9 @@ export default function ChangeRequestWorkspace({
                 </article>)}
               </div> : scr.noUpstream ? <div className="snapshotNote"><b>No direct upstream change request</b><p>{scr.noUpstream.rationale}</p><small>Stated by <PersonName userName={scr.noUpstream.actor} /> · {new Date(scr.noUpstream.statedAt).toLocaleString()}</small></div>
                 : upstreamCandidatesTop ? <div className="snapshotNote"><b>Top of ladder</b><p>No upstream change request applies under this Project's effective ladder.</p></div>
-                : <p className="muted">No authored upstream answer is recorded; this is a historical record from before trace authoring.</p>}
+                : scr.state === "Draft"
+                  ? <p className="muted">No upstream answer has been authored yet. Complete it before review.</p>
+                  : <p className="muted">No authored upstream answer is recorded; this is a historical record from before trace authoring.</p>}
               {scr.inheritedUpstream && <div className="snapshotNote"><b>Revision context</b><p>Inherited from {scr.inheritedUpstream.inheritedFromChangeRequestId ?? "the predecessor revision"}; {scr.inheritedUpstream.affirmed ? "affirmed" : "not yet affirmed"}.</p></div>}
               {(scr.upstreamHistory ?? []).length > 0 && <details className="traceHistory"><summary>Answer history ({scr.upstreamHistory!.length})</summary>
                 {scr.upstreamHistory!.map((entry) => <div className="auditRow" key={entry.id}><i /><div><b>{entry.action}</b><p>{entry.upstreamDisplayNumber ?? "No-upstream answer"}{entry.upstreamBuildVersion ? ` · upstream build ${entry.upstreamBuildVersion}` : ""}{entry.rationale ? ` · ${entry.rationale}` : ""}</p><small><PersonName userName={entry.actor} /> · {new Date(entry.occurredAt).toLocaleString()}</small></div></div>)}

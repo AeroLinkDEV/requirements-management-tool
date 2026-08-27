@@ -76,6 +76,8 @@ test('Software Draft keeps downstream impact with consuming engineers before an 
   await expect(page.getByRole('heading',{name:'Control software authoring readiness'})).toBeVisible()
   await expect(page.getByRole('button',{name:'Configure & Submit Review'})).toHaveCount(0)
   await expect(page.getByText('Draft needs authoring')).toBeVisible()
+  await expect(page.getByText('No upstream answer has been authored yet. Complete it before review.', { exact: true })).toBeVisible()
+  await expect(page.getByText('No authored upstream answer is recorded; this is a historical record from before trace authoring.', { exact: true })).toHaveCount(0)
   await page.getByRole('button',{name:'Check out & edit'}).click()
   await expect(page.getByRole('button',{name:'Modify existing HLR'})).toBeVisible()
   await expect(page.getByRole('button',{name:'Retire existing HLR'})).toBeVisible()

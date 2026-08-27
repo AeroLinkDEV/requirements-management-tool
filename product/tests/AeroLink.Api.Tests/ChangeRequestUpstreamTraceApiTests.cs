@@ -134,6 +134,50 @@ public sealed class ChangeRequestUpstreamTraceApiTests : IClassFixture<SharedApi
         using var client = _host.CreateClient();
         await SignInAsync(client, fixture.Author);
 
+        Guid parentId;
+        using (var scope = _host.Factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            var parent = new SystemChangeRequest("SRCR-78606", 0, fixture.ProjectId, fixture.CurrentReleaseId,
+                "Draft upstream parent", "Problem", "Analysis", "Solution", fixture.Author,
+                DateTimeOffset.UtcNow);
+            db.Add(parent);
+            await db.SaveChangesAsync();
+            parentId = parent.Id;
+        }
+
+        var parentCheckout = await CheckoutAsync(client, fixture.ChildId);
+        parentCheckout.Draft["upstreamLinks"] = new JsonArray(new JsonObject
+        {
+            ["upstreamChangeRequestId"] = parentId,
+            ["rationale"] = "The same-build Draft parent controls this downstream work.",
+        });
+        parentCheckout.Draft["noUpstreamRationale"] = null;
+        var parentSessionVersion = await AutosaveAsync(client, parentCheckout.SessionId,
+            parentCheckout.Version, parentCheckout.Draft);
+        using (var parentCheckIn = await client.PostAsJsonAsync(
+                   $"/api/controlled-editing/sessions/{parentCheckout.SessionId}/check-in",
+                   new { expectedVersion = parentSessionVersion }))
+        {
+            var body = await parentCheckIn.Content.ReadAsStringAsync();
+            Assert.True(parentCheckIn.StatusCode == HttpStatusCode.OK, body);
+        }
+
+        using (var deleteParent = await client.DeleteAsync($"/api/change-requests/{parentId}"))
+        {
+            var body = await deleteParent.Content.ReadAsStringAsync();
+            Assert.Equal(HttpStatusCode.Conflict, deleteParent.StatusCode);
+            var refused = JsonSerializer.Deserialize<JsonElement>(body);
+            Assert.Equal("upstream_change_request_in_use", refused.GetProperty("code").GetString());
+            Assert.Equal(1, refused.GetProperty("referencedCount").GetInt32());
+            var downstream = Assert.Single(refused.GetProperty("referencedDownstreamChangeRequests").EnumerateArray());
+            Assert.Equal(fixture.ChildId, downstream.GetProperty("id").GetGuid());
+            Assert.Contains("Check out each referenced downstream Draft", refused.GetProperty("guidance").GetString(), StringComparison.Ordinal);
+        }
+
+        using (var parentStillExists = await client.GetAsync($"/api/change-requests/{parentId}"))
+            Assert.Equal(HttpStatusCode.OK, parentStillExists.StatusCode);
+
         var normal = await client.GetFromJsonAsync<JsonElement>(
             $"/api/change-requests/{fixture.ChildId}/upstream-candidates?limit=25");
         var normalIds = normal.GetProperty("candidates").EnumerateArray()

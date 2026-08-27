@@ -876,6 +876,30 @@ public static class ChangeRequestEndpoints
                     code = "withdraw_instead",
                 });
 
+            // A Draft can still be the authored upstream answer of another Draft. The restrictive upstream
+            // foreign key would otherwise surface as an opaque provider failure, so report the exact
+            // same-project dependants and give the author a controlled unlink/replace route first.
+            var downstream = await (from link in db.ChangeRequestUpstreamLinks.AsNoTracking()
+                                    join child in db.SystemChangeRequests.AsNoTracking()
+                                        on link.ChangeRequestId equals child.Id
+                                    where link.UpstreamChangeRequestId == scr.Id
+                                        && child.ProjectId == scr.ProjectId
+                                    select new { child.Id, child.BaseNumber, child.Revision })
+                .OrderBy(x => x.BaseNumber).ThenBy(x => x.Revision).ToListAsync(ct);
+            if (downstream.Count > 0)
+                return Results.Conflict(new
+                {
+                    error = $"{scr.DisplayNumber} is referenced by {downstream.Count} downstream change request(s). Remove or replace that upstream answer through controlled checkout and check-in before deleting this Draft.",
+                    code = "upstream_change_request_in_use",
+                    guidance = "Check out each referenced downstream Draft, remove or replace this upstream answer, check it in, then retry deletion.",
+                    referencedCount = downstream.Count,
+                    referencedDownstreamChangeRequests = downstream.Take(10).Select(x => new
+                    {
+                        id = x.Id,
+                        displayNumber = $"{x.BaseNumber}.{x.Revision:D2}",
+                    }).ToArray(),
+                });
+
             // Keep the hard-delete as one provider-side parent operation. Upstream answer history is
             // immutable to ordinary child-row writes; the database permits its removal only as part of
             // cascading an authorized Draft deletion.
