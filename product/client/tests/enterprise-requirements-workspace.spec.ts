@@ -17,6 +17,7 @@ test("requirements explorer shows truthful access-aware counts", async ({
   await expect(page.getByRole("status", {
     name: /Loading controlled requirements/,
   })).toBeHidden();
+  await expect(page.getByText("150 requirements")).toBeVisible();
   await expect(page.locator(".confidence")).toContainText("Live counts · respects your access");
 });
 
