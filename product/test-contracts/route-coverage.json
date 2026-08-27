@@ -36,6 +36,7 @@
       "path": "/api/change-requests/{id:guid}",
       "file": "ChangeRequestEndpoints.cs",
       "coveredBy": [
+        "ChangeRequestUpstreamTraceApiTests",
         "WithdrawChangeRequestApiTests"
       ]
     },
