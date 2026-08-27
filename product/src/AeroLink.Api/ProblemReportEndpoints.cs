@@ -1191,6 +1191,7 @@ public static class ProblemReportEndpoints
             .Where(item => approvedIds.Contains(item.Id) && item.ProjectId == report.ProjectId
                 && (item.State == ChangeRequestState.Approved || item.State == ChangeRequestState.SelectedForBaseline))
             .Select(item => item.Id).ToListAsync(ct)).ToHashSet();
+        var identifiers = await ResolveLinkIdentifiersAsync(materialized, db, ct);
         var result = new List<ProblemReportLinkView>();
         foreach (var link in materialized)
         {
@@ -1201,12 +1202,102 @@ public static class ProblemReportEndpoints
                     && ProblemReportRelationshipPolicy.Matches(link.Relationship, link.ArtifactType),
                 _ => false,
             };
+            var identifierType = CanonicalLinkIdentifierType(link.ArtifactType);
             result.Add(new(link.ArtifactType, link.ArtifactId,
-                await ResolveLinkIdentifierAsync(link.ArtifactType, link.ArtifactId, db, ct),
+                identifiers.TryGetValue((identifierType, link.ArtifactId), out var identifier) ? identifier : null,
                 link.Relationship, link.AddedBy, link.AddedAt, trusted));
         }
         return result;
     }
+
+    /// <summary>
+    /// Resolves all identifiers needed by one report detail projection in one query per canonical artifact
+    /// type. The returned keys retain the resolver's existing accepted aliases, while the link list itself
+    /// remains untouched so its original order, spelling and trust calculation are preserved.
+    /// </summary>
+    private static async Task<Dictionary<(string ArtifactType, Guid ArtifactId), string?>> ResolveLinkIdentifiersAsync(
+        IReadOnlyList<ProblemReportLink> links, AeroLinkDbContext db, CancellationToken ct)
+    {
+        var identifiers = new Dictionary<(string ArtifactType, Guid ArtifactId), string?>();
+        foreach (var group in links.GroupBy(link => CanonicalLinkIdentifierType(link.ArtifactType)))
+        {
+            var ids = group.Select(link => link.ArtifactId).Distinct().ToList();
+            switch (group.Key)
+            {
+                case "requirement":
+                    foreach (var item in await db.Requirements.AsNoTracking().Where(x => ids.Contains(x.Id))
+                                 .Select(x => new { x.Id, Identifier = x.BaseNumber }).ToListAsync(ct))
+                        identifiers[(group.Key, item.Id)] = item.Identifier;
+                    break;
+                case "changerequest":
+                    foreach (var item in await db.SystemChangeRequests.AsNoTracking().Where(x => ids.Contains(x.Id))
+                                 .Select(x => new { x.Id, x.BaseNumber, x.Revision }).ToListAsync(ct))
+                        identifiers[(group.Key, item.Id)] = $"{item.BaseNumber}.{item.Revision:D2}";
+                    break;
+                case "testchangerequest":
+                    foreach (var item in await db.TestChangeReviews.AsNoTracking().Where(x => ids.Contains(x.Id))
+                                 .Select(x => new { x.Id, x.BaseNumber, x.Revision }).ToListAsync(ct))
+                        identifiers[(group.Key, item.Id)] = $"{item.BaseNumber}.{item.Revision:D2}";
+                    break;
+                case "testexecution":
+                    foreach (var item in await (from execution in db.TestExecutions.AsNoTracking()
+                                                .Where(x => ids.Contains(x.Id))
+                                                join revision in db.TestProcedureRevisions.AsNoTracking()
+                                                    on execution.ProcedureRevisionId equals revision.Id
+                                                join procedure in db.TestProcedures.AsNoTracking()
+                                                    on revision.ProcedureId equals procedure.Id
+                                                select new { execution.Id, procedure.BaseNumber, revision.Revision }).ToListAsync(ct))
+                        identifiers[(group.Key, item.Id)] = $"{item.BaseNumber}.{item.Revision:D2}";
+                    break;
+                case "softwarebuild":
+                    foreach (var item in await db.SoftwareBuilds.AsNoTracking().Where(x => ids.Contains(x.Id))
+                                 .Select(x => new { x.Id, Identifier = x.BuildNumber }).ToListAsync(ct))
+                        identifiers[(group.Key, item.Id)] = item.Identifier;
+                    break;
+                case "baseline":
+                    foreach (var item in await db.CandidateBaselines.AsNoTracking().Where(x => ids.Contains(x.Id))
+                                 .Select(x => new { x.Id, x.BaseNumber, x.Revision }).ToListAsync(ct))
+                        identifiers[(group.Key, item.Id)] = $"{item.BaseNumber}.{item.Revision:D2}";
+                    break;
+                case "document":
+                    foreach (var item in await db.ControlledDocuments.AsNoTracking().Where(x => ids.Contains(x.Id))
+                                 .Select(x => new { x.Id, x.DocumentNumber, x.Revision }).ToListAsync(ct))
+                        identifiers[(group.Key, item.Id)] = $"{item.DocumentNumber}.{item.Revision:D2}";
+                    break;
+                case "evidence":
+                    foreach (var item in await db.EvidenceRecords.AsNoTracking().Where(x => ids.Contains(x.Id))
+                                 .Select(x => new { x.Id, Identifier = x.OriginalFileName }).ToListAsync(ct))
+                        identifiers[(group.Key, item.Id)] = item.Identifier;
+                    break;
+                case "release":
+                    foreach (var item in await db.Releases.AsNoTracking().Where(x => ids.Contains(x.Id))
+                                 .Select(x => new { x.Id, x.Version }).ToListAsync(ct))
+                        identifiers[(group.Key, item.Id)] = item.Version is null ? null : SoftwareBuildIdentifier.FromVersion(item.Version);
+                    break;
+                case "problemreport":
+                    foreach (var item in await db.ProblemReports.AsNoTracking().Where(x => ids.Contains(x.Id))
+                                 .Select(x => new { x.Id, x.ReportNumber, x.Revision }).ToListAsync(ct))
+                        identifiers[(group.Key, item.Id)] = $"{item.ReportNumber}.{item.Revision:D2}";
+                    break;
+            }
+        }
+        return identifiers;
+    }
+
+    private static string CanonicalLinkIdentifierType(string artifactType) => artifactType.Trim().ToLowerInvariant() switch
+    {
+        "changerequest" or "scr" or "swcr" => "changerequest",
+        "testchangerequest" or "tcr" => "testchangerequest",
+        "testexecution" => "testexecution",
+        "softwarebuild" or "build" => "softwarebuild",
+        "problemreport" or "pr" => "problemreport",
+        "requirement" => "requirement",
+        "baseline" => "baseline",
+        "document" => "document",
+        "evidence" => "evidence",
+        "release" => "release",
+        _ => artifactType.Trim().ToLowerInvariant()
+    };
 
     private static async Task<string?> ResolveLinkIdentifierAsync(
         string artifactType, Guid artifactId, AeroLinkDbContext db, CancellationToken ct)

@@ -16,6 +16,62 @@ namespace AeroLink.Api.Tests;
 public sealed class ProblemReportApiTests
 {
     [Fact]
+    public async Task Detail_batches_link_identifier_queries_by_canonical_type_and_preserves_order_and_values()
+    {
+        var commands = new ProblemReportPagingCommandInterceptor();
+        using var factory = new AeroLinkApiFactory(commandInterceptor: commands);
+        using var client = factory.CreateClient();
+        await BootstrapAndLoginAsync(client);
+
+        Guid reportId, releaseId, relatedReportId;
+        Guid[] requirementIds;
+        var now = DateTimeOffset.UtcNow;
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            var program = new ProgramRecord("Problem Report link batching", $"PRLB{Guid.NewGuid():N}"[..12]);
+            var project = new ProjectRecord(program.Id, "Flight Management Product", "Flight Management System");
+            var release = new SoftwareRelease(project.Id, "1.6", false);
+            var report = new ProblemReport(project.Id, "PR-07700", "Batched identifiers", "The link projection must stay set-wise.", "", "admin", now);
+            var relatedReport = new ProblemReport(project.Id, "PR-07701", "Related report", "A related report for identifier coverage.", "", "admin", now);
+            var requirements = Enumerable.Range(1, 24)
+                .Select(index => new RequirementArtifact(project.Id, $"SYSR-077{index:D2}", RequirementLevel.System, now.AddTicks(index)))
+                .ToArray();
+            db.AddRange(program, project, release, report, relatedReport);
+            db.AddRange(requirements);
+            db.AddRange(requirements.Select((requirement, index) => new ProblemReportLink(report.Id,
+                index % 2 == 0 ? "Requirement" : "requirement", requirement.Id,
+                "AffectedRequirement", "admin", now.AddTicks(index))));
+            db.AddRange(
+                new ProblemReportLink(report.Id, "Release", release.Id, "BuildScope", "admin", now.AddTicks(100)),
+                new ProblemReportLink(report.Id, "ProblemReport", relatedReport.Id,
+                    ProblemReportRelationshipPolicy.RelatedProblemReport, "admin", now.AddTicks(101)));
+            await db.SaveChangesAsync();
+            reportId = report.Id; releaseId = release.Id; relatedReportId = relatedReport.Id;
+            requirementIds = requirements.Select(requirement => requirement.Id).ToArray();
+        }
+
+        commands.Clear();
+        using var response = await client.GetAsync($"/api/problem-reports/{reportId}");
+        var responseText = await response.Content.ReadAsStringAsync();
+        Assert.True(response.IsSuccessStatusCode, responseText);
+        var detail = JsonDocument.Parse(responseText).RootElement;
+        var links = detail.GetProperty("links").EnumerateArray().ToArray();
+        Assert.Equal(requirementIds.Length + 2, links.Length);
+        Assert.Equal(requirementIds, links.Take(requirementIds.Length).Select(link => link.GetProperty("artifactId").GetGuid()));
+        Assert.Equal(Enumerable.Range(1, requirementIds.Length).Select(index => $"SYSR-077{index:D2}"),
+            links.Take(requirementIds.Length).Select(link => link.GetProperty("identifier").GetString()));
+        Assert.Equal(releaseId, links[^2].GetProperty("artifactId").GetGuid());
+        Assert.Equal("SW-01.60", links[^2].GetProperty("identifier").GetString());
+        Assert.Equal(relatedReportId, links[^1].GetProperty("artifactId").GetGuid());
+        Assert.Equal("PR-07701.00", links[^1].GetProperty("identifier").GetString());
+
+        var requirementIdentifierQueries = commands.Commands.Count(command =>
+            command.Contains("FROM \"requirements\"", StringComparison.OrdinalIgnoreCase));
+        Assert.Equal(1, requirementIdentifierQueries);
+    }
+
+    [Fact]
     public async Task Generic_links_fail_closed_for_controlled_or_unknown_semantics_and_keep_context_links_versioned_and_scoped()
     {
         using var factory = new AeroLinkApiFactory(); using var client = factory.CreateClient(); await BootstrapAndLoginAsync(client);
