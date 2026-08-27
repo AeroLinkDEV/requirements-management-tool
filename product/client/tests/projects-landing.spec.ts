@@ -10,14 +10,21 @@ test('successful login opens the accessible Projects selector before the current
   await expect(page.getByText('Select a project to continue.')).toBeVisible()
 
   const cards = page.locator('[data-project-card]')
-  // Ten mock projects, the showcase one, the import practice one, and the create-project card.
   await expect(cards).toHaveCount(12)
-  const cardLayout = await cards.evaluateAll(items => items.map(item => ({
-    top: Math.round(item.getBoundingClientRect().top),
-    height: Math.round(item.getBoundingClientRect().height),
-  })))
-  expect(new Set(cardLayout.slice(0, 4).map(item => item.top)).size).toBe(1)
-  expect(new Set(cardLayout.map(item => item.height)).size).toBe(1)
+  await expect(page.locator('[data-project-card]:visible')).toHaveCount(3)
+  await expect(page.getByRole('link', { name: 'Open FMS Product Development' })).toBeVisible()
+  await expect(page.getByRole('link', { name: 'Open DOORS Import Practice' })).toBeVisible()
+  const sampleProjects = page.locator('details.sampleProjectsSection')
+  const sampleToggle = sampleProjects.locator('summary')
+  await expect(sampleProjects).not.toHaveAttribute('open', '')
+  await expect(sampleProjects.getByText('9 examples', { exact: true })).toBeVisible()
+  await expect(sampleProjects.getByText('GPS Receiver Modernization')).not.toBeVisible()
+  await sampleToggle.focus()
+  await expect(sampleToggle).toBeFocused()
+  await sampleToggle.press('Enter')
+  await expect(sampleProjects).toHaveAttribute('open', '')
+  await expect(sampleProjects.getByText('GPS Receiver Modernization')).toBeVisible()
+  await expect(page.locator('[data-project-card]:visible')).toHaveCount(12)
   if (process.env.AEROLINK_PROJECTS_SCREENSHOT) {
     await page.screenshot({ path: process.env.AEROLINK_PROJECTS_SCREENSHOT, fullPage: true })
   }
@@ -52,17 +59,32 @@ test('the project grid collapses cleanly without horizontal scrolling', async ({
   await login(page, 'admin', { openProject: false })
 
   await expect(page.locator('[data-project-card]')).toHaveCount(12)
+  await expect(page.locator('[data-project-card]:visible')).toHaveCount(3)
   const dimensions = await page.evaluate(() => ({
     documentWidth: document.documentElement.scrollWidth,
     viewportWidth: document.documentElement.clientWidth,
     columns: new Set(
-      [...document.querySelectorAll('[data-project-card]')].map(card =>
-        Math.round(card.getBoundingClientRect().left),
-      ),
+      [...document.querySelectorAll('[data-project-card]')]
+        .filter(card => card.getClientRects().length > 0)
+        .map(card => Math.round(card.getBoundingClientRect().left)),
     ).size,
   }))
   expect(dimensions.documentWidth).toBe(dimensions.viewportWidth)
   expect(dimensions.columns).toBe(1)
+  const sampleProjects = page.locator('details.sampleProjectsSection')
+  await sampleProjects.locator('summary').press('Enter')
+  await expect(page.locator('[data-project-card]:visible')).toHaveCount(12)
+  const expandedDimensions = await page.evaluate(() => ({
+    documentWidth: document.documentElement.scrollWidth,
+    viewportWidth: document.documentElement.clientWidth,
+    columns: new Set(
+      [...document.querySelectorAll('[data-project-card]')]
+        .filter(card => card.getClientRects().length > 0)
+        .map(card => Math.round(card.getBoundingClientRect().left)),
+    ).size,
+  }))
+  expect(expandedDimensions.documentWidth).toBe(expandedDimensions.viewportWidth)
+  expect(expandedDimensions.columns).toBe(1)
   if (process.env.AEROLINK_PROJECTS_MOBILE_SCREENSHOT) {
     await page.screenshot({ path: process.env.AEROLINK_PROJECTS_MOBILE_SCREENSHOT, fullPage: true })
   }

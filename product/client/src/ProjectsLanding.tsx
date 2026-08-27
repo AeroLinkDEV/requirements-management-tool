@@ -268,6 +268,23 @@ export default function ProjectsLanding({
   onOpenImportPractice: () => void;
   onSignOut: () => void;
 }) {
+  const activeProject = projectCards.find((project) => project.id === "fms-product-development");
+  const utilityProject = projectCards.find((project) => project.id === "doors-import-practice");
+  const sampleProjects = projectCards.filter((project) => project.status === "mock");
+  const createProject = projectCards.find((project) => project.cardType === "create-project");
+
+  const renderProjectCard = (project: ProjectCardDefinition) => {
+    const practice = project.destination === "import-practice";
+    return (
+      <ProjectCard
+        key={project.id}
+        project={project}
+        workspaceHref={practice ? importPracticeHref : project.destination ? workspaceHref : undefined}
+        onOpenWorkspace={practice ? onOpenImportPractice : onOpenWorkspace}
+      />
+    );
+  };
+
   return (
     <div className="projectsPage">
       <PortalHeader user={user} onSignOut={onSignOut}/>
@@ -279,18 +296,27 @@ export default function ProjectsLanding({
             <p>Select a project to continue.</p>
           </div>
         </header>
-        <section className="projectsGrid" aria-label="Available projects">
-          {projectCards.map((project) => {
-            const practice = project.destination === "import-practice";
-            return (
-              <ProjectCard
-                key={project.id}
-                project={project}
-                workspaceHref={practice ? importPracticeHref : project.destination ? workspaceHref : undefined}
-                onOpenWorkspace={practice ? onOpenImportPractice : onOpenWorkspace}
-              />
-            );
-          })}
+        <section className="projectsSections" aria-label="Available projects">
+          {activeProject && <div className="projectsGrid projectsPrimaryGrid">{renderProjectCard(activeProject)}</div>}
+          {utilityProject && (
+            <section className="projectUtilitySection" aria-labelledby="project-utility-heading">
+              <h2 id="project-utility-heading">Utility workspace</h2>
+              <div className="projectsGrid">{renderProjectCard(utilityProject)}</div>
+            </section>
+          )}
+          <details className="sampleProjectsSection">
+            <summary>
+              <span>
+                <strong>Sample projects</strong>
+                <small>Explore example project structures</small>
+              </span>
+              <span className="sampleProjectsCount">{sampleProjects.length} examples</span>
+            </summary>
+            <div className="projectsGrid" aria-label="Sample projects">
+              {sampleProjects.map(renderProjectCard)}
+            </div>
+          </details>
+          {createProject && <div className="projectsGrid projectsCreateGrid">{renderProjectCard(createProject)}</div>}
         </section>
       </main>
     </div>
