@@ -19,7 +19,9 @@ public sealed record ChangeRequestTraceNode(
     Guid? BuildId,
     string? BuildVersion,
     int? Revision,
-    string? Level);
+    string? Level,
+    Guid? ArtifactId = null,
+    IReadOnlyList<Guid>? BaselineMembershipIds = null);
 
 /// <summary>One provenance fact carried by a composed trace edge.</summary>
 public sealed record ChangeRequestTraceProvenance(
@@ -366,6 +368,16 @@ public static class ChangeRequestTraceProjection
                                            select new { revision.Id, revision.ArtifactId, artifact.BaseNumber,
                                                revision.Revision, revision.Statement, artifact.Level,
                                                revision.SourceChangeRequestId }).ToListAsync(ct);
+        var requirementRevisionIds = requirementRevisions.Select(x => x.Id).ToList();
+        var baselineMemberships = await (from selection in db.BaselineRequirements.AsNoTracking()
+                                         join baseline in db.CandidateBaselines.AsNoTracking()
+                                             on selection.BaselineId equals baseline.Id
+                                         where baseline.ProjectId == projectId
+                                             && requirementRevisionIds.Contains(selection.RevisionId)
+                                         select new { selection.RevisionId, selection.BaselineId }).ToListAsync(ct);
+        var membershipsByRevision = baselineMemberships
+            .GroupBy(x => x.RevisionId)
+            .ToDictionary(x => x.Key, x => (IReadOnlyList<Guid>)x.Select(y => y.BaselineId).Distinct().OrderBy(y => y).ToList());
         var allRequirementLinks = await db.RequirementTraces.AsNoTracking()
             .Where(x => x.ProjectId == projectId
                 && (x.ExactLinkSuspectLifecycleId == null
@@ -382,7 +394,8 @@ public static class ChangeRequestTraceProjection
         {
             nodes[("RequirementRevision", requirement.Id)] = new(requirement.Id, "RequirementRevision",
                 Display(requirement.BaseNumber, requirement.Revision), requirement.Statement, null, projectId,
-                null, null, requirement.Revision, requirement.Level.ToString());
+                null, null, requirement.Revision, requirement.Level.ToString(), requirement.ArtifactId,
+                membershipsByRevision.GetValueOrDefault(requirement.Id));
             if (requirement.SourceChangeRequestId is Guid sourceId && byCr.ContainsKey(sourceId))
             {
                 var edge = new EdgeBuilder(sourceId, "ChangeRequest", requirement.Id,

@@ -742,6 +742,7 @@ function App() {
         onOpenScr={(id) => navigate("scr", discipline, id, historyTypeIntent === "Interface" ? "Interface" : undefined)}
         onOpenRequirement={(id,level)=>navigate("requirements",level==="System"?"system":"software",id)}
         onOpenProblemReport={(id)=>navigate("problemReports","system",id)}
+        digitalThreadHref={context ? routePath(context, "lifecycle", discipline, selectedScrId, "change-request") : undefined}
         onDisciplineResolved={(resolved,changeRequestType) => {
           if (resolved !== discipline) setDiscipline(resolved);
           if (changeRequestType === "Interface") setHistoryTypeIntent("Interface");
@@ -999,6 +1000,8 @@ function App() {
         releases={release ? [release] : []}
         activeReleaseId={release?.id??""}
         initialArtifactId={selectedArtifactId || undefined}
+        initialArtifactKind={selectedArtifactKind || undefined}
+        requirementHref={id => context ? routePath(context, "lifecycle", "system", id) : "#"}
         onBack={() => navigate("dashboard")}
       />
     );

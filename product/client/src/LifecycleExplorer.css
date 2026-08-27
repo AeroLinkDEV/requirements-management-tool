@@ -82,3 +82,55 @@ html .traceLinkState.closed { color: #28704f; }
 .completeThreadStep small { min-height: 25px; color: #637180; font-size: 12px; font-weight: 800; letter-spacing: .05em; }
 .completeThreadStep b { width: 100%; margin: 7px 0 5px; overflow: hidden; color: #17324d; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
 .completeThreadStep span { display: -webkit-box; overflow: hidden; color: #657284; font-size: 12px; line-height: 1.35; -webkit-box-orient: vertical; -webkit-line-clamp: 4; word-break: break-word; }
+
+.crDigitalThread { display: grid; gap: 14px; }
+.crDigitalThreadHeader,.crChain,.crProposalLayer,.crMaterializedLayer { border: 1px solid var(--line); border-radius: 12px; background: white; box-shadow: 0 9px 28px rgb(16 42 68 / 5%); }
+.crDigitalThreadHeader { display: flex; justify-content: space-between; gap: 24px; padding: 22px; }
+.crDigitalThreadHeader h2 { margin: 4px 0; color: #17324d; font: 700 21px/1.25 var(--font-display); }
+.crDigitalThreadHeader p:not(.eyebrow) { margin: 0; color: var(--ink-500); font-size: 13px; }
+.crDigitalThreadHeader dl { display: grid; grid-template-columns: repeat(3,minmax(110px,1fr)); gap: 8px; margin: 0; }
+.crDigitalThreadHeader dl div { min-width: 0; border-left: 1px solid #e3e9ee; padding-left: 12px; }
+.crDigitalThreadHeader dt,.crSectionHeading span { color: #758398; font-size: 11px; font-weight: 750; letter-spacing: .04em; }
+.crDigitalThreadHeader dd { max-width: 150px; margin: 4px 0 0; overflow-wrap: anywhere; color: #26425e; font-size: 12px; }
+.crChain,.crProposalLayer,.crMaterializedLayer { padding: 20px; }
+.crSectionHeading { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; margin-bottom: 14px; }
+.crSectionHeading h3 { margin: 3px 0 0; color: #17324d; font: 700 17px/1.3 var(--font-display); }
+.crSectionHeading .eyebrow { margin: 0; }
+.crNodeGrid,.crProposalGrid,.crMaterializedGrid { display: grid; grid-template-columns: repeat(auto-fit,minmax(210px,1fr)); gap: 10px; }
+.crNodeCard { min-width: 0; display: flex; flex-direction: column; align-items: flex-start; gap: 4px; border: 1px solid #d7e2e8; border-radius: 10px; background: #fbfcfd; padding: 13px; }
+.crNodeCard.selected { border-color: #49ad9f; background: #eff9f6; box-shadow: 0 0 0 3px rgba(58,167,151,.1); }
+.crNodeCard small { color: #657687; font-size: 10px; font-weight: 800; letter-spacing: .06em; }
+.crNodeCard b { color: #17324d; font-size: 13px; overflow-wrap: anywhere; }
+.crNodeCard span,.crMaterializedGrid span { color: #657284; font: 11px ui-monospace,SFMono-Regular,Consolas,monospace; overflow-wrap: anywhere; }
+.crNodeCard i { color: #536b7b; font-size: 11px; font-style: normal; }
+.crNodeCard em { border-radius: 999px; background: #e7effb; padding: 3px 7px; color: #3569a8; font-size: 11px; font-style: normal; }
+.crEdgeList { display: grid; gap: 7px; margin-top: 12px; }
+.crEdgeList article { display: grid; grid-template-columns: minmax(150px,.6fr) minmax(180px,1fr) auto; align-items: center; gap: 10px; border-top: 1px solid #e8edf1; padding: 9px 0 0; }
+.crEdgeList b { color: #315e78; font-size: 12px; }
+.crEdgeList span { color: #657284; font: 11px ui-monospace,SFMono-Regular,Consolas,monospace; overflow-wrap: anywhere; }
+.crEdgeList div { display: flex; justify-content: flex-end; gap: 5px; flex-wrap: wrap; }
+.crEdgeList em { border-radius: 999px; background: #e8f4ef; padding: 3px 7px; color: #28735f; font-size: 10px; font-style: normal; font-weight: 700; }
+.crTraceState { margin-top: 14px; border-left: 3px solid #378bc5; border-radius: 8px; background: #edf6fb; padding: 12px; }
+.crTraceState h4 { margin: 0 0 8px; color: #2b5e7d; font-size: 12px; }
+.crTraceState dl { display: flex; gap: 18px; margin: 0; }
+.crTraceState dl div { display: flex; gap: 6px; }
+.crTraceState dt,.crTraceState dd { font-size: 12px; }
+.crTraceState dt { color: #5f7890; }
+.crTraceState dd { margin: 0; color: #214e6a; font-weight: 750; }
+.crTraceState ul { margin: 9px 0 0; padding-left: 18px; color: #765313; font-size: 12px; }
+.crTruthNote { margin: 0 0 14px; border-left: 3px solid #d6a33b; border-radius: 8px; background: #fff8e8; padding: 10px 12px; color: #765313; font-size: 12px; line-height: 1.45; }
+.crProposalGrid article { min-width: 0; border: 1px dashed #d6a33b; border-radius: 10px; background: #fffdf6; padding: 13px; }
+.crProposalGrid article>div { display: flex; justify-content: space-between; gap: 8px; }
+.crProposalGrid article b { color: #17324d; font-size: 13px; }
+.crProposalGrid article span { color: #8a5a00; font-size: 11px; font-weight: 750; }
+.crProposalGrid article p { margin: 9px 0; color: #4e5e70; font-size: 12px; line-height: 1.45; }
+.crProposalGrid article small { display: block; color: #765313; font-size: 11px; line-height: 1.4; }
+.crProposalGrid code { display: block; margin-top: 10px; color: #8a6a1b; font-size: 10px; overflow-wrap: anywhere; }
+.crMaterializedGrid article { display: flex; flex-direction: column; gap: 5px; border: 1px solid #cfe5df; border-radius: 10px; background: #f5fbf9; padding: 13px; }
+.crMaterializedGrid article>b { color: #17324d; font-size: 13px; }
+.crMaterializedGrid a { margin-top: 5px; color: #176e77; font-size: 12px; font-weight: 750; }
+.crBaselinePath { margin-top: 14px; border-top: 1px solid #dfe9e6; padding-top: 14px; }
+.crBaselinePath h4 { margin: 0; color: #2d6e62; font-size: 13px; }
+.crBaselinePath .completeThreadPath { justify-content: flex-start; padding: 18px 0 4px; }
+.crUnavailable { margin: 0; border: 1px dashed #cbd8e4; border-radius: 8px; background: #f8fbfd; padding: 12px; color: #52677b; font-size: 12px; line-height: 1.45; }
+@media(max-width:1050px){.crDigitalThreadHeader{flex-direction:column}.crDigitalThreadHeader dl{grid-template-columns:repeat(3,1fr)}.crEdgeList article{grid-template-columns:1fr}.crEdgeList div{justify-content:flex-start}.crTraceState dl{flex-wrap:wrap}}

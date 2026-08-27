@@ -256,6 +256,9 @@ public sealed class ChangeRequestTraceProjectionTests
         var requirement = new RequirementArtifact(fixture.Project.Id, "SYSR-07863", RequirementLevel.System, fixture.Now);
         var requirementRevision = new RequirementRevision(requirement.Id, 0, "The system shall remain traceable.",
             "Evidence", "Test", RequirementRevisionState.Active, root.Id, baseline.Id, fixture.Now);
+        var retiredRequirement = new RequirementArtifact(fixture.Project.Id, "SYSR-07865", RequirementLevel.System, fixture.Now);
+        var retiredRevision = new RequirementRevision(retiredRequirement.Id, 0, "Retired exact revision.",
+            "Historical", "Test", RequirementRevisionState.Retired, root.Id, baseline.Id, fixture.Now);
         var external = new RequirementArtifact(fixture.Project.Id, "SYSR-07864", RequirementLevel.System, fixture.Now);
         var externalRevision = RequirementRevision.FromExternalSourcePackage(external.Id, 0,
             "An externally supplied exact revision.", "Imported", RequirementRevisionState.Active,
@@ -265,13 +268,22 @@ public sealed class ChangeRequestTraceProjectionTests
         var code = new CodeTraceabilityRecord(fixture.Project.Id, fixture.Release.Id, external.Id,
             externalRevision.Id, CodeTraceDisposition.NoCodeChangeRequired, "", "", "", "", "", null,
             "No code change is required for this imported revision.", false, "author", fixture.Now);
-        fixture.Db.AddRange(root, baseline, import, requirement, requirementRevision, external, externalRevision, requirementTrace, code);
+        fixture.Db.AddRange(root, baseline, import, requirement, requirementRevision,
+            new BaselineRequirementSelection(baseline.Id, requirement.Id, requirementRevision.Id),
+            retiredRequirement, retiredRevision, external, externalRevision, requirementTrace, code);
         await fixture.Db.SaveChangesAsync();
 
         var result = await ChangeRequestTraceProjection.ForChangeRequestAsync(
             fixture.Db, fixture.Project.Id, root.Id, LegacyLadderPolicy.Instance, CancellationToken.None);
         Assert.NotNull(result);
-        Assert.Contains(result!.Nodes, x => x.Kind == "RequirementRevision" && x.Id == externalRevision.Id);
+        var exactRequirementNode = Assert.Single(result!.Nodes,
+            x => x.Kind == "RequirementRevision" && x.Id == requirementRevision.Id);
+        Assert.Equal(requirement.Id, exactRequirementNode.ArtifactId);
+        Assert.Contains(baseline.Id, exactRequirementNode.BaselineMembershipIds!);
+        var retiredRequirementNode = Assert.Single(result.Nodes,
+            x => x.Kind == "RequirementRevision" && x.Id == retiredRevision.Id);
+        Assert.DoesNotContain(baseline.Id, retiredRequirementNode.BaselineMembershipIds ?? []);
+        Assert.Contains(result.Nodes, x => x.Kind == "RequirementRevision" && x.Id == externalRevision.Id);
         Assert.Contains(result.Nodes, x => x.Kind == "CodeTraceability" && x.Id == code.Id);
         Assert.Contains(result.Edges, x => x.FromId == externalRevision.Id && x.ToId == code.Id
             && x.Relation == "RequirementCodeEvidence");

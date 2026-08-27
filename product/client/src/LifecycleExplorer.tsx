@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import "./LifecycleExplorer.css";
 import "./ControlledDownloads.css";
 import DocumentActions from "./DocumentActions";
-import { documentTypeLabel, verificationArtifactNoun } from "./presentation";
+import { documentTypeLabel, stateLabel, verificationArtifactNoun } from "./presentation";
 import ExactLinkLifecyclePanel from "./ExactLinkLifecyclePanel";
 
 type Baseline = { id: string; releaseId: string; releaseVersion: string; displayNumber: string; name: string; requirementsMaterializedAt?: string };
@@ -23,6 +23,25 @@ type CompletePath = {
   execution?: TraceExecution;
   build?: { id: string; buildNumber: string; state: string; recordedAt: string; releasedAt?: string };
 };
+type ChangeRequestProposal = { id: string; displayNumber: string; level: string; kind: string; statement: string; rationale?: string };
+type ChangeRequestDetail = {
+  id: string; displayNumber: string; revision: number; projectId: string; targetReleaseId: string;
+  type: string; title: string; state: string; requirementChanges: ChangeRequestProposal[];
+};
+type ChangeRequestTraceNode = {
+  id: string; kind: string; displayNumber: string; title?: string | null; state?: string | null;
+  projectId?: string | null; buildId?: string | null; buildVersion?: string | null; revision?: number | null;
+  level?: string | null; artifactId?: string | null; baselineMembershipIds?: string[] | null;
+};
+type ChangeRequestTraceEdge = {
+  fromId: string; fromKind: string; toId: string; toKind: string; relation: string;
+  provenance: { kind: string; sourceId?: string | null; isLive?: boolean; rationale?: string | null }[];
+};
+type ChangeRequestTrace = {
+  projectId: string; rootChangeRequestId: string; rootArtifactId?: string; rootArtifactKind?: string;
+  nodes: ChangeRequestTraceNode[]; edges: ChangeRequestTraceEdge[];
+  state?: { upstream: string; downstream: string; overall: string; warnings: string[] } | null;
+};
 type Props = {
   api: string;
   projectId: string;
@@ -34,10 +53,117 @@ type Props = {
    * or a shared link lands on the same record.
    */
   initialArtifactId?: string;
+  initialArtifactKind?: string;
+  requirementHref?: (artifactId: string) => string;
   onBack: () => void;
 };
 
-export default function LifecycleExplorer({ api, projectId, activeReleaseId, releases, initialArtifactId, onBack }: Props) {
+function provenanceLabel(kind: string) {
+  if (kind === "AssessmentDerived") return "Assessment-derived";
+  if (kind === "AuthorStated") return "Author-stated";
+  return stateLabel(kind);
+}
+
+const relationLabel = (relation: string) => relation
+  .replace(/([a-z])([A-Z])/g, "$1 $2")
+  .replace(/^./, first => first.toUpperCase());
+
+function ChangeRequestThread({
+  detail,
+  trace,
+  activeBaselineId,
+  exactPath,
+  exactPathError,
+  onRetry,
+  requirementHref,
+}: {
+  detail: ChangeRequestDetail;
+  trace: ChangeRequestTrace;
+  activeBaselineId?: string;
+  exactPath?: CompletePath;
+  exactPathError?: string;
+  onRetry: () => void;
+  requirementHref?: (artifactId: string) => string;
+}) {
+  const root = trace.nodes.find(node => node.kind === "ChangeRequest" && node.id === detail.id);
+  const materialized = trace.nodes.filter(node => node.kind === "RequirementRevision"
+    && Boolean(activeBaselineId) && activeBaselineId !== undefined && node.baselineMembershipIds?.includes(activeBaselineId)
+    && node.artifactId && trace.edges.some(edge => edge.fromId === detail.id
+      && edge.toId === node.id && edge.relation === "OwnsRequirementRevision"));
+
+  return <section className="crDigitalThread" aria-label={`Digital Thread for ${detail.displayNumber}`}>
+    <header className="crDigitalThreadHeader">
+      <div>
+        <p className="eyebrow">CHANGE REQUEST DIGITAL THREAD</p>
+        <h2>{detail.displayNumber}</h2>
+        <p>{detail.title}</p>
+      </div>
+      <dl>
+        <div><dt>Exact identity</dt><dd>{detail.id}</dd></div>
+        <div><dt>Revision</dt><dd>{detail.revision.toString().padStart(2, "0")}</dd></div>
+        <div><dt>Lifecycle</dt><dd>{stateLabel(detail.state)}</dd></div>
+      </dl>
+    </header>
+
+    <section className="crChain" aria-labelledby="cr-chain-heading">
+      <div className="crSectionHeading"><div><p className="eyebrow">SERVER COMPOSED PROJECTION</p><h3 id="cr-chain-heading">Change request chain</h3></div><span>{trace.nodes.length} exact nodes · {trace.edges.length} typed edges</span></div>
+      <div className="crNodeGrid" role="list" aria-label="Exact change request chain">
+        <article className="crNodeCard selected" role="listitem">
+          <small>SELECTED CHANGE REQUEST</small><b>{root?.displayNumber ?? detail.displayNumber}</b>
+          <span>{root?.id ?? detail.id}</span><em>{stateLabel(root?.state ?? detail.state)}</em>
+        </article>
+        {trace.nodes.filter(node => !(node.kind === "ChangeRequest" && node.id === detail.id)).map(node => <article className="crNodeCard" role="listitem" key={`${node.kind}-${node.id}`}>
+          <small>{node.kind === "TestChangeRequest" ? "TEST CHANGE REQUEST" : node.kind.replace(/([a-z])([A-Z])/g, "$1 $2").toUpperCase()}</small>
+          <b>{node.displayNumber}</b><span>{node.id}</span>
+          {node.revision !== null && node.revision !== undefined && <i>Revision {node.revision.toString().padStart(2, "0")}</i>}
+          {node.state && <em>{stateLabel(node.state)}</em>}
+        </article>)}
+      </div>
+      <div className="crEdgeList" aria-label="Trace provenance">
+        {trace.edges.length ? trace.edges.map(edge => <article key={`${edge.fromKind}-${edge.fromId}-${edge.toKind}-${edge.toId}-${edge.relation}`}>
+          <b>{relationLabel(edge.relation)}</b><span>{edge.fromId} → {edge.toId}</span>
+          <div>{edge.provenance.map(fact => <em key={`${fact.kind}-${fact.sourceId ?? "none"}`}>{provenanceLabel(fact.kind)}</em>)}</div>
+        </article>) : <p className="crUnavailable">No connected change-request edges are present in the server projection.</p>}
+      </div>
+      {trace.state && <section className="crTraceState" aria-label="Authoritative trace state">
+        <h4>Authoritative trace state</h4><dl><div><dt>Upstream</dt><dd>{stateLabel(trace.state.upstream)}</dd></div><div><dt>Downstream</dt><dd>{stateLabel(trace.state.downstream)}</dd></div><div><dt>Overall</dt><dd>{stateLabel(trace.state.overall)}</dd></div></dl>
+        {trace.state.warnings.length > 0 && <ul>{trace.state.warnings.map(warning => <li key={warning}>{warning}</li>)}</ul>}
+      </section>}
+    </section>
+
+    <section className="crProposalLayer" aria-labelledby="cr-proposal-heading">
+      <div className="crSectionHeading"><div><p className="eyebrow">IN-WORK CONTENT</p><h3 id="cr-proposal-heading">Proposed requirement changes</h3></div><span>Not baseline truth</span></div>
+      <p className="crTruthNote">These Introduce, Modify, and Retire entries are proposals carried by this change request. They are not materialized requirement revisions, effective baseline nodes, verification results, evidence, or release content.</p>
+      {detail.requirementChanges.length ? <div className="crProposalGrid">{detail.requirementChanges.map(change => <article key={change.id}>
+        <div><b>{change.displayNumber}</b><span>{change.kind} · {change.level}</span></div><p>{change.statement || "No proposed statement is recorded."}</p>
+        {change.rationale && <small>Rationale: {change.rationale}</small>}<code>Proposal identity {change.id}</code>
+      </article>)}</div> : <p className="crUnavailable">This change request carries no requirement changes.</p>}
+    </section>
+
+    <section className="crMaterializedLayer" aria-labelledby="cr-materialized-heading">
+      <div className="crSectionHeading"><div><p className="eyebrow">BASELINE-EXACT CONTENT</p><h3 id="cr-materialized-heading">Materialized requirement revisions</h3></div></div>
+      {materialized.length && requirementHref ? <div className="crMaterializedGrid">{materialized.map(node => <article key={node.id}><b>{node.displayNumber}</b><span>{node.id}</span><a href={requirementHref(node.artifactId!)}>Open exact requirement thread →</a></article>)}</div>
+        : <p className="crUnavailable">No requirement revision carried by this change request is materialized in the active baseline. Proposed content remains outside the baseline-exact thread.</p>}
+      {exactPathError && <div className="crUnavailable" role="alert"><span>{exactPathError}</span><button type="button" onClick={onRetry}>Retry</button></div>}
+      {exactPath && <section className="crBaselinePath" aria-labelledby="cr-baseline-path-heading">
+        <h4 id="cr-baseline-path-heading">Existing baseline-exact requirement path</h4>
+        <div className="completeThreadPath" role="list" aria-label="Existing baseline-exact requirement path">
+          {exactPath.nodes.map((node, index) => <div className="completeThreadStep" key={node.revisionId}>
+            {index > 0 && <i className="threadConnector" aria-hidden="true">›</i>}
+            <article><small>{node.level === "System" ? "SYSTEM REQUIREMENT" : node.level === "HighLevel" ? "HLR" : "LLR"}</small><b>{node.displayNumber}</b><span>{node.statement}</span></article>
+          </div>)}
+          <div className="completeThreadStep"><i className="threadConnector" aria-hidden="true">›</i><article className={!exactPath.artifact ? "missing" : ""}><small>TEST ARTIFACT</small><b>{exactPath.artifact?.displayNumber ?? "Not linked"}</b><span>{exactPath.artifact?.title ?? "Verification linkage required"}</span></article></div>
+          <div className="completeThreadStep"><i className="threadConnector" aria-hidden="true">›</i><article className={!exactPath.execution ? "missing" : ""}><small>TEST RESULT</small><b>{exactPath.execution?.outcome ?? "Not executed"}</b><span>{exactPath.execution?.determination ?? "Authoritative result required"}</span></article></div>
+          <div className="completeThreadStep"><i className="threadConnector" aria-hidden="true">›</i><article className={!exactPath.execution?.evidence.length ? "missing" : ""}><small>TEST EVIDENCE</small><b>{exactPath.execution?.evidence[0]?.originalFileName ?? "Not attached"}</b><span>{exactPath.execution?.evidence[0]?.sha256 ?? (exactPath.execution?.evidenceReference ? `External reference only: ${exactPath.execution.evidenceReference}` : "Checksummed evidence required")}</span></article></div>
+          <div className="completeThreadStep"><i className="threadConnector" aria-hidden="true">›</i><article className={!exactPath.build ? "missing" : ""}><small>BUILD</small><b>{exactPath.build?.buildNumber ?? exactPath.baseline.displayNumber}</b><span>{exactPath.build ? `${exactPath.build.state} · ${exactPath.baseline.displayNumber}` : exactPath.baseline.name}</span></article></div>
+        </div>
+      </section>}
+    </section>
+  </section>;
+}
+
+export default function LifecycleExplorer({ api, projectId, activeReleaseId, releases, initialArtifactId, initialArtifactKind, requirementHref, onBack }: Props) {
+  const isChangeRequestRoute = initialArtifactKind === "change-request" && Boolean(initialArtifactId);
   const [tab, setTab] = useState<"thread" | "documents">("thread");
   // Released and draft documents are different kinds of thing, so the tab asks which you came for rather than
   // mixing a controlled record that carries a content hash in among generated-on-the-spot drafts that
@@ -54,10 +180,57 @@ export default function LifecycleExplorer({ api, projectId, activeReleaseId, rel
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [changeRequest, setChangeRequest] = useState<ChangeRequestDetail>();
+  const [changeRequestTrace, setChangeRequestTrace] = useState<ChangeRequestTrace>();
+  const [changeRequestBaselineId, setChangeRequestBaselineId] = useState<string>();
+  const [changeRequestPathError, setChangeRequestPathError] = useState<string>();
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
+      if (isChangeRequestRoute && initialArtifactId) {
+        setChangeRequest(undefined); setChangeRequestTrace(undefined); setChangeRequestBaselineId(undefined);
+        setCompletePath(undefined); setChangeRequestPathError(undefined);
+        const [detailResponse, traceResponse, contextResponse] = await Promise.all([
+          fetch(`${api}/api/change-requests/${initialArtifactId}`),
+          fetch(`${api}/api/change-requests/${initialArtifactId}/trace`),
+          fetch(`${api}/api/build-context?projectId=${projectId}&releaseId=${activeReleaseId}`),
+        ]);
+        if (!detailResponse.ok || !traceResponse.ok || !contextResponse.ok)
+          throw new Error("This change request is unavailable in the selected Project or build.");
+        const detail = await detailResponse.json() as ChangeRequestDetail;
+        const trace = await traceResponse.json() as ChangeRequestTrace;
+        const buildContext = await contextResponse.json() as { effectiveBaselineId?: string };
+        if (detail.id !== initialArtifactId || detail.projectId !== projectId || detail.targetReleaseId !== activeReleaseId
+          || trace.projectId !== projectId || trace.rootArtifactId !== initialArtifactId
+          || trace.rootArtifactKind !== "ChangeRequest")
+          throw new Error("This change request is unavailable in the selected Project or build.");
+        const materialized = trace.nodes.find(node => node.kind === "RequirementRevision"
+          && node.baselineMembershipIds?.includes(buildContext.effectiveBaselineId ?? "") && node.artifactId
+          && trace.edges.some(edge => edge.fromId === initialArtifactId && edge.toId === node.id
+            && edge.relation === "OwnsRequirementRevision"));
+        let exactPath: CompletePath | undefined;
+        let exactPathError: string | undefined;
+        if (materialized && buildContext.effectiveBaselineId) {
+          const pathResponse = await fetch(`${api}/api/traceability/path?projectId=${projectId}&baselineId=${buildContext.effectiveBaselineId}&requirementRevisionId=${materialized.id}`);
+          if (!pathResponse.ok) exactPathError = "The exact baseline requirement path is unavailable. Retry to verify the controlled path.";
+          else {
+            const candidatePath = await pathResponse.json() as CompletePath;
+            if (candidatePath.baselineId !== buildContext.effectiveBaselineId
+              || candidatePath.focusRevisionId !== materialized.id)
+              exactPathError = "The exact baseline requirement path did not match the selected revision. Retry to verify the controlled path.";
+            else exactPath = candidatePath;
+          }
+        }
+        setChangeRequest(detail);
+        setChangeRequestTrace(trace);
+        setChangeRequestBaselineId(buildContext.effectiveBaselineId);
+        setCompletePath(exactPath);
+        setChangeRequestPathError(exactPathError);
+        setBaselines([]); setDocuments([]); setTraces([]); setFocusId("");
+        setError("");
+        return;
+      }
       const contextResponse = await fetch(`${api}/api/build-context?projectId=${projectId}&releaseId=${activeReleaseId}`);
       if (!contextResponse.ok) throw new Error("The active build context could not be loaded.");
       const buildContext = await contextResponse.json() as {
@@ -120,7 +293,7 @@ export default function LifecycleExplorer({ api, projectId, activeReleaseId, rel
     } finally {
       setLoading(false);
     }
-  }, [api, projectId, releases, activeReleaseId, baselineId, query, initialArtifactId]);
+  }, [api, projectId, releases, activeReleaseId, baselineId, query, initialArtifactId, isChangeRequestRoute]);
 
   useEffect(() => {
     const timer = setTimeout(load, 150);
@@ -150,7 +323,7 @@ export default function LifecycleExplorer({ api, projectId, activeReleaseId, rel
   // today, and what traverse() already does to move focus. The number only loads the row; focus is still
   // resolved from the stable artifact id.
   useEffect(() => {
-    if (!initialArtifactId) return;
+    if (!initialArtifactId || isChangeRequestRoute) return;
     let cancelled = false;
     (async () => {
       try {
@@ -163,7 +336,7 @@ export default function LifecycleExplorer({ api, projectId, activeReleaseId, rel
       }
     })();
     return () => { cancelled = true; };
-  }, [api, initialArtifactId]);
+  }, [api, initialArtifactId, isChangeRequestRoute]);
 
   const generate = async () => {
     if (!baselineId) return;
@@ -215,7 +388,7 @@ export default function LifecycleExplorer({ api, projectId, activeReleaseId, rel
         <div>
           <button className="back" onClick={onBack}>← Command Center</button>
           <p className="eyebrow">ASSURANCE / DIGITAL THREAD FOCUS</p>
-          <h1>Digital Thread</h1>
+          <h1>{isChangeRequestRoute ? "Digital Thread · Change Request" : "Digital Thread"}</h1>
           <p>Answer one engineering question across requirement derivation, verification, immutable evidence, and release configuration.</p>
         </div>
       </header>
@@ -225,7 +398,11 @@ export default function LifecycleExplorer({ api, projectId, activeReleaseId, rel
         <button className={tab === "thread" ? "active" : ""} onClick={() => setTab("thread")}>Digital Thread</button>
       </div>
 
-      {tab === "thread" ? <>
+      {tab === "thread" ? isChangeRequestRoute ? (
+        changeRequest && changeRequestTrace
+          ? <ChangeRequestThread detail={changeRequest} trace={changeRequestTrace} activeBaselineId={changeRequestBaselineId} exactPath={completePath} exactPathError={changeRequestPathError} onRetry={load} requirementHref={requirementHref} />
+          : <section className="traceEmpty"><b>Change request thread unavailable</b><p>The selected controlled record could not be resolved in this Project and build.</p></section>
+      ) : <>
         <section className="traceTools">
           <select aria-label="Traceability baseline" value={baselineId} onChange={(event) => setBaselineId(event.target.value)}>{baselines.map((item) => <option value={item.id} key={item.id}>{item.displayNumber} · {item.name}</option>)}</select>
           <input aria-label="Search digital thread" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search any identifier fragment…" />
