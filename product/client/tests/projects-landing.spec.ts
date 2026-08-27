@@ -15,6 +15,7 @@ test('successful login opens the accessible Projects selector before the current
   await expect(page.getByRole('link', { name: 'Open DOORS Import Practice' })).toBeVisible()
   const sampleProjects = page.locator('details.sampleProjectsSection')
   await expect(sampleProjects).not.toHaveAttribute('open', '')
+  await expect(sampleProjects.getByText('9 examples', { exact: true })).toBeVisible()
   await expect(sampleProjects.getByText('GPS Receiver Modernization')).not.toBeVisible()
   await sampleProjects.getByRole('button', { name: /Sample projects/ }).click()
   await expect(sampleProjects).toHaveAttribute('open', '')
@@ -68,6 +69,17 @@ test('the project grid collapses cleanly without horizontal scrolling', async ({
   const sampleProjects = page.locator('details.sampleProjectsSection')
   await sampleProjects.getByRole('button', { name: /Sample projects/ }).click()
   await expect(page.locator('[data-project-card]')).toHaveCount(12)
+  const expandedDimensions = await page.evaluate(() => ({
+    documentWidth: document.documentElement.scrollWidth,
+    viewportWidth: document.documentElement.clientWidth,
+    columns: new Set(
+      [...document.querySelectorAll('[data-project-card]')].map(card =>
+        Math.round(card.getBoundingClientRect().left),
+      ),
+    ).size,
+  }))
+  expect(expandedDimensions.documentWidth).toBe(expandedDimensions.viewportWidth)
+  expect(expandedDimensions.columns).toBe(1)
   if (process.env.AEROLINK_PROJECTS_MOBILE_SCREENSHOT) {
     await page.screenshot({ path: process.env.AEROLINK_PROJECTS_MOBILE_SCREENSHOT, fullPage: true })
   }
