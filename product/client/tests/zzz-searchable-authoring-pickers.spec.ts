@@ -1,5 +1,5 @@
 import { expect, test, type APIRequestContext, type Playwright } from '@playwright/test'
-import { apiBase, apiLogin, login, openNavigationGroup, selectProgram, showcaseSeed } from './auth'
+import { apiBase, apiLogin, authorNoUpstreamAnswer, login, openNavigationGroup, selectProgram, showcaseSeed } from './auth'
 
 /**
  * #402 — TCR authoring pickers must not silently truncate the candidate universe.
@@ -53,8 +53,9 @@ async function createApprovedLlrChange(
   } })
   expect(created.ok(), await created.text()).toBeTruthy()
   const draft = await created.json()
+  const ready = await authorNoUpstreamAnswer(author, draft.id, 'This LLR change has no direct upstream change request in the picker fixture.')
   const submitted = await author.post(`${apiBase}/api/change-requests/${draft.id}/submit`, { data: {
-    expectedVersion: draft.version,
+    expectedVersion: ready.version,
     approvers: [{ userId: 'admin', name: 'AeroLink Administrator' }],
     mode: 'Sequential',
   } })

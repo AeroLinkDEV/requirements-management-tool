@@ -1,11 +1,11 @@
 {
   "schemaVersion": "aerolink-api-test-intent/v2",
   "totals": {
-    "tests": 605,
-    "cases": 663,
-    "classes": 104,
-    "hostedTests": 592,
-    "hostedCases": 641,
+    "tests": 609,
+    "cases": 667,
+    "classes": 105,
+    "hostedTests": 596,
+    "hostedCases": 645,
     "nonHostedTests": 8,
     "nonHostedCases": 17,
     "unknownHostTests": 5,
@@ -21,10 +21,10 @@
     "http-boundary": {
       "label": "HTTP boundary: route, status, JSON shape",
       "level": "API (must stay hosted)",
-      "tests": 379,
-      "cases": 413,
+      "tests": 382,
+      "cases": 416,
       "unknownCases": 0,
-      "classes": 86
+      "classes": 87
     },
     "ef-translation": {
       "label": "EF translation / relational constraints",
@@ -37,10 +37,10 @@
     "auth-policy": {
       "label": "Authentication / authorization wiring",
       "level": "API (must stay hosted)",
-      "tests": 61,
-      "cases": 65,
+      "tests": 62,
+      "cases": 66,
       "unknownCases": 0,
-      "classes": 40
+      "classes": 41
     },
     "in-process-logic": {
       "label": "In-process logic with no HTTP and no client",
@@ -90,8 +90,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 18,
-        "end": 160
+        "start": 19,
+        "end": 169
       }
     },
     {
@@ -746,8 +746,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 117,
-        "end": 142
+        "start": 118,
+        "end": 143
       }
     },
     {
@@ -763,8 +763,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 775,
-        "end": 789
+        "start": 801,
+        "end": 815
       }
     },
     {
@@ -780,8 +780,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 732,
-        "end": 747
+        "start": 758,
+        "end": 773
       }
     },
     {
@@ -798,8 +798,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 377,
-        "end": 416
+        "start": 378,
+        "end": 417
       }
     },
     {
@@ -816,8 +816,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 271,
-        "end": 375
+        "start": 272,
+        "end": 376
       }
     },
     {
@@ -834,8 +834,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 434,
-        "end": 453
+        "start": 435,
+        "end": 454
       }
     },
     {
@@ -851,8 +851,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 418,
-        "end": 432
+        "start": 419,
+        "end": 433
       }
     },
     {
@@ -868,8 +868,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 754,
-        "end": 768
+        "start": 780,
+        "end": 794
       }
     },
     {
@@ -885,8 +885,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 798,
-        "end": 838
+        "start": 824,
+        "end": 864
       }
     },
     {
@@ -903,8 +903,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 144,
-        "end": 269
+        "start": 145,
+        "end": 270
       }
     },
     {
@@ -921,8 +921,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 493,
-        "end": 730
+        "start": 494,
+        "end": 756
       }
     },
     {
@@ -939,8 +939,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 455,
-        "end": 491
+        "start": 456,
+        "end": 492
       }
     },
     {
@@ -1868,6 +1868,78 @@
       "sourceLines": {
         "start": 61,
         "end": 90
+      }
+    },
+    {
+      "cls": "ChangeRequestUpstreamTraceApiTests",
+      "test": "Candidate_search_and_check_in_hold_exact_build_and_review_snapshot_contracts",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "shared-host-fixture",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 130,
+        "end": 246
+      }
+    },
+    {
+      "cls": "ChangeRequestUpstreamTraceApiTests",
+      "test": "Check_in_revalidates_future_build_and_cross_project_ids_from_the_browser",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "shared-host-fixture",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 321,
+        "end": 351
+      }
+    },
+    {
+      "cls": "ChangeRequestUpstreamTraceApiTests",
+      "test": "Derived_edge_rejects_authored_duplicate_and_frozen_evidence_survives_reopening",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "shared-host-fixture",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 248,
+        "end": 304
+      }
+    },
+    {
+      "cls": "ChangeRequestUpstreamTraceApiTests",
+      "test": "Detail_and_candidate_search_refuse_an_authenticated_non_member",
+      "kind": "Fact",
+      "intent": "auth-policy",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "shared-host-fixture",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 306,
+        "end": 319
       }
     },
     {

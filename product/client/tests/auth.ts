@@ -166,6 +166,39 @@ export async function firstSectionId(request: APIRequestContext, projectId: stri
 }
 
 /**
+ * Authors the Phase 1 no-upstream answer through the same controlled checkout,
+ * autosave, and check-in path used by the product.  API-created fixture drafts
+ * must use this path too, otherwise their direct submit bypasses the canonical
+ * draft snapshot and is rejected by the review readiness gate.
+ */
+export async function authorNoUpstreamAnswer(
+  request: APIRequestContext,
+  changeRequestId: string,
+  rationale: string,
+): Promise<{ version: number; resultingArtifactVersion: number }> {
+  const checkout = await request.post(`${apiBase}/api/controlled-editing/checkout`, {
+    data: { artifactType: 'ChangeRequest', artifactId: changeRequestId, leaseMinutes: 15 },
+  })
+  expect(checkout.ok(), await checkout.text()).toBeTruthy()
+  const lock = await checkout.json() as { id: string; version: number; draftJson: string }
+  const draft = JSON.parse(lock.draftJson) as Record<string, unknown>
+  draft.upstreamLinks = []
+  draft.noUpstreamRationale = rationale
+  const autosave = await request.put(`${apiBase}/api/controlled-editing/sessions/${lock.id}/autosave`, {
+    data: { expectedVersion: lock.version, draftJson: JSON.stringify(draft), leaseMinutes: 15 },
+  })
+  expect(autosave.ok(), await autosave.text()).toBeTruthy()
+  const saved = await autosave.json() as { version: number }
+  const checkIn = await request.post(`${apiBase}/api/controlled-editing/sessions/${lock.id}/check-in`, {
+    data: { expectedVersion: saved.version },
+  })
+  expect(checkIn.ok(), await checkIn.text()).toBeTruthy()
+  const result = await checkIn.json() as { resultingArtifactVersion: number }
+  expect(result.resultingArtifactVersion).toEqual(expect.any(Number))
+  return { ...result, version: result.resultingArtifactVersion }
+}
+
+/**
  * Chooses a Problem Report category in the picker that replaced the four-kind select.
  *
  * Driven by the label a person actually reads rather than the enum name, so a spec fails when the

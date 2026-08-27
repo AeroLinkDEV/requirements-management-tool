@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test'
-import { apiBase, apiLogin, firstSectionId, login, showcaseSeed } from './auth'
+import { apiBase, apiLogin, authorNoUpstreamAnswer, firstSectionId, login, showcaseSeed } from './auth'
 
 const completeImpacts = JSON.stringify({
   trace: 'Not Affected',
@@ -48,9 +48,14 @@ test('administrator actions work identically for another authors System and Soft
     }
 
     const draft = await create(`Administrator ${discipline.type} Draft`)
+    if (discipline.type === 'Software')
+      await authorNoUpstreamAnswer(author, draft.id, 'This derived software draft has no direct upstream change request.')
     const approved = await create(`Administrator ${discipline.type} revision`)
+    const approvedReady = discipline.type === 'Software'
+      ? await authorNoUpstreamAnswer(author, approved.id, 'This derived software recovery change has no direct upstream change request.')
+      : approved
     const submitted = await author.post(`${apiBase}/api/change-requests/${approved.id}/submit`, { data: {
-      expectedVersion: approved.version,
+      expectedVersion: approvedReady.version,
       approvers: [{ userId: 'admin', name: 'Caller supplied name ignored' }],
       mode: 'Sequential',
     } })

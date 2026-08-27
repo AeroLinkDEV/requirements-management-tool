@@ -262,6 +262,7 @@ public sealed class SystemChangeRequestControlledEditingAdapter(AeroLinkDbContex
     public async Task<ControlledEditingArtifact?> ResolveAsync(Guid artifactId, CancellationToken ct)
     {
         var item = await db.SystemChangeRequests.Include(x => x.RequirementChanges)
+            .Include(x => x.UpstreamLinks).Include(x => x.UpstreamHistory)
             .SingleOrDefaultAsync(x => x.Id == artifactId, ct);
         if (item is null) return null;
         var reportIds = await db.ProblemReportLinks.AsNoTracking().Where(link => link.ArtifactType == "ChangeRequest"
@@ -283,6 +284,18 @@ public sealed class SystemChangeRequestControlledEditingAdapter(AeroLinkDbContex
             problem = item.Problem, analysis = item.Analysis, solution = item.Solution,
             problemRich = item.ProblemRich, analysisRich = item.AnalysisRich, solutionRich = item.SolutionRich,
             problemReportIds = problemReportIds?.OrderBy(id => id),
+            // Keep the editable fields aligned with SystemChangeRequestDraft. The surrounding provenance
+            // fields remain read-only context; the check-in path must be able to round-trip autosave JSON.
+            upstreamLinks = item.UpstreamLinks.OrderBy(x => x.UpstreamChangeRequestId).Select(x => new {
+                x.UpstreamChangeRequestId, x.Rationale }),
+            noUpstreamRationale = item.NoUpstreamRationale,
+            noUpstreamStatedBy = item.NoUpstreamStatedBy,
+            noUpstreamStatedAt = item.NoUpstreamStatedAt,
+            inheritedUpstreamContextJson = item.InheritedUpstreamContextJson,
+            inheritedFromChangeRequestId = item.InheritedFromChangeRequestId,
+            upstreamAnswerAffirmed = item.UpstreamAnswerAffirmed,
+            upstreamAnswerAffirmedBy = item.UpstreamAnswerAffirmedBy,
+            upstreamAnswerAffirmedAt = item.UpstreamAnswerAffirmedAt,
             requirementChanges = item.RequirementChanges.Select(x => new { baseNumber = x.BaseNumber,
                 revision = x.Revision, level = x.Level.ToString(), kind = x.Kind.ToString(),
                 statement = x.Statement, rationale = x.Rationale, verificationMethod = x.VerificationMethod,
@@ -317,6 +330,13 @@ public sealed class SystemChangeRequestControlledEditingAdapter(AeroLinkDbContex
             actor, now, ct);
         state.ProblemReportIds.Clear();
         state.ProblemReportIds.AddRange(selectedReports);
+        if (draft.UpstreamLinks is not null || draft.NoUpstreamRationale is not null)
+            await ApplyUpstreamDraftAsync(item, draft, actor, administratorAuthority, now, effectivePolicy, ct);
+        if (draft.UpstreamAnswerAffirmed == true && !item.UpstreamAnswerAffirmed)
+        {
+            item.AffirmInheritedUpstreamAnswer(actor, now, administratorAuthority);
+            await ValidateCurrentUpstreamAnswerAsync(item, effectivePolicy, ct);
+        }
     }
 
     private async Task<IReadOnlyList<RequirementChangeDraft>> NormalizeAsync(SystemChangeRequest scr,
@@ -394,6 +414,191 @@ public sealed class SystemChangeRequestControlledEditingAdapter(AeroLinkDbContex
         return normalized;
     }
 
+    private async Task ApplyUpstreamDraftAsync(SystemChangeRequest item, SystemChangeRequestDraft draft,
+        string actor, bool administratorAuthority, DateTimeOffset now, ILadderPolicy policy, CancellationToken ct)
+    {
+        var level = item.Type switch
+        {
+            ChangeRequestType.System => RequirementLevel.System,
+            ChangeRequestType.Interface => RequirementLevel.Interface,
+            ChangeRequestType.Software when item.SoftwareLevel is { } value => value,
+            _ => throw new DomainException("The controlled Draft has no effective change-request level."),
+        };
+        var parentLevels = policy.ParentLevels(level);
+        if (parentLevels.Count == 0)
+        {
+            // The canonical snapshot always carries the trace fields so a top-level Draft round-trips
+            // through the same adapter. Empty fields are the intentional derived root answer; any authored
+            // link or rationale is still refused rather than becoming a hidden bypass.
+            if ((draft.UpstreamLinks?.Count ?? 0) == 0 && string.IsNullOrWhiteSpace(draft.NoUpstreamRationale)) return;
+            throw new DomainException("The top-of-ladder answer is derived and cannot be authored.");
+        }
+        var requested = draft.UpstreamLinks ?? [];
+        if (requested.Count > 0 && !string.IsNullOrWhiteSpace(draft.NoUpstreamRationale))
+            throw new DomainException("Named upstream change requests cannot be combined with a no-upstream answer.");
+        if (requested.Select(x => x.UpstreamChangeRequestId).Distinct().Count() != requested.Count)
+            throw new DomainException("The controlled Draft contains a duplicate upstream change request.");
+        var derivedPairs = await DerivedEdgesAsync(item, level, ct);
+        if (derivedPairs.Count != 0 && !string.IsNullOrWhiteSpace(draft.NoUpstreamRationale))
+            throw new DomainException("An assessment-derived upstream edge cannot be combined with a no-upstream answer.");
+        var requestedIds = requested.Select(x => x.UpstreamChangeRequestId).ToHashSet();
+        foreach (var existing in item.UpstreamLinks.Where(x => !requestedIds.Contains(x.UpstreamChangeRequestId)).ToList())
+            item.RemoveUpstreamLink(actor, existing.Id, "Replaced through controlled Draft check-in.", now, administratorAuthority);
+        var releases = await db.Releases.AsNoTracking().Where(x => x.ProjectId == item.ProjectId)
+            .Select(x => new { x.Id, x.PredecessorReleaseId, x.Version }).ToListAsync(ct);
+        var releaseById = releases.ToDictionary(x => x.Id);
+        var earlier = new HashSet<Guid>(); var cursor = item.TargetReleaseId;
+        while (releaseById.TryGetValue(cursor, out var release) && release.PredecessorReleaseId is { } predecessor
+            && earlier.Add(predecessor)) cursor = predecessor;
+        foreach (var requestedLink in requested)
+        {
+            var source = await db.SystemChangeRequests.AsNoTracking().SingleOrDefaultAsync(x =>
+                x.Id == requestedLink.UpstreamChangeRequestId && x.ProjectId == item.ProjectId, ct)
+                ?? throw new DomainException("The controlled Draft contains an upstream change request outside this Project.");
+            var sourceLevel = source.Type switch
+            {
+                ChangeRequestType.System => RequirementLevel.System,
+                ChangeRequestType.Interface => RequirementLevel.Interface,
+                ChangeRequestType.Software => source.SoftwareLevel,
+                _ => null,
+            };
+            if (sourceLevel is null || !parentLevels.Contains(sourceLevel.Value))
+                throw new DomainException("The controlled Draft contains an upstream change request outside the effective direct-parent ladder.");
+            var crossBuild = source.TargetReleaseId != item.TargetReleaseId;
+            if (!crossBuild && source.State == ChangeRequestState.Withdrawn)
+                throw new DomainException("A withdrawn change request cannot be an upstream dependency.");
+            if (crossBuild && (!earlier.Contains(source.TargetReleaseId)
+                || source.State is not (ChangeRequestState.Approved or ChangeRequestState.SelectedForBaseline)
+                || string.IsNullOrWhiteSpace(requestedLink.Rationale)))
+                throw new DomainException("An earlier-build upstream link requires a signed earlier revision and a specific rationale.");
+            var derived = await DerivedPairExistsAsync(item, level, source.Id, ct);
+            if (derived) throw new DomainException("The controlled Draft duplicates an assessment-derived upstream pair.");
+            if (await WouldCreateCycleAsync(item.ProjectId, item.Id, source.Id, ct))
+                throw new DomainException("The controlled Draft upstream answer would create a cycle.");
+            var existing = item.UpstreamLinks.SingleOrDefault(x => x.UpstreamChangeRequestId == source.Id);
+            if (existing is not null)
+            {
+                if (!string.Equals(existing.Rationale, requestedLink.Rationale?.Trim(), StringComparison.Ordinal))
+                    item.ChangeUpstreamLinkRationale(actor, existing.Id, requestedLink.Rationale ?? "", now, administratorAuthority);
+                continue;
+            }
+            var build = releaseById.TryGetValue(source.TargetReleaseId, out var sourceRelease) ? sourceRelease.Version : "";
+            if (string.IsNullOrWhiteSpace(build)) throw new DomainException("The controlled Draft contains an upstream change request with no build.");
+            item.AddUpstreamLink(actor, source.Id, source.DisplayNumber, source.TargetReleaseId, build,
+                requestedLink.Rationale ?? "", now, replaceNoUpstream: item.NoUpstreamRationale is not null,
+                administratorAuthority: administratorAuthority);
+        }
+        if (draft.NoUpstreamRationale is not null && item.NoUpstreamRationale != draft.NoUpstreamRationale)
+            item.SetNoUpstreamRationale(actor, draft.NoUpstreamRationale, now,
+                replaceNamedLinks: item.UpstreamLinks.Count != 0, administratorAuthority);
+        else if (draft.NoUpstreamRationale is null && draft.UpstreamLinks is not null && item.NoUpstreamRationale is not null)
+            item.ClearNoUpstreamRationale(actor, "Changed through controlled Draft check-in.", now, administratorAuthority);
+    }
+
+    private async Task ValidateCurrentUpstreamAnswerAsync(SystemChangeRequest item, ILadderPolicy policy,
+        CancellationToken ct)
+    {
+        var level = item.Type switch
+        {
+            ChangeRequestType.System => RequirementLevel.System,
+            ChangeRequestType.Interface => RequirementLevel.Interface,
+            ChangeRequestType.Software when item.SoftwareLevel is { } value => value,
+            _ => throw new DomainException("The controlled Draft has no effective change-request level."),
+        };
+        var parentLevels = policy.ParentLevels(level);
+        if (parentLevels.Count == 0)
+        {
+            if (item.UpstreamLinks.Count == 0 && string.IsNullOrWhiteSpace(item.NoUpstreamRationale)) return;
+            throw new DomainException("The top-of-ladder answer is derived and cannot be authored.");
+        }
+        if (item.UpstreamLinks.Count > 0 && !string.IsNullOrWhiteSpace(item.NoUpstreamRationale))
+            throw new DomainException("Named upstream change requests cannot be combined with a no-upstream answer.");
+        var derivedIds = (await DerivedEdgesAsync(item, level, ct)).ToHashSet();
+        if (derivedIds.Count > 0 && !string.IsNullOrWhiteSpace(item.NoUpstreamRationale))
+            throw new DomainException("An assessment-derived upstream edge cannot be combined with a no-upstream answer.");
+        var releases = await db.Releases.AsNoTracking().Where(x => x.ProjectId == item.ProjectId)
+            .Select(x => new { x.Id, x.PredecessorReleaseId, x.Version }).ToListAsync(ct);
+        var releaseById = releases.ToDictionary(x => x.Id);
+        var earlier = new HashSet<Guid>(); var cursor = item.TargetReleaseId;
+        while (releaseById.TryGetValue(cursor, out var release) && release.PredecessorReleaseId is { } predecessor
+            && earlier.Add(predecessor)) cursor = predecessor;
+        foreach (var link in item.UpstreamLinks)
+        {
+            var source = await db.SystemChangeRequests.AsNoTracking().SingleOrDefaultAsync(x =>
+                x.Id == link.UpstreamChangeRequestId && x.ProjectId == item.ProjectId, ct)
+                ?? throw new DomainException("The inherited answer points outside this Project.");
+            var sourceLevel = source.Type switch
+            {
+                ChangeRequestType.System => RequirementLevel.System,
+                ChangeRequestType.Interface => RequirementLevel.Interface,
+                ChangeRequestType.Software => source.SoftwareLevel,
+                _ => null,
+            };
+            if (sourceLevel is null || !parentLevels.Contains(sourceLevel.Value))
+                throw new DomainException("The inherited answer no longer matches the effective direct-parent ladder.");
+            if (source.TargetReleaseId != link.UpstreamBuildId
+                || !releaseById.TryGetValue(source.TargetReleaseId, out var sourceRelease)
+                || !string.Equals(sourceRelease.Version, link.UpstreamBuildVersion, StringComparison.Ordinal))
+                throw new DomainException("The inherited answer carries a stale upstream build identity.");
+            var crossBuild = source.TargetReleaseId != item.TargetReleaseId;
+            if (!crossBuild && source.State == ChangeRequestState.Withdrawn)
+                throw new DomainException("A withdrawn change request cannot be an upstream dependency.");
+            if (crossBuild && (!earlier.Contains(source.TargetReleaseId)
+                || source.State is not (ChangeRequestState.Approved or ChangeRequestState.SelectedForBaseline)
+                || string.IsNullOrWhiteSpace(link.Rationale)))
+                throw new DomainException("An inherited earlier-build link requires a signed earlier revision and its specific rationale.");
+            if (derivedIds.Contains(source.Id))
+                throw new DomainException("The inherited answer duplicates an assessment-derived upstream pair.");
+            if (await WouldCreateCycleAsync(item.ProjectId, item.Id, source.Id, ct))
+                throw new DomainException("The inherited upstream answer would create a cycle.");
+        }
+    }
+
+    private async Task<bool> DerivedPairExistsAsync(SystemChangeRequest child, RequirementLevel childLevel,
+        Guid parentId, CancellationToken ct) =>
+        await (from link in db.DownstreamAssessmentChangeRequestLinks
+               join assessment in db.DownstreamChangeAssessments on link.AssessmentId equals assessment.Id
+               where link.ChangeRequestId == child.Id && assessment.SourceChangeRequestId == parentId
+                   && assessment.ProjectId == child.ProjectId
+                   && assessment.ReleaseId == child.TargetReleaseId
+                   && assessment.TargetLevel == childLevel
+                   && assessment.State != DownstreamAssessmentState.Superseded
+               select link.Id).AnyAsync(ct);
+
+    private async Task<IReadOnlyList<Guid>> DerivedEdgesAsync(SystemChangeRequest child,
+        RequirementLevel childLevel, CancellationToken ct) =>
+        await (from link in db.DownstreamAssessmentChangeRequestLinks.AsNoTracking()
+               join assessment in db.DownstreamChangeAssessments.AsNoTracking() on link.AssessmentId equals assessment.Id
+               where link.ChangeRequestId == child.Id
+                   && assessment.ProjectId == child.ProjectId
+                   && assessment.ReleaseId == child.TargetReleaseId
+                   && assessment.TargetLevel == childLevel
+                   && assessment.State != DownstreamAssessmentState.Superseded
+               select assessment.SourceChangeRequestId).Distinct().ToListAsync(ct);
+
+    private async Task<bool> WouldCreateCycleAsync(Guid projectId, Guid childId, Guid parentId, CancellationToken ct)
+    {
+        var stated = await db.ChangeRequestUpstreamLinks.AsNoTracking()
+            .Join(db.SystemChangeRequests.AsNoTracking().Where(x => x.ProjectId == projectId),
+                x => x.ChangeRequestId, x => x.Id, (x, _) => new { x.ChangeRequestId, x.UpstreamChangeRequestId }).ToListAsync(ct);
+        var derived = await (from link in db.DownstreamAssessmentChangeRequestLinks.AsNoTracking()
+                             join assessment in db.DownstreamChangeAssessments.AsNoTracking() on link.AssessmentId equals assessment.Id
+                             where assessment.State != DownstreamAssessmentState.Superseded
+                             select new { ChangeRequestId = link.ChangeRequestId, UpstreamChangeRequestId = assessment.SourceChangeRequestId }).ToListAsync(ct);
+        var parents = stated.Concat(derived).GroupBy(x => x.ChangeRequestId)
+            .ToDictionary(x => x.Key, x => x.Select(v => v.UpstreamChangeRequestId).ToArray());
+        var seen = new HashSet<Guid>(); var stack = new Stack<Guid>(); stack.Push(parentId);
+        while (stack.Count != 0)
+        {
+            var cursor = stack.Pop();
+            if (cursor == childId) return true;
+            if (!seen.Add(cursor)) continue;
+            if (parents.TryGetValue(cursor, out var next))
+                foreach (var parent in next) stack.Push(parent);
+        }
+        return false;
+    }
+
     private async Task<int> NextSequenceAsync(string prefix, CancellationToken ct)
     {
         var values = await db.Requirements.AsNoTracking().Where(x => x.BaseNumber.StartsWith(prefix + "-"))
@@ -406,7 +611,9 @@ public sealed class SystemChangeRequestControlledEditingAdapter(AeroLinkDbContex
     private sealed record SystemChangeRequestDraft(string? Title, string? Problem, string? Analysis,
         string? Solution, List<SystemChangeRequestRequirementDraft>? RequirementChanges,
         string? ProblemRich = null, string? AnalysisRich = null, string? SolutionRich = null,
-        List<Guid>? ProblemReportIds = null);
+        List<Guid>? ProblemReportIds = null, List<SystemChangeRequestUpstreamDraft>? UpstreamLinks = null,
+        string? NoUpstreamRationale = null, bool? UpstreamAnswerAffirmed = null);
+    private sealed record SystemChangeRequestUpstreamDraft(Guid UpstreamChangeRequestId, string? Rationale = null);
     private sealed record State(SystemChangeRequest Request, List<Guid> ProblemReportIds);
     private sealed record SystemChangeRequestRequirementDraft(string? BaseNumber, int Revision,
         string? Level, string? Kind, string? Statement, string? Rationale, string? VerificationMethod,

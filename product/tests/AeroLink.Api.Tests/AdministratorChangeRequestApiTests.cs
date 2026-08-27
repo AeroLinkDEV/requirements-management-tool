@@ -3,6 +3,7 @@ using System.Net.Http.Json;
 using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using AeroLink.Domain.ChangeControl;
 using AeroLink.Domain.Identity;
 using AeroLink.Domain.Programs;
@@ -67,6 +68,13 @@ public sealed class AdministratorChangeRequestApiTests
         var sessionId = session.GetProperty("id").GetGuid();
         var draftJson = session.GetProperty("draftJson").GetString()!
             .Replace("Governed ready change", "Administrator-governed ready change", StringComparison.Ordinal);
+        if (type == ChangeRequestType.Software)
+        {
+            var draft = JsonNode.Parse(draftJson)!.AsObject();
+            draft["upstreamLinks"] = new JsonArray();
+            draft["noUpstreamRationale"] = "The administrator confirms no direct upstream change request applies.";
+            draftJson = draft.ToJsonString();
+        }
         using var autosave = await administrator.PutAsJsonAsync(
             $"/api/controlled-editing/sessions/{sessionId}/autosave",
             new { expectedVersion = session.GetProperty("version").GetInt64(), draftJson });
@@ -76,7 +84,8 @@ public sealed class AdministratorChangeRequestApiTests
         using var checkIn = await administrator.PostAsJsonAsync(
             $"/api/controlled-editing/sessions/{sessionId}/check-in",
             new { expectedVersion = sessionVersion });
-        Assert.Equal(HttpStatusCode.OK, checkIn.StatusCode);
+        var checkInBody = await checkIn.Content.ReadAsStringAsync();
+        Assert.True(checkIn.StatusCode == HttpStatusCode.OK, $"{(int)checkIn.StatusCode}: {checkInBody}");
 
         using var file = new MultipartFormDataContent();
         file.Add(new StringContent(scenario.ProjectId.ToString()), "projectId");

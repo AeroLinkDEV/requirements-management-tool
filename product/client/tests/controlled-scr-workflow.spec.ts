@@ -67,10 +67,18 @@ test('author creates, edits, submits, and sequentially approves a change request
   await expect(page.getByRole('link', { name: 'Download PDF' })).toHaveAttribute('href', /\/api\/change-requests\/.+\/download\?format=pdf/)
   await page.getByRole('button', { name: 'Check out & edit' }).click()
   await page.getByLabel('Title').fill('Introduce controlled approval workflow')
+  await expect(page.getByRole('heading', { name: 'Upstream change requests' })).toBeVisible()
+  await expect(page.getByText('Include earlier builds')).toBeVisible()
+  await page.getByLabel('No upstream change-request rationale').fill(
+    'This isolated browser workspace has no direct System change request for the new HLR work.',
+  )
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBeTruthy()
   await expect(page.getByText('Known downstream context',{exact:true})).toBeVisible()
   await expect(page.locator('.editorColumns aside select')).toHaveCount(0)
   await page.getByRole('button', { name: 'Save & check in' }).click()
   await expect(page.getByRole('heading', { name: 'Introduce controlled approval workflow' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Upstream trace answer' })).toBeVisible()
+  await expect(page.getByText('No direct upstream change request')).toBeVisible()
 
   await page.getByRole('button', { name: 'Configure & Submit Review' }).click()
   await expect(page.getByText('No reviewers selected')).toBeVisible()

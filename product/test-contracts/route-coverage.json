@@ -36,6 +36,7 @@
       "path": "/api/change-requests/{id:guid}",
       "file": "ChangeRequestEndpoints.cs",
       "coveredBy": [
+        "ChangeRequestUpstreamTraceApiTests",
         "WithdrawChangeRequestApiTests"
       ]
     },
@@ -282,6 +283,7 @@
         "CaseProcedureLifecycleApiTests",
         "ChangeAuthoringInvariantApiTests",
         "ChangeRequestReviewRationaleApiTests",
+        "ChangeRequestUpstreamTraceApiTests",
         "ClosedReleaseAuthoringTests",
         "CodeTraceabilityApiTests",
         "ConfigurationPublicationApiTests",
@@ -725,6 +727,7 @@
         "AdministratorChangeRequestApiTests",
         "AuthoredSectionTests",
         "ChangeRequestReviewRationaleApiTests",
+        "ChangeRequestUpstreamTraceApiTests",
         "TestChangeRequestReviewWorkflowTests",
         "VerificationVocabularyApiTests",
         "WithdrawChangeRequestApiTests"
@@ -768,8 +771,10 @@
       "file": "ControlledEditingEndpoints.cs",
       "coveredBy": [
         "AdministratorChangeRequestApiTests",
+        "AuthoringTracedImpactTests",
         "BuildScopedWorkspaceApiTests",
         "ChangeAuthoringInvariantApiTests",
+        "ChangeRequestUpstreamTraceApiTests",
         "ControlledEditingCheckInApiTests",
         "ControlledEditingProcedureAuthorityTests",
         "ProblemReportApiTests",
@@ -784,6 +789,8 @@
       "file": "ControlledEditingEndpoints.cs",
       "coveredBy": [
         "AdministratorChangeRequestApiTests",
+        "AuthoringTracedImpactTests",
+        "ChangeRequestUpstreamTraceApiTests",
         "ControlledEditingCheckInApiTests",
         "ControlledEditingProcedureAuthorityTests",
         "ProblemReportApiTests",
@@ -796,6 +803,7 @@
       "path": "/api/controlled-editing/sessions/{id:guid}/discard",
       "file": "ControlledEditingEndpoints.cs",
       "coveredBy": [
+        "ChangeRequestUpstreamTraceApiTests",
         "ProblemReportApiTests",
         "ProblemReportCheckoutApiTests"
       ]
@@ -907,6 +915,7 @@
       "path": "/api/downstream-assessments/{id:guid}/reopen",
       "file": "DownstreamAssessmentEndpoints.cs",
       "coveredBy": [
+        "ChangeRequestUpstreamTraceApiTests",
         "DownstreamAssessmentReopenApiTests"
       ]
     },
@@ -2263,6 +2272,8 @@
       "file": "ControlledEditingEndpoints.cs",
       "coveredBy": [
         "AdministratorChangeRequestApiTests",
+        "AuthoringTracedImpactTests",
+        "ChangeRequestUpstreamTraceApiTests",
         "ControlledEditingCheckInApiTests",
         "ControlledEditingProcedureAuthorityTests",
         "ProblemReportApiTests",

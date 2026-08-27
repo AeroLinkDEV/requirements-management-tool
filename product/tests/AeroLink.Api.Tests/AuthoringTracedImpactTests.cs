@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using AeroLink.Domain.ChangeControl;
 using AeroLink.Domain.Identity;
 using AeroLink.Domain.Programs;
@@ -606,6 +607,29 @@ public sealed class AuthoringTracedImpactTests
             });
         }
 
+        async Task<long> AuthorNoUpstreamAsync(Guid changeRequestId)
+        {
+            using var checkout = await client.PostAsJsonAsync("/api/controlled-editing/checkout",
+                new { artifactType = "SCR", artifactId = changeRequestId, leaseMinutes = 15 });
+            Assert.Equal(HttpStatusCode.Created, checkout.StatusCode);
+            var session = JsonSerializer.Deserialize<JsonElement>(await checkout.Content.ReadAsStringAsync());
+            var sessionId = session.GetProperty("id").GetGuid();
+            var expectedVersion = session.GetProperty("version").GetInt64();
+            var draft = JsonNode.Parse(session.GetProperty("draftJson").GetString()!)!.AsObject();
+            draft["upstreamLinks"] = new JsonArray();
+            draft["noUpstreamRationale"] = "The parent change is not applicable to this controlled HLR test.";
+            using var autosave = await client.PutAsJsonAsync($"/api/controlled-editing/sessions/{sessionId}/autosave",
+                new { expectedVersion, draftJson = draft.ToJsonString() });
+            Assert.Equal(HttpStatusCode.OK, autosave.StatusCode);
+            expectedVersion = JsonSerializer.Deserialize<JsonElement>(await autosave.Content.ReadAsStringAsync())
+                .GetProperty("version").GetInt64();
+            using var checkIn = await client.PostAsJsonAsync($"/api/controlled-editing/sessions/{sessionId}/check-in",
+                new { expectedVersion });
+            Assert.Equal(HttpStatusCode.OK, checkIn.StatusCode);
+            return JsonSerializer.Deserialize<JsonElement>(await checkIn.Content.ReadAsStringAsync())
+                .GetProperty("resultingArtifactVersion").GetInt64();
+        }
+
         // A normal HLR and LLR draft may be saved while its engineering decisions are incomplete.
         using (var incompleteHlr = await TryCreateDraftAsync("HighLevel", childNumber, []))
             Assert.Equal(HttpStatusCode.Created, incompleteHlr.StatusCode);
@@ -702,9 +726,10 @@ public sealed class AuthoringTracedImpactTests
         }
 
         var validHlr = await CreateDraftAsync("HighLevel", childNumber, [ladder.SystemRevisionId], impact: RequirementAuthoringJson.CompleteImpactDispositions);
+        var validHlrVersion = await AuthorNoUpstreamAsync(validHlr.GetProperty("id").GetGuid());
         using (var submitHlr = await client.PostAsJsonAsync(
                    $"/api/change-requests/{validHlr.GetProperty("id").GetGuid()}/submit",
-                   new { expectedVersion = validHlr.GetProperty("version").GetInt64(), mode = "Sequential",
+                   new { expectedVersion = validHlrVersion, mode = "Sequential",
                        approvers = new[] { new { userId = "traced.approver", name = "Traced Approver" } } }))
         {
             var body = await submitHlr.Content.ReadAsStringAsync();
@@ -712,9 +737,10 @@ public sealed class AuthoringTracedImpactTests
         }
 
         var validLlr = await CreateDraftAsync("LowLevel", "LLR-000503", [ladder.HighRevisionId], impact: RequirementAuthoringJson.CompleteImpactDispositions);
+        var validLlrVersion = await AuthorNoUpstreamAsync(validLlr.GetProperty("id").GetGuid());
         using (var submitLlr = await client.PostAsJsonAsync(
                    $"/api/change-requests/{validLlr.GetProperty("id").GetGuid()}/submit",
-                   new { expectedVersion = validLlr.GetProperty("version").GetInt64(), mode = "Sequential",
+                   new { expectedVersion = validLlrVersion, mode = "Sequential",
                        approvers = new[] { new { userId = "traced.approver", name = "Traced Approver" } } }))
         {
             var body = await submitLlr.Content.ReadAsStringAsync();

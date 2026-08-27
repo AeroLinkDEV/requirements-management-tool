@@ -153,6 +153,13 @@ AeroLink supports governed System/HLR/LLR change requests and Test Change Reques
 - preserved returned/superseded history;
 - separation between approval and actual build/release inclusion.
 
+For a non-root requirement change request, the controlled Draft also records either exact upstream change-request
+revision link(s) or an attributable no-upstream rationale before review. Same-build direct-parent linkage from the
+effective Project ladder is the normal path; an explicitly requested earlier-build link must target an exact signed
+predecessor-build revision and retain its cross-build rationale. Assessment-derived upstream evidence remains owned
+by its build-scoped downstream assessment, while the review snapshot freezes the exact assessment/link identity that
+satisfied the gate. Historical review contracts continue to hash under their original versions.
+
 Approved work does not become silently rewritten because a later revision exists.
 
 ## Problem Reports

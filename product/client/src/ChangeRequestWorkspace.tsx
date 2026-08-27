@@ -90,10 +90,49 @@ type Cycle = {
   mode: "Sequential" | "Parallel";
   state: string;
   snapshotHash: string;
+  /** 0 means this historical cycle predates the trace snapshot contract. */
+  snapshotContractVersion?: number;
+  snapshotJson?: string;
   startedAt: string;
   completedAt?: string;
   closureReason?: string;
   steps: Step[];
+};
+type UpstreamDraftLink = { upstreamChangeRequestId: string; rationale: string };
+type UpstreamDetail = UpstreamDraftLink & {
+  id: string;
+  upstreamDisplayNumber: string;
+  upstreamBuildId?: string | null;
+  upstreamBuildVersion: string;
+  actor: string;
+  statedAt: string;
+};
+type UpstreamHistory = {
+  id: string;
+  action: string;
+  upstreamChangeRequestId?: string | null;
+  upstreamDisplayNumber?: string | null;
+  upstreamBuildId?: string | null;
+  upstreamBuildVersion?: string | null;
+  rationale: string;
+  actor: string;
+  occurredAt: string;
+};
+type UpstreamCandidate = {
+  id: string;
+  displayNumber: string;
+  title: string;
+  build: string;
+  earlierBuild: boolean;
+  assessmentDerived: boolean;
+};
+type DerivedUpstreamEdge = {
+  upstreamChangeRequestId: string;
+  upstreamDisplayNumber: string;
+  upstreamBuildId: string;
+  upstreamBuildVersion: string;
+  assessmentId: string;
+  assessmentLinkId: string;
 };
 type Audit = {
   eventType: string;
@@ -129,6 +168,10 @@ type ChangeRequestDetail = {
   deferredFromState?: string | null;
   /** How far it had got when it was taken back. Present only while State is Withdrawn. */
   withdrawnFromState?: string | null;
+  noUpstream?: { rationale: string; actor: string; statedAt: string } | null;
+  upstream?: UpstreamDetail[];
+  upstreamHistory?: UpstreamHistory[];
+  inheritedUpstream?: { inheritedFromChangeRequestId?: string; inheritedUpstreamContextJson: string; affirmed: boolean; affirmedBy?: string; affirmedAt?: string } | null;
   /** Set when a build was reopened underneath this, taking back the revision it was written against. */
   rebaseRequiredReason?: string | null;
   createdAt: string;
@@ -185,6 +228,9 @@ type ScrDraft = {
   title: string; problem: string; analysis: string; solution: string;
   problemRich: string; analysisRich: string; solutionRich: string;
   problemReportIds?: string[];
+  upstreamLinks?: UpstreamDraftLink[];
+  noUpstreamRationale?: string | null;
+  upstreamAnswerAffirmed?: boolean;
 };
 type AuthoringContext = {
   type: "System" | "Software" | "Interface";
@@ -223,6 +269,23 @@ const prefixFor = (level: RequirementLevel) =>
 const parseObject = (value: string | undefined): Record<string, unknown> => {
   try {
     return JSON.parse(value || "{}") as Record<string, unknown>;
+  } catch {
+    return {};
+  }
+};
+type InheritedTraceAnswer = {
+  links?: { upstreamChangeRequestId?: string; upstreamDisplayNumber?: string; upstreamBuildVersion?: string; rationale?: string; UpstreamChangeRequestId?: string; UpstreamDisplayNumber?: string; UpstreamBuildVersion?: string; Rationale?: string }[];
+  noUpstreamRationale?: string;
+};
+type FrozenTraceSnapshot = {
+  isTopOfLadder?: boolean;
+  authoredLinks?: { upstreamChangeRequestId?: string; upstreamDisplayNumber?: string; upstreamBuildVersion?: string; rationale?: string; UpstreamChangeRequestId?: string; UpstreamDisplayNumber?: string; UpstreamBuildVersion?: string; Rationale?: string }[];
+  noUpstreamRationale?: string | null;
+  derivedLinks?: { upstreamChangeRequestId?: string; assessmentLinkId?: string; assessmentId?: string; upstreamDisplayNumber?: string; UpstreamChangeRequestId?: string; AssessmentLinkId?: string; AssessmentId?: string; UpstreamDisplayNumber?: string }[];
+};
+const inheritedTraceAnswer = (value: string | undefined): InheritedTraceAnswer => {
+  try {
+    return JSON.parse(value || "{}") as InheritedTraceAnswer;
   } catch {
     return {};
   }
@@ -433,6 +496,12 @@ export default function ChangeRequestWorkspace({
   });
   const [requirements, setRequirements] = useState<DraftRequirement[]>([]);
   const [problemReportIds, setProblemReportIds] = useState<string[]>([]);
+  const [upstreamCandidates, setUpstreamCandidates] = useState<UpstreamCandidate[]>([]);
+  const [derivedUpstreamEdges, setDerivedUpstreamEdges] = useState<DerivedUpstreamEdge[]>([]);
+  const [upstreamAnswerComplete, setUpstreamAnswerComplete] = useState(false);
+  const [upstreamSearch, setUpstreamSearch] = useState("");
+  const [upstreamCandidatesTop, setUpstreamCandidatesTop] = useState(false);
+  const [includeEarlierBuilds, setIncludeEarlierBuilds] = useState(false);
   const [approvers, setApprovers] = useState<Approver[]>([]);
   // Null means the applicable workflow has not been resolved yet (or its lookup failed): the picker stays
   // unfiltered and the server remains authoritative. True means no workflow is configured, so only users
@@ -504,6 +573,23 @@ export default function ChangeRequestWorkspace({
   useEffect(() => {
     void load();
   }, [load]);
+
+  useEffect(() => {
+    if (!scr) return;
+    const controller = new AbortController();
+    const query = upstreamSearch.trim() ? `&search=${encodeURIComponent(upstreamSearch.trim())}` : "";
+    fetch(`${api}/api/change-requests/${scr.id}/upstream-candidates?limit=25&includeEarlierBuilds=${includeEarlierBuilds}${query}`, { signal: controller.signal })
+      .then(async (response) => response.ok ? response.json() as Promise<{ isTopOfLadder: boolean; upstreamAnswerComplete?: boolean; candidates: UpstreamCandidate[]; derivedEdges?: DerivedUpstreamEdge[] }> : undefined)
+      .then((value) => {
+        if (!value) return;
+        setUpstreamCandidatesTop(value.isTopOfLadder);
+        setUpstreamAnswerComplete(value.upstreamAnswerComplete ?? false);
+        setDerivedUpstreamEdges(value.derivedEdges ?? []);
+        if (mode === "edit") setUpstreamCandidates(value.candidates ?? []);
+      })
+      .catch(() => { /* The server remains authoritative at check-in when candidate search is unavailable. */ });
+    return () => controller.abort();
+  }, [api, includeEarlierBuilds, mode, scr, upstreamSearch]);
 
   useEffect(() => {
     if (!scr) return;
@@ -590,6 +676,9 @@ export default function ChangeRequestWorkspace({
         problemRich: recovered.problemRich || fromPlainText(recovered.problem),
         analysisRich: recovered.analysisRich || fromPlainText(recovered.analysis),
         solutionRich: recovered.solutionRich || fromPlainText(recovered.solution),
+        upstreamLinks: recovered.upstreamLinks ?? [],
+        noUpstreamRationale: recovered.noUpstreamRationale ?? null,
+        upstreamAnswerAffirmed: recovered.upstreamAnswerAffirmed ?? false,
       };
       const recoveredRequirements = (recovered.requirementChanges ?? [])
         .map((item) => normalizeRequirement(item, fallbackLevel));
@@ -1026,6 +1115,7 @@ export default function ChangeRequestWorkspace({
   if (!scr) return <main className="scrLoading">Loading controlled record…</main>;
 
   const latest = [...scr.reviewCycles].sort((a, b) => b.sequence - a.sequence)[0];
+  const frozenTraceCycles = scr.reviewCycles.filter((cycle) => cycle.snapshotContractVersion === 3 && cycle.snapshotJson);
   const active =
     latest?.steps.find((step) => step.state === "Active" && step.approverId === user.userName) ??
     latest?.steps.find((step) => step.state === "Active");
@@ -1035,6 +1125,8 @@ export default function ChangeRequestWorkspace({
   const canComment = scr.state === "InReview" && latest?.state === "Active"
     && (latest?.steps ?? []).some((step) => step.approverId.toLowerCase() === user.userName.toLowerCase());
   const targetRelease = releases.find((item) => item.id === scr.targetReleaseId);
+  const inheritedAnswer = inheritedTraceAnswer(scr.inheritedUpstream?.inheritedUpstreamContextJson);
+  const upstreamById = new Map((scr.upstream ?? []).map((link) => [link.upstreamChangeRequestId, link]));
   // Signed for, whichever of the two stored states it sits in. See StartNextRevision in the domain for why
   // both count, and why a released target build takes the action away again.
   const isSignedFor = scr.state === "Approved" || scr.state === "SelectedForBaseline";
@@ -1064,7 +1156,10 @@ export default function ChangeRequestWorkspace({
     value.trim(),
   );
   const proposalsComplete = requirements.length > 0 && requirements.every(proposalComplete);
-  const reviewReady = caseComplete && proposalsComplete && requirements.length > 0;
+  const localTraceAnswerComplete = upstreamAnswerComplete || upstreamCandidatesTop || derivedUpstreamEdges.length > 0
+    || (draft.upstreamLinks ?? []).length > 0 || Boolean(draft.noUpstreamRationale?.trim())
+    || draft.upstreamAnswerAffirmed === true;
+  const reviewReady = caseComplete && proposalsComplete && requirements.length > 0 && localTraceAnswerComplete;
   const hasUnsavedChanges = mode === "edit" && serializedWorkingCopy !== lastSavedRef.current;
   // An unfinished proposal no longer blocks a check-in. `SystemChangeRequest.ValidateReadyForReview` now
   // carries the completeness the aggregate used to demand on every Draft write, so a proposal can rest
@@ -1180,6 +1275,74 @@ export default function ChangeRequestWorkspace({
             <ProblemReportPicker api={api} projectId={scr.projectId} scope="target-build" releaseId={scr.targetReleaseId}
               selected={problemReportIds} onChange={setProblemReportIds}
               legend={`PRs driving this ${artifactAcronym(scr.displayNumber, "changeRequest")} (optional)`} />
+            <section className="upstreamAnswerEditor" aria-labelledby="upstream-answer-title">
+              <div className="workspaceTitle">
+                <div>
+                  <span className="stageKicker">TRACE ANSWER</span>
+                  <h3 id="upstream-answer-title">Upstream change requests</h3>
+                  <p>Choose exact direct-parent change requests, or explain why none applies. The server revalidates every choice at check-in.</p>
+                </div>
+              </div>
+              {scr.inheritedUpstream && !draft.upstreamAnswerAffirmed && (
+                <div className="inheritedTraceAnswer">
+                  <b>Inherited from the predecessor revision</b>
+                  {inheritedAnswer.links?.map((link, index) => <p key={`${link.upstreamChangeRequestId ?? link.UpstreamChangeRequestId ?? "link"}-${index}`}>
+                    {link.upstreamDisplayNumber ?? link.UpstreamDisplayNumber ?? link.upstreamChangeRequestId ?? link.UpstreamChangeRequestId ?? "Named upstream"}
+                    {(link.upstreamBuildVersion ?? link.UpstreamBuildVersion) ? ` · upstream build ${link.upstreamBuildVersion ?? link.UpstreamBuildVersion}` : ""}
+                    {(link.rationale ?? link.Rationale) ? ` · ${link.rationale ?? link.Rationale}` : ""}
+                  </p>)}
+                  {inheritedAnswer.noUpstreamRationale && <p>No upstream: {inheritedAnswer.noUpstreamRationale}</p>}
+                  <button type="button" onClick={() => setDraft((value) => ({ ...value, upstreamAnswerAffirmed: true }))}>
+                    Affirm this inherited answer
+                  </button>
+                </div>
+              )}
+              {!upstreamCandidatesTop && (
+                <>
+                  <label><input type="checkbox" checked={includeEarlierBuilds} onChange={(event) => setIncludeEarlierBuilds(event.target.checked)} /> Include earlier builds (only signed, exact upstream revisions are eligible)</label>
+                  <label>
+                    Find a direct parent
+                    <input value={upstreamSearch} onChange={(event) => setUpstreamSearch(event.target.value)} placeholder="Search number or title" />
+                  </label>
+                  <div className="upstreamCandidateList">
+                    {upstreamCandidates.filter((candidate) => !draft.upstreamLinks?.some((link) => link.upstreamChangeRequestId === candidate.id))
+                      .filter((candidate) => !candidate.assessmentDerived).map((candidate) => (
+                        <button type="button" key={candidate.id}
+                          onClick={() => {
+                            if (draft.noUpstreamRationale && !window.confirm("Replace the authored no-upstream answer with a named upstream link?")) return;
+                            setDraft((value) => ({ ...value, noUpstreamRationale: null,
+                              upstreamLinks: [...(value.upstreamLinks ?? []), { upstreamChangeRequestId: candidate.id, rationale: "" }] }));
+                          }}>
+                          {candidate.displayNumber} · {candidate.title} (current build {targetRelease?.version ?? scr.targetReleaseId} → upstream build {candidate.build}{candidate.earlierBuild ? ", earlier build" : ""})
+                        </button>
+                      ))}
+                  </div>
+                </>
+              )}
+              {derivedUpstreamEdges.length > 0 && <div className="snapshotNote"><b>Assessment-derived upstream edges (read-only)</b>{derivedUpstreamEdges.map((edge) => <p key={edge.assessmentLinkId}>{edge.upstreamDisplayNumber} · current build {targetRelease?.version ?? scr.targetReleaseId} → upstream build {edge.upstreamBuildVersion || edge.upstreamBuildId} · assessment {edge.assessmentId} · link {edge.assessmentLinkId}</p>)}</div>}
+              {(draft.upstreamLinks ?? []).map((link) => {
+                const candidate = upstreamCandidates.find((value) => value.id === link.upstreamChangeRequestId);
+                const stored = upstreamById.get(link.upstreamChangeRequestId);
+                const displayNumber = candidate?.displayNumber ?? stored?.upstreamDisplayNumber ?? link.upstreamChangeRequestId;
+                const upstreamBuild = candidate?.build ?? stored?.upstreamBuildVersion ?? "unknown";
+                return <div className="upstreamDraftRow" key={link.upstreamChangeRequestId}>
+                  <b>{displayNumber}<small>current build {targetRelease?.version ?? scr.targetReleaseId} → upstream build {upstreamBuild}</small></b>
+                  <input aria-label={`Rationale for ${displayNumber}`} value={link.rationale}
+                    onChange={(event) => setDraft((value) => ({ ...value, upstreamLinks: (value.upstreamLinks ?? []).map((item) => item.upstreamChangeRequestId === link.upstreamChangeRequestId ? { ...item, rationale: event.target.value } : item) }))}
+                    placeholder="Why is this exact change request upstream?" />
+                  <button type="button" onClick={() => setDraft((value) => ({ ...value, upstreamLinks: (value.upstreamLinks ?? []).filter((item) => item.upstreamChangeRequestId !== link.upstreamChangeRequestId) }))}>Remove</button>
+                </div>;
+              })}
+              {!upstreamCandidatesTop && derivedUpstreamEdges.length === 0 && (draft.upstreamLinks ?? []).length === 0 && (
+                <label>
+                  No upstream change-request rationale
+                  <textarea value={draft.noUpstreamRationale ?? ""}
+                    onChange={(event) => setDraft((value) => ({ ...value, noUpstreamRationale: event.target.value || null }))}
+                    placeholder="Explain why no direct upstream change request applies." />
+                </label>
+              )}
+              {upstreamCandidatesTop && <p className="muted">This level is at the top of the configured ladder; its upstream answer is derived.</p>}
+            </section>
           </section>
 
           <section className="workspaceCard authoringCard" id="checked-requirements">
@@ -1411,6 +1574,46 @@ export default function ChangeRequestWorkspace({
                 : undefined}
             />
 
+            <section className="workspaceCard" aria-labelledby="trace-answer-title">
+              <div className="workspaceTitle"><div><h2 id="trace-answer-title">Upstream trace answer</h2><p>Authored links and the evidence frozen when this change request entered review.</p></div></div>
+              {(scr.upstream ?? []).length > 0 ? <div className="upstreamReferenceList">
+                {(scr.upstream ?? []).map((link) => <article className="upstreamReference" key={link.id}>
+                  <div><b>{link.upstreamDisplayNumber}</b><span>current build {targetRelease?.version ?? scr.targetReleaseId} → upstream build {link.upstreamBuildVersion}</span></div>
+                  <p>{link.rationale}</p>
+                  <small>Stated by <PersonName userName={link.actor} /> · {new Date(link.statedAt).toLocaleString()}</small>
+                </article>)}
+              </div> : scr.noUpstream ? <div className="snapshotNote"><b>No direct upstream change request</b><p>{scr.noUpstream.rationale}</p><small>Stated by <PersonName userName={scr.noUpstream.actor} /> · {new Date(scr.noUpstream.statedAt).toLocaleString()}</small></div>
+                : upstreamCandidatesTop ? <div className="snapshotNote"><b>Top of ladder</b><p>No upstream change request applies under this Project's effective ladder.</p></div>
+                : scr.state === "Draft"
+                  ? <p className="muted">No upstream answer has been authored yet. Complete it before review.</p>
+                  : <p className="muted">No authored upstream answer is recorded; this is a historical record from before trace authoring.</p>}
+              {scr.inheritedUpstream && <div className="snapshotNote"><b>Revision context</b><p>Inherited from {scr.inheritedUpstream.inheritedFromChangeRequestId ?? "the predecessor revision"}; {scr.inheritedUpstream.affirmed ? "affirmed" : "not yet affirmed"}.</p></div>}
+              {(scr.upstreamHistory ?? []).length > 0 && <details className="traceHistory"><summary>Answer history ({scr.upstreamHistory!.length})</summary>
+                {scr.upstreamHistory!.map((entry) => <div className="auditRow" key={entry.id}><i /><div><b>{entry.action}</b><p>{entry.upstreamDisplayNumber ?? "No-upstream answer"}{entry.upstreamBuildVersion ? ` · upstream build ${entry.upstreamBuildVersion}` : ""}{entry.rationale ? ` · ${entry.rationale}` : ""}</p><small><PersonName userName={entry.actor} /> · {new Date(entry.occurredAt).toLocaleString()}</small></div></div>)}
+              </details>}
+              {frozenTraceCycles.length > 0 && <details className="traceHistory" open>
+                <summary>Frozen review evidence ({frozenTraceCycles.length} snapshot{frozenTraceCycles.length === 1 ? "" : "s"})</summary>
+                {frozenTraceCycles.map((cycle) => {
+                  const snapshot = parseObject(cycle.snapshotJson) as FrozenTraceSnapshot;
+                  return <article className="snapshotNote" key={cycle.id}>
+                    <b>Review cycle {cycle.sequence} · contract v{cycle.snapshotContractVersion} · {cycle.snapshotHash}</b>
+                    <p>{snapshot.isTopOfLadder ? "Top-of-ladder upstream state." : "Resolved upstream state."}</p>
+                    {(snapshot.authoredLinks ?? []).map((link, index) => <small key={`authored-${index}`}>Frozen authored link: {link.upstreamDisplayNumber ?? link.UpstreamDisplayNumber ?? link.upstreamChangeRequestId ?? link.UpstreamChangeRequestId ?? "upstream"} · current build {targetRelease?.version ?? scr.targetReleaseId} → upstream build {link.upstreamBuildVersion ?? link.UpstreamBuildVersion ?? "unknown"} · {link.rationale ?? link.Rationale ?? "No rationale"}</small>)}
+                    {snapshot.noUpstreamRationale && <small>Frozen no-upstream rationale: {snapshot.noUpstreamRationale}</small>}
+                    {(snapshot.derivedLinks ?? []).map((edge, index) => {
+                      const assessmentId = edge.assessmentId ?? edge.AssessmentId;
+                      const assessmentLinkId = edge.assessmentLinkId ?? edge.AssessmentLinkId;
+                      const isAbsentFromLiveAssessment = assessmentId && assessmentLinkId
+                        ? !derivedUpstreamEdges.some((live) => live.assessmentId === assessmentId && live.assessmentLinkId === assessmentLinkId)
+                        : false;
+                      return <small key={`${assessmentLinkId ?? "edge"}-${index}`}>Derived edge: {edge.upstreamDisplayNumber ?? edge.UpstreamDisplayNumber ?? edge.upstreamChangeRequestId ?? edge.UpstreamChangeRequestId ?? "upstream"} · assessment {assessmentId ?? "unknown"} · link {assessmentLinkId ?? "unknown"}{isAbsentFromLiveAssessment ? " · frozen review evidence; no longer present in the live assessment (reopened/corrected)" : ""}</small>;
+                    })}
+                  </article>;
+                })}
+              </details>}
+              {derivedUpstreamEdges.length > 0 && <div className="snapshotNote"><b>Live assessment-derived edges</b>{derivedUpstreamEdges.map((edge) => <p key={edge.assessmentLinkId}>{edge.upstreamDisplayNumber} · current build {targetRelease?.version ?? scr.targetReleaseId} → upstream build {edge.upstreamBuildVersion || edge.upstreamBuildId} · assessment {edge.assessmentId} · link {edge.assessmentLinkId}</p>)}</div>}
+            </section>
+
             {drivingProblemReports.length > 0 && (
               <section className="workspaceCard">
                 <div className="workspaceTitle"><div><h2>Driving Problem Reports</h2><p>The problem records that authorized this engineering response</p></div></div>
@@ -1484,10 +1687,10 @@ export default function ChangeRequestWorkspace({
               ]}
             >
               {scr.state === "Draft" && isAuthor && reviewReady && (
-                <><div className="railReadiness ready"><b>Ready for review</b><span>The change case and requirement proposals are complete.</span></div><button type="button" className="primaryFull" onClick={openReviewerSetup}>Configure & Submit Review</button></>
+                <><div className="railReadiness ready"><b>Ready for review</b><span>The change case, requirement proposals, and upstream trace answer are complete.</span></div><button type="button" className="primaryFull" onClick={openReviewerSetup}>Configure & Submit Review</button></>
               )}
               {scr.state === "Draft" && isAuthor && !reviewReady && (
-                <div className="railReadiness"><b>Draft needs authoring</b><span>{!caseComplete ? "Complete the change case." : "Complete the requirement proposals."}</span><button type="button" disabled={busy || Boolean(lockStatus?.locked && !lockStatus.mine)} onClick={beginEdit}>Complete Draft readiness</button></div>
+                <div className="railReadiness"><b>Draft needs authoring</b><span>{!caseComplete ? "Complete the change case." : !proposalsComplete ? "Complete the requirement proposals." : "Complete the upstream trace answer."}</span><button type="button" disabled={busy || Boolean(lockStatus?.locked && !lockStatus.mine)} onClick={beginEdit}>Complete Draft readiness</button></div>
               )}
               {/* No second Revise button here. The action lives in the Change case header with Check out &
                   edit, so there is one place to act; this only explains what it will do. */}

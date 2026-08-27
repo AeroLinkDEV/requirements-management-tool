@@ -69,6 +69,8 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
     public DbSet<SoftwareRelease> Releases => Set<SoftwareRelease>();
     public DbSet<SoftwareBuild> SoftwareBuilds => Set<SoftwareBuild>();
     public DbSet<SystemChangeRequest> SystemChangeRequests => Set<SystemChangeRequest>();
+    public DbSet<ChangeRequestUpstreamLink> ChangeRequestUpstreamLinks => Set<ChangeRequestUpstreamLink>();
+    public DbSet<ChangeRequestUpstreamHistory> ChangeRequestUpstreamHistory => Set<ChangeRequestUpstreamHistory>();
     public DbSet<RequirementChange> RequirementChanges => Set<RequirementChange>();
     public DbSet<DownstreamChangeAssessment> DownstreamChangeAssessments => Set<DownstreamChangeAssessment>();
     public DbSet<DownstreamAssessmentChangeRequestLink> DownstreamAssessmentChangeRequestLinks => Set<DownstreamAssessmentChangeRequestLink>();
@@ -665,6 +667,14 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
             b.Property(x => x.Type).HasConversion<string>().HasMaxLength(30);
             b.Property(x => x.SoftwareLevel).HasConversion<string>().HasMaxLength(30);
             b.Property(x => x.SnapshotContractVersion).IsRequired();
+            b.Property(x => x.NoUpstreamRationale).HasMaxLength(4000);
+            b.Property(x => x.NoUpstreamStatedBy).HasMaxLength(100);
+            b.Property(x => x.InheritedUpstreamContextJson).HasMaxLength(200000);
+            b.Property(x => x.UpstreamAnswerAffirmedBy).HasMaxLength(100);
+            b.HasMany(x => x.UpstreamLinks).WithOne().HasForeignKey(x => x.ChangeRequestId).OnDelete(DeleteBehavior.Cascade);
+            b.Navigation(x => x.UpstreamLinks).UsePropertyAccessMode(PropertyAccessMode.Field);
+            b.HasMany(x => x.UpstreamHistory).WithOne().HasForeignKey(x => x.ChangeRequestId).OnDelete(DeleteBehavior.Cascade);
+            b.Navigation(x => x.UpstreamHistory).UsePropertyAccessMode(PropertyAccessMode.Field);
             b.Property(x => x.Version).IsConcurrencyToken();
             b.Ignore(x => x.DisplayNumber); b.Ignore(x => x.ActiveReviewCycle);
             b.HasIndex(x => new { x.ProjectId, x.BaseNumber, x.Revision }).IsUnique();
@@ -825,6 +835,8 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
         {
             b.ToTable("review_cycles"); b.HasKey(x => x.Id);
             b.Property(x => x.SnapshotHash).HasMaxLength(64).IsRequired();
+            b.Property(x => x.SnapshotContractVersion).IsRequired();
+            b.Property(x => x.SnapshotJson).HasMaxLength(200000).IsRequired();
             b.Property(x => x.State).HasConversion<string>().HasMaxLength(40);
             b.Property(x => x.Mode).HasConversion<string>().HasMaxLength(20);
             b.Property(x => x.ClosureReason).HasMaxLength(2000);
@@ -843,6 +855,29 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
                 "(\"ChangeRequestId\" IS NULL) <> (\"TestChangeReviewId\" IS NULL)"));
             b.HasMany(x => x.Steps).WithOne().HasForeignKey(x => x.ReviewCycleId).OnDelete(DeleteBehavior.Cascade);
             b.HasMany(x => x.Comments).WithOne().HasForeignKey(x => x.ReviewCycleId).OnDelete(DeleteBehavior.Cascade);
+        });
+        modelBuilder.Entity<ChangeRequestUpstreamLink>(b =>
+        {
+            b.ToTable("change_request_upstream_links"); b.HasKey(x => x.Id);
+            b.Property(x => x.UpstreamDisplayNumber).HasMaxLength(40).IsRequired();
+            b.Property(x => x.UpstreamBuildVersion).HasMaxLength(40).IsRequired();
+            b.Property(x => x.Rationale).HasMaxLength(4000).IsRequired();
+            b.Property(x => x.ActorId).HasMaxLength(100).IsRequired();
+            b.HasIndex(x => new { x.ChangeRequestId, x.UpstreamChangeRequestId }).IsUnique();
+            b.HasIndex(x => x.UpstreamChangeRequestId);
+            b.HasOne<SystemChangeRequest>().WithMany().HasForeignKey(x => x.UpstreamChangeRequestId).OnDelete(DeleteBehavior.Restrict);
+            b.HasOne<SoftwareRelease>().WithMany().HasForeignKey(x => x.UpstreamBuildId).OnDelete(DeleteBehavior.Restrict);
+        });
+        modelBuilder.Entity<ChangeRequestUpstreamHistory>(b =>
+        {
+            b.ToTable("change_request_upstream_history"); b.HasKey(x => x.Id);
+            b.Property(x => x.Action).HasMaxLength(40).IsRequired();
+            b.Property(x => x.UpstreamDisplayNumber).HasMaxLength(40).IsRequired();
+            b.Property(x => x.UpstreamBuildVersion).HasMaxLength(40).IsRequired();
+            b.Property(x => x.Rationale).HasMaxLength(4000).IsRequired();
+            b.Property(x => x.ActorId).HasMaxLength(100).IsRequired();
+            b.HasIndex(x => new { x.ChangeRequestId, x.OccurredAt });
+            b.HasIndex(x => x.UpstreamLinkId);
         });
         modelBuilder.Entity<ReviewComment>(b =>
         {
@@ -1949,6 +1984,25 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
         {
             var stored = await entry.GetDatabaseValuesAsync(cancellationToken);
             if (stored is null) entry.State = EntityState.Added;
+        }
+        // Upstream answer rows use application-assigned identities. EF can discover a newly appended row
+        // through the already-tracked aggregate as Modified, which would issue an UPDATE against a row that
+        // does not exist and surface as a false concurrency failure. Ask the database, as above. A row that
+        // does exist is controlled evidence and cannot be rewritten; rationale revisions replace the active
+        // link and append history through the aggregate instead.
+        foreach (var entry in ChangeTracker.Entries<ChangeRequestUpstreamLink>()
+                     .Where(x => x.State == EntityState.Modified))
+        {
+            var stored = await entry.GetDatabaseValuesAsync(cancellationToken);
+            if (stored is null) entry.State = EntityState.Added;
+            else throw new DomainException("A change-request upstream link is immutable; replace it through controlled authoring.");
+        }
+        foreach (var entry in ChangeTracker.Entries<ChangeRequestUpstreamHistory>()
+                     .Where(x => x.State == EntityState.Modified))
+        {
+            var stored = await entry.GetDatabaseValuesAsync(cancellationToken);
+            if (stored is null) entry.State = EntityState.Added;
+            else throw new DomainException("Change-request upstream history is immutable.");
         }
         foreach (var entry in ChangeTracker.Entries<ArtifactFieldDefinition>().Where(x => x.State == EntityState.Modified)) entry.State = EntityState.Added;
         // As with RequirementChange below, an application-assigned key does not prove this active cycle is

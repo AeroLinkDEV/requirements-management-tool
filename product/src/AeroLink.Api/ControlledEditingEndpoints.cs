@@ -325,6 +325,7 @@ public static class ControlledEditingEndpoints
             case ControlledArtifactFamily.ChangeRequest:
             {
                 var item = await db.SystemChangeRequests.AsNoTracking().Include(x => x.RequirementChanges)
+                    .Include(x => x.UpstreamLinks).Include(x => x.UpstreamHistory)
                     .SingleOrDefaultAsync(x => x.Id == artifactId, ct);
                 if (item is null) return null;
                 var reportIds = await db.ProblemReportLinks.AsNoTracking().Where(link =>
