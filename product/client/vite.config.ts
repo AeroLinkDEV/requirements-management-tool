@@ -4,6 +4,19 @@ import react from '@vitejs/plugin-react'
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [react()],
+  server: {
+    watch: {
+      // Playwright writes traces, screenshots, videos and reports into test-results/ and
+      // playwright-report/ inside this tree while the dev server is serving the browser journeys.
+      // On Windows chokidar hits EBUSY on a file Playwright still holds and takes the dev server
+      // down mid-sweep, which reports every remaining journey as connection-refused — a wall of
+      // failures that says nothing about the code under test. The watcher churn is also a measured
+      // share of sweep wall clock. Ignored explicitly rather than moved: the journeys legitimately
+      // run against this root, and a rerun artifact directory belongs to no module graph. The same
+      // globs cover blob-report/, which sharded runs merge from.
+      ignored: ['**/test-results/**', '**/playwright-report/**', '**/blob-report/**'],
+    },
+  },
   build: {
     // One stylesheet, even though the code is split into fourteen chunks.
     //
