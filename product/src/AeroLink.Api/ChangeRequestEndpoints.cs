@@ -156,8 +156,9 @@ public static class ChangeRequestEndpoints
             catch (DbUpdateException) { return Results.Conflict(new { error = $"A later revision of {approved.BaseNumber} already exists." }); }
         });
 
-        app.MapGet("/api/change-requests", async (Guid projectId, Guid? releaseId, int? page, int? pageSize, string? search, ChangeRequestState? state, IChangeRequestRepository repository, CancellationToken ct) =>
+        app.MapGet("/api/change-requests", async (Guid projectId, Guid? releaseId, int? page, int? pageSize, string? search, ChangeRequestState? state, HttpContext http, AeroLinkDbContext db, IChangeRequestRepository repository, CancellationToken ct) =>
         {
+            if (!await http.HasProjectAccessAsync(db, projectId, ct)) return Results.Forbid();
             var result = await repository.QueryAsync(new ScrQuery(projectId, page is null or 0 ? 1 : page.Value, pageSize is null or 0 ? 50 : pageSize.Value, search, state, releaseId), ct);
             return Results.Ok(new { result.Page, result.PageSize, result.TotalCount, result.TotalPages, items = result.Items.Select(ApiMap.ChangeRequestSummary) });
         });
@@ -169,6 +170,21 @@ public static class ChangeRequestEndpoints
             if (scr is null) return Results.NotFound();
             if (!await http.HasProjectAccessAsync(db, scr.ProjectId, ct)) return Results.Forbid();
             return Results.Ok(ApiMap.ChangeRequestDetail(scr));
+        });
+
+        // Phase 2's composed trace is a server-owned read. Resolve the owning Project first, authorize it,
+        // and only then ask the projection to materialize connected nodes; this prevents a forbidden root from
+        // becoming a side channel for cross-Project graph data.
+        app.MapGet("/api/change-requests/{id:guid}/trace", async (Guid id, HttpContext http,
+            AeroLinkDbContext db, IProjectLadderPolicyResolver policyResolver, CancellationToken ct) =>
+        {
+            var projectId = await db.SystemChangeRequests.AsNoTracking()
+                .Where(x => x.Id == id).Select(x => (Guid?)x.ProjectId).SingleOrDefaultAsync(ct);
+            if (projectId is null) return Results.NotFound();
+            if (!await http.HasProjectAccessAsync(db, projectId.Value, ct)) return Results.Forbid();
+            var policy = await policyResolver.ResolveAsync(projectId.Value, ct);
+            var trace = await ChangeRequestTraceProjection.ForChangeRequestAsync(db, projectId.Value, id, policy, ct);
+            return trace is null ? Results.NotFound() : Results.Ok(trace);
         });
 
         app.MapGet("/api/change-requests/{id:guid}/upstream-candidates", async (Guid id, string? search,

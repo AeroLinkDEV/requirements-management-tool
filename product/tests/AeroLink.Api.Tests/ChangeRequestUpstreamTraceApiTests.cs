@@ -288,6 +288,18 @@ public sealed class ChangeRequestUpstreamTraceApiTests : IClassFixture<SharedApi
         Assert.Contains(fixture.AssessmentId!.Value.ToString(), frozenJson, StringComparison.OrdinalIgnoreCase);
         Assert.Contains(fixture.AssessmentLinkId!.Value.ToString(), frozenJson, StringComparison.OrdinalIgnoreCase);
 
+        var composedBeforeReopen = await client.GetStringAsync($"/api/change-requests/{fixture.ChildId}/trace");
+        var composedBeforeReopenAgain = await client.GetStringAsync($"/api/change-requests/{fixture.ChildId}/trace");
+        Assert.Equal(composedBeforeReopen, composedBeforeReopenAgain);
+        var liveAndFrozen = JsonSerializer.Deserialize<JsonElement>(composedBeforeReopen);
+        var dualPair = Assert.Single(liveAndFrozen.GetProperty("edges").EnumerateArray(), edge =>
+            edge.GetProperty("fromId").GetGuid() == fixture.ChildId
+            && edge.GetProperty("toId").GetGuid() == fixture.CurrentSourceId);
+        var provenanceKinds = dualPair.GetProperty("provenance").EnumerateArray()
+            .Select(x => x.GetProperty("kind").GetString()).ToHashSet();
+        Assert.Contains("AssessmentDerived", provenanceKinds);
+        Assert.Contains("FrozenReviewEvidence", provenanceKinds);
+
         using var reopened = await client.PostAsJsonAsync(
             $"/api/downstream-assessments/{fixture.AssessmentId}/reopen",
             new { reason = "The engineering assessment is being corrected." });
@@ -301,6 +313,57 @@ public sealed class ChangeRequestUpstreamTraceApiTests : IClassFixture<SharedApi
         var preserved = Assert.Single(detail.GetProperty("reviewCycles").EnumerateArray())
             .GetProperty("snapshotJson").GetString()!;
         Assert.Contains(fixture.AssessmentLinkId.Value.ToString(), preserved, StringComparison.OrdinalIgnoreCase);
+        using var composedResponse = await client.GetAsync($"/api/change-requests/{fixture.ChildId}/trace");
+        var composed = JsonSerializer.Deserialize<JsonElement>(await composedResponse.Content.ReadAsStringAsync());
+        var frozenPair = Assert.Single(composed.GetProperty("edges").EnumerateArray(), edge =>
+            edge.GetProperty("fromId").GetGuid() == fixture.ChildId
+            && edge.GetProperty("toId").GetGuid() == fixture.CurrentSourceId);
+        var frozenEvidence = Assert.Single(frozenPair.GetProperty("provenance").EnumerateArray(), provenance =>
+            provenance.GetProperty("kind").GetString() == "FrozenReviewEvidence");
+        Assert.False(frozenEvidence.GetProperty("isLive").GetBoolean());
+        Assert.Equal(fixture.AssessmentLinkId, frozenEvidence.GetProperty("sourceId").GetGuid());
+        Assert.Contains("no longer present in the live assessment", frozenEvidence.GetProperty("status").GetString(),
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Composed_trace_is_exact_folded_and_project_scoped()
+    {
+        var fixture = await SeedAsync(_host.Factory, withDerivedEdge: true);
+        using var client = _host.CreateClient();
+        await SignInAsync(client, fixture.Author);
+
+        using var response = await client.GetAsync($"/api/change-requests/{fixture.ChildId}/trace");
+        var body = await response.Content.ReadAsStringAsync();
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var trace = JsonSerializer.Deserialize<JsonElement>(body);
+        Assert.Equal(fixture.ProjectId, trace.GetProperty("projectId").GetGuid());
+        var nodes = trace.GetProperty("nodes").EnumerateArray().ToList();
+        Assert.Contains(nodes, node => node.GetProperty("id").GetGuid() == fixture.ChildId
+            && node.GetProperty("kind").GetString() == "ChangeRequest");
+        Assert.Contains(nodes, node => node.GetProperty("id").GetGuid() == fixture.CurrentSourceId
+            && node.GetProperty("kind").GetString() == "ChangeRequest");
+        var pair = Assert.Single(trace.GetProperty("edges").EnumerateArray(), edge =>
+            edge.GetProperty("fromId").GetGuid() == fixture.ChildId
+            && edge.GetProperty("toId").GetGuid() == fixture.CurrentSourceId);
+        Assert.Equal("Upstream", pair.GetProperty("relation").GetString());
+        Assert.Equal("AssessmentDerived", Assert.Single(pair.GetProperty("provenance").EnumerateArray())
+            .GetProperty("kind").GetString());
+        Assert.Equal("Answered", trace.GetProperty("state").GetProperty("upstream").GetString());
+        using var history = await client.GetAsync($"/api/history/change-requests?projectId={fixture.ProjectId}&page=1&pageSize=50");
+        Assert.Equal(HttpStatusCode.OK, history.StatusCode);
+        var historyBody = JsonSerializer.Deserialize<JsonElement>(await history.Content.ReadAsStringAsync());
+        var historyItem = Assert.Single(historyBody.GetProperty("items").EnumerateArray(), item =>
+            item.GetProperty("id").GetGuid() == fixture.ChildId);
+        Assert.Equal("Answered", historyItem.GetProperty("traceState").GetProperty("upstream").GetString());
+
+        using var outsider = _host.CreateClient();
+        await SignInAsync(outsider, fixture.Outsider);
+        using var refused = await outsider.GetAsync($"/api/change-requests/{fixture.ChildId}/trace");
+        Assert.Equal(HttpStatusCode.Forbidden, refused.StatusCode);
+        var refusedBody = await refused.Content.ReadAsStringAsync();
+        Assert.DoesNotContain(fixture.ChildId.ToString(), refusedBody, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain(fixture.CurrentSourceId.ToString(), refusedBody, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -316,6 +379,16 @@ public sealed class ChangeRequestUpstreamTraceApiTests : IClassFixture<SharedApi
         using var candidates = await client.GetAsync(
             $"/api/change-requests/{fixture.ChildId}/upstream-candidates?limit=25");
         Assert.Equal(HttpStatusCode.Forbidden, candidates.StatusCode);
+
+        using var list = await client.GetAsync($"/api/change-requests?projectId={fixture.ProjectId}");
+        Assert.Equal(HttpStatusCode.Forbidden, list.StatusCode);
+        Assert.DoesNotContain(fixture.ChildId.ToString(), await list.Content.ReadAsStringAsync(),
+            StringComparison.OrdinalIgnoreCase);
+
+        using var history = await client.GetAsync($"/api/history/change-requests?projectId={fixture.ProjectId}&page=1&pageSize=50");
+        Assert.Equal(HttpStatusCode.Forbidden, history.StatusCode);
+        Assert.DoesNotContain(fixture.ChildId.ToString(), await history.Content.ReadAsStringAsync(),
+            StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
