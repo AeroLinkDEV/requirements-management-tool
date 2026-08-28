@@ -281,7 +281,7 @@ test('reviewed #563 holds keep every unsafe reusable class out of reuse headroom
     assert.match(row?.reason ?? '', /^Reviewed #563 hold:/, cls)
   }
   assert.deepEqual(hostArtifact.summary['reusable-host'], { classes: 43, tests: 276, knownCases: 307, unknownCaseTests: 0 })
-  assert.deepEqual(hostArtifact.summary['fresh-host'], { classes: 43, tests: 248, knownCases: 277, unknownCaseTests: 0 })
+  assert.deepEqual(hostArtifact.summary['fresh-host'], { classes: 43, tests: 261, knownCases: 290, unknownCaseTests: 0 })
   assert.deepEqual(hostArtifact.summary.converted, { classes: 25, tests: 147, knownCases: 155, unknownCaseTests: 0 })
   assert.deepEqual(hostArtifact.summary['migration-candidate'], { classes: 1, tests: 1, knownCases: 1, unknownCaseTests: 0 })
 })
@@ -313,7 +313,7 @@ test('host-classification case totals join exactly to the intent inventory', () 
   assert.equal(hostArtifact.totals.knownCases, intentArtifact.totals.cases)
   assert.equal(hostArtifact.totals.unknownCaseTests, intentArtifact.totals.unknownCaseTests)
   const reusable = hostArtifact.summary['reusable-host']
-  assert.equal(reusable.tests - reusable.classes, 226)
+  assert.equal(reusable.tests - reusable.classes, 233)
   assert.equal(reusable.knownCases - reusable.classes, 255)
 })
 
