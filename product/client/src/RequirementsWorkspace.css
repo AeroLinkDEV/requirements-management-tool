@@ -293,6 +293,8 @@ html .sectionTree button.active { background: #e2edf7; color: #1d4a72; font-weig
   display: block;
   border: 0;
   background: transparent;
+  box-sizing: border-box;
+  padding: 8px 13px;
   text-align: left;
   min-width: 0;
   color: inherit;

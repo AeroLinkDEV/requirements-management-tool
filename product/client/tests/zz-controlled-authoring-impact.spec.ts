@@ -16,7 +16,7 @@ test("engineer analyzes impact and creates a rich controlled requirement proposa
   ).toBeVisible();
   await page.getByLabel("Search requirements").fill("SYSR-000150");
   const requirementResult = page
-    .getByRole("button", { name: /SYSR-000150\.\d{2}/ })
+    .getByRole("link", { name: /SYSR-000150\.\d{2}/ })
     .first();
   const requirementInspector = page.getByRole("heading", {
     name: /SYSR-000150\.\d{2}/,

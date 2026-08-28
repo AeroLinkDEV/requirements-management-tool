@@ -77,7 +77,7 @@ test('the source change request named on a requirement revision opens that chang
   await page.getByRole('link', { name: 'System Requirements Explorer' }).click()
   await expect(page.getByRole('heading', { name: /System Requirements Explorer/ })).toBeVisible({ timeout: 30_000 })
 
-  await page.getByRole('button', { name: new RegExp(requirement.baseNumber) }).first().click()
+  await page.getByRole('link', { name: new RegExp(requirement.baseNumber) }).first().click()
   const inspector = page.locator('.requirementInspector')
   await expect(inspector).toBeVisible({ timeout: 30_000 })
   await inspector.getByRole('tab', { name: 'History' }).click()
