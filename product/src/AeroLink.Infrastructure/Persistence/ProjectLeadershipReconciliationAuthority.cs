@@ -183,6 +183,16 @@ public sealed class ProjectLeadershipReconciliationAuthority(AeroLinkDbContext d
                     + "or remove the legacy backup, then restart.");
                 continue;
             }
+            var isPrimary = await db.ProjectLeadershipAssignments.AsNoTracking().AnyAsync(x =>
+                x.ProgramId == programId && x.Position == position && x.HolderUserId == legacyHolder
+                && x.EndedAt == null, ct);
+            if (isPrimary)
+            {
+                problems.Add($"{name}: the legacy {position} standing backup names the active primary for "
+                    + "that position. A primary cannot be their own backup; remove the legacy backup, name "
+                    + "a different eligible backup, or replace the primary, then restart.");
+                continue;
+            }
             var currentHolders = await db.ProjectLeadershipBackups.AsNoTracking()
                 .Where(x => x.ProgramId == programId && x.Position == position && x.RemovedAt == null)
                 .Select(x => x.BackupUserId).Distinct().ToListAsync(ct);
@@ -233,6 +243,12 @@ public sealed class ProjectLeadershipReconciliationAuthority(AeroLinkDbContext d
         foreach (var group in backups.GroupBy(x => PositionForBackup(x.Role)!.Value))
         {
             var holder = group.Select(x => x.BackupUserId).Distinct().Single();
+            if (await db.ProjectLeadershipAssignments.AsNoTracking().AnyAsync(x =>
+                    x.ProgramId == programId && x.Position == group.Key && x.HolderUserId == holder
+                    && x.EndedAt == null, ct))
+                throw new InvalidOperationException(
+                    $"Project Leadership changed during reconciliation: the {group.Key} legacy backup "
+                    + "holder is now the active primary. No backup was migrated; retry the upgrade.");
             var existing = await db.ProjectLeadershipBackups.AsNoTracking().AnyAsync(x =>
                 x.ProgramId == programId && x.Position == group.Key && x.BackupUserId == holder
                 && x.RemovedAt == null, ct);

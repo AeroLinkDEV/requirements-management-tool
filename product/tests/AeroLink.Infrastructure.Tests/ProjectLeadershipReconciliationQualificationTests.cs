@@ -413,6 +413,58 @@ public sealed class ProjectLeadershipReconciliationQualificationTests
         finally { await DropDatabaseAsync(server, database); }
     }
 
+    [Fact]
+    public async Task V2_refuses_to_migrate_a_primary_as_their_own_backup_without_partial_changes()
+    {
+        if (!ServerConfigured(out var server)) return;
+        string? database = null;
+        var connection = await CreateDisposableDatabaseAsync(server);
+        try
+        {
+            database = new NpgsqlConnectionStringBuilder(connection).Database;
+            await using (var migrate = new AeroLinkDbContext(Options(connection)))
+                await migrate.Database.MigrateAsync();
+
+            var now = DateTimeOffset.UtcNow;
+            var repairable = new ProgramRecord("V2 Repairable Backup", $"V2F{Guid.NewGuid():N}"[..12]);
+            var conflicted = new ProgramRecord("V2 Primary Backup Conflict", $"V2G{Guid.NewGuid():N}"[..12]);
+            var repairableBackup = Account("v2.repairable.backup", now);
+            var primary = Account("v2.primary.legacy.backup", now);
+            await using (var seed = new AeroLinkDbContext(Options(connection)))
+            {
+                seed.AddRange(repairable, conflicted, repairableBackup, primary,
+                    new ProgramMembership(repairableBackup.Id, repairable.Id, ProgramRole.SystemEngineer, "legacy", now),
+                    new ProjectRoleBackup(repairable.Id, ProgramRole.SystemEngineeringLead,
+                        repairableBackup.Id, "legacy", now),
+                    new ProgramMembership(primary.Id, conflicted.Id, ProgramRole.SystemEngineer, "legacy", now),
+                    new ProjectLeadershipAssignment(conflicted.Id, ProjectLeadershipPosition.SystemEngineeringLead,
+                        primary.Id, "operator", now),
+                    new ProjectRoleBackup(conflicted.Id, ProgramRole.SystemEngineeringLead, primary.Id, "legacy", now));
+                await seed.SaveChangesAsync();
+            }
+
+            await using var v2 = new AeroLinkDbContext(Options(connection));
+            var failure = await Assert.ThrowsAsync<InvalidOperationException>(
+                () => new ProjectLeadershipReconciliationAuthority(v2).EnsureCompletedAsync());
+            Assert.Contains("V2 Primary Backup Conflict", failure.Message);
+            Assert.Contains("primary cannot be their own backup", failure.Message);
+
+            Assert.True(await v2.ProjectRoleBackups.AsNoTracking().AnyAsync(x =>
+                x.ProgramId == repairable.Id && x.BackupUserId == repairableBackup.Id && x.RemovedAt == null));
+            Assert.False(await v2.ProjectLeadershipBackups.AsNoTracking().AnyAsync(x =>
+                x.ProgramId == repairable.Id && x.Position == ProjectLeadershipPosition.SystemEngineeringLead
+                && x.RemovedAt == null));
+            Assert.True(await v2.ProjectRoleBackups.AsNoTracking().AnyAsync(x =>
+                x.ProgramId == conflicted.Id && x.BackupUserId == primary.Id && x.RemovedAt == null));
+            Assert.False(await v2.ProjectLeadershipBackups.AsNoTracking().AnyAsync(x =>
+                x.ProgramId == conflicted.Id && x.Position == ProjectLeadershipPosition.SystemEngineeringLead
+                && x.RemovedAt == null));
+            Assert.False(await v2.SecurityAuditEvents.AsNoTracking().AnyAsync(
+                x => x.EventType == ProjectLeadershipReconciliationAuthority.MigrationMarker + ".Completed"));
+        }
+        finally { await DropDatabaseAsync(server, database); }
+    }
+
     /// <summary>
     /// The Project Engineering Lead backup v1 deliberately left behind. Where it maps unambiguously it moves
     /// to the Project Engineer position and the legacy row is retired, so removing the new backup actually
