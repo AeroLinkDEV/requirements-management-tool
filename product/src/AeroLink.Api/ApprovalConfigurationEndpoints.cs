@@ -96,14 +96,14 @@ public static class ApprovalConfigurationEndpoints
                 // Blocking is named separately from "no holder" because a standing backup is enough to
                 // complete the stage even when the position itself is empty.
                 authorityByRole[required] = new ResolvedAuthority(
-                    required.ToString(), SingularProgramRoles.IsSingular(required),
+                    required.ToString(), SingularProgramRoles.IsPositionGoverned(required),
                     holders, standing, delegated,
                     holders.Count == 0 && standing.Count == 0 && delegated.Count == 0);
             }
 
             ResolvedAuthority Resolve(ProgramRole required) => authorityByRole.TryGetValue(required, out var value)
                 ? value
-                : new ResolvedAuthority(required.ToString(), SingularProgramRoles.IsSingular(required), [], [], [], true);
+                : new ResolvedAuthority(required.ToString(), SingularProgramRoles.IsPositionGoverned(required), [], [], [], true);
 
             var configured = Subjects.Where(subject => IsSubjectSupported(ladderPolicy, subject)).Select(subject =>
             {

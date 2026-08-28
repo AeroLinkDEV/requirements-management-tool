@@ -2,21 +2,21 @@
   "schemaVersion": "aerolink-api-host-classification/v3",
   "totals": {
     "classes": 110,
-    "tests": 668,
-    "knownCases": 734,
+    "tests": 672,
+    "knownCases": 738,
     "unknownCaseTests": 0
   },
   "summary": {
     "converted": {
       "classes": 23,
-      "tests": 137,
-      "knownCases": 145,
+      "tests": 138,
+      "knownCases": 146,
       "unknownCaseTests": 0
     },
     "fresh-host": {
       "classes": 43,
-      "tests": 255,
-      "knownCases": 284,
+      "tests": 258,
+      "knownCases": 287,
       "unknownCaseTests": 0
     },
     "migration-candidate": {
@@ -85,6 +85,18 @@
       ]
     },
     {
+      "cls": "ProjectLeadershipApiTests",
+      "tests": 8,
+      "knownCases": 16,
+      "unknownCaseTests": 0,
+      "classification": "converted",
+      "reason": "Already sharing a host through the #563 pilot.",
+      "intents": [
+        "ef-translation",
+        "http-boundary"
+      ]
+    },
+    {
       "cls": "ProcedureBrowsingApiTests",
       "tests": 7,
       "knownCases": 7,
@@ -105,18 +117,6 @@
       "reason": "Already sharing a host through the #563 pilot.",
       "intents": [
         "auth-policy",
-        "ef-translation",
-        "http-boundary"
-      ]
-    },
-    {
-      "cls": "ProjectLeadershipApiTests",
-      "tests": 7,
-      "knownCases": 15,
-      "unknownCaseTests": 0,
-      "classification": "converted",
-      "reason": "Already sharing a host through the #563 pilot.",
-      "intents": [
         "ef-translation",
         "http-boundary"
       ]
@@ -313,8 +313,8 @@
     },
     {
       "cls": "TestChangeRequestReviewWorkflowTests",
-      "tests": 42,
-      "knownCases": 46,
+      "tests": 45,
+      "knownCases": 49,
       "unknownCaseTests": 0,
       "classification": "fresh-host",
       "reason": "Reviewed #563 hold: this class bootstraps an empty database or workspace. A class-scoped SharedApiHost would make first-install state and fixed bootstrap identities order-dependent. Keep fresh-host until a bootstrap-once fixture and per-test workspace tagging are proven.",

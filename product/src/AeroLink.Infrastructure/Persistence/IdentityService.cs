@@ -59,15 +59,14 @@ public sealed class IdentityService(AeroLinkDbContext db, IDataProtectionProvide
     /// and Engineer so a stored workflow stage naming one keeps resolving. A membership carrying one must not
     /// answer for it, though: that is the conflation #816 removes, and honouring it would let a roster grant
     /// hand out a lead's review authority with no assignment anywhere. Positions answer through
-    /// <see cref="HoldsLeadershipDemandAsync"/> instead. Asking about a base eligibility role directly — "does
-    /// this person do configuration management" — is still a fair question, so the exact role is kept.
+    /// <see cref="HoldsLeadershipDemandAsync"/> instead. The four base eligibility roles are still jobs: they
+    /// answer their own base-role questions, and Project Engineer or Engineering Manager still answers an
+    /// ordinary Engineer question.
     /// </summary>
     private static IReadOnlyList<ProgramRole> MembershipAnswerableRoles(ProgramRole demanded)
     {
-        var answerable = ProgramRoleAuthority.Satisfying(demanded)
-            .Where(x => !SingularProgramRoles.IsPositionGoverned(x)).ToList();
-        if (SingularProgramRoles.IsBaseEligibility(demanded)) answerable.Add(demanded);
-        return answerable;
+        return [.. ProgramRoleAuthority.Satisfying(demanded)
+            .Where(x => !SingularProgramRoles.IsSingular(x))];
     }
 
     public async Task<bool> HasRoleAsync(AuthenticatedUser user, Guid programId, ProgramRole role, DateTimeOffset now, CancellationToken ct)

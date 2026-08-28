@@ -98,6 +98,34 @@ public sealed class ProjectAuthorityResolverTests : IDisposable
                 person.Id, _program.Id, ProjectAuthorityRequirement.BaseRole(role), _now));
     }
 
+    [Theory]
+    [InlineData(ProgramRole.ProjectEngineer)]
+    [InlineData(ProgramRole.EngineeringManager)]
+    public async Task An_engineering_base_eligibility_role_still_answers_an_ordinary_engineer_question(
+        ProgramRole role)
+    {
+        var person = Person("engineering-base", role);
+
+        Assert.True(await _resolver.IsSatisfiedAsync(person.Id, _program.Id,
+            ProjectAuthorityRequirement.BaseRole(ProgramRole.Engineer), _now));
+    }
+
+    [Fact]
+    public async Task The_engineer_holder_projection_keeps_engineering_base_roles_and_excludes_retired_rows()
+    {
+        var projectEngineer = Person("project-engineer", ProgramRole.ProjectEngineer);
+        var engineeringManager = Person("engineering-manager", ProgramRole.EngineeringManager);
+        var retiredLead = Person("retired-lead", ProgramRole.SystemEngineeringLead);
+
+        var holders = await _resolver.ResolveHoldersAsync(_program.Id, ProgramRole.Engineer, _now);
+
+        Assert.Contains(holders, x => x.UserId == projectEngineer.Id
+            && x.Source == ProjectAuthoritySource.DirectBaseRole);
+        Assert.Contains(holders, x => x.UserId == engineeringManager.Id
+            && x.Source == ProjectAuthoritySource.DirectBaseRole);
+        Assert.DoesNotContain(holders, x => x.UserId == retiredLead.Id);
+    }
+
     [Fact]
     public async Task A_raw_retired_position_membership_does_not_answer_the_positions_demands()
     {
@@ -109,6 +137,8 @@ public sealed class ProjectAuthorityResolverTests : IDisposable
             ProjectAuthorityRequirement.LegacyRoleDemand(ProgramRole.Reviewer), _now));
         Assert.False(await _resolver.IsSatisfiedAsync(person.Id, _program.Id,
             ProjectAuthorityRequirement.LegacyRoleDemand(ProgramRole.Approver), _now));
+        Assert.False(await _resolver.IsSatisfiedAsync(person.Id, _program.Id,
+            ProjectAuthorityRequirement.BaseRole(ProgramRole.Engineer), _now));
     }
 
     // ---- Primary and backup ------------------------------------------------------------------------------

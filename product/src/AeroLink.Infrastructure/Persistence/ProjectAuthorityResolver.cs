@@ -52,26 +52,33 @@ public sealed class ProjectAuthorityResolver(AeroLinkDbContext db)
         => (await ResolveAsync(userId, programId, requirement, now, ct)).Granted;
 
     /// <summary>
-    /// The roles a membership may answer with.
+    /// The roles a membership may answer for a base-role question.
     ///
     /// <c>ProgramRoleAuthority.Satisfying</c> still folds the retired position roles into Reviewer, Approver
     /// and Engineer, because a stored workflow stage naming one has to keep resolving. But a *membership*
     /// carrying <c>SystemEngineeringLead</c> must not answer those demands — that is the conflation #816
     /// exists to remove, and honouring it would let a roster grant hand out a lead's review authority with no
-    /// assignment anywhere. Positions are answered by the leadership pass instead.
+    /// assignment anywhere. The four base eligibility roles are still jobs, though: a Project Engineer or
+    /// Engineering Manager is still an Engineer for ordinary authoring gates. Positions are answered by the
+    /// leadership pass instead.
     /// </summary>
-    private static IReadOnlyList<ProgramRole> MembershipAnswerable(ProgramRole demanded) =>
-        [.. ProgramRoleAuthority.Satisfying(demanded).Where(x => !SingularProgramRoles.IsPositionGoverned(x))];
+    private static IReadOnlyList<ProgramRole> BaseRoleMembershipAnswerable(ProgramRole demanded) =>
+        [.. ProgramRoleAuthority.Satisfying(demanded).Where(x => !SingularProgramRoles.IsSingular(x))];
+
+    /// <summary>
+    /// A legacy demand naming a governed role meant the position, not the eligibility membership. For an
+    /// ordinary job demand it keeps the normal satisfying-role implications.
+    /// </summary>
+    private static IReadOnlyList<ProgramRole> LegacyDemandMembershipAnswerable(ProgramRole demanded) =>
+        SingularProgramRoles.IsPositionGoverned(demanded) ? [] : BaseRoleMembershipAnswerable(demanded);
 
     /// <summary>What work somebody performs. Membership answers it; elevation is beside the point.</summary>
     private async Task<ProjectAuthorityDecision> ResolveBaseRoleAsync(
         Guid userId, Guid programId, ProgramRole role, DateTimeOffset now, CancellationToken ct)
     {
-        // A base-role question is asked about the job, so the exact role is answerable even when it is one of
-        // the four eligibility roles — "does this person do configuration management" is a fair question.
-        var accepted = SingularProgramRoles.IsBaseEligibility(role)
-            ? [role, .. MembershipAnswerable(role)]
-            : MembershipAnswerable(role);
+        // A base-role question is asked about the job. The four eligibility roles therefore remain ordinary
+        // work roles here even though they do not answer the identically named Project Leadership position.
+        var accepted = BaseRoleMembershipAnswerable(role);
         if (await db.ProgramMemberships.AsNoTracking().AnyAsync(
                 x => x.UserId == userId && x.ProgramId == programId && x.EndedAt == null && accepted.Contains(x.Role), ct))
             return ProjectAuthorityDecision.From(ProjectAuthoritySource.DirectBaseRole);
@@ -116,7 +123,7 @@ public sealed class ProjectAuthorityResolver(AeroLinkDbContext db)
     private async Task<ProjectAuthorityDecision> ResolveLegacyDemandAsync(
         Guid userId, Guid programId, ProgramRole role, DateTimeOffset now, CancellationToken ct)
     {
-        var accepted = MembershipAnswerable(role);
+        var accepted = LegacyDemandMembershipAnswerable(role);
         if (await db.ProgramMemberships.AsNoTracking().AnyAsync(
                 x => x.UserId == userId && x.ProgramId == programId && x.EndedAt == null && accepted.Contains(x.Role), ct))
             return ProjectAuthorityDecision.From(ProjectAuthoritySource.DirectBaseRole);
@@ -211,7 +218,7 @@ public sealed class ProjectAuthorityResolver(AeroLinkDbContext db)
         ResolveHoldersAsync(Guid programId, ProgramRole demanded, DateTimeOffset now,
             bool includeProgramAdministratorSubstitution = false, CancellationToken ct = default)
     {
-        var accepted = MembershipAnswerable(demanded);
+        var accepted = LegacyDemandMembershipAnswerable(demanded);
         var results = new Dictionary<Guid, (ProjectAuthoritySource, ProjectLeadershipPosition?)>();
 
         var activeMembers = await db.ProgramMemberships.AsNoTracking()

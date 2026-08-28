@@ -72,6 +72,21 @@ public sealed class IdentityServiceAuthorityCharacterizationTests : IDisposable
         Assert.True(await _identity.HasRoleAsync(_systemEngineer.Id, _program.Id, ProgramRole.Engineer, _now, default));
     }
 
+    [Theory]
+    [InlineData(ProgramRole.ProjectEngineer)]
+    [InlineData(ProgramRole.EngineeringManager)]
+    public async Task Both_paths_keep_engineer_authority_for_an_engineering_base_eligibility_role(
+        ProgramRole role)
+    {
+        var account = NewAccount($"char.{role.ToString().ToLowerInvariant()}");
+        _db.AddRange(account, new ProgramMembership(account.Id, _program.Id, role, "admin", _now));
+        await _db.SaveChangesAsync();
+
+        var (user, _) = await SessionForAsync(account);
+        Assert.True(await _identity.HasRoleAsync(user, _program.Id, ProgramRole.Engineer, _now, default));
+        Assert.True(await _identity.HasRoleAsync(account.Id, _program.Id, ProgramRole.Engineer, _now, default));
+    }
+
     [Fact]
     public async Task A_legacy_position_keyed_backup_confers_nothing_on_both_paths()
     {

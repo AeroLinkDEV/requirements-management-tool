@@ -163,6 +163,41 @@ public sealed class ProjectLeadershipApiTests : IClassFixture<SharedApiHost>
     }
 
     [Fact]
+    public async Task Disabled_primary_and_backup_are_reported_as_ineligible_and_hold_no_authority()
+    {
+        var seeded = await SeedAsync(_host.Factory);
+        using var client = _host.CreateClient();
+        await SignInAsync(client, seeded.ManagerName);
+
+        const string position = "SystemEngineeringLead";
+        Assert.True((await client.PostAsJsonAsync($"/api/projects/{seeded.ProjectId}/leadership/{position}/primary",
+            new { holderUserId = seeded.FirstId })).IsSuccessStatusCode);
+        Assert.True((await client.PostAsJsonAsync($"/api/projects/{seeded.ProjectId}/leadership/{position}/backup",
+            new { backupUserId = seeded.BackupId })).IsSuccessStatusCode);
+
+        using (var scope = _host.Factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            (await db.UserAccounts.SingleAsync(x => x.Id == seeded.FirstId)).Disable(DateTimeOffset.UtcNow);
+            (await db.UserAccounts.SingleAsync(x => x.Id == seeded.BackupId)).Disable(DateTimeOffset.UtcNow);
+            await db.SaveChangesAsync();
+        }
+
+        var body = await client.GetFromJsonAsync<JsonElement>($"/api/projects/{seeded.ProjectId}/leadership");
+        var row = body.GetProperty("positions").EnumerateArray()
+            .Single(x => x.GetProperty("position").GetString() == position);
+        Assert.False(row.GetProperty("primary").GetProperty("eligibilityValid").GetBoolean());
+        Assert.False(row.GetProperty("backup").GetProperty("eligibilityValid").GetBoolean());
+
+        using var authorityScope = _host.Factory.Services.CreateScope();
+        var identity = authorityScope.ServiceProvider.GetRequiredService<IdentityService>();
+        Assert.False(await identity.HasRoleAsync(seeded.FirstId, seeded.ProgramId,
+            ProgramRole.SystemEngineeringLead, DateTimeOffset.UtcNow, default));
+        Assert.False(await identity.HasRoleAsync(seeded.BackupId, seeded.ProgramId,
+            ProgramRole.SystemEngineeringLead, DateTimeOffset.UtcNow, default));
+    }
+
+    [Fact]
     public async Task Promoting_the_backup_ends_the_designation_atomically()
     {
         var seeded = await SeedAsync(_host.Factory);

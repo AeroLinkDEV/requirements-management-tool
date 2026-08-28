@@ -1011,8 +1011,8 @@ public static class ChangeRequestEndpoints
                             {
                                 error = $"{account.DisplayName} does not hold Approver authority. With no review workflow configured, the reviewer must be an Approver."
                             });
-                        role = (await WorkflowEndpoints.AuthoritiesAsync(db, scr.ProjectId, [account.Id], ct))
-                            .GetValueOrDefault(account.Id);
+                        role = await WorkflowEndpoints.StageAuthorityAsync(db, scr.ProjectId, account.Id,
+                            ProgramRole.Approver, ct);
                     }
                     else if (index < workflow.Stages.Count)
                         role = await WorkflowEndpoints.StageAuthorityAsync(db, scr.ProjectId, account.Id,
@@ -1094,8 +1094,8 @@ public static class ChangeRequestEndpoints
                             {
                                 error = $"{account.DisplayName} does not hold Approver authority. With no review workflow configured, the reviewer must be an Approver."
                             });
-                        role = (await WorkflowEndpoints.AuthoritiesAsync(db, scr.ProjectId, [account.Id], ct))
-                            .GetValueOrDefault(account.Id);
+                        role = await WorkflowEndpoints.StageAuthorityAsync(db, scr.ProjectId, account.Id,
+                            ProgramRole.Approver, ct);
                     }
                     else if (index < workflow.Stages.Count)
                         role = await WorkflowEndpoints.StageAuthorityAsync(db, scr.ProjectId, account.Id,

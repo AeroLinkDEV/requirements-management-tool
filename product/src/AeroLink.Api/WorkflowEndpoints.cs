@@ -291,22 +291,50 @@ public static class WorkflowEndpoints
     }
 
     /// <summary>
-    /// The authority each user holds on the program owning this project.
+    /// The strongest effective authority each user holds on the program owning this project.
     ///
-    /// Somebody can hold several roles; the strongest is what they can sign as, because a person who is both
-    /// an engineer and a configuration manager does not lose the second by also being the first.
+    /// This must resolve the same leadership, standing-backup, delegation, account-state and administrator
+    /// rules as the signing gate. Reading raw membership rows here allowed a retired position role to become
+    /// an additional signer and could freeze an unrelated base role as the signature provenance.
     /// </summary>
     public static async Task<Dictionary<Guid, ProgramRole?>> AuthoritiesAsync(AeroLinkDbContext db,
         Guid projectId, IReadOnlyList<Guid> userIds, CancellationToken ct)
     {
         var programId = await db.Projects.Where(x => x.Id == projectId).Select(x => (Guid?)x.ProgramId).SingleOrDefaultAsync(ct);
         if (programId is null || userIds.Count == 0) return [];
+        var resolver = new ProjectAuthorityResolver(db);
+        var now = DateTimeOffset.UtcNow;
         var memberships = await db.ProgramMemberships.AsNoTracking()
             .Where(x => x.ProgramId == programId && x.EndedAt == null && userIds.Contains(x.UserId))
             .Select(x => new { x.UserId, x.Role }).ToListAsync(ct);
-        return userIds.ToDictionary(
-            id => id,
-            id => memberships.Where(x => x.UserId == id).Select(x => (ProgramRole?)x.Role).OrderByDescending(Rank).FirstOrDefault());
+        var result = new Dictionary<Guid, ProgramRole?>();
+        foreach (var userId in userIds)
+        {
+            ProgramRole? resolvedRole = null;
+            foreach (var candidate in ParticipationAuthorities)
+            {
+                var requirement = ProjectAuthorityRequirement.LegacyRoleDemand(candidate,
+                    allowProgramAdministratorSubstitution: true);
+                var decision = await resolver.ResolveAsync(userId, programId.Value, requirement, now, ct);
+                if (!decision.Granted) continue;
+
+                if (decision.Source == ProjectAuthoritySource.AdministratorSubstitution)
+                    resolvedRole = ProgramRole.Administrator;
+                else if (decision.Source == ProjectAuthoritySource.DirectBaseRole)
+                {
+                    var accepted = ProgramRoleAuthority.Satisfying(candidate)
+                        .Where(role => !SingularProgramRoles.IsSingular(role)).ToList();
+                    var held = memberships.Where(x => x.UserId == userId && accepted.Contains(x.Role))
+                        .Select(x => x.Role).ToHashSet();
+                    resolvedRole = accepted.Where(held.Contains).Select(role => (ProgramRole?)role).FirstOrDefault();
+                }
+                else
+                    resolvedRole = candidate;
+                break;
+            }
+            result[userId] = resolvedRole;
+        }
+        return result;
     }
 
     /// <summary>
@@ -337,8 +365,10 @@ public static class WorkflowEndpoints
         // cannot disagree about whether the person may occupy this stage.
         if (decision.Source == ProjectAuthoritySource.DirectBaseRole)
         {
-            var accepted = ProgramRoleAuthority.Satisfying(requiredRole)
-                .Where(role => !SingularProgramRoles.IsPositionGoverned(role)).ToList();
+            var accepted = SingularProgramRoles.IsPositionGoverned(requiredRole)
+                ? []
+                : ProgramRoleAuthority.Satisfying(requiredRole)
+                    .Where(role => !SingularProgramRoles.IsSingular(role)).ToList();
             var roles = await db.ProgramMemberships.AsNoTracking()
                 .Where(x => x.ProgramId == programId && x.UserId == userId && x.EndedAt == null
                             && accepted.Contains(x.Role))
@@ -350,17 +380,25 @@ public static class WorkflowEndpoints
         return requiredRole;
     }
 
-    private static int Rank(ProgramRole? role) => role switch
-    {
-        ProgramRole.Administrator => 7,
-        ProgramRole.ProgramManager => 6,
-        ProgramRole.ConfigurationManager => 5,
-        ProgramRole.Approver => 4,
-        ProgramRole.TestLead => 3,
-        ProgramRole.Reviewer => 2,
-        ProgramRole.TestEngineer => 1,
-        _ => 0,
-    };
+    private static readonly ProgramRole[] ParticipationAuthorities =
+    [
+        ProgramRole.Administrator,
+        ProgramRole.ProgramManager,
+        ProgramRole.ConfigurationManager,
+        ProgramRole.ProjectEngineeringLead,
+        ProgramRole.EngineeringManager,
+        ProgramRole.SystemEngineeringLead,
+        ProgramRole.SoftwareEngineeringLead,
+        ProgramRole.SystemTestLead,
+        ProgramRole.SoftwareTestLead,
+        ProgramRole.Approver,
+        ProgramRole.TestLead,
+        ProgramRole.Reviewer,
+        ProgramRole.TestEngineer,
+        ProgramRole.Engineer,
+        ProgramRole.SoftwareQualityAnalyst,
+        ProgramRole.Airworthiness,
+    ];
 
     private static void ValidateSubject(ILadderPolicy policy, ReviewSubject subject)
     {

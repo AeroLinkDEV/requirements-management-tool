@@ -32,7 +32,7 @@ public static class ProjectLeadershipEndpoints
                 .Where(x => x.ProgramId == programId && x.EndedAt == null && memberUserIds.Contains(x.UserId)).ToListAsync(ct);
             var accounts = await db.UserAccounts.AsNoTracking()
                 .Where(x => memberUserIds.Contains(x.Id))
-                .Select(x => new { x.Id, x.UserName, x.DisplayName }).ToListAsync(ct);
+                .Select(x => new { x.Id, x.UserName, x.DisplayName, x.State }).ToListAsync(ct);
             var accountById = accounts.ToDictionary(x => x.Id);
 
             object Person(Guid userId) => accountById.TryGetValue(userId, out var account)
@@ -48,13 +48,17 @@ public static class ProjectLeadershipEndpoints
                 {
                     person = Person(x.HolderUserId),
                     assignedAt = x.AssignedAt,
-                    eligibilityValid = memberships.Any(m => m.UserId == x.HolderUserId && m.Role == requiredRole),
+                    eligibilityValid = accountById.TryGetValue(x.HolderUserId, out var account)
+                        && account.State == AccountState.Active
+                        && memberships.Any(m => m.UserId == x.HolderUserId && m.Role == requiredRole),
                 }).SingleOrDefault();
                 var backup = backups.Where(x => x.Position == position).Select(x => new
                 {
                     person = Person(x.BackupUserId),
                     namedAt = x.NamedAt,
-                    eligibilityValid = memberships.Any(m => m.UserId == x.BackupUserId && m.Role == requiredRole),
+                    eligibilityValid = accountById.TryGetValue(x.BackupUserId, out var account)
+                        && account.State == AccountState.Active
+                        && memberships.Any(m => m.UserId == x.BackupUserId && m.Role == requiredRole),
                 }).SingleOrDefault();
                 return new
                 {

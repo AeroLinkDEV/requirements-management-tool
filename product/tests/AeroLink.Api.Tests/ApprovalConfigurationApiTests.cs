@@ -110,7 +110,9 @@ public sealed class ApprovalConfigurationApiTests : IClassFixture<SharedApiHost>
         Assert.False(discipline.Required.Blocking);
 
         // The kind is what makes the two signatures distinguishable; before this every step read "Reviewer".
-        Assert.Equal("Approval", system.Stages!.Single(x => x.Name == "Release approval").Kind);
+        var release = system.Stages!.Single(x => x.Name == "Release approval");
+        Assert.Equal("Approval", release.Kind);
+        Assert.True(release.Required.Singular);
     }
 
     /// <summary>

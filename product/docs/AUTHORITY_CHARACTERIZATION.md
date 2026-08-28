@@ -279,7 +279,7 @@ distinct ways. The current set:
 |---|---|---|
 | `IdentityService.HasRoleAsync` (two overloads) | 34 files, 138 literal demands | Base role, leadership, or legacy demand depending on the role named — this ambiguity is what E.3 fixes |
 | `ProgramRoleAuthority.Satisfying` | `IdentityService`, `IdentityRecords`, `WorkflowEndpoints`, `ReviewWorkflow`, `AssuranceAuthorityPolicy`, `ManagedDocumentAssignmentPolicy`, `ApprovalConfigurationEndpoints` | Role implication, unchanged by #816 |
-| Raw `ProgramMemberships` role decisions | **Corrected:** `ManagedDocumentReviewAuthority.ResolveAsync`, the `WorkflowEndpoints` candidate projection, `ProblemReportEndpoints.HasProblemReportOwnerRecoveryAuthorityAsync`, `ApprovalConfigurationEndpoints.Resolve`, `ManagedDocumentAssignmentPolicy.HasExplicitAuthorityAsync`, `ProjectAssurancePolicyService.ApproverFactsAsync`, the roster gates. **Not corrected:** `WorkflowEndpoints.StageAuthorityAsync`/`AuthoritiesAsync`, which report the role a signature was made under rather than deciding who may act | Mixed — listed per call site because the same file does both |
+| Raw `ProgramMemberships` role decisions | **Corrected:** `ManagedDocumentReviewAuthority.ResolveAsync`, the `WorkflowEndpoints` candidate, stage, and additional-signer projections, `ProblemReportEndpoints.HasProblemReportOwnerRecoveryAuthorityAsync`, `ApprovalConfigurationEndpoints.Resolve`, `ManagedDocumentAssignmentPolicy.HasExplicitAuthorityAsync`, `ProjectAssurancePolicyService.ApproverFactsAsync`, the roster gates | Mixed — listed per call site because the same file does both |
 | `ProjectRoleBackups` (legacy) | `AdministrationEndpoints`, `ApprovalConfigurationEndpoints`, `ManagedDocumentAssignmentPolicy`, `ManagedDocumentReviewAuthority`, `PersonnelEndpoints`, `WorkflowEndpoints`, `IdentityService.IsStandingBackupAsync` | Historical readability for base roles; **no longer live authority for position roles at any of these sites**, and new position-keyed rows are refused at creation |
 | `ProjectLeadershipAssignments` / `ProjectLeadershipBackups` | `IdentityService`, `ProjectLeadershipService`, `ProjectAuthorityResolver` | **The** live leadership authority |
 | `RoleDelegations` | 9 files | Exact-role, time-bounded; unchanged |
@@ -295,9 +295,10 @@ either. `ProjectAuthorityRequirement` now names the question and `ProjectAuthori
 reporting provenance (`DirectBaseRole`, `LeadershipPrimary`, `LeadershipBackup`, `Delegation`,
 `AdministratorSubstitution`, `LegacyCompatibility`).
 
-`HasRoleAsync` remains as a compatibility API and continues to answer legacy role demands both ways —
-a persisted workflow stage naming `SystemEngineeringLead` cannot say which sense it meant, so both satisfy
-it. Leadership-sensitive call sites no longer go through it.
+`HasRoleAsync` remains as a compatibility API. Base eligibility memberships still answer base-work questions
+(including Project Engineer and Engineering Manager satisfying ordinary `Engineer` gates), while retired
+position memberships answer nothing; current Project Leadership assignments/backups answer the corresponding
+legacy demands. Leadership-sensitive call sites no longer go through this ambiguous API.
 
 That cutover includes every managed-document controller and recovery gate. Ordinary authoring and assurance
 demands remain base-role questions, while Configuration Manager, Program Manager, and the retired Project
@@ -322,8 +323,9 @@ the eligibility while the incumbent still holds the post.
 
 Unchanged by this correction, and still Slice 4's: `ReviewStageKind {Review, Approval}` carries the meaning
 of a signature, and `Reviewer`/`Approver` remain grantable roles until Slice 4 retires them. Stage
-`RequiredRole` is still a `ProgramRole`; the candidate picker now resolves it through the shared resolver so
-that it and the signing gate cannot disagree, but the stored demand shape has not changed.
+`RequiredRole` is still a `ProgramRole`; candidate, configured-stage, fallback, and additional-signer
+selection now resolve through the shared resolver so they cannot disagree with the signing gate or freeze an
+unrelated base-role label as signature provenance, but the stored demand shape has not changed.
 
 ## E.6 Delegation and administrator substitution
 
@@ -341,7 +343,8 @@ authority merely by being an administrator.
 - The five retired position roles can no longer be **granted** as memberships, by either the Personnel or the
   Administration route. Existing rows stay readable; a new grant would recreate the exact state the v2
   reconciliation refuses, so on a database that has not yet run v2 it would stop the next startup.
-- A membership carrying a position role no longer answers that position's demands anywhere.
+- A membership carrying a **retired** position role no longer answers that position's demands anywhere. A
+  base-eligibility membership remains an ordinary job role, but does not answer a position-sensitive demand.
   `ProgramRoleAuthority.Satisfying` still folds the retired roles into Reviewer/Approver/Engineer so a stored
   workflow stage naming one keeps resolving, but the *membership* side of every gate filters them out and the
   leadership pass answers instead. Removing them from `Satisfying` outright is Slice 4's, once stored stages
