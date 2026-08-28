@@ -278,6 +278,8 @@ test('a worklist can be saved, reopened and removed', async ({ page }) => {
   // Clearing puts the whole library back, and applying the view has to bring the worklist back with it.
   await page.getByRole('button', { name: 'Clear', exact: true }).click()
   await expect(page.getByLabel('test artifact state')).toHaveValue('')
+  await expect(page.getByLabel('Artifact filter')).toHaveValue('all')
+  await expect(page.getByLabel('Level filter')).toHaveValue('Software')
   await page.locator(`[data-saved-view="${name}"]`).click()
   await expect(page.getByLabel('case state')).toHaveValue('Draft')
   await expect(page).toHaveURL(/artifactView=/, { timeout: 30_000 })
@@ -304,6 +306,8 @@ test('Clear returns the whole library', async ({ page }) => {
     .toBeLessThan(whole)
 
   await page.getByRole('button', { name: 'Clear', exact: true }).click()
+  await expect(page.getByLabel('Artifact filter')).toHaveValue('all')
+  await expect(page.getByLabel('Level filter')).toHaveValue('Software')
   await expect.poll(async () => Number((await count.textContent())!.replace(/[^\d]/g, '')), { timeout: 30_000 })
     .toBe(whole)
 })

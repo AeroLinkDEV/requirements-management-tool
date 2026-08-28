@@ -877,8 +877,10 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
            setQuery(''); setProcedureState(''); setProcedureOutcome(''); setArtifactKindFilter('all')
           setLevel(discipline)
           setDocumentId(''); setSectionId(''); setPage(1)
-          setCoverageReportVisible(false, true)
-          onCoverageLevelChange?.()
+          if (showAdvanced) {
+            setCoverageReportVisible(false, true)
+            onCoverageLevelChange?.()
+          }
         }}>
         Clear
       </button>
