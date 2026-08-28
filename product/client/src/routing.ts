@@ -66,6 +66,8 @@ export type AppRoute = {
   /// The exact proposal a verification TCR page should focus after an Explorer action.
   testChangeRequestProposalId?: string;
   projectConfigurationSection?: "ladder" | "assurance" | "history" | "readiness" | "approvals";
+  /** Opens the existing Explorer's authoritative coverage report, never the legacy assessment workspace. */
+  coverageReport?: boolean;
 };
 
 const decoded = (value: string | undefined) => value ? decodeURIComponent(value) : undefined;
@@ -111,6 +113,7 @@ export function parseRoute(pathname: string, search = ""): AppRoute {
   const base = { programId: decoded(parts[1]), projectId: decoded(parts[3]), releaseId: decoded(parts[5]) };
   const tail = parts.slice(6);
   const path = tail.join("/");
+  const coverageReport = query.get("coverage") === "report";
   if (!path || path === "command-center") return { ...base, view: "dashboard", discipline: "system" };
   if (path === "my-work") return { ...base, view: "mywork", discipline: "system" };
   if (path === "systems/change-requests") return { ...base, view: "history", discipline: "system", historySelectionId: query.get("selection") || undefined, historyStateIntent: historyStateIntent(query.get("state")), historyTypeIntent: query.get("type") === "All" ? "All" : "System" };
@@ -168,23 +171,23 @@ export function parseRoute(pathname: string, search = ""): AppRoute {
     return { ...base, view: "testChangeRequest", discipline: "softwareTest", artifactKind: verificationArtifactKind("LowLevel", query), artifactId: decoded(tail[3]), testChangeRequestProposalId: query.get("proposalId") || undefined };
   if (path === "system-verification/coverage") return { ...base, view: "testingCoverage", discipline: "systemTest" };
   if (tail[0] === "system-verification" && tail[1] === "coverage" && tail[2]) return { ...base, view: "testingCoverage", discipline: "systemTest", artifactId: decoded(tail[2]) };
-  if (path === "system-verification/procedures") return { ...base, view: "procedureExplorer", discipline: "systemTest" };
+  if (path === "system-verification/procedures") return { ...base, view: "procedureExplorer", discipline: "systemTest", coverageReport };
   if (path === "software-verification/cases" || path === "software-verification/procedures")
-    return { ...base, view: "procedureExplorer", discipline: "softwareTest", artifactKind: path.endsWith("/procedures") ? "Procedure" : "Case" };
+    return { ...base, view: "procedureExplorer", discipline: "softwareTest", artifactKind: path.endsWith("/procedures") ? "Procedure" : "Case", coverageReport };
   if (path === "software-verification/test-artifacts")
-    return { ...base, view: "procedureExplorer", discipline: "softwareTest" };
+    return { ...base, view: "procedureExplorer", discipline: "softwareTest", artifactKind: query.get("artifactLevel") === "LowLevel" ? "LowLevel" : query.get("artifactLevel") === "HighLevel" ? "HighLevel" : undefined, coverageReport };
   if (path === "system-verification/results") return { ...base, view: "testResults", discipline: "systemTest" };
   if (tail[0] === "system-verification" && tail[1] === "results" && tail[2]) return { ...base, view: "testResults", discipline: "systemTest", artifactId: decoded(tail[2]) };
   if (path === "software-verification/hlr/coverage") return { ...base, view: "testingCoverage", discipline: "softwareTest", artifactKind: verificationArtifactKind("HighLevel", query) };
   if (tail[0] === "software-verification" && tail[1] === "hlr" && tail[2] === "coverage" && tail[3]) return { ...base, view: "testingCoverage", discipline: "softwareTest", artifactKind: verificationArtifactKind("HighLevel", query), artifactId: decoded(tail[3]) };
   if (path === "software-verification/hlr/cases" || path === "software-verification/hlr/procedures")
-    return { ...base, view: "procedureExplorer", discipline: "softwareTest", artifactKind: path.endsWith("/procedures") ? "HighLevelProcedure" : "HighLevel" };
+    return { ...base, view: "procedureExplorer", discipline: "softwareTest", artifactKind: path.endsWith("/procedures") ? "HighLevelProcedure" : "HighLevel", coverageReport };
   if (path === "software-verification/hlr/results") return { ...base, view: "testResults", discipline: "softwareTest", artifactKind: "HighLevel" };
   if (tail[0] === "software-verification" && tail[1] === "hlr" && tail[2] === "results" && tail[3]) return { ...base, view: "testResults", discipline: "softwareTest", artifactKind: "HighLevel", artifactId: decoded(tail[3]) };
   if (path === "software-verification/llr/coverage") return { ...base, view: "testingCoverage", discipline: "softwareTest", artifactKind: verificationArtifactKind("LowLevel", query) };
   if (tail[0] === "software-verification" && tail[1] === "llr" && tail[2] === "coverage" && tail[3]) return { ...base, view: "testingCoverage", discipline: "softwareTest", artifactKind: verificationArtifactKind("LowLevel", query), artifactId: decoded(tail[3]) };
   if (path === "software-verification/llr/cases" || path === "software-verification/llr/procedures")
-    return { ...base, view: "procedureExplorer", discipline: "softwareTest", artifactKind: path.endsWith("/procedures") ? "LowLevelProcedure" : "LowLevel" };
+    return { ...base, view: "procedureExplorer", discipline: "softwareTest", artifactKind: path.endsWith("/procedures") ? "LowLevelProcedure" : "LowLevel", coverageReport };
   if (path === "software-verification/llr/results") return { ...base, view: "testResults", discipline: "softwareTest", artifactKind: "LowLevel" };
   if (tail[0] === "software-verification" && tail[1] === "llr" && tail[2] === "results" && tail[3]) return { ...base, view: "testResults", discipline: "softwareTest", artifactKind: "LowLevel", artifactId: decoded(tail[3]) };
   if (path === "system-verification") return { ...base, view: "verification", discipline: "systemTest" };
@@ -330,6 +333,20 @@ export function routePath(context: RouteContext, view: View, discipline: Discipl
     case "artifact": return `${root}/artifacts/${artifactKind}/${artifactId}`;
     default: return root;
   }
+}
+
+/**
+ * Coverage is an Explorer report over the exact build-scoped verification inventory. Keep this separate from
+ * `testingCoverage`, whose `/coverage` routes remain compatibility addresses for Downstream Assessments.
+ */
+export function coverageExplorerPath(context: RouteContext, discipline: "systemTest" | "softwareTest", level?: "HighLevel" | "LowLevel") {
+  const path = routePath(context, "procedureExplorer", discipline);
+  const query = new URLSearchParams({ coverage: "report" });
+  if (discipline === "softwareTest") {
+    query.set("artifactLevel", level === "LowLevel" ? "LowLevel" : "HighLevel");
+    query.set("artifactKind", "Case");
+  }
+  return `${path}?${query}`;
 }
 
 export function artifactPath(context: RouteContext, kind: string, id: string, discipline = "system", level?: string) {

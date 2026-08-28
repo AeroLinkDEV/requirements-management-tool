@@ -196,7 +196,7 @@ const validLevel = (value: string | null, discipline: ProcedureScope, ladder: Pr
  * to be verified.
  */
 export default function TestProcedureExplorer({ api, projectId, releaseId, discipline, buildName, releaseVersion,
-  released, onBack, onOpenRequirementRevision, onOpenTestChangeRequest, initialLevel, ladder }: {
+  released, onBack, onOpenRequirementRevision, onOpenTestChangeRequest, onCoverageReportChange, initialLevel, ladder }: {
   api: string; projectId: string; releaseId: string; discipline: ProcedureScope; buildName: string
   /** The build's own version, which the document actions name. `buildName` is the display label, not this. */
   releaseVersion: string
@@ -205,10 +205,12 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
   onOpenRequirementRevision: (requirement: { id: string; revisionId: string; level: string }) => void
   /** App owns navigation to the TCR workspace; this component owns exact artifact selection and proposal choice. */
   onOpenTestChangeRequest?: (context: TestArtifactChangeContext) => void
+  onCoverageReportChange?: (visible: boolean) => void
   initialLevel?: 'HighLevel' | 'LowLevel'
   ladder: ProjectLadderProjection | null
 }) {
   const opening = useRef(typeof location !== 'undefined' ? new URLSearchParams(location.search) : new URLSearchParams()).current
+  const coverageReportRequested = opening.get('coverage') === 'report'
   // Cases and Procedures share one combined Explorer with an artifact-kind filter. The filter defaults to
   // the complete inventory so the page communicates the controlled Case -> Procedure model immediately.
   const [artifactKindFilter, setArtifactKindFilter] = useState<'all' | 'Case' | 'Procedure'>(() => {
@@ -216,7 +218,9 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
     // retain their original kind intent for links already in circulation.
     const pathKind = typeof location !== 'undefined' && location.pathname.endsWith('/procedures')
       ? 'procedure' : typeof location !== 'undefined' && location.pathname.endsWith('/cases') ? 'case' : ''
-    const kind = opening.get('artifactKind')?.toLowerCase() || pathKind
+    const kind = coverageReportRequested && discipline !== 'System'
+      ? 'case'
+      : opening.get('artifactKind')?.toLowerCase() || pathKind
     if (kind === 'procedure') return 'Procedure'
     if (kind === 'case') return 'Case'
     return 'all'
@@ -279,7 +283,7 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
   const [traceError, setTraceError] = useState(false)
   const [comments, setComments] = useState<Comment[]>([])
   const [error, setError] = useState('')
-  const [showAdvanced, setShowAdvanced] = useState(false)
+  const [showAdvanced, setShowAdvanced] = useState(coverageReportRequested)
   const [coverage, setCoverage] = useState<Coverage>()
   const [coverageRead, setCoverageRead] = useState(false)
   const [showAllCoverage, setShowAllCoverage] = useState(false)
@@ -483,10 +487,16 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
       setSelectedDisplayNumber(queryValue(params) ?? '')
       const seeded = queryValue(params, 'Tab')
       setTab(seeded === 'trace' || seeded === 'history' || seeded === 'discussion' ? seeded : 'details')
+      const coverageReport = params.get('coverage') === 'report'
+      setShowAdvanced(coverageReport)
+      onCoverageReportChange?.(coverageReport)
+      setCoverageRead(false)
+      setCoverage(undefined)
+      setShowAllCoverage(false)
     }
     addEventListener('popstate', restore)
     return () => removeEventListener('popstate', restore)
-  }, [discipline, ladder, queryValue])
+  }, [discipline, ladder, onCoverageReportChange, queryValue])
 
   const procedures = data?.items ?? []
   // Read once, defensively. A build with no effective procedures answers with a deliberately empty page, and
@@ -585,11 +595,20 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
   // same Advanced control the Requirements Explorer uses, so the two Explorers remain identical by default
   // without deleting the governed suspect-coverage workflow.
   useEffect(() => {
-    setShowAdvanced(false)
+    setShowAdvanced(new URLSearchParams(location.search).get('coverage') === 'report')
     setCoverage(undefined)
     setCoverageRead(false)
     setShowAllCoverage(false)
   }, [api, projectId, releaseId, scope, artifactKindFilter])
+
+  const setCoverageReportVisible = (visible: boolean) => {
+    setShowAdvanced(visible)
+    onCoverageReportChange?.(visible)
+    const params = new URLSearchParams(location.search)
+    if (visible) params.set('coverage', 'report')
+    else params.delete('coverage')
+    window.history.pushState({}, '', `${location.pathname}${params.size ? `?${params}` : ''}`)
+  }
 
   useEffect(() => {
     if ((!isSystemScope && artifactKindFilter !== 'Case') || !showAdvanced || coverageRead) return
@@ -802,7 +821,12 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
        </select>
       )}
       {discipline === 'Software' && <select aria-label="Artifact filter" value={artifactKindFilter}
-        onChange={event => { setArtifactKindFilter(event.target.value as 'all' | 'Case' | 'Procedure'); setDocumentId(''); setSectionId(''); setPage(1) }}>
+        onChange={event => {
+          const next = event.target.value as 'all' | 'Case' | 'Procedure'
+          setArtifactKindFilter(next)
+          if (next !== 'Case') setCoverageReportVisible(false)
+          setDocumentId(''); setSectionId(''); setPage(1)
+        }}>
         <option value="all">All test artifacts</option>
         {caseEnabled && <option value="Case">Test cases</option>}
         {procedureEnabled && <option value="Procedure">Test procedures</option>}
@@ -822,7 +846,7 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
         <option value="Blocked">Blocked</option>
       </select>
       {(isSystemScope || artifactKindFilter === 'Case') && <button type="button" className={showAdvanced ? 'advanced active' : 'advanced'}
-        aria-expanded={showAdvanced} onClick={() => setShowAdvanced(current => !current)}>
+        aria-expanded={showAdvanced} onClick={() => setCoverageReportVisible(!showAdvanced)}>
         Advanced
       </button>}
       <button type="button" className="clear"
