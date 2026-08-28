@@ -33,6 +33,11 @@ public sealed class ProjectAuthorityResolver(AeroLinkDbContext db)
         if (account is null) return ProjectAuthorityDecision.Denied;
         if (account.UserName == IdentityService.SystemAdministratorUserName)
             return ProjectAuthorityDecision.From(ProjectAuthoritySource.AdministratorSubstitution);
+        if (requirement.AllowProgramAdministratorSubstitution
+            && await db.ProgramMemberships.AsNoTracking().AnyAsync(
+                x => x.UserId == userId && x.ProgramId == programId && x.EndedAt == null
+                     && x.Role == ProgramRole.Administrator, ct))
+            return ProjectAuthorityDecision.From(ProjectAuthoritySource.AdministratorSubstitution);
 
         return requirement.Kind switch
         {
@@ -203,7 +208,8 @@ public sealed class ProjectAuthorityResolver(AeroLinkDbContext db)
     /// candidate picker and the signing gate must both read so they cannot disagree.
     /// </summary>
     public async Task<IReadOnlyList<(Guid UserId, ProjectAuthoritySource Source, ProjectLeadershipPosition? Position)>>
-        ResolveHoldersAsync(Guid programId, ProgramRole demanded, DateTimeOffset now, CancellationToken ct = default)
+        ResolveHoldersAsync(Guid programId, ProgramRole demanded, DateTimeOffset now,
+            bool includeProgramAdministratorSubstitution = false, CancellationToken ct = default)
     {
         var accepted = MembershipAnswerable(demanded);
         var results = new Dictionary<Guid, (ProjectAuthoritySource, ProjectLeadershipPosition?)>();
@@ -248,7 +254,7 @@ public sealed class ProjectAuthorityResolver(AeroLinkDbContext db)
                 results.TryAdd(backup, (ProjectAuthoritySource.LeadershipBackup, position));
         }
 
-        var activeUserIds = activeMembers.Select(x => x.UserId).ToHashSet();
+        var activeMemberIds = activeMembers.Select(x => x.UserId).ToHashSet();
 
         // Legacy role-keyed backups still stand for the roles that are still jobs — Reviewer, SQA and the
         // rest. They are deliberately NOT honoured for position roles: that designation belongs on
@@ -258,15 +264,31 @@ public sealed class ProjectAuthorityResolver(AeroLinkDbContext db)
             .Select(x => new { x.BackupUserId, x.Role }).ToListAsync(ct);
         foreach (var backup in legacyBackups.Where(x =>
                      !SingularProgramRoles.IsSingular(x.Role) && !SingularProgramRoles.IsBaseEligibility(x.Role)
-                     && accepted.Contains(x.Role) && activeUserIds.Contains(x.BackupUserId)))
+                     && accepted.Contains(x.Role) && activeMemberIds.Contains(x.BackupUserId)))
             results.TryAdd(backup.BackupUserId, (ProjectAuthoritySource.LegacyCompatibility, null));
 
         var delegations = await db.RoleDelegations.AsNoTracking()
             .Where(x => x.ProgramId == programId && x.Role == demanded && x.RevokedAt == null)
             .ToListAsync(ct);
-        foreach (var delegation in delegations.Where(x => x.StartsAt <= now && x.EndsAt > now))
-            if (activeUserIds.Contains(delegation.DelegateUserId))
+        var activeDelegations = delegations.Where(x => x.StartsAt <= now && x.EndsAt > now).ToList();
+        var delegatedUserIds = activeDelegations.Select(x => x.DelegateUserId).Distinct().ToList();
+        HashSet<Guid> activeDelegatedUserIds = delegatedUserIds.Count == 0
+            ? []
+            : (await db.UserAccounts.AsNoTracking()
+                .Where(x => delegatedUserIds.Contains(x.Id) && x.State == AccountState.Active)
+                .Select(x => x.Id).ToListAsync(ct)).ToHashSet();
+        // A delegation is intentionally an exact, time-bounded authority in its own right and the legacy
+        // compatibility contract does not require the delegate to retain another Program membership. Project
+        // every active delegate that ResolveAsync would grant so pickers cannot hide a valid signer.
+        foreach (var delegation in activeDelegations)
+            if (activeDelegatedUserIds.Contains(delegation.DelegateUserId))
                 results.TryAdd(delegation.DelegateUserId, (ProjectAuthoritySource.Delegation, null));
+
+        if (includeProgramAdministratorSubstitution)
+            foreach (var administratorId in activeMembers
+                         .Where(x => x.Role == ProgramRole.Administrator)
+                         .Select(x => x.UserId).Distinct())
+                results[administratorId] = (ProjectAuthoritySource.AdministratorSubstitution, null);
 
         // ResolveAsync grants the one active installation administrator before consulting any project-scoped
         // source. The holder projection must report that same substitution even when the account deliberately

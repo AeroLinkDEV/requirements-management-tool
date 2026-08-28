@@ -35,9 +35,13 @@ public enum ProjectAuthorityKind
 /// </summary>
 public readonly record struct ProjectAuthorityRequirement
 {
-    private ProjectAuthorityRequirement(ProjectAuthorityKind kind, ProgramRole? role, ProjectLeadershipPosition? position)
+    private ProjectAuthorityRequirement(ProjectAuthorityKind kind, ProgramRole? role,
+        ProjectLeadershipPosition? position, bool allowProgramAdministratorSubstitution = false)
     {
-        Kind = kind; Role = role; Position = position;
+        Kind = kind;
+        Role = role;
+        Position = position;
+        AllowProgramAdministratorSubstitution = allowProgramAdministratorSubstitution;
     }
 
     public ProjectAuthorityKind Kind { get; }
@@ -48,6 +52,13 @@ public readonly record struct ProjectAuthorityRequirement
     /// <summary>Set for <see cref="ProjectAuthorityKind.LeadershipPosition"/>.</summary>
     public ProjectLeadershipPosition? Position { get; }
 
+    /// <summary>
+    /// Some persisted workflow demands deliberately allow a Program-scoped administrator to stand in.
+    /// This is explicit rather than a property of every legacy demand: assurance and other controlled
+    /// decisions do not inherit workflow's emergency substitution policy by accident.
+    /// </summary>
+    public bool AllowProgramAdministratorSubstitution { get; }
+
     /// <summary>"Does this person perform this job?" Base membership answers it; elevation is irrelevant.</summary>
     public static ProjectAuthorityRequirement BaseRole(ProgramRole role) => new(ProjectAuthorityKind.BaseRole, role, null);
 
@@ -56,14 +67,17 @@ public readonly record struct ProjectAuthorityRequirement
         new(ProjectAuthorityKind.LeadershipPosition, null, position);
 
     /// <summary>A stored demand that predates the split and must keep resolving both ways.</summary>
-    public static ProjectAuthorityRequirement LegacyRoleDemand(ProgramRole role) =>
-        new(ProjectAuthorityKind.LegacyRoleDemand, role, null);
+    public static ProjectAuthorityRequirement LegacyRoleDemand(
+        ProgramRole role, bool allowProgramAdministratorSubstitution = false) =>
+        new(ProjectAuthorityKind.LegacyRoleDemand, role, null, allowProgramAdministratorSubstitution);
 
     public override string ToString() => Kind switch
     {
         ProjectAuthorityKind.BaseRole => $"BaseRole:{Role}",
         ProjectAuthorityKind.LeadershipPosition => $"Leadership:{Position}",
-        _ => $"LegacyRoleDemand:{Role}",
+        _ => AllowProgramAdministratorSubstitution
+            ? $"LegacyRoleDemand:{Role}:ProgramAdministratorSubstitution"
+            : $"LegacyRoleDemand:{Role}",
     };
 }
 

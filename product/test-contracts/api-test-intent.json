@@ -1,11 +1,11 @@
 {
   "schemaVersion": "aerolink-api-test-intent/v2",
   "totals": {
-    "tests": 663,
-    "cases": 729,
+    "tests": 665,
+    "cases": 731,
     "classes": 110,
-    "hostedTests": 637,
-    "hostedCases": 694,
+    "hostedTests": 639,
+    "hostedCases": 696,
     "nonHostedTests": 20,
     "nonHostedCases": 29,
     "unknownHostTests": 6,
@@ -21,16 +21,16 @@
     "http-boundary": {
       "label": "HTTP boundary: route, status, JSON shape",
       "level": "API (must stay hosted)",
-      "tests": 403,
-      "cases": 445,
+      "tests": 404,
+      "cases": 446,
       "unknownCases": 0,
       "classes": 91
     },
     "ef-translation": {
       "label": "EF translation / relational constraints",
       "level": "Infrastructure (needs a database, not a host)",
-      "tests": 142,
-      "cases": 153,
+      "tests": 143,
+      "cases": 154,
       "unknownCases": 0,
       "classes": 53
     },
@@ -410,6 +410,42 @@
       "sourceLines": {
         "start": 315,
         "end": 346
+      }
+    },
+    {
+      "cls": "ApprovalConfigurationApiTests",
+      "test": "Program_administrator_is_consistent_across_picker_configuration_and_signing_gate",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "shared-host-fixture",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 485,
+        "end": 528
+      }
+    },
+    {
+      "cls": "ApprovalConfigurationApiTests",
+      "test": "Standalone_delegate_is_consistent_across_picker_configuration_and_signing_gate",
+      "kind": "Fact",
+      "intent": "ef-translation",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "shared-host-fixture",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 441,
+        "end": 483
       }
     },
     {

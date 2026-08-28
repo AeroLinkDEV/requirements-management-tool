@@ -163,28 +163,29 @@ public static class WorkflowEndpoints
             // and omitted a newly assigned lead, so it and the signature endpoint disagreed in both
             // directions. Resolving per required role makes them the same answer by construction.
             var resolver = new ProjectAuthorityResolver(db);
-            // Scoped to this program's members: the picker only ever offers them, and loading every account
-            // in the installation to find a handful is a cost paid on every page load.
+            // Load the roster once for role labels, then add only the few non-member accounts the resolver
+            // actually returns (an exact-role delegate or the installation administrator). That keeps the
+            // query scoped without hiding compatibility authority that is valid independently of membership.
             var programMembers = await db.ProgramMemberships.AsNoTracking()
                 .Where(x => x.ProgramId == programId && x.EndedAt == null)
                 .Join(db.UserAccounts.AsNoTracking().Where(x => x.State == AccountState.Active),
                     m => m.UserId, u => u.Id, (m, u) => new { u.Id, u.UserName, u.DisplayName, m.Role })
                 .ToListAsync(ct);
-            var accountById = programMembers.DistinctBy(x => x.Id).ToDictionary(x => x.Id);
+            var accountById = programMembers.DistinctBy(x => x.Id)
+                .ToDictionary(x => x.Id, x => (x.UserName, x.DisplayName));
             var rolesByUser = programMembers.GroupBy(x => x.Id)
                 .ToDictionary(x => x.Key, x => x.Select(member => member.Role).ToList());
-            var programAdministrators = programMembers
-                .Where(x => x.Role == ProgramRole.Administrator).Select(x => x.Id).Distinct().ToList();
             // The installation administrator is intentionally not required to hold a Program membership.
             // ResolveHoldersAsync includes that substitution because the signing gate does; load the account
             // alongside the scoped roster so the projection can actually name the holder it reports.
             var systemAdministrator = await db.UserAccounts.AsNoTracking()
                 .Where(x => x.State == AccountState.Active
                             && x.UserName == IdentityService.SystemAdministratorUserName)
-                .Select(x => new { x.Id, x.UserName, x.DisplayName, Role = ProgramRole.Administrator })
+                .Select(x => new { x.Id, x.UserName, x.DisplayName })
                 .SingleOrDefaultAsync(ct);
             if (systemAdministrator is not null)
-                accountById[systemAdministrator.Id] = systemAdministrator;
+                accountById[systemAdministrator.Id] =
+                    (systemAdministrator.UserName, systemAdministrator.DisplayName);
 
             // What to show beside a candidate's name: the role they actually hold that answers this stage,
             // not the stage's own required role. Labelling every option with the requirement makes the
@@ -202,7 +203,18 @@ public static class WorkflowEndpoints
             var candidatesByRole = new Dictionary<ProgramRole, IReadOnlyList<StageCandidate>>();
             foreach (var requiredRole in workflow.Stages.Select(x => x.RequiredRole).Distinct())
             {
-                var holders = await resolver.ResolveHoldersAsync(programId, requiredRole, now, ct);
+                var holders = await resolver.ResolveHoldersAsync(programId, requiredRole, now,
+                    includeProgramAdministratorSubstitution: true, ct);
+                var missingAccountIds = holders.Select(x => x.UserId)
+                    .Where(x => !accountById.ContainsKey(x)).Distinct().ToList();
+                if (missingAccountIds.Count > 0)
+                {
+                    var additionalAccounts = await db.UserAccounts.AsNoTracking()
+                        .Where(x => missingAccountIds.Contains(x.Id) && x.State == AccountState.Active)
+                        .Select(x => new { x.Id, x.UserName, x.DisplayName }).ToListAsync(ct);
+                    foreach (var account in additionalAccounts)
+                        accountById[account.Id] = (account.UserName, account.DisplayName);
+                }
                 var listed = holders.Where(x => accountById.ContainsKey(x.UserId))
                     .Select(x => new StageCandidate(
                         accountById[x.UserId].UserName, accountById[x.UserId].DisplayName,
@@ -211,13 +223,6 @@ public static class WorkflowEndpoints
                             : HeldRole(x.UserId, requiredRole),
                         x.Source.ToString()))
                     .ToList();
-                // Administrators are listed for every stage because they can stand in when the named
-                // authority is unavailable; a review that cannot proceed at all is not a control.
-                listed.AddRange(programAdministrators.Where(accountById.ContainsKey)
-                    .Select(id => new StageCandidate(
-                        accountById[id].UserName, accountById[id].DisplayName,
-                        ProgramRole.Administrator.ToString(),
-                        ProjectAuthoritySource.AdministratorSubstitution.ToString())));
                 candidatesByRole[requiredRole] = listed.DistinctBy(x => x.UserId).OrderBy(x => x.Name).ToList();
             }
 
@@ -321,7 +326,8 @@ public static class WorkflowEndpoints
             .SingleOrDefaultAsync(ct);
         if (programId is null) return null;
         var decision = await new ProjectAuthorityResolver(db).ResolveAsync(userId, programId.Value,
-            ProjectAuthorityRequirement.LegacyRoleDemand(requiredRole), DateTimeOffset.UtcNow, ct);
+            ProjectAuthorityRequirement.LegacyRoleDemand(requiredRole,
+                allowProgramAdministratorSubstitution: true), DateTimeOffset.UtcNow, ct);
         if (!decision.Granted) return null;
         if (decision.Source == ProjectAuthoritySource.AdministratorSubstitution) return ProgramRole.Administrator;
 

@@ -301,6 +301,43 @@ public sealed class ProjectAuthorityResolverTests : IDisposable
             ProjectAuthorityRequirement.LegacyRoleDemand(ProgramRole.SystemEngineeringLead), _now));
     }
 
+    [Fact]
+    public async Task A_standalone_exact_role_delegate_is_projected_when_the_per_person_gate_accepts_them()
+    {
+        var delegator = Person("delegator", ProgramRole.Approver);
+        var delegatee = Person("standalone-delegate");
+        _db.RoleDelegations.Add(new RoleDelegation(_program.Id, delegator.Id, delegatee.Id,
+            ProgramRole.Approver, _now.AddMinutes(-1), _now.AddHours(1), "Exact cover.", "test", _now));
+        await _db.SaveChangesAsync();
+
+        Assert.False(await _db.ProgramMemberships.AnyAsync(x => x.UserId == delegatee.Id));
+        Assert.True(await _resolver.IsSatisfiedAsync(delegatee.Id, _program.Id,
+            ProjectAuthorityRequirement.LegacyRoleDemand(ProgramRole.Approver), _now));
+
+        var holders = await _resolver.ResolveHoldersAsync(_program.Id, ProgramRole.Approver, _now);
+        var projected = Assert.Single(holders, x => x.UserId == delegatee.Id);
+        Assert.Equal(ProjectAuthoritySource.Delegation, projected.Source);
+    }
+
+    [Fact]
+    public async Task Program_administrator_substitution_is_explicit_and_projection_matches_the_gate()
+    {
+        var administrator = Person("program-admin", ProgramRole.Administrator);
+        var ordinary = ProjectAuthorityRequirement.LegacyRoleDemand(ProgramRole.Airworthiness);
+        var workflow = ProjectAuthorityRequirement.LegacyRoleDemand(ProgramRole.Airworthiness,
+            allowProgramAdministratorSubstitution: true);
+
+        Assert.False(await _resolver.IsSatisfiedAsync(administrator.Id, _program.Id, ordinary, _now));
+        Assert.True(await _resolver.IsSatisfiedAsync(administrator.Id, _program.Id, workflow, _now));
+
+        var ordinaryHolders = await _resolver.ResolveHoldersAsync(_program.Id, ProgramRole.Airworthiness, _now);
+        Assert.DoesNotContain(ordinaryHolders, x => x.UserId == administrator.Id);
+        var workflowHolders = await _resolver.ResolveHoldersAsync(_program.Id, ProgramRole.Airworthiness, _now,
+            includeProgramAdministratorSubstitution: true);
+        Assert.Equal(ProjectAuthoritySource.AdministratorSubstitution,
+            Assert.Single(workflowHolders, x => x.UserId == administrator.Id).Source);
+    }
+
     public void Dispose()
     {
         _db.Database.CloseConnection();

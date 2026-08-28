@@ -82,7 +82,8 @@ public static class ApprovalConfigurationEndpoints
             var authorityByRole = new Dictionary<ProgramRole, ResolvedAuthority>();
             foreach (var required in workflows.SelectMany(x => x.Stages).Select(x => x.RequiredRole).Distinct())
             {
-                var resolved = await authority.ResolveHoldersAsync(programId.Value, required, now, ct);
+                var resolved = await authority.ResolveHoldersAsync(programId.Value, required, now,
+                    includeProgramAdministratorSubstitution: true, ct);
                 List<string> Named(params ProjectAuthoritySource[] sources) => resolved
                     .Where(x => sources.Contains(x.Source) && names.ContainsKey(x.UserId))
                     .Select(x => names[x.UserId]).Distinct().Order().ToList();
