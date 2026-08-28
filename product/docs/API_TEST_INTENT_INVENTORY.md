@@ -20,27 +20,31 @@ tokens that supplied host evidence.
 
 ## Result
 
-**447 test methods, 497 known invocations, 81 classes.** This source-exact forecast supports planning only;
+<!-- BEGIN GENERATED API TEST INTENT SUMMARY -->
+**643 test methods, 701 known invocations, 109 classes.** This source-exact forecast supports planning only;
 it is not migration or rollout authority. All current theories use explicit `InlineData`,
-so every case count is known. The inventory does not infer host use from a whole class: **435 methods /
-476 cases have direct host evidence**, **8 methods / 17 cases are explicitly non-hosted**, and **4 methods /
-4 cases remain unknown** because their class contains a host fixture or factory but the method body does not
-show the host operation.
+so every case count is known.
+The inventory does not infer host use from a whole class:
+**623 methods / 672 cases have direct host evidence**,
+**14 methods / 23 cases are explicitly non-hosted**, and
+**6 methods / 6 cases remain unknown** because their class contains a host fixture or factory but
+the method body does not show the host operation.
 
 | Intent | Tests | Cases | Classes | Correct level |
 |---|---:|---:|---:|---|
-| HTTP boundary: route, status, JSON shape | 297 | 331 | 68 | API — must stay hosted |
-| EF translation / relational constraints | 74 | 77 | 31 | Infrastructure — needs a database, not a host |
-| Authentication / authorization wiring | 52 | 55 | 33 | API — must stay hosted |
-| Filesystem / evidence-root behaviour | 10 | 10 | 6 | API or Infrastructure — must stay hosted |
-| **In-process logic, no HTTP and no client** | **7** | **7** | **6** | **Domain or Infrastructure — candidate** |
-| Startup, hosting and configuration | 5 | 5 | 4 | API — must stay hosted |
-| **Business-rule matrix over data variations** | **2** | **12** | **2** | **Domain — candidate** |
+| HTTP boundary: route, status, JSON shape | 399 | 433 | 91 | API (must stay hosted) |
+| EF translation / relational constraints | 138 | 149 | 52 | Infrastructure (needs a database, not a host) |
+| Authentication / authorization wiring | 64 | 68 | 41 | API (must stay hosted) |
+| In-process logic with no HTTP and no client | 22 | 22 | 9 | Domain or Infrastructure (migration candidate) |
+| Filesystem / evidence-root behaviour | 12 | 12 | 7 | API or Infrastructure (must stay hosted) |
+| Startup, hosting and configuration | 7 | 7 | 5 | API (must stay hosted) |
+| Business-rule matrix over data variations | 1 | 10 | 1 | Domain (migration candidate) |
 
-The machine-readable artifact records **6 explicitly hosted candidate methods / 7 cases** and **2
-unknown candidate methods / 2 cases**. The known hosted candidate share is **7 of 476 cases (1.5%)**,
+The machine-readable artifact records **14 explicitly hosted candidate methods / 14 cases** and **3 unknown candidate methods / 3 cases**.
+The known hosted candidate share is **14 of 672 cases (2.1%)**,
 but that is not a safe ceiling while unknown invocations remain. The static criterion-7 result is therefore
 **unresolved**; it does not close #566 and does not justify closing #563.
+<!-- END GENERATED API TEST INTENT SUMMARY -->
 
 The unknown rows are intentionally visible rather than silently placed in the denominator:
 

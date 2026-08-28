@@ -6,12 +6,20 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { tmpdir } from 'node:os'
 import { buildHostArtifact, classifyClass } from '../lib/host-classification.mjs'
-import { buildIntentArtifact, classifyFile, summariseInventory } from '../lib/test-intent.mjs'
+import {
+  buildIntentArtifact,
+  classifyFile,
+  INVENTORY_SUMMARY_END,
+  INVENTORY_SUMMARY_START,
+  renderInventorySummary,
+  summariseInventory,
+} from '../lib/test-intent.mjs'
 
 const intentArtifact = JSON.parse(readFileSync(new URL('../api-test-intent.json', import.meta.url), 'utf8'))
 const hostArtifact = JSON.parse(readFileSync(new URL('../api-host-classification.json', import.meta.url), 'utf8'))
 const hostOverrides = JSON.parse(readFileSync(new URL('../api-host-classification-overrides.json', import.meta.url), 'utf8'))
 const testsDirectory = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'tests', 'AeroLink.Api.Tests')
+const inventoryDocumentation = readFileSync(new URL('../../docs/API_TEST_INTENT_INVENTORY.md', import.meta.url), 'utf8')
 
 test('brace-bearing InlineData is parsed as an attribute, not as the method body', () => {
   const source = `
@@ -351,4 +359,15 @@ test('committed generated artifacts are byte-stable', () => {
   const expectedHost = buildHostArtifact({ testsDirectory, inventory: expectedIntent, overrides: hostOverrides.classes })
   assert.equal(readFileSync(new URL('../api-test-intent.json', import.meta.url), 'utf8'), `${JSON.stringify(expectedIntent, null, 2)}\n`)
   assert.equal(readFileSync(new URL('../api-host-classification.json', import.meta.url), 'utf8'), `${JSON.stringify(expectedHost, null, 2)}\n`)
+})
+
+test('committed Markdown inventory summary is generated and byte-stable', () => {
+  const start = inventoryDocumentation.indexOf(INVENTORY_SUMMARY_START)
+  const end = inventoryDocumentation.indexOf(INVENTORY_SUMMARY_END)
+  assert.notEqual(start, -1)
+  assert.equal(inventoryDocumentation.indexOf(INVENTORY_SUMMARY_START, start + INVENTORY_SUMMARY_START.length), -1)
+  assert.equal(inventoryDocumentation.indexOf(INVENTORY_SUMMARY_END, end + INVENTORY_SUMMARY_END.length), -1)
+  assert.ok(end > start)
+  const generated = inventoryDocumentation.slice(start + INVENTORY_SUMMARY_START.length, end).replace(/^\n|\n$/g, '')
+  assert.equal(generated, renderInventorySummary(intentArtifact))
 })
