@@ -241,6 +241,14 @@ public sealed class ProcedureTestChangeControlApiTests
         Assert.Empty(driving.RootElement.EnumerateArray());
         Assert.Equal(fixture.RevisionId, await db.TestProcedureRevisions.AsNoTracking()
             .Where(x => x.Id == fixture.RevisionId).Select(x => x.Id).SingleAsync());
+        var sourceCoverage = await db.TestCoverage.AsNoTracking()
+            .Where(x => x.ProcedureRevisionId == fixture.RevisionId)
+            .Select(x => new { x.RequirementRevisionId, x.IsSuspect })
+            .ToListAsync();
+        Assert.Equal(2, sourceCoverage.Count);
+        Assert.Equal(new[] { fixture.RequirementRevisionId, fixture.RetainedRequirementRevisionId }.ToHashSet(),
+            sourceCoverage.Select(x => x.RequirementRevisionId).ToHashSet());
+        Assert.All(sourceCoverage, row => Assert.False(row.IsSuspect));
     }
 
     [Fact]
