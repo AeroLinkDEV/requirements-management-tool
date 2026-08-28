@@ -1,11 +1,11 @@
 {
   "schemaVersion": "aerolink-api-test-intent/v2",
   "totals": {
-    "tests": 643,
-    "cases": 701,
+    "tests": 645,
+    "cases": 703,
     "classes": 109,
-    "hostedTests": 623,
-    "hostedCases": 672,
+    "hostedTests": 625,
+    "hostedCases": 674,
     "nonHostedTests": 14,
     "nonHostedCases": 23,
     "unknownHostTests": 6,
@@ -53,10 +53,10 @@
     "filesystem": {
       "label": "Filesystem / evidence-root behaviour",
       "level": "API or Infrastructure (must stay hosted)",
-      "tests": 12,
-      "cases": 12,
+      "tests": 14,
+      "cases": 14,
       "unknownCases": 0,
-      "classes": 7
+      "classes": 8
     },
     "startup-config": {
       "label": "Startup, hosting and configuration",
@@ -113,6 +113,24 @@
     },
     {
       "cls": "ApiTestTelemetryTests",
+      "test": "Asynchronous_dispose_records_cleanup_once_and_removes_disposable_wal_artifacts",
+      "kind": "Fact",
+      "intent": "filesystem",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 98,
+        "end": 122
+      }
+    },
+    {
+      "cls": "ApiTestTelemetryTests",
       "test": "Host_and_dispose_records_report_the_same_pre_host_construction_latency",
       "kind": "Fact",
       "intent": "startup-config",
@@ -138,8 +156,26 @@
       "hosted": "unknown",
       "hostEvidence": [],
       "sourceLines": {
+        "start": 130,
+        "end": 135
+      }
+    },
+    {
+      "cls": "ApiTestTelemetryTests",
+      "test": "Synchronous_dispose_records_cleanup_once_and_removes_disposable_wal_artifacts",
+      "kind": "Fact",
+      "intent": "filesystem",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
         "start": 72,
-        "end": 77
+        "end": 96
       }
     },
     {
