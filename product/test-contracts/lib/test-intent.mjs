@@ -40,6 +40,9 @@ export const INTENTS = [
   },
 ]
 
+export const INVENTORY_SUMMARY_START = '<!-- BEGIN GENERATED API TEST INTENT SUMMARY -->'
+export const INVENTORY_SUMMARY_END = '<!-- END GENERATED API TEST INTENT SUMMARY -->'
+
 const FALLBACK = {
   key: 'in-process-logic',
   label: 'In-process logic with no HTTP and no client',
@@ -525,6 +528,44 @@ export function buildIntentArtifact(root) {
         sourceLines: row.sourceLines,
       })),
   }
+}
+
+/** Render the count-bearing portion of the human-readable inventory document. */
+export function renderInventorySummary(artifact) {
+  const { totals, intents } = artifact
+  const hostedCandidateShare = totals.hostedCases === 0
+    ? '0.0'
+    : ((totals.hostedCandidateCases / totals.hostedCases) * 100).toFixed(1)
+  const caseSummary = totals.unknownCaseTests === 0
+    ? [
+      'it is not migration or rollout authority. All current theories use explicit `InlineData`,',
+      'so every case count is known.',
+    ]
+    : [
+      `it is not migration or rollout authority. ${totals.unknownCaseTests} theory methods use runtime data`,
+      'whose invocation counts are not statically known.',
+    ]
+  const rows = Object.values(intents).map((entry) =>
+    `| ${entry.label} | ${entry.tests} | ${entry.cases} | ${entry.classes} | ${entry.level} |`)
+
+  return [
+    `**${totals.tests} test methods, ${totals.cases} known invocations, ${totals.classes} classes.** This source-exact forecast supports planning only;`,
+    ...caseSummary,
+    'The inventory does not infer host use from a whole class:',
+    `**${totals.hostedTests} methods / ${totals.hostedCases} cases have direct host evidence**,`,
+    `**${totals.nonHostedTests} methods / ${totals.nonHostedCases} cases are explicitly non-hosted**, and`,
+    `**${totals.unknownHostTests} methods / ${totals.unknownHostCases} cases remain unknown** because their class contains a host fixture or factory but`,
+    'the method body does not show the host operation.',
+    '',
+    '| Intent | Tests | Cases | Classes | Correct level |',
+    '|---|---:|---:|---:|---|',
+    ...rows,
+    '',
+    `The machine-readable artifact records **${totals.hostedCandidateTests} explicitly hosted candidate methods / ${totals.hostedCandidateCases} cases** and **${totals.unknownCandidateTests} unknown candidate methods / ${totals.unknownCandidateCases} cases**.`,
+    `The known hosted candidate share is **${totals.hostedCandidateCases} of ${totals.hostedCases} cases (${hostedCandidateShare}%)**,`,
+    'but that is not a safe ceiling while unknown invocations remain. The static criterion-7 result is therefore',
+    `**${totals.criterion7}**; it does not close #566 and does not justify closing #563.`,
+  ].join('\n')
 }
 
 function fileContents(file) {

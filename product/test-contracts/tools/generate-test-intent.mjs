@@ -4,15 +4,32 @@
 // but whose class contains a host fixture, is `unknown` rather than silently inheriting class-level host
 // evidence. Unknown rows cannot be used to claim the criterion-7 escape clause.
 
-import { writeFileSync } from 'node:fs'
+import { readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { buildIntentArtifact } from '../lib/test-intent.mjs'
+import {
+  buildIntentArtifact,
+  INVENTORY_SUMMARY_END,
+  INVENTORY_SUMMARY_START,
+  renderInventorySummary,
+} from '../lib/test-intent.mjs'
 
 const repoRoot = fileURLToPath(new URL('../../../', import.meta.url))
 const ROOT = join(repoRoot, 'product/tests/AeroLink.Api.Tests')
 const artifact = buildIntentArtifact(ROOT)
 const summary = { ...artifact.totals, intents: artifact.intents }
+
+function replaceGeneratedSummary(document, rendered) {
+  const starts = document.split(INVENTORY_SUMMARY_START).length - 1
+  const ends = document.split(INVENTORY_SUMMARY_END).length - 1
+  if (starts !== 1 || ends !== 1) {
+    throw new Error(`Expected exactly one generated inventory summary (${INVENTORY_SUMMARY_START} ... ${INVENTORY_SUMMARY_END})`)
+  }
+  const start = document.indexOf(INVENTORY_SUMMARY_START)
+  const end = document.indexOf(INVENTORY_SUMMARY_END)
+  if (end <= start) throw new Error('Generated inventory summary markers are out of order')
+  return `${document.slice(0, start)}${INVENTORY_SUMMARY_START}\n${rendered}\n${INVENTORY_SUMMARY_END}${document.slice(end + INVENTORY_SUMMARY_END.length)}`
+}
 
 console.log(`Classified ${summary.tests} test methods (${summary.cases} known cases) across ${summary.classes} classes\n`)
 console.log('intent                tests   cases   classes   level')
@@ -30,7 +47,12 @@ console.log(`#566 criterion 7 target: >= 20% of hosted test invocations removed 
 console.log(`  -> static evidence status: ${summary.criterion7}`)
 
 const outputPath = process.argv[2] ?? join(repoRoot, 'product/test-contracts/api-test-intent.json')
+const documentationPath = join(repoRoot, 'product/docs/API_TEST_INTENT_INVENTORY.md')
+const documentation = readFileSync(documentationPath, 'utf8')
+const updatedDocumentation = replaceGeneratedSummary(documentation, renderInventorySummary(artifact))
 writeFileSync(outputPath, `${JSON.stringify({
   ...artifact,
 }, null, 2)}\n`, 'utf8')
+writeFileSync(documentationPath, updatedDocumentation, 'utf8')
 console.log(`\nwrote ${outputPath}`)
+console.log(`wrote ${documentationPath}`)
