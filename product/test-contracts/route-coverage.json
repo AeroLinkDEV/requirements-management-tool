@@ -837,7 +837,9 @@
       "method": "POST",
       "path": "/api/delegations",
       "file": "AdministrationEndpoints.cs",
-      "coveredBy": []
+      "coveredBy": [
+        "SecurityBoundaryTests"
+      ]
     },
     {
       "method": "POST",

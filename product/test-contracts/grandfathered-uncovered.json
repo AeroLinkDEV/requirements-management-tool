@@ -16,7 +16,6 @@
     "POST /api/change-requests/{}/retarget",
     "POST /api/controlled-editing/sessions/{}/force-unlock",
     "POST /api/controlled-editing/sessions/{}/heartbeat",
-    "POST /api/delegations",
     "POST /api/downstream-assessments/{}/return",
     "POST /api/edit-sessions/checkout",
     "POST /api/edit-sessions/{}/discard",

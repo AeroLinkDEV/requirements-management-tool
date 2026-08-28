@@ -68,6 +68,27 @@ public static class ProjectLeadership
     };
 
     /// <summary>
+    /// The accountable position named by one of the nine legacy roster role values.
+    ///
+    /// The four base roles are only eligibility when used as memberships, while the five retired values are
+    /// history-only role keys. They still name a position when an operation such as delegation asks who may
+    /// originate that authority. Project Engineering Lead is the one non-identical name because its authority
+    /// was absorbed by the Project Engineer position.
+    /// </summary>
+    public static ProjectLeadershipPosition? PositionForGovernedRole(ProgramRole role) => role switch
+    {
+        ProgramRole.ProjectEngineer or ProgramRole.ProjectEngineeringLead => ProjectLeadershipPosition.ProjectEngineer,
+        ProgramRole.ProgramManager => ProjectLeadershipPosition.ProgramManager,
+        ProgramRole.EngineeringManager => ProjectLeadershipPosition.EngineeringManager,
+        ProgramRole.ConfigurationManager => ProjectLeadershipPosition.ConfigurationManager,
+        ProgramRole.SystemEngineeringLead => ProjectLeadershipPosition.SystemEngineeringLead,
+        ProgramRole.SoftwareEngineeringLead => ProjectLeadershipPosition.SoftwareEngineeringLead,
+        ProgramRole.SystemTestLead => ProjectLeadershipPosition.SystemTestLead,
+        ProgramRole.SoftwareTestLead => ProjectLeadershipPosition.SoftwareTestLead,
+        _ => null,
+    };
+
+    /// <summary>
     /// The role demands an active holder of the position answers, on top of what their own base-role
     /// membership already gives them. This is the compatibility bridge: the gates that today name the
     /// predecessor roles (discipline leads, the retiring ProjectEngineeringLead) keep accepting the people

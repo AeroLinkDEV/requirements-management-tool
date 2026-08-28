@@ -1,11 +1,11 @@
 {
   "schemaVersion": "aerolink-api-test-intent/v2",
   "totals": {
-    "tests": 661,
-    "cases": 727,
+    "tests": 662,
+    "cases": 728,
     "classes": 110,
-    "hostedTests": 635,
-    "hostedCases": 692,
+    "hostedTests": 636,
+    "hostedCases": 693,
     "nonHostedTests": 20,
     "nonHostedCases": 29,
     "unknownHostTests": 6,
@@ -37,8 +37,8 @@
     "auth-policy": {
       "label": "Authentication / authorization wiring",
       "level": "API (must stay hosted)",
-      "tests": 67,
-      "cases": 71,
+      "tests": 68,
+      "cases": 72,
       "unknownCases": 0,
       "classes": 42
     },
@@ -8834,6 +8834,24 @@
     },
     {
       "cls": "SecurityBoundaryTests",
+      "test": "Only_a_position_holder_or_backup_can_delegate_a_position_governed_role",
+      "kind": "Fact",
+      "intent": "auth-policy",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 398,
+        "end": 473
+      }
+    },
+    {
+      "cls": "SecurityBoundaryTests",
       "test": "Production_rejects_demo_identity_seeding_without_explicit_override",
       "kind": "Fact",
       "intent": "http-boundary",
@@ -8881,8 +8899,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 398,
-        "end": 469
+        "start": 475,
+        "end": 546
       }
     },
     {

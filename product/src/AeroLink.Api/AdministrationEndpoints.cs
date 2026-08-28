@@ -76,14 +76,25 @@ public static class AdministrationEndpoints
             var actor=http.UserAccount();if(!actor.IsAdministrator)return Results.Forbid();try{var user=await db.UserAccounts.SingleOrDefaultAsync(x=>x.Id==id,ct);if(user is null)return Results.NotFound();user.RequirePasswordChange(IdentityService.HashPassword(request.TemporaryPassword));var now=DateTimeOffset.UtcNow;var sessions=await db.UserSessions.Where(x=>x.UserId==id&&x.RevokedAt==null).ToListAsync(ct);foreach(var session in sessions)session.Revoke(now);db.SecurityAuditEvents.Add(new("AdministratorPasswordReset",actor.UserName,user.UserName,"Success",$"Issued temporary password requiring rotation and revoked {sessions.Count} session(s). Reason: {request.Reason.Trim()}",http.Connection.RemoteIpAddress?.ToString()??"local",now));await db.SaveChangesAsync(ct);return Results.NoContent();}catch(ArgumentException ex){return Results.BadRequest(new{error=ex.Message});}
         });
 
-        app.MapPost("/api/delegations", async (CreateDelegationRequest request, HttpContext http, AeroLinkDbContext db, IdentityService identity, CancellationToken ct) =>
+        app.MapPost("/api/delegations", async (CreateDelegationRequest request, HttpContext http, AeroLinkDbContext db, IdentityService identity, ProjectAuthorityResolver authority, CancellationToken ct) =>
         {
             var actor = http.UserAccount(); if (request.DelegatorUserId != actor.Id && !actor.IsAdministrator) return Results.Forbid(); if (request.DelegatorUserId == request.DelegateUserId) return Results.BadRequest(new { error = "A person cannot delegate a role to themselves." });
             var activeUsers=await db.UserAccounts.AsNoTracking().Where(x=>(x.Id==request.DelegatorUserId||x.Id==request.DelegateUserId)&&x.State==AccountState.Active).Select(x=>x.Id).ToListAsync(ct);
             if(activeUsers.Count!=2)return Results.BadRequest(new{error="Both delegation participants must be active AeroLink users."});
             var members=await db.ProgramMemberships.AsNoTracking().Where(x=>x.ProgramId==request.ProgramId&&x.EndedAt==null&&(x.UserId==request.DelegatorUserId||x.UserId==request.DelegateUserId)).Select(x=>x.UserId).Distinct().ToListAsync(ct);
             if(members.Count!=2)return Results.BadRequest(new{error="Both delegation participants must belong to the selected Program."});
-            if(!await identity.HasRoleAsync(request.DelegatorUserId,request.ProgramId,request.Role,DateTimeOffset.UtcNow,ct))return Results.Forbid();
+            var now = DateTimeOffset.UtcNow;
+            var governedPosition = ProjectLeadership.PositionForGovernedRole(request.Role);
+            var canDelegate = SingularProgramRoles.IsPositionGoverned(request.Role)
+                ? governedPosition is not null && await authority.IsSatisfiedAsync(
+                    request.DelegatorUserId, request.ProgramId,
+                    ProjectAuthorityRequirement.Leadership(governedPosition.Value), now, ct)
+                : await identity.HasRoleAsync(request.DelegatorUserId, request.ProgramId, request.Role, now, ct);
+            // A base eligibility membership is deliberately not the accountable position. Letting it mint a
+            // ProgramManager (or other position-governed) delegation would turn that base role into leadership
+            // through the delegate, bypassing the split #816 introduced. Existing non-position role delegation
+            // remains unchanged; a position's primary or standing backup may still arrange temporary cover.
+            if (!canDelegate) return Results.Forbid();
             try { var delegation = new RoleDelegation(request.ProgramId, request.DelegatorUserId, request.DelegateUserId, request.Role, request.StartsAt, request.EndsAt, request.Reason, actor.UserName, DateTimeOffset.UtcNow); db.RoleDelegations.Add(delegation); db.SecurityAuditEvents.Add(new("DelegationCreated", actor.UserName, request.DelegateUserId.ToString(), "Success", $"Delegated {request.Role} through {request.EndsAt:u}.", http.Connection.RemoteIpAddress?.ToString() ?? "local", DateTimeOffset.UtcNow)); await db.SaveChangesAsync(ct); return Results.Created($"/api/delegations/{delegation.Id}", new { delegation.Id }); }
             catch (ArgumentException ex) { return Results.BadRequest(new { error = ex.Message }); }
         });
