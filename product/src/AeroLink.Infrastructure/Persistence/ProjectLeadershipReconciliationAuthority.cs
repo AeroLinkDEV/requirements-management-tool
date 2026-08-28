@@ -120,8 +120,38 @@ public sealed class ProjectLeadershipReconciliationAuthority(AeroLinkDbContext d
                 .Where(x => x.ProgramId == programId && x.Position == position && x.EndedAt == null)
                 .Select(x => x.HolderUserId).ToListAsync(ct);
             if (assigned.Count == 0)
+            {
                 problems.Add($"{name}: an active {role} membership has no {position} leadership assignment to "
                     + "take over from it. Assign the position, or end the membership, then restart.");
+                continue;
+            }
+            // The assignment exists, but for somebody else. Ending this membership would revoke authority
+            // from a person the new model never gave anything to — a silent choice, not a reconciliation.
+            var stranded = holders.Where(x => !assigned.Contains(x)).ToList();
+            if (stranded.Count > 0)
+                problems.Add($"{name}: an active {role} membership is held by somebody who does not hold the "
+                    + $"{position} position. Retiring it would revoke their authority without replacing it. "
+                    + "End the membership deliberately, or assign them the position, then restart.");
+        }
+
+        // A legacy role-keyed backup of a position with nothing to take over from it. v1 migrated these only
+        // when the named person already held the required base role, so the ones it could not handle were
+        // left active and unreported — and they keep answering the position's demands. The four discipline
+        // leads got neither migration nor a conflict; only ProjectEngineeringLead was considered.
+        var positionBackups = await db.ProjectRoleBackups.AsNoTracking()
+            .Where(x => x.ProgramId == programId && x.RemovedAt == null)
+            .Select(x => new { x.Role, x.BackupUserId }).ToListAsync(ct);
+        foreach (var backup in positionBackups.Where(x =>
+                     SingularProgramRoles.IsPositionGoverned(x.Role) && x.Role != ProgramRole.ProjectEngineeringLead))
+        {
+            var position = PositionForBackup(backup.Role);
+            if (position is null) continue;
+            var migrated = await db.ProjectLeadershipBackups.AsNoTracking()
+                .AnyAsync(x => x.ProgramId == programId && x.Position == position && x.RemovedAt == null, ct);
+            if (migrated) continue;
+            problems.Add($"{name}: an active {backup.Role} standing backup has no equivalent "
+                + $"{position} leadership backup. Grant the person the position's base role so it can be "
+                + "migrated, or remove the legacy backup, then restart.");
         }
 
         // A ProjectEngineeringLead backup that cannot be moved to Project Engineer without overwriting a
@@ -152,6 +182,23 @@ public sealed class ProjectLeadershipReconciliationAuthority(AeroLinkDbContext d
 
         return problems;
     }
+
+    /// <summary>
+    /// The position a legacy role-keyed backup belongs to, including the four base eligibility roles whose
+    /// backups were never in scope for v1 and so were left active with nothing to supersede them.
+    /// </summary>
+    private static ProjectLeadershipPosition? PositionForBackup(ProgramRole role) => role switch
+    {
+        ProgramRole.SystemEngineeringLead => ProjectLeadershipPosition.SystemEngineeringLead,
+        ProgramRole.SoftwareEngineeringLead => ProjectLeadershipPosition.SoftwareEngineeringLead,
+        ProgramRole.SystemTestLead => ProjectLeadershipPosition.SystemTestLead,
+        ProgramRole.SoftwareTestLead => ProjectLeadershipPosition.SoftwareTestLead,
+        ProgramRole.ProjectEngineer => ProjectLeadershipPosition.ProjectEngineer,
+        ProgramRole.ProgramManager => ProjectLeadershipPosition.ProgramManager,
+        ProgramRole.EngineeringManager => ProjectLeadershipPosition.EngineeringManager,
+        ProgramRole.ConfigurationManager => ProjectLeadershipPosition.ConfigurationManager,
+        _ => null,
+    };
 
     /// <summary>Ends legacy position memberships once the assignment that replaced them exists.</summary>
     private async Task RetireLegacyPositionMembershipsAsync(Guid programId, DateTimeOffset now, CancellationToken ct)

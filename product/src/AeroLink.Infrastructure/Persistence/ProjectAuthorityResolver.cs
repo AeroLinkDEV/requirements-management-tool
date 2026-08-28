@@ -46,11 +46,27 @@ public sealed class ProjectAuthorityResolver(AeroLinkDbContext db)
         Guid userId, Guid programId, ProjectAuthorityRequirement requirement, DateTimeOffset now, CancellationToken ct = default)
         => (await ResolveAsync(userId, programId, requirement, now, ct)).Granted;
 
+    /// <summary>
+    /// The roles a membership may answer with.
+    ///
+    /// <c>ProgramRoleAuthority.Satisfying</c> still folds the retired position roles into Reviewer, Approver
+    /// and Engineer, because a stored workflow stage naming one has to keep resolving. But a *membership*
+    /// carrying <c>SystemEngineeringLead</c> must not answer those demands — that is the conflation #816
+    /// exists to remove, and honouring it would let a roster grant hand out a lead's review authority with no
+    /// assignment anywhere. Positions are answered by the leadership pass instead.
+    /// </summary>
+    private static IReadOnlyList<ProgramRole> MembershipAnswerable(ProgramRole demanded) =>
+        [.. ProgramRoleAuthority.Satisfying(demanded).Where(x => !SingularProgramRoles.IsPositionGoverned(x))];
+
     /// <summary>What work somebody performs. Membership answers it; elevation is beside the point.</summary>
     private async Task<ProjectAuthorityDecision> ResolveBaseRoleAsync(
         Guid userId, Guid programId, ProgramRole role, DateTimeOffset now, CancellationToken ct)
     {
-        var accepted = ProgramRoleAuthority.Satisfying(role);
+        // A base-role question is asked about the job, so the exact role is answerable even when it is one of
+        // the four eligibility roles — "does this person do configuration management" is a fair question.
+        var accepted = SingularProgramRoles.IsBaseEligibility(role)
+            ? [role, .. MembershipAnswerable(role)]
+            : MembershipAnswerable(role);
         if (await db.ProgramMemberships.AsNoTracking().AnyAsync(
                 x => x.UserId == userId && x.ProgramId == programId && x.EndedAt == null && accepted.Contains(x.Role), ct))
             return ProjectAuthorityDecision.From(ProjectAuthoritySource.DirectBaseRole);
@@ -95,13 +111,16 @@ public sealed class ProjectAuthorityResolver(AeroLinkDbContext db)
     private async Task<ProjectAuthorityDecision> ResolveLegacyDemandAsync(
         Guid userId, Guid programId, ProgramRole role, DateTimeOffset now, CancellationToken ct)
     {
-        var accepted = ProgramRoleAuthority.Satisfying(role);
+        var accepted = MembershipAnswerable(role);
         if (await db.ProgramMemberships.AsNoTracking().AnyAsync(
                 x => x.UserId == userId && x.ProgramId == programId && x.EndedAt == null && accepted.Contains(x.Role), ct))
             return ProjectAuthorityDecision.From(ProjectAuthoritySource.DirectBaseRole);
 
         var leadership = await ResolveAnyLeadershipSatisfyingAsync(userId, programId, role, ct);
         if (leadership.Granted) return leadership;
+
+        var legacyBackup = await ResolveLegacyBackupAsync(userId, programId, accepted, ct);
+        if (legacyBackup.Granted) return legacyBackup;
 
         return await ResolveDelegationAsync(userId, programId, role, now, ct);
     }
@@ -136,6 +155,29 @@ public sealed class ProjectAuthorityResolver(AeroLinkDbContext db)
         return ProjectAuthorityDecision.Denied;
     }
 
+    /// <summary>
+    /// A legacy role-keyed backup, for the roles that are still jobs.
+    ///
+    /// Read here as well as in <see cref="ResolveHoldersAsync"/> so the per-person answer and the projection
+    /// cannot disagree — a picker that offers somebody the signing gate then refuses is the exact failure
+    /// this resolver exists to remove. Position roles are excluded: their designation lives on
+    /// <c>ProjectLeadershipBackup</c>.
+    /// </summary>
+    private async Task<ProjectAuthorityDecision> ResolveLegacyBackupAsync(
+        Guid userId, Guid programId, IReadOnlyList<ProgramRole> accepted, CancellationToken ct)
+    {
+        var backed = await db.ProjectRoleBackups.AsNoTracking()
+            .Where(x => x.ProgramId == programId && x.BackupUserId == userId && x.RemovedAt == null)
+            .Select(x => x.Role).ToListAsync(ct);
+        if (!backed.Any(x => !SingularProgramRoles.IsPositionGoverned(x) && accepted.Contains(x)))
+            return ProjectAuthorityDecision.Denied;
+        // A backup who has left the project is not cover. Unchanged fail-closed rule.
+        return await db.ProgramMemberships.AsNoTracking()
+            .AnyAsync(x => x.UserId == userId && x.ProgramId == programId && x.EndedAt == null, ct)
+            ? ProjectAuthorityDecision.From(ProjectAuthoritySource.LegacyCompatibility)
+            : ProjectAuthorityDecision.Denied;
+    }
+
     private async Task<ProjectAuthorityDecision> ResolveDelegationAsync(
         Guid userId, Guid programId, ProgramRole role, DateTimeOffset now, CancellationToken ct)
     {
@@ -156,7 +198,7 @@ public sealed class ProjectAuthorityResolver(AeroLinkDbContext db)
     public async Task<IReadOnlyList<(Guid UserId, ProjectAuthoritySource Source, ProjectLeadershipPosition? Position)>>
         ResolveHoldersAsync(Guid programId, ProgramRole demanded, DateTimeOffset now, CancellationToken ct = default)
     {
-        var accepted = ProgramRoleAuthority.Satisfying(demanded);
+        var accepted = MembershipAnswerable(demanded);
         var results = new Dictionary<Guid, (ProjectAuthoritySource, ProjectLeadershipPosition?)>();
 
         var activeMembers = await db.ProgramMemberships.AsNoTracking()
@@ -165,8 +207,9 @@ public sealed class ProjectAuthorityResolver(AeroLinkDbContext db)
                 m => m.UserId, u => u.Id, (m, u) => new { m.UserId, m.Role })
             .ToListAsync(ct);
 
-        foreach (var member in activeMembers.Where(x => accepted.Contains(x.Role)))
-            results.TryAdd(member.UserId, (ProjectAuthoritySource.DirectBaseRole, null));
+        var byMembership = activeMembers.Where(x => accepted.Contains(x.Role)).Select(x => x.UserId).ToHashSet();
+        foreach (var userId in byMembership)
+            results.TryAdd(userId, (ProjectAuthoritySource.DirectBaseRole, null));
 
         var matching = ProjectLeadership.All
             .Where(position =>
@@ -191,9 +234,11 @@ public sealed class ProjectAuthorityResolver(AeroLinkDbContext db)
             var backups = await db.ProjectLeadershipBackups.AsNoTracking()
                 .Where(x => x.ProgramId == programId && x.Position == position && x.RemovedAt == null)
                 .Select(x => x.BackupUserId).ToListAsync(ct);
+            // TryAdd, not assignment: somebody who answers the demand in their own right AND happens to back
+            // up a position is a holder, and recording them only as a backup made the Approval Configuration
+            // Center report a stage as unheld when it was held.
             foreach (var backup in backups.Where(eligibleUsers.Contains))
-                if (!results.TryGetValue(backup, out var existing) || existing.Item1 != ProjectAuthoritySource.LeadershipPrimary)
-                    results[backup] = (ProjectAuthoritySource.LeadershipBackup, position);
+                results.TryAdd(backup, (ProjectAuthoritySource.LeadershipBackup, position));
         }
 
         var activeUserIds = activeMembers.Select(x => x.UserId).ToHashSet();

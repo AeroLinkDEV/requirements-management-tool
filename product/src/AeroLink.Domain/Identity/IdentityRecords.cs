@@ -90,6 +90,15 @@ public static class SingularProgramRoles
     /// <summary>Whether several people may hold this role, each merely eligible for the matching position.</summary>
     public static bool IsBaseEligibility(ProgramRole role) => BaseEligibility.Contains(role);
 
+    /// <summary>
+    /// Whether this role names a Project Leadership position rather than a job somebody performs.
+    ///
+    /// A membership carrying one of these must never answer for the position: the retired ones are legacy
+    /// rows awaiting reconciliation, and the four eligibility roles are the qualification, not the post.
+    /// Every gate that distinguishes the two asks this, so they cannot drift apart.
+    /// </summary>
+    public static bool IsPositionGoverned(ProgramRole role) => IsSingular(role) || IsBaseEligibility(role);
+
     public static IReadOnlyList<ProgramRole> All => LegacyPositions;
 }
 

@@ -235,10 +235,18 @@ at `6211b15f`.
 Section 3 opens "Direct `HasRoleAsync(..., ProgramRole.X, ...)` demands on `main` (17 inline sites)". That
 count and the exhaustiveness it implies are both wrong.
 
-A fresh sweep of current `main` finds **138 literal-role demands** through `HasRoleAsync` /
-`HasProjectRoleAsync`, across **34 files**. The largest consumers are:
+A fresh sweep of current `main` under `product/src`, counted three ways so the denominators are not mixed:
 
-| File | Literal-role demands |
+| Measure | Count |
+|---|---|
+| Files calling `HasRoleAsync` / `HasProjectRoleAsync` at all | **33** |
+| Files containing at least one *literal-role* demand | **22** |
+| Call sites carrying a literal role | **138** |
+| Role literals on those call sites | **245** |
+
+The largest consumers, by call sites (literal or otherwise):
+
+| File | Call sites |
 |---|---|
 | `VerificationImpactEndpoints` | 22 |
 | `BaselineEndpoints` | 16 |
@@ -255,8 +263,8 @@ By demanded role, across all sites: `ConfigurationManager` 91, `ProgramManager` 
 
 **Four live consumers named in the #822 review appear nowhere in the original document** —
 `ReleaseCampaignEndpoints`, `VerificationImpactEndpoints`, `QualityIntelligenceEndpoints` and
-`ControlledEditingCheckInEngine` each occur zero times in sections 1–7. Two of them are the first and
-fourteenth largest consumers in the repository.
+`ControlledEditingCheckInEngine` each occur zero times in sections 1–7. `VerificationImpactEndpoints` is the
+single largest consumer in the repository by call sites; `ReleaseCampaignEndpoints` is joint fifth.
 
 The original count appears to have been of *distinct inline demand sites the author enumerated by hand*
 rather than of demands in the tree. Read section 3's table as an illustrative classification of the demand
@@ -271,8 +279,8 @@ distinct ways. The current set:
 |---|---|---|
 | `IdentityService.HasRoleAsync` (two overloads) | 34 files, 138 literal demands | Base role, leadership, or legacy demand depending on the role named — this ambiguity is what E.3 fixes |
 | `ProgramRoleAuthority.Satisfying` | `IdentityService`, `IdentityRecords`, `WorkflowEndpoints`, `ReviewWorkflow`, `AssuranceAuthorityPolicy`, `ManagedDocumentAssignmentPolicy`, `ApprovalConfigurationEndpoints` | Role implication, unchanged by #816 |
-| Raw `ProgramMemberships` role decisions | `ManagedDocumentReviewAuthority`, `WorkflowEndpoints`, `ProblemReportEndpoints`, `PersonnelEndpoints`, `ProjectAssurancePolicyService` | **Corrected** — now routed through `ProjectAuthorityResolver` |
-| `ProjectRoleBackups` (legacy) | `AdministrationEndpoints`, `ApprovalConfigurationEndpoints`, `ManagedDocumentAssignmentPolicy`, `ManagedDocumentReviewAuthority`, `PersonnelEndpoints`, `WorkflowEndpoints`, `IdentityService` | Historical readability for base roles; **no longer live authority for position roles** |
+| Raw `ProgramMemberships` role decisions | **Corrected:** `ManagedDocumentReviewAuthority.ResolveAsync`, the `WorkflowEndpoints` candidate projection, `ProblemReportEndpoints.HasProblemReportOwnerRecoveryAuthorityAsync`, `ApprovalConfigurationEndpoints.Resolve`, `ManagedDocumentAssignmentPolicy.HasExplicitAuthorityAsync`, `ProjectAssurancePolicyService.ApproverFactsAsync`, the roster gates. **Not corrected:** `WorkflowEndpoints.StageAuthorityAsync`/`AuthoritiesAsync`, which report the role a signature was made under rather than deciding who may act | Mixed — listed per call site because the same file does both |
+| `ProjectRoleBackups` (legacy) | `AdministrationEndpoints`, `ApprovalConfigurationEndpoints`, `ManagedDocumentAssignmentPolicy`, `ManagedDocumentReviewAuthority`, `PersonnelEndpoints`, `WorkflowEndpoints`, `IdentityService.IsStandingBackupAsync` | Historical readability for base roles; **no longer live authority for position roles at any of these sites**, and new position-keyed rows are refused at creation |
 | `ProjectLeadershipAssignments` / `ProjectLeadershipBackups` | `IdentityService`, `ProjectLeadershipService`, `ProjectAuthorityResolver` | **The** live leadership authority |
 | `RoleDelegations` | 9 files | Exact-role, time-bounded; unchanged |
 | `ProblemReportOwnerAuthority` recovery | `ProblemReportEndpoints` | **Corrected** — leadership positions, not membership roles |
@@ -318,7 +326,17 @@ authority merely by being an administrator.
 
 ## E.7 Compatibility paths remaining after this correction
 
-- Legacy `ProjectRoleBackups` still answer **base-role** demands. They no longer answer position demands.
+- Legacy `ProjectRoleBackups` still answer **base-role** demands. They no longer answer position demands at
+  any consumer, and `POST /personnel/backups` refuses to create a new one for a position — a position's
+  backup is a `ProjectLeadershipBackup`.
+- The five retired position roles can no longer be **granted** as memberships, by either the Personnel or the
+  Administration route. Existing rows stay readable; a new grant would recreate the exact state the v2
+  reconciliation refuses, so on a database that has not yet run v2 it would stop the next startup.
+- A membership carrying a position role no longer answers that position's demands anywhere.
+  `ProgramRoleAuthority.Satisfying` still folds the retired roles into Reviewer/Approver/Engineer so a stored
+  workflow stage naming one keeps resolving, but the *membership* side of every gate filters them out and the
+  leadership pass answers instead. Removing them from `Satisfying` outright is Slice 4's, once stored stages
+  carry a `ProjectAuthorityRequirement` rather than a `ProgramRole`.
 - Legacy position **memberships** are retired by the v2 reconciliation
   (`ProjectLeadershipReconciliationAuthority`) once the equivalent assignment exists. Until a database runs
   v2 they remain live, which is why v2 is a separate marker rather than an edit to v1.
