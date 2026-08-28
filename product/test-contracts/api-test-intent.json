@@ -1,11 +1,11 @@
 {
   "schemaVersion": "aerolink-api-test-intent/v2",
   "totals": {
-    "tests": 638,
-    "cases": 696,
+    "tests": 641,
+    "cases": 699,
     "classes": 109,
-    "hostedTests": 618,
-    "hostedCases": 667,
+    "hostedTests": 621,
+    "hostedCases": 670,
     "nonHostedTests": 14,
     "nonHostedCases": 23,
     "unknownHostTests": 6,
@@ -21,16 +21,16 @@
     "http-boundary": {
       "label": "HTTP boundary: route, status, JSON shape",
       "level": "API (must stay hosted)",
-      "tests": 398,
-      "cases": 432,
+      "tests": 399,
+      "cases": 433,
       "unknownCases": 0,
-      "classes": 90
+      "classes": 91
     },
     "ef-translation": {
       "label": "EF translation / relational constraints",
       "level": "Infrastructure (needs a database, not a host)",
-      "tests": 135,
-      "cases": 146,
+      "tests": 137,
+      "cases": 148,
       "unknownCases": 0,
       "classes": 52
     },
@@ -6527,8 +6527,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 217,
-        "end": 268
+        "start": 397,
+        "end": 448
       }
     },
     {
@@ -6545,8 +6545,61 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 25,
-        "end": 215
+        "start": 205,
+        "end": 395
+      }
+    },
+    {
+      "cls": "ProcedureTestChangeControlApiTests",
+      "test": "Verification_explorer_enforces_exact_effectivity_version_session_assignment_and_duplicate_rules",
+      "kind": "Fact",
+      "intent": "ef-translation",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 51,
+        "end": 203
+      }
+    },
+    {
+      "cls": "ProcedureTestChangeControlApiTests",
+      "test": "Verification_explorer_mutates_exact_case_and_software_procedure_parents_and_rejects_wrong_kind",
+      "kind": "Fact",
+      "intent": "ef-translation",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 450,
+        "end": 515
+      }
+    },
+    {
+      "cls": "ProcedureTestChangeControlApiTests",
+      "test": "Verification_explorer_proposal_route_is_bound_to_the_test_change_api",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client"
+      ],
+      "sourceLines": {
+        "start": 33,
+        "end": 49
       }
     },
     {
