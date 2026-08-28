@@ -41,6 +41,42 @@ public sealed class SecurityBoundaryTests
         AssertSqliteConfiguration(factory.Services);
     }
 
+    /// <summary>
+    /// #593, after #601: WAL was switched on, but nothing kept it switched on.
+    ///
+    /// The WAL index — the <c>-shm</c> file — exists only while at least one connection to the database is
+    /// open. Under <c>Pooling=False</c> the last connection closes after almost every statement, and SQLite
+    /// then checkpoints and unlinks <c>-wal</c>/<c>-shm</c> under an exclusive lock, rebuilding them under
+    /// another one at the next open. An exclusive lock blocks readers, so a plain SELECT could sit out the full
+    /// 30-second retry budget and fail at statement-prepare — which is precisely the recurrence signature on
+    /// protected main, and is invisible to a configuration assertion that only reads <c>PRAGMA journal_mode</c>.
+    ///
+    /// Asserting the pragma is therefore not enough: this asserts the index is actually *there*, continuously,
+    /// across the connection churn a real test produces. Before the keep-alive connection this failed on the
+    /// first sample; the index was absent for 195 of 200 samples on an idle host.
+    /// </summary>
+    [Fact]
+    public async Task Wal_index_is_never_torn_down_while_the_test_database_is_in_use()
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var client = factory.CreateClient();
+        var walIndex = new SqliteConnectionStringBuilder(factory.ConnectionString).DataSource + "-shm";
+
+        Assert.True(File.Exists(walIndex), "The WAL index was already gone once the host had started.");
+        for (var round = 0; round < 20; round++)
+        {
+            using (var scope = factory.Services.CreateScope())
+            {
+                var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+                await db.Projects.AsNoTracking().CountAsync();
+            }
+            Assert.True(
+                File.Exists(walIndex),
+                $"The WAL index was torn down after {round + 1} scoped context(s). Readers are exposed to the "
+                + "exclusive lock SQLite takes to rebuild it, which is how #593 recurred.");
+        }
+    }
+
     [Fact]
     public void File_backed_sqlite_contention_uses_the_provider_lock_retry_budget_without_a_custom_busy_handler()
     {
@@ -452,8 +488,27 @@ internal sealed class AeroLinkApiFactory(bool seedDemoAccounts = false, bool all
     // Keep Microsoft.Data.Sqlite's provider retry budget at the previous 30-second value. This is the
     // SQLITE_BUSY/SQLITE_LOCKED retry budget, not a whole-command wall-clock budget.
     internal const int CommandTimeoutSeconds = 30;
-    private readonly string _databasePath = NewDatabase(showcaseTemplate);
-    public string ConnectionString => DatabaseConnectionString(_databasePath);
+    private readonly DisposableDatabase _database = NewDatabase(showcaseTemplate);
+    private string DatabasePath => _database.Path;
+    public string ConnectionString => DatabaseConnectionString(DatabasePath);
+
+    /// <summary>
+    /// The database file, together with the one connection that must stay open while it is in use.
+    ///
+    /// WAL mode only helps while the WAL index exists. SQLite builds that index — the <c>-shm</c> file — when
+    /// the first connection to a database opens, and tears it down, checkpointing and unlinking <c>-wal</c> and
+    /// <c>-shm</c>, when the last one closes. Both ends of that lifecycle take an exclusive lock on the whole
+    /// database, and an exclusive lock blocks readers, which is the one thing WAL exists to prevent.
+    ///
+    /// <c>Pooling=False</c> means EF opens a real connection per operation and closes it again, so the count
+    /// returns to zero between almost every statement. Measured on this factory before this connection was
+    /// held, the WAL index was absent for 195 of 200 samples on an idle host and 198 of 200 while scoped
+    /// contexts were working: the database spent its life recovering and tearing down the very index that was
+    /// meant to let a reader and a writer run side by side, and #593 recurred as a SELECT that waited out the
+    /// whole 30-second budget and died at statement-prepare. One warmed connection held for the factory's
+    /// lifetime keeps the index alive, so neither exclusive window recurs and WAL behaves as #601 intended.
+    /// </summary>
+    private sealed record DisposableDatabase(string Path, SqliteConnection WalIndexKeepAlive);
 
     /// <summary>
     /// A private database file, optionally starting as a copy of an already-seeded showcase.
@@ -463,25 +518,33 @@ internal sealed class AeroLinkApiFactory(bool seedDemoAccounts = false, bool all
     /// happens before the host starts, so the API opens a database that is already populated and its startup
     /// EnsureCreated finds nothing to do.
     /// </summary>
-    private static string NewDatabase(string? template)
+    private static DisposableDatabase NewDatabase(string? template)
     {
         var path = Path.Combine(Path.GetTempPath(), $"aerolink-api-tests-{Guid.NewGuid():N}.db");
+        SqliteConnection? keepAlive = null;
         try
         {
             if (template is not null) File.Copy(template, path);
             // The API host and test-scoped contexts intentionally use separate connections to this file. WAL lets
             // readers run while a writer is active; the provider retry budget handles remaining serialized-writer
             // contention without changing the product's PostgreSQL or SQLite configuration.
-            using var connection = new SqliteConnection(DatabaseConnectionString(path));
-            connection.Open();
-            using var command = connection.CreateCommand();
+            keepAlive = new SqliteConnection(DatabaseConnectionString(path));
+            keepAlive.Open();
+            using var command = keepAlive.CreateCommand();
             command.CommandText = "PRAGMA journal_mode=WAL;";
             if (!string.Equals(command.ExecuteScalar()?.ToString(), "wal", StringComparison.OrdinalIgnoreCase))
                 throw new InvalidOperationException("SQLite API test databases must support WAL mode.");
-            return path;
+            // Setting the pragma is not the same as joining the WAL index: SQLite attaches a connection to the
+            // index when that connection first reads or writes, and only an attached connection keeps the index
+            // alive once the others close. Read something that exists before the schema does.
+            using var warm = keepAlive.CreateCommand();
+            warm.CommandText = "SELECT count(*) FROM sqlite_master;";
+            warm.ExecuteScalar();
+            return new DisposableDatabase(path, keepAlive);
         }
         catch
         {
+            keepAlive?.Dispose();
             DeleteDatabaseArtifacts(path);
             throw;
         }
@@ -536,7 +599,7 @@ internal sealed class AeroLinkApiFactory(bool seedDemoAccounts = false, bool all
         var settings = new Dictionary<string, string?>
         {
             ["Database:Provider"] = "Sqlite",
-            ["ConnectionStrings:AeroLink"] = $"Data Source={_databasePath}",
+            ["ConnectionStrings:AeroLink"] = $"Data Source={DatabasePath}",
             ["Evidence:Root"] = _evidenceRoot,
             ["Connector:DeploymentId"] = "aerolink-api-tests",
             ["Connector:SigningKeyPath"] = _connectorKeyPath,
@@ -615,8 +678,11 @@ internal sealed class AeroLinkApiFactory(bool seedDemoAccounts = false, bool all
         {
             try
             {
+                // Released after the host, so the WAL index outlives every connection the host owns and is torn
+                // down once, here, rather than between statements.
+                _database.WalIndexKeepAlive.Dispose();
                 SqliteConnection.ClearAllPools();
-                DeleteDatabaseArtifacts(_databasePath);
+                DeleteDatabaseArtifacts(DatabasePath);
                 try { if (Directory.Exists(_evidenceRoot)) Directory.Delete(_evidenceRoot, true); }
                 catch (IOException) { } catch (UnauthorizedAccessException) { }
                 DeleteIfPresent(_connectorKeyPath);
