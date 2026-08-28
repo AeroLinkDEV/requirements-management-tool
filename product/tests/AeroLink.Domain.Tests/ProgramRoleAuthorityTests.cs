@@ -135,7 +135,9 @@ public sealed class ProgramRoleAuthorityTests
 
     /// <summary>
     /// Exactly one person holds each of these on a project. The disciplines beneath them have many members and
-    /// one lead; these have a holder and nothing beneath them.
+    /// one lead; these have a holder and nothing beneath them. (#816: the Project Engineer base role left this
+    /// set — many people may hold it as eligibility, and the singular Project Engineer is the leadership
+    /// position enforced by the Project Leadership assignment tables.)
     /// </summary>
     /// <summary>
     /// The retired position roles keep their singularity so legacy data cannot grow a second live holder.
@@ -159,7 +161,6 @@ public sealed class ProgramRoleAuthorityTests
     /// the prospective replacement could not be granted the eligibility while the incumbent still held it.
     /// </summary>
     [Theory]
-    [InlineData(ProgramRole.ProjectEngineer)]
     [InlineData(ProgramRole.ProgramManager)]
     [InlineData(ProgramRole.EngineeringManager)]
     [InlineData(ProgramRole.ConfigurationManager)]

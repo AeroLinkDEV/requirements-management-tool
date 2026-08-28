@@ -3,18 +3,16 @@ using AeroLink.Domain.Identity;
 namespace AeroLink.Domain.Tests;
 
 /// <summary>
-/// A pre-migration characterization of the ProgramRole model exactly as #816 Slice 2 found it.
-///
-/// These tests pin outcomes that Slice 2 deliberately changes — most importantly that
-/// `ProjectEngineeringLead` is currently a singular position and that `ProjectEngineer` membership carries
-/// no review/approval authority. When the Project Leadership model lands, the deltas in this file are the
-/// record of what moved; a change here without the corresponding domain change is a bug.
+/// The ProgramRole model as the #816 slices reshaped it. The original pre-migration pins lived here and
+/// were updated deliberately as each slice landed: Slice 3 moved `ProjectEngineer` out of the singular
+/// set — it is now the multi-member eligibility role for the Project Engineer leadership position, whose
+/// singularity is enforced by the Project Leadership assignment tables instead.
 /// </summary>
 public sealed class ProgramRoleModelCharacterizationTests
 {
     private static readonly ProgramRole[] SingularAsOfSnapshot =
     [
-        ProgramRole.ProjectEngineer, ProgramRole.ProgramManager, ProgramRole.EngineeringManager,
+        ProgramRole.ProgramManager, ProgramRole.EngineeringManager,
         ProgramRole.ConfigurationManager, ProgramRole.ProjectEngineeringLead,
         ProgramRole.SystemEngineeringLead, ProgramRole.SoftwareEngineeringLead,
         ProgramRole.SystemTestLead, ProgramRole.SoftwareTestLead,
@@ -25,7 +23,7 @@ public sealed class ProgramRoleModelCharacterizationTests
         ProgramRole.Engineer, ProgramRole.Reviewer, ProgramRole.Approver, ProgramRole.TestEngineer,
         ProgramRole.TestLead, ProgramRole.Administrator, ProgramRole.SystemEngineer,
         ProgramRole.SoftwareEngineer, ProgramRole.SoftwareQualityAnalyst, ProgramRole.Airworthiness,
-        ProgramRole.SystemTestEngineer, ProgramRole.SoftwareTestEngineer,
+        ProgramRole.SystemTestEngineer, ProgramRole.SoftwareTestEngineer, ProgramRole.ProjectEngineer,
     ];
 
     public static TheoryData<ProgramRole> EveryProgramRoleValue()
@@ -36,42 +34,19 @@ public sealed class ProgramRoleModelCharacterizationTests
     }
 
     /// <summary>
-    /// The four values Slice 2 moved out of membership singularity.
-    ///
-    /// The snapshot above records what Slice 1 found: nine singular roles, because the enum conflated "the
-    /// job" with "the post". #816 split them, so these four became base eligibility — several people may
-    /// perform the job, and the singular post is a <c>ProjectLeadershipAssignment</c>. The snapshot stays
-    /// intact as the historical record; this is the delta against it.
-    /// </summary>
-    private static readonly ProgramRole[] MovedToBaseEligibilityBySlice2 =
-    [
-        ProgramRole.ProjectEngineer, ProgramRole.ProgramManager,
-        ProgramRole.EngineeringManager, ProgramRole.ConfigurationManager,
-    ];
-
-    /// <summary>
-    /// The exhaustive classification of the enum. Adding a ProgramRole value without deciding whether it is
-    /// singular fails here rather than silently inheriting a default.
+    /// The exhaustive classification of the enum as the migration found it. Adding a ProgramRole value
+    /// without deciding whether it is singular fails here rather than silently inheriting a default.
     /// </summary>
     [Theory]
     [MemberData(nameof(EveryProgramRoleValue))]
     public void Every_role_value_is_exactly_classified_as_singular_or_not(ProgramRole role)
         => Assert.Equal(
-            SingularAsOfSnapshot.Contains(role) && !MovedToBaseEligibilityBySlice2.Contains(role),
+            SingularAsOfSnapshot.Contains(role),
             SingularProgramRoles.IsSingular(role));
 
     [Fact]
-    public void The_slice_1_snapshot_records_exactly_nine_singular_values()
-        => Assert.Equal(9, SingularAsOfSnapshot.Length);
-
-    /// <summary>
-    /// The delta itself, pinned so a later change that quietly re-imposes membership singularity on an
-    /// eligibility role — which would break atomic Replace-Leader again — fails here.
-    /// </summary>
-    [Theory]
-    [MemberData(nameof(EveryProgramRoleValue))]
-    public void Exactly_the_four_conflated_positions_became_base_eligibility(ProgramRole role)
-        => Assert.Equal(MovedToBaseEligibilityBySlice2.Contains(role), SingularProgramRoles.IsBaseEligibility(role));
+    public void The_snapshot_records_exactly_eight_singular_values()
+        => Assert.Equal(8, SingularAsOfSnapshot.Length);
 
     /// <summary>
     /// #816 retires ProjectEngineeringLead. Until Slice 2 performs that migration, it is still a singular

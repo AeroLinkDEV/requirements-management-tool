@@ -29,6 +29,25 @@ public static class AdministrationEndpoints
             catch (ArgumentException ex) { return Results.BadRequest(new { error = ex.Message }); }
         });
 
+        // #816: the global administrator may correct a person's CURRENT identity data. This is deliberately
+        // not a history rewrite: past signatures, audit events and role grants keep the names they were
+        // recorded with, and this change is itself attributable here.
+        app.MapPatch("/api/admin/users/{id:guid}/identity", async (Guid id, UpdateIdentityRequest request, HttpContext http, AeroLinkDbContext db, CancellationToken ct) =>
+        {
+            var actor = http.UserAccount(); if (!actor.IsAdministrator) return Results.Forbid();
+            var account = await db.UserAccounts.SingleOrDefaultAsync(x => x.Id == id, ct); if (account is null) return Results.NotFound();
+            var displayName = (request.DisplayName ?? account.DisplayName).Trim();
+            var email = (request.Email ?? account.Email).Trim();
+            if (displayName.Length == 0) return Results.BadRequest(new { error = "A display name is required." });
+            if (email.Length == 0 || !email.Contains('@') || email.Contains(' ')) return Results.BadRequest(new { error = "A valid email address is required." });
+            var before = $"{account.DisplayName} <{account.Email}>";
+            account.RefreshDirectoryProfile(displayName, email);
+            db.SecurityAuditEvents.Add(new("IdentityUpdated", actor.UserName, account.UserName, "Success",
+                $"Current profile changed from {before} to {account.DisplayName} <{account.Email}>. Historical records were not changed.",
+                http.Connection.RemoteIpAddress?.ToString() ?? "local", DateTimeOffset.UtcNow));
+            await db.SaveChangesAsync(ct);
+            return Results.NoContent();
+        });
         app.MapPost("/api/admin/users/{id:guid}/memberships", async (Guid id, GrantRoleRequest request, HttpContext http, AeroLinkDbContext db, CancellationToken ct) =>
         {
             var actor = http.UserAccount(); if (!actor.IsAdministrator) return Results.Forbid(); if (!await db.UserAccounts.AnyAsync(x => x.Id == id, ct) || !await db.Programs.AnyAsync(x => x.Id == request.ProgramId, ct)) return Results.NotFound();

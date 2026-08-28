@@ -79,6 +79,7 @@ record AcknowledgeExactLinkRequest(string Rationale);
 record ResolveExactLinkRequest(ExactLinkResolutionOutcome Outcome, string Rationale);
 record CreateUserRequest(string UserName, string DisplayName, string Email, string TemporaryPassword);
 record GrantRoleRequest(Guid ProgramId, ProgramRole Role);
+record UpdateIdentityRequest(string? DisplayName, string? Email);
 record SetAccountStateRequest(bool Enabled);
 record CreateDelegationRequest(Guid ProgramId, Guid DelegatorUserId, Guid DelegateUserId, ProgramRole Role, DateTimeOffset StartsAt, DateTimeOffset EndsAt, string Reason);
 record CreateArtifactSchemaRequest(Guid ProjectId,string Key,string Name,string AppliesTo,string Description);
