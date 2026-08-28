@@ -2,8 +2,8 @@
   "schemaVersion": "aerolink-api-host-classification/v3",
   "totals": {
     "classes": 110,
-    "tests": 646,
-    "knownCases": 704,
+    "tests": 648,
+    "knownCases": 706,
     "unknownCaseTests": 0
   },
   "summary": {
@@ -15,8 +15,8 @@
     },
     "fresh-host": {
       "classes": 43,
-      "tests": 244,
-      "knownCases": 273,
+      "tests": 246,
+      "knownCases": 275,
       "unknownCaseTests": 0
     },
     "migration-candidate": {
@@ -493,6 +493,20 @@
       ]
     },
     {
+      "cls": "ApiTestTelemetryTests",
+      "tests": 5,
+      "knownCases": 5,
+      "unknownCaseTests": 0,
+      "classification": "fresh-host",
+      "reason": "Customizes host state (interceptor-or-fault-injection); sharing could change the subject or leak configuration.",
+      "intents": [
+        "filesystem",
+        "http-boundary",
+        "in-process-logic",
+        "startup-config"
+      ]
+    },
+    {
       "cls": "ProblemReportDuplicateDispositionApiTests",
       "tests": 5,
       "knownCases": 5,
@@ -584,19 +598,6 @@
       "intents": [
         "auth-policy",
         "http-boundary"
-      ]
-    },
-    {
-      "cls": "ApiTestTelemetryTests",
-      "tests": 3,
-      "knownCases": 3,
-      "unknownCaseTests": 0,
-      "classification": "fresh-host",
-      "reason": "Customizes host state (interceptor-or-fault-injection); sharing could change the subject or leak configuration.",
-      "intents": [
-        "http-boundary",
-        "in-process-logic",
-        "startup-config"
       ]
     },
     {
