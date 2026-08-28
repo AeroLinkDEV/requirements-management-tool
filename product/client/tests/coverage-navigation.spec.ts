@@ -153,3 +153,41 @@ test('Coverage navigation omits a software level without the Verification capabi
   await expect(navigation.getByRole('link', { name: 'HLR Coverage' })).toBeVisible()
   await expect(navigation.getByRole('link', { name: 'LLR Coverage' })).toHaveCount(0)
 })
+
+test('Software Coverage level selection keeps the shell scope aligned, and Clear exits Coverage', async ({ page, request }) => {
+  test.setTimeout(180_000)
+  const showcase = await showcaseSeed(request)
+  const root = `/programs/${showcase.programId}/projects/${showcase.projectId}/releases/${showcase.activeReleaseId}`
+  await login(page)
+
+  await page.goto(`${root}/software-verification/test-artifacts?coverage=report&artifactLevel=HighLevel&artifactKind=Case`)
+  await expect(page.getByRole('navigation', { name: 'Breadcrumb' })).toContainText('Software HLR Coverage')
+  const navigation = page.getByRole('navigation', { name: 'Primary navigation' })
+  await expect(navigation.getByRole('link', { name: 'HLR Coverage' })).toHaveAttribute('aria-current', 'page')
+
+  await page.getByLabel('Level filter').selectOption('LowLevel')
+  await expect(page).toHaveURL(/software-verification\/test-artifacts\?coverage=report&artifactLevel=LowLevel&artifactKind=Case$/)
+  await expect(page.getByLabel('Level filter')).toHaveValue('LowLevel')
+  await expect(page.getByLabel('Artifact filter')).toHaveValue('Case')
+  await expect(page.getByRole('navigation', { name: 'Breadcrumb' })).toContainText('Software LLR Coverage')
+  await expect(navigation.getByRole('link', { name: 'LLR Coverage' })).toHaveAttribute('aria-current', 'page')
+
+  await page.goBack()
+  await expect(page).toHaveURL(/software-verification\/test-artifacts\?coverage=report&artifactLevel=HighLevel&artifactKind=Case$/)
+  await expect(page.getByRole('navigation', { name: 'Breadcrumb' })).toContainText('Software HLR Coverage')
+  await expect(navigation.getByRole('link', { name: 'HLR Coverage' })).toHaveAttribute('aria-current', 'page')
+  await page.goForward()
+  await expect(page).toHaveURL(/software-verification\/test-artifacts\?coverage=report&artifactLevel=LowLevel&artifactKind=Case$/)
+  await expect(page.getByRole('navigation', { name: 'Breadcrumb' })).toContainText('Software LLR Coverage')
+  await expect(navigation.getByRole('link', { name: 'LLR Coverage' })).toHaveAttribute('aria-current', 'page')
+
+  await page.getByRole('button', { name: 'Clear', exact: true }).click()
+  await expect(page).toHaveURL(/software-verification\/test-artifacts$/)
+  await expect(page.getByLabel('Level filter')).toHaveValue('Software')
+  await expect(page.getByLabel('Artifact filter')).toHaveValue('all')
+  await expect(page.getByRole('region', { name: 'Coverage summary' })).toHaveCount(0)
+  await expect(page.getByRole('navigation', { name: 'Breadcrumb' })).toContainText('Software Test Case/Procedure Explorer')
+  await expect(navigation.getByRole('link', { name: 'Test Case/Procedure Explorer' })).toHaveAttribute('aria-current', 'page')
+  await expect(navigation.getByRole('link', { name: 'HLR Coverage' })).not.toHaveAttribute('aria-current', 'page')
+  await expect(navigation.getByRole('link', { name: 'LLR Coverage' })).not.toHaveAttribute('aria-current', 'page')
+})

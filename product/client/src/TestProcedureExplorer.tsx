@@ -196,7 +196,7 @@ const validLevel = (value: string | null, discipline: ProcedureScope, ladder: Pr
  * to be verified.
  */
 export default function TestProcedureExplorer({ api, projectId, releaseId, discipline, buildName, releaseVersion,
-  released, onBack, onOpenRequirementRevision, onOpenTestChangeRequest, onCoverageReportChange, initialLevel, ladder }: {
+  released, onBack, onOpenRequirementRevision, onOpenTestChangeRequest, onCoverageReportChange, onCoverageLevelChange, initialLevel, ladder }: {
   api: string; projectId: string; releaseId: string; discipline: ProcedureScope; buildName: string
   /** The build's own version, which the document actions name. `buildName` is the display label, not this. */
   releaseVersion: string
@@ -206,6 +206,8 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
   /** App owns navigation to the TCR workspace; this component owns exact artifact selection and proposal choice. */
   onOpenTestChangeRequest?: (context: TestArtifactChangeContext) => void
   onCoverageReportChange?: (visible: boolean) => void
+  /** The shell owns the coverage route's exact software branch and therefore its breadcrumb and active nav item. */
+  onCoverageLevelChange?: (level?: 'HighLevel' | 'LowLevel') => void
   initialLevel?: 'HighLevel' | 'LowLevel'
   ladder: ProjectLadderProjection | null
 }) {
@@ -601,16 +603,16 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
     setShowAllCoverage(false)
   }, [api, projectId, releaseId, scope, artifactKindFilter])
 
-  const setCoverageReportVisible = (visible: boolean) => {
+  const setCoverageReportVisible = (visible: boolean, clearExplorerFilters = false) => {
     setShowAdvanced(visible)
-    onCoverageReportChange?.(visible)
     setCoverage(undefined)
     setCoverageStatus('idle')
     setShowAllCoverage(false)
-    const params = new URLSearchParams(location.search)
+    const params = clearExplorerFilters ? new URLSearchParams() : new URLSearchParams(location.search)
     if (visible) params.set('coverage', 'report')
     else params.delete('coverage')
     window.history.pushState({}, '', `${location.pathname}${params.size ? `?${params}` : ''}`)
+    onCoverageReportChange?.(visible)
   }
 
   useEffect(() => {
@@ -829,10 +831,12 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
         <select aria-label="Level filter"
           value={level}
           onChange={event => {
-            setLevel(event.target.value as ProcedureLevel)
+            const next = event.target.value as ProcedureLevel
+            if (showAdvanced && (next === 'HighLevel' || next === 'LowLevel')) onCoverageLevelChange?.(next)
+            setLevel(next)
             setDocumentId(''); setSectionId(''); setPage(1)
           }}>
-          <option value="Software">All software {currentArtifactPlural}</option>
+          {!showAdvanced && <option value="Software">All software {currentArtifactPlural}</option>}
            {ladderAllows(ladder, 'HighLevel', LadderCapability.Verification) && <option value="HighLevel">Software HLR</option>}
            {ladderAllows(ladder, 'LowLevel', LadderCapability.Verification) && <option value="LowLevel">Software LLR</option>}
        </select>
@@ -873,6 +877,8 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
            setQuery(''); setProcedureState(''); setProcedureOutcome(''); setArtifactKindFilter('all')
           setLevel(discipline)
           setDocumentId(''); setSectionId(''); setPage(1)
+          setCoverageReportVisible(false, true)
+          onCoverageLevelChange?.()
         }}>
         Clear
       </button>

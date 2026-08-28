@@ -554,6 +554,12 @@ function App() {
     setCoverageReport(true); setSelectedArtifactId(""); setSelectedArtifactKind(artifactKind); setRequirementRevisionId("");
     if (context) history.pushState({}, "", coverageExplorerPath(context, area, level));
   };
+  const changeCoverageLevel = (level?: "HighLevel" | "LowLevel") => {
+    // A Coverage level is shell state as well as an Explorer filter: it controls the canonical route,
+    // breadcrumb and active sidebar destination. Update the route before changing the keyed child scope.
+    if (level && context) history.pushState({}, "", coverageExplorerPath(context, "softwareTest", level));
+    setSelectedArtifactKind(level ?? "");
+  };
   // Opens a change request in the build that owns it rather than the one that happens to be selected. A
   // historical revision's source change request belongs to an earlier build by definition, so routing it into
   // the in-work build would present a released, frozen record inside a context that says it can be edited.
@@ -893,6 +899,7 @@ function App() {
          released={release.isReleased}
         ladder={ladder}
         onCoverageReportChange={setCoverageReport}
+        onCoverageLevelChange={changeCoverageLevel}
          onBack={() => navigate("dashboard")}
         onOpenRequirementRevision={openRequirementRevision}
         onOpenTestChangeRequest={openTestChangeRequestFromArtifact}
