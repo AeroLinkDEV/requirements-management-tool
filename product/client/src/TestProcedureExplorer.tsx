@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent as ReactKeyboardEvent } from 'react'
 import { PersonName } from './People'
 import { apiRequest, operationError } from './apiClient'
 import { configuredProcedureTargetsFor, stateLabel, verificationArtifactApiRoot, verificationArtifactNoun, verificationArtifactWord } from './presentation'
@@ -288,6 +288,10 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
   const [proposalCandidates, setProposalCandidates] = useState<TestChangeCandidatePage>()
   const [proposalPage, setProposalPage] = useState(1)
   const [proposalBusy, setProposalBusy] = useState(false)
+  const [proposalLoading, setProposalLoading] = useState(false)
+  const [proposalLoadError, setProposalLoadError] = useState('')
+  const [proposalRetry, setProposalRetry] = useState(0)
+  const proposalRequestTicket = useRef(0)
   const proposalTriggerRef = useRef<HTMLButtonElement>(null)
   const proposalWasOpen = useRef(false)
 
@@ -630,23 +634,39 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
     setProposalSearch('')
     setProposalPage(1)
     setProposalCandidates(undefined)
+    setProposalLoadError('')
     setProposalOpen(true)
   }
   const loadProposalCandidates = useCallback(async () => {
     if (!proposalOpen || !proposalContext) return
+    const mine = ++proposalRequestTicket.current
+    setProposalLoading(true)
+    setProposalCandidates(undefined)
+    setProposalLoadError('')
     try {
       const params = new URLSearchParams({ projectId, releaseId, artifactRevisionId: proposalContext.artifactRevisionId,
         page: String(proposalPage), pageSize: '25' })
       if (proposalSearch.trim()) params.set('search', proposalSearch.trim())
       const response = await fetch(`${api}/api/verification-artifacts/${proposalContext.artifactId}/test-change-request-candidates?${params}`)
       if (!response.ok) throw new Error(String(response.status))
-      setProposalCandidates(await response.json())
+      const candidates = await response.json() as TestChangeCandidatePage
+      if (mine === proposalRequestTicket.current) setProposalCandidates(candidates)
     } catch (problem) {
-      setError(operationError(problem, 'Eligible Test Change Requests could not be loaded.'))
+      if (mine !== proposalRequestTicket.current) return
+      const message = problem instanceof Error && /^\d+$/.test(problem.message)
+        ? 'Eligible Test Change Requests could not be loaded. Retry to search again.'
+        : operationError(problem, 'Eligible Test Change Requests could not be loaded.')
+      setProposalLoadError(message)
+      setError(message)
       setProposalCandidates(undefined)
+    } finally {
+      if (mine === proposalRequestTicket.current) setProposalLoading(false)
     }
   }, [api, projectId, releaseId, proposalOpen, proposalContext, proposalSearch, proposalPage])
-  useEffect(() => { void loadProposalCandidates() }, [loadProposalCandidates])
+  useEffect(() => {
+    if (proposalOpen && proposalContext) void loadProposalCandidates()
+    else { proposalRequestTicket.current += 1; setProposalLoading(false) }
+  }, [loadProposalCandidates, proposalOpen, proposalContext, proposalRetry])
   useEffect(() => {
     if (proposalOpen) {
       proposalWasOpen.current = true
@@ -668,6 +688,26 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
       proposalTriggerRef.current?.focus()
     }
   }, [proposalBusy, proposalOpen])
+  const handleProposalDialogKeyDown = (event: ReactKeyboardEvent<HTMLElement>) => {
+    if (event.key === 'Escape' && !proposalBusy) {
+      event.preventDefault()
+      setProposalOpen(false)
+      return
+    }
+    if (event.key !== 'Tab') return
+    const focusable = Array.from(event.currentTarget.querySelectorAll<HTMLElement>(
+      'button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), a[href], [tabindex]:not([tabindex="-1"])'))
+    if (!focusable.length) return
+    const first = focusable[0]
+    const last = focusable[focusable.length - 1]
+    if (event.shiftKey && document.activeElement === first) {
+      event.preventDefault()
+      last.focus()
+    } else if (!event.shiftKey && document.activeElement === last) {
+      event.preventDefault()
+      first.focus()
+    }
+  }
   const selectProposal = async (candidate: TestChangeCandidate) => {
     if (!proposalContext) return
     if (!candidate.eligible && candidate.existingProposalId) {
@@ -1056,12 +1096,7 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
                 : <p className="changeBoundaryNote"><b>Read-only historical record — {buildName}</b><br />Exit this workspace and select an in-work build to propose a test change.</p>}
               {proposalOpen && proposalContext && (
                   <section className="artifactChangeDialog" role="dialog" aria-modal="true"
-                  aria-labelledby="test-change-dialog-title" onKeyDown={event => {
-                    if (event.key === 'Escape' && !proposalBusy) {
-                      event.preventDefault()
-                      setProposalOpen(false)
-                    }
-                  }}>
+                  aria-labelledby="test-change-dialog-title" onKeyDown={handleProposalDialogKeyDown}>
                   <div className="artifactChangeDialogHead">
                     <div>
                       <span className="eyebrow">VERIFICATION CHANGE CONTROL</span>
@@ -1079,11 +1114,15 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
                     </button>
                     <label>Find an existing Draft
                       <input aria-label="Find an existing Test Change Request" value={proposalSearch}
-                        onChange={event => setProposalSearch(event.target.value)} placeholder="Identifier or title" />
+                        onChange={event => { setProposalSearch(event.target.value); setProposalPage(1) }} placeholder="Identifier or title" />
                     </label>
                   </div>
-                  {!proposalCandidates
+                  {proposalLoading
                     ? <p className="inspectorNote">Loading Test Change Request candidates…</p>
+                    : proposalLoadError
+                      ? <div className="inspectorNote" role="alert"><p>{proposalLoadError}</p><button type="button" onClick={() => setProposalRetry(value => value + 1)}>Retry loading candidates</button></div>
+                      : !proposalCandidates
+                        ? <p className="inspectorNote">Loading Test Change Request candidates…</p>
                     : proposalCandidates.items.length === 0
                       ? <p className="inspectorNote">No Test Change Requests match that search.</p>
                       : <ul className="artifactChangeCandidateList" aria-label="Test Change Request candidates">

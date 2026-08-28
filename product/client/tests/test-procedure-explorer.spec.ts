@@ -414,10 +414,24 @@ test('the Procedure explorer change chooser is exact, bounded, and keyboard dism
     return route.continue()
   })
   const candidatePages: string[] = []
+  const candidateSearches: string[] = []
+  let failFirstCandidateLoad = true
   await page.route('**/api/verification-artifacts/system-explorer-action/test-change-request-candidates*', async route => {
-    const requestedPage = new URL(route.request().url()).searchParams.get('page') ?? '1'
+    const requestUrl = new URL(route.request().url())
+    const requestedPage = requestUrl.searchParams.get('page') ?? '1'
+    const requestedSearch = requestUrl.searchParams.get('search') ?? ''
+    if (failFirstCandidateLoad) {
+      failFirstCandidateLoad = false
+      await route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ title: 'Temporary candidate search failure' }) })
+      return
+    }
     candidatePages.push(requestedPage)
-    const items = requestedPage === '2'
+    candidateSearches.push(requestedSearch)
+    const items = requestedSearch
+      ? [{ id: 'tcr-search-result', displayNumber: 'SYSTPCR-786098.00', title: 'Matching searched Draft',
+          state: 'Draft', outcome: 'ChangeRequired', artifactKey: 'System:Procedure', version: 2, eligible: false,
+          reason: 'Search result on the first page.' }]
+      : requestedPage === '2'
       ? [{ id: 'tcr-page-two', displayNumber: 'SYSTPCR-786099.00', title: 'Second page Draft',
           state: 'Draft', outcome: 'ChangeRequired', artifactKey: 'System:Procedure', version: 1, eligible: false,
           reason: 'A later eligible candidate is outside this page.' }]
@@ -427,8 +441,8 @@ test('the Procedure explorer change chooser is exact, bounded, and keyboard dism
           state: 'Draft', outcome: 'ChangeRequired', artifactKey: 'HighLevelSoftware:Case', version: 2,
           eligible: false, reason: 'This Draft targets a Case, not a Procedure.' }]
     await route.fulfill({ contentType: 'application/json', body: JSON.stringify({
-      artifactKey: 'System:Procedure', artifactDisplayNumber: 'SYSTP-786001.00', page: Number(requestedPage), pageSize: 25,
-      totalCount: 26, totalPages: 2, items,
+      artifactKey: 'System:Procedure', artifactDisplayNumber: 'SYSTP-786001.00', page: requestedSearch ? 1 : Number(requestedPage), pageSize: 25,
+      totalCount: requestedSearch ? 1 : 26, totalPages: requestedSearch ? 1 : 2, items,
     }) })
   })
   let posted: Record<string, unknown> | undefined
@@ -472,7 +486,15 @@ test('the Procedure explorer change chooser is exact, bounded, and keyboard dism
   const dialog = page.getByRole('dialog')
   await expect(dialog).toBeVisible()
   await expect(dialog.getByRole('button', { name: 'Close' })).toBeFocused()
+  await expect(dialog.getByRole('alert')).toContainText('Eligible Test Change Requests could not be loaded.')
+  await expect(dialog).not.toContainText('Loading Test Change Request candidates…')
+  await dialog.getByRole('button', { name: 'Retry loading candidates' }).click()
   await expect(dialog).toContainText('SYSTP-786001.00')
+  await dialog.getByRole('button', { name: 'Close' }).focus()
+  await page.keyboard.press('Shift+Tab')
+  await expect(dialog.getByRole('button', { name: 'Next →' })).toBeFocused()
+  await page.keyboard.press('Tab')
+  await expect(dialog.getByRole('button', { name: 'Close' })).toBeFocused()
   await expect(dialog).toContainText('Wrong verification kind')
   await expect(dialog.locator('li').filter({ hasText: 'Wrong verification kind' }).getByRole('button')).toBeDisabled()
   await expect(dialog.getByRole('navigation', { name: 'Test Change Request candidate pages' })).toContainText('Page 1 of 2 · 26 total')
@@ -480,8 +502,11 @@ test('the Procedure explorer change chooser is exact, bounded, and keyboard dism
   await expect(dialog).toContainText('Second page Draft')
   await expect(dialog.getByRole('navigation', { name: 'Test Change Request candidate pages' })).toContainText('Page 2 of 2 · 26 total')
   await expect.poll(() => candidatePages.at(-1)).toBe('2')
-  await dialog.getByRole('button', { name: '← Previous' }).click()
-  await expect(dialog).toContainText('Eligible System Draft')
+  await dialog.getByLabel('Find an existing Test Change Request').fill('matching searched Draft')
+  await expect(dialog).toContainText('Matching searched Draft')
+  await expect(dialog.getByRole('navigation', { name: 'Test Change Request candidate pages' })).toHaveCount(0)
+  await expect.poll(() => candidatePages.at(-1)).toBe('1')
+  await expect.poll(() => candidateSearches.at(-1)).toBe('matching searched Draft')
   await page.keyboard.press('Escape')
   await expect(dialog).toHaveCount(0)
   await expect(trigger).toBeFocused()
