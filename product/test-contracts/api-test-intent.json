@@ -1,15 +1,15 @@
 {
   "schemaVersion": "aerolink-api-test-intent/v2",
   "totals": {
-    "tests": 627,
-    "cases": 685,
-    "classes": 108,
-    "hostedTests": 608,
-    "hostedCases": 657,
+    "tests": 645,
+    "cases": 703,
+    "classes": 110,
+    "hostedTests": 625,
+    "hostedCases": 674,
     "nonHostedTests": 14,
     "nonHostedCases": 23,
-    "unknownHostTests": 5,
-    "unknownHostCases": 5,
+    "unknownHostTests": 6,
+    "unknownHostCases": 6,
     "hostedCandidateTests": 14,
     "hostedCandidateCases": 14,
     "unknownCandidateTests": 3,
@@ -21,18 +21,18 @@
     "http-boundary": {
       "label": "HTTP boundary: route, status, JSON shape",
       "level": "API (must stay hosted)",
-      "tests": 389,
-      "cases": 423,
+      "tests": 400,
+      "cases": 434,
       "unknownCases": 0,
-      "classes": 89
+      "classes": 92
     },
     "ef-translation": {
       "label": "EF translation / relational constraints",
       "level": "Infrastructure (needs a database, not a host)",
-      "tests": 133,
-      "cases": 144,
+      "tests": 139,
+      "cases": 150,
       "unknownCases": 0,
-      "classes": 52
+      "classes": 53
     },
     "auth-policy": {
       "label": "Authentication / authorization wiring",
@@ -53,10 +53,10 @@
     "filesystem": {
       "label": "Filesystem / evidence-root behaviour",
       "level": "API or Infrastructure (must stay hosted)",
-      "tests": 10,
-      "cases": 10,
+      "tests": 11,
+      "cases": 11,
       "unknownCases": 0,
-      "classes": 6
+      "classes": 7
     },
     "startup-config": {
       "label": "Startup, hosting and configuration",
@@ -5363,6 +5363,141 @@
       }
     },
     {
+      "cls": "ProblemReportHistoricalIdentityApiTests",
+      "test": "A_closure_invalidation_event_names_its_actor_even_without_a_session_supplied_name",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 226,
+        "end": 258
+      }
+    },
+    {
+      "cls": "ProblemReportHistoricalIdentityApiTests",
+      "test": "A_directory_rename_does_not_rewrite_what_a_past_event_says",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client"
+      ],
+      "sourceLines": {
+        "start": 62,
+        "end": 83
+      }
+    },
+    {
+      "cls": "ProblemReportHistoricalIdentityApiTests",
+      "test": "A_live_assignment_does_follow_the_directory",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client"
+      ],
+      "sourceLines": {
+        "start": 85,
+        "end": 107
+      }
+    },
+    {
+      "cls": "ProblemReportHistoricalIdentityApiTests",
+      "test": "A_non_seeded_account_is_named_in_the_audit_trail_and_keeps_its_handle",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client"
+      ],
+      "sourceLines": {
+        "start": 41,
+        "end": 60
+      }
+    },
+    {
+      "cls": "ProblemReportHistoricalIdentityApiTests",
+      "test": "A_page_of_the_register_names_its_people_in_one_lookup",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client"
+      ],
+      "sourceLines": {
+        "start": 173,
+        "end": 207
+      }
+    },
+    {
+      "cls": "ProblemReportHistoricalIdentityApiTests",
+      "test": "An_event_recorded_before_names_were_captured_still_reads_as_its_handle",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 109,
+        "end": 137
+      }
+    },
+    {
+      "cls": "ProblemReportHistoricalIdentityApiTests",
+      "test": "Naming_the_actors_does_not_scale_with_the_length_of_the_history",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client"
+      ],
+      "sourceLines": {
+        "start": 139,
+        "end": 171
+      }
+    },
+    {
+      "cls": "ProblemReportHistoricalIdentityApiTests",
+      "test": "Non_seeded_accounts_are_not_in_the_demo_registry",
+      "kind": "Fact",
+      "intent": "filesystem",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "unknown",
+      "hostEvidence": [],
+      "sourceLines": {
+        "start": 260,
+        "end": 272
+      }
+    },
+    {
       "cls": "ProblemReportImpactEvidenceApiTests",
       "test": "A_change_request_naming_the_report_appears_under_the_area_it_changes",
       "kind": "Fact",
@@ -6444,8 +6579,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 217,
-        "end": 268
+        "start": 446,
+        "end": 497
       }
     },
     {
@@ -6462,8 +6597,79 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 25,
-        "end": 215
+        "start": 254,
+        "end": 444
+      }
+    },
+    {
+      "cls": "ProcedureTestChangeControlApiTests",
+      "test": "Verification_explorer_enforces_exact_effectivity_version_session_assignment_and_duplicate_rules",
+      "kind": "Fact",
+      "intent": "ef-translation",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 52,
+        "end": 211
+      }
+    },
+    {
+      "cls": "ProcedureTestChangeControlApiTests",
+      "test": "Verification_explorer_modify_retains_all_effective_coverage_without_fresh_driving_delta",
+      "kind": "Fact",
+      "intent": "ef-translation",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 213,
+        "end": 252
+      }
+    },
+    {
+      "cls": "ProcedureTestChangeControlApiTests",
+      "test": "Verification_explorer_mutates_exact_case_and_software_procedure_parents_and_rejects_wrong_kind",
+      "kind": "Fact",
+      "intent": "ef-translation",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 499,
+        "end": 564
+      }
+    },
+    {
+      "cls": "ProcedureTestChangeControlApiTests",
+      "test": "Verification_explorer_proposal_route_is_bound_to_the_test_change_api",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client"
+      ],
+      "sourceLines": {
+        "start": 34,
+        "end": 50
       }
     },
     {
@@ -7777,6 +7983,111 @@
       "sourceLines": {
         "start": 111,
         "end": 126
+      }
+    },
+    {
+      "cls": "RequirementProposalOptionsApiTests",
+      "test": "Existing_draft_rejects_a_stale_expected_version_after_the_draft_changes",
+      "kind": "Fact",
+      "intent": "ef-translation",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 146,
+        "end": 170
+      }
+    },
+    {
+      "cls": "RequirementProposalOptionsApiTests",
+      "test": "Existing_draft_requires_the_exact_current_requirement_revision",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client"
+      ],
+      "sourceLines": {
+        "start": 125,
+        "end": 144
+      }
+    },
+    {
+      "cls": "RequirementProposalOptionsApiTests",
+      "test": "Existing_draft_with_active_checkout_is_ineligible_even_for_the_checkout_owner",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client"
+      ],
+      "sourceLines": {
+        "start": 94,
+        "end": 123
+      }
+    },
+    {
+      "cls": "RequirementProposalOptionsApiTests",
+      "test": "Existing_proposal_revalidates_draft_lifecycle_and_released_build_truth",
+      "kind": "Fact",
+      "intent": "ef-translation",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 172,
+        "end": 210
+      }
+    },
+    {
+      "cls": "RequirementProposalOptionsApiTests",
+      "test": "Existing_retire_or_stale_modify_proposals_are_not_advertised_as_reopenable",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client"
+      ],
+      "sourceLines": {
+        "start": 212,
+        "end": 250
+      }
+    },
+    {
+      "cls": "RequirementProposalOptionsApiTests",
+      "test": "Options_use_the_selected_build_revision_and_existing_draft_proposal_is_idempotent",
+      "kind": "Fact",
+      "intent": "ef-translation",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 17,
+        "end": 92
       }
     },
     {
