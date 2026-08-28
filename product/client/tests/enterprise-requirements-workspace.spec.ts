@@ -21,6 +21,58 @@ test("requirements explorer shows truthful access-aware counts", async ({
   await expect(page.locator(".confidence")).toContainText("Live counts · respects your access");
 });
 
+test("requirements explorer primary targets are native links in table and document views", async ({
+  page,
+  request,
+}) => {
+  test.setTimeout(180_000);
+  await apiLogin(request);
+  await login(page, 'admin', { openProject: false });
+  await selectProgram(page,"Flight Management System Live Program");
+  await openNavigationGroup(page,"SYSTEMS ENGINEERING");
+  await page.getByRole("link", { name: "System Requirements Explorer" }).click();
+  await expect(page.getByRole("heading", { name: "System Requirements Explorer" })).toBeVisible();
+  await expect(page.getByRole("status", { name: /Loading controlled requirements/ })).toBeHidden();
+  await page.getByLabel("Search requirements").fill("SYSR-000150");
+
+  const contextRoot = new URL(page.url()).pathname.replace(/\/systems\/requirements$/, "");
+  const tableTarget = page.locator('.reqTable article > a.requirementTarget').first();
+  await expect(tableTarget).toBeVisible();
+  const tableHref = await tableTarget.getAttribute('href');
+  expect(tableHref).toBeTruthy();
+  const tableUrlObject = new URL(tableHref!, page.url());
+  expect(tableUrlObject.pathname).toMatch(new RegExp(`^${contextRoot}/requirements/[0-9a-f-]{36}$`));
+  expect(tableUrlObject.search).toBe('?discipline=system');
+  const tableUrl = tableUrlObject.toString();
+  const [opened] = await Promise.all([
+    page.context().waitForEvent('page', { timeout: 30_000 }),
+    tableTarget.click({ button: 'middle' }),
+  ]);
+  await expect(opened).toHaveURL(tableUrl);
+  await opened.close();
+
+  await tableTarget.focus();
+  await page.keyboard.press('Enter');
+  await expect(page).toHaveURL(tableUrl);
+  await expect(page.getByRole('button', { name: 'Close requirement inspector' })).toBeVisible();
+  await page.getByRole('button', { name: 'Close requirement inspector' }).click();
+
+  await tableTarget.click();
+  await expect(page.getByRole('button', { name: 'Close requirement inspector' })).toBeVisible();
+  await page.getByRole('button', { name: 'Close requirement inspector' }).click();
+  await page.getByRole('button', { name: 'Document view' }).click();
+
+  const documentTarget = page.locator('.documentMode article > a.requirementTarget').first();
+  await expect(documentTarget).toBeVisible();
+  const documentHref = await documentTarget.getAttribute('href');
+  expect(documentHref).toBeTruthy();
+  const documentUrlObject = new URL(documentHref!, page.url());
+  expect(documentUrlObject.pathname).toMatch(new RegExp(`^${contextRoot}/requirements/[0-9a-f-]{36}$`));
+  expect(documentUrlObject.search).toBe('?discipline=system');
+  await documentTarget.click();
+  await expect(page.getByRole('button', { name: 'Close requirement inspector' })).toBeVisible();
+});
+
 test("requirements stay read-only while controlled proposals and imports move into Changes", async ({
   page,
   request,
@@ -58,7 +110,7 @@ test("requirements stay read-only while controlled proposals and imports move in
   await expect(page.getByText("Authoritative view", { exact: true })).toHaveCount(0);
   await expect(page.getByText("Workspace tools", { exact: true })).toHaveCount(0);
   await page.getByLabel("Search requirements").fill("SYSR-000150");
-  await page.getByRole("button", { name: /SYSR-000150\.\d{2}/ }).first().click();
+  await page.getByRole("link", { name: /SYSR-000150\.\d{2}/ }).first().click();
   await page.getByRole("tab", { name: "Trace & impact" }).click();
   await expect(page.getByRole("button", { name: "Open complete Digital Thread →" })).toBeVisible();
   await page.getByRole("tab", { name: "Overview" }).click();
@@ -145,7 +197,7 @@ test("requirements explorer chooser opens an eligible Draft and preserves keyboa
   await page.getByRole("link", { name: "System Requirements Explorer" }).click();
   await expect(page.getByRole("heading", { name: "System Requirements Explorer" })).toBeVisible();
   await page.getByLabel("Search requirements").fill("SYSR-000150");
-  await page.getByRole("button", { name: /SYSR-000150\.\d{2}/ }).first().click();
+  await page.getByRole("link", { name: /SYSR-000150\.\d{2}/ }).first().click();
   await page.getByRole("tab", { name: "Overview" }).click();
 
   const trigger = page.getByRole("button", { name: "Propose controlled change →" });

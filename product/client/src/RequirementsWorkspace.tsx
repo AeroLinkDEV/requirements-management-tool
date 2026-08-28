@@ -209,6 +209,7 @@ type Props = {
   onOpenScr: (id: string, owningReleaseId?: string | null, proposalId?: string) => void;
   onProposeChange: (requirementId: string, level?: Requirement["level"]) => void;
   onOpenRequirement: (id: string) => void;
+  requirementHref: (id: string) => string;
   onCloseRequirement: () => void;
   onOpenTraceability: (artifactId?: string) => void;
   onOpenVerification: (artifact?: { artifactId: string; procedureId?: string; revisionId?: string; displayNumber?: string; level?: string }) => void;
@@ -235,6 +236,7 @@ export default function RequirementsWorkspace({
   onOpenScr,
   onProposeChange,
   onOpenRequirement,
+  requirementHref,
   onCloseRequirement,
   onOpenTraceability,
   onOpenVerification,
@@ -1239,10 +1241,15 @@ export default function RequirementsWorkspace({
                   className={selected?.id === item.id ? "selected" : ""}
                   key={item.id}
                 >
-                  <button
-                    onClick={() => {
-                      onOpenRequirement(item.id);
-                      open(item);
+                  <a
+                    className="requirementTarget"
+                    href={requirementHref(item.id)}
+                    onClick={(event) => {
+                      if (event.detail !== 0 && event.button === 0 && !event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey) {
+                        event.preventDefault();
+                        onOpenRequirement(item.id);
+                        void open(item);
+                      }
                     }}
                   >
                     <b>{item.displayNumber}</b>
@@ -1254,7 +1261,7 @@ export default function RequirementsWorkspace({
                           <small key={x}>{x}</small>
                         ))}
                     </div>
-                  </button>
+                  </a>
                   <span>
                     {item.level === "HighLevel"
                       ? "HLR"
@@ -1304,10 +1311,15 @@ export default function RequirementsWorkspace({
             <div className="documentMode">
               {data?.items.map((item) => (
                 <article key={item.id}>
-                  <button
-                    onClick={() => {
-                      onOpenRequirement(item.id);
-                      open(item);
+                  <a
+                    className="requirementTarget"
+                    href={requirementHref(item.id)}
+                    onClick={(event) => {
+                      if (event.detail !== 0 && event.button === 0 && !event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey) {
+                        event.preventDefault();
+                        onOpenRequirement(item.id);
+                        void open(item);
+                      }
                     }}
                   >
                     <div>
@@ -1322,7 +1334,7 @@ export default function RequirementsWorkspace({
                       <span>{item.commentCount} comments</span>
                       <span>{stateLabel(item.state)}</span>
                     </footer>
-                  </button>
+                  </a>
                 </article>
               ))}
             </div>

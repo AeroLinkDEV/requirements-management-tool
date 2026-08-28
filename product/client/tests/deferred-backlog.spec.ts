@@ -67,6 +67,20 @@ test('deferred work waits in its own tab until a build takes it, and the build t
   // The row says which build shelved it, because that is what somebody deciding whether to take it needs.
   await expect(row).toContainText(/shelved from Build/)
 
+  const target = row.locator('a.deferredOpen')
+  const contextRoot = new URL(page.url()).pathname.replace(/\/systems\/change-requests$/, '')
+  const targetHref = await target.getAttribute('href')
+  expect(targetHref).toBeTruthy()
+  const expectedUrlObject = new URL(targetHref!, page.url())
+  expect(expectedUrlObject.pathname).toMatch(new RegExp(`^${contextRoot}/systems/change-requests/[0-9a-f-]{36}$`))
+  const expectedUrl = expectedUrlObject.toString()
+  const [opened] = await Promise.all([
+    page.context().waitForEvent('page', { timeout: 30_000 }),
+    target.click({ button: 'middle' }),
+  ])
+  await expect(opened).toHaveURL(expectedUrl)
+  await opened.close()
+
   // Bringing it in is the explicit act that moves it, and the button names the build it is moving into.
   const bringIn = row.getByRole('button', { name: /^Bring into Build/ })
   await expect(bringIn).toBeVisible()

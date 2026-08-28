@@ -218,7 +218,7 @@ test('opening the requirement inspector does not push the page sideways', async 
     await useDensity(page, density)
     await page.goto(new URL(root + '/systems/requirements', page.url()).toString(), { waitUntil: 'load' })
     await page.locator('.reqTable article').first().waitFor()
-    await page.locator('.reqTable article > button').first().click()
+    await page.locator('.reqTable article > a.requirementTarget').first().click()
     await expect(page.locator('.requirementInspector')).toBeVisible()
     await page.waitForTimeout(400)
 

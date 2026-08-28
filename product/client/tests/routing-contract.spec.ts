@@ -18,6 +18,7 @@ test('the authenticated project selector has a context-free route', () => {
 test('change-request route generation and parsing preserve both engineering disciplines', () => {
   const system = routePath(context, 'scr', 'system', 'scr-a')
   const software = routePath(context, 'scr', 'software', 'swcr-a')
+  const interfaceChange = routePath(context, 'scr', 'system', 'icd-a', 'Interface')
 
   expect(system).toBe('/programs/program-a/projects/project-a/releases/release-a/systems/change-requests/scr-a')
   expect(software).toBe('/programs/program-a/projects/project-a/releases/release-a/software/change-requests/swcr-a')
@@ -25,6 +26,8 @@ test('change-request route generation and parsing preserve both engineering disc
   expect(parseRoute(`${system}?proposalId=proposal-a`)).toMatchObject({ view: 'scr', requirementProposalId: 'proposal-a' })
   expect(parseRoute(software)).toMatchObject({ view: 'scr', discipline: 'software', artifactId: 'swcr-a' })
   expect(artifactPath(context, 'change-request', 'swcr-a', 'software')).toBe(software)
+  expect(interfaceChange).toBe('/programs/program-a/projects/project-a/releases/release-a/interfaces/change-requests/icd-a')
+  expect(parseRoute(interfaceChange)).toMatchObject({ view: 'scr', discipline: 'system', artifactKind: 'Interface', artifactId: 'icd-a' })
 })
 
 test('software authoring routes preserve the selected HLR or LLR level', () => {
