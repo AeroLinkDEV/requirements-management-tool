@@ -862,6 +862,7 @@ public sealed class ManagedDocumentApiTests
         Assert.Equal("ProjectLeadershipPrimary", technicalStep.GetProperty("authoritySource").GetString());
         Assert.NotEqual(Guid.Empty, technicalStep.GetProperty("authoritySourceId").GetGuid());
         Assert.Equal(Guid.Parse("89d7b639-96f1-4fd4-970a-8a0db066c493"), technicalStep.GetProperty("workflowId").GetGuid());
+        Assert.Equal(2, technicalStep.GetProperty("workflowVersion").GetInt32());
         Assert.Equal("FrozenAtAssignment;ActiveAccountAtSigning", technicalStep.GetProperty("authorityPolicy").GetString());
 
         using var technical = factory.CreateClient(); using (var login = await technical.PostAsJsonAsync("/api/auth/login", new { userName = "software.lead", password = AeroLinkApiFactory.MemberPassword })) Assert.Equal(HttpStatusCode.OK, login.StatusCode); await SecurityBoundaryTests.AuthorizeMutationsAsync(technical);

@@ -82,6 +82,33 @@ public sealed class ManagedDocumentReviewAuthorityCharacterizationTests : IDispo
         Assert.Equal("DirectMembership", evidence!.Source);
     }
 
+    [Fact]
+    public async Task Policy_v1_preserves_legacy_membership_semantics_while_current_v2_requires_leadership()
+    {
+        AddAccount("legacy.lead", ProgramRole.SystemEngineeringLead);
+        AddAccount("current.lead");
+        await _db.SaveChangesAsync();
+        Elevate("current.lead", ProjectLeadershipPosition.SystemEngineeringLead);
+        await _db.SaveChangesAsync();
+
+        Assert.Equal(1, ManagedDocumentReviewAuthority.LegacyPolicyVersion);
+        Assert.Equal(2, ManagedDocumentReviewAuthority.PolicyVersion);
+
+        var legacyV1 = await ManagedDocumentReviewAuthority.ResolveTechnicalV1Async(
+            _db, _program.Id, _accounts["legacy.lead"], _now, default);
+        Assert.NotNull(legacyV1);
+        Assert.Equal("DirectMembership", legacyV1!.Source);
+        Assert.Null(await ManagedDocumentReviewAuthority.ResolveTechnicalAsync(
+            _db, _program.Id, _accounts["legacy.lead"], _now, default));
+
+        var currentV2 = await ManagedDocumentReviewAuthority.ResolveTechnicalAsync(
+            _db, _program.Id, _accounts["current.lead"], _now, default);
+        Assert.NotNull(currentV2);
+        Assert.Equal("ProjectLeadershipPrimary", currentV2!.Source);
+        Assert.Null(await ManagedDocumentReviewAuthority.ResolveTechnicalV1Async(
+            _db, _program.Id, _accounts["current.lead"], _now, default));
+    }
+
     /// <summary>
     /// #816: the roles in the Technical set that name positions are answered by the assignment, and the
     /// evidence says so. Recording a leadership signature as "DirectMembership" would misdescribe who was

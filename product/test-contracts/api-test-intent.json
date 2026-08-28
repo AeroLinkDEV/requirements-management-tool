@@ -1,13 +1,13 @@
 {
   "schemaVersion": "aerolink-api-test-intent/v2",
   "totals": {
-    "tests": 665,
-    "cases": 731,
+    "tests": 667,
+    "cases": 733,
     "classes": 110,
-    "hostedTests": 639,
-    "hostedCases": 696,
-    "nonHostedTests": 20,
-    "nonHostedCases": 29,
+    "hostedTests": 640,
+    "hostedCases": 697,
+    "nonHostedTests": 21,
+    "nonHostedCases": 30,
     "unknownHostTests": 6,
     "unknownHostCases": 6,
     "hostedCandidateTests": 16,
@@ -29,16 +29,16 @@
     "ef-translation": {
       "label": "EF translation / relational constraints",
       "level": "Infrastructure (needs a database, not a host)",
-      "tests": 143,
-      "cases": 154,
+      "tests": 144,
+      "cases": 155,
       "unknownCases": 0,
       "classes": 53
     },
     "auth-policy": {
       "label": "Authentication / authorization wiring",
       "level": "API (must stay hosted)",
-      "tests": 68,
-      "cases": 72,
+      "tests": 69,
+      "cases": 73,
       "unknownCases": 0,
       "classes": 42
     },
@@ -606,8 +606,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 158,
-        "end": 188
+        "start": 162,
+        "end": 192
       }
     },
     {
@@ -624,8 +624,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 407,
-        "end": 462
+        "start": 451,
+        "end": 506
       }
     },
     {
@@ -642,8 +642,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 259,
-        "end": 298
+        "start": 263,
+        "end": 302
       }
     },
     {
@@ -660,8 +660,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 190,
-        "end": 236
+        "start": 194,
+        "end": 240
       }
     },
     {
@@ -678,8 +678,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 238,
-        "end": 257
+        "start": 242,
+        "end": 261
       }
     },
     {
@@ -696,8 +696,26 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 355,
-        "end": 385
+        "start": 359,
+        "end": 389
+      }
+    },
+    {
+      "cls": "AssurancePolicyApiTests",
+      "test": "Base_only_configuration_and_program_memberships_cannot_manage_assurance_policy",
+      "kind": "Fact",
+      "intent": "auth-policy",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "shared-host-fixture",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 411,
+        "end": 449
       }
     },
     {
@@ -714,8 +732,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 300,
-        "end": 353
+        "start": 304,
+        "end": 357
       }
     },
     {
@@ -732,8 +750,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 387,
-        "end": 405
+        "start": 391,
+        "end": 409
       }
     },
     {
@@ -750,8 +768,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 125,
-        "end": 156
+        "start": 129,
+        "end": 160
       }
     },
     {
@@ -768,8 +786,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 89,
-        "end": 123
+        "start": 93,
+        "end": 127
       }
     },
     {
@@ -3478,8 +3496,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 884,
-        "end": 951
+        "start": 885,
+        "end": 952
       }
     },
     {
@@ -3585,8 +3603,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 953,
-        "end": 983
+        "start": 954,
+        "end": 984
       }
     },
     {
@@ -3655,8 +3673,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 1222,
-        "end": 1246
+        "start": 1223,
+        "end": 1247
       }
     },
     {
@@ -3672,8 +3690,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 1164,
-        "end": 1194
+        "start": 1165,
+        "end": 1195
       }
     },
     {
@@ -3708,8 +3726,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 985,
-        "end": 1056
+        "start": 986,
+        "end": 1057
       }
     },
     {
@@ -3814,7 +3832,7 @@
       ],
       "sourceLines": {
         "start": 847,
-        "end": 882
+        "end": 883
       }
     },
     {
@@ -3848,8 +3866,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 1196,
-        "end": 1220
+        "start": 1197,
+        "end": 1221
       }
     },
     {
@@ -3930,8 +3948,8 @@
       "hosted": "not-hosted",
       "hostEvidence": [],
       "sourceLines": {
-        "start": 235,
-        "end": 250
+        "start": 262,
+        "end": 277
       }
     },
     {
@@ -3944,8 +3962,8 @@
       "hosted": "not-hosted",
       "hostEvidence": [],
       "sourceLines": {
-        "start": 223,
-        "end": 233
+        "start": 250,
+        "end": 260
       }
     },
     {
@@ -3958,8 +3976,8 @@
       "hosted": "not-hosted",
       "hostEvidence": [],
       "sourceLines": {
-        "start": 260,
-        "end": 319
+        "start": 287,
+        "end": 346
       }
     },
     {
@@ -3972,8 +3990,22 @@
       "hosted": "not-hosted",
       "hostEvidence": [],
       "sourceLines": {
-        "start": 207,
-        "end": 221
+        "start": 234,
+        "end": 248
+      }
+    },
+    {
+      "cls": "ManagedDocumentReviewAuthorityCharacterizationTests",
+      "test": "Policy_v1_preserves_legacy_membership_semantics_while_current_v2_requires_leadership",
+      "kind": "Fact",
+      "intent": "ef-translation",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "not-hosted",
+      "hostEvidence": [],
+      "sourceLines": {
+        "start": 85,
+        "end": 110
       }
     },
     {
@@ -3986,8 +4018,8 @@
       "hosted": "not-hosted",
       "hostEvidence": [],
       "sourceLines": {
-        "start": 162,
-        "end": 193
+        "start": 189,
+        "end": 220
       }
     },
     {
@@ -4000,8 +4032,8 @@
       "hosted": "not-hosted",
       "hostEvidence": [],
       "sourceLines": {
-        "start": 196,
-        "end": 205
+        "start": 223,
+        "end": 232
       }
     },
     {
@@ -4028,8 +4060,8 @@
       "hosted": "not-hosted",
       "hostEvidence": [],
       "sourceLines": {
-        "start": 128,
-        "end": 139
+        "start": 155,
+        "end": 166
       }
     },
     {
@@ -4042,8 +4074,8 @@
       "hosted": "not-hosted",
       "hostEvidence": [],
       "sourceLines": {
-        "start": 90,
-        "end": 108
+        "start": 117,
+        "end": 135
       }
     },
     {
@@ -4056,8 +4088,8 @@
       "hosted": "not-hosted",
       "hostEvidence": [],
       "sourceLines": {
-        "start": 114,
-        "end": 125
+        "start": 141,
+        "end": 152
       }
     },
     {
@@ -4070,8 +4102,8 @@
       "hosted": "not-hosted",
       "hostEvidence": [],
       "sourceLines": {
-        "start": 141,
-        "end": 155
+        "start": 168,
+        "end": 182
       }
     },
     {

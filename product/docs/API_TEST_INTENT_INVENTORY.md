@@ -21,27 +21,27 @@ tokens that supplied host evidence.
 ## Result
 
 <!-- BEGIN GENERATED API TEST INTENT SUMMARY -->
-**665 test methods, 731 known invocations, 110 classes.** This source-exact forecast supports planning only;
+**667 test methods, 733 known invocations, 110 classes.** This source-exact forecast supports planning only;
 it is not migration or rollout authority. All current theories use explicit `InlineData`,
 so every case count is known.
 The inventory does not infer host use from a whole class:
-**639 methods / 696 cases have direct host evidence**,
-**20 methods / 29 cases are explicitly non-hosted**, and
+**640 methods / 697 cases have direct host evidence**,
+**21 methods / 30 cases are explicitly non-hosted**, and
 **6 methods / 6 cases remain unknown** because their class contains a host fixture or factory but
 the method body does not show the host operation.
 
 | Intent | Tests | Cases | Classes | Correct level |
 |---|---:|---:|---:|---|
 | HTTP boundary: route, status, JSON shape | 404 | 446 | 91 | API (must stay hosted) |
-| EF translation / relational constraints | 143 | 154 | 53 | Infrastructure (needs a database, not a host) |
-| Authentication / authorization wiring | 68 | 72 | 42 | API (must stay hosted) |
+| EF translation / relational constraints | 144 | 155 | 53 | Infrastructure (needs a database, not a host) |
+| Authentication / authorization wiring | 69 | 73 | 42 | API (must stay hosted) |
 | In-process logic with no HTTP and no client | 28 | 28 | 10 | Domain or Infrastructure (migration candidate) |
 | Filesystem / evidence-root behaviour | 14 | 14 | 8 | API or Infrastructure (must stay hosted) |
 | Startup, hosting and configuration | 7 | 7 | 5 | API (must stay hosted) |
 | Business-rule matrix over data variations | 1 | 10 | 1 | Domain (migration candidate) |
 
 The machine-readable artifact records **16 explicitly hosted candidate methods / 16 cases** and **3 unknown candidate methods / 3 cases**.
-The known hosted candidate share is **16 of 696 cases (2.3%)**,
+The known hosted candidate share is **16 of 697 cases (2.3%)**,
 but that is not a safe ceiling while unknown invocations remain. The static criterion-7 result is therefore
 **unresolved**; it does not close #566 and does not justify closing #563.
 <!-- END GENERATED API TEST INTENT SUMMARY -->
