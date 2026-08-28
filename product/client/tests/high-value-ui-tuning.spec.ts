@@ -20,6 +20,9 @@ test('workspace tuning persists and quick navigation provides previews and recen
   await page.reload()
   await expect(page.locator('html')).toHaveAttribute('data-density','compact')
   await expect(page.locator('html')).toHaveAttribute('data-motion','reduced')
+  // The persisted display preferences arrive before the build's stored ladder. Ctrl+K is only an
+  // authorized build-workspace shortcut once the declared Command Center has replaced that transient shell.
+  await expect(page.getByRole('heading',{name:'Command Center'})).toBeVisible()
 
   await page.keyboard.press('Control+K')
   const palette=page.getByRole('dialog',{name:'Quick navigation'})
