@@ -41,6 +41,30 @@ public sealed class SecurityBoundaryTests
         AssertSqliteConfiguration(factory.Services);
     }
 
+    [Fact]
+    public void Api_test_factory_removes_all_background_workers_by_default()
+    {
+        using var factory = new AeroLinkApiFactory();
+
+        Assert.Empty(AeroLinkHostedServices(factory));
+    }
+
+    [Fact]
+    public void Api_test_factory_opt_in_registers_only_the_enterprise_job_worker()
+    {
+        using var factory = new AeroLinkApiFactory(enableEnterpriseJobWorker: true);
+
+        Assert.Collection(AeroLinkHostedServices(factory),
+            worker => Assert.IsType<EnterpriseJobWorker>(worker));
+    }
+
+    // WebApplicationFactory adds its own GenericWebHostService after ConfigureServices. That service hosts the
+    // application; this assertion concerns only the AeroLink.Infrastructure workers this factory replaces.
+    private static IHostedService[] AeroLinkHostedServices(AeroLinkApiFactory factory) =>
+        factory.Services.GetServices<IHostedService>()
+            .Where(worker => worker.GetType().Assembly == typeof(EnterpriseJobWorker).Assembly)
+            .ToArray();
+
     /// <summary>
     /// #593, after #601: WAL was switched on, but nothing kept it switched on.
     ///
@@ -489,6 +513,7 @@ internal sealed class AeroLinkApiFactory(bool seedDemoAccounts = false, bool all
     IManagedDocumentStorageFaultInjector? storageFaultInjector = null,
     ILadderPolicy? testLadderPolicy = null,
     bool attachProjectLadders = true,
+    bool enableEnterpriseJobWorker = false,
     Action<object>? telemetryObserver = null,
     [CallerFilePath] string? callerFile = null,
     [CallerMemberName] string? callerMember = null) : WebApplicationFactory<Program>
@@ -670,14 +695,12 @@ internal sealed class AeroLinkApiFactory(bool seedDemoAccounts = false, bool all
                 if (attachProjectLadders) options.AddInterceptors(new TestProjectLadderInterceptor());
                 if (commandInterceptor is not null) options.AddInterceptors(commandInterceptor);
             });
-            // Counting the queries one request makes is only meaningful when nothing else in the host is
-            // querying at the same time. Six background workers poll this database on their own timers -- the
-            // job worker, the webhook dispatcher, the document integrity sweep -- and every command they issue
-            // lands in the same interceptor as the request under measurement. An idle host was observed
-            // issuing fourteen commands in eight seconds with nothing in flight, so a poll falling inside a
-            // measured window raised the count above its bound and failed a test that had done nothing wrong.
-            // Measuring and background work cannot both be on: asking for an interceptor turns the workers off.
-            if (commandInterceptor is not null) services.RemoveAll<IHostedService>();
+            // Test hosts must not run the five production polling workers: each opens independent SQLite
+            // connections, and their idle commands make request-count and lock-contention evidence noisy.
+            // Removing them is independent of any command interceptor; the two publication suites explicitly
+            // opt back into the one worker they exercise. Keep all other production workers out of API tests.
+            services.RemoveAll<IHostedService>();
+            if (enableEnterpriseJobWorker) services.AddHostedService<EnterpriseJobWorker>();
             if (storageFaultInjector is not null)
             {
                 services.RemoveAll<IManagedDocumentStorageFaultInjector>();

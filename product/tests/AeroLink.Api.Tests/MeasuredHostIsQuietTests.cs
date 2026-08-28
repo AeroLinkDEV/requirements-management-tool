@@ -5,12 +5,13 @@ namespace AeroLink.Api.Tests;
 /// own while it is measured.
 ///
 /// The managed-document inventory test asserts a request costs between one and eight commands, and it failed
-/// on CI having counted nine. The ninth was not the request's: six background workers poll this database on
-/// their own timers, and every command they issue reaches the same interceptor. An idle host was measured
-/// issuing fourteen commands in eight seconds with nothing in flight -- the job worker's claim query, the
-/// webhook dispatcher's delivery query, a version poll -- so a worker waking inside a measured window pushed
-/// a passing request over its bound. Nothing about the product was wrong, and nothing about the assertion was
-/// wrong either; the measurement was being taken in a room that would not stay still.
+/// on CI having counted nine. The ninth was not the request's: one of five background workers was polling this
+/// database on its own timer, and every command reached the same interceptor. An idle host was measured issuing
+/// fourteen commands in eight seconds with nothing in flight -- the job worker's claim query, the webhook
+/// dispatcher's delivery query, a version poll -- so a worker waking inside a measured window pushed a passing
+/// request over its bound. Nothing about the product was wrong, and nothing about the assertion was wrong
+/// either; the measurement was being taken in a room that would not stay still. Default API test factories now
+/// remove all workers, and this eight-second observation remains the regression guard for that contract.
 /// </summary>
 public sealed class MeasuredHostIsQuietTests
 {

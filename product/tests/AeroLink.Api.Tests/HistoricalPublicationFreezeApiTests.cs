@@ -26,7 +26,7 @@ public sealed class HistoricalPublicationFreezeApiTests
     [Fact]
     public async Task Frozen_documents_are_byte_identical_after_live_state_changes_and_legacy_regeneration_is_labeled()
     {
-        using var factory = new AeroLinkApiFactory();
+        using var factory = new AeroLinkApiFactory(enableEnterpriseJobWorker: true);
         var seed = await SeedAsync(factory);
         var client = factory.CreateClient();
         using var login = await client.PostAsJsonAsync("/api/auth/login",
