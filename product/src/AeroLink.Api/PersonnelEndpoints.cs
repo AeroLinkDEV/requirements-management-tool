@@ -31,8 +31,14 @@ public static class PersonnelEndpoints
                 .Where(x => x.ProgramId == programId).ToListAsync(ct);
             var backups = await db.ProjectRoleBackups.AsNoTracking()
                 .Where(x => x.ProgramId == programId && x.RemovedAt == null).ToListAsync(ct);
+            // #816: standing backups of the eight Project Leadership positions ride alongside the legacy
+            // role-keyed backups, so the roster can show who covers a leadership position.
+            var leadershipBackups = await db.ProjectLeadershipBackups.AsNoTracking()
+                .Where(x => x.ProgramId == programId && x.RemovedAt == null).ToListAsync(ct);
 
-            var userIds = memberships.Select(x => x.UserId).Concat(backups.Select(x => x.BackupUserId)).Distinct().ToList();
+            var userIds = memberships.Select(x => x.UserId)
+                .Concat(backups.Select(x => x.BackupUserId))
+                .Concat(leadershipBackups.Select(x => x.BackupUserId)).Distinct().ToList();
             var accounts = await db.UserAccounts.AsNoTracking().Where(x => userIds.Contains(x.Id))
                 .Select(x => new { x.Id, x.UserName, x.DisplayName, x.Email, x.State }).ToListAsync(ct);
             var byId = accounts.ToDictionary(x => x.Id);
@@ -73,7 +79,9 @@ public static class PersonnelEndpoints
                         accountDisabled = account is not null && account.State != AccountState.Active,
                         roles = active.Select(x => x.Role.ToString()).Order().ToList(),
                         endedRoles = ended.Select(x => x.Role.ToString()).Order().ToList(),
-                        backsUp = backups.Where(x => x.BackupUserId == group.Key).Select(x => x.Role.ToString()).Order().ToList(),
+                        backsUp = backups.Where(x => x.BackupUserId == group.Key).Select(x => x.Role.ToString())
+                            .Concat(leadershipBackups.Where(x => x.BackupUserId == group.Key).Select(x => x.Position.ToString()))
+                            .Order().ToList(),
                         joinedAt = group.Min(x => x.GrantedAt),
                         leftAt = active.Count == 0 ? ended.Max(x => x.EndedAt) : null,
                         isCurrent = active.Count > 0,
