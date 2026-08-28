@@ -193,6 +193,8 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db, IProjectLadderPolicy
             if (!await db.ProblemReportLinks.AnyAsync(x => x.ProblemReportId == report.Id && x.ArtifactType == "Release" && x.Relationship == ProblemReportRelationshipPolicy.BuildScope, ct))
                 db.ProblemReportLinks.Add(ProblemReportRelationshipPolicy.CreateControlled(report.Id, "Release", active.Id,
                     ProblemReportRelationshipPolicy.BuildScope, ProblemReportRelationshipProducer.TargetBuildWorkflow, "system.workspace", now));
+            // Seeded demo history, with no authenticated person behind it: it captures no display name and
+            // renders as its handle, which is what a pre-#776 row looks like.
             db.ProblemReportRevisions.Add(new ProblemReportRevision(report.Id, report.Revision, "TargetBuildReconciled",
                 "system.workspace", report.CanonicalHash(), report.CanonicalSnapshot(), now));
             reconciled++;

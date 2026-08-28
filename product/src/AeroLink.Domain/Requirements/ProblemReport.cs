@@ -112,11 +112,14 @@ public sealed class ProblemReportRevision
         string snapshotHash, string snapshotJson, DateTimeOffset occurredAt,
         int snapshotSchemaVersion = ProblemReportEvidenceContract.SchemaVersion,
         string? detail = null, string? evidenceJson = null, int? eventSchemaVersion = null,
-        string? fromState = null, string? toState = null, string? rationale = null)
+        string? fromState = null, string? toState = null, string? rationale = null,
+        string? actorDisplayName = null)
     {
         Id = Guid.NewGuid(); ProblemReportId = problemReportId; Revision = revision; EventType = Required(eventType);
         if (snapshotSchemaVersion < 0) throw new DomainException("A Problem Report snapshot schema cannot be negative.");
         Actor = Required(actor); SnapshotHash = Required(snapshotHash); SnapshotJson = Required(snapshotJson);
+        // Captured at the moment the event happened, never resolved later. See the property's own note.
+        ActorDisplayName = string.IsNullOrWhiteSpace(actorDisplayName) ? null : actorDisplayName.Trim();
         SnapshotSchemaVersion = snapshotSchemaVersion; OccurredAt = occurredAt;
         Detail = detail?.Trim() ?? ""; EvidenceJson = evidenceJson;
         FromState = fromState?.Trim() ?? ""; ToState = toState?.Trim() ?? ""; Rationale = rationale?.Trim() ?? "";
@@ -128,6 +131,25 @@ public sealed class ProblemReportRevision
     public int Revision { get; private set; }
     public string EventType { get; private set; } = "";
     public string Actor { get; private set; } = "";
+    /// <summary>
+    /// The actor's human-readable name as it stood when this event occurred, or null when none was captured.
+    ///
+    /// Deliberately frozen rather than resolved from <c>UserAccount.DisplayName</c> at read time. An audit
+    /// entry that says who did something must not change its answer because the directory was edited
+    /// afterwards: if <c>jane.smith</c> approved a report in 2026 and the account is renamed in 2028, the
+    /// 2026 entry still records the name that was true when she signed it. Live resolution would silently
+    /// rewrite a frozen fact with no controlled revision to explain it.
+    ///
+    /// Null on every event recorded before this was captured, and on any event raised without an
+    /// authenticated person behind it. Null means "no name was captured", not "look it up" — the honest
+    /// rendering is then <see cref="Actor"/>, the login handle, which is what an auditor reconciles against
+    /// the identity provider anyway. It is never backfilled from today's directory.
+    ///
+    /// Not part of <see cref="ProblemReportEvidenceContract"/>: the evidence snapshot hashes the report's
+    /// content, and this sits beside it on the event. Adding it therefore leaves every historical
+    /// <see cref="SnapshotHash"/> recomputing exactly as it was written.
+    /// </summary>
+    public string? ActorDisplayName { get; private set; }
     public string SnapshotHash { get; private set; } = "";
     public string SnapshotJson { get; private set; } = "";
     public int SnapshotSchemaVersion { get; private set; }

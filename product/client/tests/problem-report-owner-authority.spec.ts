@@ -88,7 +88,11 @@ test('Problem Report ownership offers only accountable Program authority and the
   await expect(eligibleOwner).toBeVisible({ timeout: 30_000 })
   await eligibleOwner.click()
   await page.getByRole('button', { name: 'Reassign', exact: true }).click()
-  await expect(page.locator('.prIdentity').getByText(eligibleName)).toBeVisible({ timeout: 30_000 })
+  // The panel names the person now, not the account they sign in with — this owner is created by the test
+  // and is in no client-side registry, which is exactly the case #776 was about. The handle stays
+  // reachable in the title for anyone reconciling against the identity provider, so both are asserted.
+  await expect(page.locator('.prIdentity').getByText(eligibleDisplay)).toBeVisible({ timeout: 30_000 })
+  await expect(page.locator(`.prIdentity .personName[title="${eligibleName}"]`)).toBeVisible({ timeout: 30_000 })
   const reportUrl = page.url()
 
   await page.getByRole('button', { name: 'Sign out' }).click()
@@ -113,7 +117,7 @@ test('Problem Report ownership offers only accountable Program authority and the
   await login(page, 'program.manager')
   await page.goto(reportUrl)
   await expect(page.getByText('Owner no longer authorized')).toBeVisible({ timeout: 30_000 })
-  await expect(page.locator('.prIdentity').getByText(eligibleName)).toBeVisible()
+  await expect(page.locator('.prIdentity').getByText(eligibleDisplay)).toBeVisible()
   await page.locator('.prAdmin').getByText('Reassign or change target build').click()
   const recoveryPicker = page.locator('.prAdmin').getByLabel('Assigned user')
   await recoveryPicker.fill(recoveryDisplay)
@@ -122,5 +126,6 @@ test('Problem Report ownership offers only accountable Program authority and the
   await recoveryOwner.click()
   await page.getByRole('button', { name: 'Reassign', exact: true }).click()
   await expect(page.getByText('Owner no longer authorized')).toHaveCount(0)
-  await expect(page.locator('.prIdentity').getByText(recoveryName)).toBeVisible({ timeout: 30_000 })
+  await expect(page.locator('.prIdentity').getByText(recoveryDisplay)).toBeVisible({ timeout: 30_000 })
+  await expect(page.locator(`.prIdentity .personName[title="${recoveryName}"]`)).toBeVisible({ timeout: 30_000 })
 })

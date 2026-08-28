@@ -18,7 +18,7 @@ export type RelatedReport = {
   title: string;
   state: string;
   severity: string;
-  reportedBy: string;
+  reportedBy: string; reportedByDisplayName?: string | null;
   targetBuild: string;
 };
 
@@ -90,7 +90,7 @@ export default function RelatedProblemReports({ api, projectId, reportId, relate
                 <i>PR</i>
                 <span>
                   <b>{item.displayNumber} — {item.title}</b>
-                  <small>Raised by <PersonName userName={item.reportedBy} /></small>
+                  <small>Raised by <PersonName userName={item.reportedBy} displayName={item.reportedByDisplayName ?? undefined} /></small>
                 </span>
                 <span className="prRelatedState">
                   <em>{spaced(item.state)}</em>

@@ -76,7 +76,7 @@ public static class ProblemReportEndpoints
             if (request.ReleaseId is not null)
                 db.ProblemReportLinks.Add(ProblemReportRelationshipPolicy.CreateControlled(item.Id, "Release", request.ReleaseId.Value,
                     ProblemReportRelationshipPolicy.BuildScope, ProblemReportRelationshipProducer.TargetBuildWorkflow, actor.UserName, now));
-            AddRevision(db, item, "ProblemReportCreated", actor.UserName, now);
+            AddRevision(db, item, "ProblemReportCreated", actor.UserName, now, actorDisplayName: actor.DisplayName);
             await db.SaveChangesAsync(ct); await transaction.CommitAsync(ct);
             return Results.Created($"/api/problem-reports/{item.Id}", Detail(item, [], []));
         }
@@ -113,7 +113,7 @@ public static class ProblemReportEndpoints
             if (releaseId is not null)
                 db.ProblemReportLinks.Add(ProblemReportRelationshipPolicy.CreateControlled(item.Id, "Release", releaseId.Value,
                     ProblemReportRelationshipPolicy.BuildScope, ProblemReportRelationshipProducer.TargetBuildWorkflow, actor.UserName, now));
-            AddRevision(db, item, "ProblemReportCreatedFromFailedExecution", actor.UserName, now);
+            AddRevision(db, item, "ProblemReportCreatedFromFailedExecution", actor.UserName, now, actorDisplayName: actor.DisplayName);
             await db.SaveChangesAsync(ct); await transaction.CommitAsync(ct);
             var identifier = await ResolveLinkIdentifierAsync("TestExecution", execution.Id, db, ct);
             return Results.Created($"/api/problem-reports/{item.Id}", Detail(item, [new ProblemReportLinkView("TestExecution", execution.Id, identifier, ProblemReportRelationshipPolicy.OriginatingFailure, actor.UserName, now, false)], []));
@@ -224,8 +224,13 @@ public static class ProblemReportEndpoints
         var items = await matching.OrderBy(row => row.Report.NumberSequence)
             .ThenBy(row => row.Report.Revision).ThenBy(row => row.Report.Id)
             .Skip((current - 1) * size).Take(size).ToListAsync(ct);
+        // One lookup for the page, not one per row: the register shows a person per row, and this list is
+        // already bounded by the page size. Both fields here are live assignments, so the current directory
+        // name is the right answer for them.
+        var listNames = await DirectoryIdentityProjection.DisplayNamesAsync(db,
+            items.SelectMany(row => new[] { row.Report.ReportedBy, row.Report.ResponsibleEngineerId }), ct);
         return Results.Ok(new { page = current, pageSize = size, totalCount = total, totalPages,
-            items = items.Select(row => Summary(row.Report, row.Waived)) });
+            items = items.Select(row => Summary(row.Report, row.Waived, listNames)) });
     }
 
     private static async Task<IResult> DashboardAsync(Guid projectId, Guid? targetReleaseId, bool? targetUnassigned, HttpContext http, AeroLinkDbContext db, CancellationToken ct)
@@ -243,13 +248,15 @@ public static class ProblemReportEndpoints
             && x.BlockerType == "ProblemReportReleaseBlocker").ToListAsync(ct);
         bool IsWaived(ProblemReport report) => waiverRows.Any(waiver => waiver.IsActiveFor(report, now));
         var active = reports.Where(x => ProblemReportLifecycle.IsActiveWork(x.State)).ToList();
+        var attentionRows = active.OrderByDescending(x => x.IsReleaseBlocker).ThenByDescending(x => x.Severity)
+            .ThenBy(x => x.CreatedAt).Take(12).ToList();
         return Results.Ok(new
         {
             generatedAt = DateTimeOffset.UtcNow,
             summary = new { total = reports.Count, active = active.Count, closureAwaitingApproval = reports.Count(x => x.State == ProblemReportState.WaitingForSqaToClose), closed = reports.Count(x => x.State == ProblemReportState.Closed), releaseBlockers = reports.Count(x => x.IsReleaseBlocker && !IsWaived(x)), waivedBlockers = reports.Count(x => x.IsReleaseBlocker && IsWaived(x)) },
             bySeverity = reports.GroupBy(x => x.Severity).OrderBy(x => x.Key).Select(x => new { severity = x.Key.ToString(), count = x.Count() }),
             byState = reports.GroupBy(x => x.State).OrderBy(x => x.Key).Select(x => new { state = x.Key.ToString(), count = x.Count() }),
-            attention = active.OrderByDescending(x => x.IsReleaseBlocker).ThenByDescending(x => x.Severity).ThenBy(x => x.CreatedAt).Take(12).Select(x => Summary(x, IsWaived(x)))
+            attention = attentionRows.Select(x => Summary(x, IsWaived(x)))
         });
     }
 
@@ -312,6 +319,10 @@ public static class ProblemReportEndpoints
         var reviveTarget = ReviveTarget(report.State);
         var canRevive = reviveTarget is not null
             && transitions.Any(transition => string.Equals(transition.State, reviveTarget, StringComparison.Ordinal));
+        // One set-wise directory lookup for the live assignment fields on this authorized record. The
+        // immutable events below are NOT resolved here — each carries the name captured when it happened.
+        var currentNames = await DirectoryIdentityProjection.DisplayNamesAsync(
+            db, [report.ReportedBy, report.ResponsibleEngineerId], ct);
         return Results.Ok(Detail(report, await LinkViewsAsync(report, links, db, ct), revisions,
             candidates.OrderByDescending(x => x.ReportRevision).ThenByDescending(x => x.Sequence),
             impactAreas: impactAreas,
@@ -328,7 +339,7 @@ public static class ProblemReportEndpoints
                 ownerAuthorityException = ownerAuthority.Eligible ? null : "The assigned owner no longer has accountable Problem Report authority in this Program.",
                 canReassignOwner = string.Equals(actor.UserName, report.ResponsibleEngineerId, StringComparison.OrdinalIgnoreCase) || canRecoverOwner,
                 canRecoverOwner,
-            }, waivers, duplicateDiagnostic));
+            }, waivers, duplicateDiagnostic, currentNames));
     }
 
     private static async Task<IResult> ReassignAsync(Guid id, ReassignRequest request, HttpContext http,
@@ -396,10 +407,10 @@ public static class ProblemReportEndpoints
                 ? "Target build correction invalidated the prior closure evidence."
                 : null;
             AddRevision(db, report, "TargetBuildChanged", actor.UserName, now,
-                fromState: fromState, toState: targetState, rationale: relationshipRationale);
+                fromState: fromState, toState: targetState, rationale: relationshipRationale, actorDisplayName: actor.DisplayName);
             if (wasAwaitingClosure)
                 await new ProblemReportClosureCandidateService(db).InvalidatePendingAsync(report, actor.UserName,
-                    "TargetBuildChanged", now, ct, fromState, targetState, relationshipRationale);
+                    "TargetBuildChanged", now, ct, fromState, targetState, relationshipRationale, actorDisplayName: actor.DisplayName);
             await db.SaveChangesAsync(ct);
             return Results.Ok(new { id = report.Id, displayNumber = report.DisplayNumber, state = ProblemReportTransitionPolicy.Canonical(report.State).ToString(), version = report.Version, snapshotHash = report.CanonicalHash() });
         }
@@ -659,10 +670,10 @@ public static class ProblemReportEndpoints
                     : null;
                 AddRevision(db, subject, "RelatedProblemReportLinked", actor.UserName, now,
                     detail: $"Related to {other.DisplayNumber}.",
-                    fromState: fromState, toState: toState, rationale: rationale);
+                    fromState: fromState, toState: toState, rationale: rationale, actorDisplayName: actor.DisplayName);
                 if (invalidated)
                     await new ProblemReportClosureCandidateService(db).InvalidatePendingAsync(subject, actor.UserName,
-                        "RelatedProblemReportLinked", now, ct, fromState, toState, rationale);
+                        "RelatedProblemReportLinked", now, ct, fromState, toState, rationale, actorDisplayName: actor.DisplayName);
             }
             await db.SaveChangesAsync(ct);
             await transaction.CommitAsync(ct);
@@ -706,10 +717,10 @@ public static class ProblemReportEndpoints
                     : null;
                 AddRevision(db, subject, "RelatedProblemReportUnlinked", actor.UserName, now,
                     detail: $"No longer related to {other.DisplayNumber}.",
-                    fromState: fromState, toState: toState, rationale: rationale);
+                    fromState: fromState, toState: toState, rationale: rationale, actorDisplayName: actor.DisplayName);
                 if (invalidated)
                     await new ProblemReportClosureCandidateService(db).InvalidatePendingAsync(subject, actor.UserName,
-                        "RelatedProblemReportUnlinked", now, ct, fromState, toState, rationale);
+                        "RelatedProblemReportUnlinked", now, ct, fromState, toState, rationale, actorDisplayName: actor.DisplayName);
             }
             await db.SaveChangesAsync(ct);
             await transaction.CommitAsync(ct);
@@ -743,10 +754,10 @@ public static class ProblemReportEndpoints
                 ? "Contextual relationship change invalidated the prior closure evidence."
                 : null;
             AddRevision(db, report, "ContextArtifactLinked", actor.UserName, now,
-                fromState: fromState, toState: targetState, rationale: relationshipRationale);
+                fromState: fromState, toState: targetState, rationale: relationshipRationale, actorDisplayName: actor.DisplayName);
             if (wasAwaitingClosure)
                 await new ProblemReportClosureCandidateService(db).InvalidatePendingAsync(report, actor.UserName,
-                    "ContextArtifactLinked", now, ct, fromState, targetState, relationshipRationale);
+                    "ContextArtifactLinked", now, ct, fromState, targetState, relationshipRationale, actorDisplayName: actor.DisplayName);
             await db.SaveChangesAsync(ct); return Results.Created($"/api/problem-reports/{id}/links/{request.ArtifactId}", new { artifactType = canonicalType, request.ArtifactId, relationship, version = report.Version });
         }
         catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
@@ -813,10 +824,10 @@ public static class ProblemReportEndpoints
             var toState = ProblemReportTransitionPolicy.Canonical(report.State);
             var transitionRationale = LifecycleTransitionRationale(eventType, fromState, toState, rationale ?? detail);
             var revision = AddRevision(db, report, eventType, actor.UserName, now, detail,
-                fromState, toState, transitionRationale);
+                fromState, toState, transitionRationale, actorDisplayName: actor.DisplayName);
             if (wasAwaitingClosure && report.ResolutionVerificationExecutionId is null)
                 await new ProblemReportClosureCandidateService(db).InvalidatePendingAsync(report, actor.UserName,
-                    eventType, now, ct, fromState, toState, transitionRationale);
+                    eventType, now, ct, fromState, toState, transitionRationale, actorDisplayName: actor.DisplayName);
             if (afterMutation is not null) await afterMutation(report, actor, now, createdLink, revision, ct);
             await db.SaveChangesAsync(ct); return Results.Ok(new { id = report.Id, displayNumber = report.DisplayNumber, state = ProblemReportTransitionPolicy.Canonical(report.State).ToString(), version = report.Version, snapshotHash = report.CanonicalHash() });
         }
@@ -824,13 +835,18 @@ public static class ProblemReportEndpoints
         catch (DbUpdateConcurrencyException) { return Results.Conflict(new { error = "This problem report was updated concurrently. Refresh before continuing.", code = "stale_version" }); }
     }
 
+    // `actorDisplayName` is resolved server-side from the authenticated session, never from the request body.
+    // It is captured here so the event keeps the name that was true when it happened; see
+    // ProblemReportRevision.ActorDisplayName for why it is not resolved at read time instead.
     private static ProblemReportRevision AddRevision(AeroLinkDbContext db, ProblemReport report, string eventType, string actor, DateTimeOffset now, string? detail = null,
-        ProblemReportState? fromState = null, ProblemReportState? toState = null, string? rationale = null)
+        ProblemReportState? fromState = null, ProblemReportState? toState = null, string? rationale = null,
+        string? actorDisplayName = null)
     {
         // One evidence shape for every change, whether it arrives here or through a controlled checkout.
         var snapshot = ProblemReportControlledEditingAdapter.EvidenceSnapshot(report);
         var revision = new ProblemReportRevision(report.Id, report.Revision, eventType, actor, report.CanonicalHash(), snapshot, now, detail: detail,
-            fromState: fromState?.ToString(), toState: toState?.ToString(), rationale: rationale);
+            fromState: fromState?.ToString(), toState: toState?.ToString(), rationale: rationale,
+            actorDisplayName: actorDisplayName);
         db.ProblemReportRevisions.Add(revision); return revision;
     }
 
@@ -882,7 +898,12 @@ public static class ProblemReportEndpoints
         _ => artifactType.Trim()
     };
 
-    private static object Summary(ProblemReport x, bool waived = false) => new { x.Id, x.ReportNumber, x.Revision, x.DisplayNumber, x.Title, state = ProblemReportTransitionPolicy.Canonical(x.State).ToString(), severity = x.Severity.ToString(), priority = x.Priority.ToString(), category = CategoryResponse(x), x.Classification, x.ReportedBy, x.ResponsibleEngineerId, x.TargetReleaseId, x.IsReleaseBlocker, waived, x.UpdatedAt, x.Version };
+    private static object Summary(ProblemReport x, bool waived = false,
+        IReadOnlyDictionary<string, string>? currentNames = null)
+    {
+        var liveNames = currentNames ?? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        return new { x.Id, x.ReportNumber, x.Revision, x.DisplayNumber, x.Title, state = ProblemReportTransitionPolicy.Canonical(x.State).ToString(), severity = x.Severity.ToString(), priority = x.Priority.ToString(), category = CategoryResponse(x), x.Classification, x.ReportedBy, reportedByDisplayName = liveNames.Current(x.ReportedBy), x.ResponsibleEngineerId, responsibleEngineerDisplayName = liveNames.Current(x.ResponsibleEngineerId), x.TargetReleaseId, x.IsReleaseBlocker, waived, x.UpdatedAt, x.Version };
+    }
     private static object Detail(ProblemReport x, IEnumerable<ProblemReportLinkView> links,
         IEnumerable<ProblemReportRevision> revisions,
         IEnumerable<ProblemReportClosureCandidate>? closureCandidates = null,
@@ -890,8 +911,12 @@ public static class ProblemReportEndpoints
         IReadOnlyList<object>? relatedReports = null,
         object? capabilities = null,
         IEnumerable<ReadinessWaiver>? releaseWaivers = null,
-        ProblemReportDuplicateDiagnostic? duplicateDiagnostic = null)
+        ProblemReportDuplicateDiagnostic? duplicateDiagnostic = null,
+        IReadOnlyDictionary<string, string>? currentNames = null)
     {
+        // Current directory names for the live assignment fields only. Historical events below read their own
+        // captured name instead, so a rename cannot rewrite them. See DirectoryIdentityProjection.
+        var liveNames = currentNames ?? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         var materializedLinks = links.ToList();
         var approvedCorrectiveActions = materializedLinks.Where(link => link.TrustedControlledEvidence && link.Relationship == ProblemReportRelationshipPolicy.ApprovedCorrectiveAction).Select(LinkResponse).ToList();
         var testEvidence = materializedLinks.Where(link => link.TrustedControlledEvidence
@@ -899,12 +924,12 @@ public static class ProblemReportEndpoints
             && link.ArtifactId == x.ResolutionVerificationExecutionId).Select(LinkResponse).ToList();
         var now = DateTimeOffset.UtcNow; var waiverHistory = (releaseWaivers ?? []).ToList();
         var activeWaiver = waiverHistory.FirstOrDefault(item => item.IsActiveFor(x, now));
-        return new { x.Id, x.ProjectId, x.ReportNumber, x.Revision, x.DisplayNumber, x.Title, x.Problem, x.ProblemRich, x.AdditionalInformation, x.AdditionalInformationRich, x.Analysis, x.ReportedBy, x.ResponsibleEngineerId, x.TargetReleaseId, x.Classification, severity = x.Severity.ToString(), priority = x.Priority.ToString(), x.Origin, x.AffectedConfiguration, x.RootCause, x.RootCauseRich, x.Effects, x.EffectsRich, x.Containment, x.ContainmentRich, x.CorrectiveAction, x.CorrectiveActionRich, x.Workaround, x.WorkaroundRich, x.AnalysisRich, category = CategoryResponse(x), x.SystemAircraftImpact, x.SystemAircraftImpactRich, x.ImpactAssessmentJson, disposition = x.Disposition?.ToString(), x.DispositionRationale, x.ResolutionVerificationExecutionId, x.ClosureApprovedByName, x.ClosureApprovedAt, x.IsReleaseBlocker, x.ReleaseBlockerVersion, waived = activeWaiver is not null, activeReleaseWaiver = activeWaiver is null ? null : WaiverResponse(activeWaiver, x, now), releaseWaivers = waiverHistory.Select(item => WaiverResponse(item, x, now)), legacyWaiver = string.IsNullOrWhiteSpace(x.WaiverRationale) ? null : new { provenance = "LegacyUnverified", rationale = x.WaiverRationale, x.WaivedBy, x.WaivedAt }, state = ProblemReportTransitionPolicy.Canonical(x.State).ToString(), x.CreatedAt, x.UpdatedAt, x.Version, snapshotHash = x.CanonicalHash(), snapshotSchemaVersion = ProblemReportEvidenceContract.SchemaVersion, capabilities, duplicateDiagnostic,
+        return new { x.Id, x.ProjectId, x.ReportNumber, x.Revision, x.DisplayNumber, x.Title, x.Problem, x.ProblemRich, x.AdditionalInformation, x.AdditionalInformationRich, x.Analysis, x.ReportedBy, reportedByDisplayName = liveNames.Current(x.ReportedBy), x.ResponsibleEngineerId, responsibleEngineerDisplayName = liveNames.Current(x.ResponsibleEngineerId), x.TargetReleaseId, x.Classification, severity = x.Severity.ToString(), priority = x.Priority.ToString(), x.Origin, x.AffectedConfiguration, x.RootCause, x.RootCauseRich, x.Effects, x.EffectsRich, x.Containment, x.ContainmentRich, x.CorrectiveAction, x.CorrectiveActionRich, x.Workaround, x.WorkaroundRich, x.AnalysisRich, category = CategoryResponse(x), x.SystemAircraftImpact, x.SystemAircraftImpactRich, x.ImpactAssessmentJson, disposition = x.Disposition?.ToString(), x.DispositionRationale, x.ResolutionVerificationExecutionId, x.ClosureApprovedByName, x.ClosureApprovedAt, x.IsReleaseBlocker, x.ReleaseBlockerVersion, waived = activeWaiver is not null, activeReleaseWaiver = activeWaiver is null ? null : WaiverResponse(activeWaiver, x, now), releaseWaivers = waiverHistory.Select(item => WaiverResponse(item, x, now)), legacyWaiver = string.IsNullOrWhiteSpace(x.WaiverRationale) ? null : new { provenance = "LegacyUnverified", rationale = x.WaiverRationale, x.WaivedBy, x.WaivedAt }, state = ProblemReportTransitionPolicy.Canonical(x.State).ToString(), x.CreatedAt, x.UpdatedAt, x.Version, snapshotHash = x.CanonicalHash(), snapshotSchemaVersion = ProblemReportEvidenceContract.SchemaVersion, capabilities, duplicateDiagnostic,
             // Each slot arrives complete — identifier, live state and target build. A response carrying only
             // ids would force the browser into a follow-up call per artifact, and the states it showed
             // would then be read at different instants from one another.
             impactAreas = impactAreas ?? [],
-            relatedReports = relatedReports ?? [], links = materializedLinks.Select(LinkResponse), approvedCorrectiveActions, testEvidence, closureCandidates = (closureCandidates ?? []).Select(CandidateResponse), revisions = revisions.Select(x => new { x.Id, x.Revision, x.EventType, x.Actor, x.Detail, rationale = string.IsNullOrWhiteSpace(x.Rationale) ? x.Detail : x.Rationale, x.FromState, x.ToState, x.EvidenceJson, x.EventSchemaVersion, x.SnapshotSchemaVersion, x.SnapshotHash, x.SnapshotJson, x.OccurredAt }) };
+            relatedReports = relatedReports ?? [], links = materializedLinks.Select(LinkResponse), approvedCorrectiveActions, testEvidence, closureCandidates = (closureCandidates ?? []).Select(CandidateResponse), revisions = revisions.Select(x => new { x.Id, x.Revision, x.EventType, x.Actor, x.ActorDisplayName, x.Detail, rationale = string.IsNullOrWhiteSpace(x.Rationale) ? x.Detail : x.Rationale, x.FromState, x.ToState, x.EvidenceJson, x.EventSchemaVersion, x.SnapshotSchemaVersion, x.SnapshotHash, x.SnapshotJson, x.OccurredAt }) };
     }
 
     private static object WaiverResponse(ReadinessWaiver item, ProblemReport report, DateTimeOffset now) => new
@@ -1096,8 +1121,13 @@ public static class ProblemReportEndpoints
         if (relatedIds.Count == 0) return [];
         var releases = await db.Releases.AsNoTracking().Where(item => item.ProjectId == report.ProjectId)
             .ToDictionaryAsync(item => item.Id, item => item.Version, ct);
-        return (await db.ProblemReports.AsNoTracking().Where(item => relatedIds.Contains(item.Id))
-                .OrderBy(item => item.NumberSequence).ToListAsync(ct))
+        var related = await db.ProblemReports.AsNoTracking().Where(item => relatedIds.Contains(item.Id))
+            .OrderBy(item => item.NumberSequence).ToListAsync(ct);
+        // This panel sits on the same page as the record's own identity block and names a person per row, so
+        // it has to be named the same way. One lookup for the set, which is already bounded by the links.
+        var relatedNames = await DirectoryIdentityProjection.DisplayNamesAsync(db,
+            related.Select(item => item.ReportedBy), ct);
+        return related
             .Select(item => (object)new
             {
                 item.Id,
@@ -1106,6 +1136,7 @@ public static class ProblemReportEndpoints
                 state = ProblemReportTransitionPolicy.Canonical(item.State).ToString(),
                 severity = item.Severity.ToString(),
                 item.ReportedBy,
+                reportedByDisplayName = relatedNames.Current(item.ReportedBy),
                 targetBuild = item.TargetReleaseId is { } releaseId && releases.TryGetValue(releaseId, out var version) ? version : "",
             }).ToList();
     }

@@ -1020,6 +1020,13 @@ public sealed class ProblemReportControlledEditingAdapter(AeroLinkDbContext db) 
         var lifecycleRationale = fromState != toState
             ? "Controlled detail correction invalidated the prior closure evidence and returned the report to Verifying."
             : null;
+        // No `actorDisplayName` here. Check-in reaches this through IControlledEditingAdapter, which carries
+        // the actor as a bare handle several layers up, so threading one would widen a shared interface used
+        // by every controlled artifact. That is the reason it is not threaded — but it is not the only option:
+        // this method already holds `db`, so the name could be read here at write time instead. That is a
+        // deliberate deferral rather than an impossibility, and it is the honest way to describe it.
+        // Until then the event captures nothing and renders as the login handle, which is a missing fact
+        // rather than a wrong one.
         db.ProblemReportRevisions.Add(new ProblemReportRevision(item.Id, item.Revision, "DetailsCheckedIn",
             actor, item.CanonicalHash(), EvidenceSnapshot(item), now,
             detail: lifecycleRationale, fromState: fromState.ToString(), toState: toState.ToString(), rationale: lifecycleRationale));
