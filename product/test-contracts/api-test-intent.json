@@ -1,17 +1,17 @@
 {
   "schemaVersion": "aerolink-api-test-intent/v2",
   "totals": {
-    "tests": 648,
-    "cases": 706,
-    "classes": 110,
-    "hostedTests": 628,
-    "hostedCases": 677,
+    "tests": 647,
+    "cases": 705,
+    "classes": 109,
+    "hostedTests": 627,
+    "hostedCases": 676,
     "nonHostedTests": 14,
     "nonHostedCases": 23,
     "unknownHostTests": 6,
     "unknownHostCases": 6,
-    "hostedCandidateTests": 14,
-    "hostedCandidateCases": 14,
+    "hostedCandidateTests": 16,
+    "hostedCandidateCases": 16,
     "unknownCandidateTests": 3,
     "unknownCandidateCases": 3,
     "unknownCaseTests": 0,
@@ -21,34 +21,34 @@
     "http-boundary": {
       "label": "HTTP boundary: route, status, JSON shape",
       "level": "API (must stay hosted)",
-      "tests": 400,
-      "cases": 434,
+      "tests": 399,
+      "cases": 433,
       "unknownCases": 0,
-      "classes": 92
+      "classes": 91
     },
     "ef-translation": {
       "label": "EF translation / relational constraints",
       "level": "Infrastructure (needs a database, not a host)",
-      "tests": 139,
-      "cases": 150,
+      "tests": 138,
+      "cases": 149,
       "unknownCases": 0,
-      "classes": 53
+      "classes": 52
     },
     "auth-policy": {
       "label": "Authentication / authorization wiring",
       "level": "API (must stay hosted)",
-      "tests": 65,
-      "cases": 69,
+      "tests": 64,
+      "cases": 68,
       "unknownCases": 0,
-      "classes": 42
+      "classes": 41
     },
     "in-process-logic": {
       "label": "In-process logic with no HTTP and no client",
       "level": "Domain or Infrastructure (migration candidate)",
-      "tests": 22,
-      "cases": 22,
+      "tests": 24,
+      "cases": 24,
       "unknownCases": 0,
-      "classes": 9
+      "classes": 10
     },
     "filesystem": {
       "label": "Filesystem / evidence-root behaviour",
@@ -4614,8 +4614,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 17,
-        "end": 35
+        "start": 18,
+        "end": 36
       }
     },
     {
@@ -4721,58 +4721,6 @@
       "sourceLines": {
         "start": 38,
         "end": 47
-      }
-    },
-    {
-      "cls": "PersonnelDirectoryApiTests",
-      "test": "Adding_a_person_grants_several_base_roles_as_one_operation",
-      "kind": "Fact",
-      "intent": "ef-translation",
-      "cases": 1,
-      "caseEvidence": "Fact",
-      "hosted": "hosted",
-      "hostEvidence": [
-        "shared-host-fixture",
-        "factory-services"
-      ],
-      "sourceLines": {
-        "start": 68,
-        "end": 84
-      }
-    },
-    {
-      "cls": "PersonnelDirectoryApiTests",
-      "test": "Only_the_global_administrator_edits_current_identity_and_the_change_is_audited",
-      "kind": "Fact",
-      "intent": "auth-policy",
-      "cases": 1,
-      "caseEvidence": "Fact",
-      "hosted": "hosted",
-      "hostEvidence": [
-        "shared-host-fixture",
-        "factory-client",
-        "factory-services"
-      ],
-      "sourceLines": {
-        "start": 104,
-        "end": 134
-      }
-    },
-    {
-      "cls": "PersonnelDirectoryApiTests",
-      "test": "The_directory_searches_name_username_and_email_and_skips_current_members",
-      "kind": "Fact",
-      "intent": "http-boundary",
-      "cases": 1,
-      "caseEvidence": "Fact",
-      "hosted": "hosted",
-      "hostEvidence": [
-        "shared-host-fixture",
-        "factory-services"
-      ],
-      "sourceLines": {
-        "start": 86,
-        "end": 102
       }
     },
     {
@@ -8573,8 +8521,40 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 326,
-        "end": 372
+        "start": 350,
+        "end": 396
+      }
+    },
+    {
+      "cls": "SecurityBoundaryTests",
+      "test": "Api_test_factory_opt_in_registers_only_the_enterprise_job_worker",
+      "kind": "Fact",
+      "intent": "in-process-logic",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction"
+      ],
+      "sourceLines": {
+        "start": 52,
+        "end": 59
+      }
+    },
+    {
+      "cls": "SecurityBoundaryTests",
+      "test": "Api_test_factory_removes_all_background_workers_by_default",
+      "kind": "Fact",
+      "intent": "in-process-logic",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction"
+      ],
+      "sourceLines": {
+        "start": 44,
+        "end": 50
       }
     },
     {
@@ -8590,8 +8570,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 298,
-        "end": 324
+        "start": 322,
+        "end": 348
       }
     },
     {
@@ -8607,8 +8587,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 217,
-        "end": 246
+        "start": 241,
+        "end": 270
       }
     },
     {
@@ -8621,8 +8601,8 @@
       "hosted": "unknown",
       "hostEvidence": [],
       "sourceLines": {
-        "start": 91,
-        "end": 154
+        "start": 115,
+        "end": 178
       }
     },
     {
@@ -8675,8 +8655,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 194,
-        "end": 215
+        "start": 218,
+        "end": 239
       }
     },
     {
@@ -8692,8 +8672,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 248,
-        "end": 254
+        "start": 272,
+        "end": 278
       }
     },
     {
@@ -8710,8 +8690,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 256,
-        "end": 296
+        "start": 280,
+        "end": 320
       }
     },
     {
@@ -8728,8 +8708,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 374,
-        "end": 445
+        "start": 398,
+        "end": 469
       }
     },
     {
@@ -8746,8 +8726,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 57,
-        "end": 89
+        "start": 81,
+        "end": 113
       }
     },
     {

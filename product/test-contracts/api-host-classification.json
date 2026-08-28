@@ -1,22 +1,22 @@
 {
   "schemaVersion": "aerolink-api-host-classification/v3",
   "totals": {
-    "classes": 110,
-    "tests": 648,
-    "knownCases": 706,
+    "classes": 109,
+    "tests": 647,
+    "knownCases": 705,
     "unknownCaseTests": 0
   },
   "summary": {
     "converted": {
-      "classes": 24,
-      "tests": 133,
-      "knownCases": 133,
+      "classes": 23,
+      "tests": 130,
+      "knownCases": 130,
       "unknownCaseTests": 0
     },
     "fresh-host": {
       "classes": 43,
-      "tests": 246,
-      "knownCases": 275,
+      "tests": 248,
+      "knownCases": 277,
       "unknownCaseTests": 0
     },
     "migration-candidate": {
@@ -267,19 +267,6 @@
       ]
     },
     {
-      "cls": "PersonnelDirectoryApiTests",
-      "tests": 3,
-      "knownCases": 3,
-      "unknownCaseTests": 0,
-      "classification": "converted",
-      "reason": "Already sharing a host through the #563 pilot.",
-      "intents": [
-        "auth-policy",
-        "ef-translation",
-        "http-boundary"
-      ]
-    },
-    {
       "cls": "ReviewLinkOutlivedCycleTests",
       "tests": 3,
       "knownCases": 3,
@@ -380,6 +367,21 @@
       ]
     },
     {
+      "cls": "SecurityBoundaryTests",
+      "tests": 13,
+      "knownCases": 13,
+      "unknownCaseTests": 0,
+      "classification": "fresh-host",
+      "reason": "Customizes host state (service-replacement, factory-host-options); sharing could change the subject or leak configuration.",
+      "intents": [
+        "auth-policy",
+        "ef-translation",
+        "filesystem",
+        "http-boundary",
+        "in-process-logic"
+      ]
+    },
+    {
       "cls": "AuthoringTracedImpactTests",
       "tests": 12,
       "knownCases": 12,
@@ -391,20 +393,6 @@
         "ef-translation",
         "http-boundary",
         "startup-config"
-      ]
-    },
-    {
-      "cls": "SecurityBoundaryTests",
-      "tests": 11,
-      "knownCases": 11,
-      "unknownCaseTests": 0,
-      "classification": "fresh-host",
-      "reason": "Customizes host state (service-replacement, factory-host-options); sharing could change the subject or leak configuration.",
-      "intents": [
-        "auth-policy",
-        "ef-translation",
-        "filesystem",
-        "http-boundary"
       ]
     },
     {
