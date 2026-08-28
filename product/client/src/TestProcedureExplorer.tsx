@@ -657,7 +657,6 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
         ? 'Eligible Test Change Requests could not be loaded. Retry to search again.'
         : operationError(problem, 'Eligible Test Change Requests could not be loaded.')
       setProposalLoadError(message)
-      setError(message)
       setProposalCandidates(undefined)
     } finally {
       if (mine === proposalRequestTicket.current) setProposalLoading(false)

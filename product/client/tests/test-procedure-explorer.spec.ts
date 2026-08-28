@@ -490,6 +490,7 @@ test('the Procedure explorer change chooser is exact, bounded, and keyboard dism
   await expect(dialog).not.toContainText('Loading Test Change Request candidates…')
   await dialog.getByRole('button', { name: 'Retry loading candidates' }).click()
   await expect(dialog).toContainText('SYSTP-786001.00')
+  await expect(dialog.getByRole('alert')).toHaveCount(0)
   await dialog.getByRole('button', { name: 'Close' }).focus()
   await page.keyboard.press('Shift+Tab')
   await expect(dialog.getByRole('button', { name: 'Next →' })).toBeFocused()
@@ -572,4 +573,83 @@ test('the combined Explorer carries Case identity into the verification change c
   // The governed editor must collect a real CR/Case-derived or Problem Report origin; this route carries no
   // made-up artifact origin or client-side selected ID.
   expect(new URL(page.url()).search).toBe('')
+})
+
+test('the Case chooser adds an exact eligible Draft and focuses its persisted proposal', async ({ page }) => {
+  test.setTimeout(120_000)
+  await useBrowserFixture(page)
+  await login(page, 'admin')
+  await page.route('**/api/verification-artifacts?*', async route => {
+    await route.fulfill({ contentType: 'application/json', body: JSON.stringify({
+      page: 1, pageSize: 25, totalCount: 1, totalPages: 1, views: [],
+      items: [{ id: 'case-existing-action', revisionId: 'case-existing-revision',
+        displayNumber: 'HLRTC-786002.00', title: 'Case for existing Draft', state: 'Approved', requirementCount: 1,
+        ownerId: 'admin', level: 'HighLevel', artifactKind: 'Case', objective: 'Verify the Case',
+        preconditions: 'The build is available', steps: 'Exercise the Case', expectedResult: 'The Case passes' }],
+    }) })
+  })
+  await page.route('**/api/verification-artifacts/case-existing-action/*', async route => {
+    const path = new URL(route.request().url()).pathname
+    if (path.endsWith('/comments')) return route.fulfill({ contentType: 'application/json', body: '[]' })
+    if (path.endsWith('/history')) return route.fulfill({ contentType: 'application/json', body: JSON.stringify({
+      artifactId: 'case-existing-action', artifactKind: 'Case', id: 'case-existing-action',
+      baseNumber: 'HLRTC-786002', title: 'Case for existing Draft', level: 'HighLevel', ownerId: 'admin', revisions: [],
+    }) })
+    return route.continue()
+  })
+  await page.route('**/api/verification-artifacts/case-existing-action/test-change-request-candidates*', route =>
+    route.fulfill({ contentType: 'application/json', body: JSON.stringify({
+      artifactKey: 'HighLevelSoftware:Case', artifactDisplayNumber: 'HLRTC-786002.00', page: 1,
+      pageSize: 25, totalCount: 1, totalPages: 1, items: [{ id: 'tcr-case-existing', displayNumber: 'HLRTCCR-786003.00',
+        title: 'Eligible Case Draft', state: 'Draft', outcome: 'ChangeRequired',
+        artifactKey: 'HighLevelSoftware:Case', version: 5, eligible: true }],
+    }) }))
+  await page.route('**/api/verification-artifacts/case-existing-action/test-change-request-proposal', async route => {
+    const body = route.request().postDataJSON() as Record<string, unknown>
+    expect(body).toMatchObject({ artifactRevisionId: 'case-existing-revision', testChangeReviewId: 'tcr-case-existing', expectedVersion: 5 })
+    await route.fulfill({ contentType: 'application/json', body: JSON.stringify({
+      mode: 'existing', testChangeReviewId: 'tcr-case-existing', proposalId: 'case-proposal', duplicate: false,
+    }) })
+  })
+  const openedCasePackage = {
+    id: 'tcr-case-existing', projectId: 'project-786', releaseId: 'release-16',
+    displayNumber: 'HLRTCCR-786003.00', baseNumber: 'HLRTCCR-786003', revision: 0,
+    title: 'Eligible Case Draft', problem: 'A controlled Case needs alignment.',
+    analysis: 'The exact Case revision is affected.', solution: 'Record the controlled update.',
+    problemRich: '', analysisRich: '', solutionRich: '', state: 'Draft', authorId: 'admin',
+    discipline: 'HighLevelSoftware', sourceChangeRequestNumber: 'HLRCR-786003', version: 5,
+    caseContractVersion: 1, artifactKind: 'Case', artifactLevel: 'HighLevel',
+    artifactChanges: [{ id: 'case-proposal', displayNumber: 'HLRTC-786002.01', baseNumber: 'HLRTC-786002',
+      revision: 1, level: 'HighLevel', kind: 'Modify', title: 'Case for existing Draft', objective: 'Verify the Case',
+      preconditions: 'The build is available', steps: 'Exercise the Case', expectedResult: 'The Case passes',
+      rationale: 'The controlled Case changed.' }], capabilities: { canProposeArtifactChange: true },
+    coveredChangeRequests: [],
+  }
+  await page.route('**/api/test-change-reviews/tcr-case-existing/case-changes', route =>
+    route.fulfill({ contentType: 'application/json', body: JSON.stringify(openedCasePackage) }))
+  await page.route('**/api/releases/release-16/test-change-reviews', route =>
+    route.fulfill({ contentType: 'application/json', body: JSON.stringify({ items: [openedCasePackage] }) }))
+  await page.route('**/api/signatures?artifactId=tcr-case-existing', route =>
+    route.fulfill({ contentType: 'application/json', body: '[]' }))
+  await page.route('**/api/controlled-editing/status?artifactType=TestChangeRequest&artifactId=tcr-case-existing', route =>
+    route.fulfill({ contentType: 'application/json', body: JSON.stringify({ locked: false }) }))
+
+  await page.route('**/api/projects/*/configuration', route =>
+    route.fulfill({ contentType: 'application/json', body: JSON.stringify({ effectiveSteps: [
+      { catalogueEntry: 'System', capabilities: 2, enabledArtifactKinds: ['Procedure'] },
+      { catalogueEntry: 'HighLevel', capabilities: 7, enabledArtifactKinds: ['Case', 'Procedure'] },
+    ] }) }))
+  await openNavigationGroup(page, 'ASSURANCE')
+  await page.getByRole('button', { name: 'Software' }).last().click()
+  await page.getByRole('link', { name: 'Test Case/Procedure Explorer' }).click()
+  await expect(page.getByRole('heading', { name: 'Software Test Case/Procedure Explorer' })).toBeVisible({ timeout: 30_000 })
+  await page.locator('.procedureRow').first().click()
+  await page.getByRole('button', { name: 'Propose test change' }).click()
+  await page.getByRole('dialog').getByRole('button', { name: 'Add exact revision' }).click()
+  await expect(page).toHaveURL(/software-verification\/hlr\/change-requests\/tcr-case-existing\?proposalId=case-proposal/)
+  await expect(page.locator('[data-procedure-change-id="case-proposal"]')).toBeFocused()
+  const exactUrl = page.url()
+  await page.reload()
+  await expect(page).toHaveURL(exactUrl)
+  await expect(page.locator('[data-procedure-change-id="case-proposal"]')).toBeFocused()
 })
