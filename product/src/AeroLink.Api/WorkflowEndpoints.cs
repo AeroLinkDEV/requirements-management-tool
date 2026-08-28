@@ -175,6 +175,16 @@ public static class WorkflowEndpoints
                 .ToDictionary(x => x.Key, x => x.Select(member => member.Role).ToList());
             var programAdministrators = programMembers
                 .Where(x => x.Role == ProgramRole.Administrator).Select(x => x.Id).Distinct().ToList();
+            // The installation administrator is intentionally not required to hold a Program membership.
+            // ResolveHoldersAsync includes that substitution because the signing gate does; load the account
+            // alongside the scoped roster so the projection can actually name the holder it reports.
+            var systemAdministrator = await db.UserAccounts.AsNoTracking()
+                .Where(x => x.State == AccountState.Active
+                            && x.UserName == IdentityService.SystemAdministratorUserName)
+                .Select(x => new { x.Id, x.UserName, x.DisplayName, Role = ProgramRole.Administrator })
+                .SingleOrDefaultAsync(ct);
+            if (systemAdministrator is not null)
+                accountById[systemAdministrator.Id] = systemAdministrator;
 
             // What to show beside a candidate's name: the role they actually hold that answers this stage,
             // not the stage's own required role. Labelling every option with the requirement makes the
@@ -196,7 +206,10 @@ public static class WorkflowEndpoints
                 var listed = holders.Where(x => accountById.ContainsKey(x.UserId))
                     .Select(x => new StageCandidate(
                         accountById[x.UserId].UserName, accountById[x.UserId].DisplayName,
-                        HeldRole(x.UserId, requiredRole), x.Source.ToString()))
+                        x.Source == ProjectAuthoritySource.AdministratorSubstitution
+                            ? ProgramRole.Administrator.ToString()
+                            : HeldRole(x.UserId, requiredRole),
+                        x.Source.ToString()))
                     .ToList();
                 // Administrators are listed for every stage because they can stand in when the named
                 // authority is unavailable; a review that cannot proceed at all is not a control.

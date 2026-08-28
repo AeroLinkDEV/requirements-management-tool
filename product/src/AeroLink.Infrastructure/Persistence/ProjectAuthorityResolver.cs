@@ -268,6 +268,19 @@ public sealed class ProjectAuthorityResolver(AeroLinkDbContext db)
             if (activeUserIds.Contains(delegation.DelegateUserId))
                 results.TryAdd(delegation.DelegateUserId, (ProjectAuthoritySource.Delegation, null));
 
+        // ResolveAsync grants the one active installation administrator before consulting any project-scoped
+        // source. The holder projection must report that same substitution even when the account deliberately
+        // has no Program membership; otherwise a picker can hide somebody whom the signing gate accepts and
+        // the Approval Configuration Center can call a signable stage blocked. Add it last so the provenance
+        // matches ResolveAsync even if the administrator also happens to hold a project role.
+        var systemAdministratorId = await db.UserAccounts.AsNoTracking()
+            .Where(x => x.State == AccountState.Active
+                        && x.UserName == IdentityService.SystemAdministratorUserName)
+            .Select(x => (Guid?)x.Id)
+            .SingleOrDefaultAsync(ct);
+        if (systemAdministratorId is not null)
+            results[systemAdministratorId.Value] = (ProjectAuthoritySource.AdministratorSubstitution, null);
+
         return results.Select(x => (x.Key, x.Value.Item1, x.Value.Item2)).ToList();
     }
 }

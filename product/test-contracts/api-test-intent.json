@@ -1,11 +1,11 @@
 {
   "schemaVersion": "aerolink-api-test-intent/v2",
   "totals": {
-    "tests": 662,
-    "cases": 728,
+    "tests": 663,
+    "cases": 729,
     "classes": 110,
-    "hostedTests": 636,
-    "hostedCases": 693,
+    "hostedTests": 637,
+    "hostedCases": 694,
     "nonHostedTests": 20,
     "nonHostedCases": 29,
     "unknownHostTests": 6,
@@ -29,8 +29,8 @@
     "ef-translation": {
       "label": "EF translation / relational constraints",
       "level": "Infrastructure (needs a database, not a host)",
-      "tests": 141,
-      "cases": 152,
+      "tests": 142,
+      "cases": 153,
       "unknownCases": 0,
       "classes": 53
     },
@@ -374,6 +374,24 @@
       "sourceLines": {
         "start": 204,
         "end": 215
+      }
+    },
+    {
+      "cls": "ApprovalConfigurationApiTests",
+      "test": "Global_administrator_without_program_membership_is_listed_and_keeps_the_stage_signable",
+      "kind": "Fact",
+      "intent": "ef-translation",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 399,
+        "end": 439
       }
     },
     {

@@ -396,6 +396,48 @@ public sealed class ApprovalConfigurationApiTests : IClassFixture<SharedApiHost>
         Assert.DoesNotContain(candidates, x => x.GetProperty("userId").GetString() == seeded.DeputyName);
     }
 
+    [Fact]
+    public async Task Global_administrator_without_program_membership_is_listed_and_keeps_the_stage_signable()
+    {
+        using var factory = new AeroLinkApiFactory();
+        var seeded = await SeedAsync(factory,
+        [
+            new("Airworthiness approval", ProgramRole.Airworthiness, ReviewStageKind.Approval),
+        ]);
+        const string administratorDisplayName = "Global Administrator";
+        Guid administratorId;
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            var administrator = new UserAccount(IdentityService.SystemAdministratorUserName,
+                administratorDisplayName, "global.admin@example.test",
+                IdentityService.HashPassword(AeroLinkApiFactory.MemberPassword), DateTimeOffset.UtcNow);
+            db.Add(administrator);
+            await db.SaveChangesAsync();
+            administratorId = administrator.Id;
+            Assert.False(await db.ProgramMemberships.AnyAsync(
+                x => x.ProgramId == seeded.ProgramId && x.UserId == administratorId));
+        }
+
+        using var client = factory.CreateClient();
+        await SignInAsync(client, seeded.ManagerName);
+
+        var applicable = await client.GetFromJsonAsync<JsonElement>(
+            $"/api/review-workflows/applicable?projectId={seeded.ProjectId}&type=System");
+        var candidate = applicable.GetProperty("stages")[0].GetProperty("candidates")
+            .EnumerateArray().Single(x => x.GetProperty("userId").GetString()
+                                          == IdentityService.SystemAdministratorUserName);
+        Assert.Equal(nameof(ProgramRole.Administrator), candidate.GetProperty("role").GetString());
+        Assert.Equal(nameof(ProjectAuthoritySource.AdministratorSubstitution),
+            candidate.GetProperty("via").GetString());
+
+        var system = (await ReadAsync(client, seeded.ProjectId)).Artifacts.Single(x => x.Subject == "System");
+        Assert.Equal(0, system.BlockingStages);
+        var required = Assert.Single(system.Stages!).Required;
+        Assert.False(required.Blocking);
+        Assert.Contains(administratorDisplayName, required.Holders);
+    }
+
     private sealed record ConfigurationResponse(Guid ProjectId, bool CanManage, ArtifactRow[] Artifacts);
     private sealed record ArtifactRow(string Subject, bool Configured, string? Name, int? Version, string? Mode,
         StageRow[]? Stages, int BlockingStages);

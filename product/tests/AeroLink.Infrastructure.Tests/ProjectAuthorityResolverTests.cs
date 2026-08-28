@@ -283,6 +283,24 @@ public sealed class ProjectAuthorityResolverTests : IDisposable
                     ProjectAuthorityRequirement.LegacyRoleDemand(ProgramRole.SystemEngineeringLead), _now));
     }
 
+    [Fact]
+    public async Task The_holder_projection_includes_the_active_global_administrator_without_membership()
+    {
+        var administrator = new UserAccount(IdentityService.SystemAdministratorUserName, "Global Administrator",
+            "global.admin@example.test", IdentityService.HashPassword("StrongPass!2026"), _now);
+        _db.Add(administrator);
+        await _db.SaveChangesAsync();
+
+        Assert.False(await _db.ProgramMemberships.AnyAsync(x => x.UserId == administrator.Id));
+
+        var holders = await _resolver.ResolveHoldersAsync(
+            _program.Id, ProgramRole.SystemEngineeringLead, _now);
+        var projected = Assert.Single(holders, x => x.UserId == administrator.Id);
+        Assert.Equal(ProjectAuthoritySource.AdministratorSubstitution, projected.Source);
+        Assert.True(await _resolver.IsSatisfiedAsync(administrator.Id, _program.Id,
+            ProjectAuthorityRequirement.LegacyRoleDemand(ProgramRole.SystemEngineeringLead), _now));
+    }
+
     public void Dispose()
     {
         _db.Database.CloseConnection();

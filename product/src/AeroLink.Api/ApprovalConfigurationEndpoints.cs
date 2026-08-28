@@ -62,9 +62,14 @@ public static class ApprovalConfigurationEndpoints
             // SQLite deliberately does not translate DateTimeOffset comparisons. Materialize the small,
             // program-scoped live-delegation set and apply the same interval rule in memory for both providers.
             delegations = delegations.Where(x => x.StartsAt <= now && x.EndsAt > now).ToList();
+            var systemAdministratorIds = await db.UserAccounts.AsNoTracking()
+                .Where(x => x.State == AccountState.Active
+                            && x.UserName == IdentityService.SystemAdministratorUserName)
+                .Select(x => x.Id).ToListAsync(ct);
             var accountIds = memberships.Select(x => x.UserId)
                 .Concat(backups.Select(x => x.BackupUserId))
                 .Concat(delegations.Select(x => x.DelegateUserId))
+                .Concat(systemAdministratorIds)
                 .Distinct().ToList();
             var names = await db.UserAccounts.AsNoTracking()
                 .Where(x => accountIds.Contains(x.Id) && x.State == AccountState.Active)
@@ -82,7 +87,8 @@ public static class ApprovalConfigurationEndpoints
                     .Where(x => sources.Contains(x.Source) && names.ContainsKey(x.UserId))
                     .Select(x => names[x.UserId]).Distinct().Order().ToList();
 
-                var holders = Named(ProjectAuthoritySource.DirectBaseRole, ProjectAuthoritySource.LeadershipPrimary);
+                var holders = Named(ProjectAuthoritySource.DirectBaseRole, ProjectAuthoritySource.LeadershipPrimary,
+                    ProjectAuthoritySource.AdministratorSubstitution);
                 var standing = Named(ProjectAuthoritySource.LeadershipBackup, ProjectAuthoritySource.LegacyCompatibility);
                 // A delegation stays a live exact-role grant, exactly as the signing gate treats it.
                 var delegated = Named(ProjectAuthoritySource.Delegation);
