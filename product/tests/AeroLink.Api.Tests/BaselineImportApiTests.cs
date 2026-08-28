@@ -827,6 +827,7 @@ public sealed class BaselineImportApiTests
         using var client = factory.CreateClient();
         var now = DateTimeOffset.UtcNow;
         Guid projectId;
+        Guid configurationManagerId = Guid.Empty;
         using (var scope = factory.Services.CreateScope())
         {
             var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
@@ -843,6 +844,7 @@ public sealed class BaselineImportApiTests
                     IdentityService.HashPassword(AeroLinkApiFactory.MemberPassword), now);
                 db.Add(account);
                 db.Add(new ProgramMembership(account.Id, program.Id, role, "test.setup", now));
+                if (role == ProgramRole.ConfigurationManager) configurationManagerId = account.Id;
             }
             await db.SaveChangesAsync();
             projectId = project.Id;
@@ -855,7 +857,20 @@ public sealed class BaselineImportApiTests
         using var refused = await client.PostAsJsonAsync("/api/baseline-imports", StartBody(projectId));
         Assert.Equal(HttpStatusCode.Forbidden, refused.StatusCode);
 
+        // The Configuration Manager membership is eligibility, not the Program-setup authority itself.
         await SignInAsync(client, "import.cm");
+        using var baseOnlyRefused = await client.PostAsJsonAsync("/api/baseline-imports", StartBody(projectId));
+        Assert.Equal(HttpStatusCode.Forbidden, baseOnlyRefused.StatusCode);
+
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            var programId = await db.Projects.Where(x => x.Id == projectId).Select(x => x.ProgramId).SingleAsync();
+            db.Add(new ProjectLeadershipAssignment(programId, ProjectLeadershipPosition.ConfigurationManager,
+                configurationManagerId, "test.setup", now));
+            await db.SaveChangesAsync();
+        }
+
         using var allowed = await client.PostAsJsonAsync("/api/baseline-imports", StartBody(projectId));
         Assert.Equal(HttpStatusCode.Created, allowed.StatusCode);
         var id = (await allowed.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetGuid();
@@ -866,6 +881,52 @@ public sealed class BaselineImportApiTests
         Assert.Equal(HttpStatusCode.Forbidden, (await RecordSourceRecordsAsync(client, id, SourceRecord(1234))).StatusCode);
         // Reading is not the same as asserting: anyone in the Program can see where a requirement came from.
         Assert.Equal(HttpStatusCode.OK, (await client.GetAsync($"/api/baseline-imports/{id}")).StatusCode);
+    }
+
+    [Fact]
+    public async Task Creating_a_controlled_baseline_refuses_base_eligibility_and_accepts_the_position_holder()
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var client = factory.CreateClient();
+        Guid projectId;
+        Guid releaseId;
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            var now = DateTimeOffset.UtcNow;
+            var program = new ProgramRecord("Baseline Authority Program", "BAU");
+            var project = new ProjectRecord(program.Id, "Baseline Authority", "Baseline Authority");
+            var release = new SoftwareRelease(project.Id, "1.0", false);
+            var baseOnly = new UserAccount("baseline.authority.base", "Base Configuration Manager",
+                "baseline.authority.base@example.test", IdentityService.HashPassword(AeroLinkApiFactory.MemberPassword), now);
+            var holder = new UserAccount("baseline.authority.holder", "Configuration Manager Holder",
+                "baseline.authority.holder@example.test", IdentityService.HashPassword(AeroLinkApiFactory.MemberPassword), now);
+            db.AddRange(program, project, release, baseOnly, holder,
+                new ProgramMembership(baseOnly.Id, program.Id, ProgramRole.ConfigurationManager, "test.setup", now),
+                new ProgramMembership(holder.Id, program.Id, ProgramRole.ConfigurationManager, "test.setup", now),
+                new ProjectLeadershipAssignment(program.Id, ProjectLeadershipPosition.ConfigurationManager,
+                    holder.Id, "test.setup", now));
+            await db.SaveChangesAsync();
+            projectId = project.Id;
+            releaseId = release.Id;
+        }
+
+        var request = new
+        {
+            baseNumber = "SW-01.00",
+            revision = 0,
+            projectId,
+            releaseId,
+            predecessorBaselineId = (Guid?)null,
+            name = "Authority baseline",
+        };
+        await SignInAsync(client, "baseline.authority.base");
+        using var refused = await client.PostAsJsonAsync("/api/baselines", request);
+        Assert.Equal(HttpStatusCode.Forbidden, refused.StatusCode);
+
+        await SignInAsync(client, "baseline.authority.holder");
+        using var accepted = await client.PostAsJsonAsync("/api/baselines", request);
+        Assert.Equal(HttpStatusCode.Created, accepted.StatusCode);
     }
 
     private static async Task SignInAsync(HttpClient client, string userName)

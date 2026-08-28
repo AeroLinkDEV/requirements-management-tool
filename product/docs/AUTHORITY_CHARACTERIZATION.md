@@ -277,7 +277,8 @@ distinct ways. The current set:
 
 | Form | Where | Live-authority classification |
 |---|---|---|
-| `IdentityService.HasRoleAsync` (two overloads) | 34 files, 138 literal demands | Base role, leadership, or legacy demand depending on the role named — this ambiguity is what E.3 fixes |
+| `IdentityService.HasRoleAsync` (two overloads) | Direct compatibility consumers | Legacy-compatible membership, leadership, backup, and delegation answer; raw governed/retired position membership is excluded |
+| `IdentityHttpExtensions.HasProjectRoleAsync` | Untyped API endpoint gates, including baseline/build, release-campaign, integration, and review-cancel control | Every named role is routed through `ProjectAuthorityResolver.LegacyRoleDemand`; governed-role membership is eligibility only, while primary, standing backup, and exact delegation answer the position demand |
 | `ProgramRoleAuthority.Satisfying` | `IdentityService`, `IdentityRecords`, `WorkflowEndpoints`, `ReviewWorkflow`, `AssuranceAuthorityPolicy`, `ManagedDocumentAssignmentPolicy`, `ApprovalConfigurationEndpoints` | Role implication, unchanged by #816 |
 | Raw `ProgramMemberships` role decisions | **Corrected:** `ManagedDocumentReviewAuthority.ResolveAsync`, the `WorkflowEndpoints` candidate, stage, and additional-signer projections, `ProblemReportEndpoints.HasProblemReportOwnerRecoveryAuthorityAsync`, `ApprovalConfigurationEndpoints.Resolve`, `ManagedDocumentAssignmentPolicy.HasExplicitAuthorityAsync`, `ProjectAssurancePolicyService.ApproverFactsAsync`, the roster gates | Mixed — listed per call site because the same file does both |
 | `ProjectRoleBackups` (legacy) | `AdministrationEndpoints`, `ApprovalConfigurationEndpoints`, `ManagedDocumentAssignmentPolicy`, `ManagedDocumentReviewAuthority`, `PersonnelEndpoints`, `WorkflowEndpoints`, `IdentityService.IsStandingBackupAsync` | Historical readability for base roles; **no longer live authority for position roles at any of these sites**, and new position-keyed rows are refused at creation |
@@ -298,7 +299,11 @@ reporting provenance (`DirectBaseRole`, `LeadershipPrimary`, `LeadershipBackup`,
 `HasRoleAsync` remains as a compatibility API. Base eligibility memberships still answer base-work questions
 (including Project Engineer and Engineering Manager satisfying ordinary `Engineer` gates), while retired
 position memberships answer nothing; current Project Leadership assignments/backups answer the corresponding
-legacy demands. Leadership-sensitive call sites no longer go through this ambiguous API.
+legacy demands. The long-standing `HasProjectRoleAsync` endpoint helper now routes every role-shaped demand
+through `ProjectAuthorityResolver`: ordinary roles retain their membership implications, while Configuration
+Manager, Program Manager, and retired lead labels require the corresponding leadership primary, standing
+backup, or exact delegation. That central cutover closes the baseline/build, release-campaign, integration,
+and review-cancel bypasses without re-implementing the split in each endpoint.
 
 That cutover includes every managed-document controller and recovery gate. Ordinary authoring and assurance
 demands remain base-role questions, while Configuration Manager, Program Manager, and the retired Project

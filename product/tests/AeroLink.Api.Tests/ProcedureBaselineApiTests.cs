@@ -64,6 +64,7 @@ public sealed class ProcedureBaselineApiTests
         noWork.Approve("test.lead", "Agreed.", now);
         db.AddRange(carrying, noWork);
 
+        UserAccount? configurationManager = null;
         foreach (var (user, role) in new[]
                  {
                      ("baseline.cm", ProgramRole.ConfigurationManager),
@@ -74,7 +75,10 @@ public sealed class ProcedureBaselineApiTests
                 IdentityService.HashPassword(AeroLinkApiFactory.MemberPassword), now);
             db.Add(account);
             db.Add(new ProgramMembership(account.Id, program.Id, role, "test.setup", now));
+            if (role == ProgramRole.ConfigurationManager) configurationManager = account;
         }
+        db.Add(new ProjectLeadershipAssignment(program.Id, ProjectLeadershipPosition.ConfigurationManager,
+            configurationManager!.Id, "test.setup", now));
         await db.SaveChangesAsync();
         return new(project.Id, release.Id, baseline.Id, carrying.Id, noWork.Id);
     }

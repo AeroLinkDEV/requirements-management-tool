@@ -116,9 +116,9 @@ public sealed class ProjectAuthorityResolver(AeroLinkDbContext db)
     }
 
     /// <summary>
-    /// A stored demand naming a role, from before the split. It cannot say whether it meant the job or the
-    /// position, so both answer it — but the leadership half is resolved position by position, each
-    /// validated on its own eligibility.
+    /// A role-shaped demand from before the split. It cannot say whether it meant the job or the position,
+    /// so both answer it — but the leadership half is resolved position by position, each validated on its
+    /// own eligibility.
     /// </summary>
     private async Task<ProjectAuthorityDecision> ResolveLegacyDemandAsync(
         Guid userId, Guid programId, ProgramRole role, DateTimeOffset now, CancellationToken ct)

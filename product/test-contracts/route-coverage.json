@@ -1801,7 +1801,8 @@
       "path": "/api/release-campaigns",
       "file": "ReleaseCampaignEndpoints.cs",
       "coveredBy": [
-        "AssurancePolicyApiTests"
+        "AssurancePolicyApiTests",
+        "ReleaseCampaignExactIntentApiTests"
       ]
     },
     {

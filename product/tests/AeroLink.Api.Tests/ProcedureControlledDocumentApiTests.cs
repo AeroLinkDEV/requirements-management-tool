@@ -151,7 +151,9 @@ public sealed class ProcedureControlledDocumentApiTests
         var user = new UserAccount("document.cm", "Document CM", "document.cm@example.test",
             IdentityService.HashPassword(AeroLinkApiFactory.MemberPassword), now);
         db.AddRange(program, project, release, change, baseline, user,
-            new ProgramMembership(user.Id, program.Id, ProgramRole.ConfigurationManager, "test.setup", now));
+            new ProgramMembership(user.Id, program.Id, ProgramRole.ConfigurationManager, "test.setup", now),
+            new ProjectLeadershipAssignment(program.Id, ProjectLeadershipPosition.ConfigurationManager,
+                user.Id, "test.setup", now));
         await db.SaveChangesAsync();
 
         // Requirements are already represented by their own exact manifest. The controlled-output endpoint

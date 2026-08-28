@@ -40,19 +40,33 @@ public sealed class CancelReviewAuthorityTests
             "Functional Behavior", null, "test.setup", now);
         db.AddRange(specification, section);
 
-        foreach (var (userName, role) in new[]
+        var accounts = new Dictionary<string, UserAccount>(StringComparer.OrdinalIgnoreCase);
+        foreach (var (userName, roles) in new[]
                  {
-                     ("cancel.author", ProgramRole.Engineer),
-                     ("cancel.reviewer", ProgramRole.Approver),
-                     ("cancel.manager", ProgramRole.ProgramManager),
-                     ("cancel.bystander", ProgramRole.Engineer),
+                     ("cancel.author", new[] { ProgramRole.Engineer }),
+                     ("cancel.reviewer", new[] { ProgramRole.Approver }),
+                     ("cancel.manager", new[] { ProgramRole.ProgramManager }),
+                     ("cancel.manager.backup", new[] { ProgramRole.ProgramManager }),
+                     ("cancel.manager.delegate", new[] { ProgramRole.Engineer }),
+                     ("cancel.manager.base", new[] { ProgramRole.ProgramManager }),
+                     ("cancel.bystander", new[] { ProgramRole.Engineer }),
                  })
         {
             var account = new UserAccount(userName, userName, $"{userName}@example.test",
                 IdentityService.HashPassword(AeroLinkApiFactory.MemberPassword), now);
             db.Add(account);
-            db.Add(new ProgramMembership(account.Id, program.Id, role, "test.setup", now));
+            accounts[userName] = account;
+            foreach (var role in roles)
+                db.Add(new ProgramMembership(account.Id, program.Id, role, "test.setup", now));
         }
+        db.AddRange(
+            new ProjectLeadershipAssignment(program.Id, ProjectLeadershipPosition.ProgramManager,
+                accounts["cancel.manager"].Id, "test.setup", now),
+            new ProjectLeadershipBackup(program.Id, ProjectLeadershipPosition.ProgramManager,
+                accounts["cancel.manager.backup"].Id, "test.setup", now),
+            new RoleDelegation(program.Id, accounts["cancel.manager"].Id,
+                accounts["cancel.manager.delegate"].Id, ProgramRole.ProgramManager,
+                now.AddMinutes(-1), now.AddHours(1), "Program Manager cover.", "test.setup", now));
 
         var scr = new SystemChangeRequest("SRCR-00500", 0, project.Id, release.Id, "Governed change",
             "Problem", "Analysis", "Solution", "cancel.author", now);
@@ -69,6 +83,8 @@ public sealed class CancelReviewAuthorityTests
     [InlineData("cancel.author")]
     [InlineData("cancel.reviewer")]
     [InlineData("cancel.manager")]
+    [InlineData("cancel.manager.backup")]
+    [InlineData("cancel.manager.delegate")]
     public async Task Somebody_with_a_stake_can_stop_the_review(string userName)
     {
         using var factory = new AeroLinkApiFactory();
@@ -80,6 +96,19 @@ public sealed class CancelReviewAuthorityTests
         var body = await response.Content.ReadAsStringAsync();
         Assert.True(response.IsSuccessStatusCode, $"{(int)response.StatusCode}: {body}");
         Assert.Contains("\"state\":\"Draft\"", body);
+    }
+
+    [Fact]
+    public async Task Base_program_manager_membership_alone_cannot_stop_another_authors_review()
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var client = factory.CreateClient();
+        var scenario = await SeedAsync(factory);
+        await SignInAsync(client, "cancel.manager.base");
+
+        using var response = await client.PostAsJsonAsync(
+            $"/api/change-requests/{scenario.ChangeRequestId}/cancel-review", new { reason = Reason });
+        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
     }
 
     [Fact]

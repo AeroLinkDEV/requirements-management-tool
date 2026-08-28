@@ -4,6 +4,7 @@ using System.Net.Http.Json;
 using System.Text;
 using System.Text.Json;
 using AeroLink.Domain.ChangeControl;
+using AeroLink.Domain.Identity;
 using AeroLink.Domain.Programs;
 using AeroLink.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
@@ -44,6 +45,48 @@ public sealed class OpenDigitalThreadTests
         using var first=await service.PostAsJsonAsync("/api/v1/events",new{eventType="external.build.completed",aggregateType="Build",aggregateId,data=new{buildNumber="FMS-2.0.17"}});using var second=await service.PostAsJsonAsync("/api/v1/events",new{eventType="external.build.completed",aggregateType="Build",aggregateId,data=new{buildNumber="FMS-2.0.17"}});
         Assert.Equal(HttpStatusCode.Accepted,first.StatusCode);Assert.Equal(HttpStatusCode.OK,second.StatusCode);var firstBody=await first.Content.ReadFromJsonAsync<JsonElement>();var secondBody=await second.Content.ReadFromJsonAsync<JsonElement>();Assert.Equal(firstBody.GetProperty("id").GetGuid(),secondBody.GetProperty("id").GetGuid());Assert.True(secondBody.GetProperty("idempotentReplay").GetBoolean());
         using var scope=factory.Services.CreateScope();var db=scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();Assert.Single(db.IntegrationEvents.Where(x=>x.ProjectId==projectId));
+    }
+
+    [Fact]
+    public async Task Integration_control_refuses_base_eligibility_and_accepts_exact_position_delegation()
+    {
+        using var factory = new AeroLinkApiFactory();
+        Guid projectId;
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            var now = DateTimeOffset.UtcNow;
+            var program = new ProgramRecord("Integration Authority Program", "INA");
+            var project = new ProjectRecord(program.Id, "Integration Authority", "Integration Authority");
+            var delegator = new UserAccount("integration.cm.delegator", "Integration CM Delegator",
+                "integration.cm.delegator@example.test", IdentityService.HashPassword(AeroLinkApiFactory.MemberPassword), now);
+            var baseOnly = new UserAccount("integration.cm.base", "Base Integration CM",
+                "integration.cm.base@example.test", IdentityService.HashPassword(AeroLinkApiFactory.MemberPassword), now);
+            var delegatee = new UserAccount("integration.cm.delegate", "Delegated Integration CM",
+                "integration.cm.delegate@example.test", IdentityService.HashPassword(AeroLinkApiFactory.MemberPassword), now);
+            db.AddRange(program, project, delegator, baseOnly, delegatee,
+                new ProgramMembership(delegator.Id, program.Id, ProgramRole.ConfigurationManager, "test.setup", now),
+                new ProgramMembership(baseOnly.Id, program.Id, ProgramRole.ConfigurationManager, "test.setup", now),
+                new ProgramMembership(delegatee.Id, program.Id, ProgramRole.Engineer, "test.setup", now),
+                new ProjectLeadershipAssignment(program.Id, ProjectLeadershipPosition.ConfigurationManager,
+                    delegator.Id, "test.setup", now),
+                new RoleDelegation(program.Id, delegator.Id, delegatee.Id, ProgramRole.ConfigurationManager,
+                    now.AddMinutes(-1), now.AddHours(1), "Integration control cover.", "test.setup", now));
+            await db.SaveChangesAsync();
+            projectId = project.Id;
+        }
+
+        using var baseClient = factory.CreateClient();
+        await SignInAsync(baseClient, "integration.cm.base");
+        using var refused = await baseClient.PostAsJsonAsync("/api/integrations/service-identities",
+            new { projectId, name = "Base only", scopes = new[] { "requirements:read" } });
+        Assert.Equal(HttpStatusCode.Forbidden, refused.StatusCode);
+
+        using var delegatedClient = factory.CreateClient();
+        await SignInAsync(delegatedClient, "integration.cm.delegate");
+        using var accepted = await delegatedClient.PostAsJsonAsync("/api/integrations/service-identities",
+            new { projectId, name = "Delegated pipeline", scopes = new[] { "requirements:read" } });
+        Assert.Equal(HttpStatusCode.Created, accepted.StatusCode);
     }
 
     [Fact]
@@ -103,6 +146,14 @@ public sealed class OpenDigitalThreadTests
     {
         using var bootstrap=new HttpRequestMessage(HttpMethod.Post,"/api/setup/bootstrap"){Content=JsonContent.Create(new{displayName="AeroLink Administrator",email="admin@example.test",password=AeroLinkApiFactory.AdministratorPassword})};bootstrap.Headers.Add("X-AeroLink-Bootstrap-Secret",AeroLinkApiFactory.BootstrapSecret);using var created=await client.SendAsync(bootstrap);Assert.Equal(HttpStatusCode.Created,created.StatusCode);
         using var login=await client.PostAsJsonAsync("/api/auth/login",new{userName="admin",password=AeroLinkApiFactory.AdministratorPassword});Assert.Equal(HttpStatusCode.OK,login.StatusCode);
+    }
+
+    private static async Task SignInAsync(HttpClient client, string userName)
+    {
+        using var login = await client.PostAsJsonAsync("/api/auth/login",
+            new { userName, password = AeroLinkApiFactory.MemberPassword });
+        Assert.Equal(HttpStatusCode.OK, login.StatusCode);
+        await SecurityBoundaryTests.AuthorizeMutationsAsync(client);
     }
 
     private static async Task<Guid> CreateProjectAsync(AeroLinkApiFactory factory)

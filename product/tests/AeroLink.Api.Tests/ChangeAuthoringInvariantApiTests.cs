@@ -279,6 +279,8 @@ public sealed class ChangeAuthoringInvariantApiTests
         db.AddRange(program, project, release, account, reviewer,
             new ProgramMembership(account.Id, program.Id, ProgramRole.Engineer, "test.setup", now),
             new ProgramMembership(account.Id, program.Id, ProgramRole.ConfigurationManager, "test.setup", now),
+            new ProjectLeadershipAssignment(program.Id, ProjectLeadershipPosition.ConfigurationManager,
+                account.Id, "test.setup", now),
             new ProgramMembership(reviewer.Id, program.Id, ProgramRole.Reviewer, "test.setup", now),
             new ProgramMembership(reviewer.Id, program.Id, ProgramRole.Approver, "test.setup", now));
         await db.SaveChangesAsync();

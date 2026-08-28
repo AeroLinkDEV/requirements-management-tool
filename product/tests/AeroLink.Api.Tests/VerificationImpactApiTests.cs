@@ -45,6 +45,9 @@ public sealed class VerificationImpactApiTests
                 IdentityService.HashPassword(AeroLinkApiFactory.MemberPassword), now);
             db.Add(account);
             db.Add(new ProgramMembership(account.Id, program.Id, role, "test.setup", now));
+            if (role == ProgramRole.ConfigurationManager)
+                db.Add(new ProjectLeadershipAssignment(program.Id, ProjectLeadershipPosition.ConfigurationManager,
+                    account.Id, "test.setup", now));
         }
         await db.SaveChangesAsync();
 
@@ -498,6 +501,8 @@ public sealed class VerificationImpactApiTests
                 "all-parent-api", now));
             db.Add(new ProgramMembership(cm.Id, program.Id, ProgramRole.ConfigurationManager,
                 "all-parent-api", now));
+            db.Add(new ProjectLeadershipAssignment(program.Id, ProjectLeadershipPosition.ConfigurationManager,
+                cm.Id, "all-parent-api", now));
             await db.SaveChangesAsync();
             await scope.ServiceProvider.GetRequiredService<VerificationImpactService>()
                 .RaiseForApprovedChangeRequestAsync(scr, now, default);
@@ -650,6 +655,8 @@ public sealed class VerificationImpactApiTests
                 "missing-parent-api", now));
             db.Add(new ProgramMembership(cm.Id, program.Id, ProgramRole.ConfigurationManager,
                 "missing-parent-api", now));
+            db.Add(new ProjectLeadershipAssignment(program.Id, ProjectLeadershipPosition.ConfigurationManager,
+                cm.Id, "missing-parent-api", now));
             await db.SaveChangesAsync();
             await scope.ServiceProvider.GetRequiredService<VerificationImpactService>()
                 .RaiseForApprovedChangeRequestAsync(scr, now, default);
@@ -811,6 +818,8 @@ public sealed class VerificationImpactApiTests
                 "dormant-http", now));
             db.Add(new ProgramMembership(cm.Id, program.Id, ProgramRole.ConfigurationManager,
                 "dormant-http", now));
+            db.Add(new ProjectLeadershipAssignment(program.Id, ProjectLeadershipPosition.ConfigurationManager,
+                cm.Id, "dormant-http", now));
             await db.SaveChangesAsync();
             await scope.ServiceProvider.GetRequiredService<VerificationImpactService>()
                 .RaiseForApprovedChangeRequestAsync(scr, now, default);

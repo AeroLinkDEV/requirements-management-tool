@@ -20,10 +20,31 @@ public sealed class IdentityPersistenceTests
 
         await new IdentitySeeder(db).EnsureSeededAsync();
 
-        var programManager = await db.ProjectLeadershipAssignments.AsNoTracking()
-            .SingleAsync(x => x.ProgramId == program.Id && x.Position == ProjectLeadershipPosition.ProgramManager);
+        var assignments = await db.ProjectLeadershipAssignments.AsNoTracking()
+            .Where(x => x.ProgramId == program.Id).ToListAsync();
+        Assert.Equal(
+            [
+                ProjectLeadershipPosition.ProjectEngineer,
+                ProjectLeadershipPosition.ProgramManager,
+                ProjectLeadershipPosition.EngineeringManager,
+                ProjectLeadershipPosition.ConfigurationManager,
+                ProjectLeadershipPosition.SystemEngineeringLead,
+                ProjectLeadershipPosition.SoftwareEngineeringLead,
+            ],
+            assignments.Select(x => x.Position).Order().ToArray());
+        var programManager = assignments
+            .Single(x => x.Position == ProjectLeadershipPosition.ProgramManager);
         var holder = await db.UserAccounts.AsNoTracking().SingleAsync(x => x.Id == programManager.HolderUserId);
         Assert.Equal("engineering.manager", holder.UserName);
+
+        await new IdentitySeeder(db).EnsureSeededAsync();
+
+        var reseededAssignments = await db.ProjectLeadershipAssignments.AsNoTracking()
+            .Where(x => x.ProgramId == program.Id).ToListAsync();
+        Assert.Equal(assignments.Count, reseededAssignments.Count);
+        Assert.Equal(
+            assignments.OrderBy(x => x.Position).Select(x => (x.Position, x.HolderUserId)),
+            reseededAssignments.OrderBy(x => x.Position).Select(x => (x.Position, x.HolderUserId)));
     }
 
     [Fact]

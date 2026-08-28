@@ -80,6 +80,8 @@ public sealed class ReopenBaselineConsequencesApiTests
             db.Add(account);
             foreach (var role in new[] { ProgramRole.Engineer, ProgramRole.ConfigurationManager })
                 db.Add(new ProgramMembership(account.Id, program.Id, role, "test.setup", now));
+            db.Add(new ProjectLeadershipAssignment(program.Id, ProjectLeadershipPosition.ConfigurationManager,
+                account.Id, "test.setup", now));
             var reviewer = new UserAccount("reviewer", "Reviewer", "reviewer@example.test",
                 IdentityService.HashPassword(AeroLinkApiFactory.MemberPassword), now);
             db.Add(reviewer);

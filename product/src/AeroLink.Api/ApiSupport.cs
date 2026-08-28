@@ -28,7 +28,19 @@ static class IdentityHttpExtensions
     public static async Task<bool> HasProjectRoleAsync(this HttpContext context, AeroLinkDbContext db, IdentityService identity, Guid projectId, CancellationToken ct, params ProgramRole[] roles)
     {
         var programId = await db.Projects.Where(x => x.Id == projectId).Select(x => (Guid?)x.ProgramId).SingleOrDefaultAsync(ct); if (programId is null) return false;
-        foreach (var role in roles) if (await identity.HasRoleAsync(context.UserAccount(), programId.Value, role, DateTimeOffset.UtcNow, ct)) return true;
+        // Keep the long-standing endpoint helper shape while routing its answer through the one effective
+        // authority resolver. A role named by a route is a legacy demand: ordinary job memberships still
+        // answer ordinary roles, while a governed Configuration Manager / Program Manager / lead role is
+        // answered only by the current position, its standing backup, or an exact delegation. Calling
+        // IdentityService here reintroduced the base-role/position conflation at every control route.
+        _ = identity;
+        var resolver = new ProjectAuthorityResolver(db);
+        var actor = context.UserAccount();
+        var now = DateTimeOffset.UtcNow;
+        foreach (var role in roles)
+            if (await resolver.IsSatisfiedAsync(actor.Id, programId.Value,
+                    ProjectAuthorityRequirement.LegacyRoleDemand(role), now, ct))
+                return true;
         return false;
     }
     /// <summary>

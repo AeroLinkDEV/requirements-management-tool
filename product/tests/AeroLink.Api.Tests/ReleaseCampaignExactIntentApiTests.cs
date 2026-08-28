@@ -218,6 +218,48 @@ public sealed class ReleaseCampaignExactIntentApiTests
         Assert.NotEqual(afterTestSet, afterTcr);
     }
 
+    [Fact]
+    public async Task Release_campaign_control_requires_leadership_and_accepts_the_standing_backup()
+    {
+        using var factory = new AeroLinkApiFactory();
+        Guid projectId;
+        Guid releaseId;
+        Guid baselineId;
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            var now = DateTimeOffset.UtcNow;
+            var program = new ProgramRecord("Release Authority Program", "RCA");
+            var project = new ProjectRecord(program.Id, "Release Authority", "Release Authority");
+            var release = new SoftwareRelease(project.Id, "1.0", false);
+            var baseline = new CandidateBaseline("SW-01.00", 0, project.Id, release.Id, null,
+                "Release authority baseline", "test.setup", now);
+            var baseOnly = new UserAccount("release.cm.base", "Base Configuration Manager",
+                "release.cm.base@example.test", IdentityService.HashPassword(AeroLinkApiFactory.MemberPassword), now);
+            var backup = new UserAccount("release.cm.backup", "Backup Configuration Manager",
+                "release.cm.backup@example.test", IdentityService.HashPassword(AeroLinkApiFactory.MemberPassword), now);
+            db.AddRange(program, project, release, baseline, baseOnly, backup,
+                new ProgramMembership(baseOnly.Id, program.Id, ProgramRole.ConfigurationManager, "test.setup", now),
+                new ProgramMembership(backup.Id, program.Id, ProgramRole.ConfigurationManager, "test.setup", now),
+                new ProjectLeadershipBackup(program.Id, ProjectLeadershipPosition.ConfigurationManager,
+                    backup.Id, "test.setup", now));
+            await db.SaveChangesAsync();
+            projectId = project.Id;
+            releaseId = release.Id;
+            baselineId = baseline.Id;
+        }
+
+        using var baseClient = await ApproverClientAsync(factory, "release.cm.base");
+        using var refused = await baseClient.PostAsJsonAsync("/api/release-campaigns",
+            new { projectId, releaseId, baselineId, name = "Base-only attempt" });
+        Assert.Equal(HttpStatusCode.Forbidden, refused.StatusCode);
+
+        using var backupClient = await ApproverClientAsync(factory, "release.cm.backup");
+        using var accepted = await backupClient.PostAsJsonAsync("/api/release-campaigns",
+            new { projectId, releaseId, baselineId, name = "Backup-authorized campaign" });
+        Assert.Equal(HttpStatusCode.Created, accepted.StatusCode);
+    }
+
     private static async Task<HttpClient> ApproverClientAsync(AeroLinkApiFactory factory, string userName)
     {
         var client = factory.CreateClient();

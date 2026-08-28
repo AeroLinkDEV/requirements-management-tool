@@ -22,9 +22,10 @@ public enum ProjectAuthorityKind
     LeadershipPosition,
 
     /// <summary>
-    /// A persisted role demand from before the leadership model — a stored workflow stage naming
-    /// <c>SystemEngineeringLead</c>, for example. Answered by non-position membership or leadership; a raw
-    /// retired position membership never answers it. Deliberately explicit so these sites stay countable.
+    /// A role-shaped demand from before the leadership model — a stored workflow stage naming
+    /// <c>SystemEngineeringLead</c>, for example, or an untyped endpoint gate. Answered by non-position
+    /// membership or leadership; a raw retired position membership never answers it. Deliberately explicit
+    /// so these compatibility sites stay countable.
     /// </summary>
     LegacyRoleDemand,
 }
@@ -66,7 +67,7 @@ public readonly record struct ProjectAuthorityRequirement
     public static ProjectAuthorityRequirement Leadership(ProjectLeadershipPosition position) =>
         new(ProjectAuthorityKind.LeadershipPosition, null, position);
 
-    /// <summary>A stored demand that predates the split and must keep resolving both ways.</summary>
+    /// <summary>A role-shaped demand that predates the split and must keep resolving both ways.</summary>
     public static ProjectAuthorityRequirement LegacyRoleDemand(
         ProgramRole role, bool allowProgramAdministratorSubstitution = false) =>
         new(ProjectAuthorityKind.LegacyRoleDemand, role, null, allowProgramAdministratorSubstitution);
