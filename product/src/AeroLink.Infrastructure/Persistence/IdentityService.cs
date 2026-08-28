@@ -232,7 +232,72 @@ public sealed class IdentitySeeder(AeroLinkDbContext db)
                     db.ProgramMemberships.Add(new(user.Id, program, role, "system.bootstrap", now));
         }
         await db.SaveChangesAsync(ct);
+        await EnsureSeededLeadershipAsync(programs, now, ct);
     }
+
+    /// <summary>
+    /// Elevates the seeded leads into the Project Leadership positions their roles used to imply.
+    ///
+    /// Since #816 a <c>SoftwareEngineeringLead</c> membership is a retired position role that grants nothing
+    /// on its own — the authority travels with the assignment. Real deployments get their assignments from
+    /// the migration, which only runs on PostgreSQL; a fresh SQLite database seeds its state instead and
+    /// would otherwise come up with eight vacant positions and a roster of leads who cannot sign anything.
+    ///
+    /// Only the roles the seeded people actually hold are elevated, and only where the position is vacant, so
+    /// this never overwrites a decision somebody made through the API.
+    /// </summary>
+    private async Task EnsureSeededLeadershipAsync(IReadOnlyList<Guid> programs, DateTimeOffset now, CancellationToken ct)
+    {
+        foreach (var program in programs)
+        {
+            foreach (var position in ProjectLeadership.All)
+            {
+                if (await db.ProjectLeadershipAssignments.AnyAsync(
+                        x => x.ProgramId == program && x.Position == position && x.EndedAt == null, ct))
+                    continue;
+
+                // Prefer whoever the seed named as the legacy position holder; otherwise the earliest person
+                // holding the position's base role. Deterministic either way, so a reseed cannot silently
+                // move a position between two equally eligible people.
+                var requiredBaseRole = ProjectLeadership.RequiredBaseRole(position);
+                var legacyRole = LegacySeedRole(position);
+                var holder = await FirstHolderAsync(program, legacyRole, ct)
+                    ?? await FirstHolderAsync(program, requiredBaseRole, ct);
+                if (holder is null) continue;
+
+                // The same named derivation the migration uses: the lead membership is the evidence of the
+                // discipline, so the base role the position requires is granted here rather than assumed.
+                if (!await db.ProgramMemberships.AnyAsync(x => x.UserId == holder && x.ProgramId == program
+                        && x.Role == requiredBaseRole && x.EndedAt == null, ct))
+                    db.ProgramMemberships.Add(new(holder.Value, program, requiredBaseRole, "system.bootstrap", now));
+
+                db.ProjectLeadershipAssignments.Add(
+                    new ProjectLeadershipAssignment(program, position, holder.Value, "system.bootstrap", now));
+            }
+            await db.SaveChangesAsync(ct);
+        }
+    }
+
+    private async Task<Guid?> FirstHolderAsync(Guid programId, ProgramRole? role, CancellationToken ct)
+    {
+        if (role is null) return null;
+        var value = role.Value;
+        return await db.ProgramMemberships.AsNoTracking()
+            .Where(x => x.ProgramId == programId && x.EndedAt == null && x.Role == value)
+            .OrderBy(x => x.GrantedAt).ThenBy(x => x.UserId)
+            .Select(x => (Guid?)x.UserId).FirstOrDefaultAsync(ct);
+    }
+
+    /// <summary>The retired position role a seeded person may still carry for each position, if any.</summary>
+    private static ProgramRole? LegacySeedRole(ProjectLeadershipPosition position) => position switch
+    {
+        ProjectLeadershipPosition.SystemEngineeringLead => ProgramRole.SystemEngineeringLead,
+        ProjectLeadershipPosition.SoftwareEngineeringLead => ProgramRole.SoftwareEngineeringLead,
+        ProjectLeadershipPosition.SystemTestLead => ProgramRole.SystemTestLead,
+        ProjectLeadershipPosition.SoftwareTestLead => ProgramRole.SoftwareTestLead,
+        ProjectLeadershipPosition.ProjectEngineer => ProgramRole.ProjectEngineeringLead,
+        _ => null,
+    };
 
     private static IEnumerable<(string User, string Name, string Email, ProgramRole[] Roles)> GeneratedPeople()
     {

@@ -195,8 +195,12 @@ public sealed class ManagedDocumentRecoveryApiTests
         db.AddRange(program, project, owner, other, technical, quality,
             new ProgramMembership(owner.Id, program.Id, ProgramRole.Engineer, "admin", now),
             new ProgramMembership(other.Id, program.Id, ProgramRole.Engineer, "admin", now),
-            new ProgramMembership(technical.Id, program.Id, ProgramRole.SoftwareEngineeringLead, "admin", now),
-            new ProgramMembership(quality.Id, program.Id, ProgramRole.SoftwareQualityAnalyst, "admin", now));
+            // Technical review authority is the Software Engineering Lead position's since #816, so the
+            // reviewer is elevated into it rather than granted the retired role name.
+            new ProgramMembership(technical.Id, program.Id, ProgramRole.SoftwareEngineer, "admin", now),
+            new ProgramMembership(quality.Id, program.Id, ProgramRole.SoftwareQualityAnalyst, "admin", now),
+            new ProjectLeadershipAssignment(
+                program.Id, ProjectLeadershipPosition.SoftwareEngineeringLead, technical.Id, "admin", now));
         await db.SaveChangesAsync(); return (program.Id, project.Id);
     }
 }

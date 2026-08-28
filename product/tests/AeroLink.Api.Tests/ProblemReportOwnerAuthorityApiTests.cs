@@ -188,7 +188,11 @@ public sealed class ProblemReportOwnerAuthorityApiTests
         db.AddRange(program, project, otherProgram);
 
         Add("owner.engineer", ProgramRole.Engineer, program.Id);
-        Add("owner.supervisor", ProgramRole.ProgramManager, program.Id);
+        // Recovery is the Program Manager position's authority since #816, not the role's, so the supervisor
+        // is elevated into the post rather than merely granted the role that qualifies them for it.
+        var supervisorAccount = Add("owner.supervisor", ProgramRole.ProgramManager, program.Id);
+        db.Add(new ProjectLeadershipAssignment(
+            program.Id, ProjectLeadershipPosition.ProgramManager, supervisorAccount.Id, "test.setup", now));
         Add("authority.system", ProgramRole.SystemEngineer, program.Id);
         Add("authority.software", ProgramRole.SoftwareEngineer, program.Id);
         Add("authority.quality", ProgramRole.SoftwareQualityAnalyst, program.Id);

@@ -55,8 +55,18 @@ public sealed class ProjectPersonnelApiTests : IClassFixture<SharedApiHost>
         db.AddRange(manager, engineer, deputy, outsider);
         db.AddRange(
             new ProgramMembership(manager.Id, program.Id, ProgramRole.ProgramManager, "test.setup", now),
+            // Both rows deliberately: the retired SystemEngineeringLead membership is what a database
+            // upgraded from before #816 still holds, and the roster endpoints must keep managing it as
+            // history. The base role beside it is the position's eligibility.
             new ProgramMembership(engineer.Id, program.Id, ProgramRole.SystemEngineeringLead, "test.setup", now),
+            new ProgramMembership(engineer.Id, program.Id, ProgramRole.SystemEngineer, "test.setup", now),
             new ProgramMembership(deputy.Id, program.Id, ProgramRole.SystemEngineer, "test.setup", now));
+        // Roster stewardship is the Program Manager *position*, not the role that makes somebody eligible
+        // for it, so the manager is elevated rather than merely granted. The engineer holds the System
+        // Engineering Lead position for the same reason: the retired role name confers nothing on its own.
+        db.AddRange(
+            new ProjectLeadershipAssignment(program.Id, ProjectLeadershipPosition.ProgramManager, manager.Id, "test.setup", now),
+            new ProjectLeadershipAssignment(program.Id, ProjectLeadershipPosition.SystemEngineeringLead, engineer.Id, "test.setup", now));
         await db.SaveChangesAsync();
         return new(project.Id, program.Id, manager.Id, engineer.Id, deputy.Id, outsider.Id,
             managerName, engineerName, deputyName, outsiderName);
@@ -170,6 +180,19 @@ public sealed class ProjectPersonnelApiTests : IClassFixture<SharedApiHost>
         Assert.Equal(seeded.ManagerName, membership.EndedBy);
 
         var identity = scope.ServiceProvider.GetRequiredService<IdentityService>();
+        // The authority does NOT go with the legacy membership, because since #816 it never came from it.
+        // The engineer still holds the System Engineering Lead position, and that is what answers the demand.
+        Assert.True(await identity.HasRoleAsync(seeded.EngineerId, seeded.ProgramId,
+            ProgramRole.SystemEngineeringLead, DateTimeOffset.UtcNow, default));
+
+        // Ending the assignment is what removes it. Proving both halves here is the point: an upgrade that
+        // ended the membership and left the assignment would look like a revocation and not be one, and the
+        // reverse — the shape #824 shipped — left a replaced holder still signing.
+        var assignment = await db.ProjectLeadershipAssignments
+            .SingleAsync(x => x.ProgramId == seeded.ProgramId && x.HolderUserId == seeded.EngineerId
+                              && x.Position == ProjectLeadershipPosition.SystemEngineeringLead && x.EndedAt == null);
+        assignment.End("test.setup", DateTimeOffset.UtcNow);
+        await db.SaveChangesAsync();
         Assert.False(await identity.HasRoleAsync(seeded.EngineerId, seeded.ProgramId,
             ProgramRole.SystemEngineeringLead, DateTimeOffset.UtcNow, default));
     }

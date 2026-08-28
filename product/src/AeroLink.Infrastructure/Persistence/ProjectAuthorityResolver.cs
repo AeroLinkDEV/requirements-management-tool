@@ -192,10 +192,22 @@ public sealed class ProjectAuthorityResolver(AeroLinkDbContext db)
                     results[backup] = (ProjectAuthoritySource.LeadershipBackup, position);
         }
 
+        var activeUserIds = activeMembers.Select(x => x.UserId).ToHashSet();
+
+        // Legacy role-keyed backups still stand for the roles that are still jobs — Reviewer, SQA and the
+        // rest. They are deliberately NOT honoured for position roles: that designation belongs on
+        // ProjectLeadershipBackup, and reading both is what let a removed backup keep signing.
+        var legacyBackups = await db.ProjectRoleBackups.AsNoTracking()
+            .Where(x => x.ProgramId == programId && x.RemovedAt == null)
+            .Select(x => new { x.BackupUserId, x.Role }).ToListAsync(ct);
+        foreach (var backup in legacyBackups.Where(x =>
+                     !SingularProgramRoles.IsSingular(x.Role) && !SingularProgramRoles.IsBaseEligibility(x.Role)
+                     && accepted.Contains(x.Role) && activeUserIds.Contains(x.BackupUserId)))
+            results.TryAdd(backup.BackupUserId, (ProjectAuthoritySource.LegacyCompatibility, null));
+
         var delegations = await db.RoleDelegations.AsNoTracking()
             .Where(x => x.ProgramId == programId && x.Role == demanded && x.RevokedAt == null)
             .ToListAsync(ct);
-        var activeUserIds = activeMembers.Select(x => x.UserId).ToHashSet();
         foreach (var delegation in delegations.Where(x => x.StartsAt <= now && x.EndsAt > now))
             if (activeUserIds.Contains(delegation.DelegateUserId))
                 results.TryAdd(delegation.DelegateUserId, (ProjectAuthoritySource.Delegation, null));

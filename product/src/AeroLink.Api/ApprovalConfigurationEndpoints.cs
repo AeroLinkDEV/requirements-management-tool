@@ -32,7 +32,8 @@ public static class ApprovalConfigurationEndpoints
     public static void MapApprovalConfigurationEndpoints(this WebApplication app)
     {
         app.MapGet("/api/projects/{projectId:guid}/approval-configuration", async (Guid projectId, HttpContext http,
-            AeroLinkDbContext db, IdentityService identity, IProjectLadderPolicyResolver policyResolver, CancellationToken ct) =>
+            AeroLinkDbContext db, IdentityService identity, IProjectLadderPolicyResolver policyResolver,
+            ProjectAuthorityResolver authority, CancellationToken ct) =>
         {
             if (!await http.HasProjectAccessAsync(db, projectId, ct)) return Results.Forbid();
             var ladderPolicy = await policyResolver.ResolveAsync(projectId, ct);
@@ -70,30 +71,33 @@ public static class ApprovalConfigurationEndpoints
                 .Where(x => accountIds.Contains(x.Id) && x.State == AccountState.Active)
                 .ToDictionaryAsync(x => x.Id, x => x.DisplayName, ct);
 
-            // Who satisfies a stage: anybody holding a role that answers for it, plus anybody standing as its
-            // backup. The same implication the server enforces at signing time, so the page cannot promise a
-            // signature the review would refuse — or withhold one it would accept.
-            ResolvedAuthority Resolve(ProgramRole required)
+            // Who satisfies a stage, taken from the resolver the signing gate itself reads, so the page cannot
+            // promise a signature the review would refuse — or withhold one it would accept. This used to be
+            // a second scan of memberships and legacy backups that merely aimed to agree; since #816 split
+            // base roles from positions, reading the same source is what makes the agreement real.
+            var authorityByRole = new Dictionary<ProgramRole, ResolvedAuthority>();
+            foreach (var required in workflows.SelectMany(x => x.Stages).Select(x => x.RequiredRole).Distinct())
             {
-                var accepted = ProgramRoleAuthority.Satisfying(required);
-                var holders = memberships.Where(x => accepted.Contains(x.Role))
-                    .Select(x => x.UserId).Distinct()
-                    .Where(names.ContainsKey).Select(x => names[x]).Order().ToList();
-                var standing = backups.Where(x => accepted.Contains(x.Role))
-                    .Select(x => x.BackupUserId).Distinct()
-                    .Where(id => names.ContainsKey(id) && memberships.Any(m => m.UserId == id))
-                    .Select(x => names[x]).Order().ToList();
-                // IdentityService.HasRoleAsync treats a delegation as a live exact-role grant. Keep that
-                // same rule here so the configuration center never promises a delegate the signing gate rejects.
-                var delegated = delegations.Where(x => x.Role == required)
-                    .Select(x => x.DelegateUserId).Distinct()
-                    .Where(id => names.ContainsKey(id) && memberships.Any(m => m.UserId == id))
-                    .Select(x => names[x]).Order().ToList();
+                var resolved = await authority.ResolveHoldersAsync(programId.Value, required, now, ct);
+                List<string> Named(params ProjectAuthoritySource[] sources) => resolved
+                    .Where(x => sources.Contains(x.Source) && names.ContainsKey(x.UserId))
+                    .Select(x => names[x.UserId]).Distinct().Order().ToList();
+
+                var holders = Named(ProjectAuthoritySource.DirectBaseRole, ProjectAuthoritySource.LeadershipPrimary);
+                var standing = Named(ProjectAuthoritySource.LeadershipBackup, ProjectAuthoritySource.LegacyCompatibility);
+                // A delegation stays a live exact-role grant, exactly as the signing gate treats it.
+                var delegated = Named(ProjectAuthoritySource.Delegation);
                 // Blocking is named separately from "no holder" because a standing backup is enough to
                 // complete the stage even when the position itself is empty.
-                return new ResolvedAuthority(required.ToString(), SingularProgramRoles.IsSingular(required),
-                    holders, standing, delegated, holders.Count == 0 && standing.Count == 0 && delegated.Count == 0);
+                authorityByRole[required] = new ResolvedAuthority(
+                    required.ToString(), SingularProgramRoles.IsSingular(required),
+                    holders, standing, delegated,
+                    holders.Count == 0 && standing.Count == 0 && delegated.Count == 0);
             }
+
+            ResolvedAuthority Resolve(ProgramRole required) => authorityByRole.TryGetValue(required, out var value)
+                ? value
+                : new ResolvedAuthority(required.ToString(), SingularProgramRoles.IsSingular(required), [], [], [], true);
 
             var configured = Subjects.Where(subject => IsSubjectSupported(ladderPolicy, subject)).Select(subject =>
             {

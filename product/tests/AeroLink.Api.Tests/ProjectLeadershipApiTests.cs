@@ -62,6 +62,10 @@ public sealed class ProjectLeadershipApiTests : IClassFixture<SharedApiHost>
             new ProgramMembership(second.Id, program.Id, ProgramRole.SystemEngineer, "test.setup", now),
             new ProgramMembership(backup.Id, program.Id, ProgramRole.SystemEngineer, "test.setup", now),
             new ProgramMembership(testerAccount.Id, program.Id, ProgramRole.SystemTestEngineer, "test.setup", now));
+        // Managing leadership is the Program Manager position's, not the eligibility role's, so the manager
+        // is elevated into the post rather than merely granted the role that qualifies them for it.
+        db.Add(new ProjectLeadershipAssignment(
+            program.Id, ProjectLeadershipPosition.ProgramManager, manager.Id, "test.setup", now));
         await db.SaveChangesAsync();
         return new(project.Id, program.Id, manager.Id, managerName,
             first.Id, second.Id, backup.Id, testerAccount.Id,

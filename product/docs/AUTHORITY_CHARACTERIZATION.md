@@ -96,6 +96,12 @@ ProgramManager demand here becomes a **leadership-position** demand; SQA/Airwort
 
 Direct `HasRoleAsync(..., ProgramRole.X, ...)` demands on `main` (17 inline sites):
 
+> **Erratum (2026-08-28):** the "17 inline sites" count, and the exhaustiveness this section implies, are
+> wrong. The tree holds 138 literal-role demands across 34 files, and four live consumers are missing from
+> the tables below entirely. The original text is retained as the historical record; the corrected inventory
+> is in the erratum at the end of this document. Read what follows as a classification of demand *kinds*,
+> not as a census.
+
 | Demanded role | Sites | Classification |
 |---|---|---|
 | `Approver` | ChangeRequestEndpoints ×4 (stage authorize ×2, closure approvals ×2, decision ×2 more via Approver), DownstreamAssessmentEndpoints ×1 | Workflow-stage meaning (stage gates) + generic standing membership demand → Slice 4 cutover |
@@ -214,3 +220,109 @@ Recorded on #812: Team Work must consume, after Slice 4 — (a) base project rol
 delegation); (d) `ReviewStageKind` for Review/Approval wording; (e) never generic Reviewer/Approver as a
 person label. #812's current text referencing `ProgramRole` discipline leads and Reviewer/Approver holder
 presentation is stale after Slice 4 and should be implemented against the new resolver.
+
+---
+
+# Erratum and post-Slice-2 addendum — 2026-08-28
+
+**The sections above are the Slice 1 snapshot and are left as written.** They record what the
+characterization work found on `main` at `ae395e7b` and remain the historical account, including the parts
+this erratum corrects. Nothing below rewrites them; it records where they were wrong and what is true now,
+at `6211b15f`.
+
+## E.1 The consumer inventory was not exhaustive
+
+Section 3 opens "Direct `HasRoleAsync(..., ProgramRole.X, ...)` demands on `main` (17 inline sites)". That
+count and the exhaustiveness it implies are both wrong.
+
+A fresh sweep of current `main` finds **138 literal-role demands** through `HasRoleAsync` /
+`HasProjectRoleAsync`, across **34 files**. The largest consumers are:
+
+| File | Literal-role demands |
+|---|---|
+| `VerificationImpactEndpoints` | 22 |
+| `BaselineEndpoints` | 16 |
+| `ManagedDocumentEndpoints` | 14 |
+| `ProductLineEndpoints` | 12 |
+| `ReleaseCampaignEndpoints` | 11 |
+| `IntegrationEndpoints` | 11 |
+| `DownstreamAssessmentEndpoints` | 11 |
+| `VerificationEndpoints` | 10 |
+
+By demanded role, across all sites: `ConfigurationManager` 91, `ProgramManager` 48, `Engineer` 41,
+`Administrator` 14, `TestEngineer` 13, `Approver` 12, `TestLead` 11, `ProjectEngineeringLead` 10,
+`SoftwareQualityAnalyst` 5.
+
+**Four live consumers named in the #822 review appear nowhere in the original document** —
+`ReleaseCampaignEndpoints`, `VerificationImpactEndpoints`, `QualityIntelligenceEndpoints` and
+`ControlledEditingCheckInEngine` each occur zero times in sections 1–7. Two of them are the first and
+fourteenth largest consumers in the repository.
+
+The original count appears to have been of *distinct inline demand sites the author enumerated by hand*
+rather than of demands in the tree. Read section 3's table as an illustrative classification of the demand
+*kinds*, not as a census.
+
+## E.2 Corrected inventory: the forms authority actually takes
+
+A sweep for one textual pattern will always under-count, because authority is expressed in at least seven
+distinct ways. The current set:
+
+| Form | Where | Live-authority classification |
+|---|---|---|
+| `IdentityService.HasRoleAsync` (two overloads) | 34 files, 138 literal demands | Base role, leadership, or legacy demand depending on the role named — this ambiguity is what E.3 fixes |
+| `ProgramRoleAuthority.Satisfying` | `IdentityService`, `IdentityRecords`, `WorkflowEndpoints`, `ReviewWorkflow`, `AssuranceAuthorityPolicy`, `ManagedDocumentAssignmentPolicy`, `ApprovalConfigurationEndpoints` | Role implication, unchanged by #816 |
+| Raw `ProgramMemberships` role decisions | `ManagedDocumentReviewAuthority`, `WorkflowEndpoints`, `ProblemReportEndpoints`, `PersonnelEndpoints`, `ProjectAssurancePolicyService` | **Corrected** — now routed through `ProjectAuthorityResolver` |
+| `ProjectRoleBackups` (legacy) | `AdministrationEndpoints`, `ApprovalConfigurationEndpoints`, `ManagedDocumentAssignmentPolicy`, `ManagedDocumentReviewAuthority`, `PersonnelEndpoints`, `WorkflowEndpoints`, `IdentityService` | Historical readability for base roles; **no longer live authority for position roles** |
+| `ProjectLeadershipAssignments` / `ProjectLeadershipBackups` | `IdentityService`, `ProjectLeadershipService`, `ProjectAuthorityResolver` | **The** live leadership authority |
+| `RoleDelegations` | 9 files | Exact-role, time-bounded; unchanged |
+| `ProblemReportOwnerAuthority` recovery | `ProblemReportEndpoints` | **Corrected** — leadership positions, not membership roles |
+| `AssuranceAuthorityPolicy` | `ProjectAssurancePolicyService` | **Corrected** — `ProgramManager` is a position; SQA/Airworthiness remain base roles |
+
+## E.3 Base-role versus leadership-position demands
+
+The snapshot classified demands as base-role or leadership-position in prose, but the code had no way to
+express the difference: `HasRoleAsync(user, program, ProgramRole.ProgramManager)` meant both "does this
+person do the Program Manager's job" and "is this person *the* Program Manager", and answered yes to
+either. `ProjectAuthorityRequirement` now names the question and `ProjectAuthorityResolver` answers it,
+reporting provenance (`DirectBaseRole`, `LeadershipPrimary`, `LeadershipBackup`, `Delegation`,
+`AdministratorSubstitution`, `LegacyCompatibility`).
+
+`HasRoleAsync` remains as a compatibility API and continues to answer legacy role demands both ways —
+a persisted workflow stage naming `SystemEngineeringLead` cannot say which sense it meant, so both satisfy
+it. Leadership-sensitive call sites no longer go through it.
+
+## E.4 Singularity moved
+
+Section 3 recorded `SingularProgramRoles.IsSingular` enforcing singularity at membership grant for nine
+values. Four of those — `ProjectEngineer`, `ProgramManager`, `EngineeringManager`, `ConfigurationManager` —
+are base eligibility and are now **multi-member**; singularity for the position lives on
+`ProjectLeadershipAssignment`. The other five stay singular so legacy data cannot grow a second live holder.
+
+This is what makes the owner's atomic Replace-Leader possible: the prospective replacement can be granted
+the eligibility while the incumbent still holds the post.
+
+## E.5 Workflow-stage and legacy semantics
+
+Unchanged by this correction, and still Slice 4's: `ReviewStageKind {Review, Approval}` carries the meaning
+of a signature, and `Reviewer`/`Approver` remain grantable roles until Slice 4 retires them. Stage
+`RequiredRole` is still a `ProgramRole`; the candidate picker now resolves it through the shared resolver so
+that it and the signing gate cannot disagree, but the stored demand shape has not changed.
+
+## E.6 Delegation and administrator substitution
+
+Unchanged. Delegations remain exact-role and time-bounded — a delegation of one role is not a delegation of
+everything that role satisfies. The global `admin` account still satisfies every check inside
+`IdentityService`; program-scoped `Administrator` membership still substitutes in
+`ManagedDocumentReviewAuthority` and the candidate picker; and an administrator still gains **no** assurance
+authority merely by being an administrator.
+
+## E.7 Compatibility paths remaining after this correction
+
+- Legacy `ProjectRoleBackups` still answer **base-role** demands. They no longer answer position demands.
+- Legacy position **memberships** are retired by the v2 reconciliation
+  (`ProjectLeadershipReconciliationAuthority`) once the equivalent assignment exists. Until a database runs
+  v2 they remain live, which is why v2 is a separate marker rather than an edit to v1.
+- `ProgramRole.ProjectEngineeringLead` remains in the enum and remains readable in history. It is retired as
+  an active concept, is never newly granted, and its live authority is the Project Engineer position's.
+- `SingularProgramRoles.All` still returns the nine legacy position values for the existing Personnel
+  projection. The eight-card Project Leadership presentation that replaces it belongs to Slice 3 (#819).

@@ -54,8 +54,16 @@ public sealed class ApprovalConfigurationApiTests : IClassFixture<SharedApiHost>
         db.AddRange(manager, lead, deputy);
         db.AddRange(
             new ProgramMembership(manager.Id, program.Id, ProgramRole.ProgramManager, "test.setup", now),
-            new ProgramMembership(lead.Id, program.Id, ProgramRole.SystemEngineeringLead, "test.setup", now),
+            new ProgramMembership(lead.Id, program.Id, ProgramRole.SystemEngineer, "test.setup", now),
             new ProgramMembership(deputy.Id, program.Id, ProgramRole.SystemEngineer, "test.setup", now));
+        // The stage names the System Engineering Lead. Since #816 that demand is answered by the position, so
+        // the lead is elevated into it rather than granted the retired role name — and managing the roster is
+        // the Program Manager position's, so the manager is elevated too.
+        db.AddRange(
+            new ProjectLeadershipAssignment(
+                program.Id, ProjectLeadershipPosition.SystemEngineeringLead, lead.Id, "test.setup", now),
+            new ProjectLeadershipAssignment(
+                program.Id, ProjectLeadershipPosition.ProgramManager, manager.Id, "test.setup", now));
 
         var workflow = new ReviewWorkflow(project.Id, "System review", ReviewSubject.System, ReviewMode.Sequential,
             stages, "test.setup", now);
@@ -167,7 +175,10 @@ public sealed class ApprovalConfigurationApiTests : IClassFixture<SharedApiHost>
 
         Assert.Equal(0, (await ReadAsync(client, seeded.ProjectId)).Artifacts.Single(x => x.Subject == "System").BlockingStages);
 
-        await client.DeleteAsync($"/api/projects/{seeded.ProjectId}/personnel/{seeded.LeadId}/roles/{nameof(ProgramRole.SystemEngineeringLead)}");
+        // Removing the eligibility is what stands the position down: the assignment survives as history, but
+        // #816 re-checks the base role whenever the authority is exercised, so the stage has nobody to sign
+        // it from the moment the lead stops being a System Engineer.
+        await client.DeleteAsync($"/api/projects/{seeded.ProjectId}/personnel/{seeded.LeadId}/roles/{nameof(ProgramRole.SystemEngineer)}");
 
         Assert.Equal(1, (await ReadAsync(client, seeded.ProjectId)).Artifacts.Single(x => x.Subject == "System").BlockingStages);
     }

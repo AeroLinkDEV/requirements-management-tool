@@ -16,11 +16,11 @@ public sealed class AssurancePolicyTests
     private static readonly Guid Approver = Guid.NewGuid();
 
     private static AssuranceApproverFacts Person(params ProgramRole[] roles) =>
-        new(Approver, "approver", roles, [], roles.Contains(ProgramRole.Administrator));
+        new(Approver, "approver", roles, [], roles.Contains(ProgramRole.Administrator), []);
 
     private static AssuranceApproverFacts Delegate(ProgramRole role, DateTimeOffset startsAt, DateTimeOffset endsAt,
         Guid? programId = null, bool revoked = false) =>
-        new(Approver, "delegate", [], [new(role, programId ?? Program, startsAt, endsAt, revoked)], false);
+        new(Approver, "delegate", [], [new(role, programId ?? Program, startsAt, endsAt, revoked)], false, []);
 
     // ---- The catalogue's honesty obligations -------------------------------------------------------------
 
@@ -81,18 +81,44 @@ public sealed class AssurancePolicyTests
 
     // ---- The one shared approval-authority resolver ------------------------------------------------------
 
+    /// <summary>
+    /// SQA is a base assurance role and membership is the right question for it — unchanged by #816.
+    /// </summary>
     [Fact]
-    public void An_ordinary_project_policy_deviation_accepts_a_program_manager_or_sqa()
+    public void An_ordinary_project_policy_deviation_accepts_an_sqa_by_membership()
     {
-        foreach (var role in new[] { ProgramRole.ProgramManager, ProgramRole.SoftwareQualityAnalyst })
-        {
-            var decision = AssuranceDeviationAuthority.Decide(AssuranceDeviationClass.ProjectPolicy,
-                Program, Proposer, Person(role), Now);
-            Assert.True(decision.Permitted);
-            Assert.Equal(role, decision.SatisfiedBy);
-            Assert.Equal(AssuranceAuthoritySource.Membership, decision.Source);
-            Assert.Equal(AssuranceAuthorityPolicy.CurrentVersion, decision.PolicyVersion);
-        }
+        var decision = AssuranceDeviationAuthority.Decide(AssuranceDeviationClass.ProjectPolicy,
+            Program, Proposer, Person(ProgramRole.SoftwareQualityAnalyst), Now);
+        Assert.True(decision.Permitted);
+        Assert.Equal(ProgramRole.SoftwareQualityAnalyst, decision.SatisfiedBy);
+        Assert.Equal(AssuranceAuthoritySource.Membership, decision.Source);
+        Assert.Equal(AssuranceAuthorityPolicy.CurrentVersion, decision.PolicyVersion);
+    }
+
+    /// <summary>
+    /// Program Manager is an accountable position since #816, so the deviation takes whoever holds it —
+    /// not everybody granted the role that merely makes them eligible for it.
+    /// </summary>
+    [Fact]
+    public void An_ordinary_project_policy_deviation_accepts_the_program_manager_leadership()
+    {
+        var holder = new AssuranceApproverFacts(Approver, "approver",
+            [ProgramRole.ProgramManager], [], false, [ProgramRole.ProgramManager]);
+        var decision = AssuranceDeviationAuthority.Decide(AssuranceDeviationClass.ProjectPolicy,
+            Program, Proposer, holder, Now);
+        Assert.True(decision.Permitted);
+        Assert.Equal(ProgramRole.ProgramManager, decision.SatisfiedBy);
+        Assert.Equal(AssuranceAuthoritySource.ProjectLeadership, decision.Source);
+        Assert.Equal(AssuranceAuthorityPolicy.CurrentVersion, decision.PolicyVersion);
+    }
+
+    [Fact]
+    public void The_program_manager_base_role_alone_cannot_approve_a_project_policy_deviation()
+    {
+        var decision = AssuranceDeviationAuthority.Decide(AssuranceDeviationClass.ProjectPolicy,
+            Program, Proposer, Person(ProgramRole.ProgramManager), Now);
+        Assert.False(decision.Permitted);
+        Assert.Equal(AssuranceAuthoritySource.None, decision.Source);
     }
 
     [Theory]
@@ -174,7 +200,8 @@ public sealed class AssurancePolicyTests
     public void Self_approval_is_refused_however_much_authority_the_proposer_holds()
     {
         var facts = new AssuranceApproverFacts(Proposer, "proposer",
-            [ProgramRole.SoftwareQualityAnalyst, ProgramRole.ProgramManager, ProgramRole.Airworthiness], [], false);
+            [ProgramRole.SoftwareQualityAnalyst, ProgramRole.ProgramManager, ProgramRole.Airworthiness], [], false,
+            [ProgramRole.ProgramManager]);
         foreach (var deviationClass in Enum.GetValues<AssuranceDeviationClass>())
         {
             var decision = AssuranceDeviationAuthority.Decide(deviationClass, Program, Proposer, facts, Now);
