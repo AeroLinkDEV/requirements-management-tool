@@ -280,6 +280,8 @@ test('a worklist can be saved, reopened and removed', async ({ page }) => {
   await expect(page.getByLabel('test artifact state')).toHaveValue('')
   await expect(page.getByLabel('Artifact filter')).toHaveValue('all')
   await expect(page.getByLabel('Level filter')).toHaveValue('Software')
+  // Canonical Clear remounts the Explorer, so reopen the disclosure before choosing the saved view.
+  await views.locator('summary').click()
   await page.locator(`[data-saved-view="${name}"]`).click()
   await expect(page.getByLabel('case state')).toHaveValue('Draft')
   await expect(page).toHaveURL(/artifactView=/, { timeout: 30_000 })
@@ -306,10 +308,66 @@ test('Clear returns the whole library', async ({ page }) => {
     .toBeLessThan(whole)
 
   await page.getByRole('button', { name: 'Clear', exact: true }).click()
+  await expect(page).toHaveURL(/software-verification\/test-artifacts$/)
   await expect(page.getByLabel('Artifact filter')).toHaveValue('all')
   await expect(page.getByLabel('Level filter')).toHaveValue('Software')
   await expect.poll(async () => Number((await count.textContent())!.replace(/[^\d]/g, '')), { timeout: 30_000 })
     .toBe(whole)
+  await page.reload()
+  await expect(page.getByLabel('Artifact filter')).toHaveValue('all')
+  await expect(page.getByLabel('Level filter')).toHaveValue('Software')
+  await page.goBack()
+  await expect(page).toHaveURL(/software-verification\/cases/)
+  await page.goForward()
+  await expect(page).toHaveURL(/software-verification\/test-artifacts$/)
+  await expect(page.getByLabel('Artifact filter')).toHaveValue('all')
+})
+
+test('Clear canonicalizes the legacy software Procedure Explorer route', async ({ page }) => {
+  test.setTimeout(180_000)
+  await page.setViewportSize({ width: 1600, height: 900 })
+  await page.route('**/api/projects/*/configuration', async route => {
+    const response = await route.fetch()
+    const configuration = await response.json()
+    configuration.effectiveSteps = configuration.effectiveSteps.map((step: { catalogueEntry: string }) => ({
+      ...step,
+      enabledArtifactKinds: step.catalogueEntry === 'System' ? ['Procedure'] : ['Case', 'Procedure'],
+    }))
+    await route.fulfill({ response, json: configuration })
+  })
+  await login(page)
+  const root = new URL(page.url()).pathname.replace(/\/[^/]*$/, '')
+  await page.goto(new URL(`${root}/software-verification/procedures`, page.url()).toString(), { waitUntil: 'load' })
+  await expect(page.getByRole('heading', { name: 'Software Test Case/Procedure Explorer', level: 1 })).toBeVisible({ timeout: 30_000 })
+  await page.getByLabel(/Find a /).fill('HLRTC-000002')
+
+  await page.getByRole('button', { name: 'Clear', exact: true }).click()
+  await expect(page).toHaveURL(/software-verification\/test-artifacts$/)
+  await expect(page.getByLabel('Artifact filter')).toHaveValue('all')
+  await expect(page.getByLabel('Level filter')).toHaveValue('Software')
+  await page.reload()
+  await expect(page.getByLabel('Artifact filter')).toHaveValue('all')
+  await page.goBack()
+  await expect(page).toHaveURL(/software-verification\/procedures/)
+  await page.goForward()
+  await expect(page).toHaveURL(/software-verification\/test-artifacts$/)
+})
+
+test('Clear resets a filtered canonical Software Explorer route without relying on remount', async ({ page }) => {
+  test.setTimeout(180_000)
+  await page.setViewportSize({ width: 1600, height: 900 })
+  await login(page)
+  const root = new URL(page.url()).pathname.replace(/\/[^/]*$/, '')
+  await page.goto(new URL(`${root}/software-verification/test-artifacts`, page.url()).toString(), { waitUntil: 'load' })
+  await expect(page.getByRole('heading', { name: 'Software Test Case/Procedure Explorer', level: 1 })).toBeVisible({ timeout: 30_000 })
+  await page.getByLabel('Artifact filter').selectOption('Case')
+  await page.getByLabel('Find a case').fill('HLRTC-000002')
+
+  await page.getByRole('button', { name: 'Clear', exact: true }).click()
+  await expect(page).toHaveURL(/software-verification\/test-artifacts$/)
+  await expect(page.getByLabel('Artifact filter')).toHaveValue('all')
+  await expect(page.getByLabel('Level filter')).toHaveValue('Software')
+  await expect(page.getByLabel('Find a test artifact')).toHaveValue('')
 })
 
 /**

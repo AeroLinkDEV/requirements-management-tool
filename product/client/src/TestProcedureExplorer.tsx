@@ -196,7 +196,7 @@ const validLevel = (value: string | null, discipline: ProcedureScope, ladder: Pr
  * to be verified.
  */
 export default function TestProcedureExplorer({ api, projectId, releaseId, discipline, buildName, releaseVersion,
-  released, onBack, onOpenRequirementRevision, onOpenTestChangeRequest, onCoverageReportChange, onCoverageLevelChange, initialLevel, ladder }: {
+  released, onBack, onOpenRequirementRevision, onOpenTestChangeRequest, onCoverageReportChange, onCoverageLevelChange, onClearExplorerFilters, initialLevel, ladder }: {
   api: string; projectId: string; releaseId: string; discipline: ProcedureScope; buildName: string
   /** The build's own version, which the document actions name. `buildName` is the display label, not this. */
   releaseVersion: string
@@ -208,6 +208,8 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
   onCoverageReportChange?: (visible: boolean) => void
   /** The shell owns the coverage route's exact software branch and therefore its breadcrumb and active nav item. */
   onCoverageLevelChange?: (level?: 'HighLevel' | 'LowLevel') => void
+  /** App owns the canonical neutral Explorer route; Clear must not leave a share link at a legacy filtered path. */
+  onClearExplorerFilters?: () => void
   initialLevel?: 'HighLevel' | 'LowLevel'
   ladder: ProjectLadderProjection | null
 }) {
@@ -603,12 +605,12 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
     setShowAllCoverage(false)
   }, [api, projectId, releaseId, scope, artifactKindFilter])
 
-  const setCoverageReportVisible = (visible: boolean, clearExplorerFilters = false) => {
+  const setCoverageReportVisible = (visible: boolean) => {
     setShowAdvanced(visible)
     setCoverage(undefined)
     setCoverageStatus('idle')
     setShowAllCoverage(false)
-    const params = clearExplorerFilters ? new URLSearchParams() : new URLSearchParams(location.search)
+    const params = new URLSearchParams(location.search)
     if (visible) params.set('coverage', 'report')
     else params.delete('coverage')
     window.history.pushState({}, '', `${location.pathname}${params.size ? `?${params}` : ''}`)
@@ -674,6 +676,15 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
     setProposalCandidates(undefined)
     setProposalLoadError('')
     setProposalOpen(true)
+  }
+  const clearExplorerFilters = () => {
+    // App makes the URL and shell state canonical. The current neutral route has the same child key,
+    // though, so keep these local resets: navigation alone cannot clear a filtered in-memory Explorer.
+    onClearExplorerFilters?.()
+    setViewId('')
+    setQuery(''); setProcedureState(''); setProcedureOutcome(''); setArtifactKindFilter('all')
+    setLevel(discipline)
+    setDocumentId(''); setSectionId(''); setPage(1)
   }
   const loadProposalCandidates = useCallback(async () => {
     if (!proposalOpen || !proposalContext) return
@@ -872,16 +883,7 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
       </button>}
       <button type="button" className="clear"
          disabled={level === discipline && artifactKindFilter === 'all' && !query && !procedureState && !procedureOutcome && !documentId && !sectionId && !viewId}
-        onClick={() => {
-          setViewId('')
-           setQuery(''); setProcedureState(''); setProcedureOutcome(''); setArtifactKindFilter('all')
-          setLevel(discipline)
-          setDocumentId(''); setSectionId(''); setPage(1)
-          if (showAdvanced) {
-            setCoverageReportVisible(false, true)
-            onCoverageLevelChange?.()
-          }
-        }}>
+        onClick={clearExplorerFilters}>
         Clear
       </button>
       <label className="pageSizeControl">

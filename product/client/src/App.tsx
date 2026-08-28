@@ -900,6 +900,7 @@ function App() {
         ladder={ladder}
         onCoverageReportChange={setCoverageReport}
         onCoverageLevelChange={changeCoverageLevel}
+        onClearExplorerFilters={() => navigate("procedureExplorer", discipline)}
          onBack={() => navigate("dashboard")}
         onOpenRequirementRevision={openRequirementRevision}
         onOpenTestChangeRequest={openTestChangeRequestFromArtifact}
