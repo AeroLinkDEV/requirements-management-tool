@@ -89,7 +89,7 @@ export default function DeferredBacklog({ api, projectId, type, softwareLevel, a
       {items.map(item => (
         <div className="deferredRow" key={item.id}>
           <a className="deferredOpen" href={registerHref(item.id)} onClick={event => {
-            if (event.button === 0 && !event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey) {
+            if (event.detail !== 0 && event.button === 0 && !event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey) {
               event.preventDefault()
               onOpen(item.id)
             }

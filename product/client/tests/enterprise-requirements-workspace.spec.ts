@@ -35,16 +35,27 @@ test("requirements explorer primary targets are native links in table and docume
   await expect(page.getByRole("status", { name: /Loading controlled requirements/ })).toBeHidden();
   await page.getByLabel("Search requirements").fill("SYSR-000150");
 
+  const contextRoot = new URL(page.url()).pathname.replace(/\/systems\/requirements$/, "");
   const tableTarget = page.locator('.reqTable article > a.requirementTarget').first();
   await expect(tableTarget).toBeVisible();
-  await expect(tableTarget).toHaveAttribute('href', /requirements\/[0-9a-f-]{36}\?discipline=system$/);
-  const tableUrl = new URL(await tableTarget.getAttribute('href')!, page.url()).toString();
+  const tableHref = await tableTarget.getAttribute('href');
+  expect(tableHref).toBeTruthy();
+  const tableUrlObject = new URL(tableHref!, page.url());
+  expect(tableUrlObject.pathname).toMatch(new RegExp(`^${contextRoot}/requirements/[0-9a-f-]{36}$`));
+  expect(tableUrlObject.search).toBe('?discipline=system');
+  const tableUrl = tableUrlObject.toString();
   const [opened] = await Promise.all([
     page.context().waitForEvent('page', { timeout: 30_000 }),
     tableTarget.click({ button: 'middle' }),
   ]);
   await expect(opened).toHaveURL(tableUrl);
   await opened.close();
+
+  await tableTarget.focus();
+  await page.keyboard.press('Enter');
+  await expect(page).toHaveURL(tableUrl);
+  await expect(page.getByRole('button', { name: 'Close requirement inspector' })).toBeVisible();
+  await page.getByRole('button', { name: 'Close requirement inspector' }).click();
 
   await tableTarget.click();
   await expect(page.getByRole('button', { name: 'Close requirement inspector' })).toBeVisible();
@@ -53,7 +64,11 @@ test("requirements explorer primary targets are native links in table and docume
 
   const documentTarget = page.locator('.documentMode article > a.requirementTarget').first();
   await expect(documentTarget).toBeVisible();
-  await expect(documentTarget).toHaveAttribute('href', /requirements\/[0-9a-f-]{36}\?discipline=system$/);
+  const documentHref = await documentTarget.getAttribute('href');
+  expect(documentHref).toBeTruthy();
+  const documentUrlObject = new URL(documentHref!, page.url());
+  expect(documentUrlObject.pathname).toMatch(new RegExp(`^${contextRoot}/requirements/[0-9a-f-]{36}$`));
+  expect(documentUrlObject.search).toBe('?discipline=system');
   await documentTarget.click();
   await expect(page.getByRole('button', { name: 'Close requirement inspector' })).toBeVisible();
 });

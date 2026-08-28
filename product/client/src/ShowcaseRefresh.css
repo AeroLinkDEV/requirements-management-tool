@@ -322,9 +322,12 @@
 .reqNoResults p { max-width: 520px; margin: 0; font-size: 14px; line-height: 1.55; }
 .reqNoResults button { margin-top: 18px; min-height: 42px; padding: 9px 14px; border: 0; border-radius: 8px; background: var(--teal-700); color: white; font-size: 14px; font-weight: 700; }
 .documentMode article { padding: 0; }
-.documentMode article > button { width: 100%; min-height: 0; padding: 18px; border: 0; background: white; color: inherit; text-align: left; }
-.documentMode article > button:hover { background: #f7fbfb; }
-.documentMode article > button > div, .documentMode article > button > footer { display: flex; justify-content: space-between; gap: 12px; }
+.documentMode article > button,
+.documentMode article > a.requirementTarget { width: 100%; min-height: 0; padding: 18px; border: 0; background: white; color: inherit; text-align: left; }
+.documentMode article > button:hover,
+.documentMode article > a.requirementTarget:hover { background: #f7fbfb; }
+.documentMode article > button > div, .documentMode article > button > footer,
+.documentMode article > a.requirementTarget > div, .documentMode article > a.requirementTarget > footer { display: flex; justify-content: space-between; gap: 12px; }
 @keyframes reqSpin { to { transform: rotate(360deg); } }
 
 /* Release readiness: one next action, grouped evidence */

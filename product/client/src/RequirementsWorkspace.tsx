@@ -1245,7 +1245,7 @@ export default function RequirementsWorkspace({
                     className="requirementTarget"
                     href={requirementHref(item.id)}
                     onClick={(event) => {
-                      if (event.button === 0 && !event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey) {
+                      if (event.detail !== 0 && event.button === 0 && !event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey) {
                         event.preventDefault();
                         onOpenRequirement(item.id);
                         void open(item);
@@ -1315,7 +1315,7 @@ export default function RequirementsWorkspace({
                     className="requirementTarget"
                     href={requirementHref(item.id)}
                     onClick={(event) => {
-                      if (event.button === 0 && !event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey) {
+                      if (event.detail !== 0 && event.button === 0 && !event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey) {
                         event.preventDefault();
                         onOpenRequirement(item.id);
                         void open(item);
