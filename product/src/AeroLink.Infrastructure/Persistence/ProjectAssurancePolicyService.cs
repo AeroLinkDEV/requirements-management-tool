@@ -222,9 +222,20 @@ public sealed class ProjectAssurancePolicyService(AeroLinkDbContext db)
             .Where(x => x.ProgramId == programId && x.DelegateUserId == approver.Id)
             .Select(x => new { x.Role, x.ProgramId, x.StartsAt, x.EndsAt, x.RevokedAt })
             .ToListAsync(ct);
+        // The position-governed demands this approver actually answers. Resolved through the shared resolver
+        // so an assurance approval and a document signature agree about who holds a position, and so losing
+        // the eligibility retires the assurance authority at the same moment it retires the rest.
+        var resolver = new ProjectAuthorityResolver(db);
+        var leadershipAuthorities = new List<ProgramRole>();
+        foreach (var role in AssuranceAuthorityPolicy.Version(AssuranceAuthorityPolicy.CurrentVersion)
+                     .SelectMany(rule => rule.ApprovingRoles).Distinct())
+            if ((await resolver.ResolveAnyLeadershipSatisfyingAsync(approver.Id, programId, role, ct)).Granted)
+                leadershipAuthorities.Add(role);
+
         return new(approver.Id, approver.UserName, roles,
             delegations.Select(x => new AssuranceDelegationFact(x.Role, x.ProgramId, x.StartsAt, x.EndsAt, x.RevokedAt is not null)).ToList(),
-            approver.UserName == IdentityService.SystemAdministratorUserName || roles.Contains(ProgramRole.Administrator));
+            approver.UserName == IdentityService.SystemAdministratorUserName || roles.Contains(ProgramRole.Administrator),
+            leadershipAuthorities);
     }
 
     private static AssurancePolicyView View(Guid projectId, ResolvedAssurancePolicy resolved, bool canManage,

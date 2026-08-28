@@ -25,6 +25,17 @@ internal static class ManagedDocumentReviewAuthority
         ProgramRole.Approver, ProgramRole.ProgramManager
     ];
 
+    /// <summary>
+    /// Whether a role in the accepted sets names a Project Leadership position rather than a job.
+    ///
+    /// The two groups are already distinguished in the domain: the retired position roles are the singular
+    /// ones, and the four that became eligibility requirements are the base-eligibility ones. Everything
+    /// else here — Reviewer, Approver, SoftwareQualityAnalyst — is still a job somebody performs, and
+    /// membership rightly answers for it until Slice 4 retires the workflow-stage pair.
+    /// </summary>
+    private static bool IsPositionGoverned(ProgramRole role) =>
+        SingularProgramRoles.IsSingular(role) || SingularProgramRoles.IsBaseEligibility(role);
+
     public static Task<ManagedDocumentAuthorityEvidence?> ResolveTechnicalAsync(AeroLinkDbContext db,
         Guid programId, UserAccount account, DateTimeOffset now, CancellationToken ct) =>
         ResolveAsync(db, programId, account, "TechnicalDocumentReview", Technical, now, ct);
@@ -44,11 +55,28 @@ internal static class ManagedDocumentReviewAuthority
         var direct = await db.ProgramMemberships.AsNoTracking()
             .Where(x => x.ProgramId == programId && x.UserId == account.Id && x.EndedAt == null)
             .ToListAsync(ct);
-        foreach (var role in accepted)
+        // Only the roles that still describe a job are answerable by membership. The rest of this list names
+        // positions — ProgramManager, ConfigurationManager, the discipline leads — and under #816 holding
+        // that role is eligibility for the position, not the position itself. Reading them from membership
+        // here is what let a base-role-only member sign a technical review.
+        foreach (var role in accepted.Where(x => !IsPositionGoverned(x)))
         {
             var membership = direct.FirstOrDefault(x => x.Role == role);
             if (membership is not null) return new(required, role, "DirectMembership", membership.Id);
         }
+
+        // The position roles, each resolved against its own eligibility and its own active designation, so a
+        // primary or standing backup signs and nobody else does.
+        var resolver = new ProjectAuthorityResolver(db);
+        foreach (var role in accepted.Where(IsPositionGoverned))
+        {
+            var decision = await resolver.ResolveAnyLeadershipSatisfyingAsync(account.Id, programId, role, ct);
+            if (!decision.Granted) continue;
+            return new(required, role,
+                decision.Source == ProjectAuthoritySource.LeadershipBackup ? "ProjectLeadershipBackup" : "ProjectLeadershipPrimary",
+                null);
+        }
+
         var administrator = direct.FirstOrDefault(x => x.Role == ProgramRole.Administrator);
         if (administrator is not null)
             return new(required, ProgramRole.Administrator, "AdministratorSubstitution", administrator.Id);
@@ -67,7 +95,10 @@ internal static class ManagedDocumentReviewAuthority
         var backups = await db.ProjectRoleBackups.AsNoTracking()
             .Where(x => x.ProgramId == programId && x.BackupUserId == account.Id && x.RemovedAt == null)
             .ToListAsync(ct);
-        foreach (var role in accepted)
+        // Legacy role-keyed backups keep answering the roles that are still jobs. A legacy backup of a
+        // *position* must not: the migration moves those to ProjectLeadershipBackup, and honouring the old
+        // row as well would leave a replaced backup signing after the API reported them removed.
+        foreach (var role in accepted.Where(x => !IsPositionGoverned(x)))
         {
             var backup = backups.FirstOrDefault(x => x.Role == role);
             if (backup is not null && direct.Count > 0) return new(required, role, "StandingBackup", backup.Id);

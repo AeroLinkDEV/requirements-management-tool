@@ -38,15 +38,45 @@ public enum ProgramRole
 }
 
 /// <summary>
-/// A position that exactly one person holds on a project at a time.
+/// The roles that historically doubled as singular project positions, and which of them still constrain a
+/// membership grant.
 ///
-/// The disciplines have many members and one lead; these have one holder and no membership beneath them. The
-/// distinction is enforced when a membership is granted, so "who is the System Engineering Lead" has one
-/// answer rather than however many people were granted the role.
+/// #816 split one idea into two. "Who performs the Program Manager's job" and "who is *the* Program Manager"
+/// used to be the same row, so granting the role to a second person was rejected — which made replacing a
+/// leader impossible without first opening a vacancy, exactly the remove-then-add sequence the owner ruled
+/// out. Singularity now lives on <c>ProjectLeadershipAssignment</c>, where it belongs and where the database
+/// enforces it.
+///
+/// So the four roles below are base eligibility: several people may hold them, and holding one is what makes
+/// somebody *eligible* for elevation, never the elevation itself. The remaining values are retired position
+/// roles that no longer describe a job anybody performs; they stay singular so legacy data cannot grow a
+/// second live holder, and <c>ProjectLeadership</c> is where their authority now comes from.
 /// </summary>
 public static class SingularProgramRoles
 {
+    /// <summary>
+    /// Roles a project may grant to more than one person. Each is the eligibility requirement of the
+    /// identically named Project Leadership position — and satisfying it grants nothing on its own.
+    /// </summary>
+    public static readonly IReadOnlyList<ProgramRole> BaseEligibility =
+    [
+        ProgramRole.ProjectEngineer, ProgramRole.ProgramManager,
+        ProgramRole.EngineeringManager, ProgramRole.ConfigurationManager,
+    ];
+
     private static readonly ProgramRole[] Singular =
+    [
+        ProgramRole.ProjectEngineeringLead,
+        ProgramRole.SystemEngineeringLead, ProgramRole.SoftwareEngineeringLead,
+        ProgramRole.SystemTestLead, ProgramRole.SoftwareTestLead,
+    ];
+
+    /// <summary>
+    /// The nine values Personnel has always projected as "positions", in their original order. Retained so
+    /// the existing roster projection keeps its shape; the eight-card Project Leadership presentation that
+    /// replaces it belongs to Slice 3.
+    /// </summary>
+    private static readonly ProgramRole[] LegacyPositions =
     [
         ProgramRole.ProjectEngineer, ProgramRole.ProgramManager, ProgramRole.EngineeringManager,
         ProgramRole.ConfigurationManager, ProgramRole.ProjectEngineeringLead,
@@ -54,8 +84,13 @@ public static class SingularProgramRoles
         ProgramRole.SystemTestLead, ProgramRole.SoftwareTestLead,
     ];
 
+    /// <summary>Whether granting this role must reject a second concurrent holder.</summary>
     public static bool IsSingular(ProgramRole role) => Singular.Contains(role);
-    public static IReadOnlyList<ProgramRole> All => Singular;
+
+    /// <summary>Whether several people may hold this role, each merely eligible for the matching position.</summary>
+    public static bool IsBaseEligibility(ProgramRole role) => BaseEligibility.Contains(role);
+
+    public static IReadOnlyList<ProgramRole> All => LegacyPositions;
 }
 
 /// <summary>
@@ -142,15 +177,23 @@ public static class ProblemReportOwnerAuthority
         .. ProgramRoleAuthority.Satisfying(ProgramRole.TestLead),
     ];
 
-    private static readonly ProgramRole[] RecoveryRoles =
+    /// <summary>
+    /// The Project Leadership positions whose holder may take back a stranded Problem Report.
+    ///
+    /// Recovery is an accountability, not a discipline: it is the person answerable for the project who
+    /// unsticks work whose owner has gone. #816 made that explicit, so the three predecessors of this list
+    /// map onto positions — the retired <c>ProjectEngineeringLead</c> authority went to Project Engineer
+    /// along with the rest of its footprint. Holding the base <c>ProgramManager</c> or
+    /// <c>EngineeringManager</c> role is now eligibility for the position and confers no recovery.
+    /// </summary>
+    public static readonly IReadOnlyList<ProjectLeadershipPosition> RecoveryPositions =
     [
-        ProgramRole.ProjectEngineeringLead,
-        ProgramRole.EngineeringManager,
-        ProgramRole.ProgramManager,
+        ProjectLeadershipPosition.ProjectEngineer,
+        ProjectLeadershipPosition.EngineeringManager,
+        ProjectLeadershipPosition.ProgramManager,
     ];
 
     public static bool IsEligible(IEnumerable<ProgramRole> roles) => roles.Any(EligibleRoles.Contains);
-    public static bool CanRecover(IEnumerable<ProgramRole> roles) => roles.Any(RecoveryRoles.Contains);
 }
 public enum ExternalIdentityProtocol { OpenIdConnect, Saml2 }
 

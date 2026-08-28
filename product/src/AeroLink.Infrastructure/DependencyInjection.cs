@@ -160,6 +160,7 @@ public static class DependencyInjection
         services.AddScoped<SoftwareVerificationCaseMigrationAuthority>();
         services.AddScoped<ProjectLeadershipService>();
         services.AddScoped<ProjectLeadershipMigrationAuthority>();
+        services.AddScoped<ProjectLeadershipReconciliationAuthority>();
         services.AddScoped<TestChangeRequestPrefixMigrationAuthority>();
         services.AddScoped<DraftDocumentGenerator>();
         services.AddScoped<VariantConfigurationProjectionService>();
@@ -171,6 +172,7 @@ public static class DependencyInjection
         services.AddScoped<ProblemReportLinkService>();
         services.AddScoped<DownstreamImpactService>();
         services.AddScoped<BuildTestSetService>();
+        services.AddScoped<ProjectAuthorityResolver>();
         services.AddScoped<IdentityService>();
         services.AddScoped<ProjectLadderAuthoringService>();
         services.AddScoped<ProjectAssurancePolicyService>();

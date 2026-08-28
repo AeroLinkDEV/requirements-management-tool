@@ -31,6 +31,42 @@ static class IdentityHttpExtensions
         foreach (var role in roles) if (await identity.HasRoleAsync(context.UserAccount(), programId.Value, role, DateTimeOffset.UtcNow, ct)) return true;
         return false;
     }
+    /// <summary>
+    /// Who may staff a project: change the roster, and assign or back up its leadership.
+    ///
+    /// The two endpoints that manage people each carried their own copy of the answer, and both asked it as
+    /// a role check over <c>{ProgramManager, ProjectEngineeringLead, ProjectEngineer, Administrator}</c>.
+    /// Since #816 the first and third of those are base eligibility, so anybody merely granted the Project
+    /// Engineer role could restaff the project they had just been added to. Roster stewardship is an
+    /// accountability: it belongs to whoever currently holds the Program Manager or Project Engineer
+    /// position — primary or standing backup — or to a Program administrator, who keeps the emergency
+    /// capability deliberately.
+    ///
+    /// One implementation, consumed by both, so the two cannot drift apart again.
+    /// </summary>
+    public static async Task<bool> HasRosterAuthorityAsync(this HttpContext context, AeroLinkDbContext db,
+        ProjectAuthorityResolver resolver, Guid projectId, CancellationToken ct)
+    {
+        var actor = context.UserAccount();
+        if (actor.IsAdministrator) return true;
+        var programId = await db.Projects.Where(x => x.Id == projectId).Select(x => (Guid?)x.ProgramId).SingleOrDefaultAsync(ct);
+        if (programId is null) return false;
+        if (await db.ProgramMemberships.AsNoTracking().AnyAsync(
+                x => x.UserId == actor.Id && x.ProgramId == programId.Value && x.EndedAt == null
+                     && x.Role == ProgramRole.Administrator, ct))
+            return true;
+
+        var now = DateTimeOffset.UtcNow;
+        foreach (var position in RosterStewardship)
+            if (await resolver.IsSatisfiedAsync(actor.Id, programId.Value, ProjectAuthorityRequirement.Leadership(position), now, ct))
+                return true;
+        return false;
+    }
+
+    /// <summary>The leadership positions that carry roster stewardship, per the #816 owner decisions.</summary>
+    private static readonly ProjectLeadershipPosition[] RosterStewardship =
+        [ProjectLeadershipPosition.ProgramManager, ProjectLeadershipPosition.ProjectEngineer];
+
     public static async Task<bool> HasProjectAccessAsync(this HttpContext context, AeroLinkDbContext db, Guid projectId, CancellationToken ct)
     {
         var actor=context.UserAccount();if(actor.IsAdministrator)return true;

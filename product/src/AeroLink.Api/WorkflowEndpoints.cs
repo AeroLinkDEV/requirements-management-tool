@@ -23,6 +23,9 @@ public static class WorkflowEndpoints
 {
     private sealed record ApplicableCandidate(string UserName, string DisplayName, ProgramRole Role, bool IsDelegated);
 
+    /// <summary>One offered signer for one stage, carrying why they qualify so the picker can say so.</summary>
+    private sealed record StageCandidate(string UserId, string Name, string Role, string Via);
+
     public static void MapWorkflowEndpoints(this WebApplication app)
     {
         app.MapGet("/api/review-workflows", async (Guid projectId, HttpContext http, AeroLinkDbContext db,
@@ -194,6 +197,38 @@ public static class WorkflowEndpoints
             var eligible = directEligible.Concat(backupEligible).Concat(delegatedEligible)
                 .DistinctBy(x => new { x.UserName, x.Role }).ToList();
 
+            // Who each stage may actually name, taken from the same resolver the signing gate consults.
+            // The list above is built from memberships, legacy role backups and delegations, which stopped
+            // meaning authority at #816: it offered a base-role-only member for a leadership stage and
+            // omitted a newly assigned lead, so the picker and the signature endpoint disagreed in both
+            // directions. Resolving per required role makes them the same answer by construction.
+            var resolver = new ProjectAuthorityResolver(db);
+            var accountById = (await db.UserAccounts.AsNoTracking()
+                    .Where(x => x.State == AccountState.Active)
+                    .Select(x => new { x.Id, x.UserName, x.DisplayName }).ToListAsync(ct))
+                .ToDictionary(x => x.Id);
+            var programAdministrators = await db.ProgramMemberships.AsNoTracking()
+                .Where(x => x.ProgramId == programId && x.EndedAt == null && x.Role == ProgramRole.Administrator)
+                .Select(x => x.UserId).ToListAsync(ct);
+            var candidatesByRole = new Dictionary<ProgramRole, IReadOnlyList<StageCandidate>>();
+            foreach (var requiredRole in workflow.Stages.Select(x => x.RequiredRole).Distinct())
+            {
+                var holders = await resolver.ResolveHoldersAsync(programId, requiredRole, now, ct);
+                var listed = holders.Where(x => accountById.ContainsKey(x.UserId))
+                    .Select(x => new StageCandidate(
+                        accountById[x.UserId].UserName, accountById[x.UserId].DisplayName,
+                        requiredRole.ToString(), x.Source.ToString()))
+                    .ToList();
+                // Administrators are listed for every stage because they can stand in when the named
+                // authority is unavailable; a review that cannot proceed at all is not a control.
+                listed.AddRange(programAdministrators.Where(accountById.ContainsKey)
+                    .Select(id => new StageCandidate(
+                        accountById[id].UserName, accountById[id].DisplayName,
+                        ProgramRole.Administrator.ToString(),
+                        ProjectAuthoritySource.AdministratorSubstitution.ToString())));
+                candidatesByRole[requiredRole] = listed.DistinctBy(x => x.UserId).OrderBy(x => x.Name).ToList();
+            }
+
             return Results.Ok(new
             {
                 required = true,
@@ -209,19 +244,8 @@ public static class WorkflowEndpoints
                     stage.Name,
                     kind = stage.Kind.ToString(),
                     requiredRole = stage.RequiredRole.ToString(),
-                    // Administrators are listed for every stage because they can stand in when the named
-                    // authority is unavailable; a review that cannot proceed at all is not a control.
-                    candidates = eligible
-                        // IdentityService applies role delegations as exact-role grants. Keep the
-                        // established satisfying-role/admin substitution for direct memberships and
-                        // standing backups, but never infer a broader authority from a delegation.
-                        .Where(x => x.IsDelegated
-                            ? x.Role == stage.RequiredRole
-                            : ProgramRoleAuthority.Satisfying(stage.RequiredRole).Contains(x.Role)
-                                || x.Role == ProgramRole.Administrator)
-                        .Select(x => new { userId = x.UserName, name = x.DisplayName, role = x.Role.ToString() })
-                        .DistinctBy(x => x.userId)
-                        .OrderBy(x => x.name),
+                    candidates = candidatesByRole[stage.RequiredRole]
+                        .Select(x => new { userId = x.UserId, name = x.Name, role = x.Role, via = x.Via }),
                 }),
             });
         });

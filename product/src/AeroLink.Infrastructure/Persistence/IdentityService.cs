@@ -111,26 +111,15 @@ public sealed class IdentityService(AeroLinkDbContext db, IDataProtectionProvide
     /// </summary>
     private async Task<bool> HoldsLeadershipDemandAsync(Guid userId, Guid programId, ProgramRole demanded, CancellationToken ct)
     {
-        var accepted = ProgramRoleAuthority.Satisfying(demanded);
-        var primary = await db.ProjectLeadershipAssignments.AsNoTracking()
-            .Where(x => x.ProgramId == programId && x.HolderUserId == userId && x.EndedAt == null)
-            .Select(x => x.Position).ToListAsync(ct);
-        var backing = await db.ProjectLeadershipBackups.AsNoTracking()
-            .Where(x => x.ProgramId == programId && x.BackupUserId == userId && x.RemovedAt == null)
-            .Select(x => x.Position).ToListAsync(ct);
-        if (primary.Count == 0 && backing.Count == 0) return false;
-
-        var held = primary.Select(p => (Position: p, Demands: ProjectLeadership.SatisfyingDemands(p)))
-            .Concat(backing.Select(p => (Position: p, Demands: ProjectLeadership.SatisfyingDemands(p))))
-            .ToList();
-        if (!held.Any(x => x.Demands.Contains(demanded) || accepted.Any(x.Demands.Contains))) return false;
-
-        // The authority travels with the position only while its eligibility still holds: an active
-        // account and a current membership carrying the position's required base role.
         if (await db.UserAccounts.AsNoTracking().AnyAsync(x => x.Id == userId && x.State != AccountState.Active, ct)) return false;
-        var requiredRoles = held.Select(x => ProjectLeadership.RequiredBaseRole(x.Position)).Distinct().ToList();
-        return await db.ProgramMemberships.AsNoTracking()
-            .AnyAsync(x => x.UserId == userId && x.ProgramId == programId && x.EndedAt == null && requiredRoles.Contains(x.Role), ct);
+        // Delegated to the one resolver, which validates each position that answers the demand against that
+        // position's own eligibility. The version that lived here collected every position the person held,
+        // asked whether any of them answered the demand, then tested the *union* of their required base
+        // roles — so a System Engineering Lead who lost `SystemEngineer` kept the lead's Reviewer authority
+        // on the strength of an unrelated Configuration Manager position they still held.
+        var decision = await new ProjectAuthorityResolver(db)
+            .ResolveAnyLeadershipSatisfyingAsync(userId, programId, demanded, ct);
+        return decision.Granted;
     }
 
     /// <summary>

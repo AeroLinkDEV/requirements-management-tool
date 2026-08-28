@@ -1048,13 +1048,25 @@ public static class ProblemReportEndpoints
         return new(roles.Count > 0, ProblemReportOwnerAuthority.IsEligible(roles));
     }
 
+    /// <summary>
+    /// Whether this person may take back a Problem Report whose owner has gone.
+    ///
+    /// Recovery follows the accountable position, not the discipline. Before #816 an ordinary
+    /// <c>EngineeringManager</c> or <c>ProgramManager</c> membership carried it, so anybody granted the job
+    /// could reassign work they were not accountable for, and the retired <c>ProjectEngineeringLead</c> row
+    /// carried it indefinitely. It now takes the Project Engineer, Engineering Manager or Program Manager
+    /// leadership — primary or standing backup — resolved through the one resolver so this gate cannot
+    /// drift from the rest of the model.
+    /// </summary>
     private static async Task<bool> HasProblemReportOwnerRecoveryAuthorityAsync(Guid userId, Guid programId,
         AeroLinkDbContext db, CancellationToken ct)
     {
-        var roles = await db.ProgramMemberships.AsNoTracking()
-            .Where(item => item.UserId == userId && item.ProgramId == programId && item.EndedAt == null)
-            .Select(item => item.Role).ToListAsync(ct);
-        return ProblemReportOwnerAuthority.CanRecover(roles);
+        var resolver = new ProjectAuthorityResolver(db);
+        var now = DateTimeOffset.UtcNow;
+        foreach (var position in ProblemReportOwnerAuthority.RecoveryPositions)
+            if (await resolver.IsSatisfiedAsync(userId, programId, ProjectAuthorityRequirement.Leadership(position), now, ct))
+                return true;
+        return false;
     }
 
     private static async Task<string?> CurrentReleaseWaiverAuthorityAsync(ProblemReport report,
