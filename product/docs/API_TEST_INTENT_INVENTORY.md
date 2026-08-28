@@ -21,21 +21,21 @@ tokens that supplied host evidence.
 ## Result
 
 <!-- BEGIN GENERATED API TEST INTENT SUMMARY -->
-**647 test methods, 705 known invocations, 109 classes.** This source-exact forecast supports planning only;
+**651 test methods, 709 known invocations, 109 classes.** This source-exact forecast supports planning only;
 it is not migration or rollout authority. All current theories use explicit `InlineData`,
 so every case count is known.
 The inventory does not infer host use from a whole class:
 **627 methods / 676 cases have direct host evidence**,
-**14 methods / 23 cases are explicitly non-hosted**, and
+**18 methods / 27 cases are explicitly non-hosted**, and
 **6 methods / 6 cases remain unknown** because their class contains a host fixture or factory but
 the method body does not show the host operation.
 
 | Intent | Tests | Cases | Classes | Correct level |
 |---|---:|---:|---:|---|
 | HTTP boundary: route, status, JSON shape | 399 | 433 | 91 | API (must stay hosted) |
-| EF translation / relational constraints | 138 | 149 | 52 | Infrastructure (needs a database, not a host) |
+| EF translation / relational constraints | 139 | 150 | 52 | Infrastructure (needs a database, not a host) |
 | Authentication / authorization wiring | 64 | 68 | 41 | API (must stay hosted) |
-| In-process logic with no HTTP and no client | 24 | 24 | 10 | Domain or Infrastructure (migration candidate) |
+| In-process logic with no HTTP and no client | 27 | 27 | 10 | Domain or Infrastructure (migration candidate) |
 | Filesystem / evidence-root behaviour | 14 | 14 | 8 | API or Infrastructure (must stay hosted) |
 | Startup, hosting and configuration | 7 | 7 | 5 | API (must stay hosted) |
 | Business-rule matrix over data variations | 1 | 10 | 1 | Domain (migration candidate) |
