@@ -825,12 +825,22 @@ public static class VerificationImpactEndpoints
                 else if (review.ProcedureChanges.Any(x => x.BaseNumber == selected.BaseNumber))
                 { reasonCode = "already_contains_artifact"; reason = $"This Draft already contains a proposal for {selected.BaseNumber}."; }
                 var existingProposal = review.ProcedureChanges.FirstOrDefault(x => x.BaseNumber == selected.BaseNumber);
+                // A proposal identity is an actionable reopen capability, not merely a project-wide match.
+                // Keep it private to the one safe duplicate case: every normal gate above passed, this Draft
+                // targets the selected build/key, and the only refusal is that exact artifact already exists.
+                // In particular, a same-base proposal in another release must never be opened under this
+                // Explorer's build context.
+                var canOpenExisting = reasonCode == "already_contains_artifact"
+                    && review.ReleaseId == releaseId
+                    && review.ArtifactKey == key
+                    && existingProposal is not null;
                 return new
                 {
                     review.Id, review.DisplayNumber, review.Title, state = review.State.ToString(),
                     outcome = review.Outcome.ToString(), artifactKey = review.ArtifactKey.ToString(),
                     review.Version, eligible = reasonCode is null, reasonCode, reason,
-                    existingProposalId = existingProposal?.Id
+                    existingProposalId = canOpenExisting ? existingProposal!.Id : (Guid?)null,
+                    canOpenExisting
                 };
             }).ToList();
             return Results.Ok(new

@@ -439,7 +439,11 @@ test('the Procedure explorer change chooser is exact, bounded, and keyboard dism
           state: 'Draft', outcome: 'ChangeRequired', artifactKey: 'System:Procedure', version: 4, eligible: true },
         { id: 'tcr-case-kind', displayNumber: 'HLRTCCR-786002.00', title: 'Wrong verification kind',
           state: 'Draft', outcome: 'ChangeRequired', artifactKey: 'HighLevelSoftware:Case', version: 2,
-          eligible: false, reason: 'This Draft targets a Case, not a Procedure.' }]
+          eligible: false, reason: 'This Draft targets a Case, not a Procedure.' },
+        { id: 'tcr-foreign-release', displayNumber: 'SYSTPCR-786002.00', title: 'Foreign release duplicate',
+          state: 'Draft', outcome: 'ChangeRequired', artifactKey: 'System:Procedure', version: 3,
+          eligible: false, reasonCode: 'different_build', reason: 'This Test Change Request targets a different build.',
+          existingProposalId: 'foreign-proposal', canOpenExisting: false }]
     await route.fulfill({ contentType: 'application/json', body: JSON.stringify({
       artifactKey: 'System:Procedure', artifactDisplayNumber: 'SYSTP-786001.00', page: requestedSearch ? 1 : Number(requestedPage), pageSize: 25,
       totalCount: requestedSearch ? 1 : 26, totalPages: requestedSearch ? 1 : 2, items,
@@ -498,6 +502,12 @@ test('the Procedure explorer change chooser is exact, bounded, and keyboard dism
   await expect(dialog.getByRole('button', { name: 'Close' })).toBeFocused()
   await expect(dialog).toContainText('Wrong verification kind')
   await expect(dialog.locator('li').filter({ hasText: 'Wrong verification kind' }).getByRole('button')).toBeDisabled()
+  const foreignReleaseButton = dialog.locator('li').filter({ hasText: 'Foreign release duplicate' }).getByRole('button')
+  await expect(foreignReleaseButton).toBeDisabled()
+  await expect(foreignReleaseButton).toHaveText('Add exact revision')
+  const chooserUrl = page.url()
+  await foreignReleaseButton.evaluate((element) => (element as HTMLButtonElement).click())
+  await expect(page).toHaveURL(chooserUrl)
   await expect(dialog.getByRole('navigation', { name: 'Test Change Request candidate pages' })).toContainText('Page 1 of 2 · 26 total')
   await dialog.getByRole('button', { name: 'Next →' }).click()
   await expect(dialog).toContainText('Second page Draft')

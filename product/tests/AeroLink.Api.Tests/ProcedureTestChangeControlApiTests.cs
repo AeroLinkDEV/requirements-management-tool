@@ -68,6 +68,12 @@ public sealed class ProcedureTestChangeControlApiTests
         Assert.True(candidate.GetProperty("eligible").GetBoolean());
         Assert.Equal("System:Procedure", candidate.GetProperty("artifactKey").GetString());
         Assert.Equal(fixture.ReviewVersion, candidate.GetProperty("version").GetInt64());
+        var foreignReleaseCandidate = Assert.Single(candidates.GetProperty("items").EnumerateArray(),
+            x => x.GetProperty("displayNumber").GetString() == "SYSTPCR-786002.00");
+        Assert.False(foreignReleaseCandidate.GetProperty("eligible").GetBoolean());
+        Assert.Equal("different_build", foreignReleaseCandidate.GetProperty("reasonCode").GetString());
+        Assert.True(foreignReleaseCandidate.GetProperty("existingProposalId").ValueKind == JsonValueKind.Null);
+        Assert.False(foreignReleaseCandidate.GetProperty("canOpenExisting").GetBoolean());
 
         // The mutation requires the candidate version; an omitted/default token cannot bypass concurrency.
         using (var missingVersion = await client.PostAsJsonAsync(
@@ -158,6 +164,21 @@ public sealed class ProcedureTestChangeControlApiTests
             Assert.Equal(HttpStatusCode.OK, duplicate.StatusCode);
             using var json = JsonDocument.Parse(body);
             Assert.True(json.RootElement.GetProperty("duplicate").GetBoolean());
+        }
+
+        // A same-build duplicate is the one ineligible row that remains safely reopenable.
+        using (var duplicateCandidates = await client.GetAsync(
+                   $"/api/verification-artifacts/{fixture.ArtifactId}/test-change-request-candidates"
+                   + $"?projectId={fixture.ProjectId}&releaseId={fixture.ReleaseId}&artifactRevisionId={fixture.RevisionId}"))
+        {
+            var body = await duplicateCandidates.Content.ReadAsStringAsync();
+            Assert.True(duplicateCandidates.IsSuccessStatusCode, $"{(int)duplicateCandidates.StatusCode}: {body}");
+            using var json = JsonDocument.Parse(body);
+            var sameBuild = Assert.Single(json.RootElement.GetProperty("items").EnumerateArray(),
+                x => x.GetProperty("id").GetGuid() == fixture.ReviewId);
+            Assert.Equal("already_contains_artifact", sameBuild.GetProperty("reasonCode").GetString());
+            Assert.True(sameBuild.GetProperty("canOpenExisting").GetBoolean());
+            Assert.NotEqual(Guid.Empty, sameBuild.GetProperty("existingProposalId").GetGuid());
         }
 
         // The candidate list explains a Draft held by another assigned work-holder rather than offering it.
@@ -534,11 +555,27 @@ public sealed class ProcedureTestChangeControlApiTests
         var review = new TestChangeReview(project.Id, release.Id, source.Id, key, source.DisplayNumber, now,
             "SYSTPCR-786001", authorId: "procedure.author");
         review.RecordTestChangeRequired("procedure.author", now);
+        // Candidate search is project-scoped for discoverability, so prove that a same-base proposal in a
+        // different release is informational only. It must not leak a reopen identity into the current-build
+        // Explorer, where opening it would place foreign controlled history under the wrong release context.
+        var foreignRelease = new SoftwareRelease(project.Id, "7.26", false);
+        var foreignSource = new SystemChangeRequest("SRCR-786002", 0, project.Id, foreignRelease.Id,
+            "Foreign release source", "Problem", "Analysis", "Solution", "procedure.author", now);
+        var foreignReview = new TestChangeReview(project.Id, foreignRelease.Id, foreignSource.Id, key,
+            foreignSource.DisplayNumber, now,
+            "SYSTPCR-786002", authorId: "procedure.author");
+        foreignReview.RecordTestChangeRequired("procedure.author", now);
+        foreignReview.AddProcedureChange("procedure.author", new TestProcedureChangeDraft(
+            "SYSTP-786001", 1, TestProcedureLevel.System, TestProcedureChangeKind.Modify,
+            "Foreign release proposal", "Verify the foreign release behavior", "Use the foreign build",
+            "Exercise the selected behavior", "The foreign behavior is observed.",
+            "Foreign release candidate."), now);
         var impact = VerificationImpactItem.ForIntroducedRequirement(project.Id, release.Id, source.Id, review.Id,
             source.RequirementChanges.Single().Id, source.RequirementChanges.Single().DisplayNumber, "Test", now);
         impact.LinkRequirementRevision(requirementRevision.Id, now);
 
-        db.AddRange(source, baseline, requirement, requirementRevision, artifact, revision, laterRevision, review, impact);
+        db.AddRange(source, baseline, requirement, requirementRevision, artifact, revision, laterRevision, review,
+            foreignRelease, foreignSource, foreignReview, impact);
         db.BaselineRequirements.Add(new BaselineRequirementSelection(baseline.Id, requirement.Id,
             requirementRevision.Id));
         db.BaselineTestProcedures.Add(new BaselineTestProcedureSelection(baseline.Id, artifact.Id, revision.Id));

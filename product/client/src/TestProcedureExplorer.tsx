@@ -92,7 +92,7 @@ export type TestArtifactChangeContext = {
 type TestChangeCandidate = {
   id: string; displayNumber: string; title: string; state: string; outcome: string
   artifactKey: string; version: number; eligible: boolean; reasonCode?: string; reason?: string
-  existingProposalId?: string
+  existingProposalId?: string; canOpenExisting?: boolean
 }
 type TestChangeCandidatePage = {
   artifactKey: string; artifactDisplayNumber: string; page: number; pageSize: number
@@ -709,7 +709,7 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
   }
   const selectProposal = async (candidate: TestChangeCandidate) => {
     if (!proposalContext) return
-    if (!candidate.eligible && candidate.existingProposalId) {
+    if (!candidate.eligible && candidate.canOpenExisting === true && candidate.existingProposalId) {
       onOpenTestChangeRequest?.({ ...proposalContext, mode: 'existing', testChangeReviewId: candidate.id, proposalId: candidate.existingProposalId })
       setProposalOpen(false)
       return
@@ -1131,9 +1131,9 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
                             <small>{candidate.state} · {candidate.artifactKey}</small>
                             {!candidate.eligible && <p className="inspectorNote warn">{candidate.reason}</p>}
                           </div>
-                          <button type="button" disabled={proposalBusy || (!candidate.eligible && !candidate.existingProposalId)}
+                          <button type="button" disabled={proposalBusy || (!candidate.eligible && !(candidate.canOpenExisting === true && candidate.existingProposalId))}
                             onClick={() => void selectProposal(candidate)}>
-                            {candidate.existingProposalId ? 'Open existing proposal' : 'Add exact revision'}
+                            {candidate.canOpenExisting === true && candidate.existingProposalId ? 'Open existing proposal' : 'Add exact revision'}
                           </button>
                         </li>)}
                       </ul>}
