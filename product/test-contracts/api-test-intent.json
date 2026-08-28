@@ -1,11 +1,11 @@
 {
   "schemaVersion": "aerolink-api-test-intent/v2",
   "totals": {
-    "tests": 642,
-    "cases": 700,
+    "tests": 643,
+    "cases": 701,
     "classes": 109,
-    "hostedTests": 622,
-    "hostedCases": 671,
+    "hostedTests": 623,
+    "hostedCases": 672,
     "nonHostedTests": 14,
     "nonHostedCases": 23,
     "unknownHostTests": 6,
@@ -53,8 +53,8 @@
     "filesystem": {
       "label": "Filesystem / evidence-root behaviour",
       "level": "API or Infrastructure (must stay hosted)",
-      "tests": 11,
-      "cases": 11,
+      "tests": 12,
+      "cases": 12,
       "unknownCases": 0,
       "classes": 7
     },
@@ -8485,8 +8485,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 279,
-        "end": 325
+        "start": 326,
+        "end": 372
       }
     },
     {
@@ -8502,8 +8502,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 251,
-        "end": 277
+        "start": 298,
+        "end": 324
       }
     },
     {
@@ -8519,8 +8519,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 170,
-        "end": 199
+        "start": 217,
+        "end": 246
       }
     },
     {
@@ -8533,8 +8533,8 @@
       "hosted": "unknown",
       "hostEvidence": [],
       "sourceLines": {
-        "start": 44,
-        "end": 107
+        "start": 91,
+        "end": 154
       }
     },
     {
@@ -8587,8 +8587,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 147,
-        "end": 168
+        "start": 194,
+        "end": 215
       }
     },
     {
@@ -8604,8 +8604,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 201,
-        "end": 207
+        "start": 248,
+        "end": 254
       }
     },
     {
@@ -8622,8 +8622,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 209,
-        "end": 249
+        "start": 256,
+        "end": 296
       }
     },
     {
@@ -8640,8 +8640,26 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 327,
-        "end": 398
+        "start": 374,
+        "end": 445
+      }
+    },
+    {
+      "cls": "SecurityBoundaryTests",
+      "test": "Wal_index_is_never_torn_down_while_the_test_database_is_in_use",
+      "kind": "Fact",
+      "intent": "filesystem",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 57,
+        "end": 89
       }
     },
     {
