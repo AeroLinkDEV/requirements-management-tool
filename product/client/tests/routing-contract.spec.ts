@@ -107,6 +107,20 @@ test('HLR and LLR Procedure TCR routes round-trip through their level branch and
   }
 })
 
+test('TCR proposal focus is stable and shareable for System and software Procedure routes', () => {
+  const system = routePath(context, 'testChangeRequest', 'systemTest', 'tcr-system', 'Procedure', undefined, undefined, undefined, 'proposal-system')
+  expect(system).toBe('/programs/program-a/projects/project-a/releases/release-a/system-verification/change-requests/tcr-system?kind=Procedure&proposalId=proposal-system')
+  expect(parseRoute(system)).toMatchObject({ view: 'testChangeRequest', discipline: 'systemTest', artifactId: 'tcr-system', artifactKind: 'Procedure', testChangeRequestProposalId: 'proposal-system' })
+
+  const software = routePath(context, 'testChangeRequest', 'softwareTest', 'tcr-procedure', 'HighLevelProcedure', undefined, undefined, undefined, 'proposal-procedure')
+  expect(software).toBe('/programs/program-a/projects/project-a/releases/release-a/software-verification/hlr/change-requests/tcr-procedure?kind=Procedure&proposalId=proposal-procedure')
+  expect(parseRoute(software)).toMatchObject({ view: 'testChangeRequest', discipline: 'softwareTest', artifactId: 'tcr-procedure', artifactKind: 'HighLevelProcedure', testChangeRequestProposalId: 'proposal-procedure' })
+
+  const back = routePath(context, 'testChangeRequests', 'softwareTest', undefined, 'HighLevelProcedure')
+  expect(back).toBe('/programs/program-a/projects/project-a/releases/release-a/software-verification/hlr/change-requests?kind=Procedure')
+  expect(parseRoute(back).testChangeRequestProposalId).toBeUndefined()
+})
+
 test('TCR register selection is stable, typed, and omitted when context changes', () => {
   const selected = routePath(context, 'testChangeRequests', 'softwareTest', undefined, 'HighLevelProcedure', undefined, undefined, 'tcr-a')
   expect(selected).toContain('/software-verification/hlr/change-requests?kind=Procedure&selection=tcr-a')

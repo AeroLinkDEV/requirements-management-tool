@@ -84,6 +84,7 @@ export type TestArtifactChangeContext = {
   artifactId: string
   artifactRevisionId: string
   artifactKind: 'Case' | 'Procedure'
+  artifactLevel?: 'System' | 'HighLevel' | 'LowLevel'
   displayNumber: string
   testChangeReviewId?: string
   proposalId?: string
@@ -621,6 +622,7 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
   const proposalContext = useMemo(() => selected ? {
     projectId, releaseId, artifactId: selected.id, artifactRevisionId: selected.revisionId,
     artifactKind: selected.artifactKind === 'Procedure' || discipline === 'System' ? 'Procedure' as const : 'Case' as const,
+    artifactLevel: selected.level,
     displayNumber: selected.displayNumber,
   } : undefined, [discipline, projectId, releaseId, selected])
   const openProposal = () => {

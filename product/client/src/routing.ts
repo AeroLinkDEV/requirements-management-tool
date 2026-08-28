@@ -63,6 +63,8 @@ export type AppRoute = {
   historyTypeIntent?: HistoryTypeIntent;
   historySelectionId?: string;
   testChangeRequestSelectionId?: string;
+  /// The exact proposal a verification TCR page should focus after an Explorer action.
+  testChangeRequestProposalId?: string;
   projectConfigurationSection?: "ladder" | "assurance" | "history" | "readiness" | "approvals";
 };
 
@@ -159,11 +161,11 @@ export function parseRoute(pathname: string, search = ""): AppRoute {
   if (path === "software-verification/llr/change-requests")
     return { ...base, view: "testChangeRequests", discipline: "softwareTest", artifactKind: verificationArtifactKind("LowLevel", query), testChangeRequestSelectionId: query.get("selection") || undefined };
   if (tail[0] === "system-verification" && tail[1] === "change-requests" && tail[2])
-    return { ...base, view: "testChangeRequest", discipline: "systemTest", artifactId: decoded(tail[2]) };
+    return { ...base, view: "testChangeRequest", discipline: "systemTest", artifactKind: query.get("kind")?.toLowerCase() === "procedure" ? "Procedure" : undefined, artifactId: decoded(tail[2]), testChangeRequestProposalId: query.get("proposalId") || undefined };
   if (tail[0] === "software-verification" && tail[1] === "hlr" && tail[2] === "change-requests" && tail[3])
-    return { ...base, view: "testChangeRequest", discipline: "softwareTest", artifactKind: verificationArtifactKind("HighLevel", query), artifactId: decoded(tail[3]) };
+    return { ...base, view: "testChangeRequest", discipline: "softwareTest", artifactKind: verificationArtifactKind("HighLevel", query), artifactId: decoded(tail[3]), testChangeRequestProposalId: query.get("proposalId") || undefined };
   if (tail[0] === "software-verification" && tail[1] === "llr" && tail[2] === "change-requests" && tail[3])
-    return { ...base, view: "testChangeRequest", discipline: "softwareTest", artifactKind: verificationArtifactKind("LowLevel", query), artifactId: decoded(tail[3]) };
+    return { ...base, view: "testChangeRequest", discipline: "softwareTest", artifactKind: verificationArtifactKind("LowLevel", query), artifactId: decoded(tail[3]), testChangeRequestProposalId: query.get("proposalId") || undefined };
   if (path === "system-verification/coverage") return { ...base, view: "testingCoverage", discipline: "systemTest" };
   if (tail[0] === "system-verification" && tail[1] === "coverage" && tail[2]) return { ...base, view: "testingCoverage", discipline: "systemTest", artifactId: decoded(tail[2]) };
   if (path === "system-verification/procedures") return { ...base, view: "procedureExplorer", discipline: "systemTest" };
@@ -247,7 +249,7 @@ export const projectConfigurationApprovalsPath = (slug: string) =>
 export const projectConfigurationAssurancePath = (slug: string) =>
   `${projectAreaPath(slug, "projectConfiguration")}/assurance`;
 
-export function routePath(context: RouteContext, view: View, discipline: Discipline = "system", artifactId?: string, artifactKind?: string, stateIntent?: HistoryStateIntent, typeIntent?: HistoryTypeIntent, selectionId?: string) {
+export function routePath(context: RouteContext, view: View, discipline: Discipline = "system", artifactId?: string, artifactKind?: string, stateIntent?: HistoryStateIntent, typeIntent?: HistoryTypeIntent, selectionId?: string, proposalId?: string) {
   const root = `/programs/${context.programId}/projects/${context.projectId}/releases/${context.releaseId}`;
   const historyPath = (scope: "systems" | "software" | "interfaces") => {
     const path = `${root}/${scope}/change-requests`;
@@ -293,7 +295,10 @@ export function routePath(context: RouteContext, view: View, discipline: Discipl
       if (selectionId) query.set("selection", selectionId);
       return `${path}${query.size ? `?${query}` : ""}`;
     }
-    case "testChangeRequest": return `${root}/${verificationBranch(discipline, artifactKind)}/change-requests/${encodeURIComponent(artifactId ?? "")}${verificationKindSuffix(artifactKind)}`;
+    case "testChangeRequest": {
+      const path = `${root}/${verificationBranch(discipline, artifactKind)}/change-requests/${encodeURIComponent(artifactId ?? "")}${verificationKindSuffix(artifactKind)}`;
+      return proposalId ? `${path}${path.includes("?") ? "&" : "?"}proposalId=${encodeURIComponent(proposalId)}` : path;
+    }
     case "createTestChangeRequest": return `${root}/${verificationBranch(discipline, artifactKind)}/change-requests/new${verificationKindSuffix(artifactKind)}`;
     case "procedureExplorer": return discipline === "softwareTest"
       ? `${root}/software-verification/test-artifacts`

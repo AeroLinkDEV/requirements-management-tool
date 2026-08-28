@@ -432,6 +432,29 @@ test('the Procedure explorer change chooser is exact, bounded, and keyboard dism
     }) })
   })
   let posted: Record<string, unknown> | undefined
+  const openedPackage = {
+    id: 'tcr-procedure', projectId: 'project-786', releaseId: 'release-16',
+    displayNumber: 'SYSTPCR-786001.00', baseNumber: 'SYSTPCR-786001', revision: 0,
+    title: 'Eligible System Draft', problem: 'A controlled procedure needs alignment.',
+    analysis: 'The exact procedure revision is affected.', solution: 'Record the controlled update.',
+    problemRich: '', analysisRich: '', solutionRich: '', state: 'Draft', authorId: 'admin',
+    discipline: 'System', sourceChangeRequestNumber: 'SYSCR-786001', version: 4,
+    caseContractVersion: 1, artifactKind: 'Procedure', artifactLevel: 'System',
+    artifactChanges: [{ id: 'proposal-procedure', displayNumber: 'SYSTP-786001.01', baseNumber: 'SYSTP-786001',
+      revision: 1, level: 'System', kind: 'Modify', title: 'Exact System Procedure', objective: 'Verify exact identity',
+      preconditions: 'The build is available', steps: 'Execute the exact procedure', expectedResult: 'The result is recorded',
+      rationale: 'The controlled artifact changed.' }], capabilities: { canProposeArtifactChange: true },
+    coveredChangeRequests: [],
+  }
+  await page.route('**/api/test-change-reviews/tcr-procedure/procedure-changes', route =>
+    route.fulfill({ contentType: 'application/json', body: JSON.stringify(openedPackage) }))
+  await page.route('**/api/releases/release-16/test-change-reviews', route =>
+    route.fulfill({ contentType: 'application/json', body: JSON.stringify({ items: [openedPackage] }) }))
+  await page.route('**/api/signatures?artifactId=tcr-procedure', route =>
+    route.fulfill({ contentType: 'application/json', body: '[]' }))
+  await page.route('**/api/controlled-editing/status?artifactType=TestChangeRequest&artifactId=tcr-procedure', route =>
+    route.fulfill({ contentType: 'application/json', body: JSON.stringify({ locked: false }) }))
+
   await page.route('**/api/verification-artifacts/system-explorer-action/test-change-request-proposal', async route => {
     posted = route.request().postDataJSON() as Record<string, unknown>
     await route.fulfill({ contentType: 'application/json', body: JSON.stringify({
@@ -467,9 +490,14 @@ test('the Procedure explorer change chooser is exact, bounded, and keyboard dism
   await dialog.locator('li').filter({ hasText: 'Eligible System Draft' })
     .getByRole('button', { name: 'Add exact revision' }).click()
   await expect(dialog).toHaveCount(0)
-  await expect(trigger).toBeFocused()
   expect(posted).toMatchObject({ projectId: expect.any(String), releaseId: expect.any(String),
     artifactRevisionId: 'system-explorer-revision', testChangeReviewId: 'tcr-procedure', expectedVersion: 4 })
+  await expect(page).toHaveURL(/system-verification\/change-requests\/tcr-procedure\?kind=Procedure&proposalId=proposal-procedure/)
+  await expect(page.locator('[data-procedure-change-id="proposal-procedure"]')).toBeFocused()
+  const exactPackageUrl = page.url()
+  await page.reload()
+  await expect(page).toHaveURL(exactPackageUrl)
+  await expect(page.locator('[data-procedure-change-id="proposal-procedure"]')).toBeFocused()
 })
 
 test('the combined Explorer carries Case identity into the verification change chooser', async ({ page }) => {
@@ -511,4 +539,12 @@ test('the combined Explorer carries Case identity into the verification change c
   const dialog = page.getByRole('dialog')
   await expect(dialog).toContainText('Propose HLRTC-786001.00')
   await expect(dialog).toContainText('selected exact case revision remains unchanged')
+  await page.route('**/api/releases/release-16/test-change-request-sources*', route =>
+    route.fulfill({ contentType: 'application/json', body: '[]' }))
+  await dialog.getByRole('button', { name: 'Raise new Test Change Request' }).click()
+  await expect(page).toHaveURL(/software-verification\/hlr\/change-requests\/new$/)
+  await expect(page.getByRole('heading', { name: 'Create HLR Test Case Change Request' })).toBeVisible()
+  // The governed editor must collect a real CR/Case-derived or Problem Report origin; this route carries no
+  // made-up artifact origin or client-side selected ID.
+  expect(new URL(page.url()).search).toBe('')
 })
