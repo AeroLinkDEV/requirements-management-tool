@@ -90,7 +90,7 @@ test('released Build 1.5 is a durable read-only workspace and exits explicitly',
   await openNavigationGroup(page, 'SYSTEMS ENGINEERING')
   await page.getByRole('link', { name: 'System Requirements Explorer' }).click()
   await page.getByLabel('Search requirements').fill('SYSR-000001')
-  await page.getByRole('button', { name: /SYSR-000001\.00/ }).first().click()
+  await page.getByRole('link', { name: /SYSR-000001\.00/ }).first().click()
   await page.getByRole('tab', { name: 'Trace & impact' }).click()
   // Opening a procedure named on a requirement's trace lands in the Test Procedure Explorer, which is where a
   // procedure is read. It used to open a record dialog on the coverage page, which carried a procedure
