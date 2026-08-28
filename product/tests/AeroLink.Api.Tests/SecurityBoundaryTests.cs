@@ -44,16 +44,15 @@ public sealed class SecurityBoundaryTests
     /// <summary>
     /// #593, after #601: WAL was switched on, but nothing kept it switched on.
     ///
-    /// The WAL index — the <c>-shm</c> file — exists only while at least one connection to the database is
-    /// open. Under <c>Pooling=False</c> the last connection closes after almost every statement, and SQLite
-    /// then checkpoints and unlinks <c>-wal</c>/<c>-shm</c> under an exclusive lock, rebuilding them under
-    /// another one at the next open. An exclusive lock blocks readers, so a plain SELECT could sit out the full
-    /// 30-second retry budget and fail at statement-prepare — which is precisely the recurrence signature on
-    /// protected main, and is invisible to a configuration assertion that only reads <c>PRAGMA journal_mode</c>.
+    /// <c>PRAGMA journal_mode</c> is persistent in the file header and reads <c>wal</c> whether or not the WAL
+    /// index currently exists, so the #601 configuration assertions above pass in both states and cannot see
+    /// this. That is the gap. This pins the runtime state instead: the <c>-shm</c> file is actually present,
+    /// across the connection churn <c>Pooling=False</c> produces.
     ///
-    /// Asserting the pragma is therefore not enough: this asserts the index is actually *there*, continuously,
-    /// across the connection churn a real test produces. Before the keep-alive connection this failed on the
-    /// first sample; the index was absent for 195 of 200 samples on an idle host.
+    /// This is a fingerprint, not a contention test — it shows the exclusive build/teardown windows are gone,
+    /// not that any reader was unblocked. It fails on the first assertion without the keep-alive connection,
+    /// and it also catches the subtler regression of keeping that connection but dropping its warm-up read,
+    /// without which SQLite never attaches it to the index and the index is never held at all.
     /// </summary>
     [Fact]
     public async Task Wal_index_is_never_torn_down_while_the_test_database_is_in_use()
@@ -74,6 +73,18 @@ public sealed class SecurityBoundaryTests
                 File.Exists(walIndex),
                 $"The WAL index was torn down after {round + 1} scoped context(s). Readers are exposed to the "
                 + "exclusive lock SQLite takes to rebuild it, which is how #593 recurred.");
+        }
+
+        // Checking only after an operation is not enough on its own: a connection the host happens to still
+        // have open would satisfy it for the wrong reason, and the state that matters is the idle gap between
+        // statements, which is where the count reaches zero. Sample across one, and require every sample.
+        for (var sample = 0; sample < 50; sample++)
+        {
+            Assert.True(
+                File.Exists(walIndex),
+                $"The WAL index was torn down while the host sat idle (sample {sample + 1} of 50). Nothing is "
+                + "holding it, so the next reader pays to rebuild it under an exclusive lock.");
+            await Task.Delay(20);
         }
     }
 
@@ -497,16 +508,22 @@ internal sealed class AeroLinkApiFactory(bool seedDemoAccounts = false, bool all
     ///
     /// WAL mode only helps while the WAL index exists. SQLite builds that index — the <c>-shm</c> file — when
     /// the first connection to a database opens, and tears it down, checkpointing and unlinking <c>-wal</c> and
-    /// <c>-shm</c>, when the last one closes. Both ends of that lifecycle take an exclusive lock on the whole
-    /// database, and an exclusive lock blocks readers, which is the one thing WAL exists to prevent.
+    /// <c>-shm</c>, when the last one closes. Both ends take an exclusive lock on the whole database, and an
+    /// exclusive lock blocks readers, which is the one thing WAL exists to prevent.
     ///
     /// <c>Pooling=False</c> means EF opens a real connection per operation and closes it again, so the count
-    /// returns to zero between almost every statement. Measured on this factory before this connection was
-    /// held, the WAL index was absent for 195 of 200 samples on an idle host and 198 of 200 while scoped
-    /// contexts were working: the database spent its life recovering and tearing down the very index that was
-    /// meant to let a reader and a writer run side by side, and #593 recurred as a SELECT that waited out the
-    /// whole 30-second budget and died at statement-prepare. One warmed connection held for the factory's
-    /// lifetime keeps the index alive, so neither exclusive window recurs and WAL behaves as #601 intended.
+    /// returns to zero between almost every statement. Sampled on an idle host before this connection was held,
+    /// the index was absent for 195 of 200 samples: #601 turned WAL on, but nothing kept it on, so operations
+    /// were paying for an index build and teardown they need not have paid for. Holding one warmed connection
+    /// removes both windows, and WAL behaves as #601 intended.
+    ///
+    /// That is a necessary part of #593's recurrence, not the whole of it. A single one of those windows is
+    /// sub-millisecond; exhausting a 30-second budget also required the runner starvation visible in the same
+    /// shard, where this test's host build took 27.8 s against a median of 1.0 s. This removes the windows. It
+    /// does not remove the starvation, so treat a quiet suite as encouraging rather than as proof.
+    ///
+    /// The connection must stay idle. A read transaction left open on it pins the WAL and stops autocheckpoint
+    /// reclaiming it, so the file grows without bound; it exists to hold the index, and nothing else.
     /// </summary>
     private sealed record DisposableDatabase(string Path, SqliteConnection WalIndexKeepAlive);
 
@@ -524,7 +541,18 @@ internal sealed class AeroLinkApiFactory(bool seedDemoAccounts = false, bool all
         SqliteConnection? keepAlive = null;
         try
         {
-            if (template is not null) File.Copy(template, path);
+            if (template is not null)
+            {
+                // Only the .db is copied. That is safe while the template is written in DELETE mode, but a
+                // template in WAL mode can hold committed rows in its -wal, and copying the .db alone would
+                // silently drop them — a half-seeded showcase surfacing as an assertion failure somewhere else
+                // entirely. Fail closed instead of copying something that is missing its tail.
+                if (File.Exists(template + "-wal"))
+                    throw new InvalidOperationException(
+                        $"The showcase template '{template}' has an unmerged -wal; copying the database alone "
+                        + "would lose committed rows. Checkpoint the template before using it as a template.");
+                File.Copy(template, path);
+            }
             // The API host and test-scoped contexts intentionally use separate connections to this file. WAL lets
             // readers run while a writer is active; the provider retry budget handles remaining serialized-writer
             // contention without changing the product's PostgreSQL or SQLite configuration.
@@ -676,11 +704,16 @@ internal sealed class AeroLinkApiFactory(bool seedDemoAccounts = false, bool all
         }
         finally
         {
+            // Released after the host, so the WAL index outlives every connection the host owns and is torn down
+            // once, here, rather than between statements. Deliberately outside the cleanup block below and
+            // deliberately swallowing: while this connection is open Windows refuses to delete the database and
+            // its sidecars, so letting it throw here would skip every remaining step, guarantee a three-file
+            // leak, and fail a test whose assertions all passed — the exact outcome this method exists to avoid.
+            try { _database.WalIndexKeepAlive.Dispose(); }
+            catch (Exception) { }
+
             try
             {
-                // Released after the host, so the WAL index outlives every connection the host owns and is torn
-                // down once, here, rather than between statements.
-                _database.WalIndexKeepAlive.Dispose();
                 SqliteConnection.ClearAllPools();
                 DeleteDatabaseArtifacts(DatabasePath);
                 try { if (Directory.Exists(_evidenceRoot)) Directory.Delete(_evidenceRoot, true); }
