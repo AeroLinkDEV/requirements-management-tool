@@ -85,14 +85,21 @@ public enum ProjectAuthoritySource
     LegacyCompatibility,
 }
 
-/// <summary>The answer, with its provenance and the position that carried it where one did.</summary>
+/// <summary>
+/// The answer, with its provenance, the position that carried it where one did, and the row that recorded
+/// it. <paramref name="SourceId"/> is the assignment, backup, membership or delegation the authority came
+/// from: a controlled signature cites it, so "which designation was this signed under" stays answerable
+/// after the designation itself has moved on.
+/// </summary>
 public readonly record struct ProjectAuthorityDecision(
     bool Granted,
     ProjectAuthoritySource Source,
-    ProjectLeadershipPosition? Position = null)
+    ProjectLeadershipPosition? Position = null,
+    Guid? SourceId = null)
 {
     public static readonly ProjectAuthorityDecision Denied = new(false, ProjectAuthoritySource.None);
 
-    public static ProjectAuthorityDecision From(ProjectAuthoritySource source, ProjectLeadershipPosition? position = null) =>
-        new(true, source, position);
+    public static ProjectAuthorityDecision From(
+        ProjectAuthoritySource source, ProjectLeadershipPosition? position = null, Guid? sourceId = null) =>
+        new(true, source, position, sourceId);
 }

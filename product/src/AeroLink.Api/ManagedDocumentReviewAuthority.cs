@@ -74,7 +74,7 @@ internal static class ManagedDocumentReviewAuthority
             if (!decision.Granted) continue;
             return new(required, role,
                 decision.Source == ProjectAuthoritySource.LeadershipBackup ? "ProjectLeadershipBackup" : "ProjectLeadershipPrimary",
-                null);
+                decision.SourceId);
         }
 
         var administrator = direct.FirstOrDefault(x => x.Role == ProgramRole.Administrator);

@@ -854,7 +854,10 @@ public sealed class ManagedDocumentApiTests
         var technicalStep = submittedRevision.GetProperty("reviewSteps").EnumerateArray().Single(x => x.GetProperty("state").GetString() == "Active");
         Assert.Equal("TechnicalDocumentReview", technicalStep.GetProperty("requiredAuthority").GetString());
         Assert.Equal("SoftwareEngineeringLead", technicalStep.GetProperty("grantedAuthority").GetString());
-        Assert.Equal("DirectMembership", technicalStep.GetProperty("authoritySource").GetString());
+        // The signature records that the technical reviewer signed as the holder of the Software Engineering
+        // Lead position, which is what they are. Recording it as direct membership — as this did before #816
+        // separated the two — misdescribes who was accountable on a controlled signature.
+        Assert.Equal("ProjectLeadershipPrimary", technicalStep.GetProperty("authoritySource").GetString());
         Assert.NotEqual(Guid.Empty, technicalStep.GetProperty("authoritySourceId").GetGuid());
         Assert.Equal(Guid.Parse("89d7b639-96f1-4fd4-970a-8a0db066c493"), technicalStep.GetProperty("workflowId").GetGuid());
         Assert.Equal("FrozenAtAssignment;ActiveAccountAtSigning", technicalStep.GetProperty("authorityPolicy").GetString());
@@ -1244,7 +1247,10 @@ public sealed class ManagedDocumentApiTests
     {
         using var scope = factory.Services.CreateScope(); var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>(); var program = new ProgramRecord("Document Program", $"DC{Guid.NewGuid():N}"[..12]); var project = new ProjectRecord(program.Id, "Navigation Product", "Navigation Software"); var released = new SoftwareRelease(project.Id, "1.5", true); var active = new SoftwareRelease(project.Id, "1.6", false, released.Id); var now = DateTimeOffset.UtcNow;
         var technical = new UserAccount("software.lead", "Rina Shah", "software.lead@example.test", IdentityService.HashPassword(AeroLinkApiFactory.MemberPassword), now); var quality = new UserAccount("quality.analyst", "Maya Patel", "quality.analyst@example.test", IdentityService.HashPassword(AeroLinkApiFactory.MemberPassword), now); var author = new UserAccount("software.author", "Ethan Brooks", "software.author@example.test", IdentityService.HashPassword(AeroLinkApiFactory.MemberPassword), now); var reviewer = new UserAccount("system.reviewer", "Olivia Chen", "system.reviewer@example.test", IdentityService.HashPassword(AeroLinkApiFactory.MemberPassword), now);
-        db.AddRange(program, project, released, active, technical, quality, author, reviewer, new ProgramMembership(technical.Id, program.Id, ProgramRole.SoftwareEngineeringLead, "admin", now), new ProgramMembership(quality.Id, program.Id, ProgramRole.SoftwareQualityAnalyst, "admin", now), new ProgramMembership(author.Id, program.Id, ProgramRole.SoftwareEngineer, "admin", now), new ProgramMembership(author.Id, program.Id, ProgramRole.Reviewer, "admin", now), new ProgramMembership(reviewer.Id, program.Id, ProgramRole.Reviewer, "admin", now)); await db.SaveChangesAsync(); return (program.Id, project.Id, released.Id, active.Id);
+        // Technical document review is the Software Engineering Lead position's authority since #816, so the
+        // reviewer holds the base role that makes them eligible and is elevated into the post. The retired
+        // role name on its own no longer signs anything.
+        db.AddRange(program, project, released, active, technical, quality, author, reviewer, new ProgramMembership(technical.Id, program.Id, ProgramRole.SoftwareEngineer, "admin", now), new ProjectLeadershipAssignment(program.Id, ProjectLeadershipPosition.SoftwareEngineeringLead, technical.Id, "admin", now), new ProgramMembership(quality.Id, program.Id, ProgramRole.SoftwareQualityAnalyst, "admin", now), new ProgramMembership(author.Id, program.Id, ProgramRole.SoftwareEngineer, "admin", now), new ProgramMembership(author.Id, program.Id, ProgramRole.Reviewer, "admin", now), new ProgramMembership(reviewer.Id, program.Id, ProgramRole.Reviewer, "admin", now)); await db.SaveChangesAsync(); return (program.Id, project.Id, released.Id, active.Id);
     }
     private static Dictionary<string,string> Query(Uri uri) => uri.Query.TrimStart('?').Split('&').Select(part => part.Split('=', 2)).ToDictionary(pair => pair[0], pair => Uri.UnescapeDataString(pair[1]));
     private static ConnectorLaunchEnvelope LaunchEnvelope(Uri uri)

@@ -72,13 +72,17 @@ public sealed class ProjectAuthorityResolver(AeroLinkDbContext db)
             x => x.UserId == userId && x.ProgramId == programId && x.EndedAt == null && x.Role == requiredBaseRole, ct);
         if (!eligible) return ProjectAuthorityDecision.Denied;
 
-        if (await db.ProjectLeadershipAssignments.AsNoTracking().AnyAsync(
-                x => x.ProgramId == programId && x.Position == position && x.HolderUserId == userId && x.EndedAt == null, ct))
-            return ProjectAuthorityDecision.From(ProjectAuthoritySource.LeadershipPrimary, position);
+        var assignmentId = await db.ProjectLeadershipAssignments.AsNoTracking()
+            .Where(x => x.ProgramId == programId && x.Position == position && x.HolderUserId == userId && x.EndedAt == null)
+            .Select(x => (Guid?)x.Id).FirstOrDefaultAsync(ct);
+        if (assignmentId is not null)
+            return ProjectAuthorityDecision.From(ProjectAuthoritySource.LeadershipPrimary, position, assignmentId);
 
-        if (await db.ProjectLeadershipBackups.AsNoTracking().AnyAsync(
-                x => x.ProgramId == programId && x.Position == position && x.BackupUserId == userId && x.RemovedAt == null, ct))
-            return ProjectAuthorityDecision.From(ProjectAuthoritySource.LeadershipBackup, position);
+        var backupId = await db.ProjectLeadershipBackups.AsNoTracking()
+            .Where(x => x.ProgramId == programId && x.Position == position && x.BackupUserId == userId && x.RemovedAt == null)
+            .Select(x => (Guid?)x.Id).FirstOrDefaultAsync(ct);
+        if (backupId is not null)
+            return ProjectAuthorityDecision.From(ProjectAuthoritySource.LeadershipBackup, position, backupId);
 
         return ProjectAuthorityDecision.Denied;
     }
