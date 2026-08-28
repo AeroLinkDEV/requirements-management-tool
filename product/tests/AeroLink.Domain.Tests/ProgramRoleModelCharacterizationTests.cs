@@ -12,8 +12,7 @@ public sealed class ProgramRoleModelCharacterizationTests
 {
     private static readonly ProgramRole[] SingularAsOfSnapshot =
     [
-        ProgramRole.ProgramManager, ProgramRole.EngineeringManager,
-        ProgramRole.ConfigurationManager, ProgramRole.ProjectEngineeringLead,
+        ProgramRole.ProjectEngineeringLead,
         ProgramRole.SystemEngineeringLead, ProgramRole.SoftwareEngineeringLead,
         ProgramRole.SystemTestLead, ProgramRole.SoftwareTestLead,
     ];
@@ -24,6 +23,7 @@ public sealed class ProgramRoleModelCharacterizationTests
         ProgramRole.TestLead, ProgramRole.Administrator, ProgramRole.SystemEngineer,
         ProgramRole.SoftwareEngineer, ProgramRole.SoftwareQualityAnalyst, ProgramRole.Airworthiness,
         ProgramRole.SystemTestEngineer, ProgramRole.SoftwareTestEngineer, ProgramRole.ProjectEngineer,
+        ProgramRole.ProgramManager, ProgramRole.EngineeringManager, ProgramRole.ConfigurationManager,
     ];
 
     public static TheoryData<ProgramRole> EveryProgramRoleValue()
@@ -45,8 +45,8 @@ public sealed class ProgramRoleModelCharacterizationTests
             SingularProgramRoles.IsSingular(role));
 
     [Fact]
-    public void The_snapshot_records_exactly_eight_singular_values()
-        => Assert.Equal(8, SingularAsOfSnapshot.Length);
+    public void The_snapshot_records_exactly_five_singular_values()
+        => Assert.Equal(5, SingularAsOfSnapshot.Length);
 
     /// <summary>
     /// #816 retires ProjectEngineeringLead. Until Slice 2 performs that migration, it is still a singular

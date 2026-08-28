@@ -163,11 +163,12 @@ export default function PersonnelCenter({
     for (const position of leadership) map.set(position.position, position)
     return map
   }, [leadership])
-  const positionsHeldBy = useMemo(() => {
+  // Primary holders and standing backups are tracked separately: a backup is not the primary holder, and
+  // conflating them misrepresents who actually holds the position's authority (#816).
+  const primaryPositionsHeldBy = useMemo(() => {
     const map = new Map<string, string[]>()
     for (const position of leadership) {
       if (position.primary) map.set(position.primary.person.userId, [...(map.get(position.primary.person.userId) ?? []), position.position])
-      if (position.backup) map.set(position.backup.person.userId, [...(map.get(position.backup.person.userId) ?? []), position.position])
     }
     return map
   }, [leadership])
@@ -321,7 +322,7 @@ export default function PersonnelCenter({
     setIdentityDraft({ displayName: member.displayName, email: member.email })
   }
   const detailsMember = detailsFor ? memberByUser.get(detailsFor) : undefined
-  const detailsLeadership = detailsFor ? (positionsHeldBy.get(detailsFor) ?? []) : []
+  const detailsLeadership = detailsFor ? (primaryPositionsHeldBy.get(detailsFor) ?? []) : []
 
   const openPicker = (kind: 'primary' | 'backup', position: string) => {
     setPicker({ kind, position })
@@ -495,7 +496,7 @@ export default function PersonnelCenter({
                   </thead>
                   <tbody>
                     {data.members.map(member => {
-                      const held = positionsHeldBy.get(member.userId) ?? []
+                      const held = primaryPositionsHeldBy.get(member.userId) ?? []
                       return (
                         <tr key={member.userId} className={member.isCurrent ? undefined : 'departed'} data-member={member.userName}>
                           <td>

@@ -48,11 +48,15 @@ public static class SingularProgramRoles
 {
     private static readonly ProgramRole[] Singular =
     [
-        // #816: ProjectEngineer left this set. Its base role is now the multi-member eligibility for the
-        // Project Engineer leadership position — many people may perform the job, exactly one holds the
-        // position, and that singularity lives in the Project Leadership assignment tables.
-        ProgramRole.ProgramManager, ProgramRole.EngineeringManager,
-        ProgramRole.ConfigurationManager, ProgramRole.ProjectEngineeringLead,
+        // #816: ProjectEngineer, ProgramManager, EngineeringManager and ConfigurationManager left this set.
+        // They are now multi-member base eligibility roles — many people may perform the job, exactly one
+        // holds the corresponding Project Leadership position, and that singularity lives in the Project
+        // Leadership assignment tables, not here.
+        //
+        // The discipline leads remain singular as a legacy transition constraint while Slice 4 removes the
+        // last membership-based lead grants. The retiring ProjectEngineeringLead stays singular to prevent
+        // legacy re-grants while the role is retired.
+        ProgramRole.ProjectEngineeringLead,
         ProgramRole.SystemEngineeringLead, ProgramRole.SoftwareEngineeringLead,
         ProgramRole.SystemTestLead, ProgramRole.SoftwareTestLead,
     ];
