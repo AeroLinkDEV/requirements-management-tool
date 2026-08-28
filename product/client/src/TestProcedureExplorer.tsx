@@ -848,9 +848,9 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
           if (next !== 'Case') setCoverageReportVisible(false)
           setDocumentId(''); setSectionId(''); setPage(1)
         }}>
-        <option value="all">All test artifacts</option>
+        {!showAdvanced && <option value="all">All test artifacts</option>}
         {caseEnabled && <option value="Case">Test cases</option>}
-        {procedureEnabled && <option value="Procedure">Test procedures</option>}
+        {!showAdvanced && procedureEnabled && <option value="Procedure">Test procedures</option>}
       </select>}
       <select aria-label={`${currentArtifactDisplayWord} state`} value={procedureState}
         onChange={event => { setProcedureState(event.target.value); setPage(1) }}>

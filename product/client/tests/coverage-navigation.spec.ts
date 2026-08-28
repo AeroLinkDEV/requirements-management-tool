@@ -158,6 +158,16 @@ test('Software Coverage level selection keeps the shell scope aligned, and Clear
   test.setTimeout(180_000)
   const showcase = await showcaseSeed(request)
   const root = `/programs/${showcase.programId}/projects/${showcase.projectId}/releases/${showcase.activeReleaseId}`
+  await page.route('**/api/projects/*/configuration', async route => {
+    const response = await route.fetch()
+    const configuration = await response.json()
+    configuration.effectiveSteps = configuration.effectiveSteps.map((step: { catalogueEntry: string; enabledArtifactKinds?: string[] }) => (
+      step.catalogueEntry === 'HighLevel' || step.catalogueEntry === 'LowLevel'
+        ? { ...step, enabledArtifactKinds: ['Case', 'Procedure'] }
+        : step
+    ))
+    await route.fulfill({ response, json: configuration })
+  })
   await login(page)
 
   await page.goto(`${root}/software-verification/test-artifacts?coverage=report&artifactLevel=HighLevel&artifactKind=Case`)
@@ -168,7 +178,10 @@ test('Software Coverage level selection keeps the shell scope aligned, and Clear
   await page.getByLabel('Level filter').selectOption('LowLevel')
   await expect(page).toHaveURL(/software-verification\/test-artifacts\?coverage=report&artifactLevel=LowLevel&artifactKind=Case$/)
   await expect(page.getByLabel('Level filter')).toHaveValue('LowLevel')
-  await expect(page.getByLabel('Artifact filter')).toHaveValue('Case')
+  const artifactFilter = page.getByLabel('Artifact filter')
+  await expect(artifactFilter).toHaveValue('Case')
+  await expect(artifactFilter.locator('option[value="all"]')).toHaveCount(0)
+  await expect(artifactFilter.locator('option[value="Procedure"]')).toHaveCount(0)
   await expect(page.getByRole('navigation', { name: 'Breadcrumb' })).toContainText('Software LLR Coverage')
   await expect(navigation.getByRole('link', { name: 'LLR Coverage' })).toHaveAttribute('aria-current', 'page')
 
@@ -184,7 +197,12 @@ test('Software Coverage level selection keeps the shell scope aligned, and Clear
   await page.getByRole('button', { name: 'Clear', exact: true }).click()
   await expect(page).toHaveURL(/software-verification\/test-artifacts$/)
   await expect(page.getByLabel('Level filter')).toHaveValue('Software')
-  await expect(page.getByLabel('Artifact filter')).toHaveValue('all')
+  await expect(artifactFilter).toHaveValue('all')
+  await expect(artifactFilter.locator('option[value="all"]')).toHaveCount(1)
+  await expect(artifactFilter.locator('option[value="Procedure"]')).toHaveCount(1)
+  await artifactFilter.selectOption('Procedure')
+  await expect(artifactFilter).toHaveValue('Procedure')
+  await expect(page).toHaveURL(/software-verification\/test-artifacts\?artifactKind=Procedure$/)
   await expect(page.getByRole('region', { name: 'Coverage summary' })).toHaveCount(0)
   await expect(page.getByRole('navigation', { name: 'Breadcrumb' })).toContainText('Software Test Case/Procedure Explorer')
   await expect(navigation.getByRole('link', { name: 'Test Case/Procedure Explorer' })).toHaveAttribute('aria-current', 'page')
