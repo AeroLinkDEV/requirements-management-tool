@@ -600,8 +600,21 @@ internal sealed class AeroLinkApiFactory(bool seedDemoAccounts = false, bool all
     private readonly Stopwatch _construction = Stopwatch.StartNew();
     private double _constructionBeforeHostMs;
     private readonly Action<object>? _telemetryObserver = telemetryObserver;
+    // WebApplicationFactory.Dispose() enters this virtual method, then synchronously invokes its virtual
+    // DisposeAsync(), which returns here once more after stopping the host. Both public disposal paths must
+    // start one shared timer before that shutdown, while only one callback owns AeroLink's cleanup and
+    // telemetry. Interlocked keeps that ownership singular if a caller races disposal paths.
+    private int _aeroLinkDisposeStarted;
+    private readonly object _disposalStopwatchGate = new();
+    private Stopwatch? _disposalStopwatch;
 
     internal long TelemetryFactoryId => _factoryId;
+
+    public override async ValueTask DisposeAsync()
+    {
+        StartDisposalStopwatch();
+        await base.DisposeAsync();
+    }
 
     protected override IHost CreateHost(IHostBuilder builder)
     {
@@ -688,7 +701,9 @@ internal sealed class AeroLinkApiFactory(bool seedDemoAccounts = false, bool all
     /// </summary>
     protected override void Dispose(bool disposing)
     {
-        var stopwatch = Stopwatch.StartNew();
+        var stopwatch = StartDisposalStopwatch();
+        if (Interlocked.Exchange(ref _aeroLinkDisposeStarted, 1) != 0) return;
+
         ExceptionDispatchInfo? baseDisposeException = null;
         ExceptionDispatchInfo? cleanupException = null;
         try
@@ -737,6 +752,14 @@ internal sealed class AeroLinkApiFactory(bool seedDemoAccounts = false, bool all
 
         if (baseDisposeException is not null) baseDisposeException.Throw();
         if (cleanupException is not null) cleanupException.Throw();
+    }
+
+    private Stopwatch StartDisposalStopwatch()
+    {
+        lock (_disposalStopwatchGate)
+        {
+            return _disposalStopwatch ??= Stopwatch.StartNew();
+        }
     }
 
     internal static void DeleteDatabaseArtifacts(string path)

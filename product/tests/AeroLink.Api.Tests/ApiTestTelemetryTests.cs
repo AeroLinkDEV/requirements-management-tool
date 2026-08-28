@@ -57,9 +57,9 @@ public sealed class ApiTestTelemetryTests
                 Assert.Equal(System.Net.HttpStatusCode.OK, response.StatusCode);
                 host = records.Select(record => (dynamic)record).Single(record => record.phase == "host");
             }
-            // WebApplicationFactory can invoke Dispose(bool) more than once; the aggregator deterministically
-            // keeps the last dispose record, so the regression checks the same record it will count.
-            dispose = records.Select(record => (dynamic)record).Last(record => record.phase == "dispose");
+            // The AeroLink factory owns cleanup and telemetry at the outer disposal entry, so the framework's
+            // recursive callback cannot add a second dispose record.
+            dispose = Assert.Single(records.Select(record => (dynamic)record), record => record.phase == "dispose");
             Assert.Equal((double)host.constructionMs, (double)dispose.constructionMs);
             Assert.True((double)host.ms > 0, "hostMs must be recorded");
         }
@@ -67,6 +67,64 @@ public sealed class ApiTestTelemetryTests
         {
             ApiTestTelemetry.ResetForTest();
         }
+    }
+
+    [Fact]
+    public async Task Synchronous_dispose_records_cleanup_once_and_removes_disposable_wal_artifacts()
+    {
+        var records = new List<object>();
+        var factory = new AeroLinkApiFactory(telemetryObserver: records.Add);
+        var databasePath = new SqliteConnectionStringBuilder(factory.ConnectionString).DataSource;
+        try
+        {
+            using (var client = factory.CreateClient())
+            using (var response = await client.GetAsync("/api/setup/status"))
+                Assert.Equal(System.Net.HttpStatusCode.OK, response.StatusCode);
+
+            Assert.True(File.Exists(databasePath + "-shm"), "The warmed keep-alive must hold the WAL index while the factory is active.");
+
+            factory.Dispose();
+
+            dynamic dispose = Assert.Single(records.Select(record => (dynamic)record), record => record.phase == "dispose");
+            Assert.True((double)dispose.ms > 0, "Dispose telemetry must include the full synchronous disposal interval.");
+            AssertDisposableDatabaseArtifactsAreGone(databasePath);
+        }
+        finally
+        {
+            factory.Dispose();
+        }
+    }
+
+    [Fact]
+    public async Task Asynchronous_dispose_records_cleanup_once_and_removes_disposable_wal_artifacts()
+    {
+        var records = new List<object>();
+        var factory = new AeroLinkApiFactory(telemetryObserver: records.Add);
+        var databasePath = new SqliteConnectionStringBuilder(factory.ConnectionString).DataSource;
+        try
+        {
+            using (var client = factory.CreateClient())
+            using (var response = await client.GetAsync("/api/setup/status"))
+                Assert.Equal(System.Net.HttpStatusCode.OK, response.StatusCode);
+
+            Assert.True(File.Exists(databasePath + "-shm"), "The warmed keep-alive must hold the WAL index while the factory is active.");
+
+            await factory.DisposeAsync();
+
+            dynamic dispose = Assert.Single(records.Select(record => (dynamic)record), record => record.phase == "dispose");
+            Assert.True((double)dispose.ms > 0, "Dispose telemetry must include the full asynchronous disposal interval.");
+            AssertDisposableDatabaseArtifactsAreGone(databasePath);
+        }
+        finally
+        {
+            await factory.DisposeAsync();
+        }
+    }
+
+    private static void AssertDisposableDatabaseArtifactsAreGone(string databasePath)
+    {
+        Assert.All(new[] { databasePath, databasePath + "-wal", databasePath + "-shm" }, path =>
+            Assert.False(File.Exists(path), $"The disposable database artifact '{path}' remained after factory disposal."));
     }
 
     [Fact]
