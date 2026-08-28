@@ -1290,6 +1290,7 @@
       "path": "/api/managed-documents/revisions/{revisionId:guid}/force-unlock",
       "file": "ManagedDocumentEndpoints.cs",
       "coveredBy": [
+        "ManagedDocumentApiTests",
         "ManagedDocumentRecoveryApiTests"
       ]
     },

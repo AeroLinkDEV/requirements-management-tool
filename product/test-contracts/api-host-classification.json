@@ -2,8 +2,8 @@
   "schemaVersion": "aerolink-api-host-classification/v3",
   "totals": {
     "classes": 110,
-    "tests": 667,
-    "knownCases": 733,
+    "tests": 668,
+    "knownCases": 734,
     "unknownCaseTests": 0
   },
   "summary": {
@@ -15,8 +15,8 @@
     },
     "fresh-host": {
       "classes": 43,
-      "tests": 254,
-      "knownCases": 283,
+      "tests": 255,
+      "knownCases": 284,
       "unknownCaseTests": 0
     },
     "migration-candidate": {
@@ -327,8 +327,8 @@
     },
     {
       "cls": "ManagedDocumentApiTests",
-      "tests": 25,
-      "knownCases": 30,
+      "tests": 26,
+      "knownCases": 31,
       "unknownCaseTests": 0,
       "classification": "fresh-host",
       "reason": "Customizes host state (interceptor-or-fault-injection); sharing could change the subject or leak configuration.",

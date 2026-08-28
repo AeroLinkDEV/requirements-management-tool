@@ -299,6 +299,15 @@ reporting provenance (`DirectBaseRole`, `LeadershipPrimary`, `LeadershipBackup`,
 a persisted workflow stage naming `SystemEngineeringLead` cannot say which sense it meant, so both satisfy
 it. Leadership-sensitive call sites no longer go through it.
 
+That cutover includes every managed-document controller and recovery gate. Ordinary authoring and assurance
+demands remain base-role questions, while Configuration Manager, Program Manager, and the retired Project
+Engineering Lead demand resolve through Project Leadership (including its standing backup and exact legacy
+delegation). The global administrator override remains available for these controller/recovery operations;
+lifecycle-relationship editing deliberately retains its stricter explicit-Project-authority policy. A base-only
+Configuration Manager or Program Manager cannot create or start a document on another author's behalf, revise
+formal scope, transfer stewardship/responsibility, force-unlock or withdraw work, or operate integrity/storage
+recovery merely because they are eligible for the corresponding leadership position.
+
 ## E.4 Singularity moved
 
 Section 3 recorded `SingularProgramRoles.IsSingular` enforcing singularity at membership grant for nine

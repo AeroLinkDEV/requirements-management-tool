@@ -1,11 +1,11 @@
 {
   "schemaVersion": "aerolink-api-test-intent/v2",
   "totals": {
-    "tests": 667,
-    "cases": 733,
+    "tests": 668,
+    "cases": 734,
     "classes": 110,
-    "hostedTests": 640,
-    "hostedCases": 697,
+    "hostedTests": 641,
+    "hostedCases": 698,
     "nonHostedTests": 21,
     "nonHostedCases": 30,
     "unknownHostTests": 6,
@@ -37,8 +37,8 @@
     "auth-policy": {
       "label": "Authentication / authorization wiring",
       "level": "API (must stay hosted)",
-      "tests": 69,
-      "cases": 73,
+      "tests": 70,
+      "cases": 74,
       "unknownCases": 0,
       "classes": 42
     },
@@ -3478,8 +3478,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 358,
-        "end": 417
+        "start": 471,
+        "end": 530
       }
     },
     {
@@ -3496,8 +3496,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 885,
-        "end": 952
+        "start": 998,
+        "end": 1065
       }
     },
     {
@@ -3514,8 +3514,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 830,
-        "end": 845
+        "start": 943,
+        "end": 958
       }
     },
     {
@@ -3550,8 +3550,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 769,
-        "end": 796
+        "start": 882,
+        "end": 909
       }
     },
     {
@@ -3568,8 +3568,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 715,
-        "end": 740
+        "start": 828,
+        "end": 853
       }
     },
     {
@@ -3585,8 +3585,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 742,
-        "end": 767
+        "start": 855,
+        "end": 880
       }
     },
     {
@@ -3603,8 +3603,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 954,
-        "end": 984
+        "start": 1067,
+        "end": 1097
       }
     },
     {
@@ -3621,8 +3621,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 671,
-        "end": 713
+        "start": 784,
+        "end": 826
       }
     },
     {
@@ -3662,6 +3662,24 @@
     },
     {
       "cls": "ManagedDocumentApiTests",
+      "test": "Managed_document_control_routes_require_position_authority_and_preserve_primary_backup_delegation_and_admin",
+      "kind": "Fact",
+      "intent": "auth-policy",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 358,
+        "end": 469
+      }
+    },
+    {
+      "cls": "ManagedDocumentApiTests",
       "test": "My_work_surfaces_the_active_desktop_checkout_for_its_holder_only",
       "kind": "Fact",
       "intent": "http-boundary",
@@ -3673,8 +3691,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 1223,
-        "end": 1247
+        "start": 1336,
+        "end": 1360
       }
     },
     {
@@ -3690,8 +3708,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 1165,
-        "end": 1195
+        "start": 1278,
+        "end": 1308
       }
     },
     {
@@ -3726,8 +3744,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 986,
-        "end": 1057
+        "start": 1099,
+        "end": 1170
       }
     },
     {
@@ -3779,8 +3797,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 515,
-        "end": 591
+        "start": 628,
+        "end": 704
       }
     },
     {
@@ -3814,8 +3832,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 593,
-        "end": 669
+        "start": 706,
+        "end": 782
       }
     },
     {
@@ -3831,8 +3849,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 847,
-        "end": 883
+        "start": 960,
+        "end": 996
       }
     },
     {
@@ -3849,8 +3867,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 419,
-        "end": 444
+        "start": 532,
+        "end": 557
       }
     },
     {
@@ -3866,8 +3884,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 1197,
-        "end": 1221
+        "start": 1310,
+        "end": 1334
       }
     },
     {
@@ -3884,8 +3902,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 798,
-        "end": 828
+        "start": 911,
+        "end": 941
       }
     },
     {
@@ -3902,8 +3920,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 446,
-        "end": 513
+        "start": 559,
+        "end": 626
       }
     },
     {

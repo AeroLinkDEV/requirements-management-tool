@@ -176,7 +176,7 @@ public static class ManagedDocumentEndpoints
         var assignments = db.Database.IsNpgsql() ? await assignmentQuery.OrderByDescending(x => x.EffectiveAt).ThenByDescending(x => x.Id).Take(100).ToListAsync(ct)
             : (await assignmentQuery.ToListAsync(ct)).OrderByDescending(x => x.EffectiveAt).ThenByDescending(x => x.Id).Take(100).ToList();
         var actor = http.UserAccount();
-        var canCorrectFormalScopeByRole = await http.HasProjectRoleAsync(db, identity, document.ProjectId, ct,
+        var canCorrectFormalScopeByRole = await HasManagedDocumentAuthorityAsync(http, db, document.ProjectId, ct,
             ProgramRole.ConfigurationManager, ProgramRole.ProgramManager, ProgramRole.ProjectEngineeringLead);
         var canManageRelationshipByRole = await ManagedDocumentAssignmentPolicy.HasExplicitAuthorityAsync(db, document.ProjectId, actor, DateTimeOffset.UtcNow, ct,
             ProgramRole.ConfigurationManager, ProgramRole.ProgramManager, ProgramRole.ProjectEngineeringLead);
@@ -217,7 +217,7 @@ public static class ManagedDocumentEndpoints
 
     private static async Task<IResult> CreateAsync(CreateManagedDocumentRequest request, HttpContext http, AeroLinkDbContext db, IdentityService identity, ManagedDocumentFileService files, ManagedDocumentStorageCoordinator storage, CancellationToken ct)
     {
-        if (!await http.HasProjectRoleAsync(db, identity, request.ProjectId, ct, ProgramRole.Engineer, ProgramRole.ConfigurationManager, ProgramRole.ProgramManager, ProgramRole.ProjectEngineeringLead)) return Results.Forbid();
+        if (!await HasManagedDocumentAuthorityAsync(http, db, request.ProjectId, ct, ProgramRole.Engineer, ProgramRole.ConfigurationManager, ProgramRole.ProgramManager, ProgramRole.ProjectEngineeringLead)) return Results.Forbid();
         var operationError = ValidateOperationKey(request.OperationKey); if (operationError is not null) return operationError;
         var actor = http.UserAccount(); var ownerId = request.OwnerId ?? actor.UserName;
         if (!await ManagedDocumentAssignmentPolicy.IsEligibleAsync(db, identity, request.ProjectId, ownerId, DateTimeOffset.UtcNow, ct)) return Results.BadRequest(new { error = actor.IsAdministrator && request.OwnerId is null ? "Select an active authorized Program author as document steward and responsible owner; administrator status is not document-authoring authority." : "The document steward and responsible owner must be an active authorized member or delegate in this Program." });
@@ -261,7 +261,7 @@ public static class ManagedDocumentEndpoints
     private static async Task<IResult> StartRevisionAsync(Guid id, StartManagedDocumentRevisionRequest request, HttpContext http, AeroLinkDbContext db, IdentityService identity, ManagedDocumentFileService files, ManagedDocumentIntegrityService integrity, ManagedDocumentStorageCoordinator storage, CancellationToken ct)
     {
         var document = await db.ManagedDocuments.SingleOrDefaultAsync(x => x.Id == id, ct); if (document is null) return Results.NotFound();
-        if (!await http.HasProjectRoleAsync(db, identity, document.ProjectId, ct, ProgramRole.Engineer, ProgramRole.ConfigurationManager, ProgramRole.ProgramManager, ProgramRole.ProjectEngineeringLead)) return Results.Forbid();
+        if (!await HasManagedDocumentAuthorityAsync(http, db, document.ProjectId, ct, ProgramRole.Engineer, ProgramRole.ConfigurationManager, ProgramRole.ProgramManager, ProgramRole.ProjectEngineeringLead)) return Results.Forbid();
         var actor = http.UserAccount(); var ownerId = request.OwnerId ?? actor.UserName;
         if (!await ManagedDocumentAssignmentPolicy.IsEligibleAsync(db, identity, document.ProjectId, ownerId, DateTimeOffset.UtcNow, ct)) return Results.BadRequest(new { error = actor.IsAdministrator && request.OwnerId is null ? "Select an active authorized Program author as responsible revision owner; administrator status is not document-authoring authority." : "The responsible revision owner must be an active authorized member or delegate in this Program." });
         if (await db.ManagedDocumentRevisions.AnyAsync(x => x.DocumentId == id && (x.State == ManagedDocumentState.Draft || x.State == ManagedDocumentState.InReview || x.State == ManagedDocumentState.Returned), ct)) return Results.Conflict(new { error = "Complete or withdraw the existing in-work revision before starting another." });
@@ -322,7 +322,7 @@ public static class ManagedDocumentEndpoints
     private static async Task<IResult> CheckoutAsync(Guid revisionId, HttpContext http, AeroLinkDbContext db, IdentityService identity, ManagedDocumentIntegrityService integrity, ConnectorSigningService signing, CancellationToken ct)
     {
         var data = await RevisionDataAsync(db, revisionId, ct); if (data is null) return Results.NotFound();
-        if (!await http.HasProjectRoleAsync(db, identity, data.Document.ProjectId, ct, ProgramRole.Engineer, ProgramRole.ConfigurationManager, ProgramRole.ProgramManager, ProgramRole.ProjectEngineeringLead)) return Results.Forbid();
+        if (!await HasManagedDocumentAuthorityAsync(http, db, data.Document.ProjectId, ct, ProgramRole.Engineer, ProgramRole.ConfigurationManager, ProgramRole.ProgramManager, ProgramRole.ProjectEngineeringLead)) return Results.Forbid();
         if (data.Revision.State is not (ManagedDocumentState.Draft or ManagedDocumentState.Returned)) return Results.Conflict(new { error = "Only a Draft or returned revision can be checked out." });
         var actor = http.UserAccount(); if (actor.UserName != data.Revision.ResponsibleOwnerId && !actor.IsAdministrator) return Results.Forbid();
         return await CreateGrantAsync(data, "edit", actor.UserName, http, db, integrity, signing, ct);
@@ -372,7 +372,7 @@ public static class ManagedDocumentEndpoints
         if (original is null || original.SourceAttachmentId is null || original.SourceSize is null || original.SourceSha256 is null
             || original.DeploymentId is null || original.KeyId is null || original.DocumentNumber is null || original.RevisionNumber is null)
             return Results.NotFound();
-        if (original.Mode == "edit" && !await http.HasProjectRoleAsync(db, identity, data.Document.ProjectId, ct,
+        if (original.Mode == "edit" && !await HasManagedDocumentAuthorityAsync(http, db, data.Document.ProjectId, ct,
             ProgramRole.Engineer, ProgramRole.ConfigurationManager, ProgramRole.ProgramManager, ProgramRole.ProjectEngineeringLead)) return Results.Forbid();
         if (original.Mode == "edit" && !actor.IsAdministrator
             && (!string.Equals(actor.UserName, original.UserName, StringComparison.OrdinalIgnoreCase)
@@ -581,7 +581,7 @@ public static class ManagedDocumentEndpoints
         if (!await http.HasProjectAccessAsync(db, data.Document.ProjectId, ct)) return Results.Forbid();
         var actor = http.UserAccount();
         if (!string.Equals(data.Revision.ResponsibleOwnerId, actor.UserName, StringComparison.OrdinalIgnoreCase)
-            && !await http.HasProjectRoleAsync(db, identity, data.Document.ProjectId, ct, ProgramRole.ConfigurationManager, ProgramRole.ProgramManager, ProgramRole.ProjectEngineeringLead)) return Results.Forbid();
+            && !await HasManagedDocumentAuthorityAsync(http, db, data.Document.ProjectId, ct, ProgramRole.ConfigurationManager, ProgramRole.ProgramManager, ProgramRole.ProjectEngineeringLead)) return Results.Forbid();
         try
         {
             var oldHash = data.Revision.FormalSummaryHash; var now = DateTimeOffset.UtcNow; var reason = request.Reason.Trim();
@@ -596,7 +596,7 @@ public static class ManagedDocumentEndpoints
     private static async Task<IResult> ReassignStewardAsync(Guid id, ReassignManagedDocumentRequest request, HttpContext http, AeroLinkDbContext db, IdentityService identity, CancellationToken ct)
     {
         var document = await db.ManagedDocuments.SingleOrDefaultAsync(x => x.Id == id, ct); if (document is null) return Results.NotFound();
-        if (!await http.HasProjectAccessAsync(db, document.ProjectId, ct) || !await http.HasProjectRoleAsync(db, identity, document.ProjectId, ct, ProgramRole.ConfigurationManager, ProgramRole.ProgramManager, ProgramRole.ProjectEngineeringLead)) return Results.Forbid();
+        if (!await http.HasProjectAccessAsync(db, document.ProjectId, ct) || !await HasManagedDocumentAuthorityAsync(http, db, document.ProjectId, ct, ProgramRole.ConfigurationManager, ProgramRole.ProgramManager, ProgramRole.ProjectEngineeringLead)) return Results.Forbid();
         if (string.IsNullOrWhiteSpace(request.Reason) || request.Reason.Length > 1000) return Results.BadRequest(new { error = "Provide a reassignment reason of 1000 characters or fewer." });
         if (!await ManagedDocumentAssignmentPolicy.IsEligibleAsync(db, identity, document.ProjectId, request.AssigneeId, DateTimeOffset.UtcNow, ct)) return Results.BadRequest(new { error = "The new document steward must be an active authorized member or delegate in this Program." });
         try
@@ -616,7 +616,7 @@ public static class ManagedDocumentEndpoints
     private static async Task<IResult> ReassignResponsibleOwnerAsync(Guid revisionId, ReassignManagedDocumentRequest request, HttpContext http, AeroLinkDbContext db, IdentityService identity, CancellationToken ct)
     {
         var data = await RevisionDataAsync(db, revisionId, ct); if (data is null) return Results.NotFound();
-        if (!await http.HasProjectAccessAsync(db, data.Document.ProjectId, ct) || !await http.HasProjectRoleAsync(db, identity, data.Document.ProjectId, ct, ProgramRole.ConfigurationManager, ProgramRole.ProgramManager, ProgramRole.ProjectEngineeringLead)) return Results.Forbid();
+        if (!await http.HasProjectAccessAsync(db, data.Document.ProjectId, ct) || !await HasManagedDocumentAuthorityAsync(http, db, data.Document.ProjectId, ct, ProgramRole.ConfigurationManager, ProgramRole.ProgramManager, ProgramRole.ProjectEngineeringLead)) return Results.Forbid();
         if (string.IsNullOrWhiteSpace(request.Reason) || request.Reason.Length > 1000) return Results.BadRequest(new { error = "Provide a reassignment reason of 1000 characters or fewer." });
         if (!await ManagedDocumentAssignmentPolicy.IsEligibleAsync(db, identity, data.Document.ProjectId, request.AssigneeId, DateTimeOffset.UtcNow, ct)) return Results.BadRequest(new { error = "The responsible revision owner must be an active authorized member or delegate in this Program." });
         try
@@ -728,7 +728,7 @@ public static class ManagedDocumentEndpoints
 
     private static async Task<IResult> ForceUnlockAsync(Guid revisionId, ForceUnlockManagedDocumentRequest request, HttpContext http, AeroLinkDbContext db, IdentityService identity, CancellationToken ct)
     {
-        var data = await RevisionDataAsync(db, revisionId, ct); if (data is null) return Results.NotFound(); var actor = http.UserAccount(); if (!actor.IsAdministrator && !await http.HasProjectRoleAsync(db, identity, data.Document.ProjectId, ct, ProgramRole.ConfigurationManager, ProgramRole.ProgramManager)) return Results.Forbid(); var session = await db.ArtifactEditSessions.SingleOrDefaultAsync(x => x.ArtifactType == "ManagedDocument" && x.ArtifactId == data.Document.Id && x.State == EditSessionState.Active, ct); if (session is null) return Results.NotFound();
+        var data = await RevisionDataAsync(db, revisionId, ct); if (data is null) return Results.NotFound(); var actor = http.UserAccount(); if (!await HasManagedDocumentAuthorityAsync(http, db, data.Document.ProjectId, ct, ProgramRole.ConfigurationManager, ProgramRole.ProgramManager)) return Results.Forbid(); var session = await db.ArtifactEditSessions.SingleOrDefaultAsync(x => x.ArtifactType == "ManagedDocument" && x.ArtifactId == data.Document.Id && x.State == EditSessionState.Active, ct); if (session is null) return Results.NotFound();
         try { var now = DateTimeOffset.UtcNow; session.ForceUnlock(actor.UserName, request.Reason, now); var grants = await db.DocumentConnectorGrants.Where(x => x.EditSessionId == session.Id && x.RevokedAt == null).ToListAsync(ct); foreach (var grant in grants) grant.Revoke(now); db.ManagedDocumentEvents.Add(new(data.Document.Id, "DocumentForceUnlocked", actor.UserName, $"Force-unlocked the checkout held by {session.UserName}. Reason: {request.Reason}", now)); db.SecurityAuditEvents.Add(new("DocumentForceUnlock", actor.UserName, data.Document.DocumentNumber, "Success", request.Reason, http.Connection.RemoteIpAddress?.ToString() ?? "local", now)); await db.SaveChangesAsync(ct); return Results.NoContent(); } catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
     }
 
@@ -738,8 +738,8 @@ public static class ManagedDocumentEndpoints
         var data = await RevisionDataAsync(db, revisionId, ct); if (data is null) return Results.NotFound();
         var actor = http.UserAccount();
         var authority = string.Equals(data.Revision.ResponsibleOwnerId, actor.UserName, StringComparison.OrdinalIgnoreCase)
-            ? await http.HasProjectRoleAsync(db, identity, data.Document.ProjectId, ct, ProgramRole.Engineer, ProgramRole.ConfigurationManager, ProgramRole.ProgramManager, ProgramRole.ProjectEngineeringLead)
-            : await http.HasProjectRoleAsync(db, identity, data.Document.ProjectId, ct, ProgramRole.ConfigurationManager, ProgramRole.ProgramManager, ProgramRole.ProjectEngineeringLead);
+            ? await HasManagedDocumentAuthorityAsync(http, db, data.Document.ProjectId, ct, ProgramRole.Engineer, ProgramRole.ConfigurationManager, ProgramRole.ProgramManager, ProgramRole.ProjectEngineeringLead)
+            : await HasManagedDocumentAuthorityAsync(http, db, data.Document.ProjectId, ct, ProgramRole.ConfigurationManager, ProgramRole.ProgramManager, ProgramRole.ProjectEngineeringLead);
         if (!authority) return Results.Forbid();
         try
         {
@@ -885,7 +885,7 @@ public static class ManagedDocumentEndpoints
 
     private static async Task<IResult> ScanIntegrityAsync(Guid projectId, HttpContext http, AeroLinkDbContext db, IdentityService identity, ManagedDocumentIntegrityService integrity, CancellationToken ct)
     {
-        if (!await http.HasProjectRoleAsync(db, identity, projectId, ct, ProgramRole.ConfigurationManager, ProgramRole.SoftwareQualityAnalyst, ProgramRole.ProgramManager, ProgramRole.ProjectEngineeringLead)) return Results.Forbid();
+        if (!await HasManagedDocumentAuthorityAsync(http, db, projectId, ct, ProgramRole.ConfigurationManager, ProgramRole.SoftwareQualityAnalyst, ProgramRole.ProgramManager, ProgramRole.ProjectEngineeringLead)) return Results.Forbid();
         var result = await integrity.ScanProjectAsync(projectId, http.UserAccount().UserName, ct);
         return Results.Ok(new { result.Checked, result.Healthy, result.Failed, result.FailedAttachmentIds, scannedAt = DateTimeOffset.UtcNow });
     }
@@ -893,7 +893,7 @@ public static class ManagedDocumentEndpoints
     private static async Task<IResult> ReconcileStorageAsync(Guid projectId, HttpContext http, AeroLinkDbContext db,
         IdentityService identity, ManagedDocumentStorageCoordinator storage, CancellationToken ct)
     {
-        if (!await http.HasProjectRoleAsync(db, identity, projectId, ct, ProgramRole.ConfigurationManager,
+        if (!await HasManagedDocumentAuthorityAsync(http, db, projectId, ct, ProgramRole.ConfigurationManager,
             ProgramRole.SoftwareQualityAnalyst, ProgramRole.ProgramManager, ProgramRole.ProjectEngineeringLead)) return Results.Forbid();
         var result = await storage.ReconcileProjectAsync(projectId, http.UserAccount().UserName, DateTimeOffset.UtcNow, ct);
         return Results.Ok(result);
@@ -903,7 +903,7 @@ public static class ManagedDocumentEndpoints
     {
         var attachment = await db.ControlledAttachments.AsNoTracking().SingleOrDefaultAsync(x => x.Id == attachmentId && x.ArtifactType == "ManagedDocument", ct);
         if (attachment is null) return Results.NotFound();
-        if (!await http.HasProjectRoleAsync(db, identity, attachment.ProjectId, ct, ProgramRole.ConfigurationManager, ProgramRole.SoftwareQualityAnalyst, ProgramRole.ProgramManager)) return Results.Forbid();
+        if (!await HasManagedDocumentAuthorityAsync(http, db, attachment.ProjectId, ct, ProgramRole.ConfigurationManager, ProgramRole.SoftwareQualityAnalyst, ProgramRole.ProgramManager)) return Results.Forbid();
         var form = await http.Request.ReadFormAsync(ct); var file = form.Files.GetFile("file"); var reason = form["reason"].ToString();
         if (file is null) return Results.BadRequest(new { error = "Select the verified recovery object." });
         try
@@ -1179,6 +1179,35 @@ public static class ManagedDocumentEndpoints
     { var hash = ManagedDocumentFileService.Sha256(Encoding.UTF8.GetBytes($"{document.DocumentNumber}|{revision.Revision}|{revision.FormalChangeSummary}")); return new ProfessionalPublication("AeroLink", program, project, document.DocumentType, document.Title, "Controlled Project document", document.DocumentNumber, revision.Revision.ToString("D2"), "Draft", "Project-wide", "All software builds", revision.ResponsibleOwnerId, revision.CreatedAt, hash, [("Document steward", document.StewardId), ("Revision responsible owner", revision.ResponsibleOwnerId), ("Revision initiated by", revision.InitiatedBy), ("Applicability", "Project-wide; build links are contextual traceability only"), ("Formal change summary", revision.FormalChangeSummary)], [], [(revision.Revision.ToString("D2"), "Draft", revision.CreatedAt.UtcDateTime.ToString("yyyy-MM-dd"), revision.ResponsibleOwnerId)], [new("1. Purpose and scope", "Complete this controlled Word template using the applicable project standard.", [new("1.1", "Author guidance", "Purpose", "State why this document exists, what it governs, and where its applicability begins and ends.", [("Status", "Draft")])]), new("2. Controlled content", "Replace the guidance below with the approved lifecycle content.", [new("2.1", "Author guidance", "Lifecycle content", "Identify responsibilities, inputs, activities, outputs, transition criteria, records and linked AeroLink artifacts.", [("Working format", "Macro-free Microsoft Word DOCX")])]), new("3. Review and release", "AeroLink records review evidence outside the editable document.", [new("3.1", "Release criteria", "Independent approval", "A technical reviewer and a separate final SQA or configuration approver must approve the exact release candidate.", [("Released formats", "DOCX and PDF")])])]) { Watermark = "DRAFT", ControlledStatusControls = true }; }
 
     private static async Task<(string Program, string Project)> ProjectContextAsync(AeroLinkDbContext db, Guid projectId, CancellationToken ct) => await (from project in db.Projects.AsNoTracking() join program in db.Programs.AsNoTracking() on project.ProgramId equals program.Id where project.Id == projectId select new ValueTuple<string, string>(program.Name, project.Name)).SingleAsync(ct);
+
+    /// <summary>
+    /// Managed-document controller and recovery actions historically allow the global administrator, base
+    /// authoring or assurance roles where they are named, and the accountable configuration/Program/Project
+    /// Engineering leadership authorities. The old role helper could not express that distinction: asking it
+    /// for ConfigurationManager or ProgramManager accepted the multi-member eligibility role by itself.
+    /// Route every such demand through the shared resolver so primary, standing backup and exact delegation
+    /// agree, while the relationship policy above deliberately keeps its stricter no-global-admin rule.
+    /// </summary>
+    private static async Task<bool> HasManagedDocumentAuthorityAsync(HttpContext http, AeroLinkDbContext db,
+        Guid projectId, CancellationToken ct, params ProgramRole[] roles)
+    {
+        var programId = await db.Projects.AsNoTracking().Where(x => x.Id == projectId)
+            .Select(x => (Guid?)x.ProgramId).SingleOrDefaultAsync(ct);
+        if (programId is null) return false;
+
+        var resolver = new ProjectAuthorityResolver(db);
+        var actor = http.UserAccount();
+        var now = DateTimeOffset.UtcNow;
+        foreach (var role in roles)
+        {
+            var requirement = SingularProgramRoles.IsPositionGoverned(role)
+                ? ProjectAuthorityRequirement.LegacyRoleDemand(role)
+                : ProjectAuthorityRequirement.BaseRole(role);
+            if (await resolver.IsSatisfiedAsync(actor.Id, programId.Value, requirement, now, ct)) return true;
+        }
+        return false;
+    }
+
     private static int NumberSequence(string value) => int.TryParse(value[(value.LastIndexOf('-') + 1)..], out var number) ? number : 0;
     private static async Task<RelationshipRevision> RelationshipRevisionAsync(Guid documentId, Guid revisionId, HttpContext http, AeroLinkDbContext db, IdentityService identity, CancellationToken ct)
     {
