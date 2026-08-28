@@ -98,6 +98,19 @@ public sealed class ProjectAuthorityResolverTests : IDisposable
                 person.Id, _program.Id, ProjectAuthorityRequirement.BaseRole(role), _now));
     }
 
+    [Fact]
+    public async Task A_raw_retired_position_membership_does_not_answer_the_positions_demands()
+    {
+        var person = Person("legacy-position", ProgramRole.SystemEngineeringLead);
+
+        Assert.False(await _resolver.IsSatisfiedAsync(person.Id, _program.Id,
+            ProjectAuthorityRequirement.LegacyRoleDemand(ProgramRole.SystemEngineeringLead), _now));
+        Assert.False(await _resolver.IsSatisfiedAsync(person.Id, _program.Id,
+            ProjectAuthorityRequirement.LegacyRoleDemand(ProgramRole.Reviewer), _now));
+        Assert.False(await _resolver.IsSatisfiedAsync(person.Id, _program.Id,
+            ProjectAuthorityRequirement.LegacyRoleDemand(ProgramRole.Approver), _now));
+    }
+
     // ---- Primary and backup ------------------------------------------------------------------------------
 
     [Fact]
@@ -162,6 +175,8 @@ public sealed class ProjectAuthorityResolverTests : IDisposable
         await _db.SaveChangesAsync();
 
         Assert.False((await ResolveAsync(person, ProjectLeadershipPosition.SystemEngineeringLead)).Granted);
+        Assert.False((await _resolver.ResolveAnyLeadershipSatisfyingAsync(
+            person.Id, _program.Id, ProgramRole.SystemEngineeringLead, default)).Granted);
     }
 
     [Fact]

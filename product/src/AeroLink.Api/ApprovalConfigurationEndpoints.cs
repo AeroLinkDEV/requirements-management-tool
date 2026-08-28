@@ -44,8 +44,7 @@ public static class ApprovalConfigurationEndpoints
 
             // Deciding how a team reviews is a configuration-management act, matching the authority the
             // workflow routes themselves already require.
-            var canManage = await http.HasProjectRoleAsync(db, identity, projectId, ct,
-                ProgramRole.ConfigurationManager, ProgramRole.ProgramManager, ProgramRole.Administrator);
+            var canManage = await http.HasApprovalConfigurationAuthorityAsync(db, authority, projectId, ct);
 
             var workflows = await db.ReviewWorkflows.AsNoTracking().Include(x => x.Stages)
                 .Where(x => x.ProjectId == projectId && x.State == ReviewWorkflowState.Active)
@@ -155,11 +154,10 @@ public static class ApprovalConfigurationEndpoints
 
     private static async Task<IResult> SaveConfigurationAsync(Guid projectId, ReviewSubject subject,
         ConfigureApprovalRequest request, HttpContext http, AeroLinkDbContext db, IdentityService identity,
-        IProjectLadderPolicyResolver policyResolver, CancellationToken ct)
+        IProjectLadderPolicyResolver policyResolver, ProjectAuthorityResolver authority, CancellationToken ct)
     {
         if (!await db.Projects.AsNoTracking().AnyAsync(x => x.Id == projectId, ct)) return Results.NotFound();
-        if (!await http.HasProjectRoleAsync(db, identity, projectId, ct,
-                ProgramRole.ConfigurationManager, ProgramRole.ProgramManager, ProgramRole.Administrator))
+        if (!await http.HasApprovalConfigurationAuthorityAsync(db, authority, projectId, ct))
             return Results.Forbid();
         var ladderPolicy = await policyResolver.ResolveAsync(projectId, ct);
         if (!IsSubjectSupported(ladderPolicy, subject))

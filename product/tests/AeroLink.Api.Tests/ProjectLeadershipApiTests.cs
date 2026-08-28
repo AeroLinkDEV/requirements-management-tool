@@ -53,7 +53,7 @@ public sealed class ProjectLeadershipApiTests : IClassFixture<SharedApiHost>
         var backup = Account(backupEngineer);
         var testerAccount = Account(tester);
         db.AddRange(manager, first, second, backup, testerAccount);
-        // The manager carries the roster authority through the ProgramManager role; the three engineers
+        // The manager is eligible through the ProgramManager role; the three engineers
         // carry the base role the System Engineering Lead position requires; the tester deliberately does
         // not, which is what the eligibility refusal proves.
         db.AddRange(
@@ -187,17 +187,57 @@ public sealed class ProjectLeadershipApiTests : IClassFixture<SharedApiHost>
         Assert.Equal(1, await db.ProjectLeadershipBackups.CountAsync(x => x.Position == ProjectLeadershipPosition.SystemEngineeringLead && x.RemovedAt != null));
     }
 
-    [Fact]
-    public async Task The_retired_project_engineering_lead_cannot_be_newly_granted()
+    [Theory]
+    [InlineData(ProgramRole.SystemEngineeringLead)]
+    [InlineData(ProgramRole.SoftwareEngineeringLead)]
+    [InlineData(ProgramRole.SystemTestLead)]
+    [InlineData(ProgramRole.SoftwareTestLead)]
+    [InlineData(ProgramRole.ProjectEngineeringLead)]
+    public async Task A_retired_position_role_cannot_be_newly_granted_through_the_project_roster(
+        ProgramRole retiredRole)
     {
         var seeded = await SeedAsync(_host.Factory);
         using var client = _host.CreateClient();
         await SignInAsync(client, seeded.ManagerName);
 
         var granted = await client.PostAsJsonAsync($"/api/projects/{seeded.ProjectId}/personnel",
-            new { userId = seeded.FirstId, role = nameof(ProgramRole.ProjectEngineeringLead) });
+            new { userId = seeded.FirstId, role = retiredRole.ToString() });
         Assert.Equal(HttpStatusCode.Conflict, granted.StatusCode);
         Assert.Contains("retired", await granted.Content.ReadAsStringAsync());
+    }
+
+    [Theory]
+    [InlineData(ProgramRole.SystemEngineeringLead)]
+    [InlineData(ProgramRole.SoftwareEngineeringLead)]
+    [InlineData(ProgramRole.SystemTestLead)]
+    [InlineData(ProgramRole.SoftwareTestLead)]
+    [InlineData(ProgramRole.ProjectEngineeringLead)]
+    public async Task A_retired_position_role_cannot_be_newly_granted_through_global_administration(
+        ProgramRole retiredRole)
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var admin = factory.CreateClient();
+        await SecurityBoundaryTests.BootstrapAndLoginAdministratorAsync(admin);
+
+        Guid userId;
+        Guid programId;
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            var now = DateTimeOffset.UtcNow;
+            var program = new ProgramRecord($"Retired role {retiredRole}", $"RR{Guid.NewGuid():N}"[..12]);
+            var user = new UserAccount($"retired.{Guid.NewGuid():N}"[..40], "Retired role target",
+                $"retired.{Guid.NewGuid():N}@example.test", IdentityService.HashPassword(AeroLinkApiFactory.MemberPassword), now);
+            db.AddRange(program, user);
+            await db.SaveChangesAsync();
+            userId = user.Id;
+            programId = program.Id;
+        }
+
+        var adminGrant = await admin.PostAsJsonAsync($"/api/admin/users/{userId}/memberships",
+            new { programId, role = retiredRole.ToString() });
+        Assert.Equal(HttpStatusCode.Conflict, adminGrant.StatusCode);
+        Assert.Contains("retired", await adminGrant.Content.ReadAsStringAsync());
     }
 
     [Fact]

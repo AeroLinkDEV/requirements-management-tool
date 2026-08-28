@@ -121,6 +121,17 @@ public sealed class AssurancePolicyTests
         Assert.Equal(AssuranceAuthoritySource.None, decision.Source);
     }
 
+    [Fact]
+    public void Version_one_preserves_its_original_program_manager_membership_meaning()
+    {
+        var decision = AssuranceDeviationAuthority.Decide(AssuranceDeviationClass.ProjectPolicy,
+            Program, Proposer, Person(ProgramRole.ProgramManager), Now, policyVersion: 1);
+
+        Assert.True(decision.Permitted);
+        Assert.Equal(AssuranceAuthoritySource.Membership, decision.Source);
+        Assert.Equal(1, decision.PolicyVersion);
+    }
+
     [Theory]
     [InlineData(AssuranceDeviationClass.Verification)]
     [InlineData(AssuranceDeviationClass.Independence)]
@@ -215,14 +226,15 @@ public sealed class AssurancePolicyTests
     {
         Assert.Equal(Enum.GetValues<AssuranceDeviationClass>().Length,
             AssuranceAuthorityPolicy.Version(AssuranceAuthorityPolicy.CurrentVersion).Count);
-        Assert.All(AssuranceAuthorityPolicy.Version(1), rule =>
+        foreach (var version in new[] { 1, AssuranceAuthorityPolicy.CurrentVersion })
+        Assert.All(AssuranceAuthorityPolicy.Version(version), rule =>
         {
             Assert.Equal(1, rule.MinimumApprovals);
             Assert.True(rule.DelegationAllowed);
             Assert.False(rule.SelfApprovalAllowed);
             Assert.NotEmpty(rule.ApprovingRoles);
         });
-        Assert.Throws<DomainException>(() => AssuranceAuthorityPolicy.Version(2));
+        Assert.Throws<DomainException>(() => AssuranceAuthorityPolicy.Version(3));
     }
 
     // ---- The deviation record --------------------------------------------------------------------------

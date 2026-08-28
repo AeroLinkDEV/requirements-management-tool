@@ -157,7 +157,8 @@ public static class PersonnelEndpoints
 
             var now = DateTimeOffset.UtcNow;
             membership.End(actor.UserName, now);
-            await AdministrationEndpoints.EndBackupsForEndedMembershipAsync(db, userId, programId.Value, membership.Id, actor.UserName, ct);
+            await AdministrationEndpoints.EndBackupsForEndedMembershipAsync(
+                db, userId, programId.Value, membership.Id, role, actor.UserName, ct);
             db.SecurityAuditEvents.Add(new("RoleRevoked", actor.UserName, userId.ToString(), "Success",
                 $"Ended {role} on project {projectId} from the project personnel page.",
                 http.Connection.RemoteIpAddress?.ToString() ?? "local", now));

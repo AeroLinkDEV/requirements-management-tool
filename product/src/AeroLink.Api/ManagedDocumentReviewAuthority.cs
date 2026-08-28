@@ -55,18 +55,10 @@ internal static class ManagedDocumentReviewAuthority
         var direct = await db.ProgramMemberships.AsNoTracking()
             .Where(x => x.ProgramId == programId && x.UserId == account.Id && x.EndedAt == null)
             .ToListAsync(ct);
-        // Only the roles that still describe a job are answerable by membership. The rest of this list names
-        // positions — ProgramManager, ConfigurationManager, the discipline leads — and under #816 holding
-        // that role is eligibility for the position, not the position itself. Reading them from membership
-        // here is what let a base-role-only member sign a technical review.
-        foreach (var role in accepted.Where(x => !IsPositionGoverned(x)))
-        {
-            var membership = direct.FirstOrDefault(x => x.Role == role);
-            if (membership is not null) return new(required, role, "DirectMembership", membership.Id);
-        }
-
         // The position roles, each resolved against its own eligibility and its own active designation, so a
-        // primary or standing backup signs and nobody else does.
+        // primary or standing backup signs and nobody else does. Leadership is checked before a general job
+        // membership so frozen evidence records the strongest controlled fact: a Configuration Manager
+        // position holder who also holds Approver must not degrade to Approver/DirectMembership.
         var resolver = new ProjectAuthorityResolver(db);
         foreach (var role in accepted.Where(IsPositionGoverned))
         {
@@ -75,6 +67,16 @@ internal static class ManagedDocumentReviewAuthority
             return new(required, role,
                 decision.Source == ProjectAuthoritySource.LeadershipBackup ? "ProjectLeadershipBackup" : "ProjectLeadershipPrimary",
                 decision.SourceId);
+        }
+
+        // Only the roles that still describe a job are answerable by membership. The rest of this list names
+        // positions — ProgramManager, ConfigurationManager, the discipline leads — and under #816 holding
+        // that role is eligibility for the position, not the position itself. Reading them from membership
+        // here is what let a base-role-only member sign a technical review.
+        foreach (var role in accepted.Where(x => !IsPositionGoverned(x)))
+        {
+            var membership = direct.FirstOrDefault(x => x.Role == role);
+            if (membership is not null) return new(required, role, "DirectMembership", membership.Id);
         }
 
         var administrator = direct.FirstOrDefault(x => x.Role == ProgramRole.Administrator);

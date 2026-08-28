@@ -256,6 +256,7 @@
       "path": "/api/admin/users/{id:guid}/memberships",
       "file": "AdministrationEndpoints.cs",
       "coveredBy": [
+        "ProjectLeadershipApiTests",
         "SecurityBoundaryTests"
       ]
     },
@@ -1695,7 +1696,8 @@
       "path": "/api/projects/{projectId:guid}/leadership/{position}/backup",
       "file": "ProjectLeadershipEndpoints.cs",
       "coveredBy": [
-        "ProjectLeadershipApiTests"
+        "ProjectLeadershipApiTests",
+        "ProjectPersonnelApiTests"
       ]
     },
     {
@@ -1720,8 +1722,7 @@
       "path": "/api/projects/{projectId:guid}/personnel/backups",
       "file": "PersonnelEndpoints.cs",
       "coveredBy": [
-        "ApprovalConfigurationApiTests",
-        "ProjectPersonnelApiTests"
+        "ApprovalConfigurationApiTests"
       ]
     },
     {

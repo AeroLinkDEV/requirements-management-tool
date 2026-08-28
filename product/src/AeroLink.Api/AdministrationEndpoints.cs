@@ -49,7 +49,7 @@ public static class AdministrationEndpoints
             // already passed, which a removed row cannot answer.
             var membership = await db.ProgramMemberships.SingleOrDefaultAsync(x => x.UserId == id && x.ProgramId == programId && x.Role == role && x.EndedAt == null, ct); if (membership is null) return Results.NotFound();
             membership.End(actor.UserName, DateTimeOffset.UtcNow);
-            await EndBackupsForEndedMembershipAsync(db, id, programId, membership.Id, actor.UserName, ct);
+            await EndBackupsForEndedMembershipAsync(db, id, programId, membership.Id, role, actor.UserName, ct);
             db.SecurityAuditEvents.Add(new("RoleRevoked", actor.UserName, id.ToString(), "Success", $"Revoked {role} for program {programId}.", http.Connection.RemoteIpAddress?.ToString() ?? "local", DateTimeOffset.UtcNow));
             await db.SaveChangesAsync(ct); return Results.NoContent();
         });
@@ -145,8 +145,30 @@ public static class AdministrationEndpoints
     /// Personnel page, which is exactly the reassurance nobody should be given. Only their last remaining role
     /// ending removes them; losing one of several roles does not.
     /// </summary>
-    internal static async Task EndBackupsForEndedMembershipAsync(AeroLinkDbContext db, Guid userId, Guid programId, Guid justEndedMembershipId, string actor, CancellationToken ct)
+    internal static async Task EndBackupsForEndedMembershipAsync(AeroLinkDbContext db, Guid userId, Guid programId,
+        Guid justEndedMembershipId, ProgramRole endedRole, string actor, CancellationToken ct)
     {
+        var now = DateTimeOffset.UtcNow;
+        // Leadership eligibility is exact. Ending the required base role must stand down any primary or
+        // backup designation immediately, even if the person still holds another role on the Program;
+        // otherwise the stale row silently resurrects authority when that base role is granted again.
+        var affectedPositions = ProjectLeadership.All
+            .Where(position => ProjectLeadership.RequiredBaseRole(position) == endedRole).ToList();
+        if (affectedPositions.Count > 0)
+        {
+            var assignments = await db.ProjectLeadershipAssignments
+                .Where(x => x.HolderUserId == userId && x.ProgramId == programId && x.EndedAt == null)
+                .ToListAsync(ct);
+            foreach (var assignment in assignments.Where(x => affectedPositions.Contains(x.Position)))
+                assignment.End(actor, now);
+
+            var leadershipBackups = await db.ProjectLeadershipBackups
+                .Where(x => x.BackupUserId == userId && x.ProgramId == programId && x.RemovedAt == null)
+                .ToListAsync(ct);
+            foreach (var backup in leadershipBackups.Where(x => affectedPositions.Contains(x.Position)))
+                backup.Remove(actor, now);
+        }
+
         // The membership ended moments ago is tracked but unsaved, so a database query still sees it as
         // current. It is excluded by identity rather than relying on the change tracker being flushed.
         var stillAMember = await db.ProgramMemberships
@@ -155,6 +177,6 @@ public static class AdministrationEndpoints
         var backups = await db.ProjectRoleBackups
             .Where(x => x.ProgramId == programId && x.BackupUserId == userId && x.RemovedAt == null)
             .ToListAsync(ct);
-        foreach (var backup in backups) backup.Remove(actor, DateTimeOffset.UtcNow);
+        foreach (var backup in backups) backup.Remove(actor, now);
     }
 }

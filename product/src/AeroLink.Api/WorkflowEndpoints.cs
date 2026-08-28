@@ -40,11 +40,11 @@ public static class WorkflowEndpoints
         });
 
         app.MapPost("/api/review-workflows", async (CreateReviewWorkflowRequest request, HttpContext http,
-            AeroLinkDbContext db, IdentityService identity, IProjectLadderPolicyResolver policyResolver, CancellationToken ct) =>
+            AeroLinkDbContext db, IdentityService identity, IProjectLadderPolicyResolver policyResolver,
+            ProjectAuthorityResolver authority, CancellationToken ct) =>
         {
             // Deciding how a team reviews is a configuration-management act, not an authoring one.
-            if (!await http.HasProjectRoleAsync(db, identity, request.ProjectId, ct,
-                    ProgramRole.ConfigurationManager, ProgramRole.ProgramManager, ProgramRole.Administrator))
+            if (!await http.HasApprovalConfigurationAuthorityAsync(db, authority, request.ProjectId, ct))
                 return Results.Forbid();
             try
             {
@@ -65,12 +65,12 @@ public static class WorkflowEndpoints
         });
 
         app.MapPost("/api/review-workflows/{id:guid}/activate", async (Guid id, HttpContext http,
-            AeroLinkDbContext db, IdentityService identity, IProjectLadderPolicyResolver policyResolver, CancellationToken ct) =>
+            AeroLinkDbContext db, IdentityService identity, IProjectLadderPolicyResolver policyResolver,
+            ProjectAuthorityResolver authority, CancellationToken ct) =>
         {
             var workflow = await db.ReviewWorkflows.Include(x => x.Stages).SingleOrDefaultAsync(x => x.Id == id, ct);
             if (workflow is null) return Results.NotFound();
-            if (!await http.HasProjectRoleAsync(db, identity, workflow.ProjectId, ct,
-                    ProgramRole.ConfigurationManager, ProgramRole.ProgramManager, ProgramRole.Administrator))
+            if (!await http.HasApprovalConfigurationAuthorityAsync(db, authority, workflow.ProjectId, ct))
                 return Results.Forbid();
             try
             {
@@ -97,12 +97,12 @@ public static class WorkflowEndpoints
         });
 
         app.MapPost("/api/review-workflows/{id:guid}/revise", async (Guid id, ReviseReviewWorkflowRequest request,
-            HttpContext http, AeroLinkDbContext db, IdentityService identity, IProjectLadderPolicyResolver policyResolver, CancellationToken ct) =>
+            HttpContext http, AeroLinkDbContext db, IdentityService identity, IProjectLadderPolicyResolver policyResolver,
+            ProjectAuthorityResolver authority, CancellationToken ct) =>
         {
             var current = await db.ReviewWorkflows.Include(x => x.Stages).SingleOrDefaultAsync(x => x.Id == id, ct);
             if (current is null) return Results.NotFound();
-            if (!await http.HasProjectRoleAsync(db, identity, current.ProjectId, ct,
-                    ProgramRole.ConfigurationManager, ProgramRole.ProgramManager, ProgramRole.Administrator))
+            if (!await http.HasApprovalConfigurationAuthorityAsync(db, authority, current.ProjectId, ct))
                 return Results.Forbid();
             try
             {
@@ -124,12 +124,11 @@ public static class WorkflowEndpoints
         });
 
         app.MapPost("/api/review-workflows/{id:guid}/retire", async (Guid id, HttpContext http,
-            AeroLinkDbContext db, IdentityService identity, CancellationToken ct) =>
+            AeroLinkDbContext db, IdentityService identity, ProjectAuthorityResolver authority, CancellationToken ct) =>
         {
             var workflow = await db.ReviewWorkflows.Include(x => x.Stages).SingleOrDefaultAsync(x => x.Id == id, ct);
             if (workflow is null) return Results.NotFound();
-            if (!await http.HasProjectRoleAsync(db, identity, workflow.ProjectId, ct,
-                    ProgramRole.ConfigurationManager, ProgramRole.ProgramManager, ProgramRole.Administrator))
+            if (!await http.HasApprovalConfigurationAuthorityAsync(db, authority, workflow.ProjectId, ct))
                 return Results.Forbid();
             try
             {
@@ -185,7 +184,9 @@ public static class WorkflowEndpoints
             {
                 var accepted = ProgramRoleAuthority.Satisfying(required);
                 var held = rolesByUser.GetValueOrDefault(userId) ?? [];
-                return held.FirstOrDefault(accepted.Contains) is { } match ? match.ToString() : required.ToString();
+                foreach (var role in held)
+                    if (accepted.Contains(role)) return role.ToString();
+                return required.ToString();
             }
 
             var candidatesByRole = new Dictionary<ProgramRole, IReadOnlyList<StageCandidate>>();

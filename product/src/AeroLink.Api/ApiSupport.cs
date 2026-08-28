@@ -67,6 +67,29 @@ static class IdentityHttpExtensions
     private static readonly ProjectLeadershipPosition[] RosterStewardship =
         [ProjectLeadershipPosition.ProgramManager, ProjectLeadershipPosition.ProjectEngineer];
 
+    /// <summary>
+    /// Who may define the project's approval procedure. Configuration Manager and Program Manager are
+    /// accountable positions; their base roles are eligibility, not authority. Exact live delegations keep
+    /// their established compatibility meaning, and Program administrators retain emergency stewardship.
+    /// </summary>
+    public static async Task<bool> HasApprovalConfigurationAuthorityAsync(this HttpContext context,
+        AeroLinkDbContext db, ProjectAuthorityResolver resolver, Guid projectId, CancellationToken ct)
+    {
+        var programId = await db.Projects.Where(x => x.Id == projectId)
+            .Select(x => (Guid?)x.ProgramId).SingleOrDefaultAsync(ct);
+        if (programId is null) return false;
+        var actor = context.UserAccount();
+        var now = DateTimeOffset.UtcNow;
+        foreach (var role in ApprovalConfigurationAuthorities)
+            if (await resolver.IsSatisfiedAsync(actor.Id, programId.Value,
+                    ProjectAuthorityRequirement.LegacyRoleDemand(role), now, ct))
+                return true;
+        return false;
+    }
+
+    private static readonly ProgramRole[] ApprovalConfigurationAuthorities =
+        [ProgramRole.ConfigurationManager, ProgramRole.ProgramManager, ProgramRole.Administrator];
+
     public static async Task<bool> HasProjectAccessAsync(this HttpContext context, AeroLinkDbContext db, Guid projectId, CancellationToken ct)
     {
         var actor=context.UserAccount();if(actor.IsAdministrator)return true;

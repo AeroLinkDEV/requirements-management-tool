@@ -268,6 +268,51 @@ public sealed class ApprovalConfigurationApiTests : IClassFixture<SharedApiHost>
     }
 
     [Fact]
+    public async Task Configuration_management_requires_the_position_not_only_its_base_role()
+    {
+        var seeded = await SeedAsync(_host.Factory, [new("Initial review", ProgramRole.SystemEngineer)]);
+        var tag = Guid.NewGuid().ToString("N")[..8];
+        var baseName = $"config.base.{tag}";
+        var holderName = $"config.holder.{tag}";
+        using (var scope = _host.Factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            var now = DateTimeOffset.UtcNow;
+            UserAccount Account(string name) => new(name, name, $"{name}@example.test",
+                IdentityService.HashPassword(AeroLinkApiFactory.MemberPassword), now);
+            var baseOnly = Account(baseName);
+            var holder = Account(holderName);
+            db.AddRange(baseOnly, holder);
+            db.AddRange(
+                new ProgramMembership(baseOnly.Id, seeded.ProgramId, ProgramRole.ConfigurationManager, "test.setup", now),
+                new ProgramMembership(holder.Id, seeded.ProgramId, ProgramRole.ConfigurationManager, "test.setup", now),
+                new ProjectLeadershipAssignment(seeded.ProgramId, ProjectLeadershipPosition.ConfigurationManager,
+                    holder.Id, "test.setup", now));
+            await db.SaveChangesAsync();
+        }
+
+        using var baseClient = _host.CreateClient();
+        await SignInAsync(baseClient, baseName);
+        Assert.False((await ReadAsync(baseClient, seeded.ProjectId)).CanManage);
+        var refused = await baseClient.PutAsJsonAsync(
+            $"/api/projects/{seeded.ProjectId}/approval-configuration/{nameof(ReviewSubject.System)}", new
+            {
+                stages = new[] { new { name = "Base-only attempt", requiredRole = ProgramRole.SystemEngineer.ToString(), kind = "Review" } },
+            });
+        Assert.Equal(HttpStatusCode.Forbidden, refused.StatusCode);
+
+        using var holderClient = _host.CreateClient();
+        await SignInAsync(holderClient, holderName);
+        Assert.True((await ReadAsync(holderClient, seeded.ProjectId)).CanManage);
+        var accepted = await holderClient.PutAsJsonAsync(
+            $"/api/projects/{seeded.ProjectId}/approval-configuration/{nameof(ReviewSubject.System)}", new
+            {
+                stages = new[] { new { name = "Position-holder update", requiredRole = ProgramRole.SystemEngineer.ToString(), kind = "Review" } },
+            });
+        Assert.Equal(HttpStatusCode.OK, accepted.StatusCode);
+    }
+
+    [Fact]
     public async Task Legacy_revision_version_collision_returns_conflict()
     {
         var seeded = await SeedAsync(_host.Factory, [new("Initial review", ProgramRole.SystemEngineer)]);

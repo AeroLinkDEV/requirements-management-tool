@@ -58,7 +58,12 @@ internal static class ManagedDocumentAssignmentPolicy
         {
             if (SingularProgramRoles.IsPositionGoverned(role))
             {
-                if ((await resolver.ResolveAnyLeadershipSatisfyingAsync(actor.Id, programId.Value, role, ct)).Granted) return true;
+                // This compatibility question accepts the position primary or backup and an exact,
+                // time-bounded delegation, but never treats base eligibility as the position. Calling the
+                // leadership-only helper here accidentally dropped valid Configuration Manager delegations.
+                if ((await resolver.ResolveAsync(actor.Id, programId.Value,
+                        ProjectAuthorityRequirement.LegacyRoleDemand(role), now, ct)).Granted)
+                    return true;
                 continue;
             }
             var accepted = ProgramRoleAuthority.Satisfying(role).Where(x => !SingularProgramRoles.IsPositionGoverned(x)).ToList();

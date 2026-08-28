@@ -205,6 +205,22 @@ public sealed class ManagedDocumentReviewAuthorityCharacterizationTests : IDispo
     }
 
     [Fact]
+    public async Task Leadership_provenance_outranks_a_general_direct_membership()
+    {
+        AddAccount("cm.approver", ProgramRole.ConfigurationManager, ProgramRole.Approver);
+        await _db.SaveChangesAsync();
+        Elevate("cm.approver", ProjectLeadershipPosition.ConfigurationManager);
+        await _db.SaveChangesAsync();
+
+        var evidence = await ManagedDocumentReviewAuthority.ResolveFinalAsync(
+            _db, _program.Id, _accounts["cm.approver"], _now, default);
+
+        Assert.NotNull(evidence);
+        Assert.Equal(ProgramRole.ConfigurationManager, evidence!.GrantedAuthority);
+        Assert.Equal("ProjectLeadershipPrimary", evidence.Source);
+    }
+
+    [Fact]
     public async Task A_program_administrator_membership_substitutes_when_no_accepted_role_matches()
     {
         AddAccount("program.admin", ProgramRole.Administrator);

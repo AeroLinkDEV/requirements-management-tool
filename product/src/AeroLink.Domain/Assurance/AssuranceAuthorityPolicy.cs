@@ -26,8 +26,8 @@ public sealed record AssuranceAuthorityRule(
 /// </summary>
 public static class AssuranceAuthorityPolicy
 {
-    /// <summary>The authority rules recorded by the product-owner decision of 2026-08-22.</summary>
-    public const int CurrentVersion = 1;
+    /// <summary>The current rules, with accountable positions separated from base eligibility.</summary>
+    public const int CurrentVersion = 2;
 
     // One qualified approver is sufficient throughout version 1. The count is data rather than an assumption
     // baked into the resolver, because the decision says a future class may require more.
@@ -44,9 +44,17 @@ public static class AssuranceAuthorityPolicy
         new(AssuranceDeviationClass.Airworthiness, [ProgramRole.Airworthiness], 1, true, false),
     ];
 
-    public static IReadOnlyList<AssuranceAuthorityRule> Version(int version) => version == 1
-        ? Version1
-        : throw new DomainException($"Assurance authority policy version {version} is not supported.");
+    // Version 2 preserves the approved role catalogue and changes how position-governed entries are
+    // established: ProgramManager means the Project Leadership position, not the base role that qualifies a
+    // person to hold it. Keeping a separate version is what lets a historical v1 approval remain truthful.
+    private static readonly AssuranceAuthorityRule[] Version2 = [.. Version1];
+
+    public static IReadOnlyList<AssuranceAuthorityRule> Version(int version) => version switch
+    {
+        1 => Version1,
+        2 => Version2,
+        _ => throw new DomainException($"Assurance authority policy version {version} is not supported."),
+    };
 
     public static AssuranceAuthorityRule Rule(AssuranceDeviationClass deviationClass, int version = CurrentVersion) =>
         Version(version).SingleOrDefault(x => x.Class == deviationClass)
@@ -125,12 +133,15 @@ public static class AssuranceDeviationAuthority
         // so a project-policy deviation takes the holder of that position, not everybody granted the role
         // that makes them eligible for it. SQA and Airworthiness are unaffected: they remain base assurance
         // roles and membership is exactly the right question for them.
-        foreach (var role in rule.ApprovingRoles.Where(x => !IsPositionGoverned(x)))
+        // Version 1 predates the position/base-role split and must keep its original membership meaning when
+        // an immutable historical deviation is verified. Version 2 is the first policy whose ProgramManager
+        // entry means the accountable position.
+        foreach (var role in rule.ApprovingRoles.Where(x => policyVersion == 1 || !IsPositionGoverned(x)))
             if (approver.HeldRoles.Any(held => ProgramRoleAuthority.Satisfying(role).Contains(held)))
                 return new(true, $"{approver.UserName} holds {Readable(role)} authority on this Program.",
                     role, AssuranceAuthoritySource.Membership, policyVersion);
 
-        foreach (var role in rule.ApprovingRoles.Where(IsPositionGoverned))
+        foreach (var role in policyVersion >= 2 ? rule.ApprovingRoles.Where(IsPositionGoverned) : [])
             if (approver.LeadershipAuthorities.Contains(role))
                 return new(true,
                     $"{approver.UserName} holds the {Readable(role)} Project Leadership position on this Program.",

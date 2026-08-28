@@ -137,6 +137,13 @@ public sealed class ProjectAuthorityResolver(AeroLinkDbContext db)
     public async Task<ProjectAuthorityDecision> ResolveAnyLeadershipSatisfyingAsync(
         Guid userId, Guid programId, ProgramRole demanded, CancellationToken ct)
     {
+        // This helper is public because a few policy services need leadership-only provenance. They do not
+        // all enter through ResolveAsync, so the active-account gate has to live here too; otherwise a
+        // disabled holder can retain authority through this sibling while the main resolver refuses it.
+        if (!await db.UserAccounts.AsNoTracking()
+                .AnyAsync(x => x.Id == userId && x.State == AccountState.Active, ct))
+            return ProjectAuthorityDecision.Denied;
+
         var accepted = ProgramRoleAuthority.Satisfying(demanded);
         var matching = ProjectLeadership.All
             .Where(position =>

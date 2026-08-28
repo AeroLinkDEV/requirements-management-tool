@@ -73,15 +73,15 @@ public sealed class IdentityServiceAuthorityCharacterizationTests : IDisposable
     }
 
     [Fact]
-    public async Task Both_paths_accept_a_standing_backup()
+    public async Task A_legacy_position_keyed_backup_confers_nothing_on_both_paths()
     {
         // The backup is named for the lead role while holding only the discipline membership.
         _db.ProjectRoleBackups.Add(new ProjectRoleBackup(_program.Id, ProgramRole.SystemEngineeringLead, _backup.Id, "admin", _now));
         await _db.SaveChangesAsync();
 
         var (backupUser, _) = await SessionForAsync(_backup);
-        Assert.True(await _identity.HasRoleAsync(backupUser, _program.Id, ProgramRole.SystemEngineeringLead, _now, default));
-        Assert.True(await _identity.HasRoleAsync(_backup.Id, _program.Id, ProgramRole.SystemEngineeringLead, _now, default));
+        Assert.False(await _identity.HasRoleAsync(backupUser, _program.Id, ProgramRole.SystemEngineeringLead, _now, default));
+        Assert.False(await _identity.HasRoleAsync(_backup.Id, _program.Id, ProgramRole.SystemEngineeringLead, _now, default));
     }
 
     [Fact]

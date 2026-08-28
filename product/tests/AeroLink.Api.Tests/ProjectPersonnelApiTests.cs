@@ -198,11 +198,11 @@ public sealed class ProjectPersonnelApiTests : IClassFixture<SharedApiHost>
     }
 
     /// <summary>
-    /// The position becomes available once its holder's role has ended — the singular rule bites on current
-    /// holders, not on everybody who ever held it.
+    /// A retired position role remains retired even after its historical holder has ended. Reassignment now
+    /// belongs to the Project Leadership surface; recreating the membership would reopen the parallel path.
     /// </summary>
     [Fact]
-    public async Task A_position_can_be_reassigned_once_its_holder_has_been_ended()
+    public async Task A_retired_position_role_cannot_be_recreated_after_its_history_has_ended()
     {
         var seeded = await SeedAsync(_host.Factory);
         using var client = _host.CreateClient();
@@ -212,7 +212,8 @@ public sealed class ProjectPersonnelApiTests : IClassFixture<SharedApiHost>
         var reassigned = await client.PostAsJsonAsync($"/api/projects/{seeded.ProjectId}/personnel",
             new { userId = seeded.DeputyId, role = nameof(ProgramRole.SystemEngineeringLead) });
 
-        Assert.Equal(HttpStatusCode.NoContent, reassigned.StatusCode);
+        Assert.Equal(HttpStatusCode.Conflict, reassigned.StatusCode);
+        Assert.Contains("retired", await reassigned.Content.ReadAsStringAsync());
     }
 
     /// <summary>
@@ -251,8 +252,9 @@ public sealed class ProjectPersonnelApiTests : IClassFixture<SharedApiHost>
                 ProgramRole.SystemEngineeringLead, DateTimeOffset.UtcNow, default));
         }
 
-        var named = await client.PostAsJsonAsync($"/api/projects/{seeded.ProjectId}/personnel/backups",
-            new { backupUserId = seeded.DeputyId, role = nameof(ProgramRole.SystemEngineeringLead) });
+        var named = await client.PostAsJsonAsync(
+            $"/api/projects/{seeded.ProjectId}/leadership/{nameof(ProjectLeadershipPosition.SystemEngineeringLead)}/backup",
+            new { backupUserId = seeded.DeputyId });
         Assert.Equal(HttpStatusCode.NoContent, named.StatusCode);
 
         using var after = _host.Factory.Services.CreateScope();
@@ -271,10 +273,11 @@ public sealed class ProjectPersonnelApiTests : IClassFixture<SharedApiHost>
         using var client = _host.CreateClient();
         await SignInAsync(client, seeded.ManagerName);
 
-        var response = await client.PostAsJsonAsync($"/api/projects/{seeded.ProjectId}/personnel/backups",
-            new { backupUserId = seeded.OutsiderId, role = nameof(ProgramRole.SystemEngineeringLead) });
+        var response = await client.PostAsJsonAsync(
+            $"/api/projects/{seeded.ProjectId}/leadership/{nameof(ProjectLeadershipPosition.SystemEngineeringLead)}/backup",
+            new { backupUserId = seeded.OutsiderId });
 
-        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
     }
 
     /// <summary>
@@ -287,10 +290,11 @@ public sealed class ProjectPersonnelApiTests : IClassFixture<SharedApiHost>
         using var client = _host.CreateClient();
         await SignInAsync(client, seeded.ManagerName);
 
-        var response = await client.PostAsJsonAsync($"/api/projects/{seeded.ProjectId}/personnel/backups",
-            new { backupUserId = seeded.EngineerId, role = nameof(ProgramRole.SystemEngineeringLead) });
+        var response = await client.PostAsJsonAsync(
+            $"/api/projects/{seeded.ProjectId}/leadership/{nameof(ProjectLeadershipPosition.SystemEngineeringLead)}/backup",
+            new { backupUserId = seeded.EngineerId });
 
-        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
     }
 
     /// <summary>
@@ -304,17 +308,46 @@ public sealed class ProjectPersonnelApiTests : IClassFixture<SharedApiHost>
         using var client = _host.CreateClient();
         await SignInAsync(client, seeded.ManagerName);
 
-        await client.PostAsJsonAsync($"/api/projects/{seeded.ProjectId}/personnel/backups",
-            new { backupUserId = seeded.DeputyId, role = nameof(ProgramRole.SystemEngineeringLead) });
+        var named = await client.PostAsJsonAsync(
+            $"/api/projects/{seeded.ProjectId}/leadership/{nameof(ProjectLeadershipPosition.SystemEngineeringLead)}/backup",
+            new { backupUserId = seeded.DeputyId });
+        Assert.Equal(HttpStatusCode.NoContent, named.StatusCode);
         await client.DeleteAsync($"/api/projects/{seeded.ProjectId}/personnel/{seeded.DeputyId}/roles/{nameof(ProgramRole.SystemEngineer)}");
 
         using var scope = _host.Factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
-        var backup = await db.ProjectRoleBackups.AsNoTracking().SingleAsync(x => x.BackupUserId == seeded.DeputyId);
+        var backup = await db.ProjectLeadershipBackups.AsNoTracking()
+            .SingleAsync(x => x.BackupUserId == seeded.DeputyId
+                              && x.Position == ProjectLeadershipPosition.SystemEngineeringLead);
         Assert.NotNull(backup.RemovedAt);
 
         var identity = scope.ServiceProvider.GetRequiredService<IdentityService>();
         Assert.False(await identity.HasRoleAsync(seeded.DeputyId, seeded.ProgramId,
+            ProgramRole.SystemEngineeringLead, DateTimeOffset.UtcNow, default));
+    }
+
+    [Fact]
+    public async Task Ending_and_regranting_a_base_role_does_not_resurrect_the_ended_leadership_primary()
+    {
+        var seeded = await SeedAsync(_host.Factory);
+        using var client = _host.CreateClient();
+        await SignInAsync(client, seeded.ManagerName);
+
+        var ended = await client.DeleteAsync(
+            $"/api/projects/{seeded.ProjectId}/personnel/{seeded.EngineerId}/roles/{nameof(ProgramRole.SystemEngineer)}");
+        Assert.Equal(HttpStatusCode.NoContent, ended.StatusCode);
+        var regranted = await client.PostAsJsonAsync($"/api/projects/{seeded.ProjectId}/personnel",
+            new { userId = seeded.EngineerId, role = nameof(ProgramRole.SystemEngineer) });
+        Assert.Equal(HttpStatusCode.NoContent, regranted.StatusCode);
+
+        using var scope = _host.Factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+        var assignment = await db.ProjectLeadershipAssignments.AsNoTracking().SingleAsync(x =>
+            x.HolderUserId == seeded.EngineerId
+            && x.Position == ProjectLeadershipPosition.SystemEngineeringLead);
+        Assert.NotNull(assignment.EndedAt);
+        var identity = scope.ServiceProvider.GetRequiredService<IdentityService>();
+        Assert.False(await identity.HasRoleAsync(seeded.EngineerId, seeded.ProgramId,
             ProgramRole.SystemEngineeringLead, DateTimeOffset.UtcNow, default));
     }
 

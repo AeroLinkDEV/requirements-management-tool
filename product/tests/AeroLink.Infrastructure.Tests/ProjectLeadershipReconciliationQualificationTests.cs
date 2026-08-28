@@ -270,6 +270,79 @@ public sealed class ProjectLeadershipReconciliationQualificationTests
         finally { await DropDatabaseAsync(server, database); }
     }
 
+    [Fact]
+    public async Task V2_reports_a_legacy_position_membership_held_by_somebody_other_than_the_assignment_holder()
+    {
+        if (!ServerConfigured(out var server)) return;
+        string? database = null;
+        var connection = await CreateDisposableDatabaseAsync(server);
+        try
+        {
+            database = new NpgsqlConnectionStringBuilder(connection).Database;
+            await using (var migrate = new AeroLinkDbContext(Options(connection)))
+                await migrate.Database.MigrateAsync();
+
+            var now = DateTimeOffset.UtcNow;
+            var program = new ProgramRecord("V2 Holder Conflict", $"V2H{Guid.NewGuid():N}"[..12]);
+            var legacyHolder = Account("v2.legacy.holder", now);
+            var assignedHolder = Account("v2.assigned.holder", now);
+            await using (var seed = new AeroLinkDbContext(Options(connection)))
+            {
+                seed.AddRange(program, legacyHolder, assignedHolder);
+                seed.AddRange(
+                    new ProgramMembership(legacyHolder.Id, program.Id, ProgramRole.SystemEngineeringLead, "legacy", now),
+                    new ProgramMembership(assignedHolder.Id, program.Id, ProgramRole.SystemEngineer, "operator", now),
+                    new ProjectLeadershipAssignment(program.Id, ProjectLeadershipPosition.SystemEngineeringLead,
+                        assignedHolder.Id, "operator", now));
+                await seed.SaveChangesAsync();
+            }
+
+            await using var v2 = new AeroLinkDbContext(Options(connection));
+            var failure = await Assert.ThrowsAsync<InvalidOperationException>(
+                () => new ProjectLeadershipReconciliationAuthority(v2).EnsureCompletedAsync());
+            Assert.Contains("V2 Holder Conflict", failure.Message);
+            Assert.Contains("does not hold the SystemEngineeringLead position", failure.Message);
+            Assert.False(await v2.SecurityAuditEvents.AsNoTracking().AnyAsync(
+                x => x.EventType == ProjectLeadershipReconciliationAuthority.MigrationMarker + ".Completed"));
+        }
+        finally { await DropDatabaseAsync(server, database); }
+    }
+
+    [Fact]
+    public async Task V2_reports_a_position_keyed_legacy_backup_with_no_leadership_backup()
+    {
+        if (!ServerConfigured(out var server)) return;
+        string? database = null;
+        var connection = await CreateDisposableDatabaseAsync(server);
+        try
+        {
+            database = new NpgsqlConnectionStringBuilder(connection).Database;
+            await using (var migrate = new AeroLinkDbContext(Options(connection)))
+                await migrate.Database.MigrateAsync();
+
+            var now = DateTimeOffset.UtcNow;
+            var program = new ProgramRecord("V2 Backup Conflict", $"V2D{Guid.NewGuid():N}"[..12]);
+            var backup = Account("v2.legacy.backup", now);
+            await using (var seed = new AeroLinkDbContext(Options(connection)))
+            {
+                seed.AddRange(program, backup);
+                seed.AddRange(
+                    new ProgramMembership(backup.Id, program.Id, ProgramRole.SystemEngineer, "legacy", now),
+                    new ProjectRoleBackup(program.Id, ProgramRole.SystemEngineeringLead, backup.Id, "legacy", now));
+                await seed.SaveChangesAsync();
+            }
+
+            await using var v2 = new AeroLinkDbContext(Options(connection));
+            var failure = await Assert.ThrowsAsync<InvalidOperationException>(
+                () => new ProjectLeadershipReconciliationAuthority(v2).EnsureCompletedAsync());
+            Assert.Contains("V2 Backup Conflict", failure.Message);
+            Assert.Contains("standing backup has no equivalent SystemEngineeringLead leadership backup", failure.Message);
+            Assert.False(await v2.SecurityAuditEvents.AsNoTracking().AnyAsync(
+                x => x.EventType == ProjectLeadershipReconciliationAuthority.MigrationMarker + ".Completed"));
+        }
+        finally { await DropDatabaseAsync(server, database); }
+    }
+
     /// <summary>
     /// The Project Engineering Lead backup v1 deliberately left behind. Where it maps unambiguously it moves
     /// to the Project Engineer position and the legacy row is retired, so removing the new backup actually

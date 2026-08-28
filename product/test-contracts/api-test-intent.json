@@ -1,13 +1,13 @@
 {
   "schemaVersion": "aerolink-api-test-intent/v2",
   "totals": {
-    "tests": 651,
-    "cases": 709,
-    "classes": 109,
-    "hostedTests": 627,
-    "hostedCases": 676,
-    "nonHostedTests": 18,
-    "nonHostedCases": 27,
+    "tests": 656,
+    "cases": 722,
+    "classes": 110,
+    "hostedTests": 630,
+    "hostedCases": 687,
+    "nonHostedTests": 20,
+    "nonHostedCases": 29,
     "unknownHostTests": 6,
     "unknownHostCases": 6,
     "hostedCandidateTests": 16,
@@ -21,32 +21,32 @@
     "http-boundary": {
       "label": "HTTP boundary: route, status, JSON shape",
       "level": "API (must stay hosted)",
-      "tests": 399,
-      "cases": 433,
+      "tests": 400,
+      "cases": 442,
       "unknownCases": 0,
       "classes": 91
     },
     "ef-translation": {
       "label": "EF translation / relational constraints",
       "level": "Infrastructure (needs a database, not a host)",
-      "tests": 139,
-      "cases": 150,
+      "tests": 141,
+      "cases": 152,
       "unknownCases": 0,
-      "classes": 52
+      "classes": 53
     },
     "auth-policy": {
       "label": "Authentication / authorization wiring",
       "level": "API (must stay hosted)",
-      "tests": 64,
-      "cases": 68,
+      "tests": 65,
+      "cases": 69,
       "unknownCases": 0,
       "classes": 41
     },
     "in-process-logic": {
       "label": "In-process logic with no HTTP and no client",
       "level": "Domain or Infrastructure (migration candidate)",
-      "tests": 27,
-      "cases": 27,
+      "tests": 28,
+      "cases": 28,
       "unknownCases": 0,
       "classes": 10
     },
@@ -300,8 +300,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 328,
-        "end": 352
+        "start": 373,
+        "end": 397
       }
     },
     {
@@ -318,8 +318,26 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 303,
-        "end": 326
+        "start": 348,
+        "end": 371
+      }
+    },
+    {
+      "cls": "ApprovalConfigurationApiTests",
+      "test": "Configuration_management_requires_the_position_not_only_its_base_role",
+      "kind": "Fact",
+      "intent": "auth-policy",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "shared-host-fixture",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 270,
+        "end": 313
       }
     },
     {
@@ -372,8 +390,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 270,
-        "end": 301
+        "start": 315,
+        "end": 346
       }
     },
     {
@@ -3370,8 +3388,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 356,
-        "end": 415
+        "start": 358,
+        "end": 417
       }
     },
     {
@@ -3388,8 +3406,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 882,
-        "end": 949
+        "start": 884,
+        "end": 951
       }
     },
     {
@@ -3406,8 +3424,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 828,
-        "end": 843
+        "start": 830,
+        "end": 845
       }
     },
     {
@@ -3424,8 +3442,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 189,
-        "end": 267
+        "start": 191,
+        "end": 269
       }
     },
     {
@@ -3442,8 +3460,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 767,
-        "end": 794
+        "start": 769,
+        "end": 796
       }
     },
     {
@@ -3460,8 +3478,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 713,
-        "end": 738
+        "start": 715,
+        "end": 740
       }
     },
     {
@@ -3477,8 +3495,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 740,
-        "end": 765
+        "start": 742,
+        "end": 767
       }
     },
     {
@@ -3495,8 +3513,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 951,
-        "end": 981
+        "start": 953,
+        "end": 983
       }
     },
     {
@@ -3513,8 +3531,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 669,
-        "end": 711
+        "start": 671,
+        "end": 713
       }
     },
     {
@@ -3531,8 +3549,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 329,
-        "end": 354
+        "start": 331,
+        "end": 356
       }
     },
     {
@@ -3548,8 +3566,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 297,
-        "end": 327
+        "start": 299,
+        "end": 329
       }
     },
     {
@@ -3565,8 +3583,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 1220,
-        "end": 1244
+        "start": 1222,
+        "end": 1246
       }
     },
     {
@@ -3582,8 +3600,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 1162,
-        "end": 1192
+        "start": 1164,
+        "end": 1194
       }
     },
     {
@@ -3600,8 +3618,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 127,
-        "end": 187
+        "start": 129,
+        "end": 189
       }
     },
     {
@@ -3618,8 +3636,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 983,
-        "end": 1054
+        "start": 985,
+        "end": 1056
       }
     },
     {
@@ -3635,8 +3653,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 286,
-        "end": 295
+        "start": 288,
+        "end": 297
       }
     },
     {
@@ -3654,7 +3672,7 @@
       ],
       "sourceLines": {
         "start": 21,
-        "end": 125
+        "end": 127
       }
     },
     {
@@ -3671,8 +3689,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 513,
-        "end": 589
+        "start": 515,
+        "end": 591
       }
     },
     {
@@ -3688,8 +3706,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 269,
-        "end": 284
+        "start": 271,
+        "end": 286
       }
     },
     {
@@ -3706,8 +3724,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 591,
-        "end": 667
+        "start": 593,
+        "end": 669
       }
     },
     {
@@ -3723,8 +3741,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 845,
-        "end": 880
+        "start": 847,
+        "end": 882
       }
     },
     {
@@ -3741,8 +3759,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 417,
-        "end": 442
+        "start": 419,
+        "end": 444
       }
     },
     {
@@ -3758,8 +3776,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 1194,
-        "end": 1218
+        "start": 1196,
+        "end": 1220
       }
     },
     {
@@ -3776,8 +3794,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 796,
-        "end": 826
+        "start": 798,
+        "end": 828
       }
     },
     {
@@ -3794,8 +3812,22 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 444,
-        "end": 511
+        "start": 446,
+        "end": 513
+      }
+    },
+    {
+      "cls": "ManagedDocumentAssignmentPolicyTests",
+      "test": "Project_engineer_position_holder_is_accepted_and_base_only_configuration_manager_is_refused",
+      "kind": "Fact",
+      "intent": "ef-translation",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "not-hosted",
+      "hostEvidence": [],
+      "sourceLines": {
+        "start": 44,
+        "end": 57
       }
     },
     {
@@ -3826,8 +3858,8 @@
       "hosted": "not-hosted",
       "hostEvidence": [],
       "sourceLines": {
-        "start": 219,
-        "end": 234
+        "start": 235,
+        "end": 250
       }
     },
     {
@@ -3840,8 +3872,8 @@
       "hosted": "not-hosted",
       "hostEvidence": [],
       "sourceLines": {
-        "start": 207,
-        "end": 217
+        "start": 223,
+        "end": 233
       }
     },
     {
@@ -3854,8 +3886,22 @@
       "hosted": "not-hosted",
       "hostEvidence": [],
       "sourceLines": {
-        "start": 244,
-        "end": 303
+        "start": 260,
+        "end": 319
+      }
+    },
+    {
+      "cls": "ManagedDocumentReviewAuthorityCharacterizationTests",
+      "test": "Leadership_provenance_outranks_a_general_direct_membership",
+      "kind": "Fact",
+      "intent": "in-process-logic",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "not-hosted",
+      "hostEvidence": [],
+      "sourceLines": {
+        "start": 207,
+        "end": 221
       }
     },
     {
@@ -7061,6 +7107,42 @@
     },
     {
       "cls": "ProjectLeadershipApiTests",
+      "test": "A_retired_position_role_cannot_be_newly_granted_through_global_administration",
+      "kind": "Theory",
+      "intent": "http-boundary",
+      "cases": 5,
+      "caseEvidence": "InlineData",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 209,
+        "end": 241
+      }
+    },
+    {
+      "cls": "ProjectLeadershipApiTests",
+      "test": "A_retired_position_role_cannot_be_newly_granted_through_the_project_roster",
+      "kind": "Theory",
+      "intent": "http-boundary",
+      "cases": 5,
+      "caseEvidence": "InlineData",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "shared-host-fixture",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 190,
+        "end": 207
+      }
+    },
+    {
+      "cls": "ProjectLeadershipApiTests",
       "test": "A_standing_backup_answers_the_same_demands_until_the_designation_is_removed",
       "kind": "Fact",
       "intent": "http-boundary",
@@ -7127,26 +7209,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 203,
-        "end": 238
-      }
-    },
-    {
-      "cls": "ProjectLeadershipApiTests",
-      "test": "The_retired_project_engineering_lead_cannot_be_newly_granted",
-      "kind": "Fact",
-      "intent": "http-boundary",
-      "cases": 1,
-      "caseEvidence": "Fact",
-      "hosted": "hosted",
-      "hostEvidence": [
-        "shared-host-fixture",
-        "factory-client",
-        "factory-services"
-      ],
-      "sourceLines": {
-        "start": 190,
-        "end": 201
+        "start": 243,
+        "end": 278
       }
     },
     {
@@ -7163,8 +7227,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 267,
-        "end": 278
+        "start": 269,
+        "end": 281
       }
     },
     {
@@ -7183,24 +7247,6 @@
       "sourceLines": {
         "start": 147,
         "end": 158
-      }
-    },
-    {
-      "cls": "ProjectPersonnelApiTests",
-      "test": "A_position_can_be_reassigned_once_its_holder_has_been_ended",
-      "kind": "Fact",
-      "intent": "http-boundary",
-      "cases": 1,
-      "caseEvidence": "Fact",
-      "hosted": "hosted",
-      "hostEvidence": [
-        "shared-host-fixture",
-        "factory-client",
-        "factory-services"
-      ],
-      "sourceLines": {
-        "start": 204,
-        "end": 216
       }
     },
     {
@@ -7241,6 +7287,24 @@
     },
     {
       "cls": "ProjectPersonnelApiTests",
+      "test": "A_retired_position_role_cannot_be_recreated_after_its_history_has_ended",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "shared-host-fixture",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 204,
+        "end": 217
+      }
+    },
+    {
+      "cls": "ProjectPersonnelApiTests",
       "test": "A_standing_backup_carries_the_holders_authority_with_no_end_date",
       "kind": "Fact",
       "intent": "http-boundary",
@@ -7253,8 +7317,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 240,
-        "end": 265
+        "start": 241,
+        "end": 267
       }
     },
     {
@@ -7295,6 +7359,24 @@
     },
     {
       "cls": "ProjectPersonnelApiTests",
+      "test": "Ending_and_regranting_a_base_role_does_not_resurrect_the_ended_leadership_primary",
+      "kind": "Fact",
+      "intent": "ef-translation",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "shared-host-fixture",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 329,
+        "end": 352
+      }
+    },
+    {
+      "cls": "ProjectPersonnelApiTests",
       "test": "Leaving_the_project_stands_a_backup_down",
       "kind": "Fact",
       "intent": "ef-translation",
@@ -7307,8 +7389,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 300,
-        "end": 319
+        "start": 304,
+        "end": 327
       }
     },
     {
@@ -7325,8 +7407,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 325,
-        "end": 336
+        "start": 358,
+        "end": 369
       }
     },
     {
@@ -7361,8 +7443,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 222,
-        "end": 234
+        "start": 223,
+        "end": 235
       }
     },
     {
@@ -7379,8 +7461,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 283,
-        "end": 294
+        "start": 286,
+        "end": 298
       }
     },
     {

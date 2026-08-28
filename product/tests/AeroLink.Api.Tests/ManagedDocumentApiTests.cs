@@ -39,6 +39,8 @@ public sealed class ManagedDocumentApiTests
                 new ProgramMembership(configuration.Id, scope.ProgramId, ProgramRole.ConfigurationManager, "admin", now),
                 new ProgramMembership(delegated.Id, scope.ProgramId, ProgramRole.SoftwareEngineer, "admin", now),
                 new ProgramMembership(engineer.Id, scope.ProgramId, ProgramRole.SoftwareEngineer, "admin", now),
+                new ProjectLeadershipAssignment(scope.ProgramId, ProjectLeadershipPosition.ConfigurationManager,
+                    configuration.Id, "admin", now),
                 new RoleDelegation(scope.ProgramId, configuration.Id, delegated.Id, ProgramRole.ConfigurationManager, now.AddMinutes(-1), now.AddDays(1), "Relationship control coverage.", "admin", now)); await db.SaveChangesAsync();
             releasedChangeId = releasedChange.Id; activeChangeId = activeChange.Id; foreignChangeId = foreignChange.Id; reportId = report.Id; testChangeId = testChange.Id;
         }
