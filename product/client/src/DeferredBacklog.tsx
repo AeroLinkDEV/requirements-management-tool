@@ -25,7 +25,7 @@ export type DeferredItem = {
 
 type Release = { id: string; version: string; isReleased?: boolean }
 
-export default function DeferredBacklog({ api, projectId, type, softwareLevel, activeRelease, releases, onOpen, onBroughtIn }: {
+export default function DeferredBacklog({ api, projectId, type, softwareLevel, activeRelease, releases, onOpen, registerHref, onBroughtIn }: {
   api: string
   projectId: string
   type: 'System' | 'Software' | 'Interface'
@@ -33,6 +33,7 @@ export default function DeferredBacklog({ api, projectId, type, softwareLevel, a
   activeRelease?: Release
   releases: Release[]
   onOpen: (id: string) => void
+  registerHref: (id: string) => string
   onBroughtIn: () => void
 }) {
   const [items, setItems] = useState<DeferredItem[]>([])
@@ -87,7 +88,12 @@ export default function DeferredBacklog({ api, projectId, type, softwareLevel, a
       {failure && <div className="workspaceError">{failure}</div>}
       {items.map(item => (
         <div className="deferredRow" key={item.id}>
-          <button type="button" className="deferredOpen" onClick={() => onOpen(item.id)}>
+          <a className="deferredOpen" href={registerHref(item.id)} onClick={event => {
+            if (event.button === 0 && !event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey) {
+              event.preventDefault()
+              onOpen(item.id)
+            }
+          }}>
             <b>{item.displayNumber}</b>
             <p>{item.title || 'Not written up yet'}</p>
             <small>
@@ -97,7 +103,7 @@ export default function DeferredBacklog({ api, projectId, type, softwareLevel, a
               {item.deferredFromState && item.deferredFromState !== 'Draft' && <> · reached {item.deferredFromState}</>}
               {' · '}<span className="personMeta"><PersonName userName={item.authorId} /></span>
             </small>
-          </button>
+          </a>
           {activeRelease && !activeRelease.isReleased && (
             <button type="button" className="primary bringIn" disabled={busy === item.id}
               onClick={() => void bringIn(item)}>

@@ -851,6 +851,7 @@ function App() {
         onOpenScr={openChangeRequest}
         onProposeChange={(id, level) => navigate(discipline === "software" ? "createSoftwareChange" : "createSystemScr", discipline, id, level)}
         onOpenRequirement={(id) => navigate("requirements",discipline,id)}
+        requirementHref={id => context ? routePath(context, "requirements", discipline, id) : "#"}
         onCloseRequirement={() => navigate("requirements", discipline, undefined, undefined, true)}
         onOpenTraceability={(artifactId) => navigate("lifecycle", discipline, artifactId, artifactId ? "requirement" : undefined)}
         onOpenVerification={openVerificationProcedure}

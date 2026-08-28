@@ -21,6 +21,43 @@ test("requirements explorer shows truthful access-aware counts", async ({
   await expect(page.locator(".confidence")).toContainText("Live counts · respects your access");
 });
 
+test("requirements explorer primary targets are native links in table and document views", async ({
+  page,
+  request,
+}) => {
+  test.setTimeout(180_000);
+  await apiLogin(request);
+  await login(page, 'admin', { openProject: false });
+  await selectProgram(page,"Flight Management System Live Program");
+  await openNavigationGroup(page,"SYSTEMS ENGINEERING");
+  await page.getByRole("link", { name: "System Requirements Explorer" }).click();
+  await expect(page.getByRole("heading", { name: "System Requirements Explorer" })).toBeVisible();
+  await expect(page.getByRole("status", { name: /Loading controlled requirements/ })).toBeHidden();
+  await page.getByLabel("Search requirements").fill("SYSR-000150");
+
+  const tableTarget = page.locator('.reqTable article > a.requirementTarget').first();
+  await expect(tableTarget).toBeVisible();
+  await expect(tableTarget).toHaveAttribute('href', /requirements\/[0-9a-f-]{36}\?discipline=system$/);
+  const tableUrl = new URL(await tableTarget.getAttribute('href')!, page.url()).toString();
+  const [opened] = await Promise.all([
+    page.context().waitForEvent('page', { timeout: 30_000 }),
+    tableTarget.click({ button: 'middle' }),
+  ]);
+  await expect(opened).toHaveURL(tableUrl);
+  await opened.close();
+
+  await tableTarget.click();
+  await expect(page.getByRole('button', { name: 'Close requirement inspector' })).toBeVisible();
+  await page.getByRole('button', { name: 'Close requirement inspector' }).click();
+  await page.getByRole('button', { name: 'Document view' }).click();
+
+  const documentTarget = page.locator('.documentMode article > a.requirementTarget').first();
+  await expect(documentTarget).toBeVisible();
+  await expect(documentTarget).toHaveAttribute('href', /requirements\/[0-9a-f-]{36}\?discipline=system$/);
+  await documentTarget.click();
+  await expect(page.getByRole('button', { name: 'Close requirement inspector' })).toBeVisible();
+});
+
 test("requirements stay read-only while controlled proposals and imports move into Changes", async ({
   page,
   request,
@@ -58,7 +95,7 @@ test("requirements stay read-only while controlled proposals and imports move in
   await expect(page.getByText("Authoritative view", { exact: true })).toHaveCount(0);
   await expect(page.getByText("Workspace tools", { exact: true })).toHaveCount(0);
   await page.getByLabel("Search requirements").fill("SYSR-000150");
-  await page.getByRole("button", { name: /SYSR-000150\.\d{2}/ }).first().click();
+  await page.getByRole("link", { name: /SYSR-000150\.\d{2}/ }).first().click();
   await page.getByRole("tab", { name: "Trace & impact" }).click();
   await expect(page.getByRole("button", { name: "Open complete Digital Thread →" })).toBeVisible();
   await page.getByRole("tab", { name: "Overview" }).click();
@@ -145,7 +182,7 @@ test("requirements explorer chooser opens an eligible Draft and preserves keyboa
   await page.getByRole("link", { name: "System Requirements Explorer" }).click();
   await expect(page.getByRole("heading", { name: "System Requirements Explorer" })).toBeVisible();
   await page.getByLabel("Search requirements").fill("SYSR-000150");
-  await page.getByRole("button", { name: /SYSR-000150\.\d{2}/ }).first().click();
+  await page.getByRole("link", { name: /SYSR-000150\.\d{2}/ }).first().click();
   await page.getByRole("tab", { name: "Overview" }).click();
 
   const trigger = page.getByRole("button", { name: "Propose controlled change →" });

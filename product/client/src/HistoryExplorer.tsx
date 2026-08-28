@@ -85,7 +85,7 @@ export default function HistoryExplorer({api,projectId,releases,activeReleaseId,
   </nav>
   {view==='deferred'
    ?<DeferredBacklog api={api} projectId={projectId} type={scope} softwareLevel={scope==='Software'?softwareLevel:undefined}
-     activeRelease={activeRelease} releases={releases} onOpen={onOpenScr}
+     activeRelease={activeRelease} releases={releases} onOpen={onOpenScr} registerHref={registerHref}
      onBroughtIn={()=>{setView('build');setScrPage(1);void load()}}/>
    :<ChangeRequestRegister
    changeNoun="requirement changes"

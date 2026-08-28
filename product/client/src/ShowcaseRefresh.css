@@ -115,8 +115,10 @@
 .reqTableHead, .reqTable article { grid-template-columns: minmax(300px, 1fr) 95px 110px 100px 92px 105px; }
 .reqTableHead { padding: 12px 14px; font-size: 12px; }
 .reqTable article { padding: 14px; min-height: 86px; }
-.reqTable article > button { min-height: 44px; }
-.reqTable article > button b { font-size: 14px; }
+.reqTable article > button,
+.reqTable article > a.requirementTarget { min-height: 44px; }
+.reqTable article > button b,
+.reqTable article > a.requirementTarget b { font-size: 14px; }
 .reqTable article p { font-size: 13px; line-height: 1.45; margin: 5px 0; }
 .reqTable article > span { font-size: 12px; }
 .reqTable article > i { font-size: 12px; padding: 5px 8px; }
