@@ -4,7 +4,7 @@ import CommandPalette from "./CommandPalette";
 import { officialBuildName, verificationArtifactLevel, verificationArtifactRouteKey } from "./presentation";
 import ExperienceControls from "./ExperienceControls";
 import type { MotionPreference, WorkspaceDensity } from "./ExperienceControls";
-import { projectAreaPath, projectConfigurationApprovalsPath, projectConfigurationAssurancePath, projectSlugOf, readRoute, routePath } from "./routing";
+import { coverageExplorerPath, projectAreaPath, projectConfigurationApprovalsPath, projectConfigurationAssurancePath, projectSlugOf, readRoute, routePath } from "./routing";
 import type { AppRoute, Discipline, HistoryStateIntent, HistoryTypeIntent, RouteContext, View } from "./routing";
 import { usePasswordVisibilityControls } from "./PasswordVisibility";
 import {
@@ -174,9 +174,9 @@ type Workspace = {
  */
 const API = import.meta.env.VITE_API_URL ?? (import.meta.env.DEV ? "http://127.0.0.1:5080" : "");
 
-function AppNavigation({ user, workspaces, activeId, selectedProjectId, selectedReleaseId, view, discipline, artifactKind, context, projectWide, density, ladder, onNavigate, onSearch, onDisplay, onExitBuild, onSignOut }:{
+function AppNavigation({ user, workspaces, activeId, selectedProjectId, selectedReleaseId, view, discipline, artifactKind, coverageReport, context, projectWide, density, ladder, onNavigate, onOpenCoverage, onSearch, onDisplay, onExitBuild, onSignOut }:{
   user:AuthUser;workspaces:Workspace[];activeId:string;selectedProjectId:string;selectedReleaseId:string;view:View;discipline:Discipline;context?:RouteContext;
-  artifactKind:string;projectWide:boolean;density:WorkspaceDensity;ladder:ProjectLadderProjection|null;onNavigate:(view:View,discipline?:Discipline,artifactId?:string,artifactKind?:string)=>void;onSearch:()=>void;onDisplay:()=>void;onExitBuild:()=>void;onSignOut:()=>void;
+  artifactKind:string;coverageReport:boolean;projectWide:boolean;density:WorkspaceDensity;ladder:ProjectLadderProjection|null;onNavigate:(view:View,discipline?:Discipline,artifactId?:string,artifactKind?:string)=>void;onOpenCoverage:(discipline:"systemTest"|"softwareTest",level?:"HighLevel"|"LowLevel")=>void;onSearch:()=>void;onDisplay:()=>void;onExitBuild:()=>void;onSignOut:()=>void;
 }) {
   const active = workspaces.find(x => x.program.id === activeId) ?? workspaces[0];
   const project = active?.projects.find(x => x.project.id === selectedProjectId) ?? active?.projects[0];
@@ -206,13 +206,20 @@ function AppNavigation({ user, workspaces, activeId, selectedProjectId, selected
     // level-bound routes still require their exact artifactKind below.
     const levelMatches = !kind || artifactKind === kind
       || (target === "history" && view === "scr" && area === "software" && !artifactKind);
-    const activeItem = (view===target || groupedChangeView || (target==="history" && view==="scr") || (target==="release" && ["releaseImpact","releaseDecision","releaseOperations"].includes(view))) && discipline===area && levelMatches;
+    const activeItem = (view===target || groupedChangeView || (target==="history" && view==="scr") || (target==="release" && ["releaseImpact","releaseDecision","releaseOperations"].includes(view))) && discipline===area && levelMatches && !(target === "procedureExplorer" && coverageReport);
     // Fetched on hover or keyboard focus, so the workspace's code is usually already here by the time the
     // click is. Both events, because a keyboard user never hovers anything.
     const warm = () => viewCode[target]?.warm();
     const linkContext=context??(target==="managedDocuments"&&active&&project?{programId:active.program.id,projectId:project.project.id,releaseId:""}:undefined);
     return <a href={linkContext ? routePath(linkContext,target,area,undefined,kind) : "#"} className={`${topLevel?"navSectionLink ":""}${activeItem?"active":""}`.trim()} aria-label={accessibleLabel} aria-current={activeItem?"page":undefined} onPointerEnter={warm} onFocus={warm} onClick={event=>{event.preventDefault();onNavigate(target,area,undefined,kind)}}>
       <i aria-hidden="true">{icon}</i><span>{topLevel?label.toUpperCase():label}</span>
+    </a>;
+  };
+  const coverageItem = (label:string, area:"systemTest"|"softwareTest", level?:"HighLevel"|"LowLevel") => {
+    const activeItem = view === "procedureExplorer" && coverageReport && discipline === area && (!level || artifactKind === level);
+    const href = context ? coverageExplorerPath(context, area, level) : "#";
+    return <a href={href} className={activeItem ? "active" : ""} aria-current={activeItem ? "page" : undefined} onClick={event => { event.preventDefault(); onOpenCoverage(area, level); }}>
+      <i aria-hidden="true">⊞</i><span>{label}</span>
     </a>;
   };
   const engineeringView = ["createSystemScr","createSoftwareChange","createInterfaceChange","history","requirements","scr","lifecycle"].includes(view)
@@ -256,12 +263,15 @@ function AppNavigation({ user, workspaces, activeId, selectedProjectId, selected
             ? <>
                 {item("Change Requests","testChangeRequests","◫","softwareTest","Software Test Change Requests")}
                 {item("Test Case/Procedure Explorer","procedureExplorer","≡","softwareTest","Software Test Case/Procedure Explorer")}
+                {ladderAllows(ladder, "HighLevel", LadderCapability.Verification) && coverageItem("HLR Coverage", "softwareTest", "HighLevel")}
+                {ladderAllows(ladder, "LowLevel", LadderCapability.Verification) && coverageItem("LLR Coverage", "softwareTest", "LowLevel")}
                  {ladderAllows(ladder, "HighLevel", LadderCapability.Verification) && item("HLR Test Results","testResults","▦","softwareTest","Software HLR Test Results","HighLevel")}
                  {ladderAllows(ladder, "LowLevel", LadderCapability.Verification) && item("LLR Test Results","testResults","▦","softwareTest","Software LLR Test Results","LowLevel")}
               </>
             : <>
                 {item("Change Requests","testChangeRequests","◫","systemTest","System Test Change Requests")}
                 {item("Test Procedure Explorer","procedureExplorer","≡","systemTest","System Test Procedure Explorer")}
+                {coverageItem("Coverage", "systemTest")}
                 {item("Test Results","testResults","▦","systemTest","System Test Results")}
               </>}
           {item("Generated Documents","documents","▤",verificationScope,verificationScope==="softwareTest"?"Generated Software Verification Documents":"Generated System Verification Documents")}
@@ -318,6 +328,7 @@ function App() {
     [historySelectionId,setHistorySelectionId]=useState(initialRoute.historySelectionId ?? ""),
     [testChangeRequestSelectionId,setTestChangeRequestSelectionId]=useState(initialRoute.testChangeRequestSelectionId ?? ""),
     [projectConfigurationSection,setProjectConfigurationSection]=useState<"ladder"|"assurance"|"history"|"readiness"|"approvals">(initialRoute.projectConfigurationSection??"ladder"),
+    [coverageReport,setCoverageReport]=useState(initialRoute.coverageReport??false),
     [discipline,setDiscipline]=useState<Discipline>(initialRoute.discipline),
     [view, setView] = useState<View>(initialRoute.view);
   useEffect(() => {
@@ -395,7 +406,7 @@ function App() {
     if (release && release.id !== selectedReleaseId)
       setSelectedReleaseId(release.id);
   }, [release, selectedReleaseId]);
-  useEffect(()=>{const handler=()=>{const route=readRoute();setView(route.view);setDiscipline(route.discipline);setHistoryStateIntent(route.historyStateIntent);setHistoryTypeIntent(route.historyTypeIntent);setHistorySelectionId(route.historySelectionId??"");setTestChangeRequestSelectionId(route.testChangeRequestSelectionId??"");setTestChangeRequestProposalId(route.testChangeRequestProposalId??"");setProjectConfigurationSection(route.projectConfigurationSection??"ladder");if(route.programId)setActiveId(route.programId);if(route.projectId)setSelectedProjectId(route.projectId);if(route.releaseId)setSelectedReleaseId(route.releaseId);setSelectedArtifactId(route.artifactId??"");setSelectedArtifactKind(route.artifactKind??"");setRequirementRevisionId(route.requirementRevisionId??"");setRequirementProposalId(route.requirementProposalId??"");setSelectedScrId(route.view==="scr"?route.artifactId??"":"")};addEventListener("popstate",handler);return()=>removeEventListener("popstate",handler)},[]);
+  useEffect(()=>{const handler=()=>{const route=readRoute();setView(route.view);setDiscipline(route.discipline);setCoverageReport(route.coverageReport??false);setHistoryStateIntent(route.historyStateIntent);setHistoryTypeIntent(route.historyTypeIntent);setHistorySelectionId(route.historySelectionId??"");setTestChangeRequestSelectionId(route.testChangeRequestSelectionId??"");setTestChangeRequestProposalId(route.testChangeRequestProposalId??"");setProjectConfigurationSection(route.projectConfigurationSection??"ladder");if(route.programId)setActiveId(route.programId);if(route.projectId)setSelectedProjectId(route.projectId);if(route.releaseId)setSelectedReleaseId(route.releaseId);setSelectedArtifactId(route.artifactId??"");setSelectedArtifactKind(route.artifactKind??"");setRequirementRevisionId(route.requirementRevisionId??"");setRequirementProposalId(route.requirementProposalId??"");setSelectedScrId(route.view==="scr"?route.artifactId??"":"")};addEventListener("popstate",handler);return()=>removeEventListener("popstate",handler)},[]);
   const paletteShortcutEnabled = !!context && !projectLevelViews.includes(view);
   useEffect(()=>{const handler=(event:KeyboardEvent)=>{if(paletteShortcutEnabled&&(event.ctrlKey||event.metaKey)&&event.key.toLowerCase()==="k"){event.preventDefault();setPaletteOpen(true)}if(event.key==="Escape"){setPaletteOpen(false);setDisplayOpen(false)}};addEventListener("keydown",handler);return()=>removeEventListener("keydown",handler)},[paletteShortcutEnabled]);
   useEffect(()=>{document.documentElement.dataset.density=density;localStorage.setItem('aerolink-density',density)},[density]);
@@ -528,6 +539,7 @@ function App() {
   const navigate=(target:View,area:Discipline=discipline,artifactId?:string,artifactKind?:string,replace=false,stateIntent?:HistoryStateIntent,typeIntent?:HistoryTypeIntent)=>{
     setRequirementProposalId("");
     setTestChangeRequestProposalId("");
+    setCoverageReport(false);
     if(viewsRequiringArtifact.includes(target)&&!artifactId){
       // Refused rather than half-performed. Reporting it and staying put is honest; pushing a route that
       // cannot resolve is not.
@@ -536,6 +548,18 @@ function App() {
       return;
     }
     const nextStateIntent=target==="history"?stateIntent:undefined,nextTypeIntent=target==="history"?(typeIntent??(artifactKind==="Interface"?"Interface":area==="software"?"Software":"System")):undefined;setView(target);setDiscipline(area);setHistoryStateIntent(nextStateIntent);setHistoryTypeIntent(nextTypeIntent);setHistorySelectionId("");setTestChangeRequestSelectionId("");setSelectedArtifactId(artifactId??"");setSelectedArtifactKind(artifactKind??"");setRequirementRevisionId("");setSelectedScrId(target==="scr"?artifactId??"":["scr"].includes(target)?selectedScrId:"");const navigationContext=context??(target==="managedDocuments"&&active&&project?{programId:active.program.id,projectId:project.project.id,releaseId:""}:undefined);if(navigationContext){const path=routePath(navigationContext,target,area,artifactId,artifactKind,nextStateIntent,nextTypeIntent);history[replace?"replaceState":"pushState"]({},"",path)}};
+  const openCoverage = (area:"systemTest"|"softwareTest", level?:"HighLevel"|"LowLevel") => {
+    const artifactKind = area === "softwareTest" ? (level === "LowLevel" ? "LowLevel" : "HighLevel") : "";
+    setRequirementProposalId(""); setTestChangeRequestProposalId(""); setView("procedureExplorer"); setDiscipline(area);
+    setCoverageReport(true); setSelectedArtifactId(""); setSelectedArtifactKind(artifactKind); setRequirementRevisionId("");
+    if (context) history.pushState({}, "", coverageExplorerPath(context, area, level));
+  };
+  const changeCoverageLevel = (level?: "HighLevel" | "LowLevel") => {
+    // A Coverage level is shell state as well as an Explorer filter: it controls the canonical route,
+    // breadcrumb and active sidebar destination. Update the route before changing the keyed child scope.
+    if (level && context) history.pushState({}, "", coverageExplorerPath(context, "softwareTest", level));
+    setSelectedArtifactKind(level ?? "");
+  };
   // Opens a change request in the build that owns it rather than the one that happens to be selected. A
   // historical revision's source change request belongs to an earlier build by definition, so routing it into
   // the in-work build would present a released, frozen record inside a context that says it can be edited.
@@ -656,9 +680,10 @@ function App() {
   // belongs beside them rather than inside a build.
   if(view==="approvalConfiguration"&&project)return <ApprovalConfigurationCenter user={user} api={API} projectId={project.project.id} projectName={project.project.name} onBackToBuilds={()=>{setView("builds");history.pushState({},"",openProjectBuildsPath)}} onSignOut={signOut}/>;
    if(view==="projectConfiguration"&&project)return <ProjectConfigurationCenter user={user} api={API} projectId={project.project.id} projectName={project.project.name} initialSection={projectConfigurationSection} onBackToBuilds={()=>{setView("builds");history.pushState({},"",openProjectBuildsPath)}} onOpenApprovalConfiguration={()=>showProjectConfiguration("approvals")} onActivated={value=>{setLadder({effectiveSteps:value.effectiveSteps.map(step=>({...step,catalogueEntry:step.catalogueEntry as LadderLevel}))});setLadderError("");}} onSignOut={signOut}/>;
-   const navigation=<AppNavigation user={user} workspaces={workspaces} activeId={activeId} selectedProjectId={project?.project.id??selectedProjectId} selectedReleaseId={release?.id??selectedReleaseId} view={view} discipline={discipline} artifactKind={selectedArtifactKind} context={context} projectWide={view==="managedDocuments"} density={density} ladder={ladder} onNavigate={navigate} onSearch={()=>setPaletteOpen(true)} onDisplay={()=>setDisplayOpen(true)} onExitBuild={exitBuild} onSignOut={signOut}/>;
-  const labels:Record<View,string>={projects:"Projects",builds:"Software Builds",baselineImports:"Imported Baselines",personnel:"Personnel",approvalConfiguration:"Approval Configuration",projectConfiguration:"Project Configuration",dashboard:"Command Center",createSystemScr:"New System SRCR",createSoftwareChange:"New Software Change Request",createInterfaceChange:"New Interface / ICD Change Request",scr:"Change Request",baselines:"Baselines",history:"Change Requests",requirements:"Requirements Explorer",verification:"Verification",testingCoverage:"Test Coverage",testChangeRequests:"Change Requests",testChangeRequest:"Test Change Request",createTestChangeRequest:"New Test Change Request",procedureExplorer:"Test Procedure Explorer",testResults:"Test Results",documents:"Generated Documents",managedDocuments:"Documentation Center",code:"Code",problemReports:"Problem Reports",lifecycle:"Digital Thread",release:"Release Readiness",releaseImpact:"Change Impact Review",releaseDecision:"Release Evidence & Decision",releaseOperations:"Release Operations",planning:"Product Versions",mywork:"My Work",admin:"Administration",enterprise:"System Operations",integrations:"Integration Command Center",reviewWorkflows:"Review Workflows",artifact:"Artifact",notFound:"Not Found"};
-  const scopedLabel=view==="history"?`${discipline==="software"?"Software":"System"} ${labels[view]}`:view==="scr"?`${discipline==="software"?"Software":"System"} ${labels[view]}`:view==="requirements"?`${discipline==="software"?"Software":"System"} ${labels[view]}`:view==="verification"?`${discipline==="softwareTest"?"Software":"System"} Verification`:view==="procedureExplorer"?`${discipline==="softwareTest"?"Software Test Case/Procedure":"System Test Procedure"} Explorer`:labels[view];
+   const navigation=<AppNavigation user={user} workspaces={workspaces} activeId={activeId} selectedProjectId={project?.project.id??selectedProjectId} selectedReleaseId={release?.id??selectedReleaseId} view={view} discipline={discipline} artifactKind={selectedArtifactKind} coverageReport={coverageReport} context={context} projectWide={view==="managedDocuments"} density={density} ladder={ladder} onNavigate={navigate} onOpenCoverage={openCoverage} onSearch={()=>setPaletteOpen(true)} onDisplay={()=>setDisplayOpen(true)} onExitBuild={exitBuild} onSignOut={signOut}/>;
+   const labels:Record<View,string>={projects:"Projects",builds:"Software Builds",baselineImports:"Imported Baselines",personnel:"Personnel",approvalConfiguration:"Approval Configuration",projectConfiguration:"Project Configuration",dashboard:"Command Center",createSystemScr:"New System SRCR",createSoftwareChange:"New Software Change Request",createInterfaceChange:"New Interface / ICD Change Request",scr:"Change Request",baselines:"Baselines",history:"Change Requests",requirements:"Requirements Explorer",verification:"Verification",testingCoverage:"Test Coverage",testChangeRequests:"Change Requests",testChangeRequest:"Test Change Request",createTestChangeRequest:"New Test Change Request",procedureExplorer:"Test Procedure Explorer",testResults:"Test Results",documents:"Generated Documents",managedDocuments:"Documentation Center",code:"Code",problemReports:"Problem Reports",lifecycle:"Digital Thread",release:"Release Readiness",releaseImpact:"Change Impact Review",releaseDecision:"Release Evidence & Decision",releaseOperations:"Release Operations",planning:"Product Versions",mywork:"My Work",admin:"Administration",enterprise:"System Operations",integrations:"Integration Command Center",reviewWorkflows:"Review Workflows",artifact:"Artifact",notFound:"Not Found"};
+  const coverageLabel = discipline === "systemTest" ? "System Coverage" : selectedArtifactKind === "LowLevel" ? "Software LLR Coverage" : selectedArtifactKind === "HighLevel" ? "Software HLR Coverage" : "Software Coverage";
+  const scopedLabel=view==="history"?`${discipline==="software"?"Software":"System"} ${labels[view]}`:view==="scr"?`${discipline==="software"?"Software":"System"} ${labels[view]}`:view==="requirements"?`${discipline==="software"?"Software":"System"} ${labels[view]}`:view==="verification"?`${discipline==="softwareTest"?"Software":"System"} Verification`:view==="procedureExplorer"?coverageReport?coverageLabel:`${discipline==="softwareTest"?"Software Test Case/Procedure":"System Test Procedure"} Explorer`:labels[view];
   const copyLink=async()=>{try{await navigator.clipboard.writeText(location.href);setToast('Link copied to clipboard')}catch{setToast('This browser blocked clipboard access')}};
   const contextBar=<div className="contextBar"><nav aria-label="Breadcrumb"><span title={active?.program.name}>{active?.program.name}</span><b aria-hidden="true">›</b><span title={project?.project.name}>{project?.project.name}</span><b aria-hidden="true">›</b>{view!=="managedDocuments"&&<><span>Build {release?.version}</span><b aria-hidden="true">›</b></>}<strong>{scopedLabel}</strong></nav><div className="contextActions"><span className="contextReleaseState">{view==="managedDocuments"?"Project-wide":release?.isReleased?"Released · read-only":"In work"}</span><button aria-label="Copy link to this page" onClick={copyLink}>Copy link</button></div></div>;
    const palette=context?<CommandPalette api={API} context={context} ladder={ladder} open={paletteOpen} onClose={()=>setPaletteOpen(false)} onNavigate={navigate}/>:null;
@@ -861,7 +886,7 @@ function App() {
   if (view === "procedureExplorer" && project && release)
     return inShell(
       <TestProcedureExplorer
-        key={discipline === "softwareTest" ? "Software" : "System"}
+        key={`${discipline === "softwareTest" ? "Software" : "System"}-${selectedArtifactKind}-${coverageReport ? "coverage" : "explorer"}`}
         api={API}
         projectId={project.project.id}
         releaseId={release.id}
@@ -873,6 +898,9 @@ function App() {
          releaseVersion={release.version}
          released={release.isReleased}
         ladder={ladder}
+        onCoverageReportChange={setCoverageReport}
+        onCoverageLevelChange={changeCoverageLevel}
+        onClearExplorerFilters={() => navigate("procedureExplorer", discipline)}
          onBack={() => navigate("dashboard")}
         onOpenRequirementRevision={openRequirementRevision}
         onOpenTestChangeRequest={openTestChangeRequestFromArtifact}
@@ -980,6 +1008,7 @@ function App() {
         buildName={`Build ${release.version}`}
         ladder={ladder}
         onOpen={(target, level) => navigate(target, discipline, undefined, level)}
+        onOpenCoverage={level => openCoverage(discipline === "softwareTest" ? "softwareTest" : "systemTest", level)}
       />
     );
   if (view === "documents" && project && release)

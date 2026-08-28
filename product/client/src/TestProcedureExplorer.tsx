@@ -196,7 +196,7 @@ const validLevel = (value: string | null, discipline: ProcedureScope, ladder: Pr
  * to be verified.
  */
 export default function TestProcedureExplorer({ api, projectId, releaseId, discipline, buildName, releaseVersion,
-  released, onBack, onOpenRequirementRevision, onOpenTestChangeRequest, initialLevel, ladder }: {
+  released, onBack, onOpenRequirementRevision, onOpenTestChangeRequest, onCoverageReportChange, onCoverageLevelChange, onClearExplorerFilters, initialLevel, ladder }: {
   api: string; projectId: string; releaseId: string; discipline: ProcedureScope; buildName: string
   /** The build's own version, which the document actions name. `buildName` is the display label, not this. */
   releaseVersion: string
@@ -205,10 +205,16 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
   onOpenRequirementRevision: (requirement: { id: string; revisionId: string; level: string }) => void
   /** App owns navigation to the TCR workspace; this component owns exact artifact selection and proposal choice. */
   onOpenTestChangeRequest?: (context: TestArtifactChangeContext) => void
+  onCoverageReportChange?: (visible: boolean) => void
+  /** The shell owns the coverage route's exact software branch and therefore its breadcrumb and active nav item. */
+  onCoverageLevelChange?: (level?: 'HighLevel' | 'LowLevel') => void
+  /** App owns the canonical neutral Explorer route; Clear must not leave a share link at a legacy filtered path. */
+  onClearExplorerFilters?: () => void
   initialLevel?: 'HighLevel' | 'LowLevel'
   ladder: ProjectLadderProjection | null
 }) {
   const opening = useRef(typeof location !== 'undefined' ? new URLSearchParams(location.search) : new URLSearchParams()).current
+  const coverageReportRequested = opening.get('coverage') === 'report'
   // Cases and Procedures share one combined Explorer with an artifact-kind filter. The filter defaults to
   // the complete inventory so the page communicates the controlled Case -> Procedure model immediately.
   const [artifactKindFilter, setArtifactKindFilter] = useState<'all' | 'Case' | 'Procedure'>(() => {
@@ -216,7 +222,9 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
     // retain their original kind intent for links already in circulation.
     const pathKind = typeof location !== 'undefined' && location.pathname.endsWith('/procedures')
       ? 'procedure' : typeof location !== 'undefined' && location.pathname.endsWith('/cases') ? 'case' : ''
-    const kind = opening.get('artifactKind')?.toLowerCase() || pathKind
+    const kind = coverageReportRequested && discipline !== 'System'
+      ? 'case'
+      : opening.get('artifactKind')?.toLowerCase() || pathKind
     if (kind === 'procedure') return 'Procedure'
     if (kind === 'case') return 'Case'
     return 'all'
@@ -279,9 +287,9 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
   const [traceError, setTraceError] = useState(false)
   const [comments, setComments] = useState<Comment[]>([])
   const [error, setError] = useState('')
-  const [showAdvanced, setShowAdvanced] = useState(false)
+  const [showAdvanced, setShowAdvanced] = useState(coverageReportRequested)
   const [coverage, setCoverage] = useState<Coverage>()
-  const [coverageRead, setCoverageRead] = useState(false)
+  const [coverageStatus, setCoverageStatus] = useState<'idle' | 'loading' | 'ready' | 'unmaterialized' | 'failed'>('idle')
   const [showAllCoverage, setShowAllCoverage] = useState(false)
   const [proposalOpen, setProposalOpen] = useState(false)
   const [proposalSearch, setProposalSearch] = useState('')
@@ -483,10 +491,16 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
       setSelectedDisplayNumber(queryValue(params) ?? '')
       const seeded = queryValue(params, 'Tab')
       setTab(seeded === 'trace' || seeded === 'history' || seeded === 'discussion' ? seeded : 'details')
+      const coverageReport = params.get('coverage') === 'report'
+      setShowAdvanced(coverageReport)
+      onCoverageReportChange?.(coverageReport)
+      setCoverageStatus('idle')
+      setCoverage(undefined)
+      setShowAllCoverage(false)
     }
     addEventListener('popstate', restore)
     return () => removeEventListener('popstate', restore)
-  }, [discipline, ladder, queryValue])
+  }, [discipline, ladder, onCoverageReportChange, queryValue])
 
   const procedures = data?.items ?? []
   // Read once, defensively. A build with no effective procedures answers with a deliberately empty page, and
@@ -585,24 +599,50 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
   // same Advanced control the Requirements Explorer uses, so the two Explorers remain identical by default
   // without deleting the governed suspect-coverage workflow.
   useEffect(() => {
-    setShowAdvanced(false)
+    setShowAdvanced(new URLSearchParams(location.search).get('coverage') === 'report')
     setCoverage(undefined)
-    setCoverageRead(false)
+    setCoverageStatus('idle')
     setShowAllCoverage(false)
   }, [api, projectId, releaseId, scope, artifactKindFilter])
 
+  const setCoverageReportVisible = (visible: boolean) => {
+    setShowAdvanced(visible)
+    setCoverage(undefined)
+    setCoverageStatus('idle')
+    setShowAllCoverage(false)
+    const params = new URLSearchParams(location.search)
+    if (visible) params.set('coverage', 'report')
+    else params.delete('coverage')
+    window.history.pushState({}, '', `${location.pathname}${params.size ? `?${params}` : ''}`)
+    onCoverageReportChange?.(visible)
+  }
+
   useEffect(() => {
-    if ((!isSystemScope && artifactKindFilter !== 'Case') || !showAdvanced || coverageRead) return
+    if ((!isSystemScope && artifactKindFilter !== 'Case') || !showAdvanced) return
     let active = true
+    setCoverageStatus('loading')
     void (async () => {
-      const { coverage: next, failed } = await loadCoverage(api, projectId, releaseId, scope)
-      if (!active) return
-      setCoverageRead(true)
-      if (next) setCoverage(next)
-      if (failed) setError('The requirement coverage for this build could not be read.')
+      try {
+        const { coverage: next, failed } = await loadCoverage(api, projectId, releaseId, scope)
+        if (!active) return
+        if (failed) {
+          setCoverage(undefined)
+          setCoverageStatus('failed')
+        } else if (next) {
+          setCoverage(next)
+          setCoverageStatus('ready')
+        } else {
+          setCoverage(undefined)
+          setCoverageStatus('unmaterialized')
+        }
+      } catch {
+        if (!active) return
+        setCoverage(undefined)
+        setCoverageStatus('failed')
+      }
     })()
     return () => { active = false }
-  }, [api, projectId, releaseId, scope, showAdvanced, coverageRead, artifactKindFilter, isSystemScope])
+  }, [api, projectId, releaseId, scope, showAdvanced, artifactKindFilter, isSystemScope])
 
   const uncovered = coverage?.items.filter(item => item.disposition === 'Uncovered') ?? []
   const suspect = coverage?.items.filter(item => item.disposition === 'Suspect') ?? []
@@ -636,6 +676,15 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
     setProposalCandidates(undefined)
     setProposalLoadError('')
     setProposalOpen(true)
+  }
+  const clearExplorerFilters = () => {
+    // App makes the URL and shell state canonical. The current neutral route has the same child key,
+    // though, so keep these local resets: navigation alone cannot clear a filtered in-memory Explorer.
+    onClearExplorerFilters?.()
+    setViewId('')
+    setQuery(''); setProcedureState(''); setProcedureOutcome(''); setArtifactKindFilter('all')
+    setLevel(discipline)
+    setDocumentId(''); setSectionId(''); setPage(1)
   }
   const loadProposalCandidates = useCallback(async () => {
     if (!proposalOpen || !proposalContext) return
@@ -793,19 +842,26 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
         <select aria-label="Level filter"
           value={level}
           onChange={event => {
-            setLevel(event.target.value as ProcedureLevel)
+            const next = event.target.value as ProcedureLevel
+            if (showAdvanced && (next === 'HighLevel' || next === 'LowLevel')) onCoverageLevelChange?.(next)
+            setLevel(next)
             setDocumentId(''); setSectionId(''); setPage(1)
           }}>
-          <option value="Software">All software {currentArtifactPlural}</option>
+          {!showAdvanced && <option value="Software">All software {currentArtifactPlural}</option>}
            {ladderAllows(ladder, 'HighLevel', LadderCapability.Verification) && <option value="HighLevel">Software HLR</option>}
            {ladderAllows(ladder, 'LowLevel', LadderCapability.Verification) && <option value="LowLevel">Software LLR</option>}
        </select>
       )}
       {discipline === 'Software' && <select aria-label="Artifact filter" value={artifactKindFilter}
-        onChange={event => { setArtifactKindFilter(event.target.value as 'all' | 'Case' | 'Procedure'); setDocumentId(''); setSectionId(''); setPage(1) }}>
-        <option value="all">All test artifacts</option>
+        onChange={event => {
+          const next = event.target.value as 'all' | 'Case' | 'Procedure'
+          setArtifactKindFilter(next)
+          if (next !== 'Case') setCoverageReportVisible(false)
+          setDocumentId(''); setSectionId(''); setPage(1)
+        }}>
+        {!showAdvanced && <option value="all">All test artifacts</option>}
         {caseEnabled && <option value="Case">Test cases</option>}
-        {procedureEnabled && <option value="Procedure">Test procedures</option>}
+        {!showAdvanced && procedureEnabled && <option value="Procedure">Test procedures</option>}
       </select>}
       <select aria-label={`${currentArtifactDisplayWord} state`} value={procedureState}
         onChange={event => { setProcedureState(event.target.value); setPage(1) }}>
@@ -822,17 +878,12 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
         <option value="Blocked">Blocked</option>
       </select>
       {(isSystemScope || artifactKindFilter === 'Case') && <button type="button" className={showAdvanced ? 'advanced active' : 'advanced'}
-        aria-expanded={showAdvanced} onClick={() => setShowAdvanced(current => !current)}>
+        aria-expanded={showAdvanced} onClick={() => setCoverageReportVisible(!showAdvanced)}>
         Advanced
       </button>}
       <button type="button" className="clear"
          disabled={level === discipline && artifactKindFilter === 'all' && !query && !procedureState && !procedureOutcome && !documentId && !sectionId && !viewId}
-        onClick={() => {
-          setViewId('')
-           setQuery(''); setProcedureState(''); setProcedureOutcome(''); setArtifactKindFilter('all')
-          setLevel(discipline)
-          setDocumentId(''); setSectionId(''); setPage(1)
-        }}>
+        onClick={clearExplorerFilters}>
         Clear
       </button>
       <label className="pageSizeControl">
@@ -847,9 +898,22 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
     </section>
 
       {(isSystemScope || artifactKindFilter === 'Case') && showAdvanced && <div className="explorerCoverage" aria-label={`Advanced ${currentArtifactDisplayWord} coverage`}>
+      {coverageStatus === 'loading' && <p className="coverageNone" role="status">
+        Loading requirement coverage for this build.
+      </p>}
+
+      {coverageStatus === 'failed' && <p className="coverageNone" role="alert">
+        Requirement coverage for this build could not be read. No coverage counts are shown.
+      </p>}
+
+      {coverageStatus === 'unmaterialized' && <p className="coverageNone">
+        This build has not materialized its requirements, so there is nothing to report coverage against yet.
+      </p>}
+
+      {coverageStatus === 'ready' && coverage && <>
       <section className="coverageSummary" aria-label="Coverage summary">
-        <article><b>{coverage?.total ?? 0}</b><span>Requirements</span></article>
-        <article><b>{coverage?.covered ?? 0}</b><span>With a {currentArtifactDisplayWord}</span></article>
+        <article><b>{coverage.total}</b><span>Requirements</span></article>
+        <article><b>{coverage.covered}</b><span>With a {currentArtifactDisplayWord}</span></article>
         <article className={uncovered.length ? 'attention' : ''}><b>{uncovered.length}</b><span>With none</span></article>
         <article className={suspect.length ? 'attention' : ''}><b>{suspect.length}</b><span>Suspect coverage</span></article>
       </section>
@@ -876,10 +940,10 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
           <p>Every effective requirement in this build and the {currentArtifactShortPlural} that verify it.</p>
         </div>
         <button type="button" className="quiet" onClick={() => setShowAllCoverage(current => !current)}>
-          {showAllCoverage ? 'Show only what needs attention' : `Show all ${coverage?.total ?? 0} requirements`}
+          {showAllCoverage ? 'Show only what needs attention' : `Show all ${coverage.total} requirements`}
         </button>
         {showAllCoverage && <div className="fullCoverage">
-          {(coverage?.items ?? []).map(item => <article
+          {coverage.items.map(item => <article
             className={`coverageRow ${item.covered ? '' : 'attention'}`} key={`all-${item.revisionId}`}>
             <div>
               <b>{item.displayNumber}</b>
@@ -895,10 +959,7 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
           </article>)}
         </div>}
       </section>
-
-      {coverageRead && !coverage && <p className="coverageNone">
-        This build has not materialized its requirements, so there is nothing to report coverage against yet.
-      </p>}
+      </>}
     </div>}
 
     <ControlledArtifactExplorerLayout inspecting resizableKey="test-procedure-explorer">

@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test'
-import { artifactPath, parseRoute, routePath } from '../src/routing'
+import { artifactPath, coverageExplorerPath, parseRoute, routePath } from '../src/routing'
 
 const context = {
   programId: 'program-a',
@@ -219,4 +219,19 @@ test('each verification page round-trips, and a results route may carry a proble
   expect(corrective).toBe('/programs/program-a/projects/project-a/releases/release-a/software-verification/llr/results/report-a')
   expect(parseRoute(corrective)).toMatchObject({ view: 'testResults', discipline: 'softwareTest', artifactKind: 'LowLevel', artifactId: 'report-a' })
   expect(parseRoute(routePath(context, 'testResults', 'systemTest', 'report-b'))).toMatchObject({ view: 'testResults', discipline: 'systemTest', artifactId: 'report-b' })
+})
+
+test('Coverage routes open the existing Explorer report without changing Downstream Assessment compatibility routes', () => {
+  const system = coverageExplorerPath(context, 'systemTest')
+  expect(system).toBe('/programs/program-a/projects/project-a/releases/release-a/system-verification/procedures?coverage=report')
+  expect(parseRoute(system)).toMatchObject({ view: 'procedureExplorer', discipline: 'systemTest', coverageReport: true })
+
+  for (const level of ['HighLevel', 'LowLevel'] as const) {
+    const path = coverageExplorerPath(context, 'softwareTest', level)
+    expect(path).toBe(`/programs/program-a/projects/project-a/releases/release-a/software-verification/test-artifacts?coverage=report&artifactLevel=${level}&artifactKind=Case`)
+    expect(parseRoute(path)).toMatchObject({ view: 'procedureExplorer', discipline: 'softwareTest', artifactKind: level, coverageReport: true })
+  }
+
+  expect(parseRoute('/programs/program-a/projects/project-a/releases/release-a/system-verification/coverage'))
+    .toMatchObject({ view: 'testingCoverage', discipline: 'systemTest' })
 })

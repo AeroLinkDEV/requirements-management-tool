@@ -5,12 +5,12 @@ import { apiLogin, login, selectProgram } from './auth'
  * Verification is a fork, not a workspace.
  *
  * It used to be one page with four tabs, and which tab held an answer was something a reader had to know
- * before they could ask. The two questions people actually arrive with — "what is tested, and what has nobody
- * picked up?" and "what did we run, and what happened?" — are now two pages, and this is the choice between
- * them. Nothing is computed on the chooser on purpose: waiting on counts would make the reader wait to be
- * shown two links they were always going to be shown.
+ * before they could ask. The independent choices people actually arrive with — controlled test change work,
+ * open downstream assessments, requirement coverage, and recorded results — are pages now. Nothing is computed
+ * on the chooser on purpose: waiting on counts would make the reader wait to be shown links they were always
+ * going to be shown.
  */
-test('verification offers the two pages by name, and both open on real work', async ({ page, request }) => {
+test('system verification offers its named destinations, including Coverage, on real work', async ({ page, request }) => {
   test.setTimeout(180_000)
   await apiLogin(request)
   await login(page, 'admin', { openProject: false })
@@ -18,19 +18,22 @@ test('verification offers the two pages by name, and both open on real work', as
   await page.goto(`${page.url().replace(/\/command-center$/,'')}/system-verification`)
   await expect(page.getByRole('heading', { name: 'Verification' })).toBeVisible({ timeout: 30_000 })
 
-  const cards = page.locator('.landingCards button')
-  await expect(cards).toHaveCount(3)
-  await expect(cards.nth(0)).toContainText('Change Requests')
-  await expect(cards.nth(1)).toContainText('Downstream Assessments')
-  await expect(cards.nth(2)).toContainText('Test Results')
+  const system = page.getByRole('region', { name: 'System' })
+  const changeRequests = system.getByRole('button', { name: /Open Change Requests/ })
+  const downstreamAssessments = system.getByRole('button', { name: /Open Downstream Assessments/ })
+  const coverage = system.getByRole('button', { name: /Open Coverage/ })
+  const testResults = system.getByRole('button', { name: /Open Test Results/ })
+  await expect(changeRequests).toBeVisible()
+  await expect(downstreamAssessments).toBeVisible()
+  await expect(coverage).toBeVisible()
+  await expect(testResults).toBeVisible()
 
-  // The register and the assessments queue are two pages now, and the landing offers both by name.
-  await cards.nth(0).click()
+  await changeRequests.click()
   await expect(page.getByRole('heading', { name: 'System Test Change Requests' })).toBeVisible({ timeout: 30_000 })
   expect(page.url()).toContain('/system-verification/change-requests')
 
   await page.goBack()
-  await page.locator('.landingCards button').nth(1).click()
+  await downstreamAssessments.click()
   await expect(page.getByRole('heading', { name: 'Downstream Assessments' })).toBeVisible({ timeout: 30_000 })
   expect(page.url()).toContain('/system-verification/coverage')
 
@@ -48,16 +51,23 @@ test('verification offers the two pages by name, and both open on real work', as
 
   await page.goBack()
   await expect(page.getByRole('heading', { name: 'Verification' })).toBeVisible({ timeout: 30_000 })
-  await page.locator('.landingCards button').nth(2).click()
+  await coverage.click()
+  await expect(page.getByRole('heading', { name: 'System Test Procedure Explorer' })).toBeVisible({ timeout: 30_000 })
+  expect(page.url()).toContain('/system-verification/procedures?coverage=report')
+  await expect(page.getByRole('region', { name: 'Coverage summary' })).toBeVisible()
+
+  await page.goBack()
+  await expect(page.getByRole('heading', { name: 'Verification' })).toBeVisible({ timeout: 30_000 })
+  await testResults.click()
   await expect(page.getByRole('heading', { name: 'Test Results' })).toBeVisible({ timeout: 30_000 })
   expect(page.url()).toContain('/system-verification/results')
 })
 
 /**
- * Software is four destinations rather than two with a switch on them, because HLR and LLR test work is
+ * Software is eight destinations rather than four with a switch on them, because HLR and LLR test work is
  * planned, done and approved by different people.
  */
-test('software verification offers an HLR pair and an LLR pair', async ({ page, request }) => {
+test('software verification offers named HLR and LLR destinations, including Coverage', async ({ page, request }) => {
   test.setTimeout(180_000)
   await apiLogin(request)
   await login(page, 'admin', { openProject: false })
@@ -65,8 +75,22 @@ test('software verification offers an HLR pair and an LLR pair', async ({ page, 
   await page.goto(`${page.url().replace(/\/command-center$/,'')}/software-verification`)
   await expect(page.getByRole('heading', { name: 'Verification' })).toBeVisible({ timeout: 30_000 })
 
-  await expect(page.locator('.landingCards button')).toHaveCount(6)
-  const llr = page.locator('section').filter({ hasText: 'Software LLR' }).last()
+  const hlr = page.getByRole('region', { name: 'Software HLR' })
+  const llr = page.getByRole('region', { name: 'Software LLR' })
+  for (const scope of [hlr, llr]) {
+    await expect(scope.getByRole('button', { name: /Open Change Requests/ })).toBeVisible()
+    await expect(scope.getByRole('button', { name: /Open Downstream Assessments/ })).toBeVisible()
+    await expect(scope.getByRole('button', { name: /Open Coverage/ })).toBeVisible()
+    await expect(scope.getByRole('button', { name: /Open Test Results/ })).toBeVisible()
+  }
+
+  await llr.getByRole('button', { name: /Open Coverage/ }).click()
+  await expect(page.getByRole('heading', { name: 'Software Test Case/Procedure Explorer' })).toBeVisible({ timeout: 30_000 })
+  expect(page.url()).toContain('/software-verification/test-artifacts?coverage=report&artifactLevel=LowLevel&artifactKind=Case')
+  await expect(page.getByRole('region', { name: 'Coverage summary' })).toBeVisible()
+
+  await page.goBack()
+  await expect(page.getByRole('heading', { name: 'Verification' })).toBeVisible({ timeout: 30_000 })
   await llr.getByRole('button', { name: /Open Test Results/ }).click()
   await expect(page.getByRole('heading', { name: 'Test Results' })).toBeVisible({ timeout: 30_000 })
   expect(page.url()).toContain('/software-verification/llr/results')

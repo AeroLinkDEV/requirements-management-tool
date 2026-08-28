@@ -14,11 +14,12 @@ import { verificationArtifactNoun } from './presentation'
  * has one pair. Nothing is computed here on purpose: a chooser that waited on counts would make the reader
  * wait to be shown two links they were always going to be shown.
  */
-export default function VerificationLanding({ scope, buildName, ladder, onOpen }: {
+export default function VerificationLanding({ scope, buildName, ladder, onOpen, onOpenCoverage }: {
   scope: 'System' | 'Software'
   buildName: string
   ladder: ProjectLadderProjection | null
   onOpen: (view: 'testChangeRequests' | 'testingCoverage' | 'testResults', level?: 'HighLevel' | 'LowLevel') => void
+  onOpenCoverage: (level?: 'HighLevel' | 'LowLevel') => void
 }) {
   const pairs: { level?: 'HighLevel' | 'LowLevel'; title: string; note: string }[] = scope === 'System'
     ? (ladderAllows(ladder, 'System', LadderCapability.Verification)
@@ -57,8 +58,13 @@ export default function VerificationLanding({ scope, buildName, ladder, onOpen }
             </button>
             <button type="button" onClick={() => onOpen('testingCoverage', pair.level)}>
               <b>Downstream Assessments</b>
-              <span>Approved changes still waiting for a test conclusion, and what this build&apos;s {verificationArtifactNoun(scope === 'System' ? 'System' : pair.level).toLowerCase()}s cover.</span>
+              <span>Approved changes still waiting for a test conclusion.</span>
               <i>Open Downstream Assessments →</i>
+            </button>
+            <button type="button" onClick={() => onOpenCoverage(pair.level)}>
+              <b>Coverage</b>
+              <span>Which requirements this build&apos;s {verificationArtifactNoun(scope === 'System' ? 'System' : pair.level).toLowerCase()}s cover, and which still need attention.</span>
+              <i>Open Coverage →</i>
             </button>
             <button type="button" onClick={() => onOpen('testResults', pair.level)}>
               <b>Test Results</b>
