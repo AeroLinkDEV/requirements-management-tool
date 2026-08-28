@@ -172,7 +172,7 @@ test('an administrator edits the current identity of a disposable account, and t
   // Open the disposable account's details and edit its current identity.
   const row = page.locator(`[data-member="${userName}"]`)
   await expect(row).toBeVisible()
-  await row.getByRole('button', { name: `Identity Edit ${suffix}` }).click()
+  await row.getByRole('button', { name: `Identity Edit ${suffix}`, exact: true }).click()
   await expect(page.getByRole('heading', { name: `Identity Edit ${suffix}`, level: 2 })).toBeVisible()
 
   await page.getByLabel('Email').fill(`${userName}.edited@example.test`)
@@ -199,6 +199,6 @@ test('a non-admin roster manager cannot create accounts or edit global identity'
   await expect(page.getByRole('button', { name: 'Create local person/account' })).toHaveCount(0)
   await page.getByRole('button', { name: 'Cancel' }).click()
 
-  await page.locator('[data-member="quality.analyst"]').getByRole('button', { name: 'Marcus Hale' }).click()
+  await page.locator('[data-member="quality.analyst"]').getByRole('button', { name: 'Marcus Hale', exact: true }).click()
   await expect(page.getByText('Current identity (global administrator)')).toHaveCount(0)
 })
