@@ -188,6 +188,26 @@ public sealed class ControlledEditingCheckInEngineTests
     }
 
     [Fact]
+    public async Task Removed_leadership_cannot_check_in_a_lease_opened_while_the_position_was_held()
+    {
+        await using var scenario = await Scenario.CreateAsync(
+            role: ProgramRole.ConfigurationManager,
+            position: ProjectLeadershipPosition.ConfigurationManager);
+        var assignment = await scenario.Db.ProjectLeadershipAssignments
+            .SingleAsync(x => x.ProgramId == scenario.Program.Id
+                              && x.Position == ProjectLeadershipPosition.ConfigurationManager);
+        assignment.End("test.supervisor", scenario.Now.AddSeconds(30));
+        await scenario.Db.SaveChangesAsync();
+
+        var result = await scenario.Engine.CheckInAsync(scenario.Session.Id, scenario.Session.Version,
+            scenario.Actor, scenario.Now.AddMinutes(1), default);
+
+        Assert.Equal(ControlledCheckInStatus.Forbidden, result.Status);
+        Assert.Equal("project_authorization_required", result.Code);
+        await scenario.AssertUnchangedAndActiveAsync();
+    }
+
+    [Fact]
     public async Task Lifecycle_rejection_precedes_stale_snapshot_detection()
     {
         await using var scenario = await Scenario.CreateAsync();
@@ -268,7 +288,7 @@ public sealed class ControlledEditingCheckInEngineTests
             "RequirementProposal", proposal.Id, session.Version, latest, latestHash,
             scenario.Actor.UserName, scenario.Now.AddSeconds(3)));
         await scenario.Db.SaveChangesAsync();
-        var engine = new ControlledEditingCheckInEngine(scenario.Db, new IdentityService(scenario.Db),
+        var engine = new ControlledEditingCheckInEngine(scenario.Db, new ProjectAuthorityResolver(scenario.Db),
             [new SystemChangeRequestControlledEditingAdapter(scenario.Db), adapter]);
 
         var result = await engine.CheckInAsync(session.Id, session.Version, scenario.Actor,
@@ -307,7 +327,10 @@ public sealed class ControlledEditingCheckInEngineTests
         var proposal = scr.AddRequirementChange("engineer", "ICDR-000001", 0, RequirementLevel.Interface,
             RequirementChangeKind.Introduce, "Original interface contract", "Rationale", "Not applicable", now,
             ladderPolicy: policy);
-        db.AddRange(program, project, release, scr);
+        var account = new UserAccount("engineer", "Engineer", "engineer@example.test",
+            IdentityService.HashPassword("StrongPass!2026"), now);
+        db.AddRange(program, project, release, scr, account,
+            new ProgramMembership(account.Id, program.Id, ProgramRole.Engineer, "test.setup", now));
         await db.SaveChangesAsync();
 
         var adapter = new RequirementProposalControlledEditingAdapter(db, policy);
@@ -339,9 +362,9 @@ public sealed class ControlledEditingCheckInEngineTests
             session.Version, latest, latestHash, "engineer", now.AddMinutes(1)));
         await db.SaveChangesAsync();
 
-        var actor = new AuthenticatedUser(Guid.NewGuid(), "engineer", "Engineer", "engineer@example.test",
+        var actor = new AuthenticatedUser(account.Id, "engineer", "Engineer", "engineer@example.test",
             false, [new UserProgramAccess(program.Id, [ProgramRole.Engineer.ToString()])]);
-        var engine = new ControlledEditingCheckInEngine(db, new IdentityService(db), [adapter]);
+        var engine = new ControlledEditingCheckInEngine(db, new ProjectAuthorityResolver(db), [adapter]);
         var result = await engine.CheckInAsync(session.Id, session.Version, actor, now.AddMinutes(2), default);
 
         Assert.True(result.Success, result.Error);
@@ -513,7 +536,7 @@ public sealed class ControlledEditingCheckInEngineTests
         scenario.Db.ArtifactDraftSnapshots.Add(new ArtifactDraftSnapshot(scenario.Project.Id, session.Id, artifactType,
             artifactId, session.Version, latestDraft, latestHash, scenario.Actor.UserName, scenario.Now.AddSeconds(2)));
         await scenario.Db.SaveChangesAsync();
-        var engine = new ControlledEditingCheckInEngine(scenario.Db, new IdentityService(scenario.Db), [adapter]);
+        var engine = new ControlledEditingCheckInEngine(scenario.Db, new ProjectAuthorityResolver(scenario.Db), [adapter]);
         return await engine.CheckInAsync(session.Id, session.Version, scenario.Actor, scenario.Now.AddMinutes(1), default);
     }
 
@@ -605,7 +628,8 @@ public sealed class ControlledEditingCheckInEngineTests
         public ControlledEditingCheckInEngine Engine { get; }
         public DateTimeOffset Now { get; }
 
-        public static async Task<Scenario> CreateAsync(DateTimeOffset? openedAt = null, int leaseMinutes = 15)
+        public static async Task<Scenario> CreateAsync(DateTimeOffset? openedAt = null, int leaseMinutes = 15,
+            ProgramRole role = ProgramRole.Engineer, ProjectLeadershipPosition? position = null)
         {
             var options = new DbContextOptionsBuilder<AeroLinkDbContext>().UseSqlite("Data Source=:memory:").Options;
             var db = new AeroLinkDbContext(options);
@@ -617,7 +641,12 @@ public sealed class ControlledEditingCheckInEngineTests
             var release = new SoftwareRelease(project.Id, "1.0", false);
             var scr = new SystemChangeRequest("SRCR-00001", 0, project.Id, release.Id, "Original title",
                 "Original problem", "Original analysis", "Original solution", "engineer", now);
-            db.AddRange(program, project, release, scr);
+            var account = new UserAccount("engineer", "Engineer", "engineer@example.test",
+                IdentityService.HashPassword("StrongPass!2026"), now);
+            db.AddRange(program, project, release, scr, account,
+                new ProgramMembership(account.Id, program.Id, role, "test.setup", now));
+            if (position is not null)
+                db.Add(new ProjectLeadershipAssignment(program.Id, position.Value, account.Id, "test.setup", now));
             await db.SaveChangesAsync();
             var adapter = new SystemChangeRequestControlledEditingAdapter(db);
             var artifact = await adapter.ResolveAsync(scr.Id, default) ?? throw new InvalidOperationException();
@@ -629,9 +658,9 @@ public sealed class ControlledEditingCheckInEngineTests
                 snapshot, hash, "engineer", now);
             db.AddRange(session, draft);
             await db.SaveChangesAsync();
-            var actor = new AuthenticatedUser(Guid.NewGuid(), "engineer", "Engineer", "engineer@example.test",
-                false, [new UserProgramAccess(program.Id, [ProgramRole.Engineer.ToString()])]);
-            var engine = new ControlledEditingCheckInEngine(db, new IdentityService(db), [adapter]);
+            var actor = new AuthenticatedUser(account.Id, "engineer", "Engineer", "engineer@example.test",
+                false, [new UserProgramAccess(program.Id, [role.ToString()])]);
+            var engine = new ControlledEditingCheckInEngine(db, new ProjectAuthorityResolver(db), [adapter]);
             return new(db, program, project, scr, session, actor, engine, now);
         }
 

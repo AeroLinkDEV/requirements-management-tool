@@ -284,7 +284,7 @@ distinct ways. The current set:
 | `ProjectRoleBackups` (legacy) | `AdministrationEndpoints`, `ApprovalConfigurationEndpoints`, `ManagedDocumentAssignmentPolicy`, `ManagedDocumentReviewAuthority`, `PersonnelEndpoints`, `WorkflowEndpoints`, `IdentityService.IsStandingBackupAsync` | Historical readability for base roles; **no longer live authority for position roles at any of these sites**, and new position-keyed rows are refused at creation |
 | `ProjectLeadershipAssignments` / `ProjectLeadershipBackups` | `IdentityService`, `ProjectLeadershipService`, `ProjectAuthorityResolver` | **The** live leadership authority |
 | `RoleDelegations` | 9 files | Exact-role, time-bounded; unchanged |
-| `ProblemReportOwnerAuthority` recovery | `ProblemReportEndpoints` | **Corrected** — leadership positions, not membership roles |
+| `ProblemReportOwnerAuthority` ownership / recovery | `WorkspaceEndpoints`, `ProblemReportEndpoints` | **Corrected** — owner eligibility is a base-job question with retired position memberships excluded; recovery is leadership positions, not membership roles |
 | `AssuranceAuthorityPolicy` | `ProjectAssurancePolicyService` | **Corrected** — `ProgramManager` is a position; SQA/Airworthiness remain base roles |
 
 ## E.3 Base-role versus leadership-position demands
@@ -304,6 +304,13 @@ through `ProjectAuthorityResolver`: ordinary roles retain their membership impli
 Manager, Program Manager, and retired lead labels require the corresponding leadership primary, standing
 backup, or exact delegation. That central cutover closes the baseline/build, release-campaign, integration,
 and review-cancel bypasses without re-implementing the split in each endpoint.
+
+Problem Report SCCB opening and controlled-editing check-in now ask the same typed legacy demands as their
+capability/checkout counterparts. A base-only Project Engineer cannot open SCCB, and ending a Configuration
+Manager or Program Manager leadership assignment immediately prevents a holder from committing an already
+open controlled-editing lease. Problem Report owner eligibility remains a base-job question, but filters the
+five retired position-role memberships before both directory projection and reassignment, so legacy rows are
+neither offered nor accepted as responsible engineers.
 
 That cutover includes every managed-document controller and recovery gate. Ordinary authoring and assurance
 demands remain base-role questions, while Configuration Manager, Program Manager, and the retired Project

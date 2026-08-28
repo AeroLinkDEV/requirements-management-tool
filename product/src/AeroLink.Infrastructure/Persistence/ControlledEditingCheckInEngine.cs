@@ -37,7 +37,7 @@ public sealed record ControlledCheckInResult(ControlledCheckInStatus Status, str
 
 public sealed class ControlledEditingCheckInEngine(
     AeroLinkDbContext db,
-    IdentityService identity,
+    ProjectAuthorityResolver authority,
     IEnumerable<IControlledEditingAdapter> adapters,
     ILadderPolicy? policy = null)
 {
@@ -186,7 +186,8 @@ public sealed class ControlledEditingCheckInEngine(
     {
         foreach (var role in new[] { ProgramRole.Engineer, ProgramRole.TestEngineer,
                      ProgramRole.ConfigurationManager, ProgramRole.ProgramManager })
-            if (await identity.HasRoleAsync(actor, programId, role, now, ct)) return true;
+            if (await authority.IsSatisfiedAsync(actor.Id, programId,
+                    ProjectAuthorityRequirement.LegacyRoleDemand(role), now, ct)) return true;
         return false;
     }
 

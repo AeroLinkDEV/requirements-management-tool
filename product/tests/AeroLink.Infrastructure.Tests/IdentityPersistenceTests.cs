@@ -48,6 +48,32 @@ public sealed class IdentityPersistenceTests
     }
 
     [Fact]
+    public async Task Demo_identity_leadership_bootstrap_never_assigns_a_disabled_account()
+    {
+        var options = new DbContextOptionsBuilder<AeroLinkDbContext>().UseSqlite("Data Source=:memory:").Options;
+        await using var db = new AeroLinkDbContext(options);
+        await db.Database.OpenConnectionAsync();
+        await db.Database.EnsureCreatedAsync();
+        var now = DateTimeOffset.UtcNow;
+        var program = new ProgramRecord("Disabled Seed Holder Program", "DSH");
+        var disabled = new UserAccount("engineering.manager", "Engineering Manager",
+            "engineering.manager@aerolink.local", IdentityService.HashPassword(IdentitySeeder.DemoPassword), now);
+        disabled.Disable(now);
+        db.AddRange(program, disabled);
+        await db.SaveChangesAsync();
+
+        await new IdentitySeeder(db).EnsureSeededAsync();
+
+        var assignments = await db.ProjectLeadershipAssignments.AsNoTracking()
+            .Where(x => x.ProgramId == program.Id).ToListAsync();
+        Assert.DoesNotContain(assignments, x => x.HolderUserId == disabled.Id);
+        var activeHolders = (await db.UserAccounts.AsNoTracking()
+            .Where(x => x.State == AccountState.Active)
+            .Select(x => x.Id).ToListAsync()).ToHashSet();
+        Assert.All(assignments, x => Assert.Contains(x.HolderUserId, activeHolders));
+    }
+
+    [Fact]
     public void Mfa_secrets_are_standard_base32_and_totp_matches_rfc_6238()
     {
         var generated = IdentityService.CreateMfaSecret();

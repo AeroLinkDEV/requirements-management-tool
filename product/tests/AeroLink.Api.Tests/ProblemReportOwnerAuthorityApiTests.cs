@@ -26,6 +26,7 @@ public sealed class ProblemReportOwnerAuthorityApiTests
         Assert.Contains("authority.system", offered);
         Assert.Contains("authority.software", offered);
         Assert.DoesNotContain("authority.quality", offered);
+        Assert.DoesNotContain("authority.legacy-lead", offered);
         Assert.DoesNotContain("authority.outsider", offered);
         Assert.DoesNotContain("authority.other-program", offered);
 
@@ -36,6 +37,8 @@ public sealed class ProblemReportOwnerAuthorityApiTests
         await RefusedAsync(owner, report.Id, report.Version, "authority.disabled",
             "pr_owner_account_unavailable");
         await RefusedAsync(owner, report.Id, report.Version, "authority.quality",
+            "pr_owner_authority_required");
+        await RefusedAsync(owner, report.Id, report.Version, "authority.legacy-lead",
             "pr_owner_authority_required");
 
         using var accepted = await owner.PostAsJsonAsync($"/api/problem-reports/{report.Id}/owner", new
@@ -196,6 +199,7 @@ public sealed class ProblemReportOwnerAuthorityApiTests
         Add("authority.system", ProgramRole.SystemEngineer, program.Id);
         Add("authority.software", ProgramRole.SoftwareEngineer, program.Id);
         Add("authority.quality", ProgramRole.SoftwareQualityAnalyst, program.Id);
+        Add("authority.legacy-lead", ProgramRole.SystemEngineeringLead, program.Id);
         Add("authority.other-program", ProgramRole.Engineer, otherProgram.Id);
         Add("authority.outsider", null, null);
         var disabled = Add("authority.disabled", ProgramRole.Engineer, program.Id);

@@ -202,7 +202,16 @@ public static class ProblemReportOwnerAuthority
         ProjectLeadershipPosition.ProgramManager,
     ];
 
-    public static bool IsEligible(IEnumerable<ProgramRole> roles) => roles.Any(EligibleRoles.Contains);
+    /// <summary>
+    /// Whether current membership roles describe a job that may own a Problem Report.
+    ///
+    /// The satisfying-role table retains the five retired lead values so persisted workflow demands can
+    /// still be interpreted through Project Leadership. A raw membership carrying one of those values is
+    /// only legacy data, however, and must not become ordinary engineering ownership through this base-job
+    /// policy. Position authority is resolved separately wherever it is actually required.
+    /// </summary>
+    public static bool IsEligible(IEnumerable<ProgramRole> roles) =>
+        roles.Any(role => !SingularProgramRoles.IsSingular(role) && EligibleRoles.Contains(role));
 }
 public enum ExternalIdentityProtocol { OpenIdConnect, Saml2 }
 

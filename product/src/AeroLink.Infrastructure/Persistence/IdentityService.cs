@@ -319,7 +319,9 @@ public sealed class IdentitySeeder(AeroLinkDbContext db)
         // SQLite now choose the same holder instead of the browser fixture failing before any journey runs.
         var candidates = await db.ProgramMemberships.AsNoTracking()
             .Where(x => x.ProgramId == programId && x.EndedAt == null && x.Role == value)
-            .Join(db.UserAccounts.AsNoTracking(), m => m.UserId, u => u.Id, (m, u) => new { m.GrantedAt, u.UserName, u.Id })
+            .Join(db.UserAccounts.AsNoTracking(), m => m.UserId, u => u.Id,
+                (m, u) => new { m.GrantedAt, u.UserName, u.Id, u.State })
+            .Where(x => x.State == AccountState.Active)
             .ToListAsync(ct);
         return candidates.OrderBy(x => x.GrantedAt).ThenBy(x => x.UserName, StringComparer.Ordinal)
             .Select(x => (Guid?)x.Id).FirstOrDefault();

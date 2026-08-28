@@ -190,17 +190,12 @@ public sealed class ProgramRoleAuthorityTests
     [InlineData(ProgramRole.Engineer)]
     [InlineData(ProgramRole.SystemEngineer)]
     [InlineData(ProgramRole.SoftwareEngineer)]
-    [InlineData(ProgramRole.SystemEngineeringLead)]
-    [InlineData(ProgramRole.SoftwareEngineeringLead)]
-    [InlineData(ProgramRole.ProjectEngineeringLead)]
     [InlineData(ProgramRole.EngineeringManager)]
     [InlineData(ProgramRole.TestEngineer)]
     [InlineData(ProgramRole.TestLead)]
     [InlineData(ProgramRole.ProjectEngineer)]
     [InlineData(ProgramRole.SystemTestEngineer)]
     [InlineData(ProgramRole.SoftwareTestEngineer)]
-    [InlineData(ProgramRole.SystemTestLead)]
-    [InlineData(ProgramRole.SoftwareTestLead)]
     public void Engineering_and_verification_engineering_roles_can_own_problem_reports(ProgramRole role)
         => Assert.True(ProblemReportOwnerAuthority.IsEligible([role]));
 
@@ -211,7 +206,12 @@ public sealed class ProgramRoleAuthorityTests
     [InlineData(ProgramRole.ProgramManager)]
     [InlineData(ProgramRole.SoftwareQualityAnalyst)]
     [InlineData(ProgramRole.Airworthiness)]
-    public void Oversight_and_approval_only_roles_cannot_hold_problem_report_ownership(ProgramRole role)
+    [InlineData(ProgramRole.ProjectEngineeringLead)]
+    [InlineData(ProgramRole.SystemEngineeringLead)]
+    [InlineData(ProgramRole.SoftwareEngineeringLead)]
+    [InlineData(ProgramRole.SystemTestLead)]
+    [InlineData(ProgramRole.SoftwareTestLead)]
+    public void Oversight_approval_and_retired_position_memberships_cannot_hold_problem_report_ownership(ProgramRole role)
         => Assert.False(ProblemReportOwnerAuthority.IsEligible([role]));
 
     /// <summary>

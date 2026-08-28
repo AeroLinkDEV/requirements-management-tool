@@ -445,9 +445,14 @@ public sealed class ProblemReportApiTests
             new { expectedVersion = version, targetState = "Open" });
         Assert.Equal(HttpStatusCode.Forbidden, adminOpen.StatusCode);
 
-        var sccbName = await SeedSccbAsync(factory, projectId);
+        var sccbName = await SeedSccbAsync(factory, projectId, assignLeadership: false);
         using var sccb = factory.CreateClient();
         await LoginExistingAsync(sccb, sccbName);
+        using var baseRoleOnly = await sccb.PostAsJsonAsync($"/api/problem-reports/{reportId}/transition",
+            new { expectedVersion = version, targetState = "Open" });
+        Assert.Equal(HttpStatusCode.Forbidden, baseRoleOnly.StatusCode);
+
+        await AssignSccbLeadershipAsync(factory, projectId, sccbName);
         using var opened = await sccb.PostAsJsonAsync($"/api/problem-reports/{reportId}/transition",
             new { expectedVersion = version, targetState = "Open" });
         Assert.Equal(HttpStatusCode.OK, opened.StatusCode);
@@ -607,7 +612,8 @@ public sealed class ProblemReportApiTests
         db.AddRange(program, project); await db.SaveChangesAsync(); return project.Id;
     }
 
-    private static async Task<string> SeedSccbAsync(AeroLinkApiFactory factory, Guid projectId)
+    private static async Task<string> SeedSccbAsync(AeroLinkApiFactory factory, Guid projectId,
+        bool assignLeadership = true)
     {
         using var scope = factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
@@ -617,8 +623,25 @@ public sealed class ProblemReportApiTests
         var account = new UserAccount(name, "SCCB Authority", $"{name}@example.test",
             IdentityService.HashPassword(AeroLinkApiFactory.MemberPassword), now);
         db.AddRange(account, new ProgramMembership(account.Id, programId, ProgramRole.ProjectEngineer, "test.setup", now));
+        if (assignLeadership)
+            db.Add(new ProjectLeadershipAssignment(programId, ProjectLeadershipPosition.ProjectEngineer,
+                account.Id, "test.setup", now));
         await db.SaveChangesAsync();
         return name;
+    }
+
+    private static async Task AssignSccbLeadershipAsync(AeroLinkApiFactory factory, Guid projectId,
+        string userName)
+    {
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+        var programId = await db.Projects.Where(item => item.Id == projectId)
+            .Select(item => item.ProgramId).SingleAsync();
+        var userId = await db.UserAccounts.Where(item => item.UserName == userName)
+            .Select(item => item.Id).SingleAsync();
+        db.ProjectLeadershipAssignments.Add(new ProjectLeadershipAssignment(programId,
+            ProjectLeadershipPosition.ProjectEngineer, userId, "test.setup", DateTimeOffset.UtcNow));
+        await db.SaveChangesAsync();
     }
 
     private static async Task LoginExistingAsync(HttpClient client, string userName)
