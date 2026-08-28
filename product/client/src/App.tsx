@@ -305,6 +305,7 @@ function App() {
     [selectedArtifactKind,setSelectedArtifactKind]=useState(initialRoute.artifactKind ?? ""),
     [requirementRevisionId,setRequirementRevisionId]=useState(initialRoute.requirementRevisionId ?? ""),
     [requirementProposalId,setRequirementProposalId]=useState(initialRoute.requirementProposalId ?? ""),
+    [testChangeRequestProposalId,setTestChangeRequestProposalId]=useState(initialRoute.testChangeRequestProposalId ?? ""),
     [paletteOpen,setPaletteOpen]=useState(false),
     [displayOpen,setDisplayOpen]=useState(false),
     [density,setDensity]=useState<WorkspaceDensity>(()=>(localStorage.getItem('aerolink-density')==='compact'?'compact':'comfortable')),
@@ -394,7 +395,7 @@ function App() {
     if (release && release.id !== selectedReleaseId)
       setSelectedReleaseId(release.id);
   }, [release, selectedReleaseId]);
-  useEffect(()=>{const handler=()=>{const route=readRoute();setView(route.view);setDiscipline(route.discipline);setHistoryStateIntent(route.historyStateIntent);setHistoryTypeIntent(route.historyTypeIntent);setHistorySelectionId(route.historySelectionId??"");setTestChangeRequestSelectionId(route.testChangeRequestSelectionId??"");setProjectConfigurationSection(route.projectConfigurationSection??"ladder");if(route.programId)setActiveId(route.programId);if(route.projectId)setSelectedProjectId(route.projectId);if(route.releaseId)setSelectedReleaseId(route.releaseId);setSelectedArtifactId(route.artifactId??"");setSelectedArtifactKind(route.artifactKind??"");setRequirementRevisionId(route.requirementRevisionId??"");setRequirementProposalId(route.requirementProposalId??"");setSelectedScrId(route.view==="scr"?route.artifactId??"":"")};addEventListener("popstate",handler);return()=>removeEventListener("popstate",handler)},[]);
+  useEffect(()=>{const handler=()=>{const route=readRoute();setView(route.view);setDiscipline(route.discipline);setHistoryStateIntent(route.historyStateIntent);setHistoryTypeIntent(route.historyTypeIntent);setHistorySelectionId(route.historySelectionId??"");setTestChangeRequestSelectionId(route.testChangeRequestSelectionId??"");setTestChangeRequestProposalId(route.testChangeRequestProposalId??"");setProjectConfigurationSection(route.projectConfigurationSection??"ladder");if(route.programId)setActiveId(route.programId);if(route.projectId)setSelectedProjectId(route.projectId);if(route.releaseId)setSelectedReleaseId(route.releaseId);setSelectedArtifactId(route.artifactId??"");setSelectedArtifactKind(route.artifactKind??"");setRequirementRevisionId(route.requirementRevisionId??"");setRequirementProposalId(route.requirementProposalId??"");setSelectedScrId(route.view==="scr"?route.artifactId??"":"")};addEventListener("popstate",handler);return()=>removeEventListener("popstate",handler)},[]);
   const paletteShortcutEnabled = !!context && !projectLevelViews.includes(view);
   useEffect(()=>{const handler=(event:KeyboardEvent)=>{if(paletteShortcutEnabled&&(event.ctrlKey||event.metaKey)&&event.key.toLowerCase()==="k"){event.preventDefault();setPaletteOpen(true)}if(event.key==="Escape"){setPaletteOpen(false);setDisplayOpen(false)}};addEventListener("keydown",handler);return()=>removeEventListener("keydown",handler)},[paletteShortcutEnabled]);
   useEffect(()=>{document.documentElement.dataset.density=density;localStorage.setItem('aerolink-density',density)},[density]);
@@ -526,6 +527,7 @@ function App() {
   const viewsRequiringArtifact:View[]=["scr","testChangeRequest"];
   const navigate=(target:View,area:Discipline=discipline,artifactId?:string,artifactKind?:string,replace=false,stateIntent?:HistoryStateIntent,typeIntent?:HistoryTypeIntent)=>{
     setRequirementProposalId("");
+    setTestChangeRequestProposalId("");
     if(viewsRequiringArtifact.includes(target)&&!artifactId){
       // Refused rather than half-performed. Reporting it and staying put is honest; pushing a route that
       // cannot resolve is not.
@@ -578,6 +580,27 @@ function App() {
     setView("requirements");setDiscipline(area);setSelectedArtifactId(requirement.id);
     setSelectedArtifactKind(requirement.level);setRequirementRevisionId(requirement.revisionId);
     if(context){const base=routePath(context,"requirements",area,requirement.id);const query=new URLSearchParams();query.set("requirementRevisionId",requirement.revisionId);history.pushState({},"",`${base}&${query}`)}
+  };
+  const openTestChangeRequestFromArtifact=(change: import('./TestProcedureExplorer').TestArtifactChangeContext) => {
+    if (!change.artifactLevel) {
+      setToast('That verification artifact link is missing its controlled level, so nothing was opened.');
+      return;
+    }
+    const area: Discipline = change.artifactLevel === 'System' ? 'systemTest' : 'softwareTest';
+    const routeKind = change.artifactLevel === 'System' ? change.artifactKind : `${change.artifactLevel}${change.artifactKind}`;
+    if (change.mode === 'new') {
+      // The governed editor must collect a legitimate Case/CR/Problem Report origin. It does not accept an
+      // artifact as an origin, so the Explorer deliberately carries no fabricated preselection into it.
+      navigate('createTestChangeRequest', area, undefined, routeKind);
+      return;
+    }
+    if (!change.testChangeReviewId) {
+      setToast('That Test Change Request link is missing its destination, so nothing was opened.');
+      return;
+    }
+    setView('testChangeRequest'); setDiscipline(area); setSelectedArtifactId(change.testChangeReviewId);
+    setSelectedArtifactKind(routeKind); setTestChangeRequestProposalId(change.proposalId ?? '');
+    if (context) history.pushState({}, '', routePath(context, 'testChangeRequest', area, change.testChangeReviewId, routeKind, undefined, undefined, undefined, change.proposalId));
   };
   if(location.pathname==="/")history.replaceState({},"","/projects");
   const signOut=async()=>{
@@ -726,7 +749,7 @@ function App() {
         releaseVersion={release.version}
          scope={view === "createSystemScr" ? "System" : view === "createInterfaceChange" ? "Interface" : "Software"}
          softwareLevel={view === "createSoftwareChange" && (selectedArtifactKind === "HighLevel" || selectedArtifactKind === "LowLevel") ? selectedArtifactKind : undefined}
-         ladder={ladder}
+        ladder={ladder}
         user={user}
         sourceRequirementId={selectedArtifactId || undefined}
         onCancel={() => navigate("dashboard")}
@@ -848,9 +871,10 @@ function App() {
         buildName={`Build ${release.version}`}
          releaseVersion={release.version}
          released={release.isReleased}
-         ladder={ladder}
+        ladder={ladder}
          onBack={() => navigate("dashboard")}
         onOpenRequirementRevision={openRequirementRevision}
+        onOpenTestChangeRequest={openTestChangeRequestFromArtifact}
       />
     );
   // Downstream assessments and the register are one change-control workspace. Historical coverage URLs still
@@ -873,7 +897,7 @@ function App() {
          user={user}
          ladder={ladder}
          initialReviewId={selectedArtifactId}
-         initialRegisterSelectionId={testChangeRequestSelectionId || undefined}
+        initialRegisterSelectionId={testChangeRequestSelectionId || undefined}
         onBack={() => navigate("dashboard")}
         onOpenRequirementRevision={openRequirementRevision}
         onRaiseTestChangeRequest={() => navigate("createTestChangeRequest", discipline, undefined, selectedArtifactKind)}
@@ -905,6 +929,7 @@ function App() {
         onBack={() => navigate("testChangeRequests", discipline, undefined, selectedArtifactKind)}
         onOpenRequirementRevision={openRequirementRevision}
         onOpenTestChangeRequest={id => navigate("testChangeRequest", discipline, id, selectedArtifactKind)}
+        initialProposalId={testChangeRequestProposalId || undefined}
       />
     );
 

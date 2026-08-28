@@ -201,7 +201,7 @@ const normalizeCheckedOutDraft = (value: string, item: Package): WorkingDraft =>
 
 export default function TestChangeRequestPage({
   api, releaseId, releases, packageId, discipline, currentUser, onBack,
-  onOpenTestChangeRequest,
+  onOpenTestChangeRequest, initialProposalId,
 }: {
   api: string
   releaseId: string
@@ -212,6 +212,7 @@ export default function TestChangeRequestPage({
   onBack: () => void
   onOpenRequirementRevision: (requirement: { id: string; revisionId: string; level: string }) => void
   onOpenTestChangeRequest: (id: string) => void
+  initialProposalId?: string
 }) {
   const [item, setItem] = useState<Package>()
   const [signatures, setSignatures] = useState<SignatureEvidence[]>([])
@@ -273,6 +274,19 @@ export default function TestChangeRequestPage({
   }, [api, packageId])
 
   useEffect(() => { void load(); void loadStatus() }, [load, loadStatus])
+
+  // A chooser action opens the package with the exact proposal in view. This is presentation state only:
+  // the proposal identity comes from the server's persisted change and is never reconstructed from the Case
+  // or Procedure being browsed.
+  useEffect(() => {
+    if (!item || !initialProposalId) return
+    const frame = window.requestAnimationFrame(() => {
+      const target = document.querySelector<HTMLElement>(`[data-procedure-change-id="${CSS.escape(initialProposalId)}"]`)
+      target?.focus()
+      target?.scrollIntoView({ block: 'center' })
+    })
+    return () => window.cancelAnimationFrame(frame)
+  }, [initialProposalId, item])
 
   const serializedWorkingCopy = useMemo(() => draft ? JSON.stringify(draft) : '', [draft])
   useEffect(() => { lockRef.current = lock }, [lock])
@@ -611,7 +625,7 @@ export default function TestChangeRequestPage({
         <section className="workspaceCard">
           <div className="workspaceTitle"><div><h2>{artifactNoun} impact</h2><p>{(item.artifactChanges ?? item.procedureChanges ?? []).length} proposed controlled change{(item.artifactChanges ?? item.procedureChanges ?? []).length === 1 ? '' : 's'}</p></div></div>
           {!(item.artifactChanges ?? item.procedureChanges ?? []).length && <p className="workspaceEmpty">No {artifactNoun.toLowerCase()} changes are proposed yet.</p>}
-          {(item.artifactChanges ?? item.procedureChanges ?? []).map(change => <article className="requirementView" key={change.id} data-procedure-change={change.displayNumber}>
+          {(item.artifactChanges ?? item.procedureChanges ?? []).map(change => <article className="requirementView" tabIndex={change.id === initialProposalId ? -1 : undefined} key={change.id} data-procedure-change={change.displayNumber} data-procedure-change-id={change.id}>
             <div><b>{change.displayNumber}</b><span>{changeKindLabel(change.kind)}</span></div>
             <p>{change.objective || change.title}</p>
             {change.rationale && <small>{change.rationale}</small>}

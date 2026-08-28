@@ -2242,6 +2242,14 @@
     },
     {
       "method": "POST",
+      "path": "/api/verification-artifacts/{artifactId:guid}/test-change-request-proposal",
+      "file": "VerificationImpactEndpoints.cs",
+      "coveredBy": [
+        "ProcedureTestChangeControlApiTests"
+      ]
+    },
+    {
+      "method": "POST",
       "path": "/api/verification-impact/{id:guid}/assign",
       "file": "VerificationImpactEndpoints.cs",
       "coveredBy": [

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent as ReactKeyboardEvent } from 'react'
 import { PersonName } from './People'
 import { apiRequest, operationError } from './apiClient'
 import { configuredProcedureTargetsFor, stateLabel, verificationArtifactApiRoot, verificationArtifactNoun, verificationArtifactWord } from './presentation'
@@ -76,6 +76,28 @@ type History = {
 type SavedView = { id: string; name: string; queryJson: string; columnsJson: string; isShared: boolean; owned: boolean }
 /** `views` is optional because the empty-build reply is a different object; read it through `savedViews`. */
 type Page = { page: number; pageSize: number; totalCount: number; totalPages: number; views?: SavedView[]; items: Procedure[] }
+/** Stable hand-off contract for App: the selected exact artifact stays a verification concern. */
+export type TestArtifactChangeContext = {
+  mode: 'new' | 'existing'
+  projectId: string
+  releaseId: string
+  artifactId: string
+  artifactRevisionId: string
+  artifactKind: 'Case' | 'Procedure'
+  artifactLevel?: 'System' | 'HighLevel' | 'LowLevel'
+  displayNumber: string
+  testChangeReviewId?: string
+  proposalId?: string
+}
+type TestChangeCandidate = {
+  id: string; displayNumber: string; title: string; state: string; outcome: string
+  artifactKey: string; version: number; eligible: boolean; reasonCode?: string; reason?: string
+  existingProposalId?: string; canOpenExisting?: boolean
+}
+type TestChangeCandidatePage = {
+  artifactKey: string; artifactDisplayNumber: string; page: number; pageSize: number
+  totalCount: number; totalPages: number; items: TestChangeCandidate[]
+}
 /// The document a discipline's procedures are written into, and the sections inside it.
 type ProcedureDocument = {
   id: string
@@ -174,13 +196,15 @@ const validLevel = (value: string | null, discipline: ProcedureScope, ladder: Pr
  * to be verified.
  */
 export default function TestProcedureExplorer({ api, projectId, releaseId, discipline, buildName, releaseVersion,
-  released, onBack, onOpenRequirementRevision, initialLevel, ladder }: {
+  released, onBack, onOpenRequirementRevision, onOpenTestChangeRequest, initialLevel, ladder }: {
   api: string; projectId: string; releaseId: string; discipline: ProcedureScope; buildName: string
   /** The build's own version, which the document actions name. `buildName` is the display label, not this. */
   releaseVersion: string
   released: boolean
   onBack?: () => void
   onOpenRequirementRevision: (requirement: { id: string; revisionId: string; level: string }) => void
+  /** App owns navigation to the TCR workspace; this component owns exact artifact selection and proposal choice. */
+  onOpenTestChangeRequest?: (context: TestArtifactChangeContext) => void
   initialLevel?: 'HighLevel' | 'LowLevel'
   ladder: ProjectLadderProjection | null
 }) {
@@ -259,6 +283,17 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
   const [coverage, setCoverage] = useState<Coverage>()
   const [coverageRead, setCoverageRead] = useState(false)
   const [showAllCoverage, setShowAllCoverage] = useState(false)
+  const [proposalOpen, setProposalOpen] = useState(false)
+  const [proposalSearch, setProposalSearch] = useState('')
+  const [proposalCandidates, setProposalCandidates] = useState<TestChangeCandidatePage>()
+  const [proposalPage, setProposalPage] = useState(1)
+  const [proposalBusy, setProposalBusy] = useState(false)
+  const [proposalLoading, setProposalLoading] = useState(false)
+  const [proposalLoadError, setProposalLoadError] = useState('')
+  const [proposalRetry, setProposalRetry] = useState(0)
+  const proposalRequestTicket = useRef(0)
+  const proposalTriggerRef = useRef<HTMLButtonElement>(null)
+  const proposalWasOpen = useRef(false)
 
   const scope = scopeOf(discipline, level)
   // A page at a time, at the requirements explorer's own default. A build holds hundreds of procedures, and
@@ -586,6 +621,113 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
     params.set(queryKey('RevisionId'), procedure.revisionId)
     params.delete(queryKey('Tab'))
     window.history.replaceState({}, '', `${location.pathname}?${params}`)
+  }
+
+  const proposalContext = useMemo(() => selected ? {
+    projectId, releaseId, artifactId: selected.id, artifactRevisionId: selected.revisionId,
+    artifactKind: selected.artifactKind === 'Procedure' || discipline === 'System' ? 'Procedure' as const : 'Case' as const,
+    artifactLevel: selected.level,
+    displayNumber: selected.displayNumber,
+  } : undefined, [discipline, projectId, releaseId, selected])
+  const openProposal = () => {
+    if (!selected || released) return
+    setProposalSearch('')
+    setProposalPage(1)
+    setProposalCandidates(undefined)
+    setProposalLoadError('')
+    setProposalOpen(true)
+  }
+  const loadProposalCandidates = useCallback(async () => {
+    if (!proposalOpen || !proposalContext) return
+    const mine = ++proposalRequestTicket.current
+    setProposalLoading(true)
+    setProposalCandidates(undefined)
+    setProposalLoadError('')
+    try {
+      const params = new URLSearchParams({ projectId, releaseId, artifactRevisionId: proposalContext.artifactRevisionId,
+        page: String(proposalPage), pageSize: '25' })
+      if (proposalSearch.trim()) params.set('search', proposalSearch.trim())
+      const response = await fetch(`${api}/api/verification-artifacts/${proposalContext.artifactId}/test-change-request-candidates?${params}`)
+      if (!response.ok) throw new Error(String(response.status))
+      const candidates = await response.json() as TestChangeCandidatePage
+      if (mine === proposalRequestTicket.current) setProposalCandidates(candidates)
+    } catch (problem) {
+      if (mine !== proposalRequestTicket.current) return
+      const message = problem instanceof Error && /^\d+$/.test(problem.message)
+        ? 'Eligible Test Change Requests could not be loaded. Retry to search again.'
+        : operationError(problem, 'Eligible Test Change Requests could not be loaded.')
+      setProposalLoadError(message)
+      setProposalCandidates(undefined)
+    } finally {
+      if (mine === proposalRequestTicket.current) setProposalLoading(false)
+    }
+  }, [api, projectId, releaseId, proposalOpen, proposalContext, proposalSearch, proposalPage])
+  useEffect(() => {
+    if (proposalOpen && proposalContext) void loadProposalCandidates()
+    else { proposalRequestTicket.current += 1; setProposalLoading(false) }
+  }, [loadProposalCandidates, proposalOpen, proposalContext, proposalRetry])
+  useEffect(() => {
+    if (proposalOpen) {
+      proposalWasOpen.current = true
+      const dismiss = (event: KeyboardEvent) => {
+        if (event.key === 'Escape' && !proposalBusy) {
+          event.preventDefault()
+          setProposalOpen(false)
+        }
+      }
+      window.addEventListener('keydown', dismiss)
+      const frame = window.requestAnimationFrame(() => {
+        const dialog = document.querySelector<HTMLElement>('[aria-labelledby="test-change-dialog-title"]')
+        dialog?.querySelector<HTMLElement>('button, input, [tabindex]:not([tabindex="-1"])')?.focus()
+      })
+      return () => { window.cancelAnimationFrame(frame); window.removeEventListener('keydown', dismiss) }
+    }
+    if (proposalWasOpen.current) {
+      proposalWasOpen.current = false
+      proposalTriggerRef.current?.focus()
+    }
+  }, [proposalBusy, proposalOpen])
+  const handleProposalDialogKeyDown = (event: ReactKeyboardEvent<HTMLElement>) => {
+    if (event.key === 'Escape' && !proposalBusy) {
+      event.preventDefault()
+      setProposalOpen(false)
+      return
+    }
+    if (event.key !== 'Tab') return
+    const focusable = Array.from(event.currentTarget.querySelectorAll<HTMLElement>(
+      'button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), a[href], [tabindex]:not([tabindex="-1"])'))
+    if (!focusable.length) return
+    const first = focusable[0]
+    const last = focusable[focusable.length - 1]
+    if (event.shiftKey && document.activeElement === first) {
+      event.preventDefault()
+      last.focus()
+    } else if (!event.shiftKey && document.activeElement === last) {
+      event.preventDefault()
+      first.focus()
+    }
+  }
+  const selectProposal = async (candidate: TestChangeCandidate) => {
+    if (!proposalContext) return
+    if (!candidate.eligible && candidate.canOpenExisting === true && candidate.existingProposalId) {
+      onOpenTestChangeRequest?.({ ...proposalContext, mode: 'existing', testChangeReviewId: candidate.id, proposalId: candidate.existingProposalId })
+      setProposalOpen(false)
+      return
+    }
+    if (!candidate.eligible) return
+    setProposalBusy(true)
+    setError('')
+    try {
+      const response = await apiRequest<{ testChangeReviewId: string; proposalId: string }>(`${api}/api/verification-artifacts/${proposalContext.artifactId}/test-change-request-proposal`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ projectId, releaseId, artifactRevisionId: proposalContext.artifactRevisionId,
+          testChangeReviewId: candidate.id, expectedVersion: candidate.version }),
+      })
+      onOpenTestChangeRequest?.({ ...proposalContext, mode: 'existing', testChangeReviewId: response.testChangeReviewId, proposalId: response.proposalId })
+      setProposalOpen(false)
+    } catch (problem) {
+      setError(operationError(problem, 'The test artifact could not be added to that Draft. Refresh and try again.'))
+    } finally { setProposalBusy(false) }
   }
   const close = () => {
     setSelectedId('')
@@ -946,6 +1088,66 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
           {tab === 'details' && (
             <div className="inspectorBody">
               {selected.titleNote && <p className="inspectorNote warn">{selected.titleNote}</p>}
+              {!released
+                ? <button type="button" className="impactLaunch" ref={proposalTriggerRef} onClick={openProposal}>
+                    Propose test change →
+                  </button>
+                : <p className="changeBoundaryNote"><b>Read-only historical record — {buildName}</b><br />Exit this workspace and select an in-work build to propose a test change.</p>}
+              {proposalOpen && proposalContext && (
+                  <section className="artifactChangeDialog" role="dialog" aria-modal="true"
+                  aria-labelledby="test-change-dialog-title" onKeyDown={handleProposalDialogKeyDown}>
+                  <div className="artifactChangeDialogHead">
+                    <div>
+                      <span className="eyebrow">VERIFICATION CHANGE CONTROL</span>
+                      <h3 id="test-change-dialog-title">Propose {proposalContext.displayNumber}</h3>
+                    </div>
+                    <button type="button" className="quiet" onClick={() => setProposalOpen(false)}>Close</button>
+                  </div>
+                  <p>Choose a Test Change Request. The selected exact {proposalContext.artifactKind.toLowerCase()} revision remains unchanged.</p>
+                  <div className="artifactChangeDialogActions">
+                    <button type="button" onClick={() => {
+                      onOpenTestChangeRequest?.({ ...proposalContext, mode: 'new' })
+                      setProposalOpen(false)
+                    }}>
+                      Raise new Test Change Request
+                    </button>
+                    <label>Find an existing Draft
+                      <input aria-label="Find an existing Test Change Request" value={proposalSearch}
+                        onChange={event => { setProposalSearch(event.target.value); setProposalPage(1) }} placeholder="Identifier or title" />
+                    </label>
+                  </div>
+                  {proposalLoading
+                    ? <p className="inspectorNote">Loading Test Change Request candidates…</p>
+                    : proposalLoadError
+                      ? <div className="inspectorNote" role="alert"><p>{proposalLoadError}</p><button type="button" onClick={() => setProposalRetry(value => value + 1)}>Retry loading candidates</button></div>
+                      : !proposalCandidates
+                        ? <p className="inspectorNote">Loading Test Change Request candidates…</p>
+                    : proposalCandidates.items.length === 0
+                      ? <p className="inspectorNote">No Test Change Requests match that search.</p>
+                      : <ul className="artifactChangeCandidateList" aria-label="Test Change Request candidates">
+                        {proposalCandidates.items.map(candidate => <li key={candidate.id}>
+                          <div>
+                            <b>{candidate.displayNumber}</b><span>{candidate.title || 'Untitled Test Change Request'}</span>
+                            <small>{candidate.state} · {candidate.artifactKey}</small>
+                            {!candidate.eligible && <p className="inspectorNote warn">{candidate.reason}</p>}
+                          </div>
+                          <button type="button" disabled={proposalBusy || (!candidate.eligible && !(candidate.canOpenExisting === true && candidate.existingProposalId))}
+                            onClick={() => void selectProposal(candidate)}>
+                            {candidate.canOpenExisting === true && candidate.existingProposalId ? 'Open existing proposal' : 'Add exact revision'}
+                          </button>
+                        </li>)}
+                      </ul>}
+                  {proposalCandidates && proposalCandidates.totalPages > 1 && (
+                    <nav className="pager artifactChangeCandidatePager" aria-label="Test Change Request candidate pages">
+                      <button type="button" disabled={proposalBusy || proposalPage <= 1}
+                        onClick={() => setProposalPage(value => Math.max(1, value - 1))}>← Previous</button>
+                      <span>Page {proposalCandidates.page} of {proposalCandidates.totalPages} · {proposalCandidates.totalCount} total</span>
+                      <button type="button" disabled={proposalBusy || proposalPage >= proposalCandidates.totalPages}
+                        onClick={() => setProposalPage(value => Math.min(proposalCandidates.totalPages, value + 1))}>Next →</button>
+                    </nav>
+                  )}
+                </section>
+              )}
                <h3>{selectedIsProcedure ? 'Procedure' : 'Case'} title</h3>
               <div className="richRequirement">{selected.title}</div>
               <dl className="procedureCase">
