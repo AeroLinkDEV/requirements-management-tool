@@ -2,8 +2,8 @@
   "schemaVersion": "aerolink-api-host-classification/v3",
   "totals": {
     "classes": 109,
-    "tests": 645,
-    "knownCases": 703,
+    "tests": 647,
+    "knownCases": 705,
     "unknownCaseTests": 0
   },
   "summary": {
@@ -15,8 +15,8 @@
     },
     "fresh-host": {
       "classes": 43,
-      "tests": 246,
-      "knownCases": 275,
+      "tests": 248,
+      "knownCases": 277,
       "unknownCaseTests": 0
     },
     "migration-candidate": {
@@ -367,6 +367,21 @@
       ]
     },
     {
+      "cls": "SecurityBoundaryTests",
+      "tests": 13,
+      "knownCases": 13,
+      "unknownCaseTests": 0,
+      "classification": "fresh-host",
+      "reason": "Customizes host state (service-replacement, factory-host-options); sharing could change the subject or leak configuration.",
+      "intents": [
+        "auth-policy",
+        "ef-translation",
+        "filesystem",
+        "http-boundary",
+        "in-process-logic"
+      ]
+    },
+    {
       "cls": "AuthoringTracedImpactTests",
       "tests": 12,
       "knownCases": 12,
@@ -378,20 +393,6 @@
         "ef-translation",
         "http-boundary",
         "startup-config"
-      ]
-    },
-    {
-      "cls": "SecurityBoundaryTests",
-      "tests": 11,
-      "knownCases": 11,
-      "unknownCaseTests": 0,
-      "classification": "fresh-host",
-      "reason": "Customizes host state (service-replacement, factory-host-options); sharing could change the subject or leak configuration.",
-      "intents": [
-        "auth-policy",
-        "ef-translation",
-        "filesystem",
-        "http-boundary"
       ]
     },
     {

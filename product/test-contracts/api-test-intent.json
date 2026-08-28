@@ -1,17 +1,17 @@
 {
   "schemaVersion": "aerolink-api-test-intent/v2",
   "totals": {
-    "tests": 645,
-    "cases": 703,
+    "tests": 647,
+    "cases": 705,
     "classes": 109,
-    "hostedTests": 625,
-    "hostedCases": 674,
+    "hostedTests": 627,
+    "hostedCases": 676,
     "nonHostedTests": 14,
     "nonHostedCases": 23,
     "unknownHostTests": 6,
     "unknownHostCases": 6,
-    "hostedCandidateTests": 14,
-    "hostedCandidateCases": 14,
+    "hostedCandidateTests": 16,
+    "hostedCandidateCases": 16,
     "unknownCandidateTests": 3,
     "unknownCandidateCases": 3,
     "unknownCaseTests": 0,
@@ -45,10 +45,10 @@
     "in-process-logic": {
       "label": "In-process logic with no HTTP and no client",
       "level": "Domain or Infrastructure (migration candidate)",
-      "tests": 22,
-      "cases": 22,
+      "tests": 24,
+      "cases": 24,
       "unknownCases": 0,
-      "classes": 9
+      "classes": 10
     },
     "filesystem": {
       "label": "Filesystem / evidence-root behaviour",
@@ -4614,8 +4614,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 17,
-        "end": 35
+        "start": 18,
+        "end": 36
       }
     },
     {
@@ -8521,8 +8521,40 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 326,
-        "end": 372
+        "start": 350,
+        "end": 396
+      }
+    },
+    {
+      "cls": "SecurityBoundaryTests",
+      "test": "Api_test_factory_opt_in_registers_only_the_enterprise_job_worker",
+      "kind": "Fact",
+      "intent": "in-process-logic",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction"
+      ],
+      "sourceLines": {
+        "start": 52,
+        "end": 59
+      }
+    },
+    {
+      "cls": "SecurityBoundaryTests",
+      "test": "Api_test_factory_removes_all_background_workers_by_default",
+      "kind": "Fact",
+      "intent": "in-process-logic",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction"
+      ],
+      "sourceLines": {
+        "start": 44,
+        "end": 50
       }
     },
     {
@@ -8538,8 +8570,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 298,
-        "end": 324
+        "start": 322,
+        "end": 348
       }
     },
     {
@@ -8555,8 +8587,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 217,
-        "end": 246
+        "start": 241,
+        "end": 270
       }
     },
     {
@@ -8569,8 +8601,8 @@
       "hosted": "unknown",
       "hostEvidence": [],
       "sourceLines": {
-        "start": 91,
-        "end": 154
+        "start": 115,
+        "end": 178
       }
     },
     {
@@ -8623,8 +8655,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 194,
-        "end": 215
+        "start": 218,
+        "end": 239
       }
     },
     {
@@ -8640,8 +8672,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 248,
-        "end": 254
+        "start": 272,
+        "end": 278
       }
     },
     {
@@ -8658,8 +8690,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 256,
-        "end": 296
+        "start": 280,
+        "end": 320
       }
     },
     {
@@ -8676,8 +8708,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 374,
-        "end": 445
+        "start": 398,
+        "end": 469
       }
     },
     {
@@ -8694,8 +8726,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 57,
-        "end": 89
+        "start": 81,
+        "end": 113
       }
     },
     {

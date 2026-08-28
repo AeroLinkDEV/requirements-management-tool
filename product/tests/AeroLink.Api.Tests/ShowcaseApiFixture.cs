@@ -46,7 +46,8 @@ public sealed class ShowcaseApiFixture : IAsyncLifetime
     }
 
     /// <summary>A factory whose database begins as a copy of the seeded showcase.</summary>
-    internal AeroLinkApiFactory CreateFactory() => new(showcaseTemplate: _templatePath);
+    internal AeroLinkApiFactory CreateFactory(bool enableEnterpriseJobWorker = false) =>
+        new(showcaseTemplate: _templatePath, enableEnterpriseJobWorker: enableEnterpriseJobWorker);
 }
 
 /// <summary>
