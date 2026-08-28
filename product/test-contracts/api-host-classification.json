@@ -1,22 +1,22 @@
 {
   "schemaVersion": "aerolink-api-host-classification/v3",
   "totals": {
-    "classes": 111,
-    "tests": 656,
-    "knownCases": 714,
+    "classes": 112,
+    "tests": 685,
+    "knownCases": 753,
     "unknownCaseTests": 0
   },
   "summary": {
     "converted": {
       "classes": 25,
-      "tests": 139,
-      "knownCases": 139,
+      "tests": 147,
+      "knownCases": 155,
       "unknownCaseTests": 0
     },
     "fresh-host": {
       "classes": 43,
-      "tests": 248,
-      "knownCases": 277,
+      "tests": 261,
+      "knownCases": 290,
       "unknownCaseTests": 0
     },
     "migration-candidate": {
@@ -26,17 +26,17 @@
       "unknownCaseTests": 0
     },
     "reusable-host": {
-      "classes": 42,
-      "tests": 268,
-      "knownCases": 297,
+      "classes": 43,
+      "tests": 276,
+      "knownCases": 307,
       "unknownCaseTests": 0
     }
   },
   "classes": [
     {
-      "cls": "ProjectPersonnelApiTests",
-      "tests": 13,
-      "knownCases": 13,
+      "cls": "ApprovalConfigurationApiTests",
+      "tests": 15,
+      "knownCases": 15,
       "unknownCaseTests": 0,
       "classification": "converted",
       "reason": "Already sharing a host through the #563 pilot.",
@@ -47,9 +47,9 @@
       ]
     },
     {
-      "cls": "ApprovalConfigurationApiTests",
-      "tests": 11,
-      "knownCases": 11,
+      "cls": "ProjectPersonnelApiTests",
+      "tests": 14,
+      "knownCases": 14,
       "unknownCaseTests": 0,
       "classification": "converted",
       "reason": "Already sharing a host through the #563 pilot.",
@@ -61,8 +61,8 @@
     },
     {
       "cls": "AssurancePolicyApiTests",
-      "tests": 10,
-      "knownCases": 10,
+      "tests": 11,
+      "knownCases": 11,
       "unknownCaseTests": 0,
       "classification": "converted",
       "reason": "Already sharing a host through the #563 pilot.",
@@ -82,6 +82,18 @@
       "intents": [
         "ef-translation",
         "in-process-logic"
+      ]
+    },
+    {
+      "cls": "ProjectLeadershipApiTests",
+      "tests": 8,
+      "knownCases": 16,
+      "unknownCaseTests": 0,
+      "classification": "converted",
+      "reason": "Already sharing a host through the #563 pilot.",
+      "intents": [
+        "ef-translation",
+        "http-boundary"
       ]
     },
     {
@@ -118,18 +130,6 @@
       "reason": "Already sharing a host through the #563 pilot.",
       "intents": [
         "auth-policy",
-        "ef-translation",
-        "http-boundary"
-      ]
-    },
-    {
-      "cls": "ProjectLeadershipApiTests",
-      "tests": 6,
-      "knownCases": 6,
-      "unknownCaseTests": 0,
-      "classification": "converted",
-      "reason": "Already sharing a host through the #563 pilot.",
-      "intents": [
         "ef-translation",
         "http-boundary"
       ]
@@ -338,8 +338,8 @@
     },
     {
       "cls": "TestChangeRequestReviewWorkflowTests",
-      "tests": 39,
-      "knownCases": 43,
+      "tests": 45,
+      "knownCases": 49,
       "unknownCaseTests": 0,
       "classification": "fresh-host",
       "reason": "Reviewed #563 hold: this class bootstraps an empty database or workspace. A class-scoped SharedApiHost would make first-install state and fixed bootstrap identities order-dependent. Keep fresh-host until a bootstrap-once fixture and per-test workspace tagging are proven.",
@@ -352,8 +352,8 @@
     },
     {
       "cls": "ManagedDocumentApiTests",
-      "tests": 25,
-      "knownCases": 30,
+      "tests": 26,
+      "knownCases": 31,
       "unknownCaseTests": 0,
       "classification": "fresh-host",
       "reason": "Customizes host state (interceptor-or-fault-injection); sharing could change the subject or leak configuration.",
@@ -367,8 +367,8 @@
     },
     {
       "cls": "BaselineImportApiTests",
-      "tests": 21,
-      "knownCases": 21,
+      "tests": 22,
+      "knownCases": 22,
       "unknownCaseTests": 0,
       "classification": "fresh-host",
       "reason": "Reviewed #563 hold: this class bootstraps an empty database or workspace. A class-scoped SharedApiHost would make first-install state and fixed bootstrap identities order-dependent. Keep fresh-host until a bootstrap-once fixture and per-test workspace tagging are proven.",
@@ -376,6 +376,21 @@
         "auth-policy",
         "ef-translation",
         "http-boundary"
+      ]
+    },
+    {
+      "cls": "SecurityBoundaryTests",
+      "tests": 14,
+      "knownCases": 14,
+      "unknownCaseTests": 0,
+      "classification": "fresh-host",
+      "reason": "Customizes host state (service-replacement, factory-host-options); sharing could change the subject or leak configuration.",
+      "intents": [
+        "auth-policy",
+        "ef-translation",
+        "filesystem",
+        "http-boundary",
+        "in-process-logic"
       ]
     },
     {
@@ -389,21 +404,6 @@
         "auth-policy",
         "ef-translation",
         "http-boundary"
-      ]
-    },
-    {
-      "cls": "SecurityBoundaryTests",
-      "tests": 13,
-      "knownCases": 13,
-      "unknownCaseTests": 0,
-      "classification": "fresh-host",
-      "reason": "Customizes host state (service-replacement, factory-host-options); sharing could change the subject or leak configuration.",
-      "intents": [
-        "auth-policy",
-        "ef-translation",
-        "filesystem",
-        "http-boundary",
-        "in-process-logic"
       ]
     },
     {
@@ -471,6 +471,19 @@
       ]
     },
     {
+      "cls": "OpenDigitalThreadTests",
+      "tests": 7,
+      "knownCases": 11,
+      "unknownCaseTests": 0,
+      "classification": "fresh-host",
+      "reason": "Reviewed #563 hold: this class bootstraps an empty database or workspace. A class-scoped SharedApiHost would make first-install state and fixed bootstrap identities order-dependent. Keep fresh-host until stateless methods are split from bootstrap-dependent methods and per-test workspace tagging is proven.",
+      "intents": [
+        "auth-policy",
+        "ef-translation",
+        "http-boundary"
+      ]
+    },
+    {
       "cls": "ProblemReportCheckoutApiTests",
       "tests": 7,
       "knownCases": 7,
@@ -482,16 +495,17 @@
       ]
     },
     {
-      "cls": "OpenDigitalThreadTests",
+      "cls": "ReleaseCampaignExactIntentApiTests",
       "tests": 6,
-      "knownCases": 10,
+      "knownCases": 6,
       "unknownCaseTests": 0,
       "classification": "fresh-host",
-      "reason": "Reviewed #563 hold: this class bootstraps an empty database or workspace. A class-scoped SharedApiHost would make first-install state and fixed bootstrap identities order-dependent. Keep fresh-host until stateless methods are split from bootstrap-dependent methods and per-test workspace tagging is proven.",
+      "reason": "Reviewed #563 hold: this class bootstraps an empty database or workspace. A class-scoped SharedApiHost would make first-install state and fixed bootstrap identities order-dependent. Keep fresh-host until a bootstrap-once fixture and per-test workspace tagging are proven.",
       "intents": [
         "auth-policy",
         "ef-translation",
-        "http-boundary"
+        "http-boundary",
+        "in-process-logic"
       ]
     },
     {
@@ -531,19 +545,6 @@
       ]
     },
     {
-      "cls": "ReleaseCampaignExactIntentApiTests",
-      "tests": 5,
-      "knownCases": 5,
-      "unknownCaseTests": 0,
-      "classification": "fresh-host",
-      "reason": "Reviewed #563 hold: this class bootstraps an empty database or workspace. A class-scoped SharedApiHost would make first-install state and fixed bootstrap identities order-dependent. Keep fresh-host until a bootstrap-once fixture and per-test workspace tagging are proven.",
-      "intents": [
-        "ef-translation",
-        "http-boundary",
-        "in-process-logic"
-      ]
-    },
-    {
       "cls": "SecurityHardeningTests",
       "tests": 5,
       "knownCases": 5,
@@ -576,6 +577,19 @@
       "intents": [
         "ef-translation",
         "http-boundary"
+      ]
+    },
+    {
+      "cls": "GovernanceEvidenceApiTests",
+      "tests": 4,
+      "knownCases": 4,
+      "unknownCaseTests": 0,
+      "classification": "fresh-host",
+      "reason": "Owns host-scoped state (startup-config); sharing would leak it between tests.",
+      "intents": [
+        "auth-policy",
+        "http-boundary",
+        "startup-config"
       ]
     },
     {
@@ -638,18 +652,6 @@
       ]
     },
     {
-      "cls": "GovernanceEvidenceApiTests",
-      "tests": 3,
-      "knownCases": 3,
-      "unknownCaseTests": 0,
-      "classification": "fresh-host",
-      "reason": "Owns host-scoped state (startup-config); sharing would leak it between tests.",
-      "intents": [
-        "http-boundary",
-        "startup-config"
-      ]
-    },
-    {
       "cls": "ProcedureDiscussionApiTests",
       "tests": 3,
       "knownCases": 3,
@@ -684,6 +686,17 @@
       "intents": [
         "auth-policy",
         "startup-config"
+      ]
+    },
+    {
+      "cls": "ProblemReportWaiverApiTests",
+      "tests": 2,
+      "knownCases": 2,
+      "unknownCaseTests": 0,
+      "classification": "fresh-host",
+      "reason": "Reviewed #563 hold: this one-method class provides zero theoretical host-build savings under one host per class and uses bootstrap-dependent problem-report state. Keep fresh-host until it is grouped or a separate measured benefit justifies changing the fixture.",
+      "intents": [
+        "auth-policy"
       ]
     },
     {
@@ -820,17 +833,6 @@
       ]
     },
     {
-      "cls": "ProblemReportWaiverApiTests",
-      "tests": 1,
-      "knownCases": 1,
-      "unknownCaseTests": 0,
-      "classification": "fresh-host",
-      "reason": "Reviewed #563 hold: this one-method class provides zero theoretical host-build savings under one host per class and uses bootstrap-dependent problem-report state. Keep fresh-host until it is grouped or a separate measured benefit justifies changing the fixture.",
-      "intents": [
-        "auth-policy"
-      ]
-    },
-    {
       "cls": "ProductionConfigurationTests",
       "tests": 1,
       "knownCases": 1,
@@ -900,6 +902,18 @@
         "auth-policy",
         "ef-translation",
         "http-boundary"
+      ]
+    },
+    {
+      "cls": "ManagedDocumentReviewAuthorityCharacterizationTests",
+      "tests": 12,
+      "knownCases": 12,
+      "unknownCaseTests": 0,
+      "classification": "reusable-host",
+      "reason": "Static reuse candidate, not an implementation-ready safety finding: shared-host conversion requires fresh per-test clients, unique per-test tagged logical data, and assertions scoped to that data.",
+      "intents": [
+        "ef-translation",
+        "in-process-logic"
       ]
     },
     {
@@ -1011,18 +1025,6 @@
       ]
     },
     {
-      "cls": "ManagedDocumentReviewAuthorityCharacterizationTests",
-      "tests": 6,
-      "knownCases": 6,
-      "unknownCaseTests": 0,
-      "classification": "reusable-host",
-      "reason": "Static reuse candidate, not an implementation-ready safety finding: shared-host conversion requires fresh per-test clients, unique per-test tagged logical data, and assertions scoped to that data.",
-      "intents": [
-        "ef-translation",
-        "in-process-logic"
-      ]
-    },
-    {
       "cls": "ProblemReportCategoryApiTests",
       "tests": 6,
       "knownCases": 6,
@@ -1117,6 +1119,18 @@
       ]
     },
     {
+      "cls": "CancelReviewAuthorityTests",
+      "tests": 5,
+      "knownCases": 9,
+      "unknownCaseTests": 0,
+      "classification": "reusable-host",
+      "reason": "Static reuse candidate, not an implementation-ready safety finding: shared-host conversion requires fresh per-test clients, unique per-test tagged logical data, and assertions scoped to that data.",
+      "intents": [
+        "auth-policy",
+        "http-boundary"
+      ]
+    },
+    {
       "cls": "ChangeAuthoringInvariantApiTests",
       "tests": 5,
       "knownCases": 6,
@@ -1136,18 +1150,6 @@
       "classification": "reusable-host",
       "reason": "Static reuse candidate, not an implementation-ready safety finding: shared-host conversion requires fresh per-test clients, unique per-test tagged logical data, and assertions scoped to that data.",
       "intents": [
-        "http-boundary"
-      ]
-    },
-    {
-      "cls": "CancelReviewAuthorityTests",
-      "tests": 4,
-      "knownCases": 6,
-      "unknownCaseTests": 0,
-      "classification": "reusable-host",
-      "reason": "Static reuse candidate, not an implementation-ready safety finding: shared-host conversion requires fresh per-test clients, unique per-test tagged logical data, and assertions scoped to that data.",
-      "intents": [
-        "auth-policy",
         "http-boundary"
       ]
     },
@@ -1343,6 +1345,17 @@
       "reason": "Static reuse candidate, not an implementation-ready safety finding: shared-host conversion requires fresh per-test clients, unique per-test tagged logical data, and assertions scoped to that data.",
       "intents": [
         "auth-policy"
+      ]
+    },
+    {
+      "cls": "ManagedDocumentAssignmentPolicyTests",
+      "tests": 1,
+      "knownCases": 1,
+      "unknownCaseTests": 0,
+      "classification": "reusable-host",
+      "reason": "Static reuse candidate, not an implementation-ready safety finding: shared-host conversion requires fresh per-test clients, unique per-test tagged logical data, and assertions scoped to that data.",
+      "intents": [
+        "ef-translation"
       ]
     },
     {
