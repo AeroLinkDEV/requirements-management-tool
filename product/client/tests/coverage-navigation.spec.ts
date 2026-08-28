@@ -91,6 +91,22 @@ test('Coverage waits for an authoritative response before showing counts', async
   await expect(page.getByRole('button', { name: /^Show all [1-9]\d* requirements$/ })).toBeVisible()
 })
 
+test('Coverage read rejection reports failure without invented counts', async ({ page, request }) => {
+  test.setTimeout(180_000)
+  const showcase = await showcaseSeed(request)
+  const root = `/programs/${showcase.programId}/projects/${showcase.projectId}/releases/${showcase.activeReleaseId}`
+  await page.route('**/api/verification-coverage?*', route => route.abort('failed'))
+  await login(page)
+
+  await page.goto(`${root}/system-verification`)
+  await page.getByRole('button', { name: 'Open Coverage →' }).click()
+  await expect(page.getByRole('alert')).toHaveText('Requirement coverage for this build could not be read. No coverage counts are shown.')
+  await expect(page.getByRole('status')).toHaveCount(0)
+  await expect(page.getByRole('region', { name: 'Coverage summary' })).toHaveCount(0)
+  await expect(page.getByRole('heading', { name: 'Requirement coverage', exact: true })).toHaveCount(0)
+  await expect(page.getByRole('button', { name: 'Show all 0 requirements', exact: true })).toHaveCount(0)
+})
+
 test('Verification sidebar exposes Coverage for each supported scope and marks that destination active', async ({ page, request }) => {
   test.setTimeout(180_000)
   const showcase = await showcaseSeed(request)

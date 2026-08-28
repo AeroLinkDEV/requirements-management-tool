@@ -618,17 +618,23 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
     let active = true
     setCoverageStatus('loading')
     void (async () => {
-      const { coverage: next, failed } = await loadCoverage(api, projectId, releaseId, scope)
-      if (!active) return
-      if (failed) {
+      try {
+        const { coverage: next, failed } = await loadCoverage(api, projectId, releaseId, scope)
+        if (!active) return
+        if (failed) {
+          setCoverage(undefined)
+          setCoverageStatus('failed')
+        } else if (next) {
+          setCoverage(next)
+          setCoverageStatus('ready')
+        } else {
+          setCoverage(undefined)
+          setCoverageStatus('unmaterialized')
+        }
+      } catch {
+        if (!active) return
         setCoverage(undefined)
         setCoverageStatus('failed')
-      } else if (next) {
-        setCoverage(next)
-        setCoverageStatus('ready')
-      } else {
-        setCoverage(undefined)
-        setCoverageStatus('unmaterialized')
       }
     })()
     return () => { active = false }
