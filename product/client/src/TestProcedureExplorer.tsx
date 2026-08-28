@@ -285,7 +285,7 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
   const [error, setError] = useState('')
   const [showAdvanced, setShowAdvanced] = useState(coverageReportRequested)
   const [coverage, setCoverage] = useState<Coverage>()
-  const [coverageRead, setCoverageRead] = useState(false)
+  const [coverageStatus, setCoverageStatus] = useState<'idle' | 'loading' | 'ready' | 'unmaterialized' | 'failed'>('idle')
   const [showAllCoverage, setShowAllCoverage] = useState(false)
   const [proposalOpen, setProposalOpen] = useState(false)
   const [proposalSearch, setProposalSearch] = useState('')
@@ -490,7 +490,7 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
       const coverageReport = params.get('coverage') === 'report'
       setShowAdvanced(coverageReport)
       onCoverageReportChange?.(coverageReport)
-      setCoverageRead(false)
+      setCoverageStatus('idle')
       setCoverage(undefined)
       setShowAllCoverage(false)
     }
@@ -597,13 +597,16 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
   useEffect(() => {
     setShowAdvanced(new URLSearchParams(location.search).get('coverage') === 'report')
     setCoverage(undefined)
-    setCoverageRead(false)
+    setCoverageStatus('idle')
     setShowAllCoverage(false)
   }, [api, projectId, releaseId, scope, artifactKindFilter])
 
   const setCoverageReportVisible = (visible: boolean) => {
     setShowAdvanced(visible)
     onCoverageReportChange?.(visible)
+    setCoverage(undefined)
+    setCoverageStatus('idle')
+    setShowAllCoverage(false)
     const params = new URLSearchParams(location.search)
     if (visible) params.set('coverage', 'report')
     else params.delete('coverage')
@@ -611,17 +614,25 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
   }
 
   useEffect(() => {
-    if ((!isSystemScope && artifactKindFilter !== 'Case') || !showAdvanced || coverageRead) return
+    if ((!isSystemScope && artifactKindFilter !== 'Case') || !showAdvanced) return
     let active = true
+    setCoverageStatus('loading')
     void (async () => {
       const { coverage: next, failed } = await loadCoverage(api, projectId, releaseId, scope)
       if (!active) return
-      setCoverageRead(true)
-      if (next) setCoverage(next)
-      if (failed) setError('The requirement coverage for this build could not be read.')
+      if (failed) {
+        setCoverage(undefined)
+        setCoverageStatus('failed')
+      } else if (next) {
+        setCoverage(next)
+        setCoverageStatus('ready')
+      } else {
+        setCoverage(undefined)
+        setCoverageStatus('unmaterialized')
+      }
     })()
     return () => { active = false }
-  }, [api, projectId, releaseId, scope, showAdvanced, coverageRead, artifactKindFilter, isSystemScope])
+  }, [api, projectId, releaseId, scope, showAdvanced, artifactKindFilter, isSystemScope])
 
   const uncovered = coverage?.items.filter(item => item.disposition === 'Uncovered') ?? []
   const suspect = coverage?.items.filter(item => item.disposition === 'Suspect') ?? []
@@ -871,9 +882,22 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
     </section>
 
       {(isSystemScope || artifactKindFilter === 'Case') && showAdvanced && <div className="explorerCoverage" aria-label={`Advanced ${currentArtifactDisplayWord} coverage`}>
+      {coverageStatus === 'loading' && <p className="coverageNone" role="status">
+        Loading requirement coverage for this build.
+      </p>}
+
+      {coverageStatus === 'failed' && <p className="coverageNone" role="alert">
+        Requirement coverage for this build could not be read. No coverage counts are shown.
+      </p>}
+
+      {coverageStatus === 'unmaterialized' && <p className="coverageNone">
+        This build has not materialized its requirements, so there is nothing to report coverage against yet.
+      </p>}
+
+      {coverageStatus === 'ready' && coverage && <>
       <section className="coverageSummary" aria-label="Coverage summary">
-        <article><b>{coverage?.total ?? 0}</b><span>Requirements</span></article>
-        <article><b>{coverage?.covered ?? 0}</b><span>With a {currentArtifactDisplayWord}</span></article>
+        <article><b>{coverage.total}</b><span>Requirements</span></article>
+        <article><b>{coverage.covered}</b><span>With a {currentArtifactDisplayWord}</span></article>
         <article className={uncovered.length ? 'attention' : ''}><b>{uncovered.length}</b><span>With none</span></article>
         <article className={suspect.length ? 'attention' : ''}><b>{suspect.length}</b><span>Suspect coverage</span></article>
       </section>
@@ -900,10 +924,10 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
           <p>Every effective requirement in this build and the {currentArtifactShortPlural} that verify it.</p>
         </div>
         <button type="button" className="quiet" onClick={() => setShowAllCoverage(current => !current)}>
-          {showAllCoverage ? 'Show only what needs attention' : `Show all ${coverage?.total ?? 0} requirements`}
+          {showAllCoverage ? 'Show only what needs attention' : `Show all ${coverage.total} requirements`}
         </button>
         {showAllCoverage && <div className="fullCoverage">
-          {(coverage?.items ?? []).map(item => <article
+          {coverage.items.map(item => <article
             className={`coverageRow ${item.covered ? '' : 'attention'}`} key={`all-${item.revisionId}`}>
             <div>
               <b>{item.displayNumber}</b>
@@ -919,10 +943,7 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
           </article>)}
         </div>}
       </section>
-
-      {coverageRead && !coverage && <p className="coverageNone">
-        This build has not materialized its requirements, so there is nothing to report coverage against yet.
-      </p>}
+      </>}
     </div>}
 
     <ControlledArtifactExplorerLayout inspecting resizableKey="test-procedure-explorer">
