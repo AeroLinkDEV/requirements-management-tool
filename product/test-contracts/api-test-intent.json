@@ -1,11 +1,11 @@
 {
   "schemaVersion": "aerolink-api-test-intent/v2",
   "totals": {
-    "tests": 647,
-    "cases": 705,
-    "classes": 109,
-    "hostedTests": 627,
-    "hostedCases": 676,
+    "tests": 650,
+    "cases": 708,
+    "classes": 110,
+    "hostedTests": 630,
+    "hostedCases": 679,
     "nonHostedTests": 14,
     "nonHostedCases": 23,
     "unknownHostTests": 6,
@@ -21,26 +21,26 @@
     "http-boundary": {
       "label": "HTTP boundary: route, status, JSON shape",
       "level": "API (must stay hosted)",
-      "tests": 399,
-      "cases": 433,
+      "tests": 400,
+      "cases": 434,
       "unknownCases": 0,
-      "classes": 91
+      "classes": 92
     },
     "ef-translation": {
       "label": "EF translation / relational constraints",
       "level": "Infrastructure (needs a database, not a host)",
-      "tests": 138,
-      "cases": 149,
+      "tests": 139,
+      "cases": 150,
       "unknownCases": 0,
-      "classes": 52
+      "classes": 53
     },
     "auth-policy": {
       "label": "Authentication / authorization wiring",
       "level": "API (must stay hosted)",
-      "tests": 64,
-      "cases": 68,
+      "tests": 65,
+      "cases": 69,
       "unknownCases": 0,
-      "classes": 41
+      "classes": 42
     },
     "in-process-logic": {
       "label": "In-process logic with no HTTP and no client",
@@ -4721,6 +4721,58 @@
       "sourceLines": {
         "start": 38,
         "end": 47
+      }
+    },
+    {
+      "cls": "PersonnelDirectoryApiTests",
+      "test": "Adding_a_person_grants_several_base_roles_as_one_operation",
+      "kind": "Fact",
+      "intent": "ef-translation",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "shared-host-fixture",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 68,
+        "end": 84
+      }
+    },
+    {
+      "cls": "PersonnelDirectoryApiTests",
+      "test": "Only_the_global_administrator_edits_current_identity_and_the_change_is_audited",
+      "kind": "Fact",
+      "intent": "auth-policy",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "shared-host-fixture",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 104,
+        "end": 134
+      }
+    },
+    {
+      "cls": "PersonnelDirectoryApiTests",
+      "test": "The_directory_searches_name_username_and_email_and_skips_current_members",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "shared-host-fixture",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 86,
+        "end": 102
       }
     },
     {
