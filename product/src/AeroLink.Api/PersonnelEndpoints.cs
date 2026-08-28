@@ -129,13 +129,19 @@ public static class PersonnelEndpoints
         });
 
         // #816: adding a person to the project grants one or more base roles as ONE attributable logical
-        // operation — every requested role is validated before any membership is written.
+        // operation — every requested role is validated before any membership is written. When neither the
+        // legacy `role` nor the `roles` array carries a value, the request is rejected rather than silently
+        // granting the enum default.
         app.MapPost("/api/projects/{projectId:guid}/personnel", async (Guid projectId, AddProjectMemberRequest request,
             HttpContext http, AeroLinkDbContext db, IdentityService identity, CancellationToken ct) =>
         {
             var actor = http.UserAccount();
             if (!await HasRosterAuthorityAsync(http, db, identity, projectId, ct)) return Results.Forbid();
-            var roles = request.Roles is { Length: > 0 } many ? many.Distinct().ToList() : [request.Role];
+            var roles = request.Roles is { Length: > 0 } many ? many.Distinct().ToList()
+                : request.Role is not null ? new List<ProgramRole> { request.Role.Value }
+                : null;
+            if (roles is null || roles.Count == 0)
+                return Results.BadRequest(new { error = "Choose at least one project role." });
             // Project leadership staffs its own project. It does not mint project administrators — that stays
             // with the global account, so nobody can promote themselves out of the authority they were given.
             if (roles.Contains(ProgramRole.Administrator) && !actor.IsAdministrator)
@@ -254,5 +260,5 @@ public static class PersonnelEndpoints
     };
 }
 
-public sealed record AddProjectMemberRequest(Guid UserId, ProgramRole Role, ProgramRole[]? Roles = null);
+public sealed record AddProjectMemberRequest(Guid UserId, ProgramRole? Role = null, ProgramRole[]? Roles = null);
 public sealed record NameBackupRequest(Guid BackupUserId, ProgramRole Role);
