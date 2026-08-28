@@ -33,6 +33,7 @@ test('Problem Reports remain workable and explicitly target-filtered from every 
     },
   })
   expect(unassigned.ok(), await unassigned.text()).toBeTruthy()
+  const unassignedId = (await unassigned.json()).id as string
 
   const openProblemReports = async () => {
     await page.getByRole('link', { name: 'Problem Reports' }).click()
@@ -124,10 +125,12 @@ test('Problem Reports remain workable and explicitly target-filtered from every 
   await selectTargetBuild('unassigned')
   await expect(page.locator('.prList').getByText(unassignedTitle)).toBeVisible({ timeout: 30_000 })
   await page.locator('.prList').getByText(unassignedTitle).click()
+  await expect(page.getByRole('heading', { name: unassignedTitle })).toBeVisible({ timeout: 30_000 })
+  await expect(page).toHaveURL(new RegExp(`${unassignedId}.*targetBuild=unassigned`))
   await expect(page.locator('.prIdentity').getByText('Not assigned', { exact: true })).toBeVisible()
-  await expect(page).toHaveURL(/targetBuild=unassigned/)
   await page.reload({ waitUntil: 'load' })
   await expect(targetBuild()).toHaveValue('unassigned')
+  await expect(page).toHaveURL(new RegExp(`${unassignedId}.*targetBuild=unassigned`))
   await expect(page.getByRole('heading', { name: unassignedTitle })).toBeVisible({ timeout: 30_000 })
   await expect(page.locator('.prIdentity').getByText('Not assigned', { exact: true })).toBeVisible()
 })

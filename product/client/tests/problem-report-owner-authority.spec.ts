@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test'
-import { apiBase, apiLogin, login, showcaseSeed, writeRichField } from './auth'
+import { apiBase, apiLogin, login, selectProgram, showcaseSeed, writeRichField } from './auth'
 
 test('Problem Report ownership offers only accountable Program authority and the new owner can work immediately', async ({ page, request }) => {
   test.setTimeout(180_000)
@@ -98,6 +98,8 @@ test('Problem Report ownership offers only accountable Program authority and the
   await page.getByRole('button', { name: 'Sign out' }).click()
   await expect(page.getByLabel('Username')).toBeVisible({ timeout: 30_000 })
   await firstUseLogin(eligibleName)
+  await selectProgram(page, 'Flight Management System Live Program')
+  await expect(page).toHaveURL(new RegExp(`/programs/${showcase.programId}/projects/${showcase.projectId}/releases/${showcase.activeReleaseId}/command-center$`))
   await page.goto(reportUrl)
   await expect(page.getByRole('heading', { name: title })).toBeVisible({ timeout: 30_000 })
   await page.getByRole('button', { name: 'Check out & edit' }).click()
