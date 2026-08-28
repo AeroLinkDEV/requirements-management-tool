@@ -1,11 +1,11 @@
 {
   "schemaVersion": "aerolink-api-test-intent/v2",
   "totals": {
-    "tests": 650,
-    "cases": 708,
-    "classes": 110,
-    "hostedTests": 630,
-    "hostedCases": 679,
+    "tests": 656,
+    "cases": 714,
+    "classes": 111,
+    "hostedTests": 636,
+    "hostedCases": 685,
     "nonHostedTests": 14,
     "nonHostedCases": 23,
     "unknownHostTests": 6,
@@ -21,10 +21,10 @@
     "http-boundary": {
       "label": "HTTP boundary: route, status, JSON shape",
       "level": "API (must stay hosted)",
-      "tests": 400,
-      "cases": 434,
+      "tests": 404,
+      "cases": 438,
       "unknownCases": 0,
-      "classes": 92
+      "classes": 93
     },
     "ef-translation": {
       "label": "EF translation / relational constraints",
@@ -37,10 +37,10 @@
     "auth-policy": {
       "label": "Authentication / authorization wiring",
       "level": "API (must stay hosted)",
-      "tests": 65,
-      "cases": 69,
+      "tests": 67,
+      "cases": 71,
       "unknownCases": 0,
-      "classes": 42
+      "classes": 43
     },
     "in-process-logic": {
       "label": "In-process logic with no HTTP and no client",
@@ -8383,6 +8383,114 @@
       "sourceLines": {
         "start": 84,
         "end": 108
+      }
+    },
+    {
+      "cls": "RosterAuthoritySeparationTests",
+      "test": "An_unrelated_project_member_cannot_mutate_the_roster",
+      "kind": "Fact",
+      "intent": "auth-policy",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "shared-host-fixture",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 112,
+        "end": 122
+      }
+    },
+    {
+      "cls": "RosterAuthoritySeparationTests",
+      "test": "Base_project_engineer_without_leadership_cannot_mutate_the_roster",
+      "kind": "Fact",
+      "intent": "auth-policy",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "shared-host-fixture",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 70,
+        "end": 84
+      }
+    },
+    {
+      "cls": "RosterAuthoritySeparationTests",
+      "test": "Ending_the_project_engineer_leadership_assignment_removes_roster_authority",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "shared-host-fixture",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 137,
+        "end": 168
+      }
+    },
+    {
+      "cls": "RosterAuthoritySeparationTests",
+      "test": "Program_manager_base_role_retains_roster_authority",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "shared-host-fixture",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 124,
+        "end": 135
+      }
+    },
+    {
+      "cls": "RosterAuthoritySeparationTests",
+      "test": "Project_engineer_leadership_primary_can_mutate_the_roster",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "shared-host-fixture",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 86,
+        "end": 97
+      }
+    },
+    {
+      "cls": "RosterAuthoritySeparationTests",
+      "test": "Project_engineer_standing_backup_can_mutate_the_roster",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "shared-host-fixture",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 99,
+        "end": 110
       }
     },
     {

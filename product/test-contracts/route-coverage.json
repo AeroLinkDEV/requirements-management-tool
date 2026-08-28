@@ -364,6 +364,7 @@
         "ReviewCommentApiTests",
         "ReviewLinkOutlivedCycleTests",
         "ReviseChangeRequestApiTests",
+        "RosterAuthoritySeparationTests",
         "SavedViewLifecycleApiTests",
         "SearchableAuthoringPickerApiTests",
         "SecurityBoundaryTests",
@@ -1727,7 +1728,8 @@
       "coveredBy": [
         "PersonnelDirectoryApiTests",
         "ProjectLeadershipApiTests",
-        "ProjectPersonnelApiTests"
+        "ProjectPersonnelApiTests",
+        "RosterAuthoritySeparationTests"
       ]
     },
     {
