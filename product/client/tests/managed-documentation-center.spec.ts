@@ -189,7 +189,7 @@ test('review signature dialog exposes and submits the exact frozen intent', asyn
   await page.getByRole('button', { name: 'Approve stage' }).click()
   const evidence = page.getByRole('status').filter({ hasText: 'Exact signature intent' })
   await expect(evidence).toContainText('cycle 1 · step 1 v1')
-  await expect(evidence).toContainText('Reviewer via Direct Membership')
+  await expect(evidence).toContainText('SoftwareEngineeringLead via Project Leadership Primary')
   await expect(evidence.getByText(/Snapshot [0-9a-f]{12}/)).toBeVisible()
   const dialog = page.getByRole('dialog', { name: 'Documentation Center action' })
   await dialog.getByLabel('Meaning').fill('I confirm this exact submitted snapshot is technically complete.')

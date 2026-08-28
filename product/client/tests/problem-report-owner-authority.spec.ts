@@ -116,7 +116,7 @@ test('Problem Report ownership offers only accountable Program authority and the
 
   await page.getByRole('button', { name: 'Sign out' }).click()
   await expect(page.getByLabel('Username')).toBeVisible({ timeout: 30_000 })
-  await login(page, 'program.manager')
+  await login(page, 'engineering.manager')
   await page.goto(reportUrl)
   await expect(page.getByText('Owner no longer authorized')).toBeVisible({ timeout: 30_000 })
   await expect(page.locator('.prIdentity').getByText(eligibleDisplay)).toBeVisible()

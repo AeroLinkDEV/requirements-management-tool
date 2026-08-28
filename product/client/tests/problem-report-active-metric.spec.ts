@@ -25,6 +25,10 @@ test('quality assurance and the Problem Report center display the same active-wo
     role: 'ProjectEngineer',
   } })
   expect(membership.ok(), await membership.text()).toBeTruthy()
+  const leadership = await request.post(`${apiBase}/api/projects/${projectId}/leadership/ProjectEngineer/primary`, {
+    data: { holderUserId: systemsLead.id },
+  })
+  expect(leadership.ok(), await leadership.text()).toBeTruthy()
 
   const create = async (title: string) => {
     const response = await request.post(`${apiBase}/api/problem-reports`, { data: {
