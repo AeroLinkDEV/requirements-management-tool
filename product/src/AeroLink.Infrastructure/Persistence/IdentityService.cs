@@ -315,11 +315,15 @@ public sealed class IdentitySeeder(AeroLinkDbContext db)
     {
         if (role is null) return null;
         var value = role.Value;
-        return await db.ProgramMemberships.AsNoTracking()
+        // SQLite cannot translate DateTimeOffset ordering. Keep the database-side filter and projection,
+        // then apply the deterministic seed ordering to the small candidate set in memory. PostgreSQL and
+        // SQLite now choose the same holder instead of the browser fixture failing before any journey runs.
+        var candidates = await db.ProgramMemberships.AsNoTracking()
             .Where(x => x.ProgramId == programId && x.EndedAt == null && x.Role == value)
             .Join(db.UserAccounts.AsNoTracking(), m => m.UserId, u => u.Id, (m, u) => new { m.GrantedAt, u.UserName, u.Id })
-            .OrderBy(x => x.GrantedAt).ThenBy(x => x.UserName)
-            .Select(x => (Guid?)x.Id).FirstOrDefaultAsync(ct);
+            .ToListAsync(ct);
+        return candidates.OrderBy(x => x.GrantedAt).ThenBy(x => x.UserName, StringComparer.Ordinal)
+            .Select(x => (Guid?)x.Id).FirstOrDefault();
     }
 
     /// <summary>The retired position role a seeded person may still carry for each position, if any.</summary>

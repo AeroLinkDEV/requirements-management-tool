@@ -8,6 +8,25 @@ namespace AeroLink.Infrastructure.Tests;
 public sealed class IdentityPersistenceTests
 {
     [Fact]
+    public async Task Demo_identity_leadership_bootstrap_runs_on_sqlite()
+    {
+        var options = new DbContextOptionsBuilder<AeroLinkDbContext>().UseSqlite("Data Source=:memory:").Options;
+        await using var db = new AeroLinkDbContext(options);
+        await db.Database.OpenConnectionAsync();
+        await db.Database.EnsureCreatedAsync();
+        var program = new ProgramRecord("Seeded Program", "SEED");
+        db.Programs.Add(program);
+        await db.SaveChangesAsync();
+
+        await new IdentitySeeder(db).EnsureSeededAsync();
+
+        var programManager = await db.ProjectLeadershipAssignments.AsNoTracking()
+            .SingleAsync(x => x.ProgramId == program.Id && x.Position == ProjectLeadershipPosition.ProgramManager);
+        var holder = await db.UserAccounts.AsNoTracking().SingleAsync(x => x.Id == programManager.HolderUserId);
+        Assert.Equal("engineering.manager", holder.UserName);
+    }
+
+    [Fact]
     public void Mfa_secrets_are_standard_base32_and_totp_matches_rfc_6238()
     {
         var generated = IdentityService.CreateMfaSecret();
