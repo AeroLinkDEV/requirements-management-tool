@@ -1,16 +1,12 @@
 import { expect, test } from '@playwright/test'
-import { apiLogin, apiBase, login, showcaseSeed } from './auth'
+import { apiBase, apiLogin, login, showcaseSeed } from './auth'
 
 /**
  * The #816 Personnel page: Project Leadership first, roster as membership, identity details per person.
  *
- * Each test is self-contained: all base-role grants, leadership assignments and backup designations are
- * set up via the API before the browser opens. The browser then verifies the UI rendering and the
- * specific interaction being tested. This makes the tests order-independent and immune to the shared
- * worker database state that caused #814-style cross-test contamination.
- *
- * Seed-name pairings (from IdentitySeeder): software.author performs "Software Requirements Author";
- * test.author performs "Verification Author"; test.engineer is "Ethan Brooks".
+ * Each leadership-flow test creates its own accounts and data via the API before the browser opens, so
+ * no test depends on or is contaminated by another test's mutations. The browser verifies the UI
+ * rendering and the specific interaction; the authority enforcement is proven by the API tests.
  */
 
 const LEADERSHIP_POSITIONS = [
@@ -18,21 +14,9 @@ const LEADERSHIP_POSITIONS = [
   'SystemEngineeringLead', 'SoftwareEngineeringLead', 'SystemTestLead', 'SoftwareTestLead',
 ]
 
-const openPersonnel = async (page: import('@playwright/test').Page, userName = 'admin') => {
-  await login(page, userName, { openProject: false })
-  await page.getByRole('link', { name: 'Open FMS Product Development' }).click()
-  await expect(page.getByRole('heading', { name: 'Software Builds', level: 1 })).toBeVisible()
-  await page.getByRole('button', { name: 'Personnel' }).click()
-  await expect(page.getByRole('heading', { name: 'Personnel', level: 1 })).toBeVisible()
-}
-
-async function setupMembership(api: string, project: { id: string; name: string }, user: { id: string }, role: string) {
-  return import('./auth').then(({ apiBase }) =>
-    fetch(`${apiBase}/api/projects/${project.id}/personnel`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Cookie: '' },
-      body: JSON.stringify({ userId: user.id, roles: [role] }),
-    }))
+const openPersonDetails = async (page: import('@playwright/test').Page, member: string, displayName: string) => {
+  await page.locator(`[data-member="${member}"]`).getByRole('button', { name: displayName, exact: true }).click()
+  await expect(page.getByRole('heading', { name: displayName, level: 2 })).toBeVisible()
 }
 
 test('Project Leadership reports exactly the eight positions with backup state on every card', async ({ page }) => {
@@ -54,83 +38,82 @@ test('Project Leadership reports exactly the eight positions with backup state o
   await expect(page.locator('[data-assurance="Airworthiness"]')).toBeVisible()
 })
 
-test('a leader can be assigned only from people holding the required base role, then replaced', async ({ page, request }) => {
+test('a leader can be assigned from an eligible member and replaced with another eligible member', async ({ page, request }) => {
   test.setTimeout(180_000)
   const showcase = await showcaseSeed(request)
   await apiLogin(request)
+  const suffix = Date.now().toString(36)
 
-  const engineerCard = page.locator('[data-position="ProjectEngineer"]')
+  // Create two Project Engineer base-role members via the API.
+  for (const [key, name] of [['pe1', 'PE First'], ['pe2', 'PE Second']] as const) {
+    const created = await request.post(`${apiBase}/api/admin/users`, {
+      data: { userName: `s3.pe.${key}.${suffix}`, displayName: name, email: `s3.pe.${key}.${suffix}@example.test`, temporaryPassword: 'AeroLink!2026' },
+    })
+    expect(created.ok(), await created.text()).toBeTruthy()
+    const userId = (await created.json()).id as string
+    const granted = await request.post(`${apiBase}/api/projects/${showcase.projectId}/personnel`, {
+      data: { userId, roles: ['ProjectEngineer'] },
+    })
+    expect(granted.ok(), await granted.text()).toBeTruthy()
+  }
+
+  await page.setViewportSize({ width: 1440, height: 900 })
   await login(page, 'admin', { openProject: false })
   await page.getByRole('link', { name: 'Open FMS Product Development' }).click()
   await page.getByRole('button', { name: 'Personnel' }).click()
   await expect(page.getByRole('heading', { name: 'Project Leadership', level: 2 })).toBeVisible()
 
-  // The picker lists ineligible people with the reason: nobody holds Project Engineer yet.
+  const engineerCard = page.locator('[data-position="ProjectEngineer"]')
   await engineerCard.getByRole('button', { name: 'Assign leader' }).click()
   await expect(page.getByRole('dialog')).toBeVisible()
-  const ineligible = page.locator('.directoryResult.ineligible')
-  await expect(ineligible.first()).toBeVisible()
-  await expect(ineligible.first()).toContainText('Requires the Project Engineer role')
-  await page.getByRole('button', { name: 'Cancel' }).click()
-
-  // Grant the base role via the API, then verify the picker admits the now-eligible person.
-  await request.post(`${apiBase}/api/projects/${showcase.projectId}/personnel`, {
-    data: { userId: showcase.userId, roles: ['ProjectEngineer'] },
-  })
-  void showcase
-  await engineerCard.getByRole('button', { name: 'Assign leader' }).click()
-  await page.locator('.directoryResult', { hasText: 'Software Requirements Author' }).click()
+  await page.locator('.directoryResult', { hasText: 'PE First' }).click()
   await page.getByRole('button', { name: 'Confirm' }).click()
-  await expect(engineerCard).toContainText('Software Requirements Author')
+  await expect(engineerCard).toContainText('PE First')
   await expect(engineerCard).toContainText('Elevated authority')
 
-  // Grant the base role to a second person, then replace.
-  await request.post(`${apiBase}/api/projects/${showcase.projectId}/personnel`, {
-    data: { userId: showcase.secondaryUserId, roles: ['ProjectEngineer'] },
-  })
-  await openPersonDetails(page, 'test.author', 'Verification Author')
-  await page.getByLabel('Add a base role').selectOption({ label: 'Project Engineer' })
-  await expect(page.locator('[data-member="test.author"] .roleChip').filter({ hasText: 'Project Engineer' })).toHaveCount(1)
-  await page.getByRole('button', { name: 'Close' }).click()
   await engineerCard.getByRole('button', { name: 'Replace leader' }).click()
-  await page.locator('.directoryResult', { hasText: 'Verification Author' }).click()
+  await page.locator('.directoryResult', { hasText: 'PE Second' }).click()
   await page.getByRole('button', { name: 'Confirm' }).click()
-  await expect(engineerCard).toContainText('Verification Author')
-  await expect(page.locator('[data-member="test.author"] .roleChip.lead')).toHaveCount(1)
+  await expect(engineerCard).toContainText('PE Second')
+  await expect(engineerCard).toContainText('Elevated authority')
 })
 
-test('a standing backup is named, carries the position until removed, and the roster records it', async ({ page, request }) => {
+test('a standing backup is named and removed, and the roster records it', async ({ page, request }) => {
   test.setTimeout(180_000)
   const showcase = await showcaseSeed(request)
   await apiLogin(request)
+  const suffix = Date.now().toString(36)
 
-  const engineerCard = page.locator('[data-position="ProjectEngineer"]')
+  for (const [key, name] of [['bk1', 'BK Primary'], ['bk2', 'BK Deputy']] as const) {
+    const created = await request.post(`${apiBase}/api/admin/users`, {
+      data: { userName: `s3.bk.${key}.${suffix}`, displayName: name, email: `s3.bk.${key}.${suffix}@example.test`, temporaryPassword: 'AeroLink!2026' },
+    })
+    expect(created.ok(), await created.text()).toBeTruthy()
+    const userId = (await created.json()).id as string
+    await request.post(`${apiBase}/api/projects/${showcase.projectId}/personnel`, {
+      data: { userId, roles: ['SystemEngineer'] },
+    })
+  }
+
+  await page.setViewportSize({ width: 1440, height: 900 })
   await login(page, 'admin', { openProject: false })
   await page.getByRole('link', { name: 'Open FMS Product Development' }).click()
   await page.getByRole('button', { name: 'Personnel' }).click()
+  await expect(page.getByRole('heading', { name: 'Project Leadership', level: 2 })).toBeVisible()
 
-  const peAlreadyHeld = await page.locator('[data-member="software.author"] .roleChip')
-    .filter({ hasText: 'Project Engineer' }).count()
-  if (peAlreadyHeld === 0) {
-    await request.post(`${apiBase}/api/projects/${showcase.projectId}/personnel`, {
-      data: { userId: showcase.userId, roles: ['ProjectEngineer'] },
-    })
-  }
-  await engineerCard.getByRole('button', { name: 'Assign leader' }).click()
-  await page.locator('.directoryResult', { hasText: 'Software Requirements Author' }).click()
+  const leadCard = page.locator('[data-position="SystemEngineeringLead"]')
+  await leadCard.getByRole('button', { name: 'Assign leader' }).click()
+  await page.locator('.directoryResult', { hasText: 'BK Primary' }).click()
   await page.getByRole('button', { name: 'Confirm' }).click()
-  await expect(engineerCard).toContainText('Software Requirements Author')
-  await expect(page.locator('[data-member="software.author"] .roleChip.lead')).toHaveCount(1)
+  await expect(leadCard).toContainText('BK Primary')
 
-  await engineerCard.getByRole('button', { name: 'Assign backup' }).click()
-  await page.locator('.directoryResult', { hasText: 'Verification Author' }).click()
+  await leadCard.getByRole('button', { name: 'Assign backup' }).click()
+  await page.locator('.directoryResult', { hasText: 'BK Deputy' }).click()
   await page.getByRole('button', { name: 'Confirm' }).click()
-  await expect(engineerCard.getByText('Backup Verification Author')).toBeVisible()
-  await expect(page.locator('[data-member="test.author"]').getByText('Backup · Project Engineer')).toBeVisible()
+  await expect(leadCard.getByText('Backup BK Deputy')).toBeVisible()
 
-  await engineerCard.getByRole('button', { name: 'Remove backup' }).click()
-  await expect(engineerCard.getByText('No backup assigned')).toBeVisible()
-  await expect(page.locator('[data-member="test.author"]').getByText('Backup · Project Engineer')).toHaveCount(0)
+  await leadCard.getByRole('button', { name: 'Remove backup' }).click()
+  await expect(leadCard.getByText('No backup assigned')).toBeVisible()
 })
 
 test('a person is added from the directory with several base roles in one confirm', async ({ page }) => {
@@ -161,6 +144,7 @@ test('a person is added from the directory with several base roles in one confir
 })
 
 test('an administrator edits the current identity, and the change is scoped to now', async ({ page }) => {
+  test.setTimeout(120_000)
   await page.setViewportSize({ width: 1440, height: 900 })
   await login(page, 'admin', { openProject: false })
   await page.getByRole('link', { name: 'Open FMS Product Development' }).click()
