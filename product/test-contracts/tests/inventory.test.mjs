@@ -314,7 +314,7 @@ test('host-classification case totals join exactly to the intent inventory', () 
   assert.equal(hostArtifact.totals.unknownCaseTests, intentArtifact.totals.unknownCaseTests)
   const reusable = hostArtifact.summary['reusable-host']
   assert.equal(reusable.tests - reusable.classes, 233)
-  assert.equal(reusable.knownCases - reusable.classes, 255)
+  assert.equal(reusable.knownCases - reusable.classes, 264)
 })
 
 test('host classification CLI distinguishes known cases from unknown-case methods', () => {
