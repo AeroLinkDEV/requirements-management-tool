@@ -309,7 +309,7 @@ public sealed class ProjectLeadershipReconciliationQualificationTests
     }
 
     [Fact]
-    public async Task V2_reports_a_position_keyed_legacy_backup_with_no_leadership_backup()
+    public async Task V2_migrates_every_legacy_position_backup_family_to_the_same_person()
     {
         if (!ServerConfigured(out var server)) return;
         string? database = null;
@@ -321,22 +321,92 @@ public sealed class ProjectLeadershipReconciliationQualificationTests
                 await migrate.Database.MigrateAsync();
 
             var now = DateTimeOffset.UtcNow;
-            var program = new ProgramRecord("V2 Backup Conflict", $"V2D{Guid.NewGuid():N}"[..12]);
-            var backup = Account("v2.legacy.backup", now);
+            var program = new ProgramRecord("V2 Backup Families", $"V2D{Guid.NewGuid():N}"[..12]);
+            var projectEngineer = Account("v2.backup.project", now);
+            var programManager = Account("v2.backup.program", now);
+            var engineeringManager = Account("v2.backup.engineering", now);
+            var configurationManager = Account("v2.backup.configuration", now);
+            var systemEngineeringLead = Account("v2.backup.system.engineering", now);
+            var softwareEngineeringLead = Account("v2.backup.software.engineering", now);
+            var systemTestLead = Account("v2.backup.system.test", now);
+            var softwareTestLead = Account("v2.backup.software.test", now);
+            var mappings = new[]
+            {
+                (ProgramRole.ProjectEngineeringLead, ProjectLeadershipPosition.ProjectEngineer, ProgramRole.ProjectEngineer, projectEngineer),
+                (ProgramRole.ProjectEngineer, ProjectLeadershipPosition.ProjectEngineer, ProgramRole.ProjectEngineer, projectEngineer),
+                (ProgramRole.ProgramManager, ProjectLeadershipPosition.ProgramManager, ProgramRole.ProgramManager, programManager),
+                (ProgramRole.EngineeringManager, ProjectLeadershipPosition.EngineeringManager, ProgramRole.EngineeringManager, engineeringManager),
+                (ProgramRole.ConfigurationManager, ProjectLeadershipPosition.ConfigurationManager, ProgramRole.ConfigurationManager, configurationManager),
+                (ProgramRole.SystemEngineeringLead, ProjectLeadershipPosition.SystemEngineeringLead, ProgramRole.SystemEngineer, systemEngineeringLead),
+                (ProgramRole.SoftwareEngineeringLead, ProjectLeadershipPosition.SoftwareEngineeringLead, ProgramRole.SoftwareEngineer, softwareEngineeringLead),
+                (ProgramRole.SystemTestLead, ProjectLeadershipPosition.SystemTestLead, ProgramRole.SystemTestEngineer, systemTestLead),
+                (ProgramRole.SoftwareTestLead, ProjectLeadershipPosition.SoftwareTestLead, ProgramRole.SoftwareTestEngineer, softwareTestLead),
+            };
             await using (var seed = new AeroLinkDbContext(Options(connection)))
             {
-                seed.AddRange(program, backup);
-                seed.AddRange(
-                    new ProgramMembership(backup.Id, program.Id, ProgramRole.SystemEngineer, "legacy", now),
-                    new ProjectRoleBackup(program.Id, ProgramRole.SystemEngineeringLead, backup.Id, "legacy", now));
+                seed.Add(program);
+                seed.AddRange(mappings.Select(x => x.Item4).DistinctBy(x => x.Id));
+                seed.AddRange(mappings.DistinctBy(x => new { x.Item4.Id, x.Item3 }).Select(x =>
+                    new ProgramMembership(x.Item4.Id, program.Id, x.Item3, "legacy", now)));
+                seed.AddRange(mappings.Select(x =>
+                    new ProjectRoleBackup(program.Id, x.Item1, x.Item4.Id, "legacy", now)));
+                await seed.SaveChangesAsync();
+            }
+
+            await using (var v2 = new AeroLinkDbContext(Options(connection)))
+                await new ProjectLeadershipReconciliationAuthority(v2).EnsureCompletedAsync();
+
+            await using var check = new AeroLinkDbContext(Options(connection));
+            foreach (var expected in mappings.DistinctBy(x => x.Item2))
+                Assert.True(await check.ProjectLeadershipBackups.AsNoTracking().AnyAsync(x =>
+                    x.ProgramId == program.Id && x.Position == expected.Item2
+                    && x.BackupUserId == expected.Item4.Id && x.RemovedAt == null));
+            Assert.Equal(8, await check.ProjectLeadershipBackups.AsNoTracking().CountAsync(x =>
+                x.ProgramId == program.Id && x.RemovedAt == null));
+            Assert.False(await check.ProjectRoleBackups.AsNoTracking().AnyAsync(x =>
+                x.ProgramId == program.Id && x.RemovedAt == null));
+            Assert.True(await check.SecurityAuditEvents.AsNoTracking().AnyAsync(
+                x => x.EventType == ProjectLeadershipReconciliationAuthority.MigrationMarker + ".Completed"));
+        }
+        finally { await DropDatabaseAsync(server, database); }
+    }
+
+    [Fact]
+    public async Task V2_reports_a_legacy_and_leadership_backup_that_name_different_people()
+    {
+        if (!ServerConfigured(out var server)) return;
+        string? database = null;
+        var connection = await CreateDisposableDatabaseAsync(server);
+        try
+        {
+            database = new NpgsqlConnectionStringBuilder(connection).Database;
+            await using (var migrate = new AeroLinkDbContext(Options(connection)))
+                await migrate.Database.MigrateAsync();
+
+            var now = DateTimeOffset.UtcNow;
+            var program = new ProgramRecord("V2 Different Backup Holders", $"V2E{Guid.NewGuid():N}"[..12]);
+            var legacy = Account("v2.backup.legacy.holder", now);
+            var current = Account("v2.backup.current.holder", now);
+            await using (var seed = new AeroLinkDbContext(Options(connection)))
+            {
+                seed.AddRange(program, legacy, current,
+                    new ProgramMembership(legacy.Id, program.Id, ProgramRole.SystemEngineer, "legacy", now),
+                    new ProgramMembership(current.Id, program.Id, ProgramRole.SystemEngineer, "operator", now),
+                    new ProjectRoleBackup(program.Id, ProgramRole.SystemEngineeringLead, legacy.Id, "legacy", now),
+                    new ProjectLeadershipBackup(program.Id, ProjectLeadershipPosition.SystemEngineeringLead,
+                        current.Id, "operator", now));
                 await seed.SaveChangesAsync();
             }
 
             await using var v2 = new AeroLinkDbContext(Options(connection));
             var failure = await Assert.ThrowsAsync<InvalidOperationException>(
                 () => new ProjectLeadershipReconciliationAuthority(v2).EnsureCompletedAsync());
-            Assert.Contains("V2 Backup Conflict", failure.Message);
-            Assert.Contains("standing backup has no equivalent SystemEngineeringLead leadership backup", failure.Message);
+            Assert.Contains("V2 Different Backup Holders", failure.Message);
+            Assert.Contains("name different people", failure.Message);
+            Assert.True(await v2.ProjectRoleBackups.AsNoTracking().AnyAsync(x =>
+                x.ProgramId == program.Id && x.BackupUserId == legacy.Id && x.RemovedAt == null));
+            Assert.True(await v2.ProjectLeadershipBackups.AsNoTracking().AnyAsync(x =>
+                x.ProgramId == program.Id && x.BackupUserId == current.Id && x.RemovedAt == null));
             Assert.False(await v2.SecurityAuditEvents.AsNoTracking().AnyAsync(
                 x => x.EventType == ProjectLeadershipReconciliationAuthority.MigrationMarker + ".Completed"));
         }

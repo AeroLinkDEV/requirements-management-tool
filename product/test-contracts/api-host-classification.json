@@ -2,8 +2,8 @@
   "schemaVersion": "aerolink-api-host-classification/v3",
   "totals": {
     "classes": 110,
-    "tests": 656,
-    "knownCases": 722,
+    "tests": 661,
+    "knownCases": 727,
     "unknownCaseTests": 0
   },
   "summary": {
@@ -15,8 +15,8 @@
     },
     "fresh-host": {
       "classes": 43,
-      "tests": 248,
-      "knownCases": 277,
+      "tests": 253,
+      "knownCases": 282,
       "unknownCaseTests": 0
     },
     "migration-candidate": {
@@ -313,8 +313,8 @@
     },
     {
       "cls": "TestChangeRequestReviewWorkflowTests",
-      "tests": 39,
-      "knownCases": 43,
+      "tests": 42,
+      "knownCases": 46,
       "unknownCaseTests": 0,
       "classification": "fresh-host",
       "reason": "Reviewed #563 hold: this class bootstraps an empty database or workspace. A class-scoped SharedApiHost would make first-install state and fixed bootstrap identities order-dependent. Keep fresh-host until a bootstrap-once fixture and per-test workspace tagging are proven.",
@@ -554,6 +554,19 @@
       ]
     },
     {
+      "cls": "GovernanceEvidenceApiTests",
+      "tests": 4,
+      "knownCases": 4,
+      "unknownCaseTests": 0,
+      "classification": "fresh-host",
+      "reason": "Owns host-scoped state (startup-config); sharing would leak it between tests.",
+      "intents": [
+        "auth-policy",
+        "http-boundary",
+        "startup-config"
+      ]
+    },
+    {
       "cls": "IdentifierAllocationTests",
       "tests": 4,
       "knownCases": 4,
@@ -613,18 +626,6 @@
       ]
     },
     {
-      "cls": "GovernanceEvidenceApiTests",
-      "tests": 3,
-      "knownCases": 3,
-      "unknownCaseTests": 0,
-      "classification": "fresh-host",
-      "reason": "Owns host-scoped state (startup-config); sharing would leak it between tests.",
-      "intents": [
-        "http-boundary",
-        "startup-config"
-      ]
-    },
-    {
       "cls": "ProcedureDiscussionApiTests",
       "tests": 3,
       "knownCases": 3,
@@ -659,6 +660,17 @@
       "intents": [
         "auth-policy",
         "startup-config"
+      ]
+    },
+    {
+      "cls": "ProblemReportWaiverApiTests",
+      "tests": 2,
+      "knownCases": 2,
+      "unknownCaseTests": 0,
+      "classification": "fresh-host",
+      "reason": "Reviewed #563 hold: this one-method class provides zero theoretical host-build savings under one host per class and uses bootstrap-dependent problem-report state. Keep fresh-host until it is grouped or a separate measured benefit justifies changing the fixture.",
+      "intents": [
+        "auth-policy"
       ]
     },
     {
@@ -790,17 +802,6 @@
       "unknownCaseTests": 0,
       "classification": "fresh-host",
       "reason": "Customizes host state (interceptor-or-fault-injection); sharing could change the subject or leak configuration.",
-      "intents": [
-        "auth-policy"
-      ]
-    },
-    {
-      "cls": "ProblemReportWaiverApiTests",
-      "tests": 1,
-      "knownCases": 1,
-      "unknownCaseTests": 0,
-      "classification": "fresh-host",
-      "reason": "Reviewed #563 hold: this one-method class provides zero theoretical host-build savings under one host per class and uses bootstrap-dependent problem-report state. Keep fresh-host until it is grouped or a separate measured benefit justifies changing the fixture.",
       "intents": [
         "auth-policy"
       ]

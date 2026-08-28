@@ -95,6 +95,18 @@ public sealed class TestChangeRequestReviewWorkflowTests
         }
         db.Add(new ProjectLeadershipAssignment(program.Id, ProjectLeadershipPosition.ConfigurationManager,
             configurationManager!.Id, "test.setup", now));
+        var baseConfigurationManager = new UserAccount("workflow.config.base", "Base Configuration Manager",
+            "workflow.config.base@example.test", IdentityService.HashPassword(AeroLinkApiFactory.MemberPassword), now);
+        var backupConfigurationManager = new UserAccount("workflow.config.backup", "Backup Configuration Manager",
+            "workflow.config.backup@example.test", IdentityService.HashPassword(AeroLinkApiFactory.MemberPassword), now);
+        var retiredPositionMember = new UserAccount("workflow.retired.lead", "Retired Lead Membership",
+            "workflow.retired.lead@example.test", IdentityService.HashPassword(AeroLinkApiFactory.MemberPassword), now);
+        db.AddRange(baseConfigurationManager, backupConfigurationManager, retiredPositionMember,
+            new ProgramMembership(baseConfigurationManager.Id, program.Id, ProgramRole.ConfigurationManager, "test.setup", now),
+            new ProgramMembership(backupConfigurationManager.Id, program.Id, ProgramRole.ConfigurationManager, "test.setup", now),
+            new ProjectLeadershipBackup(program.Id, ProjectLeadershipPosition.ConfigurationManager,
+                backupConfigurationManager.Id, "test.setup", now),
+            new ProgramMembership(retiredPositionMember.Id, program.Id, ProgramRole.SystemEngineeringLead, "legacy", now));
         var multi = new UserAccount("workflow.multirole", "Multi Role", "workflow.multirole@example.test",
             IdentityService.HashPassword(AeroLinkApiFactory.MemberPassword), now);
         db.Add(multi);
@@ -1115,6 +1127,59 @@ public sealed class TestChangeRequestReviewWorkflowTests
                 .SelectMany(x => x.Steps).SingleAsync(x => x.ApproverId == "workflow.config");
             Assert.Equal("ConfigurationManager", step.Authority);
         }
+    }
+
+    [Fact]
+    public async Task A_base_role_only_configuration_manager_cannot_fill_a_configuration_manager_stage()
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var client = factory.CreateClient();
+        var fixture = await SeedAsync(factory);
+        await CreateWorkflowAsync(client, fixture.ProjectId, "Sequential", "System",
+            ("Configuration review", nameof(ProgramRole.ConfigurationManager)));
+        var draftId = await CreateSystemDraftAsync(factory, fixture);
+
+        await LoginAsync(client, "workflow.author");
+        using var response = await client.PostAsJsonAsync($"/api/change-requests/{draftId}/submit",
+            new { approvers = new[] { new { userId = "workflow.config.base" } }, mode = "Sequential" });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Contains("does not hold authority", await response.Content.ReadAsStringAsync());
+    }
+
+    [Fact]
+    public async Task A_configuration_manager_standing_backup_can_fill_the_configuration_manager_stage()
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var client = factory.CreateClient();
+        var fixture = await SeedAsync(factory);
+        await CreateWorkflowAsync(client, fixture.ProjectId, "Sequential", "System",
+            ("Configuration review", nameof(ProgramRole.ConfigurationManager)));
+        var draftId = await CreateSystemDraftAsync(factory, fixture);
+
+        await LoginAsync(client, "workflow.author");
+        using var response = await client.PostAsJsonAsync($"/api/change-requests/{draftId}/submit",
+            new { approvers = new[] { new { userId = "workflow.config.backup" } }, mode = "Sequential" });
+
+        Assert.True(response.IsSuccessStatusCode, await response.Content.ReadAsStringAsync());
+    }
+
+    [Fact]
+    public async Task A_raw_retired_position_membership_cannot_fill_that_position_stage()
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var client = factory.CreateClient();
+        var fixture = await SeedAsync(factory);
+        await CreateWorkflowAsync(client, fixture.ProjectId, "Sequential", "System",
+            ("System engineering lead review", nameof(ProgramRole.SystemEngineeringLead)));
+        var draftId = await CreateSystemDraftAsync(factory, fixture);
+
+        await LoginAsync(client, "workflow.author");
+        using var response = await client.PostAsJsonAsync($"/api/change-requests/{draftId}/submit",
+            new { approvers = new[] { new { userId = "workflow.retired.lead" } }, mode = "Sequential" });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Contains("does not hold authority", await response.Content.ReadAsStringAsync());
     }
 
     [Theory]

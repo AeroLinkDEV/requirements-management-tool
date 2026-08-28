@@ -23,8 +23,8 @@ public enum ProjectAuthorityKind
 
     /// <summary>
     /// A persisted role demand from before the leadership model — a stored workflow stage naming
-    /// <c>SystemEngineeringLead</c>, for example. Answered by base membership OR leadership, because the
-    /// stored record cannot say which it meant. Deliberately explicit so these sites stay countable.
+    /// <c>SystemEngineeringLead</c>, for example. Answered by non-position membership or leadership; a raw
+    /// retired position membership never answers it. Deliberately explicit so these sites stay countable.
     /// </summary>
     LegacyRoleDemand,
 }

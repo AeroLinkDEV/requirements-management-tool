@@ -1781,13 +1781,17 @@
       "method": "POST",
       "path": "/api/quality/objectives",
       "file": "QualityIntelligenceEndpoints.cs",
-      "coveredBy": []
+      "coveredBy": [
+        "GovernanceEvidenceApiTests"
+      ]
     },
     {
       "method": "POST",
       "path": "/api/quality/waivers",
       "file": "QualityIntelligenceEndpoints.cs",
-      "coveredBy": []
+      "coveredBy": [
+        "GovernanceEvidenceApiTests"
+      ]
     },
     {
       "method": "POST",

@@ -42,7 +42,9 @@ public sealed class ProblemReportWaiverApiTests
                 (await forgedInline.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("code").GetString());
         }
         await RejectIndependenceAsync(owner, fixture.ReportId, fixture.Version);
-        await RejectIndependenceAsync(reporter, fixture.ReportId, fixture.Version);
+        using (var baseRoleReporter = await reporter.PostAsJsonAsync(
+                   $"/api/problem-reports/{fixture.ReportId}/release-waiver", WaiverBody(fixture.Version)))
+            Assert.Equal(HttpStatusCode.Forbidden, baseRoleReporter.StatusCode);
         using (var ordinary = await outsider.PostAsJsonAsync($"/api/problem-reports/{fixture.ReportId}/release-waiver",
             WaiverBody(fixture.Version))) Assert.Equal(HttpStatusCode.Forbidden, ordinary.StatusCode);
         using (var testOnly = await testEngineer.PostAsJsonAsync($"/api/problem-reports/{fixture.ReportId}/release-waiver",
@@ -99,6 +101,44 @@ public sealed class ProblemReportWaiverApiTests
         Assert.Single(detail.GetProperty("releaseWaivers").EnumerateArray());
     }
 
+    [Fact]
+    public async Task Release_waiver_configuration_authority_requires_the_position_and_accepts_its_standing_backup()
+    {
+        using var factory = new AeroLinkApiFactory();
+        var fixture = await SeedPositionAuthorityAsync(factory);
+        using var baseClient = factory.CreateClient(); await LoginAsync(baseClient, "waiver.cm.base");
+        using var primaryClient = factory.CreateClient(); await LoginAsync(primaryClient, "waiver.cm.primary");
+        using var backupClient = factory.CreateClient(); await LoginAsync(backupClient, "waiver.cm.backup");
+
+        using (var refused = await baseClient.PostAsJsonAsync(
+                   $"/api/problem-reports/{fixture.ReportId}/release-waiver", WaiverBody(fixture.Version)))
+            Assert.Equal(HttpStatusCode.Forbidden, refused.StatusCode);
+
+        using var approved = await primaryClient.PostAsJsonAsync(
+            $"/api/problem-reports/{fixture.ReportId}/release-waiver", WaiverBody(fixture.Version));
+        Assert.Equal(HttpStatusCode.OK, approved.StatusCode);
+        var approvedVersion = (await approved.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("version").GetInt64();
+        var detail = await primaryClient.GetFromJsonAsync<JsonElement>($"/api/problem-reports/{fixture.ReportId}");
+        var waiverId = detail.GetProperty("activeReleaseWaiver").GetProperty("id").GetGuid();
+        Assert.Equal("ConfigurationManager",
+            detail.GetProperty("activeReleaseWaiver").GetProperty("approvalAuthority").GetString());
+
+        using var revoked = await primaryClient.PostAsJsonAsync(
+            $"/api/problem-reports/{fixture.ReportId}/release-waiver/{waiverId}/revoke",
+            new { expectedVersion = approvedVersion, reason = "Transfer controlled cover to the standing backup." });
+        Assert.Equal(HttpStatusCode.OK, revoked.StatusCode);
+        var revokedVersion = (await revoked.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("version").GetInt64();
+
+        using var backupApproved = await backupClient.PostAsJsonAsync(
+            $"/api/problem-reports/{fixture.ReportId}/release-waiver", WaiverBody(revokedVersion));
+        Assert.Equal(HttpStatusCode.OK, backupApproved.StatusCode);
+        detail = await backupClient.GetFromJsonAsync<JsonElement>($"/api/problem-reports/{fixture.ReportId}");
+        Assert.Equal("waiver.cm.backup",
+            detail.GetProperty("activeReleaseWaiver").GetProperty("approvedBy").GetString());
+        Assert.Equal("ConfigurationManager",
+            detail.GetProperty("activeReleaseWaiver").GetProperty("approvalAuthority").GetString());
+    }
+
     private static object WaiverBody(long version) => new
     {
         expectedVersion = version,
@@ -142,6 +182,37 @@ public sealed class ProblemReportWaiverApiTests
             .SetProperty(item => item.WaivedBy, owner.UserName)
             .SetProperty(item => item.WaivedAt, now.AddMinutes(2)));
         return (report.Id, project.Id, report.Version);
+    }
+
+    private static async Task<(Guid ReportId, long Version)> SeedPositionAuthorityAsync(AeroLinkApiFactory factory)
+    {
+        await using var scope = factory.Services.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+        var now = DateTimeOffset.UtcNow.AddMinutes(-5);
+        var program = new ProgramRecord("PR waiver position authority", $"PWP{Guid.NewGuid():N}"[..12]);
+        var project = new ProjectRecord(program.Id, "FMS", "Position-controlled waiver FMS");
+        var reporter = Account("waiver.position.reporter", now);
+        var owner = Account("waiver.position.owner", now);
+        var baseOnly = Account("waiver.cm.base", now);
+        var primary = Account("waiver.cm.primary", now);
+        var backup = Account("waiver.cm.backup", now);
+        var report = new ProblemReport(project.Id, "PR-09001", "Position-controlled release anomaly",
+            "An unresolved anomaly blocks the release.", "", reporter.UserName, now,
+            responsibleEngineerId: owner.UserName);
+        report.SetReleaseBlocker(owner.UserName, true, now.AddMinutes(1));
+        db.AddRange(program, project, reporter, owner, baseOnly, primary, backup,
+            new ProgramMembership(reporter.Id, program.Id, ProgramRole.Engineer, "test.setup", now),
+            new ProgramMembership(owner.Id, program.Id, ProgramRole.Engineer, "test.setup", now),
+            new ProgramMembership(baseOnly.Id, program.Id, ProgramRole.ConfigurationManager, "test.setup", now),
+            new ProgramMembership(primary.Id, program.Id, ProgramRole.ConfigurationManager, "test.setup", now),
+            new ProgramMembership(backup.Id, program.Id, ProgramRole.ConfigurationManager, "test.setup", now),
+            new ProjectLeadershipAssignment(program.Id, ProjectLeadershipPosition.ConfigurationManager,
+                primary.Id, "test.setup", now),
+            new ProjectLeadershipBackup(program.Id, ProjectLeadershipPosition.ConfigurationManager,
+                backup.Id, "test.setup", now),
+            report);
+        await db.SaveChangesAsync();
+        return (report.Id, report.Version);
     }
 
     private static UserAccount Account(string name, DateTimeOffset now) => new(name, name, $"{name}@example.test",

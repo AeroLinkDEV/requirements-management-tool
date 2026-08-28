@@ -1077,11 +1077,15 @@ public static class ProblemReportEndpoints
         var programId = await db.Projects.AsNoTracking().Where(item => item.Id == report.ProjectId)
             .Select(item => (Guid?)item.ProgramId).SingleOrDefaultAsync(ct);
         if (programId is null) return null;
-        if (await identity.HasRoleAsync(actor.Id, programId.Value, ProgramRole.SoftwareQualityAnalyst, now, ct))
+        var resolver = new ProjectAuthorityResolver(db);
+        if (await resolver.IsSatisfiedAsync(actor.Id, programId.Value,
+                ProjectAuthorityRequirement.BaseRole(ProgramRole.SoftwareQualityAnalyst), now, ct))
             return ProgramRole.SoftwareQualityAnalyst.ToString();
-        if (await identity.HasRoleAsync(actor.Id, programId.Value, ProgramRole.ConfigurationManager, now, ct))
+        if (await resolver.IsSatisfiedAsync(actor.Id, programId.Value,
+                ProjectAuthorityRequirement.Leadership(ProjectLeadershipPosition.ConfigurationManager), now, ct))
             return ProgramRole.ConfigurationManager.ToString();
-        if (await identity.HasRoleAsync(actor.Id, programId.Value, ProgramRole.ProgramManager, now, ct))
+        if (await resolver.IsSatisfiedAsync(actor.Id, programId.Value,
+                ProjectAuthorityRequirement.Leadership(ProjectLeadershipPosition.ProgramManager), now, ct))
             return ProgramRole.ProgramManager.ToString();
         return null;
     }

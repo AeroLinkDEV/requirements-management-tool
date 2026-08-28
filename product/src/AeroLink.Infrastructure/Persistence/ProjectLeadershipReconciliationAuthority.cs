@@ -25,10 +25,9 @@ namespace AeroLink.Infrastructure.Persistence;
 ///   ConfigurationManager) are PRESERVED. The enum conflated "the job" with "the post"; #816 split them, and
 ///   these four are the job. Ending them would strip the eligibility that keeps the assignment valid and
 ///   revoke the very authority this migration exists to protect.
-/// - Legacy ProjectRoleBackups of the four discipline-lead roles are removed once the equivalent
-///   ProjectLeadershipBackup exists.
-/// - A legacy ProjectEngineeringLead backup is migrated to the Project Engineer position when that is
-///   unambiguous, and refused when it is not. v1 left it alone on purpose, which made it permanent.
+/// - Every legacy role-keyed backup that names one of the eight positions is migrated to that exact
+///   position for the same person, then retired. A different new-model holder is a conflict, never a cue to
+///   delete the legacy row. ProjectEngineeringLead and ProjectEngineer both map to Project Engineer.
 ///
 /// Conflicts are refused, never resolved by guessing, and the whole repair is one transaction: a conflict in
 /// the last program must leave the first program untouched.
@@ -47,6 +46,24 @@ public sealed class ProjectLeadershipReconciliationAuthority(AeroLinkDbContext d
         (ProgramRole.SystemTestLead, ProjectLeadershipPosition.SystemTestLead),
         (ProgramRole.SoftwareTestLead, ProjectLeadershipPosition.SoftwareTestLead),
         (ProgramRole.ProjectEngineeringLead, ProjectLeadershipPosition.ProjectEngineer),
+    ];
+
+    /// <summary>
+    /// Every legacy role key that designated standing cover for a position. There are nine keys for eight
+    /// positions because both the retired ProjectEngineeringLead key and its base ProjectEngineer key map
+    /// to the Project Engineer position.
+    /// </summary>
+    private static readonly (ProgramRole Role, ProjectLeadershipPosition Position)[] LegacyPositionBackups =
+    [
+        (ProgramRole.SystemEngineeringLead, ProjectLeadershipPosition.SystemEngineeringLead),
+        (ProgramRole.SoftwareEngineeringLead, ProjectLeadershipPosition.SoftwareEngineeringLead),
+        (ProgramRole.SystemTestLead, ProjectLeadershipPosition.SystemTestLead),
+        (ProgramRole.SoftwareTestLead, ProjectLeadershipPosition.SoftwareTestLead),
+        (ProgramRole.ProjectEngineeringLead, ProjectLeadershipPosition.ProjectEngineer),
+        (ProgramRole.ProjectEngineer, ProjectLeadershipPosition.ProjectEngineer),
+        (ProgramRole.ProgramManager, ProjectLeadershipPosition.ProgramManager),
+        (ProgramRole.EngineeringManager, ProjectLeadershipPosition.EngineeringManager),
+        (ProgramRole.ConfigurationManager, ProjectLeadershipPosition.ConfigurationManager),
     ];
 
     public async Task EnsureCompletedAsync(CancellationToken ct = default)
@@ -93,8 +110,7 @@ public sealed class ProjectLeadershipReconciliationAuthority(AeroLinkDbContext d
         foreach (var programId in programIds)
         {
             await RetireLegacyPositionMembershipsAsync(programId, now, ct);
-            await RetireMigratedBackupsAsync(programId, now, ct);
-            await MigrateProjectEngineeringLeadBackupAsync(programId, now, ct);
+            await MigrateLegacyPositionBackupsAsync(programId, now, ct);
         }
     }
 
@@ -134,50 +150,46 @@ public sealed class ProjectLeadershipReconciliationAuthority(AeroLinkDbContext d
                     + "End the membership deliberately, or assign them the position, then restart.");
         }
 
-        // A legacy role-keyed backup of a position with nothing to take over from it. v1 migrated these only
-        // when the named person already held the required base role, so the ones it could not handle were
-        // left active and unreported — and they keep answering the position's demands. The four discipline
-        // leads got neither migration nor a conflict; only ProjectEngineeringLead was considered.
+        // A legacy role-keyed backup is repairable only when one unambiguous person is eligible for the
+        // mapped position and any already-created leadership backup names that same person. Existence of an
+        // arbitrary new-model row is not equivalence: retiring Alice's legacy row because Bob is the new
+        // backup would silently choose Bob and destroy the evidence of the unresolved conflict.
         var positionBackups = await db.ProjectRoleBackups.AsNoTracking()
             .Where(x => x.ProgramId == programId && x.RemovedAt == null)
             .Select(x => new { x.Role, x.BackupUserId }).ToListAsync(ct);
-        foreach (var backup in positionBackups.Where(x =>
-                     SingularProgramRoles.IsPositionGoverned(x.Role) && x.Role != ProgramRole.ProjectEngineeringLead))
+        var mappedBackups = positionBackups
+            .Select(x => new { x.Role, x.BackupUserId, Position = PositionForBackup(x.Role) })
+            .Where(x => x.Position is not null)
+            .GroupBy(x => x.Position!.Value);
+        foreach (var group in mappedBackups)
         {
-            var position = PositionForBackup(backup.Role);
-            if (position is null) continue;
-            var migrated = await db.ProjectLeadershipBackups.AsNoTracking()
-                .AnyAsync(x => x.ProgramId == programId && x.Position == position && x.RemovedAt == null, ct);
-            if (migrated) continue;
-            problems.Add($"{name}: an active {backup.Role} standing backup has no equivalent "
-                + $"{position} leadership backup. Grant the person the position's base role so it can be "
-                + "migrated, or remove the legacy backup, then restart.");
-        }
-
-        // A ProjectEngineeringLead backup that cannot be moved to Project Engineer without overwriting a
-        // different decision or inventing eligibility.
-        var pelBackups = await db.ProjectRoleBackups.AsNoTracking()
-            .Where(x => x.ProgramId == programId && x.RemovedAt == null && x.Role == ProgramRole.ProjectEngineeringLead)
-            .ToListAsync(ct);
-        foreach (var pelBackup in pelBackups)
-        {
-            var existing = await db.ProjectLeadershipBackups.AsNoTracking()
-                .Where(x => x.ProgramId == programId && x.Position == ProjectLeadershipPosition.ProjectEngineer && x.RemovedAt == null)
-                .Select(x => x.BackupUserId).SingleOrDefaultAsync(ct);
-            if (existing != Guid.Empty && existing != pelBackup.BackupUserId)
+            var position = group.Key;
+            var legacyHolders = group.Select(x => x.BackupUserId).Distinct().ToList();
+            if (legacyHolders.Count != 1)
             {
-                problems.Add($"{name}: a legacy Project Engineering Lead backup and a different Project "
-                    + "Engineer leadership backup both exist. Decide which person is the backup and remove "
-                    + "the other, then restart.");
+                problems.Add($"{name}: legacy standing backups that map to {position} name different people. "
+                    + "Decide who backs the position and remove the other legacy designation, then restart.");
                 continue;
             }
+            var legacyHolder = legacyHolders[0];
+            var requiredRole = ProjectLeadership.RequiredBaseRole(position);
             var eligible = await db.ProgramMemberships.AsNoTracking().AnyAsync(
-                x => x.UserId == pelBackup.BackupUserId && x.ProgramId == programId && x.EndedAt == null
-                     && x.Role == ProgramRole.ProjectEngineer, ct);
+                x => x.UserId == legacyHolder && x.ProgramId == programId && x.EndedAt == null
+                     && x.Role == requiredRole, ct);
             if (!eligible)
-                problems.Add($"{name}: the legacy Project Engineering Lead backup does not hold the Project "
-                    + "Engineer role, so the position's eligibility cannot be satisfied. Grant the role if "
-                    + "they should keep backing the position, or remove the legacy backup, then restart.");
+            {
+                problems.Add($"{name}: the legacy {position} standing backup does not hold the required "
+                    + $"{requiredRole} base role. Grant the role if they should keep backing the position, "
+                    + "or remove the legacy backup, then restart.");
+                continue;
+            }
+            var currentHolders = await db.ProjectLeadershipBackups.AsNoTracking()
+                .Where(x => x.ProgramId == programId && x.Position == position && x.RemovedAt == null)
+                .Select(x => x.BackupUserId).Distinct().ToListAsync(ct);
+            if (currentHolders.Any(x => x != legacyHolder))
+                problems.Add($"{name}: the legacy {position} standing backup and the current leadership "
+                    + "backup name different people. Decide who backs the position and remove the other "
+                    + "designation, then restart.");
         }
 
         return problems;
@@ -187,18 +199,9 @@ public sealed class ProjectLeadershipReconciliationAuthority(AeroLinkDbContext d
     /// The position a legacy role-keyed backup belongs to, including the four base eligibility roles whose
     /// backups were never in scope for v1 and so were left active with nothing to supersede them.
     /// </summary>
-    private static ProjectLeadershipPosition? PositionForBackup(ProgramRole role) => role switch
-    {
-        ProgramRole.SystemEngineeringLead => ProjectLeadershipPosition.SystemEngineeringLead,
-        ProgramRole.SoftwareEngineeringLead => ProjectLeadershipPosition.SoftwareEngineeringLead,
-        ProgramRole.SystemTestLead => ProjectLeadershipPosition.SystemTestLead,
-        ProgramRole.SoftwareTestLead => ProjectLeadershipPosition.SoftwareTestLead,
-        ProgramRole.ProjectEngineer => ProjectLeadershipPosition.ProjectEngineer,
-        ProgramRole.ProgramManager => ProjectLeadershipPosition.ProgramManager,
-        ProgramRole.EngineeringManager => ProjectLeadershipPosition.EngineeringManager,
-        ProgramRole.ConfigurationManager => ProjectLeadershipPosition.ConfigurationManager,
-        _ => null,
-    };
+    private static ProjectLeadershipPosition? PositionForBackup(ProgramRole role) =>
+        LegacyPositionBackups.Where(x => x.Role == role).Select(x => (ProjectLeadershipPosition?)x.Position)
+            .SingleOrDefault();
 
     /// <summary>Ends legacy position memberships once the assignment that replaced them exists.</summary>
     private async Task RetireLegacyPositionMembershipsAsync(Guid programId, DateTimeOffset now, CancellationToken ct)
@@ -216,47 +219,27 @@ public sealed class ProjectLeadershipReconciliationAuthority(AeroLinkDbContext d
         }
     }
 
-    /// <summary>Removes legacy role-keyed backups whose designation now lives on the position.</summary>
-    private async Task RetireMigratedBackupsAsync(Guid programId, DateTimeOffset now, CancellationToken ct)
-    {
-        foreach (var (role, position) in LegacyPositionMemberships)
-        {
-            if (role == ProgramRole.ProjectEngineeringLead) continue; // handled with its own mapping rules
-            var backups = await db.ProjectRoleBackups
-                .Where(x => x.ProgramId == programId && x.RemovedAt == null && x.Role == role)
-                .ToListAsync(ct);
-            if (backups.Count == 0) continue;
-            var migrated = await db.ProjectLeadershipBackups.AsNoTracking()
-                .AnyAsync(x => x.ProgramId == programId && x.Position == position && x.RemovedAt == null, ct);
-            if (!migrated) continue;
-            foreach (var backup in backups) backup.Remove(Actor, now);
-        }
-    }
-
     /// <summary>
-    /// Moves a legacy Project Engineering Lead backup onto the Project Engineer position, or leaves it for
-    /// the conflict report. v1 deliberately left this row alone so it would keep answering legacy demands —
-    /// which made it a permanent second authority channel that removing the new backup could not switch off.
+    /// Moves every unambiguous legacy position backup to the corresponding leadership position for the
+    /// same person. Conflict validation has already proved eligibility and same-person equivalence before
+    /// this method changes a row.
     /// </summary>
-    private async Task MigrateProjectEngineeringLeadBackupAsync(Guid programId, DateTimeOffset now, CancellationToken ct)
+    private async Task MigrateLegacyPositionBackupsAsync(Guid programId, DateTimeOffset now, CancellationToken ct)
     {
-        var pelBackups = await db.ProjectRoleBackups
-            .Where(x => x.ProgramId == programId && x.RemovedAt == null && x.Role == ProgramRole.ProjectEngineeringLead)
+        var legacyRoles = LegacyPositionBackups.Select(x => x.Role).Distinct().ToList();
+        var backups = await db.ProjectRoleBackups
+            .Where(x => x.ProgramId == programId && x.RemovedAt == null && legacyRoles.Contains(x.Role))
             .ToListAsync(ct);
-        foreach (var pelBackup in pelBackups)
+        foreach (var group in backups.GroupBy(x => PositionForBackup(x.Role)!.Value))
         {
-            var eligible = await db.ProgramMemberships.AsNoTracking().AnyAsync(
-                x => x.UserId == pelBackup.BackupUserId && x.ProgramId == programId && x.EndedAt == null
-                     && x.Role == ProgramRole.ProjectEngineer, ct);
-            if (!eligible) continue; // already reported as a conflict; never invent the eligibility
-
-            var existing = await db.ProjectLeadershipBackups.AsNoTracking().AnyAsync(
-                x => x.ProgramId == programId && x.Position == ProjectLeadershipPosition.ProjectEngineer
-                     && x.RemovedAt == null, ct);
+            var holder = group.Select(x => x.BackupUserId).Distinct().Single();
+            var existing = await db.ProjectLeadershipBackups.AsNoTracking().AnyAsync(x =>
+                x.ProgramId == programId && x.Position == group.Key && x.BackupUserId == holder
+                && x.RemovedAt == null, ct);
             if (!existing)
                 db.ProjectLeadershipBackups.Add(new ProjectLeadershipBackup(
-                    programId, ProjectLeadershipPosition.ProjectEngineer, pelBackup.BackupUserId, Actor, now));
-            pelBackup.Remove(Actor, now);
+                    programId, group.Key, holder, Actor, now));
+            foreach (var backup in group) backup.Remove(Actor, now);
         }
     }
 }

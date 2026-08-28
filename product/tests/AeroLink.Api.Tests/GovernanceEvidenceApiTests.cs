@@ -51,7 +51,72 @@ public sealed class GovernanceEvidenceApiTests
         var export=await Post(client,"/api/quality/exports",new{projectId,idempotencyKey="quality-portfolio-proof"});Assert.Equal(64,export.GetProperty("sha256").GetString()!.Length);using var download=await client.GetAsync(export.GetProperty("downloadUrl").GetString());Assert.Equal(HttpStatusCode.OK,download.StatusCode);Assert.Contains("no certification claim",await download.Content.ReadAsStringAsync(),StringComparison.OrdinalIgnoreCase);
     }
 
+    [Fact]
+    public async Task Quality_authority_requires_the_configuration_manager_position_not_only_its_base_role()
+    {
+        using var factory = new AeroLinkApiFactory();
+        Guid projectId;
+        await using (var scope = factory.Services.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            var now = DateTimeOffset.UtcNow;
+            var program = new ProgramRecord("Quality position authority", $"QPA{Guid.NewGuid():N}"[..12]);
+            var project = new ProjectRecord(program.Id, "Quality Position Authority", "FMS");
+            var baseOnly = Member("quality.cm.base", now);
+            var primary = Member("quality.cm.primary", now);
+            var backup = Member("quality.cm.backup", now);
+            db.AddRange(program, project, baseOnly, primary, backup,
+                new ProgramMembership(baseOnly.Id, program.Id, ProgramRole.ConfigurationManager, "test.setup", now),
+                new ProgramMembership(primary.Id, program.Id, ProgramRole.ConfigurationManager, "test.setup", now),
+                new ProgramMembership(backup.Id, program.Id, ProgramRole.ConfigurationManager, "test.setup", now),
+                new ProjectLeadershipAssignment(program.Id, ProjectLeadershipPosition.ConfigurationManager,
+                    primary.Id, "test.setup", now),
+                new ProjectLeadershipBackup(program.Id, ProjectLeadershipPosition.ConfigurationManager,
+                    backup.Id, "test.setup", now));
+            await db.SaveChangesAsync();
+            projectId = project.Id;
+        }
+
+        using var baseClient = factory.CreateClient(); await LoginMemberAsync(baseClient, "quality.cm.base");
+        using var primaryClient = factory.CreateClient(); await LoginMemberAsync(primaryClient, "quality.cm.primary");
+        using var backupClient = factory.CreateClient(); await LoginMemberAsync(backupClient, "quality.cm.backup");
+
+        using (var refused = await baseClient.PostAsJsonAsync("/api/quality/waivers", new
+               {
+                   projectId, blockerType = "VerificationGap", blockerId = Guid.NewGuid(),
+                   rationale = "A base role is not the accountable position.", expiresAt = DateTimeOffset.UtcNow.AddDays(1)
+               }))
+            Assert.Equal(HttpStatusCode.Forbidden, refused.StatusCode);
+
+        using (var accepted = await primaryClient.PostAsJsonAsync("/api/quality/waivers", new
+               {
+                   projectId, blockerType = "VerificationGap", blockerId = Guid.NewGuid(),
+                   rationale = "The accountable primary approved the bounded interval.", expiresAt = DateTimeOffset.UtcNow.AddDays(1)
+               }))
+        {
+            Assert.Equal(HttpStatusCode.Created, accepted.StatusCode);
+            Assert.Equal("ConfigurationManager",
+                (await accepted.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("approvalAuthority").GetString());
+        }
+
+        using (var accepted = await backupClient.PostAsJsonAsync("/api/quality/waivers", new
+               {
+                   projectId, blockerType = "VerificationGap", blockerId = Guid.NewGuid(),
+                   rationale = "The standing backup approved the bounded interval.", expiresAt = DateTimeOffset.UtcNow.AddDays(1)
+               }))
+            Assert.Equal(HttpStatusCode.Created, accepted.StatusCode);
+
+        using (var refused = await baseClient.PostAsJsonAsync("/api/quality/objectives", new
+               { projectId, code = "BASE-REFUSED", title = "Refused", targetJson = "{}", evidenceExpectation = "None" }))
+            Assert.Equal(HttpStatusCode.Forbidden, refused.StatusCode);
+        using (var accepted = await backupClient.PostAsJsonAsync("/api/quality/objectives", new
+               { projectId, code = "BACKUP-ACCEPTED", title = "Accepted", targetJson = "{}", evidenceExpectation = "Evidence" }))
+            Assert.Equal(HttpStatusCode.Created, accepted.StatusCode);
+    }
+
     private static async Task<Guid> CreateProjectAsync(AeroLinkApiFactory factory,string name,string code){using var scope=factory.Services.CreateScope();var db=scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();var program=new ProgramRecord(name,code);var project=new ProjectRecord(program.Id,$"{name} Project","FMS");db.AddRange(program,project);await db.SaveChangesAsync();return project.Id;}
     private static async Task BootstrapAsync(HttpClient client){using var request=new HttpRequestMessage(HttpMethod.Post,"/api/setup/bootstrap"){Content=JsonContent.Create(new{displayName="Administrator",email="admin@example.test",password=AeroLinkApiFactory.AdministratorPassword})};request.Headers.Add("X-AeroLink-Bootstrap-Secret",AeroLinkApiFactory.BootstrapSecret);using var created=await client.SendAsync(request);Assert.Equal(HttpStatusCode.Created,created.StatusCode);using var login=await client.PostAsJsonAsync("/api/auth/login",new{userName="admin",password=AeroLinkApiFactory.AdministratorPassword});Assert.Equal(HttpStatusCode.OK,login.StatusCode);await SecurityBoundaryTests.AuthorizeMutationsAsync(client);}
     private static async Task<JsonElement> Post(HttpClient client,string url,object body){using var response=await client.PostAsJsonAsync(url,body);var text=await response.Content.ReadAsStringAsync();Assert.True(response.IsSuccessStatusCode,$"{url} returned {(int)response.StatusCode}: {text}");return JsonDocument.Parse(text).RootElement.Clone();}
+    private static UserAccount Member(string userName,DateTimeOffset now)=>new(userName,userName,$"{userName}@example.test",IdentityService.HashPassword(AeroLinkApiFactory.MemberPassword),now);
+    private static async Task LoginMemberAsync(HttpClient client,string userName){using var response=await client.PostAsJsonAsync("/api/auth/login",new{userName,password=AeroLinkApiFactory.MemberPassword});Assert.Equal(HttpStatusCode.OK,response.StatusCode);await SecurityBoundaryTests.AuthorizeMutationsAsync(client);}
 }

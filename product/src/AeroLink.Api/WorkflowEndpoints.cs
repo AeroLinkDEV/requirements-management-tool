@@ -307,15 +307,28 @@ public static class WorkflowEndpoints
         var programId = await db.Projects.Where(x => x.Id == projectId).Select(x => (Guid?)x.ProgramId)
             .SingleOrDefaultAsync(ct);
         if (programId is null) return null;
-        var roles = await db.ProgramMemberships.AsNoTracking()
-            .Where(x => x.ProgramId == programId && x.UserId == userId && x.EndedAt == null)
-            .Select(x => x.Role).ToListAsync(ct);
-        if (roles.Contains(ProgramRole.Administrator)) return ProgramRole.Administrator;
-        // Precise engineering and test titles satisfy their established generic authorities (and standing
-        // backups/delegations are handled by the live signing gates). Resolve the role the stage actually
-        // asks for, rather than the strongest unrelated role the member happens to hold.
-        return roles.Any(ProgramRoleAuthority.Satisfying(requiredRole).Contains) ?
-            (roles.Contains(requiredRole) ? requiredRole : ProgramRoleAuthority.Satisfying(requiredRole).First(roles.Contains)) : null;
+        var decision = await new ProjectAuthorityResolver(db).ResolveAsync(userId, programId.Value,
+            ProjectAuthorityRequirement.LegacyRoleDemand(requiredRole), DateTimeOffset.UtcNow, ct);
+        if (!decision.Granted) return null;
+        if (decision.Source == ProjectAuthoritySource.AdministratorSubstitution) return ProgramRole.Administrator;
+
+        // Preserve the actual base role on the frozen signature where a membership answered the demand.
+        // Leadership, standing-backup and delegation decisions instead record the exact configured demand:
+        // no raw retired position membership is consulted, and the picker and submission gate therefore
+        // cannot disagree about whether the person may occupy this stage.
+        if (decision.Source == ProjectAuthoritySource.DirectBaseRole)
+        {
+            var accepted = ProgramRoleAuthority.Satisfying(requiredRole)
+                .Where(role => !SingularProgramRoles.IsPositionGoverned(role)).ToList();
+            var roles = await db.ProgramMemberships.AsNoTracking()
+                .Where(x => x.ProgramId == programId && x.UserId == userId && x.EndedAt == null
+                            && accepted.Contains(x.Role))
+                .Select(x => x.Role).ToListAsync(ct);
+            if (roles.Contains(requiredRole)) return requiredRole;
+            foreach (var role in accepted)
+                if (roles.Contains(role)) return role;
+        }
+        return requiredRole;
     }
 
     private static int Rank(ProgramRole? role) => role switch
