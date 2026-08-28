@@ -1,11 +1,11 @@
 {
   "schemaVersion": "aerolink-api-test-intent/v2",
   "totals": {
-    "tests": 641,
-    "cases": 699,
+    "tests": 642,
+    "cases": 700,
     "classes": 109,
-    "hostedTests": 621,
-    "hostedCases": 670,
+    "hostedTests": 622,
+    "hostedCases": 671,
     "nonHostedTests": 14,
     "nonHostedCases": 23,
     "unknownHostTests": 6,
@@ -29,8 +29,8 @@
     "ef-translation": {
       "label": "EF translation / relational constraints",
       "level": "Infrastructure (needs a database, not a host)",
-      "tests": 137,
-      "cases": 148,
+      "tests": 138,
+      "cases": 149,
       "unknownCases": 0,
       "classes": 52
     },
@@ -6527,8 +6527,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 397,
-        "end": 448
+        "start": 446,
+        "end": 497
       }
     },
     {
@@ -6545,8 +6545,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 205,
-        "end": 395
+        "start": 254,
+        "end": 444
       }
     },
     {
@@ -6563,8 +6563,26 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 51,
-        "end": 203
+        "start": 52,
+        "end": 211
+      }
+    },
+    {
+      "cls": "ProcedureTestChangeControlApiTests",
+      "test": "Verification_explorer_modify_retains_all_effective_coverage_without_fresh_driving_delta",
+      "kind": "Fact",
+      "intent": "ef-translation",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 213,
+        "end": 252
       }
     },
     {
@@ -6581,8 +6599,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 450,
-        "end": 515
+        "start": 499,
+        "end": 564
       }
     },
     {
@@ -6598,8 +6616,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 33,
-        "end": 49
+        "start": 34,
+        "end": 50
       }
     },
     {

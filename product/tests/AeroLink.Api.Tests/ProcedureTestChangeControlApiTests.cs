@@ -25,7 +25,8 @@ public sealed class ProcedureTestChangeControlApiTests
 {
     private sealed record Fixture(Guid ProjectId, Guid ReleaseId, Guid HlrCaseChangeId, Guid LlrCaseChangeId);
     private sealed record ExplorerFixture(Guid ProjectId, Guid ReleaseId, Guid ArtifactId, Guid RevisionId,
-        Guid LaterRevisionId, Guid RequirementRevisionId, Guid ReviewId, long ReviewVersion);
+        Guid LaterRevisionId, Guid RequirementRevisionId, Guid RetainedRequirementRevisionId, Guid ReviewId,
+        long ReviewVersion);
     private sealed record VerificationMutationFixture(Guid ProjectId, Guid ReleaseId, Guid CaseId,
         Guid CaseRevisionId, Guid ProcedureId, Guid ProcedureRevisionId, Guid CaseReviewId,
         long CaseReviewVersion, Guid ProcedureReviewId, long ProcedureReviewVersion);
@@ -147,6 +148,13 @@ public sealed class ProcedureTestChangeControlApiTests
             Assert.Equal(TestProcedureChangeKind.Modify, review.ProcedureChanges.Single().Kind);
             Assert.Equal("SYSTP-786001", review.ProcedureChanges.Single().BaseNumber);
             Assert.Equal(1, review.ProcedureChanges.Single().Revision);
+            using var parents = JsonDocument.Parse(review.ProcedureChanges.Single().ParentRevisionIdsJson);
+            var parentIds = parents.RootElement.EnumerateArray().Select(x => x.GetGuid()).ToArray();
+            Assert.Equal(2, parentIds.Length);
+            Assert.Contains(fixture.RequirementRevisionId, parentIds);
+            Assert.Contains(fixture.RetainedRequirementRevisionId, parentIds);
+            using var driving = JsonDocument.Parse(review.ProcedureChanges.Single().DrivingRequirementRevisionIdsJson);
+            Assert.Empty(driving.RootElement.EnumerateArray());
             Assert.Equal(fixture.RevisionId, await db.TestProcedureRevisions.AsNoTracking()
                 .Where(x => x.Id == fixture.RevisionId).Select(x => x.Id).SingleAsync());
         }
@@ -200,6 +208,47 @@ public sealed class ProcedureTestChangeControlApiTests
             x => x.GetProperty("id").GetGuid() == fixture.ReviewId);
         Assert.False(reassigned.GetProperty("eligible").GetBoolean());
         Assert.Equal("assigned_work_holder", reassigned.GetProperty("reasonCode").GetString());
+    }
+
+    [Fact]
+    public async Task Verification_explorer_modify_retains_all_effective_coverage_without_fresh_driving_delta()
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var client = factory.CreateClient();
+        var fixture = await SeedExplorerScenarioAsync(factory);
+        await LoginAsync(client, "procedure.author");
+
+        using var response = await client.PostAsJsonAsync(
+            $"/api/verification-artifacts/{fixture.ArtifactId}/test-change-request-proposal", new
+            {
+                projectId = fixture.ProjectId, releaseId = fixture.ReleaseId,
+                artifactRevisionId = fixture.RevisionId, testChangeReviewId = fixture.ReviewId,
+                expectedVersion = fixture.ReviewVersion,
+            });
+        var body = await response.Content.ReadAsStringAsync();
+        Assert.True(response.IsSuccessStatusCode, $"{(int)response.StatusCode}: {body}");
+
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+        var change = await db.Set<TestProcedureChange>().AsNoTracking()
+            .SingleAsync(x => x.TestChangeReviewId == fixture.ReviewId);
+        using var parents = JsonDocument.Parse(change.ParentRevisionIdsJson);
+        var parentIds = parents.RootElement.EnumerateArray().Select(x => x.GetGuid()).ToArray();
+        Assert.Equal(2, parentIds.Length);
+        Assert.Contains(fixture.RequirementRevisionId, parentIds);
+        Assert.Contains(fixture.RetainedRequirementRevisionId, parentIds);
+        using var driving = JsonDocument.Parse(change.DrivingRequirementRevisionIdsJson);
+        Assert.Empty(driving.RootElement.EnumerateArray());
+        Assert.Equal(fixture.RevisionId, await db.TestProcedureRevisions.AsNoTracking()
+            .Where(x => x.Id == fixture.RevisionId).Select(x => x.Id).SingleAsync());
+        var sourceCoverage = await db.TestCoverage.AsNoTracking()
+            .Where(x => x.ProcedureRevisionId == fixture.RevisionId)
+            .Select(x => new { x.RequirementRevisionId, x.IsSuspect })
+            .ToListAsync();
+        Assert.Equal(2, sourceCoverage.Count);
+        Assert.Equal(new[] { fixture.RequirementRevisionId, fixture.RetainedRequirementRevisionId }.ToHashSet(),
+            sourceCoverage.Select(x => x.RequirementRevisionId).ToHashSet());
+        Assert.All(sourceCoverage, row => Assert.False(row.IsSuspect));
     }
 
     [Fact]
@@ -542,6 +591,11 @@ public sealed class ProcedureTestChangeControlApiTests
         var requirementRevision = new RequirementRevision(requirement.Id, 0,
             "The system shall preserve exact verification identity.", "Explorer qualification", "Test",
             RequirementRevisionState.Active, source.Id, baseline.Id, now);
+        var retainedRequirement = new RequirementArtifact(project.Id, "SYSR-786002",
+            RequirementLevel.System, now);
+        var retainedRequirementRevision = new RequirementRevision(retainedRequirement.Id, 0,
+            "The system shall retain its other effective coverage.", "Explorer qualification", "Test",
+            RequirementRevisionState.Active, source.Id, baseline.Id, now);
         var artifact = new TestProcedure(project.Id, "SYSTP-786001", "Explorer exact System Procedure",
             "procedure.author", now, TestProcedureLevel.System);
         var revision = new TestProcedureRevision(artifact.Id, 0, "Verify exact identity", "Use the qualified build",
@@ -574,15 +628,19 @@ public sealed class ProcedureTestChangeControlApiTests
             source.RequirementChanges.Single().Id, source.RequirementChanges.Single().DisplayNumber, "Test", now);
         impact.LinkRequirementRevision(requirementRevision.Id, now);
 
-        db.AddRange(source, baseline, requirement, requirementRevision, artifact, revision, laterRevision, review,
+        db.AddRange(source, baseline, requirement, requirementRevision, retainedRequirement,
+            retainedRequirementRevision, artifact, revision, laterRevision, review,
             foreignRelease, foreignSource, foreignReview, impact);
         db.BaselineRequirements.Add(new BaselineRequirementSelection(baseline.Id, requirement.Id,
             requirementRevision.Id));
+        db.BaselineRequirements.Add(new BaselineRequirementSelection(baseline.Id, retainedRequirement.Id,
+            retainedRequirementRevision.Id));
         db.BaselineTestProcedures.Add(new BaselineTestProcedureSelection(baseline.Id, artifact.Id, revision.Id));
         db.TestCoverage.Add(new TestRequirementCoverage(revision.Id, requirementRevision.Id));
+        db.TestCoverage.Add(new TestRequirementCoverage(revision.Id, retainedRequirementRevision.Id));
         await db.SaveChangesAsync();
         return new(project.Id, release.Id, artifact.Id, revision.Id, laterRevision.Id, requirementRevision.Id,
-            review.Id, review.Version);
+            retainedRequirementRevision.Id, review.Id, review.Version);
     }
 
     private static async Task<VerificationMutationFixture> SeedVerificationMutationScenarioAsync(

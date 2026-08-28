@@ -930,36 +930,36 @@ public static class VerificationImpactEndpoints
                     ? (await db.BaselineRequirements.AsNoTracking()
                         .Where(x => x.BaselineId == baselineId).Select(x => x.RevisionId).ToListAsync(ct)).ToHashSet()
                     : [];
-                var drivingIds = isSoftwareProcedure ? Array.Empty<Guid>() : await db.TestCoverage.AsNoTracking()
-                    .Where(x => x.ProcedureRevisionId == selected.RevisionId && !x.IsSuspect
-                        && effectiveRequirementIds.Contains(x.RequirementRevisionId))
-                    .Select(x => x.RequirementRevisionId).Distinct().ToArrayAsync(ct);
+                // Explorer Modify preserves the selected revision's complete current effective coverage as
+                // the successor parent set. It records no fresh coverage delta: even a governed requirement
+                // that happens to overlap this review is retained, not newly added by this proposal.
+                var drivingIds = Array.Empty<Guid>();
                 if (!isSoftwareProcedure)
                 {
+                    parentIds = await db.TestCoverage.AsNoTracking()
+                        .Where(x => x.ProcedureRevisionId == selected.RevisionId && !x.IsSuspect
+                            && effectiveRequirementIds.Contains(x.RequirementRevisionId))
+                        .Select(x => x.RequirementRevisionId).Distinct().ToArrayAsync(ct);
                     // This is the server-resolved equivalent of the existing Modify route's full successor
-                    // selection.  The Explorer never accepts a browser-supplied coverage list, so the exact
-                    // current, non-suspect coverage becomes the retained successor set.
+                    // selection. The Explorer never accepts a browser-supplied coverage list, so the exact
+                    // current, non-suspect coverage becomes the retained successor set. Retained parents are
+                    // allowed when the current TCR governs only a subset; only fresh additions are governed
+                    // by the package scope, and this action intentionally makes none.
                     var known = await (from revision in db.RequirementRevisions.AsNoTracking()
                                        join artifact in db.Requirements.AsNoTracking() on revision.ArtifactId equals artifact.Id
-                                       where drivingIds.Contains(revision.Id)
+                                       where parentIds.Contains(revision.Id)
                                        select new { revision.Id, artifact.ProjectId, artifact.Level })
                         .ToDictionaryAsync(x => x.Id, ct);
                     var wanted = ApiMap.RequirementLevelFor(review.ProcedureLevel(ladder), ladder);
-                    foreach (var drivingId in drivingIds)
+                    foreach (var parentId in parentIds)
                     {
-                        if (!known.TryGetValue(drivingId, out var requirement))
-                            return Results.BadRequest(new { error = $"Requirement revision {drivingId} does not exist.", code = "requirement_revision_not_found" });
+                        if (!known.TryGetValue(parentId, out var requirement))
+                            return Results.BadRequest(new { error = $"Requirement revision {parentId} does not exist.", code = "requirement_revision_not_found" });
                         if (requirement.ProjectId != request.ProjectId)
-                            return Results.BadRequest(new { error = $"Requirement revision {drivingId} belongs to another project.", code = "requirement_revision_project_mismatch" });
+                            return Results.BadRequest(new { error = $"Requirement revision {parentId} belongs to another project.", code = "requirement_revision_project_mismatch" });
                         if (requirement.Level != wanted)
-                            return Results.BadRequest(new { error = $"Requirement revision {drivingId} is a {requirement.Level} requirement, which a {review.Discipline} Procedure does not verify.", code = "requirement_revision_level_mismatch" });
+                            return Results.BadRequest(new { error = $"Requirement revision {parentId} is a {requirement.Level} requirement, which a {review.Discipline} Procedure does not verify.", code = "requirement_revision_level_mismatch" });
                     }
-                    var governed = await TestChangeReviewRequirementScope.ForReviewAsync(db, review, null, ct, ladder);
-                    var governedIds = governed.Select(x => x.RevisionId).ToHashSet();
-                    var outside = drivingIds.FirstOrDefault(x => !governedIds.Contains(x));
-                    if (outside != Guid.Empty)
-                        return Results.BadRequest(new { error = $"Requirement revision {outside} is outside this Test Change Request's governed package/build scope.", code = "requirement_revision_outside_tcr_scope" });
-                    parentIds = drivingIds;
                 }
                 if (isSoftwareProcedure && selected.ParentKind != VerificationProcedureParentKind.Derived)
                 {
