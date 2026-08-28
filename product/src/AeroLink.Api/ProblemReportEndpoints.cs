@@ -421,11 +421,11 @@ public static class ProblemReportEndpoints
     private static Task<IResult> ReadyForSccbAsync(Guid id, VersionRequest request, HttpContext http, AeroLinkDbContext db, CancellationToken ct) =>
         ChangeAsync(id, request.ExpectedVersion, http, db, ct, "ReadyForSccb", (report, actor, now) => report.ReadyForSccb(actor.UserName, now));
 
-    private static async Task<IResult> OpenBySccbAsync(Guid id, VersionRequest request, HttpContext http, AeroLinkDbContext db, IdentityService identity, CancellationToken ct)
+    private static async Task<IResult> OpenBySccbAsync(Guid id, VersionRequest request, HttpContext http, AeroLinkDbContext db, CancellationToken ct)
     {
         var report = await db.ProblemReports.SingleOrDefaultAsync(x => x.Id == id, ct); if (report is null) return Results.NotFound();
         if (!await http.HasProjectAccessAsync(db, report.ProjectId, ct)) return Results.Forbid();
-        if (http.UserAccount().IsAdministrator || !await HasSccbOpeningAuthorityAsync(report, http.UserAccount(), db, identity, ct)) return Results.Forbid();
+        if (http.UserAccount().IsAdministrator || !await HasSccbOpeningAuthorityAsync(report, http.UserAccount(), db, ct)) return Results.Forbid();
         return await ChangeAsync(report, request.ExpectedVersion, http, db, ct, "OpenedBySccb", (item, actor, now) => item.OpenBySccb(actor.UserName, now));
     }
 
@@ -441,7 +441,7 @@ public static class ProblemReportEndpoints
         var target = ProblemReportTransitionPolicy.Canonical(parsed);
         if (ProblemReportTransitionPolicy.IsSccbOpening(report.State, target))
         {
-            if (http.UserAccount().IsAdministrator || !await HasSccbOpeningAuthorityAsync(report, http.UserAccount(), db, identity, ct))
+            if (http.UserAccount().IsAdministrator || !await HasSccbOpeningAuthorityAsync(report, http.UserAccount(), db, ct))
                 return Results.Forbid();
         }
         if (ProblemReportTransitionPolicy.IsSqaOnly(report.State, target))
@@ -979,17 +979,20 @@ public static class ProblemReportEndpoints
     }
 
     private static async Task<bool> HasSccbOpeningAuthorityAsync(ProblemReport report, AuthenticatedUser actor,
-        AeroLinkDbContext db, IdentityService identity, CancellationToken ct)
+        AeroLinkDbContext db, CancellationToken ct)
     {
         if (actor.IsAdministrator) return false;
         var programId = await db.Projects.AsNoTracking().Where(item => item.Id == report.ProjectId)
             .Select(item => (Guid?)item.ProgramId).SingleOrDefaultAsync(ct);
-        return programId is not null && await httpRoleAsync(programId.Value);
+        return programId is not null && await HasRoleAsync(programId.Value);
 
-        async Task<bool> httpRoleAsync(Guid id)
+        async Task<bool> HasRoleAsync(Guid id)
         {
+            var resolver = new ProjectAuthorityResolver(db);
+            var now = DateTimeOffset.UtcNow;
             foreach (var role in ProblemReportTransitionPolicy.SccbOpeningRoles)
-                if (await identity.HasRoleAsync(actor.Id, id, role, DateTimeOffset.UtcNow, ct)) return true;
+                if (await resolver.IsSatisfiedAsync(actor.Id, id,
+                        ProjectAuthorityRequirement.LegacyRoleDemand(role), now, ct)) return true;
             return false;
         }
     }
@@ -1001,7 +1004,7 @@ public static class ProblemReportEndpoints
     private static async Task<IReadOnlyList<TransitionOption>> AvailableTransitionsAsync(ProblemReport report,
         AuthenticatedUser actor, AeroLinkDbContext db, IdentityService identity, CancellationToken ct)
     {
-        var sccb = await HasSccbOpeningAuthorityAsync(report, actor, db, identity, ct);
+        var sccb = await HasSccbOpeningAuthorityAsync(report, actor, db, ct);
         var sqa = await HasCurrentSqaClosureAuthorityAsync(report, actor, db, identity, ct);
         var transitions = new List<TransitionOption>();
         foreach (var target in ProblemReportTransitionPolicy.AllowedTargets(report.State))
@@ -1048,13 +1051,25 @@ public static class ProblemReportEndpoints
         return new(roles.Count > 0, ProblemReportOwnerAuthority.IsEligible(roles));
     }
 
+    /// <summary>
+    /// Whether this person may take back a Problem Report whose owner has gone.
+    ///
+    /// Recovery follows the accountable position, not the discipline. Before #816 an ordinary
+    /// <c>EngineeringManager</c> or <c>ProgramManager</c> membership carried it, so anybody granted the job
+    /// could reassign work they were not accountable for, and the retired <c>ProjectEngineeringLead</c> row
+    /// carried it indefinitely. It now takes the Project Engineer, Engineering Manager or Program Manager
+    /// leadership — primary or standing backup — resolved through the one resolver so this gate cannot
+    /// drift from the rest of the model.
+    /// </summary>
     private static async Task<bool> HasProblemReportOwnerRecoveryAuthorityAsync(Guid userId, Guid programId,
         AeroLinkDbContext db, CancellationToken ct)
     {
-        var roles = await db.ProgramMemberships.AsNoTracking()
-            .Where(item => item.UserId == userId && item.ProgramId == programId && item.EndedAt == null)
-            .Select(item => item.Role).ToListAsync(ct);
-        return ProblemReportOwnerAuthority.CanRecover(roles);
+        var resolver = new ProjectAuthorityResolver(db);
+        var now = DateTimeOffset.UtcNow;
+        foreach (var position in ProblemReportOwnerAuthority.RecoveryPositions)
+            if (await resolver.IsSatisfiedAsync(userId, programId, ProjectAuthorityRequirement.Leadership(position), now, ct))
+                return true;
+        return false;
     }
 
     private static async Task<string?> CurrentReleaseWaiverAuthorityAsync(ProblemReport report,
@@ -1065,11 +1080,15 @@ public static class ProblemReportEndpoints
         var programId = await db.Projects.AsNoTracking().Where(item => item.Id == report.ProjectId)
             .Select(item => (Guid?)item.ProgramId).SingleOrDefaultAsync(ct);
         if (programId is null) return null;
-        if (await identity.HasRoleAsync(actor.Id, programId.Value, ProgramRole.SoftwareQualityAnalyst, now, ct))
+        var resolver = new ProjectAuthorityResolver(db);
+        if (await resolver.IsSatisfiedAsync(actor.Id, programId.Value,
+                ProjectAuthorityRequirement.BaseRole(ProgramRole.SoftwareQualityAnalyst), now, ct))
             return ProgramRole.SoftwareQualityAnalyst.ToString();
-        if (await identity.HasRoleAsync(actor.Id, programId.Value, ProgramRole.ConfigurationManager, now, ct))
+        if (await resolver.IsSatisfiedAsync(actor.Id, programId.Value,
+                ProjectAuthorityRequirement.Leadership(ProjectLeadershipPosition.ConfigurationManager), now, ct))
             return ProgramRole.ConfigurationManager.ToString();
-        if (await identity.HasRoleAsync(actor.Id, programId.Value, ProgramRole.ProgramManager, now, ct))
+        if (await resolver.IsSatisfiedAsync(actor.Id, programId.Value,
+                ProjectAuthorityRequirement.Leadership(ProjectLeadershipPosition.ProgramManager), now, ct))
             return ProgramRole.ProgramManager.ToString();
         return null;
     }

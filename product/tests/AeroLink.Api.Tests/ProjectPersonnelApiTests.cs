@@ -55,8 +55,18 @@ public sealed class ProjectPersonnelApiTests : IClassFixture<SharedApiHost>
         db.AddRange(manager, engineer, deputy, outsider);
         db.AddRange(
             new ProgramMembership(manager.Id, program.Id, ProgramRole.ProgramManager, "test.setup", now),
+            // Both rows deliberately: the retired SystemEngineeringLead membership is what a database
+            // upgraded from before #816 still holds, and the roster endpoints must keep managing it as
+            // history. The base role beside it is the position's eligibility.
             new ProgramMembership(engineer.Id, program.Id, ProgramRole.SystemEngineeringLead, "test.setup", now),
+            new ProgramMembership(engineer.Id, program.Id, ProgramRole.SystemEngineer, "test.setup", now),
             new ProgramMembership(deputy.Id, program.Id, ProgramRole.SystemEngineer, "test.setup", now));
+        // Roster stewardship is the Program Manager *position*, not the role that makes somebody eligible
+        // for it, so the manager is elevated rather than merely granted. The engineer holds the System
+        // Engineering Lead position for the same reason: the retired role name confers nothing on its own.
+        db.AddRange(
+            new ProjectLeadershipAssignment(program.Id, ProjectLeadershipPosition.ProgramManager, manager.Id, "test.setup", now),
+            new ProjectLeadershipAssignment(program.Id, ProjectLeadershipPosition.SystemEngineeringLead, engineer.Id, "test.setup", now));
         await db.SaveChangesAsync();
         return new(project.Id, program.Id, manager.Id, engineer.Id, deputy.Id, outsider.Id,
             managerName, engineerName, deputyName, outsiderName);
@@ -170,16 +180,29 @@ public sealed class ProjectPersonnelApiTests : IClassFixture<SharedApiHost>
         Assert.Equal(seeded.ManagerName, membership.EndedBy);
 
         var identity = scope.ServiceProvider.GetRequiredService<IdentityService>();
+        // The authority does NOT go with the legacy membership, because since #816 it never came from it.
+        // The engineer still holds the System Engineering Lead position, and that is what answers the demand.
+        Assert.True(await identity.HasRoleAsync(seeded.EngineerId, seeded.ProgramId,
+            ProgramRole.SystemEngineeringLead, DateTimeOffset.UtcNow, default));
+
+        // Ending the assignment is what removes it. Proving both halves here is the point: an upgrade that
+        // ended the membership and left the assignment would look like a revocation and not be one, and the
+        // reverse — the shape #824 shipped — left a replaced holder still signing.
+        var assignment = await db.ProjectLeadershipAssignments
+            .SingleAsync(x => x.ProgramId == seeded.ProgramId && x.HolderUserId == seeded.EngineerId
+                              && x.Position == ProjectLeadershipPosition.SystemEngineeringLead && x.EndedAt == null);
+        assignment.End("test.setup", DateTimeOffset.UtcNow);
+        await db.SaveChangesAsync();
         Assert.False(await identity.HasRoleAsync(seeded.EngineerId, seeded.ProgramId,
             ProgramRole.SystemEngineeringLead, DateTimeOffset.UtcNow, default));
     }
 
     /// <summary>
-    /// The position becomes available once its holder's role has ended — the singular rule bites on current
-    /// holders, not on everybody who ever held it.
+    /// A retired position role remains retired even after its historical holder has ended. Reassignment now
+    /// belongs to the Project Leadership surface; recreating the membership would reopen the parallel path.
     /// </summary>
     [Fact]
-    public async Task A_position_can_be_reassigned_once_its_holder_has_been_ended()
+    public async Task A_retired_position_role_cannot_be_recreated_after_its_history_has_ended()
     {
         var seeded = await SeedAsync(_host.Factory);
         using var client = _host.CreateClient();
@@ -189,7 +212,8 @@ public sealed class ProjectPersonnelApiTests : IClassFixture<SharedApiHost>
         var reassigned = await client.PostAsJsonAsync($"/api/projects/{seeded.ProjectId}/personnel",
             new { userId = seeded.DeputyId, role = nameof(ProgramRole.SystemEngineeringLead) });
 
-        Assert.Equal(HttpStatusCode.NoContent, reassigned.StatusCode);
+        Assert.Equal(HttpStatusCode.Conflict, reassigned.StatusCode);
+        Assert.Contains("retired", await reassigned.Content.ReadAsStringAsync());
     }
 
     /// <summary>
@@ -228,8 +252,9 @@ public sealed class ProjectPersonnelApiTests : IClassFixture<SharedApiHost>
                 ProgramRole.SystemEngineeringLead, DateTimeOffset.UtcNow, default));
         }
 
-        var named = await client.PostAsJsonAsync($"/api/projects/{seeded.ProjectId}/personnel/backups",
-            new { backupUserId = seeded.DeputyId, role = nameof(ProgramRole.SystemEngineeringLead) });
+        var named = await client.PostAsJsonAsync(
+            $"/api/projects/{seeded.ProjectId}/leadership/{nameof(ProjectLeadershipPosition.SystemEngineeringLead)}/backup",
+            new { backupUserId = seeded.DeputyId });
         Assert.Equal(HttpStatusCode.NoContent, named.StatusCode);
 
         using var after = _host.Factory.Services.CreateScope();
@@ -248,10 +273,11 @@ public sealed class ProjectPersonnelApiTests : IClassFixture<SharedApiHost>
         using var client = _host.CreateClient();
         await SignInAsync(client, seeded.ManagerName);
 
-        var response = await client.PostAsJsonAsync($"/api/projects/{seeded.ProjectId}/personnel/backups",
-            new { backupUserId = seeded.OutsiderId, role = nameof(ProgramRole.SystemEngineeringLead) });
+        var response = await client.PostAsJsonAsync(
+            $"/api/projects/{seeded.ProjectId}/leadership/{nameof(ProjectLeadershipPosition.SystemEngineeringLead)}/backup",
+            new { backupUserId = seeded.OutsiderId });
 
-        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
     }
 
     /// <summary>
@@ -264,10 +290,11 @@ public sealed class ProjectPersonnelApiTests : IClassFixture<SharedApiHost>
         using var client = _host.CreateClient();
         await SignInAsync(client, seeded.ManagerName);
 
-        var response = await client.PostAsJsonAsync($"/api/projects/{seeded.ProjectId}/personnel/backups",
-            new { backupUserId = seeded.EngineerId, role = nameof(ProgramRole.SystemEngineeringLead) });
+        var response = await client.PostAsJsonAsync(
+            $"/api/projects/{seeded.ProjectId}/leadership/{nameof(ProjectLeadershipPosition.SystemEngineeringLead)}/backup",
+            new { backupUserId = seeded.EngineerId });
 
-        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
     }
 
     /// <summary>
@@ -281,17 +308,46 @@ public sealed class ProjectPersonnelApiTests : IClassFixture<SharedApiHost>
         using var client = _host.CreateClient();
         await SignInAsync(client, seeded.ManagerName);
 
-        await client.PostAsJsonAsync($"/api/projects/{seeded.ProjectId}/personnel/backups",
-            new { backupUserId = seeded.DeputyId, role = nameof(ProgramRole.SystemEngineeringLead) });
+        var named = await client.PostAsJsonAsync(
+            $"/api/projects/{seeded.ProjectId}/leadership/{nameof(ProjectLeadershipPosition.SystemEngineeringLead)}/backup",
+            new { backupUserId = seeded.DeputyId });
+        Assert.Equal(HttpStatusCode.NoContent, named.StatusCode);
         await client.DeleteAsync($"/api/projects/{seeded.ProjectId}/personnel/{seeded.DeputyId}/roles/{nameof(ProgramRole.SystemEngineer)}");
 
         using var scope = _host.Factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
-        var backup = await db.ProjectRoleBackups.AsNoTracking().SingleAsync(x => x.BackupUserId == seeded.DeputyId);
+        var backup = await db.ProjectLeadershipBackups.AsNoTracking()
+            .SingleAsync(x => x.BackupUserId == seeded.DeputyId
+                              && x.Position == ProjectLeadershipPosition.SystemEngineeringLead);
         Assert.NotNull(backup.RemovedAt);
 
         var identity = scope.ServiceProvider.GetRequiredService<IdentityService>();
         Assert.False(await identity.HasRoleAsync(seeded.DeputyId, seeded.ProgramId,
+            ProgramRole.SystemEngineeringLead, DateTimeOffset.UtcNow, default));
+    }
+
+    [Fact]
+    public async Task Ending_and_regranting_a_base_role_does_not_resurrect_the_ended_leadership_primary()
+    {
+        var seeded = await SeedAsync(_host.Factory);
+        using var client = _host.CreateClient();
+        await SignInAsync(client, seeded.ManagerName);
+
+        var ended = await client.DeleteAsync(
+            $"/api/projects/{seeded.ProjectId}/personnel/{seeded.EngineerId}/roles/{nameof(ProgramRole.SystemEngineer)}");
+        Assert.Equal(HttpStatusCode.NoContent, ended.StatusCode);
+        var regranted = await client.PostAsJsonAsync($"/api/projects/{seeded.ProjectId}/personnel",
+            new { userId = seeded.EngineerId, role = nameof(ProgramRole.SystemEngineer) });
+        Assert.Equal(HttpStatusCode.NoContent, regranted.StatusCode);
+
+        using var scope = _host.Factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+        var assignment = await db.ProjectLeadershipAssignments.AsNoTracking().SingleAsync(x =>
+            x.HolderUserId == seeded.EngineerId
+            && x.Position == ProjectLeadershipPosition.SystemEngineeringLead);
+        Assert.NotNull(assignment.EndedAt);
+        var identity = scope.ServiceProvider.GetRequiredService<IdentityService>();
+        Assert.False(await identity.HasRoleAsync(seeded.EngineerId, seeded.ProgramId,
             ProgramRole.SystemEngineeringLead, DateTimeOffset.UtcNow, default));
     }
 

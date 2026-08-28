@@ -40,6 +40,8 @@ public sealed class ProjectConfigurationApiTests : IClassFixture<SharedApiHost>
             new ProgramMembership(manager.Id, program.Id, ProgramRole.ConfigurationManager, "test.setup", now),
             new ProgramMembership(manager.Id, program.Id, ProgramRole.Engineer, "test.setup", now),
             new ProgramMembership(member.Id, program.Id, ProgramRole.Engineer, "test.setup", now),
+            new ProjectLeadershipAssignment(program.Id, ProjectLeadershipPosition.ConfigurationManager,
+                manager.Id, "test.setup", now),
             LegacyDefaultProjectLadderFactory.Create(project.Id, now));
         await db.SaveChangesAsync();
         return new(project.Id, release.Id, managerName, memberName);

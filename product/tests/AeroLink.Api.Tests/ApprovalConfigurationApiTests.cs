@@ -54,8 +54,16 @@ public sealed class ApprovalConfigurationApiTests : IClassFixture<SharedApiHost>
         db.AddRange(manager, lead, deputy);
         db.AddRange(
             new ProgramMembership(manager.Id, program.Id, ProgramRole.ProgramManager, "test.setup", now),
-            new ProgramMembership(lead.Id, program.Id, ProgramRole.SystemEngineeringLead, "test.setup", now),
+            new ProgramMembership(lead.Id, program.Id, ProgramRole.SystemEngineer, "test.setup", now),
             new ProgramMembership(deputy.Id, program.Id, ProgramRole.SystemEngineer, "test.setup", now));
+        // The stage names the System Engineering Lead. Since #816 that demand is answered by the position, so
+        // the lead is elevated into it rather than granted the retired role name — and managing the roster is
+        // the Program Manager position's, so the manager is elevated too.
+        db.AddRange(
+            new ProjectLeadershipAssignment(
+                program.Id, ProjectLeadershipPosition.SystemEngineeringLead, lead.Id, "test.setup", now),
+            new ProjectLeadershipAssignment(
+                program.Id, ProjectLeadershipPosition.ProgramManager, manager.Id, "test.setup", now));
 
         var workflow = new ReviewWorkflow(project.Id, "System review", ReviewSubject.System, ReviewMode.Sequential,
             stages, "test.setup", now);
@@ -102,7 +110,9 @@ public sealed class ApprovalConfigurationApiTests : IClassFixture<SharedApiHost>
         Assert.False(discipline.Required.Blocking);
 
         // The kind is what makes the two signatures distinguishable; before this every step read "Reviewer".
-        Assert.Equal("Approval", system.Stages!.Single(x => x.Name == "Release approval").Kind);
+        var release = system.Stages!.Single(x => x.Name == "Release approval");
+        Assert.Equal("Approval", release.Kind);
+        Assert.True(release.Required.Singular);
     }
 
     /// <summary>
@@ -167,7 +177,10 @@ public sealed class ApprovalConfigurationApiTests : IClassFixture<SharedApiHost>
 
         Assert.Equal(0, (await ReadAsync(client, seeded.ProjectId)).Artifacts.Single(x => x.Subject == "System").BlockingStages);
 
-        await client.DeleteAsync($"/api/projects/{seeded.ProjectId}/personnel/{seeded.LeadId}/roles/{nameof(ProgramRole.SystemEngineeringLead)}");
+        // Removing the eligibility is what stands the position down: the assignment survives as history, but
+        // #816 re-checks the base role whenever the authority is exercised, so the stage has nobody to sign
+        // it from the moment the lead stops being a System Engineer.
+        await client.DeleteAsync($"/api/projects/{seeded.ProjectId}/personnel/{seeded.LeadId}/roles/{nameof(ProgramRole.SystemEngineer)}");
 
         Assert.Equal(1, (await ReadAsync(client, seeded.ProjectId)).Artifacts.Single(x => x.Subject == "System").BlockingStages);
     }
@@ -257,6 +270,51 @@ public sealed class ApprovalConfigurationApiTests : IClassFixture<SharedApiHost>
     }
 
     [Fact]
+    public async Task Configuration_management_requires_the_position_not_only_its_base_role()
+    {
+        var seeded = await SeedAsync(_host.Factory, [new("Initial review", ProgramRole.SystemEngineer)]);
+        var tag = Guid.NewGuid().ToString("N")[..8];
+        var baseName = $"config.base.{tag}";
+        var holderName = $"config.holder.{tag}";
+        using (var scope = _host.Factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            var now = DateTimeOffset.UtcNow;
+            UserAccount Account(string name) => new(name, name, $"{name}@example.test",
+                IdentityService.HashPassword(AeroLinkApiFactory.MemberPassword), now);
+            var baseOnly = Account(baseName);
+            var holder = Account(holderName);
+            db.AddRange(baseOnly, holder);
+            db.AddRange(
+                new ProgramMembership(baseOnly.Id, seeded.ProgramId, ProgramRole.ConfigurationManager, "test.setup", now),
+                new ProgramMembership(holder.Id, seeded.ProgramId, ProgramRole.ConfigurationManager, "test.setup", now),
+                new ProjectLeadershipAssignment(seeded.ProgramId, ProjectLeadershipPosition.ConfigurationManager,
+                    holder.Id, "test.setup", now));
+            await db.SaveChangesAsync();
+        }
+
+        using var baseClient = _host.CreateClient();
+        await SignInAsync(baseClient, baseName);
+        Assert.False((await ReadAsync(baseClient, seeded.ProjectId)).CanManage);
+        var refused = await baseClient.PutAsJsonAsync(
+            $"/api/projects/{seeded.ProjectId}/approval-configuration/{nameof(ReviewSubject.System)}", new
+            {
+                stages = new[] { new { name = "Base-only attempt", requiredRole = ProgramRole.SystemEngineer.ToString(), kind = "Review" } },
+            });
+        Assert.Equal(HttpStatusCode.Forbidden, refused.StatusCode);
+
+        using var holderClient = _host.CreateClient();
+        await SignInAsync(holderClient, holderName);
+        Assert.True((await ReadAsync(holderClient, seeded.ProjectId)).CanManage);
+        var accepted = await holderClient.PutAsJsonAsync(
+            $"/api/projects/{seeded.ProjectId}/approval-configuration/{nameof(ReviewSubject.System)}", new
+            {
+                stages = new[] { new { name = "Position-holder update", requiredRole = ProgramRole.SystemEngineer.ToString(), kind = "Review" } },
+            });
+        Assert.Equal(HttpStatusCode.OK, accepted.StatusCode);
+    }
+
+    [Fact]
     public async Task Legacy_revision_version_collision_returns_conflict()
     {
         var seeded = await SeedAsync(_host.Factory, [new("Initial review", ProgramRole.SystemEngineer)]);
@@ -340,11 +398,143 @@ public sealed class ApprovalConfigurationApiTests : IClassFixture<SharedApiHost>
         Assert.DoesNotContain(candidates, x => x.GetProperty("userId").GetString() == seeded.DeputyName);
     }
 
+    [Fact]
+    public async Task Global_administrator_without_program_membership_is_listed_and_keeps_the_stage_signable()
+    {
+        using var factory = new AeroLinkApiFactory();
+        var seeded = await SeedAsync(factory,
+        [
+            new("Airworthiness approval", ProgramRole.Airworthiness, ReviewStageKind.Approval),
+        ]);
+        const string administratorDisplayName = "Global Administrator";
+        Guid administratorId;
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            var administrator = new UserAccount(IdentityService.SystemAdministratorUserName,
+                administratorDisplayName, "global.admin@example.test",
+                IdentityService.HashPassword(AeroLinkApiFactory.MemberPassword), DateTimeOffset.UtcNow);
+            db.Add(administrator);
+            await db.SaveChangesAsync();
+            administratorId = administrator.Id;
+            Assert.False(await db.ProgramMemberships.AnyAsync(
+                x => x.ProgramId == seeded.ProgramId && x.UserId == administratorId));
+        }
+
+        using var client = factory.CreateClient();
+        await SignInAsync(client, seeded.ManagerName);
+
+        var applicable = await client.GetFromJsonAsync<JsonElement>(
+            $"/api/review-workflows/applicable?projectId={seeded.ProjectId}&type=System");
+        var candidate = applicable.GetProperty("stages")[0].GetProperty("candidates")
+            .EnumerateArray().Single(x => x.GetProperty("userId").GetString()
+                                          == IdentityService.SystemAdministratorUserName);
+        Assert.Equal(nameof(ProgramRole.Administrator), candidate.GetProperty("role").GetString());
+        Assert.Equal(nameof(ProjectAuthoritySource.AdministratorSubstitution),
+            candidate.GetProperty("via").GetString());
+
+        var system = (await ReadAsync(client, seeded.ProjectId)).Artifacts.Single(x => x.Subject == "System");
+        Assert.Equal(0, system.BlockingStages);
+        var required = Assert.Single(system.Stages!).Required;
+        Assert.False(required.Blocking);
+        Assert.Contains(administratorDisplayName, required.Holders);
+    }
+
+    [Fact]
+    public async Task Standalone_delegate_is_consistent_across_picker_configuration_and_signing_gate()
+    {
+        var seeded = await SeedAsync(_host.Factory,
+        [
+            new("Airworthiness approval", ProgramRole.Airworthiness, ReviewStageKind.Approval),
+        ]);
+        var tag = Guid.NewGuid().ToString("N")[..8];
+        var delegateName = $"config.external.{tag}";
+        Guid delegateId;
+        using (var scope = _host.Factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            var now = DateTimeOffset.UtcNow;
+            var delegatee = new UserAccount(delegateName, "External Delegate", $"{delegateName}@example.test",
+                IdentityService.HashPassword(AeroLinkApiFactory.MemberPassword), now);
+            db.Add(delegatee);
+            db.RoleDelegations.Add(new RoleDelegation(seeded.ProgramId, seeded.LeadId, delegatee.Id,
+                ProgramRole.Airworthiness, now.AddMinutes(-1), now.AddHours(1),
+                "Exact airworthiness coverage.", "test.setup", now));
+            await db.SaveChangesAsync();
+            delegateId = delegatee.Id;
+            Assert.False(await db.ProgramMemberships.AnyAsync(x => x.UserId == delegateId));
+        }
+
+        using var client = _host.CreateClient();
+        await SignInAsync(client, seeded.ManagerName);
+        var applicable = await client.GetFromJsonAsync<JsonElement>(
+            $"/api/review-workflows/applicable?projectId={seeded.ProjectId}&type=System");
+        var candidate = applicable.GetProperty("stages")[0].GetProperty("candidates")
+            .EnumerateArray().Single(x => x.GetProperty("userId").GetString() == delegateName);
+        Assert.Equal(nameof(ProjectAuthoritySource.Delegation), candidate.GetProperty("via").GetString());
+
+        var system = (await ReadAsync(client, seeded.ProjectId)).Artifacts.Single(x => x.Subject == "System");
+        var required = Assert.Single(system.Stages!).Required;
+        Assert.False(required.Blocking);
+        Assert.Contains("External Delegate", required.Delegates);
+
+        using var signingScope = _host.Factory.Services.CreateScope();
+        var signingDb = signingScope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+        Assert.Equal(ProgramRole.Airworthiness, await WorkflowEndpoints.StageAuthorityAsync(
+            signingDb, seeded.ProjectId, delegateId, ProgramRole.Airworthiness, default));
+    }
+
+    [Fact]
+    public async Task Program_administrator_is_consistent_across_picker_configuration_and_signing_gate()
+    {
+        var seeded = await SeedAsync(_host.Factory,
+        [
+            new("Airworthiness approval", ProgramRole.Airworthiness, ReviewStageKind.Approval),
+        ]);
+        var tag = Guid.NewGuid().ToString("N")[..8];
+        var administratorName = $"config.program.admin.{tag}";
+        Guid administratorId;
+        using (var scope = _host.Factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            var now = DateTimeOffset.UtcNow;
+            var administrator = new UserAccount(administratorName, "Program Administrator",
+                $"{administratorName}@example.test",
+                IdentityService.HashPassword(AeroLinkApiFactory.MemberPassword), now);
+            db.Add(administrator);
+            db.ProgramMemberships.Add(new ProgramMembership(administrator.Id, seeded.ProgramId,
+                ProgramRole.Administrator, "test.setup", now));
+            await db.SaveChangesAsync();
+            administratorId = administrator.Id;
+        }
+
+        using var client = _host.CreateClient();
+        await SignInAsync(client, seeded.ManagerName);
+        var applicable = await client.GetFromJsonAsync<JsonElement>(
+            $"/api/review-workflows/applicable?projectId={seeded.ProjectId}&type=System");
+        var candidate = applicable.GetProperty("stages")[0].GetProperty("candidates")
+            .EnumerateArray().Single(x => x.GetProperty("userId").GetString() == administratorName);
+        Assert.Equal(nameof(ProgramRole.Administrator), candidate.GetProperty("role").GetString());
+        Assert.Equal(nameof(ProjectAuthoritySource.AdministratorSubstitution),
+            candidate.GetProperty("via").GetString());
+
+        var system = (await ReadAsync(client, seeded.ProjectId)).Artifacts.Single(x => x.Subject == "System");
+        var required = Assert.Single(system.Stages!).Required;
+        Assert.False(required.Blocking);
+        Assert.Contains("Program Administrator", required.Holders);
+
+        using var signingScope = _host.Factory.Services.CreateScope();
+        var signingDb = signingScope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+        Assert.Equal(ProgramRole.Administrator, await WorkflowEndpoints.StageAuthorityAsync(
+            signingDb, seeded.ProjectId, administratorId, ProgramRole.Airworthiness, default));
+    }
+
     private sealed record ConfigurationResponse(Guid ProjectId, bool CanManage, ArtifactRow[] Artifacts);
     private sealed record ArtifactRow(string Subject, bool Configured, string? Name, int? Version, string? Mode,
         StageRow[]? Stages, int BlockingStages);
     private sealed record StageRow(int Position, string Name, string Kind, RequiredRow Required);
-    private sealed record RequiredRow(string Role, bool Singular, string[] Holders, string[] Backups, bool Blocking);
+    private sealed record RequiredRow(string Role, bool Singular, string[] Holders, string[] Backups,
+        string[] Delegates, bool Blocking);
     private sealed record ConfiguredResponse(Guid ProjectId, string Subject, bool Configured, string Name, int Version,
         string Mode, ConfiguredStage[] Stages);
     private sealed record ConfiguredStage(int Position, string Name, string Kind, string RequiredRole);

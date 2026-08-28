@@ -65,6 +65,8 @@ public sealed class WithdrawChangeRequestApiTests
         db.Add(account);
         foreach (var role in new[] { ProgramRole.Engineer, ProgramRole.ConfigurationManager })
             db.Add(new ProgramMembership(account.Id, program.Id, role, "test.setup", now));
+        db.Add(new ProjectLeadershipAssignment(program.Id, ProjectLeadershipPosition.ConfigurationManager,
+            account.Id, "test.setup", now));
 
         // Submitting through the API checks its approvers are real people, so the reviewer the domain seeds
         // name needs an account of its own.

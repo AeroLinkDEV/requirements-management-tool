@@ -48,7 +48,7 @@ public sealed class AssurancePolicyPostgresQualificationTests
         var proposer = Guid.NewGuid();
         var approver = Guid.NewGuid();
         var decision = AssuranceDeviationAuthority.Decide(AssuranceDeviationClass.Verification, Guid.NewGuid(),
-            proposer, new(approver, "sqa", [ProgramRole.SoftwareQualityAnalyst], [], false), Now);
+            proposer, new(approver, "sqa", [ProgramRole.SoftwareQualityAnalyst], [], false, []), Now);
         db.AssurancePolicyDeviations.Add(AssurancePolicyDeviation.Approve(project, first.Id, 1, definition,
             "Project", AssuranceLeverValue.NotRequired, "The customer runs this campaign.",
             AssuranceDeviationClass.Verification, false, proposer, "cm", approver, "sqa", decision, Now));

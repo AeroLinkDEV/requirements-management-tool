@@ -22,8 +22,9 @@ namespace AeroLink.Infrastructure.Persistence;
 ///   grant check), the earliest-granted membership names the primary; the others remain base-role members
 ///   without leadership authority. Deterministic and attributable, never arbitrary.
 /// - Role-keyed standing backups of the four discipline-lead roles migrate to the position when their
-///   holder satisfies the eligibility; a `ProjectEngineeringLead` backup deliberately does not migrate —
-///   it keeps answering legacy demands through the old path until replaced.
+///   holder satisfies the eligibility. This version left the originals alive and left a
+///   `ProjectEngineeringLead` backup unmigrated; `ProjectLeadershipReconciliationAuthority` (v2) retires
+///   both, because leaving them made the legacy row a permanent second authority channel.
 ///
 /// Idempotent: a completed run is recorded by a marker audit event, and the migration refuses with no
 /// partial state if the conflict rule fires. SQLite development databases seed fresh state and never run
@@ -47,11 +48,20 @@ public sealed class ProjectLeadershipMigrationAuthority(AeroLinkDbContext db)
     {
         if (!db.Database.IsNpgsql()) return;
         if (await db.SecurityAuditEvents.AsNoTracking().AnyAsync(x => x.EventType == CompletedEvent, ct)) return;
-        await BackfillAsync(ct);
-        db.SecurityAuditEvents.Add(new SecurityAuditEvent(CompletedEvent, Actor, "project-leadership",
-            "Success", "Project Leadership assignments and backups migrated from legacy singular memberships.",
-            "local", DateTimeOffset.UtcNow));
-        await db.SaveChangesAsync(ct);
+        // One transaction over every program and the marker. The backfill used to save inside its per-program
+        // loop, so a conflict raised by a later program left the earlier programs' assignments and derived
+        // memberships committed with no completion marker — precisely the partial state this claims to prevent.
+        var strategy = db.Database.CreateExecutionStrategy();
+        await strategy.ExecuteAsync(async () =>
+        {
+            await using var transaction = await db.Database.BeginTransactionAsync(ct);
+            await BackfillAsync(ct);
+            db.SecurityAuditEvents.Add(new SecurityAuditEvent(CompletedEvent, Actor, "project-leadership",
+                "Success", "Project Leadership assignments and backups migrated from legacy singular memberships.",
+                "local", DateTimeOffset.UtcNow));
+            await db.SaveChangesAsync(ct);
+            await transaction.CommitAsync(ct);
+        });
     }
 
     /// <summary>Provider-agnostic backfill core, so disposable qualification can exercise it directly.</summary>
@@ -146,6 +156,7 @@ public sealed class ProjectLeadershipMigrationAuthority(AeroLinkDbContext db)
                 db.ProjectLeadershipBackups.Add(new ProjectLeadershipBackup(programId, position, legacyBackup.BackupUserId, Actor, now));
             }
 
+            // Saved once by the caller, inside the transaction that also writes the marker.
             await db.SaveChangesAsync(ct);
         }
     }

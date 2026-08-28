@@ -44,6 +44,27 @@ public sealed class ProjectLeadershipTests
     public void Every_position_requires_its_approved_base_role(ProjectLeadershipPosition position, ProgramRole required)
         => Assert.Equal(required, ProjectLeadership.RequiredBaseRole(position));
 
+    [Fact]
+    public void Every_position_governed_role_maps_to_the_accountable_position_that_may_delegate_it()
+    {
+        var expected = new Dictionary<ProgramRole, ProjectLeadershipPosition>
+        {
+            [ProgramRole.ProjectEngineer] = ProjectLeadershipPosition.ProjectEngineer,
+            [ProgramRole.ProjectEngineeringLead] = ProjectLeadershipPosition.ProjectEngineer,
+            [ProgramRole.ProgramManager] = ProjectLeadershipPosition.ProgramManager,
+            [ProgramRole.EngineeringManager] = ProjectLeadershipPosition.EngineeringManager,
+            [ProgramRole.ConfigurationManager] = ProjectLeadershipPosition.ConfigurationManager,
+            [ProgramRole.SystemEngineeringLead] = ProjectLeadershipPosition.SystemEngineeringLead,
+            [ProgramRole.SoftwareEngineeringLead] = ProjectLeadershipPosition.SoftwareEngineeringLead,
+            [ProgramRole.SystemTestLead] = ProjectLeadershipPosition.SystemTestLead,
+            [ProgramRole.SoftwareTestLead] = ProjectLeadershipPosition.SoftwareTestLead,
+        };
+
+        Assert.Equal(SingularProgramRoles.All.Order(), expected.Keys.Order());
+        Assert.All(expected, pair => Assert.Equal(pair.Value, ProjectLeadership.PositionForGovernedRole(pair.Key)));
+        Assert.Null(ProjectLeadership.PositionForGovernedRole(ProgramRole.Reviewer));
+    }
+
     /// <summary>
     /// The authority footprints: what an active holder answers beyond their own base-role membership.
     /// The Project Engineer position absorbed the retired ProjectEngineeringLead authority (review,

@@ -24,10 +24,11 @@ public static class QualityIntelligenceEndpoints
         var actor=http.UserAccount();var now=DateTimeOffset.UtcNow;
         var programId=await db.Projects.Where(x=>x.Id==request.ProjectId).Select(x=>(Guid?)x.ProgramId).SingleOrDefaultAsync(ct);
         if(programId is null)return Results.NotFound();
+        var resolver=new ProjectAuthorityResolver(db);
         var authority=actor.IsAdministrator?ProgramRole.Administrator.ToString():
-            await identity.HasRoleAsync(actor.Id,programId.Value,ProgramRole.SoftwareQualityAnalyst,now,ct)?ProgramRole.SoftwareQualityAnalyst.ToString():
-            await identity.HasRoleAsync(actor.Id,programId.Value,ProgramRole.ConfigurationManager,now,ct)?ProgramRole.ConfigurationManager.ToString():
-            await identity.HasRoleAsync(actor.Id,programId.Value,ProgramRole.ProgramManager,now,ct)?ProgramRole.ProgramManager.ToString():null;
+            await resolver.IsSatisfiedAsync(actor.Id,programId.Value,ProjectAuthorityRequirement.BaseRole(ProgramRole.SoftwareQualityAnalyst),now,ct)?ProgramRole.SoftwareQualityAnalyst.ToString():
+            await resolver.IsSatisfiedAsync(actor.Id,programId.Value,ProjectAuthorityRequirement.Leadership(ProjectLeadershipPosition.ConfigurationManager),now,ct)?ProgramRole.ConfigurationManager.ToString():
+            await resolver.IsSatisfiedAsync(actor.Id,programId.Value,ProjectAuthorityRequirement.Leadership(ProjectLeadershipPosition.ProgramManager),now,ct)?ProgramRole.ProgramManager.ToString():null;
         if(authority is null)return Results.Forbid();
         try{var item=new ReadinessWaiver(request.ProjectId,request.BlockerType,request.BlockerId,0,0,
             request.Rationale,actor.Id,actor.UserName,authority,"ReadinessWaiverApproval",request.ExpiresAt,
@@ -48,7 +49,17 @@ public static class QualityIntelligenceEndpoints
     if(projectId is not null&&!await http.HasProjectAccessAsync(db,projectId.Value,ct))return Results.Forbid();var actor=http.UserAccount();var allowed=actor.IsAdministrator?null:await db.Projects.Where(x=>actor.Programs.Select(p=>p.ProgramId).Contains(x.ProgramId)).Select(x=>x.Id).ToListAsync(ct);var scope=(allowed is null?db.Projects.AsNoTracking():db.Projects.AsNoTracking().Where(x=>allowed.Contains(x.Id))).Where(x=>projectId==null||x.Id==projectId);var ids=await scope.Select(x=>x.Id).ToListAsync(ct);var verificationCoverage=await(from coverage in db.TestCoverage.AsNoTracking() join revision in db.TestProcedureRevisions.AsNoTracking() on coverage.ProcedureRevisionId equals revision.Id join procedure in db.TestProcedures.AsNoTracking().Where(x=>x.Level==TestProcedureLevel.System||x.ArtifactKind==VerificationArtifactKind.Case) on revision.ProcedureId equals procedure.Id where ids.Contains(procedure.ProjectId) select coverage.Id).CountAsync(ct);var activeProblemReports=await db.ProblemReports.Where(x=>ids.Contains(x.ProjectId)).CountAsync(ProblemReportLifecycle.ActiveWorkPredicate,ct);var generated=DateTimeOffset.UtcNow;return Results.Ok(new{generatedAt=generated,scope=new{projectCount=ids.Count,permissionSafe=true},contracts=new[]{new{key="controlled_changes",definition="System change requests in Draft, InReview, Approved, or SelectedForBaseline state.",value=await db.SystemChangeRequests.CountAsync(x=>ids.Contains(x.ProjectId),ct),unit="records"},new{key="open_problem_reports",definition=ProblemReportLifecycle.ActiveWorkDefinition,value=activeProblemReports,unit="records"},new{key="verification_coverage",definition="Requirement revision-to-verification artifact coverage links in the authorized portfolio.",value=verificationCoverage,unit="links"},new{key="controlled_publications",definition="Generated controlled documents for authorized projects.",value=await db.ControlledDocuments.CountAsync(x=>ids.Contains(x.ProjectId),ct),unit="records"}}});
     }
 
-    private static Task<bool> Authorized(Guid projectId,HttpContext http,AeroLinkDbContext db,IdentityService identity,CancellationToken ct)=>http.HasProjectRoleAsync(db,identity,projectId,ct,ProgramRole.ConfigurationManager,ProgramRole.ProgramManager,ProgramRole.Administrator);
+    private static async Task<bool> Authorized(Guid projectId,HttpContext http,AeroLinkDbContext db,IdentityService identity,CancellationToken ct)
+    {
+        var actor=http.UserAccount();
+        if(actor.IsAdministrator)return true;
+        var programId=await db.Projects.AsNoTracking().Where(x=>x.Id==projectId).Select(x=>(Guid?)x.ProgramId).SingleOrDefaultAsync(ct);
+        if(programId is null)return false;
+        var resolver=new ProjectAuthorityResolver(db);var now=DateTimeOffset.UtcNow;
+        return await resolver.IsSatisfiedAsync(actor.Id,programId.Value,ProjectAuthorityRequirement.BaseRole(ProgramRole.Administrator),now,ct)
+            ||await resolver.IsSatisfiedAsync(actor.Id,programId.Value,ProjectAuthorityRequirement.Leadership(ProjectLeadershipPosition.ConfigurationManager),now,ct)
+            ||await resolver.IsSatisfiedAsync(actor.Id,programId.Value,ProjectAuthorityRequirement.Leadership(ProjectLeadershipPosition.ProgramManager),now,ct);
+    }
 }
 public sealed record CreateQualityObjectiveRequest(Guid ProjectId,string Code,string Title,string TargetJson,string EvidenceExpectation);
 public sealed record CreateReadinessWaiverRequest(Guid ProjectId,string BlockerType,Guid BlockerId,string Rationale,DateTimeOffset ExpiresAt);

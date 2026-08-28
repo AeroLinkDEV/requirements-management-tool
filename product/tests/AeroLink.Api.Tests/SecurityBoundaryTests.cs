@@ -396,6 +396,83 @@ public sealed class SecurityBoundaryTests
     }
 
     [Fact]
+    public async Task Only_a_position_holder_or_backup_can_delegate_a_position_governed_role()
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var administrator = factory.CreateClient();
+        await BootstrapAndLoginAdministratorAsync(administrator);
+        var now = DateTimeOffset.UtcNow;
+        var program = new ProgramRecord("Delegation Leadership Program", "DLP");
+        var baseOnly = Account("base.only.manager", "Base Only Manager");
+        var primary = Account("primary.manager", "Primary Manager");
+        var backup = Account("backup.manager", "Backup Manager");
+        var baseDelegate = Account("base.delegate", "Base Delegate");
+        var primaryDelegate = Account("primary.delegate", "Primary Delegate");
+        var backupDelegate = Account("backup.delegate", "Backup Delegate");
+
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            db.AddRange(program, baseOnly, primary, backup, baseDelegate, primaryDelegate, backupDelegate);
+            db.ProgramMemberships.AddRange(
+                new(baseOnly.Id, program.Id, ProgramRole.ProgramManager, "test.setup", now),
+                new(primary.Id, program.Id, ProgramRole.ProgramManager, "test.setup", now),
+                new(backup.Id, program.Id, ProgramRole.ProgramManager, "test.setup", now),
+                new(baseDelegate.Id, program.Id, ProgramRole.Engineer, "test.setup", now),
+                new(primaryDelegate.Id, program.Id, ProgramRole.Engineer, "test.setup", now),
+                new(backupDelegate.Id, program.Id, ProgramRole.Engineer, "test.setup", now));
+            db.ProjectLeadershipAssignments.Add(new(program.Id, ProjectLeadershipPosition.ProgramManager,
+                primary.Id, "test.setup", now));
+            db.ProjectLeadershipBackups.Add(new(program.Id, ProjectLeadershipPosition.ProgramManager,
+                backup.Id, "test.setup", now));
+            await db.SaveChangesAsync();
+        }
+
+        using var baseOnlyClient = await LoginAsync(baseOnly.UserName);
+        using var refused = await CreateDelegationAsync(baseOnlyClient, baseOnly.Id, baseDelegate.Id);
+        Assert.Equal(HttpStatusCode.Forbidden, refused.StatusCode);
+
+        using var primaryClient = await LoginAsync(primary.UserName);
+        using var primaryCreated = await CreateDelegationAsync(primaryClient, primary.Id, primaryDelegate.Id);
+        Assert.Equal(HttpStatusCode.Created, primaryCreated.StatusCode);
+
+        using var backupClient = await LoginAsync(backup.UserName);
+        using var backupCreated = await CreateDelegationAsync(backupClient, backup.Id, backupDelegate.Id);
+        Assert.Equal(HttpStatusCode.Created, backupCreated.StatusCode);
+
+        using var verificationScope = factory.Services.CreateScope();
+        var verificationDb = verificationScope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+        Assert.Equal(2, await verificationDb.RoleDelegations.AsNoTracking().CountAsync(
+            x => x.ProgramId == program.Id && x.Role == ProgramRole.ProgramManager));
+
+        UserAccount Account(string userName, string displayName) =>
+            new(userName, displayName, $"{userName}@example.test",
+                IdentityService.HashPassword(AeroLinkApiFactory.MemberPassword), now);
+
+        async Task<HttpClient> LoginAsync(string userName)
+        {
+            var client = factory.CreateClient();
+            using var login = await client.PostAsJsonAsync("/api/auth/login",
+                new { userName, password = AeroLinkApiFactory.MemberPassword });
+            Assert.Equal(HttpStatusCode.OK, login.StatusCode);
+            await AuthorizeMutationsAsync(client);
+            return client;
+        }
+
+        Task<HttpResponseMessage> CreateDelegationAsync(HttpClient client, Guid delegatorId, Guid delegateId) =>
+            client.PostAsJsonAsync("/api/delegations", new
+            {
+                programId = program.Id,
+                delegatorUserId = delegatorId,
+                delegateUserId = delegateId,
+                role = ProgramRole.ProgramManager,
+                startsAt = now.AddMinutes(-1),
+                endsAt = now.AddHours(1),
+                reason = "Temporary accountable management coverage.",
+            });
+    }
+
+    [Fact]
     public async Task Role_session_and_delegation_lifecycle_exposes_current_state_without_erasing_history()
     {
         using var factory = new AeroLinkApiFactory();

@@ -1011,8 +1011,8 @@ public static class ChangeRequestEndpoints
                             {
                                 error = $"{account.DisplayName} does not hold Approver authority. With no review workflow configured, the reviewer must be an Approver."
                             });
-                        role = (await WorkflowEndpoints.AuthoritiesAsync(db, scr.ProjectId, [account.Id], ct))
-                            .GetValueOrDefault(account.Id);
+                        role = await WorkflowEndpoints.StageAuthorityAsync(db, scr.ProjectId, account.Id,
+                            ProgramRole.Approver, ct);
                     }
                     else if (index < workflow.Stages.Count)
                         role = await WorkflowEndpoints.StageAuthorityAsync(db, scr.ProjectId, account.Id,
@@ -1023,10 +1023,6 @@ public static class ChangeRequestEndpoints
                         // the client cannot turn an unrelated account into an extra reviewer.
                         role = (await WorkflowEndpoints.AuthoritiesAsync(db, scr.ProjectId, [account.Id], ct))
                             .GetValueOrDefault(account.Id);
-                    if (workflow is not null && role is null && index < workflow.Stages.Count
-                        && await identity.HasRoleAsync(account.Id, programId, workflow.Stages[index].RequiredRole,
-                            DateTimeOffset.UtcNow, ct))
-                        role = workflow.Stages[index].RequiredRole;
                     if (workflow is not null && role is null)
                         return Results.BadRequest(new { error = $"{account.DisplayName} does not hold authority to sign this review." });
                     selections.Add(new ApproverSelection(account.UserName, account.DisplayName, role));
@@ -1098,8 +1094,8 @@ public static class ChangeRequestEndpoints
                             {
                                 error = $"{account.DisplayName} does not hold Approver authority. With no review workflow configured, the reviewer must be an Approver."
                             });
-                        role = (await WorkflowEndpoints.AuthoritiesAsync(db, scr.ProjectId, [account.Id], ct))
-                            .GetValueOrDefault(account.Id);
+                        role = await WorkflowEndpoints.StageAuthorityAsync(db, scr.ProjectId, account.Id,
+                            ProgramRole.Approver, ct);
                     }
                     else if (index < workflow.Stages.Count)
                         role = await WorkflowEndpoints.StageAuthorityAsync(db, scr.ProjectId, account.Id,
@@ -1107,10 +1103,6 @@ public static class ChangeRequestEndpoints
                     else
                         role = (await WorkflowEndpoints.AuthoritiesAsync(db, scr.ProjectId, [account.Id], ct))
                             .GetValueOrDefault(account.Id);
-                    if (workflow is not null && role is null && index < workflow.Stages.Count
-                        && await identity.HasRoleAsync(account.Id, programId, workflow.Stages[index].RequiredRole,
-                            DateTimeOffset.UtcNow, ct))
-                        role = workflow.Stages[index].RequiredRole;
                     if (workflow is not null && role is null)
                         return Results.BadRequest(new { error = $"{account.DisplayName} does not hold authority to sign this review." });
                     corrected.Add(new ApproverSelection(account.UserName, account.DisplayName, role));

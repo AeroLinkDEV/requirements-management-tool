@@ -212,7 +212,9 @@ public sealed class HistoricalPublicationFreezeApiTests
         db.AddRange(program, project, release, scr, baseline, requirement, revision, target, targetRevision,
             coverageRequirement, coverageRevision,
             trace, procedure, procedureRevision, config,
-            new ProgramMembership(config.Id, program.Id, ProgramRole.ConfigurationManager, "test.setup", now));
+            new ProgramMembership(config.Id, program.Id, ProgramRole.ConfigurationManager, "test.setup", now),
+            new ProjectLeadershipAssignment(program.Id, ProjectLeadershipPosition.ConfigurationManager,
+                config.Id, "test.setup", now));
         db.BaselineRequirements.Add(new BaselineRequirementSelection(baseline.Id, requirement.Id, revision.Id));
         db.BaselineRequirements.Add(new BaselineRequirementSelection(baseline.Id, coverageRequirement.Id, coverageRevision.Id));
         db.TestCoverage.Add(new TestRequirementCoverage(procedureRevision.Id, revision.Id));

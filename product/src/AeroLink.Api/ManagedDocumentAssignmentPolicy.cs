@@ -49,9 +49,24 @@ internal static class ManagedDocumentAssignmentPolicy
         if (actor.UserName == IdentityService.SystemAdministratorUserName) return false;
         var programId = await db.Projects.AsNoTracking().Where(x => x.Id == projectId).Select(x => (Guid?)x.ProgramId).SingleOrDefaultAsync(ct);
         if (programId is null) return false;
+        // Position roles go through the resolver, base roles through membership. This gate read all of them
+        // from membership, which refused the Project Engineer position holder — the person #816 says now owns
+        // the retired ProjectEngineeringLead authority this list names — while accepting anybody merely
+        // granted ConfigurationManager. The same page then granted and refused the same person.
+        var resolver = new ProjectAuthorityResolver(db);
         foreach (var role in roles)
         {
-            var accepted = ProgramRoleAuthority.Satisfying(role).ToList();
+            if (SingularProgramRoles.IsPositionGoverned(role))
+            {
+                // This compatibility question accepts the position primary or backup and an exact,
+                // time-bounded delegation, but never treats base eligibility as the position. Calling the
+                // leadership-only helper here accidentally dropped valid Configuration Manager delegations.
+                if ((await resolver.ResolveAsync(actor.Id, programId.Value,
+                        ProjectAuthorityRequirement.LegacyRoleDemand(role), now, ct)).Granted)
+                    return true;
+                continue;
+            }
+            var accepted = ProgramRoleAuthority.Satisfying(role).Where(x => !SingularProgramRoles.IsPositionGoverned(x)).ToList();
             if (await db.ProgramMemberships.AsNoTracking().AnyAsync(x => x.ProgramId == programId && x.UserId == actor.Id && x.EndedAt == null && accepted.Contains(x.Role), ct)) return true;
             var delegations = await db.RoleDelegations.AsNoTracking().Where(x => x.ProgramId == programId && x.DelegateUserId == actor.Id && accepted.Contains(x.Role) && x.RevokedAt == null).ToListAsync(ct);
             if (delegations.Any(x => x.StartsAt <= now && x.EndsAt > now)) return true;

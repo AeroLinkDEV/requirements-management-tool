@@ -77,6 +77,7 @@ public sealed class TestChangeRequestReviewWorkflowTests
         db.Add(engineer);
         db.Add(new ProgramMembership(engineer.Id, program.Id, ProgramRole.TestEngineer, "test.setup", now));
         db.Add(new ProgramMembership(engineer.Id, program.Id, ProgramRole.Approver, "test.setup", now));
+        UserAccount? configurationManager = null;
         foreach (var (user, role) in new[]
                  {
                      ("workflow.one", ProgramRole.Approver),
@@ -90,7 +91,28 @@ public sealed class TestChangeRequestReviewWorkflowTests
                 IdentityService.HashPassword(AeroLinkApiFactory.MemberPassword), now);
             db.Add(account);
             db.Add(new ProgramMembership(account.Id, program.Id, role, "test.setup", now));
+            if (role == ProgramRole.ConfigurationManager) configurationManager = account;
         }
+        db.Add(new ProjectLeadershipAssignment(program.Id, ProjectLeadershipPosition.ConfigurationManager,
+            configurationManager!.Id, "test.setup", now));
+        var baseConfigurationManager = new UserAccount("workflow.config.base", "Base Configuration Manager",
+            "workflow.config.base@example.test", IdentityService.HashPassword(AeroLinkApiFactory.MemberPassword), now);
+        var backupConfigurationManager = new UserAccount("workflow.config.backup", "Backup Configuration Manager",
+            "workflow.config.backup@example.test", IdentityService.HashPassword(AeroLinkApiFactory.MemberPassword), now);
+        var retiredPositionMember = new UserAccount("workflow.retired.lead", "Retired Lead Membership",
+            "workflow.retired.lead@example.test", IdentityService.HashPassword(AeroLinkApiFactory.MemberPassword), now);
+        var baseProgramManagerApprover = new UserAccount("workflow.base.program.approver",
+            "Base Program Manager Approver", "workflow.base.program.approver@example.test",
+            IdentityService.HashPassword(AeroLinkApiFactory.MemberPassword), now);
+        db.AddRange(baseConfigurationManager, backupConfigurationManager, retiredPositionMember,
+            baseProgramManagerApprover,
+            new ProgramMembership(baseConfigurationManager.Id, program.Id, ProgramRole.ConfigurationManager, "test.setup", now),
+            new ProgramMembership(backupConfigurationManager.Id, program.Id, ProgramRole.ConfigurationManager, "test.setup", now),
+            new ProjectLeadershipBackup(program.Id, ProjectLeadershipPosition.ConfigurationManager,
+                backupConfigurationManager.Id, "test.setup", now),
+            new ProgramMembership(retiredPositionMember.Id, program.Id, ProgramRole.SystemEngineeringLead, "legacy", now),
+            new ProgramMembership(baseProgramManagerApprover.Id, program.Id, ProgramRole.ProgramManager, "test.setup", now),
+            new ProgramMembership(baseProgramManagerApprover.Id, program.Id, ProgramRole.Approver, "test.setup", now));
         var multi = new UserAccount("workflow.multirole", "Multi Role", "workflow.multirole@example.test",
             IdentityService.HashPassword(AeroLinkApiFactory.MemberPassword), now);
         db.Add(multi);
@@ -1113,6 +1135,109 @@ public sealed class TestChangeRequestReviewWorkflowTests
         }
     }
 
+    [Fact]
+    public async Task A_base_role_only_configuration_manager_cannot_fill_a_configuration_manager_stage()
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var client = factory.CreateClient();
+        var fixture = await SeedAsync(factory);
+        await CreateWorkflowAsync(client, fixture.ProjectId, "Sequential", "System",
+            ("Configuration review", nameof(ProgramRole.ConfigurationManager)));
+        var draftId = await CreateSystemDraftAsync(factory, fixture);
+
+        await LoginAsync(client, "workflow.author");
+        using var response = await client.PostAsJsonAsync($"/api/change-requests/{draftId}/submit",
+            new { approvers = new[] { new { userId = "workflow.config.base" } }, mode = "Sequential" });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Contains("does not hold authority", await response.Content.ReadAsStringAsync());
+    }
+
+    [Fact]
+    public async Task A_configuration_manager_standing_backup_can_fill_the_configuration_manager_stage()
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var client = factory.CreateClient();
+        var fixture = await SeedAsync(factory);
+        await CreateWorkflowAsync(client, fixture.ProjectId, "Sequential", "System",
+            ("Configuration review", nameof(ProgramRole.ConfigurationManager)));
+        var draftId = await CreateSystemDraftAsync(factory, fixture);
+
+        await LoginAsync(client, "workflow.author");
+        using var response = await client.PostAsJsonAsync($"/api/change-requests/{draftId}/submit",
+            new { approvers = new[] { new { userId = "workflow.config.backup" } }, mode = "Sequential" });
+
+        Assert.True(response.IsSuccessStatusCode, await response.Content.ReadAsStringAsync());
+    }
+
+    [Fact]
+    public async Task A_raw_retired_position_membership_cannot_fill_that_position_stage()
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var client = factory.CreateClient();
+        var fixture = await SeedAsync(factory);
+        await CreateWorkflowAsync(client, fixture.ProjectId, "Sequential", "System",
+            ("System engineering lead review", nameof(ProgramRole.SystemEngineeringLead)));
+        var draftId = await CreateSystemDraftAsync(factory, fixture);
+
+        await LoginAsync(client, "workflow.author");
+        using var response = await client.PostAsJsonAsync($"/api/change-requests/{draftId}/submit",
+            new { approvers = new[] { new { userId = "workflow.retired.lead" } }, mode = "Sequential" });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Contains("does not hold authority", await response.Content.ReadAsStringAsync());
+    }
+
+    [Fact]
+    public async Task A_raw_retired_position_membership_cannot_be_an_additional_tcr_signer()
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var client = factory.CreateClient();
+        var fixture = await SeedAsync(factory);
+        await CreateWorkflowAsync(client, fixture.ProjectId, "Sequential",
+            ("Approval", nameof(ProgramRole.Approver)));
+        await PreparePackageAsync(client, fixture);
+
+        using var response = await client.PostAsJsonAsync($"/api/test-change-reviews/{fixture.ReviewId}/submit",
+            new
+            {
+                approvers = new[]
+                {
+                    new { userId = "workflow.one" },
+                    new { userId = "workflow.retired.lead" },
+                },
+            });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Contains("does not hold authority", await response.Content.ReadAsStringAsync());
+    }
+
+    [Fact]
+    public async Task A_raw_retired_position_membership_cannot_be_an_additional_srcr_signer()
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var client = factory.CreateClient();
+        var fixture = await SeedAsync(factory);
+        await CreateWorkflowAsync(client, fixture.ProjectId, "Sequential", "System",
+            ("Approval", nameof(ProgramRole.Approver)));
+        var draftId = await CreateSystemDraftAsync(factory, fixture);
+
+        await LoginAsync(client, "workflow.author");
+        using var response = await client.PostAsJsonAsync($"/api/change-requests/{draftId}/submit",
+            new
+            {
+                approvers = new[]
+                {
+                    new { userId = "workflow.one" },
+                    new { userId = "workflow.retired.lead" },
+                },
+                mode = "Sequential",
+            });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Contains("does not hold authority", await response.Content.ReadAsStringAsync());
+    }
+
     [Theory]
     [InlineData("workflow.outsider")]   // Engineer only
     [InlineData("workflow.other")]      // TestEngineer only
@@ -1182,6 +1307,41 @@ public sealed class TestChangeRequestReviewWorkflowTests
             Assert.True(await db.ElectronicSignatures.AnyAsync(x =>
                 x.ArtifactId == draftId && x.UserName == "workflow.one"));
         }
+    }
+
+    [Fact]
+    public async Task No_workflow_srcr_freezes_approver_not_unappointed_program_manager_as_authority()
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var client = factory.CreateClient();
+        var fixture = await SeedAsync(factory);
+        var draftId = await CreateSystemDraftAsync(factory, fixture);
+
+        await LoginAsync(client, "workflow.author");
+        using var submitted = await client.PostAsJsonAsync($"/api/change-requests/{draftId}/submit",
+            new
+            {
+                approvers = new[] { new { userId = "workflow.base.program.approver" } },
+                mode = "Sequential",
+            });
+        Assert.True(submitted.IsSuccessStatusCode, await submitted.Content.ReadAsStringAsync());
+
+        using var restarted = await client.PostAsJsonAsync($"/api/change-requests/{draftId}/restart-review",
+            new
+            {
+                approvers = new[] { new { userId = "workflow.base.program.approver" } },
+                reason = "Correct the frozen reviewer authority.",
+            });
+        Assert.True(restarted.IsSuccessStatusCode, await restarted.Content.ReadAsStringAsync());
+
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+        var cycles = await db.ReviewCycles.Include(x => x.Steps)
+            .Where(x => x.ChangeRequestId == draftId)
+            .OrderBy(x => x.Sequence).ToListAsync();
+        Assert.Equal(2, cycles.Count);
+        Assert.All(cycles, cycle =>
+            Assert.Equal(nameof(ProgramRole.Approver), Assert.Single(cycle.Steps).Authority));
     }
 
     [Fact]

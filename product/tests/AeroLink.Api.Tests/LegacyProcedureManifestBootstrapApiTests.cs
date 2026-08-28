@@ -44,6 +44,7 @@ public sealed class LegacyProcedureManifestBootstrapApiTests
             "Configured product.", "1. Exercise the behavior.", "Behavior is correct.",
             TestProcedureState.Approved, "legacy.author", now);
         db.AddRange(program, project, release, request, baseline, procedure, revision);
+        UserAccount? configurationManager = null;
         foreach (var (name, role) in new[]
                  {
                      ("legacy.cm", ProgramRole.ConfigurationManager),
@@ -54,7 +55,10 @@ public sealed class LegacyProcedureManifestBootstrapApiTests
                 IdentityService.HashPassword(AeroLinkApiFactory.MemberPassword), now);
             db.Add(account);
             db.Add(new ProgramMembership(account.Id, program.Id, role, "test.setup", now));
+            if (role == ProgramRole.ConfigurationManager) configurationManager = account;
         }
+        db.Add(new ProjectLeadershipAssignment(program.Id, ProjectLeadershipPosition.ConfigurationManager,
+            configurationManager!.Id, "test.setup", now));
         await db.SaveChangesAsync();
         return new Fixture(baseline.Id, procedure.Id, revision.Id);
     }

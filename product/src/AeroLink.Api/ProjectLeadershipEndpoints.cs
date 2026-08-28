@@ -14,18 +14,10 @@ namespace AeroLink.Api;
 /// </summary>
 public static class ProjectLeadershipEndpoints
 {
-    // The retiring ProjectEngineeringLead stays acceptable here ONLY as legacy data answering old checks;
-    // it can never be newly granted, and this endpoint list deliberately omits it from the eight positions.
-    private static readonly ProgramRole[] RosterAuthority =
-    [
-        ProgramRole.ProgramManager, ProgramRole.ProjectEngineeringLead,
-        ProgramRole.ProjectEngineer, ProgramRole.Administrator
-    ];
-
     public static void MapProjectLeadershipEndpoints(this WebApplication app)
     {
         app.MapGet("/api/projects/{projectId:guid}/leadership", async (Guid projectId, HttpContext http,
-            AeroLinkDbContext db, IdentityService identity, CancellationToken ct) =>
+            AeroLinkDbContext db, IdentityService identity, ProjectAuthorityResolver authority, CancellationToken ct) =>
         {
             if (!await http.HasProjectAccessAsync(db, projectId, ct)) return Results.Forbid();
             var programId = await ProgramOfAsync(db, projectId, ct);
@@ -40,7 +32,7 @@ public static class ProjectLeadershipEndpoints
                 .Where(x => x.ProgramId == programId && x.EndedAt == null && memberUserIds.Contains(x.UserId)).ToListAsync(ct);
             var accounts = await db.UserAccounts.AsNoTracking()
                 .Where(x => memberUserIds.Contains(x.Id))
-                .Select(x => new { x.Id, x.UserName, x.DisplayName }).ToListAsync(ct);
+                .Select(x => new { x.Id, x.UserName, x.DisplayName, x.State }).ToListAsync(ct);
             var accountById = accounts.ToDictionary(x => x.Id);
 
             object Person(Guid userId) => accountById.TryGetValue(userId, out var account)
@@ -56,13 +48,17 @@ public static class ProjectLeadershipEndpoints
                 {
                     person = Person(x.HolderUserId),
                     assignedAt = x.AssignedAt,
-                    eligibilityValid = memberships.Any(m => m.UserId == x.HolderUserId && m.Role == requiredRole),
+                    eligibilityValid = accountById.TryGetValue(x.HolderUserId, out var account)
+                        && account.State == AccountState.Active
+                        && memberships.Any(m => m.UserId == x.HolderUserId && m.Role == requiredRole),
                 }).SingleOrDefault();
                 var backup = backups.Where(x => x.Position == position).Select(x => new
                 {
                     person = Person(x.BackupUserId),
                     namedAt = x.NamedAt,
-                    eligibilityValid = memberships.Any(m => m.UserId == x.BackupUserId && m.Role == requiredRole),
+                    eligibilityValid = accountById.TryGetValue(x.BackupUserId, out var account)
+                        && account.State == AccountState.Active
+                        && memberships.Any(m => m.UserId == x.BackupUserId && m.Role == requiredRole),
                 }).SingleOrDefault();
                 return new
                 {
@@ -77,9 +73,9 @@ public static class ProjectLeadershipEndpoints
 
         app.MapPost("/api/projects/{projectId:guid}/leadership/{position}/primary", async (
             Guid projectId, string position, AssignPrimaryRequest request, HttpContext http,
-            AeroLinkDbContext db, IdentityService identity, ProjectLeadershipService leadership, CancellationToken ct) =>
+            AeroLinkDbContext db, IdentityService identity, ProjectLeadershipService leadership, ProjectAuthorityResolver authority, CancellationToken ct) =>
         {
-            if (!await http.HasProjectRoleAsync(db, identity, projectId, ct, RosterAuthority)) return Results.Forbid();
+            if (!await http.HasRosterAuthorityAsync(db, authority, projectId, ct)) return Results.Forbid();
             if (!TryResolvePosition(position, out var resolved)) return Results.NotFound(new { error = "Unknown Project Leadership position." });
             var programId = await ProgramOfAsync(db, projectId, ct);
             if (programId is null) return Results.NotFound();
@@ -107,9 +103,9 @@ public static class ProjectLeadershipEndpoints
 
         app.MapPost("/api/projects/{projectId:guid}/leadership/{position}/backup", async (
             Guid projectId, string position, AssignBackupRequest request, HttpContext http,
-            AeroLinkDbContext db, IdentityService identity, ProjectLeadershipService leadership, CancellationToken ct) =>
+            AeroLinkDbContext db, IdentityService identity, ProjectLeadershipService leadership, ProjectAuthorityResolver authority, CancellationToken ct) =>
         {
-            if (!await http.HasProjectRoleAsync(db, identity, projectId, ct, RosterAuthority)) return Results.Forbid();
+            if (!await http.HasRosterAuthorityAsync(db, authority, projectId, ct)) return Results.Forbid();
             if (!TryResolvePosition(position, out var resolved)) return Results.NotFound(new { error = "Unknown Project Leadership position." });
             var programId = await ProgramOfAsync(db, projectId, ct);
             if (programId is null) return Results.NotFound();
@@ -132,9 +128,9 @@ public static class ProjectLeadershipEndpoints
 
         app.MapPut("/api/projects/{projectId:guid}/leadership/{position}/backup", async (
             Guid projectId, string position, AssignBackupRequest request, HttpContext http,
-            AeroLinkDbContext db, IdentityService identity, ProjectLeadershipService leadership, CancellationToken ct) =>
+            AeroLinkDbContext db, IdentityService identity, ProjectLeadershipService leadership, ProjectAuthorityResolver authority, CancellationToken ct) =>
         {
-            if (!await http.HasProjectRoleAsync(db, identity, projectId, ct, RosterAuthority)) return Results.Forbid();
+            if (!await http.HasRosterAuthorityAsync(db, authority, projectId, ct)) return Results.Forbid();
             if (!TryResolvePosition(position, out var resolved)) return Results.NotFound(new { error = "Unknown Project Leadership position." });
             var programId = await ProgramOfAsync(db, projectId, ct);
             if (programId is null) return Results.NotFound();
@@ -157,9 +153,9 @@ public static class ProjectLeadershipEndpoints
 
         app.MapDelete("/api/projects/{projectId:guid}/leadership/{position}/backup", async (
             Guid projectId, string position, HttpContext http,
-            AeroLinkDbContext db, IdentityService identity, ProjectLeadershipService leadership, CancellationToken ct) =>
+            AeroLinkDbContext db, IdentityService identity, ProjectLeadershipService leadership, ProjectAuthorityResolver authority, CancellationToken ct) =>
         {
-            if (!await http.HasProjectRoleAsync(db, identity, projectId, ct, RosterAuthority)) return Results.Forbid();
+            if (!await http.HasRosterAuthorityAsync(db, authority, projectId, ct)) return Results.Forbid();
             if (!TryResolvePosition(position, out var resolved)) return Results.NotFound(new { error = "Unknown Project Leadership position." });
             var programId = await ProgramOfAsync(db, projectId, ct);
             if (programId is null) return Results.NotFound();

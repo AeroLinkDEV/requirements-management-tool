@@ -243,14 +243,20 @@ test("a corrective action opens Test Results, names the report, and survives a r
   await secondRecord.getByRole('button', { name: 'Record determination' }).click()
   await expect(page.getByText(/selected as PR closure evidence/)).toBeVisible({ timeout: 30_000 })
 
-  for (const userName of ['systems.reviewer', 'cm.fms', 'program.manager']) {
+  // ProgramManager membership is eligibility only; the seeded accountable position belongs to engineering.manager.
+  for (const [userName, expectedWaiverActions] of [
+    ['systems.reviewer', 0],
+    ['cm.fms', 1],
+    ['program.manager', 0],
+    ['engineering.manager', 1],
+  ] as const) {
     await page.context().clearCookies()
     await login(page, userName, { openProject: false })
     await selectProgram(page, 'Flight Management System Live Program')
     await page.goto(reportAddress, { waitUntil: 'load' })
     await expect(page.locator('.prState')).toHaveText('Waiting for SQA to Close', { timeout: 30_000 })
     await expect(page.getByRole('button', { name: /Close Problem Report/ })).toHaveCount(0)
-    await expect(page.getByText('Approve independent release waiver')).toHaveCount(userName === 'systems.reviewer' ? 0 : 1)
+    await expect(page.getByText('Approve independent release waiver')).toHaveCount(expectedWaiverActions)
   }
 
   await page.context().clearCookies()

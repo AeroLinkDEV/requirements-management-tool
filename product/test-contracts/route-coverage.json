@@ -256,6 +256,7 @@
       "path": "/api/admin/users/{id:guid}/memberships",
       "file": "AdministrationEndpoints.cs",
       "coveredBy": [
+        "ProjectLeadershipApiTests",
         "SecurityBoundaryTests"
       ]
     },
@@ -836,7 +837,9 @@
       "method": "POST",
       "path": "/api/delegations",
       "file": "AdministrationEndpoints.cs",
-      "coveredBy": []
+      "coveredBy": [
+        "SecurityBoundaryTests"
+      ]
     },
     {
       "method": "POST",
@@ -1287,6 +1290,7 @@
       "path": "/api/managed-documents/revisions/{revisionId:guid}/force-unlock",
       "file": "ManagedDocumentEndpoints.cs",
       "coveredBy": [
+        "ManagedDocumentApiTests",
         "ManagedDocumentRecoveryApiTests"
       ]
     },
@@ -1695,7 +1699,8 @@
       "path": "/api/projects/{projectId:guid}/leadership/{position}/backup",
       "file": "ProjectLeadershipEndpoints.cs",
       "coveredBy": [
-        "ProjectLeadershipApiTests"
+        "ProjectLeadershipApiTests",
+        "ProjectPersonnelApiTests"
       ]
     },
     {
@@ -1720,8 +1725,7 @@
       "path": "/api/projects/{projectId:guid}/personnel/backups",
       "file": "PersonnelEndpoints.cs",
       "coveredBy": [
-        "ApprovalConfigurationApiTests",
-        "ProjectPersonnelApiTests"
+        "ApprovalConfigurationApiTests"
       ]
     },
     {
@@ -1780,20 +1784,25 @@
       "method": "POST",
       "path": "/api/quality/objectives",
       "file": "QualityIntelligenceEndpoints.cs",
-      "coveredBy": []
+      "coveredBy": [
+        "GovernanceEvidenceApiTests"
+      ]
     },
     {
       "method": "POST",
       "path": "/api/quality/waivers",
       "file": "QualityIntelligenceEndpoints.cs",
-      "coveredBy": []
+      "coveredBy": [
+        "GovernanceEvidenceApiTests"
+      ]
     },
     {
       "method": "POST",
       "path": "/api/release-campaigns",
       "file": "ReleaseCampaignEndpoints.cs",
       "coveredBy": [
-        "AssurancePolicyApiTests"
+        "AssurancePolicyApiTests",
+        "ReleaseCampaignExactIntentApiTests"
       ]
     },
     {

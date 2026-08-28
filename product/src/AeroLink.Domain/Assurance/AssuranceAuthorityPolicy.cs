@@ -26,8 +26,8 @@ public sealed record AssuranceAuthorityRule(
 /// </summary>
 public static class AssuranceAuthorityPolicy
 {
-    /// <summary>The authority rules recorded by the product-owner decision of 2026-08-22.</summary>
-    public const int CurrentVersion = 1;
+    /// <summary>The current rules, with accountable positions separated from base eligibility.</summary>
+    public const int CurrentVersion = 2;
 
     // One qualified approver is sufficient throughout version 1. The count is data rather than an assumption
     // baked into the resolver, because the decision says a future class may require more.
@@ -44,9 +44,17 @@ public static class AssuranceAuthorityPolicy
         new(AssuranceDeviationClass.Airworthiness, [ProgramRole.Airworthiness], 1, true, false),
     ];
 
-    public static IReadOnlyList<AssuranceAuthorityRule> Version(int version) => version == 1
-        ? Version1
-        : throw new DomainException($"Assurance authority policy version {version} is not supported.");
+    // Version 2 preserves the approved role catalogue and changes how position-governed entries are
+    // established: ProgramManager means the Project Leadership position, not the base role that qualifies a
+    // person to hold it. Keeping a separate version is what lets a historical v1 approval remain truthful.
+    private static readonly AssuranceAuthorityRule[] Version2 = [.. Version1];
+
+    public static IReadOnlyList<AssuranceAuthorityRule> Version(int version) => version switch
+    {
+        1 => Version1,
+        2 => Version2,
+        _ => throw new DomainException($"Assurance authority policy version {version} is not supported."),
+    };
 
     public static AssuranceAuthorityRule Rule(AssuranceDeviationClass deviationClass, int version = CurrentVersion) =>
         Version(version).SingleOrDefault(x => x.Class == deviationClass)
@@ -71,15 +79,24 @@ public sealed record AssuranceDelegationFact(
 /// the wrong answer here. <paramref name="IsAdministrator"/> is carried only so the refusal can
 /// say why an administrator was refused.
 /// </summary>
+/// <param name="LeadershipAuthorities">
+/// The role demands this person answers by holding a Project Leadership position — primary or standing
+/// backup — each already validated against that position's own eligibility.
+///
+/// Kept apart from <paramref name="HeldRoles"/> because #816 made them different facts. Program Manager
+/// authority over a project-policy deviation belongs to whoever holds the position; the membership that
+/// makes somebody eligible for the position is not the same statement and must not approve on its own.
+/// </param>
 public sealed record AssuranceApproverFacts(
     Guid AccountId,
     string UserName,
     IReadOnlyCollection<ProgramRole> HeldRoles,
     IReadOnlyCollection<AssuranceDelegationFact> Delegations,
-    bool IsAdministrator);
+    bool IsAdministrator,
+    IReadOnlyCollection<ProgramRole> LeadershipAuthorities);
 
 /// <summary>How the approver's authority was established, recorded on the deviation.</summary>
-public enum AssuranceAuthoritySource { None, Membership, Delegation }
+public enum AssuranceAuthoritySource { None, Membership, Delegation, ProjectLeadership }
 
 public sealed record AssuranceAuthorityDecision(
     bool Permitted, string Reason, ProgramRole? SatisfiedBy, AssuranceAuthoritySource Source, int PolicyVersion);
@@ -111,10 +128,24 @@ public static class AssuranceDeviationAuthority
         // Membership first, and through Satisfying so a more precise job title never removes the authority
         // its general form carried. None of the assurance roles has an implication today; taking it through
         // the shared rule means that stays true if one gains it.
-        foreach (var role in rule.ApprovingRoles)
+        //
+        // Position-governed roles are excluded here. Program Manager is an accountable position since #816,
+        // so a project-policy deviation takes the holder of that position, not everybody granted the role
+        // that makes them eligible for it. SQA and Airworthiness are unaffected: they remain base assurance
+        // roles and membership is exactly the right question for them.
+        // Version 1 predates the position/base-role split and must keep its original membership meaning when
+        // an immutable historical deviation is verified. Version 2 is the first policy whose ProgramManager
+        // entry means the accountable position.
+        foreach (var role in rule.ApprovingRoles.Where(x => policyVersion == 1 || !IsPositionGoverned(x)))
             if (approver.HeldRoles.Any(held => ProgramRoleAuthority.Satisfying(role).Contains(held)))
                 return new(true, $"{approver.UserName} holds {Readable(role)} authority on this Program.",
                     role, AssuranceAuthoritySource.Membership, policyVersion);
+
+        foreach (var role in policyVersion >= 2 ? rule.ApprovingRoles.Where(IsPositionGoverned) : [])
+            if (approver.LeadershipAuthorities.Contains(role))
+                return new(true,
+                    $"{approver.UserName} holds the {Readable(role)} Project Leadership position on this Program.",
+                    role, AssuranceAuthoritySource.ProjectLeadership, policyVersion);
 
         if (rule.DelegationAllowed)
             foreach (var role in rule.ApprovingRoles)
@@ -135,6 +166,14 @@ public static class AssuranceDeviationAuthority
 
         return Refused($"{approver.UserName} does not hold {required} authority on this Program, so they cannot approve a {Readable(deviationClass)} deviation.", policyVersion);
     }
+
+    /// <summary>
+    /// Whether an approving role names a Project Leadership position rather than a job somebody performs.
+    /// Only <c>ProgramManager</c> qualifies among today's assurance rules; the predicate is shared with the
+    /// rest of the model so a future rule naming a position gets the same treatment automatically.
+    /// </summary>
+    private static bool IsPositionGoverned(ProgramRole role) =>
+        SingularProgramRoles.IsSingular(role) || SingularProgramRoles.IsBaseEligibility(role);
 
     private static AssuranceAuthorityDecision Refused(string reason, int policyVersion) =>
         new(false, reason, null, AssuranceAuthoritySource.None, policyVersion);

@@ -39,6 +39,8 @@ public sealed class ManagedDocumentApiTests
                 new ProgramMembership(configuration.Id, scope.ProgramId, ProgramRole.ConfigurationManager, "admin", now),
                 new ProgramMembership(delegated.Id, scope.ProgramId, ProgramRole.SoftwareEngineer, "admin", now),
                 new ProgramMembership(engineer.Id, scope.ProgramId, ProgramRole.SoftwareEngineer, "admin", now),
+                new ProjectLeadershipAssignment(scope.ProgramId, ProjectLeadershipPosition.ConfigurationManager,
+                    configuration.Id, "admin", now),
                 new RoleDelegation(scope.ProgramId, configuration.Id, delegated.Id, ProgramRole.ConfigurationManager, now.AddMinutes(-1), now.AddDays(1), "Relationship control coverage.", "admin", now)); await db.SaveChangesAsync();
             releasedChangeId = releasedChange.Id; activeChangeId = activeChange.Id; foreignChangeId = foreignChange.Id; reportId = report.Id; testChangeId = testChange.Id;
         }
@@ -351,6 +353,119 @@ public sealed class ManagedDocumentApiTests
         Assert.Equal(HttpStatusCode.Forbidden, refused.StatusCode);
         var recovery = await administrator.GetFromJsonAsync<JsonElement>($"/api/my-work?projectId={scope.ProjectId}");
         Assert.Contains(recovery.GetProperty("tasks").EnumerateArray(), item => item.GetProperty("type").GetString() == "Project document owner recovery" && item.GetProperty("id").GetGuid() == documentId);
+    }
+
+    [Fact]
+    public async Task Managed_document_control_routes_require_position_authority_and_preserve_primary_backup_delegation_and_admin()
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var administrator = factory.CreateClient();
+        await ProblemReportApiTests.BootstrapAndLoginAsync(administrator);
+        var scope = await SeedProjectAsync(factory);
+
+        using (var serviceScope = factory.Services.CreateScope())
+        {
+            var db = serviceScope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            var now = DateTimeOffset.UtcNow;
+            var baseConfiguration = new UserAccount("base.configuration", "Base Configuration", "base.configuration@example.test", IdentityService.HashPassword(AeroLinkApiFactory.MemberPassword), now);
+            var baseProgramManager = new UserAccount("base.program.manager", "Base Program Manager", "base.program.manager@example.test", IdentityService.HashPassword(AeroLinkApiFactory.MemberPassword), now);
+            var primaryAccount = new UserAccount("configuration.primary", "Configuration Primary", "configuration.primary@example.test", IdentityService.HashPassword(AeroLinkApiFactory.MemberPassword), now);
+            var backupAccount = new UserAccount("configuration.backup", "Configuration Backup", "configuration.backup@example.test", IdentityService.HashPassword(AeroLinkApiFactory.MemberPassword), now);
+            var delegatedAccount = new UserAccount("configuration.delegated", "Configuration Delegate", "configuration.delegated@example.test", IdentityService.HashPassword(AeroLinkApiFactory.MemberPassword), now);
+            db.AddRange(baseConfiguration, baseProgramManager, primaryAccount, backupAccount, delegatedAccount,
+                new ProgramMembership(baseConfiguration.Id, scope.ProgramId, ProgramRole.ConfigurationManager, "admin", now),
+                new ProgramMembership(baseProgramManager.Id, scope.ProgramId, ProgramRole.ProgramManager, "admin", now),
+                new ProgramMembership(primaryAccount.Id, scope.ProgramId, ProgramRole.ConfigurationManager, "admin", now),
+                new ProgramMembership(backupAccount.Id, scope.ProgramId, ProgramRole.ConfigurationManager, "admin", now),
+                new ProgramMembership(delegatedAccount.Id, scope.ProgramId, ProgramRole.SoftwareEngineer, "admin", now),
+                new ProjectLeadershipAssignment(scope.ProgramId, ProjectLeadershipPosition.ConfigurationManager, primaryAccount.Id, "admin", now),
+                new ProjectLeadershipBackup(scope.ProgramId, ProjectLeadershipPosition.ConfigurationManager, backupAccount.Id, "admin", now),
+                new RoleDelegation(scope.ProgramId, primaryAccount.Id, delegatedAccount.Id, ProgramRole.ConfigurationManager,
+                    now.AddMinutes(-1), now.AddDays(1), "Controlled-document configuration coverage.", "admin", now));
+            await db.SaveChangesAsync();
+        }
+
+        using var created = await administrator.PostAsJsonAsync("/api/managed-documents", new
+        {
+            projectId = scope.ProjectId,
+            acronym = "CMP",
+            documentType = "Configuration Management Plan",
+            title = "Position-controlled configuration plan",
+            ownerId = "software.author",
+            formalChangeSummary = "Prove managed-document authority follows Project Leadership.",
+            operationKey = Guid.NewGuid().ToString("N")
+        });
+        Assert.Equal(HttpStatusCode.Created, created.StatusCode);
+        var createdBody = await created.Content.ReadFromJsonAsync<JsonElement>();
+        var documentId = createdBody.GetProperty("id").GetGuid();
+        var revisionId = createdBody.GetProperty("revisionId").GetGuid();
+        var administratorDetail = await administrator.GetFromJsonAsync<JsonElement>($"/api/managed-documents/{documentId}");
+        Assert.True(administratorDetail.GetProperty("canReassignSteward").GetBoolean());
+        Assert.True(administratorDetail.GetProperty("revisions")[0].GetProperty("canReviseFormalSummary").GetBoolean());
+
+        foreach (var userName in new[] { "base.configuration", "base.program.manager" })
+        {
+            using var baseOnly = await LoginAsync(factory, userName);
+            var detail = await baseOnly.GetFromJsonAsync<JsonElement>($"/api/managed-documents/{documentId}");
+            var revision = detail.GetProperty("revisions")[0];
+            Assert.False(detail.GetProperty("canReassignSteward").GetBoolean());
+            Assert.False(revision.GetProperty("canReviseFormalSummary").GetBoolean());
+            Assert.False(revision.GetProperty("canReassignResponsibleOwner").GetBoolean());
+
+            using var createDenied = await baseOnly.PostAsJsonAsync("/api/managed-documents", new { projectId = scope.ProjectId, acronym = "DENY", documentType = "Plan", title = "Denied", ownerId = "software.author", formalChangeSummary = "Must not persist.", operationKey = Guid.NewGuid().ToString("N") });
+            Assert.Equal(HttpStatusCode.Forbidden, createDenied.StatusCode);
+            using var successorDenied = await baseOnly.PostAsJsonAsync($"/api/managed-documents/{documentId}/revisions", new { ownerId = "software.author", changeSummary = "Must not start." });
+            Assert.Equal(HttpStatusCode.Forbidden, successorDenied.StatusCode);
+            using var formalDenied = await baseOnly.PatchAsJsonAsync($"/api/managed-documents/revisions/{revisionId}/formal-summary", new { formalChangeSummary = "Must not change.", reason = "Base eligibility is not authority.", expectedVersion = revision.GetProperty("version").GetInt64() });
+            Assert.Equal(HttpStatusCode.Forbidden, formalDenied.StatusCode);
+            using var stewardDenied = await baseOnly.PatchAsJsonAsync($"/api/managed-documents/{documentId}/steward", new { assigneeId = "software.lead", reason = "Must not transfer.", expectedVersion = detail.GetProperty("version").GetInt64() });
+            Assert.Equal(HttpStatusCode.Forbidden, stewardDenied.StatusCode);
+            using var ownerDenied = await baseOnly.PatchAsJsonAsync($"/api/managed-documents/revisions/{revisionId}/responsible-owner", new { assigneeId = "software.lead", reason = "Must not transfer.", expectedVersion = revision.GetProperty("version").GetInt64() });
+            Assert.Equal(HttpStatusCode.Forbidden, ownerDenied.StatusCode);
+            using var checkoutDenied = await baseOnly.PostAsync($"/api/managed-documents/revisions/{revisionId}/checkout", null);
+            Assert.Equal(HttpStatusCode.Forbidden, checkoutDenied.StatusCode);
+            using var unlockDenied = await baseOnly.PostAsJsonAsync($"/api/managed-documents/revisions/{revisionId}/force-unlock", new { reason = "Must not unlock." });
+            Assert.Equal(HttpStatusCode.Forbidden, unlockDenied.StatusCode);
+            using var withdrawDenied = await baseOnly.PostAsJsonAsync($"/api/managed-documents/revisions/{revisionId}/withdraw", new { reason = "Must not withdraw.", expectedVersion = revision.GetProperty("version").GetInt64() });
+            Assert.Equal(HttpStatusCode.Forbidden, withdrawDenied.StatusCode);
+            using var scanDenied = await baseOnly.PostAsync($"/api/managed-documents/projects/{scope.ProjectId}/integrity/scan", null);
+            Assert.Equal(HttpStatusCode.Forbidden, scanDenied.StatusCode);
+            using var reconcileDenied = await baseOnly.PostAsync($"/api/managed-documents/projects/{scope.ProjectId}/storage/reconcile", null);
+            Assert.Equal(HttpStatusCode.Forbidden, reconcileDenied.StatusCode);
+            using var restoreForm = new MultipartFormDataContent();
+            using var restoreDenied = await baseOnly.PostAsync($"/api/managed-documents/attachments/{revision.GetProperty("currentWorkingAttachmentId").GetGuid()}/restore", restoreForm);
+            Assert.Equal(HttpStatusCode.Forbidden, restoreDenied.StatusCode);
+        }
+
+        using var primary = await LoginAsync(factory, "configuration.primary");
+        using var backup = await LoginAsync(factory, "configuration.backup");
+        using var delegated = await LoginAsync(factory, "configuration.delegated");
+        foreach (var authorized in new[] { primary, backup, delegated })
+        {
+            var detail = await authorized.GetFromJsonAsync<JsonElement>($"/api/managed-documents/{documentId}");
+            Assert.True(detail.GetProperty("canReassignSteward").GetBoolean());
+            Assert.True(detail.GetProperty("revisions")[0].GetProperty("canReviseFormalSummary").GetBoolean());
+            Assert.True(detail.GetProperty("revisions")[0].GetProperty("canReassignResponsibleOwner").GetBoolean());
+        }
+
+        var beforePrimary = await primary.GetFromJsonAsync<JsonElement>($"/api/managed-documents/{documentId}");
+        using var formal = await primary.PatchAsJsonAsync($"/api/managed-documents/revisions/{revisionId}/formal-summary", new { formalChangeSummary = "The Configuration Manager controls the formal scope.", reason = "Exercise primary authority.", expectedVersion = beforePrimary.GetProperty("revisions")[0].GetProperty("version").GetInt64() });
+        Assert.Equal(HttpStatusCode.OK, formal.StatusCode);
+        var beforeBackup = await backup.GetFromJsonAsync<JsonElement>($"/api/managed-documents/{documentId}");
+        using var steward = await backup.PatchAsJsonAsync($"/api/managed-documents/{documentId}/steward", new { assigneeId = "software.lead", reason = "Exercise standing-backup authority.", expectedVersion = beforeBackup.GetProperty("version").GetInt64() });
+        Assert.Equal(HttpStatusCode.OK, steward.StatusCode);
+        var beforeDelegate = await delegated.GetFromJsonAsync<JsonElement>($"/api/managed-documents/{documentId}");
+        using var owner = await delegated.PatchAsJsonAsync($"/api/managed-documents/revisions/{revisionId}/responsible-owner", new { assigneeId = "software.lead", reason = "Exercise exact delegated authority.", expectedVersion = beforeDelegate.GetProperty("revisions")[0].GetProperty("version").GetInt64() });
+        Assert.Equal(HttpStatusCode.OK, owner.StatusCode);
+
+        using var scan = await primary.PostAsync($"/api/managed-documents/projects/{scope.ProjectId}/integrity/scan", null);
+        Assert.Equal(HttpStatusCode.OK, scan.StatusCode);
+        using var reconcile = await backup.PostAsync($"/api/managed-documents/projects/{scope.ProjectId}/storage/reconcile", null);
+        Assert.Equal(HttpStatusCode.OK, reconcile.StatusCode);
+        using var missingSession = await delegated.PostAsJsonAsync($"/api/managed-documents/revisions/{revisionId}/force-unlock", new { reason = "No active session exists." });
+        Assert.Equal(HttpStatusCode.NotFound, missingSession.StatusCode);
+        using var activeConflict = await primary.PostAsJsonAsync($"/api/managed-documents/{documentId}/revisions", new { ownerId = "software.author", changeSummary = "Cannot start beside the active revision." });
+        Assert.Equal(HttpStatusCode.Conflict, activeConflict.StatusCode);
     }
 
     [Fact]
@@ -854,9 +969,13 @@ public sealed class ManagedDocumentApiTests
         var technicalStep = submittedRevision.GetProperty("reviewSteps").EnumerateArray().Single(x => x.GetProperty("state").GetString() == "Active");
         Assert.Equal("TechnicalDocumentReview", technicalStep.GetProperty("requiredAuthority").GetString());
         Assert.Equal("SoftwareEngineeringLead", technicalStep.GetProperty("grantedAuthority").GetString());
-        Assert.Equal("DirectMembership", technicalStep.GetProperty("authoritySource").GetString());
+        // The signature records that the technical reviewer signed as the holder of the Software Engineering
+        // Lead position, which is what they are. Recording it as direct membership — as this did before #816
+        // separated the two — misdescribes who was accountable on a controlled signature.
+        Assert.Equal("ProjectLeadershipPrimary", technicalStep.GetProperty("authoritySource").GetString());
         Assert.NotEqual(Guid.Empty, technicalStep.GetProperty("authoritySourceId").GetGuid());
         Assert.Equal(Guid.Parse("89d7b639-96f1-4fd4-970a-8a0db066c493"), technicalStep.GetProperty("workflowId").GetGuid());
+        Assert.Equal(2, technicalStep.GetProperty("workflowVersion").GetInt32());
         Assert.Equal("FrozenAtAssignment;ActiveAccountAtSigning", technicalStep.GetProperty("authorityPolicy").GetString());
 
         using var technical = factory.CreateClient(); using (var login = await technical.PostAsJsonAsync("/api/auth/login", new { userName = "software.lead", password = AeroLinkApiFactory.MemberPassword })) Assert.Equal(HttpStatusCode.OK, login.StatusCode); await SecurityBoundaryTests.AuthorizeMutationsAsync(technical);
@@ -1244,7 +1363,18 @@ public sealed class ManagedDocumentApiTests
     {
         using var scope = factory.Services.CreateScope(); var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>(); var program = new ProgramRecord("Document Program", $"DC{Guid.NewGuid():N}"[..12]); var project = new ProjectRecord(program.Id, "Navigation Product", "Navigation Software"); var released = new SoftwareRelease(project.Id, "1.5", true); var active = new SoftwareRelease(project.Id, "1.6", false, released.Id); var now = DateTimeOffset.UtcNow;
         var technical = new UserAccount("software.lead", "Rina Shah", "software.lead@example.test", IdentityService.HashPassword(AeroLinkApiFactory.MemberPassword), now); var quality = new UserAccount("quality.analyst", "Maya Patel", "quality.analyst@example.test", IdentityService.HashPassword(AeroLinkApiFactory.MemberPassword), now); var author = new UserAccount("software.author", "Ethan Brooks", "software.author@example.test", IdentityService.HashPassword(AeroLinkApiFactory.MemberPassword), now); var reviewer = new UserAccount("system.reviewer", "Olivia Chen", "system.reviewer@example.test", IdentityService.HashPassword(AeroLinkApiFactory.MemberPassword), now);
-        db.AddRange(program, project, released, active, technical, quality, author, reviewer, new ProgramMembership(technical.Id, program.Id, ProgramRole.SoftwareEngineeringLead, "admin", now), new ProgramMembership(quality.Id, program.Id, ProgramRole.SoftwareQualityAnalyst, "admin", now), new ProgramMembership(author.Id, program.Id, ProgramRole.SoftwareEngineer, "admin", now), new ProgramMembership(author.Id, program.Id, ProgramRole.Reviewer, "admin", now), new ProgramMembership(reviewer.Id, program.Id, ProgramRole.Reviewer, "admin", now)); await db.SaveChangesAsync(); return (program.Id, project.Id, released.Id, active.Id);
+        // Technical document review is the Software Engineering Lead position's authority since #816, so the
+        // reviewer holds the base role that makes them eligible and is elevated into the post. The retired
+        // role name on its own no longer signs anything.
+        db.AddRange(program, project, released, active, technical, quality, author, reviewer, new ProgramMembership(technical.Id, program.Id, ProgramRole.SoftwareEngineer, "admin", now), new ProjectLeadershipAssignment(program.Id, ProjectLeadershipPosition.SoftwareEngineeringLead, technical.Id, "admin", now), new ProgramMembership(quality.Id, program.Id, ProgramRole.SoftwareQualityAnalyst, "admin", now), new ProgramMembership(author.Id, program.Id, ProgramRole.SoftwareEngineer, "admin", now), new ProgramMembership(author.Id, program.Id, ProgramRole.Reviewer, "admin", now), new ProgramMembership(reviewer.Id, program.Id, ProgramRole.Reviewer, "admin", now)); await db.SaveChangesAsync(); return (program.Id, project.Id, released.Id, active.Id);
+    }
+    private static async Task<HttpClient> LoginAsync(AeroLinkApiFactory factory, string userName)
+    {
+        var client = factory.CreateClient();
+        using var login = await client.PostAsJsonAsync("/api/auth/login", new { userName, password = AeroLinkApiFactory.MemberPassword });
+        Assert.Equal(HttpStatusCode.OK, login.StatusCode);
+        await SecurityBoundaryTests.AuthorizeMutationsAsync(client);
+        return client;
     }
     private static Dictionary<string,string> Query(Uri uri) => uri.Query.TrimStart('?').Split('&').Select(part => part.Split('=', 2)).ToDictionary(pair => pair[0], pair => Uri.UnescapeDataString(pair[1]));
     private static ConnectorLaunchEnvelope LaunchEnvelope(Uri uri)

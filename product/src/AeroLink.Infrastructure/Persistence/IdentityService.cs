@@ -52,12 +52,31 @@ public sealed class IdentityService(AeroLinkDbContext db, IDataProtectionProvide
         session.Revoke(now); var userName = await db.UserAccounts.Where(x => x.Id == session.UserId).Select(x => x.UserName).SingleAsync(ct); db.SecurityAuditEvents.Add(new("Logout", userName, "session", "Success", "Session revoked.", ip, now)); await db.SaveChangesAsync(ct);
     }
     public async Task<bool> ConfirmPasswordAsync(Guid userId, string password, CancellationToken ct) { var hash = await db.UserAccounts.Where(x => x.Id == userId).Select(x => x.PasswordHash).SingleAsync(ct); return VerifyPassword(password, hash); }
+    /// <summary>
+    /// The roles a membership row may answer a demand with.
+    ///
+    /// <c>ProgramRoleAuthority.Satisfying</c> still folds the retired position roles into Reviewer, Approver
+    /// and Engineer so a stored workflow stage naming one keeps resolving. A membership carrying one must not
+    /// answer for it, though: that is the conflation #816 removes, and honouring it would let a roster grant
+    /// hand out a lead's review authority with no assignment anywhere. Positions answer through
+    /// <see cref="HoldsLeadershipDemandAsync"/> instead. The four base eligibility roles are still jobs: they
+    /// answer their own base-role questions, and Project Engineer or Engineering Manager still answers an
+    /// ordinary Engineer question.
+    /// </summary>
+    private static IReadOnlyList<ProgramRole> MembershipAnswerableRoles(ProgramRole demanded)
+    {
+        return [.. ProgramRoleAuthority.Satisfying(demanded)
+            .Where(x => !SingularProgramRoles.IsSingular(x))];
+    }
+
     public async Task<bool> HasRoleAsync(AuthenticatedUser user, Guid programId, ProgramRole role, DateTimeOffset now, CancellationToken ct)
     {
         if (user.IsAdministrator) return true;
         // A more precise job title must never remove capability: somebody recorded as a System Engineer is
-        // an engineer, and every place that asks for Engineer has to accept them.
-        var accepted = ProgramRoleAuthority.Satisfying(role).Select(x => x.ToString()).ToList();
+        // an engineer, and every place that asks for Engineer has to accept them. Position roles are the
+        // exception since #816 — a SystemEngineeringLead membership is a legacy row or an eligibility, not
+        // the post, so it is the leadership pass below that answers for it.
+        var accepted = MembershipAnswerableRoles(role).Select(x => x.ToString()).ToList();
         if (user.Programs.Any(x => x.ProgramId == programId && x.Roles.Any(accepted.Contains))) return true;
         if (await HoldsLeadershipDemandAsync(user.Id, programId, role, ct)) return true;
         if (await IsStandingBackupAsync(user.Id, programId, role, ct)) return true;
@@ -79,7 +98,11 @@ public sealed class IdentityService(AeroLinkDbContext db, IDataProtectionProvide
             .Select(x => x.Role)
             .ToListAsync(ct);
         if (backedRoles.Count == 0) return false;
-        if (!backedRoles.Any(ProgramRoleAuthority.Satisfying(role).Contains)) return false;
+        // Position roles are excluded: since #816 a backup of a position is a ProjectLeadershipBackup, and
+        // honouring the legacy row here as well is what left a removed backup still signing. Reading it in
+        // one gate and not the others also gave three different answers to the same question.
+        var accepted = ProgramRoleAuthority.Satisfying(role);
+        if (!backedRoles.Any(x => !SingularProgramRoles.IsPositionGoverned(x) && accepted.Contains(x))) return false;
         return await db.ProgramMemberships.AsNoTracking()
             .AnyAsync(x => x.UserId == userId && x.ProgramId == programId && x.EndedAt == null, ct);
     }
@@ -90,7 +113,7 @@ public sealed class IdentityService(AeroLinkDbContext db, IDataProtectionProvide
         if (account.UserName == SystemAdministratorUserName) return true;
         // The same implication as the overload above. Two copies of this check exist and both are reached
         // from live authorization paths, so a rule applied to only one of them is a rule that holds by luck.
-        var accepted = ProgramRoleAuthority.Satisfying(role);
+        var accepted = MembershipAnswerableRoles(role);
         if (await db.ProgramMemberships.AsNoTracking().AnyAsync(x => x.UserId == userId && x.ProgramId == programId && x.EndedAt == null && accepted.Contains(x.Role), ct)) return true;
         if (await HoldsLeadershipDemandAsync(userId, programId, role, ct)) return true;
         if (await IsStandingBackupAsync(userId, programId, role, ct)) return true;
@@ -111,26 +134,15 @@ public sealed class IdentityService(AeroLinkDbContext db, IDataProtectionProvide
     /// </summary>
     private async Task<bool> HoldsLeadershipDemandAsync(Guid userId, Guid programId, ProgramRole demanded, CancellationToken ct)
     {
-        var accepted = ProgramRoleAuthority.Satisfying(demanded);
-        var primary = await db.ProjectLeadershipAssignments.AsNoTracking()
-            .Where(x => x.ProgramId == programId && x.HolderUserId == userId && x.EndedAt == null)
-            .Select(x => x.Position).ToListAsync(ct);
-        var backing = await db.ProjectLeadershipBackups.AsNoTracking()
-            .Where(x => x.ProgramId == programId && x.BackupUserId == userId && x.RemovedAt == null)
-            .Select(x => x.Position).ToListAsync(ct);
-        if (primary.Count == 0 && backing.Count == 0) return false;
-
-        var held = primary.Select(p => (Position: p, Demands: ProjectLeadership.SatisfyingDemands(p)))
-            .Concat(backing.Select(p => (Position: p, Demands: ProjectLeadership.SatisfyingDemands(p))))
-            .ToList();
-        if (!held.Any(x => x.Demands.Contains(demanded) || accepted.Any(x.Demands.Contains))) return false;
-
-        // The authority travels with the position only while its eligibility still holds: an active
-        // account and a current membership carrying the position's required base role.
         if (await db.UserAccounts.AsNoTracking().AnyAsync(x => x.Id == userId && x.State != AccountState.Active, ct)) return false;
-        var requiredRoles = held.Select(x => ProjectLeadership.RequiredBaseRole(x.Position)).Distinct().ToList();
-        return await db.ProgramMemberships.AsNoTracking()
-            .AnyAsync(x => x.UserId == userId && x.ProgramId == programId && x.EndedAt == null && requiredRoles.Contains(x.Role), ct);
+        // Delegated to the one resolver, which validates each position that answers the demand against that
+        // position's own eligibility. The version that lived here collected every position the person held,
+        // asked whether any of them answered the demand, then tested the *union* of their required base
+        // roles — so a System Engineering Lead who lost `SystemEngineer` kept the lead's Reviewer authority
+        // on the strength of an unrelated Configuration Manager position they still held.
+        var decision = await new ProjectAuthorityResolver(db)
+            .ResolveAnyLeadershipSatisfyingAsync(userId, programId, demanded, ct);
+        return decision.Granted;
     }
 
     /// <summary>
@@ -243,7 +255,88 @@ public sealed class IdentitySeeder(AeroLinkDbContext db)
                     db.ProgramMemberships.Add(new(user.Id, program, role, "system.bootstrap", now));
         }
         await db.SaveChangesAsync(ct);
+        await EnsureSeededLeadershipAsync(programs, now, ct);
     }
+
+    /// <summary>
+    /// Elevates the seeded leads into the Project Leadership positions their roles used to imply.
+    ///
+    /// Since #816 a <c>SoftwareEngineeringLead</c> membership is a retired position role that grants nothing
+    /// on its own — the authority travels with the assignment. Real deployments get their assignments from
+    /// the migration, which only runs on PostgreSQL; a fresh SQLite database seeds its state instead and
+    /// would otherwise come up with eight vacant positions and a roster of leads who cannot sign anything.
+    ///
+    /// Only the roles the seeded people actually hold are elevated, and only into a position that has never
+    /// been filled. A position whose assignment was ended was vacated by somebody deliberately, and a seed
+    /// run must not undo that — "no active assignment" alone would refill it on the next startup.
+    /// </summary>
+    private async Task EnsureSeededLeadershipAsync(IReadOnlyList<Guid> programs, DateTimeOffset now, CancellationToken ct)
+    {
+        foreach (var program in programs)
+        {
+            foreach (var position in ProjectLeadership.All)
+            {
+                if (await db.ProjectLeadershipAssignments.AnyAsync(
+                        x => x.ProgramId == program && x.Position == position, ct))
+                    continue;
+
+                // Prefer whoever the seed named as the legacy position holder; otherwise the earliest person
+                // holding the position's base role. Deterministic either way, so a reseed cannot silently
+                // move a position between two equally eligible people.
+                var requiredBaseRole = ProjectLeadership.RequiredBaseRole(position);
+                var legacyRole = LegacySeedRole(position);
+                var holder = await FirstHolderAsync(program, legacyRole, ct)
+                    ?? await FirstHolderAsync(program, requiredBaseRole, ct);
+                if (holder is null) continue;
+
+                // The same named derivation the migration uses: the lead membership is the evidence of the
+                // discipline, so the base role the position requires is granted here rather than assumed.
+                if (!await db.ProgramMemberships.AnyAsync(x => x.UserId == holder && x.ProgramId == program
+                        && x.Role == requiredBaseRole && x.EndedAt == null, ct))
+                    db.ProgramMemberships.Add(new(holder.Value, program, requiredBaseRole, "system.bootstrap", now));
+
+                db.ProjectLeadershipAssignments.Add(
+                    new ProjectLeadershipAssignment(program, position, holder.Value, "system.bootstrap", now));
+            }
+            await db.SaveChangesAsync(ct);
+        }
+    }
+
+    /// <summary>
+    /// The person the seed makes the holder of a position, chosen deterministically.
+    ///
+    /// The seed grants every role in one batch with a single timestamp, and several seeded people hold
+    /// <c>ProgramManager</c>, so ordering by <c>GrantedAt</c> alone leaves a tie. Breaking it on the account's
+    /// user name rather than its GUID is what makes a reseed land on the same person every time; a GUID
+    /// tie-break is a coin toss dressed up as an ordering.
+    /// </summary>
+    private async Task<Guid?> FirstHolderAsync(Guid programId, ProgramRole? role, CancellationToken ct)
+    {
+        if (role is null) return null;
+        var value = role.Value;
+        // SQLite cannot translate DateTimeOffset ordering. Keep the database-side filter and projection,
+        // then apply the deterministic seed ordering to the small candidate set in memory. PostgreSQL and
+        // SQLite now choose the same holder instead of the browser fixture failing before any journey runs.
+        var candidates = await db.ProgramMemberships.AsNoTracking()
+            .Where(x => x.ProgramId == programId && x.EndedAt == null && x.Role == value)
+            .Join(db.UserAccounts.AsNoTracking(), m => m.UserId, u => u.Id,
+                (m, u) => new { m.GrantedAt, u.UserName, u.Id, u.State })
+            .Where(x => x.State == AccountState.Active)
+            .ToListAsync(ct);
+        return candidates.OrderBy(x => x.GrantedAt).ThenBy(x => x.UserName, StringComparer.Ordinal)
+            .Select(x => (Guid?)x.Id).FirstOrDefault();
+    }
+
+    /// <summary>The retired position role a seeded person may still carry for each position, if any.</summary>
+    private static ProgramRole? LegacySeedRole(ProjectLeadershipPosition position) => position switch
+    {
+        ProjectLeadershipPosition.SystemEngineeringLead => ProgramRole.SystemEngineeringLead,
+        ProjectLeadershipPosition.SoftwareEngineeringLead => ProgramRole.SoftwareEngineeringLead,
+        ProjectLeadershipPosition.SystemTestLead => ProgramRole.SystemTestLead,
+        ProjectLeadershipPosition.SoftwareTestLead => ProgramRole.SoftwareTestLead,
+        ProjectLeadershipPosition.ProjectEngineer => ProgramRole.ProjectEngineeringLead,
+        _ => null,
+    };
 
     private static IEnumerable<(string User, string Name, string Email, ProgramRole[] Roles)> GeneratedPeople()
     {

@@ -52,6 +52,8 @@ public sealed class VerificationVocabularyApiTests
             new ProgramMembership(manager.Id, program.Id, ProgramRole.Engineer, "test.setup", now),
             new ProgramMembership(author.Id, program.Id, ProgramRole.Engineer, "test.setup", now),
             new ProgramMembership(approver.Id, program.Id, ProgramRole.Approver, "test.setup", now),
+            new ProjectLeadershipAssignment(program.Id, ProjectLeadershipPosition.ConfigurationManager,
+                manager.Id, "test.setup", now),
             ProjectVerificationVocabulary.Founding(project.Id, now));
         await db.SaveChangesAsync();
         return new(project.Id, release.Id, section.Id, managerName, authorName, approverName);

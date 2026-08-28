@@ -55,7 +55,11 @@ public sealed class AssurancePolicyApiTests : IClassFixture<SharedApiHost>
             new ProgramMembership(airworthiness.Id, program.Id, ProgramRole.Airworthiness, "test.setup", now),
             new ProgramMembership(configurationManager.Id, program.Id, ProgramRole.ConfigurationManager, "test.setup", now),
             new ProgramMembership(administrator.Id, program.Id, ProgramRole.Administrator, "test.setup", now),
-            new ProgramMembership(engineer.Id, program.Id, ProgramRole.Engineer, "test.setup", now));
+            new ProgramMembership(engineer.Id, program.Id, ProgramRole.Engineer, "test.setup", now),
+            new ProjectLeadershipAssignment(program.Id, ProjectLeadershipPosition.ProgramManager,
+                manager.Id, "test.setup", now),
+            new ProjectLeadershipAssignment(program.Id, ProjectLeadershipPosition.ConfigurationManager,
+                configurationManager.Id, "test.setup", now));
         await db.SaveChangesAsync();
         return new(project.Id, program.Id, release.Id, baseline.Id, manager.UserName, sqa.UserName,
             airworthiness.UserName, configurationManager.UserName, administrator.UserName, engineer.UserName,
@@ -402,6 +406,46 @@ public sealed class AssurancePolicyApiTests : IClassFixture<SharedApiHost>
             deviations = Array.Empty<object>(),
         });
         Assert.Equal(HttpStatusCode.Forbidden, refused.StatusCode);
+    }
+
+    [Fact]
+    public async Task Base_only_configuration_and_program_memberships_cannot_manage_assurance_policy()
+    {
+        var seeded = await SeedAsync(_host.Factory);
+        var tag = Guid.NewGuid().ToString("N")[..8];
+        var baseConfigurationManager = $"assurance.base.cm.{tag}";
+        var baseProgramManager = $"assurance.base.pm.{tag}";
+        using (var scope = _host.Factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            var now = DateTimeOffset.UtcNow;
+            UserAccount Account(string name) => new(name, name, $"{name}@example.test",
+                IdentityService.HashPassword(AeroLinkApiFactory.MemberPassword), now);
+            var cm = Account(baseConfigurationManager);
+            var pm = Account(baseProgramManager);
+            db.AddRange(cm, pm,
+                new ProgramMembership(cm.Id, seeded.ProgramId, ProgramRole.ConfigurationManager, "test.setup", now),
+                new ProgramMembership(pm.Id, seeded.ProgramId, ProgramRole.ProgramManager, "test.setup", now));
+            await db.SaveChangesAsync();
+        }
+
+        foreach (var userName in new[] { baseConfigurationManager, baseProgramManager })
+        {
+            using var client = _host.CreateClient();
+            await SignInAsync(client, userName);
+            var read = await client.GetFromJsonAsync<JsonElement>(
+                $"/api/projects/{seeded.ProjectId}/assurance-policy");
+            Assert.False(read.GetProperty("canManage").GetBoolean());
+            var refused = await client.PutAsJsonAsync($"/api/projects/{seeded.ProjectId}/assurance-policy", new
+            {
+                expectedVersion = 0,
+                declaredLevel = "LevelB",
+                reason = "Base eligibility is not configuration authority.",
+                selections = Array.Empty<object>(),
+                deviations = Array.Empty<object>(),
+            });
+            Assert.Equal(HttpStatusCode.Forbidden, refused.StatusCode);
+        }
     }
 
     [Fact]

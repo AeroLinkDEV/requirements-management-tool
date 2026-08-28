@@ -53,7 +53,7 @@ public sealed class ProjectLeadershipApiTests : IClassFixture<SharedApiHost>
         var backup = Account(backupEngineer);
         var testerAccount = Account(tester);
         db.AddRange(manager, first, second, backup, testerAccount);
-        // The manager carries the roster authority through the ProgramManager role; the three engineers
+        // The manager is eligible through the ProgramManager role; the three engineers
         // carry the base role the System Engineering Lead position requires; the tester deliberately does
         // not, which is what the eligibility refusal proves.
         db.AddRange(
@@ -62,6 +62,10 @@ public sealed class ProjectLeadershipApiTests : IClassFixture<SharedApiHost>
             new ProgramMembership(second.Id, program.Id, ProgramRole.SystemEngineer, "test.setup", now),
             new ProgramMembership(backup.Id, program.Id, ProgramRole.SystemEngineer, "test.setup", now),
             new ProgramMembership(testerAccount.Id, program.Id, ProgramRole.SystemTestEngineer, "test.setup", now));
+        // Managing leadership is the Program Manager position's, not the eligibility role's, so the manager
+        // is elevated into the post rather than merely granted the role that qualifies them for it.
+        db.Add(new ProjectLeadershipAssignment(
+            program.Id, ProjectLeadershipPosition.ProgramManager, manager.Id, "test.setup", now));
         await db.SaveChangesAsync();
         return new(project.Id, program.Id, manager.Id, managerName,
             first.Id, second.Id, backup.Id, testerAccount.Id,
@@ -159,6 +163,41 @@ public sealed class ProjectLeadershipApiTests : IClassFixture<SharedApiHost>
     }
 
     [Fact]
+    public async Task Disabled_primary_and_backup_are_reported_as_ineligible_and_hold_no_authority()
+    {
+        var seeded = await SeedAsync(_host.Factory);
+        using var client = _host.CreateClient();
+        await SignInAsync(client, seeded.ManagerName);
+
+        const string position = "SystemEngineeringLead";
+        Assert.True((await client.PostAsJsonAsync($"/api/projects/{seeded.ProjectId}/leadership/{position}/primary",
+            new { holderUserId = seeded.FirstId })).IsSuccessStatusCode);
+        Assert.True((await client.PostAsJsonAsync($"/api/projects/{seeded.ProjectId}/leadership/{position}/backup",
+            new { backupUserId = seeded.BackupId })).IsSuccessStatusCode);
+
+        using (var scope = _host.Factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            (await db.UserAccounts.SingleAsync(x => x.Id == seeded.FirstId)).Disable(DateTimeOffset.UtcNow);
+            (await db.UserAccounts.SingleAsync(x => x.Id == seeded.BackupId)).Disable(DateTimeOffset.UtcNow);
+            await db.SaveChangesAsync();
+        }
+
+        var body = await client.GetFromJsonAsync<JsonElement>($"/api/projects/{seeded.ProjectId}/leadership");
+        var row = body.GetProperty("positions").EnumerateArray()
+            .Single(x => x.GetProperty("position").GetString() == position);
+        Assert.False(row.GetProperty("primary").GetProperty("eligibilityValid").GetBoolean());
+        Assert.False(row.GetProperty("backup").GetProperty("eligibilityValid").GetBoolean());
+
+        using var authorityScope = _host.Factory.Services.CreateScope();
+        var identity = authorityScope.ServiceProvider.GetRequiredService<IdentityService>();
+        Assert.False(await identity.HasRoleAsync(seeded.FirstId, seeded.ProgramId,
+            ProgramRole.SystemEngineeringLead, DateTimeOffset.UtcNow, default));
+        Assert.False(await identity.HasRoleAsync(seeded.BackupId, seeded.ProgramId,
+            ProgramRole.SystemEngineeringLead, DateTimeOffset.UtcNow, default));
+    }
+
+    [Fact]
     public async Task Promoting_the_backup_ends_the_designation_atomically()
     {
         var seeded = await SeedAsync(_host.Factory);
@@ -183,17 +222,57 @@ public sealed class ProjectLeadershipApiTests : IClassFixture<SharedApiHost>
         Assert.Equal(1, await db.ProjectLeadershipBackups.CountAsync(x => x.Position == ProjectLeadershipPosition.SystemEngineeringLead && x.RemovedAt != null));
     }
 
-    [Fact]
-    public async Task The_retired_project_engineering_lead_cannot_be_newly_granted()
+    [Theory]
+    [InlineData(ProgramRole.SystemEngineeringLead)]
+    [InlineData(ProgramRole.SoftwareEngineeringLead)]
+    [InlineData(ProgramRole.SystemTestLead)]
+    [InlineData(ProgramRole.SoftwareTestLead)]
+    [InlineData(ProgramRole.ProjectEngineeringLead)]
+    public async Task A_retired_position_role_cannot_be_newly_granted_through_the_project_roster(
+        ProgramRole retiredRole)
     {
         var seeded = await SeedAsync(_host.Factory);
         using var client = _host.CreateClient();
         await SignInAsync(client, seeded.ManagerName);
 
         var granted = await client.PostAsJsonAsync($"/api/projects/{seeded.ProjectId}/personnel",
-            new { userId = seeded.FirstId, role = nameof(ProgramRole.ProjectEngineeringLead) });
+            new { userId = seeded.FirstId, role = retiredRole.ToString() });
         Assert.Equal(HttpStatusCode.Conflict, granted.StatusCode);
         Assert.Contains("retired", await granted.Content.ReadAsStringAsync());
+    }
+
+    [Theory]
+    [InlineData(ProgramRole.SystemEngineeringLead)]
+    [InlineData(ProgramRole.SoftwareEngineeringLead)]
+    [InlineData(ProgramRole.SystemTestLead)]
+    [InlineData(ProgramRole.SoftwareTestLead)]
+    [InlineData(ProgramRole.ProjectEngineeringLead)]
+    public async Task A_retired_position_role_cannot_be_newly_granted_through_global_administration(
+        ProgramRole retiredRole)
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var admin = factory.CreateClient();
+        await SecurityBoundaryTests.BootstrapAndLoginAdministratorAsync(admin);
+
+        Guid userId;
+        Guid programId;
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            var now = DateTimeOffset.UtcNow;
+            var program = new ProgramRecord($"Retired role {retiredRole}", $"RR{Guid.NewGuid():N}"[..12]);
+            var user = new UserAccount($"retired.{Guid.NewGuid():N}"[..40], "Retired role target",
+                $"retired.{Guid.NewGuid():N}@example.test", IdentityService.HashPassword(AeroLinkApiFactory.MemberPassword), now);
+            db.AddRange(program, user);
+            await db.SaveChangesAsync();
+            userId = user.Id;
+            programId = program.Id;
+        }
+
+        var adminGrant = await admin.PostAsJsonAsync($"/api/admin/users/{userId}/memberships",
+            new { programId, role = retiredRole.ToString() });
+        Assert.Equal(HttpStatusCode.Conflict, adminGrant.StatusCode);
+        Assert.Contains("retired", await adminGrant.Content.ReadAsStringAsync());
     }
 
     [Fact]

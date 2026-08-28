@@ -38,14 +38,17 @@ public sealed class ControlledEditingExactParentTests
             source.DisplayNumber, now, "SYSTPCR-000901");
         review.RecordTestChangeRequired("engineer", now);
         review.AssignControlledNumber("SYSTPCR-000901", now);
+        var account = new UserAccount("engineer", "Engineer", "engineer@example.test",
+            IdentityService.HashPassword("StrongPass!2026"), now);
         db.AddRange(program, project, release, source, baseline, artifact, revision,
-            new BaselineRequirementSelection(baseline.Id, artifact.Id, revision.Id), review);
+            new BaselineRequirementSelection(baseline.Id, artifact.Id, revision.Id), review, account,
+            new ProgramMembership(account.Id, program.Id, ProgramRole.Engineer, "test.setup", now));
         await db.SaveChangesAsync();
 
-        var actor = new AuthenticatedUser(Guid.NewGuid(), "engineer", "Engineer", "engineer@example.test",
+        var actor = new AuthenticatedUser(account.Id, "engineer", "Engineer", "engineer@example.test",
             false, [new UserProgramAccess(program.Id, [ProgramRole.Engineer.ToString()])]);
         var adapter = new TestChangeRequestControlledEditingAdapter(db);
-        var engine = new ControlledEditingCheckInEngine(db, new IdentityService(db), [adapter]);
+        var engine = new ControlledEditingCheckInEngine(db, new ProjectAuthorityResolver(db), [adapter]);
 
         // Checkout and autosave a malformed neither-parent proposal. The adapter intentionally allows the
         // half-written draft to be stored; the aggregate's review gate must reject it later.

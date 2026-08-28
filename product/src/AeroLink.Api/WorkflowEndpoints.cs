@@ -21,7 +21,8 @@ namespace AeroLink.Api;
 /// </summary>
 public static class WorkflowEndpoints
 {
-    private sealed record ApplicableCandidate(string UserName, string DisplayName, ProgramRole Role, bool IsDelegated);
+    /// <summary>One offered signer for one stage, carrying why they qualify so the picker can say so.</summary>
+    private sealed record StageCandidate(string UserId, string Name, string Role, string Via);
 
     public static void MapWorkflowEndpoints(this WebApplication app)
     {
@@ -39,11 +40,11 @@ public static class WorkflowEndpoints
         });
 
         app.MapPost("/api/review-workflows", async (CreateReviewWorkflowRequest request, HttpContext http,
-            AeroLinkDbContext db, IdentityService identity, IProjectLadderPolicyResolver policyResolver, CancellationToken ct) =>
+            AeroLinkDbContext db, IdentityService identity, IProjectLadderPolicyResolver policyResolver,
+            ProjectAuthorityResolver authority, CancellationToken ct) =>
         {
             // Deciding how a team reviews is a configuration-management act, not an authoring one.
-            if (!await http.HasProjectRoleAsync(db, identity, request.ProjectId, ct,
-                    ProgramRole.ConfigurationManager, ProgramRole.ProgramManager, ProgramRole.Administrator))
+            if (!await http.HasApprovalConfigurationAuthorityAsync(db, authority, request.ProjectId, ct))
                 return Results.Forbid();
             try
             {
@@ -64,12 +65,12 @@ public static class WorkflowEndpoints
         });
 
         app.MapPost("/api/review-workflows/{id:guid}/activate", async (Guid id, HttpContext http,
-            AeroLinkDbContext db, IdentityService identity, IProjectLadderPolicyResolver policyResolver, CancellationToken ct) =>
+            AeroLinkDbContext db, IdentityService identity, IProjectLadderPolicyResolver policyResolver,
+            ProjectAuthorityResolver authority, CancellationToken ct) =>
         {
             var workflow = await db.ReviewWorkflows.Include(x => x.Stages).SingleOrDefaultAsync(x => x.Id == id, ct);
             if (workflow is null) return Results.NotFound();
-            if (!await http.HasProjectRoleAsync(db, identity, workflow.ProjectId, ct,
-                    ProgramRole.ConfigurationManager, ProgramRole.ProgramManager, ProgramRole.Administrator))
+            if (!await http.HasApprovalConfigurationAuthorityAsync(db, authority, workflow.ProjectId, ct))
                 return Results.Forbid();
             try
             {
@@ -96,12 +97,12 @@ public static class WorkflowEndpoints
         });
 
         app.MapPost("/api/review-workflows/{id:guid}/revise", async (Guid id, ReviseReviewWorkflowRequest request,
-            HttpContext http, AeroLinkDbContext db, IdentityService identity, IProjectLadderPolicyResolver policyResolver, CancellationToken ct) =>
+            HttpContext http, AeroLinkDbContext db, IdentityService identity, IProjectLadderPolicyResolver policyResolver,
+            ProjectAuthorityResolver authority, CancellationToken ct) =>
         {
             var current = await db.ReviewWorkflows.Include(x => x.Stages).SingleOrDefaultAsync(x => x.Id == id, ct);
             if (current is null) return Results.NotFound();
-            if (!await http.HasProjectRoleAsync(db, identity, current.ProjectId, ct,
-                    ProgramRole.ConfigurationManager, ProgramRole.ProgramManager, ProgramRole.Administrator))
+            if (!await http.HasApprovalConfigurationAuthorityAsync(db, authority, current.ProjectId, ct))
                 return Results.Forbid();
             try
             {
@@ -123,12 +124,11 @@ public static class WorkflowEndpoints
         });
 
         app.MapPost("/api/review-workflows/{id:guid}/retire", async (Guid id, HttpContext http,
-            AeroLinkDbContext db, IdentityService identity, CancellationToken ct) =>
+            AeroLinkDbContext db, IdentityService identity, ProjectAuthorityResolver authority, CancellationToken ct) =>
         {
             var workflow = await db.ReviewWorkflows.Include(x => x.Stages).SingleOrDefaultAsync(x => x.Id == id, ct);
             if (workflow is null) return Results.NotFound();
-            if (!await http.HasProjectRoleAsync(db, identity, workflow.ProjectId, ct,
-                    ProgramRole.ConfigurationManager, ProgramRole.ProgramManager, ProgramRole.Administrator))
+            if (!await http.HasApprovalConfigurationAuthorityAsync(db, authority, workflow.ProjectId, ct))
                 return Results.Forbid();
             try
             {
@@ -155,44 +155,76 @@ public static class WorkflowEndpoints
             if (workflow is null) return Results.Ok(new { required = false });
 
             var programId = await db.Projects.Where(x => x.Id == projectId).Select(x => x.ProgramId).SingleAsync(ct);
-            var directEligible = await (from membership in db.ProgramMemberships.AsNoTracking().Where(x => x.ProgramId == programId && x.EndedAt == null)
-                                  join account in db.UserAccounts.AsNoTracking().Where(x => x.State == AccountState.Active)
-                                      on membership.UserId equals account.Id
-                                  select new ApplicableCandidate(account.UserName, account.DisplayName, membership.Role, false)).ToListAsync(ct);
-            // Standing backups are part of the same live authority policy as direct holders. Include only
-            // active Program members, so a stale backup account cannot be offered as a required signer.
-            var backupEligible = await (from backup in db.ProjectRoleBackups.AsNoTracking()
-                                        join membership in db.ProgramMemberships.AsNoTracking()
-                                            on new { UserId = backup.BackupUserId, backup.ProgramId }
-                                            equals new { UserId = membership.UserId, membership.ProgramId }
-                                        join account in db.UserAccounts.AsNoTracking().Where(x => x.State == AccountState.Active)
-                                            on backup.BackupUserId equals account.Id
-                                        where backup.ProgramId == programId && backup.RemovedAt == null && membership.EndedAt == null
-                                        select new ApplicableCandidate(account.UserName, account.DisplayName, backup.Role, false)).ToListAsync(ct);
-            // A delegation is a live exact-role grant, matching IdentityService.HasRoleAsync. The delegate
-            // must remain an active Program participant and account; ended memberships, revoked delegations,
-            // and expired/future intervals must never appear in an author-facing picker.
             var now = DateTimeOffset.UtcNow;
-            var delegationRows = await db.RoleDelegations.AsNoTracking()
-                .Where(x => x.ProgramId == programId && x.RevokedAt == null)
-                .Select(x => new { x.DelegateUserId, x.Role, x.StartsAt, x.EndsAt }).ToListAsync(ct);
-            // SQLite does not translate DateTimeOffset comparisons. Filter the small live set in memory, then
-            // use ordinary ID membership queries so PostgreSQL and SQLite expose the same candidates.
-            var liveDelegations = delegationRows.Where(x => x.StartsAt <= now && x.EndsAt > now).ToList();
-            var delegateIds = liveDelegations.Select(x => x.DelegateUserId).Distinct().ToList();
-            var delegatedAccounts = await (from membership in db.ProgramMemberships.AsNoTracking()
-                                           join account in db.UserAccounts.AsNoTracking().Where(x => x.State == AccountState.Active)
-                                               on membership.UserId equals account.Id
-                                           where membership.ProgramId == programId && membership.EndedAt == null
-                                                 && delegateIds.Contains(membership.UserId)
-                                           select new { account.Id, account.UserName, account.DisplayName }).ToListAsync(ct);
-            var delegatedEligible = liveDelegations.Join(delegatedAccounts,
-                    delegation => delegation.DelegateUserId,
-                    account => account.Id,
-                    (delegation, account) => new ApplicableCandidate(account.UserName, account.DisplayName, delegation.Role, true))
-                .ToList();
-            var eligible = directEligible.Concat(backupEligible).Concat(delegatedEligible)
-                .DistinctBy(x => new { x.UserName, x.Role }).ToList();
+
+            // Who each stage may actually name, taken from the same resolver the signing gate consults. The
+            // picker used to build candidates from memberships, legacy role backups and delegations, which
+            // stopped meaning authority at #816: it offered a base-role-only member for a leadership stage
+            // and omitted a newly assigned lead, so it and the signature endpoint disagreed in both
+            // directions. Resolving per required role makes them the same answer by construction.
+            var resolver = new ProjectAuthorityResolver(db);
+            // Load the roster once for role labels, then add only the few non-member accounts the resolver
+            // actually returns (an exact-role delegate or the installation administrator). That keeps the
+            // query scoped without hiding compatibility authority that is valid independently of membership.
+            var programMembers = await db.ProgramMemberships.AsNoTracking()
+                .Where(x => x.ProgramId == programId && x.EndedAt == null)
+                .Join(db.UserAccounts.AsNoTracking().Where(x => x.State == AccountState.Active),
+                    m => m.UserId, u => u.Id, (m, u) => new { u.Id, u.UserName, u.DisplayName, m.Role })
+                .ToListAsync(ct);
+            var accountById = programMembers.DistinctBy(x => x.Id)
+                .ToDictionary(x => x.Id, x => (x.UserName, x.DisplayName));
+            var rolesByUser = programMembers.GroupBy(x => x.Id)
+                .ToDictionary(x => x.Key, x => x.Select(member => member.Role).ToList());
+            // The installation administrator is intentionally not required to hold a Program membership.
+            // ResolveHoldersAsync includes that substitution because the signing gate does; load the account
+            // alongside the scoped roster so the projection can actually name the holder it reports.
+            var systemAdministrator = await db.UserAccounts.AsNoTracking()
+                .Where(x => x.State == AccountState.Active
+                            && x.UserName == IdentityService.SystemAdministratorUserName)
+                .Select(x => new { x.Id, x.UserName, x.DisplayName })
+                .SingleOrDefaultAsync(ct);
+            if (systemAdministrator is not null)
+                accountById[systemAdministrator.Id] =
+                    (systemAdministrator.UserName, systemAdministrator.DisplayName);
+
+            // What to show beside a candidate's name: the role they actually hold that answers this stage,
+            // not the stage's own required role. Labelling every option with the requirement makes the
+            // dropdown read as the same text repeated, which tells an author nothing about who they are
+            // choosing between.
+            string HeldRole(Guid userId, ProgramRole required)
+            {
+                var accepted = ProgramRoleAuthority.Satisfying(required);
+                var held = rolesByUser.GetValueOrDefault(userId) ?? [];
+                foreach (var role in held)
+                    if (accepted.Contains(role)) return role.ToString();
+                return required.ToString();
+            }
+
+            var candidatesByRole = new Dictionary<ProgramRole, IReadOnlyList<StageCandidate>>();
+            foreach (var requiredRole in workflow.Stages.Select(x => x.RequiredRole).Distinct())
+            {
+                var holders = await resolver.ResolveHoldersAsync(programId, requiredRole, now,
+                    includeProgramAdministratorSubstitution: true, ct);
+                var missingAccountIds = holders.Select(x => x.UserId)
+                    .Where(x => !accountById.ContainsKey(x)).Distinct().ToList();
+                if (missingAccountIds.Count > 0)
+                {
+                    var additionalAccounts = await db.UserAccounts.AsNoTracking()
+                        .Where(x => missingAccountIds.Contains(x.Id) && x.State == AccountState.Active)
+                        .Select(x => new { x.Id, x.UserName, x.DisplayName }).ToListAsync(ct);
+                    foreach (var account in additionalAccounts)
+                        accountById[account.Id] = (account.UserName, account.DisplayName);
+                }
+                var listed = holders.Where(x => accountById.ContainsKey(x.UserId))
+                    .Select(x => new StageCandidate(
+                        accountById[x.UserId].UserName, accountById[x.UserId].DisplayName,
+                        x.Source == ProjectAuthoritySource.AdministratorSubstitution
+                            ? ProgramRole.Administrator.ToString()
+                            : HeldRole(x.UserId, requiredRole),
+                        x.Source.ToString()))
+                    .ToList();
+                candidatesByRole[requiredRole] = listed.DistinctBy(x => x.UserId).OrderBy(x => x.Name).ToList();
+            }
 
             return Results.Ok(new
             {
@@ -209,19 +241,8 @@ public static class WorkflowEndpoints
                     stage.Name,
                     kind = stage.Kind.ToString(),
                     requiredRole = stage.RequiredRole.ToString(),
-                    // Administrators are listed for every stage because they can stand in when the named
-                    // authority is unavailable; a review that cannot proceed at all is not a control.
-                    candidates = eligible
-                        // IdentityService applies role delegations as exact-role grants. Keep the
-                        // established satisfying-role/admin substitution for direct memberships and
-                        // standing backups, but never infer a broader authority from a delegation.
-                        .Where(x => x.IsDelegated
-                            ? x.Role == stage.RequiredRole
-                            : ProgramRoleAuthority.Satisfying(stage.RequiredRole).Contains(x.Role)
-                                || x.Role == ProgramRole.Administrator)
-                        .Select(x => new { userId = x.UserName, name = x.DisplayName, role = x.Role.ToString() })
-                        .DistinctBy(x => x.userId)
-                        .OrderBy(x => x.name),
+                    candidates = candidatesByRole[stage.RequiredRole]
+                        .Select(x => new { userId = x.UserId, name = x.Name, role = x.Role, via = x.Via }),
                 }),
             });
         });
@@ -270,22 +291,50 @@ public static class WorkflowEndpoints
     }
 
     /// <summary>
-    /// The authority each user holds on the program owning this project.
+    /// The strongest effective authority each user holds on the program owning this project.
     ///
-    /// Somebody can hold several roles; the strongest is what they can sign as, because a person who is both
-    /// an engineer and a configuration manager does not lose the second by also being the first.
+    /// This must resolve the same leadership, standing-backup, delegation, account-state and administrator
+    /// rules as the signing gate. Reading raw membership rows here allowed a retired position role to become
+    /// an additional signer and could freeze an unrelated base role as the signature provenance.
     /// </summary>
     public static async Task<Dictionary<Guid, ProgramRole?>> AuthoritiesAsync(AeroLinkDbContext db,
         Guid projectId, IReadOnlyList<Guid> userIds, CancellationToken ct)
     {
         var programId = await db.Projects.Where(x => x.Id == projectId).Select(x => (Guid?)x.ProgramId).SingleOrDefaultAsync(ct);
         if (programId is null || userIds.Count == 0) return [];
+        var resolver = new ProjectAuthorityResolver(db);
+        var now = DateTimeOffset.UtcNow;
         var memberships = await db.ProgramMemberships.AsNoTracking()
             .Where(x => x.ProgramId == programId && x.EndedAt == null && userIds.Contains(x.UserId))
             .Select(x => new { x.UserId, x.Role }).ToListAsync(ct);
-        return userIds.ToDictionary(
-            id => id,
-            id => memberships.Where(x => x.UserId == id).Select(x => (ProgramRole?)x.Role).OrderByDescending(Rank).FirstOrDefault());
+        var result = new Dictionary<Guid, ProgramRole?>();
+        foreach (var userId in userIds)
+        {
+            ProgramRole? resolvedRole = null;
+            foreach (var candidate in ParticipationAuthorities)
+            {
+                var requirement = ProjectAuthorityRequirement.LegacyRoleDemand(candidate,
+                    allowProgramAdministratorSubstitution: true);
+                var decision = await resolver.ResolveAsync(userId, programId.Value, requirement, now, ct);
+                if (!decision.Granted) continue;
+
+                if (decision.Source == ProjectAuthoritySource.AdministratorSubstitution)
+                    resolvedRole = ProgramRole.Administrator;
+                else if (decision.Source == ProjectAuthoritySource.DirectBaseRole)
+                {
+                    var accepted = ProgramRoleAuthority.Satisfying(candidate)
+                        .Where(role => !SingularProgramRoles.IsSingular(role)).ToList();
+                    var held = memberships.Where(x => x.UserId == userId && accepted.Contains(x.Role))
+                        .Select(x => x.Role).ToHashSet();
+                    resolvedRole = accepted.Where(held.Contains).Select(role => (ProgramRole?)role).FirstOrDefault();
+                }
+                else
+                    resolvedRole = candidate;
+                break;
+            }
+            result[userId] = resolvedRole;
+        }
+        return result;
     }
 
     /// <summary>
@@ -304,28 +353,52 @@ public static class WorkflowEndpoints
         var programId = await db.Projects.Where(x => x.Id == projectId).Select(x => (Guid?)x.ProgramId)
             .SingleOrDefaultAsync(ct);
         if (programId is null) return null;
-        var roles = await db.ProgramMemberships.AsNoTracking()
-            .Where(x => x.ProgramId == programId && x.UserId == userId && x.EndedAt == null)
-            .Select(x => x.Role).ToListAsync(ct);
-        if (roles.Contains(ProgramRole.Administrator)) return ProgramRole.Administrator;
-        // Precise engineering and test titles satisfy their established generic authorities (and standing
-        // backups/delegations are handled by the live signing gates). Resolve the role the stage actually
-        // asks for, rather than the strongest unrelated role the member happens to hold.
-        return roles.Any(ProgramRoleAuthority.Satisfying(requiredRole).Contains) ?
-            (roles.Contains(requiredRole) ? requiredRole : ProgramRoleAuthority.Satisfying(requiredRole).First(roles.Contains)) : null;
+        var decision = await new ProjectAuthorityResolver(db).ResolveAsync(userId, programId.Value,
+            ProjectAuthorityRequirement.LegacyRoleDemand(requiredRole,
+                allowProgramAdministratorSubstitution: true), DateTimeOffset.UtcNow, ct);
+        if (!decision.Granted) return null;
+        if (decision.Source == ProjectAuthoritySource.AdministratorSubstitution) return ProgramRole.Administrator;
+
+        // Preserve the actual base role on the frozen signature where a membership answered the demand.
+        // Leadership, standing-backup and delegation decisions instead record the exact configured demand:
+        // no raw retired position membership is consulted, and the picker and submission gate therefore
+        // cannot disagree about whether the person may occupy this stage.
+        if (decision.Source == ProjectAuthoritySource.DirectBaseRole)
+        {
+            var accepted = SingularProgramRoles.IsPositionGoverned(requiredRole)
+                ? []
+                : ProgramRoleAuthority.Satisfying(requiredRole)
+                    .Where(role => !SingularProgramRoles.IsSingular(role)).ToList();
+            var roles = await db.ProgramMemberships.AsNoTracking()
+                .Where(x => x.ProgramId == programId && x.UserId == userId && x.EndedAt == null
+                            && accepted.Contains(x.Role))
+                .Select(x => x.Role).ToListAsync(ct);
+            if (roles.Contains(requiredRole)) return requiredRole;
+            foreach (var role in accepted)
+                if (roles.Contains(role)) return role;
+        }
+        return requiredRole;
     }
 
-    private static int Rank(ProgramRole? role) => role switch
-    {
-        ProgramRole.Administrator => 7,
-        ProgramRole.ProgramManager => 6,
-        ProgramRole.ConfigurationManager => 5,
-        ProgramRole.Approver => 4,
-        ProgramRole.TestLead => 3,
-        ProgramRole.Reviewer => 2,
-        ProgramRole.TestEngineer => 1,
-        _ => 0,
-    };
+    private static readonly ProgramRole[] ParticipationAuthorities =
+    [
+        ProgramRole.Administrator,
+        ProgramRole.ProgramManager,
+        ProgramRole.ConfigurationManager,
+        ProgramRole.ProjectEngineeringLead,
+        ProgramRole.EngineeringManager,
+        ProgramRole.SystemEngineeringLead,
+        ProgramRole.SoftwareEngineeringLead,
+        ProgramRole.SystemTestLead,
+        ProgramRole.SoftwareTestLead,
+        ProgramRole.Approver,
+        ProgramRole.TestLead,
+        ProgramRole.Reviewer,
+        ProgramRole.TestEngineer,
+        ProgramRole.Engineer,
+        ProgramRole.SoftwareQualityAnalyst,
+        ProgramRole.Airworthiness,
+    ];
 
     private static void ValidateSubject(ILadderPolicy policy, ReviewSubject subject)
     {

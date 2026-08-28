@@ -116,6 +116,8 @@ await using (var scope = app.Services.CreateAsyncScope())
         // #816: legacy singular memberships become the first Project Leadership assignments, with the
         // fail-closed Project Engineer / Project Engineering Lead conflict check this authority owns.
         await scope.ServiceProvider.GetRequiredService<ProjectLeadershipMigrationAuthority>().EnsureCompletedAsync();
+        // v2 repairs databases that completed v1, whose marker makes v1 a no-op for them forever.
+        await scope.ServiceProvider.GetRequiredService<ProjectLeadershipReconciliationAuthority>().EnsureCompletedAsync();
         await scope.ServiceProvider.GetRequiredService<TestChangeRequestPrefixMigrationAuthority>().EnsureCompletedAsync();
         // #726 is the last delivery slice: only after every execution consumer is routed through the
         // effective-executable resolver does the governed authority activate the software Procedure tier.

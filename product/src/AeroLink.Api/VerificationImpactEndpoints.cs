@@ -2492,10 +2492,6 @@ public static class VerificationImpactEndpoints
                                 workflow.Stages[index].RequiredRole, ct)
                             : (await WorkflowEndpoints.AuthoritiesAsync(db, review.ProjectId, [account.Id], ct))
                                 .GetValueOrDefault(account.Id);
-                        if (role is null && index < workflow.Stages.Count
-                            && await identity.HasRoleAsync(account.Id, programId, workflow.Stages[index].RequiredRole,
-                                DateTimeOffset.UtcNow, ct))
-                            role = workflow.Stages[index].RequiredRole;
                         if (role is null)
                             return Results.BadRequest(new { error = $"{account.DisplayName} does not hold authority to sign this review." });
                         selections.Add(new ApproverSelection(account.UserName, account.DisplayName, role));
