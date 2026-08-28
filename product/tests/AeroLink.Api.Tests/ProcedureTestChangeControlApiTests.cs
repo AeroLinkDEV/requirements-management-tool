@@ -767,6 +767,7 @@ public sealed class ProcedureTestChangeControlApiTests
         var release = new SoftwareRelease(project.Id, "7.25", false);
         db.AddRange(program, project, release);
 
+        UserAccount? configurationManager = null;
         foreach (var (name, role) in new[]
                  {
                      ("procedure.author", ProgramRole.TestEngineer),
@@ -779,7 +780,10 @@ public sealed class ProcedureTestChangeControlApiTests
                 IdentityService.HashPassword(AeroLinkApiFactory.MemberPassword), now);
             db.Add(account);
             db.Add(new ProgramMembership(account.Id, program.Id, role, "issue-725-test", now));
+            if (role == ProgramRole.ConfigurationManager) configurationManager = account;
         }
+        db.Add(new ProjectLeadershipAssignment(program.Id, ProjectLeadershipPosition.ConfigurationManager,
+            configurationManager!.Id, "issue-725-test", now));
 
         await db.SaveChangesAsync();
         return new(project.Id, release.Id, Guid.Empty, Guid.Empty);

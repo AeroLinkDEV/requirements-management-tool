@@ -77,6 +77,7 @@ public sealed class TestChangeRequestReviewWorkflowTests
         db.Add(engineer);
         db.Add(new ProgramMembership(engineer.Id, program.Id, ProgramRole.TestEngineer, "test.setup", now));
         db.Add(new ProgramMembership(engineer.Id, program.Id, ProgramRole.Approver, "test.setup", now));
+        UserAccount? configurationManager = null;
         foreach (var (user, role) in new[]
                  {
                      ("workflow.one", ProgramRole.Approver),
@@ -90,7 +91,10 @@ public sealed class TestChangeRequestReviewWorkflowTests
                 IdentityService.HashPassword(AeroLinkApiFactory.MemberPassword), now);
             db.Add(account);
             db.Add(new ProgramMembership(account.Id, program.Id, role, "test.setup", now));
+            if (role == ProgramRole.ConfigurationManager) configurationManager = account;
         }
+        db.Add(new ProjectLeadershipAssignment(program.Id, ProjectLeadershipPosition.ConfigurationManager,
+            configurationManager!.Id, "test.setup", now));
         var multi = new UserAccount("workflow.multirole", "Multi Role", "workflow.multirole@example.test",
             IdentityService.HashPassword(AeroLinkApiFactory.MemberPassword), now);
         db.Add(multi);
