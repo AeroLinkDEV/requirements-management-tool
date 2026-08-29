@@ -53,7 +53,9 @@ public sealed class RosterAuthoritySeparationTests : IClassFixture<SharedApiHost
             // The PE leadership primary assignment (Slice 2 domain).
             new ProjectLeadershipAssignment(program.Id, ProjectLeadershipPosition.ProjectEngineer, pePrimary.Id, "test.setup", now),
             // The standing backup designation.
-            new ProjectLeadershipBackup(program.Id, ProjectLeadershipPosition.ProjectEngineer, peBackup.Id, "test.setup", now));
+            new ProjectLeadershipBackup(program.Id, ProjectLeadershipPosition.ProjectEngineer, peBackup.Id, "test.setup", now),
+            // The PM leadership primary assignment: the PM base role alone is eligibility, not authority.
+            new ProjectLeadershipAssignment(program.Id, ProjectLeadershipPosition.ProgramManager, programManager.Id, "test.setup", now));
         await db.SaveChangesAsync();
         return new(project.Id, program.Id, peBaseOnly.Id, pePrimary.Id, peBackup.Id, programManager.Id, outsider.Id,
             peBaseOnly.UserName, pePrimary.UserName, peBackup.UserName, programManager.UserName, outsider.UserName);
@@ -121,8 +123,13 @@ public sealed class RosterAuthoritySeparationTests : IClassFixture<SharedApiHost
         Assert.Equal(HttpStatusCode.Forbidden, attempt.StatusCode);
     }
 
+    /// <summary>
+    /// A Program Manager leadership primary can mutate the roster. A person with only the ProgramManager
+    /// base role (eligibility without elevation) cannot — that is the #816 base-role vs leadership
+    /// separation.
+    /// </summary>
     [Fact]
-    public async Task Program_manager_base_role_retains_roster_authority()
+    public async Task Program_manager_leadership_primary_can_mutate_the_roster()
     {
         var seeded = await SeedAsync(_host.Factory);
         using var client = _host.CreateClient();
@@ -132,6 +139,30 @@ public sealed class RosterAuthoritySeparationTests : IClassFixture<SharedApiHost
             new { userId = seeded.OutsiderId, role = nameof(ProgramRole.SystemEngineer) });
         Assert.True(attempt.IsSuccessStatusCode || attempt.StatusCode == HttpStatusCode.Conflict,
             $"Expected success or conflict, got {attempt.StatusCode}");
+    }
+
+    [Fact]
+    public async Task Program_manager_base_eligibility_without_leadership_cannot_mutate_the_roster()
+    {
+        var seeded = await SeedAsync(_host.Factory);
+        using var client = _host.CreateClient();
+
+        // Create a member with the ProgramManager BASE ROLE only (no leadership assignment).
+        var baseOnly = $"rauth.pm.base.only.{Guid.NewGuid():N}"[..8];
+        using (var scope = _host.Factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            var account = new UserAccount(baseOnly, baseOnly, $"{baseOnly}@example.test",
+                IdentityService.HashPassword(AeroLinkApiFactory.MemberPassword), DateTimeOffset.UtcNow);
+            db.Add(account);
+            db.Add(new ProgramMembership(account.Id, seeded.ProgramId, ProgramRole.ProgramManager, "test.setup", DateTimeOffset.UtcNow));
+            await db.SaveChangesAsync();
+        }
+
+        await SignInAsync(client, baseOnly);
+        var attempt = await client.PostAsJsonAsync($"/api/projects/{seeded.ProjectId}/personnel",
+            new { userId = seeded.OutsiderId, role = nameof(ProgramRole.SystemEngineer) });
+        Assert.Equal(HttpStatusCode.Forbidden, attempt.StatusCode);
     }
 
     [Fact]

@@ -160,65 +160,6 @@ public sealed class IdentityService(AeroLinkDbContext db, IDataProtectionProvide
             .Select(x => x.Position).ToListAsync(ct);
         return primaries.Select(x => (x, true)).Concat(backups.Select(x => (x, false))).ToList();
     }
-
-    /// <summary>
-    /// Whether this person may change a project's roster, resolved from the #816 authority model rather
-    /// than from base-role membership alone. Under the Project Leadership model, holding the Project
-    /// Engineer base role makes a person <em>eligible</em> for the Project Engineer leadership position —
-    /// it does not grant the position's authority. Only the active primary or standing backup of that
-    /// position carries it.
-    ///
-    /// Retained authorities: ProgramManager base role (a Program Manager manages programs, including their
-    /// personnel), ProjectEngineeringLead legacy membership (transition compatibility — retired for new
-    /// grants), and program-scoped Administrator.
-    /// </summary>
-    public async Task<bool> HasRosterManagementAuthorityAsync(Guid userId, Guid programId, CancellationToken ct)
-    {
-        // Global administrator bypasses program-scoped checks.
-        var account = await db.UserAccounts.AsNoTracking()
-            .SingleOrDefaultAsync(x => x.Id == userId && x.State == AccountState.Active, ct);
-        if (account is null) return false;
-        if (account.UserName == SystemAdministratorUserName) return true;
-
-        // ProgramManager base role and program-scoped Administrator retain roster authority.
-        var legacyRoles = new[] { ProgramRole.ProgramManager, ProgramRole.Administrator };
-        var hasLegacy = await db.ProgramMemberships.AsNoTracking()
-            .AnyAsync(x => x.UserId == userId && x.ProgramId == programId && x.EndedAt == null && legacyRoles.Contains(x.Role), ct);
-        if (hasLegacy) return true;
-
-        // Project Engineering Lead legacy membership: transition compatibility only.
-        var pel = await db.ProgramMemberships.AsNoTracking()
-            .AnyAsync(x => x.UserId == userId && x.ProgramId == programId && x.Role == ProgramRole.ProjectEngineeringLead && x.EndedAt == null, ct);
-        if (pel) return true;
-
-        // #816: Project Engineer roster authority comes from the Project Leadership position (primary or
-        // standing backup), NOT from base Project Engineer membership. A person who merely holds the base
-        // role is eligible for elevation but does not carry the position's authority.
-        var pePrimary = await db.ProjectLeadershipAssignments.AsNoTracking()
-            .AnyAsync(x => x.ProgramId == programId && x.Position == ProjectLeadershipPosition.ProjectEngineer
-                && x.HolderUserId == userId && x.EndedAt == null, ct);
-        if (pePrimary)
-        {
-            // The position holder must still be a current member with the required base role.
-            var stillEligible = await db.ProgramMemberships.AsNoTracking()
-                .AnyAsync(x => x.UserId == userId && x.ProgramId == programId
-                    && x.Role == ProgramRole.ProjectEngineer && x.EndedAt == null, ct);
-            if (stillEligible) return true;
-        }
-
-        var peBackup = await db.ProjectLeadershipBackups.AsNoTracking()
-            .AnyAsync(x => x.ProgramId == programId && x.Position == ProjectLeadershipPosition.ProjectEngineer
-                && x.BackupUserId == userId && x.RemovedAt == null, ct);
-        if (peBackup)
-        {
-            var backupEligible = await db.ProgramMemberships.AsNoTracking()
-                .AnyAsync(x => x.UserId == userId && x.ProgramId == programId
-                    && x.Role == ProgramRole.ProjectEngineer && x.EndedAt == null, ct);
-            if (backupEligible) return true;
-        }
-
-        return false;
-    }
     private async Task<AuthenticatedUser> MapAsync(UserAccount user, DateTimeOffset now, CancellationToken ct)
     {
         // Ended memberships are retained as history and must never reach a session's authority set.
@@ -307,10 +248,11 @@ public sealed class IdentitySeeder(AeroLinkDbContext db)
                 db.UserAccounts.Add(user);
                 users[person.User] = user;
             }
-            // #816: curated seed accounts have their directory profile reconciled ONLY when the account has
-            // never been edited by an administrator. Once an admin changes the current display name or email,
-            // that edit is authoritative for the current identity and must survive restarts and re-seeding.
-            // The audit trail (IdentityUpdated event) records the change; this reconciliation must not undo it.
+            // #816 Slice 3: curated seed accounts have their directory profile reconciled ONLY when the
+            // account has never been edited by an administrator. Once an admin changes the current display
+            // name or email through the identity-edit endpoint, that edit is authoritative for the current
+            // identity and must survive restarts and re-seeding. The IdentityUpdated audit event records
+            // the change; this reconciliation must not silently undo it.
             else if (curatedUsers.Contains(person.User)
                 && !await db.SecurityAuditEvents.AsNoTracking().AnyAsync(
                     x => x.EventType == "IdentityUpdated" && x.Target == user.UserName, ct)

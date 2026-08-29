@@ -134,10 +134,12 @@ public sealed class ProgramRoleAuthorityTests
         => Assert.Contains(ProgramRole.ProjectEngineer, ProgramRoleAuthority.Satisfying(ProgramRole.Engineer));
 
     /// <summary>
-    /// Exactly one person holds each of these on a project. (#816: ProjectEngineer, ProgramManager,
-    /// EngineeringManager and ConfigurationManager left the singular set — they are now multi-member
-    /// eligibility base roles, and the singular authority lives in the Project Leadership assignment
-    /// tables. The discipline leads remain as a legacy transition constraint.)
+    /// Exactly one person holds each of these on a project. The disciplines beneath them have many members and
+    /// one lead; these have a holder and nothing beneath them.
+    /// </summary>
+    /// <summary>
+    /// The retired position roles keep their singularity so legacy data cannot grow a second live holder.
+    /// The four that became base eligibility do not — see the theory below.
     /// </summary>
     [Theory]
     [InlineData(ProgramRole.SystemEngineeringLead)]
@@ -145,21 +147,27 @@ public sealed class ProgramRoleAuthorityTests
     [InlineData(ProgramRole.SystemTestLead)]
     [InlineData(ProgramRole.SoftwareTestLead)]
     [InlineData(ProgramRole.ProjectEngineeringLead)]
-    public void A_position_one_person_holds_is_recorded_as_singular(ProgramRole role)
+    public void A_retired_position_role_is_still_recorded_as_singular(ProgramRole role)
         => Assert.True(SingularProgramRoles.IsSingular(role));
 
     /// <summary>
-    /// #816: these former singular roles are now multi-member eligibility base roles. Multiple people may
-    /// hold them; the leadership authority is granted through Project Leadership assignment, not through
-    /// membership singularity.
+    /// #816: these four answer "what job does this person do", and several people may do it. The singular
+    /// accountable post of the same name is a ProjectLeadershipAssignment, and that is where the database
+    /// enforces one holder.
+    ///
+    /// Enforcing it here as well is what made replacing a leader impossible without first opening a vacancy:
+    /// the prospective replacement could not be granted the eligibility while the incumbent still held it.
     /// </summary>
     [Theory]
     [InlineData(ProgramRole.ProjectEngineer)]
     [InlineData(ProgramRole.ProgramManager)]
     [InlineData(ProgramRole.EngineeringManager)]
     [InlineData(ProgramRole.ConfigurationManager)]
-    public void Leadership_eligibility_roles_are_no_longer_singular_memberships(ProgramRole role)
-        => Assert.False(SingularProgramRoles.IsSingular(role));
+    public void A_base_eligibility_role_may_be_held_by_several_people(ProgramRole role)
+    {
+        Assert.False(SingularProgramRoles.IsSingular(role));
+        Assert.True(SingularProgramRoles.IsBaseEligibility(role));
+    }
 
     /// <summary>
     /// A discipline is not singular. A project has many system engineers and one System Engineering Lead, and
@@ -182,17 +190,12 @@ public sealed class ProgramRoleAuthorityTests
     [InlineData(ProgramRole.Engineer)]
     [InlineData(ProgramRole.SystemEngineer)]
     [InlineData(ProgramRole.SoftwareEngineer)]
-    [InlineData(ProgramRole.SystemEngineeringLead)]
-    [InlineData(ProgramRole.SoftwareEngineeringLead)]
-    [InlineData(ProgramRole.ProjectEngineeringLead)]
     [InlineData(ProgramRole.EngineeringManager)]
     [InlineData(ProgramRole.TestEngineer)]
     [InlineData(ProgramRole.TestLead)]
     [InlineData(ProgramRole.ProjectEngineer)]
     [InlineData(ProgramRole.SystemTestEngineer)]
     [InlineData(ProgramRole.SoftwareTestEngineer)]
-    [InlineData(ProgramRole.SystemTestLead)]
-    [InlineData(ProgramRole.SoftwareTestLead)]
     public void Engineering_and_verification_engineering_roles_can_own_problem_reports(ProgramRole role)
         => Assert.True(ProblemReportOwnerAuthority.IsEligible([role]));
 
@@ -203,13 +206,33 @@ public sealed class ProgramRoleAuthorityTests
     [InlineData(ProgramRole.ProgramManager)]
     [InlineData(ProgramRole.SoftwareQualityAnalyst)]
     [InlineData(ProgramRole.Airworthiness)]
-    public void Oversight_and_approval_only_roles_cannot_hold_problem_report_ownership(ProgramRole role)
+    [InlineData(ProgramRole.ProjectEngineeringLead)]
+    [InlineData(ProgramRole.SystemEngineeringLead)]
+    [InlineData(ProgramRole.SoftwareEngineeringLead)]
+    [InlineData(ProgramRole.SystemTestLead)]
+    [InlineData(ProgramRole.SoftwareTestLead)]
+    public void Oversight_approval_and_retired_position_memberships_cannot_hold_problem_report_ownership(ProgramRole role)
         => Assert.False(ProblemReportOwnerAuthority.IsEligible([role]));
 
+    /// <summary>
+    /// Recovery follows the accountable position rather than the role since #816. The three predecessors map
+    /// onto positions — the retired ProjectEngineeringLead's recovery authority went to Project Engineer with
+    /// the rest of its footprint — and holding the base role now confers none of it. Whether a given person
+    /// holds one of these is the resolver's question; this pins the policy the endpoint reads.
+    /// </summary>
     [Theory]
-    [InlineData(ProgramRole.ProjectEngineeringLead)]
-    [InlineData(ProgramRole.EngineeringManager)]
-    [InlineData(ProgramRole.ProgramManager)]
-    public void Explicit_supervision_can_recover_an_ineligible_problem_report_owner(ProgramRole role)
-        => Assert.True(ProblemReportOwnerAuthority.CanRecover([role]));
+    [InlineData(ProjectLeadershipPosition.ProjectEngineer)]
+    [InlineData(ProjectLeadershipPosition.EngineeringManager)]
+    [InlineData(ProjectLeadershipPosition.ProgramManager)]
+    public void Explicit_supervision_can_recover_an_ineligible_problem_report_owner(ProjectLeadershipPosition position)
+        => Assert.Contains(position, ProblemReportOwnerAuthority.RecoveryPositions);
+
+    [Theory]
+    [InlineData(ProjectLeadershipPosition.SystemEngineeringLead)]
+    [InlineData(ProjectLeadershipPosition.SoftwareEngineeringLead)]
+    [InlineData(ProjectLeadershipPosition.SystemTestLead)]
+    [InlineData(ProjectLeadershipPosition.SoftwareTestLead)]
+    [InlineData(ProjectLeadershipPosition.ConfigurationManager)]
+    public void Leading_a_discipline_does_not_carry_problem_report_recovery(ProjectLeadershipPosition position)
+        => Assert.DoesNotContain(position, ProblemReportOwnerAuthority.RecoveryPositions);
 }
