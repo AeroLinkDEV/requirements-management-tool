@@ -1694,6 +1694,10 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
             // stage recorded before this existed was a content review, and the default has to say so on
             // purpose (LES-004).
             b.Property(x => x.Kind).HasConversion<string>().HasMaxLength(20).HasDefaultValue(ReviewStageKind.Review);
+            // Recorded since the Slice 4 cutover: which kind of authority the stage demands. Null on rows
+            // recorded before the cutover — they keep their stored RequiredRole and answer through the
+            // legacy compatibility policy, so historical evidence is never reinterpreted.
+            b.Property(x => x.RequiredAuthorityKind).HasConversion<string>().HasMaxLength(20);
             b.HasIndex(x => new { x.WorkflowId, x.Position }).IsUnique();
         });
         modelBuilder.Entity<NotificationDelivery>(b =>
