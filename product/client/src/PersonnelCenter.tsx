@@ -360,7 +360,7 @@ export default function PersonnelCenter({
 
         {!canManage && data && (
           <p className="personnelReadOnly">
-            You are viewing this roster. The Program Manager, Project Engineer or Project Engineering Lead can change it.
+            You are viewing this roster. The Program Manager or Project Engineer can change it.
           </p>
         )}
         {error && <p className="personnelError" role="alert">{error}</p>}
