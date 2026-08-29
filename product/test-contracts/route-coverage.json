@@ -371,6 +371,7 @@
         "SecurityHardeningTests",
         "SharedHostIsolationTests",
         "SoftwareChangeRequestLevelHistoryTests",
+        "TeamWorkProjectionApiTests",
         "TestChangeRequestConsolidationTests",
         "TestChangeRequestRegisterApiTests",
         "TestChangeRequestReviewWorkflowTests",

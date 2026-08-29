@@ -164,6 +164,16 @@ satisfied the gate. Historical review contracts continue to hash under their ori
 
 Approved work does not become silently rewritten because a later revision exists.
 
+## Team Work projection
+
+The server exposes a project-wide, read-only Team Work projection across current Change Requests, numbered Test
+Change Requests, Problem Reports, and downstream assessments. The projection owns the four canonical work lanes,
+0..N current-holder obligations, release/allocation provenance, and canonical record-opening identity; consumers do
+not reconstruct that lifecycle truth from roles or browser state. Review holders and Review-versus-Approval meaning
+come from the frozen active `ApprovalStep` records, not current workflow configuration, base project roles, or
+Project Leadership. Incorporated, withdrawn, closed, rejected, superseded, linked, and unnumbered records leave the
+active projection under explicit family policy. The Team Work client workspace is not yet implemented.
+
 ## Problem Reports
 
 Problem Reports are **Project-scoped controlled records**. Target build is an explicit attribute/filter rather than the record's ownership boundary.

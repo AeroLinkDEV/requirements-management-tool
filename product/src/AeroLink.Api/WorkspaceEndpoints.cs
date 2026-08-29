@@ -447,7 +447,7 @@ public static class WorkspaceEndpoints
             http.Items["AeroLink.User"] = user;
 
             var normalized = kind.Trim().ToLowerInvariant();
-            Guid? projectId = null, releaseId = null; var tail = ""; var projectWide = false;
+            Guid? projectId = null, releaseId = null; var tail = ""; var projectWide = false; var routeInvalid = false;
             Guid? reviewedDocumentId = null;
             switch (normalized)
             {
@@ -458,7 +458,15 @@ public static class WorkspaceEndpoints
                     if (record is not null)
                     {
                         projectId = record.ProjectId; releaseId = record.TargetReleaseId;
-                        tail = $"/{(record.Type == ChangeRequestType.Software ? "software" : "systems")}/change-requests/{id}";
+                        var branch = record.Type switch
+                        {
+                            ChangeRequestType.System => "systems",
+                            ChangeRequestType.Interface => "interfaces",
+                            ChangeRequestType.Software => "software",
+                            _ => null,
+                        };
+                        if (branch is null) routeInvalid = true;
+                        else tail = $"/{branch}/change-requests/{id}";
                     }
                     break;
                 }
@@ -509,8 +517,33 @@ public static class WorkspaceEndpoints
                 case "problem-report":
                 {
                     var record = await db.ProblemReports.AsNoTracking().Where(x => x.Id == id)
-                        .Select(x => new { x.ProjectId }).SingleOrDefaultAsync(ct);
-                    if (record is not null) { projectId = record.ProjectId; tail = "/problem-reports"; }
+                        .Select(x => new { x.ProjectId, x.TargetReleaseId }).SingleOrDefaultAsync(ct);
+                    if (record is not null) { projectId = record.ProjectId; releaseId = record.TargetReleaseId; tail = $"/problem-reports/{id}"; }
+                    break;
+                }
+                case "downstream-assessment" or "assessment":
+                {
+                    var record = await db.DownstreamChangeAssessments.AsNoTracking().Where(x => x.Id == id)
+                        .Select(x => new { x.ProjectId, x.ReleaseId, x.TargetLevel }).SingleOrDefaultAsync(ct);
+                    if (record is not null)
+                    {
+                        projectId = record.ProjectId; releaseId = record.ReleaseId;
+                        switch (record.TargetLevel)
+                        {
+                            case RequirementLevel.System:
+                                tail = $"/system-verification/coverage/{id}";
+                                break;
+                            case RequirementLevel.HighLevel:
+                                tail = $"/software-verification/hlr/coverage/{id}";
+                                break;
+                            case RequirementLevel.LowLevel:
+                                tail = $"/software-verification/llr/coverage/{id}";
+                                break;
+                            default:
+                                routeInvalid = true;
+                                break;
+                        }
+                    }
                     break;
                 }
                 case "test-change-request":
@@ -525,11 +558,13 @@ public static class WorkspaceEndpoints
                         projectId = record.ProjectId; releaseId = record.ReleaseId;
                         var branch = record.Discipline switch
                         {
+                            TestChangeReviewDiscipline.System => "system-verification",
                             TestChangeReviewDiscipline.HighLevelSoftware => "software-verification/hlr",
                             TestChangeReviewDiscipline.LowLevelSoftware => "software-verification/llr",
-                            _ => "system-verification",
+                            _ => null,
                         };
-                        tail = $"/{branch}/change-requests/{id}";
+                        if (branch is null) routeInvalid = true;
+                        else tail = $"/{branch}/change-requests/{id}";
                     }
                     break;
                 }
@@ -567,7 +602,7 @@ public static class WorkspaceEndpoints
                 }
             }
 
-            if (projectId is null) return Results.Redirect("/");
+            if (projectId is null || routeInvalid) return Results.Redirect("/");
             if (!await http.HasProjectAccessAsync(db, projectId.Value, ct)) return Results.Redirect("/");
 
             // Somebody following a review link after the review ended gets told so rather than left to work

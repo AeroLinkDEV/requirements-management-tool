@@ -50,6 +50,7 @@ builder.Services.AddProblemDetails();
 builder.Services.AddExceptionHandler<ConcurrencyExceptionHandler>();
 builder.Services.ConfigureHttpJsonOptions(options => options.SerializerOptions.Converters.Add(new JsonStringEnumConverter()));
 builder.Services.AddAeroLinkInfrastructure(builder.Configuration);
+builder.Services.AddScoped<TeamWorkProjectionService>();
 builder.Services.AddSingleton<ILadderPolicy, LegacyLadderPolicy>();
 if (restoreValidationReadOnly)
 {
@@ -334,6 +335,7 @@ app.MapGet("/health/ready", async (AeroLinkDbContext db,CancellationToken ct) =>
 // sign in, find your work, propose a change, freeze it, verify it, release it, administer it.
 app.MapAuthEndpoints();
 app.MapWorkspaceEndpoints();
+app.MapTeamWorkEndpoints();
 app.MapProjectConfigurationEndpoints();
 app.MapAssurancePolicyEndpoints();
 app.MapVerificationVocabularyEndpoints();
