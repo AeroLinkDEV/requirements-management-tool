@@ -20,19 +20,25 @@ public static class PersonnelEndpoints
     public static void MapPersonnelEndpoints(this WebApplication app)
     {
         app.MapGet("/api/projects/{projectId:guid}/personnel", async (Guid projectId, HttpContext http,
-            AeroLinkDbContext db, IdentityService identity, ProjectAuthorityResolver authority, CancellationToken ct) =>
+            AeroLinkDbContext db, IdentityService identity, ProjectAuthorityResolver resolver, CancellationToken ct) =>
         {
             if (!await http.HasProjectAccessAsync(db, projectId, ct)) return Results.Forbid();
             var programId = await ProgramOfAsync(db, projectId, ct);
             if (programId is null) return Results.NotFound();
 
-            var canManage = await http.HasRosterAuthorityAsync(db, authority, projectId, ct);
+            var canManage = await http.HasRosterAuthorityAsync(db, resolver, projectId, ct);
             var memberships = await db.ProgramMemberships.AsNoTracking()
                 .Where(x => x.ProgramId == programId).ToListAsync(ct);
             var backups = await db.ProjectRoleBackups.AsNoTracking()
                 .Where(x => x.ProgramId == programId && x.RemovedAt == null).ToListAsync(ct);
+            // #816: standing backups of the eight Project Leadership positions ride alongside the legacy
+            // role-keyed backups, so the roster can show who covers a leadership position.
+            var leadershipBackups = await db.ProjectLeadershipBackups.AsNoTracking()
+                .Where(x => x.ProgramId == programId && x.RemovedAt == null).ToListAsync(ct);
 
-            var userIds = memberships.Select(x => x.UserId).Concat(backups.Select(x => x.BackupUserId)).Distinct().ToList();
+            var userIds = memberships.Select(x => x.UserId)
+                .Concat(backups.Select(x => x.BackupUserId))
+                .Concat(leadershipBackups.Select(x => x.BackupUserId)).Distinct().ToList();
             var accounts = await db.UserAccounts.AsNoTracking().Where(x => userIds.Contains(x.Id))
                 .Select(x => new { x.Id, x.UserName, x.DisplayName, x.Email, x.State }).ToListAsync(ct);
             var byId = accounts.ToDictionary(x => x.Id);
@@ -73,7 +79,9 @@ public static class PersonnelEndpoints
                         accountDisabled = account is not null && account.State != AccountState.Active,
                         roles = active.Select(x => x.Role.ToString()).Order().ToList(),
                         endedRoles = ended.Select(x => x.Role.ToString()).Order().ToList(),
-                        backsUp = backups.Where(x => x.BackupUserId == group.Key).Select(x => x.Role.ToString()).Order().ToList(),
+                        backsUp = backups.Where(x => x.BackupUserId == group.Key).Select(x => x.Role.ToString())
+                            .Concat(leadershipBackups.Where(x => x.BackupUserId == group.Key).Select(x => x.Position.ToString()))
+                            .Order().ToList(),
                         joinedAt = group.Min(x => x.GrantedAt),
                         leftAt = active.Count == 0 ? ended.Max(x => x.EndedAt) : null,
                         isCurrent = active.Count > 0,
@@ -87,67 +95,87 @@ public static class PersonnelEndpoints
 
         // Accounts that could be added. Deliberately excludes current members so the picker cannot offer
         // somebody who is already here, and excludes disabled accounts so a lead cannot staff a project with
-        // people who can no longer sign in.
-        app.MapGet("/api/projects/{projectId:guid}/personnel/candidates", async (Guid projectId, HttpContext http,
-            AeroLinkDbContext db, IdentityService identity, ProjectAuthorityResolver authority, CancellationToken ct) =>
+        // people who can no longer sign in. `search` narrows the directory by name, username or email so the
+        // #816 Add Person to Project flow works as a directory rather than a bounded select.
+        app.MapGet("/api/projects/{projectId:guid}/personnel/candidates", async (Guid projectId, string? search, HttpContext http,
+            AeroLinkDbContext db, IdentityService identity, ProjectAuthorityResolver resolver, CancellationToken ct) =>
         {
-            if (!await http.HasRosterAuthorityAsync(db, authority, projectId, ct)) return Results.Forbid();
+            if (!await http.HasRosterAuthorityAsync(db, resolver, projectId, ct)) return Results.Forbid();
             var programId = await ProgramOfAsync(db, projectId, ct);
             if (programId is null) return Results.NotFound();
             var current = await db.ProgramMemberships.AsNoTracking()
                 .Where(x => x.ProgramId == programId && x.EndedAt == null).Select(x => x.UserId).Distinct().ToListAsync(ct);
+            var term = search?.Trim().ToLower();
             var candidates = await db.UserAccounts.AsNoTracking()
                 .Where(x => x.State == AccountState.Active && !current.Contains(x.Id))
+                .Where(x => term == null || term == "" || x.UserName.ToLower().Contains(term)
+                    || x.DisplayName.ToLower().Contains(term) || x.Email.ToLower().Contains(term))
                 .OrderBy(x => x.DisplayName)
                 .Select(x => new { userId = x.Id, userName = x.UserName, displayName = x.DisplayName, x.Email })
                 .ToListAsync(ct);
             return Results.Ok(candidates);
         });
 
+        // #816: adding a person to the project grants one or more base roles as ONE attributable logical
+        // operation — every requested role is validated before any membership is written. When neither the
+        // legacy `role` nor the `roles` array carries a value, the request is rejected rather than silently
+        // granting the enum default.
         app.MapPost("/api/projects/{projectId:guid}/personnel", async (Guid projectId, AddProjectMemberRequest request,
-            HttpContext http, AeroLinkDbContext db, IdentityService identity, ProjectAuthorityResolver authority, CancellationToken ct) =>
+            HttpContext http, AeroLinkDbContext db, IdentityService identity, ProjectAuthorityResolver resolver, CancellationToken ct) =>
         {
             var actor = http.UserAccount();
-            if (!await http.HasRosterAuthorityAsync(db, authority, projectId, ct)) return Results.Forbid();
+            if (!await http.HasRosterAuthorityAsync(db, resolver, projectId, ct)) return Results.Forbid();
+            var roles = request.Roles is { Length: > 0 } many ? many.Distinct().ToList()
+                : request.Role is not null ? new List<ProgramRole> { request.Role.Value }
+                : null;
+            if (roles is null || roles.Count == 0)
+                return Results.BadRequest(new { error = "Choose at least one project role." });
             // Project leadership staffs its own project. It does not mint project administrators — that stays
             // with the global account, so nobody can promote themselves out of the authority they were given.
-            if (request.Role == ProgramRole.Administrator && !actor.IsAdministrator)
+            if (roles.Contains(ProgramRole.Administrator) && !actor.IsAdministrator)
                 return Results.Forbid();
-            // #816: the retired position roles are history, not grants. Existing rows stay readable and the
+            // #816: retired position roles are history, not grants. Existing rows stay readable and the
             // v2 reconciliation retires them, but a new grant resurrects a parallel accountability the
             // leadership position now owns — and on a database that has not yet run v2 it recreates exactly
             // the state the reconciliation refuses, so the next restart would fail to start.
-            if (SingularProgramRoles.IsSingular(request.Role))
-                return Results.Conflict(new { error = $"{Readable(request.Role)} is retired as a project role. Assign the matching Project Leadership position instead." });
+            if (roles.Any(SingularProgramRoles.IsSingular))
+            {
+                var retired = roles.First(SingularProgramRoles.IsSingular);
+                return Results.Conflict(new { error = $"{Readable(retired)} is retired as a project role. Assign the matching Project Leadership position instead." });
+            }
             var programId = await ProgramOfAsync(db, projectId, ct);
             if (programId is null) return Results.NotFound();
             if (!await db.UserAccounts.AnyAsync(x => x.Id == request.UserId && x.State == AccountState.Active, ct))
                 return Results.BadRequest(new { error = "That person does not have an active AeroLink account." });
-            if (await db.ProgramMemberships.AnyAsync(x => x.UserId == request.UserId && x.ProgramId == programId && x.Role == request.Role && x.EndedAt == null, ct))
-                return Results.Conflict(new { error = "They already hold that position on this project." });
-            if (SingularProgramRoles.IsSingular(request.Role))
+            foreach (var role in roles)
             {
-                var holder = await db.ProgramMemberships.AsNoTracking()
-                    .Where(x => x.ProgramId == programId && x.Role == request.Role && x.EndedAt == null)
-                    .Join(db.UserAccounts.AsNoTracking(), m => m.UserId, u => u.Id, (m, u) => u.DisplayName)
-                    .FirstOrDefaultAsync(ct);
-                if (holder is not null)
-                    return Results.Conflict(new { error = $"{Readable(request.Role)} is held by {holder}. End their position before assigning it to somebody else." });
+                if (await db.ProgramMemberships.AnyAsync(x => x.UserId == request.UserId && x.ProgramId == programId && x.Role == role && x.EndedAt == null, ct))
+                    return Results.Conflict(new { error = $"They already hold {Readable(role)} on this project." });
+                if (SingularProgramRoles.IsSingular(role))
+                {
+                    var holder = await db.ProgramMemberships.AsNoTracking()
+                        .Where(x => x.ProgramId == programId && x.Role == role && x.EndedAt == null)
+                        .Join(db.UserAccounts.AsNoTracking(), m => m.UserId, u => u.Id, (m, u) => u.DisplayName)
+                        .FirstOrDefaultAsync(ct);
+                    if (holder is not null)
+                        return Results.Conflict(new { error = $"{Readable(role)} is held by {holder}. End their position before assigning it to somebody else." });
+                }
             }
 
-            db.ProgramMemberships.Add(new ProgramMembership(request.UserId, programId.Value, request.Role, actor.UserName, DateTimeOffset.UtcNow));
+            foreach (var role in roles)
+                db.ProgramMemberships.Add(new ProgramMembership(request.UserId, programId.Value, role, actor.UserName, DateTimeOffset.UtcNow));
             db.SecurityAuditEvents.Add(new("RoleGranted", actor.UserName, request.UserId.ToString(), "Success",
-                $"Granted {request.Role} on project {projectId} from the project personnel page.",
+                $"Granted {string.Join(", ", roles.Select(x => x.ToString()).Order())} on project {projectId} from the project personnel page.",
                 http.Connection.RemoteIpAddress?.ToString() ?? "local", DateTimeOffset.UtcNow));
             await db.SaveChangesAsync(ct);
             return Results.NoContent();
         });
 
         app.MapDelete("/api/projects/{projectId:guid}/personnel/{userId:guid}/roles/{role}", async (Guid projectId,
-            Guid userId, ProgramRole role, HttpContext http, AeroLinkDbContext db, IdentityService identity, ProjectAuthorityResolver authority, CancellationToken ct) =>
+            Guid userId, ProgramRole role, HttpContext http, AeroLinkDbContext db, IdentityService identity, ProjectAuthorityResolver resolver, CancellationToken ct) =>
         {
             var actor = http.UserAccount();
-            if (!await http.HasRosterAuthorityAsync(db, authority, projectId, ct)) return Results.Forbid();
+            if (!await http.HasRosterAuthorityAsync(db, resolver, projectId, ct)) return Results.Forbid();
             if (role == ProgramRole.Administrator && !actor.IsAdministrator) return Results.Forbid();
             var programId = await ProgramOfAsync(db, projectId, ct);
             if (programId is null) return Results.NotFound();
@@ -167,17 +195,12 @@ public static class PersonnelEndpoints
         });
 
         app.MapPost("/api/projects/{projectId:guid}/personnel/backups", async (Guid projectId, NameBackupRequest request,
-            HttpContext http, AeroLinkDbContext db, IdentityService identity, ProjectAuthorityResolver authority, CancellationToken ct) =>
+            HttpContext http, AeroLinkDbContext db, IdentityService identity, ProjectAuthorityResolver resolver, CancellationToken ct) =>
         {
             var actor = http.UserAccount();
-            if (!await http.HasRosterAuthorityAsync(db, authority, projectId, ct)) return Results.Forbid();
+            if (!await http.HasRosterAuthorityAsync(db, resolver, projectId, ct)) return Results.Forbid();
             var programId = await ProgramOfAsync(db, projectId, ct);
             if (programId is null) return Results.NotFound();
-            // #816: backing up a Project Leadership position is a ProjectLeadershipBackup. A role-keyed row
-            // here would be a second designation that the position's own removal cannot switch off — the
-            // hidden channel the v2 reconciliation exists to close.
-            if (SingularProgramRoles.IsPositionGoverned(request.Role))
-                return Results.Conflict(new { error = $"{Readable(request.Role)} is a Project Leadership position. Name its backup through the leadership position instead." });
             if (!await db.ProgramMemberships.AnyAsync(x => x.UserId == request.BackupUserId && x.ProgramId == programId && x.EndedAt == null, ct))
                 return Results.BadRequest(new { error = "A backup has to be on this project. Add them first." });
             // Somebody who already holds the position cannot also be its cover: the point of a backup is that
@@ -196,10 +219,10 @@ public static class PersonnelEndpoints
         });
 
         app.MapDelete("/api/projects/{projectId:guid}/personnel/backups/{role}", async (Guid projectId, ProgramRole role,
-            HttpContext http, AeroLinkDbContext db, IdentityService identity, ProjectAuthorityResolver authority, CancellationToken ct) =>
+            HttpContext http, AeroLinkDbContext db, IdentityService identity, ProjectAuthorityResolver resolver, CancellationToken ct) =>
         {
             var actor = http.UserAccount();
-            if (!await http.HasRosterAuthorityAsync(db, authority, projectId, ct)) return Results.Forbid();
+            if (!await http.HasRosterAuthorityAsync(db, resolver, projectId, ct)) return Results.Forbid();
             var programId = await ProgramOfAsync(db, projectId, ct);
             if (programId is null) return Results.NotFound();
             var backup = await db.ProjectRoleBackups.SingleOrDefaultAsync(x => x.ProgramId == programId && x.Role == role && x.RemovedAt == null, ct);
@@ -231,5 +254,5 @@ public static class PersonnelEndpoints
     };
 }
 
-public sealed record AddProjectMemberRequest(Guid UserId, ProgramRole Role);
+public sealed record AddProjectMemberRequest(Guid UserId, ProgramRole? Role = null, ProgramRole[]? Roles = null);
 public sealed record NameBackupRequest(Guid BackupUserId, ProgramRole Role);

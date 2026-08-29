@@ -248,7 +248,15 @@ public sealed class IdentitySeeder(AeroLinkDbContext db)
                 db.UserAccounts.Add(user);
                 users[person.User] = user;
             }
-            else if (curatedUsers.Contains(person.User) && (user.DisplayName != person.Name || user.Email != person.Email))
+            // #816 Slice 3: curated seed accounts have their directory profile reconciled ONLY when the
+            // account has never been edited by an administrator. Once an admin changes the current display
+            // name or email through the identity-edit endpoint, that edit is authoritative for the current
+            // identity and must survive restarts and re-seeding. The IdentityUpdated audit event records
+            // the change; this reconciliation must not silently undo it.
+            else if (curatedUsers.Contains(person.User)
+                && !await db.SecurityAuditEvents.AsNoTracking().AnyAsync(
+                    x => x.EventType == "IdentityUpdated" && x.Target == user.UserName, ct)
+                && (user.DisplayName != person.Name || user.Email != person.Email))
                 user.RefreshDirectoryProfile(person.Name, person.Email);
             foreach (var program in programs) foreach (var role in person.Roles)
                 if (membershipKeys.Add((user.Id, program, role)))

@@ -130,3 +130,37 @@
   .personnelHeading { flex-direction: column; }
   .addPersonPanel { right: 12px; left: 12px; width: auto; }
 }
+
+/* #816 Slice 3: Project Leadership cards, directory search, person details. The card grammar reuses
+   positionCard; these cover the leadership-specific pieces: the person link, the authority/eligibility
+   pills, the directory result list and the role-choice groups. */
+
+.personLink { background: none; border: none; padding: 0; font: inherit; font-weight: var(--weight-strong); color: var(--ink-900); cursor: pointer; text-align: left; }
+.personLink:hover { color: var(--teal-700); text-decoration: underline; }
+.positionCard .statusPill.covered { background: #dceeea; color: #256d65; }
+.leadershipWarning { margin: 6px 0 0; font-size: var(--text-sm); color: #8a5a00; background: #fdf3d7; border: 1px solid #f0dc9a; border-radius: 6px; padding: 6px 8px; }
+.positionFoot { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+
+.directoryResults { display: flex; flex-direction: column; gap: 4px; max-height: 260px; overflow: auto; border: 1px solid var(--line); border-radius: 8px; padding: 6px; }
+.directoryResult { display: flex; align-items: center; gap: 10px; padding: 7px 8px; border: 1px solid transparent; border-radius: 8px; background: none; font: inherit; text-align: left; cursor: pointer; }
+.directoryResult > span { display: flex; flex-direction: column; }
+.directoryResult > span > span { font-size: var(--text-sm); color: var(--ink-500); }
+.directoryResult:hover:not(:disabled) { background: #f2f8f7; }
+.directoryResult.chosen { border-color: var(--teal-700); background: #eef6f5; }
+.directoryResult.ineligible { opacity: .55; cursor: not-allowed; }
+
+.addPersonRoles { border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; display: flex; flex-direction: column; gap: 8px; }
+.addPersonRoles legend { font-weight: var(--weight-strong); padding: 0 6px; }
+.roleGroup { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.roleGroup > b { font-size: var(--text-sm); color: var(--ink-700); min-width: 140px; }
+.roleChoice { display: inline-flex; align-items: center; gap: 6px; }
+.roleChoice input { accent-color: var(--teal-700); }
+
+.createAccountForm { border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; display: flex; flex-direction: column; gap: 8px; }
+.createAccountForm legend { font-weight: var(--weight-strong); padding: 0 6px; }
+.createAccountForm label { display: flex; flex-direction: column; gap: 4px; font-size: var(--text-sm); }
+
+.personDetails { display: flex; flex-direction: column; gap: 6px; margin: 0 0 10px; }
+.personDetails > div { display: grid; grid-template-columns: 180px 1fr; gap: 10px; }
+.personDetails dt { color: var(--ink-500); font-size: var(--text-sm); }
+.personDetails dd { margin: 0; }

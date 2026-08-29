@@ -1,11 +1,11 @@
 {
   "schemaVersion": "aerolink-api-test-intent/v2",
   "totals": {
-    "tests": 676,
-    "cases": 744,
-    "classes": 110,
-    "hostedTests": 649,
-    "hostedCases": 708,
+    "tests": 686,
+    "cases": 754,
+    "classes": 112,
+    "hostedTests": 659,
+    "hostedCases": 718,
     "nonHostedTests": 21,
     "nonHostedCases": 30,
     "unknownHostTests": 6,
@@ -21,26 +21,26 @@
     "http-boundary": {
       "label": "HTTP boundary: route, status, JSON shape",
       "level": "API (must stay hosted)",
-      "tests": 407,
-      "cases": 451,
+      "tests": 412,
+      "cases": 456,
       "unknownCases": 0,
-      "classes": 91
+      "classes": 93
     },
     "ef-translation": {
       "label": "EF translation / relational constraints",
       "level": "Infrastructure (needs a database, not a host)",
-      "tests": 145,
-      "cases": 156,
+      "tests": 146,
+      "cases": 157,
       "unknownCases": 0,
-      "classes": 53
+      "classes": 54
     },
     "auth-policy": {
       "label": "Authentication / authorization wiring",
       "level": "API (must stay hosted)",
-      "tests": 74,
-      "cases": 78,
+      "tests": 78,
+      "cases": 82,
       "unknownCases": 0,
-      "classes": 43
+      "classes": 45
     },
     "in-process-logic": {
       "label": "In-process logic with no HTTP and no client",
@@ -5001,6 +5001,58 @@
       }
     },
     {
+      "cls": "PersonnelDirectoryApiTests",
+      "test": "Adding_a_person_grants_several_base_roles_as_one_operation",
+      "kind": "Fact",
+      "intent": "ef-translation",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "shared-host-fixture",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 68,
+        "end": 84
+      }
+    },
+    {
+      "cls": "PersonnelDirectoryApiTests",
+      "test": "Only_the_global_administrator_edits_current_identity_and_the_change_is_audited",
+      "kind": "Fact",
+      "intent": "auth-policy",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "shared-host-fixture",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 104,
+        "end": 134
+      }
+    },
+    {
+      "cls": "PersonnelDirectoryApiTests",
+      "test": "The_directory_searches_name_username_and_email_and_skips_current_members",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "shared-host-fixture",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 86,
+        "end": 102
+      }
+    },
+    {
       "cls": "PreReleaseEvidenceVisibilityTests",
       "test": "An_item_owing_pre_release_evidence_still_reports_that_it_holds_the_release",
       "kind": "Fact",
@@ -8696,6 +8748,132 @@
       "sourceLines": {
         "start": 84,
         "end": 108
+      }
+    },
+    {
+      "cls": "RosterAuthoritySeparationTests",
+      "test": "An_unrelated_project_member_cannot_mutate_the_roster",
+      "kind": "Fact",
+      "intent": "auth-policy",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "shared-host-fixture",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 114,
+        "end": 124
+      }
+    },
+    {
+      "cls": "RosterAuthoritySeparationTests",
+      "test": "Base_project_engineer_without_leadership_cannot_mutate_the_roster",
+      "kind": "Fact",
+      "intent": "auth-policy",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "shared-host-fixture",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 72,
+        "end": 86
+      }
+    },
+    {
+      "cls": "RosterAuthoritySeparationTests",
+      "test": "Ending_the_project_engineer_leadership_assignment_removes_roster_authority",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "shared-host-fixture",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 168,
+        "end": 199
+      }
+    },
+    {
+      "cls": "RosterAuthoritySeparationTests",
+      "test": "Program_manager_base_eligibility_without_leadership_cannot_mutate_the_roster",
+      "kind": "Fact",
+      "intent": "auth-policy",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "shared-host-fixture",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 144,
+        "end": 166
+      }
+    },
+    {
+      "cls": "RosterAuthoritySeparationTests",
+      "test": "Program_manager_leadership_primary_can_mutate_the_roster",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "shared-host-fixture",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 131,
+        "end": 142
+      }
+    },
+    {
+      "cls": "RosterAuthoritySeparationTests",
+      "test": "Project_engineer_leadership_primary_can_mutate_the_roster",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "shared-host-fixture",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 88,
+        "end": 99
+      }
+    },
+    {
+      "cls": "RosterAuthoritySeparationTests",
+      "test": "Project_engineer_standing_backup_can_mutate_the_roster",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "shared-host-fixture",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 101,
+        "end": 112
       }
     },
     {

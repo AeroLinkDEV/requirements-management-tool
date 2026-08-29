@@ -40,3 +40,5 @@ docs/overview-video/build/
 # change, and an untracked file in the root reads as work in progress when it is the opposite.
 HANDOFF-*.md
 PR-BODY-*.md
+# Playwright runtime output at the repository root (not the client-level path already ignored).
+test-results/

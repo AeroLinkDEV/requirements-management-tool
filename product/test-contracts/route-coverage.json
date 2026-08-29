@@ -177,6 +177,14 @@
     },
     {
       "method": "PATCH",
+      "path": "/api/admin/users/{id:guid}/identity",
+      "file": "AdministrationEndpoints.cs",
+      "coveredBy": [
+        "PersonnelDirectoryApiTests"
+      ]
+    },
+    {
+      "method": "PATCH",
       "path": "/api/managed-documents/{id:guid}/links/{linkId:guid}",
       "file": "ManagedDocumentEndpoints.cs",
       "coveredBy": []
@@ -320,6 +328,7 @@
         "ManagedDocumentRecoveryApiTests",
         "ManualTestChangeRequestApiTests",
         "OpenDigitalThreadTests",
+        "PersonnelDirectoryApiTests",
         "PreReleaseEvidenceVisibilityTests",
         "ProblemReportActiveMetricApiTests",
         "ProblemReportApiTests",
@@ -355,6 +364,7 @@
         "ReviewCommentApiTests",
         "ReviewLinkOutlivedCycleTests",
         "ReviseChangeRequestApiTests",
+        "RosterAuthoritySeparationTests",
         "SavedViewLifecycleApiTests",
         "SearchableAuthoringPickerApiTests",
         "SecurityBoundaryTests",
@@ -1716,8 +1726,10 @@
       "path": "/api/projects/{projectId:guid}/personnel",
       "file": "PersonnelEndpoints.cs",
       "coveredBy": [
+        "PersonnelDirectoryApiTests",
         "ProjectLeadershipApiTests",
-        "ProjectPersonnelApiTests"
+        "ProjectPersonnelApiTests",
+        "RosterAuthoritySeparationTests"
       ]
     },
     {
@@ -1982,6 +1994,7 @@
         "GovernanceEvidenceApiTests",
         "IdentifierAllocationTests",
         "OpenDigitalThreadTests",
+        "PersonnelDirectoryApiTests",
         "ProblemReportActiveMetricApiTests",
         "ProblemReportApiTests",
         "ProcedureDiscussionApiTests",
