@@ -49,25 +49,44 @@ public enum ReviewSubject
 public enum ReviewStageKind { Review, Approval }
 
 /// <summary>
+/// What kind of project authority a stage demands, recorded explicitly since the #816 Slice 4 cutover.
+///
+/// Before the cutover a stage carried only a <c>ProgramRole</c>, which could not say whether it meant the
+/// job somebody performs or the accountable position somebody occupies — a stage naming
+/// <c>ProjectEngineer</c> was ambiguous between "any of the project's engineers" and "the one accountable
+/// Project Engineer". New configuration records the intent; rows recorded before the cutover carry no kind
+/// and keep answering through the legacy compatibility policy.
+/// </summary>
+public enum ReviewStageAuthorityKind { BaseRole, LeadershipPosition }
+
+/// <summary>
 /// One stage of a team's review procedure: who has to sign, in what authority, and what their signature means.
 ///
 /// A stage names an authority rather than a person. "Verification lead" survives somebody changing jobs;
 /// a named individual does not, and a workflow that has to be rewritten every time somebody moves teams is
 /// a workflow nobody maintains.
+///
+/// Since the Slice 4 cutover a stage records <em>which kind</em> of authority it demands — a base project
+/// role many people may hold, or the accountable Project Leadership position exactly one person occupies —
+/// through <see cref="RequiredAuthorityKind"/>. Stages recorded before the cutover carry no kind: they keep
+/// their stored <see cref="RequiredRole"/> and answer through the legacy compatibility policy, so historical
+/// evidence is never reinterpreted under today's vocabulary.
 /// </summary>
 public sealed class ReviewWorkflowStage
 {
     private ReviewWorkflowStage() { }
 
     internal ReviewWorkflowStage(Guid workflowId, int position, string name, ProgramRole requiredRole,
-        ReviewStageKind kind = ReviewStageKind.Review)
+        ReviewStageKind kind = ReviewStageKind.Review, ReviewStageAuthorityKind? authorityKind = null)
     {
         if (string.IsNullOrWhiteSpace(name)) throw new DomainException("A review stage needs a name.");
+        ValidateAuthority(requiredRole, authorityKind);
         Id = Guid.NewGuid();
         WorkflowId = workflowId;
         Position = position;
         Name = name.Trim();
         RequiredRole = requiredRole;
+        RequiredAuthorityKind = authorityKind;
         Kind = kind;
     }
 
@@ -82,6 +101,90 @@ public sealed class ReviewWorkflowStage
     /// acknowledgement from a content examination. Teams mark their approval stages when they next revise.
     /// </summary>
     public ReviewStageKind Kind { get; private set; }
+    /// <summary>
+    /// The kind of authority this stage demands. Null on stages recorded before the Slice 4 cutover — those
+    /// keep the legacy role-shaped semantics and are never produced by new configuration.
+    /// </summary>
+    public ReviewStageAuthorityKind? RequiredAuthorityKind { get; private set; }
+
+    /// <summary>
+    /// The authority this stage demands as one #816 requirement, so the signing gate, the candidate picker
+    /// and this specification all answer from the same vocabulary.
+    /// </summary>
+    public ProjectAuthorityRequirement RequiredAuthority => RequiredAuthorityKind switch
+    {
+        ReviewStageAuthorityKind.BaseRole =>
+            ProjectAuthorityRequirement.BaseRole(RequiredRole, allowProgramAdministratorSubstitution: true),
+        ReviewStageAuthorityKind.LeadershipPosition =>
+            ProjectAuthorityRequirement.Leadership(RequiredPosition!.Value, allowProgramAdministratorSubstitution: true),
+        // Legacy rows keep the exact transitional semantics they were recorded under, administrator
+        // substitution included. Reinterpreting them under today's vocabulary would rewrite history.
+        _ => ProjectAuthorityRequirement.LegacyRoleDemand(RequiredRole, allowProgramAdministratorSubstitution: true),
+    };
+
+    /// <summary>The leadership position this stage demands, when it demands one.</summary>
+    public ProjectLeadershipPosition? RequiredPosition => RequiredAuthorityKind == ReviewStageAuthorityKind.LeadershipPosition
+        ? Enum.TryParse<ProjectLeadershipPosition>(RequiredRole.ToString(), out var parsed) && Enum.IsDefined(parsed)
+            ? parsed
+            : null
+        : null;
+
+    /// <summary>
+    /// New configuration may only demand the modern explicit authorities. Generic Reviewer/Approver are
+    /// signature meanings that lived as standing roles before the cutover — a stage's meaning now comes from
+    /// <see cref="ReviewStageKind"/>, so granting them as required authority would re-conflate the two
+    /// questions the split exists to separate. The retired ProjectEngineeringLead and the other singular
+    /// position roles are demanded through <see cref="ReviewStageAuthorityKind.LeadershipPosition"/>, never
+    /// as base membership.
+    /// </summary>
+    internal static void ValidateAuthority(ProgramRole requiredRole, ReviewStageAuthorityKind? authorityKind)
+    {
+        if (authorityKind is null) return; // legacy row: recorded before the cutover, answered compatibly
+        if (authorityKind == ReviewStageAuthorityKind.BaseRole)
+        {
+            if (requiredRole is ProgramRole.Reviewer or ProgramRole.Approver)
+                throw new DomainException(
+                    $"{requiredRole} is a signature meaning, not a project authority. Configure the stage's required authority explicitly and record the Review/Approval meaning in the stage kind.");
+            if (SingularProgramRoles.IsSingular(requiredRole))
+                throw new DomainException(
+                    $"{requiredRole} is a retired leadership position, not a base role. Demand it through the LeadershipPosition authority kind.");
+            if (!ConfigurableBaseRoles.Contains(requiredRole))
+                throw new DomainException(
+                    $"'{requiredRole}' is not a configurable base project role. Choose one of: {string.Join(", ", ConfigurableBaseRoles.Select(ReadableRole))}.");
+            return;
+        }
+        if (!Enum.TryParse<ProjectLeadershipPosition>(requiredRole.ToString(), out var parsed)
+            || !Enum.IsDefined(parsed))
+            throw new DomainException(
+                $"'{requiredRole}' does not name a Project Leadership position. Leadership authority must name one of the eight accountable positions.");
+    }
+
+    /// <summary>The base project roles new configuration may demand, per the #816 owner decisions.</summary>
+    public static readonly IReadOnlyList<ProgramRole> ConfigurableBaseRoles =
+    [
+        ProgramRole.SystemEngineer, ProgramRole.SoftwareEngineer,
+        ProgramRole.SystemTestEngineer, ProgramRole.SoftwareTestEngineer,
+        ProgramRole.ProjectEngineer, ProgramRole.ProgramManager,
+        ProgramRole.EngineeringManager, ProgramRole.ConfigurationManager,
+        ProgramRole.SoftwareQualityAnalyst, ProgramRole.Airworthiness,
+    ];
+
+    private static string ReadableRole(ProgramRole role) => role switch
+    {
+        ProgramRole.SystemEngineer => "System Engineer",
+        ProgramRole.SoftwareEngineer => "Software Engineer",
+        ProgramRole.SystemTestEngineer => "System Test Engineer",
+        ProgramRole.SoftwareTestEngineer => "Software Test Engineer",
+        ProgramRole.ProjectEngineer => "Project Engineer",
+        ProgramRole.ProgramManager => "Program Manager",
+        ProgramRole.EngineeringManager => "Engineering Manager",
+        ProgramRole.ConfigurationManager => "Configuration Manager",
+        ProgramRole.SoftwareQualityAnalyst => "Software Quality Assurance",
+        ProgramRole.Airworthiness => "Airworthiness",
+        ProgramRole.Reviewer => "Reviewer",
+        ProgramRole.Approver => "Approver",
+        _ => role.ToString(),
+    };
 }
 
 /// <summary>
@@ -126,7 +229,8 @@ public sealed class ReviewWorkflow
         CreatedBy = actorId.Trim();
         CreatedAt = now;
         for (var index = 0; index < stages.Count; index++)
-            _stages.Add(new ReviewWorkflowStage(Id, index, stages[index].Name, stages[index].RequiredRole, stages[index].Kind));
+            _stages.Add(new ReviewWorkflowStage(Id, index, stages[index].Name, stages[index].RequiredRole,
+                stages[index].Kind, stages[index].AuthorityKind));
     }
 
     public Guid Id { get; private set; }
@@ -172,11 +276,29 @@ public sealed class ReviewWorkflow
     /// <summary>The stage requirements, in order, as the review cycle needs to see them.</summary>
     public ReviewWorkflowSpecification Specification() =>
         new(Id, LogicalId, Name, Version, Mode,
-            _stages.OrderBy(x => x.Position).Select(x => new ReviewStageRequirement(x.Position, x.Name, x.RequiredRole, x.Kind)).ToList());
+            _stages.OrderBy(x => x.Position).Select(x => new ReviewStageRequirement(x.Position, x.Name,
+                x.RequiredRole, x.Kind, x.RequiredAuthorityKind)).ToList());
 }
 
-public sealed record ReviewWorkflowStageDraft(string Name, ProgramRole RequiredRole, ReviewStageKind Kind = ReviewStageKind.Review);
-public sealed record ReviewStageRequirement(int Position, string Name, ProgramRole RequiredRole, ReviewStageKind Kind = ReviewStageKind.Review);
+public sealed record ReviewWorkflowStageDraft(string Name, ProgramRole RequiredRole,
+    ReviewStageKind Kind = ReviewStageKind.Review, ReviewStageAuthorityKind? AuthorityKind = null);
+public sealed record ReviewStageRequirement(int Position, string Name, ProgramRole RequiredRole,
+    ReviewStageKind Kind = ReviewStageKind.Review, ReviewStageAuthorityKind? AuthorityKind = null)
+{
+    /// <summary>The authority this stage demands as one #816 requirement.</summary>
+    public ProjectAuthorityRequirement RequiredAuthority => AuthorityKind switch
+    {
+        ReviewStageAuthorityKind.BaseRole =>
+            ProjectAuthorityRequirement.BaseRole(RequiredRole, allowProgramAdministratorSubstitution: true),
+        ReviewStageAuthorityKind.LeadershipPosition =>
+            ProjectAuthorityRequirement.Leadership(
+                Enum.TryParse<ProjectLeadershipPosition>(RequiredRole.ToString(), out var parsed) && Enum.IsDefined(parsed)
+                    ? parsed : throw new DomainException($"'{RequiredRole}' does not name a Project Leadership position."),
+                allowProgramAdministratorSubstitution: true),
+        // Legacy rows keep the exact transitional semantics they were recorded under.
+        _ => ProjectAuthorityRequirement.LegacyRoleDemand(RequiredRole, allowProgramAdministratorSubstitution: true),
+    };
+}
 
 /// <summary>
 /// What a review must satisfy, passed to the change request at submission.
@@ -224,10 +346,25 @@ public sealed record ReviewWorkflowSpecification(
                 $"{chosen.Name} has no recorded authority on this program, so they cannot sign the {stage.Name} stage.");
         // An administrator can stand in for any stage. Somebody has to be able to unblock a review when the
         // named authority is unavailable, and the substitution is recorded on the step either way.
-        if (!ProgramRoleAuthority.Satisfying(stage.RequiredRole).Contains(chosen.Role.Value)
-            && chosen.Role != ProgramRole.Administrator)
+        if (chosen.Role == ProgramRole.Administrator) return;
+        // Legacy stages keep the historical implication semantics exactly as they were recorded — a stage
+        // naming Reviewer or a discipline lead is judged by the rules it was written under, never
+        // reinterpreted into today's vocabulary.
+        if (stage.AuthorityKind is null)
+        {
+            if (!ProgramRoleAuthority.Satisfying(stage.RequiredRole).Contains(chosen.Role.Value))
+                throw new DomainException(
+                    $"The {stage.Name} stage must be signed by a {Readable(stage.RequiredRole)}. " +
+                    $"{chosen.Name} holds {Readable(chosen.Role.Value)} authority.");
+            return;
+        }
+        // Explicit authority stages are validated against the exact demand. The API froze each selection by
+        // resolving the stage's own ProjectAuthorityRequirement, so the frozen authority is the authority
+        // the stage asked for: a base-role holder cannot ride a leadership elevation into a base-role stage,
+        // and a mere base-role member cannot answer a leadership stage.
+        if (chosen.Role != stage.RequiredRole)
             throw new DomainException(
-                $"The {stage.Name} stage must be signed by a {Readable(stage.RequiredRole)}. " +
+                $"The {stage.Name} stage must be signed through the {Readable(stage.RequiredRole)} authority. " +
                 $"{chosen.Name} holds {Readable(chosen.Role.Value)} authority.");
     }
 
