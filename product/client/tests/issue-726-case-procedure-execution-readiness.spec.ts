@@ -125,10 +125,17 @@ test('Case to allocated Procedure execution chain drives release readiness', asy
   const reviewer = (await usersResponse.json()).find(
     (user: { userName: string }) => user.userName === 'systems.reviewer')
   expect(reviewer, 'the seeded reviewer account must exist').toBeTruthy()
-  const grant = await request.post(`${apiBase}/api/admin/users/${reviewer.id}/memberships`, {
-    data: { programId: workspace.program.id, role: 'Approver' },
+  // Generic Reviewer/Approver are no longer grantable roles: they are signature meanings a workflow stage
+  // records. The no-workflow approval fallback the package reviews use below is satisfied through a Project
+  // Leadership position instead — the modern way to carry accountable approval authority.
+  const baseGrant = await request.post(`${apiBase}/api/admin/users/${reviewer.id}/memberships`, {
+    data: { programId: workspace.program.id, role: 'SystemEngineer' },
   })
-  expect(grant.ok(), await grant.text()).toBeTruthy()
+  expect(baseGrant.ok(), await baseGrant.text()).toBeTruthy()
+  const elevation = await request.post(`${apiBase}/api/projects/${workspace.project.id}/leadership/SystemEngineeringLead/primary`, {
+    data: { holderUserId: reviewer.id },
+  })
+  expect(elevation.ok(), await elevation.text()).toBeTruthy()
 
   const caseReviewResponse = await request.post(
     `${apiBase}/api/releases/${workspace.release.id}/test-change-requests`, {

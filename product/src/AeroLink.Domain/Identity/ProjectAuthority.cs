@@ -61,11 +61,14 @@ public readonly record struct ProjectAuthorityRequirement
     public bool AllowProgramAdministratorSubstitution { get; }
 
     /// <summary>"Does this person perform this job?" Base membership answers it; elevation is irrelevant.</summary>
-    public static ProjectAuthorityRequirement BaseRole(ProgramRole role) => new(ProjectAuthorityKind.BaseRole, role, null);
+    public static ProjectAuthorityRequirement BaseRole(ProgramRole role,
+        bool allowProgramAdministratorSubstitution = false) =>
+        new(ProjectAuthorityKind.BaseRole, role, null, allowProgramAdministratorSubstitution);
 
     /// <summary>"Is this person the accountable holder of this position?" Base membership never answers it.</summary>
-    public static ProjectAuthorityRequirement Leadership(ProjectLeadershipPosition position) =>
-        new(ProjectAuthorityKind.LeadershipPosition, null, position);
+    public static ProjectAuthorityRequirement Leadership(ProjectLeadershipPosition position,
+        bool allowProgramAdministratorSubstitution = false) =>
+        new(ProjectAuthorityKind.LeadershipPosition, null, position, allowProgramAdministratorSubstitution);
 
     /// <summary>A role-shaped demand that predates the split and must keep resolving both ways.</summary>
     public static ProjectAuthorityRequirement LegacyRoleDemand(

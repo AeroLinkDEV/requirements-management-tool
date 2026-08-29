@@ -1,11 +1,11 @@
 {
   "schemaVersion": "aerolink-api-test-intent/v2",
   "totals": {
-    "tests": 686,
-    "cases": 754,
-    "classes": 112,
-    "hostedTests": 659,
-    "hostedCases": 718,
+    "tests": 696,
+    "cases": 772,
+    "classes": 113,
+    "hostedTests": 669,
+    "hostedCases": 736,
     "nonHostedTests": 21,
     "nonHostedCases": 30,
     "unknownHostTests": 6,
@@ -21,18 +21,18 @@
     "http-boundary": {
       "label": "HTTP boundary: route, status, JSON shape",
       "level": "API (must stay hosted)",
-      "tests": 412,
-      "cases": 456,
+      "tests": 419,
+      "cases": 471,
       "unknownCases": 0,
-      "classes": 93
+      "classes": 94
     },
     "ef-translation": {
       "label": "EF translation / relational constraints",
       "level": "Infrastructure (needs a database, not a host)",
-      "tests": 146,
-      "cases": 157,
+      "tests": 149,
+      "cases": 160,
       "unknownCases": 0,
-      "classes": 54
+      "classes": 55
     },
     "auth-policy": {
       "label": "Authentication / authorization wiring",
@@ -192,8 +192,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 258,
-        "end": 270
+        "start": 262,
+        "end": 275
       }
     },
     {
@@ -283,7 +283,7 @@
       ],
       "sourceLines": {
         "start": 219,
-        "end": 256
+        "end": 260
       }
     },
     {
@@ -300,8 +300,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 375,
-        "end": 399
+        "start": 383,
+        "end": 407
       }
     },
     {
@@ -318,8 +318,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 350,
-        "end": 373
+        "start": 358,
+        "end": 381
       }
     },
     {
@@ -336,8 +336,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 272,
-        "end": 315
+        "start": 277,
+        "end": 322
       }
     },
     {
@@ -390,8 +390,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 401,
-        "end": 441
+        "start": 409,
+        "end": 449
       }
     },
     {
@@ -408,8 +408,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 317,
-        "end": 348
+        "start": 324,
+        "end": 356
       }
     },
     {
@@ -426,8 +426,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 487,
-        "end": 530
+        "start": 495,
+        "end": 538
       }
     },
     {
@@ -444,8 +444,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 443,
-        "end": 485
+        "start": 451,
+        "end": 493
       }
     },
     {
@@ -9846,8 +9846,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 1138,
-        "end": 1154
+        "start": 1182,
+        "end": 1198
       }
     },
     {
@@ -9864,8 +9864,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 1108,
-        "end": 1136
+        "start": 1152,
+        "end": 1180
       }
     },
     {
@@ -9881,8 +9881,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 1156,
-        "end": 1171
+        "start": 1200,
+        "end": 1215
       }
     },
     {
@@ -9899,8 +9899,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 983,
-        "end": 1013
+        "start": 1021,
+        "end": 1053
       }
     },
     {
@@ -9916,8 +9916,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 1565,
-        "end": 1586
+        "start": 1609,
+        "end": 1630
       }
     },
     {
@@ -9933,8 +9933,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 1612,
-        "end": 1627
+        "start": 1656,
+        "end": 1671
       }
     },
     {
@@ -9950,8 +9950,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 1215,
-        "end": 1239
+        "start": 1259,
+        "end": 1283
       }
     },
     {
@@ -9967,8 +9967,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 1191,
-        "end": 1213
+        "start": 1235,
+        "end": 1257
       }
     },
     {
@@ -9984,8 +9984,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 1173,
-        "end": 1189
+        "start": 1217,
+        "end": 1233
       }
     },
     {
@@ -10001,8 +10001,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 477,
-        "end": 496
+        "start": 514,
+        "end": 533
       }
     },
     {
@@ -10018,8 +10018,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 962,
-        "end": 981
+        "start": 1000,
+        "end": 1019
       }
     },
     {
@@ -10036,8 +10036,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 1076,
-        "end": 1106
+        "start": 1118,
+        "end": 1150
       }
     },
     {
@@ -10053,8 +10053,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 1045,
-        "end": 1060
+        "start": 1087,
+        "end": 1102
       }
     },
     {
@@ -10070,8 +10070,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 1413,
-        "end": 1439
+        "start": 1457,
+        "end": 1483
       }
     },
     {
@@ -10087,8 +10087,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 498,
-        "end": 517
+        "start": 535,
+        "end": 554
       }
     },
     {
@@ -10104,8 +10104,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 1511,
-        "end": 1558
+        "start": 1555,
+        "end": 1602
       }
     },
     {
@@ -10121,8 +10121,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 650,
-        "end": 670
+        "start": 687,
+        "end": 707
       }
     },
     {
@@ -10139,8 +10139,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 731,
-        "end": 764
+        "start": 768,
+        "end": 802
       }
     },
     {
@@ -10156,8 +10156,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 241,
-        "end": 259
+        "start": 278,
+        "end": 296
       }
     },
     {
@@ -10173,8 +10173,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 1588,
-        "end": 1605
+        "start": 1632,
+        "end": 1649
       }
     },
     {
@@ -10191,8 +10191,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 834,
-        "end": 868
+        "start": 872,
+        "end": 906
       }
     },
     {
@@ -10209,8 +10209,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 261,
-        "end": 301
+        "start": 298,
+        "end": 338
       }
     },
     {
@@ -10227,8 +10227,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 672,
-        "end": 706
+        "start": 709,
+        "end": 743
       }
     },
     {
@@ -10245,8 +10245,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 708,
-        "end": 729
+        "start": 745,
+        "end": 766
       }
     },
     {
@@ -10263,8 +10263,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 622,
-        "end": 648
+        "start": 659,
+        "end": 685
       }
     },
     {
@@ -10281,8 +10281,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 766,
-        "end": 791
+        "start": 804,
+        "end": 829
       }
     },
     {
@@ -10298,8 +10298,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 870,
-        "end": 885
+        "start": 908,
+        "end": 923
       }
     },
     {
@@ -10316,8 +10316,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 1374,
-        "end": 1411
+        "start": 1418,
+        "end": 1455
       }
     },
     {
@@ -10334,8 +10334,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 1312,
-        "end": 1345
+        "start": 1356,
+        "end": 1389
       }
     },
     {
@@ -10352,8 +10352,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 1271,
-        "end": 1310
+        "start": 1315,
+        "end": 1354
       }
     },
     {
@@ -10370,8 +10370,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 1241,
-        "end": 1269
+        "start": 1285,
+        "end": 1313
       }
     },
     {
@@ -10388,8 +10388,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 1347,
-        "end": 1372
+        "start": 1391,
+        "end": 1416
       }
     },
     {
@@ -10406,8 +10406,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 440,
-        "end": 475
+        "start": 477,
+        "end": 512
       }
     },
     {
@@ -10423,8 +10423,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 887,
-        "end": 936
+        "start": 925,
+        "end": 974
       }
     },
     {
@@ -10440,8 +10440,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 938,
-        "end": 960
+        "start": 976,
+        "end": 998
       }
     },
     {
@@ -10457,8 +10457,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 1477,
-        "end": 1509
+        "start": 1521,
+        "end": 1553
       }
     },
     {
@@ -10475,8 +10475,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 540,
-        "end": 620
+        "start": 577,
+        "end": 657
       }
     },
     {
@@ -10492,8 +10492,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 303,
-        "end": 327
+        "start": 340,
+        "end": 364
       }
     },
     {
@@ -10524,8 +10524,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 793,
-        "end": 832
+        "start": 831,
+        "end": 870
       }
     },
     {
@@ -10541,8 +10541,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 519,
-        "end": 538
+        "start": 556,
+        "end": 575
       }
     },
     {
@@ -10559,8 +10559,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 412,
-        "end": 438
+        "start": 449,
+        "end": 475
       }
     },
     {
@@ -10577,8 +10577,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 1015,
-        "end": 1043
+        "start": 1055,
+        "end": 1085
       }
     },
     {
@@ -10595,8 +10595,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 1441,
-        "end": 1475
+        "start": 1485,
+        "end": 1519
       }
     },
     {
@@ -10613,8 +10613,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 329,
-        "end": 410
+        "start": 366,
+        "end": 447
       }
     },
     {
@@ -11973,6 +11973,185 @@
       "sourceLines": {
         "start": 102,
         "end": 129
+      }
+    },
+    {
+      "cls": "WorkflowAuthorityCutoverApiTests",
+      "test": "A_leadership_stage_offers_its_primary_and_backup_but_never_a_base_only_member",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "shared-host-fixture",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 179,
+        "end": 197
+      }
+    },
+    {
+      "cls": "WorkflowAuthorityCutoverApiTests",
+      "test": "A_legacy_workflow_reads_as_legacy_and_its_revision_writes_an_explicit_modern_version",
+      "kind": "Fact",
+      "intent": "ef-translation",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "shared-host-fixture",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 322,
+        "end": 377
+      }
+    },
+    {
+      "cls": "WorkflowAuthorityCutoverApiTests",
+      "test": "A_modern_base_role_stage_persists_and_reads_back_explicitly",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "shared-host-fixture",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 97,
+        "end": 116
+      }
+    },
+    {
+      "cls": "WorkflowAuthorityCutoverApiTests",
+      "test": "A_modern_leadership_stage_persists_and_reads_back_explicitly",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "shared-host-fixture",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 118,
+        "end": 135
+      }
+    },
+    {
+      "cls": "WorkflowAuthorityCutoverApiTests",
+      "test": "A_write_that_is_missing_contradictory_or_legacy_shaped_is_refused",
+      "kind": "Theory",
+      "intent": "http-boundary",
+      "cases": 5,
+      "caseEvidence": "InlineData",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "shared-host-fixture",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 137,
+        "end": 159
+      }
+    },
+    {
+      "cls": "WorkflowAuthorityCutoverApiTests",
+      "test": "Base_role_and_leadership_demands_on_the_same_name_resolve_different_candidate_sets",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "shared-host-fixture",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 199,
+        "end": 226
+      }
+    },
+    {
+      "cls": "WorkflowAuthorityCutoverApiTests",
+      "test": "New_personnel_grants_of_Reviewer_and_Approver_are_refused_by_the_server",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "shared-host-fixture",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 267,
+        "end": 281
+      }
+    },
+    {
+      "cls": "WorkflowAuthorityCutoverApiTests",
+      "test": "New_standing_backups_cannot_be_created_for_Reviewer_or_Approver_but_valid_roles_still_work",
+      "kind": "Fact",
+      "intent": "ef-translation",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "shared-host-fixture",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 283,
+        "end": 320
+      }
+    },
+    {
+      "cls": "WorkflowAuthorityCutoverApiTests",
+      "test": "Retired_and_non_configurable_roles_are_refused_as_modern_base_role_authority",
+      "kind": "Theory",
+      "intent": "http-boundary",
+      "cases": 5,
+      "caseEvidence": "InlineData",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "shared-host-fixture",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 161,
+        "end": 177
+      }
+    },
+    {
+      "cls": "WorkflowAuthorityCutoverApiTests",
+      "test": "The_signing_gate_answers_the_same_requirement_the_picker_offered",
+      "kind": "Fact",
+      "intent": "ef-translation",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "shared-host-fixture",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 228,
+        "end": 265
       }
     }
   ]

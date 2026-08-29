@@ -768,6 +768,7 @@ public sealed class ProcedureTestChangeControlApiTests
         db.AddRange(program, project, release);
 
         UserAccount? configurationManager = null;
+        UserAccount? procedureReviewer = null;
         foreach (var (name, role) in new[]
                  {
                      ("procedure.author", ProgramRole.TestEngineer),
@@ -781,7 +782,12 @@ public sealed class ProcedureTestChangeControlApiTests
             db.Add(account);
             db.Add(new ProgramMembership(account.Id, program.Id, role, "issue-725-test", now));
             if (role == ProgramRole.ConfigurationManager) configurationManager = account;
+            if (role == ProgramRole.Reviewer) procedureReviewer = account;
         }
+        // The workflow stage the journeys sign demands an explicit modern base role, so the reviewer holds
+        // one alongside the historical membership.
+        db.Add(new ProgramMembership(procedureReviewer!.Id, program.Id, ProgramRole.SoftwareEngineer,
+            "issue-725-test", now));
         db.Add(new ProjectLeadershipAssignment(program.Id, ProjectLeadershipPosition.ConfigurationManager,
             configurationManager!.Id, "issue-725-test", now));
 
@@ -904,7 +910,7 @@ public sealed class ProcedureTestChangeControlApiTests
             name = "Software Procedure API review",
             appliesTo = "HighLevelSoftwareProcedure",
             mode = "Sequential",
-            stages = new[] { new { name = "Procedure reviewer", requiredRole = "Reviewer" } },
+            stages = new[] { new { name = "Procedure reviewer", kind = "Review", requiredAuthority = new { kind = "BaseRole", role = "SoftwareEngineer" } } },
         });
         var body = await created.Content.ReadAsStringAsync();
         Assert.True(created.IsSuccessStatusCode, body);

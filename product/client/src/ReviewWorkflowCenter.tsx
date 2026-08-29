@@ -1,6 +1,13 @@
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { PersonName } from "./People";
 import { stateLabel } from "./presentation";
+import {
+  authorityLabel,
+  authorityToken,
+  baseRoleAuthorities,
+  leadershipAuthorities,
+  parseAuthorityToken,
+} from "./workflowAuthorities";
 import "./ReviewWorkflowCenter.css";
 
 /**
@@ -13,9 +20,22 @@ import "./ReviewWorkflowCenter.css";
  * A procedure that has been used is never edited in place. Revising it produces the next version and retires
  * the prior one, which stays retained: a recorded approval has to remain explainable by the rules it was
  * actually judged against.
+ *
+ * Since the #816 Slice 4 cutover every stage records two independent facts: the required project authority
+ * (a base project role, or a Project Leadership position) and what the signature means (Review or Approval).
+ * A stage recorded before the cutover reads as legacy authority and, on revision, starts unselected — the
+ * new version must be explicit, never a forwarded copy of the old demand.
  */
 
-type Stage = { position: number; name: string; requiredRole: string };
+type Stage = {
+  position: number;
+  name: string;
+  kind: "Review" | "Approval";
+  requiredRole: string;
+  authorityKind?: "BaseRole" | "LeadershipPosition" | null;
+  isLegacy?: boolean;
+  requiredAuthority?: { kind: "BaseRole" | "LeadershipPosition" | "LegacyRoleDemand"; role?: string | null; position?: string | null };
+};
 type Workflow = {
   id: string;
   logicalId: string;
@@ -31,26 +51,32 @@ type Workflow = {
   stages: Stage[];
 };
 
-const roles = [
-  "Engineer",
-  "Reviewer",
-  "Approver",
-  "ConfigurationManager",
-  "TestEngineer",
-  "TestLead",
-  "ProgramManager",
-] as const;
+/** The authority a composing stage demands, kept unselected until the author actually chooses. */
+type ComposingStage = {
+  name: string;
+  kind: "Review" | "Approval";
+  authorityKind: "" | "BaseRole" | "LeadershipPosition";
+  authorityValue: string;
+};
 
-const roleLabel = (role: string) =>
-  role === "ConfigurationManager"
-    ? "Configuration Manager"
-    : role === "TestEngineer"
-      ? "Test Engineer"
-      : role === "TestLead"
-        ? "Test Lead"
-        : role === "ProgramManager"
-          ? "Program Manager"
-          : role;
+/** A saved stage loads unselected when its authority is legacy or absent: the new version must be explicit. */
+const savedAuthority = (stage: Stage): { authorityKind: ComposingStage["authorityKind"]; authorityValue: string } =>
+  stage.requiredAuthority?.kind === "BaseRole" && stage.requiredAuthority.role
+    ? { authorityKind: "BaseRole", authorityValue: stage.requiredAuthority.role }
+    : stage.requiredAuthority?.kind === "LeadershipPosition" && stage.requiredAuthority.position
+      ? { authorityKind: "LeadershipPosition", authorityValue: stage.requiredAuthority.position }
+      : { authorityKind: "", authorityValue: "" };
+
+const composingComplete = (stage: ComposingStage) =>
+  Boolean(stage.name.trim()) && parseAuthorityToken(`${stage.authorityKind}:${stage.authorityValue}`) !== null;
+
+/** What a stage's requirement says. Legacy rows read as history, never as a modern choice. */
+const stageAuthorityText = (stage: Stage) =>
+  stage.requiredAuthority?.kind === "BaseRole" && stage.requiredAuthority.role
+    ? authorityLabel(stage.requiredAuthority.role)
+    : stage.requiredAuthority?.kind === "LeadershipPosition" && stage.requiredAuthority.position
+      ? `${authorityLabel(stage.requiredAuthority.position)} — Project Leadership`
+      : `Legacy authority · ${authorityLabel(stage.requiredRole)}`;
 
 export default function ReviewWorkflowCenter({
   api,
@@ -151,7 +177,10 @@ export default function ReviewWorkflowCenter({
                     <span>{stage.position + 1}</span>
                     <div>
                       <b>{stage.name}</b>
-                      <small>Signed by a {roleLabel(stage.requiredRole)}</small>
+                      <small>
+                        {stage.kind === "Approval" ? "Approval signature · " : "Review signature · "}
+                        {stageAuthorityText(stage)}
+                      </small>
                     </div>
                   </li>
                 ))}
@@ -245,10 +274,10 @@ function WorkflowComposer({
 }) {
   const [name, setName] = useState(base?.name ?? `${appliesTo} change board`);
   const [mode, setMode] = useState<"Sequential" | "Parallel">(base?.mode ?? "Sequential");
-  const [stages, setStages] = useState<{ name: string; requiredRole: string }[]>(
-    base?.stages.map((x) => ({ name: x.name, requiredRole: x.requiredRole })) ?? [
-      { name: "Peer engineering", requiredRole: "Reviewer" },
-      { name: "Configuration management", requiredRole: "ConfigurationManager" },
+  const [stages, setStages] = useState<ComposingStage[]>(
+    base?.stages.map((x) => ({ name: x.name, kind: x.kind ?? "Review", ...savedAuthority(x) })) ?? [
+      { name: "Peer engineering", kind: "Review", authorityKind: "", authorityValue: "" },
+      { name: "Configuration approval", kind: "Approval", authorityKind: "", authorityValue: "" },
     ],
   );
   const [error, setError] = useState("");
@@ -256,12 +285,24 @@ function WorkflowComposer({
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
+    if (stages.some((stage) => !composingComplete(stage))) return;
     setBusy(true);
     setError("");
     // Revising leaves the prior version exactly as it was; a completed review must stay explainable by the
     // procedure it was actually judged against.
     const url = base ? `${api}/api/review-workflows/${base.id}/revise` : `${api}/api/review-workflows`;
-    const body = base ? { name, mode, stages } : { projectId, name, appliesTo, mode, stages };
+    const stageRequests = stages.map((stage) => {
+      const authority = parseAuthorityToken(`${stage.authorityKind}:${stage.authorityValue}`);
+      return {
+        name: stage.name,
+        kind: stage.kind,
+        requiredAuthority:
+          authority?.kind === "BaseRole"
+            ? { kind: "BaseRole", role: authority.value }
+            : { kind: "LeadershipPosition", position: authority?.value },
+      };
+    });
+    const body = base ? { name, mode, stages: stageRequests } : { projectId, name, appliesTo, mode, stages: stageRequests };
     const response = await fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -334,20 +375,53 @@ function WorkflowComposer({
                 />
               </label>
               <label>
-                Stage {index + 1} signed by
+                Stage {index + 1} signature
                 <select
-                  value={stage.requiredRole}
+                  value={stage.kind}
+                  aria-label={`Stage ${index + 1} signature meaning`}
                   onChange={(event) =>
                     setStages((items) =>
-                      items.map((x, i) => (i === index ? { ...x, requiredRole: event.target.value } : x)),
+                      items.map((x, i) =>
+                        i === index ? { ...x, kind: event.target.value as ComposingStage["kind"] } : x,
+                      ),
                     )
                   }
                 >
-                  {roles.map((role) => (
-                    <option value={role} key={role}>
-                      {roleLabel(role)}
-                    </option>
-                  ))}
+                  <option value="Review">Review</option>
+                  <option value="Approval">Approval</option>
+                </select>
+              </label>
+              <label>
+                Stage {index + 1} required project authority
+                <select
+                  value={`${stage.authorityKind}:${stage.authorityValue}`}
+                  aria-label={`Stage ${index + 1} required project authority`}
+                  onChange={(event) => {
+                    const parsed = parseAuthorityToken(event.target.value);
+                    setStages((items) =>
+                      items.map((x, i) =>
+                        i === index
+                          ? { ...x, authorityKind: parsed?.kind ?? "", authorityValue: parsed?.value ?? "" }
+                          : x,
+                      ),
+                    );
+                  }}
+                >
+                  <option value=":">Choose authority…</option>
+                  <optgroup label="Base project roles">
+                    {baseRoleAuthorities.map((role) => (
+                      <option value={authorityToken("BaseRole", role)} key={`BaseRole:${role}`}>
+                        {authorityLabel(role)}
+                      </option>
+                    ))}
+                  </optgroup>
+                  <optgroup label="Project Leadership">
+                    {leadershipAuthorities.map((position) => (
+                      <option value={authorityToken("LeadershipPosition", position)} key={`LeadershipPosition:${position}`}>
+                        {`${authorityLabel(position)} — leadership position`}
+                      </option>
+                    ))}
+                  </optgroup>
                 </select>
               </label>
               <button
@@ -365,7 +439,7 @@ function WorkflowComposer({
         <button
           type="button"
           className="workflowAddStage"
-          onClick={() => setStages((items) => [...items, { name: "", requiredRole: "Approver" }])}
+          onClick={() => setStages((items) => [...items, { name: "", kind: "Review", authorityKind: "", authorityValue: "" }])}
         >
           Add a stage
         </button>
@@ -380,7 +454,11 @@ function WorkflowComposer({
           <button type="button" className="cancel" onClick={onCancel}>
             Cancel
           </button>
-          <button disabled={busy}>{busy ? "Recording…" : "Save as draft"}</button>
+          <button
+            disabled={busy || stages.some((stage) => !composingComplete(stage))}
+          >
+            {busy ? "Recording…" : "Save as draft"}
+          </button>
         </div>
       </form>
     </div>

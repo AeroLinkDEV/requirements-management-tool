@@ -1016,7 +1016,7 @@ public static class ChangeRequestEndpoints
                     }
                     else if (index < workflow.Stages.Count)
                         role = await WorkflowEndpoints.StageAuthorityAsync(db, scr.ProjectId, account.Id,
-                            workflow.Stages[index].RequiredRole, ct);
+                            workflow.Stages[index], ct);
                     else
                         // Additional signers are allowed beyond the configured minimum, but they must still
                         // be active participants in this Program. A role is resolved from the server roster;
@@ -1099,7 +1099,7 @@ public static class ChangeRequestEndpoints
                     }
                     else if (index < workflow.Stages.Count)
                         role = await WorkflowEndpoints.StageAuthorityAsync(db, scr.ProjectId, account.Id,
-                            workflow.Stages[index].RequiredRole, ct);
+                            workflow.Stages[index], ct);
                     else
                         role = (await WorkflowEndpoints.AuthoritiesAsync(db, scr.ProjectId, [account.Id], ct))
                             .GetValueOrDefault(account.Id);

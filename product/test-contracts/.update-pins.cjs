@@ -11,12 +11,13 @@ c = c.replace(/intentArtifact\.totals\.tests, \d+/g, `intentArtifact.totals.test
 c = c.replace(/intentArtifact\.totals\.cases, \d+/g, `intentArtifact.totals.cases, ${intent.totals.cases}`);
 c = c.replace(/hostArtifact\.totals\.knownCases, \d+/g, `hostArtifact.totals.knownCases, ${intent.totals.cases}`);
 
-// Update summary deep-equal assertions
+// Update summary deep-equal assertions. Access may be `summary.key` or `summary['key']`.
 for (const key of ['reusable-host', 'fresh-host', 'converted', 'migration-candidate']) {
   const val = host.summary[key];
   if (!val) continue;
   const summaryStr = `{ classes: ${val.classes}, tests: ${val.tests}, knownCases: ${val.knownCases}, unknownCaseTests: ${val.unknownCaseTests} }`;
-  const pattern = new RegExp(`(hostArtifact\\.summary\\['${key.replace(/[-]/g, '\\-')}'\\], )\\{[^}]+\\}`);
+  const access = `hostArtifact\\.summary(?:(?:\\['${key.replace(/[-]/g, '\\-')}'\\])|(?:\\.${key}))`;
+  const pattern = new RegExp(`(${access}, )\\{[^}]+\\}`);
   c = c.replace(pattern, `$1${summaryStr}`);
 }
 
@@ -27,11 +28,12 @@ c = c.replace(/reusable\.knownCases - reusable\.classes, \d+/g, `reusable.knownC
 
 // Update CLI output regex patterns
 const totalTests = host.totals.tests;
+const fh = host.summary['fresh-host'];
 const rhPct = (rh.tests / totalTests * 100).toFixed(1);
 const fhPct = (host.summary['fresh-host'].tests / totalTests * 100).toFixed(1);
-c = c.replace(/reusable-host\\s\+\d+\\s\+\d+\\s\+\d+\\s\+\d+\\s\+[\d.]+%/,
+c = c.replace(/reusable-host\\s\+\d+\\s\+\d+\\s\+\d+\\s\+\d+\\s\+[\d.\\]+%/,
   `reusable-host\\s+${rh.classes}\\s+${rh.tests}\\s+${rh.knownCases}\\s+0\\s+${rhPct}%`);
-c = c.replace(/fresh-host\\s\+\d+\\s\+\d+\\s\+\d+\\s\+\d+\\s\+[\d.]+%/,
+c = c.replace(/fresh-host\\s\+\d+\\s\+\d+\\s\+\d+\\s\+\d+\\s\+[\d.\\]+%/,
   `fresh-host\\s+${fh.classes}\\s+${fh.tests}\\s+${fh.knownCases}\\s+0\\s+${fhPct}%`);
 c = c.replace(/Remaining reuse headroom:\\s\+\d+ classes, \d+ methods, \d+ known cases/,
   `Remaining reuse headroom:\\s+${rh.classes} classes, ${rh.tests} methods, ${rh.knownCases} known cases`);

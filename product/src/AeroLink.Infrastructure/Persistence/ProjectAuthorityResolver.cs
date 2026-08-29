@@ -312,4 +312,85 @@ public sealed class ProjectAuthorityResolver(AeroLinkDbContext db)
 
         return results.Select(x => (x.Key, x.Value.Item1, x.Value.Item2)).ToList();
     }
+
+    /// <summary>
+    /// Everybody who currently answers an EXPLICIT authority requirement on this program, with provenance.
+    ///
+    /// Slice 4 workflow stages record which kind of authority they demand, so their candidate sets are
+    /// resolved from the intent rather than from the ambiguous legacy demand:
+    /// - a base-role requirement resolves to the members who genuinely hold that job (plus exact-role
+    ///   delegations) - a leadership elevation never substitutes into it;
+    /// - a leadership requirement resolves to the position's current eligible primary and standing backup -
+    ///   a base-role-only member never appears merely because they are eligible for the post.
+    ///
+    /// The per-person ResolveAsync and this projection answer from the same rules, so the picker and the
+    /// signing gate cannot disagree.
+    /// </summary>
+    public async Task<IReadOnlyList<(Guid UserId, ProjectAuthoritySource Source, ProjectLeadershipPosition? Position)>>
+        ResolveHoldersAsync(Guid programId, ProjectAuthorityRequirement requirement, DateTimeOffset now,
+            bool includeProgramAdministratorSubstitution = false, CancellationToken ct = default)
+    {
+        // A persisted legacy demand keeps resolving through the compatibility contract it was recorded under —
+        // the same rules the per-person ResolveAsync applies — never narrowed to a modern guess.
+        if (requirement.Kind == ProjectAuthorityKind.LegacyRoleDemand)
+            return await ResolveHoldersAsync(programId, requirement.Role!.Value, now,
+                includeProgramAdministratorSubstitution, ct);
+
+        var results = new Dictionary<Guid, (ProjectAuthoritySource, ProjectLeadershipPosition?)>();
+        var activeMembers = await db.ProgramMemberships.AsNoTracking()
+            .Where(x => x.ProgramId == programId && x.EndedAt == null)
+            .Join(db.UserAccounts.AsNoTracking().Where(u => u.State == AccountState.Active),
+                m => m.UserId, u => u.Id, (m, u) => new { m.UserId, m.Role })
+            .ToListAsync(ct);
+
+        if (requirement.Kind == ProjectAuthorityKind.BaseRole)
+        {
+            var role = requirement.Role!.Value;
+            var accepted = BaseRoleMembershipAnswerable(role);
+            foreach (var holder in activeMembers.Where(x => accepted.Contains(x.Role)))
+                results.TryAdd(holder.UserId, (ProjectAuthoritySource.DirectBaseRole, null));
+            var delegations = await db.RoleDelegations.AsNoTracking()
+                .Where(x => x.ProgramId == programId && x.Role == role && x.RevokedAt == null)
+                .ToListAsync(ct);
+            var delegatedUserIds = delegations.Where(x => x.StartsAt <= now && x.EndsAt > now)
+                .Select(x => x.DelegateUserId).Distinct().ToList();
+            if (delegatedUserIds.Count > 0)
+            {
+                var delegatedIds = (await db.UserAccounts.AsNoTracking()
+                    .Where(x => delegatedUserIds.Contains(x.Id) && x.State == AccountState.Active)
+                    .Select(x => x.Id).ToListAsync(ct)).ToHashSet();
+                foreach (var userId in delegatedIds)
+                    results.TryAdd(userId, (ProjectAuthoritySource.Delegation, null));
+            }
+        }
+        else if (requirement.Kind == ProjectAuthorityKind.LeadershipPosition)
+        {
+            var position = requirement.Position!.Value;
+            var requiredBaseRole = ProjectLeadership.RequiredBaseRole(position);
+            var eligibleUsers = activeMembers.Where(x => x.Role == requiredBaseRole).Select(x => x.UserId).ToHashSet();
+            var primaries = await db.ProjectLeadershipAssignments.AsNoTracking()
+                .Where(x => x.ProgramId == programId && x.Position == position && x.EndedAt == null)
+                .Select(x => x.HolderUserId).ToListAsync(ct);
+            foreach (var holder in primaries.Where(eligibleUsers.Contains))
+                results.TryAdd(holder, (ProjectAuthoritySource.LeadershipPrimary, position));
+            var backups = await db.ProjectLeadershipBackups.AsNoTracking()
+                .Where(x => x.ProgramId == programId && x.Position == position && x.RemovedAt == null)
+                .Select(x => x.BackupUserId).ToListAsync(ct);
+            foreach (var backup in backups.Where(eligibleUsers.Contains))
+                results.TryAdd(backup, (ProjectAuthoritySource.LeadershipBackup, position));
+        }
+        if (includeProgramAdministratorSubstitution)
+            foreach (var administratorId in activeMembers
+                         .Where(x => x.Role == ProgramRole.Administrator)
+                         .Select(x => x.UserId).Distinct())
+                results[administratorId] = (ProjectAuthoritySource.AdministratorSubstitution, null);
+        var systemAdministratorId = await db.UserAccounts.AsNoTracking()
+            .Where(x => x.State == AccountState.Active
+                        && x.UserName == IdentityService.SystemAdministratorUserName)
+            .Select(x => (Guid?)x.Id)
+            .SingleOrDefaultAsync(ct);
+        if (systemAdministratorId is not null)
+            results[systemAdministratorId.Value] = (ProjectAuthoritySource.AdministratorSubstitution, null);
+        return results.Select(x => (x.Key, x.Value.Item1, x.Value.Item2)).ToList();
+    }
 }

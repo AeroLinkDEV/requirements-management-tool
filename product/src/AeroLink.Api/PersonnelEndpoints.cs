@@ -143,6 +143,14 @@ public static class PersonnelEndpoints
                 var retired = roles.First(SingularProgramRoles.IsSingular);
                 return Results.Conflict(new { error = $"{Readable(retired)} is retired as a project role. Assign the matching Project Leadership position instead." });
             }
+            // #816 Slice 4: Reviewer and Approver are signature meanings a workflow stage records, not jobs.
+            // The browser hides them; the server refuses them so a crafted request cannot grant standing
+            // control authority the workflow model replaced.
+            if (roles.Any(RetiredGrantRoles.IsRetiredGrant))
+            {
+                var retiredGrant = roles.First(RetiredGrantRoles.IsRetiredGrant);
+                return Results.Conflict(new { error = $"{Readable(retiredGrant)} is a signature meaning a review workflow stage records, not a project role. Configure the workflow's required authority instead." });
+            }
             var programId = await ProgramOfAsync(db, projectId, ct);
             if (programId is null) return Results.NotFound();
             if (!await db.UserAccounts.AnyAsync(x => x.Id == request.UserId && x.State == AccountState.Active, ct))
@@ -201,6 +209,12 @@ public static class PersonnelEndpoints
             if (!await http.HasRosterAuthorityAsync(db, resolver, projectId, ct)) return Results.Forbid();
             var programId = await ProgramOfAsync(db, projectId, ct);
             if (programId is null) return Results.NotFound();
+            // #816 Slice 4: Reviewer and Approver are signature meanings, not roles that can carry standing
+            // cover. A role-keyed backup naming one would recreate exactly the standing control authority
+            // that membership and delegation grants now refuse, so it is refused here too. Historical
+            // backup rows remain readable compatibility data; this gates only NEW creation.
+            if (RetiredGrantRoles.IsRetiredGrant(request.Role))
+                return Results.Conflict(new { error = $"{Readable(request.Role)} is a signature meaning a review workflow stage records, not a role that can be backed up. Configure the workflow's required authority instead." });
             if (!await db.ProgramMemberships.AnyAsync(x => x.UserId == request.BackupUserId && x.ProgramId == programId && x.EndedAt == null, ct))
                 return Results.BadRequest(new { error = "A backup has to be on this project. Add them first." });
             // Somebody who already holds the position cannot also be its cover: the point of a backup is that

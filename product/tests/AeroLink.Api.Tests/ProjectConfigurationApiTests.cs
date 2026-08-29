@@ -139,7 +139,7 @@ public sealed class ProjectConfigurationApiTests : IClassFixture<SharedApiHost>
 
         using var workflow = await client.PutAsJsonAsync($"/api/projects/{seeded.ProjectId}/approval-configuration/Interface", new
         {
-            stages = new[] { new { name = "ICD approval", requiredRole = "ConfigurationManager", kind = "Approval" } },
+            stages = new[] { new { name = "ICD approval", kind = "Approval", requiredAuthority = new { kind = "BaseRole", role = "ConfigurationManager" } } },
         });
         Assert.True(workflow.IsSuccessStatusCode, await workflow.Content.ReadAsStringAsync());
         using var applicable = await client.GetAsync($"/api/review-workflows/applicable?projectId={seeded.ProjectId}&type=Interface");

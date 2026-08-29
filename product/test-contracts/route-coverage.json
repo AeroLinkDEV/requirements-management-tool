@@ -382,7 +382,8 @@
         "VerificationImpactApiTests",
         "VerificationProgramIsolationApiTests",
         "VerificationVocabularyApiTests",
-        "WithdrawChangeRequestApiTests"
+        "WithdrawChangeRequestApiTests",
+        "WorkflowAuthorityCutoverApiTests"
       ]
     },
     {
@@ -1729,7 +1730,8 @@
         "PersonnelDirectoryApiTests",
         "ProjectLeadershipApiTests",
         "ProjectPersonnelApiTests",
-        "RosterAuthoritySeparationTests"
+        "RosterAuthoritySeparationTests",
+        "WorkflowAuthorityCutoverApiTests"
       ]
     },
     {
@@ -1737,7 +1739,8 @@
       "path": "/api/projects/{projectId:guid}/personnel/backups",
       "file": "PersonnelEndpoints.cs",
       "coveredBy": [
-        "ApprovalConfigurationApiTests"
+        "ApprovalConfigurationApiTests",
+        "WorkflowAuthorityCutoverApiTests"
       ]
     },
     {
@@ -2399,7 +2402,8 @@
       "path": "/api/projects/{projectId:guid}/approval-configuration/{subject}",
       "file": "ApprovalConfigurationEndpoints.cs",
       "coveredBy": [
-        "ApprovalConfigurationApiTests"
+        "ApprovalConfigurationApiTests",
+        "WorkflowAuthorityCutoverApiTests"
       ]
     },
     {

@@ -57,6 +57,10 @@ public static class AdministrationEndpoints
             // reconciliation it recreates the state that migration refuses.
             if (SingularProgramRoles.IsSingular(request.Role))
                 return Results.Conflict(new { error = $"{request.Role} is retired as a project role. Assign the matching Project Leadership position instead." });
+            // #816 Slice 4: Reviewer and Approver are signature meanings a workflow stage records, not jobs a
+            // person is granted. A crafted API request must not resurrect them as standing control authority.
+            if (RetiredGrantRoles.IsRetiredGrant(request.Role))
+                return Results.Conflict(new { error = $"{request.Role} is a signature meaning a review workflow stage records, not a project role. Configure the workflow's required authority instead." });
             db.ProgramMemberships.Add(new(id, request.ProgramId, request.Role, actor.UserName, DateTimeOffset.UtcNow));
             db.SecurityAuditEvents.Add(new("RoleGranted", actor.UserName, id.ToString(), "Success", $"Granted {request.Role} for program {request.ProgramId}.", http.Connection.RemoteIpAddress?.ToString() ?? "local", DateTimeOffset.UtcNow)); await db.SaveChangesAsync(ct); return Results.NoContent();
         });
@@ -103,6 +107,10 @@ public static class AdministrationEndpoints
             var members=await db.ProgramMemberships.AsNoTracking().Where(x=>x.ProgramId==request.ProgramId&&x.EndedAt==null&&(x.UserId==request.DelegatorUserId||x.UserId==request.DelegateUserId)).Select(x=>x.UserId).Distinct().ToListAsync(ct);
             if(members.Count!=2)return Results.BadRequest(new{error="Both delegation participants must belong to the selected Program."});
             var now = DateTimeOffset.UtcNow;
+            // #816 Slice 4: a delegation of Reviewer/Approver would extend the same retired standing authority
+            // a new grant would, so it is refused here as well.
+            if (RetiredGrantRoles.IsRetiredGrant(request.Role))
+                return Results.Conflict(new { error = $"{request.Role} is a signature meaning a review workflow stage records, not a delegable project role." });
             var governedPosition = ProjectLeadership.PositionForGovernedRole(request.Role);
             var canDelegate = SingularProgramRoles.IsPositionGoverned(request.Role)
                 ? governedPosition is not null && await authority.IsSatisfiedAsync(
