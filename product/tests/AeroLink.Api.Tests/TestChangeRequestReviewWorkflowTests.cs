@@ -77,6 +77,9 @@ public sealed class TestChangeRequestReviewWorkflowTests
         db.Add(engineer);
         db.Add(new ProgramMembership(engineer.Id, program.Id, ProgramRole.TestEngineer, "test.setup", now));
         db.Add(new ProgramMembership(engineer.Id, program.Id, ProgramRole.Approver, "test.setup", now));
+        // Modern workflow stages demand explicit base roles, so the accounts that sign them hold the
+        // System Test Engineer base role alongside their historical memberships.
+        db.Add(new ProgramMembership(engineer.Id, program.Id, ProgramRole.SystemTestEngineer, "test.setup", now));
         UserAccount? configurationManager = null;
         foreach (var (user, role) in new[]
                  {
@@ -91,6 +94,8 @@ public sealed class TestChangeRequestReviewWorkflowTests
                 IdentityService.HashPassword(AeroLinkApiFactory.MemberPassword), now);
             db.Add(account);
             db.Add(new ProgramMembership(account.Id, program.Id, role, "test.setup", now));
+            if (role == ProgramRole.Approver)
+                db.Add(new ProgramMembership(account.Id, program.Id, ProgramRole.SystemTestEngineer, "test.setup", now));
             if (role == ProgramRole.ConfigurationManager) configurationManager = account;
         }
         db.Add(new ProjectLeadershipAssignment(program.Id, ProjectLeadershipPosition.ConfigurationManager,
@@ -122,6 +127,11 @@ public sealed class TestChangeRequestReviewWorkflowTests
             IdentityService.HashPassword(AeroLinkApiFactory.MemberPassword), now);
         db.Add(leadOnly);
         db.Add(new ProgramMembership(leadOnly.Id, program.Id, ProgramRole.TestLead, "test.setup", now));
+        // Modern leadership stages demand the position, so the lead is elevated: eligible through the
+        // System Test Engineer base role, holding the System Test Lead primary.
+        db.Add(new ProgramMembership(leadOnly.Id, program.Id, ProgramRole.SystemTestEngineer, "test.setup", now));
+        db.Add(new ProjectLeadershipAssignment(program.Id, ProjectLeadershipPosition.SystemTestLead,
+            leadOnly.Id, "test.setup", now));
         var author = new UserAccount("workflow.author", "Workflow Author", "workflow.author@example.test",
             IdentityService.HashPassword(AeroLinkApiFactory.MemberPassword), now);
         db.Add(author);
@@ -160,11 +170,16 @@ public sealed class TestChangeRequestReviewWorkflowTests
     }
 
     private static async Task<Guid> CreateWorkflowAsync(HttpClient client, Guid projectId, string mode,
-        params (string Name, string Role)[] stages)
+        params (string Name, string Role, string AuthorityKind)[] stages)
         => await CreateWorkflowAsync(client, projectId, mode, "SystemTest", stages);
 
+    /// <summary>
+    /// Creates and activates a MODERN workflow through the API: every stage records an explicit authority
+    /// kind, exactly as the cutover requires of new configuration. A leadership stage names the position by
+    /// its own name; the frozen authority then carries the identically named ProgramRole.
+    /// </summary>
     private static async Task<Guid> CreateWorkflowAsync(HttpClient client, Guid projectId, string mode,
-        string appliesTo, params (string Name, string Role)[] stages)
+        string appliesTo, params (string Name, string Role, string AuthorityKind)[] stages)
     {
         await LoginAsync(client, "workflow.config");
         using var created = await client.PostAsJsonAsync("/api/review-workflows", new
@@ -173,7 +188,9 @@ public sealed class TestChangeRequestReviewWorkflowTests
             name = $"TCR {mode}",
             appliesTo,
             mode,
-            stages = stages.Select(x => new { name = x.Name, requiredRole = x.Role }).ToArray()
+            stages = stages.Select(x => x.AuthorityKind == "LeadershipPosition"
+                ? (object)new { name = x.Name, kind = "Review", requiredAuthority = new { kind = "LeadershipPosition", position = x.Role } }
+                : new { name = x.Name, kind = "Review", requiredAuthority = new { kind = "BaseRole", role = x.Role } }).ToArray()
         });
         var body = await created.Content.ReadAsStringAsync();
         Assert.True(created.IsSuccessStatusCode, $"{(int)created.StatusCode}: {body}");
@@ -181,6 +198,26 @@ public sealed class TestChangeRequestReviewWorkflowTests
         using var activated = await client.PostAsJsonAsync($"/api/review-workflows/{id}/activate", new { });
         Assert.True(activated.IsSuccessStatusCode, await activated.Content.ReadAsStringAsync());
         return id;
+    }
+
+    /// <summary>
+    /// Records a workflow exactly as rows recorded before the Slice 4 cutover look: role-shaped demands with
+    /// no authority kind, answered by the legacy compatibility policy. The API refuses legacy demands as new
+    /// configuration, so a characterization of that legacy behavior can only be written directly.
+    /// </summary>
+    private static async Task<Guid> CreateLegacyWorkflowAsync(AeroLinkApiFactory factory, Guid projectId, string mode,
+        string appliesTo, params (string Name, ProgramRole Role)[] stages)
+    {
+        var now = DateTimeOffset.UtcNow;
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+        var workflow = new ReviewWorkflow(projectId, $"TCR {mode}", Enum.Parse<ReviewSubject>(appliesTo),
+            Enum.Parse<ReviewMode>(mode),
+            stages.Select(x => new ReviewWorkflowStageDraft(x.Name, x.Role)).ToList(), "test.setup", now);
+        workflow.Activate("test.setup", now);
+        db.ReviewWorkflows.Add(workflow);
+        await db.SaveChangesAsync();
+        return workflow.Id;
     }
 
     private static async Task<JsonElement> ReadItemAsync(HttpClient client, Guid releaseId, Guid reviewId)
@@ -333,7 +370,7 @@ public sealed class TestChangeRequestReviewWorkflowTests
         using var client = factory.CreateClient();
         var fixture = await SeedAsync(factory);
         await CreateWorkflowAsync(client, fixture.ProjectId, "Sequential",
-            ("First", nameof(ProgramRole.Approver)), ("Second", nameof(ProgramRole.Approver)));
+            ("First", nameof(ProgramRole.SystemTestEngineer), "BaseRole"), ("Second", nameof(ProgramRole.SystemTestEngineer), "BaseRole"));
         await PreparePackageAsync(client, fixture);
         using (var scope = factory.Services.CreateScope())
         {
@@ -416,7 +453,7 @@ public sealed class TestChangeRequestReviewWorkflowTests
         using var client = factory.CreateClient();
         var fixture = await SeedAsync(factory);
         await CreateWorkflowAsync(client, fixture.ProjectId, "Sequential",
-            ("Required approval", nameof(ProgramRole.Approver)));
+            ("Required approval", nameof(ProgramRole.SystemTestEngineer), "BaseRole"));
         await PreparePackageAsync(client, fixture);
 
         var submitted = await SubmitAsync(client, fixture.ReviewId, new
@@ -444,7 +481,7 @@ public sealed class TestChangeRequestReviewWorkflowTests
         using var client = factory.CreateClient();
         var fixture = await SeedAsync(factory);
         await CreateWorkflowAsync(client, fixture.ProjectId, "Parallel",
-            ("First", nameof(ProgramRole.Approver)), ("Second", nameof(ProgramRole.Approver)));
+            ("First", nameof(ProgramRole.SystemTestEngineer), "BaseRole"), ("Second", nameof(ProgramRole.SystemTestEngineer), "BaseRole"));
         await PreparePackageAsync(client, fixture);
 
         var submitted = await SubmitAsync(client, fixture.ReviewId, new
@@ -481,7 +518,7 @@ public sealed class TestChangeRequestReviewWorkflowTests
         using var client = factory.CreateClient();
         var fixture = await SeedAsync(factory);
         await CreateWorkflowAsync(client, fixture.ProjectId, "Sequential",
-            ("First", nameof(ProgramRole.Approver)), ("Second", nameof(ProgramRole.Approver)));
+            ("First", nameof(ProgramRole.SystemTestEngineer), "BaseRole"), ("Second", nameof(ProgramRole.SystemTestEngineer), "BaseRole"));
         await PreparePackageAsync(client, fixture);
 
         // workflow.outsider is an Engineer, not an Approver, and cannot sign the Approver stage.
@@ -502,7 +539,7 @@ public sealed class TestChangeRequestReviewWorkflowTests
         using var client = factory.CreateClient();
         var fixture = await SeedAsync(factory);
         await CreateWorkflowAsync(client, fixture.ProjectId, "Sequential",
-            ("First", nameof(ProgramRole.Approver)), ("Second", nameof(ProgramRole.Approver)));
+            ("First", nameof(ProgramRole.SystemTestEngineer), "BaseRole"), ("Second", nameof(ProgramRole.SystemTestEngineer), "BaseRole"));
         await PreparePackageAsync(client, fixture);
 
         await SubmitAsync(client, fixture.ReviewId, new
@@ -523,7 +560,7 @@ public sealed class TestChangeRequestReviewWorkflowTests
         using var client = factory.CreateClient();
         var fixture = await SeedAsync(factory);
         await CreateWorkflowAsync(client, fixture.ProjectId, "Sequential",
-            ("First", nameof(ProgramRole.Approver)), ("Second", nameof(ProgramRole.Approver)));
+            ("First", nameof(ProgramRole.SystemTestEngineer), "BaseRole"), ("Second", nameof(ProgramRole.SystemTestEngineer), "BaseRole"));
         await PreparePackageAsync(client, fixture);
 
         // workflow.engineer holds both TestEngineer and Approver authority, so the stage role check passes
@@ -544,7 +581,7 @@ public sealed class TestChangeRequestReviewWorkflowTests
         using var client = factory.CreateClient();
         var fixture = await SeedAsync(factory);
         await CreateWorkflowAsync(client, fixture.ProjectId, "Sequential",
-            ("First", nameof(ProgramRole.Approver)), ("Second", nameof(ProgramRole.Approver)));
+            ("First", nameof(ProgramRole.SystemTestEngineer), "BaseRole"), ("Second", nameof(ProgramRole.SystemTestEngineer), "BaseRole"));
         await PreparePackageAsync(client, fixture);
 
         var first = await SubmitAsync(client, fixture.ReviewId, new
@@ -729,7 +766,7 @@ public sealed class TestChangeRequestReviewWorkflowTests
     }
 
     [Theory]
-    [InlineData("workflow.lead", ProgramRole.TestLead)]
+    [InlineData("workflow.lead", ProgramRole.SystemTestLead)]
     [InlineData("workflow.config", ProgramRole.ConfigurationManager)]
     public async Task Configured_stage_signs_with_its_frozen_authority_without_generic_Approver(
         string signer, ProgramRole authority)
@@ -737,7 +774,8 @@ public sealed class TestChangeRequestReviewWorkflowTests
         using var factory = new AeroLinkApiFactory();
         using var client = factory.CreateClient();
         var fixture = await SeedAsync(factory);
-        await CreateWorkflowAsync(client, fixture.ProjectId, "Sequential", ("Governed stage", authority.ToString()));
+        await CreateWorkflowAsync(client, fixture.ProjectId, "Sequential",
+            ("Governed stage", authority.ToString(), "LeadershipPosition"));
         await PreparePackageAsync(client, fixture);
         await SubmitAsync(client, fixture.ReviewId, new { approvers = new[] { new { userId = signer } } });
         await LoginAsync(client, signer);
@@ -891,7 +929,7 @@ public sealed class TestChangeRequestReviewWorkflowTests
         using var client = factory.CreateClient();
         var fixture = await SeedAsync(factory);
         await CreateWorkflowAsync(client, fixture.ProjectId, "Sequential",
-            ("First", nameof(ProgramRole.Approver)), ("Second", nameof(ProgramRole.Approver)));
+            ("First", nameof(ProgramRole.SystemTestEngineer), "BaseRole"), ("Second", nameof(ProgramRole.SystemTestEngineer), "BaseRole"));
         await PreparePackageAsync(client, fixture);
 
         await SubmitAsync(client, fixture.ReviewId, new
@@ -942,7 +980,7 @@ public sealed class TestChangeRequestReviewWorkflowTests
         using var client = factory.CreateClient();
         var fixture = await SeedAsync(factory);
         await CreateWorkflowAsync(client, fixture.ProjectId, "Parallel",
-            ("First", nameof(ProgramRole.Approver)), ("Second", nameof(ProgramRole.Approver)));
+            ("First", nameof(ProgramRole.SystemTestEngineer), "BaseRole"), ("Second", nameof(ProgramRole.SystemTestEngineer), "BaseRole"));
         await PreparePackageAsync(client, fixture);
 
         await SubmitAsync(client, fixture.ReviewId, new
@@ -966,7 +1004,7 @@ public sealed class TestChangeRequestReviewWorkflowTests
         using var client = factory.CreateClient();
         var fixture = await SeedAsync(factory);
         await CreateWorkflowAsync(client, fixture.ProjectId, "Sequential",
-            ("Lead review", nameof(ProgramRole.TestLead)), ("Assurance", nameof(ProgramRole.Approver)));
+            ("Lead review", nameof(ProgramRole.SystemTestLead), "LeadershipPosition"), ("Assurance", nameof(ProgramRole.SystemTestEngineer), "BaseRole"));
         await PreparePackageAsync(client, fixture);
 
         // workflow.lead holds TestLead only — no generic Approver role.
@@ -986,8 +1024,10 @@ public sealed class TestChangeRequestReviewWorkflowTests
         using var factory = new AeroLinkApiFactory();
         using var client = factory.CreateClient();
         var fixture = await SeedAsync(factory);
-        await CreateWorkflowAsync(client, fixture.ProjectId, "Sequential",
-            ("Lead review", nameof(ProgramRole.TestLead)), ("Assurance", nameof(ProgramRole.Approver)));
+        // Legacy characterization: a stage recorded before the cutover naming TestLead is answered by the
+        // role implication semantics it was written under, so the multi-role holder signs it as a TestLead.
+        await CreateLegacyWorkflowAsync(factory, fixture.ProjectId, "Sequential", "SystemTest",
+            ("Lead review", ProgramRole.TestLead), ("Assurance", ProgramRole.Approver));
         await PreparePackageAsync(client, fixture);
 
         // workflow.multirole holds both TestLead and Approver; the strongest role must not be forced on a
@@ -1018,8 +1058,10 @@ public sealed class TestChangeRequestReviewWorkflowTests
         using var factory = new AeroLinkApiFactory();
         using var client = factory.CreateClient();
         var fixture = await SeedAsync(factory);
-        await CreateWorkflowAsync(client, fixture.ProjectId, "Sequential", "System",
-            ("Lead review", nameof(ProgramRole.TestLead)));
+        // Legacy characterization, as above: the pre-cutover TestLead stage answers multi-role membership
+        // under the implication semantics it was recorded under.
+        await CreateLegacyWorkflowAsync(factory, fixture.ProjectId, "Sequential", "System",
+            ("Lead review", ProgramRole.TestLead));
 
         Guid draftId;
         using (var scope = factory.Services.CreateScope())
@@ -1080,7 +1122,7 @@ public sealed class TestChangeRequestReviewWorkflowTests
         using var client = factory.CreateClient();
         var fixture = await SeedAsync(factory);
         await CreateWorkflowAsync(client, fixture.ProjectId, "Sequential", "System",
-            ("Lead review", nameof(ProgramRole.TestLead)));
+            ("Lead review", nameof(ProgramRole.SystemTestLead), "LeadershipPosition"));
         var draftId = await CreateSystemDraftAsync(factory, fixture);
 
         await LoginAsync(client, "workflow.author");
@@ -1099,7 +1141,9 @@ public sealed class TestChangeRequestReviewWorkflowTests
             var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
             var step = await db.ReviewCycles.Include(x => x.Steps)
                 .SelectMany(x => x.Steps).SingleAsync(x => x.ApproverId == "workflow.lead");
-            Assert.Equal("TestLead", step.Authority);
+            // The stage demands the System Test Lead position; the frozen authority carries the identically
+            // named ProgramRole, not the retired TestLead compatibility value.
+            Assert.Equal("SystemTestLead", step.Authority);
             Assert.True(await db.ElectronicSignatures.AnyAsync(x =>
                 x.ArtifactId == draftId && x.UserName == "workflow.lead"));
         }
@@ -1112,7 +1156,7 @@ public sealed class TestChangeRequestReviewWorkflowTests
         using var client = factory.CreateClient();
         var fixture = await SeedAsync(factory);
         await CreateWorkflowAsync(client, fixture.ProjectId, "Sequential", "System",
-            ("Configuration review", nameof(ProgramRole.ConfigurationManager)));
+            ("Configuration review", nameof(ProgramRole.ConfigurationManager), "LeadershipPosition"));
         var draftId = await CreateSystemDraftAsync(factory, fixture);
 
         await LoginAsync(client, "workflow.author");
@@ -1142,7 +1186,7 @@ public sealed class TestChangeRequestReviewWorkflowTests
         using var client = factory.CreateClient();
         var fixture = await SeedAsync(factory);
         await CreateWorkflowAsync(client, fixture.ProjectId, "Sequential", "System",
-            ("Configuration review", nameof(ProgramRole.ConfigurationManager)));
+            ("Configuration review", nameof(ProgramRole.ConfigurationManager), "LeadershipPosition"));
         var draftId = await CreateSystemDraftAsync(factory, fixture);
 
         await LoginAsync(client, "workflow.author");
@@ -1160,7 +1204,7 @@ public sealed class TestChangeRequestReviewWorkflowTests
         using var client = factory.CreateClient();
         var fixture = await SeedAsync(factory);
         await CreateWorkflowAsync(client, fixture.ProjectId, "Sequential", "System",
-            ("Configuration review", nameof(ProgramRole.ConfigurationManager)));
+            ("Configuration review", nameof(ProgramRole.ConfigurationManager), "LeadershipPosition"));
         var draftId = await CreateSystemDraftAsync(factory, fixture);
 
         await LoginAsync(client, "workflow.author");
@@ -1177,7 +1221,7 @@ public sealed class TestChangeRequestReviewWorkflowTests
         using var client = factory.CreateClient();
         var fixture = await SeedAsync(factory);
         await CreateWorkflowAsync(client, fixture.ProjectId, "Sequential", "System",
-            ("System engineering lead review", nameof(ProgramRole.SystemEngineeringLead)));
+            ("System engineering lead review", nameof(ProgramRole.SystemEngineeringLead), "LeadershipPosition"));
         var draftId = await CreateSystemDraftAsync(factory, fixture);
 
         await LoginAsync(client, "workflow.author");
@@ -1195,7 +1239,7 @@ public sealed class TestChangeRequestReviewWorkflowTests
         using var client = factory.CreateClient();
         var fixture = await SeedAsync(factory);
         await CreateWorkflowAsync(client, fixture.ProjectId, "Sequential",
-            ("Approval", nameof(ProgramRole.Approver)));
+            ("Approval", nameof(ProgramRole.SystemTestEngineer), "BaseRole"));
         await PreparePackageAsync(client, fixture);
 
         using var response = await client.PostAsJsonAsync($"/api/test-change-reviews/{fixture.ReviewId}/submit",
@@ -1219,7 +1263,7 @@ public sealed class TestChangeRequestReviewWorkflowTests
         using var client = factory.CreateClient();
         var fixture = await SeedAsync(factory);
         await CreateWorkflowAsync(client, fixture.ProjectId, "Sequential", "System",
-            ("Approval", nameof(ProgramRole.Approver)));
+            ("Approval", nameof(ProgramRole.SystemTestEngineer), "BaseRole"));
         var draftId = await CreateSystemDraftAsync(factory, fixture);
 
         await LoginAsync(client, "workflow.author");
@@ -1417,7 +1461,7 @@ public sealed class TestChangeRequestReviewWorkflowTests
         using var client = factory.CreateClient();
         var fixture = await SeedAsync(factory);
         await CreateWorkflowAsync(client, fixture.ProjectId, "Sequential", "System",
-            ("Lead review", nameof(ProgramRole.TestLead)), ("Assurance", nameof(ProgramRole.Approver)));
+            ("Lead review", nameof(ProgramRole.SystemTestLead), "LeadershipPosition"), ("Assurance", nameof(ProgramRole.SystemTestEngineer), "BaseRole"));
         var draftId = await CreateSystemDraftAsync(factory, fixture);
 
         await LoginAsync(client, "workflow.author");
@@ -1445,7 +1489,7 @@ public sealed class TestChangeRequestReviewWorkflowTests
         using var client = factory.CreateClient();
         var fixture = await SeedAsync(factory);
         await CreateWorkflowAsync(client, fixture.ProjectId, "Sequential", "System",
-            ("First", nameof(ProgramRole.Approver)), ("Second", nameof(ProgramRole.Approver)));
+            ("First", nameof(ProgramRole.SystemTestEngineer), "BaseRole"), ("Second", nameof(ProgramRole.SystemTestEngineer), "BaseRole"));
         var draftId = await CreateSystemDraftAsync(factory, fixture);
         await LoginAsync(client, "workflow.author");
 
@@ -1481,7 +1525,7 @@ public sealed class TestChangeRequestReviewWorkflowTests
         using var client = factory.CreateClient();
         var fixture = await SeedAsync(factory);
         await CreateWorkflowAsync(client, fixture.ProjectId, "Sequential",
-            ("First", nameof(ProgramRole.Approver)), ("Second", nameof(ProgramRole.Approver)));
+            ("First", nameof(ProgramRole.SystemTestEngineer), "BaseRole"), ("Second", nameof(ProgramRole.SystemTestEngineer), "BaseRole"));
         await PreparePackageAsync(client, fixture);
 
         await SubmitAsync(client, fixture.ReviewId, new
@@ -1597,8 +1641,8 @@ public sealed class TestChangeRequestReviewWorkflowTests
             new { reason = "   " });
         Assert.Equal(HttpStatusCode.BadRequest, noReason.StatusCode);
 
-        // An approver without test authority may sign a package; putting one away is test engineering work.
-        await LoginAsync(client, "workflow.one");
+        // A reviewer without test authority may sign a package; putting one away is test engineering work.
+        await LoginAsync(client, "workflow.reviewer");
         using var refused = await client.PostAsJsonAsync($"/api/test-change-reviews/{fixture.ReviewId}/defer",
             new { reason = "Not mine to shelve." });
         Assert.Equal(HttpStatusCode.Forbidden, refused.StatusCode);

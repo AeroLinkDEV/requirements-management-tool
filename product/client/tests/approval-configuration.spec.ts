@@ -55,7 +55,7 @@ test('Selecting an artifact shows either its stages or why it has none', async (
 
     if (await stages.count()) {
       // Every stage names what it requires and what a signature on it means.
-      await expect(page.getByRole('columnheader', { name: 'Required position' })).toBeVisible()
+      await expect(page.getByRole('columnheader', { name: 'Required project authority' })).toBeVisible()
       await expect(page.getByRole('columnheader', { name: 'Who can sign today' })).toBeVisible()
       const rows = await stages.count()
       for (let index = 0; index < rows; index++) {

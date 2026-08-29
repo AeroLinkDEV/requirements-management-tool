@@ -190,7 +190,7 @@ public sealed class ProjectAuthorityResolverTests : IDisposable
 
         var membership = await _db.ProgramMemberships.SingleAsync(
             x => x.UserId == person.Id && x.Role == ProgramRole.SystemEngineer);
-        membership.End("test", _now);
+        membership.End("test", _now.AddMinutes(1));
         await _db.SaveChangesAsync();
 
         Assert.False((await ResolveAsync(person, ProjectLeadershipPosition.SystemEngineeringLead)).Granted);
@@ -216,7 +216,7 @@ public sealed class ProjectAuthorityResolverTests : IDisposable
         Assign(person, ProjectLeadershipPosition.SystemEngineeringLead);
 
         foreach (var membership in await _db.ProgramMemberships.Where(x => x.UserId == person.Id).ToListAsync())
-            membership.End("test", _now);
+            membership.End("test", _now.AddMinutes(1));
         await _db.SaveChangesAsync();
 
         Assert.False((await ResolveAsync(person, ProjectLeadershipPosition.SystemEngineeringLead)).Granted);
@@ -246,7 +246,7 @@ public sealed class ProjectAuthorityResolverTests : IDisposable
         // They stop being a System Engineer, but remain the Configuration Manager.
         var systemEngineer = await _db.ProgramMemberships.SingleAsync(
             x => x.UserId == person.Id && x.Role == ProgramRole.SystemEngineer);
-        systemEngineer.End("test", _now);
+        systemEngineer.End("test", _now.AddMinutes(1));
         await _db.SaveChangesAsync();
 
         Assert.False((await ResolveAsync(person, ProjectLeadershipPosition.SystemEngineeringLead)).Granted);
@@ -275,7 +275,7 @@ public sealed class ProjectAuthorityResolverTests : IDisposable
 
         var assignment = await _db.ProjectLeadershipAssignments.SingleAsync(
             x => x.HolderUserId == incumbent.Id && x.EndedAt == null);
-        assignment.End("test", _now);
+        assignment.End("test", _now.AddMinutes(1));
         Assign(successor, ProjectLeadershipPosition.ProgramManager);
 
         Assert.False((await ResolveAsync(incumbent, ProjectLeadershipPosition.ProgramManager)).Granted);
@@ -366,6 +366,93 @@ public sealed class ProjectAuthorityResolverTests : IDisposable
             includeProgramAdministratorSubstitution: true);
         Assert.Equal(ProjectAuthoritySource.AdministratorSubstitution,
             Assert.Single(workflowHolders, x => x.UserId == administrator.Id).Source);
+    }
+
+    // ---- Slice 4: the typed requirement overload ----------------------------------------------------------
+
+    /// <summary>
+    /// Workflow stages record an explicit kind since the cutover, so their candidate sets resolve from the
+    /// typed requirement. These pin that the typed projection and the per-person gate answer together, and
+    /// that a base-role member never answers a leadership requirement (or the reverse).
+    /// </summary>
+    [Fact]
+    public async Task The_typed_base_role_requirement_answers_genuine_members_and_exact_delegations_only()
+    {
+        var member = Person("base-member", ProgramRole.SystemEngineer);
+        var elevated = Person("elevated", ProgramRole.SystemEngineer);
+        Assign(elevated, ProjectLeadershipPosition.SystemEngineeringLead);
+        var delegatee = Person("delegatee");
+        _db.RoleDelegations.Add(new RoleDelegation(_program.Id, member.Id, delegatee.Id,
+            ProgramRole.SystemEngineer, _now.AddMinutes(-1), _now.AddHours(1), "Exact cover.", "test", _now));
+        var ended = Person("ended", ProgramRole.SystemEngineer);
+        _db.ProgramMemberships.Single(x => x.UserId == ended.Id).End("test", _now.AddMinutes(1));
+        await _db.SaveChangesAsync();
+
+        var requirement = ProjectAuthorityRequirement.BaseRole(ProgramRole.SystemEngineer);
+        var holders = await _resolver.ResolveHoldersAsync(_program.Id, requirement, _now);
+        var holderIds = holders.Select(x => x.UserId).ToHashSet();
+
+        Assert.Contains(member.Id, holderIds);
+        Assert.Contains(delegatee.Id, holderIds);
+        // Ended membership answers nothing, and a leadership elevation never substitutes into a base demand.
+        Assert.DoesNotContain(ended.Id, holderIds);
+        Assert.False(await _resolver.IsSatisfiedAsync(ended.Id, _program.Id, requirement, _now));
+        Assert.True(await _resolver.IsSatisfiedAsync(member.Id, _program.Id, requirement, _now));
+    }
+
+    [Fact]
+    public async Task The_typed_leadership_requirement_answers_primary_and_backup_and_fails_closed()
+    {
+        var primary = Person("primary", ProgramRole.SystemEngineer);
+        var backup = Person("backup", ProgramRole.SystemEngineer);
+        var baseOnly = Person("base-only", ProgramRole.SystemEngineer);
+        Assign(primary, ProjectLeadershipPosition.SystemEngineeringLead);
+        BackUp(backup, ProjectLeadershipPosition.SystemEngineeringLead);
+
+        var requirement = ProjectAuthorityRequirement.Leadership(ProjectLeadershipPosition.SystemEngineeringLead);
+        var holders = await _resolver.ResolveHoldersAsync(_program.Id, requirement, _now);
+        var bySource = holders.ToDictionary(x => x.UserId, x => x.Source);
+
+        Assert.Equal(ProjectAuthoritySource.LeadershipPrimary, bySource[primary.Id]);
+        Assert.Equal(ProjectAuthoritySource.LeadershipBackup, bySource[backup.Id]);
+        Assert.DoesNotContain(holders, x => x.UserId == baseOnly.Id);
+        Assert.False(await _resolver.IsSatisfiedAsync(baseOnly.Id, _program.Id, requirement, _now));
+
+        // A disabled holder or a lost eligibility ends the live authority, exactly as the per-person gate.
+        primary.Disable(_now);
+        await _db.SaveChangesAsync();
+        Assert.False(await _resolver.IsSatisfiedAsync(primary.Id, _program.Id, requirement, _now));
+        var afterDisabled = (await _resolver.ResolveHoldersAsync(_program.Id, requirement, _now))
+            .Select(x => x.UserId).ToHashSet();
+        Assert.DoesNotContain(primary.Id, afterDisabled);
+        Assert.Contains(backup.Id, afterDisabled);
+
+        _db.ProgramMemberships.Single(x => x.UserId == backup.Id).End("test", _now.AddMinutes(1));
+        await _db.SaveChangesAsync();
+        Assert.False(await _resolver.IsSatisfiedAsync(backup.Id, _program.Id, requirement, _now));
+    }
+
+    [Fact]
+    public async Task A_persisted_legacy_demand_through_the_typed_overload_behaves_exactly_as_recorded()
+    {
+        var lead = Person("lead", ProgramRole.SystemEngineer);
+        Assign(lead, ProjectLeadershipPosition.SystemEngineeringLead);
+        var rawRetired = Person("raw-retired", ProgramRole.SystemEngineeringLead);
+        var systemEngineer = Person("plain-engineer", ProgramRole.SystemEngineer);
+
+        var legacyLead = ProjectAuthorityRequirement.LegacyRoleDemand(ProgramRole.SystemEngineeringLead,
+            allowProgramAdministratorSubstitution: true);
+        var viaTyped = await _resolver.ResolveHoldersAsync(_program.Id, legacyLead, _now);
+        var viaRole = await _resolver.ResolveHoldersAsync(_program.Id, ProgramRole.SystemEngineeringLead, _now);
+
+        Assert.Equal(viaRole.Select(x => x.UserId).OrderBy(x => x), viaTyped.Select(x => x.UserId).OrderBy(x => x));
+        var holderIds = viaTyped.Select(x => x.UserId).ToHashSet();
+        Assert.Contains(lead.Id, holderIds);
+        // The raw retired membership never resurrects modern authority, and an unrelated base role never
+        // answers a demand it was never part of.
+        Assert.DoesNotContain(rawRetired.Id, holderIds);
+        Assert.DoesNotContain(systemEngineer.Id, holderIds);
+        Assert.False(await _resolver.IsSatisfiedAsync(rawRetired.Id, _program.Id, legacyLead, _now));
     }
 
     public void Dispose()

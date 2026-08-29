@@ -76,11 +76,24 @@ test('verification actions follow authority in the selected Program',async({page
   }})
   expect(accountResponse.ok(),await accountResponse.text()).toBeTruthy()
   const account=await accountResponse.json()
-  for(const [userId,programId,role] of [
-    [account.id,testWorkspace.program.id,'TestEngineer'],
-    [account.id,approvalWorkspace.program.id,'Approver'],
-    [reviewer.id,testWorkspace.program.id,'Approver'],
-    [reviewer.id,approvalWorkspace.program.id,'Approver'],
+  // Generic Reviewer/Approver are no longer grantable roles: they are signature meanings a workflow stage
+  // records. Where the journey needs the no-workflow approval fallback, the signer holds the authority
+  // through a Project Leadership position instead — the modern way to carry accountable approval authority.
+  const grantApproverThroughLeadership = async (userId: string, workspace: { program: { id: string }; project: { id: string } }) => {
+    const roleGrant = await request.post(`${apiBase}/api/admin/users/${userId}/memberships`, {
+      data: { programId: workspace.program.id, role: 'SystemEngineer' },
+    })
+    expect(roleGrant.ok(), await roleGrant.text()).toBeTruthy()
+    const elevation = await request.post(`${apiBase}/api/projects/${workspace.project.id}/leadership/SystemEngineeringLead/primary`, {
+      data: { holderUserId: userId },
+    })
+    expect(elevation.ok(), await elevation.text()).toBeTruthy()
+  }
+  await grantApproverThroughLeadership(reviewer.id, testWorkspace)
+  await grantApproverThroughLeadership(reviewer.id, approvalWorkspace)
+  for (const [userId, programId, role] of [
+    [account.id, testWorkspace.program.id, 'TestEngineer'],
+    [account.id, approvalWorkspace.program.id, 'Airworthiness'],
   ]){
     const grant=await request.post(`${apiBase}/api/admin/users/${userId}/memberships`,{data:{programId,role}})
     expect(grant.ok(),await grant.text()).toBeTruthy()

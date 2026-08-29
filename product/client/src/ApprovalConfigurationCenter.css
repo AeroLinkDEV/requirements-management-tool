@@ -112,3 +112,6 @@
   .configurationRow label:first-of-type { grid-column: 2 / -1; }
   .configurationRemove { grid-column: 2 / -1; justify-self: start; }
 }
+
+/* A stage recorded before the authority split: read as history, never styled as a modern choice. */
+.legacyAuthority { color: var(--ink-500); font-style: italic; }

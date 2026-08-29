@@ -226,22 +226,26 @@ public sealed class ApprovalConfigurationApiTests : IClassFixture<SharedApiHost>
 
         var first = await client.PutAsJsonAsync($"/api/projects/{seeded.ProjectId}/approval-configuration/{subject}", new
         {
-            stages = new[]
+            stages = new object[]
             {
-                new { name = "System engineer review", requiredRole = ProgramRole.SystemEngineer.ToString(), kind = "Review" },
-                new { name = "Program approval", requiredRole = ProgramRole.ProgramManager.ToString(), kind = "Approval" },
+                new { name = "System engineer review", kind = "Review",
+                    requiredAuthority = new { kind = "BaseRole", role = ProgramRole.SystemEngineer.ToString() } },
+                new { name = "Program approval", kind = "Approval",
+                    requiredAuthority = new { kind = "LeadershipPosition", position = ProjectLeadershipPosition.ProgramManager.ToString() } },
             },
         });
         Assert.Equal(HttpStatusCode.OK, first.StatusCode);
         var firstBody = await first.Content.ReadFromJsonAsync<ConfiguredResponse>();
         Assert.Equal(2, firstBody!.Version);
         Assert.Equal(2, firstBody.Stages.Length);
+        Assert.Equal(["BaseRole", "LeadershipPosition"], firstBody.Stages.Select(x => x.AuthorityKind).ToArray());
 
         var second = await client.PutAsJsonAsync($"/api/projects/{seeded.ProjectId}/approval-configuration/{subject}", new
         {
             stages = new[]
             {
-                new { name = "Lead review", requiredRole = ProgramRole.SystemEngineeringLead.ToString(), kind = "Review" },
+                new { name = "Lead review", kind = "Review",
+                    requiredAuthority = new { kind = "LeadershipPosition", position = ProjectLeadershipPosition.SystemEngineeringLead.ToString() } },
             },
         });
         Assert.Equal(HttpStatusCode.OK, second.StatusCode);
@@ -264,7 +268,8 @@ public sealed class ApprovalConfigurationApiTests : IClassFixture<SharedApiHost>
 
         var response = await client.PutAsJsonAsync($"/api/projects/{seeded.ProjectId}/approval-configuration/System", new
         {
-            stages = new[] { new { name = "Unauthorized", requiredRole = ProgramRole.SystemEngineer.ToString(), kind = "Review" } },
+            stages = new[] { new { name = "Unauthorized", kind = "Review",
+                requiredAuthority = new { kind = "BaseRole", role = ProgramRole.SystemEngineer.ToString() } } },
         });
         Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
     }
@@ -299,7 +304,8 @@ public sealed class ApprovalConfigurationApiTests : IClassFixture<SharedApiHost>
         var refused = await baseClient.PutAsJsonAsync(
             $"/api/projects/{seeded.ProjectId}/approval-configuration/{nameof(ReviewSubject.System)}", new
             {
-                stages = new[] { new { name = "Base-only attempt", requiredRole = ProgramRole.SystemEngineer.ToString(), kind = "Review" } },
+                stages = new[] { new { name = "Base-only attempt", kind = "Review",
+                    requiredAuthority = new { kind = "BaseRole", role = ProgramRole.SystemEngineer.ToString() } } },
             });
         Assert.Equal(HttpStatusCode.Forbidden, refused.StatusCode);
 
@@ -309,7 +315,8 @@ public sealed class ApprovalConfigurationApiTests : IClassFixture<SharedApiHost>
         var accepted = await holderClient.PutAsJsonAsync(
             $"/api/projects/{seeded.ProjectId}/approval-configuration/{nameof(ReviewSubject.System)}", new
             {
-                stages = new[] { new { name = "Position-holder update", requiredRole = ProgramRole.SystemEngineer.ToString(), kind = "Review" } },
+                stages = new[] { new { name = "Position-holder update", kind = "Review",
+                    requiredAuthority = new { kind = "BaseRole", role = ProgramRole.SystemEngineer.ToString() } } },
             });
         Assert.Equal(HttpStatusCode.OK, accepted.StatusCode);
     }
@@ -340,7 +347,8 @@ public sealed class ApprovalConfigurationApiTests : IClassFixture<SharedApiHost>
             mode = ReviewMode.Sequential.ToString(),
             stages = new[]
             {
-                new { name = "Racing review", requiredRole = ProgramRole.SystemEngineer.ToString(), kind = "Review" },
+                new { name = "Racing review", kind = "Review",
+                    requiredAuthority = new { kind = "BaseRole", role = ProgramRole.SystemEngineer.ToString() } },
             },
         });
 
@@ -537,5 +545,6 @@ public sealed class ApprovalConfigurationApiTests : IClassFixture<SharedApiHost>
         string[] Delegates, bool Blocking);
     private sealed record ConfiguredResponse(Guid ProjectId, string Subject, bool Configured, string Name, int Version,
         string Mode, ConfiguredStage[] Stages);
-    private sealed record ConfiguredStage(int Position, string Name, string Kind, string RequiredRole);
+    private sealed record ConfiguredStage(int Position, string Name, string Kind, string RequiredRole,
+        string? AuthorityKind, bool IsLegacy);
 }

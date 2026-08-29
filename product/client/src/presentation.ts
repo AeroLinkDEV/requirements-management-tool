@@ -411,16 +411,20 @@ const programRoleLabels: Record<string, string> = {
 export const programRoleLabel = (role: string) => programRoleLabels[role] ?? role
 
 /**
- * Every role somebody can be granted, grouped the way an organisation is: the people who do the engineering,
- * the people who lead it, the people who assure it, and the people who run the Program.
+ * Every role somebody can still be granted, grouped the way an organisation is: the people who do the
+ * engineering, the people who lead it, the people who assure it, and the people who run the Program.
  *
  * Ordered rather than alphabetical, because an alphabetical list puts Airworthiness first and Test Engineer
  * last, which tells a reader nothing about how the roles relate.
+ *
+ * The generic Reviewer/Approver pair is absent by decision: they describe what a workflow stage's signature
+ * means, not a job, and every grant path refuses them since the #816 Slice 4 cutover. The retired singular
+ * position roles (ProjectEngineeringLead and the discipline leads) are equally absent — their accountability
+ * lives on Project Leadership assignments now, and new grants of them are refused.
  */
 export const grantableProgramRoles: readonly string[] = [
   'SystemEngineer', 'SoftwareEngineer', 'TestEngineer', 'Engineer',
-  'SystemEngineeringLead', 'SoftwareEngineeringLead', 'TestLead', 'ProjectEngineeringLead',
   'EngineeringManager', 'ProgramManager',
-  'SoftwareQualityAnalyst', 'Airworthiness', 'Reviewer', 'Approver',
+  'SoftwareQualityAnalyst', 'Airworthiness',
   'ConfigurationManager', 'Administrator',
 ]

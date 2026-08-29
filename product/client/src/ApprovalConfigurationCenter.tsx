@@ -2,6 +2,13 @@ import { useCallback, useEffect, useMemo, useState, type Dispatch, type SetState
 import type { AuthUser } from './IdentityCenter'
 import PortalHeader from './PortalHeader'
 import { apiRequest, operationError } from './apiClient'
+import {
+  authorityLabel,
+  authorityToken,
+  baseRoleAuthorities,
+  leadershipAuthorities,
+  parseAuthorityToken,
+} from './workflowAuthorities'
 import './ApprovalConfigurationCenter.css'
 
 /**
@@ -24,7 +31,25 @@ type Resolved = {
   delegates?: string[]
   blocking: boolean
 }
-type Stage = { position: number; name: string; kind: 'Review' | 'Approval'; requiredRole?: string; required: Resolved }
+/**
+ * The required authority a stage demands, as recorded. `LegacyRoleDemand` only ever arrives from a row
+ * written before the cutover — it is displayed as historical, never offered as a modern choice.
+ */
+type RequiredAuthority = {
+  kind: 'BaseRole' | 'LeadershipPosition' | 'LegacyRoleDemand'
+  role?: string | null
+  position?: string | null
+}
+type Stage = {
+  position: number
+  name: string
+  kind: 'Review' | 'Approval'
+  requiredRole?: string
+  authorityKind?: 'BaseRole' | 'LeadershipPosition' | null
+  isLegacy?: boolean
+  requiredAuthority?: RequiredAuthority
+  required: Resolved
+}
 type Artifact = {
   subject: string
   configured: boolean
@@ -35,8 +60,6 @@ type Artifact = {
   blockingStages: number
 }
 type Configuration = { projectId: string; canManage: boolean; artifacts: Artifact[] }
-
-type EditableStage = { name: string; kind: 'Review' | 'Approval'; requiredRole: string }
 
 const subjectLabels: Record<string, string> = {
   System: 'System Change Request',
@@ -49,32 +72,32 @@ const subjectLabels: Record<string, string> = {
   LowLevelSoftwareTest: 'Historical LLR Test Procedure Change Request',
 }
 
-const roleLabels: Record<string, string> = {
-  ProjectEngineer: 'Project Engineer',
-  ProgramManager: 'Program Manager',
-  EngineeringManager: 'Engineering Manager',
-  ConfigurationManager: 'Configuration Manager',
-  ProjectEngineeringLead: 'Project Engineering Lead',
-  SystemEngineeringLead: 'System Engineering Lead',
-  SoftwareEngineeringLead: 'Software Engineering Lead',
-  SystemTestLead: 'System Test Lead',
-  SoftwareTestLead: 'Software Test Lead',
-  SystemEngineer: 'System Engineer',
-  SoftwareEngineer: 'Software Engineer',
-  SystemTestEngineer: 'System Test Engineer',
-  SoftwareTestEngineer: 'Software Test Engineer',
-  SoftwareQualityAnalyst: 'Software Quality Assurance',
-  Airworthiness: 'Airworthiness',
-  Engineer: 'Engineer',
-  Reviewer: 'Reviewer',
-  Approver: 'Approver',
-  TestEngineer: 'Test Engineer',
-  TestLead: 'Test Lead',
-  Administrator: 'Administrator',
-}
-const label = (role: string) => roleLabels[role] ?? role
+const label = (role: string) => authorityLabel(role)
 
-/** What the right-hand column says about a stage: a name, a count, or nobody. */
+/**
+ * One row being edited. The authority is kept as an unselected state until the author actually chooses:
+ * there is no default, because silently picking Reviewer (or anything else) is exactly the conflation the
+ * cutover removed. `authorityKind === ''` means "not chosen yet".
+ */
+type EditableStage = {
+  name: string
+  kind: 'Review' | 'Approval'
+  authorityKind: '' | 'BaseRole' | 'LeadershipPosition'
+  authorityValue: string
+}
+
+const stageComplete = (stage: EditableStage) =>
+  Boolean(stage.name.trim()) && parseAuthorityToken(`${stage.authorityKind}:${stage.authorityValue}`) !== null
+
+/** What a saved stage shows in the editor. A legacy row is deliberately left UNSELECTED: the new version must record explicit modern authority, never a forwarded copy of the old demand. */
+const savedAuthority = (stage: Stage): { authorityKind: EditableStage['authorityKind']; authorityValue: string } =>
+  stage.requiredAuthority?.kind === 'BaseRole' && stage.requiredAuthority.role
+    ? { authorityKind: 'BaseRole', authorityValue: stage.requiredAuthority.role }
+    : stage.requiredAuthority?.kind === 'LeadershipPosition' && stage.requiredAuthority.position
+      ? { authorityKind: 'LeadershipPosition', authorityValue: stage.requiredAuthority.position }
+      : { authorityKind: '', authorityValue: '' }
+
+// What the right-hand column says about a stage: a name, a count, or nobody.
 function whoCanSign(required: Resolved) {
   if (required.blocking) return 'Nobody holds this'
   const parts: string[] = []
@@ -84,10 +107,6 @@ function whoCanSign(required: Resolved) {
   if (required.delegates?.length) parts.push(`delegate ${required.delegates.join(', ')}`)
   return parts.length ? parts.join(' · ') : 'No eligible signer listed'
 }
-
-// Keep the editor's role choices in lockstep with the display vocabulary. Every current ProgramRole is listed
-// once in roleLabels, so adding a role to this page cannot silently make it display-only.
-const configurableRoles = Object.keys(roleLabels)
 
 function ConfigurationEditor({
   stages,
@@ -106,25 +125,51 @@ function ConfigurationEditor({
 }) {
   return <div className="configurationEditor">
     <p className="configurationEditorIntro">
-      Each row is one required minimum sign-off. Add rows to increase the minimum; authors may add extra eligible
-      Program participants when submitting a Draft. This policy applies to new submissions and Drafts when sent,
-      while an InReview or Approved record stays frozen on the version it started under.
+      Each row is one required minimum sign-off: the <strong>required project authority</strong> names who may
+      act — a base project role, or the one accountable Project Leadership position (with its standing backup) —
+      and the <strong>signature</strong> records what signing means, Review or Approval. Add rows to increase the
+      minimum; authors may add extra eligible Program participants when submitting a Draft. This policy applies to
+      new submissions and Drafts when sent, while an InReview or Approved record stays frozen on the version it
+      started under.
     </p>
     <ol className="configurationRows">
       {stages.map((stage, index) => <li key={index} className="configurationRow">
         <span className="configurationRowNumber">{index + 1}</span>
         <label>Stage name
-          <input value={stage.name} onChange={event => setStages(items => items.map((item, i) => i === index ? { ...item, name: event.target.value } : item))} required />
+          <input value={stage.name} aria-label={`Stage name ${index + 1}`} onChange={event => setStages(items => items.map((item, i) => i === index ? { ...item, name: event.target.value } : item))} required />
         </label>
         <label>Signature
-          <select value={stage.kind} onChange={event => setStages(items => items.map((item, i) => i === index ? { ...item, kind: event.target.value as EditableStage['kind'] } : item))}>
+          <select value={stage.kind} aria-label={`Signature ${index + 1}`} onChange={event => setStages(items => items.map((item, i) => i === index ? { ...item, kind: event.target.value as EditableStage['kind'] } : item))}>
             <option value="Review">Review</option>
             <option value="Approval">Approval</option>
           </select>
         </label>
-        <label>Required Program role
-          <select value={stage.requiredRole} onChange={event => setStages(items => items.map((item, i) => i === index ? { ...item, requiredRole: event.target.value } : item))}>
-            {configurableRoles.map(role => <option value={role} key={role}>{label(role)}</option>)}
+        <label>Required project authority
+          <select
+            value={`${stage.authorityKind}:${stage.authorityValue}`}
+            aria-label={`Required project authority ${index + 1}`}
+            onChange={event => {
+              const parsed = parseAuthorityToken(event.target.value)
+              setStages(items => items.map((item, i) => i === index ? {
+                ...item,
+                authorityKind: parsed?.kind ?? '',
+                authorityValue: parsed?.value ?? '',
+              } : item))
+            }}
+          >
+            <option value=":">Choose authority…</option>
+            <optgroup label="Base project roles">
+              {baseRoleAuthorities.map(role => (
+                <option value={authorityToken('BaseRole', role)} key={`BaseRole:${role}`}>{label(role)}</option>
+              ))}
+            </optgroup>
+            <optgroup label="Project Leadership">
+              {leadershipAuthorities.map(position => (
+                <option value={authorityToken('LeadershipPosition', position)} key={`LeadershipPosition:${position}`}>
+                  {`${label(position)} — leadership position`}
+                </option>
+              ))}
+            </optgroup>
           </select>
         </label>
         <button type="button" className="configurationRemove" disabled={stages.length === 1 || saving} onClick={() => setStages(items => items.filter((_, i) => i !== index))}>
@@ -133,11 +178,14 @@ function ConfigurationEditor({
       </li>)}
     </ol>
     <div className="configurationEditorActions">
-      <button type="button" onClick={() => setStages(items => [...items, { name: '', kind: 'Review', requiredRole: 'Reviewer' }])} disabled={saving}>+ Add required sign-off</button>
+      <button type="button" onClick={() => setStages(items => [...items, { name: '', kind: 'Review', authorityKind: '', authorityValue: '' }])} disabled={saving}>+ Add required sign-off</button>
       <span>{stages.length} minimum sign-off{stages.length === 1 ? '' : 's'} · {dirty ? 'Unsaved changes' : 'No changes'}</span>
       <div>
         <button type="button" onClick={onCancel} disabled={saving}>Cancel</button>
-        <button type="button" className="primaryConfigAction" onClick={onSave} disabled={saving || !dirty || stages.some(stage => !stage.name.trim())}>{saving ? 'Saving…' : 'Save and activate'}</button>
+        <button type="button" className="primaryConfigAction" onClick={onSave}
+          disabled={saving || !dirty || stages.some(stage => !stageComplete(stage))}>
+          {saving ? 'Saving…' : 'Save and activate'}
+        </button>
       </div>
     </div>
   </div>
@@ -193,7 +241,7 @@ export default function ApprovalConfigurationCenter({
     setDraftStages((artifact.stages ?? []).map(stage => ({
       name: stage.name,
       kind: stage.kind,
-      requiredRole: stage.requiredRole ?? stage.required.role,
+      ...savedAuthority(stage),
     })))
   }, [artifact, editing])
   const blockedTotal = useMemo(
@@ -203,7 +251,7 @@ export default function ApprovalConfigurationCenter({
   const savedStages = useMemo(() => (artifact?.stages ?? []).map(stage => ({
     name: stage.name,
     kind: stage.kind,
-    requiredRole: stage.requiredRole ?? stage.required.role,
+    ...savedAuthority(stage),
   })), [artifact])
   const dirty = editing && JSON.stringify(draftStages) !== JSON.stringify(savedStages)
 
@@ -211,16 +259,24 @@ export default function ApprovalConfigurationCenter({
     if (!artifact) return
     setSaveError('')
     setSaveSuccess('')
-    setDraftStages((artifact.stages ?? [{ position: 0, name: 'Required review', kind: 'Review', requiredRole: 'Reviewer', required: { role: 'Reviewer', singular: false, holders: [], backups: [], blocking: false } }]).map(stage => ({
+    // A legacy stage loads UNSELECTED on purpose: revising a legacy configuration writes a new explicit
+    // version, and copying the old demand forward would smuggle it past the cutover.
+    const existing = (artifact.stages ?? []).map(stage => ({
       name: stage.name,
       kind: stage.kind,
-      requiredRole: stage.requiredRole ?? stage.required.role,
-    })))
+      ...savedAuthority(stage),
+    }))
+    setDraftStages(existing.length ? existing : [{ name: '', kind: 'Review', authorityKind: '', authorityValue: '' }])
     setEditing(true)
   }
 
   const save = async () => {
     if (!artifact || draftStages.length === 0) return
+    const parsed = draftStages.map(stage => ({
+      stage,
+      authority: parseAuthorityToken(`${stage.authorityKind}:${stage.authorityValue}`),
+    }))
+    if (parsed.some(item => !item.authority)) return
     setSaving(true)
     setSaveError('')
     setSaveSuccess('')
@@ -228,7 +284,15 @@ export default function ApprovalConfigurationCenter({
       await apiRequest(`${api}/api/projects/${projectId}/approval-configuration/${artifact.subject}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ stages: draftStages }),
+        body: JSON.stringify({
+          stages: parsed.map(({ stage, authority }) => ({
+            name: stage.name,
+            kind: stage.kind,
+            requiredAuthority: authority!.kind === 'BaseRole'
+              ? { kind: 'BaseRole', role: authority!.value }
+              : { kind: 'LeadershipPosition', position: authority!.value },
+          })),
+        }),
       })
       setEditing(false)
       setSaveSuccess(`${subjectLabels[artifact.subject] ?? artifact.subject} configuration saved. New submissions will use the next active policy version.`)
@@ -355,7 +419,7 @@ export default function ApprovalConfigurationCenter({
                           <th scope="col" className="stageNumberCell">#</th>
                           <th scope="col">Stage</th>
                           <th scope="col">Signature</th>
-                          <th scope="col">Required position</th>
+                          <th scope="col">Required project authority</th>
                           <th scope="col">Who can sign today</th>
                         </tr>
                       </thead>
@@ -369,7 +433,11 @@ export default function ApprovalConfigurationCenter({
                                 {stage.kind === 'Approval' ? 'Approval' : 'Review'}
                               </span>
                             </td>
-                            <td>{label(stage.required.role)}</td>
+                            <td>
+                              {stage.isLegacy
+                                ? <span className="legacyAuthority" title="Recorded before the authority split; kept exactly as it was stored">{stage.required.role}</span>
+                                : stage.required.role}
+                            </td>
                             <td className={stage.required.blocking ? 'nobody' : undefined}>{whoCanSign(stage.required)}</td>
                           </tr>
                         ))}

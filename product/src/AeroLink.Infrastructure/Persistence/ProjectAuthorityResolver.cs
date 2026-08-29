@@ -330,6 +330,12 @@ public sealed class ProjectAuthorityResolver(AeroLinkDbContext db)
         ResolveHoldersAsync(Guid programId, ProjectAuthorityRequirement requirement, DateTimeOffset now,
             bool includeProgramAdministratorSubstitution = false, CancellationToken ct = default)
     {
+        // A persisted legacy demand keeps resolving through the compatibility contract it was recorded under —
+        // the same rules the per-person ResolveAsync applies — never narrowed to a modern guess.
+        if (requirement.Kind == ProjectAuthorityKind.LegacyRoleDemand)
+            return await ResolveHoldersAsync(programId, requirement.Role!.Value, now,
+                includeProgramAdministratorSubstitution, ct);
+
         var results = new Dictionary<Guid, (ProjectAuthoritySource, ProjectLeadershipPosition?)>();
         var activeMembers = await db.ProgramMemberships.AsNoTracking()
             .Where(x => x.ProgramId == programId && x.EndedAt == null)

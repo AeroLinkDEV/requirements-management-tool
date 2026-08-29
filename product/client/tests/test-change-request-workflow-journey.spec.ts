@@ -79,7 +79,8 @@ test('a configured two-stage sequential TCR review completes through the UI', as
   const requirementRevisionId = (await requirementsResponse.json()).items[0].revisionId as string
   expect(requirementRevisionId).toBeTruthy()
 
-  // Two seeded demo approvers, granted into this fresh Program so the standard password works in the UI.
+  // Two seeded demo accounts, granted into this fresh Program so the standard password works in the UI.
+  // The workflow below demands an explicit modern authority, so each signer holds that base role.
   const usersResponse = await request.get(`${apiBase}/api/admin/users`)
   expect(usersResponse.ok(), await usersResponse.text()).toBeTruthy()
   const users = await usersResponse.json()
@@ -89,7 +90,7 @@ test('a configured two-stage sequential TCR review completes through the UI', as
   expect(stageTwo).toBeTruthy()
   for (const reviewer of [stageOne, stageTwo]) {
     const grant = await request.post(`${apiBase}/api/admin/users/${reviewer.id}/memberships`,
-      { data: { programId: workspace.program.id, role: 'Approver' } })
+      { data: { programId: workspace.program.id, role: 'SoftwareEngineer' } })
     expect(grant.ok(), await grant.text()).toBeTruthy()
   }
 
@@ -99,8 +100,8 @@ test('a configured two-stage sequential TCR review completes through the UI', as
     appliesTo: 'SystemTest',
     mode: 'Sequential',
     stages: [
-      { name: 'First', requiredRole: 'Approver' },
-      { name: 'Second', requiredRole: 'Approver' },
+      { name: 'First', kind: 'Review', requiredAuthority: { kind: 'BaseRole', role: 'SoftwareEngineer' } },
+      { name: 'Second', kind: 'Approval', requiredAuthority: { kind: 'BaseRole', role: 'SoftwareEngineer' } },
     ],
   } })
   expect(workflowResponse.ok(), await workflowResponse.text()).toBeTruthy()

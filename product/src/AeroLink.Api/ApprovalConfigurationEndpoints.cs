@@ -101,7 +101,7 @@ public static class ApprovalConfigurationEndpoints
                 // complete the stage even when the position itself is empty.
                 authorityByRequirement[requirement.ToString()] = new ResolvedAuthority(
                     RequirementLabel(requirement),
-                    requirement.Kind == ProjectAuthorityKind.LeadershipPosition,
+                    IsPositionShaped(requirement),
                     holders, standing, delegated,
                     holders.Count == 0 && standing.Count == 0 && delegated.Count == 0);
             }
@@ -109,8 +109,7 @@ public static class ApprovalConfigurationEndpoints
             ResolvedAuthority Resolve(ProjectAuthorityRequirement requirement) =>
                 authorityByRequirement.TryGetValue(requirement.ToString(), out var value)
                     ? value
-                    : new ResolvedAuthority(RequirementLabel(requirement),
-                        requirement.Kind == ProjectAuthorityKind.LeadershipPosition, [], [], [], true);
+                    : new ResolvedAuthority(RequirementLabel(requirement), IsPositionShaped(requirement), [], [], [], true);
 
             var configured = Subjects.Where(subject => IsSubjectSupported(ladderPolicy, subject)).Select(subject =>
             {
@@ -199,14 +198,19 @@ public static class ApprovalConfigurationEndpoints
             : request.Name.Trim();
         // Every new version is written through the cutover rules: explicit modern authority only, with the
         // server refusing ambiguous, contradictory or legacy-shaped demands before anything is persisted.
-        var stages = request.Stages.Select((stage, index) =>
+        List<ReviewWorkflowStageDraft> stages;
+        try
         {
-            var draft = WorkflowEndpoints.ToStageDraft(stage);
-            var stageName = string.IsNullOrWhiteSpace(stage.Name)
-                ? $"{stage.Kind} {ReadableRole(draft.RequiredRole)} {index + 1}"
-                : stage.Name.Trim();
-            return new ReviewWorkflowStageDraft(stageName, draft.RequiredRole, stage.Kind, draft.AuthorityKind);
-        }).ToList();
+            stages = request.Stages.Select((stage, index) =>
+            {
+                var draft = WorkflowEndpoints.ToStageDraft(stage);
+                var stageName = string.IsNullOrWhiteSpace(stage.Name)
+                    ? $"{stage.Kind} {ReadableRole(draft.RequiredRole)} {index + 1}"
+                    : stage.Name.Trim();
+                return new ReviewWorkflowStageDraft(stageName, draft.RequiredRole, stage.Kind, draft.AuthorityKind);
+            }).ToList();
+        }
+        catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
 
         try
         {
@@ -279,6 +283,17 @@ public static class ApprovalConfigurationEndpoints
     };
 
     /// <summary>
+    /// Whether the demand names one accountable position rather than a job many people hold. An explicit
+    /// leadership requirement always does; a legacy demand keeps answering the way the row was recorded.
+    /// </summary>
+    private static bool IsPositionShaped(ProjectAuthorityRequirement requirement) => requirement.Kind switch
+    {
+        ProjectAuthorityKind.LeadershipPosition => true,
+        ProjectAuthorityKind.LegacyRoleDemand => SingularProgramRoles.IsPositionGoverned(requirement.Role!.Value),
+        _ => false,
+    };
+
+    /// <summary>
     /// What a stage's requirement is called on the page. The label keeps the recorded distinction visible:
     /// a leadership demand is named as the position it is, and a legacy row reads as legacy rather than
     /// being presented as a modern choice.
@@ -286,9 +301,36 @@ public static class ApprovalConfigurationEndpoints
     private static string RequirementLabel(ProjectAuthorityRequirement requirement) => requirement.Kind switch
     {
         ProjectAuthorityKind.LeadershipPosition =>
-            $"Project Leadership · {ReadableRole(Enum.Parse<ProgramRole>(requirement.Position!.Value.ToString()))}",
-        ProjectAuthorityKind.LegacyRoleDemand => $"Legacy authority · {ReadableRole(requirement.Role!.Value)}",
-        _ => ReadableRole(requirement.Role!.Value),
+            $"Project Leadership · {NounRole(Enum.Parse<ProgramRole>(requirement.Position!.Value.ToString()))}",
+        ProjectAuthorityKind.LegacyRoleDemand => $"Legacy authority · {NounRole(requirement.Role!.Value)}",
+        _ => NounRole(requirement.Role!.Value),
+    };
+
+    /// <summary>An authority as a person would say it, including the compatibility vocabulary a legacy row may still name.</summary>
+    private static string NounRole(ProgramRole role) => role switch
+    {
+        ProgramRole.SystemEngineer => "System Engineer",
+        ProgramRole.SoftwareEngineer => "Software Engineer",
+        ProgramRole.SystemTestEngineer => "System Test Engineer",
+        ProgramRole.SoftwareTestEngineer => "Software Test Engineer",
+        ProgramRole.ProjectEngineer => "Project Engineer",
+        ProgramRole.ProgramManager => "Program Manager",
+        ProgramRole.EngineeringManager => "Engineering Manager",
+        ProgramRole.ConfigurationManager => "Configuration Manager",
+        ProgramRole.SoftwareQualityAnalyst => "Software Quality Assurance",
+        ProgramRole.Airworthiness => "Airworthiness",
+        ProgramRole.Reviewer => "Reviewer",
+        ProgramRole.Approver => "Approver",
+        ProgramRole.Engineer => "Engineer",
+        ProgramRole.TestEngineer => "Test Engineer",
+        ProgramRole.TestLead => "Test Lead",
+        ProgramRole.ProjectEngineeringLead => "Project Engineering Lead",
+        ProgramRole.SystemEngineeringLead => "System Engineering Lead",
+        ProgramRole.SoftwareEngineeringLead => "Software Engineering Lead",
+        ProgramRole.SystemTestLead => "System Test Lead",
+        ProgramRole.SoftwareTestLead => "Software Test Lead",
+        ProgramRole.Administrator => "Administrator",
+        _ => role.ToString(),
     };
 
     private static string ReadableRole(ProgramRole role) => role switch
