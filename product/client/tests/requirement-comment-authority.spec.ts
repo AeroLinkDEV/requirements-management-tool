@@ -60,19 +60,27 @@ const holdRequirementCommentRead = async (page: import("@playwright/test").Page,
 
 test("a successful comment stays visible after creation and across a reselect", async ({ page, request }) => {
   test.setTimeout(180_000);
+  const showcase = await showcaseSeed(request);
   await apiLogin(request);
   const stamp = Date.now();
   const commentText = `Coverage confirmed against the released baseline ${stamp}.`;
 
-  await openExplorer(page);
-  await selectRequirement(page, "SYSR-000150");
-  await page.getByRole("tab", { name: /Discussion/ }).click();
   // This requirement is shared with other journeys (see the note on the tests below), so the tab's exact
   // count is not owned here. The count THIS journey owns is the delta: creation adds exactly one, and the
   // count survives a reselect. A stale pre-create read would drop the count back to the baseline, which is
-  // the #805 defect these assertions still catch.
+  // the #805 defect these assertions still catch. The baseline is read server-side so it cannot race the
+  // browser's own comment fetch.
+  const listResponse = await request.get(`${process.env.AEROLINK_E2E_API_BASE}/api/enterprise-requirements/workspace?projectId=${showcase.projectId}&level=System&page=1&pageSize=5&search=${encodeURIComponent("SYSR-000150")}&sort=identifier`);
+  expect(listResponse.ok(), await listResponse.text()).toBeTruthy();
+  const target = (await listResponse.json()).items.find((item: { baseNumber: string }) => item.baseNumber === "SYSR-000150");
+  expect(target, "the showcase SYSR-000150 requirement must exist").toBeTruthy();
+  const baseline = (await (await request.get(`${process.env.AEROLINK_E2E_API_BASE}/api/enterprise-requirements/${target.id}/comments`)).json())
+    .length ?? 0;
+
+  await openExplorer(page);
+  await selectRequirement(page, "SYSR-000150");
   const discussionTab = page.getByRole("tab", { name: /Discussion/ });
-  const baseline = Number((await discussionTab.textContent())?.match(/(\d+)/)?.[1] ?? 0);
+  await page.getByRole("tab", { name: /Discussion/ }).click();
   await page
     .getByPlaceholder("Add an attributable comment. Use @username to mention someone.")
     .fill(commentText);
@@ -82,14 +90,14 @@ test("a successful comment stays visible after creation and across a reselect", 
   await expect(comment).toBeVisible({ timeout: 30_000 });
   // Controlled attribution stays server-authoritative and rendered.
   await expect(comment.locator("b")).toHaveText("admin");
-  await expect(discussionTab).toContainText(String(baseline + 1));
+  await expect(discussionTab).toContainText(String(baseline + 1), { timeout: 30_000 });
 
   // The surrounding workspace settles - including reopening the inspector, which refetches everything.
   await page.getByRole("button", { name: "Close requirement inspector" }).click();
   await selectRequirement(page, "SYSR-000150");
   await page.getByRole("tab", { name: /Discussion/ }).click();
   await expect(comment).toBeVisible({ timeout: 30_000 });
-  await expect(page.getByRole("tab", { name: /Discussion/ })).toContainText(String(baseline + 1));
+  await expect(page.getByRole("tab", { name: /Discussion/ })).toContainText(String(baseline + 1), { timeout: 30_000 });
 });
 
 test("an older in-flight comment read cannot overwrite a successful creation", async ({ page, request }) => {
