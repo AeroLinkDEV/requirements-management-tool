@@ -382,7 +382,8 @@
         "VerificationImpactApiTests",
         "VerificationProgramIsolationApiTests",
         "VerificationVocabularyApiTests",
-        "WithdrawChangeRequestApiTests"
+        "WithdrawChangeRequestApiTests",
+        "WorkflowAuthorityCutoverApiTests"
       ]
     },
     {
@@ -1729,7 +1730,8 @@
         "PersonnelDirectoryApiTests",
         "ProjectLeadershipApiTests",
         "ProjectPersonnelApiTests",
-        "RosterAuthoritySeparationTests"
+        "RosterAuthoritySeparationTests",
+        "WorkflowAuthorityCutoverApiTests"
       ]
     },
     {
@@ -2399,7 +2401,8 @@
       "path": "/api/projects/{projectId:guid}/approval-configuration/{subject}",
       "file": "ApprovalConfigurationEndpoints.cs",
       "coveredBy": [
-        "ApprovalConfigurationApiTests"
+        "ApprovalConfigurationApiTests",
+        "WorkflowAuthorityCutoverApiTests"
       ]
     },
     {
