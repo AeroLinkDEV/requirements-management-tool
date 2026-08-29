@@ -91,6 +91,7 @@ public sealed class TeamWorkProjectionApiTests
         AssertItem(byId, fixture.CrDeferredDraft, "work", [], "none", "Deferred", deferred: true);
         AssertItem(byId, fixture.CrDeferredReview, "sign", [], "none", "Deferred", deferred: true);
         AssertItem(byId, fixture.CrDeferredApproved, "approved", [], "none", "Deferred", deferred: true);
+        Assert.DoesNotContain(fixture.CrDeferredUnknown, byId.Keys);
         AssertItem(byId, fixture.CrReturnedDraft, "work", [fixture.Author], "author", "Draft");
         Assert.DoesNotContain(fixture.CrSelectedReleased, byId.Keys);
         Assert.DoesNotContain(fixture.CrWithdrawn, byId.Keys);
@@ -112,6 +113,7 @@ public sealed class TeamWorkProjectionApiTests
         Assert.Equal("Pending", NullableString(byId[fixture.TcrApproval], "nativeOutcome"));
         AssertItem(byId, fixture.TcrApproved, "approved", [], "none", "Approved");
         AssertItem(byId, fixture.TcrDeferredReview, "sign", [], "none", "Deferred", deferred: true);
+        Assert.DoesNotContain(fixture.TcrDeferredUnknown, byId.Keys);
         Assert.DoesNotContain(fixture.TcrSuperseded, byId.Keys);
         Assert.DoesNotContain(fixture.TcrIncorporated, byId.Keys);
         Assert.DoesNotContain(fixture.TcrUnnumbered, byId.Keys);
@@ -367,6 +369,7 @@ public sealed class TeamWorkProjectionApiTests
         Set(crDeferredReview, nameof(SystemChangeRequest.State), ChangeRequestState.Deferred);
         Set(crDeferredReview, nameof(SystemChangeRequest.DeferredFromState), ChangeRequestState.InReview);
         var crDeferredApproved = Change("SRCR-10010", 0, project.Id, releaseA.Id, "CR Deferred Approved", "matrix.author", ChangeRequestState.Deferred, now, ChangeRequestState.Approved);
+        var crDeferredUnknown = Change("SRCR-10016", 0, project.Id, releaseA.Id, "CR Deferred Unknown", "matrix.author", ChangeRequestState.Deferred, now);
         var crWithdrawn = Change("SRCR-10011", 0, project.Id, releaseA.Id, "CR Withdrawn", "matrix.author", ChangeRequestState.Withdrawn, now);
         var crOld = Change("SRCR-10012", 0, project.Id, releaseA.Id, "CR old", "matrix.author", ChangeRequestState.Withdrawn, now);
         var crCurrent = Change("SRCR-10012", 1, project.Id, releaseA.Id, "CR current", "matrix.author", ChangeRequestState.Draft, now.AddMinutes(2));
@@ -386,6 +389,8 @@ public sealed class TeamWorkProjectionApiTests
         var tcrDeferredReview = TcrWithCycle(project.Id, releaseA.Id, source.Id, "HLRTCCR-10006", ["matrix.frozen"], [ReviewStageKind.Approval], now, ReviewCycleState.Cancelled, revision: 5);
         Set(tcrDeferredReview, nameof(TestChangeReview.State), TestChangeReviewState.Deferred);
         Set(tcrDeferredReview, nameof(TestChangeReview.DeferredFromState), TestChangeReviewState.InReview);
+        var tcrDeferredUnknown = Tcr(project.Id, releaseA.Id, source.Id, "SYSTPCR-10014", TestChangeReviewDiscipline.System, "matrix.author", now, revision: 14);
+        Set(tcrDeferredUnknown, nameof(TestChangeReview.State), TestChangeReviewState.Deferred);
         var tcrSuperseded = Tcr(project.Id, releaseA.Id, source.Id, "SYSTPCR-10007", TestChangeReviewDiscipline.System, "matrix.author", now, revision: 6);
         Set(tcrSuperseded, nameof(TestChangeReview.State), TestChangeReviewState.Superseded);
         var tcrUnnumbered = Tcr(project.Id, releaseA.Id, source.Id, "", TestChangeReviewDiscipline.System, "matrix.author", now, revision: 7);
@@ -454,8 +459,8 @@ public sealed class TeamWorkProjectionApiTests
         var unreleasedCrSelection = NewSelection<BaselineChangeRequestSelection>(unreleasedBaseline.Id, crSelectedUnreleased.Id, crSelectedUnreleased.DisplayNumber);
 
         db.AddRange(crDraft, crReview, crApproval, crMixed, crZero, crApproved, crSelected, crSelectedUnreleased, crApprovedReleaseB, crDeferredDraft, crDeferredReview,
-            crDeferredApproved, crWithdrawn, crOld, crCurrent, crReturned,
-            tcrDraft, tcrNullAssigned, tcrReview, tcrApproval, tcrApproved, tcrIncorporated, tcrDeferredReview, tcrSuperseded, tcrUnnumbered,
+            crDeferredApproved, crDeferredUnknown, crWithdrawn, crOld, crCurrent, crReturned,
+            tcrDraft, tcrNullAssigned, tcrReview, tcrApproval, tcrApproved, tcrIncorporated, tcrDeferredReview, tcrDeferredUnknown, tcrSuperseded, tcrUnnumbered,
             tcrAutomatic, tcrProcedureSystem, tcrProcedureHigh, tcrProcedureLow, tcrLatestOld, tcrLatestNew,
             prDraft, prSccb, prOpen, prDeferred, prImplementing, prVerifying, prSqa, prClosed, prRejected,
             baseline, crSelection, tcrSelection, unreleasedBaseline, unreleasedCrSelection);
@@ -463,8 +468,8 @@ public sealed class TeamWorkProjectionApiTests
         await db.SaveChangesAsync();
 
         return new MatrixSeed(project.Id, releaseA.Id, releaseB.Id, "matrix.viewer", "matrix.author", "matrix.reviewer", "matrix.frozen", "matrix.assigned", "matrix.responsible", "matrix.assessment", "matrix.idle", "matrix.inactive",
-            crDraft.Id, crReview.Id, crApproval.Id, crMixed.Id, crZero.Id, crApproved.Id, crSelected.Id, crSelectedUnreleased.Id, crApprovedReleaseB.Id, crDeferredDraft.Id, crDeferredReview.Id, crDeferredApproved.Id, crWithdrawn.Id, crOld.Id, crCurrent.Id, crReturned.Id,
-            tcrDraft.Id, tcrNullAssigned.Id, tcrReview.Id, tcrApproval.Id, tcrApproved.Id, tcrDeferredReview.Id, tcrSuperseded.Id, tcrUnnumbered.Id, tcrAutomatic.Id, tcrProcedureSystem.Id, tcrProcedureHigh.Id, tcrProcedureLow.Id, tcrLatestOld.Id, tcrLatestNew.Id, tcrIncorporated.Id,
+            crDraft.Id, crReview.Id, crApproval.Id, crMixed.Id, crZero.Id, crApproved.Id, crSelected.Id, crSelectedUnreleased.Id, crApprovedReleaseB.Id, crDeferredDraft.Id, crDeferredReview.Id, crDeferredApproved.Id, crDeferredUnknown.Id, crWithdrawn.Id, crOld.Id, crCurrent.Id, crReturned.Id,
+            tcrDraft.Id, tcrNullAssigned.Id, tcrReview.Id, tcrApproval.Id, tcrApproved.Id, tcrDeferredReview.Id, tcrDeferredUnknown.Id, tcrSuperseded.Id, tcrUnnumbered.Id, tcrAutomatic.Id, tcrProcedureSystem.Id, tcrProcedureHigh.Id, tcrProcedureLow.Id, tcrLatestOld.Id, tcrLatestNew.Id, tcrIncorporated.Id,
             prDraft.Id, prSccb.Id, prOpen.Id, prDeferred.Id, prImplementing.Id, prVerifying.Id, prSqa.Id, prClosed.Id, prRejected.Id,
             assessmentOpenPending.Id, firstAssessmentSourceId!.Value, assessmentOpenChange.Id, assessmentOpenNoChange.Id, assessmentOpenLinked.Id, assessmentReview.Id, assessmentApproved.Id, assessmentApprovedLinked.Id, assessmentSuperseded.Id, assessmentSystem.Id, assessmentLow.Id);
     }
@@ -620,8 +625,8 @@ public sealed class TeamWorkProjectionApiTests
     private sealed record MatrixSeed(Guid ProjectId, Guid ReleaseA, Guid ReleaseB, string Viewer, string Author, string Reviewer,
         string FrozenHolder, string Assigned, string Responsible, string AssessmentApprover, string IdleMember, string InactiveNonHolder,
         Guid CrDraft, Guid CrReview, Guid CrApproval, Guid CrMixed, Guid CrZeroSteps, Guid CrApproved, Guid CrSelectedReleased, Guid CrSelectedUnreleased, Guid CrApprovedReleaseB,
-        Guid CrDeferredDraft, Guid CrDeferredReview, Guid CrDeferredApproved, Guid CrWithdrawn, Guid CrSupersededOld, Guid CrSupersededCurrent, Guid CrReturnedDraft,
-        Guid TcrDraft, Guid TcrNullAssigned, Guid TcrReview, Guid TcrApproval, Guid TcrApproved, Guid TcrDeferredReview, Guid TcrSuperseded,
+        Guid CrDeferredDraft, Guid CrDeferredReview, Guid CrDeferredApproved, Guid CrDeferredUnknown, Guid CrWithdrawn, Guid CrSupersededOld, Guid CrSupersededCurrent, Guid CrReturnedDraft,
+        Guid TcrDraft, Guid TcrNullAssigned, Guid TcrReview, Guid TcrApproval, Guid TcrApproved, Guid TcrDeferredReview, Guid TcrDeferredUnknown, Guid TcrSuperseded,
         Guid TcrUnnumbered, Guid TcrAutomatic, Guid TcrProcedureSystem, Guid TcrProcedureHigh, Guid TcrProcedureLow, Guid TcrLatestOld, Guid TcrLatestNew, Guid TcrIncorporated,
         Guid PrDraft, Guid PrSccb, Guid PrOpen, Guid PrDeferred, Guid PrImplementing, Guid PrVerifying, Guid PrSqa, Guid PrClosed, Guid PrRejected,
         Guid AssessmentOpenPending, Guid AssessmentOpenPendingSource, Guid AssessmentOpenChange, Guid AssessmentOpenNoChange, Guid AssessmentOpenLinked, Guid AssessmentReview,

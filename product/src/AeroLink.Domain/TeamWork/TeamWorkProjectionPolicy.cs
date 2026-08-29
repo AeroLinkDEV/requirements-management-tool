@@ -282,9 +282,9 @@ public static class TeamWorkLanePolicy
 
     private static TeamWorkLaneDecision DeferredChangeRequest(ChangeRequestState? prior) => prior switch
     {
-        // Legacy rows may predate DeferredFromState. In that case the only honest claim is that the item is
-        // deferred work with no known prior lane; choosing InWork is conservative and carries no holder.
-        null => TeamWorkLaneDecision.OnBoard(TeamWorkLane.InWork, isDeferred: true),
+        // Legacy rows may predate DeferredFromState. Without that provenance there is no truthful lane, so the
+        // item fails closed from this four-lane projection instead of fabricating InWork.
+        null => TeamWorkLaneDecision.OffBoard,
         ChangeRequestState.Draft => TeamWorkLaneDecision.OnBoard(TeamWorkLane.InWork, isDeferred: true),
         ChangeRequestState.InReview => TeamWorkLaneDecision.OnBoard(TeamWorkLane.InReview, isDeferred: true),
         ChangeRequestState.Approved => TeamWorkLaneDecision.OnBoard(TeamWorkLane.Approved, isDeferred: true),
@@ -295,9 +295,8 @@ public static class TeamWorkLanePolicy
 
     private static TeamWorkLaneDecision DeferredTestChangeReview(TestChangeReviewState? prior) => prior switch
     {
-        // Same conservative legacy treatment as change requests: no missing provenance is promoted to a
-        // fabricated approval/review state.
-        null => TeamWorkLaneDecision.OnBoard(TeamWorkLane.InWork, isDeferred: true),
+        // Same fail-closed legacy treatment as change requests: missing provenance is not promoted to a lane.
+        null => TeamWorkLaneDecision.OffBoard,
         TestChangeReviewState.Draft => TeamWorkLaneDecision.OnBoard(TeamWorkLane.InWork, isDeferred: true),
         TestChangeReviewState.InReview => TeamWorkLaneDecision.OnBoard(TeamWorkLane.InReview, isDeferred: true),
         TestChangeReviewState.Approved => TeamWorkLaneDecision.OnBoard(TeamWorkLane.Approved, isDeferred: true),

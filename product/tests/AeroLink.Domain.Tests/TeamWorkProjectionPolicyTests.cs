@@ -31,7 +31,7 @@ public sealed class TeamWorkProjectionPolicyTests
             [ChangeRequestState.Draft] = TeamWorkLaneDecision.OnBoard(TeamWorkLane.InWork),
             [ChangeRequestState.InReview] = TeamWorkLaneDecision.OnBoard(TeamWorkLane.InReview),
             [ChangeRequestState.Approved] = TeamWorkLaneDecision.OnBoard(TeamWorkLane.Approved),
-            [ChangeRequestState.Deferred] = TeamWorkLaneDecision.OnBoard(TeamWorkLane.InWork, isDeferred: true),
+            [ChangeRequestState.Deferred] = TeamWorkLaneDecision.OffBoard,
             [ChangeRequestState.SelectedForBaseline] = TeamWorkLaneDecision.OnBoard(TeamWorkLane.Approved),
             [ChangeRequestState.Withdrawn] = TeamWorkLaneDecision.OffBoard,
         };
@@ -51,7 +51,7 @@ public sealed class TeamWorkProjectionPolicyTests
             ChangeRequestState.Deferred, ChangeRequestState.InReview).Lane);
         Assert.Equal(TeamWorkLane.Approved, TeamWorkLanePolicy.ForChangeRequest(
             ChangeRequestState.Deferred, ChangeRequestState.Approved).Lane);
-        Assert.True(TeamWorkLanePolicy.ForChangeRequest(ChangeRequestState.Deferred, null).IsDeferred);
+        Assert.True(TeamWorkLanePolicy.ForChangeRequest(ChangeRequestState.Deferred, null).IsOffBoard);
     }
 
     [Fact]
@@ -62,7 +62,7 @@ public sealed class TeamWorkProjectionPolicyTests
             [TestChangeReviewState.Draft] = TeamWorkLaneDecision.OnBoard(TeamWorkLane.InWork),
             [TestChangeReviewState.InReview] = TeamWorkLaneDecision.OnBoard(TeamWorkLane.InReview),
             [TestChangeReviewState.Approved] = TeamWorkLaneDecision.OnBoard(TeamWorkLane.Approved),
-            [TestChangeReviewState.Deferred] = TeamWorkLaneDecision.OnBoard(TeamWorkLane.InWork, isDeferred: true),
+            [TestChangeReviewState.Deferred] = TeamWorkLaneDecision.OffBoard,
             [TestChangeReviewState.Superseded] = TeamWorkLaneDecision.OffBoard,
         };
 
@@ -79,6 +79,13 @@ public sealed class TeamWorkProjectionPolicyTests
             TestChangeReviewState.Deferred, TestChangeReviewState.InReview).Lane);
         Assert.Equal(TeamWorkLane.Approved, TeamWorkLanePolicy.ForTestChangeReview(
             TestChangeReviewState.Deferred, TestChangeReviewState.Approved).Lane);
+    }
+
+    [Fact]
+    public void Deferred_records_without_historical_lane_provenance_fail_closed()
+    {
+        Assert.True(TeamWorkLanePolicy.ForChangeRequest(ChangeRequestState.Deferred, null).IsOffBoard);
+        Assert.True(TeamWorkLanePolicy.ForTestChangeReview(TestChangeReviewState.Deferred, null).IsOffBoard);
     }
 
     [Fact]
