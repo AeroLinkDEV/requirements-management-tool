@@ -1,8 +1,8 @@
 # AeroLink project state — start here
 
-**Last materially reconciled: 2026-08-26.**
+**Last materially reconciled: 2026-08-29.**
 
-**Product checkpoint used for this snapshot:** protected `main` at `0947b9c9cf4e85b1b7ac4bb898f09d6a148d4d13`, after PR #774 merged. That SHA is a checkpoint, not a promise that live `main` will not move. Always refresh GitHub before starting work.
+**Product checkpoint used for this snapshot:** the #816 Slice 4 authority cutover on branch `glm/816-slice4-workflow-authority` (PR #851, whose final head SHA is recorded in the PR), built on protected `main` at `3d2820dbd5bb8b7d1de511928ee06f54ffdd9217`. That is a checkpoint, not a promise that live `main` will not move. Always refresh GitHub before starting work.
 
 This is the single living product-level orientation record for AeroLink. It answers what the product is, what architecture is currently supported, what remains intentionally outside its claims, and where authoritative detail lives.
 
@@ -219,6 +219,22 @@ The product includes local identity/session controls, scoped roles/administratio
 
 Deployment-specific federation/provider/TLS/monitoring/service-objective work remains dependent on a real deployment/customer contract where documented.
 
+## Project authority: base roles, Project Leadership, and review workflow authority
+
+The #816 programme split project authority into two separate facts that must never collapse again:
+
+- **Base project roles** are jobs/eligibility many people may hold on a project (System Engineer, Software Engineer, System/Software Test Engineer, Project Engineer, Program Manager, Engineering Manager, Configuration Manager, Software Quality Assurance, Airworthiness). Holding one grants the job's own authority and nothing more.
+- **Project Leadership** is a separate concept with exactly eight accountable positions (Project Engineer, Program Manager, Engineering Manager, Configuration Manager, and the four discipline leads). Each position has at most one current primary holder and one standing backup; the backup carries the same live position authority while the designation is valid. **Base-role eligibility is the qualification for a position, never the position's authority.**
+- **Project Engineering Lead** and the old singular position roles are retired; their rows remain readable history and their accountability lives on the Project Leadership positions now.
+- **Reviewer and Approver are not assignable jobs.** They are not offered as Personnel roles, not newly grantable as memberships, delegations, or standing backups, and not modern workflow authorities. They survive in the enum and in historical rows as compatibility data only.
+
+A review workflow stage records two independent facts:
+
+- the **required project authority**, represented explicitly as either `BaseRole` (a base project role) or `LeadershipPosition` (an accountable position, answered by its current primary and valid standing backup); and
+- the **signature meaning**, which comes only from the stage's `ReviewStageKind` (`Review` or `Approval`) and never from a person's roles.
+
+Workflow stages recorded before this cutover carry no authority kind: they remain readable through explicit legacy-compatibility semantics and are never reinterpreted under today's vocabulary. New and revised workflow configuration must be explicit, the server refuses legacy/ambiguous writes, and all workflow authority resolves through the one central effective-authority resolver so the candidate picker, the signing gate, and the audit record answer identically. Historical and in-flight review workflow versions stay frozen and are not rewritten under current terminology.
+
 See [Security and Identity Model](docs/product-definition/SECURITY_AND_IDENTITY_MODEL.md).
 
 ## Interchange and integrations
@@ -271,6 +287,7 @@ This is intentionally short. For the narrative history, use [docs/PROJECT_HISTOR
 - #762 / PR #767 unified normal Case/Procedure software UX.
 - #765 phases 1–6 culminating in PR #774 richer Project-scoped Problem Reports and Related Problem Reports.
 - #778 repository knowledge/hygiene programme.
+- #816 Slices 2–4 / PR #851: Project Leadership + central effective-authority resolver, and the review workflow required-authority cutover (explicit BaseRole/LeadershipPosition demands, Review/Approval from the stage kind, retired Reviewer/Approver vocabulary).
 
 ## Live backlog and active work
 

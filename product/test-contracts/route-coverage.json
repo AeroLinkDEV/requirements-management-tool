@@ -1739,7 +1739,8 @@
       "path": "/api/projects/{projectId:guid}/personnel/backups",
       "file": "PersonnelEndpoints.cs",
       "coveredBy": [
-        "ApprovalConfigurationApiTests"
+        "ApprovalConfigurationApiTests",
+        "WorkflowAuthorityCutoverApiTests"
       ]
     },
     {

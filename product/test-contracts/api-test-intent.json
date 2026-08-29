@@ -1,11 +1,11 @@
 {
   "schemaVersion": "aerolink-api-test-intent/v2",
   "totals": {
-    "tests": 695,
-    "cases": 771,
+    "tests": 696,
+    "cases": 772,
     "classes": 113,
-    "hostedTests": 668,
-    "hostedCases": 735,
+    "hostedTests": 669,
+    "hostedCases": 736,
     "nonHostedTests": 21,
     "nonHostedCases": 30,
     "unknownHostTests": 6,
@@ -29,8 +29,8 @@
     "ef-translation": {
       "label": "EF translation / relational constraints",
       "level": "Infrastructure (needs a database, not a host)",
-      "tests": 148,
-      "cases": 159,
+      "tests": 149,
+      "cases": 160,
       "unknownCases": 0,
       "classes": 55
     },
@@ -12007,8 +12007,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 283,
-        "end": 338
+        "start": 322,
+        "end": 377
       }
     },
     {
@@ -12099,6 +12099,24 @@
       "sourceLines": {
         "start": 267,
         "end": 281
+      }
+    },
+    {
+      "cls": "WorkflowAuthorityCutoverApiTests",
+      "test": "New_standing_backups_cannot_be_created_for_Reviewer_or_Approver_but_valid_roles_still_work",
+      "kind": "Fact",
+      "intent": "ef-translation",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "shared-host-fixture",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 283,
+        "end": 320
       }
     },
     {

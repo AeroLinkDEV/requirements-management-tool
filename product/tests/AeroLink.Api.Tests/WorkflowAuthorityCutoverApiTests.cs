@@ -281,6 +281,45 @@ public sealed class WorkflowAuthorityCutoverApiTests : IClassFixture<SharedApiHo
     }
 
     [Fact]
+    public async Task New_standing_backups_cannot_be_created_for_Reviewer_or_Approver_but_valid_roles_still_work()
+    {
+        var seeded = await SeedRosterAsync(_host.Factory);
+        using var client = _host.CreateClient();
+        await SignInAsync(client, seeded.ManagerName);
+
+        // A crafted request must not recreate standing Reviewer/Approver authority through the
+        // role-keyed backup path that membership and delegation grants already refuse.
+        foreach (var role in new[] { "Reviewer", "Approver" })
+        {
+            var refused = await client.PostAsJsonAsync($"/api/projects/{seeded.ProjectId}/personnel/backups",
+                new { backupUserId = seeded.BackupId, role });
+            Assert.Equal(HttpStatusCode.Conflict, refused.StatusCode);
+            Assert.Contains("signature meaning", await refused.Content.ReadAsStringAsync(), StringComparison.OrdinalIgnoreCase);
+        }
+
+        // No retired backup row may exist for the program afterwards.
+        using (var scope = _host.Factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            Assert.False(await db.ProjectRoleBackups.AsNoTracking().AnyAsync(
+                x => x.ProgramId == seeded.ProgramId
+                     && (x.Role == ProgramRole.Reviewer || x.Role == ProgramRole.Approver)));
+        }
+
+        // The genuinely supported legacy-compatible backup path is unchanged: a job that still backs a
+        // role-shaped stage contract can still be covered, exactly as before the cutover.
+        var named = await client.PostAsJsonAsync($"/api/projects/{seeded.ProjectId}/personnel/backups",
+            new { backupUserId = seeded.BackupId, role = nameof(ProgramRole.SoftwareQualityAnalyst) });
+        Assert.Equal(HttpStatusCode.NoContent, named.StatusCode);
+        using (var scope = _host.Factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            Assert.True(await db.ProjectRoleBackups.AsNoTracking().AnyAsync(
+                x => x.ProgramId == seeded.ProgramId && x.Role == ProgramRole.SoftwareQualityAnalyst));
+        }
+    }
+
+    [Fact]
     public async Task A_legacy_workflow_reads_as_legacy_and_its_revision_writes_an_explicit_modern_version()
     {
         var seeded = await SeedRosterAsync(_host.Factory);
