@@ -1,11 +1,11 @@
 {
   "schemaVersion": "aerolink-api-test-intent/v2",
   "totals": {
-    "tests": 685,
-    "cases": 753,
+    "tests": 686,
+    "cases": 754,
     "classes": 112,
-    "hostedTests": 658,
-    "hostedCases": 717,
+    "hostedTests": 659,
+    "hostedCases": 718,
     "nonHostedTests": 21,
     "nonHostedCases": 30,
     "unknownHostTests": 6,
@@ -37,8 +37,8 @@
     "auth-policy": {
       "label": "Authentication / authorization wiring",
       "level": "API (must stay hosted)",
-      "tests": 77,
-      "cases": 81,
+      "tests": 78,
+      "cases": 82,
       "unknownCases": 0,
       "classes": 45
     },
@@ -8764,8 +8764,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 112,
-        "end": 122
+        "start": 114,
+        "end": 124
       }
     },
     {
@@ -8782,8 +8782,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 70,
-        "end": 84
+        "start": 72,
+        "end": 86
       }
     },
     {
@@ -8800,13 +8800,31 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 137,
-        "end": 168
+        "start": 168,
+        "end": 199
       }
     },
     {
       "cls": "RosterAuthoritySeparationTests",
-      "test": "Program_manager_base_role_retains_roster_authority",
+      "test": "Program_manager_base_eligibility_without_leadership_cannot_mutate_the_roster",
+      "kind": "Fact",
+      "intent": "auth-policy",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "shared-host-fixture",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 144,
+        "end": 166
+      }
+    },
+    {
+      "cls": "RosterAuthoritySeparationTests",
+      "test": "Program_manager_leadership_primary_can_mutate_the_roster",
       "kind": "Fact",
       "intent": "http-boundary",
       "cases": 1,
@@ -8818,8 +8836,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 124,
-        "end": 135
+        "start": 131,
+        "end": 142
       }
     },
     {
@@ -8836,8 +8854,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 86,
-        "end": 97
+        "start": 88,
+        "end": 99
       }
     },
     {
@@ -8854,8 +8872,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 99,
-        "end": 110
+        "start": 101,
+        "end": 112
       }
     },
     {
