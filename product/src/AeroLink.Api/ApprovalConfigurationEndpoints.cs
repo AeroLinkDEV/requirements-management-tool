@@ -79,10 +79,14 @@ public static class ApprovalConfigurationEndpoints
             // promise a signature the review would refuse — or withhold one it would accept. This used to be
             // a second scan of memberships and legacy backups that merely aimed to agree; since #816 split
             // base roles from positions, reading the same source is what makes the agreement real.
-            var authorityByRole = new Dictionary<ProgramRole, ResolvedAuthority>();
-            foreach (var required in workflows.SelectMany(x => x.Stages).Select(x => x.RequiredRole).Distinct())
+            //
+            // Stages are resolved per their recorded requirement, not per raw role: a BaseRole:ProjectEngineer
+            // stage and a LeadershipPosition:ProjectEngineer stage must never share one candidate set.
+            var authorityByRequirement = new Dictionary<string, ResolvedAuthority>();
+            foreach (var requirement in workflows.SelectMany(x => x.Stages)
+                         .Select(x => x.RequiredAuthority).DistinctBy(x => x.ToString()))
             {
-                var resolved = await authority.ResolveHoldersAsync(programId.Value, required, now,
+                var resolved = await authority.ResolveHoldersAsync(programId.Value, requirement, now,
                     includeProgramAdministratorSubstitution: true, ct);
                 List<string> Named(params ProjectAuthoritySource[] sources) => resolved
                     .Where(x => sources.Contains(x.Source) && names.ContainsKey(x.UserId))
@@ -95,15 +99,18 @@ public static class ApprovalConfigurationEndpoints
                 var delegated = Named(ProjectAuthoritySource.Delegation);
                 // Blocking is named separately from "no holder" because a standing backup is enough to
                 // complete the stage even when the position itself is empty.
-                authorityByRole[required] = new ResolvedAuthority(
-                    required.ToString(), SingularProgramRoles.IsPositionGoverned(required),
+                authorityByRequirement[requirement.ToString()] = new ResolvedAuthority(
+                    RequirementLabel(requirement),
+                    requirement.Kind == ProjectAuthorityKind.LeadershipPosition,
                     holders, standing, delegated,
                     holders.Count == 0 && standing.Count == 0 && delegated.Count == 0);
             }
 
-            ResolvedAuthority Resolve(ProgramRole required) => authorityByRole.TryGetValue(required, out var value)
-                ? value
-                : new ResolvedAuthority(required.ToString(), SingularProgramRoles.IsPositionGoverned(required), [], [], [], true);
+            ResolvedAuthority Resolve(ProjectAuthorityRequirement requirement) =>
+                authorityByRequirement.TryGetValue(requirement.ToString(), out var value)
+                    ? value
+                    : new ResolvedAuthority(RequirementLabel(requirement),
+                        requirement.Kind == ProjectAuthorityKind.LeadershipPosition, [], [], [], true);
 
             var configured = Subjects.Where(subject => IsSubjectSupported(ladderPolicy, subject)).Select(subject =>
             {
@@ -130,7 +137,10 @@ public static class ApprovalConfigurationEndpoints
                     stage.Name,
                     kind = stage.Kind.ToString(),
                     requiredRole = stage.RequiredRole.ToString(),
-                    required = Resolve(stage.RequiredRole),
+                    authorityKind = stage.RequiredAuthorityKind?.ToString(),
+                    isLegacy = stage.RequiredAuthorityKind is null,
+                    requiredAuthority = WorkflowEndpoints.RequiredAuthorityShape(stage),
+                    required = Resolve(stage.RequiredAuthority),
                 }).ToList();
 
                 return new
@@ -187,13 +197,16 @@ public static class ApprovalConfigurationEndpoints
         var name = string.IsNullOrWhiteSpace(request.Name)
             ? current?.Name ?? latest?.Name ?? $"{subject} approval configuration"
             : request.Name.Trim();
+        // Every new version is written through the cutover rules: explicit modern authority only, with the
+        // server refusing ambiguous, contradictory or legacy-shaped demands before anything is persisted.
         var stages = request.Stages.Select((stage, index) =>
-            new ReviewWorkflowStageDraft(
-                string.IsNullOrWhiteSpace(stage.Name)
-                    ? $"{stage.Kind} {ReadableRole(stage.RequiredRole)} {index + 1}"
-                    : stage.Name.Trim(),
-                stage.RequiredRole,
-                stage.Kind)).ToList();
+        {
+            var draft = WorkflowEndpoints.ToStageDraft(stage);
+            var stageName = string.IsNullOrWhiteSpace(stage.Name)
+                ? $"{stage.Kind} {ReadableRole(draft.RequiredRole)} {index + 1}"
+                : stage.Name.Trim();
+            return new ReviewWorkflowStageDraft(stageName, draft.RequiredRole, stage.Kind, draft.AuthorityKind);
+        }).ToList();
 
         try
         {
@@ -218,6 +231,9 @@ public static class ApprovalConfigurationEndpoints
                     x.Name,
                     kind = x.Kind.ToString(),
                     requiredRole = x.RequiredRole.ToString(),
+                    authorityKind = x.RequiredAuthorityKind?.ToString(),
+                    isLegacy = x.RequiredAuthorityKind is null,
+                    requiredAuthority = WorkflowEndpoints.RequiredAuthorityShape(x),
                 }),
             });
         }
@@ -262,6 +278,19 @@ public static class ApprovalConfigurationEndpoints
         _ => false,
     };
 
+    /// <summary>
+    /// What a stage's requirement is called on the page. The label keeps the recorded distinction visible:
+    /// a leadership demand is named as the position it is, and a legacy row reads as legacy rather than
+    /// being presented as a modern choice.
+    /// </summary>
+    private static string RequirementLabel(ProjectAuthorityRequirement requirement) => requirement.Kind switch
+    {
+        ProjectAuthorityKind.LeadershipPosition =>
+            $"Project Leadership · {ReadableRole(Enum.Parse<ProgramRole>(requirement.Position!.Value.ToString()))}",
+        ProjectAuthorityKind.LegacyRoleDemand => $"Legacy authority · {ReadableRole(requirement.Role!.Value)}",
+        _ => ReadableRole(requirement.Role!.Value),
+    };
+
     private static string ReadableRole(ProgramRole role) => role switch
     {
         ProgramRole.ConfigurationManager => "Configuration management",
@@ -274,6 +303,10 @@ public static class ApprovalConfigurationEndpoints
         ProgramRole.SystemTestLead => "System test lead",
         ProgramRole.SoftwareTestEngineer => "Software test engineering",
         ProgramRole.SoftwareTestLead => "Software test lead",
+        ProgramRole.ProjectEngineer => "Project engineering",
+        ProgramRole.EngineeringManager => "Engineering management",
+        ProgramRole.SoftwareQualityAnalyst => "Software quality assurance",
+        ProgramRole.Airworthiness => "Airworthiness",
         _ => role.ToString(),
     };
 }
@@ -286,7 +319,6 @@ public sealed record ResolvedAuthority(
     IReadOnlyList<string> Backups,
     IReadOnlyList<string> Delegates,
     bool Blocking);
-
 public sealed record ConfigureApprovalRequest(
     string? Name,
     ReviewMode? Mode,

@@ -103,6 +103,22 @@ public static class SingularProgramRoles
 }
 
 /// <summary>
+/// Generic control roles that stopped being jobs at the #816 cutover.
+///
+/// Reviewer and Approver describe what a workflow stage's signature MEANS, not what somebody is employed to
+/// do — a person reviews one artifact and approves another as the stage demands. They survive in the enum
+/// because memberships, signatures and workflow rows recorded before the cutover say so, but a NEW grant
+/// would resurrect a standing authority the workflow model replaced, so every grant path — roster, global
+/// administration and delegation — refuses them. Historical rows remain readable and answered compatibly.
+/// </summary>
+public static class RetiredGrantRoles
+{
+    public static readonly IReadOnlyList<ProgramRole> All = [ProgramRole.Reviewer, ProgramRole.Approver];
+
+    public static bool IsRetiredGrant(ProgramRole role) => All.Contains(role);
+}
+
+/// <summary>
 /// Job roles that carry an engineer's authority.
 ///
 /// Somebody recorded as a System Engineer is an engineer, and the product has thirty-odd places that ask for

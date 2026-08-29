@@ -143,6 +143,14 @@ public static class PersonnelEndpoints
                 var retired = roles.First(SingularProgramRoles.IsSingular);
                 return Results.Conflict(new { error = $"{Readable(retired)} is retired as a project role. Assign the matching Project Leadership position instead." });
             }
+            // #816 Slice 4: Reviewer and Approver are signature meanings a workflow stage records, not jobs.
+            // The browser hides them; the server refuses them so a crafted request cannot grant standing
+            // control authority the workflow model replaced.
+            if (roles.Any(RetiredGrantRoles.IsRetiredGrant))
+            {
+                var retiredGrant = roles.First(RetiredGrantRoles.IsRetiredGrant);
+                return Results.Conflict(new { error = $"{Readable(retiredGrant)} is a signature meaning a review workflow stage records, not a project role. Configure the workflow's required authority instead." });
+            }
             var programId = await ProgramOfAsync(db, projectId, ct);
             if (programId is null) return Results.NotFound();
             if (!await db.UserAccounts.AnyAsync(x => x.Id == request.UserId && x.State == AccountState.Active, ct))

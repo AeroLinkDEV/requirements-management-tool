@@ -50,7 +50,7 @@ public static class WorkflowEndpoints
             {
                 var ladderPolicy = await policyResolver.ResolveAsync(request.ProjectId, ct);
                 ValidateSubject(ladderPolicy, request.AppliesTo);
-                var stages = request.Stages.Select(x => new ReviewWorkflowStageDraft(x.Name, x.RequiredRole, x.Kind)).ToList();
+                var stages = request.Stages.Select(ToStageDraft).ToList();
                 var workflow = new ReviewWorkflow(request.ProjectId, request.Name, request.AppliesTo, request.Mode,
                     stages, http.UserAccount().UserName, DateTimeOffset.UtcNow);
                 db.ReviewWorkflows.Add(workflow);
@@ -110,7 +110,7 @@ public static class WorkflowEndpoints
                 ValidateSubject(ladderPolicy, current.AppliesTo);
                 // The prior version stays exactly as it was. A completed review has to remain explainable by
                 // the procedure it was actually judged against.
-                var stages = request.Stages.Select(x => new ReviewWorkflowStageDraft(x.Name, x.RequiredRole, x.Kind)).ToList();
+                var stages = request.Stages.Select(ToStageDraft).ToList();
                 var next = current.Revise(request.Name, request.Mode, stages, http.UserAccount().UserName, DateTimeOffset.UtcNow);
                 db.ReviewWorkflows.Add(next);
                 await db.SaveChangesAsync(ct);
@@ -200,10 +200,24 @@ public static class WorkflowEndpoints
                 return required.ToString();
             }
 
-            var candidatesByRole = new Dictionary<ProgramRole, IReadOnlyList<StageCandidate>>();
-            foreach (var requiredRole in workflow.Stages.Select(x => x.RequiredRole).Distinct())
+            // A stage's label names the authority the stage demands: the job for a base-role demand, the
+            // accountable position for a leadership demand, and the stored role verbatim for a legacy stage —
+            // never a modern-sounding rewrite of what the row actually says.
+            string AuthorityLabel(ProjectAuthorityRequirement requirement) => requirement.Kind switch
             {
-                var holders = await resolver.ResolveHoldersAsync(programId, requiredRole, now,
+                ProjectAuthorityKind.LeadershipPosition => $"Project Leadership · {ReadablePosition(requirement.Position!.Value)}",
+                ProjectAuthorityKind.LegacyRoleDemand => $"Legacy authority · {ReadableRole(requirement.Role!.Value)}",
+                _ => ReadableRole(requirement.Role!.Value),
+            };
+
+            // Modern stages resolve per recorded requirement through the typed resolver overload the signing
+            // gate answers from; legacy stages keep the compatibility demand they were recorded under. Keying
+            // by the requirement (not the raw role) is what keeps a BaseRole:ProjectEngineer stage and a
+            // LeadershipPosition:ProjectEngineer stage from sharing one candidate set.
+            var candidatesByRequirement = new Dictionary<string, IReadOnlyList<StageCandidate>>();
+            foreach (var requirement in workflow.Stages.Select(x => x.RequiredAuthority).DistinctBy(x => x.ToString()))
+            {
+                var holders = await resolver.ResolveHoldersAsync(programId, requirement, now,
                     includeProgramAdministratorSubstitution: true, ct);
                 var missingAccountIds = holders.Select(x => x.UserId)
                     .Where(x => !accountById.ContainsKey(x)).Distinct().ToList();
@@ -220,10 +234,13 @@ public static class WorkflowEndpoints
                         accountById[x.UserId].UserName, accountById[x.UserId].DisplayName,
                         x.Source == ProjectAuthoritySource.AdministratorSubstitution
                             ? ProgramRole.Administrator.ToString()
-                            : HeldRole(x.UserId, requiredRole),
+                            : requirement.Kind == ProjectAuthorityKind.LeadershipPosition
+                                ? requirement.Position!.Value.ToString()
+                                : HeldRole(x.UserId, requirement.Role!.Value),
                         x.Source.ToString()))
                     .ToList();
-                candidatesByRole[requiredRole] = listed.DistinctBy(x => x.UserId).OrderBy(x => x.Name).ToList();
+                candidatesByRequirement[requirement.ToString()] =
+                    listed.DistinctBy(x => x.UserId).OrderBy(x => x.Name).ToList();
             }
 
             return Results.Ok(new
@@ -241,7 +258,11 @@ public static class WorkflowEndpoints
                     stage.Name,
                     kind = stage.Kind.ToString(),
                     requiredRole = stage.RequiredRole.ToString(),
-                    candidates = candidatesByRole[stage.RequiredRole]
+                    authorityKind = stage.RequiredAuthorityKind?.ToString(),
+                    isLegacy = stage.RequiredAuthorityKind is null,
+                    requiredAuthority = RequiredAuthorityShape(stage),
+                    authorityLabel = AuthorityLabel(stage.RequiredAuthority),
+                    candidates = candidatesByRequirement[stage.RequiredAuthority.ToString()]
                         .Select(x => new { userId = x.UserId, name = x.Name, role = x.Role, via = x.Via }),
                 }),
             });
@@ -380,6 +401,28 @@ public static class WorkflowEndpoints
         return requiredRole;
     }
 
+    /// <summary>
+    /// The stage-aware form: an explicit-authority stage resolves through its own recorded
+    /// <see cref="ReviewStageRequirement.RequiredAuthority"/> — the exact #816 requirement the candidate
+    /// picker offered — while a legacy stage keeps answering under the compatibility demand it was recorded
+    /// under. Freezing the required role itself (not the holder's strongest role) is what lets the domain's
+    /// exact-match stage validation and this resolution agree by construction.
+    /// </summary>
+    public static async Task<ProgramRole?> StageAuthorityAsync(AeroLinkDbContext db, Guid projectId,
+        Guid userId, ReviewStageRequirement stage, CancellationToken ct)
+    {
+        if (stage.AuthorityKind is null)
+            return await StageAuthorityAsync(db, projectId, userId, stage.RequiredRole, ct);
+        var programId = await db.Projects.Where(x => x.Id == projectId).Select(x => (Guid?)x.ProgramId)
+            .SingleOrDefaultAsync(ct);
+        if (programId is null) return null;
+        var decision = await new ProjectAuthorityResolver(db).ResolveAsync(userId, programId.Value,
+            stage.RequiredAuthority, DateTimeOffset.UtcNow, ct);
+        if (!decision.Granted) return null;
+        if (decision.Source == ProjectAuthoritySource.AdministratorSubstitution) return ProgramRole.Administrator;
+        return stage.RequiredRole;
+    }
+
     private static readonly ProgramRole[] ParticipationAuthorities =
     [
         ProgramRole.Administrator,
@@ -438,8 +481,97 @@ public static class WorkflowEndpoints
         x.CreatedAt,
         x.ActivatedAt,
         x.RetiredAt,
-        stages = x.Stages.OrderBy(s => s.Position)
-            .Select(s => new { s.Position, s.Name, requiredRole = s.RequiredRole.ToString(), kind = s.Kind.ToString() }),
+        stages = x.Stages.OrderBy(s => s.Position).Select(s => new
+        {
+            s.Position,
+            s.Name,
+            requiredRole = s.RequiredRole.ToString(),
+            kind = s.Kind.ToString(),
+            authorityKind = s.RequiredAuthorityKind?.ToString(),
+            isLegacy = s.RequiredAuthorityKind is null,
+            requiredAuthority = RequiredAuthorityShape(s),
+        }),
+    };
+
+    /// <summary>
+    /// The discriminated authority a stage demands, as stored. Legacy rows say so explicitly — presenting a
+    /// persisted Reviewer demand as a modern base role would claim Reviewer is a current job.
+    /// </summary>
+    internal static object RequiredAuthorityShape(ReviewWorkflowStage stage) => stage.RequiredAuthorityKind switch
+    {
+        ReviewStageAuthorityKind.BaseRole =>
+            new { kind = nameof(ReviewStageAuthorityKind.BaseRole), role = (string?)stage.RequiredRole.ToString(), position = (string?)null },
+        ReviewStageAuthorityKind.LeadershipPosition =>
+            new { kind = nameof(ReviewStageAuthorityKind.LeadershipPosition), role = (string?)null, position = stage.RequiredPosition?.ToString() },
+        _ => new { kind = "LegacyRoleDemand", role = (string?)stage.RequiredRole.ToString(), position = (string?)null },
+    };
+
+    /// <summary>
+    /// Converts a modern stage request into its domain draft. The server owns the cutover rules: a write
+    /// without an explicit authority, with contradictory payloads, with an unrecognized kind, or demanding a
+    /// legacy role outright is refused here, not hidden by the browser. The remaining vocabulary rules
+    /// (Reviewer/Approver as meanings, singular positions, the configurable base-role list) stay in the
+    /// domain's own <see cref="ReviewWorkflowStage.ValidateAuthority"/>, which the draft's construction runs.
+    /// </summary>
+    internal static ReviewWorkflowStageDraft ToStageDraft(ReviewWorkflowStageRequest request)
+    {
+        var authority = request.RequiredAuthority
+            ?? throw new DomainException(
+                $"Stage '{request.Name}' must record a required project authority. Choose a base project role or a Project Leadership position; a legacy role demand cannot be written after the cutover.");
+        var kind = (authority.Kind ?? "").Trim();
+        if (kind.Equals("LegacyRoleDemand", StringComparison.OrdinalIgnoreCase))
+            throw new DomainException(
+                "A legacy role demand cannot be recorded as new workflow authority. Choose a base project role or a Project Leadership position.");
+        if (kind.Equals(nameof(ReviewStageAuthorityKind.BaseRole), StringComparison.OrdinalIgnoreCase))
+        {
+            if (authority.Role is null || authority.Position is not null)
+                throw new DomainException(
+                    $"Stage '{request.Name}' demands a base project role: set the role and no leadership position.");
+            return new ReviewWorkflowStageDraft(request.Name, authority.Role.Value, request.Kind,
+                ReviewStageAuthorityKind.BaseRole);
+        }
+        if (kind.Equals(nameof(ReviewStageAuthorityKind.LeadershipPosition), StringComparison.OrdinalIgnoreCase))
+        {
+            if (authority.Position is null || authority.Role is not null)
+                throw new DomainException(
+                    $"Stage '{request.Name}' demands a Project Leadership position: set the position and no base role.");
+            if (!Enum.TryParse<ProgramRole>(authority.Position.Value.ToString(), out var roleShape)
+                || !Enum.IsDefined(roleShape))
+                throw new DomainException(
+                    $"'{authority.Position.Value}' does not name a recognized project authority.");
+            return new ReviewWorkflowStageDraft(request.Name, roleShape, request.Kind,
+                ReviewStageAuthorityKind.LeadershipPosition);
+        }
+        throw new DomainException(
+            $"'{authority.Kind}' is not a recognized required-authority kind. Use '{nameof(ReviewStageAuthorityKind.BaseRole)}' or '{nameof(ReviewStageAuthorityKind.LeadershipPosition)}'.");
+    }
+
+    private static string ReadablePosition(ProjectLeadershipPosition position) => position switch
+    {
+        ProjectLeadershipPosition.ProjectEngineer => "Project Engineer",
+        ProjectLeadershipPosition.ProgramManager => "Program Manager",
+        ProjectLeadershipPosition.EngineeringManager => "Engineering Manager",
+        ProjectLeadershipPosition.ConfigurationManager => "Configuration Manager",
+        ProjectLeadershipPosition.SystemEngineeringLead => "System Engineering Lead",
+        ProjectLeadershipPosition.SoftwareEngineeringLead => "Software Engineering Lead",
+        ProjectLeadershipPosition.SystemTestLead => "System Test Lead",
+        ProjectLeadershipPosition.SoftwareTestLead => "Software Test Lead",
+        _ => position.ToString(),
+    };
+
+    private static string ReadableRole(ProgramRole role) => role switch
+    {
+        ProgramRole.SystemEngineer => "System Engineer",
+        ProgramRole.SoftwareEngineer => "Software Engineer",
+        ProgramRole.SystemTestEngineer => "System Test Engineer",
+        ProgramRole.SoftwareTestEngineer => "Software Test Engineer",
+        ProgramRole.ProjectEngineer => "Project Engineer",
+        ProgramRole.ProgramManager => "Program Manager",
+        ProgramRole.EngineeringManager => "Engineering Manager",
+        ProgramRole.ConfigurationManager => "Configuration Manager",
+        ProgramRole.SoftwareQualityAnalyst => "Software Quality Assurance",
+        ProgramRole.Airworthiness => "Airworthiness",
+        _ => role.ToString(),
     };
 
     private static bool IsWorkflowUniquenessConflict(DbUpdateException exception)
@@ -456,8 +588,19 @@ public static class WorkflowEndpoints
     }
 }
 
-public sealed record ReviewWorkflowStageRequest(string Name, ProgramRole RequiredRole,
-    ReviewStageKind Kind = ReviewStageKind.Review);
+/// <summary>
+/// The required project authority one stage demands, recorded explicitly since the Slice 4 cutover.
+///
+/// A base-role demand names the job many people may hold; a leadership demand names the accountable
+/// position exactly one person occupies (with its standing backup). Reviewer and Approver are signature
+/// meanings carried by the stage kind, not authorities, and a persisted legacy demand can never be written
+/// as new configuration — it only ever comes back in a read of a row recorded before the cutover.
+/// </summary>
+public sealed record StageAuthorityRequest(string Kind, ProgramRole? Role = null,
+    ProjectLeadershipPosition? Position = null);
+
+public sealed record ReviewWorkflowStageRequest(string Name, ReviewStageKind Kind,
+    StageAuthorityRequest? RequiredAuthority = null);
 public sealed record CreateReviewWorkflowRequest(Guid ProjectId, string Name, ReviewSubject AppliesTo,
     ReviewMode Mode, List<ReviewWorkflowStageRequest> Stages);
 public sealed record ReviseReviewWorkflowRequest(string Name, ReviewMode Mode, List<ReviewWorkflowStageRequest> Stages);

@@ -2489,7 +2489,7 @@ public static class VerificationImpactEndpoints
                         var account = directory[chosen.UserId.Trim().ToLowerInvariant()];
                         var role = index < workflow.Stages.Count
                             ? await WorkflowEndpoints.StageAuthorityAsync(db, review.ProjectId, account.Id,
-                                workflow.Stages[index].RequiredRole, ct)
+                                workflow.Stages[index], ct)
                             : (await WorkflowEndpoints.AuthoritiesAsync(db, review.ProjectId, [account.Id], ct))
                                 .GetValueOrDefault(account.Id);
                         if (role is null)
