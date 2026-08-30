@@ -65,8 +65,10 @@ test('Project configuration authors and activates a disposable graph, records hi
     }
   })
   await page.goto(`/programs/${workspace.program.id}/projects/${workspace.project.id}/releases/${workspace.release.id}/software/change-requests?level=LLR`)
-  await expect(page.locator('.downstreamQueue')).toHaveCount(1)
-  await expect(page.locator('.downstreamQueue')).toContainText('LLR engineering conclusion')
+  const downstreamQueue = page.locator('.downstreamQueue')
+  await expect(downstreamQueue).toHaveCount(1)
+  await expect(downstreamQueue).toContainText('LLR engineering conclusion')
+  await expect(downstreamQueue).toHaveAttribute('data-queue-state', /empty|rows/)
   expect(lowLevelAssessmentRequests).toBe(1)
 
   await page.goto(`/programs/${workspace.program.id}/projects/${workspace.project.id}/releases/${workspace.release.id}/command-center`)

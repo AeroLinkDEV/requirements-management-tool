@@ -40,6 +40,23 @@ test('the effective ladder keeps the FMS System root free of downstream-assessme
   expect(draftRequests).toBe(0)
 })
 
+test('the Interface change-request register never borrows the software assessment queue', async ({ page, request }) => {
+  const showcase = await showcaseSeed(request)
+  await login(page)
+  let assessmentRequests = 0
+  let draftRequests = 0
+  page.on('request', outgoing => {
+    if (outgoing.url().includes('/api/downstream-assessments')) assessmentRequests++
+    if (draftQueueRequest(outgoing.url())) draftRequests++
+  })
+
+  await page.goto(buildPath(showcase, 'interfaces/change-requests'))
+  await expect(page.getByRole('heading', { name: 'Interface / ICD Change Requests', level: 1 })).toBeVisible()
+  await expect(page.locator('.downstreamQueue')).toHaveCount(0)
+  expect(assessmentRequests).toBe(0)
+  expect(draftRequests).toBe(0)
+})
+
 test('a direct System to LowLevel effective edge makes one LLR queue request', async ({ page, request }) => {
   const showcase = await showcaseSeed(request)
   await login(page, 'admin', { openProject: false })
@@ -56,6 +73,7 @@ test('a direct System to LowLevel effective edge makes one LLR queue request', a
   const queue = page.locator('.downstreamQueue')
   await expect(queue).toBeVisible()
   await expect(queue).toContainText('LLR engineering conclusion')
+  await expect(queue).toHaveAttribute('data-queue-state', /empty|rows/)
   expect(assessmentRequests).toBe(1)
 })
 
@@ -75,6 +93,7 @@ test('an Interface parent makes System assessments applicable without a System s
   const queue = page.locator('.downstreamQueue')
   await expect(queue).toBeVisible()
   await expect(queue).toContainText('System engineering conclusion')
+  await expect(queue).toHaveAttribute('data-queue-state', /empty|rows/)
   expect(assessmentRequests).toBe(1)
 })
 
@@ -92,7 +111,9 @@ test('multiple effective parents still mount one queue and issue one target requ
   })
 
   await page.goto(buildPath(showcase, 'software/change-requests?level=LLR'))
-  await expect(page.locator('.downstreamQueue')).toHaveCount(1)
+  const queue = page.locator('.downstreamQueue')
+  await expect(queue).toHaveCount(1)
+  await expect(queue).toHaveAttribute('data-queue-state', /empty|rows/)
   expect(assessmentRequests).toBe(1)
 })
 

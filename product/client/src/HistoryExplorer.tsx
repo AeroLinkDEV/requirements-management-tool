@@ -45,7 +45,7 @@ export default function HistoryExplorer({api,projectId,releases,activeReleaseId,
  const changeStateIntent=(intent?:HistoryStateIntent)=>{setStateIntent(intent);setScrPage(1);onStateIntentChange(intent)}
  const visibleScrs=scrs.filter(x=>matchesStateIntent(x.state,stateIntent))
  const downstreamTarget=scope==='System'?'System':softwareLevel
- const downstreamApplicable=ladderAllowsDownstreamAssessment(ladder,downstreamTarget)
+ const downstreamApplicable=(scope==='System'||scope==='Software')&&ladderAllowsDownstreamAssessment(ladder,downstreamTarget)
  // The register itself is shared with the verification side, so what a reader recognises as "the register"
  // cannot drift between them. Only the mapping into its row shape is the requirements side's own.
  const toRegisterRow=(x:Scr):RegisterRow=>({
