@@ -40,6 +40,8 @@ public sealed class TeamWorkProjectionApiTests
         using var body = JsonDocument.Parse(await authorized.Content.ReadAsStringAsync());
         var items = body.RootElement.GetProperty("items").EnumerateArray().ToList();
         Assert.DoesNotContain(items, item => item.GetProperty("title").GetString() == "Foreign project record");
+        Assert.DoesNotContain(body.RootElement.GetProperty("people").EnumerateArray(),
+            person => person.GetProperty("userName").GetString() == fixture.Outsider);
 
         using var outsider = factory.CreateClient();
         await SignInAsync(outsider, fixture.Outsider);
@@ -74,9 +76,12 @@ public sealed class TeamWorkProjectionApiTests
 
         AssertItem(byId, fixture.CrDraft, "work", [fixture.Author], "author", "Draft");
         AssertItem(byId, fixture.CrReview, "review", [fixture.Reviewer], "activeReviewStage", "InReview");
+        AssertStageKinds(byId[fixture.CrReview], [(fixture.Reviewer, "review")]);
         AssertItem(byId, fixture.CrApproval, "sign", [fixture.FrozenHolder], "activeApprovalStage", "InReview");
+        AssertStageKinds(byId[fixture.CrApproval], [(fixture.FrozenHolder, "approval")]);
         AssertItem(byId, fixture.CrMixed, "sign", [fixture.Reviewer, fixture.FrozenHolder],
             "activeReviewAndApprovalStages", "InReview");
+        AssertStageKinds(byId[fixture.CrMixed], [(fixture.Reviewer, "review"), (fixture.FrozenHolder, "approval")]);
         AssertItem(byId, fixture.CrZeroSteps, "review", [], "none", "InReview");
         AssertItem(byId, fixture.CrApproved, "approved", [], "none", "Approved");
         AssertItem(byId, fixture.CrSelectedUnreleased, "approved", [], "none", "SelectedForBaseline");
@@ -109,7 +114,9 @@ public sealed class TeamWorkProjectionApiTests
         Assert.Equal("Pending", NullableString(byId[fixture.TcrDraft], "nativeOutcome"));
         AssertItem(byId, fixture.TcrNullAssigned, "work", [], "assignedEngineer", "Draft");
         AssertItem(byId, fixture.TcrReview, "review", [fixture.Reviewer], "activeReviewStage", "InReview");
+        AssertStageKinds(byId[fixture.TcrReview], [(fixture.Reviewer, "review")]);
         AssertItem(byId, fixture.TcrApproval, "sign", [fixture.FrozenHolder], "activeApprovalStage", "InReview");
+        AssertStageKinds(byId[fixture.TcrApproval], [(fixture.FrozenHolder, "approval")]);
         Assert.Equal("Pending", NullableString(byId[fixture.TcrApproval], "nativeOutcome"));
         AssertItem(byId, fixture.TcrApproved, "approved", [], "none", "Approved");
         AssertItem(byId, fixture.TcrDeferredReview, "sign", [], "none", "Deferred", deferred: true);
@@ -150,6 +157,7 @@ public sealed class TeamWorkProjectionApiTests
         Assert.DoesNotContain(fixture.AssessmentOpenLinked, byId.Keys);
         AssertItem(byId, fixture.AssessmentReview, "review", [fixture.AssessmentApprover],
             "selectedAssessmentApprover", "InReview");
+        Assert.Empty(byId[fixture.AssessmentReview].GetProperty("activeStageObligations").EnumerateArray());
         AssertItem(byId, fixture.AssessmentApproved, "approved", [], "none", "Approved");
         Assert.DoesNotContain(fixture.AssessmentApprovedLinked, byId.Keys);
         Assert.DoesNotContain(fixture.AssessmentSuperseded, byId.Keys);
@@ -189,16 +197,85 @@ public sealed class TeamWorkProjectionApiTests
         Assert.DoesNotContain(("Superseded", "ChangeRequestsLinked"), assessmentPairs);
 
         var people = root.GetProperty("people").EnumerateArray().ToList();
+        var peopleJson = root.GetProperty("people").GetRawText();
+        Assert.DoesNotContain("\"email\"", peopleJson, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("endedRoles", peopleJson, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("backsUp", peopleJson, StringComparison.OrdinalIgnoreCase);
+        Assert.All(people, person =>
+        {
+            Assert.True(person.TryGetProperty("userId", out _));
+            Assert.True(person.TryGetProperty("isCurrentProjectMember", out _));
+            Assert.True(person.TryGetProperty("accountState", out _));
+            Assert.True(person.TryGetProperty("baseRoles", out _));
+            Assert.True(person.TryGetProperty("disciplineAffinities", out _));
+        });
         var idle = people.Single(person => person.GetProperty("userName").GetString() == fixture.IdleMember);
         Assert.Equal(0, idle.GetProperty("holds").GetInt32());
+        Assert.True(idle.GetProperty("isCurrentProjectMember").GetBoolean());
+        Assert.Equal("disabled", idle.GetProperty("accountState").GetString());
+        var locked = people.Single(person => person.GetProperty("userName").GetString() == fixture.LockedMember);
+        Assert.Equal(0, locked.GetProperty("holds").GetInt32());
+        Assert.True(locked.GetProperty("isCurrentProjectMember").GetBoolean());
+        Assert.Equal("locked", locked.GetProperty("accountState").GetString());
         var inactiveHolder = people.Single(person => person.GetProperty("userName").GetString() == fixture.FrozenHolder);
         Assert.True(inactiveHolder.GetProperty("holds").GetInt32() > 0);
+        Assert.False(inactiveHolder.GetProperty("isCurrentProjectMember").GetBoolean());
+        Assert.Equal("disabled", inactiveHolder.GetProperty("accountState").GetString());
+        Assert.Empty(inactiveHolder.GetProperty("baseRoles").EnumerateArray());
+        Assert.Empty(inactiveHolder.GetProperty("disciplineAffinities").EnumerateArray());
         var mixedHolder = people.Single(person => person.GetProperty("userName").GetString() == fixture.Reviewer);
         Assert.True(mixedHolder.GetProperty("byLane").GetProperty("sign").GetInt32() > 0);
+        Assert.Equal(["SystemEngineer"], mixedHolder.GetProperty("baseRoles").EnumerateArray().Select(role => role.GetString()));
+        Assert.Equal(["system"], mixedHolder.GetProperty("disciplineAffinities").EnumerateArray().Select(affinity => affinity.GetString()));
         Assert.DoesNotContain(people, person => person.GetProperty("userName").GetString() == fixture.InactiveNonHolder);
         var totalHolds = people.Sum(person => person.GetProperty("holds").GetInt32());
         var heldItems = items.Count(item => item.GetProperty("currentHolderIds").GetArrayLength() > 0);
         Assert.True(totalHolds > heldItems, $"Expected multi-holder count to exceed held-item count; holds={totalHolds}, heldItems={heldItems}");
+    }
+
+    [Fact]
+    public void Team_work_classifies_every_current_program_role_explicitly()
+    {
+        var expected = new Dictionary<ProgramRole, string?>
+        {
+            [ProgramRole.SystemEngineer] = "SystemEngineer",
+            [ProgramRole.SoftwareEngineer] = "SoftwareEngineer",
+            [ProgramRole.SystemTestEngineer] = "SystemTestEngineer",
+            [ProgramRole.SoftwareTestEngineer] = "SoftwareTestEngineer",
+            [ProgramRole.ProjectEngineer] = "ProjectEngineer",
+            [ProgramRole.EngineeringManager] = "EngineeringManager",
+            [ProgramRole.ProgramManager] = "ProgramManager",
+            [ProgramRole.ConfigurationManager] = "ConfigurationManager",
+            [ProgramRole.SoftwareQualityAnalyst] = "SoftwareQualityAnalyst",
+            [ProgramRole.Airworthiness] = "Airworthiness",
+            [ProgramRole.Engineer] = null,
+            [ProgramRole.Reviewer] = null,
+            [ProgramRole.Approver] = null,
+            [ProgramRole.TestEngineer] = null,
+            [ProgramRole.TestLead] = null,
+            [ProgramRole.Administrator] = null,
+            [ProgramRole.ProjectEngineeringLead] = null,
+            [ProgramRole.SystemEngineeringLead] = null,
+            [ProgramRole.SoftwareEngineeringLead] = null,
+            [ProgramRole.SystemTestLead] = null,
+            [ProgramRole.SoftwareTestLead] = null,
+        };
+        Assert.Equal(Enum.GetValues<ProgramRole>().Order(), expected.Keys.Order());
+
+        var method = typeof(TeamWorkProjectionService).GetMethod(
+            "ModernBaseRoles", BindingFlags.Static | BindingFlags.NonPublic);
+        Assert.NotNull(method);
+        foreach (var role in Enum.GetValues<ProgramRole>())
+        {
+            var actual = Assert.IsAssignableFrom<IReadOnlyList<string>>(
+                method.Invoke(null, [new[] { role }]));
+            if (expected[role] is string modern) Assert.Equal([modern], actual);
+            else Assert.Empty(actual);
+        }
+
+        var unknown = Assert.Throws<TargetInvocationException>(() =>
+            method.Invoke(null, [new[] { (ProgramRole)999 }]));
+        Assert.IsType<AeroLink.Domain.Common.DomainException>(unknown.InnerException);
     }
 
     [Fact]
@@ -280,6 +357,16 @@ public sealed class TeamWorkProjectionApiTests
             item.GetProperty("currentHolderIds").EnumerateArray().Select(x => x.GetString()!).OrderBy(x => x, StringComparer.OrdinalIgnoreCase));
     }
 
+    private static void AssertStageKinds(JsonElement item, IReadOnlyCollection<(string Holder, string Kind)> expected)
+    {
+        var actual = item.GetProperty("activeStageObligations").EnumerateArray()
+            .Select(obligation => (obligation.GetProperty("holderId").GetString()!, obligation.GetProperty("stageKind").GetString()!))
+            .OrderBy(value => value.Item1, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(value => value.Item2, StringComparer.Ordinal)
+            .ToArray();
+        Assert.Equal(expected.OrderBy(value => value.Holder, StringComparer.OrdinalIgnoreCase).ThenBy(value => value.Kind), actual);
+    }
+
     private static string? NullableString(JsonElement item, string property) =>
         item.GetProperty(property).ValueKind == JsonValueKind.Null ? null : item.GetProperty(property).GetString();
 
@@ -316,6 +403,7 @@ public sealed class TeamWorkProjectionApiTests
         var foreignRecord = Change("SRCR-90000", 0, foreignProject.Id, foreignRelease.Id, "Foreign project record", "team.viewer", ChangeRequestState.Draft, now);
         db.AddRange(program, project, releaseA, releaseB, foreignProgram, foreignProject, foreignRelease, viewer, outsider, localRecord, foreignRecord);
         db.Add(new ProgramMembership(viewer.Id, program.Id, ProgramRole.Engineer, "test", now));
+        db.Add(new ProgramMembership(outsider.Id, foreignProgram.Id, ProgramRole.SoftwareEngineer, "test", now));
         await db.SaveChangesAsync();
         return new Seed(project.Id, foreignProject.Id, releaseA.Id, releaseB.Id, viewer.UserName, outsider.UserName);
     }
@@ -336,12 +424,21 @@ public sealed class TeamWorkProjectionApiTests
             Account("matrix.reviewer", "Matrix Reviewer", now), Account("matrix.frozen", "Frozen Holder", now),
             Account("matrix.assigned", "Assigned Engineer", now), Account("matrix.responsible", "Responsible Engineer", now),
             Account("matrix.assessment", "Assessment Approver", now), Account("matrix.idle", "Idle Member", now),
-            Account("matrix.inactive", "Inactive Non Holder", now),
+            Account("matrix.locked", "Locked Member", now), Account("matrix.inactive", "Inactive Non Holder", now),
         };
         db.AddRange(program, project, releaseA, releaseB);
         db.AddRange(accounts);
         foreach (var account in accounts.Where(account => account.UserName is not ("matrix.inactive" or "matrix.frozen")))
             db.Add(new ProgramMembership(account.Id, program.Id, ProgramRole.Engineer, "test", now));
+        db.Add(new ProgramMembership(accounts.Single(x => x.UserName == "matrix.reviewer").Id,
+            program.Id, ProgramRole.SystemEngineer, "test", now));
+        db.Add(new ProgramMembership(accounts.Single(x => x.UserName == "matrix.reviewer").Id,
+            program.Id, ProgramRole.Reviewer, "test", now));
+        db.Add(new ProgramMembership(accounts.Single(x => x.UserName == "matrix.reviewer").Id,
+            program.Id, ProgramRole.SystemEngineeringLead, "test", now));
+        accounts.Single(x => x.UserName == "matrix.idle").Disable(now.AddMinutes(1));
+        var locked = accounts.Single(x => x.UserName == "matrix.locked");
+        for (var failedLogin = 0; failedLogin < 8; failedLogin++) locked.LoginFailed();
         var endedMembership = new ProgramMembership(accounts.Single(x => x.UserName == "matrix.inactive").Id,
             program.Id, ProgramRole.Engineer, "test", now);
         endedMembership.End("test", now.AddMinutes(1));
@@ -467,7 +564,7 @@ public sealed class TeamWorkProjectionApiTests
         db.AddRange(assessmentIds);
         await db.SaveChangesAsync();
 
-        return new MatrixSeed(project.Id, releaseA.Id, releaseB.Id, "matrix.viewer", "matrix.author", "matrix.reviewer", "matrix.frozen", "matrix.assigned", "matrix.responsible", "matrix.assessment", "matrix.idle", "matrix.inactive",
+        return new MatrixSeed(project.Id, releaseA.Id, releaseB.Id, "matrix.viewer", "matrix.author", "matrix.reviewer", "matrix.frozen", "matrix.assigned", "matrix.responsible", "matrix.assessment", "matrix.idle", "matrix.locked", "matrix.inactive",
             crDraft.Id, crReview.Id, crApproval.Id, crMixed.Id, crZero.Id, crApproved.Id, crSelected.Id, crSelectedUnreleased.Id, crApprovedReleaseB.Id, crDeferredDraft.Id, crDeferredReview.Id, crDeferredApproved.Id, crDeferredUnknown.Id, crWithdrawn.Id, crOld.Id, crCurrent.Id, crReturned.Id,
             tcrDraft.Id, tcrNullAssigned.Id, tcrReview.Id, tcrApproval.Id, tcrApproved.Id, tcrDeferredReview.Id, tcrDeferredUnknown.Id, tcrSuperseded.Id, tcrUnnumbered.Id, tcrAutomatic.Id, tcrProcedureSystem.Id, tcrProcedureHigh.Id, tcrProcedureLow.Id, tcrLatestOld.Id, tcrLatestNew.Id, tcrIncorporated.Id,
             prDraft.Id, prSccb.Id, prOpen.Id, prDeferred.Id, prImplementing.Id, prVerifying.Id, prSqa.Id, prClosed.Id, prRejected.Id,
@@ -623,7 +720,7 @@ public sealed class TeamWorkProjectionApiTests
     private sealed record RoutingSeed(Guid ProjectId, Guid ReleaseA, Guid ReleaseB, string Viewer, Guid SystemCr,
         Guid UnsupportedAssessment, IReadOnlyList<Route> Routes);
     private sealed record MatrixSeed(Guid ProjectId, Guid ReleaseA, Guid ReleaseB, string Viewer, string Author, string Reviewer,
-        string FrozenHolder, string Assigned, string Responsible, string AssessmentApprover, string IdleMember, string InactiveNonHolder,
+        string FrozenHolder, string Assigned, string Responsible, string AssessmentApprover, string IdleMember, string LockedMember, string InactiveNonHolder,
         Guid CrDraft, Guid CrReview, Guid CrApproval, Guid CrMixed, Guid CrZeroSteps, Guid CrApproved, Guid CrSelectedReleased, Guid CrSelectedUnreleased, Guid CrApprovedReleaseB,
         Guid CrDeferredDraft, Guid CrDeferredReview, Guid CrDeferredApproved, Guid CrDeferredUnknown, Guid CrWithdrawn, Guid CrSupersededOld, Guid CrSupersededCurrent, Guid CrReturnedDraft,
         Guid TcrDraft, Guid TcrNullAssigned, Guid TcrReview, Guid TcrApproval, Guid TcrApproved, Guid TcrDeferredReview, Guid TcrDeferredUnknown, Guid TcrSuperseded,

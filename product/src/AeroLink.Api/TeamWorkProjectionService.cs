@@ -119,6 +119,8 @@ public sealed class TeamWorkProjectionService(AeroLinkDbContext db)
             var cycle = latestChangeCycles.GetValueOrDefault(change.Id);
             var allSteps = StepsFor(cycle, stepsByCycle);
             var activeSteps = cycle?.State == ReviewCycleState.Active ? allSteps : [];
+            _ = TeamWorkReviewOverlay.Resolve(allSteps.Select(TeamWorkReviewStep.From));
+            var reviewOverlay = TeamWorkReviewOverlay.Resolve(activeSteps.Select(TeamWorkReviewStep.From));
             var lane = TeamWorkLanePolicy.ForChangeRequest(change.State, change.DeferredFromState);
             var holders = TeamWorkHolderPolicy.ForChangeRequest(change.State, change.AuthorId, activeSteps
                 .Select(TeamWorkReviewStep.From));
@@ -132,7 +134,7 @@ public sealed class TeamWorkProjectionService(AeroLinkDbContext db)
             }
             else if (change.State == ChangeRequestState.InReview)
             {
-                lane = TeamWorkReviewOverlay.Resolve(activeSteps.Select(TeamWorkReviewStep.From)).LaneDecision;
+                lane = reviewOverlay.LaneDecision;
             }
 
             if (change.State == ChangeRequestState.SelectedForBaseline
@@ -156,6 +158,7 @@ public sealed class TeamWorkProjectionService(AeroLinkDbContext db)
                 null,
                 CanonicalHolderIds(holders.CurrentHolderIds),
                 WireHolderBasis(holders.HolderBasis),
+                WireStageObligations(change.State == ChangeRequestState.InReview ? reviewOverlay.ActiveStageObligations : []),
                 CanonicalUserName(change.AuthorId),
                 string.IsNullOrWhiteSpace(change.AuthorId) ? null : "author",
                 ReleaseFor(change.TargetReleaseId, releaseById),
@@ -171,6 +174,8 @@ public sealed class TeamWorkProjectionService(AeroLinkDbContext db)
             var cycle = latestTestCycles.GetValueOrDefault(review.Id);
             var allSteps = StepsFor(cycle, stepsByCycle);
             var activeSteps = cycle?.State == ReviewCycleState.Active ? allSteps : [];
+            _ = TeamWorkReviewOverlay.Resolve(allSteps.Select(TeamWorkReviewStep.From));
+            var reviewOverlay = TeamWorkReviewOverlay.Resolve(activeSteps.Select(TeamWorkReviewStep.From));
             var lane = TeamWorkLanePolicy.ForTestChangeReview(review.State, review.DeferredFromState);
             var holders = TeamWorkHolderPolicy.ForTestChangeReview(review.State, review.AssignedEngineerId,
                 activeSteps.Select(TeamWorkReviewStep.From));
@@ -181,7 +186,7 @@ public sealed class TeamWorkProjectionService(AeroLinkDbContext db)
             }
             else if (review.State == TestChangeReviewState.InReview)
             {
-                lane = TeamWorkReviewOverlay.Resolve(activeSteps.Select(TeamWorkReviewStep.From)).LaneDecision;
+                lane = reviewOverlay.LaneDecision;
             }
 
             var allocation = LatestAllocation(
@@ -210,6 +215,7 @@ public sealed class TeamWorkProjectionService(AeroLinkDbContext db)
                 WireTestChangeReviewOutcome(review.Outcome),
                 CanonicalHolderIds(holders.CurrentHolderIds),
                 WireHolderBasis(holders.HolderBasis),
+                WireStageObligations(review.State == TestChangeReviewState.InReview ? reviewOverlay.ActiveStageObligations : []),
                 raisedById,
                 raisedByKind,
                 ReleaseFor(review.ReleaseId, releaseById),
@@ -237,6 +243,7 @@ public sealed class TeamWorkProjectionService(AeroLinkDbContext db)
                 report.Disposition?.ToString(),
                 CanonicalHolderIds(holders.CurrentHolderIds),
                 WireHolderBasis(holders.HolderBasis),
+                [],
                 CanonicalUserName(report.ReportedBy),
                 string.IsNullOrWhiteSpace(report.ReportedBy) ? null : "reportedBy",
                 ReleaseFor(report.TargetReleaseId, releaseById),
@@ -265,6 +272,7 @@ public sealed class TeamWorkProjectionService(AeroLinkDbContext db)
                 assessment.Outcome.ToString(),
                 CanonicalHolderIds(holders.CurrentHolderIds),
                 WireHolderBasis(holders.HolderBasis),
+                [],
                 assessment.SourceChangeRequestId.ToString("D"),
                 "changeRequest",
                 ReleaseFor(assessment.ReleaseId, releaseById),
@@ -292,31 +300,41 @@ public sealed class TeamWorkProjectionService(AeroLinkDbContext db)
         var users = activeMemberIds.Length == 0 && holderIds.Length == 0
             ? []
             : await db.UserAccounts.AsNoTracking()
-                .Where(user => (activeMemberIds.Contains(user.Id) && user.State == AccountState.Active)
+                .Where(user => activeMemberIds.Contains(user.Id)
                     || holderIds.Contains(user.UserName))
                 .ToListAsync(ct);
         var usersById = users.ToDictionary(user => user.Id);
         var usersByName = users.ToDictionary(user => user.UserName, StringComparer.OrdinalIgnoreCase);
+        var rolesByUserId = activeMemberships
+            .GroupBy(membership => membership.UserId)
+            .ToDictionary(group => group.Key, group => group.Select(membership => membership.Role).ToArray());
 
         var peopleByName = new Dictionary<string, TeamWorkPersonAccumulator>(StringComparer.OrdinalIgnoreCase);
         foreach (var memberId in activeMemberIds)
         {
-            if (!usersById.TryGetValue(memberId, out var user) || user.State != AccountState.Active) continue;
-            peopleByName.TryAdd(user.UserName, new(user.UserName, user.DisplayName));
+            if (!usersById.TryGetValue(memberId, out var user)) continue;
+            peopleByName.TryAdd(user.UserName, new(user.UserName, user.DisplayName, user.Id, true,
+                WireAccountState(user.State), ModernBaseRoles(rolesByUserId.GetValueOrDefault(user.Id) ?? [])));
         }
         foreach (var holderId in holderIds)
         {
             if (usersByName.TryGetValue(holderId, out var user))
-                peopleByName.TryAdd(user.UserName, new(user.UserName, user.DisplayName));
+                peopleByName.TryAdd(user.UserName, new(user.UserName, user.DisplayName, user.Id,
+                    activeMemberIds.Contains(user.Id), WireAccountState(user.State),
+                    ModernBaseRoles(rolesByUserId.GetValueOrDefault(user.Id) ?? [])));
             else
-                peopleByName.TryAdd(holderId, new(holderId, holderId));
+                peopleByName.TryAdd(holderId, new(holderId, holderId, null, false, null, []));
         }
         foreach (var item in orderedItems)
         foreach (var holderId in item.CurrentHolderIds)
         {
             if (!peopleByName.TryGetValue(holderId, out var person))
             {
-                person = new(holderId, usersByName.GetValueOrDefault(holderId)?.DisplayName ?? holderId);
+                var holder = usersByName.GetValueOrDefault(holderId);
+                person = holder is null
+                    ? new(holderId, holderId, null, false, null, [])
+                    : new(holder.UserName, holder.DisplayName, holder.Id, activeMemberIds.Contains(holder.Id),
+                        WireAccountState(holder.State), ModernBaseRoles(rolesByUserId.GetValueOrDefault(holder.Id) ?? []));
                 peopleByName[holderId] = person;
             }
             person.Add(item.Lane);
@@ -372,6 +390,7 @@ public sealed class TeamWorkProjectionService(AeroLinkDbContext db)
         item.NativeOutcome,
         item.CurrentHolderIds,
         item.HolderBasis,
+        item.ActiveStageObligations,
         item.RaisedById,
         item.RaisedByKind,
         item.Release,
@@ -380,6 +399,53 @@ public sealed class TeamWorkProjectionService(AeroLinkDbContext db)
         item.DeferredFromState,
         item.UpdatedAt,
         item.OpenUrl);
+
+    private static IReadOnlyList<TeamWorkStageObligation> WireStageObligations(
+        IEnumerable<TeamWorkReviewObligation> obligations) => obligations
+        .Select(obligation => new TeamWorkStageObligation(
+            CanonicalUserName(obligation.HolderId)!,
+            obligation.StageKind switch
+            {
+                ReviewStageKind.Review => "review",
+                ReviewStageKind.Approval => "approval",
+                _ => throw new DomainException($"The review stage kind '{obligation.StageKind}' is not supported by Team Work."),
+            }))
+        .ToArray();
+
+    private static string WireAccountState(AccountState state) => state switch
+    {
+        AccountState.Active => "active",
+        AccountState.Disabled => "disabled",
+        AccountState.Locked => "locked",
+        _ => throw new DomainException($"The account state '{state}' is not supported by Team Work."),
+    };
+
+    private static IReadOnlyList<string> ModernBaseRoles(IEnumerable<ProgramRole> roles) => roles
+        .Select(role => role switch
+        {
+            ProgramRole.SystemEngineer => "SystemEngineer",
+            ProgramRole.SoftwareEngineer => "SoftwareEngineer",
+            ProgramRole.SystemTestEngineer => "SystemTestEngineer",
+            ProgramRole.SoftwareTestEngineer => "SoftwareTestEngineer",
+            ProgramRole.ProjectEngineer => "ProjectEngineer",
+            ProgramRole.EngineeringManager => "EngineeringManager",
+            ProgramRole.ProgramManager => "ProgramManager",
+            ProgramRole.ConfigurationManager => "ConfigurationManager",
+            ProgramRole.SoftwareQualityAnalyst => "SoftwareQualityAnalyst",
+            ProgramRole.Airworthiness => "Airworthiness",
+            // These memberships remain readable for compatibility but are not modern base project roles or
+            // discipline signals. Reviewer and Approver are workflow signature meanings, while the lead
+            // values are now represented by Project Leadership metadata.
+            ProgramRole.Engineer or ProgramRole.Reviewer or ProgramRole.Approver or ProgramRole.TestEngineer
+                or ProgramRole.TestLead or ProgramRole.Administrator or ProgramRole.SystemEngineeringLead
+                or ProgramRole.SoftwareEngineeringLead or ProgramRole.ProjectEngineeringLead
+                or ProgramRole.SystemTestLead or ProgramRole.SoftwareTestLead => null,
+            _ => throw new DomainException($"The program role '{role}' is not classified by Team Work."),
+        })
+        .Where(role => role is not null)
+        .Select(role => role!)
+        .Distinct(StringComparer.Ordinal)
+        .ToArray();
 
     private static string? CanonicalUserName(string? value) =>
         string.IsNullOrWhiteSpace(value) ? null : value.Trim().ToLowerInvariant();
@@ -483,6 +549,7 @@ public sealed class TeamWorkProjectionService(AeroLinkDbContext db)
         string? NativeOutcome,
         IReadOnlyList<string> CurrentHolderIds,
         string HolderBasis,
+        IReadOnlyList<TeamWorkStageObligation> ActiveStageObligations,
         string? RaisedById,
         string? RaisedByKind,
         TeamWorkRelease? Release,
@@ -492,7 +559,13 @@ public sealed class TeamWorkProjectionService(AeroLinkDbContext db)
         DateTimeOffset UpdatedAt,
         string OpenUrl);
 
-    private sealed class TeamWorkPersonAccumulator(string userName, string displayName)
+    private sealed class TeamWorkPersonAccumulator(
+        string userName,
+        string displayName,
+        Guid? userId,
+        bool isCurrentProjectMember,
+        string? accountState,
+        IReadOnlyList<string> baseRoles)
     {
         private int holds;
         private int work;
@@ -502,6 +575,10 @@ public sealed class TeamWorkProjectionService(AeroLinkDbContext db)
 
         public string UserName { get; } = userName;
         public string DisplayName { get; } = displayName;
+        public Guid? UserId { get; } = userId;
+        public bool IsCurrentProjectMember { get; } = isCurrentProjectMember;
+        public string? AccountState { get; } = accountState;
+        public IReadOnlyList<string> BaseRoles { get; } = baseRoles;
 
         public void Add(string lane)
         {
@@ -516,8 +593,17 @@ public sealed class TeamWorkProjectionService(AeroLinkDbContext db)
             }
         }
 
-        public TeamWorkPerson ToResponse() => new(UserName, DisplayName, holds,
+        public TeamWorkPerson ToResponse() => new(UserId, UserName, DisplayName, IsCurrentProjectMember,
+            AccountState, BaseRoles, DisciplineAffinities(BaseRoles), holds,
             new TeamWorkPersonLanes(work, review, sign, approved));
+
+        private static IReadOnlyList<string> DisciplineAffinities(IReadOnlyList<string> roles)
+        {
+            var affinities = new List<string>(2);
+            if (roles.Any(role => role is "SystemEngineer" or "SystemTestEngineer")) affinities.Add("system");
+            if (roles.Any(role => role is "SoftwareEngineer" or "SoftwareTestEngineer")) affinities.Add("software");
+            return affinities;
+        }
     }
 }
 
@@ -530,8 +616,13 @@ public sealed record TeamWorkProjectionResponse(
 public sealed record TeamWorkTotals(int Items, int Returned, int Unheld);
 
 public sealed record TeamWorkPerson(
+    Guid? UserId,
     string UserName,
     string DisplayName,
+    bool IsCurrentProjectMember,
+    string? AccountState,
+    IReadOnlyList<string> BaseRoles,
+    IReadOnlyList<string> DisciplineAffinities,
     int Holds,
     TeamWorkPersonLanes ByLane);
 
@@ -559,6 +650,7 @@ public sealed record TeamWorkItemResponse(
     string? NativeOutcome,
     IReadOnlyList<string> CurrentHolderIds,
     string HolderBasis,
+    IReadOnlyList<TeamWorkStageObligation> ActiveStageObligations,
     string? RaisedById,
     string? RaisedByKind,
     TeamWorkRelease? Release,
@@ -567,3 +659,5 @@ public sealed record TeamWorkItemResponse(
     string? DeferredFromState,
     DateTimeOffset UpdatedAt,
     string OpenUrl);
+
+public sealed record TeamWorkStageObligation(string HolderId, string StageKind);
