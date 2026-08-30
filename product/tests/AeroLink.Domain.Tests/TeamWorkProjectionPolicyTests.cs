@@ -151,6 +151,9 @@ public sealed class TeamWorkProjectionPolicyTests
         Assert.Equal(TeamWorkLane.InReview, result.LaneDecision.Lane);
         Assert.Equal(["reviewer.one", "reviewer.two"], result.HolderResolution.CurrentHolderIds);
         Assert.Equal(TeamWorkHolderBasis.ActiveReviewStage, result.HolderResolution.HolderBasis);
+        Assert.Equal(
+            [("reviewer.one", ReviewStageKind.Review), ("reviewer.two", ReviewStageKind.Review)],
+            result.ActiveStageObligations.Select(obligation => (obligation.HolderId, obligation.StageKind)));
     }
 
     [Fact]
@@ -165,6 +168,9 @@ public sealed class TeamWorkProjectionPolicyTests
         Assert.Equal(TeamWorkLane.AwaitingSignature, result.LaneDecision.Lane);
         Assert.Equal(["reviewer.one", "approver.one"], result.HolderResolution.CurrentHolderIds);
         Assert.Equal(TeamWorkHolderBasis.ActiveReviewAndApprovalStages, result.HolderResolution.HolderBasis);
+        Assert.Equal(
+            [("reviewer.one", ReviewStageKind.Review), ("approver.one", ReviewStageKind.Approval)],
+            result.ActiveStageObligations.Select(obligation => (obligation.HolderId, obligation.StageKind)));
     }
 
     [Fact]
@@ -180,6 +186,21 @@ public sealed class TeamWorkProjectionPolicyTests
         Assert.Equal(TeamWorkLane.InReview, result.LaneDecision.Lane);
         Assert.Empty(result.HolderResolution.CurrentHolderIds);
         Assert.Equal(TeamWorkHolderBasis.None, result.HolderResolution.HolderBasis);
+        Assert.Empty(result.ActiveStageObligations);
+    }
+
+    [Fact]
+    public void Parallel_approval_obligations_keep_each_signature_actor()
+    {
+        var result = TeamWorkReviewOverlay.Resolve(
+        [
+            new("approver.one", ReviewStageKind.Approval, ApprovalStepState.Active),
+            new("approver.two", ReviewStageKind.Approval, ApprovalStepState.Active),
+        ]);
+
+        Assert.Equal(TeamWorkLane.AwaitingSignature, result.LaneDecision.Lane);
+        Assert.Equal(["approver.one", "approver.two"], result.HolderResolution.CurrentHolderIds);
+        Assert.All(result.ActiveStageObligations, obligation => Assert.Equal(ReviewStageKind.Approval, obligation.StageKind));
     }
 
     [Fact]
@@ -192,6 +213,8 @@ public sealed class TeamWorkProjectionPolicyTests
         ]);
 
         Assert.Equal(["reviewer.one"], result.HolderResolution.CurrentHolderIds);
+        Assert.Single(result.ActiveStageObligations);
+        Assert.Equal("reviewer.one", result.ActiveStageObligations[0].HolderId);
     }
 
     [Fact]

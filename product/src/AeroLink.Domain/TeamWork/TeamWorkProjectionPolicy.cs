@@ -148,10 +148,14 @@ public sealed record TeamWorkReviewStep
     }
 }
 
+/// <summary>The persisted meaning of one currently active review obligation.</summary>
+public sealed record TeamWorkReviewObligation(string HolderId, ReviewStageKind StageKind);
+
 /// <summary>The result of applying the frozen active-review-stage overlay.</summary>
 public sealed record TeamWorkReviewOverlayResult(
     TeamWorkLaneDecision LaneDecision,
-    TeamWorkHolderResolution HolderResolution);
+    TeamWorkHolderResolution HolderResolution,
+    IReadOnlyList<TeamWorkReviewObligation> ActiveStageObligations);
 
 /// <summary>
 /// Applies review truth to a base InReview item. Every active step contributes a holder. An Approval stage
@@ -185,7 +189,8 @@ public static class TeamWorkReviewOverlay
         if (active.Length == 0)
             return new(
                 TeamWorkLaneDecision.OnBoard(TeamWorkLane.InReview),
-                TeamWorkHolderResolution.None);
+                TeamWorkHolderResolution.None,
+                Array.Empty<TeamWorkReviewObligation>());
 
         var hasReview = active.Any(step => step.StageKind == ReviewStageKind.Review);
         var hasApproval = active.Any(step => step.StageKind == ReviewStageKind.Approval);
@@ -198,7 +203,12 @@ public static class TeamWorkReviewOverlay
 
         return new(
             TeamWorkLaneDecision.OnBoard(lane),
-            new TeamWorkHolderResolution(active.Select(step => step.HolderId), basis));
+            new TeamWorkHolderResolution(active.Select(step => step.HolderId), basis),
+            active
+                .GroupBy(step => $"{step.HolderId}|{step.StageKind}", StringComparer.OrdinalIgnoreCase)
+                .Select(group => group.First())
+                .Select(step => new TeamWorkReviewObligation(step.HolderId, step.StageKind))
+                .ToArray());
     }
 }
 

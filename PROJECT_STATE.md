@@ -172,9 +172,12 @@ Change Requests, Problem Reports, and downstream assessments. The projection own
 not reconstruct that lifecycle truth from roles or browser state. Review holders and Review-versus-Approval meaning
 come from the frozen active `ApprovalStep` records, not current workflow configuration, base project roles, or
 Project Leadership. Incorporated, withdrawn, closed, rejected, superseded, linked, and unnumbered records leave the
-active projection under explicit family policy. The Phase 2 Team Work client workspace now provides a read-only,
-project-wide four-lane lifecycle board using that server projection and canonical record links. Holder grouping,
-filters, and holder detail remain future Phase 3/4 work.
+active projection under explicit family policy. The Team Work client workspace now provides the read-only,
+project-wide four-lane lifecycle board, people strip, search/type/build filters, current-holder grouping, and
+truthful current-holder detail drawer using that server projection and canonical record links. Its people ordering
+and local affinity nudge use only modern base project roles; Project Leadership remains separate metadata and
+Review/Approval remain frozen workflow-stage meanings. Holder identity is 0..N, including parallel obligations,
+and no write, assignment, due-date, or age-in-state behavior is implied.
 
 ## Problem Reports
 

@@ -1140,7 +1140,7 @@ function App() {
       />
     );
   if (view === "teamwork" && project)
-    return inShell(<TeamWork api={API} projectId={project.project.id} />);
+    return inShell(<TeamWork api={API} projectId={project.project.id} user={user} />);
   if (view === "admin" && active)
     return inShell(
       <AdministrationCenter

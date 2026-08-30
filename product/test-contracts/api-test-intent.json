@@ -1,19 +1,19 @@
 {
   "schemaVersion": "aerolink-api-test-intent/v2",
   "totals": {
-    "tests": 700,
-    "cases": 776,
+    "tests": 701,
+    "cases": 777,
     "classes": 114,
     "hostedTests": 673,
     "hostedCases": 740,
     "nonHostedTests": 21,
     "nonHostedCases": 30,
-    "unknownHostTests": 6,
-    "unknownHostCases": 6,
+    "unknownHostTests": 7,
+    "unknownHostCases": 7,
     "hostedCandidateTests": 16,
     "hostedCandidateCases": 16,
-    "unknownCandidateTests": 3,
-    "unknownCandidateCases": 3,
+    "unknownCandidateTests": 4,
+    "unknownCandidateCases": 4,
     "unknownCaseTests": 0,
     "criterion7": "unresolved"
   },
@@ -45,10 +45,10 @@
     "in-process-logic": {
       "label": "In-process logic with no HTTP and no client",
       "level": "Domain or Infrastructure (migration candidate)",
-      "tests": 28,
-      "cases": 28,
+      "tests": 29,
+      "cases": 29,
       "unknownCases": 0,
-      "classes": 10
+      "classes": 11
     },
     "filesystem": {
       "label": "Filesystem / evidence-root behaviour",
@@ -9525,8 +9525,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 204,
-        "end": 232
+        "start": 281,
+        "end": 309
       }
     },
     {
@@ -9542,8 +9542,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 53,
-        "end": 202
+        "start": 55,
+        "end": 234
       }
     },
     {
@@ -9560,7 +9560,7 @@
       ],
       "sourceLines": {
         "start": 30,
-        "end": 51
+        "end": 53
       }
     },
     {
@@ -9577,8 +9577,22 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 234,
-        "end": 263
+        "start": 311,
+        "end": 340
+      }
+    },
+    {
+      "cls": "TeamWorkProjectionApiTests",
+      "test": "Team_work_classifies_every_current_program_role_explicitly",
+      "kind": "Fact",
+      "intent": "in-process-logic",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "unknown",
+      "hostEvidence": [],
+      "sourceLines": {
+        "start": 236,
+        "end": 279
       }
     },
     {
