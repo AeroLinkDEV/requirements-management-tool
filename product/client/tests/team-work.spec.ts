@@ -732,6 +732,35 @@ test('Team Work rejects retired role vocabulary and fabricated stage provenance'
   await expect(page.getByRole('link', { name: /Parallel review change/ })).toBeVisible()
 })
 
+test('Team Work names a known raiser without exposing their account handle', async ({ page }) => {
+  const raiser = {
+    userId: '00000000-0000-0000-0000-0000000000ae', userName: 'systems.author', displayName: 'Systems Author',
+    isCurrentProjectMember: true, accountState: 'active', baseRoles: ['SystemEngineer'], disciplineAffinities: ['system'],
+    holds: 0, byLane: { work: 0, review: 0, sign: 0, approved: 0 },
+  }
+  const body = {
+    ...fixture,
+    people: [...fixture.people, raiser],
+    items: fixture.items.map(item => item.title === 'Draft system change'
+      ? { ...item, raisedById: 'systems.author', raisedByKind: 'author' }
+      : item),
+  }
+  await openTeamWork(page, body)
+
+  const card = page.getByRole('link', { name: /Draft system change/ })
+  await expect(card.getByText('Systems Author', { exact: true })).toBeVisible()
+  await expect(card).not.toContainText('systems.author')
+
+  await page.getByRole('button', { name: 'Current holder', exact: true }).click()
+  const alice = page.getByRole('button', { name: 'API Alice', exact: true })
+  await expect(alice).toBeVisible()
+  await expect(alice).not.toContainText('alice')
+  await alice.click()
+  const drawer = page.getByRole('dialog', { name: 'API Alice' })
+  await expect(drawer).toBeVisible()
+  await expect(drawer.getByText('alice', { exact: true })).toHaveCount(0)
+})
+
 function locationProjectId(url: string) {
   const match = url.match(/\/projects\/([0-9a-f-]{36})\//i)
   if (!match) throw new Error(`Project id was missing from ${url}`)

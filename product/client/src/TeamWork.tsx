@@ -393,7 +393,7 @@ function TeamWorkCard({ item, people }: { item: TeamWorkItem; people: Map<string
   const raisedBy = item.raisedByKind
     ? originLabels[item.raisedByKind]
       ? `Origin: ${originLabels[item.raisedByKind]}`
-      : item.raisedById ? `Raised by: ${displayNameFor(item.raisedById, people)} (${item.raisedById})` : undefined
+      : item.raisedById ? `Raised by: ${displayNameFor(item.raisedById, people)}` : undefined
     : undefined;
   return (
     <a className="teamWorkCard" data-team-work-card="true" href={item.openUrl}>
@@ -591,7 +591,6 @@ function TeamWorkDrawer({ person, items, people, onClose }: {
           <div>
             <span className="teamWorkEyebrow">CURRENT HOLDER</span>
             <h2 id="team-work-drawer-title">{person.displayName}</h2>
-            <p>{person.userName}</p>
           </div>
           <button type="button" aria-label="Close current holder" ref={close} onClick={onClose}>×</button>
         </header>
@@ -719,7 +718,6 @@ function TeamWorkBoard({ items, group, people, onHolder }: {
                       onClick={event => onHolder(person, event.currentTarget)}
                     >
                       {person.displayName}
-                      <small>{person.userName}</small>
                     </button>
                   )
                   : <h2>No current holder</h2>}
