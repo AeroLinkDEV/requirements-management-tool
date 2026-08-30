@@ -1,11 +1,11 @@
 {
   "schemaVersion": "aerolink-api-test-intent/v2",
   "totals": {
-    "tests": 696,
-    "cases": 772,
-    "classes": 113,
-    "hostedTests": 669,
-    "hostedCases": 736,
+    "tests": 700,
+    "cases": 776,
+    "classes": 114,
+    "hostedTests": 673,
+    "hostedCases": 740,
     "nonHostedTests": 21,
     "nonHostedCases": 30,
     "unknownHostTests": 6,
@@ -21,10 +21,10 @@
     "http-boundary": {
       "label": "HTTP boundary: route, status, JSON shape",
       "level": "API (must stay hosted)",
-      "tests": 419,
-      "cases": 471,
+      "tests": 422,
+      "cases": 474,
       "unknownCases": 0,
-      "classes": 94
+      "classes": 95
     },
     "ef-translation": {
       "label": "EF translation / relational constraints",
@@ -37,10 +37,10 @@
     "auth-policy": {
       "label": "Authentication / authorization wiring",
       "level": "API (must stay hosted)",
-      "tests": 78,
-      "cases": 82,
+      "tests": 79,
+      "cases": 83,
       "unknownCases": 0,
-      "classes": 45
+      "classes": 46
     },
     "in-process-logic": {
       "label": "In-process logic with no HTTP and no client",
@@ -9510,6 +9510,75 @@
       "sourceLines": {
         "start": 43,
         "end": 105
+      }
+    },
+    {
+      "cls": "TeamWorkProjectionApiTests",
+      "test": "Project_endpoint_ignores_a_shell_release_query_and_open_resolver_uses_each_item_release",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client"
+      ],
+      "sourceLines": {
+        "start": 204,
+        "end": 232
+      }
+    },
+    {
+      "cls": "TeamWorkProjectionApiTests",
+      "test": "Project_projection_covers_lanes_holders_revision_and_cross_family_truth",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client"
+      ],
+      "sourceLines": {
+        "start": 53,
+        "end": 202
+      }
+    },
+    {
+      "cls": "TeamWorkProjectionApiTests",
+      "test": "Project_projection_is_authorized_and_does_not_leak_a_foreign_project",
+      "kind": "Fact",
+      "intent": "auth-policy",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client"
+      ],
+      "sourceLines": {
+        "start": 30,
+        "end": 51
+      }
+    },
+    {
+      "cls": "TeamWorkProjectionApiTests",
+      "test": "Project_projection_query_count_is_constant_as_item_count_grows",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 234,
+        "end": 263
       }
     },
     {

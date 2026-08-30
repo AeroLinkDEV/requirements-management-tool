@@ -1,9 +1,9 @@
 {
   "schemaVersion": "aerolink-api-host-classification/v3",
   "totals": {
-    "classes": 113,
-    "tests": 696,
-    "knownCases": 772,
+    "classes": 114,
+    "tests": 700,
+    "knownCases": 776,
     "unknownCaseTests": 0
   },
   "summary": {
@@ -14,9 +14,9 @@
       "unknownCaseTests": 0
     },
     "fresh-host": {
-      "classes": 43,
-      "tests": 261,
-      "knownCases": 290,
+      "classes": 44,
+      "tests": 265,
+      "knownCases": 294,
       "unknownCaseTests": 0
     },
     "migration-candidate": {
@@ -624,6 +624,18 @@
       "reason": "Reviewed #563 hold: the absolute SavedRequirementViews.CountAsync() == 1 assertion at line 106 is not safe against prior class tests in a shared host. Keep fresh-host until it is filtered by per-test project/owner and fixed seed identities are explicitly tagged.",
       "intents": [
         "ef-translation",
+        "http-boundary"
+      ]
+    },
+    {
+      "cls": "TeamWorkProjectionApiTests",
+      "tests": 4,
+      "knownCases": 4,
+      "unknownCaseTests": 0,
+      "classification": "fresh-host",
+      "reason": "Customizes host state (interceptor-or-fault-injection); sharing could change the subject or leak configuration.",
+      "intents": [
+        "auth-policy",
         "http-boundary"
       ]
     },
