@@ -69,6 +69,9 @@ public sealed class ProjectConfigurationApiTests : IClassFixture<SharedApiHost>
         Assert.True(readJson.RootElement.GetProperty("canManage").GetBoolean());
         Assert.Equal(new[] { "System", "HighLevel", "LowLevel", "Customer", "Interface" },
             readJson.RootElement.GetProperty("catalogue").EnumerateArray().Select(x => x.GetProperty("catalogueEntry").GetString()).ToArray());
+        Assert.Equal(["System>HighLevel", "HighLevel>LowLevel"],
+            readJson.RootElement.GetProperty("effectiveRelationships").EnumerateArray()
+                .Select(x => $"{x.GetProperty("parent").GetString()}>{x.GetProperty("child").GetString()}").ToArray());
 
         var edit = await client.PutAsJsonAsync($"/api/projects/{seeded.ProjectId}/configuration", new
         {
@@ -93,6 +96,9 @@ public sealed class ProjectConfigurationApiTests : IClassFixture<SharedApiHost>
         Assert.Equal(ProjectLadderSnapshot.Hash(editedSnapshot!),
             edited.RootElement.GetProperty("history")[0].GetProperty("snapshotHash").GetString());
         Assert.Equal(2, edited.RootElement.GetProperty("history")[0].GetProperty("snapshotSchemaVersion").GetInt32());
+        Assert.Equal(["System>HighLevel", "HighLevel>LowLevel"],
+            edited.RootElement.GetProperty("effectiveRelationships").EnumerateArray()
+                .Select(x => $"{x.GetProperty("parent").GetString()}>{x.GetProperty("child").GetString()}").ToArray());
 
         var stale = await client.PutAsJsonAsync($"/api/projects/{seeded.ProjectId}/configuration", new
         {
@@ -136,6 +142,9 @@ public sealed class ProjectConfigurationApiTests : IClassFixture<SharedApiHost>
         using var activation = await client.PostAsJsonAsync($"/api/projects/{seeded.ProjectId}/configuration/activate",
             new { expectedVersion = 2, reason = "Activate Interface Control Document ladder" });
         Assert.True(activation.IsSuccessStatusCode, await activation.Content.ReadAsStringAsync());
+        using var activatedBody = JsonDocument.Parse(await activation.Content.ReadAsStringAsync());
+        Assert.Equal(["Interface>System"], activatedBody.RootElement.GetProperty("effectiveRelationships").EnumerateArray()
+            .Select(x => $"{x.GetProperty("parent").GetString()}>{x.GetProperty("child").GetString()}").ToArray());
 
         using var workflow = await client.PutAsJsonAsync($"/api/projects/{seeded.ProjectId}/approval-configuration/Interface", new
         {
@@ -296,6 +305,9 @@ public sealed class ProjectConfigurationApiTests : IClassFixture<SharedApiHost>
         Assert.Equal("Active", activationBody.GetProperty("state").GetString());
         Assert.Equal(3, activationBody.GetProperty("version").GetInt64());
         Assert.Equal(2, activationBody.GetProperty("effectiveSteps").GetArrayLength());
+        Assert.Equal(["System>HighLevel"],
+            activationBody.GetProperty("effectiveRelationships").EnumerateArray()
+                .Select(x => $"{x.GetProperty("parent").GetString()}>{x.GetProperty("child").GetString()}").ToArray());
         var readiness = activationBody.GetProperty("readiness");
         Assert.True(readiness.GetProperty("isReady").GetBoolean());
         Assert.Equal(LadderConsumerManifestCatalog.RequiredConsumerIds.Count, readiness.GetProperty("consumers").GetArrayLength());
@@ -353,6 +365,51 @@ public sealed class ProjectConfigurationApiTests : IClassFixture<SharedApiHost>
         using var body = JsonDocument.Parse(await edit.Content.ReadAsStringAsync());
         Assert.Equal("System", body.RootElement.GetProperty("relationships")[0].GetProperty("parent").GetString());
         Assert.Equal("LowLevel", body.RootElement.GetProperty("relationships")[0].GetProperty("child").GetString());
+        Assert.Equal(["System>HighLevel", "HighLevel>LowLevel"],
+            body.RootElement.GetProperty("effectiveRelationships").EnumerateArray()
+                .Select(x => $"{x.GetProperty("parent").GetString()}>{x.GetProperty("child").GetString()}").ToArray());
+
+        using var activation = await client.PostAsJsonAsync($"/api/projects/{seeded.ProjectId}/configuration/activate",
+            new { expectedVersion = 2, reason = "Activate the direct System to Low-Level relationship" });
+        Assert.True(activation.IsSuccessStatusCode, await activation.Content.ReadAsStringAsync());
+        using var activatedBody = JsonDocument.Parse(await activation.Content.ReadAsStringAsync());
+        Assert.Equal(["System>LowLevel"],
+            activatedBody.RootElement.GetProperty("effectiveRelationships").EnumerateArray()
+                .Select(x => $"{x.GetProperty("parent").GetString()}>{x.GetProperty("child").GetString()}").ToArray());
+    }
+
+    [Fact]
+    public async Task Active_multi_parent_configuration_projects_each_effective_direct_relationship_once()
+    {
+        var seeded = await SeedAsync(_host.Factory);
+        using var client = _host.CreateClient();
+        await SignInAsync(client, seeded.ManagerName);
+
+        using var edit = await client.PutAsJsonAsync($"/api/projects/{seeded.ProjectId}/configuration", new
+        {
+            expectedVersion = 1,
+            reason = "Configure multiple direct parents for Low-Level",
+            steps = new[]
+            {
+                new { catalogueEntry = "Interface", position = 1, capabilities = 1 },
+                new { catalogueEntry = "System", position = 2, capabilities = 7 },
+                new { catalogueEntry = "LowLevel", position = 3, capabilities = 15 },
+            },
+            relationships = new[]
+            {
+                new { parent = "Interface", child = "LowLevel" },
+                new { parent = "System", child = "LowLevel" },
+            },
+        });
+        Assert.True(edit.IsSuccessStatusCode, await edit.Content.ReadAsStringAsync());
+
+        using var activation = await client.PostAsJsonAsync($"/api/projects/{seeded.ProjectId}/configuration/activate",
+            new { expectedVersion = 2, reason = "Activate the multi-parent ladder" });
+        Assert.True(activation.IsSuccessStatusCode, await activation.Content.ReadAsStringAsync());
+        using var body = JsonDocument.Parse(await activation.Content.ReadAsStringAsync());
+        Assert.Equal(["Interface>LowLevel", "System>LowLevel"],
+            body.RootElement.GetProperty("effectiveRelationships").EnumerateArray()
+                .Select(x => $"{x.GetProperty("parent").GetString()}>{x.GetProperty("child").GetString()}").ToArray());
     }
 
     [Fact]
@@ -366,6 +423,18 @@ public sealed class ProjectConfigurationApiTests : IClassFixture<SharedApiHost>
         using var readJson = JsonDocument.Parse(await read.Content.ReadAsStringAsync());
         Assert.False(readJson.RootElement.GetProperty("canManage").GetBoolean());
         var response = await client.PutAsJsonAsync($"/api/projects/{seeded.ProjectId}/configuration", new { expectedVersion = 1, reason = "No", steps = Array.Empty<object>(), relationships = Array.Empty<object>() });
+        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task Project_configuration_read_refuses_a_project_outside_the_callers_scope()
+    {
+        var caller = await SeedAsync(_host.Factory);
+        var otherProject = await SeedAsync(_host.Factory);
+        using var client = _host.CreateClient();
+        await SignInAsync(client, caller.ManagerName);
+
+        using var response = await client.GetAsync($"/api/projects/{otherProject.ProjectId}/configuration");
         Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
     }
 

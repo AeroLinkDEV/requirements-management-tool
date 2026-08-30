@@ -6,7 +6,7 @@ import type { AuthUser } from './IdentityCenter'
 import DownstreamAssessmentQueue from './DownstreamAssessmentQueue'
 import './HistoryExplorer.css'
 import './Swrd.css'
-import { LadderCapability, ladderAllows } from './projectLadder'
+import { LadderCapability, ladderAllows, ladderAllowsDownstreamAssessment } from './projectLadder'
 import type { ProjectLadderProjection } from './projectLadder'
 
 type Release={id:string;version:string;isReleased:boolean}
@@ -44,6 +44,8 @@ export default function HistoryExplorer({api,projectId,releases,activeReleaseId,
  useEffect(()=>{setStateIntent(initialStateIntent);setScrPage(1)},[initialStateIntent])
  const changeStateIntent=(intent?:HistoryStateIntent)=>{setStateIntent(intent);setScrPage(1);onStateIntentChange(intent)}
  const visibleScrs=scrs.filter(x=>matchesStateIntent(x.state,stateIntent))
+ const downstreamTarget=scope==='System'?'System':softwareLevel
+ const downstreamApplicable=ladderAllowsDownstreamAssessment(ladder,downstreamTarget)
  // The register itself is shared with the verification side, so what a reader recognises as "the register"
  // cannot drift between them. Only the mapping into its row shape is the requirements side's own.
  const toRegisterRow=(x:Scr):RegisterRow=>({
@@ -72,7 +74,7 @@ export default function HistoryExplorer({api,projectId,releases,activeReleaseId,
       :<button className="recordBuild" onClick={()=>onCreateSoftware(softwareLevel)}>+ New {softwareLevel==='HighLevel'?'HLR':'LLR'} Change Request</button>)}
   </header>
   {scope==='Software'&&<nav className="softwareLevelTabs" aria-label="Software requirement level">{ladderAllows(ladder,'HighLevel',LadderCapability.ChangeControl)&&<button type="button" aria-current={softwareLevel==='HighLevel'?'page':undefined} onClick={()=>changeSoftwareLevel('HighLevel')}><b>HLR</b><span>High-level requirements</span></button>}{ladderAllows(ladder,'LowLevel',LadderCapability.ChangeControl)&&<button type="button" aria-current={softwareLevel==='LowLevel'?'page':undefined} onClick={()=>changeSoftwareLevel('LowLevel')}><b>LLR</b><span>Low-level requirements</span></button>}</nav>}
-  {(scope==='Software'||scope==='System')&&<DownstreamAssessmentQueue api={api} projectId={projectId} releaseId={activeReleaseId} targetLevel={scope==='System'?'System':softwareLevel} user={user} onOpenScr={onOpenScr} onOpenRequirement={onOpenRequirement} onCreateScr={(level,assessmentId,sourceNumber)=>level==='System'?onCreateSystem(assessmentId,sourceNumber):onCreateSoftware(level,assessmentId,sourceNumber)} initialAssessmentId={initialAssessmentId} onAssessmentSelected={onAssessmentSelected}/>}
+  {downstreamApplicable&&<DownstreamAssessmentQueue api={api} projectId={projectId} releaseId={activeReleaseId} targetLevel={downstreamTarget} user={user} onOpenScr={onOpenScr} onOpenRequirement={onOpenRequirement} onCreateScr={(level,assessmentId,sourceNumber)=>level==='System'?onCreateSystem(assessmentId,sourceNumber):onCreateSoftware(level,assessmentId,sourceNumber)} initialAssessmentId={initialAssessmentId} onAssessmentSelected={onAssessmentSelected}/>}
   {/* The shelf sits beside the build, not inside it. A reader planning this build can see what is waiting
       without it being counted as work this build already has. */}
   <nav className="registerViewTabs" aria-label="Register view">

@@ -17,13 +17,14 @@ type CatalogueEntry = { catalogueEntry: Level; supportedCapabilities: number };
 type Configuration = {
   projectId: string; configurationId: string; classification: string; state: string; version: number;
   activationManifestVersion?: string; activationManifestHash?: string;
-  steps: Step[]; effectiveSteps: Step[]; relationships: Relationship[]; history: HistoryItem[];
+  steps: Step[]; effectiveSteps: Step[]; effectiveRelationships: Relationship[]; relationships: Relationship[]; history: HistoryItem[];
   readiness: { version: string; hash: string; consumers: Consumer[]; missingOrUnrouted: Consumer[]; isReady: boolean };
   catalogue: CatalogueEntry[]; canManage: boolean;
 };
-type ConfigurationResponse = Omit<Configuration, "steps" | "effectiveSteps" | "catalogue"> & {
+type ConfigurationResponse = Omit<Configuration, "steps" | "effectiveSteps" | "effectiveRelationships" | "catalogue"> & {
   steps: (Omit<Step, "capabilities"> & { capabilities: unknown })[];
   effectiveSteps?: (Omit<Step, "capabilities"> & { capabilities: unknown })[];
+  effectiveRelationships?: Relationship[];
   catalogue: (Omit<CatalogueEntry, "supportedCapabilities"> & { supportedCapabilities: unknown })[];
 };
 
@@ -42,6 +43,7 @@ function normalizeConfiguration(value: ConfigurationResponse): Configuration {
     ...value,
     steps: value.steps.map(normalizeStep),
     effectiveSteps: (value.effectiveSteps ?? []).map(normalizeStep),
+    effectiveRelationships: value.effectiveRelationships ?? [],
     catalogue: value.catalogue.map(entry => ({
       ...entry,
       supportedCapabilities: capabilityMask(entry.supportedCapabilities),
