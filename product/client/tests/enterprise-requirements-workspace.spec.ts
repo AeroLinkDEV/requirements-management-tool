@@ -21,6 +21,99 @@ test("requirements explorer shows truthful access-aware counts", async ({
   await expect(page.locator(".confidence")).toContainText("Live counts · respects your access");
 });
 
+test("requirements explorer keeps every primary filter usable at desktop review widths", async ({
+  page,
+  request,
+}, testInfo) => {
+  test.setTimeout(120_000);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await apiLogin(request);
+  await login(page, "admin", { openProject: false });
+  await selectProgram(page, "Flight Management System Live Program");
+  await openNavigationGroup(page, "SYSTEMS ENGINEERING");
+  await page.getByRole("link", { name: "System Requirements Explorer" }).click();
+  await expect(page.getByRole("heading", { name: "System Requirements Explorer" })).toBeVisible();
+  await expect(page.getByRole("status", { name: /Loading controlled requirements/ })).toBeHidden();
+
+  const toolbar = page.locator(".reqCommand");
+  const search = page.getByLabel("Search requirements");
+  const level = page.getByLabel("Level filter");
+  const coverage = page.getByLabel("Coverage state filter");
+  const tag = page.getByLabel("Tag filter");
+  const namedControls = [
+    search,
+    level,
+    page.getByLabel("Verification filter"),
+    coverage,
+    tag,
+    page.getByRole("button", { name: "Advanced" }),
+    page.getByRole("button", { name: "Clear" }),
+    page.getByLabel("Rows per page"),
+    page.getByRole("button", { name: "Table view" }),
+    page.getByRole("button", { name: "Document view" }),
+  ];
+
+  for (const width of [1440, 1280]) {
+    await page.setViewportSize({ width, height: 900 });
+    await expect(toolbar).toBeVisible();
+    for (const control of namedControls) await expect(control).toBeVisible();
+    await expect(toolbar.locator("kbd")).toHaveText(/\d[\d,]* found/);
+
+    const geometry = await toolbar.evaluate((element) => {
+      const rect = element.getBoundingClientRect();
+      const children = Array.from(element.children)
+        .filter((child) => getComputedStyle(child).display !== "none")
+        .map((child) => {
+          const box = child.getBoundingClientRect();
+          return { left: box.left, right: box.right, top: box.top, bottom: box.bottom };
+        });
+      return {
+        toolbar: { left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom },
+        children,
+        viewportWidth: document.documentElement.clientWidth,
+        documentWidth: document.documentElement.scrollWidth,
+      };
+    });
+    expect(geometry.documentWidth).toBeLessThanOrEqual(geometry.viewportWidth);
+    for (const child of geometry.children) {
+      expect(child.left).toBeGreaterThanOrEqual(geometry.toolbar.left - 1);
+      expect(child.right).toBeLessThanOrEqual(geometry.toolbar.right + 1);
+      expect(child.top).toBeGreaterThanOrEqual(geometry.toolbar.top - 1);
+      expect(child.bottom).toBeLessThanOrEqual(geometry.toolbar.bottom + 1);
+    }
+
+    const searchBox = await search.boundingBox();
+    const levelBox = await level.boundingBox();
+    expect(searchBox).not.toBeNull();
+    expect(levelBox).not.toBeNull();
+    expect(searchBox!.width).toBeGreaterThanOrEqual(240);
+    expect(searchBox!.y + searchBox!.height).toBeLessThanOrEqual(levelBox!.y + 1);
+
+    await testInfo.attach(`requirements-toolbar-${width}`, {
+      body: await toolbar.screenshot(),
+      contentType: "image/png",
+    });
+  }
+
+  await coverage.selectOption("covered");
+  await expect(coverage).toHaveValue("covered");
+  await tag.fill("navigation");
+  await expect(tag).toHaveValue("navigation");
+  await page.getByRole("button", { name: "Clear", exact: true }).click();
+  await expect(coverage).toHaveValue("");
+  await expect(tag).toHaveValue("");
+
+  // At the 1280px overlay breakpoint the inspector is fixed. A multi-row sticky toolbar must not follow
+  // the document over its tabs and intercept every click after the user scrolls the record workspace.
+  await page.setViewportSize({ width: 1280, height: 720 });
+  await page.locator(".reqTable article > a.requirementTarget").first().click();
+  await expect(page.locator(".requirementInspector")).toBeVisible();
+  await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
+  const discussionTab = page.getByRole("tab", { name: /Discussion/ });
+  await discussionTab.click();
+  await expect(discussionTab).toHaveAttribute("aria-selected", "true");
+});
+
 test("requirements explorer primary targets are native links in table and document views", async ({
   page,
   request,

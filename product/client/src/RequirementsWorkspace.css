@@ -41,12 +41,22 @@
   padding: 9px 12px;
   gap: 8px;
 }
-/* This box was originally given min-width: 0 so it could shrink below the intrinsic width of the input it
-   wraps; without that the command row overflowed its container and the view-mode switch spilled 12px past
-   the right edge of the document. The search field is the element that should absorb a narrow row.
-   It was never told how far. Adding the coverage-state filter to this row took the search input to 20px
-   wide — under the 24x24 target minimum, and useless long before that — so "absorb a narrow row" now stops
-   at a usable width and the row wraps beyond it rather than pushing the page sideways. */
+.requirementsCommand {
+  height: auto;
+  min-height: 58px;
+  display: grid;
+  grid-template-columns: minmax(240px, 1fr) auto auto;
+}
+/* The responsive bar can occupy two rows at review-laptop widths. Keep both rows on the product's density
+   tokens so compact mode still earns the extra record capacity it promises instead of spending that saving
+   on fixed-height controls. Comfortable values remain the existing 40px controls and 9px outer padding. */
+html[data-density="compact"] .requirementsCommand {
+  padding-block: 5px;
+  row-gap: 4px;
+}
+/* Search, query filters and display actions are three deliberate groups. At ordinary wide-screen widths they
+   share a row; at review-laptop widths the search gets a complete row instead of collapsing while the final
+   controls escape the old fixed-height bar. */
 .reqSearch {
   flex: 1 1 0;
   min-width: 120px;
@@ -57,15 +67,22 @@
   border-radius: 8px;
   padding: 0 10px;
 }
+.requirementsCommand .reqSearch {
+  min-width: 240px;
+  height: var(--control-height);
+}
 .reqSearch input {
   flex: 1 1 0;
-  /* The floor belongs here, not on the wrapper: this is the element that collapses, and it went to 20px
-     wide — under the 24x24 target minimum — when the coverage-state filter joined the row. */
   min-width: 120px;
   border: 0;
   background: transparent;
   padding: 10px;
   outline: 0;
+}
+.requirementsCommand .reqSearch input {
+  height: 100%;
+  min-height: 0;
+  padding-block: 0;
 }
 .reqSearch kbd {
   flex: 0 0 auto;
@@ -76,8 +93,19 @@
   border-radius: 8px;
   padding: 3px 6px;
 }
+.reqPrimaryFilters,
+.reqToolbarActions {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.reqToolbarActions {
+  justify-content: flex-end;
+}
 .reqCommand select,
-.reqCommand > .tagFilter {
+.reqCommand > .tagFilter,
+.requirementsCommand .tagFilter {
   min-width: 104px;
   height: 38px;
   border: 1px solid #d9e1e9;
@@ -86,6 +114,18 @@
   padding: 0 9px;
   font-size: 12px;
   color: #4e5f73;
+}
+.reqPrimaryFilters .tagFilter {
+  width: 132px;
+}
+.requirementsCommand select,
+.requirementsCommand .tagFilter,
+.requirementsCommand .advanced {
+  height: var(--control-height);
+  min-height: var(--control-height);
+}
+.requirementsCommand .modeSwitch button {
+  min-height: var(--control-height-sm);
 }
 .reqCommand .clear {
   border: 0;
@@ -971,6 +1011,20 @@ button.coverageState:hover {
 .verificationDiff del {
   color: #a23e50;
 }
+@media (max-width: 1600px) {
+  .requirementsCommand {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+  .requirementsCommand .reqSearch {
+    grid-column: 1 / -1;
+  }
+  .requirementsCommand .reqPrimaryFilters {
+    grid-column: 1;
+  }
+  .requirementsCommand .reqToolbarActions {
+    grid-column: 2;
+  }
+}
 @media (max-width: 1360px) {
   /* The inspector becomes a fixed right-hand overlay at this width. Keep the canonical command bar above it
      and below the global context bar, including after a client-side route preserves the prior scroll offset. */
@@ -978,6 +1032,27 @@ button.coverageState:hover {
     position: sticky;
     top: 47px;
     z-index: 12;
+  }
+  .requirementsCommand {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  /* The fixed inspector owns the right edge from the context bar down. Once it is open, a tall sticky
+     command bar would sit over the inspector tabs after the document scrolls and intercept their clicks.
+     Keep the bar in normal flow for that state; it remains sticky while no inspector is open. */
+  .requirementsCommand.inspecting {
+    position: static;
+  }
+  .requirementsCommand .reqSearch,
+  .requirementsCommand .reqPrimaryFilters,
+  .requirementsCommand .reqToolbarActions {
+    grid-column: 1;
+  }
+  .requirementsCommand .reqPrimaryFilters,
+  .requirementsCommand .reqToolbarActions {
+    flex-wrap: wrap;
+  }
+  .requirementsCommand .reqToolbarActions {
+    justify-content: flex-start;
   }
   .reqLayout,
   .reqLayout.inspecting {
@@ -992,9 +1067,8 @@ button.coverageState:hover {
     z-index: 10;
     box-shadow: -15px 0 40px #10233a22;
   }
-  .reqCommand .tagFilter {
-    display: none;
-  }
+  .requirementsCommand .tagFilter { display: block; }
+  .requirementsCommand .pageSizeControl { display: flex; }
 }
 @media (max-width: 750px) {
   .specRail {
@@ -1005,6 +1079,10 @@ button.coverageState:hover {
     grid-template-columns: 1fr;
   }
   .reqCommand select {
+    display: none;
+  }
+  .requirementsCommand .tagFilter,
+  .requirementsCommand .pageSizeControl {
     display: none;
   }
   .reqTableHead,
