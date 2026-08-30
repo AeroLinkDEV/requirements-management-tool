@@ -21,7 +21,7 @@ const openCenter = async (page: import('@playwright/test').Page) => {
   await page.getByRole('link', { name: 'Integration Command Center' }).click()
   await expect(page.getByRole('heading', { name: 'Integration Command Center' })).toBeVisible()
   await expect(page.getByText('v1 operational')).toBeVisible()
-  await expect(page.getByText('Scoped service identities')).toBeVisible()
+  await expect(page.getByText('Scoped credentials')).toBeVisible()
 }
 
 const createIdentity = async (page: import('@playwright/test').Page, identityName: string) => {
@@ -61,6 +61,25 @@ const deliverTestEvent = async (page: import('@playwright/test').Page, webhookNa
   await expect(delivery).toBeVisible()
   await expect(delivery).toContainText(/attempt 0|attempt 1/)
 }
+
+test('the operator console shows runtime status without the product capability checklist', async ({ page }) => {
+  // #734 F15: the Integration Command Center is an operator console, not a product marketing
+  // surface. The static "API CONTRACT / Version 1 foundation / Ready" capability checklist is
+  // removed while every piece of live operational information and operator action remains.
+  await openCenter(page)
+
+  await expect(page.getByText('API CONTRACT')).toHaveCount(0)
+  await expect(page.getByText('Version 1 foundation')).toHaveCount(0)
+  await expect(page.locator('.capabilityPanel')).toHaveCount(0)
+  await expect(page.locator('.capabilityList')).toHaveCount(0)
+
+  await expect(page.getByText('PUBLIC API')).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Machine identities' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Webhook destinations' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Recent delivery activity' })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Send test event', exact: true })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Create identity' })).toBeVisible()
+})
 
 test('integration command center governs machine access and signed event delivery', async ({ page }) => {
   const tag = attemptTag()
